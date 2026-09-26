@@ -139,3 +139,9 @@ func indexOf(h, n string) int {
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 }
+
+// Offline fixtures record statements without persisting them. The real DB
+// gate and concurrent ownership are tested by deployment_opening_db_test.go.
+func offlineDeploymentGate(ctx context.Context, _ string, fn func(context.Context) error) error {
+	return fn(ctx)
+}

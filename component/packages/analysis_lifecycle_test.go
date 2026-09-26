@@ -35,11 +35,15 @@ type sharedAnalysisRows struct {
 	*recordingEngine
 	cancelRequested atomic.Bool
 	parked          atomic.Bool
+	opened          atomic.Bool
 	cancelAtPark    bool
 	parkAtCancel    bool
 }
 
 func (e *sharedAnalysisRows) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+	if strings.HasPrefix(q, "mutation openPackageDeployment(") {
+		e.opened.Store(true)
+	}
 	if strings.HasPrefix(q, "mutation requestPackageDeploymentCancel(") {
 		e.cancelRequested.Store(true)
 		if e.parkAtCancel {
@@ -52,7 +56,7 @@ func (e *sharedAnalysisRows) Execute(ctx context.Context, q string) (*memql.Exec
 			e.cancelRequested.Store(true)
 		}
 	}
-	if strings.HasPrefix(q, "query packageDeploymentById(") {
+	if strings.HasPrefix(q, "query packageDeploymentById(") && e.opened.Load() {
 		status := StatusAnalyzing
 		if e.parked.Load() {
 			status = StatusAwaitingConfirm
@@ -82,7 +86,7 @@ func TestBackgroundAnalysisSurvivesLeavingAndCanBeCancelledOnAnotherReplica(t *t
 			t.Setenv(HeartbeatIntervalEnv, "1")
 			h := newHarness(t, spaOnlyPackage(), ownerPackage())
 			rows := &sharedAnalysisRows{recordingEngine: h.engine}
-			h.deps.Store = &store{engine: rows}
+			h.deps.Store = &store{engine: rows, deploymentGate: offlineDeploymentGate}
 			fetch := &waitingSource{fakeFetcher: h.fetcher, entered: make(chan context.Context, 1), release: make(chan struct{})}
 			h.deps.Fetcher = fetch
 			audit := make(analysisAudit, 1)
@@ -141,7 +145,7 @@ func TestCancellationRacingAnalysisParkingIsNeverLeftUnread(t *testing.T) {
 	t.Run("flag written during park", func(t *testing.T) {
 		h := newHarness(t, spaOnlyPackage(), ownerPackage())
 		rows := &sharedAnalysisRows{recordingEngine: h.engine, cancelAtPark: true}
-		h.deps.Store = &store{engine: rows}
+		h.deps.Store = &store{engine: rows, deploymentGate: offlineDeploymentGate}
 		out, err := Deploy(context.Background(), h.deps, DeployRequest{PackageId: "abc", Actor: plainUser()})
 		if RefusalCode(err) != CodeDeploymentCancelled || out.Status != StatusCancelled || out.AwaitingConfirm {
 			t.Fatalf("lost cancellation: %+v %v", out, err)
@@ -149,6 +153,7 @@ func TestCancellationRacingAnalysisParkingIsNeverLeftUnread(t *testing.T) {
 	})
 	t.Run("parked between cancel read and flag", func(t *testing.T) {
 		rows := &sharedAnalysisRows{recordingEngine: &recordingEngine{}, parkAtCancel: true}
+		rows.opened.Store(true)
 		other := NewIntegration(rows, discardLogger())
 		other.depsOnce.Do(func() { other.deps = &Deps{Store: &store{engine: rows}, Logger: discardLogger()} })
 		reply, err := other.handleCancelDeployment(context.Background(), map[string]any{"packageId": "abc", "deploymentId": "fixed1"}, 0)

@@ -177,7 +177,7 @@ func TestRetainedSnapshotKeepsTheAlreadyKnownNewerHeadPending(t *testing.T) {
 				if newerAfterAnalyze {
 					pkg["latestKnownVersion"], pkg["updateAvailable"] = "newer-polled-head", true
 				}
-				h.engine.rows["query packageDeploymentById"] = []map[string]any{{"id": first.DeploymentId, "packageId": rowString(pkg, "id"), "status": StatusAwaitingConfirm, "sourceVersion": "sha-abc123", "snapshotArtifactId": "blob://packages/snapshots/snap.tar.gz", "report": reportMap(t, first.Report)}}
+				h.engine.rows[`query packageDeploymentById(deploymentId: "`+first.DeploymentId+`")`] = []map[string]any{{"id": first.DeploymentId, "packageId": rowString(pkg, "id"), "status": StatusAwaitingConfirm, "sourceVersion": "sha-abc123", "snapshotArtifactId": "blob://packages/snapshots/snap.tar.gz", "report": reportMap(t, first.Report)}}
 				req := DeployRequest{PackageId: rowString(pkg, "id"), Actor: plainUser(), Confirmed: true, Placements: firstDeployPlacements()}
 				if confirm {
 					req.DeploymentId = first.DeploymentId

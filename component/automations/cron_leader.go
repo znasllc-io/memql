@@ -2,7 +2,9 @@ package automations
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -51,6 +53,7 @@ type CronLeader struct {
 
 	dbGetter func() *bun.DB
 	logger   *slog.Logger
+	lockKey  int64
 
 	leader atomic.Bool
 
@@ -61,8 +64,21 @@ type CronLeader struct {
 // NewCronLeader builds the leader. dbGetter is resolved lazily (the DB may
 // not be Ready at construction). A nil logger is tolerated.
 func NewCronLeader(dbGetter func() *bun.DB, logger *slog.Logger) *CronLeader {
-	comp, _ := component.New(CronLeaderComponentName)
-	cl := &CronLeader{Component: comp, dbGetter: dbGetter, logger: logger}
+	return newCronLeader(dbGetter, logger, CronLeaderComponentName, cronLeaderLockKey)
+}
+
+// NewScopedCronLeader elects one runner independently of the general cron
+// lease. The composition layer decides which nodes may compete for a scope.
+// Replicas using the same scope share a lease; distinct scopes do not block
+// one another. It uses the same direct connection and failover contract.
+func NewScopedCronLeader(scope string, dbGetter func() *bun.DB, logger *slog.Logger) *CronLeader {
+	digest := sha256.Sum256([]byte("memql:scheduled-automation:" + scope))
+	return newCronLeader(dbGetter, logger, common.ComponentName(string(CronLeaderComponentName)+"-"+scope), int64(binary.BigEndian.Uint64(digest[:8])))
+}
+
+func newCronLeader(dbGetter func() *bun.DB, logger *slog.Logger, name common.ComponentName, key int64) *CronLeader {
+	comp, _ := component.New(name)
+	cl := &CronLeader{Component: comp, dbGetter: dbGetter, logger: logger, lockKey: key}
 	_ = cl.ConfigureLifecycle(
 		component.WithRunHook(cl.run),
 		component.WithOnStopHook(cl.cleanup),
@@ -108,7 +124,7 @@ func (cl *CronLeader) poll(ctx context.Context) {
 	}
 
 	var acquired bool
-	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", cronLeaderLockKey).Scan(&acquired); err != nil {
+	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", cl.lockKey).Scan(&acquired); err != nil {
 		cl.demote("advisory-lock query failed", err)
 		return
 	}
@@ -168,7 +184,7 @@ func (cl *CronLeader) cleanup() {
 			// Best-effort explicit unlock; closing the conn would release it
 			// anyway, but unlock first so a co-located node takes over faster.
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_, _ = conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", cronLeaderLockKey)
+			_, _ = conn.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", cl.lockKey)
 			cancel()
 		}
 		_ = conn.Close()
