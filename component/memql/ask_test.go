@@ -190,7 +190,7 @@ func TestWorkDiscoveryFindsNavigationByAppArgument(t *testing.T) {
 	rows, err := e.workCapabilitiesBuiltin(asCaller("owner"), map[string]any{"search": "open fleet"}, 0)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
-	require.Contains(t, string(rows[0].Payload), "workNavigate")
+	require.Contains(t, string(rows[0].Payload), `"name":"work.workNavigate"`)
 	require.Contains(t, string(rows[0].Payload), `"enum":["users","fleet"`)
 	fn, err := e.functions.Get("worker.agentworkerDispatchHost")
 	require.NoError(t, err)
@@ -201,4 +201,25 @@ func TestWorkDiscoveryFindsNavigationByAppArgument(t *testing.T) {
 		}
 	}
 	require.True(t, found, "Fleet identity injection must use the builtin contract")
+}
+
+func TestWorkFleetCapabilityUsesOwnedExecutionIdentity(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	user := "v1:identity:user:" + id.NewShortId()
+	ctx := auth.ContextWithToken(auth.ContextWithUserActor(context.Background(), user), &auth.TokenInfo{Subject: user})
+	ac := &auth.AccessContext{UserId: user, Role: auth.RoleOwner}
+	ctx = auth.ContextWithAccess(ctx, ac)
+	ctx = WithActingAgentId(common.ContextWithRun(ctx, common.RunContext{RunId: "trusted-run", GoalId: "trusted-goal", OwnerUserId: ac.UserId, StepKey: "trusted-step"}), "trusted-agent")
+	calls := 0
+	e.builtinExecutorHandlers["integration.agentworker.dispatchHost"] = func(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+		calls++
+		require.Equal(t, ac.UserId, args["ownerUserId"])
+		require.Equal(t, "trusted-agent", args["agentId"])
+		require.Equal(t, "trusted-run", args["runId"])
+		require.Equal(t, "trusted-step", args["stepId"])
+		return []memorynodes.MemoryNode{{ID: "result", Payload: []byte(`{"ok":false,"errorCode":"policy_denied","errorMessage":"No standing grant"}`)}}, nil
+	}
+	_, err := e.workExecuteBuiltin(ctx, map[string]any{"name": "worker.agentworkerDispatchHost", "arguments": map[string]any{"action": "exec", "ownerUserId": "another-user", "agentId": "other-agent", "runId": "other-run", "stepId": "other-step"}}, 0)
+	require.ErrorContains(t, err, "policy_denied")
+	require.Equal(t, 1, calls)
 }

@@ -39,6 +39,9 @@ func (e *MemQLEngine) workCapabilityAllowed(ctx context.Context, fn *Function) b
 }
 
 func workCapabilityApp(fn *Function) string {
+	if fn.Name == "workNavigate" {
+		return ""
+	} // The handler records the requested app, not Nexus.
 	ns := ConstructNamespaceForOrigin(fn.Origin)
 	switch ns {
 	case "identity":
