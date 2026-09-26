@@ -23,6 +23,8 @@ const retirementMaxBytes = 32 << 20
 
 // Age never outranks a live parent. Check the latest run via its indexed id,
 // so a previous terminal version cannot make current work look disposable.
+// staged-data: MUST-NOT-GATE -- hiding a staged active parent makes its detail
+// appear orphaned and permits retirement while that parent is still running.
 const retentionInactiveParentSQL = `NOT EXISTS (SELECT 1 FROM "MemoryNodes" parent WHERE parent.concept='v1:work:run' AND parent.id=n.payload->>'runId' AND COALESCE(parent.payload->>'status','') NOT IN ('succeeded','failed','cancelled','abandoned') AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newerParent WHERE newerParent.concept=parent.concept AND newerParent.id=parent.id AND newerParent."createdAt">parent."createdAt"))`
 
 // This is a closed list of operational records, never a default lifetime for
@@ -101,6 +103,9 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 
 // Retain existing global-variable settings. Explicit process configuration
 // overrides a stored policy; absent configuration uses the documented default.
+// staged-data: MUST-NOT-GATE -- hiding an active stored retention policy can
+// silently substitute a shorter default and prematurely retire its records.
+// These maintenance-only configuration reads still pass selectAdmitted.
 func (i *Integration) operationalRetentionWindows(ctx context.Context) (map[string]int, error) {
 	names := []string{"WORKER_INVOCATION_RETENTION_DAYS"}
 	for _, p := range operationalPolicies {
@@ -140,6 +145,9 @@ type retirementKey struct {
 // content-addressed object name. Read-back must match before an exact-key
 // transactional delete. Bounded batches cap both memory and database work.
 // A concurrent revision or a new child leaves the entire batch in place.
+// staged-data: MUST-NOT-GATE -- hiding staged versions loses their archive
+// evidence, and hiding staged revisions/children defeats the concurrent-write
+// guards. Every archived version passes admitRow before any deletion.
 func (i *Integration) retireVerified(ctx context.Context, concept string, candidates []map[string]any, withChildren bool, cutoff time.Time, dry bool) (int, int, string, error) {
 	if len(candidates) == 0 {
 		return 0, 0, "", nil
