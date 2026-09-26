@@ -244,7 +244,7 @@ func procedureUnwrapShellScript(argv []string) (string, bool) {
 
 // procedureLeadingCd matches a command line that opens by changing into one
 // directory: `cd <word> && <rest>`, with the word bare or single-quoted.
-var procedureLeadingCd = regexp.MustCompile(`^\s*cd\s+('[^']*'|[A-Za-z0-9_@%+=:,./-]+)\s*&&\s*`)
+var procedureLeadingCd = regexp.MustCompile(`^\s*cd\s+('[^']*'|[A-Za-z0-9_@%+=:,./~-]+)\s*&&\s*`)
 
 // procedureSplitLeadingCd moves a command's leading `cd <relative dir> &&`
 // into a working directory: `cd ./app && npm test` becomes `npm test` run in
