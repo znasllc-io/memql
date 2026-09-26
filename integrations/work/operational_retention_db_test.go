@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,7 +95,10 @@ func TestOperationalRetentionDBProtectsActiveOwnedRecentAndArchivesSystemHistory
 	}
 	// Recoverable archives contain the historical versions and intrinsic fields.
 	archived := 0
-	for _, blob := range archive.blobs {
+	for object, blob := range archive.blobs {
+		if !strings.HasSuffix(object, fmt.Sprintf("/%x.ndjson.gz", sha256.Sum256(blob))) {
+			t.Fatalf("archive filename cannot be independently verified with sha256sum: %s", object)
+		}
 		r, err := gzip.NewReader(bytes.NewReader(blob))
 		if err != nil {
 			t.Fatal(err)

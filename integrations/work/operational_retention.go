@@ -282,6 +282,8 @@ func (i *Integration) retireVerified(ctx context.Context, concept string, candid
 	if err != nil {
 		return 0, 0, "", err
 	}
+	// Standard SHA-256 is an external recovery checksum: operators verify a
+	// downloaded archive with sha256sum without running MemQL's ID engine.
 	digest := sha256.Sum256(blob)
 	object := fmt.Sprintf("retention/%s/%x.ndjson.gz", i.clock().UTC().Format("2006-01-02"), digest)
 	if _, err = archiver.Upload(ctx, container, object, blob, archiveContentType); err != nil {

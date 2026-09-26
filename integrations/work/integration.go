@@ -24,7 +24,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/znasllc-io/memql/integrations/azureblob"
 	"log/slog"
 	"strings"
 	"sync"
@@ -36,6 +35,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/num"
+	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
 // integrationName is the plug-in name and the middle segment of every
