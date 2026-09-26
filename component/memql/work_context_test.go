@@ -23,7 +23,7 @@ func (p *checkpointModel) CallChatStructured(_ context.Context, _ []common.ChatM
 	if p.fail {
 		return "", fmt.Errorf("summary unavailable")
 	}
-	return `{"facts":["The project is CNAS [0]"],"entities":["znas@znas.io [1]"],"decisions":[],"constraints":[],"unfinished":[]}`, nil
+	return `{"facts":["The project is CNAS [0]"],"entities":["owner@example.test [1]"],"decisions":[],"constraints":[],"unfinished":[]}`, nil
 }
 func TestWorkCheckpointRetainsSourcesReusesExactMemoryAndIsolatesOwners(t *testing.T) {
 	e, _, _ := readMergeTestEngine(t)
@@ -42,7 +42,7 @@ func TestWorkCheckpointRetainsSourcesReusesExactMemoryAndIsolatesOwners(t *testi
 	require.NoError(t, err)
 	require.Less(t, WorkContextSize(compacted, nil), 15001)
 	require.Equal(t, messages[len(messages)-6:], compacted[len(compacted)-6:])
-	require.Contains(t, compacted[1].Content, "znas@znas.io")
+	require.Contains(t, compacted[1].Content, "owner@example.test")
 	calls := model.calls
 	require.Positive(t, calls)
 	again, err := e.CompactWorkContext(ctx, messages, nil, 15000)

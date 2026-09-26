@@ -17,17 +17,11 @@ package agent
 //
 // # The answer: compress into the next window, and carry on
 //
-// The remedy is the one a person would use. Keep the instructions, keep the
-// recent turns that hold the live thread, drop the oldest middle, and leave a
-// note in their place saying they were dropped. Then send the SAME iteration
-// again, smaller. The work continues in the next window rather than starting
-// over, which is the whole point: a goal's progress lives in its journaled
-// steps, and the handoff is inside one step.
-//
-// component/memql's PlanContextTrim already decides exactly this and is
-// already tested there (it was built for the engine's hardened loop and, until
-// this file, had no production caller). Nothing new is invented here: this is
-// the agent lanes reaching for it at the moment it applies.
+// Owned work uses the same source-preserving checkpoints as proactive context
+// compaction. It keeps the recent exchange raw and stores exact originals for
+// recall. If checkpointing fails, the error surfaces rather than dropping data.
+// Requests outside the work runtime still use PlanContextTrim and an explicit
+// dropped-history notice. This fallback is not used by Ask or Nexus.
 //
 // # Why it converges, and why it is capped
 //
