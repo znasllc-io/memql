@@ -1,6 +1,7 @@
 package work
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -50,7 +51,7 @@ func insertSweepRow(t *testing.T, db *bun.DB, id, concept string, at time.Time, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.ExecContext(context.Background(), `INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",schema,payload) VALUES (?, ?, ?, 'sweep-test', '{}', ?::jsonb)`, id, concept, at, string(payload))
+	_, err = db.ExecContext(context.Background(), `INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",type,schema,payload) VALUES (?, ?, ?, 'sweep-test', 'object', '{}', ?::jsonb)`, id, concept, at, string(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +68,8 @@ func TestSweepDB_ReadsBindParametersAndCollapseBeforeFiltering(t *testing.T) {
 	insertSweepRow(t, db, "v1:work:run:denied", runConcept, now.Add(-time.Hour), map[string]any{"status": "waiting", "allow": true})
 	insertSweepRow(t, db, "v1:work:run:denied", runConcept, now, map[string]any{"status": "waiting", "allow": false})
 	insertSweepRow(t, db, "v1:work:observation:other", observationConcept, now, map[string]any{"status": "running"})
+	// A newer version under another concept must not displace the current run key.
+	insertSweepRow(t, db, "v1:work:run:running", observationConcept, now.Add(time.Second), map[string]any{"status": "running", "wrongConcept": true})
 	i.admitRow = func(_ context.Context, n memorynodes.MemoryNode) bool {
 		var p map[string]any
 		_ = json.Unmarshal(n.Payload, &p)
@@ -79,7 +82,7 @@ func TestSweepDB_ReadsBindParametersAndCollapseBeforeFiltering(t *testing.T) {
 	if len(rows) != 2 || rows[0]["id"] != "v1:work:run:waiting" || rows[1]["id"] != "v1:work:run:running" {
 		t.Fatalf("in-flight latest/admitted rows: %v", rows)
 	}
-	rows, err = i.selectAdmitted(ctx, runConcept, runsInFlightSQL, runConcept, 1)
+	rows, err = i.selectAdmitted(ctx, runConcept, runsInFlightSQL, runConcept, runConcept, 1, runConcept)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,10 +106,95 @@ func TestSweepDB_ReadsBindParametersAndCollapseBeforeFiltering(t *testing.T) {
 	}
 }
 
-func TestSweepDB_DeleteBindsExactIDsAndRemovesVectors(t *testing.T) {
+func TestSweepDB_ClosesOnlyMissingSystemApprovalWaits(t *testing.T) {
+	db, i := sweepDB(t)
+	if _, err := memqlengine.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := memqlengine.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Init(memorynodes.DefaultRegistry()); err != nil {
+		t.Fatal(err)
+	}
+	i.engine, i.admitRow = eng, memqlengine.AdmitSourceRow
+	now := time.Now().UTC().Truncate(time.Second)
+	i.SetNow(func() time.Time { return now })
+	actor := auth.MaintenanceActor("sweepWaitingWorkRuns")
+	ctx := auth.ContextWithToken(auth.ContextWithAccess(context.Background(), actor), &auth.TokenInfo{Subject: actor.UserId})
+	for _, tc := range []struct {
+		id          string
+		owner       string
+		goal        string
+		hasApproval bool
+		trigger     string
+	}{
+		{"orphan", "", "", false, "schedule"},
+		{"real-approval", "", "", true, "schedule"},
+		{"user-work", "v1:identity:user:alice", "v1:work:goal:alice", false, "schedule"},
+		{"event-work", "", "", false, "event:created"},
+	} {
+		approvalID := "v1:work:approval:" + tc.id
+		seed := map[string]any{"runId": runConcept + ":" + tc.id, "goalId": tc.goal, "triggeredBy": tc.trigger, "status": "waiting", "automationName": "sweepWaitingWorkRuns", "templateFingerprint": "test", "startedAt": rfc(now.Add(-time.Hour))}
+		st := i.store()
+		writeCtx := ownerActor(ctx, tc.owner)
+		if err := st.writeInternal(writeCtx, "mutation "+call("createWorkRun", seed)); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.updateRun(writeCtx, runConcept+":"+tc.id, map[string]any{"waitingOn": map[string]any{"kind": "approval", "subject": approvalID, "since": rfc(now.Add(-time.Hour))}}); err != nil {
+			t.Fatal(err)
+		}
+		if tc.hasApproval {
+			if err := st.writeInternal(ctx, "mutation "+call("createWorkApproval", map[string]any{"approvalId": approvalID, "runId": runConcept + ":" + tc.id, "kind": "feedback", "artifactHash": "test", "requestedAt": rfc(now.Add(-time.Hour))})); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	var logOutput bytes.Buffer
+	i.logger = slog.New(slog.NewTextHandler(&logOutput, nil))
+	res, err := i.SweepWaiting(ctx, time.Minute)
+	if err != nil || res.OrphanedWaitsClosed != 1 {
+		t.Fatalf("orphan recovery=%+v: %v; %s", res, err, logOutput.String())
+	}
+	for _, id := range []string{"orphan", "real-approval", "user-work", "event-work"} {
+		var status, code string
+		if err := db.QueryRowContext(ctx, `SELECT payload->>'status',COALESCE(payload->>'errorCode','') FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, runConcept+":"+id).Scan(&status, &code); err != nil {
+			t.Fatal(err)
+		}
+		if id == "orphan" {
+			if status != "failed" || code != "approval_missing" {
+				t.Fatalf("orphan state: %s %s", status, code)
+			}
+		} else if status != "waiting" {
+			t.Fatalf("preserved %s changed to %s", id, status)
+		}
+	}
+}
+
+func TestSweepDB_CompletedHistoryDoesNotResurrectWork(t *testing.T) {
 	db, i := sweepDB(t)
 	ctx := context.Background()
-	now := time.Now().UTC()
+	_, err := db.ExecContext(ctx, `INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",schema,payload)
+SELECT 'v1:work:run:history-'||n,'v1:work:run',TIMESTAMPTZ '2026-01-01'+v*interval '1 minute','sweep-test','{}',
+ jsonb_build_object('status',CASE WHEN v=10 THEN 'succeeded' ELSE 'running' END,'detail',repeat('x',1000))
+FROM generate_series(1,1000) n CROSS JOIN generate_series(1,10) v`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insertSweepRow(t, db, "v1:work:run:still-waiting", runConcept, time.Now().UTC(), map[string]any{"status": "waiting"})
+	rows, err := i.runsInFlight(ctx)
+	if err != nil || len(rows) != 1 || rows[0]["id"] != "v1:work:run:still-waiting" {
+		t.Fatalf("completed historical versions entered recovery: %v %v", rows, err)
+	}
+}
+
+func TestSweepDB_DeleteBindsExactIDsAndRemovesVectors(t *testing.T) {
+	db, i := sweepDB(t)
+	ctx := retentionOwner()
+	now := time.Now().UTC().Truncate(time.Second)
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	i.SetArchiver(&sweepDBArchive{})
 	target := observationConcept + ":quoted' OR true --"
 	keep := observationConcept + ":keep"
 	insertSweepRow(t, db, target, observationConcept, now.Add(-time.Hour), nil)
@@ -119,7 +207,7 @@ func TestSweepDB_DeleteBindsExactIDsAndRemovesVectors(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	n, err := i.deleteJournalRows(ctx, map[string][]string{observationConcept: {target}})
+	_, n, _, err := i.retireVerified(ctx, observationConcept, []map[string]any{{"id": target, "createdAt": rfc(now)}}, false, now, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,18 +227,22 @@ func TestSweepDB_DeleteBindsExactIDsAndRemovesVectors(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM node_vectors WHERE id = ?`, target).Scan(&vectors); err != nil {
 		t.Fatal(err)
 	}
-	if vectors != 0 {
-		t.Fatalf("deleted row retained %d vectors", vectors)
+	if vectors != 1 {
+		t.Fatalf("another concept still needs %d vectors", vectors)
 	}
-	n, err = i.deleteJournalRows(ctx, map[string][]string{observationConcept: {target}})
-	if err != nil || n != 0 {
-		t.Fatalf("repeat delete: %d %v", n, err)
+	_, n, _, err = i.retireVerified(ctx, modelCallConcept, []map[string]any{{"id": target, "createdAt": rfc(now.Add(time.Second))}}, false, now, false)
+	if err != nil || n != 1 {
+		t.Fatalf("remaining concept delete: %d %v", n, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM node_vectors WHERE id = ?`, target).Scan(&vectors); err != nil || vectors != 0 {
+		t.Fatalf("orphan vector count=%d: %v", vectors, err)
 	}
 }
 
 type sweepDBArchive struct {
-	blobs [][]byte
-	fail  bool
+	blobs   [][]byte
+	fail    bool
+	objects map[string][]byte
 }
 
 func (a *sweepDBArchive) Upload(_ context.Context, _, object string, data []byte, _ string) (string, error) {
@@ -158,7 +250,15 @@ func (a *sweepDBArchive) Upload(_ context.Context, _, object string, data []byte
 		return "", fmt.Errorf("test archive unavailable")
 	}
 	a.blobs = append(a.blobs, append([]byte(nil), data...))
+	if a.objects == nil {
+		a.objects = map[string][]byte{}
+	}
+	a.objects[object] = append([]byte(nil), data...)
 	return object, nil
+}
+
+func (a *sweepDBArchive) DownloadWithLimit(_ context.Context, _, object string, _ int64) ([]byte, error) {
+	return append([]byte(nil), a.objects[object]...), nil
 }
 
 func TestSweepDB_BuiltinLifecycleWithCanonicalRunID(t *testing.T) {
@@ -230,7 +330,9 @@ func TestSweepDB_BuiltinLifecycleWithCanonicalRunID(t *testing.T) {
 	execute(`workRetentionSweep(dryRun: true)`)
 	assertRetained()
 	archive.fail = true
-	execute(`workRetentionSweep(dryRun: false)`)
+	if _, err := eng.Execute(maintenance, `workRetentionSweep(dryRun: false)`); err == nil {
+		t.Fatal("archive failure reported successful retention")
+	}
 	assertRetained()
 	archive.fail = false
 	execute(`workRetentionSweep(dryRun: false)`)

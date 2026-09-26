@@ -2731,6 +2731,34 @@ variables:
 
   # --- the work spine's journal retention (epic memql#4966) ---
 
+  - name: MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS
+    component: work
+    scope: node
+    default: "30"
+    optional: true
+    description: "Days after the latest terminal version before unowned scheduled runs and their step/closed-approval histories can be archived and deleted. Active work, user goals, pending approvals and longer-lived detail are preserved. Nightly 03:40 UTC; archive read-back verification is required."
+
+  - name: MEMQL_WORKER_INVOCATION_RETENTION_DAYS
+    component: worker
+    scope: node
+    default: "90"
+    optional: true
+    description: "Days since the latest completed worker invocation version before verified archival and physical removal by the nightly work retention sweep. Active parent work is preserved. The legacy WORKER_INVOCATION_RETENTION_DAYS global variable is honored when no canonical setting exists."
+
+  - name: MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS
+    component: safety
+    scope: node
+    default: "90"
+    optional: true
+    description: "Days of safety classification evidence retained before the nightly operational retention sweep verifies an archive and physically removes expired versions. Active parent work is preserved."
+
+  - name: MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS
+    component: safety
+    scope: node
+    default: "90"
+    optional: true
+    description: "Days of safety output-screening evidence retained before verified archival and physical removal by the nightly operational retention sweep. Active parent work is preserved."
+
   - name: MEMQL_WORK_MODELCALL_RETENTION_DAYS
     component: work
     scope: node
@@ -2749,7 +2777,7 @@ variables:
     component: work
     scope: node
     optional: true
-    description: "The blob container the journal retention sweep archives expired rows into, as journal/<day>/<concept>.ndjson.gz. Defaults to the cluster's own container, MEMQL_AZURE_BLOB_CONTAINER. With neither set the sweep REFUSES to delete anything -- a cluster without object storage keeps its journal, which is why there is no TimescaleDB retention policy on these rows: a policy cannot be told to wait for an upload."
+    description: "The blob container the journal retention sweep archives expired rows into, as content-addressed retention/<day>/<sha256>.ndjson.gz objects containing complete historical versions. Defaults to the cluster's own container, MEMQL_AZURE_BLOB_CONTAINER. With neither set the sweep REFUSES to delete anything -- a cluster without object storage keeps its journal, which is why there is no TimescaleDB retention policy on these rows: a policy cannot be told to wait for an upload."
 
   # --- worker ---
 
