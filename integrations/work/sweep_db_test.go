@@ -21,9 +21,10 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
-// Use real PostgreSQL and the production Bun/pgdriver stack. Session-local
-// tables isolate sweep/retention tests from other suites and developer data.
-// A single connection keeps every query on the session owning these tables.
+// Use real PostgreSQL and the production Bun/pgdriver stack. A private schema
+// isolates tables and projection functions from other suites/developer data.
+// The primary connection keeps its search_path; concurrency tests open peers
+// explicitly scoped to the same private schema.
 func sweepDB(t *testing.T) (*bun.DB, *Integration) {
 	t.Helper()
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())

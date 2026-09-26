@@ -247,7 +247,7 @@ func TestVerifiedRetentionDBVectorFailureRollsBackRecordDeletion(t *testing.T) {
 	insertSweepRow(t, db, id, observationConcept, now, map[string]any{"ownerUserId": ""})
 	// A broken vector table injects a real transactional failure after the
 	// MemoryNodes DELETE, without touching the shared developer tables.
-	if _, err := db.ExecContext(ctx, `ALTER TABLE pg_temp.node_vectors RENAME COLUMN id TO broken_id`); err != nil {
+	if _, err := db.ExecContext(ctx, `ALTER TABLE node_vectors RENAME COLUMN id TO broken_id`); err != nil {
 		t.Fatal(err)
 	}
 	_, deleted, _, err := i.retireVerified(ctx, observationConcept, []map[string]any{{"id": id, "createdAt": rfc(now)}}, false, now, false)

@@ -18,7 +18,8 @@ CREATE INDEX IF NOT EXISTS work_run_head_events_age ON work_run_head_events (enq
 CREATE TABLE IF NOT EXISTS work_run_head_state (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
     cursor_id text NOT NULL DEFAULT '',
-    backfill_complete boolean NOT NULL DEFAULT false
+    backfill_complete boolean NOT NULL DEFAULT false,
+    generation bigint NOT NULL DEFAULT 0
 );
 INSERT INTO work_run_head_state (singleton) VALUES (true) ON CONFLICT DO NOTHING;
 
@@ -94,6 +95,10 @@ BEGIN
     -- A concurrent projector fails immediately. At REPEATABLE READ, a state
     -- row changed since our snapshot raises 40001; retry the WHOLE transaction.
     SELECT * INTO STRICT state FROM work_run_head_state WHERE singleton FOR UPDATE NOWAIT;
+    -- Touch the serialization row on EVERY pass, including queue-only passes.
+    -- Otherwise an older RR snapshot can miss a head another projector just
+    -- inserted and receive 23505 instead of the retryable 40001 fence here.
+    UPDATE work_run_head_state SET generation=generation+1 WHERE singleton;
     IF NOT state.backfill_complete THEN
         SELECT array_agg(k.id ORDER BY k.id), max(k.id) INTO run_ids, next_cursor
         FROM (
