@@ -189,8 +189,10 @@ FROM generate_series(1,1000) n CROSS JOIN generate_series(1,10) v`)
 
 func TestSweepDB_DeleteBindsExactIDsAndRemovesVectors(t *testing.T) {
 	db, i := sweepDB(t)
-	ctx := context.Background()
-	now := time.Now().UTC()
+	ctx := retentionOwner()
+	now := time.Now().UTC().Truncate(time.Second)
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	i.SetArchiver(&sweepDBArchive{})
 	target := observationConcept + ":quoted' OR true --"
 	keep := observationConcept + ":keep"
 	insertSweepRow(t, db, target, observationConcept, now.Add(-time.Hour), nil)
@@ -203,7 +205,7 @@ func TestSweepDB_DeleteBindsExactIDsAndRemovesVectors(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	n, err := i.deleteJournalRows(ctx, map[string][]string{observationConcept: {target}})
+	_, n, _, err := i.retireVerified(ctx, observationConcept, []map[string]any{{"id": target, "createdAt": rfc(now)}}, false, now, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,18 +225,22 @@ func TestSweepDB_DeleteBindsExactIDsAndRemovesVectors(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM node_vectors WHERE id = ?`, target).Scan(&vectors); err != nil {
 		t.Fatal(err)
 	}
-	if vectors != 0 {
-		t.Fatalf("deleted row retained %d vectors", vectors)
+	if vectors != 1 {
+		t.Fatalf("another concept still needs %d vectors", vectors)
 	}
-	n, err = i.deleteJournalRows(ctx, map[string][]string{observationConcept: {target}})
-	if err != nil || n != 0 {
-		t.Fatalf("repeat delete: %d %v", n, err)
+	_, n, _, err = i.retireVerified(ctx, modelCallConcept, []map[string]any{{"id": target, "createdAt": rfc(now.Add(time.Second))}}, false, now, false)
+	if err != nil || n != 1 {
+		t.Fatalf("remaining concept delete: %d %v", n, err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM node_vectors WHERE id = ?`, target).Scan(&vectors); err != nil || vectors != 0 {
+		t.Fatalf("orphan vector count=%d: %v", vectors, err)
 	}
 }
 
 type sweepDBArchive struct {
-	blobs [][]byte
-	fail  bool
+	blobs   [][]byte
+	fail    bool
+	objects map[string][]byte
 }
 
 func (a *sweepDBArchive) Upload(_ context.Context, _, object string, data []byte, _ string) (string, error) {
@@ -242,7 +248,15 @@ func (a *sweepDBArchive) Upload(_ context.Context, _, object string, data []byte
 		return "", fmt.Errorf("test archive unavailable")
 	}
 	a.blobs = append(a.blobs, append([]byte(nil), data...))
+	if a.objects == nil {
+		a.objects = map[string][]byte{}
+	}
+	a.objects[object] = append([]byte(nil), data...)
 	return object, nil
+}
+
+func (a *sweepDBArchive) DownloadWithLimit(_ context.Context, _, object string, _ int64) ([]byte, error) {
+	return append([]byte(nil), a.objects[object]...), nil
 }
 
 func TestSweepDB_BuiltinLifecycleWithCanonicalRunID(t *testing.T) {
@@ -314,7 +328,9 @@ func TestSweepDB_BuiltinLifecycleWithCanonicalRunID(t *testing.T) {
 	execute(`workRetentionSweep(dryRun: true)`)
 	assertRetained()
 	archive.fail = true
-	execute(`workRetentionSweep(dryRun: false)`)
+	if _, err := eng.Execute(maintenance, `workRetentionSweep(dryRun: false)`); err == nil {
+		t.Fatal("archive failure reported successful retention")
+	}
 	assertRetained()
 	archive.fail = false
 	execute(`workRetentionSweep(dryRun: false)`)

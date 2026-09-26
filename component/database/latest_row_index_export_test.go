@@ -19,3 +19,5 @@ const (
 	LatestRowIndexBuilt      = latestRowIndexBuilt
 	LatestRowIndexRebuilt    = latestRowIndexRebuilt
 )
+
+var EnsureWorkJournalLookupIndex = ensureWorkJournalLookupIndex

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,12 @@ import (
 )
 
 func TestWorkRecoveryIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
+	testWorkIndex(t, "memory_nodes_work_recovery_idx", database.EnsureWorkRecoveryIndex)
+}
+func TestWorkJournalLookupIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
+	testWorkIndex(t, "memory_nodes_work_journal_lookup_idx", database.EnsureWorkJournalLookupIndex)
+}
+func testWorkIndex(t *testing.T, indexName string, build func(context.Context, *bun.DB, *slog.Logger, string) error) {
 	admin := conceptIndexDB(t)
 	ctx := context.Background()
 	for _, hypertable := range []bool{false, true} {
@@ -46,19 +54,19 @@ func TestWorkRecoveryIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
 			}
 			ensure := func() {
 				t.Helper()
-				if err := database.EnsureWorkRecoveryIndex(ctx, db, nil, "MemoryNodes"); err != nil {
+				if err := build(ctx, db, nil, "MemoryNodes"); err != nil {
 					t.Fatal(err)
 				}
 			}
 			ensure()
 			ensure() // repeated migration must preserve a complete build
 			var root string
-			if err := db.QueryRowContext(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname=? AND indexname='memory_nodes_work_recovery_idx'`, schema).Scan(&root); err != nil || root == "" {
+			if err := db.QueryRowContext(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname=? AND indexname=?`, schema, indexName).Scan(&root); err != nil || root == "" {
 				t.Fatalf("root index: %q %v", root, err)
 			}
 			if hypertable {
 				var victim string
-				if err := db.QueryRowContext(ctx, `SELECT quote_ident(n.nspname)||'.'||quote_ident(c.relname) FROM pg_inherits h JOIN pg_index i ON i.indrelid=h.inhrelid JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE h.inhparent='"MemoryNodes"'::regclass AND c.relname LIKE '%work_recovery_idx' LIMIT 1`).Scan(&victim); err != nil {
+				if err := db.QueryRowContext(ctx, `SELECT quote_ident(n.nspname)||'.'||quote_ident(c.relname) FROM pg_inherits h JOIN pg_index i ON i.indrelid=h.inhrelid JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE h.inhparent='"MemoryNodes"'::regclass AND c.relname LIKE ? LIMIT 1`, "%"+strings.TrimPrefix(indexName, "memory_nodes_")).Scan(&victim); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := db.ExecContext(ctx, `DROP INDEX `+victim); err != nil {
@@ -66,7 +74,7 @@ func TestWorkRecoveryIndexBuildsAndRepairsChunkCoverage(t *testing.T) {
 				}
 				ensure() // a valid root alone must not hide a missing chunk index
 				var missing int
-				if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pg_inherits h WHERE h.inhparent='"MemoryNodes"'::regclass AND NOT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE i.indrelid=h.inhrelid AND i.indisvalid AND c.relname LIKE '%work_recovery_idx')`).Scan(&missing); err != nil || missing != 0 {
+				if err := db.QueryRowContext(ctx, `SELECT count(*) FROM pg_inherits h WHERE h.inhparent='"MemoryNodes"'::regclass AND NOT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE i.indrelid=h.inhrelid AND i.indisvalid AND c.relname LIKE ?)`, "%"+strings.TrimPrefix(indexName, "memory_nodes_")).Scan(&missing); err != nil || missing != 0 {
 					t.Fatalf("missing chunk indexes=%d: %v", missing, err)
 				}
 			}
