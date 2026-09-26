@@ -1,12 +1,14 @@
 package agent
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -152,7 +154,7 @@ func TestTheHandoffIsCappedPerTurn(t *testing.T) {
 
 	used := 0
 	for attempt := 1; attempt <= maxContextHandoffs; attempt++ {
-		next, ok := r.handOffContext(overflow, messages, &used, 0, "req")
+		next, ok := r.handOffContext(context.Background(), overflow, messages, &used, 0, "req")
 		if !ok {
 			t.Fatalf("handoff %d refused while the history was still compressible", attempt)
 		}
@@ -161,7 +163,7 @@ func TestTheHandoffIsCappedPerTurn(t *testing.T) {
 	if used != maxContextHandoffs {
 		t.Fatalf("handoffs used = %d, want %d", used, maxContextHandoffs)
 	}
-	if _, ok := r.handOffContext(overflow, messages, &used, 0, "req"); ok {
+	if _, ok := r.handOffContext(context.Background(), overflow, messages, &used, 0, "req"); ok {
 		t.Fatal("the handoff ran past its cap; an unbounded compression loop is the runaway the cap exists to stop")
 	}
 
@@ -175,7 +177,7 @@ func TestTheHandoffIsCappedPerTurn(t *testing.T) {
 		errors.New("permission denied"),
 	} {
 		fresh := 0
-		if _, ok := r.handOffContext(err, messages, &fresh, 0, "req"); ok {
+		if _, ok := r.handOffContext(context.Background(), err, messages, &fresh, 0, "req"); ok {
 			t.Fatalf("%q was treated as a context overflow", err)
 		}
 	}
@@ -190,5 +192,27 @@ func TestAnOverflowThatSurvivedCompressionIsAQuestionNotARetry(t *testing.T) {
 	})
 	if !ok || sym != work.SymptomHuman || ev.RuleId != work.RuleIdContextExhausted {
 		t.Fatalf("got %q/%q ok=%v, want human/%s", sym, ev.RuleId, ok, work.RuleIdContextExhausted)
+	}
+}
+
+// Replacing one long message by one checkpoint preserves the count but frees
+// context. Recovery must measure bytes/tokens, not the number of messages.
+type oneMessageCheckpointEngine struct{ registryEngine }
+
+func (*oneMessageCheckpointEngine) CompactWorkContext(_ context.Context, messages []common.ChatMessage, _ []common.ToolDefinition, _ int) ([]common.ChatMessage, error) {
+	next := append([]common.ChatMessage(nil), messages...)
+	next[1].Content = "[Memory checkpoint] CNAS"
+	return next, nil
+}
+func TestOwnedContextHandoffAcceptsSmallerSameCountCheckpoint(t *testing.T) {
+	r := newTestReplier(&oneMessageCheckpointEngine{})
+	owner := "v1:identity:user:checkpoint-owner"
+	ctx := auth.ContextWithUserActor(context.Background(), owner)
+	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: owner})
+	messages := []common.ChatMessage{{Role: "system", Content: "Instructions"}, {Role: "user", Content: strings.Repeat("Evidence ", 1000)}}
+	used := 0
+	next, ok := r.handOffContext(ctx, errors.New("context_length_exceeded"), messages, &used, 0, "checkpoint")
+	if !ok || used != 1 || len(next) != len(messages) {
+		t.Fatalf("valid checkpoint rejected: ok=%v used=%d messages=%d", ok, used, len(next))
 	}
 }

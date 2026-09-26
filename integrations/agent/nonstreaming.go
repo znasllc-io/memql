@@ -360,6 +360,12 @@ BackgroundLoop:
 			}, fmt.Errorf("agent: %s after %s", turnWallclockSentinel, elapsed.Round(time.Second))
 		}
 
+		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, 20000)
+		if compactErr != nil {
+			return nil, compactErr
+		}
+		messages = compacted
+
 		// One model step, bounded by the overall request timeout. The
 		// router's fallback wrapper walks the whole provider chain inside
 		// this single call, so a pre-flight failure on the primary advances
@@ -382,7 +388,7 @@ BackgroundLoop:
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
-			if next, ok := r.handOffContext(stepErr, messages, &contextHandoffs, iter, requestId); ok {
+			if next, ok := r.handOffContext(ctx, stepErr, messages, &contextHandoffs, iter, requestId); ok {
 				messages = next
 				continue
 			}

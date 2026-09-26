@@ -414,7 +414,10 @@ read as something nobody got round to.
 
 ---
 
-## H. New goal, and Ask-to-goal
+## H. New goal, and Ask's shared work record
+
+Updated 2026-09-25: the original Ask-to-goal handoff has been replaced by
+shared intake. See [Ask and voice](../../public/operate/ask-and-voice.md).
 
 `createGoal` opens the goal AND its first run in `compiling` and dispatches
 compile, so ONE call is the whole act -- there is no client-side follow-up
@@ -422,15 +425,11 @@ write to get half-done.
 
 **New goal** is the app's own composer, on the Goals section.
 
-**Ask-to-goal** is the Ask surface handing a prompt off. Ask is the OS's prompt
-surface and a goal is what replaces the chat prompt as the unit of intent, so
-the handoff is a first-class act there rather than a copy-paste: Ask offers
-"Make this a goal", calls `createGoal` with the prompt as the statement, and
-opens Nexus on the new goal through the shell's open-intent with `{ goalId }`.
-
-Both write `requestedVia: "nexus"`, which is the enum member for this shell's
-surfaces. Guessing `"api"` would file every goal a person typed as one a
-program submitted.
+**Ask** submits each text or voice turn through the same `createGoal` path,
+with its conversation context and `requestedVia: "ask"`. Its **View work**
+action opens the existing goal in Nexus through the shell's open intent with
+`{ goalId }`; it never creates a second goal. Nexus's composer writes
+`requestedVia: "nexus"`.
 
 **Nothing is inserted locally on either path.** `v1:work:goal` broadcasts, so
 the row arrives on the feed the list already draws, with the arrival cue,
@@ -482,8 +481,8 @@ pure. Under `clients/os/test/nexus/`:
   and that the rail follows the rewind.
 - `automations.test.tsx` -- the read dates itself, an act re-reads, no
   percentage anywhere, and arm/retire through the catalog's own verb.
-- `askToGoal.test.tsx` -- the act appears once an answer has landed, hands over
-  the PROMPT, and is absent where the surface cannot hand anything off.
+- `askWorkRecord.test.tsx` -- View work opens the turn's existing goal, and
+  the removed goal-handoff action cannot submit the same request again.
 - `app.test.tsx`, `approvals.test.tsx`, `rows.test.ts`, `runPage.test.tsx`,
   `settings.test.ts` -- carried over from the Work app, plus the live-work-first
   ordering.

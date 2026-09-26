@@ -20,7 +20,6 @@ import {
 import { AskSurface } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
 import { Mark } from "../chrome/Mark";
-import { useMakeGoal } from "../ask/useMakeGoal";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
 import { AccountsApp } from "./accounts/AccountsApp";
 import { ACCOUNTS_SECTIONS } from "./accounts/settings";
@@ -682,7 +681,6 @@ function AskWidgetBody() {
   // The widget hands a prompt off exactly as the sheet does (epic memql#4785).
   // One Ask, three entry points, and an act that exists on one of them is an
   // act somebody learns and then cannot find.
-  const makeGoal = useMakeGoal();
   return (
     <AskSurface
       transport={transport}
@@ -693,7 +691,7 @@ function AskWidgetBody() {
       voicePorts={voice}
       settings={settings}
       variant="widget"
-      makeGoal={makeGoal}
+      onOpenRun={(goalId) => { actions.openApp("nexus", "goals", { goalId }); }}
     />
   );
 }

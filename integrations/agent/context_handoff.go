@@ -17,17 +17,11 @@ package agent
 //
 // # The answer: compress into the next window, and carry on
 //
-// The remedy is the one a person would use. Keep the instructions, keep the
-// recent turns that hold the live thread, drop the oldest middle, and leave a
-// note in their place saying they were dropped. Then send the SAME iteration
-// again, smaller. The work continues in the next window rather than starting
-// over, which is the whole point: a goal's progress lives in its journaled
-// steps, and the handoff is inside one step.
-//
-// component/memql's PlanContextTrim already decides exactly this and is
-// already tested there (it was built for the engine's hardened loop and, until
-// this file, had no production caller). Nothing new is invented here: this is
-// the agent lanes reaching for it at the moment it applies.
+// Owned work uses the same source-preserving checkpoints as proactive context
+// compaction. It keeps the recent exchange raw and stores exact originals for
+// recall. If checkpointing fails, the error surfaces rather than dropping data.
+// Requests outside the work runtime still use PlanContextTrim and an explicit
+// dropped-history notice. This fallback is not used by Ask or Nexus.
 //
 // # Why it converges, and why it is capped
 //
@@ -43,6 +37,7 @@ package agent
 // instead of a retry nobody benefits from.
 
 import (
+	"context"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -95,7 +90,7 @@ const (
 //
 // used is a pointer because the cap is per TURN, not per iteration: a turn
 // that compresses at every iteration is not recovering, it is looping.
-func (r *Replier) handOffContext(err error, messages []common.ChatMessage, used *int, iter int, requestId string) ([]common.ChatMessage, bool) {
+func (r *Replier) handOffContext(ctx context.Context, err error, messages []common.ChatMessage, used *int, iter int, requestId string) ([]common.ChatMessage, bool) {
 	if !memql.IsContextOverflow(err) {
 		return nil, false
 	}
@@ -103,6 +98,15 @@ func (r *Replier) handOffContext(err error, messages []common.ChatMessage, used 
 		r.logger.Warn("agent: context window exhausted -- compressing freed nothing further, so the failure stands",
 			"iter", iter, "handoffs", *used, "requestId", requestId, "error", err)
 		return nil, false
+	}
+	if isOwnedWorkExecution(ctx) {
+		target := memql.WorkContextSize(messages, nil) * 2 / 3
+		next, compactErr := r.compactWorkContext(ctx, messages, nil, target)
+		if compactErr != nil || memql.WorkContextSize(next, nil) >= memql.WorkContextSize(messages, nil) {
+			return nil, false
+		}
+		*used++
+		return next, true
 	}
 	next, note, ok := handOffToNextContextWindow(messages)
 	if !ok {

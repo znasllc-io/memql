@@ -12,61 +12,34 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
-	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/id"
 )
 
-// AskEvent is public execution evidence, never a model's private reasoning.
-// Unknown token usage and cost remain absent, not misleading zeroes.
-type AskEvent struct {
-	ID             string                   `json:"id"`
-	Kind           string                   `json:"kind"`
-	Phase          string                   `json:"phase"`
-	At             time.Time                `json:"at"`
-	Provider       string                   `json:"provider,omitempty"`
-	Model          string                   `json:"model,omitempty"`
-	Name           string                   `json:"name,omitempty"`
-	App            string                   `json:"app,omitempty"`
-	Navigate       bool                     `json:"navigate,omitempty"`
-	Arguments      map[string]any           `json:"arguments,omitempty"`
-	ElapsedMS      int64                    `json:"elapsedMs,omitempty"`
-	ExpectedMS     int64                    `json:"expectedMs,omitempty"`
-	EstimateSource string                   `json:"estimateSource,omitempty"`
-	Error          string                   `json:"error,omitempty"`
-	Call           *airoute.CallObservation `json:"call,omitempty"`
-}
-
 type AskTurn struct {
-	ID        string     `json:"id"`
-	Prompt    string     `json:"prompt"`
-	Answer    string     `json:"answer"`
-	Context   string     `json:"context,omitempty"`
-	State     string     `json:"state"`
-	StartedAt time.Time  `json:"startedAt"`
-	EndedAt   *time.Time `json:"endedAt,omitempty"`
-	Activity  []AskEvent `json:"activity"`
-	Error     string     `json:"error,omitempty"`
+	VoiceInterrupted bool        `json:"voiceInterrupted,omitempty"`
+	ID               string      `json:"id"`
+	Prompt           string      `json:"prompt"`
+	Answer           string      `json:"answer"`
+	Context          string      `json:"context,omitempty"`
+	State            string      `json:"state"`
+	StartedAt        time.Time   `json:"startedAt"`
+	EndedAt          *time.Time  `json:"endedAt,omitempty"`
+	Activity         []WorkEvent `json:"activity"`
+	Error            string      `json:"error,omitempty"`
+	GoalID           string      `json:"goalId,omitempty"`
+	RunID            string      `json:"runId,omitempty"`
 }
 
 type askTranscript struct {
 	Turns []AskTurn `json:"turns"`
 }
-type askEventKey struct{}
-type askEmitter func(AskEvent) error
-
-func emitAsk(ctx context.Context, event AskEvent) error {
-	if emit, ok := ctx.Value(askEventKey{}).(askEmitter); ok {
-		return emit(event)
-	}
-	return nil
-}
 
 // RunAsk is shared by text and live voice. Only the server can append an
 // assistant message. The lock spans replicas and rejects overlapping turns;
 // a lost request is never automatically re-executed with its side effects.
-func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt, pageContext string, onText func(string), onEvent func(AskEvent)) (answer string, err error) {
+func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt, pageContext string, onText func(string), onEvent func(WorkEvent)) (answer string, err error) {
 	if subject, ok := auth.SubjectFromContext(ctx); !ok || !auth.CapableFor(ctx, subject, "read", "app:ask") {
 		return "", fmt.Errorf("Ask requires a signed-in person")
 	}
@@ -97,13 +70,18 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 	if err = json.Unmarshal(raw, &transcript); err != nil {
 		return "", fmt.Errorf("conversation transcript is unreadable")
 	}
-	for _, prior := range transcript.Turns {
+	resumeIndex := -1
+	for index, prior := range transcript.Turns {
 		if prior.ID == turnID {
 			if prior.State == "done" {
 				if onText != nil {
 					onText(prior.Answer)
 				}
 				return prior.Answer, nil
+			}
+			if prior.RunID != "" {
+				resumeIndex = index
+				break
 			}
 			return "", fmt.Errorf("this turn already started; inspect its activity before trying again")
 		}
@@ -119,25 +97,14 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		runes := []rune(strings.Join(strings.Fields(prompt), " "))
 		title = string(runes[:min(80, len(runes))])
 	}
-	history := make([]map[string]any, 0, 50)
-	for _, turn := range transcript.Turns[max(0, len(transcript.Turns)-24):] {
-		history = append(history, map[string]any{"role": "user", "content": turn.Prompt})
-		if turn.Answer != "" {
-			history = append(history, map[string]any{"role": "assistant", "content": turn.Answer})
-		}
-		evidence := []string{}
-		for _, event := range turn.Activity {
-			if event.Kind == "action" && event.Phase != "running" {
-				evidence = append(evidence, event.Name+": "+event.Phase)
-			}
-		}
-		if len(evidence) > 0 || turn.State != "done" {
-			history = append(history, map[string]any{"role": "user", "content": "[Recorded execution status for the preceding turn: " + turn.State + ". " + strings.Join(evidence, "; ") + ". Inspect current state before repeating an operation.]"})
-		}
+	e.reconcileAskRuns(ctx, &transcript)
+	history := askConversationMessages(transcript.Turns)
+	if resumeIndex < 0 {
+		transcript.Turns = append(transcript.Turns, AskTurn{ID: turnID, Prompt: prompt, Context: pageContext, State: "streaming", StartedAt: time.Now().UTC(), Activity: []WorkEvent{}})
+		resumeIndex = len(transcript.Turns) - 1
 	}
-	history = append(history, map[string]any{"role": "user", "content": prompt})
-	transcript.Turns = append(transcript.Turns, AskTurn{ID: turnID, Prompt: prompt, Context: pageContext, State: "streaming", StartedAt: time.Now().UTC(), Activity: []AskEvent{}})
-	turn := &transcript.Turns[len(transcript.Turns)-1]
+	turn := &transcript.Turns[resumeIndex]
+	turn.State, turn.Error, turn.Answer = "streaming", "", ""
 	if err = e.askSave(ctx, conversationID, title, transcript); err != nil {
 		return "", err
 	}
@@ -146,29 +113,36 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		timingHistory = transcript.Turns[:len(transcript.Turns)-1]
 	}
 	var mu sync.Mutex
-	emit := askEmitter(func(event AskEvent) error {
+	emit := func(event WorkEvent) error {
 		mu.Lock()
 		defer mu.Unlock()
 		if event.ID == "" {
 			event.ID = id.NewShortId()
 		}
-		event.At = time.Now().UTC()
+		if event.At.IsZero() {
+			event.At = time.Now().UTC()
+		}
+		if event.Kind == "model" && event.Phase == "running" && event.Call != nil {
+			event.ExpectedMS, event.EstimateSource = askExpectedFor(timingHistory, *event.Call)
+		}
 		turn.Activity = append(turn.Activity, event)
-		if saveErr := e.askSave(ctx, conversationID, title, transcript); saveErr != nil {
-			return saveErr
+		if err := e.askSave(ctx, conversationID, title, transcript); err != nil {
+			return err
 		}
 		if onEvent != nil {
 			onEvent(event)
 		}
 		return nil
-	})
-	ctx = context.WithValue(WithActingAgentRole(ctx, "assistant"), askEventKey{}, emit)
+	}
 	defer func() {
 		ended := time.Now().UTC()
 		turn.EndedAt = &ended
 		turn.State = "done"
 		if err != nil {
 			turn.State = "error"
+			if ctx.Err() != nil {
+				turn.State = "interrupted"
+			}
 			turn.Error = err.Error()
 		}
 		// Persist cancellation too, but do not give any model/tool a detached context.
@@ -179,39 +153,53 @@ func (e *MemQLEngine) RunAsk(ctx context.Context, conversationID, turnID, prompt
 		}
 	}()
 
-	ctx, cancelCall := context.WithCancelCause(ctx)
-	defer cancelCall(nil)
-	ctx = airoute.WithObserver(ctx, func(call airoute.CallObservation) {
-		event := AskEvent{ID: call.ID, Kind: "model", Phase: call.Phase, Provider: call.Provider, Model: call.Model, ElapsedMS: int64(call.ElapsedMS), Error: call.Error, Call: &call}
-		if call.Phase == "running" {
-			event.ExpectedMS, event.EstimateSource = askExpectedFor(timingHistory, call)
+	// Ask is a conversation adapter over the same intake as Nexus/API goals.
+	// Context is persisted with the run before the planner/agent replica sees it.
+	if turn.RunID == "" {
+		call, callErr := parser.RenderCall("work.createGoal", map[string]any{
+			"statement": prompt, "requestedVia": "ask",
+			"input": map[string]any{"conversation": map[string]any{
+				"id": conversationID, "turnId": turnID, "messages": history, "pageContext": pageContext,
+			}},
+		})
+		if callErr != nil {
+			return "", callErr
 		}
-		if saveErr := emit(event); saveErr != nil {
-			cancelCall(fmt.Errorf("could not record model activity: %w", saveErr))
+		result, callErr := e.Execute(ctx, "builtin "+call)
+		if callErr != nil {
+			return "", callErr
 		}
-	})
-	answer, err = e.InvokeAIChatWithFilteredToolsOpts(ctx, "askMemql", map[string]any{"context": pageContext, "history": history}, []string{"os.askDiscover", "os.askExecuteCapability"}, &ToolLoopOptions{
-		Sequential:    true,
-		AllowTextOnly: true,
-		RetryPolicy:   &ToolRetryPolicy{MaxAttempts: 1, PerCallTimeout: 90 * time.Second},
-		ContextBudget: &ContextBudget{MaxTokens: 24000},
-		OnText: func(text string) {
-			mu.Lock()
-			turn.Answer += text
-			mu.Unlock()
-			if onText != nil {
-				onText(text)
-			}
-		},
-	})
-	if cause := context.Cause(ctx); cause != nil {
-		err = cause
+		rows := MaterializeRows(result.OutputPayload())
+		if len(rows) != 1 {
+			return "", fmt.Errorf("work intake returned no run")
+		}
+		turn.GoalID, _ = rows[0]["goalId"].(string)
+		turn.RunID, _ = rows[0]["runId"].(string)
+		if turn.GoalID == "" || turn.RunID == "" {
+			return "", fmt.Errorf("work intake returned no run identity")
+		}
+		if err = e.askSave(ctx, conversationID, title, transcript); err != nil {
+			return "", err
+		}
 	}
+	if err = emit(WorkEvent{ID: "work:" + turn.RunID, Kind: "run", Phase: "running", Name: turn.RunID, Arguments: map[string]any{"goalId": turn.GoalID, "runId": turn.RunID}}); err != nil {
+		return "", err
+	}
+	answer, err = e.followWorkRun(ctx, turn.RunID, func(text string) {
+		mu.Lock()
+		turn.Answer += text
+		mu.Unlock()
+		if onText != nil {
+			onText(text)
+		}
+	}, emit)
+	if err == nil {
+		err = emit(WorkEvent{ID: "work:" + turn.RunID, Kind: "run", Phase: "completed", Name: turn.RunID, Arguments: map[string]any{"goalId": turn.GoalID, "runId": turn.RunID}})
+	}
+	// A disconnected viewer stops observing; the durable run retains its
+	// receipts and is not recreated. Explicit cancellation uses cancelGoal.
 	if turn.Answer == "" {
 		turn.Answer = answer
-		if onText != nil && answer != "" {
-			onText(answer)
-		}
 	}
 	return answer, err
 }
@@ -339,151 +327,4 @@ func (e *MemQLEngine) lockAskConversationKind(ctx context.Context, conversationI
 		}
 		_ = conn.Close()
 	}, nil
-}
-
-func (e *MemQLEngine) askAllowed(ctx context.Context, fn *Function) bool {
-	if fn == nil || !fn.Enabled || fn.ServerOnly || strings.HasPrefix(fn.Name, "ask") || strings.HasSuffix(fn.Name, "AskConversation") {
-		return false
-	}
-	if fn.FunctionKind != "query" && fn.FunctionKind != "mutation" && fn.FunctionKind != "logic" && fn.FunctionKind != "builtin" {
-		return false
-	}
-	if fn.ArgsSchema != nil {
-		for _, field := range fn.ArgsSchema.Fields {
-			if field.Secret {
-				return false
-			}
-		}
-	}
-	if e.refuseBelowRequiredRank(ctx, fn, fn.Name) != nil || e.refuseBelowRequiredCapability(ctx, fn, fn.Name) != nil {
-		return false
-	}
-	if app := askApp(fn); app != "" {
-		subject, ok := auth.SubjectFromContext(ctx)
-		if !ok || !auth.CapableFor(ctx, subject, "read", "app:"+app) {
-			return false
-		}
-	}
-	return true
-}
-
-func askApp(fn *Function) string {
-	ns := ConstructNamespaceForOrigin(fn.Origin)
-	switch ns {
-	case "identity":
-		if strings.HasPrefix(fn.Name, "my") || strings.HasPrefix(fn.Name, "own") {
-			return "identity"
-		}
-		return "users"
-	case "groups", "access":
-		return "users"
-	case "worker", "providers", "policies", "rules", "router":
-		return "fleet"
-	case "library":
-		return "files"
-	case "accounts":
-		return "accounts"
-	case "campaigns":
-		return "campaigns"
-	case "platform":
-		return "deployables"
-	case "agents", "node", "cluster", "automations":
-		return "cluster"
-	case "work", "goals":
-		return "nexus"
-	case "training", "knowledge":
-		return "training"
-	}
-	return ""
-}
-
-func (e *MemQLEngine) askCapabilitiesBuiltin(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	if _, ok := auth.SubjectFromContext(ctx); !ok {
-		return nil, fmt.Errorf("sign in to discover capabilities")
-	}
-	search := strings.ToLower(strings.TrimSpace(stringArg(args, "search")))
-	if search == "" || len(search) > 300 {
-		return nil, fmt.Errorf("provide a short capability search")
-	}
-	var matches []map[string]any
-	for _, fn := range e.functions.List() {
-		if !e.askAllowed(ctx, fn) {
-			continue
-		}
-		name := QualifyConstruct(ConstructNamespaceForOrigin(fn.Origin), fn.Name)
-		haystack := strings.ToLower(name + " " + fn.Description + " " + fn.DocComment + " " + fn.BoundConcept)
-		found := true
-		for _, word := range strings.Fields(search) {
-			if !strings.Contains(haystack, word) {
-				found = false
-				break
-			}
-		}
-		if !found {
-			continue
-		}
-		fields := []map[string]any{}
-		if fn.ArgsSchema != nil {
-			for _, field := range fn.ArgsSchema.Fields {
-				fields = append(fields, map[string]any{"name": field.Name, "type": field.Type, "optional": field.Optional, "description": field.Description, "enum": field.Enum})
-			}
-		}
-		matches = append(matches, map[string]any{"name": name, "kind": fn.FunctionKind, "description": fn.Description, "arguments": fields, "app": askApp(fn)})
-	}
-	sort.Slice(matches, func(i, j int) bool { return matches[i]["name"].(string) < matches[j]["name"].(string) })
-	if len(matches) > 30 {
-		matches = matches[:30]
-	}
-	raw, _ := json.Marshal(map[string]any{"capabilities": matches})
-	return []memorynodes.MemoryNode{{ID: "capabilities", Payload: raw}}, nil
-}
-
-func (e *MemQLEngine) askExecuteBuiltin(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	name := stringArg(args, "name")
-	fn, err := e.functions.Get(name)
-	if err != nil || !e.askAllowed(ctx, fn) {
-		return nil, fmt.Errorf("capability is unavailable for this person")
-	}
-	arguments, ok := args["arguments"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("arguments must be an object")
-	}
-	call, err := parser.RenderCall(QualifyConstruct(ConstructNamespaceForOrigin(fn.Origin), fn.Name), arguments)
-	if err != nil {
-		return nil, err
-	}
-	// Runtime calls accept qualified names; `use` belongs to declarations,
-	// not executable expressions. Keep the namespace to avoid ambiguous names.
-	call = fn.FunctionKind + " " + call
-	event := AskEvent{ID: id.NewShortId(), Kind: "action", Phase: "running", Name: name, App: askApp(fn), Navigate: askApp(fn) != ""}
-	// Only resource identifiers are navigation hints. Never mirror arbitrary
-	// content or credentials into desktop events.
-	event.Arguments = map[string]any{}
-	for key, value := range arguments {
-		if strings.HasSuffix(key, "Id") {
-			if v, ok := value.(string); ok {
-				event.Arguments[key] = BareShortId(v)
-			}
-		}
-	}
-	if err := emitAsk(ctx, event); err != nil {
-		return nil, fmt.Errorf("could not record action before execution: %w", err)
-	}
-	result, err := e.Execute(ctx, call)
-	event.Phase = "completed"
-	if err != nil {
-		event.Phase = "failed"
-		event.Error = err.Error()
-	}
-	if recordErr := emitAsk(ctx, event); recordErr != nil {
-		return nil, fmt.Errorf("action result could not be recorded; check current state before retrying: %w", recordErr)
-	}
-	if err != nil {
-		return nil, err
-	}
-	raw, err := json.Marshal(result.OutputPayload())
-	if err != nil {
-		return nil, err
-	}
-	return []memorynodes.MemoryNode{{ID: "result", Payload: raw}}, nil
 }

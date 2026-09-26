@@ -155,6 +155,9 @@ func workDraftExpressions(inputNames []string, sections []sectionPlan) workDraft
 	if len(inputNames) > 0 {
 		entries := make([]string, 0, len(inputNames))
 		for _, name := range inputNames {
+			if name == "conversation" {
+				continue
+			}
 			entries = append(entries, name+": args."+name)
 		}
 		x.goalInputStatement = "goalInput := {" + strings.Join(entries, ", ") + "}"
