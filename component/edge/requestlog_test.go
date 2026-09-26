@@ -124,8 +124,8 @@ func TestRequestLogClassifiesWhatWasNotServed(t *testing.T) {
 func TestRequestLogSkipsSystemOwnedSites(t *testing.T) {
 	portal := &Site{ID: "site-portal", Hostname: "shop.example.com", Status: "live", Kind: "spa", SystemOwned: true}
 	rec, records := serveWithLog(t, portal, map[string]string{"index.html": "PORTAL"}, http.MethodGet, "/")
-	if rec.Code != http.StatusOK || rec.Body.String() != "PORTAL" {
-		t.Fatalf("the system-owned site must serve normally; got %d %q", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || sourceHTML(rec.Body.String()) != "PORTAL" {
+		t.Fatalf("the system-owned site must serve normally; got %d %q", rec.Code, sourceHTML(rec.Body.String()))
 	}
 	if len(records) != 0 {
 		t.Errorf("recorded %d requests for a system-owned site, want none", len(records))
@@ -147,8 +147,8 @@ func TestNoRecorderChangesNothing(t *testing.T) {
 	rec := serve(t,
 		&Site{ID: "s", Hostname: "shop.example.com", Status: "live", Kind: "spa"},
 		map[string]string{"index.html": "ROOT"}, "/")
-	if rec.Code != http.StatusOK || rec.Body.String() != "ROOT" {
-		t.Errorf("got %d %q, want 200 ROOT", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK || sourceHTML(rec.Body.String()) != "ROOT" {
+		t.Errorf("got %d %q, want 200 ROOT", rec.Code, sourceHTML(rec.Body.String()))
 	}
 }
 
@@ -300,13 +300,13 @@ func TestTheRecordHappensAfterTheResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 
-	if rec.Body.String() != "ROOT" {
-		t.Fatalf("body = %q, want ROOT", rec.Body.String())
+	if sourceHTML(rec.Body.String()) != "ROOT" {
+		t.Fatalf("body = %q, want ROOT", sourceHTML(rec.Body.String()))
 	}
 	select {
 	case got := <-seen:
-		if got.Bytes != int64(len("ROOT")) {
-			t.Errorf("bytes = %d, want %d -- the record is taken once the body is written", got.Bytes, len("ROOT"))
+		if got.Bytes != int64(rec.Body.Len()) {
+			t.Errorf("bytes = %d, want %d -- the record is taken once the body is written", got.Bytes, rec.Body.Len())
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no record arrived")

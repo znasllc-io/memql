@@ -117,6 +117,7 @@ type DeployableReport struct {
 	// gate can show which store this deploys against. It names a secret; it
 	// never carries one.
 	Binding *ManifestBinding `json:"binding,omitempty"`
+	Testing *ManifestTesting `json:"testing,omitempty"`
 
 	// ResolutionTail is the manifest's choice of what a path matching no file
 	// answers, carried through to EnsureSite. Empty means the kind decides.

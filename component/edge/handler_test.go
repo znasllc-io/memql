@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -93,8 +94,8 @@ func TestResolutionOrder(t *testing.T) {
 			t.Errorf("GET %s = %d, want 200", tc.path, rec.Code)
 			continue
 		}
-		if rec.Body.String() != tc.want {
-			t.Errorf("GET %s served %q, want %q", tc.path, rec.Body.String(), tc.want)
+		if sourceHTML(rec.Body.String()) != tc.want {
+			t.Errorf("GET %s served %q, want %q", tc.path, sourceHTML(rec.Body.String()), tc.want)
 		}
 	}
 }
@@ -121,9 +122,9 @@ func TestDirectoryIndexWinsOverHTMLFileWhenBothExist(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /catalog = %d, want 200", rec.Code)
 	}
-	if rec.Body.String() != "CATALOG-DIR" {
+	if sourceHTML(rec.Body.String()) != "CATALOG-DIR" {
 		t.Errorf("GET /catalog served %q, want %q -- the <path>/index.html rung must win over <path>.html",
-			rec.Body.String(), "CATALOG-DIR")
+			sourceHTML(rec.Body.String()), "CATALOG-DIR")
 	}
 }
 
@@ -373,3 +374,9 @@ func TestHostedSitesMayAskForTheMicrophoneAndNothingElse(t *testing.T) {
 		}
 	}
 }
+
+// Byte-identity tests compare the published source, excluding the hosting
+// layer's version monitor. site_refresh_test.go checks the complete response.
+var refreshTag = regexp.MustCompile(`<script src="/_memql/site-refresh.js" data-memql-version="[a-f0-9]{32}" defer></script>`)
+
+func sourceHTML(body string) string { return refreshTag.ReplaceAllString(body, "") }

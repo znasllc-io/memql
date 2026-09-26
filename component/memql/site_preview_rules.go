@@ -58,12 +58,6 @@ func (r PreviewRefusal) Empty() bool { return r.Code == "" }
 // The refusal vocabulary. CLOSED, and each value is a distinct situation an
 // operator can act on; two situations that need the same act would be one code.
 const (
-	// PreviewRefusalServingBindingIsDevelopment -- the deployable is bound to a
-	// development store and the act would put it in front of shoppers.
-	PreviewRefusalServingBindingIsDevelopment = "serving_binding_is_development_store"
-	// PreviewRefusalBindingIsNotDevelopment -- the preview binding names the
-	// store shoppers reach, so exercising it would take real orders.
-	PreviewRefusalBindingIsNotDevelopment = "preview_binding_is_not_development_store"
 	// PreviewRefusalStoreUnreadable -- the store a binding names cannot be read by
 	// whoever is asking, so neither question above can be answered.
 	PreviewRefusalStoreUnreadable = "bound_store_unreadable"
@@ -78,19 +72,13 @@ const (
 	// PreviewRefusalSystemOwned -- the platform's own site is exempt from this whole
 	// axis, as it is from the status axis and the settings axis.
 	PreviewRefusalSystemOwned = "site_is_system_owned"
-	// PreviewRefusalNoPreviewBinding -- a storefront with no development store
-	// attached has nothing to exercise against.
-	PreviewRefusalNoPreviewBinding = "no_preview_binding"
 )
 
 // PreviewBoundStore is what a caller could learn about the store a binding names.
 //
-// THREE STATES, NOT TWO, and the third is the one that matters. `Readable`
-// false does NOT mean "not a development store": it means nobody could answer,
-// and an unanswerable question about whether a storefront is pointed at real
-// money must refuse rather than assume. Reading an unreadable store as "not a
-// development store" would let a go-live through precisely when the cluster had
-// lost track of what the site is bound to.
+// Empty bindings serve design preview. Readable bindings may select either
+// store type. A nonempty unreadable binding is refused, because it cannot be
+// validated under the caller's access.
 type PreviewBoundStore struct {
 	// ID is the store the binding names, or empty for an unbound deployable.
 	ID string
@@ -122,104 +110,25 @@ func (s PreviewBoundStore) name() string {
 	return "the bound store"
 }
 
-// SiteGoLiveRefusal answers whether a deployable may be taken live, or a candidate
-// promoted, given the store its SERVING binding names (issue memql#5546).
-//
-// ONE FUNCTION FOR BOTH ACTS, because they are one question asked twice: both
-// are "may this version be put in front of shoppers", and a storefront bound to
-// a development store has no shoppers to put it in front of. It would serve a
-// catalog nobody can buy from and take orders into a store that is not the
-// merchant's -- and it would look like a successful launch while doing it,
-// which is why the refusal is typed rather than left to a person noticing.
-//
-// A NON-STOREFRONT DEPLOYABLE IS NEVER REFUSED. An `spa` or a `static` site has
-// no binding and no store, so there is no question to ask; `storefront` false
-// returns no refusal without looking at anything.
-//
-// A STOREFRONT THAT IS NOT CONNECTED IS REFUSED (Connect Shopify, D5), and that
-// reverses what this rule used to allow. A storefront's first deploy now lands
-// as a draft with no store whenever the manifest's store cannot be attached
-// (component/packages, the publish stage), so "unbound" is no longer the
-// harmless state before anybody wires one up: it is a storefront whose deploy
-// succeeded and which has no catalog behind it. Taking it live would put an
-// empty shop in front of shoppers and call that a launch. The same is true of
-// a store row with no Storefront token -- the edge would serve an empty token
-// and the catalog would not load. Both are one situation with one act that
-// clears it, so they are one code.
-//
-// THE TOKEN IS JUDGED LAST. An unreadable store and a development store are
-// refusals about WHICH store is bound, and connecting a token clears neither,
-// so they are reported first.
+// SiteGoLiveRefusal validates the Production binding. Store type does not
+// determine the destination: an owner may use a sandbox on either URL. An
+// unconnected storefront serves its design; an unreadable binding is refused.
 func SiteGoLiveRefusal(storefront bool, serving PreviewBoundStore) PreviewRefusal {
-	if !storefront {
-		return PreviewRefusal{}
-	}
-	// An unattached storefront can serve its design and navigation. Commerce
-	// readiness is shown separately on its Store panel.
-	if strings.TrimSpace(serving.ID) == "" {
-		return PreviewRefusal{}
-	}
-	if !serving.Readable {
-		return PreviewRefusal{
-			Code: PreviewRefusalStoreUnreadable,
-			Message: "this storefront is bound to store " + serving.name() +
-				", which cannot be read here -- so whether it is a development store cannot be answered, and a storefront may not go in front of shoppers on an unanswered question.",
-			Remedy: "Ask an operator who can read the store to check the binding, or re-bind this storefront to a store you can read.",
-		}
-	}
-	if serving.IsDevelopment {
-		return PreviewRefusal{
-			Code: PreviewRefusalServingBindingIsDevelopment,
-			Message: "this storefront is bound to " + serving.name() +
-				", which is a development store -- serving it to shoppers would show a catalog nobody can buy from and take orders into a store that is not the merchant's.",
-			Remedy: "Bind the storefront to the store shoppers reach, then try again. The development store stays on the preview binding.",
-		}
-	}
-	return PreviewRefusal{}
+	return SitePreviewBindingRefusal(storefront, serving)
 }
 
-// SitePreviewBindingRefusal answers whether a candidate may be exercised against the store
-// the PREVIEW binding names -- the other direction of the same guard.
-//
-// THE FAILURE IT PREVENTS IS SILENT, which is why it exists at all. A preview
-// pointed at the live store looks exactly like a preview: the catalog loads,
-// the cart works, the checkout opens. It stops looking like a preview at the
-// moment a test payment lands in the merchant's real orders, and by then it has
-// happened.
-//
-// An unbound preview binding is refused even though the design may go live.
-// Commerce checks need a development store: the act that clears this is
-// attaching a development store, not connecting the shop. Exercising an
-// unbound preview would fall back to no store at all and report four
-// observations of nothing.
-func SitePreviewBindingRefusal(storefront bool, preview PreviewBoundStore) PreviewRefusal {
-	if !storefront {
+// SitePreviewBindingRefusal validates the independent Testing binding. No
+// binding means design preview. The store's own permissions still govern
+// whether the caller may attach it; this rule never grants access to a row.
+func SitePreviewBindingRefusal(storefront bool, store PreviewBoundStore) PreviewRefusal {
+	if !storefront || strings.TrimSpace(store.ID) == "" || store.Readable {
 		return PreviewRefusal{}
 	}
-	if strings.TrimSpace(preview.ID) == "" {
-		return PreviewRefusal{
-			Code:    PreviewRefusalNoPreviewBinding,
-			Message: "this storefront has no development store on its preview binding, so there is nothing to exercise a candidate against.",
-			Remedy:  "Attach a development store to the preview binding first.",
-		}
+	return PreviewRefusal{
+		Code:    PreviewRefusalStoreUnreadable,
+		Message: "The connected store " + store.name() + " cannot be read here.",
+		Remedy:  "Connect a store you can read, or disconnect it to view the design.",
 	}
-	if !preview.Readable {
-		return PreviewRefusal{
-			Code: PreviewRefusalStoreUnreadable,
-			Message: "the preview binding names store " + preview.name() +
-				", which cannot be read here -- so whether it is a development store cannot be answered.",
-			Remedy: "Ask an operator who can read the store to check the preview binding, or point it at a store you can read.",
-		}
-	}
-	if !preview.IsDevelopment {
-		return PreviewRefusal{
-			Code: PreviewRefusalBindingIsNotDevelopment,
-			Message: "the preview binding names " + preview.name() +
-				", which is the store shoppers reach -- exercising a candidate against it would put test carts and test payments in the merchant's real store.",
-			Remedy: "Point the preview binding at a development store. Shopify marks one on the store row as isDevelopment.",
-		}
-	}
-	return PreviewRefusal{}
 }
 
 // SiteCandidateRefusal answers whether `candidate` may be set as the candidate version of

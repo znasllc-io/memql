@@ -68,14 +68,19 @@ func PlanFingerprint(rep *Report) string {
 			// and it is a plan that parks either way.
 			problem = d.Problem.Code
 		}
-		apps = append(apps, strings.Join([]string{
+		fields := []string{
 			d.Name, d.Kind, d.Path, d.Command, d.Output,
 			boolWord(d.Prebuilt, "prebuilt", "builds"),
 			bindingWord(d.Binding),
 			d.DisplayName, deploymentFingerprint(d.Deployment),
 			assetPlanFingerprint(d.Assets),
 			problem,
-		}, "|"))
+		}
+		// Preserve existing fingerprints when Testing is not declared.
+		if d.Testing != nil {
+			fields = append(fields, testingFingerprint(d.Testing))
+		}
+		apps = append(apps, strings.Join(fields, "|"))
 	}
 	sort.Strings(apps)
 	parts = append(parts, "apps="+strings.Join(apps, ";"))
@@ -278,4 +283,11 @@ func policyDeploymentId(pkg map[string]any, version string) string {
 		id += fmt.Sprintf("-%x", sum[:6])
 	}
 	return id
+}
+
+func testingFingerprint(t *ManifestTesting) string {
+	if t == nil {
+		return ""
+	}
+	return "testing:" + bindingWord(t.Binding)
 }

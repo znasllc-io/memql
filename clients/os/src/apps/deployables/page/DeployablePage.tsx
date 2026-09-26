@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
-import { Activity, ExternalLink } from "lucide-react";
+import { Activity } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Head, Input, Panel, useLiveView } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
@@ -13,7 +13,7 @@ import { deploymentFromRow, type DeploymentRow, type PackageRow } from "../packa
 import type { PartsHeld } from "../parts";
 import { deployedByLabel, deployerOf, type NameOf } from "../people";
 import { usePackageDeployments } from "../packages/usePackages";
-import { liveUrlFor, ownerLabel, siteName, type SiteRow } from "../rows";
+import { ownerLabel, siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { confirmationWordFor } from "../words";
 import { actsFor, runForApp, siblingRunInFlight, type ActName } from "./acts";
@@ -33,6 +33,7 @@ import { DomainWizard } from "./stops/Domains";
 import { ShopifyStorePanel } from "../store/ShopifyStorePanel";
 import { RefusalNotice } from "../preview/PreviewSection";
 import { useBundleFlip } from "./useBundleFlip";
+import { VisitSiteButton } from "./VisitSiteButton";
 
 // The deployable page (epic memql#4937, design sections C and D): ONE head,
 // ONE rail, ONE bar.
@@ -159,7 +160,6 @@ export function DeployablePage({
   const rail: StandingInput = { mode: "standing", pkg, app, run, site };
   const refusalStop = refusalStopFor(run);
   const name = pkg?.declares.find(d => d.name === app)?.displayName?.trim() || site.title || site.packageDeployableName || siteName(site);
-  const url = liveUrlFor(site.hostname);
 
   // WHAT THE ENGINE SAYS IS LEGAL about this deployable's candidate (epic
   // memql#5531). The bar offers a promotion only when the readiness has landed
@@ -184,7 +184,7 @@ export function DeployablePage({
         ? null
         : {
             hasCandidate: previewReadiness.hasCandidate,
-            canPromote: previewReadiness.canPromote && site.candidateRef !== site.bundleRef,
+            canPromote: site.kind !== "shopify_storefront" && previewReadiness.canPromote && site.candidateRef !== site.bundleRef,
             canGoLive: previewReadiness.canGoLive,
             goLiveRefusal: previewReadiness.goLiveRefusal,
           },
@@ -386,11 +386,7 @@ export function DeployablePage({
         <Panel label={`Deployable ${siteName(site)}`}>
           {/* Page navigation stays with the title; Ask belongs to the window. */}
           <Head title={name} breadcrumbs={[{ label: backLabel, onSelect: onBack }, { label: name }]} back={{ label: backLabel, onSelect: onBack }}>
-            {url === "" ? null : (
-              <a className="os-icon-button" aria-label={`Open ${name} in a new tab`} title={`Open ${name} in a new tab`} href={url} target="_blank" rel="noreferrer noopener">
-                <ExternalLink size={16} aria-hidden />
-              </a>
-            )}
+            <VisitSiteButton site={site} name={name} can={can} readiness={previewReadiness} readinessError={previewRead.error} onWritten={previewRead.reread} onOpenStore={() => setDetail("store")} />
             <OpenLogsButton iconOnly subject={site.id} subjectConcept={Concepts.PLATFORM_SITE} ariaLabel={`Logs for ${name}`} />
             <IconButton label="Traffic" onClick={() => setDetail("traffic")}><Activity size={16} aria-hidden /></IconButton>
           </Head>

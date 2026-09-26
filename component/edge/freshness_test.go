@@ -15,11 +15,11 @@ import (
 // Exercise the real handler and blob opener while promoting two bundles under
 // the same public URLs. Browser validators from release one cannot hide two.
 func TestNewBundleAtSameURLCannotReturnStale304(t *testing.T) {
-	for _, kind := range []string{"static", "spa"} {
+	for _, kind := range []string{"static", "spa", storefrontKind} {
 		t.Run(kind, func(t *testing.T) {
 			objects := map[string][]byte{}
 			paths := map[string]string{"/": "index.html", "/about": "about.html", "/nested/": "nested/index.html", "/legacy.htm": "legacy.htm", "/app.js": "app.js", "/styles.css": "styles.css", "/service-worker.js": "service-worker.js", "/config.json": "config.json"}
-			if kind == "spa" {
+			if kind != "static" {
 				paths["/client-route"] = "index.html"
 			}
 			for _, name := range paths {
@@ -31,8 +31,8 @@ func TestNewBundleAtSameURLCannotReturnStale304(t *testing.T) {
 			tags := map[string]string{}
 			for url := range paths {
 				r := get(t, h, url, nil)
-				if r.Code != 200 || r.Body.String() != "release one" || !isNoCache(r.Header().Get("Cache-Control")) {
-					t.Fatalf("first %s: %d %q %v", url, r.Code, r.Body.String(), r.Header())
+				if r.Code != 200 || sourceHTML(r.Body.String()) != "release one" || !isNoCache(r.Header().Get("Cache-Control")) {
+					t.Fatalf("first %s: %d %q %v", url, r.Code, sourceHTML(r.Body.String()), r.Header())
 				}
 				tags[url] = r.Header().Get("ETag")
 				if strings.Contains(r.Header().Get("Cache-Control"), "no-store") {
@@ -42,8 +42,8 @@ func TestNewBundleAtSameURLCannotReturnStale304(t *testing.T) {
 			site.BundleRef = "blob://release-two/"
 			for url, oldTag := range tags {
 				r := get(t, h, url, map[string]string{"If-None-Match": oldTag, "If-Modified-Since": time.Now().Add(time.Hour).UTC().Format(http.TimeFormat)})
-				if r.Code != 200 || r.Body.String() != "release two" || r.Header().Get("ETag") == oldTag {
-					t.Fatalf("second %s: %d %q %v", url, r.Code, r.Body.String(), r.Header())
+				if r.Code != 200 || sourceHTML(r.Body.String()) != "release two" || r.Header().Get("ETag") == oldTag {
+					t.Fatalf("second %s: %d %q %v", url, r.Code, sourceHTML(r.Body.String()), r.Header())
 				}
 				if same := get(t, h, url, map[string]string{"If-None-Match": r.Header().Get("ETag")}); same.Code != 304 {
 					t.Fatalf("unchanged %s: %d", url, same.Code)
@@ -86,8 +86,8 @@ func TestFileReleaseWithPreservedSizeAndTimestampUsesContentValidator(t *testing
 			if second.Code != 200 || second.Header().Get("ETag") == first.Header().Get("ETag") {
 				t.Fatalf("%s: %d %v", method, second.Code, second.Header())
 			}
-			if method == "GET" && second.Body.String() != "release two" {
-				t.Fatal(second.Body.String())
+			if method == "GET" && sourceHTML(second.Body.String()) != "release two" {
+				t.Fatal(sourceHTML(second.Body.String()))
 			}
 			if method == "HEAD" && second.Body.Len() != 0 {
 				t.Fatal("HEAD returned a body")

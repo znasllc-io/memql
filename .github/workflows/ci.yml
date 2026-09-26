@@ -488,6 +488,9 @@ jobs:
               - 'docs/public/overview/proving/scorecard/**'
             go:
               - '**/*.go'
+              # Embedded browser runtime and Node tests execute in component/edge.
+              - 'component/edge/site_refresh.js'
+              - 'component/edge/site_refresh_test.cjs'
               - 'go.mod'
               - 'go.sum'
               - 'go.work'

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
 // Site is the projection of v1:platform:site the edge needs to serve a request.
@@ -49,6 +51,9 @@ type Site struct {
 	// API and no public form says the opposite.
 	ShopperForms bool
 	SystemOwned  bool
+
+	// StorefrontTesting is a private sibling origin serving BundleRef with PreviewStore.
+	StorefrontTesting bool
 
 	// Binding is the site row's typed per-kind configuration, carried through
 	// as the untyped object the row stores (memql#4345). Empty for every kind
@@ -310,9 +315,22 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 	// misses for the same key collapse into one query instead of each
 	// driving their own.
 	anySite, err, _ := r.sf.Do(key, func() (any, error) {
-		site, err := r.exec.SiteByHostname(ctx, key)
+		lookup := key
+		production, testing := frontdoor.StorefrontProductionHost(key)
+		if testing {
+			lookup = production
+		}
+		site, err := r.exec.SiteByHostname(ctx, lookup)
+		if testing && site != nil && (site.Kind != storefrontKind || normalizeHost(site.Hostname) != production || site.SystemOwned) {
+			site = nil
+		}
 		if err != nil {
 			return nil, err
+		}
+
+		if site != nil {
+			copied := *site
+			site = &copied
 		}
 
 		// THE CUSTOM-DOMAIN ALIAS (epic memql#4805, design D8). One extra
@@ -332,7 +350,7 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 		// a scanner walking random hostnames would drive TWO queries per
 		// request instead of one, which would make the alias step an
 		// amplifier rather than a lookup.
-		if site == nil {
+		if site == nil && !testing {
 			site, err = r.exec.SiteForCustomDomain(ctx, key)
 			if err != nil {
 				return nil, err
@@ -357,7 +375,7 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 		// The miss is cached by the shared write below, for the reason the
 		// alias step gives: without it, a scanner walking hostnames against the
 		// wildcard would drive THREE queries per request instead of one.
-		if site == nil {
+		if site == nil && !testing {
 			site, err = r.exec.SiteForAccountFrontDoor(ctx, key)
 			if err != nil {
 				return nil, err
@@ -416,6 +434,12 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 		// A MISS IS CACHED TOO. Without this, a scanner walking random hostnames
 		// drives one database query per request -- an amplifier pointed at the
 		// database, reachable by anyone who can resolve the wildcard.
+		if testing && site != nil {
+			copied := *site
+			copied.Hostname = key
+			copied.StorefrontTesting = true
+			site = &copied
+		}
 		r.mu.Lock()
 		r.cache[key] = entry{site: site, at: time.Now()}
 		r.mu.Unlock()
@@ -436,6 +460,7 @@ func (r *resolver) Invalidate(hostname string) {
 	key := normalizeHost(hostname)
 	r.mu.Lock()
 	delete(r.cache, key)
+	delete(r.cache, frontdoor.StorefrontTestingHost(key))
 	r.mu.Unlock()
 }
 

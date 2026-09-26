@@ -206,7 +206,7 @@ func (e *MemQLEngine) validateSitePreview(
 		}
 	}
 
-	// Rule 3 -- a preview binding names a DEVELOPMENT store.
+	// Rule 3 -- the Testing binding names a readable store of either type.
 	//
 	// CLEARING IT IS ALWAYS ALLOWED. An empty storeId is the unbound state, and
 	// detaching a development store must stay expressible for the reason
@@ -221,10 +221,8 @@ func (e *MemQLEngine) validateSitePreview(
 		}
 	}
 
-	// Rule 4 -- going live, and promoting, are refused while the SERVING
-	// binding names a development store, or nothing, or a store with no
-	// Storefront token (Connect Shopify, D5). An empty binding reads no
-	// store: boundStoreFacts answers it without a query.
+	// Rule 4 -- a connected Production store must be readable. An empty
+	// binding serves design preview; a sandbox is a valid Production binding.
 	//
 	// The binding judged is the one this write LEAVES BEHIND: a caller may
 	// re-bind and go live in one delta, and judging the stored value would

@@ -900,11 +900,43 @@ receives a 304 without transferring the body again. Blob validators include the 
 file validators hash actual bytes. Date-only validators are ignored because
 archive timestamps can survive a release unchanged.
 
-These headers apply to static/SPA bundle responses. Dynamic and proxy
-responses keep their own policies. An already open tab is not forcibly
-reloaded, and an application-owned service worker can independently control
-its cache. Responses previously cached as immutable cannot be revoked by new
-headers; those clients need expiry, a changed asset URL, or a one-time refresh.
+These headers apply to static sites, SPAs, and Shopify storefronts. Dynamic
+and proxy responses keep their own policies.
+
+**Open pages also follow deployment changes (since 0.23.0).** The edge inserts
+one small same-origin script into every HTML document, including prerendered
+routes and SPA fallbacks. The original inline script bytes and CSP hashes stay
+intact. Each document carries an opaque deployment identifier; publishing,
+rolling back, changing its store binding or runtime settings, and upgrading
+the engine changes that identifier. Testing and Production check their own
+origin and effective store binding independently.
+
+The script checks with a bodyless, non-cacheable `HEAD /runtime-config.json`
+on load, browser-history restoration, SPA navigation, return to the tab, and
+every 30 seconds while visible. These background polls neither resolve store
+credentials nor write visitor traffic records. After two checks agree on a
+changed deployment, the browser automatically replaces the current document,
+keeping its route, other query parameters, and fragment. A temporary query
+marker bypasses old document cache entries and is removed after loading.
+Unchanged releases do not reload. HTML validators include the embedded
+identifier, so an old document cannot receive a false 304 after a change.
+
+A failed or offline check leaves the working page intact and retries after
+connectivity returns. Hidden tabs wait until visible. Form edits defer the
+background reload until the visitor leaves that route, preserving unfinished
+input. Two agreeing observations and a one-minute reload cooldown reduce
+oscillation while replicas converge during a rolling upgrade. Normal update
+detection takes about 33 seconds after the edge resolves the new release;
+cache invalidation delays, unavailable networks, and unfinished forms can
+extend that window. Automatic publishing determines *which* release is live;
+this browser mechanism makes an already loaded page follow it.
+
+This takes effect once a browser loads HTML containing the monitor. A server
+cannot retroactively execute code in an old, already open page. An application
+that installs its own service worker must allow network access for this version
+check and document updates; an offline cache that deliberately intercepts them
+cannot offer the same freshness guarantee. JavaScript-disabled browsers rely
+on ordinary HTTP revalidation when navigating.
 
 ### 2. The edge's own memory
 
