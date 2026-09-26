@@ -68,6 +68,8 @@ func TestSweepDB_ReadsBindParametersAndCollapseBeforeFiltering(t *testing.T) {
 	insertSweepRow(t, db, "v1:work:run:denied", runConcept, now.Add(-time.Hour), map[string]any{"status": "waiting", "allow": true})
 	insertSweepRow(t, db, "v1:work:run:denied", runConcept, now, map[string]any{"status": "waiting", "allow": false})
 	insertSweepRow(t, db, "v1:work:observation:other", observationConcept, now, map[string]any{"status": "running"})
+	// A newer version under another concept must not displace the current run key.
+	insertSweepRow(t, db, "v1:work:run:running", observationConcept, now.Add(time.Second), map[string]any{"status": "running", "wrongConcept": true})
 	i.admitRow = func(_ context.Context, n memorynodes.MemoryNode) bool {
 		var p map[string]any
 		_ = json.Unmarshal(n.Payload, &p)
@@ -80,7 +82,7 @@ func TestSweepDB_ReadsBindParametersAndCollapseBeforeFiltering(t *testing.T) {
 	if len(rows) != 2 || rows[0]["id"] != "v1:work:run:waiting" || rows[1]["id"] != "v1:work:run:running" {
 		t.Fatalf("in-flight latest/admitted rows: %v", rows)
 	}
-	rows, err = i.selectAdmitted(ctx, runConcept, runsInFlightSQL, runConcept, 1)
+	rows, err = i.selectAdmitted(ctx, runConcept, runsInFlightSQL, runConcept, runConcept, 1, runConcept)
 	if err != nil {
 		t.Fatal(err)
 	}

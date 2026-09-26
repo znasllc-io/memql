@@ -707,11 +707,12 @@ func (i *Integration) foldSummaries(ctx context.Context, expired map[string][]ma
 
 // runsInFlight is every run at a non-terminal status, whoever owns it.
 //
-// The partial recovery index enumerates non-terminal version keys, and the
-// covering latest-row index rejects every superseded key before payloads are
-// fetched. Completed histories never need their payloads loaded by recovery.
-// Filtering status without that anti-join would resurrect an old running
-// version of a run that already finished.
+// Materialize current keys using the covering latest-row index, then probe the
+// partial recovery index before fetching bounded payloads. Correlating a
+// historical candidate's concept into an anti-join forces heap reads on
+// Timescale chunks because the partial index only stores id and createdAt.
+// Starting from current keys also avoids probing for newer versions once per
+// historical running state. Terminal histories never enter the payload join.
 //
 // staged-data: MUST-NOT-GATE -- a staged run SKIPPED HERE IS NEVER SWEPT. This
 // is the only reader allowed to close a run whose node died and the only one
@@ -725,27 +726,29 @@ func (i *Integration) foldSummaries(ctx context.Context, expired map[string][]ma
 // These statements execute through Bun, whose formatter consumes ? arguments.
 // PostgreSQL $n placeholders would reach the driver without their parameters.
 const runsInFlightSQL = `
-WITH candidates AS MATERIALIZED (
+WITH latest AS MATERIALIZED (
+    SELECT DISTINCT ON (id) id, "createdAt"
+    FROM "MemoryNodes"
+    WHERE concept = ?
+    ORDER BY id, "createdAt" DESC
+), candidates AS MATERIALIZED (
     SELECT n.id, n."createdAt"
     FROM "MemoryNodes" n
+    JOIN latest l ON l.id = n.id AND l."createdAt" = n."createdAt"
     WHERE n.concept = ?
       AND COALESCE(n.payload->>'status', '') NOT IN ('succeeded', 'failed', 'cancelled', 'abandoned')
-      AND NOT EXISTS (
-          SELECT 1 FROM "MemoryNodes" newer
-          WHERE newer.concept = n.concept AND newer.id = n.id
-            AND newer."createdAt" > n."createdAt"
-      )
     ORDER BY n."createdAt" ASC
     LIMIT ?
 )
 SELECT n.id, n."createdAt", n.payload
 FROM candidates c JOIN "MemoryNodes" n
     ON n.id = c.id AND n."createdAt" = c."createdAt"
+WHERE n.concept = ?
 ORDER BY n."createdAt" ASC
 `
 
 func (i *Integration) runsInFlight(ctx context.Context) ([]map[string]any, error) {
-	return i.selectAdmitted(ctx, runConcept, runsInFlightSQL, runConcept, sweepPageSize)
+	return i.selectAdmitted(ctx, runConcept, runsInFlightSQL, runConcept, runConcept, sweepPageSize, runConcept)
 }
 
 // expiredJournalRowsSQL is the retention read. The boundary is applied to the
