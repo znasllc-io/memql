@@ -89,6 +89,10 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		"auditEventRetentionSweep",
 		"checkDeployableHealth",
 		"logsRetentionSweep",
+		// The engine-owned repository poll discovers sources across owners
+		// before borrowing each source owner's credential/deploy authority.
+		// A reader actor silently sees no packages and reports checked=0.
+		"pollPackageUpstreams",
 		// routingEvidenceFold (epic memql#5146) is the one entry here whose
 		// read spans owners because the QUESTION does. It asks how a model
 		// behaved across the fleet, and a model's behaviour is not one
@@ -203,6 +207,21 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	if ac.Role != auth.RoleReader {
 		t.Errorf("the ordinary system actor carries role %q, want %q -- memql#2801's guarantee for a "+
 			"caller with no identity of its own", ac.Role, auth.RoleReader)
+	}
+}
+
+func TestRepositoryFeedNamesDoNotElevateInheritedCallers(t *testing.T) {
+	for _, name := range []string{"pollPackageUpstreams", "notePackageUpstreamFromWebhook"} {
+		for _, role := range []auth.Role{auth.RoleReader, auth.RoleDeveloper} {
+			t.Run(name+"/"+string(role), func(t *testing.T) {
+				caller := &auth.AccessContext{UserId: "feed-caller", Role: role}
+				ctx := auth.ContextWithAccess(context.Background(), caller)
+				got, ok := auth.AccessFromContext(contextWithSystemActor(ctx, name))
+				if !ok || got != caller || got.IsClusterOwner() {
+					t.Fatalf("an inherited caller was replaced or elevated: %+v", got)
+				}
+			})
+		}
 	}
 }
 
