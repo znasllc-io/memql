@@ -105,10 +105,12 @@ func (s *store) query(ctx context.Context, q string) ([]map[string]any, error) {
 	return memqlRows(res), nil
 }
 
-// The two @serverOnly READS the header names. They live HERE, beside the one
-// stamp, rather than at their callers: a @serverOnly call belongs next to the
-// internal origin it needs, where the next reader -- and the conformance gate
-// that holds every such call to a file that stamps -- finds the two together.
+// The @serverOnly READS. They live HERE, beside the one stamp, rather than at
+// their callers: a @serverOnly call belongs next to the internal origin it
+// needs, where the next reader -- and the conformance gate that holds every
+// such call to a file that stamps -- finds the two together. The header names
+// the two the lift makes; the third is the promotion decision's
+// (approvalByIdAsCluster), made for the same reason by the same principal.
 
 // runByIdAsCluster reads one run through the by-id read, which only a cluster
 // owner's actor answers: the maintenance principal learning whose run an event
@@ -127,6 +129,20 @@ func (s *store) runByIdAsCluster(ctx context.Context, runId string) (map[string]
 // principal first.
 func (s *store) activeUserIds(ctx context.Context) ([]map[string]any, error) {
 	return s.executeInternal(ctx, "query usersForSeedSweep()")
+}
+
+// approvalByIdAsCluster reads one approval through the by-id read, which --
+// like workRunById -- only a cluster owner's actor answers: the promotion
+// decision's automation learning whose construct a DECIDED approval names. A
+// person has no by-id read of a decided approval (their list is the pending
+// one), and the caller admits only the cluster's principal first. nil when
+// nothing answered.
+func (s *store) approvalByIdAsCluster(ctx context.Context, approvalId string) (map[string]any, error) {
+	rows, err := s.executeInternal(ctx, "query "+call("workApprovalById", map[string]any{"approvalId": approvalId}))
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return rows[0], nil
 }
 
 // --- call-string construction --------------------------------------------
