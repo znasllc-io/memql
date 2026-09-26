@@ -68,8 +68,9 @@ or client-visible session authority.
 - **Ask** is chrome, not a module: the dock orb, the desk widget and every
   title bar open the same streaming surface. It takes dictation (#4747):
   hold the mic to talk, tap it to keep listening. Each turn uses the same durable
-  work engine as Nexus; View work opens its existing goal. Closing a viewer
-  never resubmits work. Conversation checkpoints and execution progress belong
+  work engine as Nexus. Its goals remain visible in Nexus; Ask has no
+  per-message work menu. Explicit Stop cancels the durable goal; closing a viewer
+  only detaches and never resubmits work. Conversation checkpoints and execution progress belong
   to the shared engine.
 - **Roles**: one predicate (`system/roles.ts`) gates apps and app sections
   from `MyAccess.role` — the SLUG the person's user row carries, resolved
