@@ -92,7 +92,7 @@ Agent configuration:
 | Setting | Purpose |
 | --- | --- |
 | `MEMQL_LIVEKIT_URL` | Internal signaling/service endpoint, normally `ws://livekit:7880`. |
-| `MEMQL_LIVEKIT_PUBLIC_URL` | Browser-reachable WSS signaling endpoint. |
+| `MEMQL_LIVEKIT_PUBLIC_URL` | Browser-reachable WSS signaling endpoint. Set identically on agent and edge nodes; the edge admits this origin in API-enabled sites' connection policy. |
 | `MEMQL_LIVEKIT_API_KEY` | LiveKit server API key from `memql-voice`. |
 | `MEMQL_LIVEKIT_API_SECRET` | LiveKit server secret from `memql-voice`. Never sent to the browser. |
 

@@ -20,3 +20,8 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value: {name: MEMQL_LIVEKIT_PUBLIC_URL, value: 'wss://voice.$(MEMQL_DOMAIN)'}
+  - target: { kind: Deployment, name: edge }
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: {name: MEMQL_LIVEKIT_PUBLIC_URL, value: 'wss://voice.$(MEMQL_DOMAIN)'}

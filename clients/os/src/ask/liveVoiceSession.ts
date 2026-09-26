@@ -37,6 +37,7 @@ export class LiveVoiceSession {
    if (generation !== this.generation) return;
    const room = new Room({ adaptiveStream: false, audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
    this.room = room;
+   let connected = false;
    room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
     if (track.kind !== Track.Kind.Audio || participant.identity !== "memql") return;
     const element = track.attach(); element.hidden = true; document.body.append(element); this.audio.add(element);
@@ -53,8 +54,11 @@ export class LiveVoiceSession {
      this.conversation.voiceEvent(event);
     } catch { /* Non-Ask room data carries no instruction. */ }
    });
-   room.on(RoomEvent.Disconnected, () => { if (generation === this.generation) { this.stop(); this.patch({ error: "Voice connection ended. You can reconnect." }); } });
+   // A failed connect emits Disconnected before rejecting. Let the catch below
+   // preserve that error instead of invalidating the attempt and hiding it.
+   room.on(RoomEvent.Disconnected, () => { if (connected && generation === this.generation) { this.stop(); this.patch({ error: "Voice connection ended. You can reconnect." }); } });
    await room.connect(credentials.url, credentials.token);
+   connected = true;
    if (generation !== this.generation) { await room.disconnect(); return; }
    await room.localParticipant.setMicrophoneEnabled(true);
    if (generation !== this.generation) { await room.disconnect(); return; }
