@@ -16,8 +16,8 @@ binding. A design deployment or rollback changes the build served by both.
 
 | Destination | Example address | Store selection |
 |---|---|---|
-| Production | `https://graceful-fjord.example.com` | Production in the Store panel |
-| Testing | `https://test--graceful-fjord.example.com` | Testing in the Store panel |
+| Production website | `https://graceful-fjord.example.com` | Production in the Store panel |
+| Testing website | `https://test--graceful-fjord.example.com` | Testing in the Store panel |
 
 Either destination can use a sandbox or a live store, and both may select the
 same store. An unconnected destination displays design preview. Store selection

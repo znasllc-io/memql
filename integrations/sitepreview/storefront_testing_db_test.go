@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -20,22 +21,22 @@ func TestStorefrontTestingOpensSharedBuildWithoutCandidateOrStore(t *testing.T) 
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	siteID, host := "testing-"+suffix, "shop-"+suffix+".example.com"
 	owner := parityOwner("testing-owner-" + suffix)
-	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createSite(siteId: %q, hostname: %q, kind: "shopify_storefront", status: "draft", bundleRef: "blob://sites/shared/v1/")`, siteID, host)); err != nil {
+	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, kind: "shopify_storefront", status: "draft", bundleRef: "blob://sites/shared/v1/")`, langparser.QuoteString(siteID), langparser.QuoteString(host))); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		_, _ = db.NewDelete().TableExpr(`"MemoryNodes"`).Where("id = ? OR payload->>'siteId' = ? OR payload->>'siteId' = ?", "v1:platform:site:"+siteID, siteID, "v1:platform:site:"+siteID).Exec(context.Background())
 	})
-	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createSite(siteId: %q, hostname: %q, kind: "spa", status: "draft")`, "reserved-"+suffix, "test--"+host)); err == nil {
+	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, kind: "spa", status: "draft")`, langparser.QuoteString("reserved-"+suffix), langparser.QuoteString("test--"+host))); err == nil {
 		t.Fatal("a site claimed the reserved testing hostname")
 	}
 	integration := NewIntegration(parityEngine{eng}, Config{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	for _, store := range []string{"", "live-" + suffix, "sandbox-" + suffix} {
 		if store != "" {
-			if _, err := eng.Execute(auth.ContextWithInternalOrigin(owner), fmt.Sprintf(`mutation createStore(storeId: %q, domain: %q, isDevelopment: %t)`, store, store+".myshopify.com", strings.HasPrefix(store, "sandbox-"))); err != nil {
+			if _, err := eng.Execute(auth.ContextWithInternalOrigin(owner), fmt.Sprintf(`mutation createStore(storeId: %s, domain: %s, isDevelopment: %t)`, langparser.QuoteString(store), langparser.QuoteString(store+".myshopify.com"), strings.HasPrefix(store, "sandbox-"))); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := eng.Execute(owner, fmt.Sprintf(`mutation updateSitePreviewBinding(siteId: %q, storeId: %q)`, siteID, store)); err != nil {
+			if _, err := eng.Execute(owner, fmt.Sprintf(`mutation updateSitePreviewBinding(siteId: %s, storeId: %s)`, langparser.QuoteString(siteID), langparser.QuoteString(store))); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {

@@ -6,11 +6,11 @@ import (
 )
 
 func TestStorefrontDestinationHosts(t *testing.T) {
-	host := StorefrontTestingHost("  graceful-fjord.memql.znas.io ")
-	if host != "test--graceful-fjord.memql.znas.io" {
+	host := StorefrontTestingHost("  graceful-fjord.cluster.example.com ")
+	if host != "test--graceful-fjord.cluster.example.com" {
 		t.Fatal(host)
 	}
-	if got, ok := StorefrontProductionHost(host); !ok || got != "graceful-fjord.memql.znas.io" {
+	if got, ok := StorefrontProductionHost(host); !ok || got != "graceful-fjord.cluster.example.com" {
 		t.Fatal(got, ok)
 	}
 	for _, bad := range []string{"", "shop", "test--shop.example.com", strings.Repeat("a", 58) + ".example.com"} {

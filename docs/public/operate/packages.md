@@ -98,7 +98,7 @@ Two halves, and the asymmetry is deliberate:
 label without changing `name`, which identifies the same app on redeploy.
 For a Shopify storefront, the existing `deployment` address and `binding`
 configure **Production**. A second stable **Testing** URL is assigned automatically:
-`test--<production-hostname>` (for example, `test--graceful-fjord.memql.znas.io`).
+`test--<production-hostname>` (for example, `test--graceful-fjord.cluster.example.com`).
 Both destinations use one deployable and the same build. Testing access opens
 through MemQL OS's **Visit → Testing** action.
 
@@ -107,7 +107,7 @@ Set the independent testing store with the optional manifest block:
 ```yaml
     testing:
       binding:
-        store: fylo-sandbox.myshopify.com
+        store: sandbox.myshopify.com
 ```
 
 Both bindings may name the same store, including a sandbox. An unconnected
