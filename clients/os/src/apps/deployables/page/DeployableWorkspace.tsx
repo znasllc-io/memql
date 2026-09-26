@@ -126,17 +126,19 @@ function DomainPiece({ site, onClick }: { site: SiteRow; onClick: () => void }) 
 function StorePiece({ storeId, testingId, siteId, onClick }: { storeId: string; testingId: string; siteId: string; onClick: () => void }) {
   const bound = useStore(storeId);
   const testing = useStore(testingId);
+  const connection = storeId ? bound : testing;
+  const connected = Boolean(connection.store?.adminTokenRef && connection.store?.storefrontTokenRef);
   const detail =
-    storeId === ""
-      ? testing.store ? `${storeLabel(testing.store)} · Testing` : testingId ? testing.state === "failed" || testing.state === "read" ? "Testing store unavailable" : <InlineSkeleton label="Loading testing store" /> : "Not connected"
-      : bound.state === "failed"
+    !storeId && !testingId
+      ? "Not connected"
+      : connection.state === "failed"
         ? "The store could not be read"
-        : bound.store !== null
-          ? [storeLabel(bound.store), bound.store.isDevelopment ? "Sandbox · Setup needed" : !bound.store.storefrontTokenRef || !bound.store.adminTokenRef ? "Setup needed" : "Production"].filter((part) => part !== "").join(" \u00b7 ")
-          : bound.state === "read"
+        : connection.store !== null
+          ? [storeLabel(connection.store), storeId ? "" : "Testing", connection.store.isDevelopment ? "Sandbox" : "", connected ? "Connected" : "Setup needed"].filter((part) => part !== "").join(" \u00b7 ")
+          : connection.state === "read"
             ? "Names a store that is not on this cluster"
             : <InlineSkeleton label="Loading store" />;
-  return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={!storeId || bound.state === "failed" || (bound.state === "read" && (!bound.store || bound.store.isDevelopment || !bound.store.storefrontTokenRef || !bound.store.adminTokenRef)) ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" /><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
+  return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={(!storeId && !testingId) || connection.state === "failed" || (connection.state === "read" && !connected) ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" /><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
 }
 
 export function attemptWord(status: string): string {
