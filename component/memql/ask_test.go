@@ -184,3 +184,21 @@ func TestAskExecutesQualifiedCapabilitiesWithCallerRowScope(t *testing.T) {
 	require.Contains(t, fmt.Sprint(events), todoID)
 
 }
+
+func TestWorkDiscoveryFindsNavigationByAppArgument(t *testing.T) {
+	e, _, _ := sharedReadMergeEngine(t)
+	rows, err := e.workCapabilitiesBuiltin(asCaller("owner"), map[string]any{"search": "open fleet"}, 0)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Contains(t, string(rows[0].Payload), "workNavigate")
+	require.Contains(t, string(rows[0].Payload), `"enum":["users","fleet"`)
+	fn, err := e.functions.Get("worker.agentworkerDispatchHost")
+	require.NoError(t, err)
+	var found bool
+	for _, field := range workCapabilityFields(fn) {
+		if field.Name == "ownerUserId" {
+			found = true
+		}
+	}
+	require.True(t, found, "Fleet identity injection must use the builtin contract")
+}

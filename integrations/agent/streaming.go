@@ -69,26 +69,27 @@ const (
 // The retry block in runStreamingToolLoop only fires on errors, so a
 // silent stall is invisible to it.
 //
-// 30s is comfortable headroom over Anthropic's ~15s SSE ping cadence.
-// Real model work emits chunks well within that window; only truly
-// stalled streams hit the timer. When it fires we surface a typed
-// transient error so the existing retry logic catches it.
-//
-// INTERACTIVE-ONLY (memql#901). This watchdog lives in consumeStreamingTurn,
-// which only the interactive streaming lane uses. Background plan/task
-// execution runs on the non-streaming executor (runNonStreamingToolLoop,
-// memql#896), which has no idle watchdog -- it bounds each step with an
-// overall request timeout instead. The 30s default was briefly raised to
-// 120s (memql#893) to stop the watchdog false-killing slow produceArtifact
-// turns while they still ran through this path; that band-aid is retired now
-// that background work bypasses the watchdog, so the default is back to a
-// value tuned for genuinely-stalled LIVE streams.
+// The 30s default assumes a provider that sends live chunks or keepalives.
+// Fleet models may stay silent while evaluating a prompt or assembling tool
+// arguments, so their resolved route receives a longer bounded allowance.
+// Every attempt owns a cancellation context; a timed-out attempt must stop
+// before a retry starts, otherwise slow local inference piles up in a queue.
 //
 // Override via MEMQL_STREAM_IDLE_TIMEOUT_SECONDS for ops; the resolver
 // caches once per process.
 const defaultStreamIdleTimeoutSeconds = 30
 
 const envStreamIdleTimeoutSeconds = "MEMQL_STREAM_IDLE_TIMEOUT_SECONDS"
+
+// Local prefill and complete tool-argument generation can exceed an SSE idle
+// interval without a failed connection. Operator overrides remain a floor.
+func streamIdleBudgetForVendor(vendor string) time.Duration {
+	budget := streamIdleTimeout()
+	if vendor == "fleet" && budget < 3*time.Minute {
+		return 3 * time.Minute
+	}
+	return budget
+}
 
 // streamIdleSentinel is the substring the runStreamingToolLoop retry
 // classifier looks for to recognise the watchdog's typed error and
@@ -303,6 +304,7 @@ type turnContext struct {
 	// because each iteration is a fresh plan/turn.
 	IsProduceArtifactExecution bool
 	IsWorkExecution            bool
+	StreamIdleBudget           time.Duration
 }
 
 // guardProduceArtifactRedelegation reports whether a tool call should be
@@ -450,8 +452,10 @@ StreamLoop:
 		)
 		attempt := 0
 		for {
-			chunks, err = provider.CallChatStreamWithTools(ctx, messages, tools)
+			attemptCtx, cancelAttempt := context.WithCancel(ctx)
+			chunks, err = provider.CallChatStreamWithTools(attemptCtx, messages, tools)
 			if err != nil {
+				cancelAttempt()
 				if next, ok := r.handOffContext(ctx, err, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next
 					continue
@@ -479,7 +483,8 @@ StreamLoop:
 				break StreamLoop
 			}
 
-			turnText, turnCalls, streamErr = r.consumeStreamingTurn(ctx, chunks, sink, &textChunks, &fullText, turnStart, iter, requestId, &ttftLogged)
+			turnText, turnCalls, streamErr = r.consumeStreamingTurn(attemptCtx, chunks, sink, &textChunks, &fullText, turnStart, iter, requestId, &ttftLogged, turnCtx.StreamIdleBudget)
+			cancelAttempt()
 			if streamErr != nil {
 				if next, ok := r.handOffContext(ctx, streamErr, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next
@@ -824,6 +829,7 @@ func (r *Replier) consumeStreamingTurn(
 	iter int,
 	requestId string,
 	ttftLogged *bool,
+	idleBudget time.Duration,
 ) (turnText string, toolCalls []common.ToolCall, err error) {
 	var turnBuilder strings.Builder
 	var textBuffer strings.Builder
@@ -852,7 +858,9 @@ func (r *Replier) consumeStreamingTurn(
 	// resets the timer. If nothing arrives for streamIdleTimeout the
 	// upstream stream is considered stalled and we surface a typed
 	// transient error so runStreamingToolLoop's retry kicks in.
-	idleBudget := streamIdleTimeout()
+	if idleBudget <= 0 {
+		idleBudget = streamIdleTimeout()
+	}
 	idleTimer := time.NewTimer(idleBudget)
 	defer idleTimer.Stop()
 

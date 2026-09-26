@@ -37,6 +37,8 @@ const (
 
 // BuiltinArgContract describes parse-time argument schema for builtin function calls.
 type BuiltinArgContract struct {
+	// Fields preserves descriptions and enums for capability discovery.
+	Fields               []*FunctionArgsField
 	Profile              BuiltinArgProfile
 	StringKey            string
 	Required             []string
@@ -52,6 +54,9 @@ func (c *BuiltinArgContract) clone() *BuiltinArgContract {
 		Profile:   c.Profile,
 		StringKey: c.StringKey,
 		Required:  append([]string(nil), c.Required...),
+	}
+	for _, field := range c.Fields {
+		out.Fields = append(out.Fields, field.clone())
 	}
 	if c.Properties != nil {
 		out.Properties = make(map[string]string, len(c.Properties))

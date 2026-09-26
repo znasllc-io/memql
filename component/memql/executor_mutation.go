@@ -2009,6 +2009,12 @@ func (e *MemQLEngine) embedWorkObservation(ctx context.Context, id string, paylo
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return
 	}
+	// Progress snapshots are presentation state, not semantic memory. A reply
+	// updates them repeatedly; embedding each update would spend inference on
+	// labels such as "response streaming" and delay the stream itself.
+	if data, ok := p["data"].(map[string]any); ok && data["execution"] != nil {
+		return
+	}
 	content, _ := p["content"].(string)
 	if strings.TrimSpace(content) == "" {
 		return

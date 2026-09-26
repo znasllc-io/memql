@@ -33,7 +33,7 @@ func TestFleetMediaAndToolResultsSurviveReplicaHop(t *testing.T) {
 						t.Error("lost image settings")
 					}
 				}
-				return workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop, Content: "Hello", Audio: &memqlv1.ModelCallAudio{Data: []byte("spoken"), MediaType: "audio/wav", SampleRateHz: 24000}, Segments: []*memqlv1.ModelCallTranscriptSegment{{Text: "Hello", EndSeconds: 1}}, Images: []*memqlv1.ModelCallImage{{Data: []byte("generated"), MediaType: "image/png"}}, ToolCalls: []workerservice.ModelCallToolCall{{Id: "call", Name: "askDiscover", ArgumentsJSON: `{"search":"fleet"}`}}}
+				return workerservice.ModelCallOutcome{FinishReason: workerservice.ModelFinishStop, Content: "Hello", Audio: &memqlv1.ModelCallAudio{Data: []byte("spoken"), MediaType: "audio/wav", SampleRateHz: 24000}, Segments: []*memqlv1.ModelCallTranscriptSegment{{Text: "Hello", EndSeconds: 1}}, Images: []*memqlv1.ModelCallImage{{Data: []byte("generated"), MediaType: "image/png"}}, ToolCalls: []workerservice.ModelCallToolCall{{Id: "call", Name: "discoverCapabilities", ArgumentsJSON: `{"search":"fleet"}`}}}
 			}, func(c *Candidate, w *workerservice.Worker) {
 				value := (ModelAttributes{ContextWindow: 8192, Tools: true, Vision: true, AudioIn: true, AudioOut: true, ImageGen: true}).String()
 				c.Labels[workerservice.ModelLabel(hopModel)] = value
@@ -46,7 +46,7 @@ func TestFleetMediaAndToolResultsSurviveReplicaHop(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Audio == nil || string(result.Audio.Data) != "spoken" || len(result.Segments) != 1 || len(result.Images) != 1 || len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "askDiscover" {
+			if result.Audio == nil || string(result.Audio.Data) != "spoken" || len(result.Segments) != 1 || len(result.Images) != 1 || len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "discoverCapabilities" {
 				t.Fatalf("lost terminal payload: %+v", result)
 			}
 		})

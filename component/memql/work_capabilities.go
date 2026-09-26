@@ -21,11 +21,9 @@ func (e *MemQLEngine) workCapabilityAllowed(ctx context.Context, fn *Function) b
 	if fn.FunctionKind != "query" && fn.FunctionKind != "mutation" && fn.FunctionKind != "logic" && fn.FunctionKind != "builtin" {
 		return false
 	}
-	if fn.ArgsSchema != nil {
-		for _, field := range fn.ArgsSchema.Fields {
-			if field.Secret {
-				return false
-			}
+	for _, field := range workCapabilityFields(fn) {
+		if field.Secret {
+			return false
 		}
 	}
 	if e.refuseBelowRequiredRank(ctx, fn, fn.Name) != nil || e.refuseBelowRequiredCapability(ctx, fn, fn.Name) != nil {
@@ -85,6 +83,9 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 		}
 		name := QualifyConstruct(ConstructNamespaceForOrigin(fn.Origin), fn.Name)
 		haystack := strings.ToLower(name + " " + fn.Description + " " + fn.DocComment + " " + fn.BoundConcept)
+		for _, field := range workCapabilityFields(fn) {
+			haystack += " " + strings.ToLower(field.Name+" "+field.Description+" "+fmt.Sprint(field.Enum))
+		}
 		found := true
 		for _, word := range strings.Fields(search) {
 			if !strings.Contains(haystack, word) {
@@ -96,10 +97,8 @@ func (e *MemQLEngine) workCapabilitiesBuiltin(ctx context.Context, args map[stri
 			continue
 		}
 		fields := []map[string]any{}
-		if fn.ArgsSchema != nil {
-			for _, field := range fn.ArgsSchema.Fields {
-				fields = append(fields, map[string]any{"name": field.Name, "type": field.Type, "optional": field.Optional, "description": field.Description, "enum": field.Enum})
-			}
+		for _, field := range workCapabilityFields(fn) {
+			fields = append(fields, map[string]any{"name": field.Name, "type": field.Type, "optional": field.Optional, "description": field.Description, "enum": field.Enum})
 		}
 		matches = append(matches, map[string]any{"name": name, "kind": fn.FunctionKind, "description": fn.Description, "arguments": fields, "app": workCapabilityApp(fn)})
 	}
@@ -134,7 +133,7 @@ func (e *MemQLEngine) workExecuteBuiltin(ctx context.Context, args map[string]an
 			copy[key] = value
 		}
 		arguments = copy
-		for _, field := range fn.ArgsSchema.Fields {
+		for _, field := range workCapabilityFields(fn) {
 			switch field.Name {
 			case "agentId":
 				arguments[field.Name] = ActingAgentIdFromContext(ctx)
@@ -215,4 +214,17 @@ func (e *MemQLEngine) workNavigateBuiltin(ctx context.Context, args map[string]a
 	}
 	raw, _ := json.Marshal(map[string]any{"requested": true, "app": app, "note": "Navigation was requested in the connected OS. This is not a data change or a receipt that a browser displayed it."})
 	return []memorynodes.MemoryNode{{ID: event.ID, Payload: raw}}, nil
+}
+
+// Builtins declare their contract on the body, other constructs in args {}.
+// Keep both paths visible so discovery never advertises an empty contract and
+// Fleet identity cannot become a model-supplied field on the builtin path.
+func workCapabilityFields(fn *Function) []*FunctionArgsField {
+	if fn.ArgsSchema != nil {
+		return fn.ArgsSchema.Fields
+	}
+	if fn.BuiltinArgs != nil {
+		return fn.BuiltinArgs.Fields
+	}
+	return nil
 }

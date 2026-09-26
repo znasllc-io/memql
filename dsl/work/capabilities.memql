@@ -1,9 +1,11 @@
 /// Discover named capabilities admitted by the current caller's permissions.
+@description("Discover capabilities admitted by the current caller permissions. Search short words naming the app or operation.")
 @executor("workCapabilities")
 @args(profile="object")
 builtin workCapabilities { search string! }
 
 /// Execute a discovered capability under the original caller's authority.
+@description("Execute a discovered capability under the current caller authority using its exact arguments.")
 @executor("workExecute")
 @args(profile="object")
 builtin workExecute {
@@ -27,6 +29,7 @@ tool executeCapability {
 
 /// Open or focus a MemQL OS app for the person watching this run. This is
 /// navigation, never a data mutation. It needs a connected OS viewer.
+@description("Open or focus a MemQL OS app for the person watching this run. Navigation only; requires a connected viewer.")
 @executor("workNavigate")
 @args(profile="object")
 builtin workNavigate {
@@ -36,6 +39,7 @@ builtin workNavigate {
 
 /// Search original conversation messages and checkpoint sources in this work
 /// run. Results retain their source index; a checkpoint never erases evidence.
+@description("Search original conversation messages and checkpoint sources in this work run by a word, name or identifier.")
 @executor("recallWorkHistory")
 @args(profile="object")
 builtin workRecallHistory { search string! }
