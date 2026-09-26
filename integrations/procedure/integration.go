@@ -127,8 +127,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"{runId, goalSignature, candidates, constructId, accepted}.",
 			Handler: i.handleLearnFromRun,
 			ArgsSchema: map[string]string{
-				"runId": "string (required) -- the v1:work:run that just succeeded",
-				"level": "integer -- 1 mines the actions inside sessions (default), 2 mines automation invocations",
+				"runId":       "string (required) -- the v1:work:run that just succeeded",
+				"ownerUserId": "string -- owner hint used only by the trusted completion trigger",
+				"level":       "integer -- 1 mines the actions inside sessions (default), 2 mines automation invocations",
 			},
 		},
 		{

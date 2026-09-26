@@ -92,11 +92,18 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 		}
 		switch run["status"] {
 		case "succeeded":
-			if answer.Len() == 0 {
-				steps, err := read(ctx, "workStepsForOwnerRun", runID)
-				if err != nil {
-					return "", err
+			steps, err := read(ctx, "workStepsForOwnerRun", runID)
+			if err != nil {
+				return answer.String(), err
+			}
+			for _, file := range workResultFiles(steps) {
+				if onEvent != nil {
+					if err := onEvent(WorkEvent{ID: "file-" + fmt.Sprint(file["fileId"]), Kind: "artifact", Phase: "completed", At: time.Now().UTC(), Name: fmt.Sprint(file["name"]), App: "files", Arguments: file}); err != nil {
+						return answer.String(), err
+					}
 				}
+			}
+			if answer.Len() == 0 {
 				text := workResultText(run, steps)
 				answer.WriteString(text)
 				if onText != nil {
@@ -128,6 +135,13 @@ func followWorkRun(ctx context.Context, runID string, read workRowReader, onText
 }
 
 func workResultText(run map[string]any, steps []map[string]any) string {
+	if files := workResultFiles(steps); len(files) > 0 {
+		names := make([]string, 0, len(files))
+		for _, file := range files {
+			names = append(names, fmt.Sprint(file["name"]))
+		}
+		return "Created in Files: " + strings.Join(names, ", ") + "."
+	}
 	if outcome, ok := run["outcome"].(map[string]any); ok {
 		if result, ok := outcome["returned"]; ok {
 			raw, _ := json.Marshal(result)
@@ -139,7 +153,7 @@ func workResultText(run map[string]any, steps []map[string]any) string {
 	// merely to rephrase them or pretending an absent result is an answer.
 	var results []any
 	for _, step := range steps {
-		if step["status"] == "succeeded" || step["status"] == "completed" {
+		if step["status"] == "done" {
 			if result := step["result"]; result != nil {
 				results = append(results, result)
 			}
@@ -150,4 +164,26 @@ func workResultText(run map[string]any, steps []map[string]any) string {
 	}
 	raw, _ := json.Marshal(results)
 	return string(raw)
+}
+
+func workResultFiles(steps []map[string]any) []map[string]any {
+	var files []map[string]any
+	seen := map[string]bool{}
+	for _, step := range steps {
+		if step["status"] != "done" {
+			continue
+		}
+		result, _ := step["result"].(map[string]any)
+		for _, row := range MaterializeRows(result["value"]) {
+			fileID, _ := row["outputFileId"].(string)
+			name, _ := row["name"].(string)
+			hash, _ := row["sha256"].(string)
+			if fileID == "" || name == "" || hash == "" || seen[fileID] {
+				continue
+			}
+			seen[fileID] = true
+			files = append(files, map[string]any{"fileId": BareShortId(fileID), "name": name, "sha256": hash})
+		}
+	}
+	return files
 }

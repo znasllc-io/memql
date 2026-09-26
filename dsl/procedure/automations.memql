@@ -7,19 +7,17 @@
 // bundle whose construct stays a candidate on the trust ladder; promotion is a
 // person's, and epic D owns it.
 
-/// On a run reaching a terminal state, mine the corpus it belongs to. The builtin itself decides
-/// whether there is anything to learn: a run with no goalSignature, or a corpus of fewer than two
-/// recordings, answers `accepted: false` with the reason rather than failing. Filtering here on
-/// status would need the trigger to name a value the row carries at fire time, and an automation
-/// that fired on every update would mine the same corpus once per step.
+/// Mine only completed recordings. The owner travels with the event; the handler borrows that
+/// one owner's authority and rechecks the persisted run before reading their corpus.
 @trigger(event="node.updated", concept="v1:work:run")
+@filter(row => row.status == "succeeded" && row.ownerUserId != "" && row.goalSignature != "")
 automation learnFromSucceededRun {
   args {
-    id      any
-    status  any
+    id           any
+    ownerUserId  any
   }
 
-  learned := builtin procedureLearnFromRun(runId: args.id ?? "")
+  learned := builtin procedureLearnFromRun(runId: args.id ?? "", ownerUserId: args.ownerUserId ?? "")
 }
 
 /// Every six hours: mine the second corpus level, where an automation invocation is a symbol like

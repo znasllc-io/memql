@@ -692,6 +692,7 @@ function AskWidgetBody() {
       settings={settings}
       variant="widget"
       onOpenRun={(goalId) => { actions.openApp("nexus", "goals", { goalId }); }}
+      onOpenFile={(fileId) => { actions.openApp("files", "browse", { fileId }); }}
     />
   );
 }

@@ -29,6 +29,7 @@
 @executor("integration.procedure.learnFromRun")
 builtin procedureLearnFromRun {
   runId  string!  @description("The v1:work:run that just succeeded.")
+  ownerUserId  string  @description("Owner hint for the trusted completion trigger. Ordinary callers can only learn from their own runs.")
   level  integer  @description("1 mines the actions inside recorded sessions (default); 2 mines automation invocations, so a repeated sequence of automations becomes a higher automation.")
 }
 

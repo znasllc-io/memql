@@ -167,8 +167,15 @@ func (i *Integration) claimCompile(ctx context.Context, runId string) bool {
 type compileHeartbeatKey struct{}
 
 func (i *Integration) compileWithHeartbeat(ctx context.Context, compiler Compiler, req CompileRequest) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	if observer, ok := i.engine.(interface {
+		ObserveWorkCalls(context.Context, context.CancelCauseFunc) context.Context
+	}); ok {
+		// Install on the planner that received the persisted run. An observer
+		// on the originating BFF cannot see compilation's model calls.
+		ctx = observer.ObserveWorkCalls(ctx, cancel)
+	}
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	done := make(chan struct{})
 	// Cancel an in-flight database pulse before joining it. Closing only a
@@ -193,7 +200,7 @@ func (i *Integration) compileWithHeartbeat(ctx context.Context, compiler Compile
 				}
 				if rowString(run, "status") != runStatusCompiling || argBool(run, "cancelRequested") {
 					cancelPulse()
-					cancel()
+					cancel(context.Canceled)
 					return
 				}
 				err = i.store().updateRun(pulseCtx, req.RunId, map[string]any{"heartbeatAt": rfc(i.clock())})

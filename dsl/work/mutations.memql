@@ -34,6 +34,7 @@ mutation run createWorkRun {
   args {
     runId                  string!
     goalId                 string
+    goalSignature          string
     automationName         string!
     templateFingerprint    string!
     templateConstructId    string
@@ -54,7 +55,7 @@ mutation run createWorkRun {
     startedAt              string!
   }
   insert {
-    accept { goalId, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt }
+    accept { goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt }
     stamp {
       id: args.runId
       ownerUserId: actor.userId
@@ -74,6 +75,7 @@ mutation run createWorkRun {
 mutation run updateWorkRun {
   args {
     runId            string!
+    goalSignature    string
     status           string
     automationName   string
     templateConstructId  string
@@ -97,7 +99,7 @@ mutation run updateWorkRun {
     summary          object
   }
   update {
-    accept { status, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary }
+    accept { status, goalSignature, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary }
     stamp {
       id: args.runId
     }

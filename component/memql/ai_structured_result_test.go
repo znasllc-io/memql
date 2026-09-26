@@ -20,6 +20,9 @@ func TestStructuredFleetCallJournalsLocalUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(fleet.lastReq.Messages) < 2 || fleet.lastReq.Messages[len(fleet.lastReq.Messages)-1].Role != "user" {
+		t.Fatalf("structured recovery cannot run on runtimes requiring a user query: %+v", fleet.lastReq.Messages)
+	}
 	rows := journal.rows["materialization-run"]
 	if len(rows) != 1 {
 		t.Fatalf("model journal has %d rows", len(rows))
