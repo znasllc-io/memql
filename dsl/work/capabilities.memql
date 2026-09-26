@@ -30,7 +30,7 @@ tool executeCapability {
 @executor("workNavigate")
 @args(profile="object")
 builtin workNavigate {
- app string! @enum("users", "fleet", "nexus", "cluster", "files", "accounts", "campaigns", "deployables", "training", "settings", "identity", "concepts", "materializer")
+ app enum("users", "fleet", "nexus", "cluster", "files", "accounts", "campaigns", "deployables", "training", "settings", "identity", "concepts", "materializer")!
  section string @description("Optional existing app section identifier.")
 }
 

@@ -76,6 +76,10 @@ var promptLevels = map[string]string{
 	// result. The agent chooses actions and writes a user-facing reply; it does
 	// not emit executable DSL, so the agent reply band is sufficient.
 	"workAgentReply": "strong",
+	// workContextCheckpoint summarizes a bounded immutable prefix. Originals
+	// remain available for recall; this derived memory neither executes work nor
+	// changes authority. The fast band handles this constrained extraction.
+	"workContextCheckpoint": "fast",
 	// deriveProcedureHole: proposes how ONE argument of a learned procedure is
 	// derived from an earlier step's result (epic memql#5402, D6's single
 	// bounded call). Reasoning rather than fast, and the reason is the shape
