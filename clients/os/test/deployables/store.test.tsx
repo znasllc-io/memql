@@ -108,15 +108,25 @@ const BOUND: FakeSeed = {
 };
 
 describe("the store is a connection on the deployable, not a build setting", () => {
-  it("draws a Store slot in the connections column", async () => {
-    const connection = fakeConnection(BOUND);
+  it.each([
+    { store: STORE, testingOnly: false, needsSetup: false },
+    { store: DEV_STORE, testingOnly: false, needsSetup: false },
+    { store: DEV_STORE, testingOnly: true, needsSetup: false },
+    { store: { ...DEV_STORE, adminTokenRef: "" }, testingOnly: false, needsSetup: true },
+    { store: { ...DEV_STORE, storefrontTokenRef: "" }, testingOnly: true, needsSetup: true },
+  ])("shows the bound store's connection readiness ($testingOnly, $needsSetup)", async ({ store, testingOnly, needsSetup }) => {
+    const connection = fakeConnection({ ...BOUND, stores: [store], sites: [{ ...SHOP, binding: testingOnly ? {} : { storeId: store.id }, previewBinding: testingOnly ? { storeId: store.id } : {} }] });
     mount(connection);
     const page = await openDeployable("shop.memql.example.com");
     const slot = storeSlot(page);
     expect(slot).not.toBeNull();
     // It reads the store, so the slot names the DOMAIN rather than an opaque
     // row id: the domain is what somebody came to check.
-    await waitFor(() => expect(slot?.textContent).toContain("example.myshopify.com"));
+    await waitFor(() => expect(slot?.textContent).toContain(store.domain));
+    expect(slot?.textContent).toContain(needsSetup ? "Setup needed" : "Connected");
+    expect(slot?.hasAttribute("data-os-setup")).toBe(needsSetup);
+    if (store.isDevelopment) expect(slot?.textContent).toContain("Sandbox");
+    if (testingOnly) expect(slot?.textContent).toContain("Testing");
   });
 
   it("opens both store connections without candidate or grant controls", async () => {
