@@ -10570,13 +10570,6 @@ a.os-button {
   background: var(--os-warn);
 }
 
-/* ---- Ask-to-goal -------------------------------------------------------- */
-
-.os-ask-handoff {
-  margin: 4px 0 0;
-  font-size: var(--os-text-sm);
-}
-
 /* MOTION IS DATA-DRIVEN HERE, never a timer -- the road changes when a step's
  * status changes and the beacon when work lands, which is the only thing that
  * should move a picture somebody is reading. Reduced motion stills the
