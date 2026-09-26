@@ -336,6 +336,7 @@ jobs:
               - 'scripts/secrets/manifest.yaml'
               - 'component/envregistry/manifest.yaml'
               - 'component/architecture/embedded/**'
+              - 'component/memql/os_navigation.json'
               - 'dsl/**/automations.memql'
               - 'dsl/**/mutations.memql'
               - 'dsl/**/logic.memql'
@@ -488,6 +489,8 @@ jobs:
               - 'docs/public/overview/proving/scorecard/**'
             go:
               - '**/*.go'
+              # Embedded navigation contract drives engine authorization and record resolution.
+              - 'component/memql/os_navigation.json'
               # Embedded browser runtime and Node tests execute in component/edge.
               - 'component/edge/site_refresh.js'
               - 'component/edge/site_refresh_test.cjs'
@@ -666,6 +669,8 @@ jobs:
               - 'clients/os/src/system/**'
               - 'clients/os/src/kit/**'
             osclient:
+              # Checked against the live OS manifests by navigationContract.test.ts.
+              - 'component/memql/os_navigation.json'
               - 'clients/**'
               - 'sdk/ts/**'
               - 'scripts/os/**'

@@ -64,7 +64,7 @@ func TestSpeechSegmentationWaitsForSentenceOrBound(t *testing.T) {
 
 func TestEchoReferenceRejectsOnlyRecentRepeatedSpeech(t *testing.T) {
 	p := &voicePlayback{}
-	p.speaking("Files and documents, compose reports and lists. What would you like?", time.Second)
+	p.speaking("Files and documents, compose reports and lists. What would you like?")
 	for _, text := range []string{"Files and documents compose reports", "COMPOSE reports and lists."} {
 		if !p.echo(text) {
 			t.Fatalf("echo accepted: %q", text)
@@ -75,6 +75,7 @@ func TestEchoReferenceRejectsOnlyRecentRepeatedSpeech(t *testing.T) {
 			t.Fatalf("user interruption rejected: %q", text)
 		}
 	}
+	p.finished()
 	p.through = time.Now().Add(-time.Second)
 	if p.echo("Files and documents compose reports") {
 		t.Fatal("old speech suppressed a new turn")
@@ -103,7 +104,7 @@ func TestVoiceFalseInterruptionPreservesReplyAndRealSpeechCancelsIt(t *testing.T
 	go func() {
 		defer close(done)
 		driveVoice(ctx, voiceTestRoom{}, input, func(context.Context, []byte) voiceInput { v := <-inputs; checked <- struct{}{}; return v }, func(ctx context.Context, v voiceInput, p *voicePlayback) {
-			p.speaking("Files and documents compose reports and lists", time.Minute)
+			p.speaking("Files and documents compose reports and lists")
 			started <- v.text
 			<-ctx.Done()
 			stopped <- v.text
@@ -155,7 +156,8 @@ func TestVoiceFalseInterruptionPreservesReplyAndRealSpeechCancelsIt(t *testing.T
 
 func TestEchoUsesCaptureTimeEvenWhenTranscriptionIsSlow(t *testing.T) {
 	p := &voicePlayback{}
-	p.speaking("Files and documents compose reports", time.Second)
+	p.speaking("Files and documents compose reports")
+	p.finished()
 	capturedAt := time.Now().Add(-10 * time.Second)
 	p.since = capturedAt.Add(-time.Second)
 	p.through = time.Now().Add(-time.Second)
@@ -164,6 +166,24 @@ func TestEchoUsesCaptureTimeEvenWhenTranscriptionIsSlow(t *testing.T) {
 	}
 	if p.echo("Files and documents compose reports") {
 		t.Fatal("stale reference suppressed new speech")
+	}
+}
+
+func TestEchoReferenceSurvivesPlaybackPauses(t *testing.T) {
+	p := &voicePlayback{}
+	p.speaking("Files and documents compose reports")
+	p.since = time.Now().Add(-time.Minute)
+	p.through = time.Now().Add(-time.Second)
+	if !p.echo("Files and documents compose reports") {
+		t.Fatal("delayed playback lost its echo reference before delivery finished")
+	}
+	p.finished()
+	if !p.echo("Files and documents compose reports") {
+		t.Fatal("playback completion lost the acoustic echo tail")
+	}
+	p.through = time.Now().Add(-time.Second)
+	if p.echo("Files and documents compose reports") {
+		t.Fatal("completed playback suppressed a later user turn")
 	}
 }
 

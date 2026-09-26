@@ -278,8 +278,9 @@ func (e *MemQLEngine) askVoiceTurn(ctx context.Context, room audio.Room, opts As
 				continue
 			}
 			state("speaking")
-			playback.speaking(sentence, time.Duration(len(samples)/2)*time.Second/time.Duration(rate))
+			playback.speaking(sentence)
 			speechErr = room.Publish(ctx, samples, rate)
+			playback.finished()
 		}
 		speechDone <- speechErr
 	}()

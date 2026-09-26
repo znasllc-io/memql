@@ -21,6 +21,7 @@ type voicePlayback struct {
 	mu             sync.Mutex
 	words          []string
 	since, through time.Time
+	publishing     bool
 }
 
 func speechWords(text string) []string {
@@ -31,7 +32,7 @@ func speechWords(text string) []string {
 		return ' '
 	}, text))
 }
-func (p *voicePlayback) speaking(text string, duration time.Duration) {
+func (p *voicePlayback) speaking(text string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.words = append(p.words, speechWords(text)...)
@@ -42,7 +43,15 @@ func (p *voicePlayback) speaking(text string, duration time.Duration) {
 	if p.since.IsZero() {
 		p.since = now
 	}
-	p.through = now.Add(duration + 3*time.Second)
+	p.publishing = true
+}
+func (p *voicePlayback) finished() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.publishing = false
+	// A transcription pause extends actual playback beyond its original
+	// duration. Keep the reference through delivery, then allow a short tail.
+	p.through = time.Now().Add(3 * time.Second)
 }
 func (p *voicePlayback) echo(text string) bool { return p.echoAt(text, time.Now()) }
 
@@ -53,7 +62,7 @@ func (p *voicePlayback) echoAt(text string, heardAt time.Time) bool {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if heardAt.Before(p.since) || heardAt.After(p.through) {
+	if heardAt.Before(p.since) || (!p.publishing && heardAt.After(p.through)) {
 		return false
 	}
 	return strings.Contains(" "+strings.Join(p.words, " ")+" ", " "+strings.Join(words, " ")+" ")
