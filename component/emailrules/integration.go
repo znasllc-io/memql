@@ -65,8 +65,20 @@ func init() {
 			engine: pluginEngine{pctx.Engine},
 			logger: pctx.Logger,
 			claim:  newFirstFireClaim(pctx.BunDB, pctx.Logger),
+			gate:   newFiringGate(firingGateDB(pctx), pctx.Logger),
 		}, nil
 	})
+}
+
+// firingGateDB resolves the handle the firing gate locks on: the DIRECT
+// endpoint, so a wait for a rule's lock queues on a connection the bulk traffic
+// does not use, and the main pool on a node that has no direct endpoint. The
+// lock is transaction-scoped, so it holds behind a transaction pooler too.
+func firingGateDB(pctx memql.PluginContext) func() *bun.DB {
+	if pctx.DirectBunDB != nil {
+		return pctx.DirectBunDB
+	}
+	return pctx.BunDB
 }
 
 // firstFireClaimName namespaces a created rule's claims in the execution-claim
@@ -115,6 +127,13 @@ type Integration struct {
 	engine Engine
 	logger *slog.Logger
 	claim  FirstFireClaim
+	gate   FiringGate
+}
+
+// firer is the Firer this node's fire builtin runs: the created rule's
+// once-per-row claim and the firing gate, both wired from the node's database.
+func (i *Integration) firer() *Firer {
+	return NewFirer(i.engine).WithFirstFireClaim(i.claim).WithFiringGate(i.gate)
 }
 
 func (i *Integration) IntegrationName() string { return IntegrationName }
@@ -201,7 +220,7 @@ func (i *Integration) handleFire(ctx context.Context, args map[string]any, _ int
 		return nil, fmt.Errorf("emailrules.fire: emailRuleId is required")
 	}
 	event, _ := args["event"].(map[string]any)
-	out, err := NewFirer(i.engine).WithFirstFireClaim(i.claim).Fire(ctx, ruleID, strings.TrimSpace(argString(args, "nodeId")), event)
+	out, err := i.firer().Fire(ctx, ruleID, strings.TrimSpace(argString(args, "nodeId")), event)
 	if err != nil {
 		return nil, err
 	}

@@ -38,6 +38,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 )
@@ -63,6 +64,7 @@ type FirstFireClaim func(ctx context.Context, ruleID, rowID string) bool
 type Firer struct {
 	store *Store
 	claim FirstFireClaim
+	gate  FiringGate
 }
 
 func NewFirer(engine Engine) *Firer { return &Firer{store: NewStore(engine)} }
@@ -70,6 +72,14 @@ func NewFirer(engine Engine) *Firer { return &Firer{store: NewStore(engine)} }
 // WithFirstFireClaim returns the Firer with the claim a created rule needs.
 func (f *Firer) WithFirstFireClaim(claim FirstFireClaim) *Firer {
 	f.claim = claim
+	return f
+}
+
+// WithFiringGate returns the Firer with the gate that records one rule's
+// firings one at a time across every replica (firing_gate.go). Without one, a
+// firing is recorded unlocked, and firings that overlap can lose increments.
+func (f *Firer) WithFiringGate(gate FiringGate) *Firer {
+	f.gate = gate
 	return f
 }
 
@@ -154,10 +164,64 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 	} else if len(out.Refusals) > 0 {
 		detail = truncate(strings.Join(out.Refusals, "; "), 4096)
 	}
-	if rerr := f.store.RecordFiring(auth.ContextWithInternalOrigin(ctx), ruleID, state.FiredCount+1, detail); rerr != nil && err == nil {
+	if rerr := f.recordFiring(ctx, ruleID, detail); rerr != nil && err == nil {
 		err = rerr
 	}
 	return out, err
+}
+
+// recordFiring advances the rule's count by exactly one and stamps its
+// liveness (memql#5431).
+//
+// The state read at the top of Fire is NOT what gets advanced. It was read
+// before the sends, possibly from this node's result cache, and any firing that
+// overlapped this one -- here or on another replica -- may have advanced the
+// count since. So the count is read again INSIDE the rule's firing gate, fresh
+// from the database, and the new version is stamped after the version that
+// read returned. firing_gate.go says why each of the three is needed.
+func (f *Firer) recordFiring(ctx context.Context, ruleID, detail string) error {
+	record := func(ctx context.Context) error {
+		state, found, err := f.store.FiringStateByID(ctx, ruleID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("emailrules: rule %q is gone; its firing was not recorded", ruleID)
+		}
+		firedAt := firedAtAfter(state.VersionAt, time.Now())
+		return f.store.RecordFiring(auth.ContextWithInternalOrigin(ctx), ruleID, state.FiredCount+1, firedAt, detail)
+	}
+	if f.gate == nil {
+		return record(ctx)
+	}
+	return f.gate(ctx, ruleID, record)
+}
+
+// firedAtAfter is when a firing is recorded: now, or one microsecond after the
+// version it was derived from, whichever is later.
+//
+// The version is the ORDER. Every read of a rule is served its newest version,
+// and a version's createdAt is the writing process's wall clock -- so a replica
+// whose clock lags another's would stamp its increment BEFORE the version it
+// read, and every later read would skip it: the same lost increment the gate
+// closes, reopened by clock skew rather than by overlap. Stamping strictly
+// after the version read makes the order the gate imposes the order the table
+// records.
+//
+// Microseconds, because that is what the column stores: a Go time that differs
+// from the prior only below a microsecond would round onto the prior's key, and
+// the store's insert drops a second version at an existing (id, createdAt)
+// without a word (ON CONFLICT DO NOTHING).
+func firedAtAfter(prior, now time.Time) time.Time {
+	now = now.UTC().Truncate(time.Microsecond)
+	if prior.IsZero() {
+		return now
+	}
+	prior = prior.UTC().Truncate(time.Microsecond)
+	if now.After(prior) {
+		return now
+	}
+	return prior.Add(time.Microsecond)
 }
 
 // fireOperational mails this cluster's own people through the transactional

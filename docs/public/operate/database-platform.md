@@ -391,6 +391,122 @@ must never carry the migrations** — they take advisory locks, and a lock
 acquired in one transaction and released in another is, on a pooled connection,
 released by whoever holds that backend next.
 
+## MemoryNodes compression
+
+`MemoryNodes` is meant to compress its cold tail. The document version history
+migration (`20260609000000`) asks for compression segmented by `concept`,
+ordered by `"createdAt" DESC`, and a policy that compresses a chunk once it is
+90 days old. **No instance has ever had it** (memql#5421), for three independent
+reasons, each measured on TimescaleDB 2.29:
+
+- On a fresh install the table is not yet a hypertable when that migration
+  runs, so the migration skipped it.
+- On an older install, where it was, the migration's policy call named the
+  table unquoted, failed, and rolled the whole block back with a notice.
+- Since the work spine's recovery heads (`20260926020000_work_run_heads`), the
+  table carries `work_run_head_delete`: an `AFTER DELETE` trigger with a
+  transition table. TimescaleDB refuses compression on a hypertable with a
+  DELETE trigger of that kind, in both directions — compression cannot be
+  enabled while it exists, and it cannot be created on a compressed table.
+
+**What a node does about it.** On every boot, after the post-migration hook
+makes `MemoryNodes` a hypertable, the node applies exactly those settings and
+that policy — but only when the table has no compression settings and carries
+no DELETE trigger with a transition table. It records what it decided on the
+hook's status row, as `payload.compression.MemoryNodes`: `enabled`,
+`already enabled`, `blocked: DELETE trigger with a transition table: <names>`,
+`skipped: ...`, or `failed: ...` (a failure is retried by the next boot). It
+waits at most two seconds for the table lock and gives up rather than hold
+other queries behind it.
+
+**Today every instance reports `blocked`**, and nothing about it changes. The
+block lifts when the work spine captures deletes some other way: a row-level
+`AFTER DELETE` trigger coexists with compression, and fires for rows deleted
+out of a compressed chunk (measured). `SecretMemoryNodes` is not compressed, and
+nothing intends it to be.
+
+### Checking an instance
+
+```sql
+-- What the node decided at its last boot
+SELECT payload->'compression'->>'MemoryNodes' AS compression
+  FROM "MemoryNodes"
+ WHERE id = 'system.timescaledb.status'
+ ORDER BY "createdAt" DESC
+ LIMIT 1;
+
+-- The catalog's own answer
+SELECT hypertable_name, compression_enabled
+  FROM timescaledb_information.hypertables
+ WHERE hypertable_schema = 'public'
+   AND hypertable_name IN ('MemoryNodes', 'SecretMemoryNodes');
+
+-- The policy, and whether it has run
+SELECT j.job_id, j.schedule_interval, j.config->>'compress_after' AS compress_after,
+       s.last_run_status, s.last_successful_finish, s.next_start
+  FROM timescaledb_information.jobs AS j
+  LEFT JOIN timescaledb_information.job_stats AS s ON s.job_id = j.job_id
+ WHERE j.hypertable_schema = 'public'
+   AND j.hypertable_name = 'MemoryNodes'
+   AND j.config->>'compress_after' IS NOT NULL;
+
+-- What blocks it, if anything
+SELECT tgname
+  FROM pg_trigger
+ WHERE tgrelid = '"MemoryNodes"'::regclass
+   AND NOT tgisinternal
+   AND (tgtype & 8) <> 0
+   AND tgoldtable IS NOT NULL;
+
+-- How much of the table is compressed
+SELECT count(*) FILTER (WHERE is_compressed) AS compressed_chunks, count(*) AS chunks
+  FROM timescaledb_information.chunks
+ WHERE hypertable_schema = 'public'
+   AND hypertable_name = 'MemoryNodes';
+```
+
+### When the block lifts: plan that first boot
+
+The first boot after the block lifts enables compression on every instance,
+fresh or years old, with no migration. The policy job then runs **within
+seconds**, not at its 12-hour interval, and compresses every chunk more than 90
+days old. On an instance with a long history that is one background job over
+the whole cold tail — CPU and I/O on the database for as long as it takes — so
+treat that release like scheduled maintenance.
+
+- **Reads** keep their meaning: a compressed chunk is decompressed
+  transparently. Reads that reach the cold tail are slower, which is the trade
+  the migration chose.
+- **Ordinary writes** are appends: a mutation writes a new version and never
+  rewrites an old one.
+- **Anything that `UPDATE`s or `DELETE`s old rows decompresses what it
+  touches**, and TimescaleDB caps that per transaction
+  (`timescaledb.max_tuples_decompressed_per_dml_transaction`, 100000 by
+  default; measured to refuse a 150000-row statement outright). The migration
+  runner's connections lift the cap, because a concept-scoped repair migration
+  is exactly that shape. Request-serving connections keep it, and the runtime
+  paths that delete or rewrite old rows run there: the retention sweeps
+  (authActivity, the work journal), the readiness purge, knowledge seed
+  cleanup, and the Shopify compliance jobs. A batched sweep stays under the
+  cap; a single statement over a large, cold, compressed set does not, and has
+  to batch or lift the cap for its own transaction
+  (`SET LOCAL timescaledb.max_tuples_decompressed_per_dml_transaction = 0`).
+- A later migration that adds a DELETE trigger with a transition table to
+  `MemoryNodes` **fails** on an instance where compression is on.
+
+### Stopping it
+
+Remove the policy and keep the settings:
+
+```sql
+SELECT remove_compression_policy('"MemoryNodes"'::regclass);
+```
+
+A node leaves a table that has compression settings alone, so the policy stays
+removed across boots. Do **not** turn compression itself off
+(`ALTER TABLE ... SET (timescaledb.compress = false)`): the next boot would put
+it back.
+
 ---
 
 ## Related
