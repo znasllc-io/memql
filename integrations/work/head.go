@@ -143,7 +143,7 @@ func reassertion(row map[string]any, version int) map[string]any {
 	if attempt <= 0 {
 		attempt = version
 	}
-	return map[string]any{
+	args := map[string]any{
 		"stepId":            rowString(row, "id"),
 		"status":            rowString(row, "status"),
 		"result":            objectOrEmpty(row, "result"),
@@ -165,7 +165,19 @@ func reassertion(row map[string]any, version int) map[string]any {
 		"cost":              rowFloat(row, "cost"),
 		"errorCode":         rowString(row, "errorCode"),
 		"errorMessage":      rowString(row, "errorMessage"),
+		"actualFootprint":   objectOrEmpty(row, "actualFootprint"),
+		"approvalId":        rowString(row, "approvalId"),
+		"externalKey":       rowString(row, "externalKey"),
+		"input":             objectOrEmpty(row, "input"),
+		"fingerprint":       objectOrEmpty(row, "fingerprint"),
 	}
+	// resumeAt is a datetime, and an empty string is not one: it is named
+	// only when the version had a timer wait. A head moves only on a finished
+	// run, so a later version's resumeAt left behind names a wait that is over.
+	if at := rowString(row, "resumeAt"); at != "" {
+		args["resumeAt"] = at
+	}
+	return args
 }
 
 // objectOrEmpty is a stored object field, or {} -- an explicit empty object,

@@ -255,9 +255,15 @@ mutation step reassertWorkStepVersion {
     cost               float
     errorCode          string
     errorMessage       string
+    actualFootprint    object
+    approvalId         string
+    resumeAt           string
+    externalKey        string
+    input              object
+    fingerprint        object
   }
   update {
-    accept { status, result, resultFingerprint, binding, postcondition, symptom, attempt, version, basis, override, authoredBy, childRunId, idempotencyKey, startedAt, finishedAt, durationMs, tokens, cost, errorCode, errorMessage }
+    accept { status, result, resultFingerprint, binding, postcondition, symptom, attempt, version, basis, override, authoredBy, childRunId, idempotencyKey, startedAt, finishedAt, durationMs, tokens, cost, errorCode, errorMessage, actualFootprint, approvalId, resumeAt, externalKey, input, fingerprint }
     stamp {
       id: args.stepId
     }
