@@ -176,7 +176,7 @@ func mergeVariables(input, compiled map[string]any) map[string]any {
 	if len(input) == 0 && len(compiled) == 0 {
 		return nil
 	}
-	out := make(map[string]any, len(input)+len(compiled))
+	out := make(map[string]any, len(input))
 	for k, v := range input {
 		out[k] = v
 	}
