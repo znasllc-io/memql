@@ -259,16 +259,25 @@ func nearestIntrinsic(leaf string) string {
 // declared, down to the first hop into a value whose keys the declaration
 // does not close.
 func (c *sortChecker) checkPayloadPath(key, path string, directionSlot bool, refuse func(reason, fix string) error) error {
-	if c.fields == nil {
-		return nil // no bound concept: no declaration to hold the key to
-	}
 	segs := strings.Split(path, ".")
-	walked := ""
-	for i, seg := range segs {
+	// Every segment is a field name, whatever the concept: the rule the
+	// runtime compiler holds a sort key's path to (checkSortPathSegments),
+	// so a key the load admits is one the ORDER BY can render.
+	for _, seg := range segs {
 		seg = strings.TrimSpace(seg)
 		if seg == "" {
 			return refuse("a field path has an empty segment", "write each field name between the dots")
 		}
+		if !isSafePathSegment(seg) {
+			return refuse(fmt.Sprintf("%q is not a field name", seg), "a field name is letters, digits, `_` and `-`")
+		}
+	}
+	if c.fields == nil {
+		return nil // no bound concept: no declaration to hold the key to
+	}
+	walked := ""
+	for i, seg := range segs {
+		seg = strings.TrimSpace(seg)
 		if walked == "" {
 			walked = seg
 		} else {

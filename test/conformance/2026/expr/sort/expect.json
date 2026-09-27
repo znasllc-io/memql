@@ -164,6 +164,13 @@
       "verdict": "refuse_load",
       "code": "sort_key_unknown",
       "message": "sort key \"row.provenance\": row.provenance is an object, and an object has no order"
+    },
+    {
+      "file": "key-that-is-not-a-field-name.memql",
+      "verdict": "refuse_load",
+      "code": "sort_key_unknown",
+      "message": "sort key \"due date\": \"due date\" is not a field name -- a field name is letters, digits, `_` and `-`",
+      "note": "Every segment of a sort key's path is a field name, the rule the filter's path builders apply; the runtime compiler holds a runtime query's key to it too."
     }
   ]
 }
