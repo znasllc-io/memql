@@ -29,6 +29,7 @@ import {
   appWord,
   procedureTitle,
   promotionSubject,
+  promotionTargetWords,
   PROCEDURE_PROMOTION,
   type ProcedureRow,
   type PromotionSubject,
@@ -681,6 +682,10 @@ function PromotionPanel({
     subject.recordedFrom.model,
     subject.recordedFrom.effort === "" ? "" : `${subject.recordedFrom.effort} effort`,
   ].filter((part) => part.trim() !== "");
+  // WHERE IT WOULD RUN, and whether its matches were dry: two additive keys.
+  // An engine that sends neither gets exactly the card it had -- an absent key
+  // is not drawn as a dash, because "not said" is not a fact about the run.
+  const where = promotionTargetWords(subject.target);
   return (
     <Panel label="What you are promoting">
       <Subhead>What you are promoting</Subhead>
@@ -742,7 +747,16 @@ function PromotionPanel({
             )
           }
         />
+        {where === "" ? null : <Fact label="Where it would run" value={where} />}
       </Facts>
+      {/* DRY MATCHES ARE SAID ONCE, IN PLAIN WORDS. The count above is real,
+          but what it counted was a comparison: promoting is the first time
+          this procedure would act by itself. */}
+      {subject.dryEvidence ? (
+        <Caption>
+          Its matches compared the commands it would run with the app&apos;s own; it has not run by itself yet.
+        </Caption>
+      ) : null}
     </Panel>
   );
 }

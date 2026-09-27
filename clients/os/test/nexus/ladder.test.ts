@@ -9,6 +9,7 @@ import {
   procedureFromRow,
   procedureTitle,
   promotionSubject,
+  promotionTargetWords,
   rungStates,
   stepArgs,
   tokensOf,
@@ -228,5 +229,45 @@ describe("the promotion's subject", () => {
     ]);
     expect(subject?.shadowMatches).toBe(5);
     expect(subject?.recordedFrom.app).toBe("codex");
+  });
+
+  function subjectOf(over: Record<string, unknown>) {
+    return promotionSubject(
+      approvalFromRow(
+        approvalRow({
+          id: "a1",
+          kind: "procedurePromotion",
+          subject: { constructId: "p1", procedureHash: "sha256:v1", shadowMatches: 5, ...over },
+        }),
+      ),
+    );
+  }
+
+  it("reads where it would run and whether its matches were dry", () => {
+    const subject = subjectOf({ target: "workbench", dryEvidence: true });
+    expect(subject?.target).toBe("workbench");
+    expect(subject?.dryEvidence).toBe(true);
+    expect(subjectOf({ target: "machine", dryEvidence: false })?.dryEvidence).toBe(false);
+  });
+
+  it("reads both keys as absent when the engine did not send them", () => {
+    const subject = subjectOf({});
+    expect(subject?.target).toBe("");
+    expect(subject?.dryEvidence).toBe(false);
+    // Only a real boolean says the evidence was dry; a string is not one.
+    expect(subjectOf({ dryEvidence: "true" })?.dryEvidence).toBe(false);
+  });
+});
+
+describe("where a promotion would run", () => {
+  it("names the two places a replay runs, in the card's own words", () => {
+    expect(promotionTargetWords("workbench")).toBe("In the workbench, a sandbox in your cluster");
+    expect(promotionTargetWords("machine")).toBe("On your machine");
+  });
+
+  it("says nothing for an absent target, and a value it has no word for as itself", () => {
+    expect(promotionTargetWords("")).toBe("");
+    expect(promotionTargetWords("   ")).toBe("");
+    expect(promotionTargetWords("gpu-pool")).toBe("gpu-pool");
   });
 });

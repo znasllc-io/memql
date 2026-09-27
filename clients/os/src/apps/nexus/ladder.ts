@@ -978,6 +978,18 @@ export interface PromotionSubject {
   /** free parameter hole id -> distinct bindings the streak saw, in id order. */
   distinctBindings: Array<[string, number]>;
   recordedFrom: RecordedFrom;
+  /**
+   * Where the promoted procedure would run -- "workbench" or "machine" -- or
+   * "" when the subject does not say. ADDITIVE: an engine that predates the
+   * key sends none, and the card then says nothing about it.
+   */
+  target: string;
+  /**
+   * True only when the subject says the matches were DRY: the commands it
+   * would run were compared with the app's own, and nothing was executed.
+   * Absent, or anything but a real boolean, is false -- the card adds nothing.
+   */
+  dryEvidence: boolean;
 }
 
 /** The subject of a promotion approval, or null for every other kind. */
@@ -996,7 +1008,30 @@ export function promotionSubject(approval: ApprovalRow): PromotionSubject | null
       .filter((e): e is [string, number] => typeof e[1] === "number")
       .sort(([a], [b]) => a.localeCompare(b)),
     recordedFrom: recordedFromOf(s?.["recordedFrom"]),
+    target: str(s, "target").trim(),
+    dryEvidence: s?.["dryEvidence"] === true,
   };
+}
+
+/**
+ * Where a promotion would run, as the card says it.
+ *
+ * The promotion is the one moment a person decides to let this procedure act
+ * for real, so the place it acts is part of the decision. "" when the subject
+ * does not say, so nothing is drawn; a value this build has no words for is
+ * shown as itself rather than guessed onto one of the two.
+ */
+export function promotionTargetWords(target: string): string {
+  switch (target.trim()) {
+    case "":
+      return "";
+    case "workbench":
+      return "In the workbench, a sandbox in your cluster";
+    case "machine":
+      return "On your machine";
+    default:
+      return target.trim();
+  }
 }
 
 /** The app a recording came from, as its maker names it. */

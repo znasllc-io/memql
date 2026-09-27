@@ -298,7 +298,7 @@ describe("the queue is live", () => {
 // The ladder's one approval (epic memql#5408, #5412)
 // ---------------------------------------------------------------------------
 
-function promotionRow(over: Record<string, unknown> = {}) {
+function promotionRow(over: Record<string, unknown> = {}, subjectOver: Record<string, unknown> = {}) {
   return approvalRow({
     id: "a-promo",
     kind: "procedurePromotion",
@@ -327,6 +327,7 @@ function promotionRow(over: Record<string, unknown> = {}) {
       shadowMatches: 5,
       distinctBindings: { "s0.command.2": 2 },
       recordedFrom: { app: "claude-code", model: "claude-sonnet-4-5", effort: "high", sessionIds: [], runIds: [] },
+      ...subjectOver,
     },
     ...over,
   });
@@ -458,6 +459,48 @@ describe("a promotion", () => {
     await screen.findByRole("region", { name: "What you are promoting" });
     expect(screen.queryByText("What it says")).toBeNull();
     expect(document.body.textContent ?? "").not.toContain('{"s0.command.2"');
+  });
+});
+
+// Two additive keys on the subject: where the promoted procedure would run,
+// and whether its matches were dry -- compared, never executed.
+const DRY_SENTENCE =
+  "Its matches compared the commands it would run with the app's own; it has not run by itself yet.";
+
+async function openPromotionCard(subjectOver: Record<string, unknown>) {
+  mount(fakeConnection({ approvals: [promotionRow({}, subjectOver)] }));
+  fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
+  return screen.findByRole("region", { name: "What you are promoting" });
+}
+
+describe("a promotion's target and dry evidence", () => {
+  it("says it would run in the workbench, as a fact beside the rest", async () => {
+    const card = await openPromotionCard({ target: "workbench" });
+    const fact = within(card).getByText("Where it would run");
+    expect(fact.tagName).toBe("DT");
+    expect(fact.nextElementSibling?.textContent).toBe("In the workbench, a sandbox in your cluster");
+  });
+
+  it("says it would run on the person's own machine", async () => {
+    const card = await openPromotionCard({ target: "machine" });
+    expect(within(card).getByText("Where it would run").nextElementSibling?.textContent).toBe("On your machine");
+  });
+
+  it("says once, plainly, that dry matches have not run by themselves", async () => {
+    const card = await openPromotionCard({ target: "workbench", dryEvidence: true });
+    expect(within(card).getAllByText(DRY_SENTENCE)).toHaveLength(1);
+  });
+
+  it("adds nothing when the proposal carries neither key", async () => {
+    const card = await openPromotionCard({});
+    expect(within(card).queryByText("Where it would run")).toBeNull();
+    expect(within(card).queryByText(DRY_SENTENCE)).toBeNull();
+    expect(card.textContent ?? "").not.toMatch(/has not run by itself/);
+  });
+
+  it("says nothing about dry matches that were not dry", async () => {
+    const card = await openPromotionCard({ target: "machine", dryEvidence: false });
+    expect(within(card).queryByText(DRY_SENTENCE)).toBeNull();
   });
 });
 
