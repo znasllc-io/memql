@@ -1113,10 +1113,12 @@ func (Spec) hasUserContact() bool {
 }
 
 func TestParser_SpecWithOrCondition(t *testing.T) {
+	// `||`, not `,`: the comma was a second spelling of OR until memql#5439
+	// retired it, and this body used to be written with one.
 	input := `
 @description("Node has at least one contact method")
 func (Spec) hasContactMethod() bool {
-  return payload.email!=nil,payload.phone!=nil
+  return payload.email!=nil || payload.phone!=nil
 }`
 
 	lexer := NewLexer(input)

@@ -179,19 +179,23 @@ func TestATreeAtTheBoundStillWalks(t *testing.T) {
 // component/memql.
 func TestTheProceduralGrammarIsBoundedToo(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		src  func(links int) string
+		name  string
+		src   func(links int) string
+		parse func(string) (ExpressionNode, error)
 	}{
-		{"and", func(n int) string { return "a==1" + strings.Repeat(" && a==1", n) }},
-		{"or", func(n int) string { return "a==1" + strings.Repeat(" || a==1", n) }},
-		{"comma-or", func(n int) string { return "a==1" + strings.Repeat(", a==1", n) }},
-		{"additive", func(n int) string { return "a == 1" + strings.Repeat(" + 1", n) }},
+		{"and", func(n int) string { return "a==1" + strings.Repeat(" && a==1", n) }, ParseExpression},
+		{"or", func(n int) string { return "a==1" + strings.Repeat(" || a==1", n) }, ParseExpression},
+		// The engine refuses the retired `,` connective at its first comma
+		// (memql#5439), so no chain of them reaches it; the expressions
+		// rewrite still READS one, and must be bounded where it folds them.
+		{"legacy-comma-or", func(n int) string { return "a==1" + strings.Repeat(", a==1", n) }, parseLegacyExpression},
+		{"additive", func(n int) string { return "a == 1" + strings.Repeat(" + 1", n) }, ParseExpression},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := ParseExpression(tc.src(MaxExpressionChain)); err != nil {
+			if _, err := tc.parse(tc.src(MaxExpressionChain)); err != nil {
 				t.Fatalf("a chain of exactly %d links must parse: %v", MaxExpressionChain, err)
 			}
-			requireChainRefusal(t, mustFail(ParseExpression(tc.src(MaxExpressionChain+1))))
+			requireChainRefusal(t, mustFail(tc.parse(tc.src(MaxExpressionChain+1))))
 		})
 	}
 }

@@ -168,6 +168,42 @@ var xmtClauses = []struct{ name, in, want string }{
 	{"a clause at 110 columns stays on one line",
 		`  filter  storeId==args.storeId && gid==args.gid && actor.isClusterOwner==true`,
 		`  filter  row => row.storeId == args.storeId && row.gid == args.gid && actor.isClusterOwner == true`},
+
+	// The retired connectives (memql#5375, memql#5439). The engine refuses
+	// both and names this rewrite, which reads them as they meant.
+	{"the retired comma is OR",
+		`  filter  status==args.status, archived==true`,
+		`  filter  row => row.status == args.status || row.archived == true`},
+	{"the retired comma sits at the OR level",
+		`  filter  status==args.status && archived==true, ownerUserId==actor.userId`,
+		`  filter  row => row.status == args.status && row.archived == true || row.ownerUserId == actor.userId`},
+	{"the retired comma inside parentheses (the memql#3612 bypass)",
+		`  filter  ownerUserId==actor.userId && (title==args.filter, visibility=="public")`,
+		`  filter  row => row.ownerUserId == actor.userId && (row.title == args.filter || row.visibility == "public")`},
+	{"the retired comma inside a guard",
+		`  filter  when(args.filter) { title==args.filter, summary==args.filter }`,
+		`  filter  row => args.filter == nil || (row.title == args.filter || row.summary == args.filter)`},
+	{"the retired semicolon is AND",
+		`  filter  status==args.status; archived==true`,
+		`  filter  row => row.status == args.status && row.archived == true`},
+
+	// Traversals: the legacy target was a filter of its own; edition 2026
+	// writes it as a lambda over the traversed row.
+	{"a traversal's target becomes its lambda",
+		`  filter  parentOf(concept==v1:crm:account && id==args.filter)`,
+		`  filter  row => parentOf(p => p.concept == "v1:crm:account" && p.id == args.filter)`},
+	{"the retired comma folded into a traversal is OR (memql#5439)",
+		`  filter  parentOf(concept==v1:rel:hub, concept==v1:rel:space)`,
+		`  filter  row => parentOf(p => p.concept == "v1:rel:hub" || p.concept == "v1:rel:space")`},
+	{"a labelled traversal keeps its label, and the fold after it",
+		`  filter  references("assignedTo", id==args.filter, id==actor.userId)`,
+		`  filter  row => references("assignedTo", p => p.id == args.filter || p.id == actor.userId)`},
+	{"a predicate in a traversal's target reads the traversed row",
+		`  filter  childOf(isActiveRecord && concept==v1:x:folder) && requiresOwner`,
+		`  filter  row => childOf(p => isActiveRecord(p) && p.concept == "v1:x:folder") && requiresOwner(actor)`},
+	{"a guard beside a condition in a traversal's target",
+		`  filter  childOf(concept==v1:x:folder && when(args.filter) { name==args.filter })`,
+		`  filter  row => childOf(p => p.concept == "v1:x:folder" && (args.filter == nil || p.name == args.filter))`},
 }
 
 func TestRewriteExpressions_Filters(t *testing.T) {
@@ -191,6 +227,10 @@ func TestRewriteExpressions_RefusesWhatItCannotConvert(t *testing.T) {
 		{"a comment inside a multi-line clause", "  filter  a==args.a // first\n          && b==args.b", "a comment inside the clause"},
 		{"a negated guard", `  filter  !when(args.x) { a==args.x }`, "no negation of a deletion"},
 		{"a reserved head", `  filter  config.x == 1`, "config is a reserved engine name"},
+		// A traversal the rewrite cannot state faithfully is the author's.
+		{"a traversal inside a traversal's target", `  filter  parentOf(childOf(concept==v1:x:folder))`, "the childOf(...) traversal takes a lambda in edition 2026; migrate it by hand"},
+		{"a traversal whose target is only a guard", `  filter  parentOf(when(args.filter) { id==args.filter })`, "nothing but when(args.<field>) guards"},
+		{"a traversal whose target is a lone string", `  filter  parentOf("v1:x:folder:abc")`, "the parentOf(...) traversal's target"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -595,7 +635,9 @@ func TestRewriteExpressions_ConversionRoundTripsToTheLegacyTree(t *testing.T) {
 	for _, tc := range xmtClauses {
 		clause := xmtClauseText(tc.in)
 		t.Run(tc.name, func(t *testing.T) {
-			legacy, err := ParseExpression(clause)
+			// The rewrite's own reading: the engine refuses the retired
+			// connectives, and this harness checks what they MEANT.
+			legacy, err := parseLegacyExpression(clause)
 			if err != nil {
 				t.Fatalf("legacy parse: %v", err)
 			}
@@ -664,6 +706,9 @@ func xmtNormalize(n ast.ExpressionNode, andCtx bool) ast.ExpressionNode {
 		return &ast.SpecReferenceExpr{Name: e.Name}
 	case *ast.NotExpr:
 		return &ast.NotExpr{Target: xmtNormalize(e.Target, true)}
+	case *ast.RelationshipExpr:
+		// A traversal's target is a filter of its own, converted at the top.
+		return &ast.RelationshipExpr{Function: e.Function, Target: xmtNormalize(e.Target, true), Label: e.Label}
 	}
 	return n
 }
@@ -675,6 +720,19 @@ func xmtReverse(t *testing.T, n ast.ExpressionNode) ast.ExpressionNode {
 	case *ast.ParenExpr:
 		return xmtReverse(t, e.Inner)
 	case *ast.CallExpr:
+		// A traversal: an optional string label, then the lambda over the
+		// traversed row, whose body is the legacy target.
+		if lam, ok := e.Args[len(e.Args)-1].(*ast.LambdaExpr); ok && len(e.Args) <= 2 {
+			rel := &ast.RelationshipExpr{Function: ast.RelationshipFunction(e.Name), Target: xmtReverse(t, lam.Body)}
+			if len(e.Args) == 2 {
+				label, _ := e.Args[0].(*ast.LiteralExpr)
+				if label == nil {
+					t.Fatalf("a traversal's first of two arguments is its label: %s", ast.FormatExpr(e))
+				}
+				rel.Label, _ = label.Value.(string)
+			}
+			return rel
+		}
 		if len(e.Args) != 1 {
 			t.Fatalf("a predicate application takes one receiver: %s", ast.FormatExpr(e))
 		}
@@ -716,7 +774,8 @@ func xmtComparison(t *testing.T, field ast.ExpressionNode, op ast.ComparisonOper
 	root, rest := xmtPathOf(field)
 	var parts []string
 	switch {
-	case root == "row" && len(rest) > 0:
+	case (root == "row" || root == xmTraversalParam) && len(rest) > 0:
+		// A traversal's lambda reads its own row as the filter reads `row`.
 		if _, ok := xmIntrinsic(rest[0]); ok {
 			parts = append([]string{"row"}, rest...)
 		} else {
