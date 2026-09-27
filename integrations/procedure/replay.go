@@ -369,6 +369,9 @@ type replay struct {
 	// resuming: a replay of this very statement had started and not
 	// finished, and this one continues it from its receipts.
 	resuming bool
+	// ranHash is the version a resumed run was opened against, when a
+	// re-lift has replaced it since (reenterReplaced).
+	ranHash string
 	// dryStep marks the steps a SHADOW compared dry although the rest of it
 	// ran in the sandbox: commands that may send something out of it
 	// (network.go). A later data-flow hole reading one of them takes the
@@ -571,7 +574,7 @@ func (r *replay) reenter(ctx context.Context) (finished bool) {
 		return true
 	}
 	if ran := ranVersion(existing); ran != "" && ran != r.c.hash {
-		r.reenterReplaced(ctx, existing, ran)
+		r.reenterReplaced(ctx, ran)
 		return true
 	}
 	r.resuming = true
@@ -589,8 +592,9 @@ func ranVersion(run map[string]any) string {
 // would hold the current template to them -- so nothing runs and nothing is
 // counted: a comparison is closed as not made, and a served goal goes to the
 // app with every step the receipts say ran.
-func (r *replay) reenterReplaced(ctx context.Context, run map[string]any, ran string) {
+func (r *replay) reenterReplaced(ctx context.Context, ran string) {
 	r.out.VersionReplaced = true
+	r.ranHash = ran
 	r.out.Code = codeVersionReplaced
 	r.out.Diagnosis = "A replay of this procedure started on a version a re-lift has since replaced, so it was closed rather than resumed against the new one."
 	r.i.log().Info("procedure: a replay run of a replaced version was closed rather than resumed",
@@ -614,17 +618,23 @@ func (r *replay) reenterReplaced(ctx context.Context, run map[string]any, ran st
 // handBackResumed closes a resumed replay the procedure can no longer finish
 // and hands the goal to the app with every step the receipts say ran.
 func (r *replay) handBackResumed(ctx context.Context) {
-	r.out.Completed = append(r.out.Completed, r.ranSteps()...)
+	ran := r.ranSteps()
+	r.out.Completed = append(r.out.Completed, ran...)
 	r.out.Completed = append(r.out.Completed, r.inFlightSteps()...)
 	started := len(r.out.Completed) > 0
 	r.out.StartRefused = !started
-	r.out.DivergedStep = len(r.out.Completed)
+	// It stopped at the first step with no receipt: a step that MAY HAVE RUN
+	// did not finish.
+	r.out.DivergedStep = len(ran)
 	r.outcome = r.baseOutcome()
 	r.outcome["diagnosis"] = r.out.Diagnosis
 	r.outcome["code"] = r.out.Code
 	r.outcome["completed"] = completedList(r.out.Completed)
+	r.outcome["stoppedAt"] = len(ran)
 	if r.out.VersionReplaced {
+		r.outcome["procedureHash"] = r.ranHash
 		r.outcome["versionReplaced"] = true
+		r.outcome["replacedBy"] = r.c.hash
 	}
 	r.closeRun(ctx, "failed", r.out.Code, r.out.Diagnosis)
 	r.fallBack(ctx, Guidance{Diagnosis: r.out.Diagnosis, Completed: r.out.Completed}, started)
@@ -931,15 +941,17 @@ func (r *replay) reenterFinished(ctx context.Context, run map[string]any) {
 		// Closed with no outcome: the run never reached its own finish. Its
 		// receipts are the only record of what ran.
 		r.loadReceipts(ownerActor(ctx, r.req.OwnerUserId))
-		r.out.Completed = append(r.out.Completed, r.ranSteps()...)
+		ran := r.ranSteps()
+		r.out.Completed = append(r.out.Completed, ran...)
 		r.out.Completed = append(r.out.Completed, r.inFlightSteps()...)
 		r.out.Diagnosis = fmt.Sprintf("A replay of this goal was interrupted (its run is %s) after %d step(s), and the app takes it from there.",
-			firstNonEmpty(str(run, "status"), "closed"), len(r.out.Completed))
-		r.out.DivergedStep = len(r.out.Completed)
+			firstNonEmpty(str(run, "status"), "closed"), len(ran))
+		r.out.DivergedStep = len(ran)
 		o = r.baseOutcome()
 		o["interrupted"] = true
 		o["diagnosis"] = r.out.Diagnosis
 		o["completed"] = completedList(r.out.Completed)
+		o["stoppedAt"] = len(ran)
 	}
 	r.outcome = o
 	started := r.out.Diverged || len(r.out.Completed) > 0

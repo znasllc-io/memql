@@ -167,7 +167,31 @@ func TestAnInterruptedHandBackNamesTheStepInFlight(t *testing.T) {
 	if len(g.Completed) != 2 || !g.Completed[1].MayHaveRun || g.Completed[1].Index != 1 {
 		t.Fatalf("guidance steps = %+v, want the step in flight named as one that may have run", g.Completed)
 	}
-	if !containsAll(g.Prompt, "may have run", "- step 2 (fs_write)") {
-		t.Fatalf("the prompt does not name the step in flight:\n%s", g.Prompt)
+	if !containsAll(g.Prompt, "may have run", "- step 2 (fs_write)", "It stopped at step 2") {
+		t.Fatalf("the prompt does not name the step in flight, or where the replay stopped:\n%s", g.Prompt)
+	}
+	if out.DivergedStep != 1 {
+		t.Fatalf("stopped at index %d, want the step in flight (1): a step that may have run did not finish", out.DivergedStep)
+	}
+}
+
+// TestAResumeTheRungNoLongerServesNamesWhereItStopped: resumed after the
+// procedure was demoted, a replay goes no further and hands the goal back
+// with what ran and what was in flight -- stopped at the step in flight.
+func TestAResumeTheRungNoLongerServesNamesWhereItStopped(t *testing.T) {
+	w, machine := machineReplayWorld(t)
+	req := servedReq(w)
+	interruptedAfterStep0(t, w, req, "running")
+	w.lc.set("ladder", "shadow")
+	out, err := w.i.Replay(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if len(machine.recorded()) != 0 || !out.FellBack || out.DivergedStep != 1 {
+		t.Fatalf("outcome = %+v with %d dispatches, want a hand-back stopped at the step in flight", out, len(machine.recorded()))
+	}
+	g := w.f.recorded()[0].Guidance
+	if len(g.Completed) != 2 || !g.Completed[1].MayHaveRun || !containsAll(g.Prompt, "It stopped at step 2") {
+		t.Fatalf("guidance = %+v\n%s", g.Completed, g.Prompt)
 	}
 }
