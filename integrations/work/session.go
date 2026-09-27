@@ -424,7 +424,7 @@ type runInheritance struct {
 // exists to close.
 //
 // The variables inherited are the GOAL'S INPUT: the parent's, less every one
-// only a replay reads (replayOnlyVariables).
+// only a replay reads (component/work.GoalInput).
 func (w *SessionWriter) parentRunInheritance(ctx context.Context, owner, parentRunId string) runInheritance {
 	parentRunId = strings.TrimSpace(parentRunId)
 	if parentRunId == "" {
@@ -438,41 +438,14 @@ func (w *SessionWriter) parentRunInheritance(ctx context.Context, owner, parentR
 	}
 	return runInheritance{
 		goalSignature: strings.TrimSpace(rowString(parent, "goalSignature")),
-		variables:     goalInputOf(rowMap(parent, "variables")),
+		variables:     workstate.GoalInput(rowMap(parent, "variables")),
 	}
 }
 
 // ProcedureConstructVariable is the variable compile adds to the run of a goal
-// a learned procedure serves (integrations/planner, work_compile.go): the one
-// argument of replayLearnedProcedure, naming the procedure serving the goal.
-// Compile lays it over the goal's input; the goal never supplied it.
-const ProcedureConstructVariable = "procedureConstructId"
-
-// replayOnlyVariables are the variables a replay reads and a goal never
-// supplied -- every key compile lays over a goal's input when a learned
-// procedure serves it (epic memql#5408). A recording opened from such a run,
-// the app taking the goal back, inherits the goal's input WITHOUT them: the
-// lift reads a recording's variables as the goal's input, maps the
-// procedure's parameters onto them and lists their keys as its inputs, so a
-// recording carrying one would teach it an input nobody gave.
-var replayOnlyVariables = []string{ProcedureConstructVariable}
-
-// goalInputOf is a run's variables less the replay-only ones. It copies, so
-// the row read is left as it was, and answers nil when nothing is left -- an
-// empty object is not an input.
-func goalInputOf(variables map[string]any) map[string]any {
-	out := make(map[string]any, len(variables))
-	for k, v := range variables {
-		out[k] = v
-	}
-	for _, k := range replayOnlyVariables {
-		delete(out, k)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
+// a learned procedure serves. The one definition is component/work's, which
+// says why a recording must not inherit it.
+const ProcedureConstructVariable = workstate.ProcedureConstructVariable
 
 // actionStepKey names the step. It is the app's OWN id where there is one, so
 // a recorded step ties back to the line of the transcript that produced it;

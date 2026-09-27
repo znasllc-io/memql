@@ -38,6 +38,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
+	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/component/workjournal"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -233,7 +234,10 @@ func (d *AppSessionDelegate) beginChildRun(ctx context.Context, h memqlengine.Ap
 
 // parentRunInheritance reads the delegating run under its OWNER's actor --
 // the composite tier answers anybody else zero rows and no error -- and
-// returns the goal signature and variables the child run inherits.
+// returns the goal signature and variables the child run inherits. The
+// variables are the GOAL'S INPUT (component/work.GoalInput): when a learned
+// procedure served the parent and diverged, this session IS the app taking the
+// goal back, and the replay's own procedure id is not an input anybody gave.
 //
 // BEST-EFFORT, for stampParentStep's reason: the session is about to run on
 // somebody's machine either way. A parent that cannot be read costs the
@@ -262,7 +266,7 @@ func (d *AppSessionDelegate) parentRunInheritance(ctx context.Context, owner, pa
 	}
 	signature, _ := rows[0]["goalSignature"].(string)
 	variables, _ := rows[0]["variables"].(map[string]any)
-	return strings.TrimSpace(signature), variables
+	return strings.TrimSpace(signature), workstate.GoalInput(variables)
 }
 
 // stampParentStep records the subrun on the step that was handed over.
