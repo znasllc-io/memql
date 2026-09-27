@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -172,6 +173,9 @@ func materialize(n *Node, values map[string]string, inJSON bool) (any, error) {
 		case FormArgv:
 			return materializeArgv(n, values)
 		case FormPath, FormRootedPath:
+			if err := checkSegmentHoles(n, values); err != nil {
+				return nil, err
+			}
 			segs, err := spelledElements(n, values)
 			if err != nil {
 				return nil, err
@@ -262,9 +266,12 @@ func scalarValue(s, litType string, inJSON bool) (any, error) {
 // `"\d+"` still keeping its backslash. Re-quoting the value instead -- the
 // only thing the tree used to keep -- single-quotes whatever holds a space,
 // which turns every expansion into literal text, and a trusted procedure
-// then runs a different command that still exits 0. The separators, when the
-// template kept its first recording's, go back between the words; without
-// them the words are joined by single spaces.
+// then runs a different command that still exits 0. A PARAMETER is the
+// opposite case: its value came from a goal, not from a recording, and it is
+// written as one literal word (strictQuote) -- whatever it holds, the program
+// receives exactly it as one argument. The separators, when the template kept
+// its first recording's, go back between the words; without them the words
+// are joined by single spaces.
 //
 // Nothing written here can disagree with the tree: a spelling that does not
 // read back as its own value, or separators that are not whitespace between
@@ -291,7 +298,10 @@ func materializeArgv(n *Node, values map[string]string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			words[i] = shellQuote(v)
+			if strings.IndexByte(v, 0) >= 0 {
+				return "", fmt.Errorf("procedure: hole %s holds a NUL byte, which no argument of a command line can carry", k.HoleId)
+			}
+			words[i] = strictQuote(v)
 		default:
 			return "", fmt.Errorf("procedure: element %d of a command line is a%s %s node, and only a literal or a parameter can be written into one",
 				i, articleN(kindNames[k.Kind]), kindNames[k.Kind])
@@ -366,12 +376,71 @@ func spelledElements(n *Node, values map[string]string) ([]string, error) {
 // same kind of token to it. Bare keeps the first a redirect, which recordings
 // use constantly; it turns the second into a pipe. Only a payload from before
 // the spellings is written this way: a recorded argument with a spelling is
-// written as spelled.
+// written as spelled, and a parameter's value is never written with this rule
+// at all (strictQuote).
 func shellQuote(s string) string {
 	if s != "" && !strings.ContainsAny(s, `'"\`) && strings.IndexFunc(s, unicode.IsSpace) < 0 {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// strictSafeWord is a word no POSIX shell reads as anything but itself:
+// nothing that splits, quotes, expands, globs, redirects or ends a command.
+// It is the same set app/procedure_step_translation.go quotes an argument
+// VECTOR's elements with (procedureShellSafeWord) -- the two are one rule,
+// applied on the two sides of the dispatcher seam, and must stay one.
+var strictSafeWord = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+// strictQuote writes a PARAMETER's value into a command line as exactly one
+// literal argument. It is bare only when strictSafeWord matches; otherwise it
+// is single-quoted, each single quote inside closing the quoting, escaped and
+// reopened, and the empty value is written as two single quotes.
+//
+// It is not shellQuote, and the difference is the whole point. shellQuote is
+// the rule for a RECORDED argument whose spelling was not kept, where a bare
+// `>` was the author's redirect and must stay one. A parameter's value comes
+// from a goal: `x;rm${IFS}-rf${IFS}$HOME` must reach cp as one file name, not
+// reach the shell as a second command, and `$(id)`, a backtick, `R&D.txt`,
+// `*.txt`, `a|b` and `~/x` must each be one argument, unexpanded. What an
+// argument MEANS to the program -- an option, an absolute path, a parent
+// directory -- is a separate question, which CheckBindings answers against
+// what the recordings put there.
+//
+// A value holding a NUL has no spelling at all -- the command line would end
+// there -- and the caller refuses it, naming the parameter.
+func strictQuote(s string) string {
+	if strictSafeWord.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// checkSegmentHoles holds every parameter that is one SEGMENT of a path to
+// one segment: not empty, not `.` or `..`, no slash and no NUL. A path is
+// never read by a shell, so any other value is one file name however it is
+// spelled; but `..` climbs out of the directory every recording wrote into,
+// and a value holding a slash writes somewhere no recording named. Each is
+// refused naming the parameter.
+func checkSegmentHoles(n *Node, values map[string]string) error {
+	for _, k := range n.Kids {
+		if k == nil || k.Kind != KindHole {
+			continue
+		}
+		v, ok := values[k.HoleId]
+		if !ok {
+			continue // spelledElements refuses it, naming it
+		}
+		switch {
+		case v == "":
+			return fmt.Errorf("procedure: hole %s is one segment of a path and was given an empty one", k.HoleId)
+		case v == "." || v == "..":
+			return fmt.Errorf("procedure: hole %s is one segment of a path and was given %q, which names a directory rather than a file in it", k.HoleId, v)
+		case strings.ContainsAny(v, "/\x00"):
+			return fmt.Errorf("procedure: hole %s is one segment of a path and was given %q, which is not one segment", k.HoleId, v)
+		}
+	}
+	return nil
 }
 
 // encodeJSON is the re-encoding of a JSON document: keys sorted (encoding/json

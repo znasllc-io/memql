@@ -437,3 +437,111 @@ func TestInputLiteralSpellsAValueAsCanonicalizationDoes(t *testing.T) {
 		}
 	}
 }
+
+// probeValues are what a goal's input could put in a parameter that a
+// generalization learned from `cp report.txt dest1.txt` and
+// `cp report.txt dest2.txt`: shell code in every spelling, a glob, an
+// operator, a home directory, a parent directory, an option and an absolute
+// path.
+var probeValues = []string{
+	"x;rm${IFS}-rf${IFS}$HOME", "$(id)", "`id`", "R&D.txt", "*.txt", "a|b", "~/x", "..", "-rf", "/etc/passwd",
+}
+
+// cpTemplate is the template the two recordings generalize into: one hole,
+// the destination.
+func cpTemplate(t *testing.T) (Template, string) {
+	t.Helper()
+	tmpl := Generalize([][]Action{{execStep("cp report.txt dest1.txt")}, {execStep("cp report.txt dest2.txt")}})
+	if len(tmpl.Holes) != 1 {
+		t.Fatalf("fixture: holes = %+v, want the destination", tmpl.Holes)
+	}
+	return tmpl, tmpl.Holes[0].Id
+}
+
+// TestAParameterIsOneLiteralWordInACommandLine (B1): a value a goal supplies is
+// DATA. It was written bare whenever it held no whitespace, quote or
+// backslash -- the rule for recorded operators -- so `x;rm${IFS}-rf${IFS}$HOME`
+// ran `rm -rf $HOME`, and `$(id)`, a backtick, `R&D.txt`, `*.txt`, `a|b` and
+// `~/x` were all read by the shell as something other than one argument. Now
+// it is bare only when it is nothing but characters no shell treats
+// specially, and single-quoted otherwise: whatever it holds, the command
+// receives it as exactly one argument.
+func TestAParameterIsOneLiteralWordInACommandLine(t *testing.T) {
+	tmpl, hole := cpTemplate(t)
+	want := map[string]string{
+		"x;rm${IFS}-rf${IFS}$HOME": `'x;rm${IFS}-rf${IFS}$HOME'`,
+		"$(id)":                    `'$(id)'`,
+		"`id`":                     "'`id`'",
+		"R&D.txt":                  `'R&D.txt'`,
+		"*.txt":                    `'*.txt'`,
+		"a|b":                      `'a|b'`,
+		"~/x":                      `'~/x'`,
+		"..":                       `..`,
+		"-rf":                      `-rf`,
+		"/etc/passwd":              `/etc/passwd`,
+		"it's":                     `'it'\''s'`,
+		"":                         `''`,
+		"a b":                      `'a b'`,
+	}
+	for _, v := range append(append([]string(nil), probeValues...), "it's", "", "a b") {
+		cmd := materializedCommand(t, tmpl.Steps[0].Args, map[string]string{hole: v})
+		if exp := "cp report.txt " + want[v]; cmd != exp {
+			t.Errorf("value %q: command = %q, want %q", v, cmd, exp)
+		}
+		toks := splitArgv(cmd)
+		if len(toks) != 3 || toks[2].Lit != v {
+			t.Errorf("value %q: the command reads back as %q, want the value as ONE argument", v, lits(toks))
+		}
+	}
+}
+
+// TestAParameterHoldingNULIsRefusedNamingIt: no shell word can carry a NUL --
+// the command line would end there -- so a value holding one is refused
+// rather than truncated into a different argument.
+func TestAParameterHoldingNULIsRefusedNamingIt(t *testing.T) {
+	tmpl, hole := cpTemplate(t)
+	_, err := Materialize(tmpl.Steps[0].Args, map[string]string{hole: "a\x00b"})
+	if err == nil || !strings.Contains(err.Error(), hole) {
+		t.Fatalf("a NUL in a parameter must refuse naming it; got %v", err)
+	}
+}
+
+// writeTemplate is the template two writes generalize into: the file name,
+// a path SEGMENT, is the hole.
+func writeTemplate(t *testing.T) (Template, string) {
+	t.Helper()
+	mk := func(name string) []Action {
+		return Canonicalize([]Step{{StepType: "fs_write", Consumed: true, Input: map[string]any{"file_path": "./out/" + name, "content": "hi"}}})
+	}
+	tmpl := Generalize([][]Action{mk("a.txt"), mk("b.txt")})
+	if len(tmpl.Holes) != 1 || tmpl.Holes[0].Id != "s0.file_path.2" {
+		t.Fatalf("fixture: holes = %+v, want the file name", tmpl.Holes)
+	}
+	return tmpl, tmpl.Holes[0].Id
+}
+
+// TestAPathSegmentParameterTakesExactlyOneSegment (B2): a parameter standing
+// for one segment of a path takes one segment. `..` there climbs out of the
+// directory every recording wrote into, and a value holding a slash writes
+// somewhere no recording named; both are refused naming the parameter, as are
+// the empty segment and `.`. Anything else is one file name, however it is
+// spelled -- a path is never read by a shell.
+func TestAPathSegmentParameterTakesExactlyOneSegment(t *testing.T) {
+	tmpl, hole := writeTemplate(t)
+	for _, bad := range []string{"..", ".", "", "~/x", "/etc/passwd", "a/b", "a\x00b"} {
+		_, err := Materialize(tmpl.Steps[0].Args, map[string]string{hole: bad})
+		if err == nil || !strings.Contains(err.Error(), hole) {
+			t.Errorf("segment %q: want a refusal naming %s, got %v", bad, hole, err)
+		}
+	}
+	for _, ok := range []string{"c.txt", "a|b", "$(id)", "-rf", "R&D.txt"} {
+		v, err := Materialize(tmpl.Steps[0].Args, map[string]string{hole: ok})
+		if err != nil {
+			t.Errorf("segment %q: %v", ok, err)
+			continue
+		}
+		if got := v.(map[string]any)["file_path"]; got != "./out/"+ok {
+			t.Errorf("segment %q: path = %q", ok, got)
+		}
+	}
+}
