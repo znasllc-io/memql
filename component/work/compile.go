@@ -67,6 +67,14 @@ type CatalogCandidate struct {
 	// MissingArgs are the arguments this goal supplies that the candidate
 	// does not declare -- the gap list a near match must close.
 	MissingArgs []string
+	// Rung is RungNone for an authored construct and the ladder rung for a
+	// learned procedure (epic memql#5408). Decide does not read it: the
+	// planner passes a procedure through DecideServe BEFORE Decide, keeps
+	// only the ones that serve, and ranks trusted before canary. What Decide
+	// returns carries it, and it is what routes an exact hit on a learned
+	// procedure to the replay automation rather than to the construct by
+	// name.
+	Rung Rung
 }
 
 // CompileInput is everything the decision reads.

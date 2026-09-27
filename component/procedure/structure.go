@@ -20,10 +20,13 @@ const (
 )
 
 // ProcessTree is the structured shape of a corpus.
+//
+// Its JSON form is the one MarshalTree writes, and decoding one checks it (see
+// serialize.go).
 type ProcessTree struct {
-	Op       TreeOp
-	Symbol   string
-	Children []*ProcessTree
+	Op       TreeOp         `json:"op"`
+	Symbol   string         `json:"symbol,omitempty"`
+	Children []*ProcessTree `json:"children,omitempty"`
 }
 
 // Structure runs the inductive miner over the corpus, per goal signature, so

@@ -1,6 +1,9 @@
 package procedure
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestNodeEqual_IsStructuralAndOrderIndependentForObjects(t *testing.T) {
 	a := Obj(map[string]*Node{"b": Lit("2"), "a": Lit("1")})
@@ -58,5 +61,61 @@ func TestNodeEqual_AHoleEqualsOnlyTheSameHole(t *testing.T) {
 	}
 	if HoleNode("h1", "string").Equal(Lit("x")) {
 		t.Fatal("a hole is not a literal")
+	}
+}
+
+// TestFormIsIgnoredByEqual pins what Form IS: a note on how canonicalization
+// read a string (a command line, a path, a JSON document), kept so that
+// Materialize can write the value back the way it arrived. It is never part of
+// identity. Two recordings whose trees agree are the same action however their
+// strings were spelled, and a Form inside Equal would stop them generalizing.
+func TestFormIsIgnoredByEqual(t *testing.T) {
+	argv := Arr(Lit("ls"), Lit("-la"))
+	argv.Form = FormArgv
+	path := Arr(Lit("ls"), Lit("-la"))
+	path.Form = FormPath
+	plain := Arr(Lit("ls"), Lit("-la"))
+	if !argv.Equal(path) || !argv.Equal(plain) || !plain.Equal(argv) {
+		t.Fatal("two trees that differ only in Form must be Equal: Form is a rendering hint")
+	}
+	obj := Obj(map[string]*Node{"a": Lit("1")})
+	obj.Form = FormJSON
+	if !obj.Equal(Obj(map[string]*Node{"a": Lit("1")})) {
+		t.Fatal("an object's Form must not take part in equality either")
+	}
+}
+
+// TestCloneCopiesTheForm: a template is built from clones of recorded trees,
+// and a clone that dropped the Form would materialize a command line as an
+// array.
+func TestCloneCopiesTheForm(t *testing.T) {
+	n := Obj(map[string]*Node{"command": Arr(Lit("git"), Lit("status"))})
+	n.Form = FormJSON
+	n.Kids[0].Form = FormArgv
+	c := n.Clone()
+	if c.Form != FormJSON || c.Kids[0].Form != FormArgv {
+		t.Fatalf("Clone lost a Form: root %q, child %q", c.Form, c.Kids[0].Form)
+	}
+}
+
+// TestRawAndSepsAreIgnoredByEqualAndCopiedByClone: the spelling of a command
+// is a rendering hint, like LitType and Form. Two recordings of one argument
+// spelled differently are the same argument, and a Clone that dropped the
+// spelling would replay a command nobody recorded.
+func TestRawAndSepsAreIgnoredByEqualAndCopiedByClone(t *testing.T) {
+	a := Arr(&Node{Kind: KindLit, Lit: "a b", Raw: `"a b"`})
+	a.Form, a.Seps = FormArgv, []string{"", " "}
+	b := Arr(&Node{Kind: KindLit, Lit: "a b", Raw: `'a b'`})
+	b.Form, b.Seps = FormArgv, []string{"  ", ""}
+	if !a.Equal(b) {
+		t.Fatal("two spellings of one argument must be Equal")
+	}
+	c := a.Clone()
+	if c.Kids[0].Raw != `"a b"` || !reflect.DeepEqual(c.Seps, a.Seps) {
+		t.Fatalf("Clone lost the spelling: %+v / %q", *c.Kids[0], c.Seps)
+	}
+	c.Seps[0] = "changed"
+	if a.Seps[0] != "" {
+		t.Fatal("Clone shares its separators with the original")
 	}
 }

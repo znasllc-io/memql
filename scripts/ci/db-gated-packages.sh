@@ -197,6 +197,7 @@ readonly DB_GATED_TREES=(
 	"integrations/embedding"
 	"integrations/groups"
 	"integrations/planner"
+	"integrations/procedure"
 	"integrations/shopify"
 	"integrations/sitepreview"
 	"integrations/work"

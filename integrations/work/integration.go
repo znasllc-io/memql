@@ -284,7 +284,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Handler:     i.handleDecideApproval,
 			ArgsSchema: map[string]string{
 				"approvalId": "string (required) -- the v1:work:approval to decide",
-				"decision":   "string (required) -- approved, rejected, or answered",
+				"decision":   "string (required) -- approved, rejected, or answered (a feedback question); a procedurePromotion takes only approved or rejected",
 				"answer":     "object -- the person's answer, for a feedback approval",
 			},
 		},

@@ -187,11 +187,17 @@ func doRun(c *capability.Capability) int {
 	}
 	defer closeDB()
 
+	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	r := &proving.Runner{
 		Engine:    eng,
 		Cassettes: cassettes,
-		Logger:    slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})),
+		Logger:    logger,
 		Prov:      prov,
+		// The learned-procedure lifecycles run the platform's own learner,
+		// ladder and replay runner against this engine; without it every
+		// lifecycle scenario refuses to run rather than publishing a figure
+		// nothing drove.
+		Lifecycle: proving.NewEngineLifecycle(eng, logger),
 	}
 
 	c.Step("running %d scenarios on both arms", len(corpus.Scenarios))
@@ -272,11 +278,17 @@ func doGate(c *capability.Capability) int {
 	}
 	defer closeDB()
 
+	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	r := &proving.Runner{
 		Engine:    eng,
 		Cassettes: cassettes,
-		Logger:    slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})),
+		Logger:    logger,
 		Prov:      prov,
+		// The learned-procedure lifecycles run the platform's own learner,
+		// ladder and replay runner against this engine; without it every
+		// lifecycle scenario refuses to run rather than publishing a figure
+		// nothing drove.
+		Lifecycle: proving.NewEngineLifecycle(eng, logger),
 	}
 	result, err := r.Run(context.Background(), corpus)
 	if err != nil {

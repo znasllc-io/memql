@@ -12,6 +12,8 @@ import { RunPage } from "./RunPage";
 import { RunsSection } from "./RunsSection";
 import { defaultRunId } from "./world";
 import { NEXUS_APP_ID, NEXUS_LOG_CONCEPTS } from "./concepts";
+import { PROCEDURE_PROMOTION } from "./ladder";
+import { useAutomationFeeds } from "./useAutomations";
 import {
   useCancelGoal,
   useCreateGoal,
@@ -68,10 +70,15 @@ import { useSession } from "../../chrome/access";
 // THE SELECTION IS THE APP'S, NOT A SECTION'S
 // ===========================================================================
 // Following a goal to its run and a run to its approval crosses sections, and
-// a selection held inside a section would be lost on the way. So the three ids
-// live here and each section is told what is open -- which also means going to
+// a selection held inside a section would be lost on the way. So the ids live
+// here and each section is told what is open -- which also means going to
 // Approvals to answer something and coming back lands somebody exactly where
-// they were.
+// they were. A learned procedure's page is the fourth (epic memql#5408): its
+// promotion is decided in Approvals, and its approval card links back to it.
+//
+// THE CATALOG'S FEEDS ARE HELD HERE TOO, for the same reason: the Automations
+// list and a promotion's approval card both follow them, and two collections
+// over one catalog would be free to disagree about where a procedure stands.
 
 /** The concepts this app owns, for its Logs section's subject scope. */
 const LOG_CONCEPTS = NEXUS_LOG_CONCEPTS;
@@ -130,6 +137,19 @@ export function NexusApp({
     return byId;
   }, [goalRows]);
 
+  // THE CATALOG, FOLLOWED WHILE A VISIBLE SURFACE NEEDS IT (see
+  // useAutomations). Automations always does; Approvals does only while a
+  // promotion waits in it, because only that card names a procedure it has to
+  // find.
+  const feeds = useAutomationFeeds(
+    sectionId === "automations" ||
+      (sectionId === "approvals" && approvalRows.some((a) => a.kind === PROCEDURE_PROMOTION)),
+  );
+  // Which procedure's page is open. A link naming one the feed does not hold
+  // yet is kept until the feed has answered; the section then opens it or says
+  // it is not there.
+  const [openProcedureId, setOpenProcedureId] = useState("");
+
   function openRun(runId: string) {
     if (runId.trim() === "") return;
     setOpenRunId(runId);
@@ -152,8 +172,15 @@ export function NexusApp({
     navigate("approvals");
   }
 
+  function openProcedureById(constructId: string) {
+    if (constructId.trim() === "") return;
+    setOpenProcedureId(constructId);
+    askContext(`nexus procedure:${idTail(constructId)}`);
+    navigate("automations");
+  }
+
   // A STANDING OPEN INSTRUCTION, id-matched on consumption so acting on a
-  // stale render can never eat a newer one. The payload names ONE of the three
+  // stale render can never eat a newer one. The payload names ONE of the four
   // things this app can open; anything else is left alone rather than guessed
   // at, which is what keeps an unrelated opener from moving somebody's window.
   const handled = useRef("");
@@ -163,15 +190,17 @@ export function NexusApp({
     const runId = typeof payload["runId"] === "string" ? payload["runId"] : "";
     const goalId = typeof payload["goalId"] === "string" ? payload["goalId"] : "";
     const approvalId = typeof payload["approvalId"] === "string" ? payload["approvalId"] : "";
+    const procedureId = typeof payload["procedureId"] === "string" ? payload["procedureId"] : "";
     // A MOMENT, so a rewound goal is shareable. The OS has no per-window URL --
     // this is the shell's deep-link primitive, and an opener that hands one in
     // gets the goal drawn as it stood. Ignored on a run or approval payload,
     // because neither of those surfaces is rewindable.
     const at = typeof payload["at"] === "string" ? payload["at"] : "";
-    if (runId === "" && goalId === "" && approvalId === "") return;
+    if (runId === "" && goalId === "" && approvalId === "" && procedureId === "") return;
     handled.current = intent.id;
     if (runId !== "") openRun(runId);
     else if (approvalId !== "") openApproval(approvalId);
+    else if (procedureId !== "") openProcedureById(procedureId);
     else {
       setOpenAt(at);
       openGoal(goalId);
@@ -218,7 +247,19 @@ export function NexusApp({
   }
   if (sectionId === "automations") {
     return (
-      <AutomationsSection selectedId={selectedAutomationId} onSelect={setSelectedAutomationId} />
+      <AutomationsSection
+        feeds={feeds}
+        selectedId={selectedAutomationId}
+        onSelect={setSelectedAutomationId}
+        openProcedureId={openProcedureId}
+        onOpenProcedure={openProcedureById}
+        onCloseProcedure={() => setOpenProcedureId("")}
+        approvals={approvalRows}
+        approvalsKnown={approvals.snapshot.state === "live"}
+        runs={runRows}
+        onOpenApproval={openApproval}
+        onOpenRun={openRun}
+      />
     );
   }
   if (sectionId === "approvals") {
@@ -230,6 +271,8 @@ export function NexusApp({
         selectedApprovalId={selectedApprovalId}
         onSelectApproval={setSelectedApprovalId}
         onOpenRun={openRun}
+        procedures={feeds.procedureRows}
+        onOpenProcedure={openProcedureById}
       />
     );
   }

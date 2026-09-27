@@ -142,6 +142,13 @@ const settings: OsAppManifest = {
     { id: "levels", name: "Levels", requires: "app:settings/levels" },
     { id: "rules", name: "Rules", requires: "app:settings/rules" },
     { id: "decisions", name: "Decisions", requires: "app:settings/decisions" },
+    // Procedures (epic memql#5408): the certification ladder's values -- how
+    // much evidence a learned procedure needs before it runs without a model.
+    // AFTER Decisions, closing the AI group in the order a person learns it:
+    // where a call goes, how much it needs, who gets what, what happened, and
+    // when a goal stops needing a model at all. Seeded on the Levels roles,
+    // because it is the same kind of read-only reflection of the cluster.
+    { id: "procedures", name: "Procedures", requires: "app:settings/procedures" },
     { id: "tokens", name: "Tokens", requires: "app:settings/tokens" },
     { id: "keys", name: "Keys", requires: "app:settings/keys" },
     // The shell's own lines (epic memql#4895): what the OS front end
@@ -639,6 +646,17 @@ const nexus: OsAppManifest = {
   sections: NEXUS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
+  // Learned procedures (epic memql#5408) are a new kind of thing in the
+  // Automations list -- work the system watched an app do, climbing a ladder
+  // toward running without a model -- and nothing else in the shell says they
+  // exist. The destination is the SECTION, so the marker is reachable on a
+  // cluster that has learned nothing yet (the empty list says where they come
+  // from), and the shell acknowledges it when Automations is visible -- never
+  // when the app opens on Goals. Advance the revision only when the surface
+  // itself changes meaningfully, never because a procedure climbed.
+  attentionChanges: [
+    { id: "nexus:procedures", revision: "procedures-1", sectionId: "automations", label: "Learned procedures" },
+  ],
   component: NexusApp,
 };
 

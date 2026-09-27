@@ -809,10 +809,9 @@ func (i *Integration) recordWorkspace(ctx context.Context, runId, planOwner, sto
 // the written bytes to v1:common:attachment so the Library renders /
 // downloads the real file (memql#733 local, memql#742 cluster).
 //
-// ownerUserId / partitionId are resolved from the producing Plan
-// (planById -> createdBy / partitionId): the workbench dispatch args
-// don't carry the user id, but the run's createdBy is server-stamped
-// from actor.userId so it is the authoritative owner. Idempotent: the
+// ownerUserId / partitionId are resolved from the producing run
+// (workRunForOwner -> ownerUserId): the workbench dispatch args don't
+// carry the user id, and the run's owner is the authoritative one. Idempotent: the
 // outputId is derived deterministically from (ownerUserId, runId,
 // path). Best-effort: any failure (engine nil, owner unresolved, byte
 // read/upload error, insert error) is logged and swallowed so it can't
@@ -1109,7 +1108,7 @@ func detectMimeType(fileName string, data []byte) string {
 	return "application/octet-stream"
 }
 
-// resolvePlanOwner reads planById and returns the run's owner
+// resolvePlanOwner reads the run (workRunForOwner) and returns its owner
 // user id and partitionId. Returns empty strings on any failure -- the
 // caller treats an empty owner as "skip promotion". The planFull shape
 // flattens, so rows land in res.OutputPayload() with the fields as
@@ -1143,6 +1142,13 @@ func (i *Integration) resolvePlanOwner(ctx context.Context, runId string) (owner
 // absent, e.g. a user-initiated workbench call where the inserter IS the
 // owner. (memql#952)
 func planOwnerFromRow(row map[string]any) string {
+	// A v1:work:run names its owner outright -- ownerUserId, copied from the
+	// goal at open -- and that is the one answer for every run since the
+	// work spine replaced the plan. requestedBy and createdBy are the
+	// plan-era reading, kept for a row that carries no owner field.
+	if owner := strings.TrimSpace(stringFromRow(row, "ownerUserId")); owner != "" {
+		return owner
+	}
 	if owner := strings.TrimSpace(stringFromRow(row, "requestedBy")); owner != "" {
 		return owner
 	}

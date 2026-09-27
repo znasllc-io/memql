@@ -82,8 +82,11 @@ import (
 	_ "github.com/znasllc-io/memql/component/logstore"
 	_ "github.com/znasllc-io/memql/integrations/library"
 	_ "github.com/znasllc-io/memql/integrations/liveknowledge"
-	// Procedure automations load on every node and consume work-run events;
-	// their executors must be present wherever those events arrive.
+	// Procedure learning and its certification ladder (epics memql#5402 and
+	// memql#5408). Registered on every node type: its automations load
+	// everywhere and consume work-run and approval events, so their
+	// executors must be present wherever those events arrive.
+	// app/integrations_procedure.go installs its compile gate and replay seams.
 	_ "github.com/znasllc-io/memql/integrations/procedure"
 	_ "github.com/znasllc-io/memql/integrations/rbac"
 	// Cutting a release of MemQL itself (epic memql#4434). Registered on

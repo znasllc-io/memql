@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	"github.com/znasllc-io/memql/component/workjournal"
@@ -310,5 +311,162 @@ func TestNoJournalLeavesTheRecordingRunToTheRecorder(t *testing.T) {
 	}
 	if got := ex.got.Input["recordingRunId"]; got != "" {
 		t.Fatalf("Input[recordingRunId] = %v, want empty so the recorder opens one", got)
+	}
+}
+
+// parentRunEngine answers the delegating run's read and records the actor it
+// was asked under, so "the parent was read as its owner" is an observation.
+type parentRunEngine struct {
+	parent  map[string]any
+	queries []string
+	actors  []string
+}
+
+func (e *parentRunEngine) Execute(ctx context.Context, q string) (*memqlengine.ExecuteResult, error) {
+	e.queries = append(e.queries, q)
+	actor := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+		actor = ac.UserId
+	}
+	e.actors = append(e.actors, actor)
+	if strings.HasPrefix(q, "query workRunForOwner(") && e.parent != nil {
+		return memqlengine.NewResultWithOutput([]any{e.parent}), nil
+	}
+	return nil, nil
+}
+
+// TestADelegatedSessionRunCarriesItsParentsGoalSignature (epic memql#5408, gap
+// G2). The session is RECORDED into the child run the delegate opens, and
+// procedure learning mines the recordings of one goal signature -- so the child
+// must be born carrying its parent's signature, the parent's id and the
+// parent's variables (the goal's input, which the lift maps parameters onto).
+// A child without them belongs to no corpus, and the app's work on this goal
+// could never become a procedure.
+//
+// The parent is read under its OWNER's actor, because the composite tier
+// answers anybody else zero rows and no error. The control is a handover that
+// names no parent run: nothing is read and none of the three is written.
+func TestADelegatedSessionRunCarriesItsParentsGoalSignature(t *testing.T) {
+	var opened []string
+	journal := workjournal.New(workjournal.ExecutorFunc(func(_ context.Context, q string) (any, error) {
+		if strings.HasPrefix(q, "mutation createWorkRun(") {
+			opened = append(opened, q)
+		}
+		return nil, nil
+	}), nil, "node-a")
+	eng := &parentRunEngine{parent: map[string]any{
+		"id":            "v1:work:run:r1",
+		"goalSignature": "sig-of-the-goal",
+		"variables":     map[string]any{"day": "2026-09-04"},
+	}}
+	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{"sessionId": "s"}}}
+	d := newAppSessionDelegateFor(ex, journal, eng, nil)
+
+	if _, err := d.RunStep(context.Background(), memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code",
+		RunId: "v1:work:run:r1", StepId: "v1:work:step:s1", Prompt: "ship it",
+	}); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if len(opened) != 1 {
+		t.Fatalf("expected one child run opened, got %d", len(opened))
+	}
+	for _, want := range []string{
+		`goalSignature: "sig-of-the-goal"`,
+		`parentRunId: "v1:work:run:r1"`,
+		`variables: {"day":"2026-09-04"}`,
+	} {
+		if !strings.Contains(opened[0], want) {
+			t.Errorf("the child run lacks %s:\n%s", want, opened[0])
+		}
+	}
+	var readAsOwner bool
+	for i, q := range eng.queries {
+		if strings.HasPrefix(q, "query workRunForOwner(") && eng.actors[i] == "u1" {
+			readAsOwner = true
+		}
+	}
+	if !readAsOwner {
+		t.Fatalf("the parent run was never read under its owner's actor: %v / %v", eng.queries, eng.actors)
+	}
+
+	// The control: no parent run named, nothing inherited.
+	opened = nil
+	control := &parentRunEngine{parent: eng.parent}
+	d = newAppSessionDelegateFor(ex, journal, control, nil)
+	if _, err := d.RunStep(context.Background(), memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code", StepId: "v1:work:step:s2", Prompt: "go",
+	}); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	for _, q := range control.queries {
+		if strings.HasPrefix(q, "query workRunForOwner(") {
+			t.Fatalf("a handover with no parent run read one anyway: %s", q)
+		}
+	}
+	if len(opened) != 1 {
+		t.Fatalf("expected one child run opened, got %d", len(opened))
+	}
+	for _, absent := range []string{"goalSignature", "parentRunId", "variables"} {
+		if strings.Contains(opened[0], absent+":") {
+			t.Errorf("a child with no parent wrote %s anyway:\n%s", absent, opened[0])
+		}
+	}
+}
+
+// TestARepairRecordingDoesNotInheritTheReplaysProcedure (epic memql#5408). When
+// a learned procedure serves a goal, compile lays procedureConstructId over the
+// goal's input; when the replay diverges, the app takes the goal back in a
+// session delegated from that same run. The recording inherits the goal's
+// INPUT -- the lift maps parameters onto it and lists its keys as the goal's
+// inputs -- so it must not inherit the replay's own variable, or the next lift
+// would learn an input nobody gave. The control: a parent whose only variable
+// is the replay's writes no variables at all.
+func TestARepairRecordingDoesNotInheritTheReplaysProcedure(t *testing.T) {
+	var opened []string
+	journal := workjournal.New(workjournal.ExecutorFunc(func(_ context.Context, q string) (any, error) {
+		if strings.HasPrefix(q, "mutation createWorkRun(") {
+			opened = append(opened, q)
+		}
+		return nil, nil
+	}), nil, "node-a")
+	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{"sessionId": "s"}}}
+	handover := memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code",
+		RunId: "v1:work:run:r1", StepId: "v1:work:step:s1", Prompt: "finish it",
+	}
+
+	eng := &parentRunEngine{parent: map[string]any{
+		"id":            "v1:work:run:r1",
+		"goalSignature": "sig-of-the-goal",
+		"variables":     map[string]any{"day": "2026-09-04", "procedureConstructId": "v1:authoring:construct:c1"},
+	}}
+	if _, err := newAppSessionDelegateFor(ex, journal, eng, nil).RunStep(context.Background(), handover); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if len(opened) != 1 {
+		t.Fatalf("expected one child run opened, got %d", len(opened))
+	}
+	if !strings.Contains(opened[0], `variables: {"day":"2026-09-04"}`) {
+		t.Errorf("the recording lost the goal's input:\n%s", opened[0])
+	}
+	if strings.Contains(opened[0], "procedureConstructId") {
+		t.Errorf("the recording inherited the replay's procedure:\n%s", opened[0])
+	}
+
+	opened = nil
+	only := &parentRunEngine{parent: map[string]any{
+		"id":            "v1:work:run:r1",
+		"goalSignature": "sig-of-the-goal",
+		"variables":     map[string]any{"procedureConstructId": "v1:authoring:construct:c1"},
+	}}
+	if _, err := newAppSessionDelegateFor(ex, journal, only, nil).RunStep(context.Background(), handover); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if len(opened) != 1 {
+		t.Fatalf("expected one child run opened, got %d", len(opened))
+	}
+	if strings.Contains(opened[0], "variables:") {
+		t.Errorf("a parent whose only variable is the replay's wrote variables anyway:\n%s", opened[0])
 	}
 }

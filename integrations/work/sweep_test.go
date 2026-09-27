@@ -520,6 +520,82 @@ func TestSweepHandsASilentRunBackBeforeAbandoningIt(t *testing.T) {
 	})
 }
 
+// replayRunRow is a learned procedure's replay run as integrations/procedure's
+// replay runner opens it (replay.go, open): `running`, naming the construct it
+// replays as its automation and template, carrying NO goal, and triggered by
+// `procedure:<mode>`. The trigger is the literal the runner WRITES, spelled out
+// rather than built from this package's constant, which would agree with any
+// value the two sides drifted to.
+func replayRunRow(id, heartbeatAt string) map[string]any {
+	return map[string]any{
+		"id": id, "ownerUserId": "u-alice", "status": runStatusRunning,
+		"automationName":      "learnedProcedure_abc_l1",
+		"templateConstructId": "v1:authoring:construct:p1",
+		"triggeredBy":         "procedure:trusted",
+		"parentRunId":         "v1:work:run:goal-served",
+		"heartbeatAt":         heartbeatAt,
+	}
+}
+
+// TestSweepLeavesAProcedureReplayRunToItsRunner (epic memql#5408). A replay run
+// names an automation and a template construct and has no goal, so the
+// backstop handed a silent one to the dispatcher -- which admits a goal-less
+// running run on recovery, could not load the procedure's bundle as a
+// template, and FAILED the live replay `automation_not_runnable`; the terminal
+// status then released its workbench mid-step. The replay runner owns the run,
+// so no recovery path here -- the backstop, a due timer -- hands it to the
+// template executor. Its heartbeat is still the only evidence the sweep has
+// that it is alive, so a silent one is closed the way every silent run is.
+func TestSweepLeavesAProcedureReplayRunToItsRunner(t *testing.T) {
+	now := testNow
+	stale := now.Add(-10 * time.Minute).Format(time.RFC3339)
+	fresh := now.Add(-5 * time.Second).Format(time.RFC3339)
+
+	parked := replayRunRow("v1:work:run:replay-parked", stale)
+	parked["status"] = runStatusWaiting
+	parked["waitingOn"] = map[string]any{"kind": "timer", "resumeAt": now.Add(-time.Minute).Format(time.RFC3339)}
+
+	i, eng := newTestIntegration(t)
+	d, c := &capturingDispatcher{}, &stubClaimer{grant: true}
+	i.SetDispatcher(d)
+	i.SetRunClaimer(c)
+	res := sweepRows(context.Background(), i, []map[string]any{
+		replayRunRow("v1:work:run:replay-silent", stale),
+		replayRunRow("v1:work:run:replay-live", fresh),
+		parked,
+		// THE NEGATIVE CONTROL: an ordinary goal-less run, just as silent,
+		// is still handed back -- or every assertion below would pass on a
+		// sweep that recovers nothing at all.
+		{
+			"id": "v1:work:run:ordinary", "ownerUserId": "u-bob", "status": runStatusRunning,
+			"automationName": "invokeAgent", "triggeredBy": "schedule", "heartbeatAt": stale,
+		},
+	}, now, time.Minute)
+
+	if got := d.seen(); len(got) != 1 || got[0].RunId != "v1:work:run:ordinary" {
+		t.Fatalf("dispatched %+v, want only the ordinary run: a replay run is its runner's, and the template executor fails it automation_not_runnable mid-replay", got)
+	}
+	if len(c.keys) != 1 || c.keys[0] != "v1:work:run:ordinary" {
+		t.Errorf("claimed %v, want only the ordinary run's claim", c.keys)
+	}
+	if res.Redispatched != 1 || res.Resumed != 0 {
+		t.Errorf("sweep = %+v, want the ordinary run redispatched and nothing resumed", res)
+	}
+	writes := map[string]map[string]any{}
+	for _, call := range eng.callsTo("updateWorkRun") {
+		args := call.Args(t)
+		writes[args["runId"].(string)] = args
+	}
+	for _, untouched := range []string{"v1:work:run:replay-live", "v1:work:run:replay-parked", "v1:work:run:ordinary"} {
+		if w, written := writes[untouched]; written {
+			t.Errorf("%s was written %v; a beating replay, a parked replay and a run just handed back are all left alone", untouched, w)
+		}
+	}
+	if w := writes["v1:work:run:replay-silent"]; w["status"] != runStatusAbandoned || w["errorCode"] != "run_abandoned" {
+		t.Errorf("the silent replay run was written %v, want it closed abandoned by its heartbeat -- never failed by a dispatcher", w)
+	}
+}
+
 // A run parked on a SHUT INFERENCE DOOR is re-tried; every other approval kind
 // waits on a person and must not be handed back to the cluster behind their
 // back (epic memql#5096, design D9).

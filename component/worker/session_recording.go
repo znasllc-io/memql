@@ -370,7 +370,11 @@ func (s *sessionRecording) Close(ctx context.Context, result RunResult, transcri
 		ExitCode: result.ExitCode, ErrorMessage: result.ErrorMessage,
 		RecordedActions: recorded, DroppedActions: dropped,
 		TranscriptFileId: transcriptFileId,
-		FinishedAt:       time.Now().UTC(),
+		// The app's REPORT, for StoreTranscript's reason: by END the app has
+		// said what it served with, and the recording run is where a lifted
+		// procedure's provenance is read back from.
+		Model: result.Model, Effort: result.Effort,
+		FinishedAt: time.Now().UTC(),
 	}); err != nil {
 		s.logger.Warn("app session: could not close the recording",
 			"session_id", s.sessionId, "run_id", s.runId, "error", err)
@@ -394,6 +398,40 @@ func contentFileName(path, sessionId, actionId string) string {
 		base = "content"
 	}
 	return fmt.Sprintf("%s.%s.%s", base, shortLabel(sessionId), shortLabel(actionId))
+}
+
+// ContentBaseName reads the file's own base name back out of a name
+// contentFileName composed: `main.go.<session>.<action>` -> `main.go`. A lift
+// needs it to say WHICH file a recorded content was (epic memql#5408): the
+// observation references the Library row by id, and the row keeps only this
+// name.
+//
+// The session and action ids make the inverse exact when they are the ones the
+// name was composed from. They often are not, and that is not an edge case: a
+// recorded content is content-ADDRESSED, so an action that wrote bytes an
+// earlier session already filed references that session's row, under that
+// session's suffix. So when the expected suffix is absent the last two
+// dot-separated labels are stripped instead -- exact whenever the labels carry
+// no dot, which every id this tree mints satisfies. ok is false for a name
+// without the composed shape; a caller then has no base name rather than a
+// wrong one.
+func ContentBaseName(name, sessionId, actionId string) (string, bool) {
+	name = strings.TrimSpace(name)
+	if sessionId != "" && actionId != "" {
+		suffix := "." + shortLabel(sessionId) + "." + shortLabel(actionId)
+		if base := strings.TrimSuffix(name, suffix); base != name && base != "" {
+			return base, true
+		}
+	}
+	last := strings.LastIndexByte(name, '.')
+	if last <= 0 || last == len(name)-1 {
+		return "", false
+	}
+	prev := strings.LastIndexByte(name[:last], '.')
+	if prev <= 0 || prev == last-1 {
+		return "", false
+	}
+	return name[:prev], true
 }
 
 // shortLabel takes the distinctive tail of an id for a file name.

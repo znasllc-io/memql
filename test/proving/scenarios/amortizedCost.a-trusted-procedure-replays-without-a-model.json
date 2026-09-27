@@ -1,0 +1,117 @@
+{
+  "id": "amortizedCost.a-trusted-procedure-replays-without-a-model",
+  "family": "amortizedCost",
+  "title": "A learned procedure climbs to trusted on its own evidence and serves a goal with no model and no app",
+  "description": "The app is the proving suite's FIXTURE APP: a fake harness that performs the goal's actions on the fake machine and reports each one as the cockpit does, through the same session writer a delegated app session is recorded through. It is not a provider and plays no cassette; every session it runs counts as one model reach, because an app session is the intelligence a learned procedure exists to stop paying for. Two recordings with two bindings are lifted into a procedure; two goals with two new bindings are served by the app with the procedure compared beside it in a sandbox (m=2 matches across k=2 bindings); a person approves the one promotion through the work spine's own decide handler; one canary replay makes it trusted; and the measured goal is served by the trusted replay alone. The ladder is the platform's own at every goal: the scenario never says which rung serves.",
+  "goal": "Reconcile the weekly ledger for {{account}} and notify the operators",
+  "variables": [],
+  "steps": [
+    {
+      "key": "reconcile",
+      "type": "exec",
+      "target": "reconcile.sh --account {{account}} --period weekly",
+      "effect": "machine"
+    },
+    {
+      "key": "notify",
+      "type": "exec",
+      "target": "notify.sh --to ops --account {{account}}",
+      "effect": "machine"
+    },
+    {
+      "key": "archive",
+      "type": "exec",
+      "target": "archive.sh --account {{account}}",
+      "effect": "machine"
+    }
+  ],
+  "procedure": {
+    "policy": {
+      "shadowMatches": 2,
+      "distinctBindings": 2,
+      "canaryMatches": 1
+    },
+    "goals": [
+      {
+        "variables": {
+          "account": "acme"
+        }
+      },
+      {
+        "variables": {
+          "account": "globex"
+        }
+      },
+      {
+        "variables": {
+          "account": "initech"
+        }
+      },
+      {
+        "variables": {
+          "account": "umbrella"
+        }
+      },
+      {
+        "decide": "approved"
+      },
+      {
+        "variables": {
+          "account": "hooli"
+        }
+      },
+      {
+        "variables": {
+          "account": "stark"
+        },
+        "measure": true
+      }
+    ]
+  },
+  "world": {
+    "machine": {
+      "labels": {
+        "os": "linux"
+      },
+      "scripts": {
+        "reconcile.sh": "{\"lines\": 42, \"balanced\": true}\n",
+        "notify.sh": "notice queued\n",
+        "archive.sh": "archived\n"
+      }
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:authoring:construct",
+      "where": {
+        "ladder": "trusted"
+      },
+      "count": 1
+    },
+    {
+      "rows": "v1:work:approval",
+      "where": {
+        "kind": "procedurePromotion",
+        "decision": "approved"
+      },
+      "count": 1
+    },
+    {
+      "check": "aTrustedReplayReachedNoModel",
+      "count": 1
+    },
+    {
+      "effects": "machine.run",
+      "count": 18
+    },
+    {
+      "effects": "machine.duplicates",
+      "count": 0
+    }
+  ],
+  "claims": [
+    "amortizedCost.replaysServedWithoutModel",
+    "amortizedCost.providerCalls"
+  ]
+}

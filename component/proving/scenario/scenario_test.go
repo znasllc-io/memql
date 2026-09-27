@@ -355,3 +355,202 @@ func TestCorpusControlsDemandsANegativeControlForEveryBlockingZeroClaim(t *testi
 		t.Fatalf("CorpusControls refused a corpus with controls for both: %v", err)
 	}
 }
+
+// --- Procedure lifecycles (epic memql#5408) ---------------------------------
+
+// validProcedure is a lifecycle that passes Validate, for a test to break one
+// field of at a time. Built fresh per call, like valid().
+func validProcedure() Scenario {
+	return Scenario{
+		Id:          "amortizedCost.a-procedure-lifecycle",
+		Family:      figure.FamilyAmortizedCost,
+		Title:       "A learned procedure climbs to trusted and replays without a model",
+		Description: "The fixture app is a fake harness, not a provider.",
+		Goal:        "Reconcile the weekly ledger for {{account}}",
+		Steps: []Step{
+			{Key: "reconcile", Type: "exec", Target: "reconcile.sh --account {{account}} --period weekly", Effect: FacetMachine},
+			{Key: "notify", Type: "exec", Target: "notify.sh --to ops --account {{account}}", Effect: FacetMachine},
+		},
+		World: World{Machine: &MachineWorld{Scripts: map[string]string{"reconcile.sh": "ok\n", "notify.sh": "sent\n"}}},
+		Procedure: &Procedure{
+			Policy: LadderPolicy{ShadowMatches: intp(2), DistinctBindings: intp(2), CanaryMatches: intp(1)},
+			Goals: []ProcedureGoal{
+				{Variables: map[string]string{"account": "acme"}},
+				{Variables: map[string]string{"account": "globex"}},
+				{Decide: DecideApproved},
+				{Variables: map[string]string{"account": "stark"}, Measure: true,
+					Inject: []Injection{{At: "notify", Kind: KindContract, Message: "notify.sh exited 1", Once: true}}},
+			},
+		},
+		Verify: []Check{{Rows: "v1:authoring:construct", Where: map[string]string{"ladder": "trusted"}, Count: intp(1)}},
+		Claims: []figure.Metric{figure.MetricReplaysWithoutModel, figure.MetricProviderCalls},
+	}
+}
+
+func TestTheValidProcedureFixtureIsValid(t *testing.T) {
+	// The negative control for every break below: a fixture that stopped
+	// validating would make each of them pass for the wrong reason.
+	if err := validProcedure().Validate(); err != nil {
+		t.Fatalf("the lifecycle fixture every other test breaks one field of does not itself validate: %v", err)
+	}
+}
+
+func TestEveryLifecycleRuleRefusesItsBreak(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		break_ func(*Scenario)
+		want   string
+	}{
+		{"top-level variables", func(s *Scenario) { s.Variables = []map[string]string{{"account": "acme"}} }, "binds its variables per goal"},
+		{"top-level inject", func(s *Scenario) {
+			s.Inject = []Injection{{At: "notify", Kind: KindContract, Message: "x", Once: true}}
+		}, "injects into ONE goal"},
+		{"a policy value below one", func(s *Scenario) { s.Procedure.Policy.CanaryMatches = intp(0) }, "procedure.policy.canaryMatches = 0"},
+		{"a tool the fixture does not speak", func(s *Scenario) { s.Steps[0].Type = "fs_write" }, "the fixture app speaks"},
+		{"an action with no machine effect", func(s *Scenario) { s.Steps[0].Effect = "" }, "effect: machine"},
+		{"a reasoning action", func(s *Scenario) { s.Steps[0].Reasoning = true }, "not a provider"},
+		{"an action ordered by dependsOn", func(s *Scenario) { s.Steps[1].DependsOn = []string{"reconcile"} }, "order written"},
+		{"a script the machine does not declare", func(s *Scenario) { s.Steps[0].Target = "missing.sh --account {{account}}" }, "does not declare"},
+		{"a script named by a placeholder", func(s *Scenario) { s.Steps[0].Target = "{{account}}.sh" }, "named by a placeholder"},
+		{"an unknown decision", func(s *Scenario) { s.Procedure.Goals[2].Decide = "maybe" }, "is not"},
+		{"a decision carrying a goal", func(s *Scenario) { s.Procedure.Goals[2].Variables = map[string]string{"account": "x"} }, "not a goal anything serves"},
+		{"an unbound placeholder", func(s *Scenario) { s.Procedure.Goals[0].Variables = map[string]string{} }, "does not bind {{account}}"},
+		{"a variable nothing reads", func(s *Scenario) { s.Procedure.Goals[0].Variables["region"] = "eu" }, "neither its statement nor any action uses"},
+		{"a kill injection", func(s *Scenario) { s.Procedure.Goals[3].Inject[0].Kind = KindKill }, "a lifecycle goal injects"},
+		{"an injection that fires every time", func(s *Scenario) { s.Procedure.Goals[3].Inject[0].Once = false }, "once: true"},
+		{"an injection with no message", func(s *Scenario) { s.Procedure.Goals[3].Inject[0].Message = "" }, "has no message"},
+		{"an injection at no action", func(s *Scenario) { s.Procedure.Goals[3].Inject[0].At = "notfy" }, "not an action"},
+		{"an injection at a shared script", func(s *Scenario) {
+			s.Steps = append(s.Steps, Step{Key: "renotify", Type: "exec", Target: "notify.sh --to audit --account {{account}}", Effect: FacetMachine})
+		}, "more than one action runs"},
+		{"two measured goals", func(s *Scenario) { s.Procedure.Goals[0].Measure = true }, "both measured"},
+		{"no measured goal", func(s *Scenario) { s.Procedure.Goals[3].Measure = false }, "no procedure goal is measured"},
+		{"a measured goal that is not the last", func(s *Scenario) {
+			s.Procedure.Goals = append(s.Procedure.Goals, ProcedureGoal{Variables: map[string]string{"account": "wayne"}})
+		}, "is not the last goal"},
+		{"no goals", func(s *Scenario) { s.Procedure.Goals = nil }, "measures nothing"},
+		{"a figure the lifecycle does not produce", func(s *Scenario) {
+			s.Claims = append(s.Claims, figure.MetricStepsServed)
+		}, "does not produce"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := validProcedure()
+			tc.break_(&s)
+			err := s.Validate()
+			if err == nil {
+				t.Fatal("Validate() accepted the break")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %v\nwant it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestADivergenceClaimNeedsAnInjectedMeasuredGoal(t *testing.T) {
+	// "Nothing was delivered twice across a divergence" is true of every goal
+	// in which nothing diverged. The claim is only a claim when the measured
+	// goal is the one the failure is injected into.
+	s := validProcedure()
+	s.Id, s.Family = "durability.a-procedure-lifecycle", figure.FamilyDurability
+	s.Claims = []figure.Metric{figure.MetricDuplicatedAcrossDivergence}
+	if err := s.Validate(); err != nil {
+		t.Fatalf("a divergence claim over an injected measured goal was refused: %v", err)
+	}
+	s.Procedure.Goals[3].Inject = nil
+	if err := s.Validate(); err == nil || !strings.Contains(err.Error(), "injects no failure") {
+		t.Fatalf("Validate() = %v, want a refusal of a divergence claim with nothing diverging", err)
+	}
+}
+
+func TestAScriptedScenarioCannotClaimALifecycleFigure(t *testing.T) {
+	// The automation runner has no ladder. Its reading of either figure would
+	// be a zero by construction, published as a measurement.
+	s := valid()
+	s.Claims = append(s.Claims, figure.MetricDuplicatedAcrossDivergence)
+	if err := s.Validate(); err == nil || !strings.Contains(err.Error(), "only a procedure lifecycle produces") {
+		t.Fatalf("Validate() = %v, want a refusal", err)
+	}
+}
+
+func TestANegativeControlMustClaimItsMetric(t *testing.T) {
+	// A control that produces no figure checks nothing, and without this the
+	// runner finds out only after running the whole corpus.
+	s := valid()
+	s.NegativeControlFor = figure.MetricResumedElsewhere
+	if err := s.Validate(); err == nil || !strings.Contains(err.Error(), "does not claim") {
+		t.Fatalf("Validate() = %v, want a refusal", err)
+	}
+	s.NegativeControlFor = figure.MetricDuplicatedEffects
+	if err := s.Validate(); err != nil {
+		t.Fatalf("a control for a metric the scenario claims was refused: %v", err)
+	}
+}
+
+func TestCorpusControlsDemandsAZeroReadingControlForABlockingPositiveCounter(t *testing.T) {
+	// The second direction. replaysServedWithoutModel's claim is a positive
+	// count, and the way it lies is a counter that reads its claim where no
+	// replay was served -- so its control must read ZERO, and a corpus
+	// without one is refused exactly as a zero-claim without its control is.
+	headline := validProcedure()
+	c := Corpus{Scenarios: []Scenario{headline}}
+	err := c.CorpusControls()
+	if err == nil {
+		t.Fatal("CorpusControls accepted a blocking positive counter with no control")
+	}
+	for _, want := range []string{
+		string(figure.MetricReplaysWithoutModel) + " (its control must read zero",
+		string(figure.MetricProviderCalls) + " (its control must read non-zero",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v\nwant it to name %q", err, want)
+		}
+	}
+
+	shadowOnly := validProcedure()
+	shadowOnly.Id = "amortizedCost.control-a-shadow-procedure"
+	shadowOnly.NegativeControlFor = figure.MetricReplaysWithoutModel
+	fresh := validProcedure()
+	fresh.Id = "amortizedCost.control-a-fresh-goal"
+	fresh.NegativeControlFor = figure.MetricProviderCalls
+	if err := (Corpus{Scenarios: []Scenario{headline, shadowOnly, fresh}}).CorpusControls(); err != nil {
+		t.Fatalf("CorpusControls refused a corpus with a control in each direction: %v", err)
+	}
+}
+
+func TestAHigherIsBetterRatioIsNotDemandedAControl(t *testing.T) {
+	// The rule's boundary, pinned: a blocking verdict ratio (the verifier's
+	// pass rate) is not a counter, and the corpus carries none of those
+	// controls. Were the rule widened to every blocking metric, the committed
+	// corpus would fail on six metrics at once -- this is the test that says
+	// the boundary is deliberate.
+	s := valid()
+	s.Id, s.Family = "reliability.a-clean-run", figure.FamilyReliability
+	s.Claims = []figure.Metric{figure.MetricPassRate}
+	if err := (Corpus{Scenarios: []Scenario{s}}).CorpusControls(); err != nil {
+		t.Fatalf("CorpusControls demanded a control for a blocking ratio: %v", err)
+	}
+}
+
+func TestPlaceholdersAndRenderReadTheSameSpelling(t *testing.T) {
+	s := "Reconcile {{account}} for {{ period }} and {{account}} again, not {{missing}}"
+	if got := Placeholders(s); strings.Join(got, ",") != "account,period,missing" {
+		t.Errorf("Placeholders = %v, want account, period, missing in first-appearance order", got)
+	}
+	got := Render(s, map[string]string{"account": "acme", "period": "weekly"})
+	if want := "Reconcile acme for weekly and acme again, not {{missing}}"; got != want {
+		t.Errorf("Render = %q, want %q", got, want)
+	}
+}
+
+func TestAStepsScriptIsTheBaseNameOfItsCommandsFirstWord(t *testing.T) {
+	for target, want := range map[string]string{
+		"reconcile.sh --account acme": "reconcile.sh",
+		"./bin/notify.sh --to ops":    "notify.sh",
+		"":                            "",
+	} {
+		if got := (Step{Target: target}).Script(); got != want {
+			t.Errorf("Script(%q) = %q, want %q", target, got, want)
+		}
+	}
+}

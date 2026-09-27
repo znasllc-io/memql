@@ -170,6 +170,45 @@ var maintenanceAutomations = map[string]string{
 		"because log_line is a dedicated hypertable no row admission ever sees. Without this principal the " +
 		"automation's RoleReader system actor is refused by the very sweep it exists to run, every night, " +
 		"and the store grows past its retention with one refusal line per night as the only sign",
+	// Procedure learning and the certification ladder (epic memql#5408, which
+	// closes epic memql#5402's gap G10). Four entries, one argument: each
+	// automation must read a row -- the approval an event names, or the list of
+	// owners a schedule has to walk -- BEFORE it can know whose it is, and then
+	// does every other read under that owner's own actor. The principal buys the
+	// first read and the handler's floor, never a cross-owner corpus: a
+	// procedure mined from two people's recordings is correct about neither, so
+	// no handler reads a person's rows as anybody else.
+	//
+	// learnFromSucceededRun is deliberately NOT here. Its event carries the
+	// run's owner, and the handler borrows exactly that owner (only for the
+	// trusted completion trigger, re-verified by an owner-filtered read), which
+	// is narrower than a cluster-wide principal and needs no first read.
+	"mineProcedureCorpusAcrossAutomations": "the six-hourly sweep over every owner's recorded corpus " +
+		"(epic memql#5402; gap G10, closed in epic memql#5408). A cron firing carries no arguments, so the " +
+		"owner arrives blank, and the handler answers a blank owner from THIS principal -- and only from " +
+		"it -- by listing owners and mining each one's corpus under that owner's own actor. Without it the " +
+		"sweep is refused every six hours with one line in one replica's log, and the second corpus level " +
+		"is learned by nothing: indistinguishable from a cluster that has already learned everything there is",
+	"demoteProcedures": "the certification ladder's fifteen-minute demotion sweep (epic memql#5408). It " +
+		"re-evaluates EVERY owner's canary and trusted procedures against the current ladder policy, so its " +
+		"reads span owners by nature: the procedure that should stop serving belongs to somebody who is not " +
+		"there to ask. v1:authoring:construct declares the plain owner tier, so no cluster-wide read exists " +
+		"-- the handler lists owners and reads each one's procedures under that owner's actor, and refuses " +
+		"any caller but this principal and trusted server-side Go. Without it the sweep is refused, and a " +
+		"procedure that no longer clears the policy keeps serving goals with no model until it next fails",
+	"retireProcedures": "the certification ladder's nightly retirement sweep (epic memql#5408), the " +
+		"demotion sweep's twin in every respect but the question: it retires EVERY owner's procedures " +
+		"that have gone unused past the policy's window, so its reads span owners for the same reason and " +
+		"clear the same handler floor. Without it nothing retires, and a procedure recorded against an " +
+		"environment long gone stays servable for good -- a claim about the person's work that nobody is " +
+		"still checking",
+	"onProcedurePromotionDecided": "the ladder's promotion decision (epic memql#5408), fired when a " +
+		"procedurePromotion approval is decided. It must read the approval -- which names the construct " +
+		"and its owner -- before it can know whose decision it is, and the by-id approval read is " +
+		"cluster-owner-scoped for resume's reason: the hash is compared before anybody knows whose " +
+		"decision it is. Under the default reader actor the approval reads as absent and the decision is " +
+		"applied to nothing, so a procedure a person APPROVED stays in shadow forever, with no error: the " +
+		"one human act the ladder asks for, silently discarded",
 }
 
 // IsMaintenanceAutomation reports whether this automation runs under the

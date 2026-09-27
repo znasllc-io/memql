@@ -1,0 +1,33 @@
+// seeds.memql
+//
+// The certification ladder's values (epic memql#5408, issue #5409).
+//
+// ONE GLOBAL SEED, and its NAME is its row id: a global seed with no `id` in
+// its body takes the seed's name, so `seed ladderPolicy primary` materializes
+// v1:authoring:ladderPolicy:primary through createLadderPolicy. Every read
+// (ladderPolicyCurrent) pins that literal id.
+//
+// REFRESHED ON EVERY BOOT. The seed materializer re-asserts every global seed
+// on every node at startup, and the fields a seed declares win, so these
+// numbers are the ones the ladder applies after any restart -- the same
+// refresh the cluster singletons get, without a gate of their own. A write
+// that does not change a value is skipped (seedRowIsCurrent), so an unchanged
+// seed costs one read per node per boot and appends no version.
+//
+// THE SAME NUMBERS LIVE IN GO EXACTLY ONCE, as
+// component/work.DefaultLadderPolicy(), and only for a row that is absent or
+// unreadable. Changing a value here changes the ladder; changing it there
+// changes nothing while this row exists.
+
+/// The certification ladder's values: m = 5 shadow matches across k = 2 distinct bindings per
+/// free parameter propose a promotion to canary; 5 clean canary replays make a procedure trusted;
+/// 2 failed replays, or 1 replay whose preconditions proved insufficient, demote it to shadow; 30
+/// days without a replay retire it.
+seed ladderPolicy primary {
+  shadowMatches:         5
+  distinctBindings:      2
+  canaryMatches:         5
+  failuresToDemote:      2
+  insufficientToDemote:  1
+  retireAfterDays:       30
+}

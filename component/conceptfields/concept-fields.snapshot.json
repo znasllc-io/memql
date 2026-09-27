@@ -349,6 +349,7 @@
       "file": "authoring/concepts.memql",
       "fields": [
         "bundleId",
+        "canaryMatches",
         "catalogKey",
         "catalogMatchText",
         "catalogedAt",
@@ -357,15 +358,27 @@
         "compiledForm",
         "conceptDataStaged",
         "conceptRetired",
+        "distinctBindings",
+        "failures",
         "goalSignature",
         "grammarVersion",
+        "insufficient",
         "kind",
+        "ladder",
+        "ladderChangedAt",
+        "ladderReason",
         "lastReinforced",
+        "lastReplayAt",
         "name",
         "origin",
         "ownerUserId",
+        "preconditions",
+        "procedure",
+        "procedureHash",
+        "promotionApprovalId",
         "reinforceCount",
         "reliability",
+        "shadowMatches",
         "source",
         "status",
         "targetNamespace"
@@ -392,6 +405,13 @@
           "shape",
           "spec",
           "trait"
+        ],
+        "ladder": [
+          "canary",
+          "candidate",
+          "retired",
+          "shadow",
+          "trusted"
         ],
         "status": [
           "active",
@@ -451,6 +471,26 @@
           "core"
         ]
       }
+    },
+    {
+      "concept": "v1:authoring:ladderPolicy",
+      "file": "authoring/concepts.memql",
+      "fields": [
+        "canaryMatches",
+        "distinctBindings",
+        "failuresToDemote",
+        "insufficientToDemote",
+        "retireAfterDays",
+        "shadowMatches"
+      ],
+      "required": [
+        "canaryMatches",
+        "distinctBindings",
+        "failuresToDemote",
+        "insufficientToDemote",
+        "retireAfterDays",
+        "shadowMatches"
+      ]
     },
     {
       "concept": "v1:bench:run",
@@ -7872,6 +7912,7 @@
           "feedback",
           "inferenceUnavailable",
           "planReview",
+          "procedurePromotion",
           "routingReview",
           "scopeElevation",
           "sideEffect",
@@ -8012,6 +8053,7 @@
         "nodeId",
         "outcome",
         "ownerUserId",
+        "parentRunId",
         "replayPolicy",
         "spent",
         "startedAt",
