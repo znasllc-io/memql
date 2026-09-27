@@ -6604,10 +6604,19 @@ func (x *SenseCompletionItem) GetIsSnippet() bool {
 
 // Diagnose -- returns errors and warnings for a document.
 type SenseDiagnoseMsg struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Source        string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
-	FilePath      string                 `protobuf:"bytes,3,opt,name=file_path,json=filePath,proto3" json:"file_path,omitempty"` // optional, helps resolve version prefix
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Source    string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	// file_path is the document's path RELATIVE TO THE DSL ROOT, e.g.
+	// "planner/queries.memql" -- the path the load derives a construct's
+	// namespace from. When it places the document in a domain the engine
+	// loaded, Diagnose also runs the engine's load over `source` and returns
+	// Lower's refusals (`lower_unknown_field`, ...) as errors carrying their
+	// rule code (memql#5434), which costs the load of the document's
+	// constructs. Optional: empty, or a path in no loaded domain, skips that
+	// pass, because without the path a name two domains declare would resolve
+	// wrongly and the refusals would be false.
+	FilePath      string `protobuf:"bytes,3,opt,name=file_path,json=filePath,proto3" json:"file_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
