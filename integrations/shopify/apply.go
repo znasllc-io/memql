@@ -176,8 +176,14 @@ func (c *Connector) fetchAndMap(ctx context.Context, store Store, spec *generate
 	if spec.Singleton == "" {
 		vars["id"] = gid
 	}
-	resp, err := c.adminCall(ctx, store, spec.FetchDocument, spec.FetchOp, vars)
+	resp, err := c.callWithGrant(ctx, store, spec, spec.FetchOp, vars)
 	if err != nil {
+		if memqlsync.IsNotGranted(err) {
+			// A delivery for a domain the grant does not cover: no
+			// number of retries fetches it, so the drain must not spend
+			// them.
+			return nil, memqlsync.Permanent(err)
+		}
 		return nil, err
 	}
 	data, err := resp.DataMap()

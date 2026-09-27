@@ -24,8 +24,8 @@ query ShopifyFetchChannel($id: ID!) {
   }
 }
 
-query ShopifyListChannel($first: Int!, $after: String, $query: String) {
-  channels(first: $first, after: $after, query: $query) {
+query ShopifyListChannel($first: Int!, $after: String) {
+  channels(first: $first, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id

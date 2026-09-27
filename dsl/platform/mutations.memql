@@ -1714,6 +1714,7 @@ mutation syncState upsertSyncState {
     lastInboundAt    datetime
     lagSeconds       int
     lastReconcileAt  datetime
+    lastAttemptAt    datetime
     driftCount       int
     outboxDepth      int
     deadLetterCount  int
@@ -1721,7 +1722,7 @@ mutation syncState upsertSyncState {
     lastError        string
   }
   insert {
-    accept { conceptId, connector, direction, lastInboundAt, lastReconcileAt }
+    accept { conceptId, connector, direction, lastInboundAt, lastReconcileAt, lastAttemptAt }
     stamp {
       id:               args.stateId
       backfillCursor:   args.backfillCursor ?? ""

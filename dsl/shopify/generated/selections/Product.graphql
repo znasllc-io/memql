@@ -40,8 +40,8 @@ query ShopifyFetchProduct($id: ID!) {
       productType
       publishedAt
       requiresSellingPlan
+      resourcePublications(first: 25) { nodes { isPublished publication { id } publishDate publishable { __typename } } }
       resourcePublicationsCount { count precision }
-      resourcePublications(first: 25) { nodes { id } }
       sellingPlanGroupsCount { count precision }
       sellingPlanGroups(first: 25) { nodes { id } }
       seo { description title }
@@ -127,8 +127,8 @@ query ShopifyListProduct($first: Int!, $after: String, $query: String) {
       productType
       publishedAt
       requiresSellingPlan
+      resourcePublications(first: 25) { nodes { isPublished publication { id } publishDate publishable { __typename } } }
       resourcePublicationsCount { count precision }
-      resourcePublications(first: 25) { nodes { id } }
       sellingPlanGroupsCount { count precision }
       sellingPlanGroups(first: 25) { nodes { id } }
       seo { description title }

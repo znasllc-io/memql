@@ -181,6 +181,7 @@ shape syncState syncStateFull {
   lastInboundAt
   lagSeconds
   lastReconcileAt
+  lastAttemptAt
   driftCount
   outboxDepth
   deadLetterCount

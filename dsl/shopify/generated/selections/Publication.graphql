@@ -18,8 +18,8 @@ query ShopifyFetchPublication($id: ID!) {
   }
 }
 
-query ShopifyListPublication($first: Int!, $after: String, $query: String) {
-  publications(first: $first, after: $after, query: $query) {
+query ShopifyListPublication($first: Int!, $after: String) {
+  publications(first: $first, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id

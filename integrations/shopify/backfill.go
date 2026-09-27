@@ -358,19 +358,23 @@ func (c *Connector) streamBulk(ctx context.Context, store Store, spec *generated
 func (c *Connector) mapBulkLine(store Store, spec *generated.TypeSpec, obj map[string]any) []memqlsync.MirrorWrite {
 	parentGID, _ := obj["__parentId"].(string)
 	gid, _ := obj["id"].(string)
-	if gid == "" {
-		return nil
-	}
 	lineSpec := spec
-	if parentGID != "" {
+	switch {
+	case parentGID == "" && gid == "":
+		return nil
+	case parentGID != "" && gid != "":
 		lineSpec = specForGID(gid)
-		if lineSpec == nil {
-			// A child of a type this build does not mirror. Skipped
-			// silently: the bulk query only asks for what the allowlist
-			// names, so this means the allowlist changed under a running
-			// operation.
-			return nil
-		}
+	case parentGID != "":
+		// A child that declares no id says nothing about its type; it is
+		// whichever of the parent's id-less children its key satisfies.
+		lineSpec = idlessChildOf(spec, obj)
+	}
+	if lineSpec == nil {
+		// A child of a type this build does not mirror, or one no single
+		// child claims. Skipped silently: the bulk query only asks for
+		// what the allowlist names, so this means the allowlist changed
+		// under a running operation.
+		return nil
 	}
 	return mapObject(lineSpec, store.ID, obj, parentGID, c.now())
 }

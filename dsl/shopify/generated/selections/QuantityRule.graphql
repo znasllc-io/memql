@@ -8,7 +8,6 @@ query ShopifyFetchQuantityRule($id: ID!) {
   node(id: $id) {
     __typename
     ... on QuantityRule {
-      id
       increment
       isDefault
       maximum

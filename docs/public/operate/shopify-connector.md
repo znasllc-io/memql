@@ -295,7 +295,11 @@ own interval has elapsed. Domains whose root connection accepts a `query:`
 filter are paged by `updated_at:>`; the rest -- gift cards, price lists and
 catalogs, menus, pages, blogs, articles, policies, marketing, payouts,
 redirects, carrier services, store credit -- are re-listed whole on their own
-cadence and rows the origin no longer returns are tombstoned.
+cadence and rows the origin no longer returns are tombstoned. Metaobjects
+and metafield definitions are not swept at all: `metaobjects(type:)` and
+`metafieldDefinitions(ownerType:)` each require an argument a generic
+listing cannot supply, so those two domains are kept current by their
+webhooks alone (listing them per type / per owner type is future work).
 
 A full re-list that hits its page cap tombstones **nothing**. Tombstoning is
 an argument from absence, and the argument is only valid if the walk was
@@ -513,7 +517,26 @@ ingestion for one merchant while their deliveries keep being staged.
   and twos are normal (Shopify redelivers). A climbing number means something
   is replaying old deliveries.
 - **tombstoned** -- rows the origin no longer has.
-- **phase** -- `idle`, `backfilling`, `reconciling`, `paused`, `error`.
+- **phase** -- `idle`, `backfilling`, `reconciling`, `paused`, `error`, and
+  `not granted` for a domain the store's grant does not reach (a standing
+  fact about the connection, not a fault; the reason is on the row).
+- **lastError** on a domain reading `not granted: shopify needs read_content`
+  -- the store was connected without any scope that domain reads under. The
+  sweep does not ask the origin about it (the answer is known here) and
+  records the reason once; widening the grant and reconnecting is what
+  changes it. The store's health lists these as **domainsNotGranted**.
+- **fieldsDenied** -- per domain, the fields the grant does not cover
+  (a variant's publication counts without `read_publications`). Shopify
+  refuses such a field with ACCESS_DENIED and, because most of them are
+  non-null, blanks the whole page with it; the connector removes the field
+  from that store's copy of the document and asks again, so the rows land
+  without it. Learned from the origin's answers since the node started, so
+  it is empty until a sweep or a delivery has run, and each replica learns
+  it once.
+- A domain whose generated query the origin rejects outright, or whose page
+  costs more than the 1,000-point ceiling, is not retried on the next tick:
+  a rejection is reported once and the domain waits its own cadence; a
+  cost refusal shrinks the page to fit and remembers the size.
 
 ### Pausing a store
 

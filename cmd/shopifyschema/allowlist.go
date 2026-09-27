@@ -86,6 +86,9 @@ type Entry struct {
 	// References are connections kept as a []string of GIDs rather than
 	// materialised. Anything not listed here or in Children is omitted from
 	// the mirror -- a connection is expensive and silence is the default.
+	// A connection whose node type has no id (resourcePublications,
+	// discountApplications) has no GID to keep, and is carried inline as
+	// a []object instead.
 	References []string `yaml:"references,omitempty"`
 	// Skip names fields to omit even though they map cleanly: the ones
 	// whose cost or churn is not worth mirroring.
@@ -152,6 +155,12 @@ func (a *Allowlist) validate() error {
 		}
 		if e.Reconcile == ReconcileFullRelist && e.Cadence == "" {
 			return fmt.Errorf("%s: a full re-list needs a cadence -- it is the only thing that bounds the drift window", e.Type)
+		}
+		// Both listing modes page a root connection. Without a query the
+		// runtime has nothing to page and silently reconciles nothing,
+		// which reads as a healthy domain that is in fact never swept.
+		if e.Reconcile != ReconcileNone && e.Query == "" {
+			return fmt.Errorf("%s: reconcile %s needs a query to page -- a domain with no generic listing is reconcile: %s", e.Type, e.Reconcile, ReconcileNone)
 		}
 		for topic, action := range e.Topics {
 			if action != ActionUpsert && action != ActionDelete {

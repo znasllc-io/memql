@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 	"strings"
 	"time"
 
@@ -349,6 +350,8 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 			"scopesGranted":      toAny(store.ScopesGranted),
 			"scopesNeeded":       toAny(generated.Scopes),
 			"scopesMissing":      toAny(missingScopes(store.ScopesGranted)),
+			"domainsNotGranted":  toAny(domainsNotGranted(store)),
+			"fieldsDenied":       fieldsDeniedAny(c.FieldsDenied(store.ID)),
 			"health":             store.Health,
 			"driftLast":          drift,
 			"domains":            domains,
@@ -399,7 +402,12 @@ func phaseOf(st map[string]any) string {
 	if b, ok := rowValue(st, "paused").(bool); ok && b {
 		return "paused"
 	}
-	if mapString(st, "lastError") != "" {
+	if lastErr := mapString(st, "lastError"); lastErr != "" {
+		if strings.HasPrefix(lastErr, memqlsync.ErrNotGranted.Error()) {
+			// A standing fact about the grant, not a fault: the domain is
+			// idle until the grant widens, and the reason is on the row.
+			return "not granted"
+		}
 		return "error"
 	}
 	switch mapString(st, "backfillStatus") {
@@ -409,6 +417,33 @@ func phaseOf(st map[string]any) string {
 		return "error"
 	}
 	return "idle"
+}
+
+// domainsNotGranted names the mirrored domains the store's grant reaches
+// none of the scopes for -- the ones the sweep skips rather than asks about
+// (scopesMissingFor). What an operator would unlock by widening the grant.
+func domainsNotGranted(store Store) []string {
+	var out []string
+	for _, concept := range generated.ApplyOrder {
+		spec := generated.Types[concept]
+		if spec == nil || spec.Reconcile == generated.ReconcileNone {
+			// A child materialised with its parent, or a singleton: the
+			// sweep never considers it on its own.
+			continue
+		}
+		if len(scopesMissingFor(store, spec)) > 0 {
+			out = append(out, generated.ConceptID(concept))
+		}
+	}
+	return out
+}
+
+func fieldsDeniedAny(in map[string][]string) map[string]any {
+	out := map[string]any{}
+	for concept, fields := range in {
+		out[concept] = toAny(fields)
+	}
+	return out
 }
 
 // missingScopes is the allowlist's needs minus what the store granted.
@@ -421,10 +456,7 @@ func missingScopes(granted []string) []string {
 	if len(granted) == 0 {
 		return nil
 	}
-	have := map[string]bool{}
-	for _, s := range granted {
-		have[s] = true
-	}
+	have := grantIncludes(granted)
 	var missing []string
 	for _, s := range generated.Scopes {
 		if !have[s] {

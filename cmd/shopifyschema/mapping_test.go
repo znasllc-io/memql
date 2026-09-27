@@ -72,6 +72,25 @@ func testSchema() *Schema {
 	add(&Type{Kind: "OBJECT", Name: "WidgetConnection", Fields: []Field{
 		{Name: "nodes", Type: nn(list(nn(named("OBJECT", "Widget"))))},
 	}})
+	// Mirrored, but with NO id field: the shape of ShopLocale and of a
+	// price list's prices. Nothing about it can be referenced by GID.
+	add(&Type{Kind: "OBJECT", Name: "Sticker", Fields: []Field{
+		{Name: "label", Type: named("SCALAR", "String")},
+		{Name: "widget", Type: named("OBJECT", "Widget")},
+	}})
+	add(&Type{Kind: "OBJECT", Name: "StickerConnection", Fields: []Field{
+		{Name: "nodes", Type: nn(list(nn(named("OBJECT", "Sticker"))))},
+	}})
+	add(&Type{Kind: "UNION", Name: "Sticky", PossibleTypes: []TypeRef{*named("OBJECT", "Sticker"), *named("OBJECT", "Widget")}})
+	// Listed through a root connection that takes no query: argument.
+	add(&Type{Kind: "OBJECT", Name: "Gadget", Interfaces: []TypeRef{*named("INTERFACE", "Node")}, Fields: []Field{
+		{Name: "id", Type: nn(named("SCALAR", "ID"))},
+		{Name: "updatedAt", Type: nn(named("SCALAR", "DateTime"))},
+		{Name: "name", Type: named("SCALAR", "String")},
+	}})
+	add(&Type{Kind: "OBJECT", Name: "GadgetConnection", Fields: []Field{
+		{Name: "nodes", Type: nn(list(nn(named("OBJECT", "Gadget"))))},
+	}})
 
 	add(&Type{Kind: "OBJECT", Name: "Thing", Interfaces: []TypeRef{*named("INTERFACE", "Node")}, Fields: []Field{
 		{Name: "id", Type: nn(named("SCALAR", "ID"))},
@@ -94,6 +113,10 @@ func testSchema() *Schema {
 		{Name: "addresses", Type: nn(list(nn(named("OBJECT", "Address"))))},
 		{Name: "widget", Type: named("OBJECT", "Widget")},
 		{Name: "widgets", Type: nn(named("OBJECT", "WidgetConnection"))},
+		{Name: "sticker", Type: named("OBJECT", "Sticker")},
+		{Name: "stickers", Type: nn(list(nn(named("OBJECT", "Sticker"))))},
+		{Name: "stickerFeed", Type: nn(named("OBJECT", "StickerConnection"))},
+		{Name: "sticky", Type: named("UNION", "Sticky")},
 		{Name: "metafields", Type: nn(named("OBJECT", "MetafieldConnection"))},
 		{Name: "tags", Type: nn(named("OBJECT", "TagConnection"))},
 		{Name: "lines", Type: nn(named("OBJECT", "LineConnection"))},
@@ -105,6 +128,9 @@ func testSchema() *Schema {
 	}})
 	add(&Type{Kind: "OBJECT", Name: "QueryRoot", Fields: []Field{
 		{Name: "things", Args: []InputValue{{Name: "first", Type: named("SCALAR", "Int")}, {Name: "query", Type: named("SCALAR", "String")}}, Type: nn(named("OBJECT", "ThingConnection"))},
+		{Name: "gadgets", Args: []InputValue{{Name: "first", Type: named("SCALAR", "Int")}, {Name: "after", Type: named("SCALAR", "String")}}, Type: nn(named("OBJECT", "GadgetConnection"))},
+		// metafieldDefinitions(ownerType:) and metaobjects(type:), in miniature.
+		{Name: "gizmos", Args: []InputValue{{Name: "first", Type: named("SCALAR", "Int")}, {Name: "kind", Type: nn(named("SCALAR", "String"))}}, Type: nn(named("OBJECT", "GadgetConnection"))},
 	}})
 	return s
 }
@@ -117,11 +143,13 @@ func testAllowlist(t *testing.T) *Allowlist {
 			{
 				Type: "Thing", Concept: "thing", Query: "things", Reconcile: ReconcileUpdatedAt, Bulk: true,
 				Children:   []Child{{Connection: "lines", Type: "Line"}},
-				References: []string{"tags", "widgets"},
+				References: []string{"tags", "widgets", "stickerFeed"},
 				Topics:     map[string]string{"THINGS_UPDATE": ActionUpsert, "THINGS_DELETE": ActionDelete},
 			},
 			{Type: "Line", Concept: "thingLine", Reconcile: ReconcileNone},
 			{Type: "Widget", Concept: "widget", Reconcile: ReconcileNone},
+			{Type: "Sticker", Concept: "sticker", Reconcile: ReconcileNone},
+			{Type: "Gadget", Concept: "gadget", Query: "gadgets", Reconcile: ReconcileFullRelist, Cadence: "1h", Bulk: true},
 		},
 	}
 	if err := al.validate(); err != nil {
@@ -358,5 +386,101 @@ func TestChildFindsItsParentThroughABackReference(t *testing.T) {
 	// resolve its parent -- and the plan says so rather than guessing.
 	if got := planFor(t, "thingLine").ParentGidPath; got != "" {
 		t.Errorf("got %q, want empty: Line carries no back-reference to Thing", got)
+	}
+}
+
+// A mirrored type that declares no id has no GID to reference. `{ id }` on
+// it is a field the schema does not have -- ShopLocale under a market's web
+// presence, ResourcePublication under a product -- and the Admin API refuses
+// the PARENT's whole document, fetch and sweep alike. Such a type is inlined
+// like any other nested shape, in every position it can appear.
+func TestMirroredTypesWithoutAnIdAreInlinedNotReferenced(t *testing.T) {
+	p := planFor(t, "thing")
+	for _, name := range []string{"stickerGid", "stickersGids", "stickerFeedGids"} {
+		if hasField(p, name) {
+			t.Errorf("%s: a type without an id cannot be kept as a GID", name)
+		}
+	}
+	single := fieldByName(t, p, "sticker")
+	if single.Kind != KindObject || single.DSLType != "object" || single.Extract != "sticker" {
+		t.Errorf("object: kind %q type %q extract %q", single.Kind, single.DSLType, single.Extract)
+	}
+	if want := "sticker { label widget { id } }"; single.Selection != want {
+		t.Errorf("object: selection %q, want %q", single.Selection, want)
+	}
+	many := fieldByName(t, p, "stickers")
+	if many.Kind != KindObjectList || many.DSLType != "[]object" || many.Extract != "stickers" {
+		t.Errorf("list: kind %q type %q extract %q", many.Kind, many.DSLType, many.Extract)
+	}
+	feed := fieldByName(t, p, "stickerFeed")
+	if feed.Kind != KindObjectList || feed.DSLType != "[]object" || feed.Extract != "stickerFeed.nodes[]" {
+		t.Errorf("connection: kind %q type %q extract %q", feed.Kind, feed.DSLType, feed.Extract)
+	}
+	if want := "stickerFeed(first: 25) { nodes { label widget { id } } }"; feed.Selection != want {
+		t.Errorf("connection: selection %q, want %q", feed.Selection, want)
+	}
+	if !feed.OmitFromBulk {
+		t.Error("connection: an inline reference connection stays out of bulk exactly as a GID one does")
+	}
+	union := fieldByName(t, p, "sticky")
+	if want := "sticky { __typename ... on Sticker { label widget { id } } ... on Widget { id } }"; union.Selection != want {
+		t.Errorf("union: selection %q, want %q", union.Selection, want)
+	}
+	for _, f := range p.Fields {
+		if strings.Contains(f.Selection, "Sticker { id }") || strings.Contains(f.Selection, "sticker { id }") {
+			t.Errorf("%s: selection %q asks Sticker for an id it does not have", f.Name, f.Selection)
+		}
+	}
+	// ...while a mirrored type WITH an id is still a reference.
+	if got := fieldByName(t, p, "widgetGid"); got.Selection != "widget { id }" {
+		t.Errorf("widget: selection %q -- the id rule must not un-reference a type that has one", got.Selection)
+	}
+}
+
+// A root connection with a required argument the list document never
+// supplies -- metafieldDefinitions(ownerType:), metaobjects(type:) -- cannot
+// be listed generically. Saying so at generation time, naming the connection
+// and the argument, beats a missingRequiredArguments error on every sweep.
+func TestAConnectionRequiringAnExtraArgumentIsRefused(t *testing.T) {
+	al := &Allowlist{APIVersion: "2026-07", Types: []Entry{
+		{Type: "Gadget", Concept: "gadget", Query: "gizmos", Reconcile: ReconcileFullRelist, Cadence: "1h"},
+	}}
+	if err := al.validate(); err != nil {
+		t.Fatalf("allowlist: %v", err)
+	}
+	_, err := NewPlanner(testSchema(), al).Plan()
+	if err == nil {
+		t.Fatal("a generic listing through gizmos(kind:) was accepted")
+	}
+	for _, want := range []string{"gizmos", `"kind"`, ReconcileNone} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %s", err, want)
+		}
+	}
+}
+
+// The updated_at mode rides the query: argument. A connection without one
+// cannot carry the filter, whatever the allowlist says.
+func TestUpdatedAtReconcileNeedsAFilterableConnection(t *testing.T) {
+	al := &Allowlist{APIVersion: "2026-07", Types: []Entry{
+		{Type: "Gadget", Concept: "gadget", Query: "gadgets", Reconcile: ReconcileUpdatedAt},
+	}}
+	if err := al.validate(); err != nil {
+		t.Fatalf("allowlist: %v", err)
+	}
+	_, err := NewPlanner(testSchema(), al).Plan()
+	if err == nil || !strings.Contains(err.Error(), "gadgets") || !strings.Contains(err.Error(), "query") {
+		t.Fatalf("updated_at over an unfilterable connection was accepted, or the error does not say why: %v", err)
+	}
+}
+
+// Both listing modes page a root connection; without one the runtime
+// silently reconciles nothing, which looks like a healthy domain.
+func TestAListedReconcileNeedsAQuery(t *testing.T) {
+	al := &Allowlist{APIVersion: "2026-07", Types: []Entry{
+		{Type: "Gadget", Concept: "gadget", Reconcile: ReconcileFullRelist, Cadence: "1h"},
+	}}
+	if err := al.validate(); err == nil || !strings.Contains(err.Error(), "query") {
+		t.Fatalf("a full re-list with nothing to page was accepted: %v", err)
 	}
 }

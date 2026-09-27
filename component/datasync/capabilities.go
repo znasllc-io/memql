@@ -52,7 +52,7 @@ func NewIntegration(engine Engine, logger *slog.Logger) *Integration {
 	return &Integration{
 		store:      store,
 		applier:    applier,
-		dispatcher: NewDispatcher(store, applier),
+		dispatcher: NewDispatcher(store, applier).WithLogger(logger),
 		runner:     NewRunner(store, applier, logger),
 		logger:     logger.With("component", "datasync"),
 	}

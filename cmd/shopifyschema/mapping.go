@@ -93,10 +93,13 @@ type FieldPlan struct {
 	Selection string // the GraphQL selection text, "" for a plain leaf
 	// SelectionBulk is the same field inside a BULK operation, where a
 	// connection takes no pagination argument and is spelled through
-	// edges/node. Empty means the field is omitted from bulk entirely --
-	// which is what happens to reference connections, whose GID lists are
-	// filled by the fetch and reconcile paths instead.
+	// edges/node. Empty means the fetch selection is reused as is.
 	SelectionBulk string
+	// OmitFromBulk keeps the field out of the bulk document altogether.
+	// Set on every reference connection: each nested connection counts
+	// against a bulk query's budget, and what it carries is refilled by
+	// the paged list operation on the first reconcile after a backfill.
+	OmitFromBulk bool
 	// Extract is where the value lives in the fetched JSON, in the small
 	// path language the connector's applier understands: "field",
 	// "field.id", "field[].id", "field.nodes[].id".
@@ -132,6 +135,18 @@ type TypePlan struct {
 	// or streamed by a bulk operation -- so a webhook naming it has nothing
 	// to fetch, and the apply path has to re-fetch the PARENT instead.
 	ImplementsNode bool
+	// HasID says the type declares an `id` field, which is where a mirror
+	// row's gid comes from. Not every mirrored type does: a price list's
+	// prices and quantity rules, and ShopLocale, are keyed by their parent
+	// and a variant or locale instead. Selecting `id` on one of those is
+	// a field the schema does not have, and the whole document is refused.
+	HasID bool
+	// ListFilterable says the root connection accepts `query:`, so the
+	// list document can declare $query and an updated_at sweep can pass
+	// `updated_at:>`. Seven root connections do not (channels, publications,
+	// themes, ...), and for those a declared-but-unaccepted $query is a
+	// validation error on every page, not an ignored variable.
+	ListFilterable bool
 	// VersionField is the Admin field the apply guard compares. Most types
 	// carry updatedAt; some carry only createdAt; a handful carry neither,
 	// and for those the guard degrades to the fetch time -- which is
@@ -185,6 +200,12 @@ func (p *Planner) planType(e *Entry) (*TypePlan, error) {
 	for _, i := range t.Interfaces {
 		if i.Named() == "Node" {
 			plan.ImplementsNode = true
+		}
+	}
+	plan.HasID = t.Field("id") != nil
+	if e.Query != "" {
+		if err := p.planListing(plan, e); err != nil {
+			return nil, err
 		}
 	}
 	if parentType, conn := e.Parent(); parentType != "" {
@@ -311,6 +332,69 @@ func (p *Planner) planType(e *Entry) (*TypePlan, error) {
 	return plan, nil
 }
 
+// listArguments are the arguments the generated list document supplies
+// (first, after, query) or that Shopify always defaults (reverse, sortKey).
+// A root connection requiring anything else -- metafieldDefinitions
+// (ownerType:), metaobjects(type:) -- cannot be listed generically, and
+// refusing it here is what stops the runtime finding that out from a
+// missingRequiredArguments error on every sweep.
+var listArguments = map[string]bool{
+	"first": true, "after": true, "query": true, "reverse": true, "sortKey": true,
+}
+
+// planListing checks the QueryRoot connection an entry is listed through and
+// records whether it can be filtered. Both facts come from the schema, not
+// the allowlist: which arguments a connection takes is Shopify's decision.
+func (p *Planner) planListing(plan *TypePlan, e *Entry) error {
+	rootName := p.schema.QueryType
+	if rootName == "" {
+		rootName = "QueryRoot"
+	}
+	root, err := p.schema.MustLookup(rootName)
+	if err != nil {
+		return err
+	}
+	field := root.Field(e.Query)
+	if field == nil {
+		return fmt.Errorf("%s: %s has no field %q to list it through", e.Type, rootName, e.Query)
+	}
+	for _, a := range field.Args {
+		if a.Type.NonNull() && a.DefaultValue == "" && !listArguments[a.Name] {
+			return fmt.Errorf("%s: %s.%s requires the argument %q, which a generic listing cannot supply -- drop `query` and set reconcile: %s (listing per %s is future work)",
+				e.Type, rootName, e.Query, a.Name, ReconcileNone, a.Name)
+		}
+	}
+	plan.ListFilterable = field.HasArg("query")
+	if e.Reconcile == ReconcileUpdatedAt && !plan.ListFilterable {
+		return fmt.Errorf("%s is set to reconcile by updated_at, but %s.%s accepts no `query` argument to carry the filter -- use %s with a cadence",
+			e.Type, rootName, e.Query, ReconcileFullRelist)
+	}
+	return nil
+}
+
+// referencedByGid reports whether a nested type is kept as a GID reference:
+// it is mirrored in its own concept AND declares the `id` the reference
+// would carry. A mirrored type without an id has no GID to keep, so it is
+// inlined like any other nested shape -- `{ id }` on it is a field the
+// schema does not have, and the whole document is refused.
+func (p *Planner) referencedByGid(t *Type) bool {
+	return t != nil && p.list.Entry(t.Name) != nil && t.Field("id") != nil
+}
+
+// connectionNodeType resolves what a Relay connection is a connection OF,
+// through its `nodes` field. The naming convention is the fallback for a
+// connection type the fixture happened to prune.
+func (p *Planner) connectionNodeType(connName string) *Type {
+	if conn := p.schema.Lookup(connName); conn != nil {
+		if nodes := conn.Field("nodes"); nodes != nil {
+			if t := p.schema.Lookup(nodes.Type.Named()); t != nil {
+				return t
+			}
+		}
+	}
+	return p.schema.Lookup(strings.TrimSuffix(connName, "Connection"))
+}
+
 // requiresArgument reports whether a field cannot be selected without the
 // caller supplying something -- `metafield(namespace:, key:)` and the like.
 func requiresArgument(f *Field) bool {
@@ -366,22 +450,37 @@ func (p *Planner) planField(f *Field, isRef bool) (FieldPlan, bool, error) {
 		if !isRef {
 			return fp, false, nil
 		}
+		// Deliberately absent from bulk either way (see OmitFromBulk).
+		fp.OmitFromBulk = true
+		fp.Required = false
+		node := p.connectionNodeType(named)
+		if node != nil && node.Field("id") == nil {
+			// The node type has no id to keep -- ResourcePublication,
+			// DiscountApplication -- so the rows come inline instead.
+			sel := p.objectSelection(node, 0)
+			if sel == "" {
+				return fp, false, nil
+			}
+			fp.Kind = KindObjectList
+			fp.DSLType = "[]object"
+			fp.Doc = fmt.Sprintf("Inline %s rows (reference connection, first %d): the type has no id to keep a GID of.", node.Name, refsPageSize)
+			fp.Selection = fmt.Sprintf("%s(first: %d) { nodes %s }", f.Name, refsPageSize, sel)
+			fp.Extract = f.Name + ".nodes[]"
+			return fp, true, nil
+		}
 		fp.Kind = KindRefs
 		fp.DSLType = "[]string"
-		fp.Required = false
 		fp.Doc = fmt.Sprintf("GIDs only (reference connection, first %d).", refsPageSize)
 		fp.Selection = fmt.Sprintf("%s(first: %d) { nodes { id } }", f.Name, refsPageSize)
-		// Deliberately absent from bulk. Every nested connection counts
-		// against a bulk query's budget, and a list of GIDs is the
-		// cheapest thing to refill: the paged list operation carries it,
-		// so the first reconcile after a backfill fills it in.
 		fp.Extract = f.Name + ".nodes[].id"
 		return fp, true, nil
 	}
 
 	// A mirrored type referenced as a plain object (Order.customer) or as a
-	// list of them: keep the GID only.
-	if target != nil && (target.Kind == "OBJECT" || target.Kind == "INTERFACE") && p.list.Entry(named) != nil {
+	// list of them: keep the GID only. A mirrored type WITHOUT an id
+	// (ShopLocale) falls through to the nested-object rule below and is
+	// inlined -- there is no GID to keep.
+	if target != nil && (target.Kind == "OBJECT" || target.Kind == "INTERFACE") && p.referencedByGid(target) {
 		if f.Type.IsList() {
 			fp.Kind = KindRefs
 			fp.DSLType = "[]string"
@@ -506,12 +605,20 @@ func (p *Planner) objectSelection(t *Type, depth int) string {
 			// A member that is itself MIRRORED is a reference, exactly as
 			// a mirrored object field is: inlining it would put a whole
 			// second row inside this one, and the two copies would drift
-			// apart between fetches.
-			if p.list.Entry(member.Name) != nil {
+			// apart between fetches. (Only when it has an id to refer by.)
+			if p.referencedByGid(member) {
 				parts = append(parts, "... on "+member.Name+" { id }")
 				continue
 			}
-			if sub := p.objectSelection(member, depth+1); sub != "" {
+			sub := p.objectSelection(member, depth+1)
+			if sub == "" {
+				// A member reached at the depth bound still keeps its own
+				// scalars: a PricingValue that is a percentage is
+				// `{ percentage }`, and a `{ __typename }` alone would name
+				// the kind of value while dropping the value.
+				sub = p.leafSelection(member)
+			}
+			if sub != "" {
 				parts = append(parts, "... on "+member.Name+" "+sub)
 			}
 		}
@@ -540,13 +647,36 @@ func (p *Planner) objectSelection(t *Type, depth int) string {
 			// following it here would inline a whole second row -- an
 			// order's customer, that customer's last order, and so on
 			// down. Keep its id; the row is mirrored in its own concept.
-			if p.list.Entry(named) != nil {
+			// A mirrored type with no id is inlined like anything else.
+			if p.referencedByGid(target) {
 				parts = append(parts, f.Name+" { id }")
 				continue
 			}
 			if sub := p.objectSelection(target, depth+1); sub != "" {
 				parts = append(parts, f.Name+" "+sub)
 			}
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "{ " + strings.Join(parts, " ") + " }"
+}
+
+// leafSelection is a type's scalar and enum fields and nothing nested: the
+// selection a union member gets at the depth bound.
+func (p *Planner) leafSelection(t *Type) string {
+	var parts []string
+	for _, f := range t.Fields {
+		if f.IsDeprecated || requiresArgument(&f) {
+			continue
+		}
+		target := p.schema.Lookup(f.Type.Named())
+		if target == nil {
+			continue
+		}
+		if target.Kind == "SCALAR" || target.Kind == "ENUM" {
+			parts = append(parts, f.Name)
 		}
 	}
 	if len(parts) == 0 {

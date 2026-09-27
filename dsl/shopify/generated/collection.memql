@@ -57,11 +57,11 @@ concept collection {
   productsCount              object
   /// Admin GraphQL products. GIDs only (reference connection, first 25).
   productsGids               []string
+  /// Admin GraphQL resourcePublications. Inline ResourcePublication rows
+  /// (reference connection, first 25): the type has no id to keep a GID of.
+  resourcePublications       []object
   /// Admin GraphQL resourcePublicationsCount.
   resourcePublicationsCount  object
-  /// Admin GraphQL resourcePublications. GIDs only (reference connection,
-  /// first 25).
-  resourcePublicationsGids   []string
   /// Admin GraphQL seo.
   seo                        object
   /// Admin GraphQL sortOrder.

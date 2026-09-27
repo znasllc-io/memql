@@ -48,7 +48,7 @@ func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, par
 	if spec == nil || obj == nil {
 		return nil
 	}
-	gid, _ := obj["id"].(string)
+	gid := identityOf(spec, obj, parentGID)
 	if gid == "" {
 		return nil
 	}
@@ -74,6 +74,24 @@ func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, par
 	}
 	for _, f := range spec.Fields {
 		raw := extractPath(obj, f.Extract)
+		// A null from the origin is never a null in the payload. Every
+		// generated field is optional and typed, and the concept schema
+		// refuses a JSON null for a typed property ("expected string, but
+		// got null"), so a nullable Admin field that is simply unset -- an
+		// inventory level's deactivationAlert -- used to make the whole
+		// row unwritable on every sweep. A string field is written as ""
+		// (the engine reads "" and absent as one unset value, and "" is
+		// what clears the stored value under the engine's read-merge of a
+		// write to an existing row); every other type is omitted, which
+		// on an existing row keeps its last mirrored value -- a limit of
+		// the raw insert, which has no way to unset a typed field, noted
+		// until the engine grows one.
+		if raw == nil {
+			if f.DSLType == "string" {
+				payload[f.Name] = ""
+			}
+			continue
+		}
 		switch f.Kind {
 		case generated.KindMetafields:
 			payload[f.Name] = metafieldMap(raw)
@@ -104,6 +122,69 @@ func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, par
 		}
 	}
 	return out
+}
+
+// identityOf is the GID a row is keyed by.
+//
+// A Node carries its own. A child type that declares no `id` -- a price
+// list's price, its quantity rule -- is one row in the origin all the same,
+// keyed there by the variant it prices; so it is keyed here by the parent
+// that carried it and the first GID reference its selection keeps
+// ("gid://shopify/PriceList/1#gid://shopify/ProductVariant/7"). The row's
+// `gid` field carries that composite, which is not a GID Shopify would
+// resolve; the concept's own `variantGid` / `productVariantGid` is the
+// reference a reader wants. Before the generator learned which types have
+// no id, these children were asked for one and the whole parent sweep was
+// refused; asked for nothing, they arrived without one and were dropped
+// here in silence.
+func identityOf(spec *generated.TypeSpec, obj map[string]any, parentGID string) string {
+	if gid, _ := obj["id"].(string); gid != "" {
+		return gid
+	}
+	if spec == nil || spec.HasID || parentGID == "" {
+		return ""
+	}
+	if key := childKey(spec, obj); key != "" {
+		return parentGID + "#" + key
+	}
+	return ""
+}
+
+// childKey is the first GID reference an id-less child carries, or "".
+func childKey(spec *generated.TypeSpec, obj map[string]any) string {
+	for _, f := range spec.Fields {
+		if f.Kind != generated.KindGid {
+			continue
+		}
+		if s, ok := extractPath(obj, f.Extract).(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// idlessChildOf names which of a parent's id-less children a bulk line is.
+//
+// A bulk line for a Node says what it is through its GID; a line for a
+// type without one says nothing, so it is the child whose key the line
+// satisfies -- and only when exactly one does. A line two children could
+// both claim is dropped rather than guessed.
+func idlessChildOf(parent *generated.TypeSpec, obj map[string]any) *generated.TypeSpec {
+	if parent == nil {
+		return nil
+	}
+	var match *generated.TypeSpec
+	for _, child := range parent.Children {
+		spec := generated.Types[child.Concept]
+		if spec == nil || spec.HasID || childKey(spec, obj) == "" {
+			continue
+		}
+		if match != nil {
+			return nil
+		}
+		match = spec
+	}
+	return match
 }
 
 // tombstone is the write that marks a mirrored row gone at the origin.
@@ -207,8 +288,16 @@ func normalizeJSON(v any) any {
 	case nil:
 		return nil
 	case map[string]any:
+		// A null member of a nested object is dropped for the same reason
+		// a null top-level field is (see mapObject): the object's declared
+		// shape types its properties, and null validates as none of them.
+		// A restated nested object replaces the stored one wholesale, so
+		// the omission reads as cleared here.
 		out := make(map[string]any, len(val))
 		for k, item := range val {
+			if item == nil {
+				continue
+			}
 			out[k] = normalizeJSON(item)
 		}
 		return out

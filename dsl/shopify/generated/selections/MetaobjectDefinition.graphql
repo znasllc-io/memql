@@ -26,8 +26,8 @@ query ShopifyFetchMetaobjectDefinition($id: ID!) {
   }
 }
 
-query ShopifyListMetaobjectDefinition($first: Int!, $after: String, $query: String) {
-  metaobjectDefinitions(first: $first, after: $after, query: $query) {
+query ShopifyListMetaobjectDefinition($first: Int!, $after: String) {
+  metaobjectDefinitions(first: $first, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id

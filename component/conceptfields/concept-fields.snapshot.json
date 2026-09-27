@@ -4530,6 +4530,7 @@
         "direction",
         "driftCount",
         "lagSeconds",
+        "lastAttemptAt",
         "lastError",
         "lastInboundAt",
         "lastReconcileAt",
@@ -5204,8 +5205,8 @@
         "metafields",
         "productsCount",
         "productsGids",
+        "resourcePublications",
         "resourcePublicationsCount",
-        "resourcePublicationsGids",
         "seo",
         "sortOrder",
         "sources",
@@ -6022,8 +6023,8 @@
       "concept": "v1:shopify:marketWebPresence",
       "file": "shopify/generated/marketWebPresence.memql",
       "fields": [
-        "alternateLocalesGids",
-        "defaultLocaleGid",
+        "alternateLocales",
+        "defaultLocale",
         "deleted",
         "domain",
         "gid",
@@ -6427,7 +6428,7 @@
         "customerJourneySummary",
         "customerLocale",
         "deleted",
-        "discountApplicationsGids",
+        "discountApplications",
         "discountCode",
         "discountCodes",
         "displayAddress",
@@ -6828,8 +6829,8 @@
         "productType",
         "publishedAt",
         "requiresSellingPlan",
+        "resourcePublications",
         "resourcePublicationsCount",
-        "resourcePublicationsGids",
         "sellingPlanGroupsCount",
         "sellingPlanGroupsGids",
         "seo",
@@ -8675,6 +8676,41 @@
       "kind": "field",
       "migration": "20260908030000_planner_retirement_row_keys.up.sql",
       "note": "epic memql#5000 (commit f8b0126d6) deleted v1:planner:plan, task and taskState and swept the fields pointing at them. Measured by memql#5210."
+    },
+    {
+      "concept": "v1:shopify:collection",
+      "field": "resourcePublicationsGids",
+      "kind": "field",
+      "waiver": "Never populated: the only document that could have filled it selected `id` on a type that has none (the Admin API answers `Field 'id' doesn't exist on type 'ResourcePublication'`), so every fetch and list of the parent failed before a row could carry it, and bulk backfills omit reference connections. The generator now inlines the rows under `resourcePublications` instead (cmd/shopifyschema, Shopify datasync sweep fix).",
+      "note": "Shopify reconciliation sweep fix: generated selections rejected by the Admin API"
+    },
+    {
+      "concept": "v1:shopify:marketWebPresence",
+      "field": "alternateLocalesGids",
+      "kind": "field",
+      "waiver": "Never populated: the only document that could have filled it selected `id` on a type that has none (the Admin API answers `Field 'id' doesn't exist on type 'ShopLocale'`), so every fetch and list of the parent failed before a row could carry it, and bulk backfills omit reference connections. The generator now inlines the rows under `alternateLocales` instead (cmd/shopifyschema, Shopify datasync sweep fix).",
+      "note": "Shopify reconciliation sweep fix: generated selections rejected by the Admin API"
+    },
+    {
+      "concept": "v1:shopify:marketWebPresence",
+      "field": "defaultLocaleGid",
+      "kind": "field",
+      "waiver": "Never populated: the only document that could have filled it selected `id` on a type that has none (the Admin API answers `Field 'id' doesn't exist on type 'ShopLocale'`), so every fetch and list of the parent failed before a row could carry it, and bulk backfills omit reference connections. The generator now inlines the rows under `defaultLocale` instead (cmd/shopifyschema, Shopify datasync sweep fix).",
+      "note": "Shopify reconciliation sweep fix: generated selections rejected by the Admin API"
+    },
+    {
+      "concept": "v1:shopify:order",
+      "field": "discountApplicationsGids",
+      "kind": "field",
+      "waiver": "Never populated: the only document that could have filled it selected `id` on a type that has none (the Admin API answers `Field 'id' doesn't exist on type 'DiscountApplication'`), so every fetch and list of the parent failed before a row could carry it, and bulk backfills omit reference connections. The generator now inlines the rows under `discountApplications` instead (cmd/shopifyschema, Shopify datasync sweep fix).",
+      "note": "Shopify reconciliation sweep fix: generated selections rejected by the Admin API"
+    },
+    {
+      "concept": "v1:shopify:product",
+      "field": "resourcePublicationsGids",
+      "kind": "field",
+      "waiver": "Never populated: the only document that could have filled it selected `id` on a type that has none (the Admin API answers `Field 'id' doesn't exist on type 'ResourcePublication'`), so every fetch and list of the parent failed before a row could carry it, and bulk backfills omit reference connections. The generator now inlines the rows under `resourcePublications` instead (cmd/shopifyschema, Shopify datasync sweep fix).",
+      "note": "Shopify reconciliation sweep fix: generated selections rejected by the Admin API"
     },
     {
       "concept": "v1:workbench:workspace",
