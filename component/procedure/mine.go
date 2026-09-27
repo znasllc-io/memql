@@ -1,6 +1,7 @@
 package procedure
 
 import (
+	"math"
 	"sort"
 	"strings"
 )
@@ -26,13 +27,38 @@ type Pattern struct {
 	// Cohesion is 1/(1+mean gap) over the pattern's occurrences: 1 when every
 	// occurrence is contiguous, falling as they scatter.
 	Cohesion float64
+	// WeightedSupport is the sum of the weights of the sequences the pattern
+	// occurs in -- Support when every sequence weighs one. It RANKS and never
+	// admits: the floor is Support, a count of distinct sequences.
+	WeightedSupport float64
 }
 
 // Mine finds closed frequent sub-sequences with a gap tolerance, ranked by
 // coverage and cohesion BEFORE frequency, removing each winner from the corpus
-// and re-mining until nothing clears the support floor.
+// and re-mining until nothing clears the support floor. It is MineWeighted
+// with every sequence weighing one.
+func Mine(sequences [][]string, p Params) []Pattern {
+	return MineWeighted(sequences, nil, p.MinSupport, p.Gap)
+}
+
+// MineWeighted is Mine over a corpus whose sequences carry weights: a
+// recording a person liked weighs more than one nobody judged (design D23,
+// "liked ones rank higher"). A missing or non-positive weight is one.
 //
-// Three choices carry the weight.
+// THE WEIGHT RANKS AND NEVER COUNTS. The two-use floor (D14) is a count of
+// DISTINCT sequences, so one liked recording is still one use -- a like is a
+// judgment of a recording, not a second recording, and a procedure lifted from
+// one run is correct about that run alone. Weighted support is a tie-break
+// after coverage and cohesion, and only what a weight ADDS above one is
+// compared: a corpus nobody judged ranks exactly as an unweighted one, so
+// weighing a corpus changes no procedure until somebody likes something.
+//
+// AND IT NEVER REORDERS AN OCCURRENCE. Occurrences stay in sequence order and
+// positions stay as found, so an instance set -- and the template generalized
+// from it, and the version hash over that -- is the same with or without a
+// like; a like never resets a procedure's ladder.
+//
+// Three choices carry the weight of the ranking itself.
 //
 // CLOSED ONLY. A pattern with the same support as a longer pattern containing
 // it is not reported. Without closure the output is every prefix of every
@@ -47,8 +73,7 @@ type Pattern struct {
 // corpus, so the runner-up is scored against what is LEFT. Otherwise the whole
 // list fills with the winner's own sub-sequences, each a pattern nobody would
 // lift on its own.
-func Mine(sequences [][]string, p Params) []Pattern {
-	minSupport := p.MinSupport
+func MineWeighted(sequences [][]string, weights []float64, minSupport, gap int) []Pattern {
 	if minSupport < 2 {
 		minSupport = 2
 	}
@@ -67,12 +92,12 @@ func Mine(sequences [][]string, p Params) []Pattern {
 
 	var out []Pattern
 	for {
-		cands := closedCandidates(work, minSupport, p.Gap)
+		cands := closedCandidates(work, minSupport, gap)
 		if len(cands) == 0 {
 			return out
 		}
 		for i := range cands {
-			score(&cands[i], total)
+			score(&cands[i], total, weights)
 		}
 		sort.SliceStable(cands, func(i, j int) bool { return betterPattern(cands[i], cands[j]) })
 		winner := cands[0]
@@ -82,15 +107,18 @@ func Mine(sequences [][]string, p Params) []Pattern {
 }
 
 // betterPattern is the ranking, and it is a total order so that two replicas
-// mining one corpus agree. Coverage first, cohesion second, then length,
-// then support, then the symbols themselves -- the last tiebreak exists only
-// so the answer never depends on map iteration order.
+// mining one corpus agree. Coverage first, cohesion second, then what the
+// weights add above one (MineWeighted), then length, then support, then the
+// symbols themselves -- the last tiebreak exists only so the answer never
+// depends on map iteration order.
 func betterPattern(a, b Pattern) bool {
 	switch {
 	case a.Coverage != b.Coverage:
 		return a.Coverage > b.Coverage
 	case a.Cohesion != b.Cohesion:
 		return a.Cohesion > b.Cohesion
+	case likedWeight(a) != likedWeight(b):
+		return likedWeight(a) > likedWeight(b)
 	case len(a.Symbols) != len(b.Symbols):
 		return len(a.Symbols) > len(b.Symbols)
 	case a.Support != b.Support:
@@ -100,8 +128,32 @@ func betterPattern(a, b Pattern) bool {
 	}
 }
 
-func score(p *Pattern, totalSymbols int) {
+// likedWeight is what a pattern's weights add above one per sequence: zero for
+// every pattern of a corpus nobody judged, which is what keeps a weighted
+// corpus ranking exactly as an unweighted one until something is liked.
+func likedWeight(p Pattern) float64 {
+	return p.WeightedSupport - float64(p.Support)
+}
+
+// weightOf is one sequence's weight. A missing, non-positive or non-finite one
+// is one: a NaN would make the ranking stop being a total order, and two
+// replicas would then disagree about which pattern won.
+func weightOf(weights []float64, sequence int) float64 {
+	if sequence < 0 || sequence >= len(weights) {
+		return 1
+	}
+	if w := weights[sequence]; w > 0 && !math.IsInf(w, 0) {
+		return w
+	}
+	return 1
+}
+
+func score(p *Pattern, totalSymbols int, weights []float64) {
 	p.Support = len(p.Occurrences)
+	p.WeightedSupport = 0
+	for _, occ := range p.Occurrences {
+		p.WeightedSupport += weightOf(weights, occ.Sequence)
+	}
 	p.Coverage = float64(p.Support*len(p.Symbols)) / float64(totalSymbols)
 	gapTotal, gapCount := 0, 0
 	for _, occ := range p.Occurrences {

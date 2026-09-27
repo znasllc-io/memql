@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 )
@@ -82,6 +83,15 @@ type CompileOutcome struct {
 	// procedure on the ladder, so it has to be told which (epic memql#5408).
 	// WorkCompiler.Compile merges them over the goal's input.
 	Variables map[string]any
+	// DecompositionRefused is why triage's decomposition was refused, as the
+	// boundary rule words it ("decomposition_refused: section ... ends
+	// mid-effect ..."), when it was; the goal was then authored whole (epic
+	// memql#5414, D24). Empty otherwise.
+	DecompositionRefused string
+	// Sections is how a decomposed goal's sections were routed -- served by a
+	// catalogued automation, or planned live -- as the draft has them. Empty
+	// for a goal that was not decomposed.
+	Sections []work.SectionDecision
 }
 
 // replayProcedureAutomation is the embedded template a learned procedure is
@@ -156,12 +166,24 @@ func (l *PlannerAgentLoop) CompileGoalForRun(ctx context.Context, req CompileReq
 	// way a model is reached before the author tier.
 	d := work.Decide(in)
 	if !d.NeedsTriage {
-		return l.finishCompile(ctx, req, d, out, sandbox, sectionableDecision{})
+		return l.finishCompile(ctx, req, d, out, sandbox, sectionableDecision{}, nil)
 	}
 
+	// DESCRIPTION GUIDANCE (epic memql#5414, D23), read HERE and nowhere
+	// earlier: this is the first point at which a model is genuinely about to
+	// be used for the goal. An exact catalog hit and a procedure serve never
+	// get this far, and a replay never compiles at all -- text is not a row a
+	// replay can act on. The same guidance reaches the design pass if the
+	// goal is authored.
+	guidance := l.descriptionGuidance(ctx, req, sig)
+
 	// Tier 3: ONE classifier call answering complexity AND sectionability.
-	complexity, _, sectionable, cerr := l.classifySectionable(ctx, req.Statement, time.Now().UTC().Format(time.RFC3339))
-	out.ModelCalls++
+	complexity, _, sectionable, cerr := l.classifySectionable(ctx, req.Statement, time.Now().UTC().Format(time.RFC3339), guidance)
+	if cerr == nil || !memql.IsProviderUnavailable(cerr) {
+		// Counted when the call reached a provider. A cluster with no
+		// classifier made no call, and ModelCalls counts only calls that ran.
+		out.ModelCalls++
+	}
 	if cerr != nil {
 		if memql.IsProviderUnavailable(cerr) {
 			// No classifier on this cluster. Authoring is the honest
@@ -183,11 +205,18 @@ func (l *PlannerAgentLoop) CompileGoalForRun(ctx context.Context, req CompileReq
 	}
 
 	d = work.Decide(in)
-	return l.finishCompile(ctx, req, d, out, sandbox, sectionable)
+	// DECOMPOSITION (epic memql#5414, D24): a decomposition that breaks the
+	// boundary rule sends the goal to the author route; one that holds asks
+	// the catalog for every section before any is planned live. Neither
+	// reaches a model.
+	d, sectionable = l.decideDecomposition(ctx, req, d, sectionable, &out)
+	return l.finishCompile(ctx, req, d, out, sandbox, sectionable, guidance)
 }
 
-// finishCompile carries out whichever route was decided.
-func (l *PlannerAgentLoop) finishCompile(ctx context.Context, req CompileRequest, d work.Decision, out CompileOutcome, sandbox authoringSandbox, sectionable sectionableDecision) (CompileOutcome, error) {
+// finishCompile carries out whichever route was decided. guidance is the
+// goal's description guidance, read before triage; nil when no model has
+// been asked about the goal.
+func (l *PlannerAgentLoop) finishCompile(ctx context.Context, req CompileRequest, d work.Decision, out CompileOutcome, sandbox authoringSandbox, sectionable sectionableDecision, guidance []map[string]any) (CompileOutcome, error) {
 	out.Route = d.Route
 	if d.Candidate != nil {
 		out.ConstructId = d.Candidate.ConstructId
@@ -216,26 +245,29 @@ func (l *PlannerAgentLoop) finishCompile(ctx context.Context, req CompileRequest
 		if sandbox == nil {
 			return out, fmt.Errorf("work compile: goal %s needs a runnable draft and no Gate 1 sandbox is available", req.GoalId)
 		}
-		agentId := ""
-		nativeFile := sectionable.RequiresFile != nil && *sectionable.RequiresFile
-		navigationOnly := sectionable.Navigation != nil && !nativeFile && !sectionable.Sectionable && strings.TrimSpace(sectionable.Navigation.App) != ""
-		if !navigationOnly && (!nativeFile || (sectionable.Sectionable && len(sectionable.Sections) >= minSectionsForFanout)) {
-			var err error
-			agentId, err = l.reasoningAgent(ctx, req.OwnerUserId)
-			if err != nil {
-				return out, err
+		persisted, err := l.reasoningDraft(ctx, req, out, sandbox, sectionable)
+		if err != nil && sectionable.catalog != nil {
+			// A CATALOGUED SECTION THAT CANNOT TRAVEL IS PLANNED LIVE, never a
+			// failed goal. The draft carries every served automation's bundle,
+			// and Gate 1 or the dependency seal can refuse the combination --
+			// two bundles naming one construct differently, a member that no
+			// longer compiles. Nothing was written (persistWorkDraft writes
+			// only after both), so the goal is drafted again with every
+			// section live, which costs a model per section rather than the
+			// goal.
+			l.warnCompile("work compile: a catalogued section could not be carried into the draft; every section is planned live", req, err)
+			sectionable = sectionable.withoutCatalog()
+			for n := range out.Sections {
+				out.Sections[n].Route, out.Sections[n].Candidate, out.Sections[n].Similarity = work.SectionIntelligence, nil, 0
 			}
+			persisted, err = l.reasoningDraft(ctx, req, out, sandbox, sectionable)
 		}
-		bundle, err := synthesizeWorkReasoningBundle(req, agentId, sectionable)
-		if err != nil {
-			return out, err
-		}
-		return l.persistWorkDraft(ctx, req, out, bundle, sandbox)
+		return persisted, err
 	case work.RouteAuthor:
 		if sandbox == nil {
 			return out, fmt.Errorf("work compile: goal %s needs authoring and no sandbox is available; a draft that cannot pass Gate 1 must not be run", req.GoalId)
 		}
-		plan, err := l.runDesignPass(ctx, req.Statement, req.OwnerUserId, nil)
+		plan, err := l.runDesignPassGuided(ctx, req.Statement, req.OwnerUserId, nil, guidance)
 		if err != nil {
 			return out, fmt.Errorf("work compile: design pass for goal %s: %w", req.GoalId, err)
 		}
@@ -266,6 +298,85 @@ func (l *PlannerAgentLoop) finishCompile(ctx context.Context, req CompileRequest
 	default:
 		return out, fmt.Errorf("work compile: goal %s reached no route", req.GoalId)
 	}
+}
+
+// reasoningDraft synthesizes the deterministic draft for a trivial or
+// sectionable goal and persists it through Gate 1. The owner's reasoning
+// agent is resolved only when the draft calls it.
+func (l *PlannerAgentLoop) reasoningDraft(ctx context.Context, req CompileRequest, out CompileOutcome, sandbox authoringSandbox, dec sectionableDecision) (CompileOutcome, error) {
+	agentId := ""
+	if dec.needsReasoningAgent(workDraftHeadline(req)) {
+		var err error
+		if agentId, err = l.reasoningAgent(ctx, req.OwnerUserId); err != nil {
+			return out, err
+		}
+	}
+	bundle, err := synthesizeWorkReasoningBundle(req, agentId, dec)
+	if err != nil {
+		return out, err
+	}
+	return l.persistWorkDraft(ctx, req, out, bundle, sandbox)
+}
+
+// maxDescriptionGuidance is how many of a goal shape's dislikes reach a
+// prompt: the newest, because the person's most recent objection is the one
+// most likely to still apply.
+const maxDescriptionGuidance = 5
+
+// descriptionGuidance is what the goal's owner disliked about earlier answers
+// to this goal shape (epic memql#5414, design D23): their dislikes on runs of
+// the same goal signature, newest first, at most maxDescriptionGuidance, each
+// as the prompts' guidance input declares it -- {axes: "product, process",
+// reason}. Read under the OWNER, because guidance mined from somebody else's
+// dislikes would steer this person's goal by another person's taste. A failed
+// read is no guidance, never a failed compile.
+func (l *PlannerAgentLoop) descriptionGuidance(ctx context.Context, req CompileRequest, signature string) []map[string]any {
+	if l.engine == nil || strings.TrimSpace(req.OwnerUserId) == "" || signature == "" {
+		return nil
+	}
+	call, err := langparser.RenderCall("workDescriptionGuidance", map[string]any{"goalSignature": signature})
+	if err != nil {
+		l.warnCompile("work compile: the description guidance read could not be rendered", req, err)
+		return nil
+	}
+	res, err := l.engine.Execute(ownerActorContext(ctx, req.OwnerUserId), "query "+call)
+	if err != nil {
+		l.warnCompile("work compile: the description guidance read failed; the goal's model calls go without it", req, err)
+		return nil
+	}
+	rows := memql.MaterializeRows(res)
+	// Newest first, as the query sorts -- ordered again here because the
+	// FIVE kept must be the newest five, and a reader that trusted the order
+	// would keep whichever five arrived first.
+	createdAt := func(r map[string]any) time.Time {
+		t, _ := time.Parse(time.RFC3339Nano, getString(r, "createdAt"))
+		return t
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return createdAt(rows[i]).After(createdAt(rows[j])) })
+	var out []map[string]any
+	for _, r := range rows {
+		data := mapField(r, "data")
+		// The query filters on both; checked again, because a guidance
+		// entry from another goal shape is advice about a different goal.
+		if work.ParseVerdict(getString(data, "verdict")) != work.VerdictDislike || getString(data, "goalSignature") != signature {
+			continue
+		}
+		axes := mapField(data, "axes")
+		named := work.Axes{
+			Product:     axes["product"] == true,
+			Process:     axes["process"] == true,
+			Performance: axes["performance"] == true,
+		}.Names()
+		reason := strings.TrimSpace(getString(data, "reason"))
+		if len(named) == 0 && reason == "" {
+			continue
+		}
+		out = append(out, map[string]any{"axes": strings.Join(named, ", "), "reason": reason})
+		if len(out) == maxDescriptionGuidance {
+			break
+		}
+	}
+	return out
 }
 
 // cataloguedForSignature is the exact tier: one owner-scoped, signature-

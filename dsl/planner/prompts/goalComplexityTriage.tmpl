@@ -12,12 +12,21 @@ Output ONLY a JSON object -- no markdown fences, no prose:
   "sectionable": true | false,
   "assembly": "<one short sentence: how the sections combine into the final deliverable>",
   "sections": [
-    { "label": "<short name for this section>", "instruction": "<what to produce for THIS section>" }
+    {
+      "label": "<short name for this section>",
+      "instruction": "<what to produce for THIS section>",
+      "purpose": "<this section as a one-line goal of its own>",
+      "inputs": ["<a goal input name, or an earlier section's output name>"],
+      "outputs": ["<name of what this section produces>"],
+      "reuseIntent": "reusable" | "goalSpecific" | "accountSpecific",
+      "effects": ["files" | "machine" | "external" | "spend" | "concept:<v1 concept id>"],
+      "postcondition": "<how the end of this section is checked, or empty>"
+    }
   ]
 }
 ```
 
-`sectionable` / `assembly` / `sections` are OPTIONAL -- include them ONLY when the deliverable decomposes into INDEPENDENT sections (see SECTIONABLE below). Omit them, or set `sectionable: false` with `sections: []`, otherwise.
+`sectionable` / `assembly` / `sections` are OPTIONAL -- include them ONLY when the deliverable decomposes into sections (see SECTIONABLE below). Omit them, or set `sectionable: false` with `sections: []`, otherwise.
 
 `requiresFile` is REQUIRED and must be a JSON boolean on every answer, including trivial goals. Set it true when the requested deliverable must be saved as a file (for example a Markdown file in the Library, a PDF, a spreadsheet, or a downloadable document). Set it false when replying with the content itself fully satisfies the goal. Judge the requested outcome, not mentions of files used as sources. A true answer makes final delivery verify that this run actually saved a ready file; a prose confirmation alone cannot satisfy it.
 
@@ -74,21 +83,36 @@ complexity = "complex" when the goal is a multi-phase program, needs multiple sp
 - Qualifiers like "full", "complete", "in full detail", "every scene", "not a summary" multiply the per-item volume -- weigh them.
 - Mentioning a tool the agent already has (write a file, make a list) is NOT complexity.
 
-## SECTIONABLE (independent sections that can run in PARALLEL)
+## SECTIONABLE (a deliverable cut into ordered sections)
 
-Set `sectionable: true` ONLY when the deliverable is ONE conceptually-simple deliverable that decomposes into INDEPENDENT sections -- each section producible on its own, in any order, WITHOUT needing the output of the others -- and the sections are then concatenated/assembled into the final result. When you do, list one `sections` entry per independent unit (each with a short `label` and an `instruction` for that unit) and give a one-line `assembly`.
+Set `sectionable: true` ONLY when the deliverable decomposes into a small number of clear SECTIONS, produced one after another in the order you list them and then assembled into the final result. When you do, list one `sections` entry per section, in order, and give a one-line `assembly`.
 
-This is the "N complete things, each written out in full" pattern:
-- "a file with 10 folk tales, each a COMPLETE story" -> sectionable: true; one section per tale; assembly = "concatenate the ten stories into one markdown file".
-- "full chapter drafts for each item in this outline" -> sectionable: true; one section per chapter.
-- "a profile of each of these 6 vendors" -> sectionable: true; one section per vendor.
+Two shapes qualify:
+- INDEPENDENT sections -- the "N complete things, each written out in full" pattern. Each section is producible on its own, WITHOUT the output of any other section, so their order does not matter; their `inputs` name only the goal's own inputs.
+  - "a file with 10 folk tales, each a COMPLETE story" -> sectionable: true; one section per tale; assembly = "concatenate the ten stories into one markdown file".
+  - "full chapter drafts for each item in this outline" -> sectionable: true; one section per chapter.
+  - "a profile of each of these 6 vendors" -> sectionable: true; one section per vendor.
+- ORDERED sections -- a few clear steps where a later section reads what an earlier one produced. The later section names that output in its `inputs`, spelled exactly as the earlier section spelled it in its `outputs`.
+  - "summarise last month's invoices and draft an email to finance with the totals" -> sectionable: true; section 1 "summarise the month's invoices" has outputs ["invoiceSummary"]; section 2 "draft the email to finance" has inputs ["invoiceSummary"].
 
-Set `sectionable: false` (the default) when the work is NOT a clean fan-out of independent units:
-- the sections depend on each other or must be produced in order (each builds on the last),
-- the deliverable is a single continuous piece that can't be cut into independent parts ("a 30-page handbook with a flowing narrative"),
+Every section entry carries:
+- `label`: a short name for the section.
+- `instruction`: what to produce for THIS section.
+- `purpose`: the section as a goal of its own, in one line, in the words a person would use to ask for just this part ("summarise the month's invoices"). Keep it general rather than tied to this goal's specifics: earlier work that did the same thing is found by it, and reused instead of planned again.
+- `inputs`: the names this section reads -- the goal's own input names (as the goal names them), or an earlier section's outputs. `[]` when it reads nothing by name.
+- `outputs`: the names of what this section produces, as single words ("invoiceSummary", "chapter3").
+- `reuseIntent`: "reusable" when the section is a general capability other goals would want too, "goalSpecific" when it only makes sense for this goal, "accountSpecific" when it depends on one client's or account's specifics.
+- `effects`: what the section CHANGES besides producing text -- "files" (writes or edits files), "machine" (acts on the person's computer), "external" (sends, posts or calls anything outside, such as an email, a webhook or an API), "spend" (costs money), or "concept:<v1 concept id>" (writes records of that kind, for example "concept:v1:todos:todo"). `[]` for a section that only reads and writes text.
+- `postcondition`: how the END of the section is checked -- "the report file exists in the Library", "a v1:todos:todo with that title exists". REQUIRED whenever `effects` is not empty; `""` for a section with no effects, whose outputs are its end.
+
+THE BOUNDARY RULE: every section must end at a point that can be checked. A section that changes something says how its end is checked (a `postcondition`), and a section that changes nothing names what it produces (at least one `output`). A decomposition with a section that would stop in the middle of a change -- `effects` without a `postcondition` -- is refused, and the goal is then planned as a whole instead, which costs more.
+
+Set `sectionable: false` (the default) when:
+- the deliverable is a single continuous piece that can't be cut into parts ("a 30-page handbook with a flowing narrative"),
+- a section could only end in the middle of a change (the boundary rule above),
 - it's `trivial` (fits in one pass -- no sections needed), or
 - it's `complex` (needs research, multiple specialists, or a multi-phase program -- the planner handles those itself).
 
-When in doubt, prefer `sectionable: false` -- a non-sectionable goal simply routes through the normal planner; a wrongly-sectioned one fans out work that wasn't actually independent.
+When in doubt, prefer `sectionable: false` -- a non-sectionable goal simply routes through the normal planner; a wrongly-sectioned one splits work that was not actually separable.
 
 Output the JSON now.
