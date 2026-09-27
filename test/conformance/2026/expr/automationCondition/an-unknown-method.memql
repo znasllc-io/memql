@@ -1,0 +1,11 @@
+/// Raise a ticket when a goal's status reads as closed, through a method no value has.
+@trigger(event="node.updated", concept="v1:work:goal")
+automation acUnknownMethod {
+  args {
+    id      string
+    status  string
+  }
+  if args.status.startsWith("clos") {
+    raised := mutation raiseAgentTicket(title: "closed " + args.id)
+  }
+}

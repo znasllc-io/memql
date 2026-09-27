@@ -150,3 +150,90 @@ automation nativeToo {
 		t.Fatalf("read %q, want %q", got, want)
 	}
 }
+
+// TestStatementGatesReadAnAutomationsHeaderLambdas (memql#5426): an
+// automation's trigger @filter and @loop's until are evaluated in process by
+// the evaluator its conditions use, so a bare call there is held to the same
+// rule -- a catalog function or a declared predicate -- and reported at the
+// line it is written on, where it used to load and refuse every fire. A known
+// function and a declared predicate pass.
+func TestStatementGatesReadAnAutomationsHeaderLambdas(t *testing.T) {
+	src := `/// Filters on names nothing declares.
+@trigger(event="node.updated", concept="v1:probe:thing")
+@filter(row => frobnicate(row.status))
+automation probeFilterCall {
+  builtin note(v: 1)
+}
+
+@trigger(event="node.updated", concept="v1:probe:thing")
+@filter(row => row.status != "done" && isNoSuchSpec(row))
+@loop(maxDepth=3, until=row => definitelyNothing(row))
+automation probeHeaderCalls {
+  builtin note(v: 1)
+}
+
+@trigger(event="node.updated", concept="v1:probe:thing")
+@filter(row => lower(row.status) == "open" && isOpen(row) && isActive(row))
+automation probeFilterKnown {
+  builtin note(v: 1)
+}
+`
+	got := statementGates(SourceFile{"probe/predicates.memql", predicatesFile}, SourceFile{"probe/automations.memql", src})
+	want := []string{
+		"statement-unknown-call@probe/automations.memql:3 probeFilterCall: `frobnicate(...)` is not a function or a predicate known here",
+		"statement-unknown-call@probe/automations.memql:9 probeHeaderCalls: `isNoSuchSpec(...)` is not a function or a predicate known here",
+		"statement-unknown-call@probe/automations.memql:10 probeHeaderCalls: `definitelyNothing(...)` is not a function or a predicate known here",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("want %d reports, got:\n%s", len(want), strings.Join(got, "\n"))
+	}
+	for i := range want {
+		if !strings.HasPrefix(got[i], want[i]) || !strings.HasSuffix(got[i], "[body_call_unknown]") {
+			t.Errorf("report %d = %q, want it to open %q and end with the code", i, got[i], want[i])
+		}
+	}
+}
+
+// TestStatementGatesRefuseAMethodNoValueHas (memql#5426): the evaluator
+// resolves `x.name()` against the methods a list or a string has before it
+// evaluates the receiver, so a name neither has fails on every run; the gate
+// refuses it at load -- in a condition, in a logic's return and in a trigger
+// filter -- and passes a catalog method.
+func TestStatementGatesRefuseAMethodNoValueHas(t *testing.T) {
+	src := `@trigger(event="node.updated", concept="v1:probe:thing")
+@filter(row => row.status.frob())
+automation probeMethods {
+  args {
+    region  string
+    tags    []string
+  }
+  if args.region.includes("-") && args.tags.count() > 0 {
+    builtin note(v: 1)
+  }
+  if args.region.frobnicate() {
+    builtin note(v: 2)
+  }
+}
+
+logic probeLogicMethod {
+  args {
+    region  string
+  }
+  return args.region.shout()
+}
+`
+	got := statementGates(SourceFile{"probe/automations.memql", src})
+	want := []string{
+		"statement-unknown-call@probe/automations.memql:2 probeMethods: `.frob()` is not a method of a list or a string",
+		"statement-unknown-call@probe/automations.memql:11 probeMethods: `.frobnicate()` is not a method of a list or a string",
+		"statement-unknown-call@probe/automations.memql:20 probeLogicMethod: `.shout()` is not a method of a list or a string",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("want %d reports, got:\n%s", len(want), strings.Join(got, "\n"))
+	}
+	for i := range want {
+		if !strings.HasPrefix(got[i], want[i]) || !strings.HasSuffix(got[i], "[body_call_unknown]") {
+			t.Errorf("report %d = %q, want it to open %q and end with the code", i, got[i], want[i])
+		}
+	}
+}

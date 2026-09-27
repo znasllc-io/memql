@@ -1,0 +1,9 @@
+/// A trigger filter that calls a method no value has.
+@trigger(event="node.updated", concept="v1:work:goal")
+@filter(row => row.status.startsWith("clos"))
+automation tfUnknownMethodFilter {
+  args {
+    id  string
+  }
+  note := mutation tfNoteGoal(goalId: args.id, note: "closing")
+}

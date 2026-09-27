@@ -226,6 +226,13 @@
       "verdict": "refuse_parse",
       "code": "body_missing_expression",
       "message": "missing condition between `if` and `{`: write `if <condition> { ... }`"
+    },
+    {
+      "file": "an-unknown-method.memql",
+      "verdict": "refuse_load",
+      "code": "body_call_unknown",
+      "message": "`.startsWith()` is not a method of a list or a string, so the expression fails when it runs",
+      "note": "A condition's method is resolved against the function catalog at load, as its bare calls are (memql#5426)."
     }
   ]
 }
