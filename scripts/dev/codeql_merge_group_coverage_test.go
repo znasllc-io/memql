@@ -1,6 +1,14 @@
 // Static guard over the coverage that compensates for CodeQL's merge_group
 // no-op (znasllc-io/memql#2973).
 //
+// CURRENT STATE (memql#5482): codeql.yml no longer subscribes to merge_group
+// or pull_request, so the no-op below is gone and the two implication tests
+// SKIP -- the "provably absent" branch they were written with. What holds
+// CodeQL now is the pair of tests at the end of this file: every push to main
+// is analysed with no path filter, and the pull-request path stays off as a
+// recorded decision. The history below explains why the implication tests
+// stay: if merge_group ever comes back WITH a no-op, they fire again.
+//
 // # The tradeoff being guarded
 //
 // `.github/workflows/codeql.yml` runs a single `echo` on `merge_group` and
@@ -257,6 +265,60 @@ func TestCodeQLNoOpStepStatesItsReason(t *testing.T) {
 					"  name: %q\n  run:  %q", s.Name, s.Run)
 			}
 			return
+		}
+	}
+}
+
+// TestCodeQLAnalysesEveryPushToMain holds the coverage CodeQL keeps once it is
+// off the pull-request path (epic memql#5476, memql#5482): every push to main
+// -- the tree that lands -- and the weekly scan. With pull_request gone this is
+// no longer a compensating trigger behind a no-op; it is THE coverage, so it is
+// asserted unconditionally rather than as an implication. A branch narrowed
+// away from main, or a path filter, leaves some landed trees never analysed
+// with nothing going red.
+func TestCodeQLAnalysesEveryPushToMain(t *testing.T) {
+	wf := codeqlYAML(t)
+	push, ok := wf.On["push"].(map[string]any)
+	if !ok {
+		t.Fatalf("codeql.yml has no `push` trigger mapping (got %T): the tree that lands is analysed by "+
+			"nothing but the weekly scan (memql#5482)", wf.On["push"])
+	}
+	branches, _ := push["branches"].([]any)
+	covers := false
+	for _, b := range branches {
+		if s, _ := b.(string); s == "main" || s == "**" || s == "*" {
+			covers = true
+		}
+	}
+	if !covers {
+		t.Errorf("codeql.yml's push trigger does not cover main (branches: %v)", branches)
+	}
+	for _, k := range []string{"paths", "paths-ignore"} {
+		if v, has := push[k]; has {
+			t.Errorf("codeql.yml's push trigger carries a `%s` filter (%v): a landed tree the filter "+
+				"excludes is never analysed, and nothing says so", k, v)
+		}
+	}
+	if _, ok := wf.On["schedule"]; !ok {
+		t.Error("codeql.yml dropped its weekly `schedule`: the only trigger that fires with no push at all")
+	}
+}
+
+// TestCodeQLIsOffThePullRequestPath records the decision (memql#5482) as an
+// assertion, the way ruleset-baseline.md records ruleset decisions: CodeQL does
+// not run on pull requests or on the merge queue. It gated no merge -- the
+// ruleset requires `ci-required` alone -- cost three runners per pull-request
+// push, and each run's ~1 GB dependency cache held the repository's cache store
+// at its limit, evicting the caches the pull-request lanes read. Re-adding
+// either trigger is a new decision, not a fix: change this test with it, and
+// the design record's section 1.
+func TestCodeQLIsOffThePullRequestPath(t *testing.T) {
+	wf := codeqlYAML(t)
+	for _, trig := range []string{"pull_request", "pull_request_target", "merge_group"} {
+		if _, ok := wf.On[trig]; ok {
+			t.Errorf("codeql.yml runs on %s again. It was taken off that path deliberately "+
+				"(epic memql#5476, memql#5482): no merge waits on it, and its per-run cache evicts the "+
+				"ones the lanes read. If that decision is being reversed, reverse this test with it.", trig)
 		}
 	}
 }

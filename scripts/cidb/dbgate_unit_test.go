@@ -1308,3 +1308,78 @@ func TestDSNLiteralFindings(t *testing.T) {
 		t.Errorf("an exempt file was still flagged: %v", got)
 	}
 }
+
+// --- the planned selector (memql#5485) -------------------------------------
+
+const plannedLaneYAML = `
+jobs:
+  db-tests:
+    needs: [changes, plan]
+    if: ${{ github.event_name != 'pull_request' || needs.plan.outputs.db_count != '0' }}
+    strategy:
+      matrix: ${{ fromJSON(needs.plan.outputs.db_matrix) }}
+    env:
+      MEMQL_REQUIRE_DB: '1'
+    steps:
+      - name: db-gated
+        run: |
+          start=$SECONDS
+          go test -count=1 -p=${{matrix.parallel}} -timeout=${{matrix.timeout}} ${{matrix.packages}}
+          echo "done in $((SECONDS - start))s"
+`
+
+// TestParseDBTestsJob_RecognisesThePlannedSelector pins the one planned form,
+// in both spellings, and that it is not mistaken for a package or a flag.
+func TestParseDBTestsJob_RecognisesThePlannedSelector(t *testing.T) {
+	for _, form := range []string{"${{matrix.packages}}", "${{ matrix.packages }}"} {
+		spec := mustParse(t, strings.Replace(plannedLaneYAML, "${{matrix.packages}}", form, 1))
+		if len(spec.steps) != 1 || !spec.steps[0].planned {
+			t.Fatalf("%s: want one planned step, got %+v", form, spec.steps)
+		}
+		if len(spec.steps[0].pkgs) != 0 {
+			t.Errorf("%s: the planned argument was read as a package: %v", form, spec.steps[0].pkgs)
+		}
+		if spec.matrix != plannerMatrix {
+			t.Errorf("%s: matrix = %q, want %q", form, spec.matrix, plannerMatrix)
+		}
+		if got := laneRunFindings(spec); len(got) != 0 {
+			t.Errorf("%s: the healthy planned lane produced findings: %v", form, got)
+		}
+	}
+}
+
+// TestLaneRunFindings_PlannedWiring covers each way a planned lane could run
+// packages this gate cannot account for.
+func TestLaneRunFindings_PlannedWiring(t *testing.T) {
+	cases := map[string]func(string) string{
+		"a matrix that is not the planner's": func(y string) string {
+			return strings.Replace(y, "needs.plan.outputs.db_matrix", "needs.plan.outputs.go_matrix", 1)
+		},
+		"no needs: plan": func(y string) string {
+			return strings.Replace(y, "needs: [changes, plan]", "needs: [changes]", 1)
+		},
+		"literal packages mixed into the planned step": func(y string) string {
+			return strings.Replace(y, "${{matrix.packages}}", "${{matrix.packages}} ./component/memql/...", 1)
+		},
+		"a literal step beside the planned one": func(y string) string {
+			return y + "      - run: go test -count=1 ./component/memql/...\n"
+		},
+	}
+	for name, mutate := range cases {
+		spec := mustParse(t, mutate(plannedLaneYAML))
+		if got := laneRunFindings(spec); len(got) == 0 {
+			t.Errorf("%s: no finding; the lane would run packages the gate cannot see", name)
+		}
+	}
+}
+
+// TestJobIfIsPathRouting_ThePlannerRoutes: the planner's output is routing,
+// and the constant-false guard still applies to it.
+func TestJobIfIsPathRouting_ThePlannerRoutes(t *testing.T) {
+	if !jobIfIsPathRouting("${{ github.event_name != 'pull_request' || needs.plan.outputs.db_count != '0' }}") {
+		t.Error("the planner's db_count condition must count as routing")
+	}
+	if jobIfIsPathRouting("${{ false && needs.plan.outputs.db_count != '0' }}") {
+		t.Error("a constant false beside the planner's output must still be refused")
+	}
+}

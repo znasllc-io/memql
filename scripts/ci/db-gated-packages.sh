@@ -18,20 +18,19 @@
 # The non-DB tests in those packages are not lost -- db-tests runs the whole
 # package, not just the gated cases.
 #
-# # Why the list lives here and db-tests keeps its literal arguments
+# # The ONE list, and who reads it (memql#5485)
 #
-# `scripts/cidb/dbgate_test.go` is a 1100-line gate that derives the db-tests
-# lane's package selector by parsing literal `./`-prefixed arguments out of that
-# step's `run:` block. `source` and `.` are in its shellControlKeywords, so
-# making db-tests source this script would either empty its derived package list
-# or mark the block non-plain -- either way disarming the gate that exists
-# because these suites once rotted unnoticed (memql#2342).
+# DB_GATED_TREES below is the only copy of the set. Until memql#5485 db-tests
+# carried a second one -- literal `./<tree>/...` arguments on its `go test`
+# lines -- because scripts/cidb derived the lane's selector from those literals
+# and refused a step that sourced a script, and a test held the two equal.
 #
-# Rather than rework that gate, db-tests keeps its literal arguments and this
-# script holds the canonical set for go-checks to subtract. The two cannot drift
-# apart because scripts/ci/db_gated_packages_test.go asserts they are identical;
-# that test is the "single source of truth" property, enforced rather than
-# asserted by convention.
+# The planner removed that copy. db-tests is a matrix of shards, and
+# scripts/ci/affected builds it by RUNNING this script (`--trees` and
+# `--complement`), so every refusal below refuses the plan too. scripts/cidb
+# runs `--patterns` for its coverage assertions and runs the real planner to
+# prove every provisioned package lands in a shard; and
+# scripts/ci/db_gated_packages_test.go fails if a literal comes back.
 set -euo pipefail
 
 # MODULE_PATH is pinned, NOT read from `go list -m` (memql#3165).
@@ -64,8 +63,8 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # than chosen: dbtest imports memory-nodes, which imports component/database, so
 # an in-package test importing dbtest is an import cycle.
 #
-# DB_GATED_TREES is the canonical set. Keep in sync with the db-tests step in
-# .github/workflows/ci.yml -- enforced by TestDBGatedTreesMatchTheDBTestsLane.
+# DB_GATED_TREES is the canonical set, and the only one: the db-tests lane runs
+# exactly these trees through the planner (see the header).
 #
 # memql#4301 WIDENED `component/identity/recoverykey` to `component/identity`.
 # The magic-link consume became a compare-and-swap under a Postgres advisory
@@ -167,11 +166,9 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # never runs. THE TREE rather than the one pack, so the wholesale pack joins
 # the day it lands.
 #
-# KEEP COMMENTS OUT OF THE ARRAY BODY, and parentheses out of any that must go
-# there. TestDBGatedTreesMatchTheDBTestsLane finds this array's end with the
-# FIRST `)` after the declaration, so a parenthesised aside between the entries
-# truncates the list silently -- everything below it stops being read, and the
-# comparison then reports a drift nobody introduced.
+# Keep the array body to entries: the reasons live in these comments above it.
+# (It once HAD to be, because a Go test found the array's end with the first
+# `)` after the declaration; every reader now runs the script instead.)
 #
 # memql#5431 added `component/emailrules`. An event-email rule's fired count
 # was written read-then-plus-one, and two firings that overlapped both wrote

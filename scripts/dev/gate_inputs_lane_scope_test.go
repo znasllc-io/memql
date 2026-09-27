@@ -43,6 +43,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -512,5 +513,58 @@ func TestGateInputsStepStillConsultsItsBucket(t *testing.T) {
 	if !strings.Contains(runGates, "needs.changes.outputs.gates") {
 		t.Errorf("RUN_GATES no longer derives from the `gates` bucket, so the step it guards is "+
 			"disconnected from the paths it exists to cover.\ngot: %s", runGates)
+	}
+}
+
+// TestPlannerGatePackagesMatchTheGateInputsStep holds the planner's gate list
+// to this step's (memql#5484).
+//
+// Both answer one question -- which packages read repository files by PATH,
+// so that a non-Go change must run them -- for two different diffs: this step
+// for a change the planner never sees (docs, manifests, scripts), the planner
+// for a change mixing those with Go, where go-tests runs only what the change
+// reaches. Two lists answering one question drift, and a drift here is
+// invisible in the worst direction: a gate package missing from the planner's
+// list does not run on the mixed pull request that changes its input.
+func TestPlannerGatePackagesMatchTheGateInputsStep(t *testing.T) {
+	step, ok := gateInputsStep(t)
+	if !ok {
+		t.Fatal("no gate-inputs step in go-checks; TestGateInputsStepCoversEveryGatePackage reports why")
+	}
+	var stepPkgs []string
+	for _, line := range commandLines(step.Run) {
+		if !strings.Contains(line, "go test") {
+			continue
+		}
+		for _, m := range pkgPatternRe.FindAllStringSubmatch(line, -1) {
+			stepPkgs = append(stepPkgs, strings.TrimSpace(m[2]))
+		}
+	}
+	var wf struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				ID  string            `yaml:"id"`
+				Env map[string]string `yaml:"env"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(ciYAML(t), &wf); err != nil {
+		t.Fatalf("parse .github/workflows/ci.yml: %v", err)
+	}
+	var planner []string
+	for _, s := range wf.Jobs["plan"].Steps {
+		if s.ID == "plan" {
+			planner = strings.Fields(s.Env["GATE_PACKAGES"])
+		}
+	}
+	if len(planner) == 0 || len(stepPkgs) == 0 {
+		t.Fatalf("could not read both lists (planner %v, gate-inputs step %v); this guard cannot pass vacuously", planner, stepPkgs)
+	}
+	sort.Strings(planner)
+	sort.Strings(stepPkgs)
+	if strings.Join(planner, " ") != strings.Join(stepPkgs, " ") {
+		t.Errorf("the plan step's GATE_PACKAGES and the gate-inputs step disagree:\n  planner: %v\n  step:    %v\n"+
+			"Make them identical: a package in one and not the other runs on one kind of pull request and "+
+			"not the other (memql#5484).", planner, stepPkgs)
 	}
 }

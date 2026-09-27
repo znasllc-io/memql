@@ -30,7 +30,9 @@ checks gating a merge:
 
 - `.github/workflows/ci.yml` — produces the single required `ci-required`
   aggregator (and all the lanes behind it).
-- `.github/workflows/codeql.yml` — the `Analyze` security checks.
+- `.github/workflows/codeql.yml` — the `Analyze` security checks. (Removed
+  again in memql#5482, with its `pull_request` trigger: see the end of this
+  page.)
 - `.github/workflows/gitleaks.yml` — the secret scan.
 
 Key behaviors that make this correct:
@@ -198,6 +200,18 @@ mechanical property nothing else substitutes for, which is why four
 sessions independently invented scheduling ceremony around its absence
 before anyone checked whether it was on.
 
+**And with the queue ON, the strict rule is the part that still charged per
+merge -- so it is off (memql#5481, decided 2026-09-27).** The queue already
+builds and tests the exact tree that lands, so `strict` only re-proved that
+from the pull request's side: every merge still flipped every other open pull
+request to `BEHIND`, and each paid an `update-branch` and a fresh full run for
+a property the queue was about to check anyway. With it off, a sibling merge
+costs an open pull request nothing. The one path that skips the queue, the
+owner bypass, still refuses a branch behind its base, because
+`merge-as-owner.sh` measures the drift itself; the decision, the command that
+shows the live value and how to reverse it are in
+[ruleset-baseline.md](ruleset-baseline.md).
+
 ### The intended configuration, for whoever turns it back on
 
 Recorded as the *previous* configuration rather than the current one:
@@ -273,18 +287,22 @@ any two jobs across `.github/workflows/` ever share a name again. If a
 scan lane is made required in future, name it by its check-run name from
 that guard's inventory, not by its workflow or job key.
 
-**`Analyze (go)` is a deliberate no-op on `merge_group`.** It reports the
-required context green without analysing the candidate: a SARIF upload
-keyed to the torn-down `gh-readonly-queue` ref wedges the queue (#1539),
-so `.github/workflows/codeql.yml` gates checkout, init, autobuild and
-analyze on `github.event_name != 'merge_group'` and runs a single `echo`
-instead. CodeQL coverage comes from the `pull_request`, `push: main` and
-weekly `schedule` triggers instead, and
-`scripts/dev/codeql_merge_group_coverage_test.go` fails the build if any
-of those is removed while the no-op remains.
+**CodeQL is not on the queue's path at all, nor on a pull request's
+(memql#5482).** `.github/workflows/codeql.yml` runs on every push to `main`
+-- the tree that lands -- and on its weekly schedule, and nowhere else. It
+gated no merge (the only required context is `ci-required`), cost three
+runners per pull-request push (`Analyze (go)` alone 7 to 10 minutes, 43 on a
+large pull request), and each run's ~1 GB dependency cache held the
+repository's cache store at its limit. A finding now surfaces in the
+Security tab minutes after the merge that introduced it rather than on the
+pull request. `scripts/dev/codeql_merge_group_coverage_test.go` holds the
+push and schedule coverage and the decision itself.
 
-This paragraph previously said the queue "runs the full suite on it",
-which was read as covering all three contexts and is not true of
-`Analyze (go)` (corrected in memql#2973). The guard's own header cited
-this page as the authority for the no-op, which pointed a reader at a
-page that contradicted it.
+That retired the `merge_group` no-op this page used to describe: `Analyze
+(go)` reported the context green without analysing the candidate, because a
+SARIF upload keyed to the torn-down `gh-readonly-queue` ref wedges the queue
+(#1539), and it existed only so a queue waiting on that context would not
+stall. Nothing requires the context, so nothing waits. The guard's
+implication tests still fire if a `merge_group` trigger ever returns with a
+no-op, and this paragraph's earlier corrections (memql#2973) are in its
+history.

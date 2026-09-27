@@ -1,0 +1,74 @@
+name: go-cache
+description: >-
+  Restore the shared Go module and build cache. Run after actions/setup-go
+  (with `cache: false`) in every ci.yml job that runs Go.
+
+# WHY THIS REPLACES setup-go's OWN CACHE (memql#5482)
+#
+# setup-go saves its cache from whichever job finishes first under a key every
+# Go job shares. In ci.yml that was the path-routing lane -- two small
+# packages -- so every cache the repository held was 22 MB, and every other
+# lane restored almost nothing: `go build` of the module took 137s on every
+# run, and no test result was ever served from the cache. A full build of this
+# module fills 1.45 GB of build cache and downloads 941 MB of modules;
+# restored, the same build takes seconds.
+#
+# So there is ONE writer: go-checks, which builds and vets the whole module
+# and runs the fuzz step, saves this cache at the end of a green push to
+# main, under the key this action computes. Every other job only restores.
+# scripts/dev/go_cache_single_writer_test.go holds both halves.
+#
+# THE KEY. Go's caches are content-addressed, so an older cache is never
+# wrong, only less complete: the key exists to decide freshness, not
+# correctness. It changes when any go.sum/go.work.sum changes and once a day,
+# and the restore-keys fall back first to today's-or-earlier with the same
+# sums, then to anything for this toolchain -- so one dependency bump no
+# longer cold-starts every job. The daily component matters because Go trims
+# cache entries unused for five days; a cache that stays under one key for a
+# week would come back mostly trimmed.
+#
+# Pull requests restore main's cache (a pull request can read the base
+# branch's caches) and never save: a pull request's cache is visible to that
+# pull request alone, and the repository's cache store is shared by every
+# workflow.
+
+outputs:
+  key:
+    description: The exact key for this run; go-checks saves under it.
+    value: ${{ steps.key.outputs.key }}
+  paths:
+    description: The cached paths, one per line, for the save step.
+    value: ${{ steps.key.outputs.paths }}
+  cache-hit:
+    description: '"true" when the exact key was restored.'
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute the Go cache key
+      id: key
+      shell: bash
+      env:
+        SUMS: ${{ hashFiles('**/go.sum', 'go.work.sum') }}
+      run: |
+        set -euo pipefail
+        prefix="go-v1-${RUNNER_OS}-${RUNNER_ARCH}-$(go env GOVERSION)"
+        {
+          echo "prefix=${prefix}"
+          echo "sums=${SUMS}"
+          echo "key=${prefix}-${SUMS}-$(date -u +%Y-%m-%d)"
+          echo "paths<<PATHS"
+          go env GOMODCACHE GOCACHE
+          echo "PATHS"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore the Go cache
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.key.outputs.paths }}
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: |
+          ${{ steps.key.outputs.prefix }}-${{ steps.key.outputs.sums }}-
+          ${{ steps.key.outputs.prefix }}-

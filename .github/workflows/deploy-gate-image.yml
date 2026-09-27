@@ -19,6 +19,13 @@ on:
     paths:
       - 'cmd/deploy-gate-check/**'
 
+# Cancel a superseded build when a new commit is pushed to the same pull
+# request, the block every other workflow here carries (memql#5482); pushes
+# to main key off the commit SHA, so they never cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

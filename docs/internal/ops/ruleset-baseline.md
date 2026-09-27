@@ -59,6 +59,51 @@ in [merge-queue.md](merge-queue.md); the point-in-time evidence is in
 **dated audit**, not a live status page — it correctly records 2026-08-06 and
 should not be edited to match today.
 
+### `strict_required_status_checks_policy`: off
+
+**Decided 2026-09-27 (memql#5481, epic memql#5476; design record
+`docs/superpowers/specs/2026-09-16-pipelines-program-design.md`, section 1).**
+The `required_status_checks` rule keeps its one context, `ci-required`; only
+its "branch must be up to date" parameter is off. Read the live value rather
+than this line:
+
+```
+$ gh api repos/znasllc-io/memql/rulesets/16630577 \
+    --jq '.rules[] | select(.type=="required_status_checks") | .parameters.strict_required_status_checks_policy'
+false
+```
+
+**Why it can be off.** The merge queue builds every candidate on
+`gh-readonly-queue/*` -- the base plus the pull request, exactly the tree that
+lands -- and runs the full suite on it before anything merges (`ci.yml`'s
+`merge_group` trigger). The strict rule enforced the same property a second
+time, from the pull request's side, and charged for it on every sibling
+merge: each merge to `main` flipped every open pull request to `BEHIND`, which
+meant `update-branch` and a fresh full run -- the "two or three runs per
+change" the design record measures in its section 1. That is the cost
+memql#5476 removes.
+
+**What still enforces up-to-dateness, and must keep doing so.** The owner
+bypass (`scripts/dev/merge-as-owner.sh`, CLAUDE.md "Branch Workflow" item 2)
+merges immediately rather than through the queue, so on that path nothing
+else tests the combination. The script therefore MEASURES the drift itself
+(`compare/<base>...<head>`) and refuses a branch that is behind, or whose
+drift it cannot read. That refusal never depended on this parameter --
+`BLOCKED` hides `BEHIND` on every pull request here anyway -- and it is what
+keeps the bypass from landing an untested tree with the parameter off.
+
+**What the drift check asserts, deliberately.** `scripts/ci/ruleset-drift.sh`
+reads `.rules[].type` only, so this parameter is outside it in either state;
+confirmed when this was recorded. That is the right scope: the check exists to
+catch a write that silently DROPS rules (the 2026-08-06 failure shape), and a
+rule's parameters are decisions, recorded here. If they ever need asserting,
+that is a new axis with its own baseline, as enforcement is.
+
+**To reverse it:** set the parameter back with a PUT that re-sends EVERY rule
+(see "Why a recorded baseline at all" -- a write that omits a rule deletes it),
+confirm `ruleset-drift.sh` still reports five rules asserted, and edit this
+section.
+
 ---
 
 ## Ruleset 19450314 — `Code Quality Copilot review for default branch`

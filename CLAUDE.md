@@ -333,17 +333,19 @@ DSL all live here.
 
    **A queued PR can go `DIRTY`, and it will stay there.** When a sibling lands
    underneath it, `mergeStateStatus` becomes `DIRTY` and does not resolve
-   itself; rebase on `origin/main` and force-push. **`BEHIND`** is the strict
-   status-check policy saying the base moved: `gh pr update-branch <n>` clears
-   it, then wait for CI on the new merge commit. **But `mergeStateStatus` is
-   ONE value and GitHub returns the STRONGEST blocker, so `BLOCKED` HIDES
-   `BEHIND`** -- and every PR here is blocked on a code-owner review its author
-   may not give, so a stale branch reads `BLOCKED` and that name is never seen.
-   `merge-as-owner.sh` therefore MEASURES the drift rather than reading it off
-   the state (`compare/<base>...<head>`, printed by `--check` as a `base` line)
+   itself; rebase on `origin/main` and force-push. **The strict up-to-date
+   policy is OFF by decision** (memql#5481; the recorded state and the command
+   that verifies it are in
+   [ruleset-baseline.md](docs/internal/ops/ruleset-baseline.md)): the queue
+   builds and tests the exact tree that lands, so a sibling merge no longer
+   forces `update-branch` and a fresh full run. **The owner bypass below skips
+   the queue**, so for it the base still matters: `merge-as-owner.sh` MEASURES
+   the drift (`compare/<base>...<head>`, printed by `--check` as a `base` line)
    and refuses on a non-zero count OR an unreadable comparison -- forcing
-   either with `--admin` lands a tree CI never tested against the current base,
-   which is the one thing `strict` exists to prevent.
+   either with `--admin` lands a tree CI never tested against the current base.
+   It measures rather than reading `mergeStateStatus`, which is ONE value
+   naming the STRONGEST blocker: every PR here is `BLOCKED` on a code-owner
+   review its author may not give, and that hides any staleness.
 2. **Merging your own PR: the owner uses the BYPASS, never a settings change.**
    The ruleset requires a code-owner review and that requirement stays on, but
    **GitHub never lets a pull request's author approve it** -- there is no
@@ -364,11 +366,12 @@ DSL all live here.
    scripts/dev/merge-as-owner.sh --pr=<n>           # merge
    ```
 
-   **"A failing check" means a failing REQUIRED one** (memql#5016). Two lanes
-   are red on pristine `main` and not required: CodeQL's `Analyze (go)`
-   (crashes above ~300 changed files) and `install-cluster-e2e` -- which DOES
-   test the branch (all three legs check the PR's commit out), so a red there
-   is a log to read, not a lane to wave through. The script refuses on a red or
+   **"A failing check" means a failing REQUIRED one** (memql#5016).
+   `install-cluster-e2e` is not required and can be red on pristine `main`,
+   but it DOES test the branch (all three legs check the PR's commit out), so a
+   red there is a log to read, not a lane to wave through. (CodeQL's `Analyze`
+   jobs were the other such lane; they left the pull-request path in
+   memql#5482 and now analyse every push to main.) The script refuses on a red or
    pending check the RULESET REQUIRES (`ci-required`, an `if: always()`
    aggregate) and REPORTS the rest as `FAILED (REQUIRED)` or `failed (not
    required)`. **If the required-check list cannot be read it refuses on

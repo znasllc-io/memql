@@ -62,6 +62,7 @@ package citags
 // catches the tags that do not.
 
 import (
+	"fmt"
 	"go/build"
 	"os"
 	"path/filepath"
@@ -145,13 +146,140 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// workflowDoc is the sliver of the GitHub Actions schema this gate reads.
+// workflowDoc is the sliver of the GitHub Actions schema this gate reads: each
+// job's `run:` text, and its strategy.matrix so a matrix job's commands can be
+// read per entry (memql#5483).
 type workflowDoc struct {
 	Jobs map[string]struct {
+		Strategy struct {
+			Matrix yaml.Node `yaml:"matrix"`
+		} `yaml:"strategy"`
 		Steps []struct {
 			Run string `yaml:"run"`
 		} `yaml:"steps"`
 	} `yaml:"jobs"`
+}
+
+// matrixRef matches a `${{ matrix.<key> }}` interpolation, spaces optional.
+var matrixRef = regexp.MustCompile(`\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}`)
+
+// matrixCombos expands a job's STATIC strategy.matrix into its combinations:
+// the cross product of its list-valued keys, plus each `include` entry. A
+// matrix computed at run time (`${{ fromJSON(...) }}`) has nothing static to
+// expand and yields none, so its steps are read as written -- and a
+// `-tags ${{ matrix.tag }}` left unexpanded matches no tag, which is the safe
+// direction: it cannot make a tagged file look covered.
+func matrixCombos(m yaml.Node) []map[string]string {
+	if m.Kind != yaml.MappingNode {
+		return nil
+	}
+	var keys []string
+	values := map[string][]string{}
+	var include []map[string]string
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		k, v := m.Content[i].Value, m.Content[i+1]
+		switch {
+		case k == "include" && v.Kind == yaml.SequenceNode:
+			for _, entry := range v.Content {
+				if entry.Kind != yaml.MappingNode {
+					continue
+				}
+				combo := map[string]string{}
+				for j := 0; j+1 < len(entry.Content); j += 2 {
+					if entry.Content[j+1].Kind == yaml.ScalarNode {
+						combo[entry.Content[j].Value] = entry.Content[j+1].Value
+					}
+				}
+				include = append(include, combo)
+			}
+		case k == "exclude":
+			// An excluded combination runs nothing, so dropping the
+			// exclusion can only ADD lanes -- over-reporting coverage the
+			// matrix does not have. No workflow here uses one; refuse to
+			// guess rather than read one wrongly.
+			panic("citags: strategy.matrix.exclude is not modelled -- teach matrixCombos before using it")
+		case v.Kind == yaml.SequenceNode:
+			keys = append(keys, k)
+			for _, item := range v.Content {
+				if item.Kind == yaml.ScalarNode {
+					values[k] = append(values[k], item.Value)
+				}
+			}
+		}
+	}
+	var combos []map[string]string
+	if len(keys) > 0 {
+		combos = []map[string]string{{}}
+		for _, k := range keys {
+			var next []map[string]string
+			for _, base := range combos {
+				for _, v := range values[k] {
+					merged := map[string]string{k: v}
+					for bk, bv := range base {
+						merged[bk] = bv
+					}
+					next = append(next, merged)
+				}
+			}
+			combos = next
+		}
+	}
+	return append(combos, include...)
+}
+
+// renderRuns returns a step's `run:` text once per matrix combination with its
+// `${{ matrix.<key> }}` references substituted, or the text as written when
+// the job has no static matrix or the step names none of it.
+func renderRuns(run string, combos []map[string]string) []string {
+	if len(combos) == 0 || !matrixRef.MatchString(run) {
+		return []string{run}
+	}
+	out := make([]string, 0, len(combos))
+	for _, c := range combos {
+		out = append(out, matrixRef.ReplaceAllStringFunc(run, func(ref string) string {
+			if v, ok := c[matrixRef.FindStringSubmatch(ref)[1]]; ok {
+				return v
+			}
+			return ref
+		}))
+	}
+	return out
+}
+
+// lanesFromWorkflow returns every `go test -tags` invocation in one workflow,
+// reading ONLY steps[].run, once per matrix entry for a matrix job.
+func lanesFromWorkflow(name string, data []byte) ([]lane, error) {
+	var wf workflowDoc
+	if err := yaml.Unmarshal(data, &wf); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", name, err)
+	}
+	var out []lane
+	for _, job := range wf.Jobs {
+		combos := matrixCombos(job.Strategy.Matrix)
+		for _, step := range job.Steps {
+			for _, run := range renderRuns(step.Run, combos) {
+				for _, cmd := range goTestCmd.FindAllStringSubmatch(run, -1) {
+					args := cmd[1]
+					m := tagsFlag.FindStringSubmatch(args)
+					if m == nil {
+						continue
+					}
+					var pkgs []string
+					compileOnly := false
+					for _, f := range strings.Fields(args) {
+						if strings.HasPrefix(f, "./") || f == "..." {
+							pkgs = append(pkgs, f)
+						}
+						if f == "-c" {
+							compileOnly = true
+						}
+					}
+					out = append(out, lane{tags: strings.Split(m[1], ","), pkgs: pkgs, workflow: name, compileOnly: compileOnly})
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 // ciLanes parses the PR-critical workflows and returns every `go test -tags`
@@ -173,34 +301,65 @@ func ciLanes(t *testing.T, root string) []lane {
 		if readErr != nil {
 			t.Fatalf("reading %s: %v", e.Name(), readErr)
 		}
-		var wf workflowDoc
-		if err := yaml.Unmarshal(data, &wf); err != nil {
-			t.Fatalf("parsing %s: %v", e.Name(), err)
+		lanes, err := lanesFromWorkflow(e.Name(), data)
+		if err != nil {
+			t.Fatal(err)
 		}
-		for _, job := range wf.Jobs {
-			for _, step := range job.Steps {
-				for _, cmd := range goTestCmd.FindAllStringSubmatch(step.Run, -1) {
-					args := cmd[1]
-					m := tagsFlag.FindStringSubmatch(args)
-					if m == nil {
-						continue
-					}
-					var pkgs []string
-					compileOnly := false
-					for _, f := range strings.Fields(args) {
-						if strings.HasPrefix(f, "./") || f == "..." {
-							pkgs = append(pkgs, f)
-						}
-						if f == "-c" {
-							compileOnly = true
-						}
-					}
-					out = append(out, lane{tags: strings.Split(m[1], ","), pkgs: pkgs, workflow: e.Name(), compileOnly: compileOnly})
-				}
-			}
-		}
+		out = append(out, lanes...)
 	}
 	return out
+}
+
+// TestMatrixEntriesAreReadAsLanes pins the expansion memql#5483 depends on: the
+// tag passes are ONE matrix job, so without it every tagged file would read as
+// uncovered -- and, worse, a regression here that expanded nothing would look
+// exactly like that and be "fixed" by deleting the matrix.
+func TestMatrixEntriesAreReadAsLanes(t *testing.T) {
+	wf := []byte(`
+jobs:
+  tagged:
+    strategy:
+      matrix:
+        include:
+          - tag: agent
+            packages: ./app/ ./integrations/agent/
+          - tag: mcp
+            packages: ./component/mcp/
+    steps:
+      - run: go test -tags ${{ matrix.tag }} -timeout=300s ${{ matrix.packages }}
+  crossed:
+    strategy:
+      matrix:
+        tag: [edge, bff]
+    steps:
+      - run: go test -tags ${{matrix.tag}} ./component/server/
+  planned:
+    strategy:
+      matrix: ${{ fromJSON(needs.plan.outputs.go_matrix) }}
+    steps:
+      - run: go test -tags ${{ matrix.tag }} ${{ matrix.packages }}
+`)
+	lanes, err := lanesFromWorkflow("ci.yml", wf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, l := range lanes {
+		got[strings.Join(l.tags, ",")+" "+strings.Join(l.pkgs, " ")] = true
+	}
+	for _, want := range []string{
+		"agent ./app/ ./integrations/agent/",
+		"mcp ./component/mcp/",
+		"edge ./component/server/",
+		"bff ./component/server/",
+	} {
+		if !got[want] {
+			t.Errorf("missing lane %q; got %v", want, got)
+		}
+	}
+	if len(lanes) != 4 {
+		t.Errorf("want exactly the 4 static lanes (a computed matrix expands to none), got %d: %v", len(lanes), got)
+	}
 }
 
 // buildsUnder reports whether the file compiles under the given extra build
