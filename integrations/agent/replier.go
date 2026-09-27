@@ -335,6 +335,21 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		Role:             role,
 		ExplicitProvider: explicitProvider,
 	}
+	// A PERSON'S OVERRIDE FOR THIS STEP (epic memql#5414, design D20). A work
+	// turn somebody re-ran or branched runs at the level they asked for, on
+	// the model they pinned -- which outranks the agent's stored preference
+	// for this one version -- and at the effort they chose. It goes through
+	// the same function every prompt path uses, so the knobs cannot mean two
+	// things; the instructions and guidance already ride the turn's history
+	// (integrations/agents' workTurnHistory). Only an owned work execution can
+	// carry an override, and every other turn is untouched.
+	if isOwnedWorkExecution(ctx) {
+		overridden, err := memql.ApplyStepOverride(ctx, routerReq)
+		if err != nil {
+			return nil, err
+		}
+		routerReq = overridden
+	}
 	// Provider resolution + the tool loop are the lane-specific caller's
 	// job (handleStreaming resolves stream-with-tools; handleBackground
 	// resolves the non-streaming tool surface). prepareTurn only builds
