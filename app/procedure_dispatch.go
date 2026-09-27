@@ -386,9 +386,14 @@ func runProcedureFetch(ctx context.Context, host procedureHost, args map[string]
 // CLUSTER whatever the procedure's target, because that is where the app's
 // call ran too: over MCP, as its owner.
 //
-// A SHADOW REPLAY RUNS ONLY A TOOL THAT READS. Its handler must call a query;
-// a mutation, a logic, a builtin, an automation or a webhook could write, and
-// a shadow writes nothing.
+// A REPLAYED MCP STEP RUNS ONLY A TOOL THAT READS, IN EVERY MODE. Its handler
+// must call a query; a mutation, a logic, a builtin, an automation or a webhook
+// could write. The recorded call ran under the app session's credential, which
+// is pinned to the read/query surface, while a replay acts as the owner with a
+// borrowed actor that is not -- so a replay that ran a writing tool would do
+// something the recording could not have, with more authority than it had. A
+// shadow writes nothing anyway; a canary or trusted replay is held to the
+// recording.
 func runProcedureMCP(
 	ctx context.Context,
 	tools procedureToolCatalog,
@@ -411,9 +416,8 @@ func runProcedureMCP(
 	if !registered {
 		return procedure.DispatchResult{}, fmt.Errorf("%q is not a registered MemQL tool, so there is nothing here to call", name)
 	}
-	readOnly := kind == "query"
-	if req.Sandbox && !readOnly {
-		return procedure.DispatchResult{}, fmt.Errorf("a shadow replay runs only a tool that reads, and %q calls a %s", name, kind)
+	if kind != "query" {
+		return procedure.DispatchResult{}, fmt.Errorf("%q calls a %s, and a replayed MCP step runs only a tool that reads: the recorded call ran under the app session's credential, pinned to the read/query surface, and a replay asks for no more than the recording had", name, kind)
 	}
 	if agents == nil {
 		return procedure.DispatchResult{}, fmt.Errorf("this node cannot resolve the agent a tool call acts as")
@@ -460,8 +464,8 @@ func runProcedureMCP(
 			"resultType": resultType,
 			"digest":     procedureDigest(raw),
 		},
-		// A MemQL row write is outside the replay's workspace by definition.
-		Delivered: !readOnly && !isError,
+		// A read delivers nothing, and a read is all a replayed MCP step runs.
+		Delivered: false,
 	}, nil
 }
 

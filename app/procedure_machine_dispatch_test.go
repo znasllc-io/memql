@@ -354,6 +354,22 @@ func TestAnAbsoluteMachinePathIsLiteralAndMayNotClimb(t *testing.T) {
 	}
 }
 
+// A machine-local procedure's MCP step is held to the same rule as the
+// workbench's: a trusted replay may call a tool that reads, never one whose
+// handler could write -- the app session's credential could not have.
+func TestATrustedMachineReplayRefusesAnMCPToolThatCouldWrite(t *testing.T) {
+	tools := &fakeProcedureTools{kinds: map[string]string{"updateCalendarEvent": "mutation"}}
+	d := newTestMachineDispatcher(newFakeMachine(), testMachineRoot)
+	d.tools = tools
+	_, err := d.Dispatch(context.Background(), machineStep("mcp", map[string]any{"tool": "updateCalendarEvent", "arguments": map[string]any{"eventId": "e1"}}))
+	if err == nil || !strings.Contains(err.Error(), `"updateCalendarEvent"`) {
+		t.Fatalf("a trusted machine replay of a mutation tool = %v, want a refusal naming it", err)
+	}
+	if tools.calls != 0 {
+		t.Fatal("the mutation tool was executed")
+	}
+}
+
 func TestAHomePathOnTheMachineIsRefused(t *testing.T) {
 	m := newFakeMachine()
 	if _, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(),

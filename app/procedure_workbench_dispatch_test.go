@@ -661,36 +661,43 @@ func TestAnMCPQueryRunsAsTheOwnersAgentAndIsTypedAsItWasRecorded(t *testing.T) {
 	}
 }
 
-func TestAShadowRefusesAnMCPToolThatCouldWrite(t *testing.T) {
-	for _, kind := range []string{"mutation", "logic", "builtin", "automation", "webhook", "unknown"} {
-		tools := &fakeProcedureTools{kinds: map[string]string{"saveNote": kind}}
-		req := workbenchStep("mcp", map[string]any{"tool": "saveNote"})
-		req.Sandbox = true
-		if _, err := newTestWorkbenchDispatcher(newFakeWorkbench(), tools).Dispatch(context.Background(), req); err == nil {
-			t.Errorf("a shadow ran a %s tool", kind)
-		}
-		if tools.calls != 0 {
-			t.Errorf("a %s tool was executed in a shadow", kind)
+// A REPLAYED MCP STEP ONLY READS, IN EVERY MODE. The recorded call ran under
+// the app session's credential, which is pinned to the read/query surface; the
+// replay acts as the owner, with a borrowed actor that is not. So a tool whose
+// handler could write -- a mutation, a logic, a builtin, an automation, a
+// webhook, or one whose handler cannot be read -- is refused before it runs,
+// naming it, on a trusted replay exactly as in a shadow. The step did not run,
+// so the refusal is a Go error.
+func TestAReplayedMCPToolThatCouldWriteIsRefusedInEveryMode(t *testing.T) {
+	for _, mode := range []string{"shadow", "trusted"} {
+		for _, kind := range []string{"mutation", "logic", "builtin", "automation", "webhook", "unknown"} {
+			tools := &fakeProcedureTools{kinds: map[string]string{"saveNote": kind},
+				result: `{"content":[{"type":"text","text":"{\"id\":\"n1\"}"}],"isError":false}`}
+			req := workbenchStep("mcp", map[string]any{"tool": "saveNote", "arguments": map[string]any{"text": "x"}})
+			req.Sandbox = mode == "shadow"
+			_, err := newTestWorkbenchDispatcher(newFakeWorkbench(), tools).Dispatch(context.Background(), req)
+			if err == nil || !strings.Contains(err.Error(), `"saveNote"`) || !strings.Contains(err.Error(), kind) {
+				t.Errorf("%s replay of a %s tool = %v, want a refusal naming the tool and what it calls", mode, kind, err)
+			}
+			if tools.calls != 0 {
+				t.Errorf("a %s tool was executed on a %s replay", kind, mode)
+			}
 		}
 	}
 }
 
-func TestOutsideAShadowAnMCPToolThatWritesRunsAndDelivers(t *testing.T) {
-	tools := &fakeProcedureTools{kinds: map[string]string{"saveNote": "mutation"},
-		result: `{"content":[{"type":"text","text":"{\"id\":\"n1\"}"}],"isError":false}`}
+// And a tool that reads runs outside a shadow too -- delivering nothing, which
+// is what a read is.
+func TestATrustedReplayRunsAnMCPToolThatReads(t *testing.T) {
+	tools := &fakeProcedureTools{kinds: map[string]string{"librarySearch": "query"},
+		result: `{"content":[{"type":"text","text":"[]"}],"isError":false}`}
 	res, err := newTestWorkbenchDispatcher(newFakeWorkbench(), tools).Dispatch(context.Background(),
-		workbenchStep("mcp", map[string]any{"tool": "saveNote", "arguments": map[string]any{"text": "x"}}))
+		workbenchStep("mcp", map[string]any{"tool": "librarySearch", "arguments": map[string]any{"q": "x"}}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Delivered || res.Observation.ResultType != "object" {
-		t.Fatalf("a mutation = %+v, delivered %v", res.Observation, res.Delivered)
-	}
-	tools.result = `{"content":[{"type":"text","text":"denied"}],"isError":true}`
-	res, err = newTestWorkbenchDispatcher(newFakeWorkbench(), tools).Dispatch(context.Background(),
-		workbenchStep("mcp", map[string]any{"tool": "saveNote"}))
-	if err != nil || res.Delivered || res.Observation.IsError == nil || !*res.Observation.IsError {
-		t.Fatalf("a failed mutation = %+v, delivered %v, %v", res.Observation, res.Delivered, err)
+	if tools.calls != 1 || res.Delivered || res.Observation.IsError == nil || *res.Observation.IsError || res.Observation.ResultType != "array" {
+		t.Fatalf("a trusted read = %+v delivered %v after %d calls", res.Observation, res.Delivered, tools.calls)
 	}
 }
 
