@@ -1,0 +1,7 @@
+/// The open tickets, with the sort clause written twice.
+query ticket openTicketsSortedTwice {
+  filter row => row.status == "open"
+  sort "row.createdAt", "desc"
+  sort "title", "asc"
+  paginate 20
+}

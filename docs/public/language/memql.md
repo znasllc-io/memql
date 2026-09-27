@@ -1822,6 +1822,12 @@ query artifact artifactsInFolder {
 A long filter continues on the lines below it: a line that opens with `&&`,
 `||` or `??` joins the one above it, as the example shows.
 
+Each clause is written once. A second `filter` or `sort` line used to replace
+the first without a word -- dropping its conditions or its keys -- and a clause
+written twice is refused at parse as `query_clause_duplicate`, quoting both
+lines (memql#5429): join the conditions with `&&` in one filter, and list every
+key in one sort clause.
+
 Body directives: `filter` (the predicate), `shape` (named projection), and optional `sort "field", "dir"` / `paginate N` / `refine row => ...` lines ([the refine clause](#the-refine-clause)):
 
 <!-- corpus: 2026/examples/memql/queries/sort-paginate.memql -->

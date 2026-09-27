@@ -25,6 +25,20 @@
       "code": "signature_concept_unresolved",
       "message": "signature concept \"supportNote\" does not resolve: it is neither imported nor a same-domain concept",
       "note": "The unimported half of the same rule, refused before memql#5433 and carrying its code since."
+    },
+    {
+      "file": "sort-written-twice.memql",
+      "verdict": "refuse_parse",
+      "code": "query_clause_duplicate",
+      "message": "`sort` is written twice -- `sort \"row.createdAt\", \"desc\"`, then `sort \"title\", \"asc\"` -- and a query takes one sort clause",
+      "note": "memql#5429. The body is read into one slot per clause, so the second sort line replaced the first one's keys without a word."
+    },
+    {
+      "file": "filter-written-twice.memql",
+      "verdict": "refuse_parse",
+      "code": "query_clause_duplicate",
+      "message": "`filter` is written twice",
+      "note": "The same defect on the clause where it costs most: the second filter line replaced the first, and with it the ownership test."
     }
   ]
 }
