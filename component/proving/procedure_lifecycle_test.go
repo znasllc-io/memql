@@ -185,6 +185,42 @@ func TestTheHarnessIsGivenTheScenariosValuesAndPutsThemBack(t *testing.T) {
 	}
 }
 
+func TestEveryGoalRunIsClosedAndEveryReplayKnowsItsGoal(t *testing.T) {
+	// A goal run left `running` reads as work still in flight to every sweep
+	// and every reader; and a replay that is not told its goal, its statement
+	// and the statement that asked for it cannot key its own run, so a
+	// resumed goal would replay twice.
+	h := &fakeHarness{}
+	r := &Runner{Lifecycle: h, Prov: lifecycleProv()}
+	if p, _ := runBoth(t, r, lifecycles(t)[scnDivergence]); !p.Passed {
+		t.Fatalf("the platform arm failed: %v", p.Failures)
+	}
+	if len(h.ladders) != 1 {
+		t.Fatalf("%d ladders were built, want 1", len(h.ladders))
+	}
+	l := h.ladders[0]
+	opened, closed := len(l.spine.goals), len(l.spine.closed)
+	if opened == 0 || opened != closed {
+		t.Fatalf("%d goal runs opened and %d closed; every one must be closed", opened, closed)
+	}
+	for run, served := range l.spine.closed {
+		if !served {
+			t.Errorf("goal run %s was closed as not served, and every goal of this lifecycle was served -- the last by the app's repair", run)
+		}
+	}
+	if len(l.orders) == 0 {
+		t.Fatal("no replay was asked for, so this test checked nothing")
+	}
+	for _, o := range l.orders {
+		if o.StepKey != replayStatementKey || o.GoalId == "" || o.Statement == "" || o.GoalRunId == "" {
+			t.Errorf("a replay was asked for as %+v; it needs its goal, its statement and the statement key %q", o, replayStatementKey)
+		}
+		if g := l.spine.goals[o.GoalRunId]; g.construct != o.ConstructId {
+			t.Errorf("goal run %s names construct %q and was replayed from %q; the run must name what serves it", o.GoalRunId, g.construct, o.ConstructId)
+		}
+	}
+}
+
 // --- Negative controls, run on the TEST ------------------------------------------
 
 func TestGuidanceThatNamesNoCompletedStepIsADuplicateTheFigureAndTheCheckBothSee(t *testing.T) {

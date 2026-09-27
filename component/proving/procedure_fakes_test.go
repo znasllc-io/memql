@@ -60,7 +60,10 @@ type fakeHarness struct {
 	ladders []*fakeLadder
 }
 
-func (h *fakeHarness) Open(_ context.Context, overlay work.LadderPolicy) (*LifecyclePlatform, error) {
+func (h *fakeHarness) Open(_ context.Context, owner string, overlay work.LadderPolicy) (*LifecyclePlatform, error) {
+	if owner == "" {
+		return nil, fmt.Errorf("no owner")
+	}
 	h.mu.Lock()
 	h.opened = append(h.opened, overlay)
 	h.mu.Unlock()
@@ -79,7 +82,7 @@ func (h *fakeHarness) Open(_ context.Context, overlay work.LadderPolicy) (*Lifec
 			*f.dst = f.v
 		}
 	}
-	spine := &fakeSpine{goals: map[string]fakeGoalRun{}, approvals: map[string]*ApprovalState{}}
+	spine := &fakeSpine{goals: map[string]fakeGoalRun{}, approvals: map[string]*ApprovalState{}, closed: map[string]bool{}}
 	rec := &fakeRecorder{runs: map[string]*fakeRecording{}}
 	return &LifecyclePlatform{
 		Recorder: rec,
@@ -106,6 +109,7 @@ func (h *fakeHarness) Open(_ context.Context, overlay work.LadderPolicy) (*Lifec
 type fakeGoalRun struct {
 	sig       string
 	variables map[string]string
+	construct string
 }
 
 type fakeSpine struct {
@@ -114,6 +118,8 @@ type fakeSpine struct {
 	goals     map[string]fakeGoalRun
 	approvals map[string]*ApprovalState
 	order     []string
+	// closed records every goal run closed, and whether it was served.
+	closed map[string]bool
 }
 
 func (s *fakeSpine) OpenGoal(_ context.Context, g GoalOrder) (string, string, error) {
@@ -125,8 +131,21 @@ func (s *fakeSpine) OpenGoal(_ context.Context, g GoalOrder) (string, string, er
 		vars[k] = fmt.Sprint(v)
 	}
 	runId := fmt.Sprintf("v1:work:run:goal-%d", s.n)
-	s.goals[runId] = fakeGoalRun{sig: g.GoalSignature, variables: vars}
+	s.goals[runId] = fakeGoalRun{sig: g.GoalSignature, variables: vars, construct: g.ProcedureConstructId}
 	return fmt.Sprintf("v1:work:goal:%d", s.n), runId, nil
+}
+
+func (s *fakeSpine) CloseGoal(_ context.Context, _ string, runId string, served bool, _ string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.goals[runId]; !ok {
+		return fmt.Errorf("no goal run %q", runId)
+	}
+	if _, done := s.closed[runId]; done {
+		return fmt.Errorf("goal run %q closed twice", runId)
+	}
+	s.closed[runId] = served
+	return nil
 }
 
 func (s *fakeSpine) DecideApproval(_ context.Context, _ string, approvalId, decision string) error {
@@ -140,12 +159,20 @@ func (s *fakeSpine) DecideApproval(_ context.Context, _ string, approvalId, deci
 	return nil
 }
 
-func (s *fakeSpine) PromotionApprovals(context.Context, string) ([]ApprovalState, error) {
+func (s *fakeSpine) PromotionApprovals(_ context.Context, _ string, known []string) ([]ApprovalState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Every pending one, and each known one whatever its decision -- the
+	// engine's read-back answers the same union.
+	want := map[string]bool{}
+	for _, id := range known {
+		want[id] = true
+	}
 	out := make([]ApprovalState, 0, len(s.order))
 	for _, id := range s.order {
-		out = append(out, *s.approvals[id])
+		if a := s.approvals[id]; a.Decision == "" || want[id] {
+			out = append(out, *a)
+		}
 	}
 	return out, nil
 }
@@ -257,6 +284,8 @@ type fakeLadder struct {
 	constructs map[string]*fakeConstruct // by goal signature
 	recordings map[string]int            // succeeded recordings per signature
 	replays    int
+	// orders are every replay the driver asked for, as it asked.
+	orders []ReplayOrder
 }
 
 // recordingGoal resolves a recording to the goal it served.
@@ -346,7 +375,7 @@ func (l *fakeLadder) ShadowCompare(_ context.Context, _ string, runId string) ([
 		bindings[p] = g.variables[p]
 	}
 	t := work.Advance(c.state, work.LadderEvent{Kind: work.EventShadowCompared, Match: match, Bindings: bindings, FreeParameters: l.freeParameters()}, l.policy)
-	rep := ReplayReport{ConstructId: c.id, Mode: "shadow", Match: match, From: string(t.From), To: string(t.To)}
+	rep := ReplayReport{ConstructId: c.id, Mode: "shadow", Match: match, From: string(t.From), To: string(t.To), Rung: string(t.From)}
 	if t.Propose {
 		t.State.PromotionApprovalId = l.spine.raise(c.id)
 		rep.Proposed, rep.PromotionApprovalId = true, t.State.PromotionApprovalId
@@ -382,12 +411,17 @@ func (l *fakeLadder) Replay(ctx context.Context, o ReplayOrder) (ReplayReport, e
 		}
 	}
 	l.replays++
+	l.orders = append(l.orders, o)
 	replayRun := fmt.Sprintf("v1:work:run:replay-%d", l.replays)
 	l.mu.Unlock()
 	if c == nil {
 		return ReplayReport{}, fmt.Errorf("no construct %q", o.ConstructId)
 	}
-	rep := ReplayReport{ConstructId: c.id, Mode: o.Mode, ReplayRunId: replayRun, ModelCalls: l.knobs.replayModelCalls, From: string(c.state.Rung)}
+	rep := ReplayReport{ConstructId: c.id, Mode: o.Mode, ReplayRunId: replayRun, ModelCalls: l.knobs.replayModelCalls, From: string(c.state.Rung), Rung: string(c.state.Rung)}
+	if l.knobs.serveShadow && c.state.Rung == work.RungShadow {
+		// The lie carried through: the runner reports the rung it was told.
+		rep.Rung = string(work.RungTrusted)
+	}
 	vars := map[string]string{}
 	for k, v := range o.Input {
 		vars[k] = fmt.Sprint(v)
@@ -411,6 +445,7 @@ func (l *fakeLadder) Replay(ctx context.Context, o ReplayOrder) (ReplayReport, e
 		rep.Served = true
 		return rep, nil
 	}
+	rep.Code = "procedure_diverged"
 	guidance := rep.Completed
 	if l.knobs.dropGuidance {
 		guidance = nil

@@ -17,14 +17,14 @@ commit and date it came from. A figure that was not measured says so, in
 its own words, rather than reporting a zero -- an absent figure and a zero
 are different answers.
 
-- **Scorecard** `2026-09-06` at commit `2d001309a`
-- **Corpus** `6d36d1420dc4ad89` -- two scorecards with different corpus fingerprints measured different things and are not a trend
+- **Scorecard** `2026-09-27` at commit `b60d656bd`
+- **Corpus** `38d4510b53a2aa15` -- two scorecards with different corpus fingerprints measured different things and are not a trend
 
 ## The two tiers
 
 | Tier | Armed | Last run | |
 |---|---|---|---|
-| `ci` | yes | 2026-09-06 | replayed on every pull request; it reaches no provider. Responses come from synthetic. |
+| `ci` | yes | 2026-09-27 | replayed on every pull request; it reaches no provider. Responses come from synthetic. |
 | `live` | no | never | dispatched by hand from proving-live.yml; it has not been run, so every live figure reads `tierNotRun` |
 
 ## What each tier can honestly measure
@@ -70,8 +70,20 @@ CI and stay that way until the live tier fills them.
 |---|---|---|---|
 | `amortizedCost.a-catalog-hit-makes-no-model-call` | `amortizedCost.compileCallsOnCatalogHit` | platform | 0 (0-0, N=1) |
 | `amortizedCost.control-a-catalog-miss-reaches-a-model` | `amortizedCost.compileCallsOnCatalogHit` | platform | 1 (1-1, N=1) |
+| `amortizedCost.a-local-fleet-serves-every-call` | `amortizedCost.providerCalls` | baseline | 0 (0-0, N=1) |
+| `amortizedCost.a-local-fleet-serves-every-call` | `amortizedCost.providerCalls` | platform | 0 (0-0, N=1) |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.providerCalls` | baseline | 2 (2-2, N=1) |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.providerCalls` | platform | 1 (1-1, N=1) |
+| `amortizedCost.a-trusted-procedure-replays-without-a-model` | `amortizedCost.providerCalls` | baseline | 1 (1-1, N=1) |
+| `amortizedCost.a-trusted-procedure-replays-without-a-model` | `amortizedCost.providerCalls` | platform | 0 (0-0, N=1) |
+| `amortizedCost.control-a-fresh-goal-reaches-a-model` | `amortizedCost.providerCalls` | baseline | 1 (1-1, N=1) |
+| `amortizedCost.control-a-fresh-goal-reaches-a-model` | `amortizedCost.providerCalls` | platform | 1 (1-1, N=1) |
+| `amortizedCost.control-a-reasoning-step-does-reach-a-provider` | `amortizedCost.providerCalls` | baseline | 1 (1-1, N=1) |
+| `amortizedCost.control-a-reasoning-step-does-reach-a-provider` | `amortizedCost.providerCalls` | platform | 1 (1-1, N=1) |
+| `amortizedCost.a-trusted-procedure-replays-without-a-model` | `amortizedCost.replaysServedWithoutModel` | baseline | 0 (0-0, N=1) |
+| `amortizedCost.a-trusted-procedure-replays-without-a-model` | `amortizedCost.replaysServedWithoutModel` | platform | 1 (1-1, N=1) |
+| `amortizedCost.control-a-shadow-procedure-serves-no-goal` | `amortizedCost.replaysServedWithoutModel` | baseline | 0 (0-0, N=1) |
+| `amortizedCost.control-a-shadow-procedure-serves-no-goal` | `amortizedCost.replaysServedWithoutModel` | platform | 0 (0-0, N=1) |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.stepsServedFromJournal` | baseline | 5 (5-5, N=1) |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.stepsServedFromJournal` | platform | 5 (5-5, N=1) |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.tokensPerGoal` | baseline | -- (a replayed run's tokens are the cassette's recorded tokens, not this run's) |
@@ -85,7 +97,13 @@ Platform against the bare-loop baseline:
 |---|---|---|
 | `amortizedCost.a-catalog-hit-makes-no-model-call` | `amortizedCost.compileCallsOnCatalogHit` | not comparable: the baseline arm produced no figure |
 | `amortizedCost.control-a-catalog-miss-reaches-a-model` | `amortizedCost.compileCallsOnCatalogHit` | not comparable: the baseline arm produced no figure |
+| `amortizedCost.a-local-fleet-serves-every-call` | `amortizedCost.providerCalls` | unchanged |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.providerCalls` | improved (-50.0%) |
+| `amortizedCost.a-trusted-procedure-replays-without-a-model` | `amortizedCost.providerCalls` | improved (-100.0%) |
+| `amortizedCost.control-a-fresh-goal-reaches-a-model` | `amortizedCost.providerCalls` | unchanged |
+| `amortizedCost.control-a-reasoning-step-does-reach-a-provider` | `amortizedCost.providerCalls` | unchanged |
+| `amortizedCost.a-trusted-procedure-replays-without-a-model` | `amortizedCost.replaysServedWithoutModel` | improved (+1 absolute; no relative figure, the earlier value was zero) |
+| `amortizedCost.control-a-shadow-procedure-serves-no-goal` | `amortizedCost.replaysServedWithoutModel` | unchanged |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.stepsServedFromJournal` | unchanged |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.tokensPerGoal` | undecidable (the earlier figure is notMeasurableOnReplay) |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.usdPerGoal` | undecidable (the earlier figure is notMeasurableOnReplay) |
@@ -117,6 +135,8 @@ Platform against the bare-loop baseline:
 | `recovery.a-transient-failure-is-retried` | `recovery.modelCalls` | platform | 0 (0-0, N=1) |
 | `recovery.an-environment-failure-is-classified-by-rules` | `recovery.modelCalls` | baseline | 0 (0-0, N=1) |
 | `recovery.an-environment-failure-is-classified-by-rules` | `recovery.modelCalls` | platform | 0 (0-0, N=1) |
+| `recovery.control-a-novel-failure-reaches-the-classifier` | `recovery.modelCalls` | baseline | 0 (0-0, N=1) |
+| `recovery.control-a-novel-failure-reaches-the-classifier` | `recovery.modelCalls` | platform | 2 (2-2, N=1) |
 | `recovery.repair-runs-from-the-failed-step` | `recovery.modelCalls` | baseline | 2 (2-2, N=1) |
 | `recovery.repair-runs-from-the-failed-step` | `recovery.modelCalls` | platform | 1 (1-1, N=1) |
 | `recovery.a-stalled-loop-escalates-instead-of-retrying` | `recovery.rate` | baseline | 0.0% (0.0%-0.0%, N=1) |
@@ -142,6 +162,7 @@ Platform against the bare-loop baseline:
 |---|---|---|
 | `recovery.a-transient-failure-is-retried` | `recovery.modelCalls` | unchanged |
 | `recovery.an-environment-failure-is-classified-by-rules` | `recovery.modelCalls` | unchanged |
+| `recovery.control-a-novel-failure-reaches-the-classifier` | `recovery.modelCalls` | regressed (+2 absolute; no relative figure, the earlier value was zero) |
 | `recovery.repair-runs-from-the-failed-step` | `recovery.modelCalls` | improved (-50.0%) |
 | `recovery.a-stalled-loop-escalates-instead-of-retrying` | `recovery.rate` | improved (+1 absolute; no relative figure, the earlier value was zero) |
 | `recovery.a-transient-failure-is-retried` | `recovery.rate` | unchanged |
@@ -160,6 +181,10 @@ Platform against the bare-loop baseline:
 | `durability.a-script-step-on-a-machine-survives-a-stop` | `durability.duplicatedSideEffects` | platform | 0 (0-0, N=1) |
 | `durability.a-stopped-run-resumes-with-no-duplicated-effect` | `durability.duplicatedSideEffects` | baseline | 1 (1-1, N=1) |
 | `durability.a-stopped-run-resumes-with-no-duplicated-effect` | `durability.duplicatedSideEffects` | platform | 0 (0-0, N=1) |
+| `durability.a-divergence-duplicates-no-side-effect` | `durability.duplicatedSideEffectsAcrossDivergence` | baseline | 1 (1-1, N=1) |
+| `durability.a-divergence-duplicates-no-side-effect` | `durability.duplicatedSideEffectsAcrossDivergence` | platform | 0 (0-0, N=1) |
+| `durability.control-a-divergence-without-guidance-duplicates` | `durability.duplicatedSideEffectsAcrossDivergence` | baseline | 1 (1-1, N=1) |
+| `durability.control-a-divergence-without-guidance-duplicates` | `durability.duplicatedSideEffectsAcrossDivergence` | platform | 0 (0-0, N=1) |
 | `durability.a-resume-re-executes-no-completed-step` | `durability.resumedOnAnotherNode` | platform | 100.0% (100.0%-100.0%, N=1) |
 | `durability.a-stopped-run-resumes-with-no-duplicated-effect` | `durability.resumedOnAnotherNode` | platform | 100.0% (100.0%-100.0%, N=1) |
 | `durability.a-resume-re-executes-no-completed-step` | `durability.resumedStepsReExecuted` | baseline | 2 (2-2, N=1) |
@@ -175,6 +200,8 @@ Platform against the bare-loop baseline:
 |---|---|---|
 | `durability.a-script-step-on-a-machine-survives-a-stop` | `durability.duplicatedSideEffects` | improved (-100.0%) |
 | `durability.a-stopped-run-resumes-with-no-duplicated-effect` | `durability.duplicatedSideEffects` | improved (-100.0%) |
+| `durability.a-divergence-duplicates-no-side-effect` | `durability.duplicatedSideEffectsAcrossDivergence` | improved (-100.0%) |
+| `durability.control-a-divergence-without-guidance-duplicates` | `durability.duplicatedSideEffectsAcrossDivergence` | improved (-100.0%) |
 | `durability.a-resume-re-executes-no-completed-step` | `durability.resumedOnAnotherNode` | not comparable: the baseline arm produced no figure |
 | `durability.a-stopped-run-resumes-with-no-duplicated-effect` | `durability.resumedOnAnotherNode` | not comparable: the baseline arm produced no figure |
 | `durability.a-resume-re-executes-no-completed-step` | `durability.resumedStepsReExecuted` | improved (-100.0%) |
