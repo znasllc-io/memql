@@ -466,7 +466,7 @@ func (j *workJournal) stepRunning(ctx context.Context, exec *AutomationExecution
 	if j == nil || exec == nil || step == nil {
 		return
 	}
-	j.call(ctx, "createWorkStep", map[string]any{
+	args := map[string]any{
 		"stepId":         workStepId(exec.ID, step.ID),
 		"runId":          exec.ID,
 		"key":            step.ID,
@@ -478,7 +478,61 @@ func (j *workJournal) stepRunning(ctx context.Context, exec *AutomationExecution
 		"attempt":        attempt,
 		"idempotencyKey": exec.ID + ":" + step.ID + ":" + strconv.Itoa(attempt),
 		"startedAt":      rfc3339(time.Now()),
-	})
+	}
+	versionArgs(exec, step, attempt, args)
+	j.call(ctx, "createWorkStep", args)
+}
+
+// versionResets are the per-version fields an intent after the first names
+// empty (epic memql#5414). createWorkStep on an existing id is a SHALLOW
+// read-merge that drops JSON null, so a field this intent does not name keeps
+// the previous version's value -- a version 2 still running would show version
+// 1's answer, and keep it forever if its receipt never landed.
+var versionResets = map[string]func() any{
+	"result":            func() any { return map[string]any{} },
+	"resultFingerprint": func() any { return "" },
+	"binding":           func() any { return map[string]any{} },
+	"errorCode":         func() any { return "" },
+	"errorMessage":      func() any { return "" },
+	"childRunId":        func() any { return "" },
+}
+
+// versionArgs adds what an intent says about the version it opens (epic
+// memql#5414, design D18 and D20): its number (the attempt), the head of every
+// earlier step it runs against (the basis, OMITTED when pristine -- every
+// earlier step at version 1 of this run -- so an ordinary run writes none),
+// what a person changed for it when it is the step a re-run targets, and on
+// any version after the first the reset of what the previous version wrote.
+//
+// The head advances here, at the intent, for a skipped step as for any other:
+// the version a step is running as is the one every later step computes from.
+// A nested key is not an entry and has no basis of its own; the executions that
+// journal nested keys carry no head.
+func versionArgs(exec *AutomationExecution, step *Step, version int, args map[string]any) {
+	key := step.ID
+	args["version"] = version
+	if basis := exec.head.advance(exec.StepOrder, key, version); basis != nil && !work.IsPristine(basis, exec.StepOrder, key) {
+		args["basis"] = basis.Object()
+	}
+	targeted := exec.rerun != nil && !isNestedStepKey(key) && key == exec.rerun.StepKey
+	if targeted {
+		args["override"] = exec.rerun.overrideObject()
+		if author := exec.rerun.author(); author != "" {
+			args["authoredBy"] = author
+		}
+	}
+	if version <= 1 {
+		return
+	}
+	for field, empty := range versionResets {
+		args[field] = empty()
+	}
+	if !targeted {
+		args["override"] = map[string]any{}
+	}
+	if _, ok := args["authoredBy"]; !ok {
+		args["authoredBy"] = ""
+	}
 }
 
 // stepFinished writes the receipt version of a step row and a heartbeat on
@@ -488,17 +542,28 @@ func (j *workJournal) stepRunning(ctx context.Context, exec *AutomationExecution
 // the same reason, and reading the struct would write an empty chain head on
 // exactly the failed runs resume exists for. The result is the trimmed MinimalStepResult shape, the same
 // shape the checkpoint carried and resume rehydrates from.
+//
+// The run write carries the WHOLE head (epic memql#5414): the row's read-merge
+// is shallow, so a map naming only this step would erase every other entry.
+// While a re-run is served it also carries what is left of the request's stale
+// steps, this one taken off once the body has moved past it -- which is how an
+// interrupted re-run knows where it stopped (rerunResumePoint).
 func (j *workJournal) stepFinished(ctx context.Context, exec *AutomationExecution, step *Step, result *StepResult, chainHead string) {
 	if j == nil || exec == nil || step == nil || result == nil {
 		return
 	}
 	j.stepFinishedRowOnly(ctx, exec, step, result)
-	j.call(ctx, "updateWorkRun", map[string]any{
+	if result.Status != "failed" || step.OnError == ErrorStrategyContinue {
+		exec.head.finished(step.ID)
+	}
+	args := map[string]any{
 		"runId":       exec.ID,
 		"heartbeatAt": rfc3339(time.Now()),
 		"chainHead":   chainHead,
 		"stepOrder":   exec.StepOrder,
-	})
+	}
+	exec.head.write(args)
+	j.call(ctx, "updateWorkRun", args)
 }
 
 // stepFinishedRowOnly writes a step's receipt and nothing on the run: for the
@@ -536,12 +601,15 @@ func (j *workJournal) stepFinishedRowOnly(ctx context.Context, exec *AutomationE
 }
 
 // stepSkipped writes a step whose condition decided it would not run: one
-// row at `skipped`, with no intent version, because nothing was intended.
-func (j *workJournal) stepSkipped(ctx context.Context, exec *AutomationExecution, step *Step, seq int) {
+// row at `skipped`, with no `running` row before it, because nothing was
+// intended. It is still a VERSION of the step (epic memql#5414) -- the answer
+// the run gave there, which every later step computed from -- so it carries
+// its number and its basis, and advances the head.
+func (j *workJournal) stepSkipped(ctx context.Context, exec *AutomationExecution, step *Step, seq, version int) {
 	if j == nil || exec == nil || step == nil {
 		return
 	}
-	j.call(ctx, "createWorkStep", map[string]any{
+	args := map[string]any{
 		"stepId":    workStepId(exec.ID, step.ID),
 		"runId":     exec.ID,
 		"key":       step.ID,
@@ -550,20 +618,30 @@ func (j *workJournal) stepSkipped(ctx context.Context, exec *AutomationExecution
 		"kind":      stepKindFor(step),
 		"call":      stepCallSummary(step),
 		"status":    "skipped",
-		"attempt":   1,
+		"attempt":   version,
 		"startedAt": rfc3339(time.Now()),
-	})
+	}
+	versionArgs(exec, step, version, args)
+	j.call(ctx, "createWorkStep", args)
+	exec.head.finished(step.ID)
 }
 
 // reopenRun flips a failed run back to running for a resume; the retried
 // steps write new versions with attempt incremented.
+//
+// It beats the heartbeat too. The resumed run's last heartbeat is the previous
+// execution's -- for a re-run of a finished run, possibly hours old -- and the
+// abandoned sweep judges a running run by it: left stale until the first step
+// finished, the run would look abandoned from the moment this replica took it,
+// and the sweep would hand it to a second replica while this one ran it.
 func (j *workJournal) reopenRun(ctx context.Context, exec *AutomationExecution) {
 	if j == nil || exec == nil {
 		return
 	}
 	j.call(ctx, "updateWorkRun", map[string]any{
-		"runId":  exec.ID,
-		"status": "running",
+		"runId":       exec.ID,
+		"status":      "running",
+		"heartbeatAt": rfc3339(time.Now()),
 	})
 }
 
@@ -678,7 +756,23 @@ func (j *workJournal) closeRunRecord(ctx context.Context, exec *AutomationExecut
 	if exec.Error != "" {
 		args["errorMessage"] = exec.Error
 	}
+	closeHeadArgs(exec, args)
 	j.call(ctx, "updateWorkRun", args)
+}
+
+// closeHeadArgs adds what a run's terminal write says about its head (epic
+// memql#5414): the whole head -- a step skipped after the last receipt is in it
+// only in memory until now -- and, when the run served a re-run, the request
+// cleared (`rerun: {}`) with no step left stale. Only a CLOSE clears them: a
+// run that parks keeps both, so the replica that resumes it still serves the
+// request, and still aims the override at its step if that step had not
+// finished.
+func closeHeadArgs(exec *AutomationExecution, args map[string]any) {
+	exec.head.write(args)
+	if exec.rerun != nil {
+		args["rerun"] = map[string]any{}
+		args["staleSteps"] = []string{}
+	}
 }
 
 // parkOnInference writes the approval and puts the run at `waiting`.

@@ -539,7 +539,7 @@ func TestJournal_CanonicalRunIDKeepsStableStepIDs(t *testing.T) {
 			step := &Step{ID: "layer0.sales", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}
 			j.stepRunning(context.Background(), exec, step, 0, 1)
 			j.stepFinished(context.Background(), exec, step, &StepResult{StepId: step.ID, Status: "completed", Result: "done", CompletedAt: time.Now()}, "")
-			j.stepSkipped(context.Background(), exec, step, 0)
+			j.stepSkipped(context.Background(), exec, step, 0, 1)
 			j.stepRunning(context.Background(), exec, step, 0, 2)
 			var writes int
 			for _, call := range rec.calls {

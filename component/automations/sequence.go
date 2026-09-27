@@ -81,12 +81,26 @@ type resumedList struct {
 	at        string
 	// attempt is the attempt `at` last recorded.
 	attempt int
+	// bases, on a re-run, is the attempt base of every step it may execute
+	// (rerunBases): each runs one past the highest version it recorded.
+	bases map[string]int
+	// reread, on a re-run, names the finished reads before the resume point
+	// whose rows were too many to record: they are read again for their
+	// value, and write no row, because the version the head names is still
+	// the version the run shows.
+	reread map[string]bool
 }
 
 // attemptBase is how many attempts of step the journal already holds: its
 // attempts go on from there.
 func (r *sequenceRun) attemptBase(step *Step) int {
-	if r.resumed != nil && step.ID == r.resumed.at {
+	if r.resumed == nil {
+		return 0
+	}
+	if base, ok := r.resumed.bases[step.ID]; ok {
+		return base
+	}
+	if step.ID == r.resumed.at {
 		return max(r.resumed.attempt, 1)
 	}
 	return 0
@@ -233,6 +247,17 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 			if r.continued[step.ID] {
 				continue
 			}
+			if r.reread[step.ID] {
+				value, err := e.rereadStatement(ctx, step, stepCtx)
+				if err != nil {
+					if step.OnError == ErrorStrategyContinue {
+						continue
+					}
+					return seqOutcome{}, err
+				}
+				ev.names.bind(step.Binds, value)
+				continue
+			}
 		}
 
 		if step.Exprs != nil && step.Exprs.Condition != nil {
@@ -250,7 +275,7 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 				now := time.Now()
 				skipped := &StepResult{StepId: step.ID, Status: "skipped", StartedAt: now, CompletedAt: now}
 				e.recordStep(ctx, run, step, skipped)
-				run.journalSkipped(ctx, step, stepIndex)
+				run.journalSkipped(ctx, step, stepIndex, run.attemptBase(step)+1)
 				continue
 			}
 		}
@@ -258,8 +283,9 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 		switch step.Type {
 		case StepTypeExpression, StepTypeReturn:
 			// Evaluated here rather than through the registry, and journaled
-			// like every other step: an intent row, then its receipt.
-			run.journalRunning(ctx, step, stepIndex, 1)
+			// like every other step: an intent row, then its receipt -- as
+			// the next version of the step, which on a fresh run is 1.
+			run.journalRunning(ctx, step, stepIndex, run.attemptBase(step)+1)
 			started := time.Now()
 			var (
 				v   any
@@ -402,9 +428,25 @@ func (r *sequenceRun) journalFinished(ctx context.Context, step *Step, result *S
 	r.journal.stepFinished(ctx, r.stepCtx.Execution, step, result, r.chainHead)
 }
 
-// journalSkipped writes a skipped step's row, when this list journals.
-func (r *sequenceRun) journalSkipped(ctx context.Context, step *Step, seq int) {
-	r.journal.stepSkipped(ctx, r.stepCtx.Execution, step, seq)
+// journalSkipped writes a skipped step's row, when this list journals, as the
+// version it would have run as.
+func (r *sequenceRun) journalSkipped(ctx context.Context, step *Step, seq, version int) {
+	r.journal.stepSkipped(ctx, r.stepCtx.Execution, step, seq, version)
+}
+
+// rereadStatement runs a finished read again for its value and writes no row
+// (resumedList.reread): its recorded version stays the step's current one.
+// The run's record gets the result, as a resumed run's record gets every
+// served step's.
+func (e *Executor) rereadStatement(ctx context.Context, step *Step, stepCtx *StepContext) (any, error) {
+	result, err := e.executeStep(ctx, step, stepCtx)
+	if err != nil {
+		return nil, fmt.Errorf("step %q: read again: %w", step.ID, err)
+	}
+	if exec := stepCtx.Execution; exec != nil && result != nil {
+		exec.AddStepResult(result)
+	}
+	return statementValue(step, result), nil
 }
 
 // heartbeatJournal is the journal whose run a step's execution keeps alive:
