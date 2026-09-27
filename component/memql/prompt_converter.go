@@ -163,14 +163,18 @@ func promptFieldToToolField(field *languageParser.PromptField, origin string) (t
 			}
 			tf.description = val
 		case "default":
-			// The text (or the number) as written; promptDefaultValue holds
-			// it to a literal of the field's type and supplies the value the
-			// schema publishes (memql#5430).
+			// The text as written -- an unquoted number's own digits, not
+			// its parsed value -- which promptDefaultValue converts to the
+			// field's type, supplying the value the schema publishes
+			// (memql#5430).
 			tf.defaultVal = stringifyAttrValue(attr.Value)
 			tf.defaultSet = true
 			switch attr.Value.(type) {
 			case float64, int, int64:
 				tf.defaultNumber = true
+				if attr.Literal != "" {
+					tf.defaultVal = attr.Literal
+				}
 			}
 		case "enum":
 			// Multi-value or single string. parseAttribute may surface

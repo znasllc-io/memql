@@ -14,40 +14,41 @@ package memql
 // `"false"` default reached a bool argument as a string and failed the
 // mutation -- one annotation at a time.
 //
-// THE RULE: the quoted text is a literal of the field's declared type, read as
-// JSON, since the value is published in the field's JSON-Schema input:
+// THE RULE: the default's text converts to the field's declared type the way
+// a tool's default has always been converted at call time
+// (coerceSchemaDefault, strconv), and is refused only when it does not:
 //
 //	string   any text (the text itself)
-//	integer  an integer literal: -?(0|[1-9][0-9]*), within int64
-//	number   a number literal: -?(0|[1-9][0-9]*)(.[0-9]+)?([eE][+-]?[0-9]+)?
-//	boolean  true or false
+//	integer  what strconv.ParseInt(text, 10, 64) reads: "10", "+10", "010"
+//	number   what strconv.ParseFloat(text, 64) reads: "2.5", ".5", "1e3"
+//	boolean  what strconv.ParseBool reads: "true", "false", "1", "0", "t", "TRUE"
 //	array    a JSON array: @default("[]")
 //	object   a JSON object: @default("{}")
 //
 // and, when the field declares its values (`enum(...)` or @enum), one of them.
+// Every spelling the conversion read before still loads -- the language
+// freeze retires a spelling that worked only through a deprecation window --
+// and what it could not read, the text a handler used to receive as a raw
+// string, is refused. An array or an object was never converted, so a
+// default of either kind is read as JSON: its value is published at last,
+// and text that is no array or object is refused.
 //
 // A PROMPT field is held to the same rule. Its registry placement also admits
-// an unquoted number, `@default(5)`, which is a literal of a numeric field --
-// a whole one of an integer field -- and of nothing else: on a string field it
-// is written quoted, `@default("5")`.
+// an unquoted number, `@default(5)`, which is read as the text it was written
+// as -- `@default(1e3)` and `@default("1e3")` are one default, and an integer
+// keeps every digit.
 //
-// WHY A QUOTED NUMBER STAYS LEGAL. The registry's one tool form is the quoted
-// string, and every tool default in the tree is a quoted number on an integer
-// field (`@default("10")`, dsl/memql/tools.memql and four more); no product
-// bundle writes one, and no prompt anywhere declares a default. Accepting the
-// quoted text when it parses as the declared type keeps every one of them
-// loading, and refuses exactly the defaults that were never values of their
-// field.
-//
-// The default is PUBLISHED with the field's type -- `"default": 10`, not
-// `"default": "10"` -- so the schema the model reads agrees with itself, and
-// toolSchemaDefaults hands a tool's handler the same value either way.
+// The default is PUBLISHED with the field's type and in its canonical form --
+// `"default": 10` for "+10", `true` for "TRUE" -- so the schema the model
+// reads agrees with itself, and toolSchemaDefaults hands a tool's handler the
+// value the conversion always produced. A number field's NaN or infinity has
+// no JSON form, so its text is published, and converts at call time as before.
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -94,12 +95,7 @@ func (e *FieldDefaultError) Error() string {
 // RuleCode is the refusal's stable rule id (baseloader.CodedRefusal).
 func (e *FieldDefaultError) RuleCode() string { return e.Code }
 
-var (
-	toolDefaultIntegerRe = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
-	toolDefaultNumberRe  = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
-)
-
-// toolDefaultValue reads a tool field's @default text as a literal of the
+// toolDefaultValue reads a tool field's @default text as a value of the
 // field's JSON-Schema type (schemaType: the type toolDeclToTool publishes),
 // returning the value to publish, or the refusal.
 func toolDefaultValue(tool string, f ast.ToolFieldDecl, schemaType string) (any, error) {
@@ -111,42 +107,32 @@ func toolDefaultValue(tool string, f ast.ToolFieldDecl, schemaType string) (any,
 		Value: strconv.Quote(f.Default), Reason: reason, Fix: fix, Code: ToolDefaultCode}
 }
 
-// promptDefaultValue reads a prompt field's @default as a literal of the
-// field's JSON-Schema type, returning the value to publish, or the refusal.
-// Unlike a tool field's, it may have been written as an unquoted number.
+// promptDefaultValue reads a prompt field's @default as a value of the field's
+// JSON-Schema type, returning the value to publish, or the refusal. An
+// unquoted number is read as the text it was written as, so it and its quoted
+// spelling are one default.
 func promptDefaultValue(prompt string, f toolField) (any, error) {
-	schemaType := promptSchemaType(f.typeName)
 	typeWord := f.typeName
 	if f.elementType != "" {
 		typeWord = "[]" + f.elementType
 	}
-	refuse := func(written, reason, fix string) error {
-		return &FieldDefaultError{Construct: "prompt", Name: prompt, Field: f.name, Type: fieldTypeWord(typeWord, f.enumValues),
-			Value: written, Reason: reason, Fix: fix, Code: PromptDefaultCode}
-	}
-	if f.defaultNumber {
-		// An unquoted number is a literal of a numeric field and of nothing
-		// else; its text reads as one exactly as the quoted form's does.
-		if schemaType != "integer" && schemaType != "number" {
-			return nil, refuse(f.defaultVal, fmt.Sprintf("is a number, and the field is a %s", schemaType),
-				fmt.Sprintf("write it quoted, as in @default(%s)", strconv.Quote(f.defaultVal)))
-		}
-		value, reason, fix := literalOfType(schemaType, f.enumValues, f.defaultVal)
-		if reason != "" {
-			return nil, refuse(f.defaultVal, reason, fix)
-		}
+	value, reason, fix := literalOfType(promptSchemaType(f.typeName), f.enumValues, f.defaultVal)
+	if reason == "" {
 		return value, nil
 	}
-	value, reason, fix := literalOfType(schemaType, f.enumValues, f.defaultVal)
-	if reason != "" {
-		return nil, refuse(strconv.Quote(f.defaultVal), reason, fix)
+	written := strconv.Quote(f.defaultVal)
+	if f.defaultNumber {
+		written = f.defaultVal
 	}
-	return value, nil
+	return nil, &FieldDefaultError{Construct: "prompt", Name: prompt, Field: f.name, Type: fieldTypeWord(typeWord, f.enumValues),
+		Value: written, Reason: reason, Fix: fix, Code: PromptDefaultCode}
 }
 
-// literalOfType reads text as a literal of a JSON-Schema type, one of the
-// field's declared values when it has any. It returns the value, or -- when
-// the text is not one -- why, and what to write instead.
+// literalOfType converts text to a value of a JSON-Schema type, one of the
+// field's declared values when it has any, by the conversion a tool's default
+// has always had at call time (coerceSchemaDefault). It returns the value to
+// publish, or -- when the conversion does not read the text -- why, and what
+// to write instead.
 func literalOfType(schemaType string, enum []string, text string) (value any, reason, fix string) {
 	if len(enum) > 0 && !slices.Contains(enum, text) {
 		return nil, "is not one of the field's values",
@@ -156,27 +142,33 @@ func literalOfType(schemaType string, enum []string, text string) (value any, re
 	case "string":
 		return text, "", ""
 	case "integer":
-		if toolDefaultIntegerRe.MatchString(text) {
-			if n, err := strconv.ParseInt(text, 10, 64); err == nil {
-				return n, "", ""
-			}
+		n, err := strconv.ParseInt(text, 10, 64)
+		switch {
+		case err == nil:
+			return n, "", ""
+		case errors.Is(err, strconv.ErrRange):
 			return nil, "is outside the integers a field can hold", `write one within 64 bits, as in @default("20")`
 		}
 		return nil, "is not an integer", `write one, as in @default("20")`
 	case "number":
-		if toolDefaultNumberRe.MatchString(text) {
-			if v, err := strconv.ParseFloat(text, 64); err == nil && !math.IsInf(v, 0) {
-				return v, "", ""
-			}
-			return nil, "is outside the numbers a field can hold", `write a finite one, as in @default("0.5")`
+		// An integer keeps every digit: a float64 would publish
+		// 9007199254740993 as ...992.
+		if n, err := strconv.ParseInt(text, 10, 64); err == nil {
+			return n, "", ""
+		}
+		f, err := strconv.ParseFloat(text, 64)
+		switch {
+		case err == nil && (math.IsNaN(f) || math.IsInf(f, 0)):
+			return text, "", "" // no JSON form; converts at call time, as it always did
+		case err == nil:
+			return f, "", ""
+		case errors.Is(err, strconv.ErrRange):
+			return nil, "is outside the numbers a field can hold", `write a smaller one, as in @default("0.5")`
 		}
 		return nil, "is not a number", `write one, as in @default("0.5")`
 	case "boolean":
-		switch text {
-		case "true":
-			return true, "", ""
-		case "false":
-			return false, "", ""
+		if b, err := strconv.ParseBool(text); err == nil {
+			return b, "", ""
 		}
 		return nil, "is not true or false", `write @default("true") or @default("false")`
 	case "array":

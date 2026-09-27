@@ -356,17 +356,27 @@ OWN domain are ambient -- in scope with no import (#2617); the tree
 gate keeps redundant same-domain imports out of the corpus.
 
 The concept a query's or a mutation's signature binds --
-`query <Concept> <name>` -- must resolve to a concept an import supplies, or to
-one of the file's own domain; a spec's binding, to an imported shape or
-concept. One that does not is refused at load with the rule id
-`signature_concept_unresolved`, naming the concept, the import that failed to
-supply it, and the import to add when another domain declares it
-(memql#5433). That includes an import whose namespace declares no such
-concept: it used to bind the construct to no concept at all, so a query with
-no filter loaded and matched nothing. A shape and a seed resolve their concept
-by name across every mounted domain -- a shape preferring its own domain when
-two declare the name, a seed as the seed materializer resolves it, which never
-reads an import -- and carry the same rule id when no domain supplies it.
+`query <Concept> <name>` -- resolves through the file's imports, then through
+its own domain; a spec's binding resolves to an imported shape or concept.
+Refused at load with the rule id `signature_concept_unresolved`
+(memql#5433):
+
+- a name no import brings in that is not a concept of the file's own domain
+  -- the refusal names the import to add when another domain declares it;
+- a name an import brings in when no mounted domain declares a concept of
+  that name, or when several do and the import's namespace selects none of
+  them. Such an import used to bind the construct to no concept at all, so a
+  query with no filter loaded and matched nothing.
+
+Not refused: an import's namespace is read only to choose between concepts
+that share the name. When exactly one mounted domain declares the concept,
+the import binds it whatever namespace the import names --
+`use crm.concepts.{ lead }` binds `v1:sales:lead` when `sales` alone declares
+a `lead` -- and an import of a shape or a function that shares the name is
+read the same way. A shape and a seed resolve their concept by name across every
+mounted domain -- a shape preferring its own domain when two declare the name,
+a seed as the seed materializer resolves it, which never reads an import --
+and carry the same rule id when no domain supplies it.
 
 <!-- corpus: 2026/examples/memql/concepts/retention-override.memql -->
 ```memql
@@ -1562,14 +1572,15 @@ Logic prompts (routing / suggest / classification) use the structured-output pat
 
 **The body must cover the template, and `@defaultProvider` must name a real provider** (memql#3616). The input schema compiles with `additionalProperties: false` and is validated **before** the template renders, so a variable the `.tmpl` reads but the body omits is a field no caller can ever supply — the load refuses rather than registering a schema that cannot serve its own template. Likewise `@defaultProvider` must name a declared `provider`, never a `policy` slug: a dangling name does not error at call time, it silently falls through to the default provider. A `@disabled` provider still counts as declared. See [authoring rule 28](authoring-rules.md).
 
-**A field's `@default` is a literal of the field's type** (memql#5430), held
-to the rule a [tool field's](#tools) is: `@default("en")` on a `string`
-field, `@default("3")` or an unquoted `@default(3)` on an `int` field, `"true"`
-or `"false"` on a `boolean`, one of an `enum(...)` field's values. An unquoted
-number is a literal of a numeric field only; on a `string` field it is written
-quoted. Anything else is refused at load as `prompt_default_type`, naming the
-prompt, the field, its type and the value, and the input schema publishes the
-default with the field's type.
+**A field's `@default` converts to the field's type** (memql#5430), by the rule
+a [tool field's](#tools) does: `@default("en")` on a `string` field,
+`@default("3")` on an `int` field, `"true"` or `"false"` on a `boolean`, one of
+an `enum(...)` field's values. An unquoted number is read as the text it was
+written as -- `@default(3)` and `@default("3")` are one default, and so are the
+refused `@default(1e3)` and `@default("1e3")` on an `int` field. A default that
+does not convert is refused at load as `prompt_default_type`, naming the prompt,
+the field, its type and the value, and the input schema publishes the default
+with the field's type, an integer keeping every digit.
 
 Two legacy forms are retired (both rejected at parse time):
 - `func (Prompt) name(ctx any) { ... }` — receiver-function wrapping.
@@ -2406,16 +2417,21 @@ tool findUsers {
 }
 ```
 
-A field's `@default` is one quoted string, and the text between the quotes is a
-literal of the field's type (memql#5430): an integer on an `integer` field
+A field's `@default` is one quoted string, and the text between the quotes must
+convert to the field's type (memql#5430) the way a default has always been
+converted when a call leaves the field out: an integer on an `integer` field
 (`"10"`), a number on a `number` field (`"2.5"`), `"true"` or `"false"` on a
 `boolean` field, one of the declared values on an `enum(...)` field, JSON on an
-`array` or `object` field (`"[]"`), and any text on a `string` field. The input
-schema publishes it with that type -- `"default": 10`, not `"default": "10"` --
-and a call that leaves the field out receives that value. A default that is not
-a literal of its field's type, `@default("twenty")` on an `integer` field, is
-refused at load with the rule id `tool_default_type`, naming the tool, the
-field, its type and the value.
+`array` or `object` field (`"[]"`), and any text on a `string` field. Those are
+the spellings to write; the other spellings the conversion always read -- `"+10"`
+or `"010"`, `".5"`, `"1"` or `"TRUE"` for a boolean -- still load. The input
+schema publishes the default with its type and in its canonical form --
+`"default": 10`, not `"default": "10"` -- and a call that leaves the field out
+receives that value. A default the conversion cannot read, `@default("twenty")`
+on an `integer` field, is refused at load with the rule id
+`tool_default_type`, naming the tool, the field, its type and the value -- a
+`@disabled` tool's included, since switching it back on is only removing the
+annotation.
 
 The tool loop binds tool-call args to handler args and forwards. A query handler is one construct call -- a query, mutation, logic, builtin or automation -- or that call inside `paginate(...)`, as above, and it is parsed when the tool loads: a handler that is not a call, such as a raw filter, refuses the load. It reads each tool argument as `args.<name>`, as in `@handler(type="query", query="query findEvents(title: args.title)")`, and the call is rendered from the arguments' values, so a caller's text is data whatever it contains; an argument the caller did not supply is left out of the call. The `$args.<name>` text substitution is retired: `$args.x`, bare or quoted as `"$args.x"`, refuses the load -- write `args.x` (`memqlmigrate --rewrite=expressions` rewrites both spellings). The legacy `func (Tool)` form is retired; the parser rejects it with a migration hint.
 

@@ -1,16 +1,19 @@
 package memql
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // prompt_default_5430_test.go -- memql#5430, the prompt half: a prompt field's
-// @default is held to a literal of the field's type, as a tool field's is.
-// Its placement also admits an unquoted number, which is a literal of a
-// numeric field only.
+// @default converts to the field's type by the rule a tool field's does. Its
+// placement also admits an unquoted number, which is read as the text it was
+// written as, so `@default(3)` and `@default("3")` are one default.
 
 func TestPromptDefaultIsALiteralOfTheFieldType(t *testing.T) {
 	type tc struct {
@@ -27,7 +30,12 @@ func TestPromptDefaultIsALiteralOfTheFieldType(t *testing.T) {
 		{typ: "int", text: "3", want: int64(3)},
 		{typ: "int", text: "3", number: true, want: int64(3)},
 		{typ: "float", text: "0.5", number: true, want: 0.5},
-		{typ: "number", text: "2", want: float64(2)},
+		{typ: "number", text: "2", want: int64(2)},
+		{typ: "float", text: "9007199254740993", number: true, want: int64(9007199254740993)},
+		{typ: "int", text: "9007199254740993", number: true, want: int64(9007199254740993)},
+		// An unquoted number is the text it spells, on any field.
+		{typ: "string", text: "5", number: true, want: "5"},
+		{typ: "boolean", text: "1", number: true, want: true},
 		{typ: "boolean", text: "true", want: true},
 		{typ: "array", elem: "object", text: "[]", want: []any{}},
 		{typ: "object", text: `{"a": 1}`, want: map[string]any{"a": float64(1)}},
@@ -36,9 +44,11 @@ func TestPromptDefaultIsALiteralOfTheFieldType(t *testing.T) {
 		{typ: "string", enum: []string{"short", "long"}, text: "long", want: "long"},
 
 		{typ: "int", text: "three", fault: "is not an integer"},
-		{typ: "int", text: "2.5", number: true, fault: "is not an integer"},
-		{typ: "string", text: "5", number: true, fault: "is a number, and the field is a string -- write it quoted, as in @default(\"5\")"},
-		{typ: "boolean", text: "1", number: true, fault: "is a number, and the field is a boolean"},
+		{typ: "int", text: "2.5", number: true, fault: "@default(2.5) is not an integer"},
+		// 1e3 is 1000 once parsed, but it is not what an integer field reads:
+		// unquoted, it is refused as its quoted spelling is.
+		{typ: "int", text: "1e3", number: true, fault: "@default(1e3) is not an integer"},
+		{typ: "int", text: "1e3", fault: "@default(\"1e3\") is not an integer"},
 		{typ: "boolean", text: "yes", fault: "is not true or false"},
 		{typ: "array", elem: "object", text: "none", fault: "is not a JSON array"},
 		{typ: "string", enum: []string{"short", "long"}, text: "medium", fault: "is not one of the field's values"},
@@ -83,13 +93,14 @@ func TestPromptDefaultRefusedAtLoadAndPublishedTyped(t *testing.T) {
 	}
 	diags := lint(t, sigTree(map[string]string{
 		"promptdefault5430/prompts.memql": prompt("pdWordLength5430", `length  int  @default("three")  @description("Sentences.")`) + "\n" +
-			prompt("pdNumberOnString5430", `language  string  @default(5)  @description("Language.")`) + "\n" +
+			prompt("pdExponentLength5430", `length  int  @default(1e3)  @description("Sentences.")`) + "\n" +
+			prompt("pdExactCount5430", `count  int  @default(9007199254740993)  @description("A count.")`) + "\n" +
 			prompt("pdThreeSentences5430", `length  int  @default(3)  @description("Sentences.")`),
 		"promptdefault5430/digest.tmpl": "{{ .title }}",
 	}))
 	for construct, want := range map[string]string{
 		`"pdWordLength5430"`:     `prompt "pdWordLength5430" field "length" (int): @default("three") is not an integer`,
-		`"pdNumberOnString5430"`: `prompt "pdNumberOnString5430" field "language" (string): @default(5) is a number, and the field is a string`,
+		`"pdExponentLength5430"`: `prompt "pdExponentLength5430" field "length" (int): @default(1e3) is not an integer`,
 	} {
 		d := sigRefusal(t, diags, construct)
 		if d.Code != PromptDefaultCode || !strings.Contains(d.Message, want) {
@@ -97,7 +108,7 @@ func TestPromptDefaultRefusedAtLoadAndPublishedTyped(t *testing.T) {
 		}
 	}
 	for _, d := range diags {
-		if strings.Contains(d.Message, "pdThreeSentences5430") {
+		if strings.Contains(d.Message, "pdThreeSentences5430") || strings.Contains(d.Message, "pdExactCount5430") {
 			t.Errorf("a whole-number default on an int field was refused:\n  %s", d.Message)
 		}
 	}
@@ -111,5 +122,28 @@ func TestPromptDefaultRefusedAtLoadAndPublishedTyped(t *testing.T) {
 	prop := schema["properties"].(map[string]any)["length"].(map[string]any)
 	if prop["default"] != int64(3) || prop["type"] != "integer" {
 		t.Errorf("published %#v, want an integer default 3", prop)
+	}
+}
+
+// An unquoted integer is read from the digits written, not from its parsed
+// float64: the published schema keeps every one.
+func TestPromptDefaultKeepsAnUnquotedIntegerExact(t *testing.T) {
+	for _, typ := range []string{"int", "float"} {
+		ast, err := languageParser.ParsePromptDecl("@level(\"fast\")\n@templateFile(\"x.tmpl\")\nprompt p {\n  n  " + typ + "  @default(9007199254740993)\n}\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		decl, err := promptDeclToPromptDecl(ast, "unified:x/prompts.memql:p")
+		if err != nil {
+			t.Fatalf("%s: %v", typ, err)
+		}
+		schema, err := decl.toInputSchema()
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(schema)
+		if !strings.Contains(string(b), `"default":9007199254740993`) {
+			t.Errorf("%s field: published %s, want the default's every digit", typ, b)
+		}
 	}
 }

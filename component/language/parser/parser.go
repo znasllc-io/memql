@@ -946,11 +946,13 @@ func (p *Parser) parseAttributeArgs() (*Attribute, error) {
 		// produce the same Go type for the same source -- see #255 /
 		// #265 (consolidated into baseparser).
 		if p.check(TokenNumber) {
-			val, numErr := baseparser.ParseNumericLiteral(p.current.Literal)
+			literal := p.current.Literal
+			val, numErr := baseparser.ParseNumericLiteral(literal)
 			if numErr == nil {
 				p.advance()
 				if p.check(TokenParenClose) {
 					attr.Value = val
+					attr.Literal = literal
 					p.advance()
 					return attr, nil
 				}

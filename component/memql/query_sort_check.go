@@ -259,16 +259,25 @@ func nearestIntrinsic(leaf string) string {
 // declared, down to the first hop into a value whose keys the declaration
 // does not close.
 func (c *sortChecker) checkPayloadPath(key, path string, directionSlot bool, refuse func(reason, fix string) error) error {
-	if c.fields == nil {
-		return nil // no bound concept: no declaration to hold the key to
-	}
 	segs := strings.Split(path, ".")
-	walked := ""
-	for i, seg := range segs {
+	// Every segment is a field name, whatever the concept: the rule the
+	// runtime compiler holds a sort key's path to (checkSortPathSegments),
+	// so a key the load admits is one the ORDER BY can render.
+	for _, seg := range segs {
 		seg = strings.TrimSpace(seg)
 		if seg == "" {
 			return refuse("a field path has an empty segment", "write each field name between the dots")
 		}
+		if !isSafePathSegment(seg) {
+			return refuse(fmt.Sprintf("%q is not a field name", seg), "a field name is letters, digits, `_` and `-`")
+		}
+	}
+	if c.fields == nil {
+		return nil // no bound concept: no declaration to hold the key to
+	}
+	walked := ""
+	for i, seg := range segs {
+		seg = strings.TrimSpace(seg)
 		if walked == "" {
 			walked = seg
 		} else {
@@ -276,7 +285,9 @@ func (c *sortChecker) checkPayloadPath(key, path string, directionSlot bool, ref
 		}
 		s, ok := c.fields[walked]
 		if !ok {
-			return c.undeclared(walked, directionSlot && len(segs) == 1, refuse)
+			// Only a single word could have been meant as a direction: a
+			// key written with a dot -- `payload.nope`, `a.b` -- is a key.
+			return c.undeclared(key, walked, directionSlot && !strings.Contains(key, "."), refuse)
 		}
 		if i == len(segs)-1 {
 			return nil
@@ -302,7 +313,7 @@ func (c *sortChecker) checkPayloadPath(key, path string, directionSlot bool, ref
 // direction goes is refused as an unknown DIRECTION: it is no direction, and
 // no field either, so the direction is what the author was most likely
 // writing -- and the refusal names the field it may have meant all the same.
-func (c *sortChecker) undeclared(path string, directionSlot bool, refuse func(reason, fix string) error) error {
+func (c *sortChecker) undeclared(key, path string, directionSlot bool, refuse func(reason, fix string) error) error {
 	prefix := ""
 	if i := strings.LastIndex(path, "."); i >= 0 {
 		prefix = path[:i+1]
@@ -325,7 +336,7 @@ func (c *sortChecker) undeclared(path string, directionSlot bool, refuse func(re
 	if directionSlot {
 		return &SortKeyError{
 			Code:   SortCodeUnknownDirection,
-			Text:   path,
+			Text:   key, // what the author wrote, not the path it names
 			Reason: fmt.Sprintf(`a direction is "asc" or "desc", and as the next key it names no field of %s`, c.concept.Name),
 			Fix:    directionFix(path, near),
 		}

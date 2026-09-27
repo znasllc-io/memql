@@ -1,9 +1,14 @@
 package memql
 
 import (
+	"io"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/component"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // signature_concept_5433_test.go -- memql#5433: a construct signature whose
@@ -252,4 +257,144 @@ spec sigNowhereSpec5433 isSigNowhereOpen5433 = row => row.status == "open"
 			t.Errorf("%s: want the code, last in brackets; got [%s] %s", construct, d.Code, d.Message)
 		}
 	}
+}
+
+// The remedy names the right thing to do with the import that took the name.
+// An import of a SHAPE that shares the concept's name is not the concept's
+// import, and adding a concepts import beside it changes nothing (the first
+// import naming a name is the one resolution reads): the fix aliases it. And
+// the fix never suggests importing the file's own domain, whose concepts
+// need no import. Each fix is followed below, and the result loads.
+func TestSignatureConceptFixIsOneThatLoads(t *testing.T) {
+	concept := func(name string) string { return "/// A record.\nconcept " + name + " {\n  title  string\n}\n" }
+	query := func(imports, name string) string {
+		return imports + "\n/// Every record.\nquery sigFixLead5433 " + name + " {\n  sort \"row.createdAt\", \"desc\"\n  paginate 20\n}\n"
+	}
+	base := map[string]string{
+		"sigfixsales5433/concepts.memql": concept("sigFixLead5433"),
+		"sigfixmkt5433/concepts.memql":   concept("sigFixLead5433"),
+		"sigfixcrm5433/concepts.memql":   concept("sigFixCard5433"),
+		// A shape of crm's own concept, named as the lead concept is.
+		"sigfixcrm5433/shapes.memql": "/// A card.\n@row\nshape sigFixCard5433 sigFixLead5433 {\n  title\n}\n",
+	}
+	with := func(extra map[string]string) map[string]string {
+		out := map[string]string{}
+		for k, v := range base {
+			out[k] = v
+		}
+		for k, v := range extra {
+			out[k] = v
+		}
+		return out
+	}
+
+	diags := lint(t, sigTree(with(map[string]string{
+		"sigfixuse5433/queries.memql": query("use sigfixcrm5433.shapes.{ sigFixLead5433 }\n", "sigFixLeadsByShape5433"),
+	})))
+	d := sigRefusal(t, diags, `"sigFixLeadsByShape5433"`)
+	for _, want := range []string{
+		"the name is taken by `use sigfixcrm5433.shapes.{ sigFixLead5433 }`, which imports a shape, not a concept",
+		"alias it -- `use sigfixcrm5433.shapes.{ sigFixLead5433 as <another name> }`",
+		"`use sigfixmkt5433.concepts.{ sigFixLead5433 }`",
+		"`use sigfixsales5433.concepts.{ sigFixLead5433 }`",
+	} {
+		if !strings.Contains(d.Message, want) {
+			t.Errorf("the shape-import refusal does not say %q:\n  %s", want, d.Message)
+		}
+	}
+	if strings.Contains(d.Message, "`use sigfixcrm5433.shapes.{ sigFixLead5433 }` imports it") {
+		t.Errorf("the refusal calls a shape import the concept's import:\n  %s", d.Message)
+	}
+	// Followed: the shape aliased, the concept imported.
+	diags = lint(t, sigTree(with(map[string]string{
+		"sigfixuse5433/queries.memql": query("use sigfixcrm5433.shapes.{ sigFixLead5433 as sigFixLeadCard5433 }\nuse sigfixsales5433.concepts.{ sigFixLead5433 }\n", "sigFixLeadsByShape5433"),
+	})))
+	for _, other := range diags {
+		if strings.Contains(other.Message, "sigFixLeadsByShape5433") {
+			t.Errorf("following the fix did not load:\n  %s", other.Message)
+		}
+	}
+
+	// A concepts import naming neither of the two namespaces that declare
+	// the concept -- one of them the file's own.
+	own := map[string]string{
+		"sigfixown5433/concepts.memql":   "/// A deal.\nconcept sigFixDeal5433 {\n  title  string\n}\n",
+		"sigfixother5433/concepts.memql": "/// A deal.\nconcept sigFixDeal5433 {\n  title  string\n}\n",
+	}
+	ownQuery := func(imports string) string {
+		return imports + "\n/// Every deal.\nquery sigFixDeal5433 sigFixDeals5433 {\n  sort \"row.createdAt\", \"desc\"\n  paginate 20\n}\n"
+	}
+	own["sigfixown5433/queries.memql"] = ownQuery("use sigfixnone5433.concepts.{ sigFixDeal5433 }\n")
+	d = sigRefusal(t, lint(t, sigTree(own)), `"sigFixDeals5433"`)
+	for _, want := range []string{
+		"drop `use sigfixnone5433.concepts.{ sigFixDeal5433 }`: this file's own domain declares the concept",
+		"in place of `use sigfixnone5433.concepts.{ sigFixDeal5433 }` from the namespace that declares it: `use sigfixother5433.concepts.{ sigFixDeal5433 }`",
+	} {
+		if !strings.Contains(d.Message, want) {
+			t.Errorf("the own-domain refusal does not say %q:\n  %s", want, d.Message)
+		}
+	}
+	if strings.Contains(d.Message, "use sigfixown5433.concepts") {
+		t.Errorf("the refusal suggests importing the file's own domain:\n  %s", d.Message)
+	}
+	// Followed: the import dropped.
+	own["sigfixown5433/queries.memql"] = ownQuery("")
+	for _, other := range lint(t, sigTree(own)) {
+		if strings.Contains(other.Message, "sigFixDeals5433") {
+			t.Errorf("following the fix did not load:\n  %s", other.Message)
+		}
+	}
+}
+
+// What memql.md says is NOT refused: an import's namespace only breaks a tie
+// between concepts sharing a name, so when exactly one mounted domain declares
+// the concept, the import binds it whatever namespace the import names. The
+// documentation lists this; this test is what keeps the list true.
+func TestSignatureConceptImportNamespaceOnlyBreaksATie(t *testing.T) {
+	root := sigTree(map[string]string{
+		"sigtiesales5433/concepts.memql": "/// A lead.\nconcept sigTieLead5433 {\n  status  string\n}\n",
+		"sigtieuse5433/queries.memql":    "use sigtiecrm5433.concepts.{ sigTieLead5433 }\n\n/// The open leads.\nquery sigTieLead5433 sigTieOpenLeads5433 {\n  filter row => row.status == \"open\"\n  paginate 20\n}\n",
+	})
+	for _, d := range lint(t, root) {
+		if strings.Contains(d.Message, "sigTieOpenLeads5433") || strings.Contains(d.Message, "sigTieLead5433") {
+			t.Errorf("an import naming another namespace was refused, but memql.md documents it binding the one concept of that name:\n  %s", d.Message)
+		}
+	}
+	eng, stop := sigEngine(t, root)
+	defer stop()
+	fn, ok := eng.Functions().Lookup("sigTieOpenLeads5433")
+	if !ok {
+		t.Fatal("the query did not register")
+	}
+	if fn.BoundConcept != "v1:sigtiesales5433:sigTieLead5433" {
+		t.Errorf("bound %q, want the one concept of that name, v1:sigtiesales5433:sigTieLead5433", fn.BoundConcept)
+	}
+}
+
+// sigEngine boots an engine over the embedded tree with root mounted beside
+// it (root's domains declaring the engine's language line), for a test that
+// reads what a construct bound rather than only whether it loaded. stop
+// restores the global tree and the concept registry.
+func sigEngine(t *testing.T, root fstest.MapFS) (*MemQLEngine, func()) {
+	t.Helper()
+	_, _, unmount := memqldsl.MountOverlayDomains(nil, withLanguageLines(root))
+	stop := func() {
+		unmount()
+		memoryNodes.ReplaceAll(nil)
+		_, _ = LoadUnifiedConcepts(nil)
+	}
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		stop()
+		t.Fatalf("concepts: %v", err)
+	}
+	eng, err := New(nil, (&component.Component{}).WithLoggerWriter(io.Discard))
+	if err != nil {
+		stop()
+		t.Fatal(err)
+	}
+	if err := eng.Init(memoryNodes.DefaultRegistry()); err != nil {
+		stop()
+		t.Fatalf("init: %v", err)
+	}
+	return eng, stop
 }
