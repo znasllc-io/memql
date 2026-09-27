@@ -837,7 +837,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       - name: go test (path routing + CI-configuration guards)
@@ -893,7 +894,11 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      # THIS job is the shared Go cache's one writer: see the save step at the
+      # end, and .github/actions/go-cache for why there is exactly one.
+      - uses: ./.github/actions/go-cache
+        id: go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
 
@@ -1195,6 +1200,21 @@ jobs:
           fuzz ./test/conformance FuzzParse
           echo "SUCCESS: bounded fuzz completed with no new failing inputs"
 
+      # THE SHARED GO CACHE'S ONE WRITER (memql#5482). Last, so what it saves
+      # holds the whole module's build and vet plus the fuzz-instrumented
+      # builds; only on a green push to main, so every pull request and every
+      # other lane restores a cache made from main, and nothing a pull request
+      # compiled is ever served to another. Skipped when the day's key already
+      # exists: a cache is immutable per key, and a second writer would only
+      # race the first. .github/actions/go-cache carries the reasoning and
+      # scripts/dev/go_cache_single_writer_test.go holds it.
+      - name: save the shared Go cache (push to main only)
+        if: ${{ success() && github.event_name == 'push' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-cache.outputs.paths }}
+          key: ${{ steps.go-cache.outputs.key }}
+
   # Test lane (memql#3161 / design D5.3c). Split out of go-checks so that lane's
   # duration becomes max(test, build+vet+drift) rather than their sum: `go test`
   # was 223s of go-checks' 364s and the drift checks (15s combined) sat behind
@@ -1224,7 +1244,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       # Runs the COMPLEMENT of the db-gated trees, not `./...` (memql#3160 /
@@ -1388,7 +1409,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       - name: go build -tags ${{ matrix.tag }}
@@ -1422,7 +1444,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       # Needed here since memql#4302, when the cross-replica magic-link gate
       # started importing that package -- vet fails with "pattern
@@ -1447,6 +1470,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
+          # npm's download cache, keyed on the lockfiles this lane installs
+          # (memql#5482): an unchanged lockfile installs from the runner
+          # instead of the registry.
+          cache: npm
+          cache-dependency-path: |
+            sdk/ts/package-lock.json
       # Retried (memql#3166 / design D4.3): dependency install is a network op.
       # The typecheck and test steps below are deliberately NOT retried --
       # retrying a test is how a flake becomes invisible.
@@ -1470,6 +1499,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
+          # npm's download cache, keyed on the lockfiles this lane installs
+          # (memql#5482): an unchanged lockfile installs from the runner
+          # instead of the registry.
+          cache: npm
+          cache-dependency-path: |
+            sdk/ts-viewkit/package-lock.json
       - name: install
         run: scripts/ci/retry.sh -- make viewkit-install
       - name: typecheck
@@ -1502,6 +1537,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '22'
+          # npm's download cache, keyed on the lockfiles this lane installs
+          # (memql#5482): an unchanged lockfile installs from the runner
+          # instead of the registry.
+          cache: npm
+          cache-dependency-path: |
+            clients/os/package-lock.json
+            sdk/ts/package-lock.json
       # Retried (memql#3166 / design D4.3): dependency install is a network
       # op. The three steps below are deliberately NOT retried -- retrying a
       # test is how a flake becomes invisible.
@@ -1605,7 +1647,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       # Create the extensions the migrations expect (mirrors docker/init-db.sql,
@@ -1722,7 +1765,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       # Create the extensions the migrations expect (mirrors docker/init-db.sql,
@@ -2091,7 +2135,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       - name: create required Postgres extensions
@@ -2150,12 +2195,21 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
+          # npm's download cache, keyed on the lockfiles this lane installs
+          # (memql#5482): an unchanged lockfile installs from the runner
+          # instead of the registry.
+          cache: npm
+          cache-dependency-path: |
+            sdk/ts/package-lock.json
+            sdk/ts-viewkit/package-lock.json
+            editors/vscode/package-lock.json
       # Every drift guard over a checked-in editors/vscode asset lives under
       # cmd/memql-lsp (grammar, language configuration, extension manifest).
       # Run the whole tree, not just the grammar package: an editors/vscode-only
@@ -2165,13 +2219,15 @@ jobs:
       - name: editors/vscode drift checks (grammar, language config, manifest)
         run: go test -count=1 ./cmd/memql-lsp/...
       # `vscode-test` depends on `vscode-deps` in the Makefile so it stays
-      # self-sufficient from a clean checkout. A standalone retry-wrapped
-      # "build deps" step here would run the same npm installs a SECOND time,
-      # unretried, as vscode-test's own prerequisite -- defeating the retry.
-      # Wrap the single remaining invocation instead so the one place the
-      # flaky-registry calls actually happen is retried.
+      # self-sufficient from a clean checkout, which is why its npm installs
+      # happen INSIDE the test target. This step used to be wrapped in
+      # scripts/ci/retry.sh for those installs alone -- which retried the
+      # extension's TESTS too, the one thing retry.sh's own header forbids,
+      # since a retried flake is an invisible one. With the npm cache above
+      # the installs come from the runner, so the wrapper is gone (memql#5482)
+      # and a red test is red the first time.
       - name: extension unit tests
-        run: scripts/ci/retry.sh -- make vscode-test
+        run: make vscode-test
       # DELIBERATELY NOT PASSING --skip-deps, even though the step above has
       # already built the workspace deps (memql#3340). This step used to pass
       # ONLY because of that: package.sh built no `file:` dependency of its own,
@@ -2235,10 +2291,19 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
+          # npm's download cache, keyed on the lockfiles this lane installs
+          # (memql#5482): an unchanged lockfile installs from the runner
+          # instead of the registry.
+          cache: npm
+          cache-dependency-path: |
+            sdk/ts/package-lock.json
+            sdk/ts-viewkit/package-lock.json
+            editors/vscode/package-lock.json
       # Electron needs a display and a handful of shared libraries the runner
       # image does not carry. libasound's package was renamed in Ubuntu 24.04
       # (the t64 time_t transition), so both spellings are attempted rather than
@@ -2313,7 +2378,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       - name: go.work lists every module in the tree
