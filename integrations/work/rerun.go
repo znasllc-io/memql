@@ -84,6 +84,11 @@ func (i *Integration) handleRerunStep(ctx context.Context, args map[string]any, 
 	if snapshot != nil {
 		workspace = fmt.Sprintf("%s-v%d", bareRunId(run.id), plan.Versions[stepKey])
 	}
+	// THE SAME WORDS MEAN TWO THINGS. On a session step the person edited the
+	// whole prompt the app was given; on any other step they wrote
+	// instructions to add to the step's own. The version replaced decides,
+	// wherever the new one is served.
+	override.WholePrompt = snapshot != nil
 
 	now := i.clock().UTC()
 	fields := reopenFields(now)

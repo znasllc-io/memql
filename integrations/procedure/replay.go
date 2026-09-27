@@ -2255,23 +2255,30 @@ func (r *replay) goalContext(ctx context.Context) (string, string) {
 // BEST EFFORT. Guidance that cannot be read costs the app a hint and is
 // logged; it never costs the goal its hand-back.
 func (r *replay) descriptionGuidance(ctx context.Context) string {
-	actorCtx := ownerActor(ctx, r.req.OwnerUserId)
+	return r.i.descriptionGuidance(ctx, r.req.OwnerUserId, r.req.GoalRunId, r.c.signature)
+}
+
+// descriptionGuidance reads a goal's accumulated dislikes for whoever takes
+// it over: the goal run's signature, else the construct's, under the owner's
+// actor. "" when there are none, and when they cannot be read (logged).
+func (i *Integration) descriptionGuidance(ctx context.Context, owner, goalRunId, constructSignature string) string {
+	actorCtx := ownerActor(ctx, owner)
 	var sig string
-	if runId := strings.TrimSpace(r.req.GoalRunId); runId != "" {
-		if run, err := r.i.runForOwner(actorCtx, runId); err == nil && run != nil {
+	if runId := strings.TrimSpace(goalRunId); runId != "" {
+		if run, err := i.runForOwner(actorCtx, runId); err == nil && run != nil {
 			sig = strings.TrimSpace(str(run, "goalSignature"))
 		}
 	}
 	if sig == "" {
-		sig = strings.TrimSpace(r.c.signature)
+		sig = strings.TrimSpace(constructSignature)
 	}
 	if sig == "" {
 		return ""
 	}
-	rows, err := r.i.store.query(actorCtx, "query "+call("workDescriptionGuidance", map[string]any{"goalSignature": sig}))
+	rows, err := i.store.query(actorCtx, "query "+call("workDescriptionGuidance", map[string]any{"goalSignature": sig}))
 	if err != nil {
-		r.i.log().Warn("procedure: could not read the goal's description guidance; the app takes the goal back without it",
-			"construct", r.c.id, "run", r.req.GoalRunId, "error", err)
+		i.log().Warn("procedure: could not read the goal's description guidance; the app takes the goal without it",
+			"run", goalRunId, "error", err)
 		return ""
 	}
 	return work.DescriptionGuidance(rows)

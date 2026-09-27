@@ -92,6 +92,9 @@ func (i *Integration) handleBranchRun(ctx context.Context, args map[string]any, 
 	if err != nil {
 		return nil, err
 	}
+	// The branched version's prompt is the whole session prompt only when a
+	// session answered the version it branches from (see rerun.go).
+	override.WholePrompt = snapshot != nil
 
 	runId := newRowId(runConcept)
 	now := i.clock().UTC()

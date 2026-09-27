@@ -631,6 +631,22 @@ func TestARerunDecodesTheRequestOffTheRunRow(t *testing.T) {
 	}
 }
 
+// A whole session prompt is decoded as one, and only with a prompt behind it:
+// the delegate replaces a session's prompt on the flag and adds instructions
+// without it.
+func TestAWholeSessionPromptIsDecodedAsOne(t *testing.T) {
+	whole := stepOverrideFrom(map[string]any{"prompt": "Write the report again.", "wholePrompt": true})
+	if whole == nil || !whole.WholePrompt || whole.Prompt != "Write the report again." {
+		t.Fatalf("override = %+v, want the whole prompt", whole)
+	}
+	if o := stepOverrideFrom(map[string]any{"prompt": "Add the refunds."}); o == nil || o.WholePrompt {
+		t.Fatalf("override = %+v, want instructions", o)
+	}
+	if o := stepOverrideFrom(map[string]any{"wholePrompt": true, "level": "fast"}); o == nil || o.WholePrompt {
+		t.Fatalf("override = %+v: a flag with no prompt describes nothing", o)
+	}
+}
+
 func TestARerunTargetMustBeOneOfTheRunsOwnSteps(t *testing.T) {
 	for _, tc := range []struct {
 		key  string

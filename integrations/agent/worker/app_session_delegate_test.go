@@ -525,8 +525,8 @@ func TestASessionOverrideReplacesThePromptAndSetsTheKnobs(t *testing.T) {
 		Prompt: "[system]\nYou are the reviser.\n\nRevise the report.",
 	}
 	ov := &common.StepOverride{
-		Prompt: "Revise report.md and put the totals in bold.",
-		Level:  "reasoning", Model: "app:claude-code:opus", Effort: "xhigh",
+		Prompt: "Revise report.md and put the totals in bold.", WholePrompt: true,
+		Level: "reasoning", Model: "app:claude-code:opus", Effort: "xhigh",
 		GuidanceAxes: []string{"product"}, GuidanceReason: "the totals are missing",
 	}
 	if _, err := d.RunStep(overriddenSessionStep(ov, nil), handover); err != nil {
@@ -581,6 +581,30 @@ func TestASessionOverrideReplacesThePromptAndSetsTheKnobs(t *testing.T) {
 	if ex.got.Input["prompt"] != "Revise the report." || ex.got.Input["level"] != "strong" ||
 		ex.got.Input["effort"] != "" || ex.got.Input["freshWorkspace"] != "" {
 		t.Fatalf("a step nobody re-ran was changed: %+v", ex.got.Input)
+	}
+}
+
+// INSTRUCTIONS ARE NOT A PROMPT. When the version being replaced was not a
+// session -- a model answered it, or a learned procedure did -- the person
+// wrote instructions to add to the step's own prompt, and a session handed
+// only those would lose its goal. The handed-over prompt is kept, and the
+// instructions are added exactly once: a tool loop has already put them in the
+// conversation it flattened, a procedure's hand-back has not.
+func TestInstructionsAreAddedToTheSessionPromptNeverSwappedForIt(t *testing.T) {
+	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{"sessionId": "s"}}}
+	d := newAppSessionDelegateFor(ex, nil, nil, nil)
+	ov := &common.StepOverride{Prompt: "Put the totals in bold."}
+	instructions := memqlengine.StepOverrideInstructions(ov)
+	for _, prompt := range []string{"Revise the report.", "Revise the report.\n\n" + instructions} {
+		handover := memqlengine.AppSessionHandover{
+			ActingUserId: "u1", AppId: "claude-code", RunId: "v1:work:run:r1", StepId: "revise", Prompt: prompt,
+		}
+		if _, err := d.RunStep(overriddenSessionStep(ov, nil), handover); err != nil {
+			t.Fatalf("RunStep: %v", err)
+		}
+		if got := ex.got.Input["prompt"]; got != "Revise the report.\n\n"+instructions {
+			t.Fatalf("from %q the session got %q, want the goal's prompt with the instructions once", prompt, got)
+		}
 	}
 }
 

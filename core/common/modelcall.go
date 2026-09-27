@@ -114,9 +114,14 @@ type StepOverride struct {
 	// Effort is the effort to ask an app to spend: low, medium, high, xhigh
 	// or max. Empty lets the level decide.
 	Effort string
-	// Prompt is, for a session step, the WHOLE prompt the new session runs
-	// with; for any other step, instructions added to its prompt.
+	// Prompt is, when WholePrompt is set, the WHOLE prompt the new session
+	// runs with; otherwise instructions added to the step's own prompt.
 	Prompt string
+	// WholePrompt says Prompt replaces an app session's prompt: the replaced
+	// version was answered by a session, and the person edited the prompt it
+	// ran with. It is decided by the act from that version, never by where
+	// the new version happens to be served.
+	WholePrompt bool
 	// Inputs replace the step's own arguments by name.
 	Inputs map[string]any
 	// GuidanceAxes and GuidanceReason are what the person disliked about the

@@ -65,10 +65,17 @@ type Guidance struct {
 
 // Override is a person's change to one version of one step.
 type Override struct {
-	Level       string         `json:"level,omitempty"`
-	Model       string         `json:"model,omitempty"`
-	Effort      string         `json:"effort,omitempty"`
-	Prompt      string         `json:"prompt,omitempty"`
+	Level  string `json:"level,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
+	Prompt string `json:"prompt,omitempty"`
+	// WholePrompt says the Prompt is the WHOLE prompt an app session ran the
+	// replaced version with, as the person edited it, rather than
+	// instructions added to the step's own prompt. The act decides it from
+	// the version being replaced -- an app session's recording is what the
+	// person was shown -- because the same words mean two different things,
+	// and a session handed only instructions would lose its goal.
+	WholePrompt bool           `json:"wholePrompt,omitempty"`
 	Inputs      map[string]any `json:"inputs,omitempty"`
 	Guidance    *Guidance      `json:"guidance,omitempty"`
 	RequestedBy string         `json:"requestedBy,omitempty"`
@@ -133,6 +140,9 @@ func (o Override) Object() map[string]any {
 	put("effort", o.Effort)
 	if strings.TrimSpace(o.Prompt) != "" {
 		out["prompt"] = o.Prompt
+		if o.WholePrompt {
+			out["wholePrompt"] = true
+		}
 	}
 	if len(o.Inputs) > 0 {
 		inputs := make(map[string]any, len(o.Inputs))
@@ -163,11 +173,13 @@ func ParseOverride(v any) Override {
 		return Override{}
 	}
 	str := func(k string) string { s, _ := m[k].(string); return s }
+	whole, _ := m["wholePrompt"].(bool)
 	o := Override{
 		Level:       str("level"),
 		Model:       str("model"),
 		Effort:      str("effort"),
 		Prompt:      str("prompt"),
+		WholePrompt: whole && strings.TrimSpace(str("prompt")) != "",
 		RequestedBy: str("requestedBy"),
 	}
 	if in, ok := m["inputs"].(map[string]any); ok && len(in) > 0 {

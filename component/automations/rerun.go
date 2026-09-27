@@ -207,14 +207,15 @@ func rerunSpecFrom(v any) *RerunSpec {
 var guidanceAxes = []string{"product", "process", "performance"}
 
 // stepOverrideFrom decodes a stored override object: {level, model, effort,
-// prompt, inputs, guidance: {axes: {product, process, performance}, reason,
-// feedbackId}, requestedBy}. It answers nil for an override that changes
-// nothing about the call, so a context carries an override only when there is
-// one to apply.
+// prompt, wholePrompt, inputs, guidance: {axes: {product, process,
+// performance}, reason, feedbackId}, requestedBy}. It answers nil for an
+// override that changes nothing about the call, so a context carries an
+// override only when there is one to apply.
 func stepOverrideFrom(m map[string]any) *common.StepOverride {
 	if len(m) == 0 {
 		return nil
 	}
+	whole, _ := m["wholePrompt"].(bool)
 	o := &common.StepOverride{
 		Level:       strings.TrimSpace(stringField(m, "level")),
 		Model:       strings.TrimSpace(stringField(m, "model")),
@@ -222,6 +223,7 @@ func stepOverrideFrom(m map[string]any) *common.StepOverride {
 		Prompt:      stringField(m, "prompt"),
 		RequestedBy: strings.TrimSpace(stringField(m, "requestedBy")),
 	}
+	o.WholePrompt = whole && strings.TrimSpace(o.Prompt) != ""
 	if inputs, ok := m["inputs"].(map[string]any); ok && len(inputs) > 0 {
 		o.Inputs = inputs
 	}

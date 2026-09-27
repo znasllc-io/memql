@@ -81,3 +81,24 @@ func TestTheOverrideRoundTripsThroughItsStoredForm(t *testing.T) {
 		t.Error("an absent override has no guidance")
 	}
 }
+
+// A whole session prompt says so in its stored form, and a flag with no prompt
+// behind it is no flag: there is nothing for it to describe.
+func TestAWholePromptRoundTripsOnlyWithAPrompt(t *testing.T) {
+	whole := Override{Prompt: "Write the report again, refunds included.", WholePrompt: true}
+	if obj := whole.Object(); obj["wholePrompt"] != true {
+		t.Fatalf("stored = %v, want wholePrompt", obj)
+	}
+	if got := ParseOverride(whole.Object()); !got.WholePrompt || got.Prompt != whole.Prompt {
+		t.Errorf("round trip = %+v", got)
+	}
+	if obj := (Override{WholePrompt: true, Level: "strong"}).Object(); obj["wholePrompt"] != nil {
+		t.Errorf("stored = %v: a flag with no prompt was kept", obj)
+	}
+	if got := ParseOverride(map[string]any{"wholePrompt": true, "level": "strong"}); got.WholePrompt {
+		t.Error("a stored flag with no prompt was read as a whole prompt")
+	}
+	if got := ParseOverride(map[string]any{"prompt": "Add the refunds."}); got.WholePrompt {
+		t.Error("a prompt with no flag is instructions")
+	}
+}

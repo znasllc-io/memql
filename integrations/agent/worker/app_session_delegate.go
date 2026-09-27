@@ -425,11 +425,15 @@ func (d *AppSessionDelegate) planSession(ctx context.Context, owner string, h me
 
 // applyOverride puts a person's override onto the session (design D20).
 //
-// THE PROMPT IS REPLACED, not added to. A session step's prompt is recorded on
+// THE PROMPT IS REPLACED ONLY WHEN IT IS THE WHOLE PROMPT. When a session
+// answered the version being replaced, its prompt is recorded on
 // v1:worker:appSession.prompt, which is what the person was shown and edited,
-// so their text is the whole prompt the new session runs with. The flattened
-// conversation the door handed over -- which already carried the seam's
-// instructions message -- goes with it.
+// so their text is the whole prompt the new session runs with and the
+// flattened conversation the door handed over goes with it. When anything
+// else answered it -- a model, or a learned procedure -- the person wrote
+// INSTRUCTIONS, and a session handed only those would lose its goal: the
+// handed-over prompt is kept, and the instructions are added unless the seam
+// already put them in it (the tool loops do; a procedure's hand-back does not).
 //
 // THE KNOBS go through ApplyStepOverride, the function every prompt seam uses,
 // so a level means one thing everywhere and an invalid one refuses here rather
@@ -458,7 +462,11 @@ func (d *AppSessionDelegate) applyOverride(ctx context.Context, plan *sessionPla
 		}
 	}
 	if strings.TrimSpace(ov.Prompt) != "" {
-		plan.prompt = ov.Prompt
+		if ov.WholePrompt {
+			plan.prompt = ov.Prompt
+		} else if instructions := memqlengine.StepOverrideInstructions(ov); !strings.Contains(plan.prompt, instructions) {
+			plan.prompt = strings.TrimRight(plan.prompt, "\n") + "\n\n" + instructions
+		}
 	}
 	// The guidance is appended ONCE. Without a replaced prompt the handed-over
 	// conversation already carries it (the seam appended it before the door

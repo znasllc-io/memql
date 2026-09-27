@@ -219,8 +219,10 @@ func TestABranchOfASessionStepStartsFromTheRebuiltWorkspace(t *testing.T) {
 	if rerun["workspace"] != bareRunId(forkId) {
 		t.Errorf("workspace = %v, want the fork's own id", rerun["workspace"])
 	}
-	if override, _ := rerun["override"].(map[string]any); override["prompt"] != "Write the tests first." {
-		t.Errorf("override = %v", override)
+	// The prompt of a session step is the WHOLE prompt, and the request says
+	// so: the new session takes it as it is.
+	if override, _ := rerun["override"].(map[string]any); override["prompt"] != "Write the tests first." || override["wholePrompt"] != true {
+		t.Errorf("override = %v, want the prompt marked as the whole session prompt", override)
 	}
 	// Every recording read runs under the owner's own actor, unstamped.
 	for _, c := range eng.recorded() {
@@ -235,7 +237,9 @@ func TestABranchOfASessionStepStartsFromTheRebuiltWorkspace(t *testing.T) {
 func TestARerunOfASessionStepGetsAFreshWorkspaceNamedForItsVersion(t *testing.T) {
 	i, eng := sessionFixture(t, false)
 
-	if _, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "code"}, 0); err != nil {
+	if _, err := i.handleRerunStep(callerContext(actOwner), map[string]any{
+		"runId": actRunId, "stepKey": "code", "prompt": "Write the tests first.",
+	}, 0); err != nil {
 		t.Fatalf("rerunStep: %v", err)
 	}
 	rerun, _ := argsOf(t, eng, "updateWorkRun")["rerun"].(map[string]any)
@@ -244,6 +248,9 @@ func TestARerunOfASessionStepGetsAFreshWorkspaceNamedForItsVersion(t *testing.T)
 	}
 	if snapshot := work.ParseSnapshot(rerun["snapshot"]); snapshot == nil || len(snapshot.Files) != 1 {
 		t.Errorf("snapshot = %v", rerun["snapshot"])
+	}
+	if override, _ := rerun["override"].(map[string]any); override["wholePrompt"] != true {
+		t.Errorf("override = %v, want a session step's prompt marked as the whole prompt", override)
 	}
 }
 
@@ -257,12 +264,19 @@ func TestAStepNoAppAnsweredCarriesNoSnapshot(t *testing.T) {
 	eng.reply("workRunForOwner", actRunRow(runStatusSucceeded, "plan", "code"))
 	eng.replyWhen("workRunForOwner", "sub-", map[string]any{"id": "v1:work:run:sub-2", "automationName": "summarize"})
 
-	if _, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "code"}, 0); err != nil {
+	if _, err := i.handleRerunStep(callerContext(actOwner), map[string]any{
+		"runId": actRunId, "stepKey": "code", "prompt": "Summarize the tests too.",
+	}, 0); err != nil {
 		t.Fatalf("rerunStep: %v", err)
 	}
 	rerun, _ := argsOf(t, eng, "updateWorkRun")["rerun"].(map[string]any)
 	if _, has := rerun["snapshot"]; has {
 		t.Errorf("rerun = %v; a subrun that is not an app session leaves nothing to rebuild", rerun)
+	}
+	// Its words are INSTRUCTIONS, added to the step's own prompt wherever the
+	// new version is served -- never a whole prompt that would lose the goal.
+	if override, _ := rerun["override"].(map[string]any); override["prompt"] != "Summarize the tests too." || override["wholePrompt"] != nil {
+		t.Errorf("override = %v, want instructions, not a whole prompt", override)
 	}
 	if _, has := rerun["workspace"]; has {
 		t.Errorf("rerun = %v; only a session step moves to a fresh workspace", rerun)

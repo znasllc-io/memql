@@ -126,6 +126,43 @@ func TestTheFallbackAsksForTheRequestsLevel(t *testing.T) {
 	}
 }
 
+// A PERSON'S KNOBS OPEN THE DOOR (epic memql#5414, D20). When the step handed
+// over is one a person re-ran, the app they named, its level and its effort
+// are the request's -- and a step nobody re-ran is asked for exactly as
+// before.
+func TestAReRunStepsOverrideChoosesTheAppAndTheLevel(t *testing.T) {
+	rt := &fakeSessionRouter{client: &fakeSessionClient{result: &common.ToolCallingChatResult{}}, resolution: sessionResolution()}
+	f := &procedureAppFallback{resolve: rt.resolve, agents: testAgents}
+	rerun := common.ContextWithRun(context.Background(), common.RunContext{
+		RunId: "v1:work:run:goalrun", StepKey: "replayed", OwnerUserId: "v1:identity:user:owner", Mode: common.RunModeLive,
+		Override: &common.StepOverride{Level: "strong", Model: "app:codex:gpt-5-codex", Effort: "high"},
+	})
+	if _, err := f.Handover(rerun, fallbackRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if rt.got.ExplicitProvider != "app:codex:gpt-5-codex" || rt.got.Level != airoute.LevelStrong || rt.got.Effort != "high" {
+		t.Fatalf("request = provider %q level %q effort %q, want the person's app, level and effort",
+			rt.got.ExplicitProvider, rt.got.Level, rt.got.Effort)
+	}
+
+	// A level no step is re-run at refuses before the router is asked.
+	calls := rt.calls
+	bad := common.ContextWithRun(context.Background(), common.RunContext{
+		RunId: "v1:work:run:goalrun", StepKey: "replayed", Override: &common.StepOverride{Level: "embeddings"},
+	})
+	if _, err := f.Handover(bad, fallbackRequest()); err == nil || rt.calls != calls {
+		t.Fatalf("an embeddings override = %v, router asked %d more times", err, rt.calls-calls)
+	}
+
+	// The control: no override, the recorded app at the fallback's level.
+	if _, err := f.Handover(context.Background(), fallbackRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if rt.got.ExplicitProvider != "app:claude-code" || rt.got.Level != airoute.LevelReasoning || rt.got.Effort != "" {
+		t.Fatalf("a step nobody re-ran was changed: %+v", rt.got)
+	}
+}
+
 func TestAGoalWhoseAppIsUnknownGoesToAnySignedInApp(t *testing.T) {
 	for _, app := range []string{"", "some-new-app"} {
 		rt := &fakeSessionRouter{client: &fakeSessionClient{result: &common.ToolCallingChatResult{}}, resolution: sessionResolution()}
