@@ -121,6 +121,12 @@ type DispatchRequest struct {
 	// has moved. Carried so the seam can say what it was told when the two
 	// disagree, which is the difference between "a race" and "a bug".
 	Status string
+
+	// RerunRequestId is the re-run request the event's row carried
+	// (run.rerun.requestId, epic memql#5414), empty for every other run. The
+	// claim is keyed on it -- see runClaimKey -- and the seam serves the
+	// request only under a claim for that request.
+	RerunRequestId string
 }
 
 // CanDispatchStoredRun rechecks an event or explicit recovery request against
@@ -303,7 +309,7 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 	// The claim key is the RUN ID, which is the identity of the work. Keying
 	// on the automation name instead would let one run of a template block
 	// every other run of the same template.
-	if !claimer.ClaimWithTTL(ctx, runClaimName, req.RunId, runClaimTTL) {
+	if !claimer.ClaimWithTTL(ctx, runClaimName, runClaimKey(req), runClaimTTL) {
 		return false
 	}
 
@@ -317,6 +323,24 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 	// own run, and ownerActor says so.
 	d.Dispatch(ownerActor(ctx, req.OwnerUserId), req)
 	return true
+}
+
+// runClaimKey is the key a dispatch claims under: the run id, and for a
+// re-run the request too (epic memql#5414).
+//
+// A re-run executes a FINISHED run again under its own id, usually within
+// minutes of the run's first dispatch -- a person reads the answer and asks
+// for another. Keyed on the run id alone, that dispatch would meet the first
+// execution's lease (runClaimTTL, four minutes from its claim), every replica
+// would lose, and the sweep, finding the run silent and the lease held, would
+// close it as abandoned. Each request is a new unit of work on the run, so each
+// claims for itself; the seam refuses to serve a request under a claim taken
+// for another (or for none), which keeps one request to one replica.
+func runClaimKey(req DispatchRequest) string {
+	if id := strings.TrimSpace(req.RerunRequestId); id != "" {
+		return req.RunId + "#rerun:" + id
+	}
+	return req.RunId
 }
 
 // idOnly reports the shape runEventFields produces for an event that carried
@@ -357,6 +381,9 @@ func runEventFields(ev events.Event) (DispatchRequest, bool) {
 	req.OwnerUserId, _ = payload["ownerUserId"].(string)
 	req.GoalId, _ = payload["goalId"].(string)
 	req.Variables, _ = payload["variables"].(map[string]any)
+	if rerun, ok := payload["rerun"].(map[string]any); ok {
+		req.RerunRequestId, _ = rerun["requestId"].(string)
+	}
 	return req, true
 }
 

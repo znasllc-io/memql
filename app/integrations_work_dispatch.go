@@ -21,6 +21,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/znasllc-io/memql/component/auth"
 	"time"
 
@@ -139,6 +140,15 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 	if !workRunCanStart(req, journal, time.Now()) {
 		return
 	}
+	// A re-run is claimed under its own request (epic memql#5414), and served
+	// only under that claim: a late event from the run's previous execution,
+	// or one for a request since replaced, holds a different claim, and
+	// serving the row's request under it would let two replicas run it.
+	if !workRerunServable(req, journal) {
+		log.Info("work run dispatch: this claim is not for the re-run request the run carries; the claim that is serves it",
+			"component", "work.dispatch", "run", req.RunId, "claimedFor", req.RerunRequestId)
+		return
+	}
 	// Event payloads may be stale or contain only an id. Use the current
 	// row for ownership, variables, mode and goal on the execution replica.
 	req.OwnerUserId, req.GoalId = journal.OwnerUserId, journal.GoalId
@@ -184,6 +194,16 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 		defer executor.Close()
 	}
 
+	// A run carrying a re-run request -- a step run again, a head move's
+	// re-run, or a branch's first execution -- resumes where the request
+	// stands, whatever the journal's own failure point says. Asked before the
+	// no-steps branch below, because a fresh branch has no rows of its own and
+	// would otherwise be executed from its first step, prefix and all.
+	if journal.Rerun != nil {
+		d.dispatchRerun(ctx, req, executor, auto, journal, source)
+		return
+	}
+
 	if journal.FailedStep == "" && len(journal.Steps) == 0 {
 		// A run without step intents or receipts starts at the first step.
 		// Ordinary recovery restores its saved trigger; goals bind variables.
@@ -213,6 +233,49 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 	exec, execErr := executor.ResumeFrom(ctx, journal, auto, &automations.ResumeOptions{
 		AllowSideEffects: true,
 	})
+	d.report(ctx, req, exec, execErr)
+}
+
+// dispatchRerun serves a run carrying a re-run request (epic memql#5414, task
+// memql#5415).
+//
+// EVERYTHING HERE IS READ FROM ROWS. The person's act ran on whichever node
+// served it -- a bff, as a rule -- and wrote the request onto the run row; this
+// agent holds none of that node's memory. The prefix a branch shares lives in
+// the run it forked (a branch of a branch may name that run's source too), so
+// every run the head names for a step before the target is loaded here and
+// handed to automations.PrepareRerun, which serves those steps from their
+// rows and never executes them.
+func (d *workRunDispatcher) dispatchRerun(ctx context.Context, req workspine.DispatchRequest, executor *automations.Executor, auto *automations.Automation, journal, source *automations.RunJournal) {
+	var sources []*automations.RunJournal
+	for _, id := range automations.RerunSources(journal, auto) {
+		if source != nil && memql.BareShortId(source.RunId) == memql.BareShortId(id) {
+			sources = append(sources, source)
+			continue
+		}
+		s, err := automations.LoadRunJournal(ctx, d.app.engine, id)
+		if err != nil {
+			d.failRun(ctx, req, workRerunSourceMissing, fmt.Sprintf("run %s, which the re-run's prefix is served from, could not be read: %v", id, err))
+			return
+		}
+		sources = append(sources, s)
+	}
+	resume, opts, code, err := workRerunResumption(journal, sources, auto)
+	if err != nil {
+		d.failRun(ctx, req, code, err.Error())
+		return
+	}
+	d.app.Logger.Info("work run dispatch: serving a re-run request",
+		"component", "work.dispatch", "run", req.RunId, "reason", opts.Rerun.Reason,
+		"request", opts.Rerun.RequestId, "step", opts.Rerun.StepKey, "resumeFrom", opts.FromStep)
+	exec, execErr := executor.ResumeFrom(ctx, resume, auto, opts)
+	if exec == nil && execErr != nil {
+		// Refused before a step ran, so nothing wrote the run's close: the
+		// run sits at `running`, and the sweep would call it abandoned with
+		// a sentence about a node going away.
+		d.failRun(ctx, req, workRerunRefused, execErr.Error())
+		return
+	}
 	d.report(ctx, req, exec, execErr)
 }
 

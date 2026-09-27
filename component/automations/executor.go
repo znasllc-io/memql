@@ -14,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/provenance"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -752,6 +753,14 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 				"component", ComponentName, "automation", automation.Name)
 		}
 	}
+	// The head the journal writes at every receipt (epic memql#5414). A new
+	// run's starts empty; an adopted run's starts at whatever its row already
+	// names, which for a run with no steps is nothing either.
+	var initialHead work.Head
+	if adopt != nil && adopt.Journal != nil {
+		initialHead = resumeHead(adopt.Journal)
+	}
+	exec.head = newRunHead(initialHead, nil)
 	if adopt != nil {
 		journal.adoptRun(ctx, automation, exec)
 	} else {
@@ -924,31 +933,62 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 // The mode is always live here. A replay is not driven from this executor: it
 // is a derived run whose context integrations/work stamps at the point it
 // dispatches the compile.
+//
+// A RE-RUN'S OVERRIDE IS SET HERE AND NOWHERE ELSE (epic memql#5414, design
+// D20). When the execution serves a re-run, the step it targets -- and every
+// step inside it, a loop body or a branch being part of that step's version --
+// gets the override and the snapshot, and every other step gets them CLEARED,
+// so nothing one step's context carried can reach the next. The workspace the
+// request names reaches every step of the execution. An execution serving no
+// re-run leaves all three as it found them: a logic's statements inside the
+// targeted step run on an execution of their own, and inherit the targeted
+// step's context from the call that started them.
 func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, step *Step) context.Context {
 	if e == nil || e.sandboxRun || stepCtx == nil || stepCtx.Execution == nil || step == nil {
 		return ctx
 	}
+	exec := stepCtx.Execution
+	key := stepKeyIn(ctx, step.ID)
 	// Keep inherited lineage and replay policy, but identify the current
 	// step when this executor owns that run. Nested executions keep their
 	// parent's association rather than attributing a call to another run.
 	// A step in a statement body's nested list is keyed by its list's path
 	// (stepKeyIn, sequence.go); every other step's key is its id.
 	if run, ok := common.RunFromContext(ctx); ok {
-		if memql.BareShortId(run.RunId) == memql.BareShortId(stepCtx.Execution.ID) {
-			run.StepKey = stepKeyIn(ctx, step.ID)
+		if memql.BareShortId(run.RunId) == memql.BareShortId(exec.ID) {
+			run.StepKey = key
+			applyRerun(&run, exec.rerun, key)
 			return common.ContextWithRun(ctx, run)
 		}
 		return ctx
 	}
-	return common.ContextWithRun(ctx, common.RunContext{
-		RunId:   stepCtx.Execution.ID,
-		StepKey: stepKeyIn(ctx, step.ID),
+	run := common.RunContext{
+		RunId:   exec.ID,
+		StepKey: key,
 		Mode:    common.RunModeLive,
 		// No owner: an automation's run is the DEPLOYMENT's, which is what
 		// journalContext's Synthetic actor already makes true of its run and
 		// step rows. The journal reads a blank-owner run through the
 		// cluster-owner query for exactly this reason.
-	})
+	}
+	applyRerun(&run, exec.rerun, key)
+	return common.ContextWithRun(ctx, run)
+}
+
+// applyRerun puts what a re-run request says about one step on that step's
+// run context (see withRunContext). Nil spec: nothing changes.
+func applyRerun(run *common.RunContext, spec *RerunSpec, key string) {
+	if spec == nil {
+		return
+	}
+	if spec.targets(key) {
+		run.Override, run.Snapshot = spec.Override, spec.Snapshot
+	} else {
+		run.Override, run.Snapshot = nil, nil
+	}
+	if spec.Workspace != "" {
+		run.Workspace = spec.Workspace
+	}
 }
 
 // saveCheckpointOnFailure persists a checkpoint when an automation fails.

@@ -142,5 +142,6 @@ func (j *workJournal) cancelStop(ctx context.Context, exec *AutomationExecution,
 	if by != "" {
 		args["cancelledBy"] = by
 	}
+	closeHeadArgs(exec, args)
 	j.call(ctx, "updateWorkRun", args)
 }
