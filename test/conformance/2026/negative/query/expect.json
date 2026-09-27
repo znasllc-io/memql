@@ -39,6 +39,13 @@
       "code": "query_clause_duplicate",
       "message": "`filter` is written twice",
       "note": "The same defect on the clause where it costs most: the second filter line replaced the first, and with it the ownership test."
+    },
+    {
+      "file": "shape-import-takes-the-name.memql",
+      "verdict": "refuse_load",
+      "code": "signature_concept_unresolved",
+      "message": "the name is taken by `use crm.shapes.{ supportTask }`, which imports a shape, not a concept -- alias it -- `use crm.shapes.{ supportTask as <another name> }` -- so \"supportTask\" names the concept",
+      "note": "memql#5433. The first import naming a name is the one resolution reads, so a shape import sharing the concept's name is aliased, not joined by a second import."
     }
   ]
 }

@@ -253,3 +253,90 @@ spec sigNowhereSpec5433 isSigNowhereOpen5433 = row => row.status == "open"
 		}
 	}
 }
+
+// The remedy names the right thing to do with the import that took the name.
+// An import of a SHAPE that shares the concept's name is not the concept's
+// import, and adding a concepts import beside it changes nothing (the first
+// import naming a name is the one resolution reads): the fix aliases it. And
+// the fix never suggests importing the file's own domain, whose concepts
+// need no import. Each fix is followed below, and the result loads.
+func TestSignatureConceptFixIsOneThatLoads(t *testing.T) {
+	concept := func(name string) string { return "/// A record.\nconcept " + name + " {\n  title  string\n}\n" }
+	query := func(imports, name string) string {
+		return imports + "\n/// Every record.\nquery sigFixLead5433 " + name + " {\n  sort \"row.createdAt\", \"desc\"\n  paginate 20\n}\n"
+	}
+	base := map[string]string{
+		"sigfixsales5433/concepts.memql": concept("sigFixLead5433"),
+		"sigfixmkt5433/concepts.memql":   concept("sigFixLead5433"),
+		"sigfixcrm5433/concepts.memql":   concept("sigFixCard5433"),
+		// A shape of crm's own concept, named as the lead concept is.
+		"sigfixcrm5433/shapes.memql": "/// A card.\n@row\nshape sigFixCard5433 sigFixLead5433 {\n  title\n}\n",
+	}
+	with := func(extra map[string]string) map[string]string {
+		out := map[string]string{}
+		for k, v := range base {
+			out[k] = v
+		}
+		for k, v := range extra {
+			out[k] = v
+		}
+		return out
+	}
+
+	diags := lint(t, sigTree(with(map[string]string{
+		"sigfixuse5433/queries.memql": query("use sigfixcrm5433.shapes.{ sigFixLead5433 }\n", "sigFixLeadsByShape5433"),
+	})))
+	d := sigRefusal(t, diags, `"sigFixLeadsByShape5433"`)
+	for _, want := range []string{
+		"the name is taken by `use sigfixcrm5433.shapes.{ sigFixLead5433 }`, which imports a shape, not a concept",
+		"alias it -- `use sigfixcrm5433.shapes.{ sigFixLead5433 as <another name> }`",
+		"`use sigfixmkt5433.concepts.{ sigFixLead5433 }`",
+		"`use sigfixsales5433.concepts.{ sigFixLead5433 }`",
+	} {
+		if !strings.Contains(d.Message, want) {
+			t.Errorf("the shape-import refusal does not say %q:\n  %s", want, d.Message)
+		}
+	}
+	if strings.Contains(d.Message, "`use sigfixcrm5433.shapes.{ sigFixLead5433 }` imports it") {
+		t.Errorf("the refusal calls a shape import the concept's import:\n  %s", d.Message)
+	}
+	// Followed: the shape aliased, the concept imported.
+	diags = lint(t, sigTree(with(map[string]string{
+		"sigfixuse5433/queries.memql": query("use sigfixcrm5433.shapes.{ sigFixLead5433 as sigFixLeadCard5433 }\nuse sigfixsales5433.concepts.{ sigFixLead5433 }\n", "sigFixLeadsByShape5433"),
+	})))
+	for _, other := range diags {
+		if strings.Contains(other.Message, "sigFixLeadsByShape5433") {
+			t.Errorf("following the fix did not load:\n  %s", other.Message)
+		}
+	}
+
+	// A concepts import naming neither of the two namespaces that declare
+	// the concept -- one of them the file's own.
+	own := map[string]string{
+		"sigfixown5433/concepts.memql":   "/// A deal.\nconcept sigFixDeal5433 {\n  title  string\n}\n",
+		"sigfixother5433/concepts.memql": "/// A deal.\nconcept sigFixDeal5433 {\n  title  string\n}\n",
+	}
+	ownQuery := func(imports string) string {
+		return imports + "\n/// Every deal.\nquery sigFixDeal5433 sigFixDeals5433 {\n  sort \"row.createdAt\", \"desc\"\n  paginate 20\n}\n"
+	}
+	own["sigfixown5433/queries.memql"] = ownQuery("use sigfixnone5433.concepts.{ sigFixDeal5433 }\n")
+	d = sigRefusal(t, lint(t, sigTree(own)), `"sigFixDeals5433"`)
+	for _, want := range []string{
+		"drop `use sigfixnone5433.concepts.{ sigFixDeal5433 }`: this file's own domain declares the concept",
+		"in place of `use sigfixnone5433.concepts.{ sigFixDeal5433 }` from the namespace that declares it: `use sigfixother5433.concepts.{ sigFixDeal5433 }`",
+	} {
+		if !strings.Contains(d.Message, want) {
+			t.Errorf("the own-domain refusal does not say %q:\n  %s", want, d.Message)
+		}
+	}
+	if strings.Contains(d.Message, "use sigfixown5433.concepts") {
+		t.Errorf("the refusal suggests importing the file's own domain:\n  %s", d.Message)
+	}
+	// Followed: the import dropped.
+	own["sigfixown5433/queries.memql"] = ownQuery("")
+	for _, other := range lint(t, sigTree(own)) {
+		if strings.Contains(other.Message, "sigFixDeals5433") {
+			t.Errorf("following the fix did not load:\n  %s", other.Message)
+		}
+	}
+}
