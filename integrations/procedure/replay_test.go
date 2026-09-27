@@ -239,8 +239,12 @@ func TestNoProberMeansALearnedPreconditionIsUnmeasured(t *testing.T) {
 	w.i.seams.prober = nil
 	w.i.seams.mu.Unlock()
 	out := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
-	if !out.StartRefused || len(out.Preconditions.Unmeasured) == 0 || !strings.Contains(out.Diagnosis, "no prober") {
+	if !out.StartRefused || len(out.Preconditions.Unmeasured) == 0 || !strings.Contains(out.Diagnosis, "no prober") || out.Code != codeNoProber {
 		t.Fatalf("outcome = %+v, want the start refused as unmeasured", out)
+	}
+	// The NODE lacks a seam, which says nothing about the procedure.
+	if w.lc.get("failures") != float64(0) {
+		t.Fatalf("failures = %v: a node with no prober counted against the procedure", w.lc.get("failures"))
 	}
 }
 
@@ -404,11 +408,11 @@ func TestAWorkbenchStepIsNotOneTheAppMaySkip(t *testing.T) {
 
 // TestARefusedStepIsAFailedReplayNotAnInsufficientPrecondition: a Go error from
 // a dispatcher means the step did NOT run -- a gate, a scope, a spelling the
-// executor does not support. After a step ran it is a divergence that
-// delivered nothing; before any ran it is a refused START. Neither says the
-// preconditions were insufficient, so each counts as one failed replay --
-// two of which demote -- rather than the one insufficiency that demotes at
-// once.
+// executor does not support, the machine not there. After a step ran it is a
+// divergence that delivered nothing: one failed replay -- two of which demote
+// -- rather than the one insufficiency that demotes at once. Before any step
+// ran it is the TARGET refusing, which says nothing about the procedure: a
+// refused start the ladder does not count (review finding I1).
 func TestARefusedStepIsAFailedReplayNotAnInsufficientPrecondition(t *testing.T) {
 	w := newReplayWorld(t, "trusted")
 	w.d.fail["step1"] = errors.New("denied_by_scope")
@@ -422,14 +426,20 @@ func TestARefusedStepIsAFailedReplayNotAnInsufficientPrecondition(t *testing.T) 
 
 	w.d.fail = map[string]error{"step0": errors.New("command_not_allowed")}
 	second := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
-	if !second.StartRefused || second.Diverged || second.Code != codeStartRefused {
-		t.Fatalf("a first step refused before it ran = %+v, want a refused start", second)
+	if !second.StartRefused || second.Diverged || second.Code != codeTargetUnavailable {
+		t.Fatalf("a first step refused before it ran = %+v, want a refused start the ladder does not count", second)
 	}
 	if !strings.Contains(w.f.recorded()[1].Guidance.Prompt, "did not start, so nothing has been done") {
 		t.Fatalf("the app was not told nothing ran:\n%s", w.f.recorded()[1].Guidance.Prompt)
 	}
-	if !second.Transition.Demoted || w.lc.get("ladder") != "shadow" {
-		t.Fatalf("two failed replays did not demote: %+v, ladder %v", second.Transition, w.lc.get("ladder"))
+	if second.Transition.From != "" || w.lc.get("ladder") != "trusted" || w.lc.get("failures") != float64(1) {
+		t.Fatalf("a target's refusal moved the ladder: %+v, ladder %v, failures %v", second.Transition, w.lc.get("ladder"), w.lc.get("failures"))
+	}
+
+	w.d.fail = map[string]error{"step1": errors.New("denied_by_scope")}
+	third := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
+	if !third.Transition.Demoted || w.lc.get("ladder") != "shadow" {
+		t.Fatalf("two failed replays did not demote: %+v, ladder %v", third.Transition, w.lc.get("ladder"))
 	}
 }
 

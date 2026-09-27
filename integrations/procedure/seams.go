@@ -138,6 +138,11 @@ type CompletedStep struct {
 	IdempotencyKey string
 	Summary        string
 	SideEffect     bool
+	// MayHaveRun: the step was sent and whether it ran is unknown -- its
+	// target stopped answering, or the node running the replay died before
+	// its receipt was written. The app is told to check before repeating it,
+	// never that it did not run.
+	MayHaveRun bool
 }
 
 // FallbackOutcome is what the app's session produced.

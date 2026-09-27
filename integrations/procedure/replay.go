@@ -173,9 +173,10 @@ type ReplayOutcome struct {
 	Rung work.Rung
 	// Code is the replay run's errorCode when it did not serve or match:
 	// procedure_not_servable, procedure_start_refused, procedure_mismatch,
-	// procedure_diverged, no_machine_dispatcher, no_workbench_dispatcher --
-	// or, when nothing could take the goal over, procedure_fallback_unavailable
-	// or procedure_fallback_failed.
+	// procedure_diverged, procedure_version_replaced, and -- none of which the
+	// ladder counts -- procedure_target_unavailable, no_machine_dispatcher,
+	// no_workbench_dispatcher, no_prober; or, when nothing could take the goal
+	// over, procedure_fallback_unavailable or procedure_fallback_failed.
 	Code string
 	// Preconditions is the start check, when one was made.
 	Preconditions proc.PreconditionReport
@@ -185,6 +186,10 @@ type ReplayOutcome struct {
 	// AlreadyDone: the replay run had already finished, and this call ran,
 	// counted and handed over nothing that had been done.
 	AlreadyDone bool
+	// TargetUnavailable: the target could not finish a step for a reason
+	// that says nothing about the procedure, so the replay stopped there and
+	// the ladder did not count it.
+	TargetUnavailable bool
 	// VersionReplaced: the construct was re-lifted to another version while
 	// this replay ran, so the ladder did not count it.
 	VersionReplaced bool
@@ -207,6 +212,10 @@ const (
 	codeFallbackUnavailable = "procedure_fallback_unavailable"
 	codeFallbackFailed      = "procedure_fallback_failed"
 	codeVersionReplaced     = "procedure_version_replaced"
+	// codeTargetUnavailable and codeNoProber are the target or the node, not
+	// the procedure: the ladder does not count either (review finding I1).
+	codeTargetUnavailable = "procedure_target_unavailable"
+	codeNoProber          = "no_prober"
 )
 
 const (
@@ -404,6 +413,10 @@ func (r *replay) run(ctx context.Context) {
 	if r.startRefusedMidway || r.out.NotCompared {
 		// The first step was refused before it ran: the start refusal (or,
 		// in shadow, the comparison not made) is already the whole answer.
+		return
+	}
+	if r.out.TargetUnavailable {
+		r.finishUncounted(ctx)
 		return
 	}
 	r.finish(ctx)
@@ -897,12 +910,13 @@ func (r *replay) checkPreconditions(ctx context.Context) bool {
 	var (
 		observed proc.Preconditions
 		probeErr error
+		code     = codeTargetUnavailable
 	)
 	if needsProbe := !proc.CheckPreconditions(r.c.learned, proc.Preconditions{}, target).Held; needsProbe {
 		if p := r.i.prober(); p != nil {
 			observed, probeErr = p.Probe(r.seamContext(ctx), r.target, r.req.OwnerUserId, r.runId, r.c.learned)
 		} else {
-			probeErr = errors.New("no prober is installed on this node")
+			probeErr, code = errors.New("no prober is installed on this node"), codeNoProber
 		}
 	}
 	report := proc.CheckPreconditions(r.c.learned, observed, target)
@@ -913,10 +927,18 @@ func (r *replay) checkPreconditions(ctx context.Context) bool {
 	if report.Held {
 		return true
 	}
+	if probeErr != nil {
+		// A PROBE THAT COULD NOT RUN measured nothing -- the machine asleep,
+		// no workbench peer, no prober on this node -- so it says nothing
+		// about whether the preconditions hold, and the ladder does not count
+		// it (review finding I1). The goal still goes to the app.
+		return r.refuseStart(ctx, code,
+			"Its preconditions could not be checked on the "+target+": "+preconditionSentence(report, probeErr)+".", false)
+	}
 	// A SHADOW that cannot start is evidence of nothing: the app served the
 	// goal regardless, and the ladder is left where it was.
 	return r.refuseStart(ctx, codeStartRefused,
-		"Its preconditions did not hold on the "+target+": "+preconditionSentence(report, probeErr)+".", r.mode != ReplayShadow)
+		"Its preconditions did not hold on the "+target+": "+preconditionSentence(report, nil)+".", r.mode != ReplayShadow)
 }
 
 func preconditionSentence(report proc.PreconditionReport, probeErr error) string {
@@ -1050,24 +1072,29 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		if derr != nil {
 			// A GO ERROR MEANS THE STEP DID NOT RUN -- a gate or scope
 			// refusal, a missing surface, a spelling the executor does not
-			// support, the sandbox saying no. Before anything has run that is
-			// a refused START (and, in shadow, a comparison not made here);
-			// after, it is a divergence that delivered nothing.
-			r.writeStepReceipt(ctx, key, "failed", done, nil, nil, derr.Error(), false, "")
+			// support, the sandbox saying no, the machine not there. Before
+			// anything has run that is the TARGET refusing, which says nothing
+			// about the procedure: a refused start the ladder does not count
+			// (review finding I1), and in shadow a comparison not made here.
+			// After a step ran, it is a divergence that delivered nothing.
+			r.writeStepReceipt(ctx, key, "failed", done, nil, nil, "procedure_step_failed", derr.Error(), false, "")
 			if len(r.out.Completed) == 0 {
 				if r.mode == ReplayShadow {
-					r.notCompared(codeStartRefused, fmt.Sprintf("Its first step (%s: %s) was refused before it ran on this node (%v), so the comparison was not made.", step.Tool, summary, derr))
+					r.notCompared(codeTargetUnavailable, fmt.Sprintf("Its first step (%s: %s) was refused before it ran on this node (%v), so the comparison was not made.", step.Tool, summary, derr))
 					r.outcome = r.baseOutcome()
 					r.outcome["notCompared"] = true
 					r.outcome["diagnosis"] = r.out.Diagnosis
-					r.closeRun(ctx, "failed", codeStartRefused, r.out.Diagnosis)
+					r.closeRun(ctx, "failed", codeTargetUnavailable, r.out.Diagnosis)
 					return false
 				}
-				r.refuseStart(ctx, codeStartRefused, fmt.Sprintf("Its first step (%s: %s) was refused before it ran: %v.", step.Tool, summary, derr), true)
+				r.refuseStart(ctx, codeTargetUnavailable, fmt.Sprintf("Its first step (%s: %s) was refused before it ran: %v.", step.Tool, summary, derr), false)
 				r.startRefusedMidway = true
 				return false
 			}
 			return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) was refused before it ran: %v.", idx+1, step.Tool, summary, derr), false)
+		}
+		if res.Unavailable {
+			return r.stopUnavailable(ctx, idx, key, done, res)
 		}
 		obs, output = res.Observation, res.Output
 		// A SIDE EFFECT is what the DISPATCHER says reached the world beyond
@@ -1084,7 +1111,7 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		if r.dry {
 			status = "skipped"
 		}
-		r.writeStepReceipt(ctx, key, status, done, &obs, output, "", match, strings.Join(why, "; "))
+		r.writeStepReceipt(ctx, key, status, done, &obs, output, "", "", match, strings.Join(why, "; "))
 	}
 	if match {
 		r.trace = append(r.trace, symbol)
@@ -1100,7 +1127,12 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		if r.mode == ReplayShadow {
 			what = "what the app did"
 		}
-		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) did not match %s: %s.", idx+1, step.Tool, summary, what, reason), true)
+		// INSUFFICIENT (D16) is reserved for a step that RAN TO AN ANSWER of
+		// its own and answered differently while every precondition held. A
+		// step that timed out, or lost its answer, did not finish: what it
+		// would have said is unknown, and that is an ordinary failure.
+		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) did not match %s: %s.", idx+1, step.Tool, summary, what, reason),
+			!match && completedStep(step.Tool, obs, output))
 	}
 	r.outputs[idx] = output
 	r.out.Completed = append(r.out.Completed, done)
@@ -1133,6 +1165,99 @@ func (r *replay) compare(idx int, tool string, args map[string]any, obs work.Ste
 		return work.CompareShadow(exp, app, obs)
 	}
 	return work.Compare(exp, obs)
+}
+
+// completedStep reports whether a step RAN TO AN ANSWER of its own: the
+// executor reported what it did, success or error. A step that stopped short
+// of one -- a timeout, a signal, a lost reply -- reports an error with the
+// measurement it never took (a command's exit code, a fetch's or a tool's
+// result type) missing, or names the timeout; what it would have answered is
+// unknown, so its difference from the recordings is no evidence about the
+// procedure's preconditions.
+func completedStep(tool string, obs work.StepObservation, output any) bool {
+	if obs.IsError == nil {
+		return false
+	}
+	if !*obs.IsError {
+		return true
+	}
+	if m, ok := output.(map[string]any); ok {
+		switch str(m, "errorCode") {
+		case "timeout", "worker_disconnected":
+			return false
+		}
+	}
+	switch tool {
+	case "exec":
+		return obs.ExitCode != nil
+	case "fetch", "mcp":
+		return obs.ResultType != ""
+	}
+	// A write or a read that failed is the executor's answer about the file.
+	return true
+}
+
+// stopUnavailable stops a replay at a step its target could not finish for a
+// reason that says nothing about the procedure (review finding I1): the
+// stream dropped, a forward failed, no workbench peer answered. The step MAY
+// HAVE RUN -- its effects are unknown -- so it is recorded that way and the
+// app is told to check before repeating it. The ladder does not count it: a
+// shadow comparison is not made, and a served goal goes to the app.
+func (r *replay) stopUnavailable(ctx context.Context, idx int, key string, done CompletedStep, res DispatchResult) bool {
+	done.MayHaveRun = true
+	done.SideEffect = res.Delivered
+	why := "the target stopped answering"
+	if m, ok := res.Output.(map[string]any); ok {
+		if code := strings.TrimSpace(str(m, "errorCode")); code != "" {
+			why = firstNonEmpty(strings.TrimSpace(str(m, "errorMessage")), code) + " (" + code + ")"
+		}
+	}
+	diagnosis := fmt.Sprintf("Step %d (%s: %s) could not be finished on the %s -- %s -- so whether it ran is unknown.",
+		idx+1, done.Tool, done.Summary, r.targetName(), why)
+	r.writeStepReceipt(ctx, key, "failed", done, &res.Observation, res.Output, codeTargetUnavailable, diagnosis, false, "")
+	if r.mode == ReplayShadow {
+		r.notCompared(codeTargetUnavailable, diagnosis+" The comparison was not made, and the ladder is where it was.")
+		r.outcome = r.baseOutcome()
+		r.outcome["notCompared"] = true
+		r.outcome["diagnosis"] = r.out.Diagnosis
+		r.closeRun(ctx, "failed", codeTargetUnavailable, r.out.Diagnosis)
+		return false
+	}
+	r.out.TargetUnavailable = true
+	r.out.Code = codeTargetUnavailable
+	r.out.DivergedStep = idx
+	r.out.Diagnosis = diagnosis
+	r.out.Completed = append(r.out.Completed, done)
+	return false
+}
+
+// targetName is where the replay's steps run, as a sentence says it.
+func (r *replay) targetName() string {
+	if r.target == "" {
+		return "target"
+	}
+	return string(r.target)
+}
+
+// finishUncounted closes a served replay that stopped for a reason that says
+// nothing about the procedure, and hands the goal to the app with every step
+// that ran or may have. No ladder event: the target, not the procedure, is
+// what failed.
+func (r *replay) finishUncounted(ctx context.Context) {
+	r.outcome = r.divergenceOutcome()
+	r.outcome["code"] = r.out.Code
+	r.outcome["diagnosis"] = r.out.Diagnosis
+	r.outcome["stoppedAt"] = r.out.DivergedStep
+	r.outcome["targetUnavailable"] = true
+	if r.i.appFallback() == nil {
+		r.out.Code = codeFallbackUnavailable
+		r.outcome["fallback"] = "no app fallback is installed on this node, so nothing served the goal"
+	}
+	if !r.settle(ctx, "failed", r.out.Code, r.out.Diagnosis, nil, false, false) {
+		return
+	}
+	r.fallBack(ctx, Guidance{Diagnosis: r.out.Diagnosis, Completed: append([]CompletedStep(nil), r.out.Completed...)}, true)
+	r.recordHandover(ctx)
 }
 
 // holeValues is every value one step's holes take: a free parameter's
@@ -1500,10 +1625,14 @@ func (r *replay) divergenceOutcome() map[string]any {
 func completedList(steps []CompletedStep) []any {
 	out := make([]any, 0, len(steps))
 	for _, s := range steps {
-		out = append(out, map[string]any{
+		step := map[string]any{
 			"index": s.Index, "tool": s.Tool, "idempotencyKey": s.IdempotencyKey,
 			"summary": s.Summary, "sideEffect": s.SideEffect,
-		})
+		}
+		if s.MayHaveRun {
+			step["mayHaveRun"] = true
+		}
+		out = append(out, step)
 	}
 	return out
 }
@@ -1518,9 +1647,10 @@ func completedFrom(v any) []CompletedStep {
 			continue
 		}
 		side, _ := m["sideEffect"].(bool)
+		mayHave, _ := m["mayHaveRun"].(bool)
 		out = append(out, CompletedStep{
 			Index: intOf(m, "index"), Tool: str(m, "tool"), IdempotencyKey: str(m, "idempotencyKey"),
-			Summary: str(m, "summary"), SideEffect: side,
+			Summary: str(m, "summary"), SideEffect: side, MayHaveRun: mayHave,
 		})
 	}
 	return out
@@ -1601,11 +1731,14 @@ func (r *replay) writeStepIntent(ctx context.Context, idx int, key, idem string)
 // later step or a resume needs, whether it matched -- and the call it made,
 // its tool and whether it may have touched anything, which is what a hand-back
 // after an interruption tells the app not to repeat.
-func (r *replay) writeStepReceipt(ctx context.Context, key, status string, done CompletedStep, obs *work.StepObservation, output any, errMsg string, passed bool, message string) {
+func (r *replay) writeStepReceipt(ctx context.Context, key, status string, done CompletedStep, obs *work.StepObservation, output any, errCode, errMsg string, passed bool, message string) {
 	payload := map[string]any{
 		"tool":       done.Tool,
 		"summary":    done.Summary,
 		"sideEffect": done.SideEffect,
+	}
+	if done.MayHaveRun {
+		payload["mayHaveRun"] = true
 	}
 	if obs != nil {
 		if o, err := asObject(obs); err == nil {
@@ -1622,7 +1755,7 @@ func (r *replay) writeStepReceipt(ctx context.Context, key, status string, done 
 		"finishedAt": r.now(),
 	}
 	if errMsg != "" {
-		args["errorCode"] = "procedure_step_failed"
+		args["errorCode"] = firstNonEmpty(errCode, "procedure_step_failed")
 		args["errorMessage"] = errMsg
 	} else {
 		args["postcondition"] = map[string]any{
@@ -1744,11 +1877,14 @@ func renderGuidance(statement string, g Guidance, started bool, stoppedAt int) s
 		b.WriteString(g.Diagnosis)
 		return b.String()
 	}
-	var delivered, local []CompletedStep
+	var delivered, local, unknown []CompletedStep
 	for _, s := range g.Completed {
-		if s.SideEffect {
+		switch {
+		case s.MayHaveRun:
+			unknown = append(unknown, s)
+		case s.SideEffect:
 			delivered = append(delivered, s)
-		} else {
+		default:
 			local = append(local, s)
 		}
 	}
@@ -1764,6 +1900,15 @@ func renderGuidance(statement string, g Guidance, started bool, stoppedAt int) s
 		// reached it; the app redoes whatever of them the goal still needs.
 		b.WriteString("It also ran these steps in its own workspace, which you do not share, so their effects did not reach you:\n")
 		for _, s := range local {
+			fmt.Fprintf(&b, "- step %d (%s): %s [idempotency key %s]\n", s.Index+1, s.Tool, s.Summary, s.IdempotencyKey)
+		}
+	}
+	if len(unknown) > 0 {
+		// NEITHER DONE NOR NOT DONE. The step was sent and nothing came back
+		// that says whether it ran; telling the app it did not would have it
+		// repeat an effect that may have landed.
+		b.WriteString("These steps were sent and whether they ran is unknown -- they may have run, so check before repeating them:\n")
+		for _, s := range unknown {
 			fmt.Fprintf(&b, "- step %d (%s): %s [idempotency key %s]\n", s.Index+1, s.Tool, s.Summary, s.IdempotencyKey)
 		}
 	}
