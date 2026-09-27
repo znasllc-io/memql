@@ -263,13 +263,22 @@ type LadderPolicy struct {
 	RetireAfterDays      *int `json:"retireAfterDays,omitempty"`
 }
 
-// ProcedureGoal is one entry of a lifecycle: a goal a person asks for, or a
-// person's decision on the promotion the ladder proposed.
+// ProcedureGoal is one entry of a lifecycle: a goal a person asks for, a
+// person's decision on the promotion the ladder proposed, or a person stepping
+// into the goal served last -- a verdict on the step the app served for it, or
+// that step run again (epic memql#5414).
 type ProcedureGoal struct {
 	// Decide is a person's decision on the procedurePromotion approval the
 	// ladder raised: "approved" or "rejected". An entry that decides carries
 	// nothing else -- it is not a goal.
 	Decide string `json:"decide,omitempty"`
+	// Feedback is a person's verdict on the step the app served for the goal
+	// served LAST, at that step's current version (design D21). An entry that
+	// gives feedback carries nothing else.
+	Feedback *Feedback `json:"feedback,omitempty"`
+	// Rerun is a person running that same step again, as a new version of it
+	// (D18, D20). An entry that re-runs carries nothing else.
+	Rerun *Rerun `json:"rerun,omitempty"`
 	// Goal overrides the scenario's goal statement for this one goal. A
 	// different statement is a different goal signature, so this is how a
 	// scenario asks for a FRESH goal on the same fixture.
@@ -285,6 +294,62 @@ type ProcedureGoal struct {
 	// because a scenario-wide injection would fire in whichever goal reached
 	// the action first, which is a recording, not the goal being measured.
 	Inject []Injection `json:"inject,omitempty"`
+	// Answer is what the fixture app does INSTEAD of the named actions in this
+	// goal's FIRST session: a wrong answer, for a person to dislike and run
+	// again. Keyed by action (step key); each value is a command on the fake
+	// machine running the SAME script as the action it replaces, its
+	// placeholders bound from this goal as the action's are. Every later
+	// session of the goal -- a re-run -- performs the actions as written.
+	Answer map[string]string `json:"answer,omitempty"`
+}
+
+// Feedback is a person's verdict on one version of a step, on the AI Fluency
+// framework's three Discernment axes (design D21).
+type Feedback struct {
+	// Verdict is like, dislike or neutral.
+	Verdict string `json:"verdict"`
+	// Axes are what a dislike found wrong: product (what it produced),
+	// process (how it went about it), performance (how it behaved). A dislike
+	// names at least one -- the platform refuses one that does not, because
+	// the question is the point -- and a like or neutral names none.
+	Axes []string `json:"axes,omitempty"`
+	// Reason is why, in the person's words. It rides as guidance when the
+	// step is run again (D23).
+	Reason string `json:"reason,omitempty"`
+}
+
+// Rerun is a step run again as a new version.
+type Rerun struct {
+	// Level is the level of intelligence to ask for instead of the step's
+	// own: fast, strong or reasoning. Empty keeps the step's.
+	Level string `json:"level,omitempty"`
+}
+
+// Serves reports whether the entry is a goal a person asks for, as against a
+// decision, a verdict or a re-run.
+func (g ProcedureGoal) Serves() bool {
+	return g.Decide == "" && g.Feedback == nil && g.Rerun == nil
+}
+
+// carriesGoal reports whether an entry says anything only a goal may say.
+func (g ProcedureGoal) carriesGoal() bool {
+	return g.Goal != "" || len(g.Variables) > 0 || g.Measure || len(g.Inject) > 0 || len(g.Answer) > 0
+}
+
+// Intervenes reports whether any entry steps into a goal already served -- a
+// verdict or a re-run. A lifecycle that does runs every goal the app serves
+// through the platform's automation executor, so that the goal's run holds a
+// real step: one a person can judge, and run again as a new version.
+func (p *Procedure) Intervenes() bool {
+	if p == nil {
+		return false
+	}
+	for _, g := range p.Goals {
+		if g.Feedback != nil || g.Rerun != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Decision values a lifecycle entry may carry.
@@ -292,6 +357,36 @@ const (
 	DecideApproved = "approved"
 	DecideRejected = "rejected"
 )
+
+// The verdicts a feedback entry may give, the axes a dislike may name and the
+// levels a re-run may ask for -- the closed sets the platform's own acts accept
+// (component/work.ValidateFeedback and ValidateOverride, held to these by a
+// test in component/proving, since this package may import neither).
+const (
+	VerdictLike    = "like"
+	VerdictDislike = "dislike"
+	VerdictNeutral = "neutral"
+)
+
+var (
+	feedbackVerdicts = []string{VerdictLike, VerdictDislike, VerdictNeutral}
+	feedbackAxes     = []string{"product", "process", "performance"}
+	rerunLevels      = []string{"fast", "strong", "reasoning"}
+)
+
+// MaxFeedbackReasonBytes is the longest reason the platform keeps; a longer
+// one is refused by the act, so a lifecycle carrying one could not run.
+const MaxFeedbackReasonBytes = 2000
+
+// FeedbackVerdicts returns the verdicts a feedback entry may give, for the test
+// that holds the set to the platform's.
+func FeedbackVerdicts() []string { return append([]string(nil), feedbackVerdicts...) }
+
+// FeedbackAxes returns the axes a dislike may name, in the framework's order.
+func FeedbackAxes() []string { return append([]string(nil), feedbackAxes...) }
+
+// RerunLevels returns the levels a re-run may ask for.
+func RerunLevels() []string { return append([]string(nil), rerunLevels...) }
 
 // The rows a lifecycle's verifier may assert on. A lifecycle keeps no journal
 // run of its own; it answers from the ladder's rows, read back from the
@@ -332,12 +427,22 @@ func LifecycleRows() map[string]map[string][]string {
 	return out
 }
 
+// The two named checks of a person's correction (epic memql#5414, task
+// memql#5420). Named here because the loader holds each to a lifecycle whose
+// entries can make it true.
+const (
+	CheckLiftedFromTheLikedVersion = "aLiftedProcedureCameFromTheLikedVersion"
+	CheckDislikedVersionReadable   = "theDislikedVersionIsStillReadable"
+)
+
 // lifecycleChecks are the named checks that read a lifecycle's record. Only a
 // lifecycle may name them, and a lifecycle may name no other: the scripted
 // checks read a journal run a lifecycle does not have.
 var lifecycleChecks = map[string]bool{
 	"aTrustedReplayReachedNoModel":               true,
 	"aDivergedReplayHandedOverItsCompletedSteps": true,
+	CheckLiftedFromTheLikedVersion:               true,
+	CheckDislikedVersionReadable:                 true,
 }
 
 // procedureTools is the CLOSED set of tools the fixture app speaks. One, and
@@ -512,6 +617,9 @@ var namedChecks = map[string]string{
 	// The procedure lifecycle's two (epic memql#5408).
 	"aTrustedReplayReachedNoModel":               "the assertion relates the replay's own model-call count and the fixture app's call counter over one goal of a lifecycle -- two instruments over one interval, which no row predicate or world counter holds",
 	"aDivergedReplayHandedOverItsCompletedSteps": "the assertion relates where a replay stopped, the guidance the app was handed and the actions the app then performed -- three records of one handover, which no single row or counter holds",
+	// A person's correction (epic memql#5414, task memql#5420).
+	CheckLiftedFromTheLikedVersion: "the assertion relates three records of one correction -- the recording each version of the step delegated, the verdict a person gave each version, and the recordings and steps of the procedure the platform learned -- which no single row or counter holds",
+	CheckDislikedVersionReadable:   "the assertion reads a step's EVERY version, which only the version-history read answers; a row assertion reads each row's newest version, which is exactly the one the re-run replaced",
 }
 
 // NamedChecks returns the registered check names, sorted.
@@ -757,8 +865,30 @@ func validateProcedure(s Scenario, claimed map[figure.Metric]bool, bad func(stri
 		}
 	}
 
-	// The goals.
+	// The goals, and what a person does between them.
+	//
+	// A verdict or a re-run applies to the goal served LAST, and the loader
+	// walks the entries keeping what the driver will: which goal that is,
+	// whether the app served it, and the versions its step will have. So an
+	// entry the driver could not act on, and a named check the entries could
+	// never make true, are refused here rather than found in the database
+	// lane.
 	measured := -1
+	lastServed := -1
+	approved := false
+	appServed := map[int]bool{}
+	history := map[int]*stepHistory{}
+	stepIn := func(i int, verb string) *stepHistory {
+		switch {
+		case lastServed < 0:
+			bad("procedure.goals[%d] %s the step of the goal served last, and no goal has been served before it", i, verb)
+			return nil
+		case !appServed[lastServed]:
+			bad("procedure.goals[%d] %s the step of goal %d, which follows an approved promotion: a procedure may serve that goal, and a goal a procedure serves hands no step to the app for a person to judge or run again", i, verb, lastServed)
+			return nil
+		}
+		return history[lastServed]
+	}
 	for i, g := range p.Goals {
 		if g.Measure {
 			if measured >= 0 {
@@ -766,12 +896,50 @@ func validateProcedure(s Scenario, claimed map[figure.Metric]bool, bad func(stri
 			}
 			measured = i
 		}
-		if g.Decide != "" {
+		kinds := 0
+		for _, set := range []bool{g.Decide != "", g.Feedback != nil, g.Rerun != nil} {
+			if set {
+				kinds++
+			}
+		}
+		if kinds > 1 {
+			bad("procedure.goals[%d] is more than one of a decision, a verdict and a re-run; an entry is one thing a person does", i)
+			continue
+		}
+		switch {
+		case g.Decide != "":
 			if g.Decide != DecideApproved && g.Decide != DecideRejected {
 				bad("procedure.goals[%d] decides %q, which is not %q or %q", i, g.Decide, DecideApproved, DecideRejected)
 			}
-			if g.Goal != "" || len(g.Variables) > 0 || g.Measure || len(g.Inject) > 0 {
+			if g.carriesGoal() {
 				bad("procedure.goals[%d] decides a promotion and also carries a goal; a decision is a person answering an approval, not a goal anything serves", i)
+			}
+			if g.Decide == DecideApproved {
+				approved = true
+			}
+			continue
+		case g.Feedback != nil:
+			if g.carriesGoal() {
+				bad("procedure.goals[%d] gives a verdict and also carries a goal; a verdict is a person judging the goal served before it, not a goal anything serves", i)
+			}
+			validateFeedback(i, *g.Feedback, bad)
+			if h := stepIn(i, "judges"); h != nil {
+				h.verdicts[h.current] = g.Feedback.Verdict
+			}
+			continue
+		case g.Rerun != nil:
+			if g.carriesGoal() {
+				bad("procedure.goals[%d] re-runs a step and also carries a goal; a re-run is a new version of the goal served before it, not a goal of its own", i)
+			}
+			switch lvl := g.Rerun.Level; {
+			case lvl == "" || containsString(rerunLevels, lvl):
+			case lvl == "embeddings":
+				bad("procedure.goals[%d] re-runs at the embeddings level, which a re-run never asks for: a different embedder answers in a different vector space (design D10)", i)
+			default:
+				bad("procedure.goals[%d].rerun.level is %q, which is not one of %s", i, lvl, strings.Join(rerunLevels, ", "))
+			}
+			if h := stepIn(i, "re-runs"); h != nil {
+				h.current++
 			}
 			continue
 		}
@@ -786,6 +954,13 @@ func validateProcedure(s Scenario, claimed map[figure.Metric]bool, bad func(stri
 		for _, ph := range Placeholders(statement) {
 			want[ph] = true
 		}
+		// A procedure may serve a goal of the scenario's own statement once a
+		// promotion has been approved, and then the app never performs it.
+		byProcedure := approved && g.Goal == ""
+		validateAnswer(s, i, g, byProcedure, want, bad)
+		lastServed = i
+		appServed[i] = !byProcedure
+		history[i] = &stepHistory{current: 1, verdicts: map[int]string{}}
 		for ph := range want {
 			if _, ok := g.Variables[ph]; !ok {
 				bad("procedure.goals[%d] does not bind {{%s}}; the fixture app would run the placeholder as written", i, ph)
@@ -829,6 +1004,30 @@ func validateProcedure(s Scenario, claimed map[figure.Metric]bool, bad func(stri
 		bad("procedure.goals[%d] is measured but is not the last goal; what follows the measured goal would run unmeasured, and a reader would take the published figure for the end state", measured)
 	}
 
+	// A correction's two named checks, each held to entries that can make it
+	// true. A check with nothing to find would fail in the lane for the
+	// scenario's reason rather than the platform's.
+	replaced, corrected := false, false
+	for _, h := range history {
+		for v, verdict := range h.verdicts {
+			if verdict != VerdictDislike || v >= h.current {
+				continue
+			}
+			replaced = true
+			if h.verdicts[h.current] == VerdictLike {
+				corrected = true
+			}
+		}
+	}
+	for i, c := range s.Verify {
+		switch {
+		case c.Named == CheckLiftedFromTheLikedVersion && !corrected:
+			bad("verifier %d names %s, and no goal of this lifecycle has a version a person disliked run again and the version it ends on liked: there is no liked version to tell from a disliked one", i, c.Named)
+		case c.Named == CheckDislikedVersionReadable && !replaced:
+			bad("verifier %d names %s, and no goal of this lifecycle has a version a person disliked run again, so no replaced version is left to read", i, c.Named)
+		}
+	}
+
 	// The verifier: a lifecycle answers the ladder's rows and its own named
 	// checks, and nothing a scripted run's journal would.
 	for i, c := range s.Verify {
@@ -857,6 +1056,77 @@ func validateProcedure(s Scenario, claimed map[figure.Metric]bool, bad func(stri
 	}
 	if claimed[figure.MetricDuplicatedAcrossDivergence] && measured >= 0 && len(p.Goals[measured].Inject) == 0 {
 		bad("claims %s, but the measured goal injects no failure: nothing diverges, and \"nothing was delivered twice\" would be true of every goal", figure.MetricDuplicatedAcrossDivergence)
+	}
+}
+
+// stepHistory is one served goal's step as a lifecycle's entries leave it: the
+// version that is current, and each version's newest verdict. It is the
+// loader's copy of what the driver keeps -- a re-run adds one version, a
+// verdict judges the current one -- so the two numbering the same way is a
+// property of the entries, not of either reader.
+type stepHistory struct {
+	current  int
+	verdicts map[int]string
+}
+
+// validateFeedback refuses a verdict the platform's act would refuse, or one
+// that says nothing it could act on.
+func validateFeedback(i int, f Feedback, bad func(string, ...any)) {
+	if !containsString(feedbackVerdicts, f.Verdict) {
+		bad("procedure.goals[%d].feedback.verdict is %q, which is not one of %s", i, f.Verdict, strings.Join(feedbackVerdicts, ", "))
+	}
+	seen := map[string]bool{}
+	for _, a := range f.Axes {
+		switch {
+		case !containsString(feedbackAxes, a):
+			bad("procedure.goals[%d].feedback names the axis %q, which is not one of %s", i, a, strings.Join(feedbackAxes, ", "))
+		case seen[a]:
+			bad("procedure.goals[%d].feedback names the axis %q twice", i, a)
+		}
+		seen[a] = true
+	}
+	switch {
+	case f.Verdict == VerdictDislike && len(f.Axes) == 0:
+		bad("procedure.goals[%d] dislikes the step and names no axis; a dislike says what was wrong -- the product, the process or the performance -- and the platform refuses one that does not (design D21)", i)
+	case f.Verdict != VerdictDislike && len(f.Axes) > 0:
+		bad("procedure.goals[%d] gives a %s verdict naming axes; the axes are what a dislike found wrong, and a %s names none", i, f.Verdict, f.Verdict)
+	}
+	if len(f.Reason) > MaxFeedbackReasonBytes {
+		bad("procedure.goals[%d].feedback.reason is %d bytes; the platform keeps a reason of at most %d and refuses a longer one", i, len(f.Reason), MaxFeedbackReasonBytes)
+	}
+}
+
+// validateAnswer refuses a wrong answer the fixture app could not perform as
+// the same action done wrongly, and adds its placeholders to what the goal
+// must bind.
+func validateAnswer(s Scenario, i int, g ProcedureGoal, byProcedure bool, want map[string]bool, bad func(string, ...any)) {
+	if len(g.Answer) == 0 {
+		return
+	}
+	if byProcedure {
+		bad("procedure.goals[%d] carries a wrong answer and follows an approved promotion: a procedure may serve the goal, and then the app never performs the answer", i)
+	}
+	for _, key := range sortedKeys(g.Answer) {
+		cmd := g.Answer[key]
+		var step *Step
+		for k := range s.Steps {
+			if s.Steps[k].Key == key {
+				step = &s.Steps[k]
+			}
+		}
+		switch {
+		case step == nil:
+			bad("procedure.goals[%d].answer names %q, which is not an action in this scenario", i, key)
+		case strings.TrimSpace(cmd) == "":
+			bad("procedure.goals[%d].answer[%s] is empty; a wrong answer is the command the app runs instead", i, key)
+		case (Step{Target: cmd}).Script() != step.Script():
+			bad("procedure.goals[%d].answer[%s] runs %q, and the action it replaces runs %q; a wrong answer is the same action done wrongly, so the recording keeps its shape and an injection keeps its aim", i, key, (Step{Target: cmd}).Script(), step.Script())
+		case strings.TrimSpace(cmd) == strings.TrimSpace(step.Target):
+			bad("procedure.goals[%d].answer[%s] is the action as written; a wrong answer must differ from it", i, key)
+		}
+		for _, ph := range Placeholders(cmd) {
+			want[ph] = true
+		}
 	}
 }
 

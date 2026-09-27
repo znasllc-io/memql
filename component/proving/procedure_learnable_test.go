@@ -114,7 +114,7 @@ func recordingBindings(t *testing.T, s scenario.Scenario) []map[string]string {
 	t.Helper()
 	var out []map[string]string
 	for _, g := range s.Procedure.Goals {
-		if g.Decide == "" && g.Goal == "" && len(out) < 2 {
+		if g.Serves() && g.Goal == "" && len(out) < 2 {
 			out = append(out, g.Variables)
 		}
 	}
