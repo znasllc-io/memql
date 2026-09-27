@@ -51,6 +51,12 @@ export interface ComposerBaselineRead {
 export interface ComposerProps {
   mode: "rerun" | "branch";
   stepKey: string;
+  /**
+   * A model or an app answers this step. When nothing does -- a query, a
+   * mutation -- the intelligence and the words are not questions this step
+   * has, so the form asks only for its inputs.
+   */
+  modelled: boolean;
   /** The version the act starts from: the current one. */
   fromVersion: number | null;
   consequence: string;
@@ -83,6 +89,7 @@ export function actName(mode: "rerun" | "branch"): string {
 export function Composer({
   mode,
   stepKey,
+  modelled,
   fromVersion,
   consequence,
   baseline,
@@ -108,7 +115,7 @@ export function Composer({
     if (error !== "") refusal.current?.focus();
   }, [error]);
 
-  const loadingPrompt = baseline.session && (baseline.state === "loading" || draft.text === null);
+  const loadingPrompt = modelled && baseline.session && (baseline.state === "loading" || draft.text === null);
   const textLabel = baseline.session ? "Prompt" : "Instructions";
 
   function setInput(id: string, patch: Partial<InputRow>): void {
@@ -124,7 +131,10 @@ export function Composer({
       className="os-dialog os-nexus-composer"
       // THE FIRST FIELD, not the first focusable thing: "Start from them" sits
       // above the fields and rewrites the form in one click.
-      initialFocus={(dialog) => dialog.querySelector<HTMLElement>(".os-nexus-composer-pair .os-select")}
+      initialFocus={(dialog) =>
+        dialog.querySelector<HTMLElement>(".os-nexus-composer-pair .os-select") ??
+        dialog.querySelector<HTMLElement>(".os-nexus-input-row .os-input")
+      }
       floor={
         <>
           {error === "" ? null : (
@@ -158,94 +168,99 @@ export function Composer({
         </p>
       )}
 
-      <div className="os-nexus-composer-pair">
-        <Field label="Level">
-          <Select
-            id={`${ids}-level`}
-            label="Level"
-            value={draft.level}
-            onChange={(level) => onDraft({ ...draft, level })}
-          >
-            <option value="">{ownLevel === "" ? "Its own" : `Its own (${levelWord(ownLevel).toLowerCase()})`}</option>
-            {OVERRIDE_LEVELS.map((level) => (
-              <option key={level} value={level}>
-                {levelWord(level)}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Effort">
-          <Select
-            id={`${ids}-effort`}
-            label="Effort"
-            value={draft.effort}
-            onChange={(effort) => onDraft({ ...draft, effort })}
-          >
-            <option value="">The level decides</option>
-            {OVERRIDE_EFFORTS.map((effort) => (
-              <option key={effort} value={effort}>
-                {effortWord(effort)}
-              </option>
-            ))}
-          </Select>
-          <InfoDetail title="Effort">
-            <p>
-              How hard an app works on the step -- Claude Code or Codex, when one answers it. A step a
-              model answers directly has no such setting and ignores it.
-            </p>
-            <p>Left alone, the level decides.</p>
-          </InfoDetail>
-        </Field>
-      </div>
+      {modelled ? (
+        <>
+          <div className="os-nexus-composer-pair">
+            <Field label="Level">
+              <Select
+                id={`${ids}-level`}
+                label="Level"
+                value={draft.level}
+                onChange={(level) => onDraft({ ...draft, level })}
+              >
+                <option value="">{ownLevel === "" ? "Its own" : `Its own (${levelWord(ownLevel).toLowerCase()})`}</option>
+                {OVERRIDE_LEVELS.map((level) => (
+                  <option key={level} value={level}>
+                    {levelWord(level)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Effort">
+              <Select
+                id={`${ids}-effort`}
+                label="Effort"
+                value={draft.effort}
+                onChange={(effort) => onDraft({ ...draft, effort })}
+              >
+                <option value="">The level decides</option>
+                {OVERRIDE_EFFORTS.map((effort) => (
+                  <option key={effort} value={effort}>
+                    {effortWord(effort)}
+                  </option>
+                ))}
+              </Select>
+              <InfoDetail title="Effort">
+                <p>
+                  How hard an app works on the step -- Claude Code or Codex, when one answers it. A step a
+                  model answers directly has no such setting and ignores it.
+                </p>
+                <p>Left alone, the level decides.</p>
+              </InfoDetail>
+            </Field>
+          </div>
 
-      <Field label="Model">
-        <Input
-          id={`${ids}-model`}
-          label="Model"
-          code
-          value={draft.model}
-          placeholder="The level decides"
-          onChange={(model) => onDraft({ ...draft, model })}
-        />
-        <InfoDetail title="Model">
-          <p>Pins one place to answer the step instead of letting the level choose. Any one of:</p>
-          <p>
-            <code>chat54Mini</code> -- a provider by its name.
-            <br />
-            <code>fleet:qwen3:8b</code> -- a model on your own machines.
-            <br />
-            <code>app:claude-code</code> -- an app, with the model it chooses.
-            <br />
-            <code>app:claude-code:opus</code> -- an app, and the model it should use.
-          </p>
-          <p>Left empty, the level decides.</p>
-        </InfoDetail>
-      </Field>
+          <Field label="Model">
+            <Input
+              id={`${ids}-model`}
+              label="Model"
+              code
+              value={draft.model}
+              placeholder="The level decides"
+              onChange={(model) => onDraft({ ...draft, model })}
+            />
+            <InfoDetail title="Model">
+              <p>Pins one place to answer the step instead of letting the level choose. Any one of:</p>
+              <p>
+                <code>chat54Mini</code> -- a provider by its name.
+                <br />
+                <code>fleet:qwen3:8b</code> -- a model on your own machines.
+                <br />
+                <code>app:claude-code</code> -- an app, with the model it chooses.
+                <br />
+                <code>app:claude-code:opus</code> -- an app, and the model it should use.
+              </p>
+              <p>Left empty, the level decides.</p>
+            </InfoDetail>
+          </Field>
 
-      <div className="os-form-field">
-        <label className="os-form-field-label" htmlFor={`${ids}-text`}>
-          {textLabel}
-        </label>
-        {loadingPrompt ? (
-          <ContentSkeleton kind="form" label="Loading the prompt the session ran with" />
-        ) : (
-          <textarea
-            id={`${ids}-text`}
-            className="os-nexus-statement os-nexus-composer-text"
-            rows={baseline.session ? 7 : 3}
-            value={draft.text ?? ""}
-            placeholder={baseline.session ? "" : "Added to the step's prompt, for this version only"}
-            onChange={(event) => onDraft({ ...draft, text: event.target.value })}
-          />
-        )}
-        {baseline.session && !loadingPrompt ? (
-          <Caption>
-            {baseline.state === "error"
-              ? `The prompt it ran with could not be read: ${baseline.error}. Write the whole prompt the session should run with.`
-              : "The whole prompt the session runs with."}
-          </Caption>
-        ) : null}
-      </div>
+          <div className="os-form-field">
+            <label className="os-form-field-label" htmlFor={`${ids}-text`}>
+              {textLabel}
+            </label>
+            {loadingPrompt ? (
+              <ContentSkeleton kind="form" label="Loading the prompt the session ran with" />
+            ) : (
+              <textarea
+                id={`${ids}-text`}
+                className="os-nexus-statement os-nexus-composer-text"
+                rows={baseline.session ? 7 : 3}
+                value={draft.text ?? ""}
+                placeholder={baseline.session ? "" : "Added to the step's prompt, for this version only"}
+                onChange={(event) => onDraft({ ...draft, text: event.target.value })}
+              />
+            )}
+            {baseline.session && !loadingPrompt ? (
+              <Caption>
+                {baseline.state === "error"
+                  ? `The prompt it ran with could not be read: ${baseline.error}. Write the whole prompt the session should run with.`
+                  : "The whole prompt the session runs with."}
+              </Caption>
+            ) : null}
+          </div>
+
+        </>
+      ) : null}
 
       <div className="os-form-field os-nexus-inputs">
         <div className="os-nexus-inputs-head">

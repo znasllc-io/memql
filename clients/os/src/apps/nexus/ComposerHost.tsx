@@ -4,6 +4,7 @@ import { useBranchRun, useRerunStep, type BranchReply, type RerunReply } from ".
 import { Composer } from "./Composer";
 import type { Axes } from "./feedback";
 import { overridden, type Head, type StepRow } from "./rows";
+import { kindCalledAModel } from "./words";
 import { useSessionPrompt } from "./useInterventions";
 import {
   BRANCH_CONSEQUENCE,
@@ -133,6 +134,7 @@ export function ComposerHost({
 
   if (request === null || draft === null) return null;
 
+  const modelled = step === null || kindCalledAModel(step.kind) !== false || step.childRunId !== "";
   const busy = request.mode === "rerun" ? rerun.busy : branch.busy;
   const error = request.mode === "rerun" ? rerun.error : branch.error;
   const baseline = { session, prompt: prompt.state === "ready" ? prompt.prompt : "" };
@@ -218,6 +220,7 @@ export function ComposerHost({
     <Composer
       mode={request.mode}
       stepKey={request.stepKey}
+      modelled={modelled}
       fromVersion={current}
       consequence={consequence}
       baseline={{ session, state: prompt.state, prompt: prompt.prompt, error: prompt.error }}

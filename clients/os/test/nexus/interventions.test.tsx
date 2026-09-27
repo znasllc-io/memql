@@ -242,6 +242,25 @@ describe("Run again", () => {
     expect(conn.query.rerunStep.mock.calls[0]?.[0]).toEqual({ runId: RUN, stepKey: "publish" });
   });
 
+  it("asks only for the inputs of a step no model answers, starting from what it ran with", async () => {
+    const conn = await openRun({
+      steps: reportSteps({ publish: { input: { channel: "#sales", limit: 20 } } }),
+      versions: reportVersions().map((row) =>
+        row["key"] === "publish" ? { ...row, input: { channel: "#sales", limit: 20 } } : row,
+      ),
+    });
+    await selectStep("publish");
+    const dialog = await composer("Run again");
+    // A mutation has no level, model, effort or prompt to change.
+    expect(within(dialog).queryByRole("combobox", { name: "Level" })).toBeNull();
+    expect(within(dialog).queryByLabelText("Instructions")).toBeNull();
+    // Its recorded inputs are laid out to edit; only the one changed is sent.
+    fireEvent.change(within(dialog).getByLabelText("Value of limit"), { target: { value: "50" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
+    await waitFor(() => expect(conn.query.rerunStep).toHaveBeenCalled());
+    expect(conn.query.rerunStep.mock.calls[0]?.[0]).toEqual({ runId: RUN, stepKey: "publish", inputs: { limit: 50 } });
+  });
+
   it("keeps the composer, every field and the server's own sentence when it refuses", async () => {
     const conn = await openRun({ writeError: new Error("run_not_finished: run run-1 is still running") });
     await selectStep("draft");

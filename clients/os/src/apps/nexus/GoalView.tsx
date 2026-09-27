@@ -358,6 +358,13 @@ export function GoalView({
                       onOpen={() =>
                         setSelectedStepKey(step.key === selectedStepKey ? "" : step.key)
                       }
+                      // WHAT THE LIVE ROW AND THE HEAD KNOW, without the run
+                      // page's versions read: a retried or re-run step still
+                      // shows it was, as the "attempt N" chip used to say.
+                      versions={{
+                        count: Math.max(step.version, step.attempt, appRun?.head[step.key]?.version ?? 0),
+                        current: appRun?.head[step.key]?.runId === "" ? (appRun.head[step.key]?.version ?? step.version) : step.version,
+                      }}
                     />
                   </li>
                 ))}
