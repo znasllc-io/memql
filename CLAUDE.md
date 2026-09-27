@@ -532,6 +532,10 @@ needs EXPLICIT plumbing -- it does NOT travel implicitly.
   forwarded** request (`AiForwardRouter`, `proxySI`, `NodeService` forwards)
   does NOT see it -- thread it through the message or metadata and resolve it
   on the receiving side.
+- A read-modify-write of one row across replicas needs a Postgres lock around
+  the read and the write, a read that skips this node's result cache
+  (`memql.ContextWithFreshRead`), and a version stamped after the one it read
+  -- each alone was measured insufficient (memql#5431).
 - Every cross-node event-bus pub/sub needs a **routing rule**
   (`node.RegisterRoutingRule`) or it silently dies in cluster mode.
 - Before calling a feature done, ask: *which node holds this state, and which
@@ -1222,6 +1226,11 @@ consolidated file per construct kind per namespace; policies are consolidated in
 are CORE, so a pack cannot mount them and a runtime mount colliding with them is
 skipped.
 
+**An automation loads only from its domain's `automations.memql`**
+(memql#5437): one declared in any other file refuses the load
+(`construct_misplaced`, `dsl/construct_placement.go`); it used to load as
+nothing.
+
 ## Argument resolution
 
 All DSL constructs share one model for declaring inputs and one namespace pair
@@ -1313,7 +1322,9 @@ The full list is
 `len(` / `count(x)` / `contains(s, sub)` function family, `null`, a filter or
 `@filter` without its lambda header, a `spec` or `trait` body written
 `{ return ... }`, and `$args.` in a tool handler. The string a client sends to
-`Execute` is the internal query form, which keeps its own grammar.
+`Execute` is the internal query form, which keeps its own grammar -- but it too
+refuses `;` and `,` as connectives (`retired_comma_connective`, memql#5439;
+`parentOf(a, b)` is `parentOf(a || b)`).
 
 ## Levels, policies and rules
 
@@ -1512,7 +1523,9 @@ govern them -- without it every retention sweep and boot seed becomes a
 peer-write and stops.
 
 **`@requiresRank("<role>")` is the SURFACE half** (D6): an actor-rank FLOOR on a
-query / mutation / logic, enforced at execution and validated at LOAD. It gates
+query / mutation / logic / tool (on a tool it judges the person the call is
+for, and decides what is listed to them, memql#5438), enforced at execution and
+validated at LOAD. It gates
 WHO MAY CALL; `@rowAuthz` still decides WHICH ROWS come back. It is the enforced
 counterpart to MemQL OS's per-surface `requires: "app:<id>"` (a capability
 RESOURCE the shell asks its effective set about, epic memql#5289), which stays
@@ -1698,7 +1711,9 @@ author-facing shape (see "Retired author-side forms" above).
 **Concept binding lives in the construct signature.** The two-identifier
 signature `query <Concept> <name>`, `mutation <Concept> <name>`,
 `seed <Concept> <name>` and `shape <Concept> <name>` names the bound concept
-directly; the loader resolves the name through the file's file-top imports.
+directly; the loader resolves the name through the file's file-top imports,
+and one that does not resolve refuses the load naming the import to add
+(`signature_concept_unresolved`, memql#5433).
 
 **Cross-file dependencies go through file-top `use` imports.** Every construct
 another file pulls into local scope (shapes, traits, specs, mutations, queries,
@@ -1744,7 +1759,10 @@ nearest pushdown spelling):
 - Sort keys keep their string form and the `row.` namespace for intrinsics --
   `sort "row.createdAt", "desc"` (`TestSortKeysUseRowNamespace`). Payload sort
   keys stay bare; `provenance` has no sort form; the runtime/SDK sort surface
-  accepts either spelling.
+  accepts either spelling. An authored key must name a declared field or a
+  sortable intrinsic, and a direction is `asc` / `desc` in any case
+  (`sort_key_unknown` / `sort_direction_unknown`); a clause is written once
+  (`query_clause_duplicate` -- a second `filter` used to replace the first).
 - **One boolean grammar:** `&&`, `||`, `!` and parentheses, with the precedence
   [memql.md](docs/public/language/memql.md#operator-precedence) publishes. `!`
   works in every position and negates exactly; there is no truthiness, so a
@@ -1784,8 +1802,9 @@ nearest pushdown spelling):
   field carrying one did not default -- the concept-field form was published as
   the JSON-Schema `default` keyword, which no validator applies. Apply a default
   in the body with `args.X ?? <default>`; `??` is the only mechanism that fills
-  a value. It **stays** on a `tool` / `prompt` / `builtin` field, where the body
-  IS the schema handed to the model and `default` is a value the model reads.
+  a value. It **stays** on a `tool` / `prompt` field (a `builtin` field refuses
+  it as misplaced), where the body IS the schema handed to the model and
+  `default` is a value the model reads -- a literal of the field's type.
   `a ?? b ?? c` returns the first operand that does not fall through, the last
   as the fallback; `coalesce(a, b)` is retired, so `??` is the one spelling.
   **`??` is BLANK-coalescing:** it falls through on an empty OR
@@ -2050,8 +2069,11 @@ tool searchUsers {
   `method`) and `type` is required. `@rateLimit` and `@scopes` are RETIRED
   (epic memql#5375): both were stored on the tool, cloned, advertised on the
   gRPC tool descriptor and enforced nowhere, so each read as a ceiling or an
-  authorization gate while being neither. `@allowedRoles` stays and is the
-  AGENT-role gate, enforced on every path.
+  authorization gate while being neither. `@allowedRoles` is DEPRECATED
+  (memql#5438, refused from 0.26): it mixed the agent's role and the person's.
+  Write `@requiresAgentRole(...)` (which agent calls, held to
+  `v1:agents:agent.role`) and `@requiresRank` (the person);
+  `memqlmigrate --rewrite=allowed-roles` rewrites it.
 - **The handler is validated at load** -- unknown type, missing function name /
   query / URL -- and a tool must carry a handler at all. A query handler is
   parsed there: ONE construct call, or that call inside `paginate(...)`, whose
@@ -2067,11 +2089,14 @@ tool searchUsers {
   at boot (`tool_handler_resolution.go`), so a handler naming a function that
   does not exist is a load problem strict boot refuses, not a mid-turn failure.
   A builtin is reached through `@handler(type="function", name="<builtin>")`;
-  there is no `"builtin"` handler type.
+  there is no `"builtin"` handler type. Every field the builtin REQUIRES must be
+  a tool field too (`tool_handler_arg_undeclared`, memql#5436): no call
+  supplies one the tool does not declare.
 - **Field types and field annotations are closed sets.** An unknown type is
   refused rather than emitted as `"string"` (which would tell the model
   "string", coerce the `@default` to a string, and hand a `@required integer`
-  handler argument `"10"`).
+  handler argument `"10"`). A `@default` must be a literal of the field's type
+  (`tool_default_type`, memql#5430).
 
 ### Integration Capabilities
 
@@ -2093,7 +2118,7 @@ builtin workbenchDispatchHost {
 Available integrations (core, registered via the plug-in system):
 agents, auth, database, deployversion, email, embedding, files,
 azureblob (as `storage`), harnessRecall, identity, knowledge, library,
-liveknowledge, rbac, router, shopify, similarity, timeutil, workbench,
+rbac, router, shopify, similarity, timeutil, workbench,
 workTrace, plus node-type-scoped ones (agent, stt) wired explicitly in
 `app/integrations_*.go` when their dependencies sit outside the stable
 `PluginContext` surface. `training` is a
@@ -2140,7 +2165,8 @@ decided by routing rules plus which binary's build tags compile the subscriber.
 
 Language service for .memql files, exposed via gRPC on `MemqlService.Stream`:
 **Tokenize** (semantic tokens), **Complete** (context-aware autocompletion),
-**Diagnose** (lexer / parser / semantic errors), **Hover** (symbol info) and
+**Diagnose** (lexer / parser / semantic errors; given the file's path under the
+DSL root, also Lower's `lower_*` load refusals, memql#5434), **Hover** (symbol info) and
 **SignatureHelp**. Package: `component/memql/sense/` -- pure Go, no gRPC
 dependency; handlers in `component/grpc/sense_handlers.go`.
 
