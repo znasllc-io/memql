@@ -327,6 +327,7 @@ func extendSpansOverPreamble(source string, spans []constructSpan) []constructSp
 	}
 	runeToByte = append(runeToByte, len(source))
 
+	preambles := parser.NewPreambleWalker(source)
 	for i := range spans {
 		start := spans[i].start
 		if start < 0 || start >= len(runeToByte) {
@@ -336,10 +337,11 @@ func extendSpansOverPreamble(source string, spans []constructSpan) []constructSp
 		if lineStart := strings.LastIndexByte(source[:byteStart], '\n') + 1; strings.TrimSpace(source[lineStart:byteStart]) == "" {
 			byteStart = lineStart
 		}
-		// PreambleStartOf returns either byteStart itself or a line start, and
-		// both are rune boundaries, so the reverse lookup is exact rather than
-		// a nearest match.
-		spans[i].start = sort.SearchInts(runeToByte, parser.PreambleStartOf(source, byteStart))
+		// The walk (parser.PreambleStartOf, one walker for the file) returns
+		// either byteStart itself or a line start, and both are rune
+		// boundaries, so the reverse lookup is exact rather than a nearest
+		// match.
+		spans[i].start = sort.SearchInts(runeToByte, preambles.StartOf(byteStart))
 	}
 	return spans
 }

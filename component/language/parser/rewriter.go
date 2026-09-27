@@ -336,6 +336,9 @@ func rewriteEachBlock(
 		return source, nil
 	}
 	out := source
+	// The preambles are read from `source`: matches are processed in reverse,
+	// so everything above the construct being rewritten is still `source`.
+	preambles := NewPreambleWalker(source)
 	for i := len(matches) - 1; i >= 0; i-- {
 		h := matches[i]
 
@@ -397,7 +400,7 @@ func rewriteEachBlock(
 		}
 
 		body := out[openIdx+1 : closeIdx]
-		preamble := precedingAnnotationBlock(out, h[0])
+		preamble := source[preambles.StartOf(h[0]):h[0]]
 		rewritten, err := emit(name, conceptId, body, preamble)
 		if err != nil {
 			start, end := nameExtent()
@@ -413,27 +416,6 @@ func rewriteEachBlock(
 		out = out[:h[0]] + rewritten + out[closeIdx+1:]
 	}
 	return out, nil
-}
-
-// precedingAnnotationBlock returns the contiguous run of annotation
-// (`@...`) and comment (`//`) lines immediately preceding the
-// construct header at headerStart. A blank line or any non-annotation/
-// non-comment line terminates the block. The returned text lets a
-// per-construct emitter inspect the construct's annotations (e.g.
-// `@unbounded("reason")`) without re-parsing the whole file.
-func precedingAnnotationBlock(src string, headerStart int) string {
-	blockStart := headerStart
-	for k := headerStart - 1; k >= 0; {
-		lineStart := strings.LastIndexByte(src[:k], '\n') + 1
-		line := strings.TrimSpace(strings.TrimRight(src[lineStart:k+1], "\r\n"))
-		if strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
-			blockStart = lineStart
-			k = lineStart - 1
-			continue
-		}
-		break
-	}
-	return src[blockStart:headerStart]
 }
 
 // emitFuncHeader writes the procedural function preamble: optional

@@ -20,8 +20,10 @@ package memql
 // natively and doesn't run any rewriters).
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
@@ -80,10 +82,17 @@ func (e *ConceptParseError) RuleCode() string {
 // errors: a caller that registers concepts must refuse on one (strict boot),
 // and a caller that only wants what parsed must say so by ignoring them in
 // its own code, where a reviewer can see it.
+//
+// A block whose opening brace never closes is one of the errors too
+// (memql#5426 review). It used to vanish, and every concept below it with it:
+// its unclosed `{` left the rest of the file inside it, so no later header was
+// top-level. The concepts below it that close are declarations now, and the
+// one that does not is refused by name.
 func ExtractConceptDecls(source string) ([]*languageAst.ConceptDecl, []*ConceptParseError) {
 	var out []*languageAst.ConceptDecl
 	var failed []*ConceptParseError
-	for _, slice := range conceptSlices(source) {
+	slices, unterminated := conceptSlicesReporting(source)
+	for _, slice := range slices {
 		file, err := languageParser.ParseFile(slice.Source)
 		if err != nil {
 			failed = append(failed, conceptParseError(source, slice, err))
@@ -95,8 +104,15 @@ func ExtractConceptDecls(source string) ([]*languageAst.ConceptDecl, []*ConceptP
 			}
 		}
 	}
+	for _, u := range unterminated {
+		failed = append(failed, &ConceptParseError{Name: u.Name, Line: u.HeaderLine, Err: errConceptUnterminated})
+	}
+	sort.SliceStable(failed, func(i, j int) bool { return failed[i].Line < failed[j].Line })
 	return out, failed
 }
+
+// errConceptUnterminated is the refusal of a concept whose `{` never closes.
+var errConceptUnterminated = errors.New("the `{` that opens its body is never closed")
 
 // conceptParseError places a slice's parse failure in its file: the line of
 // the slice's `concept` keyword, and the parser's refusal re-read with the
@@ -137,4 +153,11 @@ var conceptHeaderRe = regexp.MustCompile(`(?m)^concept[ \t]+([A-Za-z_][A-Za-z0-9
 // inside a string of either quote form does not move the depth.
 func conceptSlices(source string) []languageParser.DeclarationSlice {
 	return languageParser.ExtractDeclarationSlices(source, conceptHeaderRe)
+}
+
+// conceptSlicesReporting is conceptSlices, and every concept whose opening
+// brace never closes -- which conceptSlices leaves out, and which a caller that
+// registers concepts must refuse rather than lose.
+func conceptSlicesReporting(source string) ([]languageParser.DeclarationSlice, []languageParser.UnterminatedDeclaration) {
+	return languageParser.ExtractDeclarationSlicesReporting(source, conceptHeaderRe)
 }

@@ -5,6 +5,11 @@
       "verdict": "load_ok"
     },
     {
+      "file": "above-a-multi-line-annotation.memql",
+      "verdict": "load_ok",
+      "note": "An annotation whose argument list spans lines is one annotation, and the declaration's preamble reads through it: the loaders' walk used to stop at its continuation lines and cut every annotation above it out of the slice, refusing this prompt as declaring no level (memql#5426)."
+    },
+    {
       "file": "with-an-unquoted-value.memql",
       "verdict": "refuse_parse",
       "code": "annotation_form",

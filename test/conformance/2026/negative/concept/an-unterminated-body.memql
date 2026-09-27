@@ -1,0 +1,8 @@
+/// A ticket whose body is never closed.
+concept ticket {
+  title  string
+
+/// A note, which closes.
+concept note {
+  body  string
+}

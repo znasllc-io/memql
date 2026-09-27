@@ -57,6 +57,37 @@ func validateOuterExpressionNames(a *Automation) error {
 	return nil
 }
 
+// validatePreconditionArgs holds each precondition's check to the args rule
+// the compiler holds the body and the header lambdas to (memql#5426 review):
+// an `args.<name>` read the args block does not declare is refused,
+// args_undeclared. The check runs against the bound args like a statement, so
+// an undeclared read there reads absent on every run -- and a precondition
+// that misses aborts the run, so it failed closed on every fire without a
+// word at load. The compiler never sees a precondition: extractPreconditions
+// lifts it out of the source before the parse.
+func validatePreconditionArgs(a *Automation) error {
+	if len(a.Preconditions) == 0 {
+		return nil
+	}
+	declared := map[string]bool{}
+	if a.Args != nil {
+		for _, field := range a.Args.Fields {
+			if field != nil {
+				declared[field.Name] = true
+			}
+		}
+	}
+	for _, pc := range a.Preconditions {
+		if pc == nil || pc.checkExpr == nil {
+			continue
+		}
+		if err := compiler.CheckArgsReads(a.Name, "precondition "+pc.ID, pc.checkExpr, declared); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // v1FreeNames calls visit for every IdentExpr in n that no enclosing lambda
 // binds: the names n reads from its scope. A callee name is not an IdentExpr
 // (CallExpr.Name), and neither is a member or a map key, so none of those is

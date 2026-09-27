@@ -493,7 +493,10 @@ type xmDecl struct {
 // read on the masked view so an `@actor` written in a doc comment or a string
 // does not count.
 func xmPreambleAnnotations(f *xmFile, headerStart int) map[string]bool {
-	start := PreambleStartOf(f.src, headerStart)
+	if f.preambles == nil {
+		f.preambles = NewPreambleWalker(f.src)
+	}
+	start := f.preambles.StartOf(headerStart)
 	out := map[string]bool{}
 	for _, m := range xmAnnotation.FindAllStringSubmatch(f.mask[start:headerStart], -1) {
 		out[m[1]] = true
@@ -513,7 +516,8 @@ type xmFile struct {
 	code       string // comments blanked, strings intact: what a clause's text is read from
 	mask       string // comments and string contents blanked: what structure is found on
 	lineStarts []int
-	lineDepth  []int // brace depth at the start of each line, counted on mask
+	lineDepth  []int           // brace depth at the start of each line, counted on mask
+	preambles  *PreambleWalker // built on the first preamble read
 }
 
 func newXMFile(src string) *xmFile {

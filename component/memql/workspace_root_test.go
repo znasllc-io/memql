@@ -53,16 +53,36 @@ func TestResolveDSLRoot_RootAlreadyHoldsDomains(t *testing.T) {
 	}
 }
 
-// TestResolveDSLRoot_SingleDomainIsNotARoot pins the two-domain threshold. One
-// directory holding a .memql file is not enough to call its parent a DSL root,
-// or a stray scratch file would capture the search above the real tree.
-func TestResolveDSLRoot_SingleDomainIsNotARoot(t *testing.T) {
-	oneDomain := fstest.MapFS{
-		"calendar/concepts.memql": &fstest.MapFile{Data: []byte("concept calendarEvent {\n  id string\n}")},
-		"docs/readme.md":          &fstest.MapFile{Data: []byte("# docs\n")},
+// TestResolveDSLRoot_ADomainOfSubNamespaces (memql#5426 review): a domain is a
+// directory holding a .memql file the tree walker reads at ANY depth -- what
+// boot and memqllint call one (dslfs.HoldsMemqlFile). The editor required one
+// directly in the directory, so a product domain holding only sub-namespace
+// directories was not a domain here: dsl/ did not qualify, and every `use`
+// line resolved against the repository root.
+func TestResolveDSLRoot_ADomainOfSubNamespaces(t *testing.T) {
+	productRepo := fstest.MapFS{
+		"dsl/acme/billing/concepts.memql": &fstest.MapFile{Data: []byte("concept invoice {\n  id string\n}")},
+		"dsl/acme/orders/concepts.memql":  &fstest.MapFile{Data: []byte("concept order {\n  id string\n}")},
+		"cmd/product/main.go":             &fstest.MapFile{Data: []byte("package main\n")},
 	}
-	if isDSLRoot(oneDomain) {
-		t.Error("a single domain directory must not qualify as a DSL root")
+	if _, prefix := resolveDSLRoot(productRepo); prefix != "dsl" {
+		t.Fatalf("prefix = %q; want \"dsl\" -- a domain whose files sit in sub-namespaces is still a domain", prefix)
+	}
+	if g := buildWorkspaceGraph(productRepo); g.HasNamespace("dsl") {
+		t.Error("HasNamespace(dsl) = true; \"dsl\" is the container directory, not a namespace an author can import")
+	}
+}
+
+// TestResolveDSLRoot_PrefersTheConventionalCandidate: with domains counted at
+// any depth, a repository root whose dsl/, packs/ and examples/ all hold .memql
+// files somewhere below looks like a directory of domains itself, so the
+// candidate is asked first and wins.
+func TestResolveDSLRoot_PrefersTheConventionalCandidate(t *testing.T) {
+	repo := repoShapedFS()
+	repo["packs/reviewspack/dsl/reviews/concepts.memql"] = &fstest.MapFile{Data: []byte("concept review {\n  id string\n}")}
+	repo["examples/reading-list/concepts.memql"] = &fstest.MapFile{Data: []byte("concept book {\n  id string\n}")}
+	if _, prefix := resolveDSLRoot(repo); prefix != "dsl" {
+		t.Fatalf("prefix = %q; want \"dsl\" -- the repository's other trees must not make its root the DSL root", prefix)
 	}
 }
 

@@ -96,9 +96,21 @@ func SplitBundleSource(source string) []SandboxConstruct {
 	// Concepts: each concept block (preamble + body) is its own slice, named by
 	// its header. A block that does not parse is split out all the same, so
 	// the sandbox reports its parse error rather than the bundle losing it
-	// without a word (memql#5426).
-	for _, slice := range conceptSlices(source) {
+	// without a word (memql#5426). So is one whose `{` never closes, running
+	// to the next concept or the end of the bundle: the sandbox refuses it by
+	// name, and the concepts below it are their own slices.
+	conceptBlocks, unterminated := conceptSlicesReporting(source)
+	for _, slice := range conceptBlocks {
 		add("concept", slice.Name, slice.Source)
+	}
+	for _, u := range unterminated {
+		end := len(source)
+		for _, slice := range conceptBlocks {
+			if slice.Start > u.Start && slice.Start < end {
+				end = slice.Start
+			}
+		}
+		add("concept", u.Name, source[u.Start:end])
 	}
 	// Function family: query / mutation / logic. The slice carries its own kind
 	// (derived from the source keyword). ExtractFunctionSlices deliberately

@@ -410,6 +410,7 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 	// Spans, not just the blanked copy: see the preamble walk below for why a
 	// blank line inside a block comment is indistinguishable without them.
 	commentSpans := languageParser.CommentSpans(source)
+	preambles := languageParser.NewPreambleWalker(source)
 
 	matches := automationStructHeader.FindAllStringSubmatchIndex(scan, -1)
 
@@ -496,6 +497,13 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 		// comment body into the slice made compileMemQL's raw-text gates fire
 		// on ordinary comments. Those gates now scan a blanked view too
 		// (loader.go), which is the half that makes this safe.
+		//
+		// And a line inside a MULTI-LINE annotation's argument list belongs to
+		// that annotation (memql#5426): it starts with neither `@` nor a
+		// comment, so the walk used to stop there, and an automation whose
+		// @filter spans lines lost the @trigger above it -- loaded with a nil
+		// trigger, never subscribed, and silent. The continuation lines come
+		// from the shared walker, and the walk resumes above the `@`.
 		preambleStart := headerStart
 		for k := headerStart - 1; k >= 0; k-- {
 			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
@@ -505,6 +513,11 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 			if strings.HasPrefix(blanked, "@") || (blanked == "" && (original != "" || inComment)) {
 				preambleStart = lineStart
 				k = lineStart - 1
+				continue
+			}
+			if opener, ok := preambles.ContinuationStart(lineStart); ok {
+				preambleStart = opener
+				k = opener - 1
 				continue
 			}
 			break

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // TestBuildConceptIndex_RealTreeDefaultVersion runs the concept index over
@@ -73,7 +75,7 @@ func TestAssembleConceptIdFromPreamble_VersionDefault(t *testing.T) {
 		if m == nil {
 			t.Fatalf("%s: fixture has no concept header", tc.name)
 		}
-		got := assembleConceptIdFromPreamble(tc.src, m[0], "widget", "gadgets")
+		got := assembleConceptIdFromPreamble(langparser.NewPreambleWalker(tc.src), tc.src, m[0], "widget", "gadgets")
 		if got != tc.want {
 			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
 		}

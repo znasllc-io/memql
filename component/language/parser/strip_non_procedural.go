@@ -132,6 +132,7 @@ func StripNonProceduralBlocks(source string) string {
 
 	// Process in reverse so byte offsets stay stable.
 	out := source
+	preambles := NewPreambleWalker(source)
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		headerStart := m[0]
@@ -151,21 +152,11 @@ func StripNonProceduralBlocks(source string) string {
 			continue
 		}
 
-		// Walk backwards from headerStart to pick up the @-attribute
-		// preamble. Stop at a blank line, a comment line that isn't
-		// part of an attribute run, or another declaration.
-		preambleStart := headerStart
-		for k := headerStart - 1; k >= 0; k-- {
-			lineStart := strings.LastIndexByte(out[:k], '\n') + 1
-			line := strings.TrimRight(out[lineStart:k+1], "\r\n")
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") {
-				preambleStart = lineStart
-				k = lineStart - 1 // continue from the line above
-				continue
-			}
-			break
-		}
+		// The preamble the shared walk finds (preamble_walk.go): the
+		// annotations above the header, a multi-line one whole, and the
+		// comment lines among them. Matches are processed in reverse, so
+		// everything above this header is still `source`.
+		preambleStart := preambles.StartOf(headerStart)
 
 		replacement := "// <stripped: " + kind + " " + name + ">\n"
 		out = out[:preambleStart] + replacement + out[closeIdx+1:]

@@ -138,6 +138,7 @@ func extractFunctionSlices(source string) []FunctionSlice {
 	// Collect file-top `use ... .{ ... }` blocks once so each slice
 	// inherits them.
 	usePreamble := extractUseDeclarations(source)
+	preambles := languageParser.NewPreambleWalker(source)
 
 	var slices []FunctionSlice
 	for _, m := range matches {
@@ -200,27 +201,9 @@ func extractFunctionSlices(source string) []FunctionSlice {
 			continue
 		}
 
-		// Walk backwards for the @-attribute preamble.
-		preambleStart := headerStart
-		for k := headerStart - 1; k >= 0; k-- {
-			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
-			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") {
-				preambleStart = lineStart
-				k = lineStart - 1
-				continue
-			}
-			if strings.HasPrefix(trimmed, "//") {
-				preambleStart = lineStart
-				k = lineStart - 1
-				continue
-			}
-			if trimmed == "" {
-				break
-			}
-			break
-		}
+		// The @-attribute + comment preamble, a multi-line annotation whole
+		// (languageParser.PreambleWalker, memql#5426).
+		preambleStart := preambles.StartOf(headerStart)
 
 		body := source[preambleStart : closeIdx+1]
 		if usePreamble != "" {
@@ -266,6 +249,7 @@ func ExtractAutomationSlices(source string) []FunctionSlice {
 	}
 
 	usePreamble := extractUseDeclarations(source)
+	preambles := languageParser.NewPreambleWalker(source)
 
 	var slices []FunctionSlice
 	for _, m := range matches {
@@ -286,19 +270,9 @@ func ExtractAutomationSlices(source string) []FunctionSlice {
 			continue
 		}
 
-		// Walk backwards for the @-attribute / comment preamble.
-		preambleStart := headerStart
-		for k := headerStart - 1; k >= 0; k-- {
-			lineStart := strings.LastIndexByte(source[:k], '\n') + 1
-			line := strings.TrimRight(source[lineStart:k+1], "\r\n")
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
-				preambleStart = lineStart
-				k = lineStart - 1
-				continue
-			}
-			break
-		}
+		// The @-attribute / comment preamble, a multi-line annotation whole
+		// (languageParser.PreambleWalker, memql#5426).
+		preambleStart := preambles.StartOf(headerStart)
 
 		body := source[preambleStart : closeIdx+1]
 		if usePreamble != "" {

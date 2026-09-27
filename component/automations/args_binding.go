@@ -41,6 +41,7 @@ import (
 	"sync/atomic"
 	"unicode/utf8"
 
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -260,9 +261,56 @@ func argInEnum(value any, options []any) bool {
 	return false
 }
 
+// compileArgsPatterns compiles every @pattern in an automation's args
+// contract, at load, through the one check a query's args field and a concept
+// field are held to (memoryNodes.CompilePattern, memql#5426 review). The
+// binder compiled a pattern at the first fire and took one that does not
+// compile as no constraint, so an automation whose @pattern was not a regular
+// expression loaded clean and then bound every value it was written to
+// refuse. It is refused under pattern_invalid now, naming the field.
+func compileArgsPatterns(automation *Automation) error {
+	if automation == nil || automation.Args == nil {
+		return nil
+	}
+	for _, field := range automation.Args.Fields {
+		if err := compileArgsFieldPatterns(field, ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// compileArgsFieldPatterns is compileArgsPatterns for one field, its array
+// element schema and its nested fields. An element schema has no name of its
+// own, so it is reported under the field that declares it.
+func compileArgsFieldPatterns(field *ArgsField, parent string) error {
+	if field == nil {
+		return nil
+	}
+	name := field.Name
+	if strings.TrimSpace(name) == "" {
+		name = parent
+	}
+	if field.Pattern != "" {
+		if _, err := memoryNodes.CompilePattern(field.Pattern); err != nil {
+			return fmt.Errorf("args field %q: %w", name, err)
+		}
+	}
+	if err := compileArgsFieldPatterns(field.Items, name); err != nil {
+		return err
+	}
+	for _, nested := range field.Nested {
+		if err := compileArgsFieldPatterns(nested, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // compilePattern compiles + caches a @pattern regex. A pattern that fails to
-// compile yields nil (treated as no constraint) -- an invalid pattern is a
-// parse/load concern, not a fire-time refusal cause.
+// compile yields nil (treated as no constraint): the load refuses one
+// (compileArgsPatterns), so only an automation built by hand, never loaded,
+// can reach here with it.
 func compilePattern(pattern string) *regexp.Regexp {
 	if v, ok := patternCache.Load(pattern); ok {
 		re, _ := v.(*regexp.Regexp)

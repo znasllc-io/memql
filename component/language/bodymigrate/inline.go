@@ -19,6 +19,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // expandTerse writes the one-statement automation a terse header meant.
@@ -136,18 +138,12 @@ func sortedKeys[V any](m map[string]V) []string {
 }
 
 // declarationRegion returns the span of a logic declaration together with
-// the contiguous doc-comment, comment and annotation lines directly above it,
-// and the newline that ends it.
+// the contiguous doc-comment, comment and annotation lines directly above it
+// -- a multi-line annotation whole, through the engine's own preamble walk
+// (memql#5426), so a deletion never leaves an annotation's first lines behind
+// to attach to whatever follows -- and the newline that ends it.
 func declarationRegion(src string, c construct) (int, int) {
-	start := lineStart(src, c.start)
-	for start > 0 {
-		prevStart := lineStart(src, start-1)
-		line := strings.TrimSpace(src[prevStart : start-1])
-		if line == "" || !(strings.HasPrefix(line, "//") || strings.HasPrefix(line, "@")) {
-			break
-		}
-		start = prevStart
-	}
+	start := langparser.PreambleStartOf(src, lineStart(src, c.start))
 	end := c.close + 1
 	if end < len(src) && src[end] == '\n' {
 		end++
@@ -161,14 +157,20 @@ func declarationRegion(src string, c construct) (int, int) {
 }
 
 // docLines returns a declaration's `///` doc-comment lines, as `//` lines.
+// A multi-line annotation between them and the header is stepped over whole.
 func docLines(src string, c construct) []string {
 	var out []string
+	preambles := langparser.NewPreambleWalker(src)
 	start := lineStart(src, c.start)
 	for start > 0 {
 		prevStart := lineStart(src, start-1)
 		line := strings.TrimSpace(src[prevStart : start-1])
 		if strings.HasPrefix(line, "@") {
 			start = prevStart
+			continue
+		}
+		if opener, ok := preambles.ContinuationStart(prevStart); ok {
+			start = opener
 			continue
 		}
 		if !strings.HasPrefix(line, "///") {

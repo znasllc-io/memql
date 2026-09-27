@@ -2640,7 +2640,13 @@ boot logs each such row as `durable authored construct quarantined at
 re-hydration` with its id, rule and remedy, and one WARN line listing them all
 (`durably-promoted constructs did not re-hydrate`), so
 `kubectl logs -n memql deploy/<node> | grep 'did not re-hydrate'` finds them
-(memql#5426). A failure that carries no rule id keeps the stamp's diagnosis.
+(memql#5426). Only a rule that narrowed the language reads this way: an
+annotation refusal, a retired or deprecated form, or one of the spelling
+refusals the DSL v1 follow-ups added. Any other failure keeps the stamp's
+diagnosis, a coded one included -- a syntax error, a bound concept that no
+longer resolves (`signature_concept_unresolved`), a concept that does not
+parse (`concept_unparsed`) -- because deleting a line is no remedy for a
+dependency the tree stopped declaring.
 
 **The migration channel is `memqlmigrate`.** Every rewrite is registered in
 one registry, keyed by the edition it moves a tree onto and the epic that

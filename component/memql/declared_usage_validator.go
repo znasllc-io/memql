@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/compiler"
+	"github.com/znasllc-io/memql/component/language/dslclause"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -166,8 +167,9 @@ func validateArgsReferencesAreDeclared(body string, funcDef *languageParser.Func
 	}
 
 	// Blank comments + strings FIRST (so a multi-line literal cannot desync
-	// the scan), then drop annotation lines.
-	scanned := stripAttrLines(languageParser.BlankCommentsAndStrings(body))
+	// the scan), then drop annotation lines, then the reads of a lambda
+	// parameter named `args`.
+	scanned := blankShadowedArgs(stripAttrLines(languageParser.BlankCommentsAndStrings(body)))
 	for _, match := range argsFieldReference.FindAllStringSubmatch(scanned, -1) {
 		name := match[1]
 		if declared[name] {
@@ -190,6 +192,122 @@ func validateArgsReferencesAreDeclared(body string, funcDef *languageParser.Func
 		return fmt.Errorf("function %q: body reads args.%s, which is not declared in the args block (declared: %s) -- an undeclared arg is silently absent when the caller omits it, and bypasses @required / type / @enum / @pattern when the caller supplies it [%s]", funcDef.Name, name, strings.Join(sortedDeclaredArgsNames(declared), ", "), compiler.CodeArgsUndeclared)
 	}
 	return nil
+}
+
+// blankShadowedArgs blanks every `args` a lambda parameter of that name binds
+// in view -- a comment- and string-blanked body -- so the scan above reads only
+// the construct's own arguments (memql#5426 review).
+//
+// A bare name resolves to a lambda parameter in scope before a reserved root,
+// so inside `items.where(args => args.active)` the read is the element's, not
+// an argument of the construct. The automation compiler has always answered
+// that way (its walk treats a lambda's parameters as locals), while this scan,
+// which reads text, refused `args.active` as undeclared in a query or a logic
+// -- one spelling, two verdicts, depending on the construct it sat in.
+//
+// A lambda's body runs as far as it can (`=>` binds loosest): to the bracket
+// that encloses the lambda, a comma that ends its argument, or, outside any
+// bracket, the end of its clause (dslclause.ContinuesClause).
+func blankShadowedArgs(view string) string {
+	var out []byte
+	for arrow := strings.Index(view, "=>"); arrow >= 0; {
+		if lambdaParamsName(view, arrow, "args") {
+			if out == nil {
+				out = []byte(view)
+			}
+			end := lambdaBodyEnd(view, arrow+2)
+			for i := arrow + 2; i+4 <= end; i++ {
+				if view[i:i+4] == "args" && !identByteAt(view, i-1) && !identByteAt(view, i+4) {
+					copy(out[i:i+4], "    ")
+				}
+			}
+		}
+		next := strings.Index(view[arrow+2:], "=>")
+		if next < 0 {
+			break
+		}
+		arrow += 2 + next
+	}
+	if out == nil {
+		return view
+	}
+	return string(out)
+}
+
+// lambdaParamsName reports whether the lambda whose `=>` is at arrow names
+// name among its parameters: `name =>` or `(a, name) =>`.
+func lambdaParamsName(view string, arrow int, name string) bool {
+	j := arrow - 1
+	for j >= 0 && (view[j] == ' ' || view[j] == '\t' || view[j] == '\n' || view[j] == '\r') {
+		j--
+	}
+	if j < 0 {
+		return false
+	}
+	if view[j] == ')' {
+		open := strings.LastIndexByte(view[:j], '(')
+		if open < 0 {
+			return false
+		}
+		for _, param := range strings.Split(view[open+1:j], ",") {
+			if strings.TrimSpace(param) == name {
+				return true
+			}
+		}
+		return false
+	}
+	k := j
+	for k >= 0 && identByteAt(view, k) {
+		k--
+	}
+	return view[k+1:j+1] == name
+}
+
+// lambdaBodyEnd is the offset one past the last byte of the lambda body that
+// starts at start.
+func lambdaBodyEnd(view string, start int) int {
+	depth := 0
+	for i := start; i < len(view); i++ {
+		switch view[i] {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			if depth == 0 {
+				return i
+			}
+			depth--
+		case ',':
+			if depth == 0 {
+				return i
+			}
+		case '\n':
+			if depth > 0 {
+				continue
+			}
+			lineStart := strings.LastIndexByte(view[:i], '\n') + 1
+			rest := view[i+1:]
+			next := ""
+			for _, line := range strings.Split(rest, "\n") {
+				if next = strings.TrimSpace(line); next != "" {
+					break
+				}
+			}
+			if !dslclause.ContinuesClause(strings.TrimSpace(view[lineStart:i]), next) {
+				return i
+			}
+		}
+	}
+	return len(view)
+}
+
+// identByteAt reports whether view[i] is an identifier byte; false out of
+// range.
+func identByteAt(view string, i int) bool {
+	if i < 0 || i >= len(view) {
+		return false
+	}
+	c := view[i]
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
 // sortedDeclaredArgsNames returns a declared-args set's names in a stable
