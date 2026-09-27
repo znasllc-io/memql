@@ -518,3 +518,14 @@ Each stream works only in its files, commits `Issue #<N>: ...`, and reports what
 - The fresh workspace travels as the executor input `freshWorkspace`; an unresolvable snapshot file refuses the step naming it before any child run opens.
 - Coordinator: a work turn whose override pins a Model now names its run and step on the resolve request, so the session door can take it (default routing of other turns unchanged).
 - Open: a strict REPLAY must carry each step's recorded override or it diverges (the hash covers the appended messages) -- asked of the executor stream.
+
+### Task 2 (executor), merged at `04c87c986` (+ coordinator `ad0768e72`, `30e20309d`, `e882f6da3`)
+- `RerunSpec{RequestId, Reason, StepKey, Override, Snapshot, Workspace, RequestedBy, OverrideRecord map[string]any, Versions map[string]int}`; `RunJournal` gains `Head`, `Rerun`, `MaxAttempt`, `StaleSteps`, `StepOverrides`; `StepState.Version`; `ResumeOptions.Rerun`/`Overrides`; `RunAdoption.Overrides`; `PrepareRerun(run, sources, automation) (*RunJournal, *ResumeOptions, error)`, `RerunSources(run, automation) []string`; constants `RerunReasonRerun/HeadMove/Branch`; errors `ErrRerunStepInvalid`, `ErrForkPrefixUnavailable`.
+- The acts MUST write: a fresh `requestId` on EVERY request (the agent claims `runId#rerun:<requestId>` once per request, no lease), `heartbeatAt: now` with the status flip, `rerun.versions = plan.Versions`, and `staleSteps`.
+- The resume point is COMPUTED: a branch -> the first step at/after the fork step not yet finished; with `versions` -> the first step not yet redone at its version; else the first stale step at/after the target; else the target.
+- `staleSteps` SHRINKS as each new version finishes (the remainder is written at every receipt), which is how an interrupted re-run resumes. Only a close (succeeded/failed, failTerminally, cancelStop) clears `rerun` and `staleSteps`; a parked run keeps both. FailRun (dispatch refusal) clears `rerun` only (coordinator).
+- Prefix steps served from another run follow the head's references, in branches and in re-runs inside a branch; a reference whose source row moved on is refused (`fork_prefix_unavailable`).
+- A REPLAY runs each step with the override its source's newest row records.
+- Every executor-journaled run now writes `version` on each intent, a non-pristine basis, and the whole head at each receipt; `reopenRun` refreshes `heartbeatAt`.
+- Coordinator: a person's `Inputs` are laid over the targeted step's evaluated arguments by name in the function and automation step executors (`component/automations/steps/step_inputs.go`).
+- Known limits: a strict replay of a BRANCH diverges at the prefix (the branch never made those calls); a replay's own step rows do not record the override they ran with (context only).
