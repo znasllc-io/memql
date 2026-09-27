@@ -130,7 +130,11 @@ mistake this layout exists to prevent:
   the struct-form rewriter's family, the top-level dispatch table and
   `use` -- which the parser's refusal of any other word and the load gate
   `construct_unknown` both read (memql#5356); the clauses each construct
-  takes are `parser.BodyClauses`. `dslspec/` derives both, and hand-authors
+  takes are `parser.BodyClauses`. Which lines OPEN a top-level statement is
+  one scan too, `parser.TopLevelStatements` (keyword, declared name, line),
+  shared by `construct_unknown` and `construct_misplaced` -- the gate that
+  refuses an automation declared outside its domain's `automations.memql`
+  (memql#5437, rule in `dsl/construct_placement.go`). `dslspec/` derives both, and hand-authors
   only what the parser cannot say (each construct's category, doc and
   annotation receiver) plus the keywords, operators, field types and
   legal-next rules. Its drift test fails when that hand-authored remainder

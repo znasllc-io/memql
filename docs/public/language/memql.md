@@ -213,6 +213,8 @@ dsl/
 
 Authoring reference skeletons live under `dsl/_reference/` (`_concept`, `_shape`, `_spec`, `_trait`, `_agent`); files whose path starts with `_` are never loaded.
 
+**Only an automation's file is a load rule.** Every loader reads every `.memql` file of a domain, whatever its name, so for every other kind the per-kind file above is the layout rather than a requirement. An automation is the exception: the automation loader, which wires triggers, reads a domain's automations from its `automations.memql` and from no other file. An automation declared in any other file -- or in a directory whose name begins with `_` or `.` -- is refused at load, naming the file it belongs in (`construct_misplaced`), in the embedded tree, a `MEMQL_DSL_PATH` bundle, a pack, a package and `memqllint` alike. Before the refusal existed such an automation passed every gate that reads the whole tree and loaded as nothing, with a clean boot.
+
 When `MEMQL_DSL_PATH` is unset, the binary reads its baked-in embedded tree. Setting `MEMQL_DSL_PATH=/path/to/dsl-root` reads from disk instead, with per-namespace fallback to the embedded copy — useful for dev hacking, per-deploy patches, and test fixtures.
 
 > **Retired layout.** The old versioned per-construct skeletons (`concepts/v1/...`, `specs/v1/...`, `functions/v1/...`, `shapes/v1/...`, `prompts/v1/...`, `providers/v1/...`, `automations/v1/...`) no longer exist. Constructs live in the flattened `dsl/<namespace>/<construct>s.memql` files described above.
@@ -2313,7 +2315,7 @@ tool notifyOnCall {
 
 ## Automations
 
-Automations are event- or schedule-triggered workflows declared in `dsl/<namespace>/automations.memql`, written in the [body language](#bodies):
+Automations are event- or schedule-triggered workflows declared in `dsl/<namespace>/automations.memql`, written in the [body language](#bodies). That file is the only one the automation loader reads, and an automation declared anywhere else is refused at load (`construct_misplaced`; see [The DSL Tree](#the-dsl-tree)):
 
 <!-- corpus: 2026/examples/memql/automations/event-trigger.memql -->
 ```memql

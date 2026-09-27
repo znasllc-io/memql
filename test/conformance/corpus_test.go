@@ -135,6 +135,14 @@ type corpusCase struct {
 	// Expect (corpus_call_test.go). Without it an evaluate case's file is a
 	// bare expression.
 	Call string `json:"call,omitempty"`
+	// Mount is the file name the case is mounted under in its domain, for a
+	// case whose verdict depends on it: a construct kind whose loader reads it
+	// from one file of a domain (an automation, from automations.memql) is
+	// refused when it is declared in any other (construct_misplaced,
+	// memql#5437). Without it a case that declares an automation is mounted as
+	// automations.memql and every other case as case.memql, so a load case can
+	// only ever be judged in the file its loader reads.
+	Mount string `json:"mount,omitempty"`
 	// Note says why the case exists. Not checked.
 	Note string `json:"note,omitempty"`
 }
@@ -613,6 +621,14 @@ func corpusValidateCase(dir string, c corpusCase) string {
 	if c.Call != "" && c.Verdict != verdictEvaluate {
 		return "call names a logic to run, which only an evaluate case does"
 	}
+	if c.Mount != "" {
+		if c.Verdict != verdictLoadOK && c.Verdict != verdictRefuseLoad {
+			return "mount names the file a case is loaded from, which only a load_ok or refuse_load case is"
+		}
+		if strings.Contains(c.Mount, "/") || !strings.HasSuffix(c.Mount, ".memql") || c.Mount == "fixture.memql" {
+			return "mount names a .memql file in the case's domain directory, other than fixture.memql"
+		}
+	}
 	if len(c.Calls) > 0 && c.Verdict != verdictEvaluate {
 		return "calls answers the construct calls of an evaluate case; this case evaluates nothing"
 	}
@@ -723,6 +739,9 @@ func corpusTree(runs []*corpusRun) fstest.MapFS {
 		name := "case.memql"
 		if corpusAutomationDecl.MatchString(r.src) {
 			name = "automations.memql"
+		}
+		if r.c.Mount != "" {
+			name = r.c.Mount
 		}
 		tree[r.domain+"/"+name] = &fstest.MapFile{Data: []byte(r.src)}
 	}

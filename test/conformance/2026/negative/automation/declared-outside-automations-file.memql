@@ -1,0 +1,6 @@
+/// Counts the open invoices every night -- or would, from the file its loader reads.
+@trigger(schedule="0 0 3 * * *")
+automation countOpenInvoicesNightly {
+  open := query openInvoicesForSweep()
+  return open.count()
+}
