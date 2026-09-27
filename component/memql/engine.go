@@ -1147,7 +1147,12 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// does not, so a cached page would be served to a call it does not answer.
 	// A refined query is a bounded page read by construction; the cache buys
 	// it little and would cost correctness.
-	useCache := e.cache != nil && len(plan.Mutations) == 0 && plan.Refine == nil
+	//
+	// NOR when the caller asked for a fresh read (fresh_read.go, memql#5431):
+	// a read-modify-write under a cross-replica lock must see what the
+	// previous holder committed, and this node's cache hears about that only
+	// through an asynchronous broadcast. Neither consulted nor filled.
+	useCache := e.cache != nil && len(plan.Mutations) == 0 && plan.Refine == nil && !FreshReadFromContext(ctx)
 	signature := e.planCacheSignature(ctx, plan)
 	fieldSignature := projectionSignature(plan.Fields, plan.ConceptFields, plan.Metadata)
 	// Resolve named shape reference to a compiled template.
