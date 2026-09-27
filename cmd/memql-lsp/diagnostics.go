@@ -22,24 +22,41 @@ const rebuildDebounce = 300 * time.Millisecond
 
 // publishDiagnostics runs Sense's Diagnose over the document's current buffer and
 // pushes the mapped diagnostics to the client, together with the refusal of the
-// document's language line when the last build refused it (languageline.go). A
-// closed/unknown document, or a nil Sense service, publishes nothing; a
-// publish always carries the whole set, so one without a refusal clears the
-// squiggle the previous one drew.
+// document's language line when the last build refused it (languageline.go),
+// and the last load's refusals carried onto the buffer (loadpass.go). Then it
+// starts the load of the buffer, which publishes again when it finishes -- a
+// keystroke's syntax error never waits on the load. A closed/unknown
+// document, or a nil Sense service, publishes nothing; a publish always
+// carries the whole set, so one without a refusal clears the squiggle the
+// previous one drew.
 func (s *server) publishDiagnostics(notify glsp.NotifyFunc, uri protocol.DocumentUri) {
 	// Held from reading the buffer to sending, so a close cannot slip between
 	// the two and be overwritten by what was computed before it (didClose).
 	s.publishMu.Lock()
-	defer s.publishMu.Unlock()
 	text, ok := s.docs.get(uri)
-	if !ok {
-		return
+	if ok {
+		s.publishLocked(notify, uri, text)
 	}
+	s.publishMu.Unlock()
+	if ok {
+		s.scheduleLoadPass(notify, uri)
+	}
+}
+
+// publishLocked publishes a document's whole diagnostic set for text: Sense's
+// Diagnose, the load's refusals -- one squiggle per fault, as
+// sense.MergeLoadDiagnostics keeps them -- and the language line's. The caller
+// holds publishMu.
+func (s *server) publishLocked(notify glsp.NotifyFunc, uri protocol.DocumentUri, text string) {
 	svc, lines := s.getBuild()
 	if svc == nil {
 		return
 	}
-	lspDiags := senseDiagnostics(svc, uri, text)
+	merged := sense.MergeLoadDiagnostics(svc.Diagnose(text, uriToPath(uri)), s.loads.carried(uri, text))
+	lspDiags := make([]protocol.Diagnostic, 0, len(merged))
+	for _, d := range merged {
+		lspDiags = append(lspDiags, toLSPDiagnostic(text, d))
+	}
 	// Beside Sense's own, never instead of them: a refused domain's files still
 	// get their syntax and reference diagnostics.
 	lspDiags = append(lspDiags, s.languageLineDiagnostics(uri, text, lines)...)
@@ -47,17 +64,6 @@ func (s *server) publishDiagnostics(notify glsp.NotifyFunc, uri protocol.Documen
 		URI:         uri,
 		Diagnostics: lspDiags,
 	})
-}
-
-// senseDiagnostics is Sense's Diagnose over a document's buffer, in the LSP
-// wire form.
-func senseDiagnostics(svc *sense.Service, uri protocol.DocumentUri, text string) []protocol.Diagnostic {
-	senseDiags := svc.Diagnose(text, uriToPath(uri))
-	out := make([]protocol.Diagnostic, 0, len(senseDiags))
-	for _, d := range senseDiags {
-		out = append(out, toLSPDiagnostic(text, d))
-	}
-	return out
 }
 
 // toLSPDiagnostic maps a Sense diagnostic to the LSP wire form: Sense's 1-based

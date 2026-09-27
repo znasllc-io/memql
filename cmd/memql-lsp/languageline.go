@@ -98,16 +98,9 @@ func languageLineDiagnostic(text string, p memql.LanguageLineProblem) protocol.D
 // under the workspace root, is in no mounted domain, or is in a domain whose
 // line is accepted.
 func (s *server) documentRefusal(uri protocol.DocumentUri, lines memql.WorkspaceLanguageLines) ([]memql.LanguageLineProblem, bool) {
-	rel, ok := s.workspacePath(uri)
+	rel, ok := s.treePath(uri, lines)
 	if !ok {
 		return nil, false
-	}
-	// The lines were resolved from the tree the domains sit in, which is
-	// lines.Root below the workspace root.
-	if lines.Root != "" {
-		if rel, ok = strings.CutPrefix(rel, lines.Root+"/"); !ok {
-			return nil, false
-		}
 	}
 	line, ok := lines.Lines.For(rel)
 	if !ok || !line.Refused {

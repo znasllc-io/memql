@@ -49,6 +49,16 @@ type server struct {
 	// clear (didClose states the rule).
 	publishMu sync.Mutex
 
+	// loads is each open document's last load result and which documents have
+	// a load running (loadpass.go).
+	loads *loadPasses
+
+	// buildMu keeps a document's load from running while a build swaps the
+	// process-global DSL state (the mounted tree) it reads: buildSense holds it
+	// for writing, a load for reading. Separate from mu, which is held only
+	// for the swap of the finished build.
+	buildMu sync.RWMutex
+
 	// catalogMu guards catalog, the connected cluster's construct catalog as
 	// last pushed by the client over `memql/clusterCatalog`. Its ZERO VALUE IS
 	// DISCONNECTED, which is what makes "no client has pushed anything yet" and
@@ -73,6 +83,7 @@ func newServer(root string, log commonlog.Logger) *server {
 		docs:    newDocumentStore(),
 		diag:    newDiagnosticsDebouncer(diagnosticsDebounce),
 		rebuild: newRebuildDebouncer(rebuildDebounce),
+		loads:   newLoadPasses(),
 	}
 }
 
@@ -125,6 +136,10 @@ func (s *server) setBuild(svc *sense.Service, lines memql.WorkspaceLanguageLines
 // line is published on its domain's files, and the failure is announced once
 // through notify. A nil notify announces nothing.
 func (s *server) buildSense(notify glsp.NotifyFunc) {
+	// No document's load runs while the build mounts and unmounts the
+	// workspace in the process-global tree the load reads (loadpass.go).
+	s.buildMu.Lock()
+	defer s.buildMu.Unlock()
 	// The lines are the build's own, as its Init resolved them, so they and
 	// the build's error are one answer even when a memql.toml changes while
 	// the build runs.
@@ -298,6 +313,7 @@ func (s *server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	defer s.publishMu.Unlock()
 	s.docs.closeDoc(uri)
 	s.rewrite.forget(uri)
+	s.loads.forget(uri)
 	ctx.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         uri,
 		Diagnostics: []protocol.Diagnostic{},
