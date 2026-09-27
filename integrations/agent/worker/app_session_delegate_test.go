@@ -697,3 +697,60 @@ func TestASnapshotFileWithNoArtifactRefusesTheStepNamingIt(t *testing.T) {
 		t.Fatal("a snapshot with no fresh workspace still ran a session")
 	}
 }
+
+// TestARepairRecordingDoesNotInheritTheReplaysProcedure (epic memql#5408). When
+// a learned procedure serves a goal, compile lays procedureConstructId over the
+// goal's input; when the replay diverges, the app takes the goal back in a
+// session delegated from that same run. The recording inherits the goal's
+// INPUT -- the lift maps parameters onto it and lists its keys as the goal's
+// inputs -- so it must not inherit the replay's own variable, or the next lift
+// would learn an input nobody gave. The control: a parent whose only variable
+// is the replay's writes no variables at all.
+func TestARepairRecordingDoesNotInheritTheReplaysProcedure(t *testing.T) {
+	var opened []string
+	journal := workjournal.New(workjournal.ExecutorFunc(func(_ context.Context, q string) (any, error) {
+		if strings.HasPrefix(q, "mutation createWorkRun(") {
+			opened = append(opened, q)
+		}
+		return nil, nil
+	}), nil, "node-a")
+	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{"sessionId": "s"}}}
+	handover := memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code",
+		RunId: "v1:work:run:r1", StepId: "v1:work:step:s1", Prompt: "finish it",
+	}
+
+	eng := &parentRunEngine{parent: map[string]any{
+		"id":            "v1:work:run:r1",
+		"goalSignature": "sig-of-the-goal",
+		"variables":     map[string]any{"day": "2026-09-04", "procedureConstructId": "v1:authoring:construct:c1"},
+	}}
+	if _, err := newAppSessionDelegateFor(ex, journal, eng, nil).RunStep(context.Background(), handover); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if len(opened) != 1 {
+		t.Fatalf("expected one child run opened, got %d", len(opened))
+	}
+	if !strings.Contains(opened[0], `variables: {"day":"2026-09-04"}`) {
+		t.Errorf("the recording lost the goal's input:\n%s", opened[0])
+	}
+	if strings.Contains(opened[0], "procedureConstructId") {
+		t.Errorf("the recording inherited the replay's procedure:\n%s", opened[0])
+	}
+
+	opened = nil
+	only := &parentRunEngine{parent: map[string]any{
+		"id":            "v1:work:run:r1",
+		"goalSignature": "sig-of-the-goal",
+		"variables":     map[string]any{"procedureConstructId": "v1:authoring:construct:c1"},
+	}}
+	if _, err := newAppSessionDelegateFor(ex, journal, only, nil).RunStep(context.Background(), handover); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if len(opened) != 1 {
+		t.Fatalf("expected one child run opened, got %d", len(opened))
+	}
+	if strings.Contains(opened[0], "variables:") {
+		t.Errorf("a parent whose only variable is the replay's wrote variables anyway:\n%s", opened[0])
+	}
+}

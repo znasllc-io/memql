@@ -2042,11 +2042,11 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   it was last showing and select nothing. That is a click that looks like it
   worked, and it wants a change to Files rather than one here.
 
-  **`v1:authoring:bundle` is still not drawn**, and not because it was
-  forgotten: it carries no broadcast routing rule, so a live feed over it
-  would render correct on load and then never move -- worse than not drawing
-  it, because the map would be claiming wiring that is not there. The
-  artifact does carry one, which is why that half is live.
+  **`v1:authoring:bundle` is not drawn yet.** This paragraph used to say it
+  could not be, because it carried no broadcast routing rule; it does --
+  `component/node/routing.go` forwards every `v1:authoring:*` event
+  (memql#4542). A live feed over it would move like the artifact half does,
+  so drawing it is a client change nobody has made yet, not missing wiring.
 
   **No WebGL, and it is enforced rather than intended.** MemQL OS carries none
   by owner requirement; `test/deployables/map.test.tsx` is the shell-wide guard
@@ -2067,12 +2067,17 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   of it. The moment rides the shell's actual deep-link primitive instead --
   `openApp("nexus", { goalId, at })`.
 
-- **AUTOMATIONS IS A READ, AND THE LADDER IS A WORD.**
-  `v1:authoring:construct` carries no broadcast routing rule -- checked in
-  `component/node/routing.go` rather than assumed, which is this README's own
-  standing rule -- so the section prints when it looked and offers to look
-  again. A live-looking list that silently never moves is worse than a read
-  that dates itself, because the caption would claim wiring that is not there.
+- **AUTOMATIONS IS LIVE, AND THE LADDER IS A WORD.**
+  `v1:authoring:construct` broadcasts, through the `v1:authoring:*` patterns in
+  `component/node/routing.go` (memql#4542). A first cut looked for a rule NAMING
+  the concept, found none, and printed a not-live caption beside "Look again" --
+  the Fleet mistake this README's routing-rule rule exists to stop. The list and
+  a learned procedure's page follow the construct and the ladder's policy row as
+  live collections, so a procedure whose ladder moves on an agent node moves on
+  screen. Construct is owner-tier, so the subscription delivers a person's own
+  rows exactly as the read does. The arrival cue fires on a rung change, a
+  status flip or a promotion arriving -- never on the counts and replay times a
+  shadow comparison rewrites every time it runs.
 
   `reliability` is 0..1 and it is NOT a probability of success: it climbs on a
   matched-fingerprint success and decays on mismatch and on disuse. Printing

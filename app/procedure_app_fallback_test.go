@@ -157,8 +157,8 @@ func TestTheFallbackRefusesAnythingButAnAppSession(t *testing.T) {
 	}
 }
 
-// The runner turns this into procedure_fallback_unavailable, so the router's
-// OWN WORDS must survive -- they say which door was shut and why.
+// The runner turns this into procedure_fallback_failed, so the router's OWN
+// WORDS must survive -- they say which door was shut and why.
 func TestTheFallbackCarriesTheRoutersOwnWords(t *testing.T) {
 	rt := &fakeSessionRouter{err: errors.New("router: every door is shut: app:claude-code: no signed-in machine offers claude-code")}
 	_, err := (&procedureAppFallback{resolve: rt.resolve, agents: testAgents}).Handover(context.Background(), fallbackRequest())

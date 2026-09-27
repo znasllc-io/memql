@@ -22,6 +22,10 @@ type Runner struct {
 	Cassettes cassette.Set
 	Logger    *slog.Logger
 	Prov      figure.Provenance
+	// Lifecycle opens the learned-procedure half of the platform for a
+	// procedure lifecycle scenario's platform arm (procedure_lifecycle.go).
+	// Nil fails such a scenario loudly rather than skipping it.
+	Lifecycle LifecycleHarness
 }
 
 // ArmResult is one arm's run of one scenario: what happened, and everything
@@ -66,6 +70,22 @@ type ArmResult struct {
 	// which is different from a scenario that ran and failed its verifier.
 	Err error
 
+	// The procedure lifecycle's counters, all about its ONE measured goal
+	// (procedure_lifecycle.go):
+	//
+	// ReplaysServedWithoutModel is 1 when a TRUSTED procedure served the goal
+	// itself with no model and no app call, else 0.
+	ReplaysServedWithoutModel int
+	// AppCalls is the fixture app's sessions during the goal. The app is the
+	// lifecycle's only intelligence, so a session is a model reach.
+	AppCalls int
+	// DuplicatedAcrossDivergence is the world's duplicates during the goal --
+	// whose failure the scenario injects, so that a replay stops part-way and
+	// the app takes over.
+	DuplicatedAcrossDivergence int
+	// lifecycle is everything the driver saw, for the verifier.
+	lifecycle *lifecycleRecord
+
 	// unrecovered records that the run ended failed even after its resume.
 	// It is what a verifier asserting `status: failed` reads, and it is a
 	// legitimate expected outcome: a scenario may exist to show that an
@@ -102,10 +122,14 @@ func (r *Runner) RunScenario(ctx context.Context, s scenario.Scenario, arm figur
 		player = cassette.NewPlayer(c)
 	}
 
-	switch arm {
-	case figure.ArmPlatform:
+	switch {
+	case s.Procedure != nil:
+		// A learned-procedure lifecycle: a sequence of goals on the fixture
+		// app, served however the platform's ladder decides.
+		r.runLifecycle(ctx, s, arm, w, &res)
+	case arm == figure.ArmPlatform:
 		r.runPlatform(ctx, s, w, player, &res)
-	case figure.ArmBaseline:
+	case arm == figure.ArmBaseline:
 		r.runBaseline(s, w, player, &res)
 	default:
 		res.Err = fmt.Errorf("unknown arm %q", arm)
@@ -242,6 +266,15 @@ func (r *Runner) runBaseline(s scenario.Scenario, w *world.World, player *casset
 // verify runs the scenario's deterministic verifier.
 func verify(s scenario.Scenario, w *world.World, res ArmResult) []string {
 	var failures []string
+	if res.lifecycle != nil {
+		// What the lifecycle needed and the platform did not do -- a decision
+		// with nothing proposed, a session that failed -- is the platform's
+		// answer being wrong, so it fails the verifier with the lifecycle's own
+		// account of what happened beside it.
+		for _, p := range res.lifecycle.Problems {
+			failures = append(failures, fmt.Sprintf("%s (the lifecycle: %s)", p, res.lifecycle.narrative()))
+		}
+	}
 	for i, c := range s.Verify {
 		form, err := c.Form()
 		if err != nil {
@@ -302,6 +335,12 @@ func compareCount(c scenario.Check, got int, what string) string {
 // else -- a verifier that silently answered zero for an unsupported concept
 // would make `count: 0` pass on a scenario that asserts nothing.
 func rowCount(c scenario.Check, res ArmResult) (int, bool) {
+	if res.lifecycle != nil {
+		// A lifecycle keeps no journal run of its own to answer the
+		// automation rows from; it answers the ladder's rows, read back from
+		// the platform after its last goal.
+		return lifecycleRowCount(c, res.lifecycle)
+	}
 	switch c.Rows {
 	case "v1:work:run":
 		switch c.Where["status"] {
@@ -359,6 +398,10 @@ func runNamedCheck(name string, s scenario.Scenario, w *world.World, res ArmResu
 			return "no journal run was opened"
 		}
 		return ""
+	case "aTrustedReplayReachedNoModel":
+		return checkTrustedReplayReachedNoModel(res.lifecycle)
+	case "aDivergedReplayHandedOverItsCompletedSteps":
+		return checkDivergedReplayHandedOver(res.lifecycle)
 	case "approvalRefusesAChangedArtifact":
 		// The hash comparison itself is a property of component/work, proved
 		// there over values. What this checks is that the scenario reached the

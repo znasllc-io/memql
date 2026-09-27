@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -89,10 +91,11 @@ type procedureHost interface {
 	resolvePath(ctx context.Context, p string) (hostPath, reported string, err error)
 	// prepareCommand is the exec arguments a step's command runs with here.
 	prepareCommand(ctx context.Context, cmd procedureCommandLine) (map[string]any, error)
-	// delivers reports whether an effect on this surface reaches outside the
-	// replay's own workspace -- the person's machine does, the workbench's
-	// per-run directory does not.
-	delivers() bool
+	// delivers reports whether a successful action on this surface reaches
+	// outside the replay's own workspace -- every one on the person's machine
+	// does; on the workbench only an fs_write does, which it promotes into the
+	// run owner's Library.
+	delivers(action string) bool
 }
 
 // procedureAgentResolver answers the owner's reasoning agent.
@@ -137,7 +140,7 @@ func runProcedureStep(
 	)
 	switch req.Tool {
 	case work.StepTypeExec:
-		res, err = runProcedureExec(ctx, host, args)
+		res, err = runProcedureExec(ctx, host, req.Timeout, args)
 	case work.StepTypeFSWrite:
 		res, err = runProcedureWrite(ctx, host, req.Sandbox, args)
 	case work.StepTypeFSRead:
@@ -150,13 +153,37 @@ func runProcedureStep(
 		err = fmt.Errorf("%q is not a tool a replay can run (exec, fs_write, fs_read, fetch, mcp)", req.Tool)
 	}
 	if err != nil {
+		var unavailable *procedureUnavailable
+		if errors.As(err, &unavailable) {
+			return procedureUnavailableResult(unavailable), nil
+		}
 		return procedure.DispatchResult{}, fmt.Errorf("procedure dispatch: step %s (%s): %w", req.StepKey, req.Tool, err)
 	}
 	return res, nil
 }
 
-// runProcedureExec runs a recorded command.
-func runProcedureExec(ctx context.Context, host procedureHost, args map[string]any) (procedure.DispatchResult, error) {
+// procedureUnavailableResult is a step whose TARGET could not finish it: a
+// failed observation that measured nothing -- what a reader that knows nothing
+// of Unavailable has always been handed for a lost answer -- marked
+// Unavailable, so the ladder does not count it against the procedure, and
+// delivering nothing this dispatcher knows of. The receipt says which host
+// action went unanswered and why.
+func procedureUnavailableResult(u *procedureUnavailable) procedure.DispatchResult {
+	isError := true
+	return procedure.DispatchResult{
+		Observation: work.StepObservation{IsError: &isError},
+		Output: map[string]any{
+			"action":       u.action,
+			"errorCode":    u.reply.ErrorCode,
+			"errorMessage": u.reply.ErrorMessage,
+			"unavailable":  true,
+		},
+		Unavailable: true,
+	}
+}
+
+// runProcedureExec runs a recorded command, bounded by the step's timeout.
+func runProcedureExec(ctx context.Context, host procedureHost, timeout time.Duration, args map[string]any) (procedure.DispatchResult, error) {
 	if background, _ := args["run_in_background"].(bool); background {
 		return procedure.DispatchResult{}, fmt.Errorf("it ran in the background, so what the app recorded is a job handle rather than the command's result, and no replay of it could compare")
 	}
@@ -168,18 +195,18 @@ func runProcedureExec(ctx context.Context, host procedureHost, args map[string]a
 	if err != nil {
 		return procedure.DispatchResult{}, err
 	}
-	if t := procedureTimeoutSec(args); t > 0 {
+	if t := procedureTimeoutSec(timeout, args); t > 0 {
 		execArgs["timeoutSec"] = t
 	}
 	reply, err := host.call(ctx, "exec", execArgs)
 	if err != nil {
 		return procedure.DispatchResult{}, err
 	}
-	if procedureRefusedBeforeRunning[reply.ErrorCode] {
-		return procedure.DispatchResult{}, procedureRefusal(host.label(), "the command", reply)
+	if err := procedureHostAnswer(host.label(), "the command", "exec", reply); err != nil {
+		return procedure.DispatchResult{}, err
 	}
 	obs, out := procedureExecObservation(reply)
-	return procedure.DispatchResult{Observation: obs, Output: out, Delivered: host.delivers()}, nil
+	return procedure.DispatchResult{Observation: obs, Output: out, Delivered: host.delivers("exec")}, nil
 }
 
 // runProcedureWrite writes a file: a Write's whole content, or an Edit's or a
@@ -216,8 +243,14 @@ func runProcedureWrite(ctx context.Context, host procedureHost, sandbox bool, ar
 		content = edited
 	}
 
-	var ok bool
+	// writeAction is the host action the bytes went through, which is what
+	// decides whether they reached anything a person sees.
+	var (
+		ok          bool
+		writeAction string
+	)
 	if sandbox {
+		writeAction = "exec"
 		reply, err := host.call(ctx, "exec", map[string]any{
 			"cmd":   procedureSandboxWriteCommand(hostPath),
 			"stdin": content,
@@ -225,8 +258,8 @@ func runProcedureWrite(ctx context.Context, host procedureHost, sandbox bool, ar
 		if err != nil {
 			return procedure.DispatchResult{}, err
 		}
-		if procedureRefusedBeforeRunning[reply.ErrorCode] {
-			return procedure.DispatchResult{}, procedureRefusal(host.label(), "the write", reply)
+		if err := procedureHostAnswer(host.label(), "the write", "exec", reply); err != nil {
+			return procedure.DispatchResult{}, err
 		}
 		code, hasCode := procedurePayloadInt(reply.Payload["exitCode"])
 		ok = hasCode && code == 0 && reply.ErrorCode == ""
@@ -234,12 +267,13 @@ func runProcedureWrite(ctx context.Context, host procedureHost, sandbox bool, ar
 			out["errorCode"], out["errorMessage"] = reply.ErrorCode, reply.ErrorMessage
 		}
 	} else {
+		writeAction = "fs_write"
 		reply, err := host.call(ctx, "fs_write", map[string]any{"path": hostPath, "content": content})
 		if err != nil {
 			return procedure.DispatchResult{}, err
 		}
-		if procedureRefusedBeforeRunning[reply.ErrorCode] {
-			return procedure.DispatchResult{}, procedureRefusal(host.label(), "the write", reply)
+		if err := procedureHostAnswer(host.label(), "the write", "fs_write", reply); err != nil {
+			return procedure.DispatchResult{}, err
 		}
 		ok = reply.OK
 		if !ok {
@@ -255,7 +289,7 @@ func runProcedureWrite(ctx context.Context, host procedureHost, sandbox bool, ar
 	return procedure.DispatchResult{
 		Observation: procedureFileObservation("write", ok, reported, digest),
 		Output:      out,
-		Delivered:   ok && host.delivers(),
+		Delivered:   ok && host.delivers(writeAction),
 	}, nil
 }
 
@@ -275,11 +309,14 @@ func readProcedureFile(ctx context.Context, host procedureHost, hostPath string)
 		content, _ := reply.Payload["content"].(string)
 		return content, true, nil
 	}
-	if procedureRefusedBeforeRunning[reply.ErrorCode] {
-		return "", false, procedureRefusal(host.label(), "the read an edit needs", reply)
+	if err := procedureHostAnswer(host.label(), "the read an edit needs", "fs_read", reply); err != nil {
+		return "", false, err
 	}
 	stat, err := host.call(ctx, "fs_stat", map[string]any{"path": hostPath})
 	if err != nil {
+		return "", false, err
+	}
+	if err := procedureHostAnswer(host.label(), "the look an edit needs at a file it cannot read", "fs_stat", stat); err != nil {
 		return "", false, err
 	}
 	if exists, known := stat.Payload["exists"].(bool); stat.OK && known && !exists {
@@ -304,8 +341,8 @@ func runProcedureRead(ctx context.Context, host procedureHost, args map[string]a
 	if err != nil {
 		return procedure.DispatchResult{}, err
 	}
-	if procedureRefusedBeforeRunning[reply.ErrorCode] {
-		return procedure.DispatchResult{}, procedureRefusal(host.label(), "the read", reply)
+	if err := procedureHostAnswer(host.label(), "the read", "fs_read", reply); err != nil {
+		return procedure.DispatchResult{}, err
 	}
 	out := map[string]any{"action": "fs_read", "path": reported}
 	if !reply.OK {
@@ -338,8 +375,8 @@ func runProcedureFetch(ctx context.Context, host procedureHost, args map[string]
 	if err != nil {
 		return procedure.DispatchResult{}, err
 	}
-	if procedureRefusedBeforeRunning[reply.ErrorCode] {
-		return procedure.DispatchResult{}, procedureRefusal(host.label(), "the fetch", reply)
+	if err := procedureHostAnswer(host.label(), "the fetch", "http_fetch", reply); err != nil {
+		return procedure.DispatchResult{}, err
 	}
 	obs, out := procedureFetchObservation(reply)
 	return procedure.DispatchResult{Observation: obs, Output: out}, nil
@@ -349,9 +386,14 @@ func runProcedureFetch(ctx context.Context, host procedureHost, args map[string]
 // CLUSTER whatever the procedure's target, because that is where the app's
 // call ran too: over MCP, as its owner.
 //
-// A SHADOW REPLAY RUNS ONLY A TOOL THAT READS. Its handler must call a query;
-// a mutation, a logic, a builtin, an automation or a webhook could write, and
-// a shadow writes nothing.
+// A REPLAYED MCP STEP RUNS ONLY A TOOL THAT READS, IN EVERY MODE. Its handler
+// must call a query; a mutation, a logic, a builtin, an automation or a webhook
+// could write. The recorded call ran under the app session's credential, which
+// is pinned to the read/query surface, while a replay acts as the owner with a
+// borrowed actor that is not -- so a replay that ran a writing tool would do
+// something the recording could not have, with more authority than it had. A
+// shadow writes nothing anyway; a canary or trusted replay is held to the
+// recording.
 func runProcedureMCP(
 	ctx context.Context,
 	tools procedureToolCatalog,
@@ -374,9 +416,8 @@ func runProcedureMCP(
 	if !registered {
 		return procedure.DispatchResult{}, fmt.Errorf("%q is not a registered MemQL tool, so there is nothing here to call", name)
 	}
-	readOnly := kind == "query"
-	if req.Sandbox && !readOnly {
-		return procedure.DispatchResult{}, fmt.Errorf("a shadow replay runs only a tool that reads, and %q calls a %s", name, kind)
+	if kind != "query" {
+		return procedure.DispatchResult{}, fmt.Errorf("%q calls a %s, and a replayed MCP step runs only a tool that reads: the recorded call ran under the app session's credential, pinned to the read/query surface, and a replay asks for no more than the recording had", name, kind)
 	}
 	if agents == nil {
 		return procedure.DispatchResult{}, fmt.Errorf("this node cannot resolve the agent a tool call acts as")
@@ -423,8 +464,8 @@ func runProcedureMCP(
 			"resultType": resultType,
 			"digest":     procedureDigest(raw),
 		},
-		// A MemQL row write is outside the replay's workspace by definition.
-		Delivered: !readOnly && !isError,
+		// A read delivers nothing, and a read is all a replayed MCP step runs.
+		Delivered: false,
 	}, nil
 }
 

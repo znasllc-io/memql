@@ -84,7 +84,11 @@ func (p *procedureProber) Probe(ctx context.Context, target work.ReplayTarget, o
 
 	var observed proc.Preconditions
 	if target != work.TargetWorkbench && len(learned.Platform) > 0 {
-		if payload, ok := procedureProbeExec(ctx, host, "uname -s -m"); ok {
+		payload, ok, err := procedureProbeExec(ctx, host, "uname -s -m")
+		if err != nil {
+			return proc.Preconditions{}, err
+		}
+		if ok {
 			if goos, goarch, ok := procedurePlatformOf(procedureVersionLine(payload)); ok {
 				observed.Platform = map[string]string{"os": goos, "arch": goarch}
 			}
@@ -100,7 +104,10 @@ func (p *procedureProber) Probe(ctx context.Context, target work.ReplayTarget, o
 		if !procedureToolWord.MatchString(name) {
 			continue
 		}
-		payload, ok := procedureProbeExec(ctx, host, procedureVersionCommand(name))
+		payload, ok, err := procedureProbeExec(ctx, host, procedureVersionCommand(name))
+		if err != nil {
+			return proc.Preconditions{}, err
+		}
 		if !ok {
 			continue
 		}
@@ -113,57 +120,86 @@ func (p *procedureProber) Probe(ctx context.Context, target work.ReplayTarget, o
 	}
 
 	if learned.EmptyWorkspace != nil {
-		if empty, ok := procedureProbeEmptyWorkspace(ctx, host); ok {
+		empty, ok, err := procedureProbeEmptyWorkspace(ctx, host)
+		if err != nil {
+			return proc.Preconditions{}, err
+		}
+		if ok {
 			observed.EmptyWorkspace = &empty
 		}
 	}
 	return observed, nil
 }
 
+// procedureProbeUnavailable is the error for a TARGET that could not answer:
+// the surface could not be asked at all, or it answered with a code that says
+// the target itself is gone (procedureTargetUnavailable). That is not a
+// measurement, and an empty one in its place would read as every learned
+// predicate missing -- a refused start the ladder counts against a procedure
+// for a laptop that was asleep. As an error it is a start nobody could
+// measure, which the runner does not count.
+func procedureProbeUnavailable(host procedureHost, reply procedureHostReply, err error) error {
+	if err != nil {
+		return fmt.Errorf("procedure probe: %s could not be asked: %w", host.label(), err)
+	}
+	if procedureTargetUnavailable[reply.ErrorCode] {
+		return fmt.Errorf("procedure probe: %s is unavailable (%s)", host.label(), reply.ErrorCode)
+	}
+	return nil
+}
+
 // procedureProbeExec runs one probe command with no working directory -- a
 // version flag does not depend on one -- and answers its output when it exited
-// cleanly.
-func procedureProbeExec(ctx context.Context, host procedureHost, cmd string) (map[string]any, bool) {
+// cleanly. A target that could not answer is an error
+// (procedureProbeUnavailable); a command it ran and refused, or that failed,
+// is simply not a measurement.
+func procedureProbeExec(ctx context.Context, host procedureHost, cmd string) (map[string]any, bool, error) {
 	reply, err := host.call(ctx, "exec", map[string]any{"cmd": cmd, "timeoutSec": procedureProbeTimeoutSec})
-	if err != nil || reply.ErrorCode != "" {
-		return nil, false
+	if gone := procedureProbeUnavailable(host, reply, err); gone != nil {
+		return nil, false, gone
+	}
+	if reply.ErrorCode != "" {
+		return nil, false, nil
 	}
 	if code, ok := procedurePayloadInt(reply.Payload["exitCode"]); !ok || code != 0 {
-		return nil, false
+		return nil, false, nil
 	}
-	return reply.Payload, true
+	return reply.Payload, true, nil
 }
 
 // procedureProbeEmptyWorkspace answers whether the replay's workspace has no
 // entries. A workspace that does not exist yet is empty: the replay creates
 // it. A listing that was cut short is not a count.
-func procedureProbeEmptyWorkspace(ctx context.Context, host procedureHost) (bool, bool) {
+func procedureProbeEmptyWorkspace(ctx context.Context, host procedureHost) (bool, bool, error) {
 	dir, _, err := host.resolvePath(ctx, ".")
 	if err != nil {
-		return false, false
+		return false, false, nil
 	}
 	reply, err := host.call(ctx, "fs_list", map[string]any{"path": dir})
-	if err != nil {
-		return false, false
+	if gone := procedureProbeUnavailable(host, reply, err); gone != nil {
+		return false, false, gone
 	}
 	if reply.OK {
 		if truncated, _ := reply.Payload["truncated"].(bool); truncated {
-			return false, true
+			return false, true, nil
 		}
 		if n, ok := procedurePayloadInt(reply.Payload["count"]); ok {
-			return n == 0, true
+			return n == 0, true, nil
 		}
 		if entries, ok := reply.Payload["entries"].([]any); ok {
-			return len(entries) == 0, true
+			return len(entries) == 0, true, nil
 		}
-		return false, false
+		return false, false, nil
 	}
 	stat, err := host.call(ctx, "fs_stat", map[string]any{"path": dir})
-	if err != nil || !stat.OK {
-		return false, false
+	if gone := procedureProbeUnavailable(host, stat, err); gone != nil {
+		return false, false, gone
+	}
+	if !stat.OK {
+		return false, false, nil
 	}
 	if exists, known := stat.Payload["exists"].(bool); known && !exists {
-		return true, true
+		return true, true, nil
 	}
-	return false, false
+	return false, false, nil
 }

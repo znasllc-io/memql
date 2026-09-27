@@ -73,6 +73,16 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	runId := rowString(approval, "runId")
 	owner := rowString(approval, "ownerUserId")
 
+	// A PROMOTION TAKES TWO DECISIONS, its two options: approved moves the
+	// procedure from shadow to canary and rejected keeps it in shadow
+	// (integrations/procedure's DecidePromotion). An `answered` one would be
+	// recorded -- spending the approval -- and then move nothing, leaving the
+	// construct waiting on an approval nobody can decide again. So it is
+	// refused before anything is read or written.
+	if kind == work.ApprovalKindProcedurePromotion && decision == "answered" {
+		return nil, fmt.Errorf("work: a procedure promotion is decided approved (the procedure moves from shadow to canary) or rejected (it stays in shadow); it takes no answer")
+	}
+
 	// THE ARTIFACT-HASH GATE. An approval is a decision about a specific
 	// thing -- this command, this patch, this draft -- and it never carries
 	// to a modified one.

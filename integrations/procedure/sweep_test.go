@@ -63,6 +63,18 @@ func newSweepWorld(t *testing.T, pageSize int) *sweepWorld {
 		}
 		return page, next
 	})
+	// The construct read FRESH inside the ladder lock, by id, as its owner.
+	w.eng.answer("authoringConstructById", func(c recordedCall, _ string) ([]map[string]any, string) {
+		id, _ := parseCallArgs(t, c.Query)["constructId"].(string)
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		for _, r := range w.rows[c.Actor] {
+			if str(r, "id") == id {
+				return []map[string]any{copyRow(t, r)}, ""
+			}
+		}
+		return nil, ""
+	})
 	w.eng.onWrite("recordConstructLadder", func(c recordedCall) {
 		args := parseCallArgs(t, c.Query)
 		w.mu.Lock()
@@ -239,5 +251,34 @@ func TestAPersonCannotRunTheSweep(t *testing.T) {
 	}
 	if w.row(testOwner, "over")["ladder"] != "shadow" {
 		t.Fatal("the internal sweep did not demote")
+	}
+}
+
+// TestTheSweepDecidesOnTheConstructAsItIsNow (review finding C1): the page
+// row says a trusted procedure is over its failure threshold, and by the time
+// the sweep reaches it a clean replay has cleared the failures. The page only
+// NOMINATES; the demotion is decided again from the construct read inside the
+// ladder lock, so a procedure that is fine now is not demoted on what it was.
+func TestTheSweepDecidesOnTheConstructAsItIsNow(t *testing.T) {
+	w := newSweepWorld(t, 100)
+	w.rows[testOwner] = []map[string]any{procedureOn("healed", "trusted", map[string]any{"failures": float64(3)})}
+	page := w.eng.dynamic["learnedProceduresForOwner"]
+	w.eng.answerSome("learnedProceduresForOwner", func(c recordedCall, cursor string) ([]map[string]any, string, bool) {
+		rows, next, handled := page(c, cursor)
+		// A clean replay lands after the page was read.
+		w.mu.Lock()
+		w.rows[testOwner][0]["failures"] = float64(0)
+		w.mu.Unlock()
+		return rows, next, handled
+	})
+	res := sweepAsCluster(t, w, SweepDemotion)
+	if res.Demoted != 0 || len(res.Changed) != 0 {
+		t.Fatalf("result = %+v: the sweep demoted a procedure on the failures it no longer has", res)
+	}
+	if got := w.row(testOwner, "healed")["ladder"]; got != "trusted" {
+		t.Fatalf("healed is %v, want still trusted", got)
+	}
+	if n := len(w.eng.callsTo("authoringConstructById")); n != 1 {
+		t.Fatalf("the nominated procedure was re-read %d times, want once, inside its lock", n)
 	}
 }

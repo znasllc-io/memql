@@ -512,6 +512,11 @@
         "requires": "app:settings/decisions"
       },
       {
+        "id": "procedures",
+        "name": "Procedures",
+        "requires": "app:settings/procedures"
+      },
+      {
         "id": "tokens",
         "name": "Tokens",
         "requires": "app:settings/tokens"

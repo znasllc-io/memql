@@ -66,13 +66,22 @@ func AntiUnify(a, b *Node, next holeNamer) (*Node, int) {
 	if a.Kind != b.Kind {
 		return HoleNode(next(), widenType(typeOf(a), typeOf(b))), maxInt(a.Size(), b.Size())
 	}
+	if rootednessDiffers(a, b) {
+		// Two paths with the same segments, one rooted and one not, name
+		// different files. The root lives in the Form, which Equal ignores,
+		// so without this they generalized with no hole at all and replayed
+		// whichever the first recording said. The whole path is the hole:
+		// it goes back as the one string it is.
+		return HoleNode(next(), "string"), maxInt(a.Size(), b.Size())
+	}
 	switch a.Kind {
 	case KindLit:
 		if a.Lit == b.Lit {
 			// The LEFT operand's hints survive: a number both sides agree on
 			// is still a number, or the template renders and materializes it
-			// as a string.
-			return &Node{Kind: KindLit, Lit: a.Lit, LitType: a.LitType, Form: a.Form}, 0
+			// as a string -- and an argument both sides agree on is still
+			// spelled the way the first instance spelled it.
+			return &Node{Kind: KindLit, Lit: a.Lit, LitType: a.LitType, Raw: a.Raw, Form: a.Form}, 0
 		}
 		return HoleNode(next(), widenType(typeOf(a), typeOf(b))), 1
 	case KindHole:
@@ -121,6 +130,9 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 		dist int
 		ai   int
 		bi   int
+		// inserted: some element came from the right alone, so the
+		// generalization's elements are no longer the left's one for one.
+		inserted bool
 	)
 	// emitGap generalizes the unmatched runs before the next matched pair.
 	emitGap := func(untilA, untilB int) {
@@ -140,6 +152,7 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 				kids = append(kids, HoleNode(next(), typeOf(b.Kids[bi])))
 				dist += b.Kids[bi].Size()
 				bi++
+				inserted = true
 			}
 		}
 	}
@@ -154,12 +167,54 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 	// A generalized command line is still a command line: without the Form a
 	// template's argv would materialize as a list, and a shell cannot run one.
 	g.Form = a.Form
+	// The left's SEPARATORS survive only while every element is the left's,
+	// one for one and in order: they are the text between THOSE elements. An
+	// element the right inserted has no gap in the left, and the command line
+	// falls back to single spaces rather than borrowing one that was never
+	// recorded.
+	if !inserted && a.Seps != nil && len(a.Seps) == len(a.Kids)+1 {
+		g.Seps = append(make([]string, 0, len(a.Seps)), a.Seps...)
+	}
 	return g, dist
+}
+
+// rootednessDiffers reports that exactly one of two nodes is a rooted path.
+// Every other reading Form records is spelling -- a command recorded as a
+// line and as a vector is one command -- but /tmp/x and tmp/x are two files.
+func rootednessDiffers(a, b *Node) bool {
+	return (a.Form == FormRootedPath) != (b.Form == FormRootedPath)
+}
+
+// sameMeaning is Equal plus the one reading that is meaning, rootedness,
+// anywhere in the two trees. It is what the common subsequence pairs
+// elements by: an element paired as common is cloned into the template from
+// the left, unexamined, so a pairing that ignored the root would carry a
+// rooted path over a relative one with no hole.
+func sameMeaning(a, b *Node) bool {
+	return a.Equal(b) && sameRootedness(a, b)
+}
+
+// sameRootedness walks two Equal trees together.
+func sameRootedness(a, b *Node) bool {
+	if a == nil || b == nil {
+		return true
+	}
+	if rootednessDiffers(a, b) {
+		return false
+	}
+	for i := range a.Kids {
+		if i < len(b.Kids) && !sameRootedness(a.Kids[i], b.Kids[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // lcsPairs returns the index pairs of a longest common subsequence, in order.
 // Equality is structural, so a matched element is one both sides actually
-// recorded rather than one that merely sits at the same offset.
+// recorded rather than one that merely sits at the same offset -- and it is
+// sameMeaning rather than Equal, so a rooted path never pairs with a relative
+// one.
 func lcsPairs(a, b []*Node) [][2]int {
 	n, m := len(a), len(b)
 	table := make([][]int, n+1)
@@ -168,7 +223,7 @@ func lcsPairs(a, b []*Node) [][2]int {
 	}
 	for i := n - 1; i >= 0; i-- {
 		for j := m - 1; j >= 0; j-- {
-			if a[i].Equal(b[j]) {
+			if sameMeaning(a[i], b[j]) {
 				table[i][j] = table[i+1][j+1] + 1
 			} else {
 				table[i][j] = maxInt(table[i+1][j], table[i][j+1])
@@ -179,7 +234,7 @@ func lcsPairs(a, b []*Node) [][2]int {
 	i, j := 0, 0
 	for i < n && j < m {
 		switch {
-		case a[i].Equal(b[j]):
+		case sameMeaning(a[i], b[j]):
 			pairs = append(pairs, [2]int{i, j})
 			i++
 			j++

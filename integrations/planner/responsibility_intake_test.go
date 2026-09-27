@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // responsibilityEvent builds a graph event in the shape
@@ -127,4 +128,47 @@ func TestResponsibilityIntake_FoldAnswersStillFiresOnUpdate(t *testing.T) {
 		exec, _, _ := eng.snapshot()
 		return countContains(exec, "foldResponsibilityIntakeAnswers") >= 1
 	})
+}
+
+// TestEncodeArgsSpellsEveryStringTheLanguagesWay: every string encodeArgs
+// writes -- an argument, a string nested in an object or a list, an object's
+// key -- is spelled by langparser.QuoteString, and everything else keeps the
+// spelling it had. The strings carry < and &, the characters json.Marshal
+// spells its own way, so a renderer that still used it fails here; the real
+// parser reading every value back unchanged is the other half.
+func TestEncodeArgsSpellsEveryStringTheLanguagesWay(t *testing.T) {
+	text := "a \"quote\", a back\\slash, a line separator, <tag> & co"
+	args := map[string]any{
+		"title":    text,
+		"metadata": map[string]any{"note": text, "a<b": 1, "on": true},
+		"tags":     []string{text, "plain"},
+		"count":    3,
+		"ratio":    0.25,
+		"none":     nil,
+	}
+	got := encodeArgs(args)
+	q := langparser.QuoteString
+	want := "count: 3, metadata: {" + q("a<b") + ":1," + q("note") + ":" + q(text) + "," + q("on") + ":true}, none: null, ratio: 0.25, " +
+		"tags: [" + q(text) + "," + q("plain") + "], title: " + q(text)
+	if got != want {
+		t.Errorf("encodeArgs wrote\n\t%s\nwant every string in the language's own quoting\n\t%s", got, want)
+	}
+
+	expr, err := langparser.ParseExpression("probe(" + got + ")")
+	if err != nil {
+		t.Fatalf("the real parser refused what encodeArgs wrote: %v\n\t%s", err, got)
+	}
+	fn, ok := expr.(*langparser.FunctionCallExpr)
+	if !ok {
+		t.Fatalf("parsed as %T, not a call", expr)
+	}
+	if fn.Args["title"] != text {
+		t.Errorf("title read back as %q, want %q", fn.Args["title"], text)
+	}
+	if meta, _ := fn.Args["metadata"].(map[string]any); meta["note"] != text || meta["on"] != true {
+		t.Errorf("metadata read back as %v", fn.Args["metadata"])
+	}
+	if tags, _ := fn.Args["tags"].([]any); len(tags) != 2 || tags[0] != text {
+		t.Errorf("tags read back as %v", fn.Args["tags"])
+	}
 }

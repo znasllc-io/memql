@@ -129,10 +129,12 @@ func (w *SessionWriter) OpenRecording(ctx context.Context, r workerservice.Recor
 	// THE RUN INHERITS ITS PARENT'S GOAL (epic memql#5408, gap G2), exactly as
 	// a run the delegate opens does: procedure learning mines the recordings of
 	// ONE goal signature, so a recording that does not carry its parent's
-	// belongs to no corpus, and one without the parent's variables cannot say
-	// which goal input supplied each parameter. Read under the owner's own
-	// actor -- the parent is theirs -- and a parent that cannot be read leaves
-	// the recording unsigned rather than refused: the session runs either way.
+	// belongs to none of its goal's corpus, and one without the goal's input --
+	// the parent's variables, less the replay-only ones -- cannot say which
+	// input supplied each parameter. Read under the owner's own actor -- the
+	// parent is theirs -- and a parent that cannot be read leaves the recording
+	// with its own statement's signature rather than refused: the session runs
+	// either way.
 	inherited := w.parentRunInheritance(ctx, owner, r.ParentRunId)
 	if err := w.store.writeInternal(ownerActor(ctx, owner), "mutation "+call("createWorkGoal", map[string]any{
 		"goalId":       goalId,
@@ -415,9 +417,14 @@ type runInheritance struct {
 
 // parentRunInheritance reads the delegating run under its owner's actor. It is
 // BEST-EFFORT for the file header's reason: a parent that cannot be read costs
-// the recording its place in a corpus, and refusing the session would cost the
-// person the work. The failure is logged, because a recording that silently
-// belongs to no goal is the gap this exists to close.
+// the recording its PARENT's corpus -- it keeps the signature of its own
+// statement, which OpenRecording writes unless a parent's replaces it -- and
+// refusing the session would cost the person the work. The failure is logged,
+// because a recording that silently left its goal's corpus is the gap this
+// exists to close.
+//
+// The variables inherited are the GOAL'S INPUT: the parent's, less every one
+// only a replay reads (component/work.GoalInput).
 func (w *SessionWriter) parentRunInheritance(ctx context.Context, owner, parentRunId string) runInheritance {
 	parentRunId = strings.TrimSpace(parentRunId)
 	if parentRunId == "" {
@@ -425,15 +432,20 @@ func (w *SessionWriter) parentRunInheritance(ctx context.Context, owner, parentR
 	}
 	parent, err := w.store.runForOwner(ownerActor(ctx, owner), parentRunId)
 	if err != nil || parent == nil {
-		w.logger.Warn("app session recording: could not read the delegating run; the recording carries no goal signature",
+		w.logger.Warn("app session recording: could not read the delegating run; the recording keeps the goal signature of its own statement and inherits no variables",
 			"parent_run_id", parentRunId, "error", err)
 		return runInheritance{}
 	}
 	return runInheritance{
 		goalSignature: strings.TrimSpace(rowString(parent, "goalSignature")),
-		variables:     rowMap(parent, "variables"),
+		variables:     workstate.GoalInput(rowMap(parent, "variables")),
 	}
 }
+
+// ProcedureConstructVariable is the variable compile adds to the run of a goal
+// a learned procedure serves. The one definition is component/work's, which
+// says why a recording must not inherit it.
+const ProcedureConstructVariable = workstate.ProcedureConstructVariable
 
 // actionStepKey names the step. It is the app's OWN id where there is one, so
 // a recorded step ties back to the line of the transcript that produced it;

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -239,8 +240,12 @@ func TestNoProberMeansALearnedPreconditionIsUnmeasured(t *testing.T) {
 	w.i.seams.prober = nil
 	w.i.seams.mu.Unlock()
 	out := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
-	if !out.StartRefused || len(out.Preconditions.Unmeasured) == 0 || !strings.Contains(out.Diagnosis, "no prober") {
+	if !out.StartRefused || len(out.Preconditions.Unmeasured) == 0 || !strings.Contains(out.Diagnosis, "no prober") || out.Code != codeNoProber {
 		t.Fatalf("outcome = %+v, want the start refused as unmeasured", out)
+	}
+	// The NODE lacks a seam, which says nothing about the procedure.
+	if w.lc.get("failures") != float64(0) {
+		t.Fatalf("failures = %v: a node with no prober counted against the procedure", w.lc.get("failures"))
 	}
 }
 
@@ -349,9 +354,14 @@ func TestADivergenceHandsTheAppThePartialTraceAndNeverRedoesACompletedStep(t *te
 	if !reflect.DeepEqual(g.Completed, out.Completed) || g.Procedure != w.name {
 		t.Fatalf("guidance = %+v", g)
 	}
+	// Steps are numbered from 1 in everything a person or the app reads, as
+	// MemQL OS lists them; the stored indices stay 0-based.
 	if !containsAll(g.Prompt, testStatement, "A learned procedure already ran these steps -- do not repeat them:",
-		key0, "It stopped at step 1 because:", "out/report.txt") {
+		"- step 1 (exec)", key0, "It stopped at step 2 because:", "Step 2 (fs_write", "out/report.txt") {
 		t.Fatalf("the prompt does not hand over the partial trace:\n%s", g.Prompt)
+	}
+	if out.DivergedStep != 1 || out.Completed[0].Index != 0 {
+		t.Fatalf("stored indices %d / %d, want the 0-based positions", out.DivergedStep, out.Completed[0].Index)
 	}
 	if fb[0].StepId != journalStepId(goalRunId, "replayed") || fb[0].RunId != goalRunId || fb[0].GoalId != goalId || fb[0].App != "claude-code" {
 		t.Fatalf("hand-back = %+v", fb[0])
@@ -399,11 +409,11 @@ func TestAWorkbenchStepIsNotOneTheAppMaySkip(t *testing.T) {
 
 // TestARefusedStepIsAFailedReplayNotAnInsufficientPrecondition: a Go error from
 // a dispatcher means the step did NOT run -- a gate, a scope, a spelling the
-// executor does not support. After a step ran it is a divergence that
-// delivered nothing; before any ran it is a refused START. Neither says the
-// preconditions were insufficient, so each counts as one failed replay --
-// two of which demote -- rather than the one insufficiency that demotes at
-// once.
+// executor does not support, the machine not there. After a step ran it is a
+// divergence that delivered nothing: one failed replay -- two of which demote
+// -- rather than the one insufficiency that demotes at once. Before any step
+// ran it is the TARGET refusing, which says nothing about the procedure: a
+// refused start the ladder does not count (review finding I1).
 func TestARefusedStepIsAFailedReplayNotAnInsufficientPrecondition(t *testing.T) {
 	w := newReplayWorld(t, "trusted")
 	w.d.fail["step1"] = errors.New("denied_by_scope")
@@ -417,14 +427,20 @@ func TestARefusedStepIsAFailedReplayNotAnInsufficientPrecondition(t *testing.T) 
 
 	w.d.fail = map[string]error{"step0": errors.New("command_not_allowed")}
 	second := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
-	if !second.StartRefused || second.Diverged || second.Code != codeStartRefused {
-		t.Fatalf("a first step refused before it ran = %+v, want a refused start", second)
+	if !second.StartRefused || second.Diverged || second.Code != codeTargetUnavailable {
+		t.Fatalf("a first step refused before it ran = %+v, want a refused start the ladder does not count", second)
 	}
 	if !strings.Contains(w.f.recorded()[1].Guidance.Prompt, "did not start, so nothing has been done") {
 		t.Fatalf("the app was not told nothing ran:\n%s", w.f.recorded()[1].Guidance.Prompt)
 	}
-	if !second.Transition.Demoted || w.lc.get("ladder") != "shadow" {
-		t.Fatalf("two failed replays did not demote: %+v, ladder %v", second.Transition, w.lc.get("ladder"))
+	if second.Transition.From != "" || w.lc.get("ladder") != "trusted" || w.lc.get("failures") != float64(1) {
+		t.Fatalf("a target's refusal moved the ladder: %+v, ladder %v, failures %v", second.Transition, w.lc.get("ladder"), w.lc.get("failures"))
+	}
+
+	w.d.fail = map[string]error{"step1": errors.New("denied_by_scope")}
+	third := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
+	if !third.Transition.Demoted || w.lc.get("ladder") != "shadow" {
+		t.Fatalf("two failed replays did not demote: %+v, ladder %v", third.Transition, w.lc.get("ladder"))
 	}
 }
 
@@ -507,6 +523,14 @@ func TestAShadowMatchingMTimesAcrossKBindingsRaisesExactlyOnePromotion(t *testin
 	if subject["constructId"] != w.constructId || subject["procedureHash"] != w.hash || subject["shadowMatches"] != float64(2) {
 		t.Fatalf("subject = %v", subject)
 	}
+	// It says where the procedure would run, and that its evidence RAN: the
+	// comparisons replayed it in the workbench sandbox rather than dry.
+	if subject["target"] != "workbench" || subject["dryEvidence"] != false {
+		t.Fatalf("subject target / dryEvidence = %v / %v, want workbench / false", subject["target"], subject["dryEvidence"])
+	}
+	if q, _ := a["question"].(string); !strings.Contains(q, "in the workbench") || strings.Contains(q, "has not run by itself") {
+		t.Fatalf("question = %q, want it to name the workbench and claim no dry evidence", q)
+	}
 	if !approvals[0].Internal || approvals[0].Actor != replayOwner {
 		t.Fatalf("the approval was raised internal=%v as %q, want the stamp and the owner", approvals[0].Internal, approvals[0].Actor)
 	}
@@ -521,7 +545,7 @@ func TestAShadowMatchingMTimesAcrossKBindingsRaisesExactlyOnePromotion(t *testin
 }
 
 // TestAShadowReplayIsNeverCountedTwice: the replay run of a comparison is
-// derived from the recording and the version, so a comparison that is run
+// derived from the recording and the construct, so a comparison that is run
 // again for the same recording finds its run and counts nothing.
 func TestAShadowReplayIsNeverCountedTwice(t *testing.T) {
 	w := newReplayWorld(t, "shadow")
@@ -529,6 +553,65 @@ func TestAShadowReplayIsNeverCountedTwice(t *testing.T) {
 	again := w.shadowOf(t, "v1:work:run:rec-c", "c.txt")
 	if !again.AlreadyDone || w.lc.get("shadowMatches") != float64(1) || len(w.eng.callsTo("recordConstructLadder")) != 1 {
 		t.Fatalf("the same recording was counted twice: %+v, shadowMatches %v", again, w.lc.get("shadowMatches"))
+	}
+}
+
+// TestARecordingIsComparedOncePerConstructWhateverTheVersion: a recording is
+// evidence about a procedure ONCE. Compared against one version, then asked
+// about again after the procedure was re-lifted (procedureLearnFromRun called
+// a second time, the proving driver comparing again), it finds the comparison
+// it already made -- its replay run is derived from the recording and the
+// construct, not the version -- answers what that one answered, and moves
+// nothing: the recording must not count a second time, against a version it
+// may itself have been learned into.
+func TestARecordingIsComparedOncePerConstructWhateverTheVersion(t *testing.T) {
+	w := newReplayWorld(t, "shadow")
+	first := w.shadowOf(t, "v1:work:run:rec-c", "c.txt")
+	if !first.Match || w.lc.get("shadowMatches") != float64(1) {
+		t.Fatalf("first comparison = %+v, shadowMatches %v", first, w.lc.get("shadowMatches"))
+	}
+	// A re-lift: a new version on the entry rung, its streak empty.
+	reliftTo(w, "shadow", "sha256:the-relifted-version")
+	dispatches, ladderWrites := len(w.d.recorded()), len(w.eng.callsTo("recordConstructLadder"))
+
+	again := w.shadowOf(t, "v1:work:run:rec-c", "c.txt")
+	if !again.AlreadyDone || again.ReplayRunId != first.ReplayRunId || !again.Match {
+		t.Fatalf("the same recording compared again = %+v, want the first comparison's answer", again)
+	}
+	if len(w.d.recorded()) != dispatches || len(w.eng.callsTo("recordConstructLadder")) != ladderWrites {
+		t.Fatal("the same recording was replayed or counted a second time")
+	}
+	if w.lc.get("shadowMatches") != float64(0) {
+		t.Fatalf("shadowMatches = %v: the new version's streak counted a recording already counted", w.lc.get("shadowMatches"))
+	}
+}
+
+// TestAComparisonOfAReplacedVersionIsClosedNotResumed: a comparison started
+// against one version and was interrupted; by the time it is asked for again
+// the procedure has been re-lifted. Its receipts are the OLD version's steps,
+// so resuming it would compare the new version's template against them. It is
+// closed, saying a newer version replaced the one it ran, and counts nothing.
+func TestAComparisonOfAReplacedVersionIsClosedNotResumed(t *testing.T) {
+	w := newReplayWorld(t, "shadow")
+	req := ReplayRequest{OwnerUserId: replayOwner, ConstructId: w.constructId, Mode: ReplayShadow, GoalRunId: "v1:work:run:rec-c"}
+	runId, derived := (&replay{mode: ReplayShadow, req: req, c: &loaded{id: w.constructId, hash: w.hash}}).replayRunId()
+	if !derived {
+		t.Fatal("a shadow comparison of a recording must derive its run id")
+	}
+	w.work.putRun(map[string]any{
+		"id": runId, "ownerUserId": replayOwner, "status": "running", "triggeredBy": "procedure:shadow",
+		"input": map[string]any{"constructId": w.constructId, "procedureHash": "sha256:the-version-it-started-on", "mode": "shadow"},
+	})
+	out := w.shadowOf(t, "v1:work:run:rec-c", "c.txt")
+	if !out.NotCompared || out.Match || !out.VersionReplaced {
+		t.Fatalf("outcome = %+v, want the stale comparison closed as not compared", out)
+	}
+	if len(w.d.recorded()) != 0 || len(w.eng.callsTo("recordConstructLadder")) != 0 {
+		t.Fatalf("a comparison of a replaced version dispatched %d step(s) or moved the ladder", len(w.d.recorded()))
+	}
+	run := w.work.run(runId)
+	if o, _ := run["outcome"].(map[string]any); run["status"] != "failed" || o["versionReplaced"] != true {
+		t.Fatalf("the stale comparison's run = %v, want it closed saying the version was replaced", run)
 	}
 }
 
@@ -564,11 +647,15 @@ func TestAMachineLocalProcedureIsComparedDryInShadow(t *testing.T) {
 // TestACallThatDoesNotReadBackAsItsStepIsRefusedBeforeDispatch (D16's
 // content-addressed input check): the call about to be dispatched must read
 // back as its template step, bound to exactly the values the replay bound.
-// Here the report's file name is a parameter inside a PATH, and the goal's
-// input carries a separator -- "sub/report.txt" would write one directory
-// deeper than any recording did, a different call wearing the right values.
-// The write is refused before it is dispatched; the command before it ran,
-// and is what the app is told about. The control: a plain name serves.
+// Here the report's file name is a parameter inside a PATH. A goal input
+// carrying a separator -- "sub/report.txt" would write one directory deeper
+// than any recording did, a different call wearing the right values -- is
+// refused as it is written out, since a path-segment parameter takes one
+// segment (component/procedure.Materialize); and a value that is written out
+// but does not read back as itself -- a number parameter given "1.0", which
+// goes out as 1 -- is refused by the input check. Either way the write never
+// reaches the dispatcher; the command before it ran, and is what the app is
+// told about. The control: a plain name serves.
 func TestACallThatDoesNotReadBackAsItsStepIsRefusedBeforeDispatch(t *testing.T) {
 	withNameHole := func(w *replayWorld) {
 		w.withDecoded(t, func(p *Procedure) {
@@ -582,23 +669,158 @@ func TestACallThatDoesNotReadBackAsItsStepIsRefusedBeforeDispatch(t *testing.T) 
 			p.InputMap["s1.file_path.2"] = "name"
 		})
 	}
+	withCountHole := func(w *replayWorld) {
+		w.withDecoded(t, func(p *Procedure) {
+			args := p.Steps[1].Args
+			for n, k := range args.Keys {
+				if k == "content" {
+					args.Kids[n] = proc.HoleNode("s1.content", "number")
+				}
+			}
+			p.Holes = append(p.Holes, proc.Hole{Id: "s1.content", StepIndex: 1, Path: []string{"content"}, Type: "number", Class: proc.HoleFree})
+			p.FreeParameters = append(p.FreeParameters, "s1.content")
+			p.InputMap["s1.content"] = "count"
+		})
+	}
 
-	w := newReplayWorld(t, "trusted")
-	withNameHole(w)
-	out := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile, "name": "sub/report.txt"})
-	if !out.Diverged || out.DivergedStep != 1 || out.Insufficient || !strings.Contains(out.Diagnosis, "would not have made the call") {
-		t.Fatalf("outcome = %+v, want the write refused before it ran, as a plain failure", out)
-	}
-	if keys := dispatchedKeys(w.d.recorded()); !reflect.DeepEqual(keys, []string{"step0"}) {
-		t.Fatalf("dispatched %v: the write must never reach the dispatcher", keys)
-	}
-	if len(out.Completed) != 1 || out.Completed[0].Index != 0 {
-		t.Fatalf("completed = %+v, want the command that ran", out.Completed)
+	for _, c := range []struct {
+		name  string
+		shape func(*replayWorld)
+		input map[string]any
+		says  []string
+	}{
+		{"a separator in a path segment", withNameHole, map[string]any{"file": goalFile, "name": "sub/report.txt"},
+			[]string{"could not be written out", "s1.file_path.2", "not one segment"}},
+		{"a value that does not read back as itself", withCountHole, map[string]any{"file": goalFile, "count": "1.0"},
+			[]string{"would not have made the call", "s1.content"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newReplayWorld(t, "trusted")
+			c.shape(w)
+			out := w.serve(t, ReplayTrusted, c.input)
+			if !out.Diverged || out.DivergedStep != 1 || out.Insufficient || !containsAll(out.Diagnosis, c.says...) {
+				t.Fatalf("outcome = %+v, want the write refused before it ran, as a plain failure saying %q", out, c.says)
+			}
+			if keys := dispatchedKeys(w.d.recorded()); !reflect.DeepEqual(keys, []string{"step0"}) {
+				t.Fatalf("dispatched %v: the write must never reach the dispatcher", keys)
+			}
+			if len(out.Completed) != 1 || out.Completed[0].Index != 0 {
+				t.Fatalf("completed = %+v, want the command that ran", out.Completed)
+			}
+		})
 	}
 
 	control := newReplayWorld(t, "trusted")
 	withNameHole(control)
 	if ok := control.serve(t, ReplayTrusted, map[string]any{"file": goalFile, "name": "report.txt"}); !ok.Served {
 		t.Fatalf("the control did not serve, so the refusal above proves nothing: %+v", ok)
+	}
+}
+
+// TestAStoredPreconditionThisReplicaCannotCheckRefusesTheReplay (E5): the
+// stored initiation set is read through DecodePreconditions, and a predicate
+// a newer writer learned -- one this replica has no check for -- refuses the
+// replay rather than being skipped. Skipped, the replay would start on
+// evidence the recordings never gave; refused, nothing is dispatched.
+func TestAStoredPreconditionThisReplicaCannotCheckRefusesTheReplay(t *testing.T) {
+	w := newReplayWorld(t, "trusted")
+	prec, _ := w.lc.get("preconditions").(map[string]any)
+	prec = copyRow(t, prec)
+	prec["kernel"] = map[string]any{"min": "6.1"}
+	w.lc.set("preconditions", prec)
+
+	_, err := w.i.Replay(context.Background(), ReplayRequest{
+		OwnerUserId: replayOwner, ConstructId: w.constructId, Mode: ReplayTrusted, GoalRunId: goalRunId,
+		Input: map[string]any{"file": goalFile},
+	})
+	if err == nil || !strings.Contains(err.Error(), "kernel") {
+		t.Fatalf("Replay = %v, want a refusal naming the predicate it cannot check", err)
+	}
+	if len(w.d.recorded()) != 0 {
+		t.Fatalf("a replay with an uncheckable precondition dispatched %v", dispatchedKeys(w.d.recorded()))
+	}
+	if _, err := DecodePreconditions(map[string]any{"tools": map[string]any{"mkdir": "9.4"}}); err != nil {
+		t.Fatalf("the control: a known predicate must still decode: %v", err)
+	}
+}
+
+// TestAGoalValueNoRecordingWasShapedLikeRefusesTheStart (B5): the fixture's
+// parameter is a file name every recording spelled plainly. A goal that gives
+// it an option, an absolute path, a home directory or a parent directory
+// asks for a call no recording made: the start is refused naming the
+// parameter and the value, nothing is dispatched, the goal goes to the app
+// once, and the ladder counts it -- the procedure was chosen for this goal and
+// could not serve it.
+func TestAGoalValueNoRecordingWasShapedLikeRefusesTheStart(t *testing.T) {
+	for _, v := range []string{"-rf", "/etc/passwd", "~/x", ".."} {
+		t.Run(v, func(t *testing.T) {
+			w := newReplayWorld(t, "trusted")
+			out := w.serve(t, ReplayTrusted, map[string]any{"file": v})
+			if !out.StartRefused || out.Served || out.Code != codeStartRefused || !containsAll(out.Diagnosis, "s0.command.7", strconv.Quote(v)) {
+				t.Fatalf("outcome = %+v, want a refused start naming the parameter and the value", out)
+			}
+			if len(w.d.recorded()) != 0 {
+				t.Fatalf("a refused value dispatched %v", dispatchedKeys(w.d.recorded()))
+			}
+			if len(w.f.recorded()) != 1 {
+				t.Fatalf("the app was handed the goal %d time(s), want once", len(w.f.recorded()))
+			}
+			if w.lc.get("failures") != float64(1) {
+				t.Errorf("failures = %v, want the refused start counted", w.lc.get("failures"))
+			}
+		})
+	}
+}
+
+// TestAGoalValueThatIsShellTextReplaysAsOneArgument (B5): a value that holds
+// shell code, an operator or a glob is not refused -- nothing about it is an
+// option or a path no recording showed -- and it reaches the command as
+// exactly one argument, never as code: the dispatched command quotes it.
+func TestAGoalValueThatIsShellTextReplaysAsOneArgument(t *testing.T) {
+	for v, quoted := range map[string]string{
+		"x;rm${IFS}-rf${IFS}$HOME": `'x;rm${IFS}-rf${IFS}$HOME'`,
+		"$(id)":                    `'$(id)'`,
+		"`id`":                     "'`id`'",
+		"R&D.txt":                  `'R&D.txt'`,
+		"*.txt":                    `'*.txt'`,
+		"a|b":                      `'a|b'`,
+	} {
+		t.Run(v, func(t *testing.T) {
+			w := newReplayWorld(t, "trusted")
+			out := w.serve(t, ReplayTrusted, map[string]any{"file": v})
+			if !out.Served {
+				t.Fatalf("outcome = %+v, want served", out)
+			}
+			calls := w.d.recorded()
+			if got, want := calls[0].Args["command"], "mkdir -p out && echo hello > "+quoted; got != want {
+				t.Fatalf("dispatched %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestAShadowRecordingWithAValueNoRecordingWasShapedLikeIsAMismatch (B5): in
+// shadow the app's own action bound the parameter, and a value shaped like
+// nothing the procedure was learned from makes the recording something other
+// than an instance of it -- a MISMATCH, recorded like an unfit recording's,
+// with nothing replayed and the streak started again.
+func TestAShadowRecordingWithAValueNoRecordingWasShapedLikeIsAMismatch(t *testing.T) {
+	w := newReplayWorld(t, "shadow")
+	w.lc.set("shadowMatches", float64(1))
+	out := w.shadowOf(t, "v1:work:run:rec-x", "-rf")
+	if out.Match || !out.Diverged || out.StartRefused || out.Code != codeMismatch || !containsAll(out.Diagnosis, "s0.command.7", `"-rf"`) {
+		t.Fatalf("outcome = %+v, want a mismatch naming the parameter and the value", out)
+	}
+	if out.DivergedStep != 0 {
+		t.Errorf("DivergedStep = %d, want the parameter's step", out.DivergedStep)
+	}
+	if len(w.d.recorded()) != 0 {
+		t.Fatalf("a mismatched recording dispatched %v", dispatchedKeys(w.d.recorded()))
+	}
+	if w.lc.get("shadowMatches") != float64(0) {
+		t.Fatalf("shadowMatches = %v: a mismatch starts the streak again", w.lc.get("shadowMatches"))
+	}
+	if run := w.work.run(out.ReplayRunId); run == nil || run["errorCode"] != codeMismatch {
+		t.Fatalf("the mismatch was not recorded: %v", run)
 	}
 }

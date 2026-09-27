@@ -27,10 +27,11 @@ import {
 // journal is an on-demand read that says when it was taken. Reading a routing
 // rule's absence as "nothing to see" is the mistake the Fleet app made once
 // and the Training app records; here the split is the design's, stated up
-// front. The Automations section reads a SEVENTH concept the same way and for
-// the same reason (`v1:authoring:construct`, which carries no routing rule),
-// and it is not in this list because it is not a population this app owns --
-// it belongs to the authoring catalog, which Nexus reads and does not write.
+// front. The Automations section follows TWO more concepts, and they are live
+// too: `v1:authoring:construct` and the ladder's policy row both broadcast,
+// through the `v1:authoring:*` rules in component/node/routing.go (memql#4542).
+// They are not in this list because they are not populations this app owns --
+// they belong to the authoring catalog, which Nexus reads and does not write.
 
 export const NEXUS_APP_ID = "nexus";
 
@@ -72,8 +73,11 @@ export const NEXUS_LOG_CONCEPTS = [
   ...NEXUS_JOURNAL_CONCEPTS,
 ] as const;
 
-/** The catalog the Automations section reads. Not owned by this app. */
+/** The catalog the Automations section follows. Not owned by this app. */
 export const CONSTRUCT_CONCEPT: string = Concepts.AUTHORING_CONSTRUCT;
+
+/** The ladder's values: one seeded row, rewritten on every boot. Not owned by this app. */
+export const LADDER_POLICY_CONCEPT: string = Concepts.AUTHORING_LADDER_POLICY;
 
 export const GOAL_CONCEPT: string = GOAL_CONCEPT_ID;
 export const RUN_CONCEPT: string = RUN_CONCEPT_ID;

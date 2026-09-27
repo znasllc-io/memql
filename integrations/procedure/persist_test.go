@@ -344,7 +344,7 @@ func TestADislikedInstanceStepHoldsTheLiftAtCandidate(t *testing.T) {
 		t.Fatalf("rung = %s, want candidate", res.Rung)
 	}
 	reason := argsOf(t, eng.callTo(t, "recordConstructLadder"))["ladderReason"].(string)
-	if !strings.Contains(reason, "instance 1, step 1") {
+	if !strings.Contains(reason, "instance 2, step 2") {
 		t.Fatalf("reason %q must name the instance and the step", reason)
 	}
 
@@ -473,5 +473,100 @@ func TestTheLiftReadsNothingAsTheCluster(t *testing.T) {
 	sort.Strings(reads)
 	if len(reads) != 0 {
 		t.Fatalf("calls not made as the owner: %v", reads)
+	}
+}
+
+// TestAVersionWithAReplayRiskStaysACandidateNamingIt (B5): the recordings
+// ran their command through `bash -c "<script>"`, so the parameter the
+// template learned is the SCRIPT -- a goal's input would choose the code that
+// runs, however it is quoted. The version is lifted (it is what the
+// recordings did) and held at candidate, the ladder's reason the first
+// sentence of component/procedure.ReplayRisks, however cleanly the candidate
+// gate and Gate 1 pass.
+func TestAVersionWithAReplayRiskStaysACandidateNamingIt(t *testing.T) {
+	recs := twoRecordings()
+	for n := range recs {
+		recs[n].execCommand = `bash -c "mkdir -p out && echo hello > ` + recs[n].file + `"`
+	}
+	eng, res := liftFixture(t, recs...)
+	if res.Rung != work.RungCandidate {
+		t.Fatalf("rung = %s, want candidate: a version whose parameter is a script never climbs", res.Rung)
+	}
+	reason := argsOf(t, eng.callTo(t, "recordConstructLadder"))["ladderReason"].(string)
+	if !containsAll(reason, "step 0", "script bash runs") {
+		t.Fatalf("reason %q must be ReplayRisks' sentence naming the step and the script", reason)
+	}
+
+	// The control: the same goal recorded without the wrapper enters shadow.
+	if _, ok := liftFixture(t, twoRecordings()...); ok.Rung != work.RungShadow {
+		t.Fatalf("the control lifted to %s, so the hold above proves nothing", ok.Rung)
+	}
+}
+
+// TestAVersionWithAParameterNoGoalInputSuppliesStaysACandidate: the two
+// recordings wrote a-copy.txt and b-copy.txt while their goals' input named
+// a.txt and b.txt, so the file name is a free parameter no goal input
+// supplies (LearnInputMap ties it to nothing). The app's own actions bind it
+// in shadow, so the version would earn a promotion there -- and then every
+// canary start would be refused as unbound and counted, demoting it and
+// asking the person again. It stays a candidate, the reason naming the
+// parameter.
+func TestAVersionWithAParameterNoGoalInputSuppliesStaysACandidate(t *testing.T) {
+	recs := twoRecordings()
+	for n := range recs {
+		recs[n].execCommand = "mkdir -p out && echo hello > " + strings.TrimSuffix(recs[n].file, ".txt") + "-copy.txt"
+	}
+	eng, res := liftFixture(t, recs...)
+	payload, err := DecodeProcedure(argsOf(t, eng.callTo(t, "recordProcedure"))["procedure"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(payload.FreeParameters, []string{"s0.command.7"}) || len(payload.InputMap) != 0 {
+		t.Fatalf("fixture: free parameters %v / inputMap %v, want one parameter no input supplies", payload.FreeParameters, payload.InputMap)
+	}
+	if res.Rung != work.RungCandidate {
+		t.Fatalf("rung = %s, want candidate: no canary or trusted replay could bind its parameter", res.Rung)
+	}
+	reason := argsOf(t, eng.callTo(t, "recordConstructLadder"))["ladderReason"].(string)
+	if !containsAll(reason, "parameter s0.command.7", "no goal input supplies it") {
+		t.Fatalf("reason %q must name the parameter no goal input supplies", reason)
+	}
+
+	// The control: the goal's input names the file the recordings wrote.
+	if _, ok := liftFixture(t, twoRecordings()...); ok.Rung != work.RungShadow {
+		t.Fatalf("the control lifted to %s, so the hold above proves nothing", ok.Rung)
+	}
+}
+
+// TestACodexCorpusLiftsIntoShadowWithItsParameterInsideTheScript: the same
+// goal recorded by Codex, every command the vector ["bash", "-lc",
+// "<script>"]. The script is read as the command line it is, so the file
+// name is a parameter INSIDE it -- tied to the goal's `file` input like any
+// other -- rather than the whole script as a parameter no replay could be
+// trusted with. The version enters shadow, and its template writes a new
+// goal's value back into the script.
+func TestACodexCorpusLiftsIntoShadowWithItsParameterInsideTheScript(t *testing.T) {
+	recs := twoRecordings()
+	for n := range recs {
+		recs[n].execVector = []any{"bash", "-lc", "mkdir -p out && echo hello > " + recs[n].file}
+	}
+	eng, res := liftFixture(t, recs...)
+	if res.Rung != work.RungShadow {
+		reason := argsOf(t, eng.callTo(t, "recordConstructLadder"))["ladderReason"]
+		t.Fatalf("rung = %s (%v), want shadow: the parameter is a word of the script, not the script", res.Rung, reason)
+	}
+	p, err := DecodeProcedure(argsOf(t, eng.callTo(t, "recordProcedure"))["procedure"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(p.FreeParameters, []string{"s0.command.2.7"}) || p.InputMap["s0.command.2.7"] != "file" {
+		t.Fatalf("free parameters %v / inputMap %v, want the file inside the script, supplied by the goal's `file`", p.FreeParameters, p.InputMap)
+	}
+	v, err := proc.Materialize(p.Steps[0].Args, map[string]string{"s0.command.2.7": "e.txt"})
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	if got, want := v.(map[string]any)["command"], []any{"bash", "-lc", "mkdir -p out && echo hello > e.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %q, want %q", got, want)
 	}
 }

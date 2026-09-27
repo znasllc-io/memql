@@ -734,6 +734,81 @@ propose until a liked version of that step exists. The proving suite gains
 shadow-only construct serves none, and `durability.duplicatedSideEffectsAcrossDivergence`
 that must read zero.
 
+**What shipped differently, recorded 2026-09-26 when epic D landed.** Nine things this
+section named that the implementation resolved otherwise, each for a reason found while
+building it:
+
+- **A replay executes the stored TEMPLATE, not the rendered source.** The source is the
+  artifact a person reads; the runner needs typed holes, per-step expectations and an
+  input map, which it reads from `construct.procedure`. So the approval's artifact hash
+  (`construct.procedureHash`) covers all three of source, template and preconditions,
+  not only the source and preconditions -- and leaves out comment lines, the title and
+  `recordedFrom`, because a later recording that agrees with the procedure changes its
+  provenance and must not send an approved procedure back down the ladder.
+- **The ladder keeps more state than the section named.** Beside `shadowMatches`,
+  `distinctBindings`, `failures` and `lastReplayAt` it keeps `canaryMatches` (trust is
+  earned by CONSECUTIVE clean canary replays), `insufficient` (D16's second demotion
+  counter), `promotionApprovalId` (so a redelivered decision is a no-op rather than a
+  second promotion) and `ladderReason` / `ladderChangedAt` (the sentence Nexus shows).
+- **Preconditions are checked once, at the start, not before every step.** After each
+  step the comparison is the postcondition, and the live check is a prefix fit against
+  the template's OWN step sequence rather than the inductive miner's model of the corpus:
+  a mined pattern may skip symbols the corpus model has, so that model would flag every
+  replay at its first gap.
+- **Environment variables are learned and shown but never compared.** A replay runs in
+  the worker's or the workbench's environment, never the app's, and a fingerprint's
+  variables (`CLAUDE_CONFIG_DIR`, `ANTHROPIC_MODEL`) describe the app's. The per-step
+  comparison is the net for a variable that mattered.
+- **Workspace paths are made relative before anything is learned.** Every recording ran
+  in its own workspace and the apps write absolute paths, so without it the workspace
+  segment was a free hole no goal input binds, and no real procedure could reach
+  trusted. The same function relativizes the app's actions before a shadow comparison.
+- **A version no executor can run stays a candidate**, naming the step: a nested
+  automation, an app's prose answer, or a tool neither executor has. Epic C would have
+  lifted it and the ladder would have proposed something that cannot replay.
+- **A replay run is never a recording** (`triggeredBy: procedure:<mode>`, steps of type
+  `procedureStep`), so a procedure never learns from, or shadows, its own replays.
+- **In shadow a machine-local procedure is compared DRY**: bound to the app's own actions
+  and compared without being dispatched. Only a workbench procedure really runs in
+  shadow, because only the workbench is a sandbox (D4).
+- **The completion trigger learns as the run's owner, not as a maintenance principal.**
+  Main moved it to borrowed owner authority while this epic was in flight; the two
+  sweeps are maintenance automations as written. Handing a diverged goal to the app
+  needs the owner's reasoning agent with standing computer-use scope and a signed-in
+  machine on the SAME agent replica, since an app session has no cross-node forward yet.
+
+**What the review before merge changed, recorded 2026-09-27.** An independent review of
+the whole epic found that a replay could do things this section rules out. The fixes are
+rules the section implied but did not state:
+
+- **A parameter is a value, never code.** A replayed command is the recorded command
+  byte for byte (each token keeps its spelling, and the text between tokens is kept);
+  a parameter is written as ONE strictly quoted word, and takes only the kinds of value
+  its recordings showed -- a value beginning with `-`, `/` or `~`, or climbing out with
+  `..`, is refused unless a recording's did. A version whose parameter would be code
+  (the script of `sh -c`, inline interpreter code, `eval`, a heredoc line), whose
+  recorded value came through a shell expansion, or that has a parameter no goal input
+  supplies stays a candidate. Before this, a goal's input reached `/bin/sh -c` on a
+  person's machine with nothing quoting it.
+- **A shadow does not repeat what a recording sent out.** The workbench is a sandbox for
+  files, not for the network, so a command that sends something out of it (a posting or
+  uploading `curl`, `git push`, a publish, `ssh`, the cloud and cluster CLIs) is compared
+  dry in shadow and is a side effect the app is told not to repeat when served.
+- **A target that is not there is not the procedure failing.** A machine that is
+  offline, a dropped stream or a workbench with no peer sends the goal to the app and
+  the ladder counts nothing; D16's "a precondition that never held" means one that was
+  MEASURED not to hold.
+- **The ladder is one critical section per construct.** Every read-advance-write --
+  replay finish, shadow comparison, promotion decision, sweep, re-lift -- takes a
+  per-construct advisory lock and advances from a fresh read, and an event about a
+  version that has since been replaced is dropped. Without it a re-lift landing during a
+  trusted replay put the NEW, unapproved version on the trusted rung.
+- **The ladder is server-written at the write chokepoint.** `@serverOnly` closes only a
+  mutation; a raw write never consults it, so an origin-keyed, field-level guard in
+  `component/memql` refuses any write without internal origin that changes a ladder
+  field -- or the source of a construct already on the ladder, which is what a person
+  approves.
+
 ### Epic E -- Intervention, feedback and reusable decomposition
 
 **Scope.** D18 to D24. Its intervention and feedback tasks depend on B (the rows exist);

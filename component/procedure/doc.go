@@ -23,7 +23,9 @@
 // reason -- every decision a replay takes can be checked on a literal:
 //
 //	Bind / BindInstance(template, action)  -> hole values   what a recording put in each hole
-//	Materialize(node, values)              -> Go value      what a replay sends, back through Node.Form
+//	Materialize(node, values)              -> Go value      what a replay sends: the recorded spelling, a parameter one quoted word
+//	CheckBindings(template, values)        -> refusal       a value shaped like nothing the recordings put there
+//	ReplayRisks(template, instances)       -> sentences     what keeps a template from being promoted at all
 //	LearnInputMap(template, instances, in) -> hole -> key   which goal input supplies each free parameter
 //	LearnPreconditions(fingerprints, used) -> Preconditions the predicates every recorded start agreed on
 //	CheckPreconditions(learned, observed)  -> report        compared before the first step

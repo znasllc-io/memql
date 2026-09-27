@@ -1,13 +1,17 @@
 package work
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	workstate "github.com/znasllc-io/memql/component/work"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
@@ -524,5 +528,69 @@ func TestTheCloseCarriesTheReportedModelAndEffortOnTheSummary(t *testing.T) {
 		if _, present := silent[absent]; present {
 			t.Errorf("an app that reported nothing left %s = %v on the summary", absent, silent[absent])
 		}
+	}
+}
+
+// TestARecordingInheritsTheGoalsInputAndNotTheReplaysVariables (epic
+// memql#5408). A goal a learned procedure serves runs replayLearnedProcedure,
+// and compile lays procedureConstructId over the goal's input to say which
+// procedure. When the replay hands the goal back to the app, the repair
+// session's recording is opened from that goal run -- and the lift reads a
+// recording's variables AS THE GOAL'S INPUT: it maps parameters onto them and
+// lists their keys as the procedure's inputs. A recording that kept
+// procedureConstructId would teach it an input nobody gave. The goal's own
+// input riding along is the control: without it, dropping every variable would
+// pass.
+func TestARecordingInheritsTheGoalsInputAndNotTheReplaysVariables(t *testing.T) {
+	w, eng := newSessionWriter(t)
+	eng.reply("workRunForOwner", map[string]any{
+		"id": "v1:work:run:goal", "goalSignature": "sig-goal",
+		"variables": map[string]any{"day": "2026-09-04", "procedureConstructId": "v1:authoring:construct:p1"},
+	})
+	if _, err := w.OpenRecording(context.Background(), workerservice.RecordingOpen{
+		SessionId: testSessionId, OwnerUserId: testOwner, App: "claude-code",
+		ParentRunId: "v1:work:run:goal", ParentStepId: "v1:work:step:goal-replay",
+	}); err != nil {
+		t.Fatalf("OpenRecording: %v", err)
+	}
+	vars, _ := eng.callTo(t, "createWorkRun").Args(t)["variables"].(map[string]any)
+	if _, leaked := vars["procedureConstructId"]; leaked {
+		t.Errorf("variables = %v: the recording inherited the replay's procedureConstructId, which the lift would read as a goal input", vars)
+	}
+	if vars["day"] != "2026-09-04" {
+		t.Errorf("variables = %v, want the goal's own input inherited", vars)
+	}
+}
+
+// TestAnUnreadableParentLeavesTheRecordingItsOwnStatementsSignature: a parent
+// that cannot be read costs the recording its PARENT's signature, not its
+// signature -- it keeps the one built from its own statement -- and the
+// warning has to say that, or an operator reading it goes looking for an
+// unsigned run that does not exist.
+func TestAnUnreadableParentLeavesTheRecordingItsOwnStatementsSignature(t *testing.T) {
+	eng := newRecordingEngine()
+	eng.refuse("workRunForOwner", errors.New("database unavailable"))
+	var logs bytes.Buffer
+	w := NewSessionWriter(eng, slog.New(slog.NewTextHandler(&logs, nil)))
+	w.SetNow(func() time.Time { return testNow })
+	if _, err := w.OpenRecording(context.Background(), workerservice.RecordingOpen{
+		SessionId: testSessionId, OwnerUserId: testOwner, App: "claude-code", Prompt: "Summarise the ledger",
+		ParentRunId: "v1:work:run:goal",
+	}); err != nil {
+		t.Fatalf("OpenRecording: %v", err)
+	}
+	run := eng.callTo(t, "createWorkRun").Args(t)
+	if want := workstate.GoalSignature("Summarise the ledger", nil); run["goalSignature"] != want {
+		t.Errorf("goalSignature = %v, want %s, the signature of the recording's own statement", run["goalSignature"], want)
+	}
+	if _, present := run["variables"]; present {
+		t.Errorf("variables = %v, from a parent nobody read", run["variables"])
+	}
+	warning := logs.String()
+	if !strings.Contains(warning, "could not read the delegating run") {
+		t.Fatalf("no warning about the unreadable parent was logged: %q", warning)
+	}
+	if strings.Contains(warning, "no goal signature") || !strings.Contains(warning, "its own statement") {
+		t.Errorf("the warning %q does not say what was written: the recording keeps its own statement's signature", warning)
 	}
 }

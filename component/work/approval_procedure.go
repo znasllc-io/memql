@@ -9,7 +9,8 @@ package work
 // move from shadow to canary; after that yes it climbs and falls on its own
 // evidence (ladder.go). So this approval is the whole of the human's part in
 // certification, and it has to carry everything the decision rests on: what
-// the procedure is, which version, how it matched, and where it was recorded
+// the procedure is, which version, how it matched -- and whether those matches
+// ran anything at all -- where it would now run, and where it was recorded
 // from.
 //
 // THE ARTIFACT HASH IS THE CONSTRUCT'S procedureHash -- the digest over its
@@ -21,7 +22,6 @@ package work
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -55,11 +55,19 @@ type PromotionProposal struct {
 	RecordedFrom map[string]any
 	// Title is the goal statement the procedure serves.
 	Title string
+	// Target is where a canary would run it (D4): TargetWorkbench or
+	// TargetMachine, as the procedure payload stores it. Empty -- or a value
+	// this build does not know -- makes no claim about where.
+	Target string
+	// DryEvidence is that the shadow matches were DRY: a machine-local
+	// procedure is compared without being dispatched (the calls it would
+	// make against the app's), so it has never run by itself.
+	DryEvidence bool
 }
 
 // ProcedurePromotionApproval builds the approval row. The subject always
-// carries the same seven keys, as copies, so the card reads alike on every
-// promotion and the ladder can keep working on its own maps after raising it.
+// carries the same keys, as copies, so the card reads alike on every promotion
+// and the ladder can keep working on its own maps after raising it.
 func ProcedurePromotionApproval(p PromotionProposal, requestedAt time.Time) ApprovalRequest {
 	bindings := make(map[string]any, len(p.DistinctBindings))
 	for id, n := range p.DistinctBindings {
@@ -69,6 +77,7 @@ func ProcedurePromotionApproval(p PromotionProposal, requestedAt time.Time) Appr
 	for k, v := range p.RecordedFrom {
 		recordedFrom[k] = v
 	}
+	target := promotionTarget(p.Target)
 	subject := map[string]any{
 		"constructId":      p.ConstructId,
 		"constructName":    p.ConstructName,
@@ -77,6 +86,8 @@ func ProcedurePromotionApproval(p PromotionProposal, requestedAt time.Time) Appr
 		"shadowMatches":    p.ShadowMatches,
 		"distinctBindings": bindings,
 		"recordedFrom":     recordedFrom,
+		"target":           string(target),
+		"dryEvidence":      p.DryEvidence,
 	}
 	// No expiry: a pending promotion costs nothing while it waits, because
 	// the procedure stays in shadow and the app keeps serving.
@@ -87,7 +98,7 @@ func ProcedurePromotionApproval(p PromotionProposal, requestedAt time.Time) Appr
 		Source: EvidenceSourceRules,
 	}, requestedAt, 0)
 	a.ArtifactHash = p.ProcedureHash
-	a.Question = fmt.Sprintf("Promote %s to canary? It matched the app %d times beside it, and would now run for real with the app standing by.", promotionSubjectName(p), p.ShadowMatches)
+	a.Question = promotionQuestion(p, target)
 	// TWO OPTIONS AND NO THIRD, as for the routing review: "not now" would
 	// decide nothing and leave the same evidence proposing again. A decline
 	// is recorded and spends the streak, which is what makes it final.
@@ -98,15 +109,66 @@ func ProcedurePromotionApproval(p PromotionProposal, requestedAt time.Time) Appr
 	return a
 }
 
+// promotionTarget is the target the question names and the subject carries --
+// one reading, so the card and the question cannot disagree. Exact, as
+// ParseRung is: a value this build does not know is no claim about where,
+// never a guess that would tell a person where a procedure runs on the
+// strength of a spelling nobody wrote.
+func promotionTarget(s string) ReplayTarget {
+	switch t := ReplayTarget(s); t {
+	case TargetMachine, TargetWorkbench:
+		return t
+	}
+	return ""
+}
+
+// promotionQuestion puts the decision to a person: what, how often it matched
+// the app, where it would now run -- on their own machine or in the sandbox,
+// which is the difference between a canary that acts on their files and one
+// that cannot -- and, when its matches were dry, that it has never run by
+// itself. With no known target it makes no claim about where.
+func promotionQuestion(p PromotionProposal, target ReplayTarget) string {
+	name, matched := promotionSubjectName(p), timesPhrase(p.ShadowMatches)
+	var q string
+	switch target {
+	case TargetMachine:
+		q = fmt.Sprintf("Promote %s to canary? It matched the app %s, and would now run on your machine with the app standing by.", name, matched)
+	case TargetWorkbench:
+		q = fmt.Sprintf("Promote %s to canary? It matched the app %s, and would now run in the workbench, a sandbox in your cluster, with the app standing by.", name, matched)
+	default:
+		q = fmt.Sprintf("Promote %s to canary? It matched the app %s beside it, and would now run for real with the app standing by.", name, matched)
+	}
+	if p.DryEvidence {
+		q += " Those matches compared the commands it would run with the app's own; it has not run by itself yet."
+	}
+	return q
+}
+
+// timesPhrase spells a match count the way usedPhrase spells a use count: an
+// operator may set m to one, and "matched the app 1 times" is the sentence a
+// reader stops at.
+func timesPhrase(n int) string {
+	if n == 1 {
+		return "once"
+	}
+	return fmt.Sprintf("%d times", n)
+}
+
 // promotionSubjectName is what the question calls the procedure. The GOAL
 // it serves, when the lift recorded one, because that is the only name a
 // person recognises: the construct name is derived from the goal signature
 // (learnedProcedure_<digest>_l1) and reads as noise in an inbox. The
 // construct name is the fallback, and a generic phrase the last resort --
 // never an empty quote.
+//
+// The goal is quoted the way a person writes a quotation, in plain double
+// quotes: Go's quoting would show a statement that carries quotation marks of
+// its own with backslashes in it, and one that ran over several lines with a
+// literal \n. Its whitespace is collapsed instead, so it is one line in the
+// question.
 func promotionSubjectName(p PromotionProposal) string {
-	if t := strings.TrimSpace(p.Title); t != "" {
-		return strconv.Quote(t)
+	if t := strings.Join(strings.Fields(p.Title), " "); t != "" {
+		return `"` + t + `"`
 	}
 	if n := strings.TrimSpace(p.ConstructName); n != "" {
 		return n
@@ -119,7 +181,7 @@ func promotionSubjectName(p PromotionProposal) string {
 // the rule a single value could not have satisfied.
 func promotionReason(p PromotionProposal) string {
 	if len(p.DistinctBindings) == 0 {
-		return fmt.Sprintf("matched the app %d consecutive times in shadow, with no parameter to vary", p.ShadowMatches)
+		return fmt.Sprintf("matched the app %s in shadow, with no parameter to vary", streakPhrase(p.ShadowMatches))
 	}
 	fewest := -1
 	for _, n := range p.DistinctBindings {
@@ -127,5 +189,22 @@ func promotionReason(p PromotionProposal) string {
 			fewest = n
 		}
 	}
-	return fmt.Sprintf("matched the app %d consecutive times in shadow, across at least %d distinct bindings of every parameter", p.ShadowMatches, fewest)
+	return fmt.Sprintf("matched the app %s in shadow, across at least %s of every parameter", streakPhrase(p.ShadowMatches), bindingsPhrase(fewest))
+}
+
+// streakPhrase spells a run of matches: an operator may set the ladder's m to
+// one, and "1 consecutive times" is not a sentence.
+func streakPhrase(n int) string {
+	if n == 1 {
+		return "once"
+	}
+	return fmt.Sprintf("%d consecutive times", n)
+}
+
+// bindingsPhrase spells a count of distinct bindings, singular at one.
+func bindingsPhrase(n int) string {
+	if n == 1 {
+		return "1 distinct binding"
+	}
+	return fmt.Sprintf("%d distinct bindings", n)
 }

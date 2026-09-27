@@ -28,13 +28,12 @@
 // `artifactsForRun`, was written FOR this map -- its own DSL header says so --
 // and had no caller for as long as the join did not exist.
 //
-// `v1:authoring:bundle` is NOT drawn, and the reason is not that it was
-// forgotten. It carries no broadcast routing rule (component/node/routing.go
-// broadcasts artifact and not bundle), so a live feed over it would render
-// correct on load and then never move -- worse than not drawing it, because
-// the map would be claiming wiring that is not there. Drawing it wants that
-// rule first, which is a decision about event volume rather than a client
-// change.
+// `v1:authoring:bundle` is NOT drawn yet. This note used to say it could not
+// be -- that it carried no broadcast routing rule -- and that was wrong:
+// component/node/routing.go forwards graph.node.{created,updated,deleted} for
+// every `v1:authoring:*` concept (memql#4542), bundle included. A live feed
+// over it would move, so drawing it is a client change nobody has made yet,
+// not wiring that is absent.
 //
 // GENERATED CONSTANTS, NEVER COMPOSED IDS (the Logs epic's rule, memql#4895):
 // a hand-written "v1:work:step" would silently stop matching the day the

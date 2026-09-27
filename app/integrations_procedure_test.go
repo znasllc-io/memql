@@ -75,6 +75,12 @@ func TestTheProcedureIntegrationShipsWithItsCompileGate(t *testing.T) {
 	if integ == nil {
 		t.Fatal("the registered procedure integration is not the expected type")
 	}
+	// The ladder's per-construct lock takes its database handle from the
+	// app's own plugin context: without it every ladder move runs unlocked,
+	// and two replicas finishing replays of one procedure race.
+	if !integ.LadderLockInstalled() {
+		t.Fatal("the procedure factory, built from the app's plugin context, installed no handle for the ladder lock")
+	}
 	if integ.CompileGateInstalled() {
 		t.Fatal("the gate was installed before the wiring ran, so this test would pass having wired nothing")
 	}
@@ -160,6 +166,7 @@ func procedureWiredApp(t *testing.T) (*App, *procedure.Integration) {
 // compiled as.
 func TestTheProcedureIntegrationShipsWithItsWorkbenchDispatcher(t *testing.T) {
 	t.Setenv("MEMQL_WORKBENCH_REMOTE", "1")
+	t.Setenv("MEMQL_WORKBENCH_LOCAL_FALLBACK", "")
 	app, integ := procedureWiredApp(t)
 	app.wireProcedureIntegration()
 
@@ -179,10 +186,11 @@ func TestTheProcedureIntegrationShipsWithItsWorkbenchDispatcher(t *testing.T) {
 // learned procedure's commands running beside the planner's credentials.
 func TestAWorkbenchThatWouldRunOnThisNodesOwnDiskIsNotInstalled(t *testing.T) {
 	t.Setenv("MEMQL_WORKBENCH_REMOTE", "")
+	t.Setenv("MEMQL_WORKBENCH_LOCAL_FALLBACK", "")
 	app, integ := procedureWiredApp(t)
 	app.wireProcedureIntegration()
 
-	want, why := procedureWorkbenchIsSandboxed(node.CompiledNodeType(), false)
+	want, why := procedureWorkbenchIsSandboxed(node.CompiledNodeType(), false, false)
 	wb, _, _, _ := integ.ReplaySeamsInstalled()
 	if wb != want {
 		t.Fatalf("workbench dispatcher installed = %v on a %s node without the remote flag, want %v (%s)",
@@ -195,24 +203,71 @@ func TestAWorkbenchThatWouldRunOnThisNodesOwnDiskIsNotInstalled(t *testing.T) {
 
 func TestTheWorkbenchDispatcherIsInstalledOnlyWhereItReachesAWorkbench(t *testing.T) {
 	for _, tc := range []struct {
-		nodeType node.NodeType
-		remote   bool
-		want     bool
+		nodeType      node.NodeType
+		remote        bool
+		localFallback bool
+		want          bool
 	}{
-		{node.NodeTypeAgent, true, true},
-		{node.NodeTypeAgent, false, true}, // the workbench's own single-node mode
-		{node.NodeTypeBFF, true, true},
-		{node.NodeTypeBFF, false, false},
-		{node.NodeTypeWorkbench, false, true},
-		{node.NodeTypePlanner, false, false},
-		{node.NodeTypePlanner, true, true}, // forwards, or refuses no_workbench_peer
-		{node.NodeTypeMCP, false, false},
-		{node.NodeTypeEdge, false, false},
-		{node.NodeTypeIdentity, false, false},
+		{node.NodeTypeAgent, true, false, true},
+		{node.NodeTypeAgent, false, false, true}, // the workbench's own single-node mode
+		{node.NodeTypeAgent, true, true, true},   // forwards, or that same single-node mode
+		{node.NodeTypeBFF, true, false, true},
+		{node.NodeTypeBFF, false, false, false},
+		{node.NodeTypeWorkbench, false, false, true},
+		{node.NodeTypeWorkbench, true, true, true},
+		{node.NodeTypePlanner, false, false, false},
+		{node.NodeTypePlanner, true, false, true}, // forwards, or refuses no_workbench_peer
+		{node.NodeTypeMCP, false, false, false},
+		{node.NodeTypeEdge, false, false, false},
+		{node.NodeTypeIdentity, false, false, false},
+		// WITH THE LOCAL FALLBACK, no peer means THIS node's own disk: the
+		// remote flag no longer asserts that the step runs on a workbench.
+		{node.NodeTypeBFF, true, true, false},
+		{node.NodeTypePlanner, true, true, false},
+		{node.NodeTypeMCP, true, true, false},
+		{node.NodeTypeEdge, true, true, false},
+		{node.NodeTypeIdentity, true, true, false},
+		// The fallback without the remote flag changes nothing: it is only
+		// consulted in remote mode.
+		{node.NodeTypeBFF, false, true, false},
 	} {
-		got, why := procedureWorkbenchIsSandboxed(tc.nodeType, tc.remote)
+		got, why := procedureWorkbenchIsSandboxed(tc.nodeType, tc.remote, tc.localFallback)
 		if got != tc.want || why == "" {
-			t.Errorf("%s remote=%v -> %v (%q), want %v", tc.nodeType, tc.remote, got, why, tc.want)
+			t.Errorf("%s remote=%v localFallback=%v -> %v (%q), want %v", tc.nodeType, tc.remote, tc.localFallback, got, why, tc.want)
+		}
+	}
+}
+
+// The wiring reads the fallback from the environment the workbench plug-in
+// reads it from, so a node where the plug-in would run a replay's step on its
+// own disk gets no dispatcher -- whatever this test binary was compiled as.
+func TestAWorkbenchWithTheLocalFallbackIsInstalledOnlyWhereItsOwnDiskIsAWorkbench(t *testing.T) {
+	t.Setenv("MEMQL_WORKBENCH_REMOTE", "1")
+	t.Setenv("MEMQL_WORKBENCH_LOCAL_FALLBACK", "1")
+	app, integ := procedureWiredApp(t)
+	app.wireProcedureIntegration()
+
+	want, why := procedureWorkbenchIsSandboxed(node.CompiledNodeType(), true, true)
+	wb, _, _, _ := integ.ReplaySeamsInstalled()
+	if wb != want {
+		t.Fatalf("workbench dispatcher installed = %v on a %s node with the remote flag and the local fallback, want %v (%s)",
+			wb, node.CompiledNodeType(), want, why)
+	}
+	if node.CompiledNodeType() == node.NodeTypeBFF && wb {
+		t.Fatal("a bff with the local fallback got the workbench dispatcher, whose steps would run on the bff's own disk when no peer answers")
+	}
+}
+
+// The fallback is parsed the way integrations/workbench parses it, so the two
+// agree about which nodes run steps on their own disk.
+func TestTheLocalFallbackIsReadAsTheWorkbenchReadsIt(t *testing.T) {
+	for value, want := range map[string]bool{
+		"1": true, "true": true, "TRUE": true, " yes ": true, "On": true,
+		"": false, "0": false, "no": false, "false": false, "enabled": false,
+	} {
+		t.Setenv("MEMQL_WORKBENCH_LOCAL_FALLBACK", value)
+		if got := workbenchLocalFallbackEnabled(); got != want {
+			t.Errorf("MEMQL_WORKBENCH_LOCAL_FALLBACK=%q -> %v, want %v", value, got, want)
 		}
 	}
 }

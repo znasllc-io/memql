@@ -204,7 +204,10 @@ func StepTypeForTool(tool string) string {
 		return StepTypeMCP
 	}
 	switch name {
-	case "fs_write", "write", "write_file", "edit", "str_replace", "apply_patch", "file_change":
+	// MultiEdit is an Edit applied several times to one file: a write. Were it
+	// left to the `exec` default, its step would name no command and the
+	// replay's MultiEdit translation would never be reached.
+	case "fs_write", "write", "write_file", "edit", "multiedit", "str_replace", "apply_patch", "file_change":
 		return StepTypeFSWrite
 	case "fs_read", "read", "read_file", "cat", "view":
 		return StepTypeFSRead

@@ -1,7 +1,9 @@
 package procedure
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"regexp"
 	"sort"
@@ -29,6 +31,27 @@ type Preconditions struct {
 	Tools          map[string]string `json:"tools,omitempty"`          // name -> version (only tools the procedure's exec steps invoke)
 	Variables      map[string]string `json:"variables,omitempty"`      // name -> VariableUnset | digest
 	EmptyWorkspace *bool             `json:"emptyWorkspace,omitempty"` // every recorded start had cwdEntries == 0
+}
+
+// preconditionFields is Preconditions without its methods, so decoding it does
+// not recurse.
+type preconditionFields Preconditions
+
+// UnmarshalJSON decodes a stored initiation set and REFUSES a field it does
+// not know. A predicate is something every recorded start agreed on, and a
+// replica older than the writer that SKIPPED one -- a kernel version, say, a
+// later cockpit learned to fingerprint -- would start a replay the recordings
+// never showed could succeed. Refused, the replay does not start; the goal
+// goes to the app, which is the direction a missing check must fail in.
+func (p *Preconditions) UnmarshalJSON(b []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var f preconditionFields
+	if err := dec.Decode(&f); err != nil {
+		return fmt.Errorf("procedure: decoding preconditions: %w", err)
+	}
+	*p = Preconditions(f)
+	return nil
 }
 
 // VariableUnset is a variable's value in Preconditions when it was not set.
@@ -349,9 +372,9 @@ func boolWord(b bool) string {
 // shells are the command words whose -c argument is itself a command line.
 var shells = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "fish": true}
 
-// controlOperators separate the simple commands of a command line, so the
-// word after one is a command word again.
-var controlOperators = map[string]bool{"&&": true, "||": true, ";": true, "|": true, "&": true, "|&": true}
+// maxScriptDepth bounds how deep UsedTools reads `sh -c` inside `sh -c`: each
+// level strips a layer of quoting, so a real line runs out long before this.
+const maxScriptDepth = 8
 
 // UsedTools returns the tools a procedure's exec steps invoke: every COMMAND
 // WORD of each step's command, by basename, sorted -- basename because the
@@ -361,13 +384,19 @@ var controlOperators = map[string]bool{"&&": true, "||": true, ";": true, "|": t
 // the tool. `cd app && npm test` invokes npm, and Codex runs EVERY command as
 // `bash -lc '<script>'`: reading argv[0] alone would give a Codex procedure no
 // tool preconditions at all. So the command line is read the way a shell
-// reads its simple commands -- a word after a control operator (&&, ||, ;, |,
-// &) is a command word again, a NAME=value before one is an assignment, and
-// the -c argument of a shell is a command line of its own. It is still not a
-// shell: it does not expand anything, and a wrapper like `env` or `sudo` is
-// reported as itself. Over-reporting is harmless -- LearnPreconditions keeps
-// only tools the fingerprints probed -- and under-reporting is what would
-// weaken the check.
+// reads its simple commands (readShell): an unquoted control operator ends
+// one wherever it stands -- `cd app&&npm test` names npm -- and a quoted one
+// is text -- `grep "a|b" f` names grep and nothing else; a newline ends a
+// command; a here-document's body is input, not commands; a NAME=value before
+// the command word is an assignment; and the -c argument of a shell is a
+// command line of its own. It is read from each argument's recorded SPELLING
+// (Node.Raw), because the value alone cannot say whether an operator was
+// quoted.
+//
+// It is still not a shell: it does not expand anything, and a wrapper like
+// `env` or `sudo` is reported as itself. Over-reporting is harmless --
+// LearnPreconditions keeps only tools the fingerprints probed -- and
+// under-reporting is what would weaken the check.
 //
 // A command word that is a hole names no one tool and is skipped.
 func UsedTools(t Template) []string {
@@ -403,105 +432,106 @@ func sortedCommandKeys() []string {
 	return keys
 }
 
-// holeWord stands for an argument that is a hole: its text is unknown, and it
-// can be neither a command word nor a script.
-const holeWord = "\x00hole"
-
 // commandWordsOf reads one command argument in whichever shape it was
-// recorded: a command line (a string, parsed into argv), or an ARGUMENT VECTOR
-// (a list, executed directly with no shell between its elements).
+// recorded: a command line (a string, or an argv the template holds), or an
+// ARGUMENT VECTOR (a list, executed directly with no shell between its
+// elements).
 func commandWordsOf(n *Node) []string {
 	switch {
 	case n.Kind == KindLit:
-		return commandLineWords(words(splitArgv(n.Lit)))
+		return commandLineWords(readShell(n.Lit).items, 0)
 	case n.Kind == KindArray && n.Form == FormArgv:
-		return commandLineWords(words(n.Kids))
+		src, _ := argvSource(n)
+		return commandLineWords(readShell(src).items, 0)
 	case n.Kind == KindArray:
-		return argumentVectorWords(words(n.Kids))
+		return argumentVectorWords(n.Kids)
 	}
 	return nil
-}
-
-// words is each element's text, or holeWord for an element that has none.
-func words(kids []*Node) []string {
-	out := make([]string, len(kids))
-	for i, k := range kids {
-		switch {
-		case k == nil || k.Kind == KindHole:
-			out[i] = holeWord
-		case k.Kind == KindLit:
-			out[i] = k.Lit
-		default:
-			v, err := Materialize(k, nil)
-			s, ok := v.(string)
-			if err != nil || !ok {
-				out[i] = holeWord
-				continue
-			}
-			out[i] = s
-		}
-	}
-	return out
 }
 
 // argumentVectorWords reads a vector executed with no shell: its first
-// element is the one command word, unless it is a shell whose -c argument is a
-// command line.
-func argumentVectorWords(argv []string) []string {
-	if len(argv) == 0 || argv[0] == holeWord {
+// element is the one command word, and a shell's script is a command line of
+// its own. Canonicalization reads that script as one (a FormArgv element), so
+// the shell running it -- first in the vector, or behind a wrapper -- and the
+// script's own command words are read from it. A vector stored before scripts
+// were read, its script one literal after the shell's -c, is read as it
+// always was.
+func argumentVectorWords(kids []*Node) []string {
+	if len(kids) == 0 || kids[0] == nil || kids[0].Kind != KindLit {
 		return nil
 	}
-	word := basename(argv[0])
+	word := basename(kids[0].Lit)
 	out := []string{word}
-	if shells[word] {
-		out = append(out, shellScriptWords(argv[1:])...)
-	}
-	return out
-}
-
-// commandLineWords reads a command line's simple commands.
-func commandLineWords(tokens []string) []string {
-	var out []string
-	expectCommand := true
-	for i := 0; i < len(tokens); i++ {
-		tok := tokens[i]
-		if controlOperators[tok] {
-			expectCommand = true
+	read := false
+	for i, k := range kids {
+		if k == nil || k.Kind != KindArray || k.Form != FormArgv {
 			continue
 		}
-		ends := strings.HasSuffix(tok, ";") && tok != ";"
-		if expectCommand && tok != holeWord && !isAssignment(tok) {
-			word := basename(strings.TrimSuffix(tok, ";"))
-			if word != "" {
-				out = append(out, word)
-				if shells[word] {
-					end := i + 1
-					for end < len(tokens) && !controlOperators[tokens[end]] {
-						end++
-					}
-					out = append(out, shellScriptWords(tokens[i+1:end])...)
-				}
+		for j := i - 1; j >= 0; j-- {
+			if kids[j] != nil && kids[j].Kind == KindLit && shells[basename(kids[j].Lit)] {
+				out = append(out, basename(kids[j].Lit))
+				break
 			}
-			expectCommand = false
-		} else if expectCommand && tok == holeWord {
-			expectCommand = false
 		}
-		if ends {
-			expectCommand = true
+		out = append(out, commandWordsOf(k)...)
+		read = true
+	}
+	if !read && shells[word] {
+		args := make([]shellItem, 0, len(kids)-1)
+		for _, k := range kids[1:] {
+			if k == nil || k.Kind != KindLit {
+				args = append(args, shellItem{slots: []int{-1}})
+				continue
+			}
+			args = append(args, shellItem{word: k.Lit})
+		}
+		if script, ok := shellScript(args); ok {
+			out = append(out, commandLineWords(readShell(script).items, 1)...)
 		}
 	}
 	return out
 }
 
-// shellScriptWords finds a shell's -c flag among its arguments and reads the
-// argument after it as a command line.
-func shellScriptWords(args []string) []string {
-	for i, a := range args {
-		if isShortFlagWithC(a) && i+1 < len(args) && args[i+1] != holeWord {
-			return commandLineWords(words(splitArgv(args[i+1])))
+// commandLineWords is the command word of every simple command in a read
+// command line, and -- for a shell -- of its -c script, to maxScriptDepth.
+func commandLineWords(items []shellItem, depth int) []string {
+	var out []string
+	for _, cmd := range simpleCommands(items) {
+		i := 0
+		for i < len(cmd) && len(cmd[i].slots) == 0 && isAssignment(cmd[i].word) {
+			i++
+		}
+		if i >= len(cmd) || len(cmd[i].slots) > 0 {
+			continue
+		}
+		// A subshell's `(` is not part of the word it opens.
+		word := basename(strings.TrimLeft(cmd[i].word, "("))
+		if word == "" {
+			continue
+		}
+		out = append(out, word)
+		if shells[word] && depth < maxScriptDepth {
+			if script, ok := shellScript(cmd[i+1:]); ok {
+				out = append(out, commandLineWords(readShell(script).items, depth+1)...)
+			}
 		}
 	}
-	return nil
+	return out
+}
+
+// shellScript finds a shell's -c flag among its arguments and answers the
+// argument after it: the script the shell runs. A script that is a hole names
+// nothing.
+func shellScript(args []shellItem) (string, bool) {
+	for i, a := range args {
+		if len(a.slots) == 0 && isShortFlagWithC(a.word) {
+			if i+1 < len(args) && len(args[i+1].slots) == 0 {
+				return args[i+1].word, true
+			}
+			return "", false
+		}
+	}
+	return "", false
 }
 
 // isShortFlagWithC matches -c, -lc, -ec: a cluster of one-letter options one

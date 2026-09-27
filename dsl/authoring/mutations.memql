@@ -346,16 +346,20 @@ mutation construct recordConstructReliability {
 
 /// Record a LEARNED procedure's payload on its construct (epic memql#5408): the rendered MemQL
 /// source, the procedure TEMPLATE a replay executes, the learned preconditions, and procedureHash --
-/// sha256: over the canonical JSON of the three, the version a procedurePromotion approval pins. The
-/// lift writes it on a first lift and on every re-lift whose hash changed; an unchanged hash writes
-/// nothing, so re-mining an unchanged corpus keeps every ladder counter.
+/// sha256: over the canonical JSON of the three less provenance, presentation and the dispatcher's
+/// time limits (comment lines, title, recordedFrom, hints), the version a procedurePromotion approval
+/// pins. The lift writes it on a first lift and on every re-lift whose hash changed; an unchanged hash
+/// writes nothing, so re-mining an unchanged corpus keeps every ladder counter.
 ///
 /// Server-only, and scoping to actor.userId is not the missing piece: the construct is already the
 /// caller's own row. What must not be the caller's is the ASSERTION that this template is what their
 /// recordings show -- the ladder replays it, and a trusted procedure serves goals with no model and
 /// no app, so a caller able to write `procedure` could write the code their own goals then run
-/// unreviewed. The one writer is integrations/procedure, under the owner's borrowed actor and one
-/// internal-origin stamp.
+/// unreviewed. @serverOnly closes THIS mutation only -- a raw insert(...) never consults it -- so
+/// the fields are also held at the write chokepoint: component/memql/construct_ladder_write_guard.go
+/// refuses a write without internal origin that changes procedure, preconditions or procedureHash,
+/// or the source of a construct already on the ladder. The one writer is integrations/procedure,
+/// under the owner's borrowed actor and one internal-origin stamp.
 ///
 /// THE THREE ARE ONE VERSION, which is why preconditions defaults to `{}` rather than being left
 /// alone when a caller sends none: a re-lift that learned no predicates must CLEAR the previous
@@ -389,8 +393,11 @@ mutation construct recordProcedure {
 /// served by the procedure WITHOUT A MODEL, and a caller able to write `trusted` could skip the
 /// shadow evidence and the one human approval the ladder exists to require. Scoping to
 /// actor.userId does not help -- these are already the caller's own rows, and the point is that the
-/// judgement is not theirs to make. The writers are integrations/procedure's shadow comparison,
-/// replay runner, promotion decision and sweeps.
+/// judgement is not theirs to make. @serverOnly closes THIS mutation only -- a raw insert(...) never
+/// consults it -- so every field below is also held at the write chokepoint:
+/// component/memql/construct_ladder_write_guard.go refuses a write without internal origin that
+/// changes any of them. The writers are integrations/procedure's shadow comparison, replay runner,
+/// promotion decision and sweeps.
 ///
 /// Every evidence argument is OPTIONAL and bound with no default, so a write names exactly the
 /// fields it moves and the read-merge keeps the rest. promotionApprovalId is the one a caller CLEARS:

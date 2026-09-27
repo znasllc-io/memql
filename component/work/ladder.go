@@ -99,12 +99,15 @@ type LadderPolicy struct {
 	// CanaryMatches is the consecutive clean canary replays that make a
 	// procedure trusted.
 	CanaryMatches int
-	// FailuresToDemote is the consecutive failed replays (refused starts
-	// included) that demote a canary or trusted procedure to shadow.
+	// FailuresToDemote is the consecutive failed replays (refused starts and
+	// insufficient preconditions included) that demote a canary or trusted
+	// procedure to shadow.
 	FailuresToDemote int
 	// InsufficientToDemote is the replays that diverged although every
 	// precondition held -- the preconditions proved insufficient -- that
-	// demote it.
+	// demote it. Each also counts toward FailuresToDemote, and either
+	// threshold demotes: the stronger signal never demotes later than an
+	// ordinary failure would.
 	InsufficientToDemote int
 	// RetireAfterDays is D14's window: a procedure unused for longer retires.
 	RetireAfterDays int
@@ -168,10 +171,11 @@ type LadderState struct {
 	// may be a path in somebody's home directory, and this row is read by
 	// every surface that shows the ladder.
 	DistinctBindings map[string][]string
-	// Failures is the consecutive failed replays on canary or trusted.
+	// Failures is the consecutive failed replays on canary or trusted, a
+	// refused start and an insufficient precondition's divergence included.
 	Failures int
 	// Insufficient is the replays that diverged although every precondition
-	// held.
+	// held, since the last clean replay. Each is in Failures as well.
 	Insufficient int
 	// PromotionApprovalId is the open procedurePromotion approval, "" when
 	// none.
@@ -413,23 +417,47 @@ func advanceReplayed(t *Transition, e LadderEvent, p LadderPolicy) {
 		t.Reason = fmt.Sprintf("replayed cleanly %d of the %d consecutive times trust needs", st.CanaryMatches, p.CanaryMatches)
 		return
 	}
-	// Any failure breaks a canary's run of clean replays.
+	// Any failure breaks a canary's run of clean replays, and every failure
+	// counts toward the consecutive failures that demote -- an insufficient
+	// precondition's included. D16 makes the insufficient precondition the
+	// STRONGER signal (one demotes where an ordinary failure takes two), so
+	// it must never demote LATER than an ordinary failure would: counted on
+	// its own counter alone, operator values that set the insufficient count
+	// above the failure count kept a procedure trusted through divergences
+	// two ordinary failures would have demoted it for. Either threshold
+	// demotes, and the reason names the one that did -- the insufficient
+	// precondition when both did, since it is what says the procedure does
+	// not know when it applies.
 	st.CanaryMatches = 0
+	st.Failures++
 	if e.Insufficient {
 		st.Insufficient++
-		if st.Insufficient >= p.InsufficientToDemote {
-			demote(t, "diverged although every precondition held, so its preconditions are not enough to know when it applies; demoted to shadow to earn its place again")
-			return
-		}
-		t.Reason = fmt.Sprintf("diverged although every precondition held (%d of the %d that demote it)", st.Insufficient, p.InsufficientToDemote)
-		return
 	}
-	st.Failures++
-	if st.Failures >= p.FailuresToDemote {
+	switch {
+	case e.Insufficient && st.Insufficient >= p.InsufficientToDemote:
+		demote(t, insufficientDemotion(st.Insufficient))
+	case e.Insufficient && st.Failures >= p.FailuresToDemote:
+		demote(t, fmt.Sprintf("%d replays failed in a row, the last diverging although every precondition held, so it is demoted to shadow to earn its place again", st.Failures))
+	case st.Failures >= p.FailuresToDemote:
 		demote(t, fmt.Sprintf("%d replays failed in a row, so it is demoted to shadow to earn its place again", st.Failures))
-		return
+	case e.Insufficient:
+		t.Reason = fmt.Sprintf("diverged although every precondition held (%d of the %d such replays that demote it; %d of the %d failures in a row that also do)",
+			st.Insufficient, p.InsufficientToDemote, st.Failures, p.FailuresToDemote)
+	default:
+		t.Reason = fmt.Sprintf("a replay failed (%d of the %d consecutive failures that demote it)", st.Failures, p.FailuresToDemote)
 	}
-	t.Reason = fmt.Sprintf("a replay failed (%d of the %d consecutive failures that demote it)", st.Failures, p.FailuresToDemote)
+}
+
+// insufficientDemotion is the reason an insufficient precondition demotes. One
+// is D16's rule and the record's default, and the sentence says it plainly; a
+// count appears only where an operator set the threshold above one. Every
+// replay but a clean one leaves the count standing, so the ones counted had no
+// clean replay between them -- not necessarily no other failure.
+func insufficientDemotion(n int) string {
+	if n <= 1 {
+		return "diverged although every precondition held, so its preconditions are not enough to know when it applies; demoted to shadow to earn its place again"
+	}
+	return fmt.Sprintf("diverged although every precondition held, %d times with no clean replay between, so its preconditions are not enough to know when it applies; demoted to shadow to earn its place again", n)
 }
 
 // advanceStartRefused counts a start whose preconditions did not hold. Nothing
@@ -457,11 +485,14 @@ func advanceStartRefused(t *Transition, p LadderPolicy) {
 func advanceSweep(t *Transition, e LadderEvent, p LadderPolicy) {
 	st := &t.State
 	if t.From == RungCanary || t.From == RungTrusted {
+		// The insufficient precondition first, as advanceReplayed names it:
+		// every insufficient replay is a failure too, so both being over is
+		// the ordinary case, and the stronger signal is the one to name.
 		switch {
-		case st.Failures >= p.FailuresToDemote:
-			demote(t, fmt.Sprintf("the current policy demotes a procedure after %d failed replays, and this one has %d", p.FailuresToDemote, st.Failures))
 		case st.Insufficient >= p.InsufficientToDemote:
 			demote(t, fmt.Sprintf("the current policy demotes a procedure after %d replays whose preconditions proved insufficient, and this one has %d", p.InsufficientToDemote, st.Insufficient))
+		case st.Failures >= p.FailuresToDemote:
+			demote(t, fmt.Sprintf("the current policy demotes a procedure after %d failed replays, and this one has %d", p.FailuresToDemote, st.Failures))
 		}
 	}
 	// An unknown last use is never evidence of disuse. The window is compared
@@ -475,7 +506,15 @@ func advanceSweep(t *Transition, e LadderEvent, p LadderPolicy) {
 			// A retired procedure cannot be promoted, so an open proposal
 			// would be a card whose decision reaches nothing.
 			st.PromotionApprovalId = ""
-			t.Reason = fmt.Sprintf("unused for %d days, longer than the %d-day window, so it retires", int(idle.Hours()/24), p.RetireAfterDays)
+			retirement := fmt.Sprintf("unused for %d days, longer than the %d-day window, so it retires", int(idle.Hours()/24), p.RetireAfterDays)
+			if t.Demoted {
+				// Both happened in this pass, and the reason is the one
+				// sentence a person reads about it: the retirement alone would
+				// hide that its replays had also been failing.
+				t.Reason += "; it was also " + retirement
+			} else {
+				t.Reason = retirement
+			}
 		}
 	}
 	if !t.Demoted && !t.Retired {

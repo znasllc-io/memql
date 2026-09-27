@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/integrations/planner"
@@ -166,6 +167,20 @@ func TestAMachineCommandRunsInTheReplaysOwnWorkspace(t *testing.T) {
 	}
 }
 
+// The step's timeout reaches the machine's command the way it reaches the
+// workbench's: from the request, beside the template.
+func TestTheRequestsTimeoutReachesTheMachineExec(t *testing.T) {
+	m := newFakeMachine()
+	req := machineStep("exec", map[string]any{"command": "make build"})
+	req.Timeout = 180 * time.Second
+	if _, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if args := m.lastArgs(); args["cmd"] != "make build" || args["timeoutSec"] != 180 {
+		t.Fatalf("exec args = %+v, want the command with timeoutSec 180", args)
+	}
+}
+
 func TestAMachineCommandKeepsCodexsShell(t *testing.T) {
 	m := newFakeMachine()
 	if _, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(),
@@ -235,6 +250,123 @@ func TestAMachineGateDenialIsAnError(t *testing.T) {
 		machineStep("fs_write", map[string]any{"file_path": "/tmp/x", "content": "x"}))
 	if err != nil || res.Observation.IsError == nil || !*res.Observation.IsError {
 		t.Fatalf("worker_disconnected = %+v, %v", res.Observation, err)
+	}
+}
+
+// A DROPPED STREAM OR AN UNREACHABLE REPLICA SAYS NOTHING ABOUT THE PROCEDURE.
+// The step is a failed observation, as before, and Unavailable -- which is what
+// keeps the ladder from counting a machine that went to sleep against the
+// procedure. The workspace a command needs made first answers the same way.
+func TestAnUnreachableMachineIsUnavailableNotAFailedProcedure(t *testing.T) {
+	for _, code := range []string{"worker_disconnected", "worker_unreachable"} {
+		for name, req := range map[string]procedure.DispatchRequest{
+			"fs_write": machineStep("fs_write", map[string]any{"file_path": "/tmp/x", "content": "x"}),
+			"fs_read":  machineStep("fs_read", map[string]any{"file_path": "/etc/hosts"}),
+			"exec":     machineStep("exec", map[string]any{"command": "make"}),
+		} {
+			m := newFakeMachine()
+			for _, action := range []string{"exec", "fs_write", "fs_read", "fs_stat"} {
+				m.refuse[action] = code
+			}
+			res, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(), req)
+			if err != nil {
+				t.Errorf("%s %s: %v -- an unreachable machine is a result the runner reads", code, name, err)
+				continue
+			}
+			if !res.Unavailable || res.Observation.IsError == nil || !*res.Observation.IsError || res.Delivered {
+				t.Errorf("%s %s = %+v unavailable %v delivered %v; want a failed, undelivered, Unavailable step",
+					code, name, res.Observation, res.Unavailable, res.Delivered)
+			}
+		}
+	}
+	// A timeout is the procedure's: counted, not excused.
+	m := newFakeMachine()
+	m.exec = func(map[string]any) map[string]any { return map[string]any{"exitCode": 0} }
+	d := newTestMachineDispatcher(m, testMachineRoot)
+	if _, err := d.Dispatch(context.Background(), machineStep("exec", map[string]any{"command": "true"})); err != nil {
+		t.Fatal(err)
+	}
+	m.refuse["exec"] = "timeout"
+	res, err := d.Dispatch(context.Background(), machineStep("exec", map[string]any{"command": "make"}))
+	if err != nil || res.Unavailable || res.Observation.IsError == nil || !*res.Observation.IsError {
+		t.Fatalf("a timeout = %+v unavailable %v, %v", res.Observation, res.Unavailable, err)
+	}
+}
+
+// A GOAL SUPPLIES A PARAMETER, AND A PARAMETER CAN SIT IN A PATH. Whatever the
+// value, a relative path that climbs out of the replay's workspace is refused
+// before anything is sent -- the one directory a replay owns on the person's
+// machine -- and one that stays inside lands there.
+func TestAMachinePathThatLeavesTheReplaysWorkspaceIsRefused(t *testing.T) {
+	for _, p := range []string{"../.ssh/authorized_keys", "a/../../x", "./out/../../x"} {
+		for tool, args := range map[string]map[string]any{
+			"fs_write": {"file_path": p, "content": "ssh-ed25519 AAAA planted\n"},
+			"fs_read":  {"file_path": p},
+		} {
+			m := newFakeMachine()
+			_, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(), machineStep(tool, args))
+			if err == nil || !strings.Contains(err.Error(), "leaves the replay's workspace") {
+				t.Errorf("%s %q -> %v, want a refusal that it leaves the workspace", tool, p, err)
+			}
+			if len(m.calls) != 0 {
+				t.Errorf("%s %q reached the machine: %v", tool, p, m.actions())
+			}
+		}
+	}
+
+	m := newFakeMachine()
+	res, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(),
+		machineStep("fs_write", map[string]any{"file_path": "./out/a.txt", "content": "a\n"}))
+	if err != nil {
+		t.Fatalf("a path inside the workspace = %v", err)
+	}
+	if args := m.lastArgs(); args["path"] != testMachineRoot+"/replay1/out/a.txt" {
+		t.Fatalf("fs_write args = %+v, want the file in the replay's workspace", args)
+	}
+	if o := res.Observation; len(o.Contents) != 1 || o.Contents[0].Path != "out/a.txt" {
+		t.Fatalf("observation = %+v", o)
+	}
+}
+
+// AN ABSOLUTE PATH IS USED AS THE RECORDING WROTE IT -- it is what makes the
+// procedure machine-local -- and the one way a goal-supplied value could move
+// it is a `..` segment climbing out of the directory it names. That is
+// refused; the path as written is not.
+func TestAnAbsoluteMachinePathIsLiteralAndMayNotClimb(t *testing.T) {
+	for _, p := range []string{"/Users/someone/notes/../../.ssh/authorized_keys", "/Users/someone/notes/.."} {
+		m := newFakeMachine()
+		_, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(),
+			machineStep("fs_write", map[string]any{"file_path": p, "content": "x"}))
+		if err == nil || !strings.Contains(err.Error(), "..") {
+			t.Errorf("%q -> %v, want it refused for climbing", p, err)
+		}
+		if len(m.calls) != 0 {
+			t.Errorf("%q reached the machine: %v", p, m.actions())
+		}
+	}
+	m := newFakeMachine()
+	if _, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(),
+		machineStep("fs_write", map[string]any{"file_path": "/Users/someone/notes/./today.md", "content": "x"})); err != nil {
+		t.Fatalf("an absolute path that climbs nowhere = %v", err)
+	}
+	if args := m.lastArgs(); args["path"] != "/Users/someone/notes/today.md" {
+		t.Fatalf("fs_write args = %+v", args)
+	}
+}
+
+// A machine-local procedure's MCP step is held to the same rule as the
+// workbench's: a trusted replay may call a tool that reads, never one whose
+// handler could write -- the app session's credential could not have.
+func TestATrustedMachineReplayRefusesAnMCPToolThatCouldWrite(t *testing.T) {
+	tools := &fakeProcedureTools{kinds: map[string]string{"updateCalendarEvent": "mutation"}}
+	d := newTestMachineDispatcher(newFakeMachine(), testMachineRoot)
+	d.tools = tools
+	_, err := d.Dispatch(context.Background(), machineStep("mcp", map[string]any{"tool": "updateCalendarEvent", "arguments": map[string]any{"eventId": "e1"}}))
+	if err == nil || !strings.Contains(err.Error(), `"updateCalendarEvent"`) {
+		t.Fatalf("a trusted machine replay of a mutation tool = %v, want a refusal naming it", err)
+	}
+	if tools.calls != 0 {
+		t.Fatal("the mutation tool was executed")
 	}
 }
 

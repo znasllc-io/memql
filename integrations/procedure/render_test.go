@@ -86,7 +86,7 @@ func TestAStepWhoseArgumentsHaveNoSpellingIsACommentLine(t *testing.T) {
 	if written {
 		t.Fatalf("a key that is not a name cannot be written:\n%s", src)
 	}
-	if !strings.Contains(src, "  // call0: step 0, tool exec -- an argument has no MemQL spelling") {
+	if !strings.Contains(src, "  // call0: step 1, tool exec -- an argument has no MemQL spelling") {
 		t.Fatalf("the unwritten step must be a comment naming it:\n%s", src)
 	}
 	if strings.Contains(src, "procedureStep(") {
@@ -184,5 +184,30 @@ func TestEveryStepCallsTheDeclaredProcedureStepBuiltin(t *testing.T) {
 	src, _ := renderProcedureSource("p", "", tmpl, freeHoles(tmpl), planner.TemplateProvenance{})
 	if strings.Count(src, "builtin procedureStep(step: ") != len(tmpl.Steps) {
 		t.Fatalf("every step must call procedureStep with its step index:\n%s", src)
+	}
+}
+
+// TestACodexProceduresSourceCompilesThroughTheRealGate1: a Codex step's script
+// is read as a command line, so the rendered source spells it as a nested
+// list of words with the parameter among them -- and that source must still
+// pass the real compile gate, or no Codex procedure would ever be re-runnable.
+func TestACodexProceduresSourceCompilesThroughTheRealGate1(t *testing.T) {
+	codex := func(file string) []proc.Action {
+		return proc.Canonicalize([]proc.Step{{StepType: "exec", Input: map[string]any{
+			"command": []any{"bash", "-lc", "mkdir -p out && echo hello > " + file},
+		}}})
+	}
+	instances := [][]proc.Action{codex("a.txt"), codex("b.txt")}
+	tmpl := proc.Generalize(instances)
+	tmpl.Holes = proc.Classify(tmpl, instances)
+	src, written := renderProcedureSource("learnedProcedure_codex_l1", "Write the greeting file", tmpl, freeHoles(tmpl),
+		planner.TemplateProvenance{RunIds: []string{"r1", "r2"}, Uses: 2})
+	if !written || !strings.Contains(src, `["bash", "-lc", ["mkdir", "-p", "out", "&&", "echo", "hello", ">", args.command_2_70]]`) {
+		t.Fatalf("the Codex step must render with its script as words and the parameter among them:\n%s", src)
+	}
+	report := memql.SandboxCompileBundleWithEngine(
+		[]memql.SandboxConstruct{{Kind: "automation", Name: "learnedProcedure_codex_l1", Source: src}}, realDSLEngine(t))
+	if !compiledAutomation(report, "learnedProcedure_codex_l1") || !report.OK {
+		t.Fatalf("the rendered Codex procedure does not pass Gate 1: %+v\n%s", report.Diagnostics, src)
 	}
 }

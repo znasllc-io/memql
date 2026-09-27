@@ -319,3 +319,55 @@ func TestUsedToolsFindsEveryCommandOfACommandLine(t *testing.T) {
 		}
 	}
 }
+
+// TestUsedToolsReadsOperatorsAttachedToWords (E2): a shell reads `&&`, `;`
+// and `|` wherever they are unquoted, attached to a word or not, so
+// `cd app&&npm test` runs npm -- and it reads them nowhere they ARE quoted, so
+// `grep "a|b" f` runs grep and nothing called b. The spelling of each
+// argument is what says which; its value does not. A redirection that holds
+// `&` or `|` (`2>&1`, `>|`) is not an operator, a newline ends a command as a
+// `;` does, a here-document's body is not a command at all, and a subshell's
+// first word is a command word.
+func TestUsedToolsReadsOperatorsAttachedToWords(t *testing.T) {
+	for _, c := range []struct {
+		line string
+		want []string
+	}{
+		{"cd app&&npm test", []string{"cd", "npm"}},
+		{`grep "a|b" f`, []string{"grep"}},
+		{`grep 'x;y' f; wc -l f`, []string{"grep", "wc"}},
+		{"cd app;npm test|grep ok", []string{"cd", "grep", "npm"}},
+		{"npm test 2>&1 | tee log", []string{"npm", "tee"}},
+		{"make build >| out.log && git status", []string{"git", "make"}},
+		{"cd app\nnpm test", []string{"cd", "npm"}},
+		{"cat <<'EOF' > notes.txt\nhello world\n  rm -rf x\nEOF\ngit add notes.txt", []string{"cat", "git"}},
+		{"(cd app && npm ci)", []string{"cd", "npm"}},
+		{`bash -c "cd x;make"`, []string{"bash", "cd", "make"}},
+		{`echo "$(date)" && ls`, []string{"echo", "ls"}},
+	} {
+		if got := UsedTools(execTemplate(c.line)); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%q: UsedTools = %v, want %v", c.line, got, c.want)
+		}
+	}
+}
+
+// TestUsedToolsReadsAVectorsScript: a shell's script inside an argument
+// vector is a command line of its own, read as one -- behind a wrapper as
+// well -- and a vector stored before scripts were read (its script one
+// literal) is read as it always was.
+func TestUsedToolsReadsAVectorsScript(t *testing.T) {
+	vector := func(vec ...any) Template {
+		return Template{Steps: []TemplateStep{{Tool: "exec", Args: Canonicalize([]Step{{
+			StepType: "exec", Consumed: true, Input: map[string]any{"command": vec},
+		}})[0].Args}}}
+	}
+	if got, want := UsedTools(vector("sudo", "-u", "bob", "bash", "-c", "cd app&&npm test")), []string{"bash", "cd", "npm", "sudo"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("behind sudo: UsedTools = %v, want %v", got, want)
+	}
+	stored := Template{Steps: []TemplateStep{{Tool: "exec", Args: Obj(map[string]*Node{
+		"command": Arr(Lit("bash"), Lit("-lc"), Lit("make build && git status")),
+	})}}}
+	if got, want := UsedTools(stored), []string{"bash", "git", "make"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("a stored literal script: UsedTools = %v, want %v", got, want)
+	}
+}

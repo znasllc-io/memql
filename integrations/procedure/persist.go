@@ -3,6 +3,7 @@ package procedure
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -113,13 +114,15 @@ func (i *Integration) lift(ctx context.Context, k corpusKey, mined *minedCorpus)
 	if err != nil {
 		return lifted{}, err
 	}
-	existing, err := i.procedureByName(actorCtx, v.name)
+	existing, release, err := i.lockedProcedureByName(actorCtx, v.name)
 	if err != nil {
 		return lifted{}, err
 	}
-	switch {
-	case existing == nil:
+	if existing == nil {
 		return i.createProcedure(actorCtx, k, v)
+	}
+	defer release()
+	switch {
 	case storedRung(existing) == work.RungRetired && str(existing, "procedureHash") != v.hash:
 		// Retirement is terminal. A changed procedure is a NEW candidate,
 		// written as a new construct, never a resurrection of the retired
@@ -165,6 +168,26 @@ func (i *Integration) prepareVersion(ctx context.Context, k corpusKey, mined *mi
 	v.report, v.gateRan = i.compile(source, v.name)
 	v.reRunnable = v.gateRan && v.report.OK && everyStepWritten && compiledAutomation(v.report, v.name)
 	v.rung, v.reason = work.EntryRung(candidateEvidence(win, t, insts, mined.recs))
+	// A PARAMETER NO GOAL CAN SUPPLY NEVER CLIMBS. A free hole the input map
+	// ties to no goal input is bound in shadow by the app's own actions, so
+	// the version would earn its promotion there -- and every canary start
+	// after it would be refused as unbound and counted, demoting it and asking
+	// the person again for a procedure no goal can run.
+	for _, id := range built.FreeParameters {
+		if _, supplied := built.InputMap[id]; !supplied {
+			v.rung, v.reason = work.RungCandidate, fmt.Sprintf("parameter %s differs between the recordings and no goal input supplies it, so a replay could not choose it", id)
+			break
+		}
+	}
+	// A VERSION A REPLAY COULD NOT RUN SAFELY NEVER CLIMBS: a parameter that is
+	// a shell's script or an interpreter's code, one the recordings reached
+	// through an expansion, a recording the template does not even bind
+	// (component/procedure.ReplayRisks). Its shadow comparisons could match
+	// every time, and the one approval would ask a person to vouch for what
+	// the steps do not show. It stays a candidate, the first risk its reason.
+	if risks := proc.ReplayRisks(t, actionsOf(insts)); len(risks) > 0 {
+		v.rung, v.reason = work.RungCandidate, risks[0]
+	}
 	// A VERSION NO DISPATCHER CAN RUN NEVER CLIMBS (replayable.go). Its
 	// shadow comparisons could still match -- a dry comparison of arguments
 	// needs no dispatcher -- and the one approval would then ask a person to
@@ -235,7 +258,8 @@ func (i *Integration) createProcedure(ctx context.Context, k corpusKey, v versio
 }
 
 // keepProcedure is the same version: nothing is written, with two exceptions
-// that are both RECOVERIES rather than changes.
+// that are both RECOVERIES rather than changes -- and the dispatch hints,
+// which are not the version (refreshHints).
 //
 //   - A version on no rung, or still a candidate, re-enters with the evidence
 //     as it stands now. The first is a lift interrupted before its ladder
@@ -259,7 +283,47 @@ func (i *Integration) keepProcedure(ctx context.Context, k corpusKey, v version,
 			return out, err
 		}
 	}
+	if err := i.refreshHints(ctx, constructId, v, existing); err != nil {
+		return out, err
+	}
 	return out, nil
+}
+
+// refreshHints writes a kept version's dispatch hints when the corpus now says
+// something else -- a later recording let a command run longer than any
+// before, and the next replay must not be cut off where the app was not
+// (payload.go's header, review finding I2). The hints are outside the hash, so
+// this is not a new version: only the stored payload's `hints` key changes,
+// and the source, the preconditions, the provenance, the hash and the ladder
+// are written back exactly as stored. The same hints write nothing.
+func (i *Integration) refreshHints(ctx context.Context, constructId string, v version, existing map[string]any) error {
+	stored, ok := existing["procedure"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	want := v.procedure["hints"]
+	if reflect.DeepEqual(stored["hints"], want) {
+		return nil
+	}
+	updated := make(map[string]any, len(stored)+1)
+	for key, val := range stored {
+		updated[key] = val
+	}
+	if want == nil {
+		delete(updated, "hints")
+	} else {
+		updated["hints"] = want
+	}
+	if err := i.store.writeInternal(ctx, "mutation "+call("recordProcedure", map[string]any{
+		"constructId":   constructId,
+		"source":        str(existing, "source"),
+		"procedure":     updated,
+		"preconditions": existing["preconditions"],
+		"procedureHash": str(existing, "procedureHash"),
+	})); err != nil {
+		return fmt.Errorf("record procedure hints: %w", err)
+	}
+	return nil
 }
 
 // reliftProcedure writes a changed version in place: the ladder FIRST, so the
@@ -348,6 +412,41 @@ func (i *Integration) recordSignature(ctx context.Context, constructId string, k
 		return fmt.Errorf("record goal signature: %w", err)
 	}
 	return nil
+}
+
+// lockedProcedureByName is the owner's construct of this name read INSIDE its
+// ladder lock, and the lock's release; nil with no lock when there is none.
+//
+// A CONSTRUCT THAT EXISTS IS MOVED UNDER ITS LADDER LOCK (ladder.go, review
+// finding C1), decided from the row read inside it. A re-lift writes the entry
+// rung and then the new version, and a replay finishing in between would write
+// the rung it loaded back over the first -- serving the second, which nobody
+// has shadowed or approved, with no model. The lock is keyed by the construct
+// the name named when the lift looked; if the name names ANOTHER construct by
+// the time the lock is held (a lift elsewhere created a newer one), the
+// decision is made again, once, against that one.
+func (i *Integration) lockedProcedureByName(ctx context.Context, name string) (map[string]any, func(), error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		existing, err := i.procedureByName(ctx, name)
+		if err != nil || existing == nil {
+			return nil, nil, err
+		}
+		constructId := str(existing, "id")
+		release, err := i.lockLadder(ctx, constructId)
+		if err != nil {
+			return nil, nil, fmt.Errorf("procedure: the lift could not take %s's ladder: %w", constructId, err)
+		}
+		fresh, err := i.procedureByName(ctx, name)
+		switch {
+		case err != nil:
+			release()
+			return nil, nil, err
+		case fresh != nil && str(fresh, "id") == constructId:
+			return fresh, release, nil
+		}
+		release()
+	}
+	return nil, nil, fmt.Errorf("procedure: the construct named %s changed while the lift took its ladder, twice", name)
 }
 
 // procedureByName is the owner's construct of this name, or nil

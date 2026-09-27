@@ -32,7 +32,8 @@ func TestADislikedInstanceStepHoldsACandidateUntilALikedVersionExists(t *testing
 	if ready {
 		t.Fatal("a disliked instance step must hold the candidate")
 	}
-	if !strings.Contains(reason, "instance 0") || !strings.Contains(reason, "step 1") {
+	// The first instance's second step, counted the way a person counts.
+	if !strings.HasPrefix(reason, "instance 1, step 2 was disliked") {
 		t.Fatalf("the reason must name the instance and the step; got %q", reason)
 	}
 
@@ -42,6 +43,23 @@ func TestADislikedInstanceStepHoldsACandidateUntilALikedVersionExists(t *testing
 	)
 	if ready, reason := CandidateGate(cleared); !ready {
 		t.Fatalf("a liked version after the dislike clears it; still held: %q", reason)
+	}
+}
+
+// A person counts from one. The reason is read in Nexus, where "instance 0,
+// step 0" names nothing anybody can find; the gate's own indexes stay
+// zero-based, and only the sentence counts from one.
+func TestTheHeldReasonCountsInstancesAndStepsFromOne(t *testing.T) {
+	_, reason := CandidateGate(evidence([]StepVersions{versions(VerdictDislike)}))
+	if !strings.HasPrefix(reason, "instance 1, step 1 was disliked") {
+		t.Fatalf("the first step of the first instance must read as instance 1, step 1; got %q", reason)
+	}
+	_, reason = CandidateGate(evidence(
+		[]StepVersions{versions(), versions()},
+		[]StepVersions{versions(), versions(), versions(VerdictDislike)},
+	))
+	if !strings.HasPrefix(reason, "instance 2, step 3 was disliked") {
+		t.Fatalf("the third step of the second instance must read as instance 2, step 3; got %q", reason)
 	}
 }
 

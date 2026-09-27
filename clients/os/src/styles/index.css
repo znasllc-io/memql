@@ -9405,6 +9405,14 @@ a.os-button {
   flex-direction: column;
   gap: 8px;
 }
+/* A ROW'S FOCUS RING IS DRAWN INSIDE IT HERE. The column scrolls, so it clips
+ * whatever paints outside it, and a record row runs edge to edge: the kit's
+ * ring, 2px outside the row, lost both its sides and read as two rules, the
+ * upper one on top of the divider -- a keyboard user could not tell focus from
+ * a line. Inset, it is a whole ring again. */
+.os-nexus-column .os-row.os-record-row:focus-visible {
+  outline-offset: -2px;
+}
 .os-nexus-aside {
   flex: 1 1 320px;
   max-width: 460px;
@@ -10404,14 +10412,24 @@ a.os-button {
 }
 
 /* ---- approvals --------------------------------------------------------*/
-.os-nexus-approval-run {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--os-text-sm);
-  color: var(--os-muted);
+/* AN APPROVAL ROW CARRIES NO SUMMARY FACTS, so the record row's quiet middle
+ * column stood empty: a third of the row reserved for nothing while the
+ * question beside it -- the one thing the row is for -- was clamped
+ * mid-sentence. Narrow, the empty cell took a line of its own under the
+ * question and left a blank band. The question takes the track instead; the
+ * state column keeps its floor, so the kind still starts at one x down the
+ * list. Keyed on the cell being EMPTY, so a row that ever carries a fact gets
+ * the kit's column back. */
+.os-nexus-approvals .os-record-summary:empty {
+  display: none;
+}
+.os-nexus-approvals .os-row.os-record-row[data-no-icon]:has(> .os-record-summary:empty) {
+  grid-template-columns: minmax(0, 1fr) minmax(8.5rem, auto) 14px;
+}
+@container os-record-list (max-width: 600px) {
+  .os-nexus-approvals .os-row.os-record-row[data-no-icon]:has(> .os-record-summary:empty) {
+    grid-template-columns: minmax(0, 1fr) auto 12px;
+  }
 }
 /* THE QUESTION IS THE LOUDEST THING IN THE PANEL. A person opens an approval
  * to answer it, not to read metadata about it, so it is set at content size
@@ -10837,24 +10855,6 @@ a.os-button {
   display: flex;
   flex-direction: column;
   min-height: 100%;
-}
-/* The catalog is a PLAIN list, not a LiveList: `v1:authoring:construct` has no
- * routing rule to subscribe to. So it needs the reset every list in this shell
- * gets from `.os-livelist-rows` and does not inherit here -- without it the
- * browser draws its own bullets and indent, which no other list in the OS
- * does. Found by looking at it; jsdom applies no stylesheet at all. */
-.os-nexus-catalog {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.os-nexus-row-sub {
-  color: var(--os-muted);
-  font-size: var(--os-text-xs);
 }
 .os-nexus-rung-line {
   margin: 0 0 10px;
@@ -15624,3 +15624,586 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 [data-ask-control="completed"] > button { animation: os-ask-control-settle .9s ease-out; }
 @keyframes os-ask-control-settle { 0% { transform: scale(.97); outline: 1px solid var(--os-accent); } 100% { transform: scale(1); outline: 1px solid transparent; } }
 @media (prefers-reduced-motion: reduce) { [data-ask-control] > button { animation: none; } }
+
+/* ===========================================================================
+ * Nexus -> Automations: learned procedures and the certification ladder
+ * (epic memql#5408, task memql#5412)
+ * ===========================================================================
+ * The page spends its boldness in ONE place, the ladder; everything else is
+ * the shell's Panel, Subhead and Facts. Every colour is a token, so a theme
+ * pack restyles it with no code and the light mode is not a second drawing.
+ */
+
+/* ---- the page ---------------------------------------------------------- */
+/* The page is the window's height with a scrolling BODY and the bar as its
+ * floor -- the goal view's rule, for the goal view's reason: a procedure with
+ * a dozen steps must not carry its one act off the bottom of the window. */
+.os-nexus-procedure-body {
+  container: os-nexus-procedure / inline-size;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-bottom: 16px;
+}
+/* THE RECORD SITS SIDE BY SIDE WHEN THERE IS ROOM (rule 9): three short Facts
+ * panels stacked at full width paint most of a wide window as label gutter.
+ * Two across when three do not fit, with the third taking the whole row --
+ * `auto-fit` left it alone in half a row, beside half a window of nothing. */
+.os-nexus-procedure-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.os-nexus-procedure-grid > .os-panel {
+  min-width: 0;
+}
+@container os-nexus-procedure (max-width: 1000px) {
+  .os-nexus-procedure-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .os-nexus-procedure-grid > .os-panel:last-child {
+    grid-column: 1 / -1;
+  }
+}
+@container os-nexus-procedure (max-width: 620px) {
+  .os-nexus-procedure-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.os-nexus-procedure-lines {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+  min-width: 0;
+}
+.os-nexus-procedure-lines > .os-copyvalue {
+  max-width: 100%;
+}
+.os-nexus-procedure-when {
+  color: var(--os-muted);
+  font-size: var(--os-text-sm);
+  white-space: nowrap;
+}
+.os-nexus-procedure-nowrap {
+  white-space: nowrap;
+}
+/* The preconditions' two groups: what a replay checks, and what it only
+ * records. A quiet name over each, because which list a line is in IS the
+ * fact -- a gate or not a gate. */
+.os-nexus-procedure-group {
+  display: grid;
+  gap: 6px;
+}
+.os-nexus-procedure-group + .os-nexus-procedure-group {
+  padding-top: 10px;
+  border-top: 1px solid var(--os-line);
+}
+.os-nexus-procedure-group-name {
+  margin: 0;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+/* One label column across both groups, so the values line up down the panel
+ * rather than each group settling its own. */
+.os-nexus-procedure-group .os-facts {
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  margin: 0;
+}
+
+/* ---- the ladder ---------------------------------------------------------
+ *
+ * FOUR RUNGS DRAWN AS A STAIR. Each rung's tread sits one rise above the last,
+ * joined by a riser, so the thing reads as climbing before a word is read. The
+ * part the procedure has climbed is solid accent; the rest is a dashed rail --
+ * a way still to be walked, not a broken line. The rung it stands on is a
+ * filled mark with a held ring and its state in words beneath it: never a
+ * pulse, because standing still on a rung is not activity. A promotion waiting
+ * on the person holds the ring on the PLATE ground instead -- the rail's own
+ * "waiting on you" mark -- so the one real event on the page reads as one.
+ *
+ * The names stay on one baseline under the stair, so the four columns read as
+ * text; only the rail rises. Below 640px of its width the stair turns
+ * upright, highest rung on top, and the DOM order -- lowest first -- is what a
+ * screen reader walks either way.
+ */
+/* The frame is the container, not the ladder: a container query cannot style
+ * the container itself, and upright the ladder's own grid changes shape. */
+.os-nexus-ladder-frame {
+  container: os-nexus-ladder / inline-size;
+}
+.os-nexus-ladder {
+  --ladder-mark: 20px;
+  --ladder-rise: 14px;
+  --ladder-gap: 18px;
+  --ladder-rail: calc(var(--ladder-rise) * 3 + var(--ladder-mark));
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  column-gap: var(--ladder-gap);
+  row-gap: 16px;
+  padding: 4px 2px 2px;
+}
+.os-nexus-ladder-rungs {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  column-gap: var(--ladder-gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.os-nexus-ladder-rung {
+  --y: calc(var(--ladder-rise) * (3 - var(--os-ladder-step)) + var(--ladder-mark) / 2);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding-top: calc(var(--ladder-rail) + 12px);
+}
+.os-nexus-ladder-mark {
+  position: absolute;
+  left: 0;
+  top: calc(var(--y) - var(--ladder-mark) / 2);
+  z-index: 1;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  width: var(--ladder-mark);
+  height: var(--ladder-mark);
+  border: 1.5px solid var(--os-rail);
+  border-radius: 50%;
+  background: var(--os-plate);
+  color: var(--os-accent);
+}
+.os-nexus-ladder-tread {
+  position: absolute;
+  left: calc(var(--ladder-mark) / 2);
+  top: calc(var(--y) - 1px);
+  width: calc(100% + var(--ladder-gap));
+  height: 0;
+  border-top: 2px dashed var(--os-rail);
+}
+.os-nexus-ladder-rung:last-child .os-nexus-ladder-tread {
+  width: calc(100% - var(--ladder-mark) / 2);
+}
+.os-nexus-ladder-riser {
+  position: absolute;
+  left: calc(var(--ladder-mark) / 2 - 1px);
+  top: var(--y);
+  width: 0;
+  height: var(--ladder-rise);
+  border-left: 2px dashed var(--os-rail);
+}
+.os-nexus-ladder-name {
+  font-size: var(--os-text-md);
+  font-weight: 600;
+  color: var(--os-ink);
+}
+.os-nexus-ladder-now {
+  margin-top: 5px;
+  font-size: var(--os-text-sm);
+  font-weight: 600;
+  color: var(--os-accent);
+}
+
+/* Climbed: every tread below the rung it stands on, and every riser up to it. */
+.os-nexus-ladder-rung[data-state="passed"] .os-nexus-ladder-tread {
+  border-top-style: solid;
+  border-top-color: var(--os-accent);
+}
+.os-nexus-ladder-rung:is([data-state="passed"], [data-state="current"]) .os-nexus-ladder-riser {
+  border-left-style: solid;
+  border-left-color: var(--os-accent);
+}
+/* The top rung has nowhere further to climb: standing on it IS the landing. */
+.os-nexus-ladder-rung[data-state="current"]:last-child .os-nexus-ladder-tread {
+  border-top-style: solid;
+  border-top-color: var(--os-accent);
+}
+.os-nexus-ladder-rung[data-state="passed"] .os-nexus-ladder-mark {
+  border-color: var(--os-accent);
+  background: color-mix(in srgb, var(--os-accent) 16%, var(--os-plate));
+}
+.os-nexus-ladder-rung[data-state="current"] .os-nexus-ladder-mark {
+  border-color: var(--os-accent);
+  background: var(--os-accent);
+  box-shadow: 0 0 0 5px var(--os-accent-soft);
+}
+.os-nexus-ladder[data-waiting] .os-nexus-ladder-rung[data-state="current"] .os-nexus-ladder-mark {
+  border-width: 2px;
+  background: var(--os-plate);
+}
+.os-nexus-ladder-rung[data-state="ahead"] .os-nexus-ladder-name {
+  font-weight: 500;
+  color: var(--os-muted);
+}
+
+/* ---- what moves it: the evidence under the rung it stands on ---- */
+/* It HANGS from the current rung -- the same left edge as that rung's mark,
+ * with the accent thread down it -- so the counts read as that rung's, not
+ * as a caption for the whole ladder. At least two columns wide, so the top
+ * rung's sentence is not wrapped into a quarter of the panel. */
+.os-nexus-ladder-evidence {
+  container: os-nexus-evidence / inline-size;
+  grid-column: var(--os-ladder-from, 1) / -1;
+  display: grid;
+  gap: 10px;
+  margin-left: calc(var(--ladder-mark) / 2 - 1px);
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid var(--os-accent);
+  min-width: 0;
+}
+/* ONE GRID FOR EVERY COUNT. Each row is a subgrid of the list, so the marks
+ * start at one x and the figures at another, and the columns pack to the
+ * rung's side instead of spreading the figure across the panel -- a figure
+ * half a panel from its marks reads as some other count. Where subgrid is
+ * unknown the second declaration drops and each row keeps its own columns. */
+.os-nexus-ladder-counts {
+  display: grid;
+  grid-template-columns: fit-content(13rem) auto max-content;
+  justify-content: start;
+  column-gap: 14px;
+  row-gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.os-nexus-ladder-counts > li {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+/* The figure never gives way -- "2 of 5" cut to "2 c" is a different number
+ * -- so it is the LABEL that yields, to an ellipsis, and below a width where
+ * even that is cramped the row stacks: its name, then the marks and figure. */
+.os-nexus-ladder-count {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: fit-content(13rem) auto max-content;
+  grid-template-columns: subgrid;
+  justify-content: start;
+  align-items: center;
+  column-gap: 14px;
+  font-size: var(--os-text-sm);
+}
+/* Stacked, each count is its own two lines -- the name, then the marks with
+ * the figure right beside them. A grid would size its columns to the NAME
+ * spanning them and push the figure off its marks. */
+@container os-nexus-evidence (max-width: 380px) {
+  .os-nexus-ladder-counts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .os-nexus-ladder-count {
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .os-nexus-ladder-count-label {
+    flex: 0 0 100%;
+  }
+  .os-nexus-ladder-evidence[data-side="left"] .os-nexus-ladder-count {
+    justify-content: flex-end;
+  }
+}
+.os-nexus-ladder-count-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--os-muted);
+}
+.os-nexus-ladder-pips {
+  display: inline-flex;
+  gap: 4px;
+}
+.os-nexus-ladder-pip {
+  box-sizing: border-box;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--os-rail);
+  border-radius: 3px;
+}
+.os-nexus-ladder-pip[data-on] {
+  border-color: var(--os-accent);
+  background: var(--os-accent);
+}
+.os-nexus-ladder-count-figure {
+  font-variant-numeric: tabular-nums;
+  color: var(--os-ink);
+  white-space: nowrap;
+}
+/* A count that moves a procedure DOWN is the one place the warning ink
+ * appears, and only once it has moved at all. */
+.os-nexus-ladder-count[data-tone="fall"] .os-nexus-ladder-pip[data-on] {
+  border-color: var(--os-warn);
+  background: var(--os-warn);
+}
+.os-nexus-ladder-count[data-tone="fall"] .os-nexus-ladder-count-figure {
+  color: var(--os-warn);
+}
+.os-nexus-ladder-aside {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+.os-nexus-ladder-next {
+  margin: 0;
+  max-width: 62ch;
+  font-size: var(--os-text-base);
+  line-height: 1.5;
+  color: var(--os-ink);
+}
+.os-nexus-ladder[data-waiting] .os-nexus-ladder-next {
+  font-weight: 600;
+  color: var(--os-accent);
+}
+/* THE TOP RUNG HANGS ITS EVIDENCE TO THE LEFT. Its column is the last one, so
+ * the block ends at its mark instead of starting there: two columns wide, the
+ * thread on its right edge, dropping from the trusted mark itself. */
+.os-nexus-ladder-evidence[data-side="left"] {
+  grid-column: 2 / 4;
+  justify-items: end;
+  margin-left: 0;
+  margin-right: calc(-1 * (var(--ladder-gap) + var(--ladder-mark) / 2 + 1px));
+  padding: 2px 16px 2px 0;
+  border-left: 0;
+  border-right: 2px solid var(--os-accent);
+  text-align: right;
+}
+.os-nexus-ladder-evidence[data-side="left"] :is(.os-nexus-ladder-counts, .os-nexus-ladder-count) {
+  justify-content: end;
+}
+
+/* Retired, or never on it: a quiet account where the ladder would be. */
+.os-nexus-ladder-off {
+  display: grid;
+  gap: 6px;
+}
+.os-nexus-ladder-off-line {
+  margin: 0;
+  font-size: var(--os-text-md);
+  color: var(--os-ink);
+}
+.os-nexus-ladder-off .os-caption {
+  margin: 0;
+  max-width: 70ch;
+}
+
+@container os-nexus-ladder (max-width: 640px) {
+  .os-nexus-ladder {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .os-nexus-ladder-rungs {
+    display: flex;
+    flex-direction: column-reverse;
+  }
+  /* Highest rung on top: the DOM's FIRST rung is the one drawn last, so it is
+   * the one that carries no space beneath it. */
+  .os-nexus-ladder-rung {
+    padding: 0 0 18px calc(var(--ladder-mark) + 14px);
+  }
+  .os-nexus-ladder-rung:first-child {
+    padding-bottom: 0;
+  }
+  .os-nexus-ladder-mark {
+    top: 0;
+  }
+  .os-nexus-ladder-tread {
+    display: none;
+  }
+  /* Upright, a riser runs from a rung's mark DOWN to the rung below it. */
+  .os-nexus-ladder-riser {
+    top: calc(var(--ladder-mark) / 2);
+    height: 100%;
+  }
+  .os-nexus-ladder-evidence,
+  .os-nexus-ladder-evidence[data-side="left"] {
+    grid-column: 1 / -1;
+    justify-items: stretch;
+    margin: 0 0 0 calc(var(--ladder-mark) / 2 - 1px);
+    padding: 2px 0 2px 16px;
+    border-right: 0;
+    border-left: 2px solid var(--os-accent);
+    text-align: left;
+  }
+  /* The name on its own line, then the marks with their figure beside them:
+   * a figure a line away from its marks reads as a different count. */
+  .os-nexus-ladder-counts,
+  .os-nexus-ladder-evidence[data-side="left"] .os-nexus-ladder-counts {
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-content: stretch;
+  }
+  .os-nexus-ladder-count,
+  .os-nexus-ladder-evidence[data-side="left"] .os-nexus-ladder-count {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: subgrid;
+    justify-content: stretch;
+    row-gap: 4px;
+  }
+  .os-nexus-ladder-count-label {
+    grid-column: 1 / -1;
+  }
+}
+/* UPRIGHT, THE EVIDENCE HANGS UNDER ITS OWN RUNG, not under the ladder's
+ * foot, where it would read as the bottom rung's. The rungs and the evidence
+ * share five rows -- the list a subgrid of them -- and each takes the row the
+ * page computed; the rail runs on through the evidence's thread to the rung
+ * below. Where subgrid is unknown the evidence stays under the whole ladder. */
+@supports (grid-template-rows: subgrid) {
+  @container os-nexus-ladder (max-width: 640px) {
+    .os-nexus-ladder {
+      grid-template-rows: repeat(5, auto);
+      row-gap: 0;
+    }
+    .os-nexus-ladder-rungs {
+      grid-row: 1 / -1;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: subgrid;
+    }
+    .os-nexus-ladder-rung {
+      grid-row: var(--os-ladder-row);
+    }
+    /* Standing on the bottom rung, the evidence is the foot: room above it. */
+    .os-nexus-ladder-rung:first-child[data-state="current"] {
+      padding-bottom: 18px;
+    }
+    .os-nexus-ladder-evidence,
+    .os-nexus-ladder-evidence[data-side="left"] {
+      grid-row: var(--os-ladder-evidence-row);
+      padding-left: calc(var(--ladder-mark) / 2 + 13px);
+    }
+    .os-nexus-ladder-evidence[data-rungs-below] {
+      padding-bottom: 18px;
+    }
+  }
+}
+
+/* ---- the steps ---------------------------------------------------------- */
+/* A NUMBERED LIST BECAUSE IT IS A SEQUENCE: the steps run in this order, and
+ * the number is the one a divergence names ("it stopped at step 3"). */
+.os-nexus-procedure-steps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.os-nexus-procedure-step {
+  display: grid;
+  grid-template-columns: 1.25rem 3.75rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--os-line);
+}
+.os-nexus-procedure-step:first-child {
+  border-top: 0;
+  padding-top: 2px;
+}
+.os-nexus-procedure-step-n {
+  text-align: right;
+  font-size: var(--os-text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--os-muted);
+}
+.os-nexus-procedure-step-tool {
+  font-size: var(--os-text-base);
+  font-weight: 600;
+  color: var(--os-ink);
+}
+.os-nexus-procedure-step-args {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.os-nexus-procedure-arg {
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-sm);
+  line-height: 1.75;
+  color: var(--os-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* A value that changes goal to goal is a chip IN the line, on its baseline. */
+.os-nexus-procedure-arg .os-chip {
+  margin: 0 1px;
+  vertical-align: baseline;
+  line-height: 1.45;
+}
+.os-nexus-procedure-arg-rest {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.os-nexus-procedure-arg-key {
+  flex: none;
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+}
+/* The rest of the arguments are secondary -- a file's whole content can be an
+ * argument -- so they clamp to two lines rather than taking the page. */
+.os-nexus-procedure-arg-rest .os-nexus-procedure-arg {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  color: var(--os-muted);
+}
+
+/* ---- the merged list ------------------------------------------------------ */
+/* The one line a learned row says about where it stands. A promotion waiting
+ * on the person is the one real event, and the only line in the accent. */
+.os-nexus-evidence-line[data-tone="waiting"] {
+  font-weight: 600;
+  color: var(--os-accent);
+}
+.os-nexus-evidence-line[data-tone="fall"] {
+  color: var(--os-warn);
+}
+.os-nexus-procedure-fresh {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  white-space: nowrap;
+}
+/* A sentence keeps a sentence's measure (rule 9): the list takes the window,
+ * the captions under it do not. */
+.os-nexus-automations .os-caption {
+  max-width: 90ch;
+}
+/* Record rows draw their own hairline; the live list's row gap would put a
+ * sliver of page between every pair of them (the Cluster Mesh list's rule). */
+.os-nexus-automations .os-livelist-rows {
+  gap: 0;
+}
+/* THE LIST SCROLLS IN ITS OWN COLUMN (rule 11). In a wrapping split a flex
+ * line is as tall as its tallest item, so a long list -- or a short one made
+ * tall by the detail beside it in a narrow window -- grew past the window and
+ * ran under the action bar, its rows painting over the bar's own words. The
+ * aside was already bounded this way; the list was not. */
+.os-nexus-automations .os-nexus-column {
+  max-height: 100%;
+}
+/* An authored automation's detail stands BESIDE the list, and the row it
+ * belongs to says so in the shell's one selection language: the record row's
+ * own `[data-open]` plate and inset accent edge, exactly as Approvals and
+ * every other record list draw it. No selection of its own here. */
+
+/* ---- Settings -> Procedures ------------------------------------------------ */
+.os-settings-procedures {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.os-settings-procedures-absent {
+  margin: 0;
+  font-size: var(--os-text-base);
+  color: var(--os-ink);
+}
+.os-settings-procedures .os-record-heading {
+  min-height: 0;
+}

@@ -2739,6 +2739,24 @@ gate in the HANDLER. `component/procedure/reference` is a research harness
 (D6), never product: skipped when `python3` is absent, with a deliberately
 wrong reference committed so the harness can be shown to fail.
 
+**Certification and replay (epic memql#5408)** put a learned procedure on a
+ladder -- candidate, shadow, canary, trusted, retired -- decided by pure
+functions in `component/work` (`Advance`, `DecideServe`, `Compare`) over the
+seeded `v1:authoring:ladderPolicy:primary` row. Three rules reach outside it:
+
+- **A person approves once, and only the ladder writes the ladder.** Shadow to
+  canary is one `procedurePromotion` approval pinned to `procedureHash`; the
+  ladder fields are written with internal origin only, held against a raw
+  write by `component/memql/construct_ladder_write_guard.go`.
+- **A replay run is never a recording** (`triggeredBy: procedure:<mode>`): the
+  learner skips it, and stale-run recovery leaves it to the replay runner.
+  A recording inherits the goal's input WITHOUT the replay's own variable --
+  `component/work.GoalInput` is the one strip, used by both recording writers.
+- **A parameter is a value, never code.** `component/procedure.Materialize`
+  writes a recorded command back byte for byte and a parameter as one quoted
+  word; a version whose parameter would be code stays a candidate
+  (`ReplayRisks`). [learned-procedures.md](docs/public/operate/learned-procedures.md).
+
 ### Planner / Knowledge / Validation
 
 The schema is stable, so new features add fields/automations without migrations.

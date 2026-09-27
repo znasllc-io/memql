@@ -1,6 +1,9 @@
 package procedure
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestNodeEqual_IsStructuralAndOrderIndependentForObjects(t *testing.T) {
 	a := Obj(map[string]*Node{"b": Lit("2"), "a": Lit("1")})
@@ -92,5 +95,27 @@ func TestCloneCopiesTheForm(t *testing.T) {
 	c := n.Clone()
 	if c.Form != FormJSON || c.Kids[0].Form != FormArgv {
 		t.Fatalf("Clone lost a Form: root %q, child %q", c.Form, c.Kids[0].Form)
+	}
+}
+
+// TestRawAndSepsAreIgnoredByEqualAndCopiedByClone: the spelling of a command
+// is a rendering hint, like LitType and Form. Two recordings of one argument
+// spelled differently are the same argument, and a Clone that dropped the
+// spelling would replay a command nobody recorded.
+func TestRawAndSepsAreIgnoredByEqualAndCopiedByClone(t *testing.T) {
+	a := Arr(&Node{Kind: KindLit, Lit: "a b", Raw: `"a b"`})
+	a.Form, a.Seps = FormArgv, []string{"", " "}
+	b := Arr(&Node{Kind: KindLit, Lit: "a b", Raw: `'a b'`})
+	b.Form, b.Seps = FormArgv, []string{"  ", ""}
+	if !a.Equal(b) {
+		t.Fatal("two spellings of one argument must be Equal")
+	}
+	c := a.Clone()
+	if c.Kids[0].Raw != `"a b"` || !reflect.DeepEqual(c.Seps, a.Seps) {
+		t.Fatalf("Clone lost the spelling: %+v / %q", *c.Kids[0], c.Seps)
+	}
+	c.Seps[0] = "changed"
+	if a.Seps[0] != "" {
+		t.Fatal("Clone shares its separators with the original")
 	}
 }

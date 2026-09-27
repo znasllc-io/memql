@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,23 +46,35 @@ func Bind(t Template, stepIndex int, a Action) (map[string]string, bool) {
 // take EVERY step: a recording that took only some of them did something else,
 // and comparing the procedure against it would measure the wrong run.
 func BindInstance(t Template, instance []Action) (map[string]string, bool) {
-	if len(instance) != len(t.Steps) {
-		return nil, false
-	}
+	out, _, ok := bindInstanceAt(t, instance)
+	return out, ok
+}
+
+// bindInstanceAt is BindInstance, answering -- when the instance does not
+// bind -- the first step it did not fit: where its steps and the template's
+// stop agreeing in number, or the step whose arguments did not bind, or the
+// step that bound a hole to a second value.
+func bindInstanceAt(t Template, instance []Action) (map[string]string, int, bool) {
 	out := map[string]string{}
 	for i := range t.Steps {
+		if i >= len(instance) {
+			return nil, i, false
+		}
 		b, ok := Bind(t, i, instance[i])
 		if !ok {
-			return nil, false
+			return nil, i, false
 		}
 		for id, v := range b {
 			if prev, seen := out[id]; seen && prev != v {
-				return nil, false
+				return nil, i, false
 			}
 			out[id] = v
 		}
 	}
-	return out, true
+	if len(instance) != len(t.Steps) {
+		return nil, len(t.Steps), false
+	}
+	return out, 0, true
 }
 
 // bindNode walks the template and the instance together. Structure must agree
@@ -95,7 +108,9 @@ func bindNode(tmpl, inst *Node, out map[string]string) bool {
 		}
 		return true
 	case KindArray:
-		if inst.Kind != KindArray || len(inst.Kids) != len(tmpl.Kids) {
+		// A path's root is meaning: a template learned from /tmp/x/... does
+		// not fit a recording that wrote tmp/x/..., whatever the segments.
+		if inst.Kind != KindArray || len(inst.Kids) != len(tmpl.Kids) || rootednessDiffers(tmpl, inst) {
 			return false
 		}
 		for i := range tmpl.Kids {
@@ -119,13 +134,16 @@ func bindNode(tmpl, inst *Node, out map[string]string) bool {
 //
 // What round-trips, and how exactly:
 //
-//   - a scalar, a path and an argument vector: byte for byte;
-//   - a command line: as the same ARGUMENTS -- splitArgv reads the output back
-//     as the recorded tree -- but not the same quoting, which the tree never
-//     kept;
+//   - a scalar, a path and an argument vector: byte for byte -- a shell's
+//     script inside a vector is a command line, written back as below;
+//   - a command line: byte for byte, as long as the template holds it whole
+//     -- every argument its recorded spelling (Node.Raw), the text between
+//     them the recorded separators (Node.Seps). A parameter is written as one
+//     quoted word, and a payload from before the spellings is re-quoted
+//     argument by argument and joined by single spaces, as it always was;
 //   - a JSON document: as the same document, keys sorted and compact, numbers
 //     exactly as recorded and nothing HTML-escaped; its original layout was
-//     never kept either.
+//     never kept.
 func Materialize(n *Node, values map[string]string) (any, error) {
 	return materialize(n, values, false)
 }
@@ -168,15 +186,11 @@ func materialize(n *Node, values map[string]string, inJSON bool) (any, error) {
 	case KindArray:
 		switch n.Form {
 		case FormArgv:
-			words, err := spelledElements(n, values)
-			if err != nil {
+			return materializeArgv(n, values)
+		case FormPath, FormRootedPath:
+			if err := checkSegmentHoles(n, values); err != nil {
 				return nil, err
 			}
-			for i, w := range words {
-				words[i] = shellQuote(w)
-			}
-			return strings.Join(words, " "), nil
-		case FormPath, FormRootedPath:
 			segs, err := spelledElements(n, values)
 			if err != nil {
 				return nil, err
@@ -260,10 +274,81 @@ func scalarValue(s, litType string, inJSON bool) (any, error) {
 	}
 }
 
-// spelledElements is an argv's arguments or a path's segments as strings. An
-// element is a literal (taken verbatim, whatever its recorded type: an
-// argument is text) or a hole (its binding, verbatim). A structured element
-// is allowed only when it materializes to a string itself.
+// materializeArgv writes a command line back as the ONE string a shell runs.
+//
+// An argument the recording spelled is written AS it was spelled: the shell
+// is handed what it was handed then, `"$HOME/My Docs"` still expanding and
+// `"\d+"` still keeping its backslash. Re-quoting the value instead -- the
+// only thing the tree used to keep -- single-quotes whatever holds a space,
+// which turns every expansion into literal text, and a trusted procedure
+// then runs a different command that still exits 0. A PARAMETER is the
+// opposite case: its value came from a goal, not from a recording, and it is
+// written as one literal word (strictQuote) -- whatever it holds, the program
+// receives exactly it as one argument. The separators, when the template kept
+// its first recording's, go back between the words; without them the words
+// are joined by single spaces.
+//
+// Nothing written here can disagree with the tree: a spelling that does not
+// read back as its own value, or separators that are not whitespace between
+// the arguments, are refused, because the tree is what a person approved and
+// what the replay's input check reads -- and a spelling it does not describe
+// would run unseen.
+func materializeArgv(n *Node, values map[string]string) (string, error) {
+	words := make([]string, len(n.Kids))
+	for i, k := range n.Kids {
+		switch {
+		case k == nil:
+			return "", fmt.Errorf("procedure: element %d of a command line is missing", i)
+		case k.Kind == KindLit && k.Raw != "":
+			if !spelledAs(k.Raw, k.Lit) {
+				return "", fmt.Errorf("procedure: element %d of a command line is spelled %q, which does not read back as its value %q", i, k.Raw, k.Lit)
+			}
+			words[i] = k.Raw
+		case k.Kind == KindLit:
+			// A payload from before the spellings: the lenient rule it was
+			// written with, which keeps a recorded operator an operator.
+			words[i] = shellQuote(k.Lit)
+		case k.Kind == KindHole:
+			v, err := holeValue(k, values)
+			if err != nil {
+				return "", err
+			}
+			if strings.IndexByte(v, 0) >= 0 {
+				return "", fmt.Errorf("procedure: hole %s holds a NUL byte, which no argument of a command line can carry", k.HoleId)
+			}
+			words[i] = strictQuote(v)
+		default:
+			return "", fmt.Errorf("procedure: element %d of a command line is a%s %s node, and only a literal or a parameter can be written into one",
+				i, articleN(kindNames[k.Kind]), kindNames[k.Kind])
+		}
+	}
+	if n.Seps == nil {
+		return strings.Join(words, " "), nil
+	}
+	if err := checkSeps(n.Seps, len(n.Kids)); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	b.WriteString(n.Seps[0])
+	for i, w := range words {
+		b.WriteString(w)
+		b.WriteString(n.Seps[i+1])
+	}
+	return b.String(), nil
+}
+
+// articleN is the "n" of "an" before a word that starts with a vowel.
+func articleN(word string) string {
+	if word != "" && strings.ContainsRune("aeiou", rune(word[0])) {
+		return "n"
+	}
+	return ""
+}
+
+// spelledElements is a path's segments as strings. An element is a literal
+// (taken verbatim, whatever its recorded type: a segment is text) or a hole
+// (its binding, verbatim). A structured element is allowed only when it
+// materializes to a string itself.
 func spelledElements(n *Node, values map[string]string) ([]string, error) {
 	out := make([]string, len(n.Kids))
 	for i, k := range n.Kids {
@@ -293,24 +378,84 @@ func spelledElements(n *Node, values map[string]string) ([]string, error) {
 	return out, nil
 }
 
-// shellQuote writes one argument so splitArgv reads it back unchanged: an
-// argument containing whitespace, a quote or a backslash, or an empty one, is
-// wrapped in single quotes, each single quote inside it closing the quoting,
-// escaped with a backslash, and reopening it; anything else is bare.
+// shellQuote is the LENIENT quoting rule, for a recorded argument that carries
+// no spelling -- a payload written before Node.Raw existed. It writes one
+// argument so splitArgv reads it back unchanged: an argument containing
+// whitespace, a quote or a backslash, or an empty one, is wrapped in single
+// quotes, each single quote inside it closing the quoting, escaped with a
+// backslash, and reopening it; anything else is bare.
 //
 // Bare is deliberate for everything else, and it has a price worth naming.
-// canonicalization kept the ARGUMENTS of a command line but not whether each
+// Such a payload kept the ARGUMENTS of a command line but not whether each
 // was quoted, so `>` in `echo hi > out.txt` and `|` in `grep "a|b"` are the
 // same kind of token to it. Bare keeps the first a redirect, which recordings
-// use constantly; it turns the second into a pipe. A command that changes
-// meaning this way fails its shadow comparison, and a procedure that never
-// matches the app is never promoted -- D15's ladder, not this function, is
-// what stands between that and a trusted replay.
+// use constantly; it turns the second into a pipe. Only a payload from before
+// the spellings is written this way: a recorded argument with a spelling is
+// written as spelled, and a parameter's value is never written with this rule
+// at all (strictQuote).
 func shellQuote(s string) string {
 	if s != "" && !strings.ContainsAny(s, `'"\`) && strings.IndexFunc(s, unicode.IsSpace) < 0 {
 		return s
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// strictSafeWord is a word no POSIX shell reads as anything but itself:
+// nothing that splits, quotes, expands, globs, redirects or ends a command.
+// It is the same set app/procedure_step_translation.go quotes an argument
+// VECTOR's elements with (procedureShellSafeWord) -- the two are one rule,
+// applied on the two sides of the dispatcher seam, and must stay one.
+var strictSafeWord = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+// strictQuote writes a PARAMETER's value into a command line as exactly one
+// literal argument. It is bare only when strictSafeWord matches; otherwise it
+// is single-quoted, each single quote inside closing the quoting, escaped and
+// reopened, and the empty value is written as two single quotes.
+//
+// It is not shellQuote, and the difference is the whole point. shellQuote is
+// the rule for a RECORDED argument whose spelling was not kept, where a bare
+// `>` was the author's redirect and must stay one. A parameter's value comes
+// from a goal: `x;rm${IFS}-rf${IFS}$HOME` must reach cp as one file name, not
+// reach the shell as a second command, and `$(id)`, a backtick, `R&D.txt`,
+// `*.txt`, `a|b` and `~/x` must each be one argument, unexpanded. What an
+// argument MEANS to the program -- an option, an absolute path, a parent
+// directory -- is a separate question, which CheckBindings answers against
+// what the recordings put there.
+//
+// A value holding a NUL has no spelling at all -- the command line would end
+// there -- and the caller refuses it, naming the parameter.
+func strictQuote(s string) string {
+	if strictSafeWord.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// checkSegmentHoles holds every parameter that is one SEGMENT of a path to
+// one segment: not empty, not `.` or `..`, no slash and no NUL. A path is
+// never read by a shell, so any other value is one file name however it is
+// spelled; but `..` climbs out of the directory every recording wrote into,
+// and a value holding a slash writes somewhere no recording named. Each is
+// refused naming the parameter.
+func checkSegmentHoles(n *Node, values map[string]string) error {
+	for _, k := range n.Kids {
+		if k == nil || k.Kind != KindHole {
+			continue
+		}
+		v, ok := values[k.HoleId]
+		if !ok {
+			continue // spelledElements refuses it, naming it
+		}
+		switch {
+		case v == "":
+			return fmt.Errorf("procedure: hole %s is one segment of a path and was given an empty one", k.HoleId)
+		case v == "." || v == "..":
+			return fmt.Errorf("procedure: hole %s is one segment of a path and was given %q, which names a directory rather than a file in it", k.HoleId, v)
+		case strings.ContainsAny(v, "/\x00"):
+			return fmt.Errorf("procedure: hole %s is one segment of a path and was given %q, which is not one segment", k.HoleId, v)
+		}
+	}
+	return nil
 }
 
 // encodeJSON is the re-encoding of a JSON document: keys sorted (encoding/json

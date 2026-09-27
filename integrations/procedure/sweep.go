@@ -118,6 +118,14 @@ func (i *Integration) sweepOwner(ctx context.Context, sweep, owner string, now t
 }
 
 // sweepOne re-evaluates one procedure and writes it only when it moved.
+//
+// THE PAGE ROW ONLY NOMINATES. It was read when the page was, and a replay or
+// a decision may have moved the construct since, so a procedure the page row
+// says would move is decided again from the construct read FRESH inside its
+// ladder lock (ladder.go, review finding C1) -- a demotion computed from a
+// stale row would overwrite a promotion made in between. A procedure the page
+// row says stays put takes no lock: the sweep passes every procedure in the
+// cluster every fifteen minutes.
 func (i *Integration) sweepOne(ctx context.Context, sweep, owner string, row map[string]any, policy work.LadderPolicy, now time.Time, res *SweepResult) {
 	state := ladderStateOf(row)
 	if state.Rung == work.RungNone || state.Rung == work.RungRetired {
@@ -125,20 +133,25 @@ func (i *Integration) sweepOne(ctx context.Context, sweep, owner string, row map
 		return
 	}
 	res.Examined++
-	ev := work.LadderEvent{Kind: work.EventSweep, At: now}
-	if sweep == SweepRetirement {
-		ev.LastUsedAt = lastUsed(state, row)
-	}
-	t := work.Advance(state, ev, policy)
-	switch {
-	case sweep == SweepDemotion && !t.Demoted:
-		return
-	case sweep == SweepRetirement && !t.Retired:
-		return
-	case !ladderMoved(state, t):
+	if _, moves := sweepTransition(sweep, state, row, policy, now); !moves {
 		return
 	}
 	constructId := str(row, "id")
+	fresh, release, err := i.lockedConstruct(ctx, owner, constructId)
+	if err != nil {
+		i.log().Warn("procedure: the ladder sweep could not re-read a procedure it would move", "constructId", constructId, "error", err)
+		res.Errors++
+		return
+	}
+	defer release()
+	state = ladderStateOf(fresh)
+	if state.Rung == work.RungNone || state.Rung == work.RungRetired {
+		return
+	}
+	t, moves := sweepTransition(sweep, state, fresh, policy, now)
+	if !moves {
+		return
+	}
 	if err := i.writeLadder(ctx, owner, constructId, t); err != nil {
 		i.log().Warn("procedure: the ladder sweep could not write a procedure", "constructId", constructId, "error", err)
 		res.Errors++
@@ -153,6 +166,25 @@ func (i *Integration) sweepOne(ctx context.Context, sweep, owner string, row map
 	}
 	i.log().Info("procedure: the ladder sweep moved a procedure",
 		"sweep", sweep, "constructId", constructId, "from", string(t.From), "to", string(t.To), "reason", t.Reason)
+}
+
+// sweepTransition is what one sweep does to one procedure's state, and
+// whether that is a move this sweep writes: the demotion sweep writes only a
+// demotion, the retirement sweep only a retirement, and neither a transition
+// that changes nothing.
+func sweepTransition(sweep string, state work.LadderState, row map[string]any, policy work.LadderPolicy, now time.Time) (work.Transition, bool) {
+	ev := work.LadderEvent{Kind: work.EventSweep, At: now}
+	if sweep == SweepRetirement {
+		ev.LastUsedAt = lastUsed(state, row)
+	}
+	t := work.Advance(state, ev, policy)
+	switch {
+	case sweep == SweepDemotion && !t.Demoted:
+		return t, false
+	case sweep == SweepRetirement && !t.Retired:
+		return t, false
+	}
+	return t, ladderMoved(state, t)
 }
 
 // lastUsed is when a procedure was last used: its last replay, or -- for one

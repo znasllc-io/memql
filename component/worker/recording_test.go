@@ -19,6 +19,8 @@ func TestStepTypeForToolCoversTheNormalizedNames(t *testing.T) {
 		"fs_write":   "fs_write",
 		"write":      "fs_write",
 		"edit":       "fs_write",
+		"multiedit":  "fs_write",
+		"MultiEdit":  "fs_write",
 		"fs_read":    "fs_read",
 		"read":       "fs_read",
 		"fetch":      "fetch",
@@ -30,6 +32,18 @@ func TestStepTypeForToolCoversTheNormalizedNames(t *testing.T) {
 	} {
 		if got := StepTypeForTool(tool); got != want {
 			t.Errorf("StepTypeForTool(%q) = %q, want %q", tool, got, want)
+		}
+	}
+}
+
+// TestAMultiEditIsAWriteLikeTheEditItIs: Claude Code's MultiEdit is an Edit
+// applied several times to one file, and a replay can only run it as the
+// write it is -- recorded as `exec`, its step names no command, and the
+// dispatcher's MultiEdit translation is never reached.
+func TestAMultiEditIsAWriteLikeTheEditItIs(t *testing.T) {
+	for _, tool := range []string{"Edit", "MultiEdit", "Write"} {
+		if got := StepTypeForTool(tool); got != StepTypeFSWrite {
+			t.Errorf("StepTypeForTool(%q) = %q, want %q", tool, got, StepTypeFSWrite)
 		}
 	}
 }

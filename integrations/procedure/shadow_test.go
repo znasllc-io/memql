@@ -308,3 +308,72 @@ func TestTheDispatcherSeesTheOwnersForwardedAuthorityOnTheShadowPath(t *testing.
 		}
 	}
 }
+
+// TestARecordingTheVersionWasLearnedFromIsNotEvidenceAboutIt: the recording
+// that created (or re-lifted) a version is part of that version's corpus. The
+// completion trigger never compares it -- the lift was not unchanged -- but a
+// second procedureLearnFromRun on the same run finds the lift unchanged and
+// would compare it, counting a recording toward the very procedure it taught.
+// The version's own recordedFrom names it, and it is not compared.
+func TestARecordingTheVersionWasLearnedFromIsNotEvidenceAboutIt(t *testing.T) {
+	rec := recording1("c.txt", testNow.Add(-10*time.Minute))
+	w := shadowWorld(t, rec)
+	w.withProcedure(t, func(p map[string]any) {
+		from, _ := p["recordedFrom"].(map[string]any)
+		from["runIds"] = append(from["runIds"].([]any), rec.runId)
+	})
+	outs, err := w.i.ShadowCompare(personCtx(testOwner), rec.runId)
+	if err != nil {
+		t.Fatalf("ShadowCompare: %v", err)
+	}
+	if len(outs) != 0 || len(w.d.recorded()) != 0 || len(w.eng.callsTo("recordConstructLadder")) != 0 {
+		t.Fatalf("a recording the version was learned from was compared with it: %+v", outs)
+	}
+
+	// The control: the same recording, not among the version's own, is.
+	control := shadowWorld(t, rec)
+	if outs, err := control.i.ShadowCompare(personCtx(testOwner), rec.runId); err != nil || len(outs) != 1 || !outs[0].Match {
+		t.Fatalf("the control compared %+v, %v -- so the refusal above proves nothing", outs, err)
+	}
+}
+
+// TestTheSeamsRunWithTheOriginOfTheCallTheyReplay (review finding M9): a
+// replay runs inside an automation, whose context carries INTERNAL origin --
+// and a replayed MCP tool call made under it could reach a @serverOnly
+// construct the recorded call, made by the app over MCP with client origin,
+// never could. The dispatcher and the prober are handed client origin, on the
+// served path and the shadow path alike; every row this package writes still
+// stamps internal origin itself.
+func TestTheSeamsRunWithTheOriginOfTheCallTheyReplay(t *testing.T) {
+	served := newReplayWorld(t, "trusted")
+	automation := auth.ContextWithInternalOrigin(auth.ContextWithForwardedAuthority(personCtx(replayOwner), auth.ForwardedAuthority{
+		Subject: replayOwner, CredentialClass: auth.ForwardedClassUser,
+	}))
+	if _, err := served.i.Replay(automation, ReplayRequest{OwnerUserId: replayOwner, ConstructId: served.constructId,
+		Mode: ReplayTrusted, GoalRunId: goalRunId, Input: map[string]any{"file": goalFile}}); err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+
+	rec := recording1("c.txt", testNow.Add(-10*time.Minute))
+	shadow := shadowWorld(t, rec)
+	if _, err := shadow.i.shadowCompareRun(auth.ContextWithInternalOrigin(personCtx(testOwner)), rec.runRow()); err != nil {
+		t.Fatalf("shadowCompareRun: %v", err)
+	}
+
+	for name, w := range map[string]*replayWorld{"served": served, "shadow": shadow} {
+		seen := append(append([]bool(nil), w.p.internal...), w.d.internal...)
+		if len(w.p.internal) != 1 || len(w.d.internal) != 2 {
+			t.Fatalf("%s: probes %d, dispatches %d", name, len(w.p.internal), len(w.d.internal))
+		}
+		for n, internal := range seen {
+			if internal {
+				t.Fatalf("%s: seam call %d ran under internal origin, which the call it replays never had", name, n)
+			}
+		}
+		for _, c := range w.eng.writes() {
+			if !c.Internal {
+				t.Fatalf("%s: %s was written without the internal-origin stamp", name, c.Name())
+			}
+		}
+	}
+}

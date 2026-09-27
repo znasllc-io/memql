@@ -26,6 +26,16 @@ import {
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import type { DecideApprovalState } from "./actions";
 import {
+  appWord,
+  procedureTitle,
+  promotionSubject,
+  promotionTargetWords,
+  PROCEDURE_PROMOTION,
+  type ProcedureRow,
+  type PromotionSubject,
+} from "./ladder";
+import { BindingCounts } from "./ProcedurePage";
+import {
   approvalFingerprint,
   approvalFromRow,
   approvalSubjectLine,
@@ -34,7 +44,14 @@ import {
   type ApprovalRow,
   type RunRow,
 } from "./rows";
-import { approvalKindMeaning, approvalKindWord, decisionWord } from "./words";
+import {
+  approvalDecidedNext,
+  approvalKindMeaning,
+  approvalKindWord,
+  approvalParksARun,
+  approvalRejectMeaning,
+  decisionWord,
+} from "./words";
 
 // APPROVALS: the inbox, and the reason this app exists at all.
 //
@@ -72,6 +89,13 @@ export interface ApprovalsSectionProps {
   selectedApprovalId: string;
   onSelectApproval: (approvalId: string) => void;
   onOpenRun: (runId: string) => void;
+  /**
+   * The learned procedures, so a promotion can name the procedure it would
+   * move -- and its parameters by the goal inputs that bind them. Empty until
+   * the catalog is read; the card then says what the approval itself carries.
+   */
+  procedures?: readonly ProcedureRow[];
+  onOpenProcedure?: (constructId: string) => void;
 }
 
 export function ApprovalsSection({
@@ -81,6 +105,8 @@ export function ApprovalsSection({
   selectedApprovalId,
   onSelectApproval,
   onOpenRun,
+  procedures = [],
+  onOpenProcedure,
 }: ApprovalsSectionProps) {
   const [search, setSearch] = useState("");
   const [choice, setChoice] = useState("");
@@ -152,17 +178,21 @@ export function ApprovalsSection({
         });
       }
     } else {
+      const labels = decisionLabels(selected);
+      // A DECIDED PROMOTION MOVES THE LADDER ON ITS OWN: the procedure is a
+      // feed, so its page and its row follow the answer without a re-read.
+      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision);
       acts.push({
-        label: "Reject",
+        label: labels.reject,
         busy: decide.deciding === idTail(selected.id),
-        ariaLabel: "Reject this: the step fails and the run does not do it",
-        onAct: () => void decide.decide(selected.id, "rejected"),
+        ariaLabel: `${labels.reject === "Reject" ? "Reject this" : labels.reject}: ${approvalRejectMeaning(selected.kind)}`,
+        onAct: () => decideIt("rejected"),
       });
       acts.push({
-        label: "Approve",
+        label: labels.approve,
         tone: "primary",
         busy: decide.deciding === idTail(selected.id),
-        onAct: () => void decide.decide(selected.id, "approved"),
+        onAct: () => decideIt("approved"),
       });
     }
   }
@@ -223,6 +253,8 @@ export function ApprovalsSection({
               freeText={freeText}
               onFreeText={setFreeText}
               onOpenRun={onOpenRun}
+              procedures={procedures}
+              onOpenProcedure={onOpenProcedure}
             />
           </div>
         )}
@@ -240,7 +272,10 @@ export function ApprovalsSection({
               ? hasOptions
                 ? "pick an answer above to send it"
                 : "write an answer above to send it"
-              : approvalKindMeaning(selected.kind)
+              : selected.kind === PROCEDURE_PROMOTION
+                ? // SAID ONCE: a promotion's question already says what it does.
+                  undefined
+                : approvalKindMeaning(selected.kind)
           }
           tone={selected.decision === "" ? "paused" : "none"}
           acts={acts}
@@ -311,7 +346,7 @@ function ApprovalLine({
       dim={approval.decision !== "" || lapsed}
       state={approvalKindWord(approval.kind)}
       stateTitle={approvalKindMeaning(approval.kind)}
-      secondary={run === null ? "a run" : runTitle(run)}
+      secondary={approvalContext(approval, run)}
       stateExtra={
         <>
           {lapsed ? <Chip tone="muted">lapsed</Chip> : null}
@@ -320,8 +355,7 @@ function ApprovalLine({
           </span>
         </>
       }
-    >
-    </KitRow>
+    />
   );
 }
 
@@ -333,6 +367,8 @@ function ApprovalDetail({
   freeText,
   onFreeText,
   onOpenRun,
+  procedures,
+  onOpenProcedure,
 }: {
   approval: ApprovalRow;
   run: RunRow | null;
@@ -341,23 +377,38 @@ function ApprovalDetail({
   freeText: string;
   onFreeText: (next: string) => void;
   onOpenRun: (runId: string) => void;
+  procedures: readonly ProcedureRow[];
+  onOpenProcedure?: (constructId: string) => void;
 }) {
   const isFeedback = approval.kind === "feedback";
   const shutDoors = doorsFromSubject(approval);
+  const promotion = promotionSubject(approval);
+  // The procedure a promotion names, once the catalog holds it -- which is
+  // what lets the card call its parameters by their goal inputs and compare
+  // the version proposed with the version in the catalog now.
+  const promoted =
+    promotion === null || promotion.constructId === ""
+      ? null
+      : (procedures.find((p) => idTail(p.id) === idTail(promotion.constructId)) ?? null);
   // The door report has its OWN panel below, so it is kept out of the generic
   // key/value dump -- where it would render as one line of JSON.stringify and
   // tell a reader nothing they could act on. A generic renderer over a
   // structured subject is how a human gate becomes invisible while remaining
-  // technically present.
-  const subjectEntries = Object.entries(approval.subject ?? {}).filter(
-    ([key]) => shutDoors === null || (key !== "doors" && key !== "code"),
-  );
+  // technically present. A promotion's subject is the same case: it has a
+  // panel of its own, so none of it is dumped here.
+  const subjectEntries =
+    promotion !== null
+      ? []
+      : Object.entries(approval.subject ?? {}).filter(
+          ([key]) => shutDoors === null || (key !== "doors" && key !== "code"),
+        );
 
   return (
     <>
       <Panel label="What is being asked">
         <p className="os-nexus-approval-ask">{approvalSubjectLine(approval)}</p>
-        <Caption>{approvalKindMeaning(approval.kind)}</Caption>
+        {/* SAID ONCE: a promotion's question already says what promoting does. */}
+        {approval.kind === PROCEDURE_PROMOTION ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
 
         {isFeedback ? (
           approval.options.length > 0 ? (
@@ -392,6 +443,15 @@ function ApprovalDetail({
           )
         ) : null}
       </Panel>
+
+      {promotion === null ? null : (
+        <PromotionPanel
+          approval={approval}
+          subject={promotion}
+          procedure={promoted}
+          onOpenProcedure={onOpenProcedure}
+        />
+      )}
 
       {shutDoors === null ? null : (
         <Panel label="Which doors were shut">
@@ -435,40 +495,51 @@ function ApprovalDetail({
       {/* THE EVIDENCE, VERBATIM AND IN THE DATA VOICE. This is the classifier's
           own account of why the run stopped rather than carrying on, and the
           rule id is where somebody goes to change the policy. A paraphrase
-          would be this window's opinion about a decision the engine made. */}
-      <Panel label="Why you were asked">
-        <Subhead>The classifier's evidence</Subhead>
-        <Facts>
-          <Fact label="Tier" value={approval.evidenceTier} mono />
-          <Fact label="Reason" value={approval.evidenceReason} />
-          <Fact label="Rule" value={approval.evidenceRuleId} mono />
-          <Fact label="Source" value={approval.evidenceSource} mono />
-        </Facts>
-        {approval.evidenceTier === "" &&
-        approval.evidenceReason === "" &&
-        approval.evidenceRuleId === "" ? (
-          <Caption>
-            No evidence was recorded with this one. That is a fact about the row rather than about
-            the decision -- it does not mean the gate fired for no reason.
-          </Caption>
-        ) : null}
-      </Panel>
+          would be this window's opinion about a decision the engine made.
+          SAID ONCE on a promotion: "What you are promoting" carries its
+          evidence -- the matches and the bindings the ladder counted -- and
+          the generic panel would repeat the same reason in the data voice. */}
+      {approval.kind === PROCEDURE_PROMOTION ? null : (
+        <Panel label="Why you were asked">
+          <Subhead>The classifier's evidence</Subhead>
+          <Facts>
+            <Fact label="Tier" value={approval.evidenceTier} mono />
+            <Fact label="Reason" value={approval.evidenceReason} />
+            <Fact label="Rule" value={approval.evidenceRuleId} mono />
+            <Fact label="Source" value={approval.evidenceSource} mono />
+          </Facts>
+          {approval.evidenceTier === "" &&
+          approval.evidenceReason === "" &&
+          approval.evidenceRuleId === "" ? (
+            <Caption>
+              No evidence was recorded with this one. That is a fact about the row rather than about
+              the decision -- it does not mean the gate fired for no reason.
+            </Caption>
+          ) : null}
+        </Panel>
+      )}
 
       <Panel label="What it is attached to">
         <Facts>
-          <Fact
-            label="Run"
-            value={
-              run === null ? (
-                approval.runId
-              ) : (
-                <button type="button" className="os-nexus-link" onClick={() => onOpenRun(run.id)}>
-                  {runTitle(run)}
-                </button>
-              )
-            }
-          />
-          <Fact label="Step" value={approval.stepKey} mono />
+          {/* A RUN AND A STEP ONLY WHERE THERE ARE ONES. A routing review is
+              raised by a sweep and names neither; a promotion names the
+              FINISHED shadow run whose comparison met the threshold, and no
+              step of it. An em dash beside "Step" on those says nothing. */}
+          {approval.runId === "" ? null : (
+            <Fact
+              label={approval.kind === PROCEDURE_PROMOTION ? "Last comparison" : "Run"}
+              value={
+                run === null ? (
+                  approval.runId
+                ) : (
+                  <button type="button" className="os-nexus-link" onClick={() => onOpenRun(run.id)}>
+                    {runTitle(run)}
+                  </button>
+                )
+              }
+            />
+          )}
+          {approval.stepKey === "" ? null : <Fact label="Step" value={approval.stepKey} mono />}
           <Fact
             label="Raised"
             value={
@@ -494,13 +565,20 @@ function ApprovalDetail({
         {/* THE HASH IS SHOWN BECAUSE IT IS THE PROMISE. Deciding this approves
             THIS artifact and no other: if it changes before the run resumes,
             the decision is refused rather than carried across. Somebody
-            comparing two approvals of the same command needs the value. */}
-        <Subhead>The exact thing you are deciding</Subhead>
-        <CopyValue value={approval.artifactHash} label="artifact hash" />
-        <Caption>
-          Your decision is about this artifact only. If it changes before the run resumes, the
-          decision is refused rather than carried over to the new one.
-        </Caption>
+            comparing two approvals of the same command needs the value. A
+            promotion carries it in its own panel, beside the version it pins,
+            so it is said there once. */}
+        {promotion !== null ? null : (
+          <>
+            <Subhead>The exact thing you are deciding</Subhead>
+            <CopyValue value={approval.artifactHash} label="artifact hash" />
+            <Caption>
+              {approvalParksARun(approval.kind)
+                ? "Your decision is about this artifact only. If it changes before the run resumes, the decision is refused rather than carried over to the new one."
+                : "Your decision is about this artifact only. If it changes before the decision is applied, the decision is refused rather than carried over to the new one."}
+            </Caption>
+          </>
+        )}
 
         {subjectEntries.length === 0 ? null : (
           <>
@@ -529,10 +607,157 @@ function ApprovalDetail({
           sentence={`${decisionWord(approval.decision)}${
             approval.decidedAt === "" ? "" : ` on ${formatMoment(approval.decidedAt)}`
           }.`}
-          next="The run was told, and picked up from where it parked."
+          next={approvalDecidedNext(approval.kind, approval.decision)}
         />
       )}
     </>
+  );
+}
+
+/**
+ * What an approval is attached to, in the row's quiet line.
+ *
+ * "a run" was the fallback when the run was not in the feed, and it is wrong
+ * for the two kinds that park none: a routing review comes from the nightly
+ * fold, and a promotion is about a PROCEDURE -- the finished shadow run it
+ * names is where the last comparison happened, not what is being decided.
+ */
+function approvalContext(approval: ApprovalRow, run: RunRow | null): string {
+  if (approval.kind === "routingReview") return "the nightly routing review";
+  // SAID ONCE: a promotion's question names the goal the procedure serves, so
+  // the row does not name it a second time beside it.
+  if (approval.kind === PROCEDURE_PROMOTION) return "";
+  return run === null ? "a run" : runTitle(run);
+}
+
+/**
+ * The two acts' names.
+ *
+ * A PROMOTION NAMES ITS OWN OUTCOMES. The ladder writes the two options it
+ * offers -- "Promote to canary", "Keep it in shadow" -- and an act that says
+ * exactly what happens beats "Approve" beside a question about a rung. They
+ * are the approval's own words, not ones invented here; a row without them
+ * falls back to the words every other kind uses.
+ */
+function decisionLabels(approval: ApprovalRow): { approve: string; reject: string } {
+  if (approval.kind !== PROCEDURE_PROMOTION) return { approve: "Approve", reject: "Reject" };
+  const offered = (value: string) => approval.options.find((o) => o.value === value)?.label.trim() ?? "";
+  const approve = offered("approved");
+  const reject = offered("rejected");
+  return { approve: approve || "Approve", reject: reject || "Reject" };
+}
+
+/**
+ * What a promotion would move, and the evidence it rests on.
+ *
+ * BOTH HASHES ARE ON THE CARD (#5412). The construct version is the one the
+ * ladder proposed; the artifact hash is the one the decision is checked
+ * against. They are the same value when all is well -- the approval pins the
+ * version -- and showing both is what lets a person see that for themselves.
+ * When the catalog holds a NEWER version than the one proposed, the card says
+ * so before the decision is refused for it.
+ */
+function PromotionPanel({
+  approval,
+  subject,
+  procedure,
+  onOpenProcedure,
+}: {
+  approval: ApprovalRow;
+  subject: PromotionSubject;
+  procedure: ProcedureRow | null;
+  onOpenProcedure?: (constructId: string) => void;
+}) {
+  const title =
+    procedure !== null
+      ? procedureTitle(procedure)
+      : subject.title.trim() || subject.constructName.trim() || "The learned procedure";
+  const changed =
+    procedure !== null &&
+    procedure.procedureHash !== "" &&
+    approval.artifactHash !== "" &&
+    procedure.procedureHash !== approval.artifactHash;
+  const from = [
+    appWord(subject.recordedFrom.app),
+    subject.recordedFrom.model,
+    subject.recordedFrom.effort === "" ? "" : `${subject.recordedFrom.effort} effort`,
+  ].filter((part) => part.trim() !== "");
+  // WHERE IT WOULD RUN, and whether its matches were dry: two additive keys.
+  // An engine that sends neither gets exactly the card it had -- an absent key
+  // is not drawn as a dash, because "not said" is not a fact about the run.
+  const where = promotionTargetWords(subject.target);
+  return (
+    <Panel label="What you are promoting">
+      <Subhead>What you are promoting</Subhead>
+      {changed ? (
+        <Notice
+          tone="warn"
+          sentence="This procedure has changed since it was proposed."
+          next="Deciding will be refused: the version below is not the one in your catalog now, and a changed procedure earns its own proposal."
+        />
+      ) : null}
+      <Facts>
+        <Fact
+          label="Procedure"
+          value={
+            onOpenProcedure !== undefined && subject.constructId !== "" ? (
+              <button
+                type="button"
+                className="os-nexus-link"
+                onClick={() => onOpenProcedure(subject.constructId)}
+              >
+                {title}
+              </button>
+            ) : (
+              title
+            )
+          }
+        />
+        <Fact label="Construct version" value={<CopyValue value={subject.procedureHash} label="construct version" />} />
+        <Fact label="Artifact hash" value={<CopyValue value={approval.artifactHash} label="artifact hash" />} />
+        <Fact
+          label="Matches beside the app"
+          value={subject.shadowMatches === null ? "" : `${subject.shadowMatches} in a row`}
+        />
+        <Fact
+          label="Distinct bindings"
+          value={
+            subject.distinctBindings.length === 0 ? (
+              "no parameter to vary"
+            ) : (
+              <BindingCounts counts={subject.distinctBindings} inputMap={procedure?.inputMap ?? {}} />
+            )
+          }
+        />
+        <Fact
+          label="Recorded from"
+          value={
+            // Each part whole: a model id broken at its own hyphen reads as two.
+            from.length === 0 ? (
+              ""
+            ) : (
+              <>
+                {from.map((part, i) => (
+                  <span key={part}>
+                    {i === 0 ? null : ", "}
+                    <span className="os-nexus-procedure-nowrap">{part}</span>
+                  </span>
+                ))}
+              </>
+            )
+          }
+        />
+        {where === "" ? null : <Fact label="Where it would run" value={where} />}
+      </Facts>
+      {/* DRY MATCHES ARE SAID ONCE, IN PLAIN WORDS. The count above is real,
+          but what it counted was a comparison: promoting is the first time
+          this procedure would act by itself. */}
+      {subject.dryEvidence ? (
+        <Caption>
+          Its matches compared the commands it would run with the app&apos;s own; it has not run by itself yet.
+        </Caption>
+      ) : null}
+    </Panel>
   );
 }
 

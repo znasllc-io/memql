@@ -2,6 +2,8 @@ package procedure
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,16 +89,36 @@ func canonicalizeValue(key string, v any) *Node {
 		return canonicalizeString(key, t)
 	case []any:
 		kids := make([]*Node, len(t))
+		script := -1
+		if commandKeys[key] {
+			script = shellScriptIndex(t)
+		}
 		for i, e := range t {
 			if s, ok := e.(string); ok && commandKeys[key] {
-				// An ARGUMENT VECTOR -- Codex's exec events record argv this
-				// way -- is already split, and each element is one argument
-				// taken verbatim. Reading one again as a command line would
-				// treat the apostrophe in `don't` as an opening quote and
-				// lose it, and a replay would send a message nobody wrote.
-				// Kept whole, the vector is also Equal to the same command
-				// recorded as a string, so the two recordings generalize
-				// together.
+				if i == script {
+					// THE ONE ELEMENT THAT IS A COMMAND LINE: the script a
+					// shell in the vector runs. Codex records every command
+					// as ["bash", "-lc", "<script>"], and kept as one literal
+					// any value that varied between two recordings made the
+					// WHOLE script a parameter -- code a goal would choose --
+					// so no parameterised Codex procedure could climb. Read
+					// as a command line, with its spelling, exactly as a
+					// `command` string is, the value is one word inside it,
+					// and Materialize writes the script back byte for byte.
+					toks, seps := scanArgv(s)
+					n := Arr(toks...)
+					n.Form = FormArgv
+					n.Seps = seps
+					kids[i] = n
+					continue
+				}
+				// Every other element of an ARGUMENT VECTOR is already one
+				// argument, taken verbatim. Reading one again as a command
+				// line would treat the apostrophe in `don't` as an opening
+				// quote and lose it, and a replay would send a message
+				// nobody wrote. Kept whole, a vector that runs no shell
+				// script is also Equal to the same command recorded as a
+				// string, so the two recordings generalize together.
 				kids[i] = Lit(s)
 				continue
 			}
@@ -145,6 +167,90 @@ var commandKeys = map[string]bool{
 	"argv":    true,
 }
 
+// posixShells are the shells whose -c script canonicalization reads as a
+// command line. fish is absent on purpose: its quoting is not POSIX -- a
+// backslash escapes inside its single quotes -- so a parameter written into a
+// fish script by POSIX rules could be read back as another value.
+var posixShells = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true}
+
+// scriptWrappers run the command that follows their own options and
+// arguments, so a shell behind one -- `sudo -u bob bash -c ...`,
+// `env X=1 bash -lc ...` -- is still the shell that runs the script. The list
+// is short on purpose: a shell word that some OTHER program is merely handed
+// (`echo bash -c x`) must not have its "script" re-read, because a parameter
+// written into it would be quoted for a shell that never reads it. Missing a
+// wrapper only leaves its script one literal, which ReplayRisks refuses.
+var scriptWrappers = map[string]bool{
+	"sudo": true, "doas": true, "env": true, "nice": true, "nohup": true,
+	"timeout": true, "time": true, "stdbuf": true, "setsid": true, "ionice": true,
+}
+
+// shellOptionsWithArgument are the shell options that take the next word as
+// their argument, so the search for the script steps over it
+// (`bash -o pipefail -c ...`).
+var shellOptionsWithArgument = map[string]bool{"-o": true, "+o": true, "-O": true, "+O": true, "--rcfile": true, "--init-file": true}
+
+// shellScriptIndex is the index of the script a POSIX shell in an argument
+// vector runs, or -1 when it runs none. The shell is the vector's first
+// element, or the first shell word behind a scriptWrapper that is; the script
+// is what the shell itself takes it to be -- its first operand after its
+// options, when one of them is a short-flag cluster holding c (-c, -lc, -ec).
+// `bash script.sh -c x` runs a script FILE, and its -c is the file's.
+func shellScriptIndex(vec []any) int {
+	word := func(i int) (string, bool) {
+		if i < 0 || i >= len(vec) {
+			return "", false
+		}
+		s, ok := vec[i].(string)
+		return s, ok
+	}
+	first, ok := word(0)
+	if !ok {
+		return -1
+	}
+	shell := -1
+	switch {
+	case posixShells[basename(first)]:
+		shell = 0
+	case scriptWrappers[basename(first)]:
+		for i := 1; i < len(vec); i++ {
+			if w, ok := word(i); ok && posixShells[basename(w)] {
+				shell = i
+				break
+			}
+		}
+	}
+	if shell < 0 {
+		return -1
+	}
+	sawC := false
+	for k := shell + 1; k < len(vec); k++ {
+		w, ok := word(k)
+		if !ok {
+			return -1
+		}
+		switch {
+		case w == "--":
+			// The end of the options: the next word is the operand.
+			if _, ok := word(k + 1); ok && sawC {
+				return k + 1
+			}
+			return -1
+		case len(w) > 1 && (w[0] == '-' || w[0] == '+'):
+			sawC = sawC || isShortFlagWithC(w)
+			if shellOptionsWithArgument[w] {
+				k++
+			}
+		default:
+			if sawC {
+				return k
+			}
+			return -1
+		}
+	}
+	return -1
+}
+
 // pathKeys are the argument names whose value is a filesystem path.
 var pathKeys = map[string]bool{
 	"path":       true,
@@ -161,8 +267,10 @@ var pathKeys = map[string]bool{
 // nobody can tell apart.
 func canonicalizeString(key, s string) *Node {
 	if commandKeys[key] {
-		n := Arr(splitArgv(s)...)
+		toks, seps := scanArgv(s)
+		n := Arr(toks...)
 		n.Form = FormArgv
+		n.Seps = seps
 		return n
 	}
 	if n, ok := parseJSONTree(s); ok {
@@ -230,60 +338,179 @@ func splitPath(s string) []*Node {
 	return out
 }
 
-// splitArgv splits a command line on whitespace, honouring single and double
-// quotes and backslash escapes. It is not a shell: it does not expand,
-// substitute or interpret operators, because the recording is evidence of what
-// ran and re-interpreting it would be a second opinion about it.
+// splitArgv is a command line's arguments, each carrying its spelling
+// (scanArgv without the separators).
 func splitArgv(s string) []*Node {
+	toks, _ := scanArgv(s)
+	return toks
+}
+
+// scanArgv splits a command line on whitespace the way a POSIX shell removes
+// quotes, and keeps how it was WRITTEN: every argument's exact source text
+// (Node.Raw) and the exact text around the arguments -- the separators, one
+// more than the arguments. Put back together the pieces are the line, byte
+// for byte, which is what lets Materialize send a recorded command as it ran.
+//
+// The values follow POSIX quote removal exactly, because a value is what the
+// PROGRAM received and two recordings are compared by it:
+//
+//   - inside single quotes nothing is special;
+//   - inside double quotes a backslash escapes only $, `, ", \ and a newline,
+//     and before any other character it is a literal backslash -- so
+//     `grep -E "\d+"` searched for \d+, and `printf "a\tb"` printed a\tb;
+//   - outside quotes a backslash escapes the next character, and one that
+//     ends the line is kept, as sh keeps it;
+//   - a backslash-newline outside single quotes is a line continuation and
+//     vanishes. It belongs to an argument only when the argument goes on
+//     after it; otherwise it is separator text.
+//
+// It is still not a shell: it does not expand, substitute or interpret
+// operators, because the recording is evidence of what ran and
+// re-interpreting it would be a second opinion about it. A value holding
+// `$(date +%F)` is the text the shell was handed, not what it expanded to --
+// which is exactly why the spelling is kept beside it.
+//
+// It reads bytes rather than runes: every character it treats specially is
+// ASCII, and no byte of a multi-byte UTF-8 sequence is, so a spelling sliced
+// at these boundaries is always whole runes.
+func scanArgv(s string) ([]*Node, []string) {
 	var (
-		out   []*Node
-		cur   strings.Builder
-		open  bool
-		quote rune
-		esc   bool
+		toks    []*Node
+		seps    []string
+		val     strings.Builder
+		open    bool // an argument is being read
+		start   int  // where the open argument's spelling begins
+		end     int  // just past the last byte that belongs to it
+		sepFrom int  // where the separator before the next argument begins
+		quote   byte // 0, '\'' or '"'
 	)
-	flush := func() {
-		if open {
-			out = append(out, Lit(cur.String()))
-			cur.Reset()
-			open = false
+	begin := func(at int) {
+		if !open {
+			open, start = true, at
 		}
 	}
-	for _, r := range s {
+	flush := func() {
+		seps = append(seps, s[sepFrom:start])
+		toks = append(toks, &Node{Kind: KindLit, Lit: val.String(), Raw: s[start:end]})
+		val.Reset()
+		open, sepFrom = false, end
+	}
+	for i := 0; i < len(s); {
+		c := s[i]
 		switch {
-		case esc:
-			cur.WriteRune(r)
-			open = true
-			esc = false
-		case r == '\\' && quote != '\'':
-			esc = true
-			open = true
-		case quote != 0:
-			if r == quote {
+		case quote == '\'':
+			if c == '\'' {
 				quote = 0
 			} else {
-				cur.WriteRune(r)
+				val.WriteByte(c)
 			}
-			open = true
-		case r == '\'' || r == '"':
-			quote = r
-			open = true
-		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
-			flush()
+			i++
+			end = i
+		case quote == '"':
+			switch {
+			case c == '"':
+				quote = 0
+				i++
+			case c == '\\' && i+1 < len(s) && s[i+1] == '\n':
+				i += 2
+			case c == '\\' && i+1 < len(s) && strings.IndexByte("$`\"\\", s[i+1]) >= 0:
+				val.WriteByte(s[i+1])
+				i += 2
+			default:
+				val.WriteByte(c)
+				i++
+			}
+			end = i
+		case c == '\\' && i+1 < len(s) && s[i+1] == '\n':
+			i += 2
+		case c == '\\':
+			begin(i)
+			if i+1 < len(s) {
+				val.WriteByte(s[i+1])
+				i += 2
+			} else {
+				val.WriteByte(c)
+				i++
+			}
+			end = i
+		case c == '\'' || c == '"':
+			begin(i)
+			quote = c
+			i++
+			end = i
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+			if open {
+				flush()
+			}
+			i++
 		default:
-			cur.WriteRune(r)
-			open = true
+			begin(i)
+			val.WriteByte(c)
+			i++
+			end = i
 		}
 	}
-	flush()
-	return out
+	if open {
+		flush()
+	}
+	seps = append(seps, s[sepFrom:])
+	return toks, seps
+}
+
+// spelledAs reports whether raw is ONE argument whose value is lit, with
+// nothing around it -- what an argument's recorded spelling must be, so the
+// command a replay sends says what the tree it was approved as says.
+func spelledAs(raw, lit string) bool {
+	toks, seps := scanArgv(raw)
+	return len(toks) == 1 && toks[0].Lit == lit && seps[0] == "" && seps[1] == ""
+}
+
+// checkSeps is what a command line's separators must be: one more than its
+// arguments, each nothing but the text scanArgv puts between arguments --
+// blanks and line continuations -- and every one BETWEEN two arguments holding
+// a blank, or the two would be sent as one argument. Separators that carried
+// anything else would send text the tree does not describe.
+func checkSeps(seps []string, args int) error {
+	if len(seps) != args+1 {
+		return fmt.Errorf("procedure: a command line of %d argument(s) carries %d separator(s), not %d", args, len(seps), args+1)
+	}
+	for i, s := range seps {
+		blank := false
+		for j := 0; j < len(s); j++ {
+			switch s[j] {
+			case ' ', '\t', '\r', '\n':
+				blank = true
+			case '\\':
+				if j+1 < len(s) && s[j+1] == '\n' {
+					j++
+					continue
+				}
+				return fmt.Errorf("procedure: separator %d of a command line is %q, which is not whitespace", i, s)
+			default:
+				return fmt.Errorf("procedure: separator %d of a command line is %q, which is not whitespace", i, s)
+			}
+		}
+		if !blank && i > 0 && i < args {
+			return fmt.Errorf("procedure: separator %d of a command line is %q, which does not separate two arguments", i, s)
+		}
+	}
+	return nil
 }
 
 // formatNumber writes a float back in the shortest spelling that round-trips,
 // and without an exponent for an integral value. 1 and 1.0 must produce the
 // same literal or two recordings of one call compare unequal.
+//
+// The int64 range is checked BEFORE any conversion. Converting a float
+// outside it is implementation-defined: amd64 answers the integer indefinite
+// value, which never equals the float, but arm64 saturates, and 2^63 used to
+// come back as 9223372036854775807 -- another number, spelled one way on a
+// Mac and another on a Linux replica. This module may not import core/num,
+// which owns that narrowing for the rest of the tree; the guard is its local
+// equivalent.
 func formatNumber(f float64) string {
-	if f == float64(int64(f)) {
+	const bound = 1 << 63 // exactly representable: -bound is int64's minimum, bound is one past its maximum
+	if f >= -bound && f < bound && f == math.Trunc(f) {
 		return strconv.FormatInt(int64(f), 10)
 	}
 	return strconv.FormatFloat(f, 'g', -1, 64)

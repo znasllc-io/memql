@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"mime"
 	"path"
 	"strings"
@@ -313,6 +314,7 @@ func (i *Integration) handleDispatch(ctx context.Context, tool string, args map[
 		RequireLabels: LabelsFromArgs(args["requireLabels"]),
 		PreferLabels:  LabelsFromArgs(args["preferLabels"]),
 		ReroutedFrom:  strings.TrimSpace(asString(args["reroutedFrom"])),
+		Timeout:       dispatchTimeoutFor(innerArgs),
 	}
 	if req.OwnerUserId == "" || req.AgentId == "" {
 		return nil, fmt.Errorf("worker integration: agentId and ownerUserId required")
@@ -349,6 +351,58 @@ func (i *Integration) handleDispatch(ctx context.Context, tool string, args map[
 		CreatedAt: time.Now().UTC(),
 		Payload:   payload,
 	}}, nil
+}
+
+// dispatchAnswerMargin is how much longer than a command's own time limit
+// the dispatch waits for its answer: the worker ends the command at its limit,
+// and the answer still has to cross the stream.
+const dispatchAnswerMargin = 30 * time.Second
+
+// dispatchTimeoutCeiling bounds a dispatch however long a command asked to
+// run: a caller cannot hold a dispatch -- and the stream slot under it --
+// open indefinitely by naming a large timeoutSec.
+const dispatchTimeoutCeiling = time.Hour
+
+// dispatchTimeoutFor is how long the dispatch of one action waits for its
+// answer. A COMMAND'S OWN TIME LIMIT CAN ONLY LENGTHEN IT (epic memql#5408):
+// the worker ends an exec at its timeoutSec, so a dispatch that waited only
+// the default five minutes abandoned a command given ten with the machine
+// still running it -- a replayed step the recording let run longer could
+// never match. Zero leaves the dispatcher's default, and a limit shorter than
+// the default never shortens it, so no caller's dispatch got less time than
+// it had before.
+func dispatchTimeoutFor(actionArgs map[string]any) time.Duration {
+	var secs float64
+	switch v := actionArgs["timeoutSec"].(type) {
+	case float64:
+		secs = v
+	case int:
+		secs = float64(v)
+	case int64:
+		secs = float64(v)
+	case json.Number:
+		f, err := v.Float64()
+		if err != nil {
+			return 0
+		}
+		secs = f
+	default:
+		return 0
+	}
+	if math.IsNaN(secs) || secs <= 0 {
+		return 0
+	}
+	if secs >= dispatchTimeoutCeiling.Seconds() {
+		return dispatchTimeoutCeiling
+	}
+	wait := time.Duration(secs*float64(time.Second)) + dispatchAnswerMargin
+	if wait <= workerservice.DispatchTimeoutDefault {
+		return 0
+	}
+	if wait > dispatchTimeoutCeiling {
+		return dispatchTimeoutCeiling
+	}
+	return wait
 }
 
 // promoteWorkerOutput records a v1:library:generatedOutput row for a
