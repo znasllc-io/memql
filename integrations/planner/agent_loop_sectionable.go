@@ -495,13 +495,20 @@ func withSectionableLogic(bundle authoringBundle) authoringBundle {
 // non-sectionable zero decision + unknown complexity so the caller routes
 // normally. guidance is the goal's description guidance (D23), passed only
 // when there is some.
-func (l *PlannerAgentLoop) classifySectionable(ctx context.Context, goal, nowRFC3339 string, guidance []map[string]any) (goalComplexity, string, sectionableDecision, error) {
+func (l *PlannerAgentLoop) classifySectionable(ctx context.Context, goal, nowRFC3339 string, guidance []map[string]any, goalInputs []string) (goalComplexity, string, sectionableDecision, error) {
 	data := map[string]any{
 		"goal": truncate(goal, maxGoalChars),
 		"now":  nowRFC3339,
 	}
 	if len(guidance) > 0 {
 		data["guidance"] = guidance
+	}
+	// The goal's own input names (epic memql#5414): a section's catalog
+	// signature is its purpose plus its input names, so a section that
+	// respelled "month" as "period" would miss the automation already doing
+	// that work, and would bind nothing from the goal's input.
+	if len(goalInputs) > 0 {
+		data["inputKeys"] = goalInputs
 	}
 	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "goalComplexityTriage", data)
 	if err != nil {

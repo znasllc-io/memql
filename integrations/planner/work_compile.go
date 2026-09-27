@@ -178,7 +178,7 @@ func (l *PlannerAgentLoop) CompileGoalForRun(ctx context.Context, req CompileReq
 	guidance := l.descriptionGuidance(ctx, req, sig)
 
 	// Tier 3: ONE classifier call answering complexity AND sectionability.
-	complexity, _, sectionable, cerr := l.classifySectionable(ctx, req.Statement, time.Now().UTC().Format(time.RFC3339), guidance)
+	complexity, _, sectionable, cerr := l.classifySectionable(ctx, req.Statement, time.Now().UTC().Format(time.RFC3339), guidance, inputKeys(req.Input))
 	if cerr == nil || !memql.IsProviderUnavailable(cerr) {
 		// Counted when the call reached a provider. A cluster with no
 		// classifier made no call, and ModelCalls counts only calls that ran.

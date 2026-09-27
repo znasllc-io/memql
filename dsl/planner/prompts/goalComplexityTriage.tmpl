@@ -50,6 +50,9 @@ with one deterministic navigation step instead of a second model turn.
 "{{.goal}}"
 {{if .now}}
 Current time: {{.now}}
+{{end}}{{if .inputKeys}}
+Inputs the goal supplies: {{range $i, $k := .inputKeys}}{{if $i}}, {{end}}{{$k}}{{end}}
+A section that reads one of these inputs names it EXACTLY as written here.
 {{end}}
 {{if .guidance}}
 ## WHAT WAS WRONG BEFORE WITH THIS GOAL

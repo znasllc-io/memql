@@ -710,3 +710,16 @@ func TestAnOldShapeTriageAnswerStillFansOut(t *testing.T) {
 		}
 	}
 }
+
+// TestTriageIsToldTheGoalsInputNames: a section's catalog signature is its
+// purpose plus its input names, so triage is handed the goal's own input
+// names -- a section that respelled "day" as "date" would miss the automation
+// already doing its work, and would bind nothing from the goal's input.
+func TestTriageIsToldTheGoalsInputNames(t *testing.T) {
+	eng := &guidanceRecorder{sectionCatalogEngine: newSectionCatalogEngine(map[string]any{"complexity": "complex", "requiresFile": false})}
+	_, _ = (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), compileReq(), nil, realSandbox{})
+	got, _ := eng.data["goalComplexityTriage"]["inputKeys"].([]string)
+	if want := inputKeys(compileReq().Input); len(want) == 0 || strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("triage inputKeys = %v, want the goal's own input names %v", got, want)
+	}
+}
