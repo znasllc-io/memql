@@ -601,10 +601,10 @@ func (j *workJournal) stepFinishedRowOnly(ctx context.Context, exec *AutomationE
 }
 
 // stepSkipped writes a step whose condition decided it would not run: one
-// row at `skipped`, with no intent version, because nothing was intended. It
-// is still a VERSION of the step (epic memql#5414) -- the answer the run gave
-// there, which every later step computed from -- so it carries its number and
-// its basis, and advances the head.
+// row at `skipped`, with no `running` row before it, because nothing was
+// intended. It is still a VERSION of the step (epic memql#5414) -- the answer
+// the run gave there, which every later step computed from -- so it carries
+// its number and its basis, and advances the head.
 func (j *workJournal) stepSkipped(ctx context.Context, exec *AutomationExecution, step *Step, seq, version int) {
 	if j == nil || exec == nil || step == nil {
 		return
