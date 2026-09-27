@@ -28,6 +28,27 @@ import (
 //
 // A filter is a small thing to lose and an unrecoverable thing to have lost,
 // so it gets a gate.
+//
+// # Where the sweeps live, and why that is checked too
+//
+// In automations.memql, the one file of a domain the automation loader reads.
+// They lived in trial.memql until memql#5437, where they compiled and parsed and
+// this file's gates passed over them -- and not one of them had ever loaded.
+// TestEverySweepNarrowsItsCandidates therefore names the six it expects, so a
+// sweep that moves out of the loaded file stops this gate rather than leaving
+// it green over nothing; TestEveryFleetAutomationLoads (bundle_test.go) is the
+// check that the loader actually loads them.
+
+// fleetSweeps are the scheduled automations of the fleet domain: the five of a
+// trial's lifecycle and idle hibernation.
+var fleetSweeps = []string{
+	"trialNudgeDay7",
+	"trialNudgeDay12",
+	"trialExpirySuspend",
+	"trialExpiryClose",
+	"hibernateIdleInstances",
+	"teardownAfterGrace",
+}
 
 var (
 	fleetConstructHeader = regexp.MustCompile(`^(automation|logic)\s+(\w+)\s*\{`)
@@ -95,17 +116,17 @@ func fleetConstructs(t *testing.T, file string) []fleetConstruct {
 // acts on the entire fleet -- and the sweep that would do the most damage is
 // also the one whose action cannot be undone.
 func TestEverySweepNarrowsItsCandidates(t *testing.T) {
-	constructs := fleetConstructs(t, "trial.memql")
+	constructs := fleetConstructs(t, "automations.memql")
 	if len(constructs) == 0 {
-		t.Fatal("parsed no automations from trial.memql -- either the file moved or this parse stopped matching, and either way this gate is watching nothing")
+		t.Fatal("parsed no automations from automations.memql -- either the file moved or this parse stopped matching, and either way this gate is watching nothing")
 	}
 
-	var checked int
+	checked := map[string]bool{}
 	for _, c := range constructs {
 		if c.kind != "automation" || !scheduleTrigger.MatchString(c.src) {
 			continue
 		}
-		checked++
+		checked[c.name] = true
 
 		var loops []*ast.ForStatement
 		ast.WalkBody(c.body.Statements, func(s ast.BodyStatement) bool {
@@ -126,8 +147,13 @@ func TestEverySweepNarrowsItsCandidates(t *testing.T) {
 			}
 		}
 	}
-	if checked == 0 {
-		t.Fatal("found no scheduled automations, so this gate checked nothing")
+	// The reachable positive, by name: every sweep is a scheduled automation
+	// in the file the loader reads. One missing from here is one this gate is
+	// not watching -- and, if it moved to another file, one that never runs.
+	for _, name := range fleetSweeps {
+		if !checked[name] {
+			t.Errorf("sweep %s is not a scheduled automation in automations.memql, so this gate did not check its `for` -- and an automation declared in any other file never loads", name)
+		}
 	}
 }
 
@@ -169,8 +195,8 @@ func TestTheDestructiveSweepIsTheOnlyTeardownPath(t *testing.T) {
 		t.Fatalf("%s is called from nowhere -- the grace-expiry sweep does not destroy anything, so a torn-down tenant is one we keep paying for", teardown)
 	case len(callers) > 1:
 		t.Errorf("%s is called from %d places (%v). It must have exactly one caller: the grace-expiry sweep. What protects a customer's data here is a SEQUENCE -- pause, fourteen days, teardown -- and a second caller removes the fourteen days without removing anything that looks like a safeguard.", teardown, len(callers), callers)
-	case callers[0] != "trial.memql teardownAfterGrace":
-		t.Errorf("%s's single caller is %s; the only path to it is the grace-expiry sweep, trial.memql teardownAfterGrace", teardown, callers[0])
+	case callers[0] != "automations.memql teardownAfterGrace":
+		t.Errorf("%s's single caller is %s; the only path to it is the grace-expiry sweep, automations.memql teardownAfterGrace", teardown, callers[0])
 	}
 }
 

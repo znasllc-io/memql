@@ -40,7 +40,8 @@ package emailrules
 // user row it fired on -- and a caller-scoped read from inside an automation
 // returns nothing while looking entirely correct, which is the trap this tree
 // documents twice (component/campaigns/schedule.go's header, and the fleet
-// pack's billing.memql). Forwarding the event envelope sidesteps it: the
+// bundle's dunningEmailOnPaymentFailure in deploy/fleet/dsl/fleet/
+// automations.memql). Forwarding the event envelope sidesteps it: the
 // payload the trigger already delivered is the payload the rule reads its
 // recipient address out of, and no second read happens at all.
 
