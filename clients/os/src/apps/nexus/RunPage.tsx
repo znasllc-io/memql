@@ -281,6 +281,13 @@ export function RunPage({
       ? null
       : (open.versions.find((version) => version.version === selected) ?? null);
 
+  // A refusal belongs to the version it was about: picking another step or
+  // another version clears it rather than leaving it under acts it is not
+  // about.
+  useEffect(() => {
+    head.reset();
+  }, [openStepKey, selected]);
+
   function toggleStep(key: string): void {
     setOpenStepKey((held) => (held === key ? "" : key));
   }
