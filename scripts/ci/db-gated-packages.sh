@@ -191,6 +191,19 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # the Deployables page draws Go live from one and the engine enforces the
 # other -- and that parity is a claim about real rows read as the deployment
 # and as the caller, which a fake engine answers either way.
+# memql#5705 added `component/datasync`. The sync runtime's health row
+# (v1:platform:syncState) is written through the real engine, and the defect
+# the PR fixes -- a row id whose short segment carried colons, refused by the
+# engine's id validation on every 10-minute sweep, so the Shopify connector's
+# health was never recorded at all -- is invisible to the recording engine the
+# package's other suites drive: it accepts any id. syncstate_write_db_test.go
+# inserts the row for real and reads it back, and a db-gated test outside this
+# lane only ever runs on the machine of whoever happened to have Postgres up.
+#
+# What the complement now means, having looked: `component/datasync` moves from
+# go-checks to db-tests whole. Nothing is lost -- the lane runs whole packages
+# -- and the package's other suites are ordinary unit tests over an in-memory
+# store that now happen to run beside a database they ignore.
 readonly DB_GATED_TREES=(
 	"app"
 	"component/memql"
@@ -198,6 +211,7 @@ readonly DB_GATED_TREES=(
 	"component/backup"
 	"component/campaigns"
 	"component/database"
+	"component/datasync"
 	"component/emailrules"
 	"component/grpc"
 	"component/identity"
