@@ -89,13 +89,12 @@ func TestProcedureLiftDB_RecordedSessionsBecomeAProcedureOnTheLadder(t *testing.
 		t.Fatalf("procedureConstructsForGoalSignature = %v, want exactly the lifted construct %v", found, row["id"])
 	}
 
-	// THE SAME CORPUS AGAIN, from the automation's side: the maintenance
-	// principal reads the run by id, and the lift finds the construct it
-	// wrote and writes nothing.
-	again, err := integ.LearnFromRun(auth.ContextWithAccess(context.Background(),
-		auth.MaintenanceActor("learnFromSucceededRun")), recordingRuns[0])
+	// THE SAME CORPUS AGAIN, the way the completion trigger arrives after it
+	// has borrowed the event's owner: as that owner, through the owned read.
+	// The lift finds the construct it wrote and writes nothing.
+	again, err := integ.LearnFromRun(ownerCtx, recordingRuns[0])
 	if err != nil {
-		t.Fatalf("LearnFromRun as the maintenance principal: %v", err)
+		t.Fatalf("LearnFromRun as the borrowed owner: %v", err)
 	}
 	if again.Lift != procedure.LiftUnchanged || again.ConstructId != row["id"] || again.ProcedureHash != res.ProcedureHash {
 		t.Fatalf("second lift = %+v, want the first construct, unchanged", again)

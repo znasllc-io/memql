@@ -138,8 +138,17 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 	if out.ConstructId != "" {
 		args["templateConstructId"] = out.ConstructId
 	}
-	if len(req.Input) > 0 {
-		args["variables"] = req.Input
+	// THE RUN'S VARIABLES ARE THE GOAL'S INPUT AND WHAT THE TEMPLATE NEEDS
+	// BESIDE IT (epic memql#5408). A learned procedure is served through ONE
+	// embedded template, replayLearnedProcedure, which has to be told which
+	// construct serves the goal -- compile's out.Variables says so -- and the
+	// procedure binds its parameters from the goal's input. Compile's value
+	// WINS over an input of the same name: the construct that serves a goal is
+	// compile's decision, and a goal whose input happened to carry
+	// procedureConstructId must not choose which procedure runs without a
+	// model.
+	if vars := mergeVariables(req.Input, out.Variables); len(vars) > 0 {
+		args["variables"] = vars
 	}
 	// THE GOAL SIGNATURE, on the run (epic memql#5408, gap G2). Compile is the
 	// one place that computes it, and until this write it existed only on a
@@ -157,6 +166,24 @@ func (c *WorkCompiler) Compile(ctx context.Context, req workintegration.CompileR
 			"route", string(out.Route), "modelCalls", out.ModelCalls,
 			"automation", out.AutomationName, "gaps", len(out.Gaps))
 	}
+}
+
+// mergeVariables is the goal's input with compile's variables laid over it,
+// in a map of its own: neither argument is modified, because req.Input is the
+// goal's record and out.Variables is compile's answer, and a write through
+// either would change what the other one says.
+func mergeVariables(input, compiled map[string]any) map[string]any {
+	if len(input) == 0 && len(compiled) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(input)+len(compiled))
+	for k, v := range input {
+		out[k] = v
+	}
+	for k, v := range compiled {
+		out[k] = v
+	}
+	return out
 }
 
 // failRun marks the run failed with the compile error. A goal whose compile

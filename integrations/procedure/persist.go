@@ -165,6 +165,14 @@ func (i *Integration) prepareVersion(ctx context.Context, k corpusKey, mined *mi
 	v.report, v.gateRan = i.compile(source, v.name)
 	v.reRunnable = v.gateRan && v.report.OK && everyStepWritten && compiledAutomation(v.report, v.name)
 	v.rung, v.reason = work.EntryRung(candidateEvidence(win, t, insts, mined.recs))
+	// A VERSION NO DISPATCHER CAN RUN NEVER CLIMBS (replayable.go). Its
+	// shadow comparisons could still match -- a dry comparison of arguments
+	// needs no dispatcher -- and the one approval would then ask a person to
+	// vouch for something the cluster cannot do. It stays a candidate,
+	// saying which step and which tool.
+	if why, blocked := firstUnreplayable(t); blocked {
+		v.rung, v.reason = work.RungCandidate, why
+	}
 	if !v.reRunnable {
 		v.rung, v.reason = work.RungCandidate, notRunnableReason(v.gateRan, v.report, everyStepWritten)
 	}

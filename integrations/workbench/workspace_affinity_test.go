@@ -35,7 +35,7 @@ import (
 // ---------------------------------------------------------------------------
 
 // fakeGraph stands in for the engine + database. It answers the four
-// v1:workbench:workspace calls plus planById, and -- the part that matters --
+// v1:workbench:workspace calls plus the owned run read, and -- the part that matters --
 // it ENFORCES THE ROW-AUTHZ TIER: workspaceForRun returns only rows owned by
 // the actor on the context, and no actor means no rows.
 //
@@ -47,7 +47,7 @@ import (
 type fakeGraph struct {
 	mu sync.Mutex
 
-	// planOwner is what planById reports as requestedBy.
+	// planOwner owns the run workRunForOwner answers -- to that actor only.
 	planOwner string
 
 	rows []map[string]string
@@ -84,19 +84,19 @@ func (g *fakeGraph) run(ctx context.Context, q string) ([]map[string]any, error)
 	args := fakeArgs(q)
 
 	switch {
-	case strings.HasPrefix(q, "query planById("):
-		if g.planOwner == "" {
-			// An unreadable / absent plan. Deliberately NOT "a row with a blank
-			// requestedBy": planOwnerFromRow falls back to the row-intrinsic
-			// createdBy (memql#952), which on the planner path is
-			// "system:planner" -- so a row that exists always resolves to
-			// something. The unresolvable case is the row not being there.
+	case strings.HasPrefix(q, "query workRunForOwner("):
+		// The OWNED read (row.ownerUserId == actor.userId): an absent run and
+		// a run the caller does not own answer the same way -- no row -- which
+		// is the fail-closed reading the integration turns into a refusal.
+		if g.planOwner == "" || actor == "" || actor != g.planOwner {
+			if actor == "" {
+				g.unactoredReads++
+			}
 			return nil, nil
 		}
 		return []map[string]any{{
 			"id":          args["runId"],
-			"requestedBy": g.planOwner,
-			"createdBy":   "system:planner",
+			"ownerUserId": g.planOwner,
 		}}, nil
 
 	case strings.HasPrefix(q, "query workspaceForRun("):
@@ -254,7 +254,10 @@ func TestOnePlanKeepsOneWorkspaceAcrossThreeCallsWithTwoReplicas(t *testing.T) {
 	graph := &fakeGraph{planOwner: testPlanOwner}
 	reps := newCluster(t, graph, slog.New(slog.DiscardHandler), "workbench-1", "workbench-2")
 	byId := map[string]*replica{reps[0].nodeId: reps[0], reps[1].nodeId: reps[1]}
-	ctx := context.Background()
+	// The caller is the run's owner, as every production dispatch is: the
+	// agent turn's person, or the work dispatch's persisted owner. The run is
+	// read through the OWNED read, so an unactored call resolves no owner.
+	ctx := auth.ContextWithUserActor(context.Background(), testPlanOwner)
 
 	// Call 1: no workspace yet, so no pin. Writes the file.
 	first := selectWorkbenchPeer([]*node.PeerEntry{reps[0].entry, reps[1].entry}, "", alwaysReachable)
@@ -370,7 +373,7 @@ func TestNodeLossReprovisionsExactlyOnceAndSaysWhy(t *testing.T) {
 	graph := &fakeGraph{planOwner: testPlanOwner}
 	reps := newCluster(t, graph, logger, "workbench-1", "workbench-2")
 	lost, survivor := reps[0], reps[1]
-	ctx := context.Background()
+	ctx := auth.ContextWithUserActor(context.Background(), testPlanOwner)
 
 	// The plan establishes its workspace on workbench-1.
 	if res := dispatchTo(t, lost, ctx, testPlanId, map[string]any{
@@ -517,7 +520,7 @@ func TestWorkspaceReadWithNoActorReturnsNothing(t *testing.T) {
 // describes AND to the operator. The next call reads nothing, provisions again,
 // and the split returns.
 func TestDispatchRefusesWhenThePlanOwnerCannotBeResolved(t *testing.T) {
-	graph := &fakeGraph{planOwner: ""} // planById finds no row at all
+	graph := &fakeGraph{planOwner: ""} // the run read finds no row at all
 	reps := newCluster(t, graph, slog.New(slog.DiscardHandler), "workbench-1")
 	root := reps[0].integ.manager.Root()
 
