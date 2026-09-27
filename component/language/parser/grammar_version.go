@@ -286,6 +286,22 @@ package parser
 // unchanged in the other. A bump still records what the grammar IS. But a
 // NARROWING of the authored surface is no longer a bump plus a rewrite mode:
 // it is a deprecation window first, and a reservation afterwards.
+//
+// # 2026.09-dsl-v1-agent-role-axis (memql#5438)
+//
+// Two WIDENINGS on a tool, and the first form through the window since the
+// freeze. `@requiresAgentRole("assistant", ...)` is a new tool annotation
+// (annotation_unknown on a tool before) gating WHICH AGENT calls, and
+// `@requiresRank("<role>")` is legal on a tool (annotation_misplaced before),
+// gating the PERSON the call is for. Nothing previously valid stopped being
+// valid, so no rewrite mode is owed for the bump itself.
+//
+// `@allowedRoles(...)` is DEPRECATED alongside them, which is not a narrowing
+// at this version: it parses exactly as before while its window runs
+// (component/language/deprecation, deprecated_allowed_roles, 0.24.0 to 0.26),
+// warns naming both replacements, and ships its rewrite,
+// `memqlmigrate --rewrite=allowed-roles`. The surface corpus pins that it still
+// parses; the refusal after the window is the parser's (parseAttributeArgs).
 
 import (
 	"crypto/sha256"
@@ -304,7 +320,7 @@ import (
 //
 // Before-write field statements and trigger timing coexist with the retirement
 // of error(). error("message") remains live; no statement has an onError context.
-const GrammarVersion = "2026.09-before-write-error-accessor-77cda60c"
+const GrammarVersion = "2026.09-dsl-v1-agent-role-axis-e3f94bad"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

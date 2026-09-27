@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.1
+
+- **Tools say which agent may call them, and which person.** Edition 2026
+  gains `@requiresAgentRole("assistant", ...)` on a tool -- the acting agent's
+  role -- and `@requiresRank("<role>")` becomes legal on a tool, where it
+  judges the person the call is for. Completion and hover offer both. Grammar
+  `2026.09-dsl-v1-agent-role-axis-e3f94bad`; the language is still edition 2026.
+- **`@allowedRoles(...)` is deprecated.** It still loads, and the editor now
+  warns on every use naming the two annotations it splits into; the quick fix
+  writes `@requiresAgentRole(...)` for a list of agent roles and
+  `@requiresRank(...)` for a list of person roles that forms a floor, and
+  offers nothing for a list it cannot carry across exactly.
+
 ## 0.6.0
 
 MemQL edition 2026 is frozen, and this release is the editor that speaks it.

@@ -628,6 +628,34 @@ automation probe {
   logic probe(x: 1)
 }`},
 
+	// ---- the agent-role axis (memql#5438) ----------------------------------
+	// @requiresAgentRole is a new tool annotation and @requiresRank a new
+	// placement on a tool: both WIDENINGS -- before them the first was
+	// annotation_unknown on a tool and the second annotation_misplaced. Which
+	// values they may hold is the load's question (the agent concept's role
+	// enum, the role ladder), which this path does not reach. @allowedRoles is
+	// DEPRECATED, not retired: inside its window it parses exactly as before.
+	{"tool: @requiresAgentRole (memql#5438)", true, `@handler(type="function", name="probe")
+@requiresAgentRole("assistant", "specialist")
+tool probe {
+  a string
+}`},
+	{"tool: @requiresRank (memql#5438)", true, `@handler(type="function", name="probe")
+@requiresRank("developer")
+tool probe {
+  a string
+}`},
+	{"tool: @requiresAgentRole unquoted (annotation_form)", false, `@handler(type="function", name="probe")
+@requiresAgentRole(assistant)
+tool probe {
+  a string
+}`},
+	{"tool: @allowedRoles inside its deprecation window", true, `@handler(type="function", name="probe")
+@allowedRoles("assistant")
+tool probe {
+  a string
+}`},
+
 	// NOT in this corpus: the retired procedural `func (Query) name(ctx any)`
 	// author-side form. It is refused, but NOT by NormaliseAll + ParseFile --
 	// measured here, it parses clean at this layer, so an entry asserting
