@@ -64,7 +64,47 @@ func parityBoot(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
 	if err := eng.Init(memorynodes.DefaultRegistry()); err != nil {
 		t.Fatalf("engine Init: %v", err)
 	}
+	seedSelfAccount(t, eng, db)
 	return eng, db
+}
+
+// selfAccountID is the cluster's own organization: the default an operator's
+// site takes when it names no accountId (component/memql
+// organization_ownership.go).
+const selfAccountID = "v1:accounts:account:self"
+
+// seedSelfAccount makes the row the boot seed makes, the way it makes it:
+// absence-gated, the same mutation, under the same maintenance identity
+// (dsl/accounts/automations.memql, seedSelfAccount).
+//
+// On a real cluster that startup automation has written the row before anyone
+// can act. This engine runs no startup automations, so until memql#5485 the
+// row existed here only because ANOTHER package's tests had written it into
+// the one database the unsharded db-tests lane shared -- the tests creating a
+// site with no accountId passed or failed on what ran before them. Sharding
+// gives every db shard its own Postgres, and on a fresh one they failed with
+// organization_not_found. A test's preconditions are its own to make.
+func seedSelfAccount(t *testing.T, eng *memql.MemQLEngine, db *bun.DB) {
+	t.Helper()
+	n, err := db.NewSelect().TableExpr(`"MemoryNodes"`).Where("id = ?", selfAccountID).Count(context.Background())
+	if err != nil {
+		t.Fatalf("looking for %s: %v", selfAccountID, err)
+	}
+	if n > 0 {
+		return
+	}
+	// The three surfaces the automation executor stamps for a maintenance
+	// run (component/automations/executor.go, contextWithSystemActor): the
+	// claims and the token `createdBy` resolves through, and the access
+	// context row authz reads.
+	ma := auth.MaintenanceActor("seedSelfAccount")
+	claims := map[string]any{"sub": ma.UserId, "email": ma.UserId, "role": string(ma.Role)}
+	seed := auth.ContextWithAccess(
+		auth.ContextWithToken(auth.ContextWithClaims(context.Background(), claims), auth.BuildTokenInfo(claims)), ma)
+	if _, err := eng.Execute(seed, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "My company")`,
+		langparser.QuoteString(selfAccountID))); err != nil {
+		t.Fatalf("seeding %s as the boot seed does: %v", selfAccountID, err)
+	}
 }
 
 // parityOwner is a real cluster owner -- NOT a `system:` actor, which the
