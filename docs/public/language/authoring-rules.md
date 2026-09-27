@@ -2406,7 +2406,8 @@ reviewer can see.
 **Caching is ON by default, and an annotation changes the number rather
 than switching the feature on.** A pure read carrying no annotation is
 cached for 60 seconds (memql#1970). Write `@cache(N)` to choose a
-different TTL and `@nocache` to opt out.
+different TTL and `@cache(0)` to opt out (`@nocache` was retired in epic
+memql#5375; `memqlmigrate --rewrite=attributes` rewrites it).
 
 `N` is a **whole number of SECONDS**, written positionally:
 `@cache(300)`. That is the preferred form since memql#2618 and the form
