@@ -137,6 +137,12 @@ func (i *Integration) SetLadderLockDB(db func() *bun.DB) {
 	}
 }
 
+// LadderLockInstalled reports whether the ladder's lock has a database handle
+// to be taken on, for the wiring test that holds the node to it: with none,
+// every ladder move runs unlocked, green in every test and racy in the
+// cluster.
+func (i *Integration) LadderLockInstalled() bool { return i != nil && i.lockDB != nil }
+
 // SetDeriver installs the one bounded model call. Called once, from the node
 // that holds a router. Absent, every unexplained hole simply stays free --
 // which is a correct procedure with one more parameter, never a failure.
