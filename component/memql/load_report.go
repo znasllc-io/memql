@@ -56,11 +56,16 @@ const AllowSkipsEnvVar = "MEMQL_DSL_ALLOW_SKIPS"
 // brick a fleet. Distinct from a baseloader.Skip, which is an IN-TREE
 // (embedded core / pack) construct drop and DOES fail strict boot.
 type QuarantinedConstruct struct {
+	// Id is the v1:authoring:construct row, the handle an operator fixes or
+	// demotes it by (memql#5426).
+	Id       string
 	Kind     string
 	Name     string
 	BundleId string
 	Owner    string
-	Err      string
+	// Code is the rule id of the recompile refusal, "" when it carries none.
+	Code string
+	Err  string
 }
 
 // LoadReport accumulates the outcome of a full DSL load pass. One report

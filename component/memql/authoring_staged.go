@@ -398,13 +398,13 @@ func (e *MemQLEngine) recompileAndStageRow(_ context.Context, row AuthoringConst
 		// whichever registry the engine holds rather than the package default.
 		fn, cerr := compileAuthoredFunction(sc, e.conceptBindingRegistry())
 		if cerr != nil {
-			return explainStaleGrammarStamp(row, fmt.Errorf("recompile staged %s %q: %w", row.Kind, row.Name, cerr))
+			return explainRehydrationFailure(row, fmt.Errorf("recompile staged %s %q: %w", row.Kind, row.Name, cerr))
 		}
 		c.Compiled = fn
 	case "spec", "trait":
 		spec, cerr := compileAuthoredSpec(sc)
 		if cerr != nil {
-			return explainStaleGrammarStamp(row, fmt.Errorf("recompile staged %s %q: %w", row.Kind, row.Name, cerr))
+			return explainRehydrationFailure(row, fmt.Errorf("recompile staged %s %q: %w", row.Kind, row.Name, cerr))
 		}
 		if spec == nil {
 			// compileAuthoredSpec's (nil, nil) is the #2607 intentional-skip

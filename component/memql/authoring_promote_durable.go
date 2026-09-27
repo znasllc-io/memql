@@ -41,6 +41,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -655,6 +656,11 @@ func newRehydrateConfig(opts ...rehydrateOption) (rehydrateConfig, error) {
 //   - a row stamped with the CURRENT grammar. Its source failing to compile is a
 //     real defect in the source or a missing dependency, and blaming a grammar
 //     move that did not happen would send the reader somewhere useless.
+//
+// It is reached only for a failure that carries no rule id: one that does is a
+// named rule of the language, and explainRehydrationFailure reports it with its
+// own remedy (memql#5426) -- a stray line a narrowing now refuses is fixed by
+// deleting it, which no memqlmigrate rewrite does.
 func explainStaleGrammarStamp(row AuthoringConstructRow, err error) error {
 	if err == nil || row.GrammarVersion == "" || row.GrammarVersion == languageParser.GrammarVersion {
 		return err
@@ -735,13 +741,13 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 		// difference between the binding resolving and not.
 		fn, err := compileAuthoredFunction(sc, e.conceptBindingRegistry())
 		if err != nil {
-			return explainStaleGrammarStamp(row, fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err))
+			return explainRehydrationFailure(row, fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err))
 		}
 		c.Compiled = fn
 	case "spec", "trait":
 		spec, err := compileAuthoredSpec(sc)
 		if err != nil {
-			return explainStaleGrammarStamp(row, fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err))
+			return explainRehydrationFailure(row, fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err))
 		}
 		if spec == nil {
 			// compileAuthoredSpec's (nil, nil) is the #2607 intentional-skip
@@ -795,7 +801,7 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 		// there is no second place for it to be stored wrong.
 		concept, err := compileAuthoredConcept(sc)
 		if err != nil {
-			return explainStaleGrammarStamp(row, fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err))
+			return explainRehydrationFailure(row, fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err))
 		}
 		c.Compiled = concept
 	default:
@@ -831,20 +837,26 @@ func (e *MemQLEngine) quarantineRehydratedConstruct(row AuthoringConstructRow, c
 	if e == nil || cause == nil {
 		return
 	}
+	code := baseloader.RuleCode(cause)
 	if e.Component != nil && e.Logger != nil {
 		e.Logger.Error("durable authored construct quarantined at re-hydration (stored source failed to recompile; not re-registered, boot continues)",
 			"component", "memql.engine",
+			"id", row.Id,
 			"kind", row.Kind,
 			"name", row.Name,
 			"bundleId", row.BundleId,
 			"owner", row.OwnerUserId,
+			"grammarVersion", row.GrammarVersion,
+			"code", code,
 			"error", cause)
 	}
 	e.loadReport.AddQuarantine(QuarantinedConstruct{
+		Id:       row.Id,
 		Kind:     row.Kind,
 		Name:     row.Name,
 		BundleId: row.BundleId,
 		Owner:    row.OwnerUserId,
+		Code:     code,
 		Err:      cause.Error(),
 	})
 }
