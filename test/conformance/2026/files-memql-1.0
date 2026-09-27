@@ -786,9 +786,11 @@ negative/logic/chain-too-long.memql
 negative/logic/nesting-too-deep.memql
 negative/mutate/imported-concept-declared-nowhere.memql
 negative/mutate/two-write-blocks.memql
+negative/query/filter-written-twice.memql
 negative/query/imported-concept-declared-nowhere-filtered.memql
 negative/query/imported-concept-declared-nowhere.memql
 negative/query/signature-concept-not-imported.memql
+negative/query/sort-written-twice.memql
 negative/query/unknown-clause.memql
 negative/seed/concept-declared-nowhere.memql
 negative/shape/concept-declared-nowhere.memql
