@@ -315,6 +315,9 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	if err := validateOuterExpressionNames(&automation); err != nil {
 		return nil, err
 	}
+	if err := validatePreconditionArgs(&automation); err != nil {
+		return nil, err
+	}
 
 	// G5 (memql#2367, ADR Decision 6): `event.payload.X` reads are RETIRED
 	// in automation bodies -- the payload binds to the args { } contract and

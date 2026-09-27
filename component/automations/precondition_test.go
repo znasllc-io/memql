@@ -2,11 +2,15 @@ package automations
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/language/compiler"
 )
 
 // Epic 4 / memql#2139: first-class automation preconditions.
@@ -142,6 +146,41 @@ automation guardedGreet {
 	}
 	if len(auto.Steps) != 1 {
 		t.Fatalf("the step must survive precondition stripping; got %d steps", len(auto.Steps))
+	}
+}
+
+// TestCompileMemQL_RefusesAnUndeclaredArgsReadInAPrecondition (memql#5426
+// review): a precondition's check reads the bound args like a statement, so
+// an `args.<name>` the block does not declare is refused at load,
+// args_undeclared, naming the precondition -- it read absent on every run,
+// and a precondition that misses aborts the run, so the automation failed
+// closed on every fire. A declared read is the control.
+func TestCompileMemQL_RefusesAnUndeclaredArgsReadInAPrecondition(t *testing.T) {
+	loader := NewLoader(LoaderOptions{})
+	const tmpl = `@trigger(event="deploy.requested")
+automation guardedDeploy {
+  args {
+    imageDigest  string
+  }
+  precondition digestPinned {
+    check: args.%s != ""
+    description: "the image digest is pinned"
+  }
+  gate := logic requireForwardDeploy(environment: args.imageDigest)
+}`
+	_, err := loader.compileMemQL(fmt.Sprintf(tmpl, "imageDigset"), "test:undeclared")
+	if err == nil {
+		t.Fatal("a precondition reading an undeclared argument loaded")
+	}
+	var undeclared *compiler.ArgsUndeclaredError
+	if !errors.As(err, &undeclared) || undeclared.Where != "precondition digestPinned" || undeclared.Field != "imageDigset" {
+		t.Fatalf("err = %v, want args_undeclared for args.imageDigset in precondition digestPinned", err)
+	}
+	if !strings.HasSuffix(err.Error(), "[args_undeclared]") {
+		t.Errorf("the refusal does not end with its code: %v", err)
+	}
+	if _, err := loader.compileMemQL(fmt.Sprintf(tmpl, "imageDigest"), "test:declared"); err != nil {
+		t.Fatalf("a precondition reading a declared argument was refused: %v", err)
 	}
 }
 
