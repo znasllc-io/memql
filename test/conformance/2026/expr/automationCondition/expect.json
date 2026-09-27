@@ -233,6 +233,20 @@
       "code": "body_call_unknown",
       "message": "`.startsWith()` is not a method of a list or a string, so the expression fails when it runs",
       "note": "A condition's method is resolved against the function catalog at load, as its bare calls are (memql#5426)."
+    },
+    {
+      "file": "a-method-call-of-the-wrong-shape.memql",
+      "verdict": "refuse_load",
+      "code": "body_call_unknown",
+      "message": "list.any(pred lambda) bool takes 1 argument(s), and `args.tags.any()` passes 0, so the expression fails when it runs",
+      "note": "The evaluator checks a call's arguments against the catalog entry before it reads the receiver, so a call of the wrong shape fails on every run whatever the data; the load checks it the same way (memql#5426)."
+    },
+    {
+      "file": "a-list-method-on-a-string-literal.memql",
+      "verdict": "refuse_load",
+      "code": "body_call_unknown",
+      "message": "`.sum()` is a list method and `\"abc\"` is a string, so the expression fails when it runs",
+      "note": "The receiver's type is written in the source, so a method it does not have is refused at load (memql#5426)."
     }
   ]
 }

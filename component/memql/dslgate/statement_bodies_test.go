@@ -258,3 +258,45 @@ automation probeMultiLineFilter {
 		t.Fatalf("want one report opening %q, got:\n%s", want, strings.Join(got, "\n"))
 	}
 }
+
+// TestStatementGatesRefuseACallOfTheWrongShape (memql#5426 review): the
+// evaluator checks a call's arguments against the catalog entry before it
+// evaluates the receiver, so a call of the wrong shape fails on every run
+// whatever the data -- and `"abc".sum()` calls a list method on a value the
+// source already says is a string. Both are refused at load, as is a catalog
+// function called with the wrong count; a name a list and a string both have
+// fits when it fits either, and a lambda's parameter count, which the catalog
+// does not state, is not judged here.
+func TestStatementGatesRefuseACallOfTheWrongShape(t *testing.T) {
+	src := `logic probeShapes {
+  args {
+    items  []object
+    name   string
+  }
+  a := args.items.any()
+  b := "abc".sum()
+  c := args.items.where(1)
+  d := lower()
+  e := args.items.any(x => x.active == true)
+  f := args.name.count() + args.items.count()
+  g := args.items.reduce(0, (acc, x) => acc + x.n)
+  h := "abc".includes("b")
+  return lower(args.name)
+}
+`
+	got := statementGates(SourceFile{"probe/logic.memql", src})
+	want := []string{
+		"statement-unknown-call@probe/logic.memql:6 probeShapes: list.any(pred lambda) bool takes 1 argument(s), and `args.items.any()` passes 0",
+		"statement-unknown-call@probe/logic.memql:7 probeShapes: `.sum()` is a list method and `\"abc\"` is a string",
+		"statement-unknown-call@probe/logic.memql:8 probeShapes: argument 1 of list.where(",
+		"statement-unknown-call@probe/logic.memql:9 probeShapes: lower(",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("want %d reports, got:\n%s", len(want), strings.Join(got, "\n"))
+	}
+	for i := range want {
+		if !strings.HasPrefix(got[i], want[i]) || !strings.HasSuffix(got[i], "[body_call_unknown]") {
+			t.Errorf("report %d = %q, want it to open %q and end with the code", i, got[i], want[i])
+		}
+	}
+}

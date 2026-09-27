@@ -1,0 +1,10 @@
+/// Raise a ticket when a goal changes, through a list method called on a string.
+@trigger(event="node.updated", concept="v1:work:goal")
+automation acListMethodOnString {
+  args {
+    id  string
+  }
+  if "abc".sum() > 0 {
+    raised := mutation raiseAgentTicket(title: "summed " + args.id)
+  }
+}

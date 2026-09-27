@@ -88,10 +88,18 @@ func scanStatementBodies(files []SourceFile) []Violation {
 					if x.Receiver != nil {
 						if detail := unknownMethod(x.Name); detail != "" {
 							report(GateStatementUnknownCall, x.Span, detail)
+						} else if detail := methodCallMisfit(x); detail != "" {
+							report(GateStatementUnknownCall, x.Span, detail)
 						}
 						break
 					}
-					if _, fn := functions.Lookup(x.Name); fn || predicates[x.Name] {
+					if fn, isFunction := functions.Lookup(x.Name); isFunction {
+						if misfit := callShapeMisfit(x, fn); misfit != "" {
+							report(GateStatementUnknownCall, x.Span, misfit+", so the expression fails when it runs ["+compiler.CodeBodyCallUnknown+"]")
+						}
+						break
+					}
+					if predicates[x.Name] {
 						break
 					}
 					remedy := "call a catalog function or a spec or trait the corpus declares"
@@ -143,6 +151,88 @@ func unknownMethod(name string) string {
 	}
 	return fmt.Sprintf("`.%s()` is not a method of a list or a string, so the expression fails when it runs: call a method the function catalog lists [%s]",
 		name, compiler.CodeBodyCallUnknown)
+}
+
+// methodCallMisfit is the report for a call of a method the evaluator refuses
+// on every run although the name is one, or "" when the call may run. Two
+// things are decided before a receiver's value exists, so they are decided at
+// load too (memql#5426 review):
+//
+//   - the call's shape -- how many arguments, and which are lambdas -- which
+//     the evaluator checks against the catalog entry before it evaluates the
+//     receiver (exprCheckShape): `args.items.any()` fails whatever the items
+//     are. A name a list and a string both have fits when it fits either.
+//   - a string literal's methods: `"abc".sum()` is a list method called on a
+//     value whose type the source already says.
+//
+// A lambda's parameter count is not checked: the evaluator reads it from a
+// table of its own (list.reduce takes two), which the catalog does not state.
+func methodCallMisfit(x *ast.CallExpr) string {
+	listFn, onList := functions.Method(functions.TypeList, x.Name)
+	strFn, onString := functions.Method(functions.TypeString, x.Name)
+	if lit, ok := ast.Unparen(x.Receiver).(*ast.LiteralExpr); ok {
+		if _, isString := lit.Value.(string); isString {
+			if !onString {
+				return fmt.Sprintf("`.%s()` is a list method and `%s` is a string, so the expression fails when it runs: call it on a list, or call a string method [%s]",
+					x.Name, ast.FormatExpr(x.Receiver), compiler.CodeBodyCallUnknown)
+			}
+			onList = false
+		}
+	}
+	misfit := ""
+	for _, entry := range []struct {
+		fn functions.Function
+		ok bool
+	}{{listFn, onList}, {strFn, onString}} {
+		if !entry.ok {
+			continue
+		}
+		m := callShapeMisfit(x, entry.fn)
+		if m == "" {
+			return ""
+		}
+		if misfit == "" {
+			misfit = m
+		}
+	}
+	if misfit == "" {
+		return ""
+	}
+	return misfit + ", so the expression fails when it runs [" + compiler.CodeBodyCallUnknown + "]"
+}
+
+// callShapeMisfit says how a call does not fit a catalog entry's parameters,
+// or "" when it does -- the evaluator's shape check (exprCheckShape) as far as
+// the catalog states it: positional arguments only, a count between the
+// required parameters and all of them, and a lambda exactly where the entry
+// takes one.
+func callShapeMisfit(x *ast.CallExpr, fn functions.Function) string {
+	if len(x.Named) > 0 {
+		return fmt.Sprintf("%s takes positional arguments, not named ones", fn.Signature())
+	}
+	required := 0
+	for _, p := range fn.Params {
+		if !p.Optional {
+			required++
+		}
+	}
+	if n := len(x.Args); n < required || n > len(fn.Params) {
+		want := fmt.Sprintf("%d", required)
+		if required != len(fn.Params) {
+			want = fmt.Sprintf("%d to %d", required, len(fn.Params))
+		}
+		return fmt.Sprintf("%s takes %s argument(s), and `%s` passes %d", fn.Signature(), want, ast.FormatExpr(x), n)
+	}
+	for i, a := range x.Args {
+		_, isLambda := ast.Unparen(a).(*ast.LambdaExpr)
+		switch wantLambda := fn.Params[i].Type == functions.TypeLambda; {
+		case wantLambda && !isLambda:
+			return fmt.Sprintf("argument %d of %s is a lambda, as in x => ..., and `%s` is not one", i+1, fn.Signature(), ast.FormatExpr(a))
+		case !wantLambda && isLambda:
+			return fmt.Sprintf("argument %d of %s is a value, not a lambda", i+1, fn.Signature())
+		}
+	}
+	return ""
 }
 
 // StatementBodiesRead is the statement-body gates' coverage: "<file> <name>"
