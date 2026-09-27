@@ -219,7 +219,7 @@ func (i *Integration) handleStepVersions(ctx context.Context, args map[string]an
 		if e, named := head[key]; named {
 			current = e.RunId == "" && e.Version == version
 		}
-		payload := make(map[string]any, len(row)+1)
+		payload := make(map[string]any, len(row))
 		for k, v := range row {
 			payload[k] = v
 		}

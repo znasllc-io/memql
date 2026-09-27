@@ -26,7 +26,9 @@ func withOverrideInputs(ctx context.Context, args map[string]any) map[string]any
 	if !ok || run.Override == nil || len(run.Override.Inputs) == 0 {
 		return args
 	}
-	out := make(map[string]any, len(args)+len(run.Override.Inputs))
+	// Sized by the arguments alone: the map grows for the inputs, and a hint
+	// that summed two lengths is an allocation size that can overflow.
+	out := make(map[string]any, len(args))
 	for k, v := range args {
 		out[k] = v
 	}

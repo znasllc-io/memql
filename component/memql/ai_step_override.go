@@ -41,6 +41,7 @@ package memql
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/znasllc-io/memql/core/airoute"
@@ -211,9 +212,8 @@ func withStepOverrideMessages(ctx context.Context, messages []common.ChatMessage
 	if len(extra) == 0 {
 		return messages
 	}
-	out := make([]common.ChatMessage, 0, len(messages)+len(extra))
-	out = append(out, messages...)
-	return append(out, extra...)
+	// A NEW slice, never the caller's spare capacity: slices.Concat copies.
+	return slices.Concat(messages, extra)
 }
 
 // withStepOverrideText appends the same messages to a SINGLE-PROMPT call, as
