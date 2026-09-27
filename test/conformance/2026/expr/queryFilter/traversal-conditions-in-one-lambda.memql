@@ -1,0 +1,9 @@
+/// The parents of either of two tickets: one lambda, its conditions joined.
+query ticket qfParentsOfEither {
+  args {
+    firstId   string  @required
+    secondId  string  @required
+  }
+  filter row => parentOf(p => p.id == args.firstId || p.id == args.secondId)
+  paginate 20
+}
