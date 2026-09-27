@@ -502,3 +502,38 @@ func TestAVersionWithAReplayRiskStaysACandidateNamingIt(t *testing.T) {
 		t.Fatalf("the control lifted to %s, so the hold above proves nothing", ok.Rung)
 	}
 }
+
+// TestAVersionWithAParameterNoGoalInputSuppliesStaysACandidate: the two
+// recordings wrote a-copy.txt and b-copy.txt while their goals' input named
+// a.txt and b.txt, so the file name is a free parameter no goal input
+// supplies (LearnInputMap ties it to nothing). The app's own actions bind it
+// in shadow, so the version would earn a promotion there -- and then every
+// canary start would be refused as unbound and counted, demoting it and
+// asking the person again. It stays a candidate, the reason naming the
+// parameter.
+func TestAVersionWithAParameterNoGoalInputSuppliesStaysACandidate(t *testing.T) {
+	recs := twoRecordings()
+	for n := range recs {
+		recs[n].execCommand = "mkdir -p out && echo hello > " + strings.TrimSuffix(recs[n].file, ".txt") + "-copy.txt"
+	}
+	eng, res := liftFixture(t, recs...)
+	payload, err := DecodeProcedure(argsOf(t, eng.callTo(t, "recordProcedure"))["procedure"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(payload.FreeParameters, []string{"s0.command.7"}) || len(payload.InputMap) != 0 {
+		t.Fatalf("fixture: free parameters %v / inputMap %v, want one parameter no input supplies", payload.FreeParameters, payload.InputMap)
+	}
+	if res.Rung != work.RungCandidate {
+		t.Fatalf("rung = %s, want candidate: no canary or trusted replay could bind its parameter", res.Rung)
+	}
+	reason := argsOf(t, eng.callTo(t, "recordConstructLadder"))["ladderReason"].(string)
+	if !containsAll(reason, "parameter s0.command.7", "no goal input supplies it") {
+		t.Fatalf("reason %q must name the parameter no goal input supplies", reason)
+	}
+
+	// The control: the goal's input names the file the recordings wrote.
+	if _, ok := liftFixture(t, twoRecordings()...); ok.Rung != work.RungShadow {
+		t.Fatalf("the control lifted to %s, so the hold above proves nothing", ok.Rung)
+	}
+}

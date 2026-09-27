@@ -165,6 +165,17 @@ func (i *Integration) prepareVersion(ctx context.Context, k corpusKey, mined *mi
 	v.report, v.gateRan = i.compile(source, v.name)
 	v.reRunnable = v.gateRan && v.report.OK && everyStepWritten && compiledAutomation(v.report, v.name)
 	v.rung, v.reason = work.EntryRung(candidateEvidence(win, t, insts, mined.recs))
+	// A PARAMETER NO GOAL CAN SUPPLY NEVER CLIMBS. A free hole the input map
+	// ties to no goal input is bound in shadow by the app's own actions, so
+	// the version would earn its promotion there -- and every canary start
+	// after it would be refused as unbound and counted, demoting it and asking
+	// the person again for a procedure no goal can run.
+	for _, id := range built.FreeParameters {
+		if _, supplied := built.InputMap[id]; !supplied {
+			v.rung, v.reason = work.RungCandidate, fmt.Sprintf("parameter %s differs between the recordings and no goal input supplies it, so a replay could not choose it", id)
+			break
+		}
+	}
 	// A VERSION A REPLAY COULD NOT RUN SAFELY NEVER CLIMBS: a parameter that is
 	// a shell's script or an interpreter's code, one the recordings reached
 	// through an expansion, a recording the template does not even bind
