@@ -522,20 +522,41 @@ func docsCorpusPageOf(casePath string) string {
 // that package, and would leave the browsable example the one copy nothing
 // checks. Byte identity is one assertion, it names both paths, and it cannot
 // drift.
-var publishedExampleCases = map[string]string{
-	"../../examples/reading-list/reading.memql":         "2026/examples/first-program/reading-list.memql",
-	"../../examples/research-desk/research/brief.memql": "2026/examples/research-workflow/brief.memql",
+//
+// An example folder may hold MORE THAN ONE FILE, and research-desk does: its
+// automation is in research/automations.memql, the one file of a domain the
+// automation loader reads, and everything it calls is in research/brief.memql
+// (memql#5437 -- in brief.memql the automation never loaded). A case is one
+// file, so its content is the example's files in the order listed, joined by
+// one blank line, which is the single-file layout the example had before the
+// split and the one the page's fences quote from.
+var publishedExampleCases = []struct {
+	files    []string
+	casePath string
+}{
+	{[]string{"../../examples/reading-list/reading.memql"}, "2026/examples/first-program/reading-list.memql"},
+	{[]string{
+		"../../examples/research-desk/research/brief.memql",
+		"../../examples/research-desk/research/automations.memql",
+	}, "2026/examples/research-workflow/brief.memql"},
 }
 
 // TestPublishedExamplesMatchTheirCorpusCases fails when a checked-in example
 // folder and the corpus case that holds it to the engine have drifted apart.
 func TestPublishedExamplesMatchTheirCorpusCases(t *testing.T) {
-	for example, casePath := range publishedExampleCases {
-		published, err := os.ReadFile(filepath.FromSlash(example))
-		if err != nil {
-			t.Fatalf("read published example %s: %v", example, err)
+	for _, pinned := range publishedExampleCases {
+		casePath := pinned.casePath
+		var parts []string
+		for _, file := range pinned.files {
+			b, err := os.ReadFile(filepath.FromSlash(file))
+			if err != nil {
+				t.Fatalf("read published example %s: %v", file, err)
+			}
+			parts = append(parts, string(b))
 		}
-		if got, want := string(published), docsCorpusReadCase(t, casePath); got != want {
+		example := strings.Join(pinned.files, " + ")
+		published := strings.Join(parts, "\n")
+		if got, want := published, docsCorpusReadCase(t, casePath); got != want {
 			t.Errorf("%s and %s have drifted apart.\n\n%s\n\n"+
 				"They are one content in two places: the folder is what a reader opens and lints, the case is what "+
 				"TestCorpusVerdicts runs the engine over, and the page's fences are checked against the case. "+

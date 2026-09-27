@@ -68,9 +68,11 @@ import (
 //   - component/language/parser: reconstructTokens, which rebuilt PayloadRaw
 //     from lexed tokens -- so a literal this package accepted could not be
 //     re-read by this package.
-//   - core/liveknowledge's memqlQuote. That package is an L0 leaf with zero
-//     in-repo imports (memql#3164), so it cannot import this one; the quoter is
-//     injected by integrations/liveknowledge instead of copied down.
+//   - core/liveknowledge's memqlQuote, an L0 leaf with zero in-repo imports
+//     (memql#3164) that took this function injected rather than copied down.
+//     Both it and integrations/liveknowledge were retired in memql#5432 with
+//     the dormant live-source connector they served, whose dispatcher still
+//     built its own lookups with %q.
 //   - sdk/go/client, fixed at the emitter (sdk/gen/emit_go.go) and regenerated,
 //     plus support.go's renderMemQLValue.
 //   - component/memql: encodeForMemqlSubstitution and renderDryRunMemQLValue,

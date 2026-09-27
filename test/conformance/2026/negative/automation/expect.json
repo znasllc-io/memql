@@ -1,0 +1,12 @@
+{
+  "cases": [
+    {
+      "file": "declared-outside-automations-file.memql",
+      "mount": "billing.memql",
+      "verdict": "refuse_load",
+      "code": "construct_misplaced",
+      "message": "which the automation loader never reads: a domain's automations load from its automations.memql and from no other file, so it would load as nothing, with no skip and no warning. Move it to",
+      "note": "memql#5437. The automation loader reads a domain's automations from its automations.memql and from no other file. Declared anywhere else an automation parsed, passed every gate that reads the whole tree, and loaded as nothing: ten automations of the MemQL Cloud control plane sat in billing.memql and trial.memql that way while the docs described them running. The case is mounted as billing.memql (mount) because its verdict is about the file name; mounted as automations.memql, the default for a case that declares an automation, the same source loads."
+    }
+  ]
+}

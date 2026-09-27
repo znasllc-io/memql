@@ -287,7 +287,7 @@ var BoundConcepts = map[string]string{
 	"agentOwner":                                       "v1:agents:agent",
 	"agentRoleBySlug":                                  "v1:agents:agentRole",
 	"agentRoleSlugsInUse":                              "v1:agents:agent",
-	"agentsForPlan":                                    "v1:agents:agent",
+	"agentsForRun":                                     "v1:agents:agent",
 	"allAgents":                                        "v1:agents:agent",
 	"allDocumentChunkDomains":                          "v1:knowledge:documentChunk",
 	"allOutputScreenings":                              "v1:safety:outputScreening",

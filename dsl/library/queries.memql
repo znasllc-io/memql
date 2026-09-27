@@ -306,7 +306,7 @@ query documentVersion documentVersionsForOwner {
 //
 // Owned, exactly like every other read in this file: the row set is gated
 // by `row.ownerUserId == actor.userId` server-side and the plan id narrows it
-// further. Unlike `agentsForPlan` (whose own header explains why an owner
+// further. Unlike `agentsForRun` (whose own header explains why an owner
 // conjunct there would be a silent emptiness), the owner pointer on an
 // artifact is stamped from the actor on every write and is load-bearing --
 // so it is a real gate here, not decoration.

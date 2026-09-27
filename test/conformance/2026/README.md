@@ -79,6 +79,7 @@ constructs carry the annotation's name for that reason (`openTicketsCache`,
 | `sql` | For `lower`: text the lowered SQL must contain. |
 | `expect` | For `evaluate`: the value the expression must produce. An absent result is `null`. |
 | `call` | For `evaluate`: a logic the case file declares, run with `args` instead of evaluating a bare expression; `calls` answers the construct calls it makes that are not to another logic the case declares. |
+| `mount` | For `load_ok` and `refuse_load`: the file name the case is mounted under in its domain, when the verdict depends on it. A case is otherwise mounted as `automations.memql` when it declares an automation -- the one file of a domain the automation loader reads -- and as `case.memql` when it does not, so a case can only be judged somewhere else by naming it: an automation declared in any other file is refused at load (`construct_misplaced`, `negative/automation/`). |
 | `note` | Why the case exists. Not checked. |
 
 ## The verdicts

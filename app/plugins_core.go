@@ -81,7 +81,6 @@ import (
 	// requires and integrations could not import back.
 	_ "github.com/znasllc-io/memql/component/logstore"
 	_ "github.com/znasllc-io/memql/integrations/library"
-	_ "github.com/znasllc-io/memql/integrations/liveknowledge"
 	// Procedure learning and its certification ladder (epics memql#5402 and
 	// memql#5408). Registered on every node type: its automations load
 	// everywhere and consume work-run and approval events, so their

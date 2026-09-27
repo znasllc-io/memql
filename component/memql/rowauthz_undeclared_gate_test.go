@@ -603,7 +603,7 @@ const undeclared4208CodeMetricReason = "memql#4208 -- prefix-scoped codeMetric r
 //	          `ownerUserId` as a caller ARGUMENT rather than stamping it
 //	          from the actor, so a planner-provisioned specialist can carry
 //	          an empty one -- and the planner agent itself is owned by no
-//	          user at all. agentsForPlan is `@public` for exactly that
+//	          user at all. agentsForRun is `@public` for exactly that
 //	          reason, narrowed by lineage.originatingRunId, and every one
 //	          of its eight already-listed siblings is here too.
 //
@@ -712,8 +712,8 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"agentById":             {"v1:agents:agent", undeclaredGrandfatherReason},
 	"agentOwner":            {"v1:agents:agent", undeclaredGrandfatherReason},
 	"agentRoleSlugsInUse":   {"v1:agents:agent", undeclaredGrandfatherReason},
-	"agentsForPlan":         {"v1:agents:agent", undeclared4369NexusAgentReason},
 	"agentsForRegistry":     {"v1:agents:agent", undeclaredGrandfatherReason},
+	"agentsForRun":          {"v1:agents:agent", undeclared4369NexusAgentReason},
 	"allAgents":             {"v1:agents:agent", undeclaredGrandfatherReason},
 	"assistantAgentForUser": {"v1:agents:agent", undeclaredGrandfatherReason},
 

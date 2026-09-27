@@ -986,7 +986,13 @@ the declaration keyword already carries that: `libraryFolders`,
 shipped declarations carrying one. (See naming-conventions.md.)
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/<construct>s.memql`), so the file name never
-carries an individual construct's name.
+carries an individual construct's name. For every kind but one that
+is the layout rather than a load rule -- the loaders read every file
+of a domain. The exception is an automation: it is read from its
+domain's `automations.memql` and from no other file, and one declared
+anywhere else is refused at load (`construct_misplaced`). Before that
+refusal existed it loaded as nothing, with a clean lint and a clean
+boot (memql#5437).
 
 ```
 dsl/library/queries.memql       query folder libraryFolders { ... }

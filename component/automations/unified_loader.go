@@ -72,7 +72,7 @@ var automationLooseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Z
 var automationTerseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+@`)
 
 // LoadFromUnifiedTree walks dsl.Tree() looking for
-// `<domain>/automations.memql` files, extracts every
+// `<domain>/automations.memql` files (dsl.LoaderReadsConstruct), extracts every
 // `automation NAME { ... }` block, and compiles each via the
 // existing compileMemQL pipeline.
 //
@@ -129,7 +129,13 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, "/automations.memql") {
+		// A domain's automations are read from its automations.memql and no
+		// other file. The rule lives in dsl (LoaderReadsConstruct) rather than
+		// here because the construct-misplaced contract gate reads the same
+		// one to refuse an automation declared anywhere else (memql#5437):
+		// this walk never sees such a file, so without the gate the automation
+		// would load as nothing, with a clean boot.
+		if !memqldsl.LoaderReadsConstruct("automation", path) {
 			return nil
 		}
 		// A disabled pack is mounted-inert (module-registry design section

@@ -6092,14 +6092,15 @@ func CreateSiteBuild(args CreateSiteArgs) string {
 //
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.go).
 type CreateSkillArgs struct {
-	SkillId       string
-	Slug          string
-	Name          string
-	Description   string
-	Category      string
-	Tags          []any
-	DomainIds     []any
-	ToolSlugs     []any
+	SkillId     string
+	Slug        string
+	Name        string
+	Description string
+	Category    string
+	Tags        []any
+	DomainIds   []any
+	ToolSlugs   []any
+	// Inert since memql#5432 retired the live-knowledge mechanism; stored and never resolved.
 	LiveSourceIds []any
 	Tier          string
 	Predefined    bool
@@ -8190,14 +8191,15 @@ func MarkStoreRedactedBuild(args MarkStoreRedactedArgs) string {
 //
 // Bound concept: v1:skills:skill (machine-readable: BoundConcepts["mintSkill"] in generated_concepts.go).
 type MintSkillArgs struct {
-	SkillId           string
-	Slug              string
-	Name              string
-	Description       string
-	Category          string
-	Tags              []any
-	DomainIds         []any
-	ToolSlugs         []any
+	SkillId     string
+	Slug        string
+	Name        string
+	Description string
+	Category    string
+	Tags        []any
+	DomainIds   []any
+	ToolSlugs   []any
+	// Inert since memql#5432 retired the live-knowledge mechanism; stored and never resolved.
 	LiveSourceIds     []any
 	Tier              string
 	Instructions      map[string]any

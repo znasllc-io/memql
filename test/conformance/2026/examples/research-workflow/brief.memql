@@ -122,9 +122,11 @@ query researchBrief researchBriefs {
 // showcase:cache:end
 
 // showcase:automation:start
-/// A request becomes a saved draft. Updates do not retrigger this create event.
+/// A request becomes a saved draft. Only a requested row starts it: saving the
+/// draft writes a new version, which is a create event too, and must not rerun it.
 @actor
 @trigger(event="graph.node.created.v1:research:researchBrief")
+@filter(row => row.status == "requested")
 automation prepareResearchBrief {
   args {
     id       string!

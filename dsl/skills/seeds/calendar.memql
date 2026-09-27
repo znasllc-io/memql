@@ -5,9 +5,9 @@
 // tools.memql) into one named capability so an agent that carries this
 // skill can read + write the user's first-party calendar events. The
 // events themselves are the source of truth (v1:calendar:calendarEvent);
-// external Google / CalDAV sync lands later via the knowledge:liveSource
-// / liveConnector mechanism and is out of scope for this skill -- native
-// is canonical.
+// external Google / CalDAV sync is out of scope for this skill and has no
+// path today (the knowledge:liveSource / liveConnector mechanism once
+// planned for it was retired in memql#5432) -- native is canonical.
 //
 // Like every skill seed, this lives under dsl/agents/skills/ (the skill
 // concept is agents-namespaced and the SeedMaterializer loads all skill
@@ -17,7 +17,7 @@
 // a corpus of facts to retrieve.
 
 
-@description("App-native calendar: create, list, find, reschedule, and delete the user's own events. Backs the 'remind me the day before X' flow -- the reactive harness reads the same calendarEvent rows. First-party source of truth; external Google Calendar can sync in later via the liveSource mechanism (not part of this skill). Bundles the calendarList / calendarFind / calendarCreate / calendarUpdate / calendarDelete tools.")
+@description("App-native calendar: create, list, find, reschedule, and delete the user's own events. Backs the 'remind me the day before X' flow -- the reactive harness reads the same calendarEvent rows. First-party source of truth; an external Google Calendar sync is not part of this skill. Bundles the calendarList / calendarFind / calendarCreate / calendarUpdate / calendarDelete tools.")
 seed skill calendar {
   slug:          "calendar"
   name:          "Calendar"

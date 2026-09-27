@@ -23,6 +23,16 @@ each one at the point it matters: no cross-row lookups are needed, the design is
 loop-free by construction, and Orbit gets an honest progress signal without ever
 holding credentials for the cluster's control plane.
 
+**Every automation of the domain is in that one file**, in three sections: the
+controller, billing (Stripe and dunning), and the trial clock with idle
+hibernation. That is not tidiness. The automation loader reads a domain's
+automations from its `automations.memql` and from no other file, and the billing
+and trial automations lived in `billing.memql` and `trial.memql` until
+memql#5437 -- where they parsed, passed every gate that reads the whole tree,
+and never loaded, while the operator docs described them running. The engine
+now refuses an automation declared in any other file at load
+(`construct_misplaced`), in this bundle and every other tree.
+
 ## Two halves, on opposite sides of a line
 
 |  | Lives in | Why |
@@ -59,6 +69,10 @@ go test ./deploy/fleet/                       # the bundle gates
 go run ./cmd/memqllint deploy/fleet/dsl/      # the same pipeline, on demand
 go test ./deploy/k8s/components/tenant/       # the tier presets + the scripts
 ```
+
+`TestEveryFleetAutomationLoads` is the one to know about: it runs the automation
+loader itself over the bundle and requires every automation the bundle declares
+to come back loaded, through the loader's own compile and loop gates.
 
 `go test ./...` does **not** otherwise look at this tree —
 `test/dslconformance` walks `dsl.Tree()`, which is the embedded tree plus

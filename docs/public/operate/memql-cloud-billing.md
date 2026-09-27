@@ -25,6 +25,18 @@ tenant  ──webhook──▶  POST /inbound/usage   ──▶  v1:platform:inb
 Both flows ride the engine's existing [inbound receiver](inbound-delivery.md).
 There is no new HTTP endpoint, which was the epic's architecture decision.
 
+The fleet's billing automations are the billing section of
+`deploy/fleet/dsl/fleet/automations.memql`: `claimStripeDelivery`,
+`dunningNoticeOnPaymentFailure`, `dunningEmailOnPaymentFailure` and
+`clearDelinquencyOnRecovery`. **Until memql#5437 none of them ran.** They lived
+in `billing.memql`, and the automation loader reads a domain's automations from
+its `automations.memql` and from no other file -- so they parsed, passed every
+gate that reads the whole tree, and never loaded, while this page described
+them running. They load now, and the engine refuses an automation declared in
+any other file at load (`construct_misplaced`). The second arrow of the diagram,
+`usage` to a meter, has no handler yet; see
+[what is not built yet](#what-is-not-built-yet).
+
 ## Configuring the Stripe source
 
 ```bash
@@ -136,6 +148,16 @@ invoice.payment_failed  →  subscription past_due  →  subscriber delinquent  
 card and someone who has not read their email yet. Cutting the customer off
 loses the customer *and* the invoice — the two things dunning exists to protect.
 
+**What runs is the start of the clock and the recovery flag.** When a
+subscription goes `past_due`, `dunningNoticeOnPaymentFailure` marks the
+subscriber `delinquent` and `dunningEmailOnPaymentFailure` stages the email;
+when it returns to `active`, `clearDelinquencyOnRecovery` returns the subscriber
+to `active`. **The end of the clock is not automated**: nothing reads a
+`past_due` subscription's `graceEndsAt` and suspends its instance, and nothing
+resumes an instance on recovery. Both are an operator's act today, and a
+`past_due` subscription is written by an operator too until the Stripe path can
+read a delivery (below).
+
 The dunning email is keyed on `graceEndsAt`, not on the account, so it fires
 **once per cycle**. Keyed on the account it would fire once *ever*: outbound
 staging is idempotent by `requestId`, so the customer's second late payment
@@ -157,8 +179,8 @@ Two properties make that safe:
 
 That last point is the reason `recordUsage` takes totals. A redelivery lands on
 the same `v1:platform:inboundRequest` row, but staging it is still a write — so
-the automation **fires again**. An additive meter would double the customer's
-bill; a set-valued one is a no-op.
+a handler on the delivery **fires again**. An additive meter would double the
+customer's bill; a set-valued one is a no-op.
 
 ## Provider costs feed the margins
 
@@ -192,7 +214,11 @@ Stated rather than implied.
   capability lands.
 - **The Stripe event → fleet row resolution is not wired.**
   `claimStripeDelivery` stamps the delivery **`failed`, with the reason on the
-  row**, and stops.
+  row**, and stops. It fires on a row whose status is `received` -- a delivery
+  the receiver just staged, a redelivery included -- and that filter is also
+  what keeps its own `failed` stamp, a new version of the row and so a create
+  event of its own, from re-triggering it; the engine's loop check refused the
+  automation without it the first time it loaded.
 
   `failed` rather than `processing` is deliberate: `processing` means "a product
   automation has this in hand", so every Stripe delivery would sit there forever
@@ -223,6 +249,11 @@ Stated rather than implied.
   would serve every product draining `POST /inbound/{source}`**, which is the
   entire point of that surface existing.
 
+- **A tenant's usage report is not turned into a meter.** `recordUsage`
+  exists and takes the absolute totals described above; the handler that would
+  read a `usage` delivery and call it does not, for the reason the Stripe
+  resolution is not wired: the DSL cannot read a delivery's body. A `usage`
+  delivery is staged, `claimStripeDelivery` passes it over, and no meter moves.
 - **Stripe usage records are not pushed.** `usageMeter.reportedToStripe` exists
   and the arithmetic is defined; the API call needs a server-side Stripe
   credential and an outbound path for it.

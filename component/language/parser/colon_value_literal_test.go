@@ -293,7 +293,9 @@ func TestEveryArgumentPositionRefusesAColonName(t *testing.T) {
 func TestBareCanonicalIdPositionalArgIsStillAccepted(t *testing.T) {
 	for _, src := range []string{
 		`from(v1:agents:agent)`,
-		`from(v1:knowledge:liveSource)`,
+		// A camelCase final segment, the shape the retired live-knowledge
+		// dispatcher's `from(v1:knowledge:liveSource)` used to exercise.
+		`from(v1:knowledge:documentChunk)`,
 		// A lone glued token: ambiguous, therefore accepted.
 		`f(a:someIdent)`,
 	} {

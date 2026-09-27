@@ -783,6 +783,7 @@ expr/triggerFilter/timestamp-call.memql
 expr/triggerFilter/urgent-or-high.memql
 negative/action/missing-required-capability-arg.memql
 negative/ai/query-filter.memql
+negative/automation/declared-outside-automations-file.memql
 negative/concept/nesting-too-deep.memql
 negative/logic/chain-too-long.memql
 negative/logic/nesting-too-deep.memql

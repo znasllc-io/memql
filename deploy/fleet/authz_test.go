@@ -213,9 +213,13 @@ func TestEveryFleetQueryIsCallerScoped(t *testing.T) {
 
 	// SERVER-ONLY -- an internal sweep or webhook handler, deliberately
 	// unscoped, because there is no caller to scope to. A scheduled automation
-	// runs with no actor at all, and "find every trial that expired today" is
-	// not a question a caller-scoped read can answer: constraining it to
-	// actor.userId would return NOTHING while looking perfectly scoped.
+	// runs as its own synthetic actor (`system:automation:<name>`), which owns
+	// no row, and "find every trial that expired today" is not a question a
+	// caller-scoped read can answer: constraining it to actor.userId would
+	// return NOTHING while looking perfectly scoped. Its reads reach these
+	// queries at internal origin because the automation came from the loaded
+	// tree -- which the trial sweeps did not until memql#5437, when they moved
+	// into automations.memql.
 	//
 	// This is the one bucket that could hide a genuine hole, so it is the one
 	// with two independent checks below rather than a list:
