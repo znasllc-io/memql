@@ -762,6 +762,9 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 	exec.head = newRunHead(initialHead, nil)
 	if adopt != nil {
+		exec.overrides = adopt.Overrides
+	}
+	if adopt != nil {
 		journal.adoptRun(ctx, automation, exec)
 	} else {
 		journal.openRun(ctx, automation, exec, triggeringEvent, parentCause)
@@ -934,15 +937,17 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 // is a derived run whose context integrations/work stamps at the point it
 // dispatches the compile.
 //
-// A RE-RUN'S OVERRIDE IS SET HERE AND NOWHERE ELSE (epic memql#5414, design
-// D20). When the execution serves a re-run, the step it targets -- and every
-// step inside it, a loop body or a branch being part of that step's version --
-// gets the override and the snapshot, and every other step gets them CLEARED,
-// so nothing one step's context carried can reach the next. The workspace the
-// request names reaches every step of the execution. An execution serving no
-// re-run leaves all three as it found them: a logic's statements inside the
-// targeted step run on an execution of their own, and inherit the targeted
-// step's context from the call that started them.
+// AN OVERRIDE IS SET HERE AND NOWHERE ELSE (epic memql#5414, design D20).
+// When the execution serves a re-run, the step it targets -- and every step
+// inside it, a loop body or a branch being part of that step's version -- gets
+// the override and the snapshot, and every other step gets them CLEARED, so
+// nothing one step's context carried can reach the next. The workspace the
+// request names reaches every step of the execution. A REPLAY puts each step's
+// recorded override on that step the same way, since the calls it serves were
+// made with them. An execution serving neither leaves all three as it found
+// them: a logic's statements inside the targeted step run on an execution of
+// their own, and inherit the targeted step's context from the call that
+// started them.
 func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, step *Step) context.Context {
 	if e == nil || e.sandboxRun || stepCtx == nil || stepCtx.Execution == nil || step == nil {
 		return ctx
@@ -957,7 +962,7 @@ func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, ste
 	if run, ok := common.RunFromContext(ctx); ok {
 		if memql.BareShortId(run.RunId) == memql.BareShortId(exec.ID) {
 			run.StepKey = key
-			applyRerun(&run, exec.rerun, key)
+			applyStepOverride(&run, exec, key)
 			return common.ContextWithRun(ctx, run)
 		}
 		return ctx
@@ -971,22 +976,24 @@ func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, ste
 		// step rows. The journal reads a blank-owner run through the
 		// cluster-owner query for exactly this reason.
 	}
-	applyRerun(&run, exec.rerun, key)
+	applyStepOverride(&run, exec, key)
 	return common.ContextWithRun(ctx, run)
 }
 
-// applyRerun puts what a re-run request says about one step on that step's
-// run context (see withRunContext). Nil spec: nothing changes.
-func applyRerun(run *common.RunContext, spec *RerunSpec, key string) {
-	if spec == nil {
+// applyStepOverride puts what the execution says about one step's override on
+// that step's run context (see withRunContext): a replay's recorded override
+// for the step, and a re-run's request for the step it targets, which wins. An
+// execution with neither changes nothing.
+func applyStepOverride(run *common.RunContext, exec *AutomationExecution, key string) {
+	spec := exec.rerun
+	if spec == nil && exec.overrides == nil {
 		return
 	}
+	run.Override, run.Snapshot = exec.overrides[topLevelKey(key)], nil
 	if spec.targets(key) {
 		run.Override, run.Snapshot = spec.Override, spec.Snapshot
-	} else {
-		run.Override, run.Snapshot = nil, nil
 	}
-	if spec.Workspace != "" {
+	if spec != nil && spec.Workspace != "" {
 		run.Workspace = spec.Workspace
 	}
 }

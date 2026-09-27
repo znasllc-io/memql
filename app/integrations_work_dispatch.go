@@ -212,6 +212,9 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 			TriggeredBy: "compiled",
 			Variables:   d.variables(req, journal),
 			Journal:     journal,
+			// A replay runs each step with the override its source's head
+			// version ran with, or the calls it serves would not match.
+			Overrides: workReplayOverrides(journal, source),
 		})
 		d.report(ctx, req, exec, execErr)
 		return
@@ -232,6 +235,7 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 	// possible and is the accepted cost of resuming at all.
 	exec, execErr := executor.ResumeFrom(ctx, journal, auto, &automations.ResumeOptions{
 		AllowSideEffects: true,
+		Overrides:        workReplayOverrides(journal, source),
 	})
 	d.report(ctx, req, exec, execErr)
 }
@@ -269,6 +273,7 @@ func (d *workRunDispatcher) dispatchRerun(ctx context.Context, req workspine.Dis
 		d.failRun(ctx, req, code, err.Error())
 		return
 	}
+	opts.Overrides = workReplayOverrides(journal, source)
 	d.app.Logger.Info("work run dispatch: serving a re-run request",
 		"component", "work.dispatch", "run", req.RunId, "reason", opts.Rerun.Reason,
 		"request", opts.Rerun.RequestId, "step", opts.Rerun.StepKey, "resumeFrom", opts.FromStep)

@@ -257,3 +257,22 @@ func TestADispatchServesOnlyTheRerunItsClaimIsFor(t *testing.T) {
 		}
 	}
 }
+
+// A replay runs each step with the override its source recorded; nothing else
+// the dispatcher executes does.
+func TestAReplayRunsWithTheOverridesItsSourceRecorded(t *testing.T) {
+	source := &automations.RunJournal{RunId: "src1", StepOverrides: map[string]*common.StepOverride{"b": {Prompt: "Name the regions."}}}
+	replay := &automations.RunJournal{RunId: "r2", Mode: common.RunModeReplay, ForkedFromRunId: "v1:work:run:src1"}
+	if got := workReplayOverrides(replay, source); got["b"] == nil || got["b"].Prompt != "Name the regions." {
+		t.Fatalf("a replay's overrides = %+v, want its source's", got)
+	}
+	for _, j := range []*automations.RunJournal{
+		{RunId: "r3", Mode: common.RunModeLive, ForkedFromRunId: "src1"},
+		{RunId: "r4", Mode: common.RunModeFork, ForkedFromRunId: "src1"},
+		{RunId: "r5", Mode: common.RunModeReplay, ForkedFromRunId: "another"},
+	} {
+		if got := workReplayOverrides(j, source); got != nil {
+			t.Errorf("run %s (mode %s, from %s) took the source's overrides: %+v", j.RunId, j.Mode, j.ForkedFromRunId, got)
+		}
+	}
+}

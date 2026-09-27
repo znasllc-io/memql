@@ -752,6 +752,10 @@ type AutomationExecution struct {
 	// value would follow it there.
 	rerun *RerunSpec
 
+	// overrides are the recorded overrides a replay applies, by top-level
+	// step key (epic memql#5414), for rerun's reason riding the execution.
+	overrides map[string]*common.StepOverride
+
 	// head is the run's head while it executes (rerun.go), advanced at each
 	// top-level step's intent and written whole on every receipt. Nil on an
 	// execution that journals no run of its own -- a logic's statements inside

@@ -680,3 +680,74 @@ func TestAHeadMoveRerunRunsTheStaleStepsWithNoOverride(t *testing.T) {
 		t.Fatalf("the stale step's new version: %v", publish)
 	}
 }
+
+// A replay serves each step's model calls from the replayed run's journal,
+// where they were made with the override that step's head version carried --
+// and the request hash covers what an override adds. So a replay puts each
+// step's recorded override on that step's context, as the step ran it.
+func TestAReplayAppliesEachStepsRecordedOverride(t *testing.T) {
+	srcRun, srcSteps := finishedRun("src1")
+	srcSteps[1]["override"] = map[string]any{"level": "reasoning", "prompt": "Name the regions.", "requestedBy": "u1"}
+	srcSteps[2]["override"] = map[string]any{}
+	source, err := runJournalFromRows(srcRun, srcSteps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(source.StepOverrides) != 1 || source.StepOverrides["b"] == nil || source.StepOverrides["b"].Prompt != "Name the regions." {
+		t.Fatalf("the replayed run's recorded overrides = %+v, want b's alone (an empty override is none)", source.StepOverrides)
+	}
+
+	probe := newRunContextProbe()
+	e := NewExecutor(ExecutorOptions{StepRegistry: probe})
+	ctx := common.ContextWithRun(context.Background(), common.RunContext{RunId: "replay1", GoalId: "v1:work:goal:g1", OwnerUserId: "u1", Mode: common.RunModeReplay, SourceRunId: "src1"})
+	exec, err := e.ExecuteAdopted(ctx, statementAutomation(t, rerunSource), RunAdoption{RunId: "replay1", Overrides: source.StepOverrides})
+	if err != nil || exec.Status != "completed" {
+		t.Fatalf("replay: %v %v", exec, err)
+	}
+	draft := probe.runOf(t, "draft")
+	if draft.Override != source.StepOverrides["b"] || draft.Mode != common.RunModeReplay || draft.SourceRunId != "src1" {
+		t.Fatalf("the replayed step ran with %+v", draft)
+	}
+	for _, callee := range []string{"fetch", "publish"} {
+		if o := probe.runOf(t, callee).Override; o != nil {
+			t.Errorf("%s ran with b's override: %+v", callee, o)
+		}
+	}
+}
+
+// Each recorded override reaches its own step and no other, however many the
+// replayed run carries -- on a first execution and on an interrupted replay's
+// resume alike.
+func TestAReplayedOverrideNeverReachesAnotherStep(t *testing.T) {
+	overrides := map[string]*common.StepOverride{"a": {Level: "fast"}, "publish": {Prompt: "Sign it."}}
+	ctx := common.ContextWithRun(context.Background(), common.RunContext{RunId: "replay1", Mode: common.RunModeReplay})
+
+	probe := newRunContextProbe()
+	if _, err := NewExecutor(ExecutorOptions{StepRegistry: probe}).ExecuteAdopted(ctx, statementAutomation(t, rerunSource), RunAdoption{RunId: "replay1", Overrides: overrides}); err != nil {
+		t.Fatal(err)
+	}
+	if probe.runOf(t, "fetch").Override != overrides["a"] || probe.runOf(t, "publish").Override != overrides["publish"] {
+		t.Fatal("a step lost its own recorded override")
+	}
+	if o := probe.runOf(t, "draft").Override; o != nil {
+		t.Fatalf("the step between two overridden ones ran with %+v", o)
+	}
+
+	// An interrupted replay resumes with the same map.
+	a := statementAutomation(t, rerunSource)
+	j := &RunJournal{
+		RunId: "replay1", AutomationName: a.Name, FailedStep: "b",
+		Steps:      map[string]*MinimalStepResult{"a": {StepId: "a", Status: "success", Value: "A1"}},
+		StepStates: states("a", StepState{Status: "done", Attempt: 1}, "b", StepState{Status: "running", Attempt: 1}),
+	}
+	resumed := newRunContextProbe()
+	if _, err := NewExecutor(ExecutorOptions{StepRegistry: resumed}).ResumeFrom(ctx, j, a, &ResumeOptions{AllowSideEffects: true, Overrides: overrides}); err != nil {
+		t.Fatal(err)
+	}
+	if o := resumed.runOf(t, "draft").Override; o != nil {
+		t.Fatalf("the resumed step ran with another step's override: %+v", o)
+	}
+	if resumed.runOf(t, "publish").Override != overrides["publish"] {
+		t.Fatal("the resumed replay lost publish's recorded override")
+	}
+}

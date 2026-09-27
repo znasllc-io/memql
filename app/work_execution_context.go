@@ -143,3 +143,20 @@ func workRerunRefusal(j *automations.RunJournal) (string, error) {
 	}
 	return "", nil
 }
+
+// workReplayOverrides is the override each step of a REPLAY runs with (epic
+// memql#5414): the one the replayed run's head version of that step recorded.
+// The model calls a replay serves were journaled with those overrides applied,
+// and the request hash covers what an override adds, so a step replayed
+// without its override asks a different question and a strict replay diverges
+// there. The replayed run is the source the dispatcher already loaded for the
+// run's lineage; nil for every run that is not a replay of it.
+func workReplayOverrides(j, source *automations.RunJournal) map[string]*common.StepOverride {
+	if j == nil || source == nil || j.Mode != common.RunModeReplay {
+		return nil
+	}
+	if memql.BareShortId(source.RunId) != memql.BareShortId(j.ForkedFromRunId) {
+		return nil
+	}
+	return source.StepOverrides
+}

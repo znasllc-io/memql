@@ -44,6 +44,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -119,6 +120,13 @@ type RunJournal struct {
 	// Rerun is the pending re-run request, decoded from run.rerun; nil when
 	// absent or cleared to {}.
 	Rerun *RerunSpec
+	// StepOverrides is the override each top-level step's newest row
+	// records, by key: the override its head version ran with (the newest
+	// row IS the head, a head move re-asserting the version it makes
+	// current). Only steps somebody overrode appear. A replay of this run
+	// applies them (ResumeOptions.Overrides, RunAdoption.Overrides), because
+	// the model calls its journal holds were made with them.
+	StepOverrides map[string]*common.StepOverride
 }
 
 // StepState is one step's latest journal row: its status and its attempt.
@@ -147,6 +155,12 @@ type ResumeOptions struct {
 	// empty resumes where the request stands (rerunResumePoint);
 	// PrepareRerun builds the journal and the options together.
 	Rerun *RerunSpec
+
+	// Overrides are the overrides a REPLAY applies, by top-level step key:
+	// the replayed run's StepOverrides. Each reaches its own step alone, as a
+	// re-run's does (withRunContext). A re-run's own request wins for the
+	// step it targets.
+	Overrides map[string]*common.StepOverride
 }
 
 // IsStepRetryable reports whether a step type can be re-run with no
@@ -248,6 +262,14 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 		state := StepState{Status: stringField(row, "status"), Attempt: intField(row, "attempt"), Version: intField(row, "version")}
 		j.StepStates[key] = state
 		j.MaxAttempt[key] = max(state.Attempt, state.Version)
+		if record, ok := row["override"].(map[string]any); ok {
+			if o := stepOverrideFrom(record); o != nil {
+				if j.StepOverrides == nil {
+					j.StepOverrides = map[string]*common.StepOverride{}
+				}
+				j.StepOverrides[key] = o
+			}
+		}
 		if stringField(row, "status") == "running" {
 			j.HasRunningStep = true
 		}
@@ -471,6 +493,7 @@ func (e *Executor) ResumeFrom(
 	// context, so it reaches this run's steps and journal writes and no other
 	// run's (a sub-automation a step starts is an execution of its own).
 	exec.rerun = rerun
+	exec.overrides = opts.Overrides
 	var stale []string
 	if rerun != nil && len(journal.StaleSteps) > 0 {
 		stale = journal.StaleSteps
