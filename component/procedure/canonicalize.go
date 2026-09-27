@@ -3,6 +3,7 @@ package procedure
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -395,8 +396,17 @@ func checkSeps(seps []string, args int) error {
 // formatNumber writes a float back in the shortest spelling that round-trips,
 // and without an exponent for an integral value. 1 and 1.0 must produce the
 // same literal or two recordings of one call compare unequal.
+//
+// The int64 range is checked BEFORE any conversion. Converting a float
+// outside it is implementation-defined: amd64 answers the integer indefinite
+// value, which never equals the float, but arm64 saturates, and 2^63 used to
+// come back as 9223372036854775807 -- another number, spelled one way on a
+// Mac and another on a Linux replica. This module may not import core/num,
+// which owns that narrowing for the rest of the tree; the guard is its local
+// equivalent.
 func formatNumber(f float64) string {
-	if f == float64(int64(f)) {
+	const bound = 1 << 63 // exactly representable: -bound is int64's minimum, bound is one past its maximum
+	if f >= -bound && f < bound && f == math.Trunc(f) {
 		return strconv.FormatInt(int64(f), 10)
 	}
 	return strconv.FormatFloat(f, 'g', -1, 64)

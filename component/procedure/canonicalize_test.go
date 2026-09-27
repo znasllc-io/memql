@@ -1,6 +1,7 @@
 package procedure
 
 import (
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -331,5 +332,33 @@ func TestCanonicalizeKeepsTheSpellingOnTheArgv(t *testing.T) {
 	}
 	if argv.Kids[1].Raw != `"a b"` || argv.Kids[1].Lit != "a b" {
 		t.Fatalf("token 1 = %+v, want the value a b spelled \"a b\"", *argv.Kids[1])
+	}
+}
+
+// TestFormatNumberNeverNarrowsAFloatOutsideInt64 (E3): converting a float
+// outside int64's range to int64 is implementation-defined in Go. On amd64 it
+// yields the integer indefinite value, which never compares equal to the
+// float, so the old spelling happened to come out right there; on arm64 it
+// SATURATES (FCVTZS), and 2^63 came back as 9223372036854775807 -- a
+// different number, and a different literal on a developer's Mac than on a
+// Linux replica, so one recording spelled two ways. The range is checked
+// before any conversion.
+func TestFormatNumberNeverNarrowsAFloatOutsideInt64(t *testing.T) {
+	for _, c := range []struct {
+		f    float64
+		want string
+	}{
+		{math.Ldexp(1, 63), "9.223372036854776e+18"},
+		{-math.Ldexp(1, 63), "-9223372036854775808"},
+		{1e19, "1e+19"},
+		{-1e19, "-1e+19"},
+		{math.Ldexp(1, 63) - 1024, "9223372036854774784"},
+		{3, "3"},
+		{0.25, "0.25"},
+		{math.Inf(1), "+Inf"},
+	} {
+		if got := formatNumber(c.f); got != c.want {
+			t.Errorf("formatNumber(%v) = %q, want %q", c.f, got, c.want)
+		}
 	}
 }
