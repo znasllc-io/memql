@@ -138,3 +138,60 @@ func TestFindUnknownConstructKeywordsStaysInStep(t *testing.T) {
 		t.Errorf("a clean file reported %+v", got)
 	}
 }
+
+// TopLevelStatements reads the same lines FindUnknownConstructKeywords does,
+// and names what each declares in every construct form: the struct forms, a
+// two-identifier signature, a predicate's `=` body, the terse automation
+// header and the loose one whose brace is on the next line. A construct
+// keyword inside a body -- an automation's own `automation x(...)` call, a
+// query statement in a logic, a keyword inside a string or a comment -- is
+// not top level (memql#5437).
+func TestTopLevelStatementsNameWhatEachDeclares(t *testing.T) {
+	src := strings.Join([]string{
+		`use fleet.logic.{ runningInstances }`, // 1
+		``,
+		`/// automation docOnly { is a comment.`, // 3
+		`concept brief {`,                        // 4
+		`  note string @description("automation inString {")`,
+		`}`,
+		`query brief briefsForOwner {`, // 7
+		`  filter row => row.note == "x"`,
+		`}`,
+		`spec brief hasNote = row => row.note != nil`, // 10
+		`trait isOpen = row => row.open == true`,      // 11
+		`@trigger(event="node.created", concept="v1:x:brief")`,
+		`automation strict {`, // 13
+		`  automation nested(x: 1)`,
+		`  sources := query briefsForOwner()`,
+		`}`,
+		`automation loose`, // 17
+		`{`,
+		`}`,
+		`automation terse @trigger(event="a") => logic x`, // 20
+		`seed brief first {`,                              // 21
+		`  note: "automation notADecl {"`,
+		`}`,
+	}, "\n")
+	type stmt struct {
+		line          int
+		keyword, name string
+	}
+	var got []stmt
+	for _, s := range TopLevelStatements(src) {
+		got = append(got, stmt{s.Line, s.Keyword, s.Name})
+	}
+	want := []stmt{
+		{1, "use", ""},
+		{4, "concept", "brief"},
+		{7, "query", "briefsForOwner"},
+		{10, "spec", "hasNote"},
+		{11, "trait", "isOpen"},
+		{13, "automation", "strict"},
+		{17, "automation", "loose"},
+		{20, "automation", "terse"},
+		{21, "seed", "first"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("TopLevelStatements =\n  %+v\nwant\n  %+v", got, want)
+	}
+}

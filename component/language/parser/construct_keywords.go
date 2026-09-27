@@ -89,16 +89,69 @@ func FindUnknownConstructKeywords(source string) []UnknownConstructKeyword {
 	all := strings.Join(keywords, ", ")
 
 	var out []UnknownConstructKeyword
+	for _, h := range topLevelHeads(source) {
+		if !known[h.word] && !(h.word == "func" && legacyProceduralAuthorForm.MatchString(h.text)) {
+			out = append(out, UnknownConstructKeyword{
+				Line:    h.line,
+				Keyword: h.word,
+				Message: unknownConstructMessage(h.word, keywords, all),
+			})
+		}
+	}
+	return out
+}
+
+// TopLevelStatement is one top-level statement of a source: the word that
+// opens it and the name it declares.
+type TopLevelStatement struct {
+	// Line is the 1-based line of the statement's first word.
+	Line int
+	// Keyword is that word: a construct keyword, in a file that loads.
+	Keyword string
+	// Name is the declared name: the last identifier of the statement's head
+	// before its body, an `=`, an annotation or a `(`, which is the name in
+	// every construct form (`automation NAME {`, `query <Concept> NAME {`,
+	// `spec <bound> NAME = ...`, the terse `automation NAME @trigger(...)`).
+	// It is "" for a head that declares nothing, a `use` line among them.
+	Name string
+}
+
+// TopLevelStatements lists every top-level statement of source in order, read
+// exactly as FindUnknownConstructKeywords reads them: a line that begins with
+// a word while no brace, parenthesis or bracket is open, over a copy with
+// comments and strings blanked. A construct keyword inside another construct's
+// body -- an `automation NAME(...)` call in a statement, a `query` in a logic
+// -- is not top level and is not listed.
+//
+// It is the reader a load gate uses to ask what a file DECLARES without
+// parsing it, so a file the parser would refuse is still read for the
+// statements it opens (memql#5437: the construct-misplaced gate).
+func TopLevelStatements(source string) []TopLevelStatement {
+	heads := topLevelHeads(source)
+	out := make([]TopLevelStatement, 0, len(heads))
+	for _, h := range heads {
+		out = append(out, TopLevelStatement{Line: h.line, Keyword: h.word, Name: statementName(h.word, h.text)})
+	}
+	return out
+}
+
+// topLevelHead is one top-level statement as the scan meets it: its line, its
+// first word, and the line's text with comments and strings blanked.
+type topLevelHead struct {
+	line       int
+	word, text string
+}
+
+// topLevelHeads is the one scan both readers above share, so the gate that
+// lists declarations and the gate that refuses an unknown keyword cannot
+// disagree about which lines are top level.
+func topLevelHeads(source string) []topLevelHead {
+	var out []topLevelHead
 	depth := 0 // braces, parentheses and brackets, which nest together
 	for i, line := range strings.Split(BlankCommentsAndStrings(source), "\n") {
 		if depth == 0 {
-			if m := statementHead.FindStringSubmatch(line); m != nil && !known[m[1]] &&
-				!(m[1] == "func" && legacyProceduralAuthorForm.MatchString(line)) {
-				out = append(out, UnknownConstructKeyword{
-					Line:    i + 1,
-					Keyword: m[1],
-					Message: unknownConstructMessage(m[1], keywords, all),
-				})
+			if m := statementHead.FindStringSubmatch(line); m != nil {
+				out = append(out, topLevelHead{line: i + 1, word: m[1], text: line})
 			}
 		}
 		for _, c := range line {
@@ -113,6 +166,26 @@ func FindUnknownConstructKeywords(source string) []UnknownConstructKeyword {
 		}
 	}
 	return out
+}
+
+// statementIdent is one identifier of a statement's head.
+var statementIdent = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
+
+// statementName is the name a top-level statement opened by word declares:
+// the last identifier after the word and before the head ends.
+func statementName(word, text string) string {
+	if word == "use" {
+		return ""
+	}
+	_, rest, _ := strings.Cut(strings.TrimSpace(text), word)
+	if end := strings.IndexAny(rest, "{=(@"); end >= 0 {
+		rest = rest[:end]
+	}
+	idents := statementIdent.FindAllString(rest, -1)
+	if len(idents) == 0 {
+		return ""
+	}
+	return idents[len(idents)-1]
 }
 
 // unknownConstruct is the refusal for one top-level statement opened by word,
