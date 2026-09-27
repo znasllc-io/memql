@@ -2129,9 +2129,10 @@ the change. The gates, with their test names:
   namespace, an authored sort clause is held to the query's concept at
   load: a bare key is a declared payload field (a dotted one is walked hop
   by hop, as a filter walks `row.a.b`), a `row.` key is one of the sortable
-  intrinsics, and a direction is `"asc"` or `"desc"` in lower case. A key
-  that names nothing is refused as `sort_key_unknown`, a direction in
-  another case as `sort_direction_unknown`; both name the key and the fix.
+  intrinsics, and a word where a direction goes is `"asc"` or `"desc"` (in
+  any case; lower case is the spelling to write). A key that names nothing
+  is refused as `sort_key_unknown`, a word in a direction's place that is no
+  direction as `sort_direction_unknown`; both name the key and the fix.
   Before this a misspelled key loaded and ordered on a JSONB path no row
   carries, and `sort "priority", "sideways"` loaded as two keys. The rules
   are in [Sort keys](memql.md#sort-keys).

@@ -25,9 +25,14 @@ package memql
 //     open `object`, a map, a union, an untyped field), past which the rest of
 //     the path is the author's to answer for; a hop through a scalar or a list
 //     names nothing;
-//   - a direction is "asc" or "desc", in lower case. The grammar reads one in
-//     any case -- a runtime query string's "ASC" orders ascending, and that
-//     does not change -- but an authored clause has one spelling.
+//   - a direction is "asc" or "desc". Lower case is the spelling to write,
+//     but the grammar reads a direction in any case and "ASC" always ordered
+//     ascending, so any case loads -- refusing it would retire a spelling that
+//     worked, which the language freeze does through a deprecation window,
+//     not a load refusal. What IS refused is a word where a direction goes
+//     that is no direction: `sort "priority", "sideways"`, which the grammar
+//     reads as a second key, is refused as an unknown direction when the
+//     concept declares no field of that name.
 //
 // A bare row intrinsic (`sort "createdAt"`) is NOT this check's: the
 // sort-row-intrinsic contract gate refuses it, by the same detector the editor
@@ -35,8 +40,9 @@ package memql
 //
 // WITHOUT A BOUND CONCEPT -- a load with no concept registry, which only an
 // offline tool or a test runs -- the concept-independent rules still apply
-// (the `row.` namespace, the reserved heads, the direction) and a payload key
-// is not checked: there is no declaration to hold it to. A query with an
+// (the `row.` namespace and the reserved heads) and a payload key -- a word in
+// a direction's place included -- is not checked: there is no declaration to
+// hold it to. A query with an
 // unresolvable signature concept never gets here; it is refused first
 // (memql#5433).
 
@@ -55,8 +61,9 @@ const (
 	// SortCodeUnknownKey: a sort key that names neither a declared payload
 	// field nor a sortable row intrinsic.
 	SortCodeUnknownKey = "sort_key_unknown"
-	// SortCodeUnknownDirection: a direction written other than "asc" or
-	// "desc".
+	// SortCodeUnknownDirection: a word written where a direction goes --
+	// right after a key written with none -- that is neither "asc" nor "desc"
+	// (in any case) nor a field the concept declares.
 	SortCodeUnknownDirection = "sort_direction_unknown"
 )
 
@@ -104,11 +111,10 @@ func checkQuerySortClause(body languageParser.ExpressionNode, concept *memoryNod
 			return err
 		}
 		for i, f := range clause.Fields {
-			if err := checkSortDirection(f); err != nil {
-				return err
-			}
 			// A key right after a key written with no direction sits where a
-			// direction could have been: `sort "priority", "sideways"`.
+			// direction could have been: `sort "priority", "sideways"`. The
+			// grammar read whatever direction it found -- in any case, as at
+			// run time -- so only the literals it read as KEYS are judged.
 			directionSlot := i > 0 && clause.Fields[i-1].DirectionText == ""
 			if err := c.checkKey(f.Field, directionSlot); err != nil {
 				return err
@@ -147,21 +153,6 @@ func authoredSortClauses(expr languageParser.ExpressionNode) []*languageParser.S
 		}
 	}
 	return out
-}
-
-// checkSortDirection refuses a direction written other than "asc" or "desc".
-// Only a literal the grammar read AS a direction reaches here -- it matched
-// "asc" or "desc" in some case -- so the one fix is its lower-case spelling.
-func checkSortDirection(f languageParser.SortField) error {
-	if f.DirectionText == "" || f.DirectionText == "asc" || f.DirectionText == "desc" {
-		return nil
-	}
-	return &SortKeyError{
-		Code:   SortCodeUnknownDirection,
-		Text:   f.DirectionText,
-		Reason: `a direction is "asc" or "desc", written in lower case`,
-		Fix:    fmt.Sprintf("write %q", strings.ToLower(strings.TrimSpace(f.DirectionText))),
-	}
 }
 
 // sortChecker holds a sort key to one concept's declarations.
@@ -308,7 +299,9 @@ func (c *sortChecker) checkPayloadPath(key, path string, directionSlot bool, ref
 
 // undeclared refuses a payload path the concept does not declare, suggesting
 // the nearest declared name at the same depth. A single word written where a
-// direction could have been is refused as both: it is neither.
+// direction goes is refused as an unknown DIRECTION: it is no direction, and
+// no field either, so the direction is what the author was most likely
+// writing -- and the refusal names the field it may have meant all the same.
 func (c *sortChecker) undeclared(path string, directionSlot bool, refuse func(reason, fix string) error) error {
 	prefix := ""
 	if i := strings.LastIndex(path, "."); i >= 0 {
@@ -330,8 +323,29 @@ func (c *sortChecker) undeclared(path string, directionSlot bool, refuse func(re
 		fix = fmt.Sprintf("did you mean %q?", near[0])
 	}
 	if directionSlot {
-		reason = fmt.Sprintf(`it is not a direction, which is "asc" or "desc", and %s declares no field %q`, c.concept.Name, path)
-		fix = `write "asc" or "desc" after the key it orders, or name a declared field`
+		return &SortKeyError{
+			Code:   SortCodeUnknownDirection,
+			Text:   path,
+			Reason: fmt.Sprintf(`a direction is "asc" or "desc", and as the next key it names no field of %s`, c.concept.Name),
+			Fix:    directionFix(path, near),
+		}
 	}
 	return refuse(reason, fix)
+}
+
+// directionFix is what to write for a word in a direction's place: the
+// direction it spells out, when it spells one, and otherwise either direction
+// -- or the declared field it is closest to, if it was meant as a key.
+func directionFix(word string, nearFields []string) string {
+	switch strings.ToLower(strings.TrimSpace(word)) {
+	case "ascending", "ascend", "up":
+		return `write "asc"`
+	case "descending", "descend", "down":
+		return `write "desc"`
+	}
+	fix := `write "asc" or "desc" after the key it orders`
+	if len(nearFields) > 0 {
+		fix += fmt.Sprintf(", or, for a second key, %q", nearFields[0])
+	}
+	return fix
 }

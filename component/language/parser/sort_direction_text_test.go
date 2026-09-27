@@ -7,9 +7,9 @@ import (
 )
 
 // sort_direction_text_test.go -- memql#5429. The grammar reads a sort direction
-// in any case (a runtime query string's "ASC" orders ascending, and that stays),
-// and records the spelling it read, so the loader can hold an AUTHORED clause to
-// the lower-case one. A key written with no direction records none.
+// in any case ("ASC" orders ascending) and records the spelling it read; a key
+// written with no direction records none, which is how the loader tells that
+// the literal after it sat where a direction goes.
 func TestSortFieldRecordsTheDirectionAsWritten(t *testing.T) {
 	expr := queryFilterExpr(t, `sort(status == "open", "priority", "ASC", "title", "row.createdAt", "desc")`)
 	sortExpr, ok := expr.(*ast.SortExpr)
