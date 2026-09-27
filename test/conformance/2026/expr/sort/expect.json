@@ -171,6 +171,13 @@
       "code": "sort_key_unknown",
       "message": "sort key \"due date\": \"due date\" is not a field name -- a field name is letters, digits, `_` and `-`",
       "note": "Every segment of a sort key's path is a field name, the rule the filter's path builders apply; the runtime compiler holds a runtime query's key to it too."
+    },
+    {
+      "file": "payload-key-after-a-key.memql",
+      "verdict": "refuse_load",
+      "code": "sort_key_unknown",
+      "message": "sort key \"payload.effort\": v1:",
+      "note": "A key written with a dot is a key wherever it stands -- never read as a direction -- and the refusal quotes it as written, not the path it names."
     }
   ]
 }

@@ -73,6 +73,12 @@ func TestSortClauseIsHeldToTheBoundConcept(t *testing.T) {
 			[]string{`or, for a second key, "title"`}},
 		{"sortBadDirectionThenDirection5429", `"priority", "sideways", "desc"`, SortCodeUnknownDirection,
 			[]string{`sort direction "sideways"`}},
+		// A key written with a dot is a key wherever it stands, and the
+		// refusal quotes it as written.
+		{"sortBadDottedAfterKey5429", `"priority", "payload.nope"`, SortCodeUnknownKey,
+			[]string{`sort key "payload.nope": v1:sortcheck5429:sortTicket5429 declares no field "nope"`}},
+		{"sortBadNestedAfterKey5429", `"priority", "routing.team"`, SortCodeUnknownKey,
+			[]string{`sort key "routing.team": v1:sortcheck5429:sortTicket5429 declares no field "routing.team"`}},
 		{"sortBadRowUnknown5429", `"row.updatedAt", "desc"`, SortCodeUnknownKey,
 			[]string{`sort key "row.updatedAt": row.updatedAt is not a sortable row intrinsic`}},
 		{"sortBadRowTypo5429", `"row.createAt", "desc"`, SortCodeUnknownKey,
