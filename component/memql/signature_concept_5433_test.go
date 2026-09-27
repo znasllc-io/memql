@@ -1,9 +1,14 @@
 package memql
 
 import (
+	"io"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/core/component"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // signature_concept_5433_test.go -- memql#5433: a construct signature whose
@@ -339,4 +344,57 @@ func TestSignatureConceptFixIsOneThatLoads(t *testing.T) {
 			t.Errorf("following the fix did not load:\n  %s", other.Message)
 		}
 	}
+}
+
+// What memql.md says is NOT refused: an import's namespace only breaks a tie
+// between concepts sharing a name, so when exactly one mounted domain declares
+// the concept, the import binds it whatever namespace the import names. The
+// documentation lists this; this test is what keeps the list true.
+func TestSignatureConceptImportNamespaceOnlyBreaksATie(t *testing.T) {
+	root := sigTree(map[string]string{
+		"sigtiesales5433/concepts.memql": "/// A lead.\nconcept sigTieLead5433 {\n  status  string\n}\n",
+		"sigtieuse5433/queries.memql":    "use sigtiecrm5433.concepts.{ sigTieLead5433 }\n\n/// The open leads.\nquery sigTieLead5433 sigTieOpenLeads5433 {\n  filter row => row.status == \"open\"\n  paginate 20\n}\n",
+	})
+	for _, d := range lint(t, root) {
+		if strings.Contains(d.Message, "sigTieOpenLeads5433") || strings.Contains(d.Message, "sigTieLead5433") {
+			t.Errorf("an import naming another namespace was refused, but memql.md documents it binding the one concept of that name:\n  %s", d.Message)
+		}
+	}
+	eng, stop := sigEngine(t, root)
+	defer stop()
+	fn, ok := eng.Functions().Lookup("sigTieOpenLeads5433")
+	if !ok {
+		t.Fatal("the query did not register")
+	}
+	if fn.BoundConcept != "v1:sigtiesales5433:sigTieLead5433" {
+		t.Errorf("bound %q, want the one concept of that name, v1:sigtiesales5433:sigTieLead5433", fn.BoundConcept)
+	}
+}
+
+// sigEngine boots an engine over the embedded tree with root mounted beside
+// it (root's domains declaring the engine's language line), for a test that
+// reads what a construct bound rather than only whether it loaded. stop
+// restores the global tree and the concept registry.
+func sigEngine(t *testing.T, root fstest.MapFS) (*MemQLEngine, func()) {
+	t.Helper()
+	_, _, unmount := memqldsl.MountOverlayDomains(nil, withLanguageLines(root))
+	stop := func() {
+		unmount()
+		memoryNodes.ReplaceAll(nil)
+		_, _ = LoadUnifiedConcepts(nil)
+	}
+	if _, err := LoadUnifiedConcepts(nil); err != nil {
+		stop()
+		t.Fatalf("concepts: %v", err)
+	}
+	eng, err := New(nil, (&component.Component{}).WithLoggerWriter(io.Discard))
+	if err != nil {
+		stop()
+		t.Fatal(err)
+	}
+	if err := eng.Init(memoryNodes.DefaultRegistry()); err != nil {
+		stop()
+		t.Fatalf("init: %v", err)
+	}
+	return eng, stop
 }
