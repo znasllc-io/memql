@@ -1177,6 +1177,12 @@ var agentContextStamps = map[string]agentContextStamp{
 	// value back. No agentId: the CALLING agent is not what is being resolved,
 	// and stamping one would populate an argument this tool does not declare.
 	"askSpecialist": {StampOwnerUserId: true},
+	// ensureAgent matches, extends or creates an agent in the OWNER's
+	// catalog, so the owner is, again, the half the model must not choose.
+	// ownerUserId is @autoInjected in the tool schema, and this entry is what
+	// puts the turn's owner back after the strip. No agentId: the tool does
+	// not declare one, and the agent it returns is not the calling one.
+	"ensureAgent": {StampOwnerUserId: true},
 	// canvasPublish: no flat agentId / ownerUserId in the schema;
 	// agentId rides inside `actor`. Space is `space`, not `partitionId`.
 	// StampThreadVisibility carries the Phase 9 visibility-inheritance
