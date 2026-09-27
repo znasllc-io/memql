@@ -103,7 +103,13 @@ func TestTriggerFilterLoadsWithoutAConstructCall(t *testing.T) {
 		"the shipped filter": `row => row.status == "stored"`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			a, err := loader.compileMemQL(filteredAutomation(conditionTicketID, filter), "test:onRow")
+			src := filteredAutomation(conditionTicketID, filter)
+			if strings.Contains(filter, "args.limit") {
+				// A filter reads the args its automation declares
+				// (memql#5426, args_undeclared).
+				src = strings.Replace(src, "automation onRow {\n", "automation onRow {\n  args {\n    limit int\n  }\n", 1)
+			}
+			a, err := loader.compileMemQL(src, "test:onRow")
 			if err != nil {
 				t.Fatalf("@filter(%s): %v", filter, err)
 			}

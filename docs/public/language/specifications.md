@@ -133,7 +133,9 @@ at load and enforced at execution.
 (The `actorEnvelope` `@actor` shape is the gateway to the auth envelope;
 the spec reads its projected key -- `role` -- through its `actor`
 parameter. The signature binding is verified at load: it must resolve
-to an imported shape or concept.)
+to an imported shape or concept, or the load refuses it with the rule id
+`signature_concept_unresolved` that every construct signature shares,
+memql#5433.)
 
 A context-spec is applied to `actor` in a filter --
 `filter row => requiresOwner(actor) && row.status == "open"` -- or, from

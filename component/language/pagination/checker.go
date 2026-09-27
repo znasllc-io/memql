@@ -113,6 +113,7 @@ var (
 func ScanSource(file, src string) []QueryFinding {
 	var findings []QueryFinding
 	matches := queryHeaderRe.FindAllStringSubmatchIndex(src, -1)
+	preambles := parser.NewPreambleWalker(src)
 	for _, m := range matches {
 		concept := src[m[2]:m[3]]
 		name := src[m[4]:m[5]]
@@ -124,7 +125,7 @@ func ScanSource(file, src string) []QueryFinding {
 			continue
 		}
 		body := src[m[1]:closeIdx]
-		preamble := precedingAnnotations(src, m[0])
+		preamble := src[preambles.StartOf(m[0]):m[0]]
 
 		findings = append(findings, classifyQuery(file, line, name, concept, preamble, body))
 	}
@@ -248,23 +249,6 @@ func hasDirective(body, kw string) bool {
 		}
 	}
 	return false
-}
-
-// precedingAnnotations returns the contiguous run of `@...` / `//` lines
-// immediately above headerStart -- the construct's annotation preamble.
-func precedingAnnotations(src string, headerStart int) string {
-	blockStart := headerStart
-	for k := headerStart - 1; k >= 0; {
-		lineStart := strings.LastIndexByte(src[:k], '\n') + 1
-		line := strings.TrimSpace(strings.TrimRight(src[lineStart:k+1], "\r\n"))
-		if strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
-			blockStart = lineStart
-			k = lineStart - 1
-			continue
-		}
-		break
-	}
-	return src[blockStart:headerStart]
 }
 
 // matchingCloseBrace walks src from openIdx (a `{`) to its matching

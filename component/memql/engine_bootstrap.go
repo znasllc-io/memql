@@ -145,6 +145,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 			File:      v.Origin,
 			Phase:     "validate",
 			Err:       v.Detail,
+			Code:      v.Code,
 		})
 	}
 
@@ -307,6 +308,13 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	if _, slErr := LoadUnifiedSeeds(e.Logger, seedRegistry, report); slErr != nil {
 		e.Logger.Warn("unified seed loader returned an error",
 			"component", "memql.engine", "error", slErr)
+	}
+	// memql#5433: a seed whose signature concept no mounted domain declares
+	// has no row to write, and used to fail at materialization on every boot
+	// as a log line. Refused here, with the code a query or a mutation whose
+	// signature concept does not resolve carries.
+	for _, v := range validateSeedConceptBindings(seedRegistry, e.concepts) {
+		report.AddSkip(baseloader.SkipFor("memql.seedConceptValidator", "seed", v.Seed, v.File, "validate", v.Err))
 	}
 	e.seeds = seedRegistry
 	e.seedMaterializer = NewSeedMaterializer(e, e.seeds)
@@ -546,9 +554,11 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// context.Background(): Init carries none, and this read belongs to
 	// the boot rather than to any request. On a FIRST boot the catalog is
 	// being seeded by this very startup, so the ladder reads empty and
-	// rankOf falls back to the engine's compiled base slugs -- which is
-	// why the five base roles validate on a fresh cluster and a
-	// custom-role floor is the case that needs a seeded catalog.
+	// rankOf falls back to the engine's compiled base ladder -- which is
+	// why every base rung validates on a fresh cluster, by the seed's slug
+	// ("user", "viewer") or the user row's alias ("writer", "reader")
+	// alike, and a custom-role floor is the case that needs a seeded
+	// catalog.
 	for _, problem := range e.validateRequiresRankSlugs(context.Background(), functionRegistry) {
 		report.AddSkip(baseloader.Skip{
 			Component: "memql.engine",
@@ -556,11 +566,25 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 			Name:      "requiresRank",
 			Phase:     "contract-gate:requiresRank",
 			Err:       problem.Error(),
+			Code:      baseloader.RuleCode(problem),
 		})
 		if e.Component != nil && e.Logger != nil {
 			e.Logger.Error("@requiresRank names an unknown role",
 				"component", "memql.engine",
 				"detail", problem.Error())
+		}
+	}
+
+	// A tool's two gates (memql#5438), checked here beside the function floors
+	// because the rank half IS the check above, applied to a tool:
+	// @requiresAgentRole against the v1:agents:agent role enum this load built,
+	// @requiresRank against the same ladder. See tool_gate_load.go.
+	for _, problem := range e.recordToolGateProblems(context.Background(), report, e.tools, concepts, rawTree) {
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("a tool gate names a value nothing can hold",
+				"component", "memql.engine",
+				"tool", problem.tool,
+				"detail", problem.err.Error())
 		}
 	}
 

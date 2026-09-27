@@ -51,13 +51,44 @@ type Parser struct {
 	// expressions keep working.
 	currentFuncType FunctionType
 
-	// suppressCommaOr disables the legacy `,`-as-OR separator at the
-	// logical-OR precedence level. It is set while parsing the arguments
-	// of a Story 4 collection method (#2302 / ADR §2.2) so a comma
-	// terminates one argument instead of folding the next into an OR
-	// expression (e.g. `reduce(0, (acc, n) => ...)` -- the `0` arg must
-	// stop at the comma). `||` still parses as OR.
-	suppressCommaOr bool
+	// inCollectionArgs is set while the arguments of a Story 4 collection
+	// method (#2302 / ADR §2.2) are parsed, and it decides two things there:
+	//
+	//   - a comma at the OR level ENDS the argument, for parseMethodArgList
+	//     to consume (`reduce(0, (acc, n) => ...)` -- the `0` stops at its
+	//     comma), where anywhere else that comma is the retired `,`
+	//     connective and is refused (refuseCommaConnective, memql#5439);
+	//   - an object literal's values parse as full expressions
+	//     (parseObject), so a `select(g => {...})` projection can compute.
+	//
+	// Both follow from being inside that argument list, which is why they
+	// share one flag.
+	inCollectionArgs bool
+
+	// legacyConnectives makes this parser read the two connectives the
+	// language retired with their old meanings -- `,` as OR and `;` as AND --
+	// instead of refusing them. The expressions rewrite is the only reader
+	// that sets it (parseLegacyExpression): it has to READ a retired spelling
+	// to write its replacement, and the refusals name it as the fix. Every
+	// parse the engine makes refuses both (memql#5375, memql#5439).
+	//
+	// It reaches the connective levels (parseLogicalOr, parseLogicalAnd) and
+	// so every group, guard and traversal target above them. shape()'s query
+	// argument is the one comma it does not reach (parseShapeQueryArg refuses
+	// a folding comma either way): no clause the rewrite reads holds a
+	// shape() call, which is a directive the rewriter lowers, never filter
+	// text.
+	legacyConnectives bool
+
+	// traversal is the head of the relationship traversal whose argument list
+	// is being parsed, as written up to its target -- `parentOf(`, or
+	// `references("respondsAs", ` for a labelled one -- and traversalNesting
+	// the nesting level of that list, so a comma directly inside it,
+	// `parentOf(a, b)`, is refused with the traversal's own fix,
+	// `parentOf(a || b)`, while a comma nested deeper (inside a group in the
+	// target) gets the general one.
+	traversal        string
+	traversalNesting int
 
 	// suppressComparisonFold disables parseIdentifierExpression's early
 	// identifier-led comparison fold while a `??` chain's continuation
@@ -735,11 +766,17 @@ func (p *Parser) parseDefinition() (Node, error) {
 func (p *Parser) refuseTopLevelToken() error {
 	tok := p.current
 	if tok.Type == TokenKeywordUse {
-		return newParseErrorf(&tok, "a use line must come before the file's first construct -- move it to the top of the file")
+		// The load gate refuses the same line with the same message and code
+		// (FindMisplacedUseLines, memql#5426). Positioned at the token but
+		// not carrying it, so the rule id stays last rather than ahead of a
+		// `(got "use")` that says nothing the message does not.
+		err := &ParseError{Message: misplacedUseMessage, Cause: &MisplacedUse{Line: tok.Line, Message: misplacedUseMessage}}
+		err.setToken(tok)
+		return err
 	}
 	if tok.Type == TokenIdentifier || isKeywordToken(tok.Type) {
-		if m := statementHead.FindStringSubmatch(tok.Literal); m != nil && !isConstructKeyword(m[1]) {
-			u := unknownConstruct(tok.Line, m[1])
+		if word, ok := lineHead(tok.Literal); ok && !isConstructKeyword(word) {
+			u := unknownConstruct(tok.Line, word)
 			return &ParseError{Message: u.Message, Pos: tok.Pos, Line: tok.Line, Column: tok.Column, Cause: u}
 		}
 	}
@@ -762,12 +799,8 @@ func declarationKeywords() []string {
 
 // isConstructKeyword reports whether word opens a top-level statement.
 func isConstructKeyword(word string) bool {
-	for _, k := range ConstructKeywords() {
-		if k == word {
-			return true
-		}
-	}
-	return false
+	set, _, _ := constructKeywords()
+	return set[word]
 }
 
 // parseAttribute parses a Python-style @attribute decorator.
@@ -817,6 +850,16 @@ func (p *Parser) parseAttributeArgs() (*Attribute, error) {
 
 	// Check for optional arguments: (...)
 	if p.check(TokenParenOpen) {
+		// @allowedRoles is in a deprecation window (memql#5438): it parses
+		// exactly as it always did until the window is spent, and is then
+		// refused here, naming @requiresAgentRole / @requiresRank and the
+		// rewrite. The scan that warns about it meanwhile is
+		// ScanDeprecatedUses (deprecated_uses.go).
+		if name == allowedRolesName {
+			if err := p.refuseDeprecatedForm(ruleDeprecatedAllowedRoles, atTok); err != nil {
+				return nil, err
+			}
+		}
 		p.advance()
 
 		// Empty parens: @name()
@@ -899,11 +942,13 @@ func (p *Parser) parseAttributeArgs() (*Attribute, error) {
 		// produce the same Go type for the same source -- see #255 /
 		// #265 (consolidated into baseparser).
 		if p.check(TokenNumber) {
-			val, numErr := baseparser.ParseNumericLiteral(p.current.Literal)
+			literal := p.current.Literal
+			val, numErr := baseparser.ParseNumericLiteral(literal)
 			if numErr == nil {
 				p.advance()
 				if p.check(TokenParenClose) {
 					attr.Value = val
+					attr.Literal = literal
 					p.advance()
 					return attr, nil
 				}
@@ -1353,30 +1398,28 @@ func (p *Parser) parseGoStyleEmptyOrCommentBody() (Node, error) {
 	return nil, nil
 }
 
-// parseOrPipeOnly parses at OR precedence but consumes ONLY the `||` operator,
-// never the legacy `,`-as-OR separator (memql#2796).
+// parseOrPipeOnly parses at OR precedence and STOPS at a comma, leaving it for
+// the caller (memql#2796).
 //
 // Used where the expression is followed by a STRUCTURAL comma: the
 // `return <value>, <error>` separator, a directive's `sort(<target>, "field")`
-// boundary, and contains()'s substring argument. All of these stopped at
-// parseLogicalAnd -- one level below parseLogicalOr, the only level that
-// consumes `||` -- which made a top-level unparenthesized `||` unparseable,
-// while the grammar documents `&&` and `||` with Go precedence (a relationship
-// that only means something if both can appear at the same level without
-// parens). The `||` was simply left unconsumed, so the parser then reported
-// whatever it wanted next and never named the operator.
+// boundary, contains()'s substring argument and shape()'s template. All of
+// these stopped at parseLogicalAnd -- one level below parseLogicalOr, the only
+// level that consumes `||` -- which made a top-level unparenthesized `||`
+// unparseable, while the grammar documents `&&` and `||` with Go precedence (a
+// relationship that only means something if both can appear at the same level
+// without parens). The `||` was simply left unconsumed, so the parser then
+// reported whatever it wanted next and never named the operator.
 //
-// Written as its own loop rather than by setting suppressCommaOr around
-// parseLogicalOr, which is what an earlier cut of this did. That flag is
-// dual-purpose: it also selects the object-literal value grammar (parseObject),
-// so setting it here silently changed how `{a: 1}` parses inside a query body
-// or directive target, and it propagates into nested parseGrouped /
-// parseWhenGuard, where it would have turned the still-supported `(a, b)` OR
-// form into a parse error. A local loop touches neither -- this is a strict
-// superset of parseLogicalAnd, adding `||` consumption and nothing else.
-//
-// Mirrors parseShapeLogicalOr, which resolves the same comma-vs-OR ambiguity
-// locally rather than through parser state.
+// It is its own loop rather than parseLogicalOr under a flag, because a comma
+// means something different at each. Here it is the caller's separator; at
+// parseLogicalOr a comma is the retired `,` connective and is refused
+// (memql#5439). The one flag that makes parseLogicalOr stop at a comma
+// instead, inCollectionArgs, also selects the object-literal value grammar
+// (parseObject) and propagates into nested groups, so setting it here would
+// silently change how `{a: 1}` parses inside a query body or directive target.
+// A local loop touches neither -- this is a strict superset of parseLogicalAnd,
+// adding `||` consumption and nothing else.
 func (p *Parser) parseOrPipeOnly() (ExpressionNode, error) {
 	left, err := p.parseLogicalAnd()
 	if err != nil {
@@ -1894,9 +1937,8 @@ func (p *Parser) parsePromptDecl(attrs []*Attribute) (*PromptDecl, error) {
 	// it is why a prompt names no model: a model name at a call site is a
 	// release every time the fleet changes.
 	//
-	// NOT REQUIRED HERE, deliberately. The corpus does not carry one yet, and
-	// requiring it in the parser would refuse every prompt in the tree the
-	// moment this lands. The requirement belongs to the loader, which can put a
+	// NOT REQUIRED HERE, deliberately. The requirement belongs to the loader
+	// (component/memql/prompt_level_required.go, memql#5426), which puts a
 	// prompt with no level on the LoadReport as a skip that strict boot refuses
 	// -- one place, with MEMQL_DSL_ALLOW_SKIPS as the operator break-glass, and
 	// the same rule applied to a bundle mounted at MEMQL_DSL_PATH. An absent
@@ -3294,17 +3336,25 @@ func (p *Parser) parseTernary() (ExpressionNode, error) {
 	}, nil
 }
 
-// parseLogicalOr parses OR expressions. The Go-style `||` operator is the
-// canonical form; the legacy `,`-as-OR separator is still accepted (its
-// tree-wide retirement is memql#5439 -- #977 and #5363 are both CLOSED, and
-// #5363's PR merged without taking it). It is deliberately NOT retired
-// alongside `;`-as-AND in epic memql#5375: `;` had no live producer left,
-// while `,` still folds two filters into ONE argument at a traversal call
-// (`parentOf(concept==X, concept==Y)`), which is what suppressCommaOr below
-// exists to distinguish. Retiring it without a codemod would ship a refusal
-// whose migration does not exist. Both sit at the OR precedence level --
-// looser than `&&` (parseLogicalAnd) -- so `a && b || c` parses as
-// `(a && b) || c`, matching Go.
+// parseLogicalOr parses OR expressions: `||`, one level looser than `&&`
+// (parseLogicalAnd), so `a && b || c` parses as `(a && b) || c`, matching Go.
+//
+// `,` is NOT OR (memql#5439, the twin of memql#5375's `;`). It was a second
+// spelling of `||` at this level, which is how `(ownerUserId==actor.userId,
+// visibility=="public")` read as a disjunction while every reader took it for
+// a list of conditions -- the memql#3612 authorization bypass. A comma that
+// reaches this level is refused by refuseCommaConnective, with the rule code
+// the edition-2026 grammar refuses the same comma with in a `.memql` file, so
+// a caller keys on one code whichever grammar met it. It was retired only
+// once a census found no producer left: the struct-form rewriter's lowering,
+// every engine and client query builder, the docs, and a boot of every tree
+// in the repository all spell OR `||`.
+//
+// Two places are not refusals. In a collection method's argument list
+// (inCollectionArgs) the comma ends the argument, for parseMethodArgList to
+// consume. And the expressions rewrite reads a legacy clause with
+// legacyConnectives set, so the comma keeps its old meaning for exactly the
+// reader that has to understand it to write `||` in its place.
 func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 	left, err := p.parseLogicalAnd()
 	if err != nil {
@@ -3314,20 +3364,14 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 		return nil, nil
 	}
 
-	// `,` as OR is DEFERRED to epic memql#5363 (the expression language),
-	// not retired here, and the reason belongs beside the code.
-	//
-	// D17 lists it next to `;` as AND, and the two turned out not to be
-	// alike. `;` had no live producer left once the four machine-generated
-	// ones were fixed. `,` has one: it is how two filter expressions fold
-	// into ONE argument at a traversal call --
-	// `parentOf(concept==v1:rel:hub, concept==v1:rel:space)` -- and
-	// parseOrPipeOnly's comment below calls `(a, b)` a "still-supported OR
-	// form" in as many words. Its codemod is `--rewrite=expressions`, which
-	// memql#5363 owns along with the lambda parameter this position also
-	// changes, so retiring it here would ship a refusal whose migration does
-	// not exist yet.
-	for (!p.suppressCommaOr && p.check(TokenComma)) || p.check(TokenPipePipe) {
+	for {
+		if p.check(TokenComma) && !p.inCollectionArgs {
+			if !p.legacyConnectives {
+				return nil, p.refuseCommaConnective()
+			}
+		} else if !p.check(TokenPipePipe) {
+			break
+		}
 		// Each operator is one link of a tree as tall as the chain
 		// (chain_bound.go).
 		if err := p.chainLink(p.current); err != nil {
@@ -3349,6 +3393,40 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 	}
 
 	return left, nil
+}
+
+// refuseCommaConnective refuses the `,` at the cursor, reached where the
+// procedural grammar has no comma: after a complete operand, outside every
+// argument list, element list and collection method that owns one. It is the
+// retired `,` connective (memql#5439) and carries retired_comma_connective,
+// the code the edition-2026 grammar gives the same comma.
+//
+// Directly inside a traversal's argument list the message names the
+// traversal's own fix. `parentOf(a, b)` is where the comma was hardest to
+// read as anything but a second argument, and the fix a reader needs is not
+// "write ||" in the abstract but the one call it should have been.
+func (p *Parser) refuseCommaConnective() error {
+	tok := p.current
+	operandFollows := true
+	switch p.peekAhead(1).Type {
+	case TokenEOF, TokenParenClose, TokenBracketClose, TokenBraceClose, TokenComma:
+		operandFollows = false
+	}
+	if p.traversal != "" && p.nesting == p.traversalNesting && operandFollows {
+		return commaConnectiveError(tok, fmt.Sprintf(
+			"write || -- a traversal takes one filter, so %[1]sa, b) is %[1]sa || b) (%[2]s rewrites it)",
+			p.traversal, v1Migrator))
+	}
+	return v1Retired(tok, ruleCommaConnective)
+}
+
+// commaConnectiveError is the retired `,` connective's refusal with a
+// position-specific tail after the shared head, so every comma refusal starts
+// with the same words and carries the same rule whichever grammar met it.
+func commaConnectiveError(tok Token, tail string) error {
+	form, _ := v1FormByRule(ruleCommaConnective)
+	msg := fmt.Sprintf("%s is retired in edition 2026: %s", form.Spelling, tail)
+	return &RetiredFormError{Form: form, Parse: v1ParseErrorAt(tok, msg)}
 }
 
 // parseNullCoalesce parses the resurrected `??` null-coalescing level
@@ -3440,11 +3518,17 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 	// `&&` in the same position, so one boolean grammar read two ways and a
 	// reader had to know both to grep for either -- and the two do not share
 	// precedence intuitions, which is how a filter comes to mean something
-	// other than it looks like.
-	if p.semicolonIsAConnective() {
-		return nil, newParseErrorf(&p.current, "`;` as AND is retired -- write `&&`. One boolean grammar, so precedence reads the same everywhere (memql#5375). %s", annotations.AttributeRewriteHint)
-	}
-	for p.check(TokenAmpAmp) {
+	// other than it looks like. The expressions rewrite reads a legacy clause
+	// with legacyConnectives set, and there alone `;` keeps its old meaning,
+	// so the rewrite can write `&&` in its place.
+	for {
+		if p.semicolonIsAConnective() {
+			if !p.legacyConnectives {
+				return nil, newParseErrorf(&p.current, "`;` as AND is retired -- write `&&`. One boolean grammar, so precedence reads the same everywhere (memql#5375). %s", annotations.AttributeRewriteHint)
+			}
+		} else if !p.check(TokenAmpAmp) {
+			break
+		}
 		if err := p.chainLink(p.current); err != nil {
 			return nil, err
 		}
@@ -3460,9 +3544,6 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 			Op:    LogicalAnd,
 			Left:  left,
 			Right: right,
-		}
-		if p.semicolonIsAConnective() {
-			return nil, newParseErrorf(&p.current, "`;` as AND is retired -- write `&&`. One boolean grammar, so precedence reads the same everywhere (memql#5375). %s", annotations.AttributeRewriteHint)
 		}
 	}
 
@@ -3728,6 +3809,13 @@ func (p *Parser) parseGrouped() (ExpressionNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	// `(a, b)` was the retired `,` connective's commonest spelling -- the
+	// memql#3612 bypass. parseLogicalOr refuses it; inside a collection
+	// method's arguments it stops at the comma instead, and a group never
+	// holds one, so the refusal is made here rather than as "expected )".
+	if p.check(TokenComma) {
+		return nil, p.refuseCommaConnective()
+	}
 	if err := p.expect(TokenParenClose); err != nil {
 		return nil, err
 	}
@@ -3907,6 +3995,12 @@ func (p *Parser) parseWhenGuard() (ExpressionNode, error) {
 	}
 	if inner == nil {
 		return nil, newParseErrorf(&p.current, "when(%s) { ... } block must contain an expression", guard)
+	}
+	// The block holds one expression; a comma in it is the retired `,`
+	// connective, refused by name where parseLogicalOr stopped at it (see
+	// parseGrouped).
+	if p.check(TokenComma) {
+		return nil, p.refuseCommaConnective()
 	}
 	if err := p.expect(TokenBraceClose); err != nil {
 		return nil, err
@@ -4451,14 +4545,27 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 		// confused -- an inner filter expression never begins with a bare
 		// string literal followed by a comma.
 		label := ""
+		head := name + "("
 		if p.check(TokenString) && p.peekAhead(1).Type == TokenComma {
 			label = p.current.Literal
+			head += QuoteString(label) + ", "
 			p.advance() // the label
 			p.advance() // the comma
 		}
 
-		// Parse inner expression
+		// The target is ONE filter. Any other comma in this argument list is
+		// the retired `,` connective, which folded `parentOf(a, b)` into
+		// `parentOf(a || b)` (memql#5439); traversal and traversalNesting let
+		// its refusal name that call rather than the connective alone.
+		prevTraversal, prevTraversalNesting := p.traversal, p.traversalNesting
+		p.traversal, p.traversalNesting = head, p.nesting
 		inner, err := p.parseExpression()
+		if err == nil && p.check(TokenComma) {
+			// Reached only inside a collection method's arguments, where
+			// parseLogicalOr stops at a comma rather than refusing it.
+			err = p.refuseCommaConnective()
+		}
+		p.traversal, p.traversalNesting = prevTraversal, prevTraversalNesting
 		if err != nil {
 			return nil, err
 		}
@@ -4760,54 +4867,31 @@ func (p *Parser) parseShapeFunction() (ExpressionNode, error) {
 	}, nil
 }
 
-// parseShapeQueryArg parses the query expression argument of shape().
-// This is similar to parseExpression but stops at comma when we're at depth 0.
+// parseShapeQueryArg parses shape()'s query argument: an expression at OR
+// precedence that stops at the comma separating it from the template.
+//
+// That comma is followed by the template -- `{` for an inline one, a string
+// for a named one -- and it is the only comma the argument can be followed
+// by. Any other is the retired `,` connective, which folded
+// `shape(a, b, "name")` into `shape(a || b, "name")` until memql#5439; it is
+// refused here naming the call it should have been, rather than left for
+// parseShapeFunction to report as a malformed template. Every input with no
+// such comma parses exactly as the local OR loop this replaced did: it
+// consumed the same `||` operators and stopped at the same template comma.
 func (p *Parser) parseShapeQueryArg() (ExpressionNode, error) {
-	return p.parseShapeLogicalOr()
-}
-
-// parseShapeLogicalOr parses OR expressions for shape query, stopping at comma.
-func (p *Parser) parseShapeLogicalOr() (ExpressionNode, error) {
-	left, err := p.parseLogicalAnd()
-	if err != nil {
-		return nil, err
+	target, err := p.parseOrPipeOnly()
+	if err != nil || target == nil {
+		return target, err
 	}
-	if left == nil {
-		return nil, nil
-	}
-
-	// In shape context, comma at depth 0 means end of query argument, so a
-	// comma followed by `{` (inline template) or "name" (named shape) ends
-	// the expression. The `||` operator is unambiguous OR and never a
-	// template separator, so it always continues the expression.
-	for p.check(TokenComma) || p.check(TokenPipePipe) {
-		if p.check(TokenComma) {
-			// Peek ahead to see if this comma separates query from template
-			nextType := p.peekAhead(1).Type
-			if nextType == TokenBraceOpen || nextType == TokenString {
-				// This comma precedes the template (inline or named), stop here
-				break
-			}
-		}
-		if err := p.chainLink(p.current); err != nil {
-			return nil, err
-		}
-		p.advance() // consume the OR operator (`,` or `||`)
-		right, err := p.parseLogicalAnd()
-		if err != nil {
-			return nil, err
-		}
-		if right == nil {
-			break
-		}
-		left = &LogicalExpr{
-			Op:    LogicalOr,
-			Left:  left,
-			Right: right,
+	if p.check(TokenComma) {
+		switch p.peekAhead(1).Type {
+		case TokenBraceOpen, TokenString:
+		default:
+			return nil, commaConnectiveError(p.current,
+				"write || -- in shape(<query>, <template>) a comma ends the query, so shape(a, b, <template>) is shape(a || b, <template>)")
 		}
 	}
-
-	return left, nil
+	return target, nil
 }
 
 // parseDirectiveTarget parses the leading expression argument of a
@@ -4896,13 +4980,15 @@ func (p *Parser) parseSortFunction() (ExpressionNode, error) {
 		p.advance()
 
 		direction := SortDesc
+		directionText := ""
 		if p.check(TokenComma) && p.peekAhead(1).Type == TokenString && isSortDirectionLiteral(p.peekAhead(1).Literal) {
 			p.advance() // consume comma
 			direction = parseSortDirection(p.current.Literal)
+			directionText = p.current.Literal
 			p.advance() // consume direction literal
 		}
 
-		fields = append(fields, SortField{Field: field, Direction: direction})
+		fields = append(fields, SortField{Field: field, Direction: direction, DirectionText: directionText})
 
 		if p.check(TokenParenClose) {
 			break
@@ -5609,12 +5695,13 @@ func (p *Parser) parseObject() (map[string]any, error) {
 		// (`g.key`) become evaluable ExpressionNodes resolved against the
 		// lambda scope -- the JSON-value grammar (parseValue) stops at the
 		// first arithmetic operator (`expected '}', got "/"`) and stores a
-		// path as an opaque raw string. Gated on the collection-arg flag
-		// (suppressCommaOr, set only while parsing a Story 4 collection
-		// method's arguments) so arg-time / spec / shape object literals keep
-		// the literal JSON-value grammar -- infix arithmetic stays out of
-		// those positions, preserving the #2316 in-memory-only containment.
-		if p.suppressCommaOr {
+		// path as an opaque raw string. Gated on inCollectionArgs (set only
+		// while parsing a Story 4 collection method's arguments) so arg-time
+		// / spec / shape object literals keep the literal JSON-value grammar
+		// -- infix arithmetic stays out of those positions, preserving the
+		// #2316 in-memory-only containment. The value's comma is the entry
+		// separator, which the same flag makes parseLogicalOr stop at.
+		if p.inCollectionArgs {
 			expr, err := p.parseExpression()
 			if err != nil {
 				return nil, err

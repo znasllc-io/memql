@@ -1,0 +1,9 @@
+/// Note a goal when it reaches the status the automation was never told about.
+@trigger(event="node.updated", concept="v1:work:goal")
+@filter(row => row.status == args.wanted)
+automation tfUndeclaredArgFilter {
+  args {
+    id  string
+  }
+  note := mutation tfNoteGoal(goalId: args.id, note: "reached")
+}

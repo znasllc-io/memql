@@ -183,38 +183,37 @@ func useFor(d declaredAt, name string) string {
 // its callers; it is repeated here because this is the function whose logic
 // depends on it.
 func scanCrossNamespaceImports(files []SourceFile, opts Options) []Violation {
+	// What each file declares, imports and references is read off its text
+	// once per process (source_facts.go); only the join below -- which
+	// namespace declares what, and the core-domain verdict -- is per scan.
 	paths := make([]string, 0, len(files))
-	code := make(map[string]string, len(files))
+	facts := make(map[string]*sourceFacts, len(files))
 	for _, f := range files {
 		paths = append(paths, f.Path)
-		code[f.Path] = codeOnly(f.Content)
+		facts[f.Path] = factsOf(f.Content)
 	}
 
 	// Pass 1: where each construct name is declared. The S5 uniqueness gate
 	// (#2360) means a flat name cannot legitimately be declared twice, so first
-	// wins and a duplicate is that gate's problem rather than this one's.
+	// wins and a duplicate is that gate's problem rather than this one's. A
+	// two-identifier signature (`query <Concept> <name>`) declares its second
+	// identifier (declFact.name).
 	declared := map[string]declaredAt{}
 	for _, p := range paths {
-		for _, m := range declLineRe.FindAllStringSubmatch(code[p], -1) {
-			kind := m[1]
-			name := m[2]
-			if m[3] != "" {
-				name = m[3] // two-identifier signature: `query <Concept> <name>`
-			}
-			if _, seen := declared[name]; !seen {
-				declared[name] = declaredAt{kind: kind, namespace: namespaceOf(p), file: p}
+		for _, d := range facts[p].declarations() {
+			if _, seen := declared[d.name]; !seen {
+				declared[d.name] = declaredAt{kind: d.kind, namespace: namespaceOf(p), file: p}
 			}
 		}
 	}
 
 	var out []Violation
 	for _, p := range paths {
-		src := code[p]
 		ns := namespaceOf(p)
 
 		imported := map[string]bool{}
-		for _, m := range useLineRe.FindAllStringSubmatch(src, -1) {
-			for _, n := range strings.Split(m[2], ",") {
+		for _, u := range facts[p].useLines() {
+			for _, n := range strings.Split(u.names, ",") {
 				n = strings.TrimSpace(n)
 				// `<source> as <local>`: the SOURCE name is what authorizes the
 				// reference (memql#3802). Both spellings are accepted here --
@@ -233,12 +232,8 @@ func scanCrossNamespaceImports(files []SourceFile, opts Options) []Violation {
 			}
 		}
 		declaredHere := map[string]bool{}
-		for _, m := range declLineRe.FindAllStringSubmatch(src, -1) {
-			name := m[2]
-			if m[3] != "" {
-				name = m[3]
-			}
-			declaredHere[name] = true
+		for _, d := range facts[p].declarations() {
+			declaredHere[d.name] = true
 		}
 
 		reported := map[string]bool{}
@@ -271,11 +266,9 @@ func scanCrossNamespaceImports(files []SourceFile, opts Options) []Violation {
 			})
 		}
 
-		for _, m := range callRe.FindAllStringSubmatch(src, -1) {
-			report(m[2])
-		}
-		for _, m := range shapeClauseRe.FindAllStringSubmatch(src, -1) {
-			report(m[1])
+		// The calls, then the `shape` clauses (sourceFacts.references).
+		for _, name := range facts[p].references() {
+			report(name)
 		}
 	}
 	return out

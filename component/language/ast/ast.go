@@ -94,6 +94,13 @@ const (
 type SortField struct {
 	Field     string
 	Direction SortDirection
+	// DirectionText is the direction literal as written -- in any case, as
+	// the grammar reads one -- and "" when the key was written with none
+	// (Direction is then the default, desc). It is what tells a load check
+	// whether the literal after a key sat where a direction goes: the grammar
+	// reads `sort "priority", "sideways"` as two keys, and the load refuses
+	// the second as an unknown direction (memql#5429).
+	DirectionText string
 }
 
 // RelationshipFunction enumerates supported relationship traversal functions.
@@ -779,6 +786,12 @@ type Attribute struct {
 	// in it as `true`, the same entry `key=true` makes (memql#5359). The
 	// parser fills it; an attribute built in Go may leave it nil.
 	ArgKeys []ArgKey
+	// Literal is the argument as written when it is one bare number --
+	// `@default(1e3)` -- whose parsed value Value holds as an int64 or a
+	// float64. A reader that holds the argument to a type reads this text,
+	// not the parsed value: 1e3 parses to 1000 and 9007199254740993 does not
+	// survive a float64, and the author wrote neither (memql#5430).
+	Literal string
 }
 
 // ArgKey is one keyword argument as it was written.
@@ -1937,7 +1950,9 @@ type ToolDecl struct {
 	ExecutionTime        string   // "fast" / "medium" / "slow"
 	RateLimitMaxCalls    int      // 0 = no rate limit; @rateLimit(maxCalls=...)
 	RateLimitPeriod      int      // seconds; paired with RateLimitMaxCalls
-	AllowedRoles         []string // @allowedRoles("assistant", ...) -- empty = no restriction
+	AllowedRoles         []string // @allowedRoles("assistant", ...) -- empty = no restriction; DEPRECATED (memql#5438)
+	RequiresAgentRole    []string // @requiresAgentRole("assistant", ...) -- the acting agent's role must be one of these; empty = any caller
+	RequiresRank         string   // @requiresRank("<role>") -- the person the call is for must hold this role or one ranked above it
 	Scopes               []string // @scopes("operator", ...) -- caller must hold a superset
 	MCPExposed           bool     // @mcp flag -- opt this tool into the curated MCP connector surface (memql#1596)
 	Disabled             bool     // @disabled flag -- the loader skips registration (#2606)
@@ -1959,7 +1974,12 @@ type ToolFieldDecl struct {
 	AutoInjected bool     // @autoInjected -- value is stamped server-side; LLM-supplied values are dropped at dispatch
 	Description  string   // @description("...") value
 	EnumValues   []string // @enum("a", "b", "c") values; empty = no enum constraint
-	Default      string   // @default("x") value, stored as a string regardless of the field's declared type
+	Default      string   // @default("x") value: the text between the quotes, whatever the field's declared type
+	// HasDefault reports that @default was written, which Default alone
+	// cannot: `@default("")` is written and empty. The loader holds the text
+	// to a literal of the field's type (memql#5430), and an empty text is one
+	// only for a string field.
+	HasDefault bool
 }
 
 // PolicyDecl is the shared-frontend AST node for an AI Router

@@ -166,29 +166,19 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 		hypertableResults := map[string]bool{}
 
 		if hasCreateHypertable {
-			existing := map[string]struct{}{}
-			var hypertableNames []string
-
-			if err := bunDB.NewRaw("SELECT hypertable_name FROM timescaledb_information.hypertable").
-				Scan(ctx, &hypertableNames); err != nil {
-				errMsg := err.Error()
-				if strings.Contains(errMsg, "timescaledb_information") || strings.Contains(errMsg, "42P01") {
-					logger.Info("timescaledb_information.hypertable view not available yet; relying on create_hypertable")
-				} else {
-					logger.Warn("failed to list existing hypertables", "error", err)
-				}
-			} else {
-				for _, name := range hypertableNames {
-					existing[name] = struct{}{}
-				}
-			}
-
 			tables := []string{memoryNodesTableName, secretMemoryNodesTableName}
 
 			for _, table := range tables {
-				if _, ok := existing[table]; ok {
+				// Already one: nothing to convert. The lookup used to read
+				// `timescaledb_information.hypertable`, a view that does not
+				// exist, so it always fell through to create_hypertable below
+				// -- harmless under if_not_exists, and a misleading log line on
+				// every boot. An error here still falls through, as it did.
+				if isHypertable, _, err := hypertableCompression(ctx, bunDB, table); err == nil && isHypertable {
 					hypertableResults[table] = true
 					continue
+				} else if err != nil {
+					logger.Warn("failed to read the hypertable catalog; relying on create_hypertable", "table", table, "error", err)
 				}
 
 				query := fmt.Sprintf("SELECT create_hypertable('%s'::regclass, 'createdAt', migrate_data => TRUE, if_not_exists => TRUE)", quoteIdentifier(table))
@@ -203,6 +193,15 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 					hypertableResults[table] = true
 				}
 			}
+		}
+
+		// The compression 20260609 intended and no install ever got, applied
+		// where the conversion above happens (memory_nodes_compression.go,
+		// memql#5421). Self-guarding: it acts only on a hypertable with no
+		// compression settings and no DELETE trigger carrying a transition
+		// table, records what it decided, and never fails the boot.
+		compression := map[string]string{
+			memoryNodesTableName: ensureMemoryNodesCompression(ctx, bunDB, logger),
 		}
 
 		installed := info.Version.Valid
@@ -233,6 +232,8 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 		if len(hypertableResults) > 0 {
 			payload["hypertables"] = hypertableResults
 		}
+
+		payload["compression"] = compression
 
 		payloadJSON, payloadErr := json.Marshal(payload)
 
@@ -285,6 +286,7 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 				"schema", schema,
 				"hasCreateHypertable", hasCreateHypertable,
 				"hypertables", hypertableResults,
+				"compression", compression,
 			)
 		} else if activationErr == nil {
 			logger.Error("TimescaleDB extension not enabled after attempted activation")

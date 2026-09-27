@@ -1,5 +1,26 @@
-// fleet domain -- ORCHESTRATION: the MemQL Cloud control plane's controller
-// (epic memql#3852, task memql#3853).
+// fleet domain -- every automation of the MemQL Cloud control plane (epic
+// memql#3852).
+//
+// Three sections, three kinds of orchestration: the CONTROLLER that reconciles
+// a cluster to its instance row (task memql#3853), BILLING, which turns events
+// from two outside systems into graph writes (task memql#3854), and the TRIAL
+// CLOCK and IDLE HIBERNATION, scheduled sweeps that act when a date passes
+// (task memql#3856) -- all six @disabled pending the trial lifecycle redesign
+// (memql#5677; the section says why).
+//
+// ONE FILE, BECAUSE THE LOADER READS ONE FILE. The automation loader reads a
+// domain's automations from its automations.memql and from no other file. The
+// billing and trial automations used to live in billing.memql and trial.memql,
+// where nothing ever loaded them: every other pass read those files and found
+// them well formed, the bundle linted and booted clean, and no delivery was
+// claimed, no dunning email staged, no trial paused and no suspended tenant
+// torn down (memql#5437). An automation declared anywhere else is now refused
+// at load (construct_misplaced), so the kinds are sections here rather than
+// files.
+//
+// =============================================================================
+//   The controller
+// =============================================================================
 //
 // THE DESIGN IN ONE SENTENCE: the v1:fleet:instance row is DESIRED STATE, and
 // these automations reconcile the world to it.
@@ -50,9 +71,9 @@
 // last-write-wins onto the same row.
 
 use fleet.actions.{ provisionTenant, resumeTenant, suspendTenant, tearDownTenant }
-use fleet.logic.{ instanceCommand, teardownConfirmationPhrase }
-use fleet.mutations.{ markInstanceRunning, markInstanceSuspended, markInstanceTornDown }
-use platform.mutations.{ stageOutboundRequest }
+use fleet.logic.{ instanceCommand, runningInstances, suspendedInstances, teardownConfirmationPhrase, trialingSubscriptions }
+use fleet.mutations.{ endSubscription, markInstanceRunning, markInstanceSuspended, markInstanceTornDown, requestInstanceSuspend, requestInstanceTeardown, setSubscriberStatus }
+use platform.mutations.{ stageOutboundRequest, updateInboundRequestStatus }
 
 // =============================================================================
 //   Provisioning
@@ -276,5 +297,519 @@ automation welcomeOnInstanceRunning {
       )
     }
     default { }
+  }
+}
+
+// =============================================================================
+//   BILLING: Stripe in, meters out (task memql#3854)
+// =============================================================================
+//
+// A different KIND of orchestration from the controller above, which
+// reconciles a cluster to a desired-state row: this section translates events
+// from two outside systems into graph writes. They share the domain and almost
+// nothing else. These four lived in billing.memql until memql#5437, and none of
+// them had ever loaded (see the head of this file).
+//
+// =============================================================================
+//   Two inbound flows, one receiver
+// =============================================================================
+//
+// Everything here rides `POST /inbound/{source}` -- the engine's
+// signature-verifying webhook receiver -- and stages nothing of its own. No new
+// HTTP endpoint, which was the epic's architecture decision and is now
+// implementable: memql#3854 taught the receiver to read a COMPOSITE signature
+// header, without which a Stripe delivery could not be verified at all (see
+// component/inbound/verify_composite_test.go for what was actually wrong).
+//
+//   source `stripe`  -- Stripe's own webhooks. Money.
+//   source `usage`   -- a TENANT reporting its own consumption. Metering.
+//
+// THE SECOND ONE IS THE INTERESTING DESIGN PROBLEM. Usage happens inside a
+// tenant's cluster; the meters live on the mothership. There is no shared
+// database between them and there must not be -- instance isolation is what a
+// customer is buying. So a tenant REPORTS: it stages an outbound webhook row,
+// the engine's outbound worker delivers it to the mothership's inbound
+// receiver, and a handler here turns it into a `recordUsage` write. Both
+// delivery halves already exist. The handler does NOT yet: turning a `usage`
+// delivery into a meter needs its body read, and the DSL cannot read one -- the
+// limit claimStripeDelivery below records -- so a `usage` delivery falls through
+// claimStripeDelivery's default and is not counted.
+//
+// The consequence to hold onto: metering is EVENTUALLY consistent and
+// at-least-once. A tenant that cannot reach the mothership keeps serving and
+// reports later. That is deliberate -- the alternative is a customer's instance
+// going down because our billing system is having a bad afternoon -- and it is
+// exactly why the allowance ceiling is ALSO enforced inside the tenant, by
+// configuration, where no network is involved. See the "two layers" note below.
+//
+// =============================================================================
+//   Two layers of allowance, and why one of them is not enough
+// =============================================================================
+//
+// LAYER 1, THE METER, is the accounting truth: what the customer consumed this
+// period, what it costs, what Stripe is told. It is reconstructed from reports,
+// so it lags, and a lost report under-bills by that report.
+//
+// LAYER 2, THE GUARD, is the structural backstop: the tier's ceiling rendered
+// into the tenant's own `MEMQL_LLM_MAX_TOTAL_CALLS` / `_MAX_TOTAL_COST_USD`
+// (docs/public/ai/llm-cost-control.md). It is enforced in-process, since boot,
+// with no network and no graph read. A tenant cannot exceed it even if the
+// mothership is unreachable, even if metering is broken, even if this file has
+// a bug in it.
+//
+// Layer 2 is what makes the epic's launch gate -- "NO unbounded-spend path
+// exists" -- a structural claim rather than a hope about our own correctness.
+// A trial is the case that matters: its card has been authorized and never
+// charged, so an unbounded trial is an unbounded gift. Which is why the trial
+// tier's `overagePolicy` is `throttle` where every other tier meters, and why
+// the tenant template renders a hard call cap for it.
+//
+// =============================================================================
+//   Idempotency, which is not optional here
+// =============================================================================
+//
+// The inbound receiver gives at-least-once delivery with a stable row id: a
+// redelivery lands on the SAME v1:platform:inboundRequest row, but staging it
+// is still a write, so the automation FIRES AGAIN. That is the documented
+// contract (docs/public/operate/inbound-delivery.md) and it is the one thing a
+// billing handler must not get wrong -- a doubled meter increment is a customer
+// billed twice for one turn.
+//
+// The defence is the meter's identity rather than a dedupe check: one row per
+// (subscription, period, metric), at a derived id, holding an ABSOLUTE total
+// reported by the tenant. Re-applying the same report writes the same number.
+// Reporting is idempotent because it is a SET, not an ADD -- which is why
+// `recordUsage` takes totals and not deltas, and why the tenant is the one that
+// counts.
+
+// =============================================================================
+//   Stripe -> the fleet graph
+// =============================================================================
+
+/// A verified inbound delivery arrived. If it came from Stripe, mark it as one nothing can handle
+/// yet, with the reason on the row.
+///
+/// FIRES ON EVERY FRESHLY STAGED INBOUND ROW rather than filtering to `stripe` on the trigger. The
+/// `switch` below is the source filter, and a delivery from any other source falls through its
+/// default having done nothing -- which is a no-op rather than an error, because the set of sources
+/// a deployment admits is configuration and is not knowable from here. `ingestCampaignFeedback` in
+/// the campaigns domain has the same shape for the same reason.
+///
+/// THE STATUS FILTER IS WHAT STOPS IT CLAIMING ITS OWN WRITE. An update of the row publishes
+/// node.created for its new version, so the `failed` stamp below is itself a delivery this trigger
+/// sees; without `row.status == "received"` the automation re-triggers on it until the chain-depth
+/// cap stops the run. The loop gate refused exactly that the first time this automation loaded
+/// (memql#5437 -- it had lived in a file the loader never read). A redelivery re-stages the SAME row
+/// but keeps the status it already has -- stageInboundRequest is @createOnly("status") -- so a
+/// delivery this automation already stamped `failed` stays `failed` and is NOT claimed again; only
+/// a delivery the receiver has just staged, still `received`, is.
+///
+/// WHAT IT DELIBERATELY DOES NOT DO is act on the event. It stamps `failed` with a reason and stops.
+///
+/// `failed`, NOT `processing`, and the difference matters more than it looks (corrected after
+/// memql#3854 landed). `processing` means "a product automation has this in hand" -- so every Stripe
+/// delivery would sit in that state forever, and an operator running
+/// `inboundRequestsByStatus("processing")` would watch a pile grow that nothing was working. A
+/// status that claims a worker which does not exist is worse than no handler at all: it is a
+/// backlog that reads as progress.
+///
+/// `failed` is what the row IS. It is queryable, it carries `lastError` naming the missing piece,
+/// and the day the JSON-extract builtin lands the same rows are re-drainable -- because the engine
+/// never retries product-side handling itself, so nothing here is lost by saying so plainly.
+///
+/// The reason is worth stating precisely, because the obvious guess about it is wrong.
+///
+/// It is NOT the lookup. `subscriptionByStripeId` in queries.memql resolves a `sub_...` to a fleet
+/// row perfectly well: @serverOnly + @unbounded is exactly the shape an internal sweep or webhook
+/// handler takes, the same one `usersInDeletionCooldown` has carried in the identity domain for
+/// some time, and a logic reaches it with OriginInternal stamped by the step executor.
+///
+/// It is that THE DSL CANNOT READ THE EVENT. `v1:platform:inboundRequest.body` is the verified raw
+/// request body as a STRING, and the automation evaluator has no JSON parsing -- no field
+/// extraction, no path read, nothing that turns those bytes into `data.object.subscription`. So a
+/// handler can see that a Stripe delivery arrived and cannot see what it says.
+///
+/// That is a real limit on the inbound surface's "no product Go" promise, and this is the second
+/// thing to hit it: campaigns needed a Go builtin (`integration.campaigns.ingestFeedback`) for the
+/// identical reason -- it parses a provider payload off a staged row because nothing in the DSL
+/// could. The fix is generic and belongs in the engine rather than here: one JSON-extract builtin
+/// would serve every product draining `POST /inbound/{source}`, which is the entire point of that
+/// surface existing. Recorded on memql#3854.
+@trigger(event="node.created", concept="v1:platform:inboundRequest")
+@filter(row => row.status == "received")
+automation claimStripeDelivery {
+  args {
+    id     any
+    source any
+    status any
+  }
+
+  switch args.source {
+    case "stripe" {
+      mutation updateInboundRequestStatus(
+        requestId: args.id,
+        status:    "failed",
+        lastError: "no handler: the DSL cannot parse a webhook body, so the Stripe event cannot be mapped to a fleet row (memql#3854). Re-drainable once a JSON-extract builtin lands."
+      )
+    }
+    default { }
+  }
+}
+
+// =============================================================================
+//   Dunning -- a payment failed, and what happens next
+// =============================================================================
+//
+// THE POLICY, stated once: a failed payment starts a CLOCK, it does not cut
+// service. Seven days of grace, an email at the start of it, suspension at the
+// end, and an immediate resume on recovery.
+//
+// WHAT RUNS is the start of that clock and the recovery flag: the account goes
+// `delinquent` and the email is staged, and it returns to `active` when the
+// subscription does. The END of the clock is not automated -- no sweep reads a
+// past_due subscription's graceEndsAt and suspends its instance -- and neither
+// is the resume; both are an operator's act today.
+//
+// Cutting a customer off the moment a card expires loses the customer AND the
+// invoice -- the two things dunning exists to protect. Most failed payments are
+// an expired card and a person who has not read their email yet, not a refusal
+// to pay. The subscriber row goes `delinquent` so the state is visible in the
+// fleet console and in Orbit; the instance keeps running.
+
+/// A subscription entered `past_due`: mark the account delinquent (the email is
+/// dunningEmailOnPaymentFailure's). The instance is untouched -- see the policy note above.
+/// `graceEndsAt` was set by whoever wrote `past_due` -- an operator today, the Stripe path once it
+/// can read a delivery -- and no sweep acts on it yet.
+@trigger(event="node.updated", concept="v1:fleet:subscription")
+automation dunningNoticeOnPaymentFailure {
+  args {
+    id           any
+    subscriberId any
+    status       any
+  }
+
+  switch args.status {
+    case "past_due" {
+      mutation setSubscriberStatus(
+        subscriberId: args.subscriberId,
+        status:       "delinquent"
+      )
+    }
+    default { }
+  }
+}
+
+/// A subscription recovered: clear the account's delinquency. `activateSubscription` already
+/// cleared the grace clock -- a subscription that is active is not in any grace period by
+/// definition, and a stale `graceEndsAt` is how a recovered account gets torn down a week later.
+///
+/// FIRES ON THE TRANSITION, past_due to active, and on nothing else. Every write to an active
+/// subscription is a node.updated event -- a period roll, a mirrored Stripe field -- and firing
+/// on the STATE rewrote the subscriber on each of them, and returned an account to `active` that
+/// an operator had set otherwise. `oldStatus` is the prior version's status, the same reading the
+/// tree's other transition automations use (dsl/work, dsl/procedure).
+@trigger(event="node.updated", concept="v1:fleet:subscription")
+@filter(row => row.status == "active" && args.oldStatus == "past_due")
+automation clearDelinquencyOnRecovery {
+  args {
+    subscriberId any
+    oldStatus    any
+  }
+
+  mutation setSubscriberStatus(
+    subscriberId: args.subscriberId,
+    status:       "active"
+  )
+}
+
+/// A payment failed: tell the person who pays.
+///
+/// FIRES ON THE SUBSCRIPTION, not on the subscriber, even though `billingEmail` is conceptually the
+/// account's. Two reasons, and the second is the one that decided it:
+///
+///   Every automation in this domain reads only the row that triggered it, because an automation's
+///   actor is not the row's owner and a caller-scoped read from inside one returns nothing while
+///   looking entirely correct. So the address is denormalised onto the subscription, exactly as
+///   `instance.notifyEmail` is.
+///
+///   And the IDEMPOTENCY KEY has to change per dunning CYCLE. `stageOutboundRequest` is idempotent
+///   by requestId -- a re-stage onto an existing row preserves the worker-owned delivery state
+///   rather than resending -- which is exactly right for the at-least-once event stream this fires
+///   on, and exactly wrong if the key is constant per account: the customer's SECOND late payment,
+///   months later, would land on a row already marked `sent` and no mail would go out. Keying on
+///   `graceEndsAt` makes it once per cycle, which is what "tell them their payment failed" means.
+///
+/// The message names no amount and no card. It cannot: this row does not carry them, Stripe does,
+/// and a dunning email that guesses at a figure is worse than one that does not mention it.
+@trigger(event="node.updated", concept="v1:fleet:subscription")
+automation dunningEmailOnPaymentFailure {
+  args {
+    id           any
+    billingEmail any
+    graceEndsAt  any
+    status       any
+  }
+
+  switch args.status {
+    case "past_due" {
+      mutation stageOutboundRequest(
+        requestId:   "fleet-dunning-" + args.id + "-" + args.graceEndsAt,
+        medium:      "email",
+        target:      args.billingEmail,
+        subject:     "Action needed: your MemQL Cloud payment did not go through",
+        body:        "We could not process your latest MemQL Cloud payment. Your instance keeps running -- please update your payment details in the billing portal within the grace period to avoid interruption.",
+        requestedBy: "fleet.dunningEmailOnPaymentFailure"
+      )
+    }
+    default { }
+  }
+}
+
+// =============================================================================
+//   The TRIAL CLOCK and IDLE HIBERNATION (task memql#3856)
+// =============================================================================
+//
+// Six scheduled sweeps. Five of them are the entire lifecycle of a customer who
+// never pays: nudged at day 7 and day 12, suspended at day 14, offered their
+// data back for 14 more, and then torn down. The sixth hibernates an idle
+// instance of any tier. They lived in trial.memql until memql#5437, and none of
+// them had ever loaded (see the head of this file).
+//
+// ALL SIX ARE @disabled, PENDING THE TRIAL LIFECYCLE REDESIGN (memql#5677).
+// They load and are checked like every other construct -- a disabled construct
+// is maintained -- but the scheduler does not run them. Two findings decided it,
+// both measured once the sweeps loaded:
+//
+//   - THEY READ NOTHING. Their candidate queries (instancesByStatus,
+//     subscriptionsByStatus) are owner-tier reads, and an automation runs as its
+//     own synthetic actor (`system:automation:<name>`), which owns no row. See
+//     "how they are allowed to read" below.
+//   - FIXING THE READ WOULD EXPOSE THE DAMAGE. teardownAfterGrace would destroy
+//     any instance suspended for 14 days -- a customer's own pause, a
+//     hibernation, a dunning suspension -- while its subscription is still
+//     billed; trialExpirySuspend and the nudges key off `instance.trialEndsAt`,
+//     which nothing updates after a conversion or an extension. The lifecycle
+//     has to be designed as a whole before any of it runs.
+//
+// =============================================================================
+//   Why these are sweeps at all, and how they are allowed to read
+// =============================================================================
+//
+// Everything else in this domain reacts to a row that changed. A clock cannot:
+// nothing writes a row when a date passes. So these six are `@trigger(schedule=)`
+// and they READ -- which is the one thing this domain's automations otherwise
+// never do, because an automation's actor is not the row's owner and a
+// caller-scoped read from inside one returns nothing while looking correct.
+//
+// The queries they call carry a pair of annotations (queries.memql, "Internal
+// sweeps"): `@serverOnly` refuses a client-originated call outright, and
+// `@unbounded` declares that reading every row is the intent -- with the reason
+// recorded, so the pagination gate does not silently truncate a sweep to its
+// first page and leave the tail of the fleet unswept. deploy/fleet/authz_test.go
+// checks BOTH annotations are present, because either alone is a defect wearing
+// the other's clothes.
+//
+// That pair makes the CALL reachable from an automation; it does not widen the
+// concept's owner tier. The row-authz layer still admits only the rows the
+// caller owns, and an automation's synthetic actor owns none -- so these reads
+// return nothing, which is the first reason the sweeps are disabled (above).
+// Giving them a reach they can use is part of memql#5677.
+//
+// =============================================================================
+//   Every sweep reads exactly ONE concept, and that is why the clocks are
+//   denormalised
+// =============================================================================
+//
+// A sweep cannot join. So the clock a sweep reads has to be on the row it
+// sweeps: `instance.trialEndsAt` is copied from the subscription, and
+// `instance.suspendedAt` is the grace clock on the DATA rather than on the
+// billing relationship.
+//
+// That is not duplication for convenience -- it is what makes the sweeps
+// possible at all, and it is the same reason `notifyEmail`, `billingEmail`, the
+// two spend ceilings and the shape fields are denormalised. The cost is that a
+// clock moved on the subscription must be re-stamped on the instance; the
+// benefit is that no sweep in this section can be silently returning nothing.
+//
+// =============================================================================
+//   The windowing lives in the loop, not in the filter
+// =============================================================================
+//
+// "trialEndsAt is between 7 and 8 days away" is computed per row in the `for`
+// loop's `if` clause, over the candidate rows runningInstances returns. The
+// bracket is one day wide and the sweep fires daily, which is what makes each
+// nudge fire EXACTLY ONCE per instance -- no duplicates from a wide bracket, no
+// gaps from a narrow one.
+//
+// =============================================================================
+//   What a trial costs, and what bounds it
+// =============================================================================
+//
+// A trial runs Graph-level FEATURES on Node-shaped infrastructure (the `solo`
+// profile, `entry` database) with the tier's hard cap: 500 message credits,
+// `overagePolicy: throttle`.
+//
+// The caps are enforced in the tenant's own process by the spend ceiling
+// (task memql#3854), not by these sweeps. That distinction matters: a sweep runs
+// once a day, and a runaway does not wait for it. What these do is bound the
+// trial in TIME; what bounds it in SPEND is a limit on the other side of the
+// boundary that needs no network and no clock.
+
+// =============================================================================
+//   Day 7 and day 12 -- the nudges
+// =============================================================================
+
+/// Daily 09:00 UTC: tell every trial that is a week from ending. The first of two nudges; the second
+/// is two days out (below), which is when somebody who meant to buy actually acts.
+///
+/// The email is keyed on the instance AND the milestone, so the two nudges are different outbound
+/// rows and neither suppresses the other -- `stageOutboundRequest` is idempotent by requestId, so a
+/// shared key would mean the day-12 message silently never sent.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): nudges key off
+/// `instance.trialEndsAt`, which nothing updates after a conversion or an extension, and its
+/// candidate read returns nothing to an automation.
+@disabled
+@trigger(schedule="0 0 9 * * *")
+automation trialNudgeDay7 {
+  decide := logic runningInstances(event: event)
+  for item in decide if item.tier == "trial" && item.trialEndsAt > addDuration(now, "P7D") && item.trialEndsAt <= addDuration(now, "P8D") {
+    mutation stageOutboundRequest(
+      requestId:   "fleet-trial-nudge-7-" + item.id,
+      medium:      "email",
+      target:      item.notifyEmail,
+      subject:     "One week left on your MemQL Cloud trial",
+      body:        "Your trial instance at https://" + item.domain + " has a week to run. Add a plan in Orbit to keep it -- nothing is lost if you decide later, but the instance pauses when the trial ends.",
+      requestedBy: "fleet.trialNudgeDay7"
+    )
+  }
+}
+
+/// Daily 09:00 UTC: the two-days-out nudge. Deliberately a different message from the day-7 one --
+/// this is the last one before the instance pauses, and it says what happens next rather than
+/// repeating the invitation.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): the same stale
+/// `instance.trialEndsAt` as trialNudgeDay7, and the same empty read.
+@disabled
+@trigger(schedule="0 0 9 * * *")
+automation trialNudgeDay12 {
+  decide := logic runningInstances(event: event)
+  for item in decide if item.tier == "trial" && item.trialEndsAt > addDuration(now, "P2D") && item.trialEndsAt <= addDuration(now, "P3D") {
+    mutation stageOutboundRequest(
+      requestId:   "fleet-trial-nudge-12-" + item.id,
+      medium:      "email",
+      target:      item.notifyEmail,
+      subject:     "Your MemQL Cloud trial ends in two days",
+      body:        "Your trial instance at https://" + item.domain + " pauses in two days. Your data stays exactly where it is for 14 days after that, and adding a plan in Orbit brings it straight back.",
+      requestedBy: "fleet.trialNudgeDay12"
+    )
+  }
+}
+
+// =============================================================================
+//   Day 14 -- the trial ends
+// =============================================================================
+
+/// Daily 02:00 UTC: pause every trial instance whose clock has run out. Scale-to-zero, data intact
+/// -- which is the whole shape of the offer: a trial that ends does not destroy anything, it stops
+/// costing us compute.
+///
+/// The instance and the subscription are closed by two separate sweeps, because neither can read the
+/// other. They are eventually consistent with each other, and the order does not matter: a paused
+/// instance whose subscription is still `trialing` for a few hours is a customer who cannot use a
+/// service they are not paying for, which is the intended state either way.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): it keys off `instance.trialEndsAt`,
+/// which nothing updates after a conversion or an extension, so it would pause a customer who
+/// converted.
+@disabled
+@trigger(schedule="0 0 2 * * *")
+automation trialExpirySuspend {
+  decide := logic runningInstances(event: event)
+  for item in decide if item.tier == "trial" && item.trialEndsAt != nil && item.trialEndsAt < now {
+    mutation requestInstanceSuspend(instanceId: item.id)
+  }
+}
+
+/// Daily 02:00 UTC: close out every subscription whose trial has ended, and start the 14-day clock
+/// on the data.
+///
+/// `paused`, not `cancelled`. The customer did not cancel -- they ran out of trial, which is a
+/// different fact about the same person and the one that decides whether "convert" or "resubscribe"
+/// is the right word in every message that follows.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): its candidate read returns nothing
+/// to an automation, and it closes subscriptions on the trial clock the redesign replaces.
+@disabled
+@trigger(schedule="0 0 2 * * *")
+automation trialExpiryClose {
+  decide := logic trialingSubscriptions(event: event)
+  for item in decide if item.trialEndsAt != nil && item.trialEndsAt < now {
+    mutation endSubscription(
+      subscriptionId: item.id,
+      status:         "paused",
+      graceEndsAt:    addDuration(now, "P14D")
+    )
+  }
+}
+
+// =============================================================================
+//   Hibernation -- an instance nobody is using
+// =============================================================================
+
+/// Daily 03:00 UTC: scale to zero any instance that has served nothing for 14 days.
+///
+/// THIS APPLIES TO EVERY TIER, not just trials, and that is deliberate. A paying customer's idle
+/// instance costs us exactly as much as an idle trial's, and resuming is a scale-up rather than a
+/// restore -- the data never moved. What a paid tier buys is not "always warm", it is capacity when
+/// they use it; a tier that genuinely needs zero cold starts is a product decision with a price
+/// attached, not a default.
+///
+/// `lastActivityAt` is stamped by the TENANT's own heartbeat, because the control plane cannot see
+/// the tenant's traffic. An instance that has never reported activity therefore has an empty field
+/// and is skipped rather than hibernated -- fail-safe in the direction that costs money rather than
+/// the one that surprises a customer.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): a hibernated instance is
+/// `suspended`, and teardownAfterGrace would destroy it 14 days later while its subscription is
+/// still billed.
+@disabled
+@trigger(schedule="0 0 3 * * *")
+automation hibernateIdleInstances {
+  decide := logic runningInstances(event: event)
+  for item in decide if item.lastActivityAt != nil && addDuration(item.lastActivityAt, "P14D") < now {
+    mutation requestInstanceSuspend(instanceId: item.id)
+  }
+}
+
+// =============================================================================
+//   The end of the grace period
+// =============================================================================
+
+/// Daily 04:00 UTC: tear down instances that have been suspended for 14 days.
+///
+/// This is the only automation in the fleet that destroys data, and it is a SWEEP rather than a
+/// reaction for exactly that reason: nothing a customer or an operator does in one action reaches
+/// it. The path is pause, then fourteen days, then this.
+///
+/// The capability script takes a final backup before deleting anything and ABORTS if that backup
+/// fails, so a teardown that could not preserve the data does not happen. The instance is left in
+/// `tearing_down` in that case -- a state that says what was being attempted, which is what an
+/// operator needs and what a row that looked finished would deny them.
+///
+/// `suspendedAt` is the clock, and it is the instance's OWN field rather than the subscription's
+/// `graceEndsAt`. The two normally agree; where they do not, this one is the honest one -- it
+/// measures how long the data has actually been cold, which is the thing the grace period is about.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): it would destroy ANY instance
+/// suspended for 14 days -- a customer's own pause, a hibernation, a dunning suspension -- while
+/// its subscription is still billed.
+@disabled
+@trigger(schedule="0 0 4 * * *")
+automation teardownAfterGrace {
+  decide := logic suspendedInstances(event: event)
+  for item in decide if item.suspendedAt != nil && addDuration(item.suspendedAt, "P14D") < now {
+    mutation requestInstanceTeardown(instanceId: item.id)
   }
 }

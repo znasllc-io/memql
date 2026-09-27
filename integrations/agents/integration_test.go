@@ -66,7 +66,7 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 			}
 		}
 		if c.Name == "requestUserFeedback" {
-			for _, key := range []string{"question", "kind", "planId"} {
+			for _, key := range []string{"question", "kind", "runId"} {
 				if _, ok := c.ArgsSchema[key]; !ok {
 					t.Errorf("requestUserFeedback ArgsSchema missing %q", key)
 				}
@@ -126,9 +126,10 @@ func (e *recordingEngine) Execute(_ context.Context, query string) (*memql.Execu
 // fakeWorkGoals records the goals the two entry points open, and the
 // questions requestUserFeedback parks a run on.
 type fakeWorkGoals struct {
-	opened []DirectGoal
-	asked  []FeedbackApproval
-	err    error
+	opened   []DirectGoal
+	asked    []FeedbackApproval
+	askedFor []string // the owner each question was raised for
+	err      error
 }
 
 func (f *fakeWorkGoals) OpenDirectGoal(_ context.Context, g DirectGoal) (string, string, error) {
@@ -139,11 +140,12 @@ func (f *fakeWorkGoals) OpenDirectGoal(_ context.Context, g DirectGoal) (string,
 	return "v1:work:goal:g1", "v1:work:run:r1", nil
 }
 
-func (f *fakeWorkGoals) RaiseFeedbackApproval(_ context.Context, _ string, a FeedbackApproval) (string, error) {
+func (f *fakeWorkGoals) RaiseFeedbackApproval(_ context.Context, owner string, a FeedbackApproval) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
 	f.asked = append(f.asked, a)
+	f.askedFor = append(f.askedFor, owner)
 	return "v1:work:approval:a1", nil
 }
 
@@ -160,7 +162,7 @@ func TestHandleProduceArtifact_OpensExactlyOneGoal(t *testing.T) {
 	goals := &fakeWorkGoals{}
 	i.SetWorkGoals(goals)
 
-	nodes, err := i.handleProduceArtifact(context.Background(), map[string]any{
+	nodes, err := i.handleProduceArtifact(asPerson("u1"), map[string]any{
 		"goal":        "A markdown file listing 10 beautiful birds",
 		"ownerUserId": "u1",
 		"partitionId": "s1",
@@ -196,7 +198,7 @@ func TestHandleProduceArtifact_RefusesWithNoGoalSurface(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), &recordingEngine{})
 	// deliberately no SetWorkGoals
 
-	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
+	_, err := i.handleProduceArtifact(asPerson("u1"), map[string]any{
 		"goal":        "A markdown file listing 10 birds",
 		"ownerUserId": "u1",
 		"partitionId": "s1",
@@ -233,7 +235,7 @@ func TestHandleProduceArtifact_RequiresOwnerUserId(t *testing.T) {
 
 func TestHandleProduceArtifact_RequiresPartitionId(t *testing.T) {
 	i := New(memql.NewAgentRegistry(), nil)
-	_, err := i.handleProduceArtifact(context.Background(), map[string]any{
+	_, err := i.handleProduceArtifact(asPerson("u1"), map[string]any{
 		"goal":        "A markdown file listing 10 birds",
 		"ownerUserId": "u1",
 	}, 0)

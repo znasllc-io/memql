@@ -123,6 +123,26 @@ type AccessContext struct {
 	// Set by the three synthetic constructors and by nothing a request can
 	// reach, exactly like ConnectorName and IsAnonymous above.
 	Synthetic bool
+
+	// RoleStandIn marks an actor whose Role is a STAND-IN rather than the
+	// person's own rung: borrowed authority (ContextWithUserActor), which
+	// asserts writer for whoever it borrows, and work restored without a
+	// captured interactive grant (ContextWithPersistedOwner), which asserts
+	// writer for its owner whatever they hold.
+	//
+	// The role keeps its job -- it bounds what the work may do to rows -- but
+	// it says nothing about how senior the person is. So a gate that asks
+	// THAT question reads the person instead: a tool's @requiresRank
+	// (component/memql/tool_gate.go, memql#5438), which judged an agent acting
+	// for a READER as a writer and one acting for an ADMIN as a writer too.
+	//
+	// It grants nothing, and every other gate reads Role exactly as before.
+	// It is PROCESS-LOCAL: ForwardedAuthority has no such field, so a node
+	// that re-binds this actor from a mesh hop sees an ordinary writer. No
+	// tool loop runs on the far side of one -- a work step runs its agent turn
+	// on the node that restored the owner (integrations/agents/agent_turn.go)
+	// -- and a hop that ever carried one would need the field on the wire.
+	RoleStandIn bool
 }
 
 // AccessContextKey is the context key for AccessContext values.
@@ -204,7 +224,10 @@ func ContextWithUserActor(ctx context.Context, userId string) context.Context {
 	// be an admin -- but the UserId is a real person's, and a row created here
 	// is genuinely theirs. See AccessContext.Synthetic for the failure that
 	// separated the two.
-	return ContextWithAccess(ctx, &AccessContext{UserId: userId, Role: RoleWriter, Unranked: true})
+	// RoleStandIn: RoleWriter bounds what the borrowed work may write; it is
+	// not this person's rung, so a gate that asks how senior they are reads
+	// them instead (AccessContext.RoleStandIn).
+	return ContextWithAccess(ctx, &AccessContext{UserId: userId, Role: RoleWriter, Unranked: true, RoleStandIn: true})
 }
 
 // IsClusterOwner returns true when the caller is a cluster-wide owner.

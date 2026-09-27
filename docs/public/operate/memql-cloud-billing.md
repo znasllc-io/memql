@@ -25,6 +25,20 @@ tenant  ──webhook──▶  POST /inbound/usage   ──▶  v1:platform:inb
 Both flows ride the engine's existing [inbound receiver](inbound-delivery.md).
 There is no new HTTP endpoint, which was the epic's architecture decision.
 
+The fleet's billing automations are the billing section of
+`deploy/fleet/dsl/fleet/automations.memql`: `claimStripeDelivery`,
+`dunningNoticeOnPaymentFailure`, `dunningEmailOnPaymentFailure` and
+`clearDelinquencyOnRecovery`. **Until memql#5437 none of them ran.** They lived
+in `billing.memql`, and the automation loader reads a domain's automations from
+its `automations.memql` and from no other file -- so they parsed, passed every
+gate that reads the whole tree, and never loaded, while this page described
+them running. They load now, and the engine refuses an automation declared in
+any other file at load (`construct_misplaced`). The second arrow of the diagram,
+`usage` to a meter, has no handler yet; see
+[what is not built yet](#what-is-not-built-yet). The fleet's scheduled sweeps --
+the trial clock and idle hibernation -- are `@disabled` pending the trial
+lifecycle redesign (memql#5677); see [trials](memql-cloud-trials.md).
+
 ## Configuring the Stripe source
 
 ```bash
@@ -136,6 +150,16 @@ invoice.payment_failed  →  subscription past_due  →  subscriber delinquent  
 card and someone who has not read their email yet. Cutting the customer off
 loses the customer *and* the invoice — the two things dunning exists to protect.
 
+**What runs is the start of the clock and the recovery flag.** When a
+subscription goes `past_due`, `dunningNoticeOnPaymentFailure` marks the
+subscriber `delinquent` and `dunningEmailOnPaymentFailure` stages the email;
+when it returns to `active`, `clearDelinquencyOnRecovery` returns the subscriber
+to `active`. **The end of the clock is not automated**: nothing reads a
+`past_due` subscription's `graceEndsAt` and suspends its instance, and nothing
+resumes an instance on recovery. Both are an operator's act today, and a
+`past_due` subscription is written by an operator too until the Stripe path can
+read a delivery (below).
+
 The dunning email is keyed on `graceEndsAt`, not on the account, so it fires
 **once per cycle**. Keyed on the account it would fire once *ever*: outbound
 staging is idempotent by `requestId`, so the customer's second late payment
@@ -157,8 +181,8 @@ Two properties make that safe:
 
 That last point is the reason `recordUsage` takes totals. A redelivery lands on
 the same `v1:platform:inboundRequest` row, but staging it is still a write — so
-the automation **fires again**. An additive meter would double the customer's
-bill; a set-valued one is a no-op.
+a handler on the delivery **fires again**. An additive meter would double the
+customer's bill; a set-valued one is a no-op.
 
 ## Provider costs feed the margins
 
@@ -192,7 +216,14 @@ Stated rather than implied.
   capability lands.
 - **The Stripe event → fleet row resolution is not wired.**
   `claimStripeDelivery` stamps the delivery **`failed`, with the reason on the
-  row**, and stops.
+  row**, and stops. It fires on a row whose status is `received` -- a delivery
+  the receiver has just staged -- and that filter is also what keeps its own
+  `failed` stamp, a new version of the row and so a create event of its own,
+  from re-triggering it; the engine's loop check refused the automation without
+  it the first time it loaded. A redelivery lands on the same row and keeps the
+  status that row already has (`stageInboundRequest` is `@createOnly("status")`),
+  so a delivery already stamped `failed` stays `failed` and is not claimed
+  again.
 
   `failed` rather than `processing` is deliberate: `processing` means "a product
   automation has this in hand", so every Stripe delivery would sit there forever
@@ -202,15 +233,16 @@ Stated rather than implied.
   queryable, carries `lastError` naming the missing piece, and stays
   re-drainable, since the engine never retries product-side handling itself.
 
-  The reason is worth stating precisely, because the obvious guess about it is
-  wrong.
+  Two pieces are missing, and the obvious one is only half of it.
 
-  It is **not** the lookup. `subscriptionByStripeId` resolves a `sub_...` to a
-  fleet row perfectly well — `@serverOnly` + `@unbounded` is exactly the shape an
-  internal sweep or webhook handler takes, and a logic reaches it with
-  `OriginInternal` stamped by the step executor.
+  The lookup does not reach the row either. `subscriptionByStripeId` carries
+  `@serverOnly` + `@unbounded`, which makes it callable from a handler at
+  internal origin -- but `v1:fleet:subscription` is an owner-tier concept, and
+  an automation runs as its own synthetic actor, which owns no row, so the
+  lookup returns nothing to it. That is the same reason the fleet's scheduled
+  sweeps read nothing (memql#5677).
 
-  It is that **the DSL cannot read the event.**
+  And **the DSL cannot read the event.**
   `v1:platform:inboundRequest.body` is the verified raw body as a *string*, and
   the automation evaluator has no JSON parsing — no field extraction, no path
   read, nothing that turns those bytes into `data.object.subscription`. A
@@ -223,15 +255,22 @@ Stated rather than implied.
   would serve every product draining `POST /inbound/{source}`**, which is the
   entire point of that surface existing.
 
+- **A tenant's usage report is not turned into a meter.** `recordUsage`
+  exists and takes the absolute totals described above; the handler that would
+  read a `usage` delivery and call it does not, for the reason the Stripe
+  resolution is not wired: the DSL cannot read a delivery's body. A `usage`
+  delivery is staged, `claimStripeDelivery` passes it over, and no meter moves.
 - **Stripe usage records are not pushed.** `usageMeter.reportedToStripe` exists
   and the arithmetic is defined; the API call needs a server-side Stripe
   credential and an outbound path for it.
 
-The through-line: what is missing is **not** graph access. The sweeps
-(`subscriptionsByStatus`, `instancesByStatus`, `subscriptionByStripeId`) are
-built and reach every row an internal handler needs. What is missing is the
-ability to read a third party's payload, and one generic engine builtin closes
-it for every product at once.
+The through-line: two pieces are missing. One is the ability to read a third
+party's payload, which one generic engine builtin would close for every product
+at once. The other is graph access for the control plane's own automations:
+the internal queries (`subscriptionsByStatus`, `instancesByStatus`,
+`subscriptionByStripeId`) are callable from a handler, but they read owner-tier
+concepts, and an automation's synthetic actor owns none of the rows -- which is
+also why the scheduled sweeps are `@disabled` (memql#5677).
 
 ## Related
 

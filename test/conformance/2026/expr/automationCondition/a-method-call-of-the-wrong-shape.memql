@@ -1,0 +1,11 @@
+/// Raise a ticket when a goal carries tags, through a method called without its predicate.
+@trigger(event="node.updated", concept="v1:work:goal")
+automation acWrongShapeMethod {
+  args {
+    id    string
+    tags  []string
+  }
+  if args.tags.any() {
+    raised := mutation raiseAgentTicket(title: "tagged " + args.id)
+  }
+}

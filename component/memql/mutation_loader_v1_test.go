@@ -128,6 +128,7 @@ mutation probe updateProbe {
     id: args.probeId
     args.note
     status: args.status ?? "updated"
+    details: { depth: 2 }
     ownerUserId: actor.userId
   }
 }

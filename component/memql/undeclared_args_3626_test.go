@@ -250,3 +250,54 @@ func TestCorpusHasNoUndeclaredArgsReferences(t *testing.T) {
 	}
 	t.Logf("swept %d function-shaped constructs; none reads an undeclared args.X", seen)
 }
+
+// TestALambdaParameterNamedArgsIsNotAnArgsRead (memql#5426 review): a bare
+// name resolves to a lambda parameter in scope before a reserved root, so
+// `args.active` inside `args => ...` in a statement reads the element, not an
+// argument of the construct. The automation compiler has always answered that
+// way; this text scan refused the same line in a logic as an undeclared
+// argument. A read of the construct's own undeclared argument beside the
+// lambda is still refused. In a query filter, where a lambda parameter may not
+// hide a reserved name at all, the refusal is the lowering's, which names the
+// parameter -- not an undeclared argument the author never wrote.
+func TestALambdaParameterNamedArgsIsNotAnArgsRead(t *testing.T) {
+	for _, tc := range []struct{ name, kind, src, refused, code string }{
+		{name: "zzShadowLogic", kind: "logic", src: `logic zzShadowLogic {
+  args {
+    items  []object
+  }
+  return args.items.where(args => args.active == true)
+}`},
+		{name: "zzShadowLogicTwoParams", kind: "logic", src: `logic zzShadowLogicTwoParams {
+  args {
+    items  []object
+  }
+  return args.items.reduce(0, (acc, args) => acc + args.count)
+}`},
+		{name: "zzShadowLogicOutside", kind: "logic", refused: "args.missing", code: "args_undeclared", src: `logic zzShadowLogicOutside {
+  args {
+    items  []object
+  }
+  return args.items.where(args => args.active == true).count() + args.missing
+}`},
+		{name: "zzShadowQuery", kind: "query", refused: "`args` is a reserved name", code: "lower_refused", src: `use identity.concepts.{ user }
+
+query user zzShadowQuery {
+  filter args => args.active == true
+  paginate 10
+}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tryParseNewFunctionSyntax(tc.name, tc.kind, tc.src, "identity."+tc.kind+"s.memql", undeclaredArgsRegistry())
+			if tc.refused == "" {
+				if err != nil {
+					t.Fatalf("a read of the lambda's own parameter was refused: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.refused) || !strings.HasSuffix(err.Error(), "["+tc.code+"]") {
+				t.Fatalf("err = %v, want %s saying %q", err, tc.code, tc.refused)
+			}
+		})
+	}
+}

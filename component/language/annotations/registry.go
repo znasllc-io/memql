@@ -155,6 +155,10 @@ func lifecycle(r Receiver, description string) []Placement {
 const (
 	docActorOnFunction = "Declares that the body reads the authenticated actor (actor.userId, actor.role, actor.identityId, actor.isClusterOwner, actor.primaryEmail, actor.now). The actor-binding load rule refuses a body that reads actor.* without it (memql#2621)."
 	docActorOnShape    = "Shape kind marker: the shape projects the authenticated actor's envelope (actor.userId / actor.role / ...), and carries no signature concept."
+	// docRequiresRankOnTool is @requiresRank on a tool, which differs from the
+	// function placements in WHOSE rank it reads and in also deciding what is
+	// listed (memql#5438).
+	docRequiresRankOnTool = "The person-rank FLOOR on a tool: a call is admitted only when the person it is for -- the authenticated user over MCP, or the user an agent acts for in its tool loop -- holds this role or one ranked above it, and a tool above the caller's rank is not listed to them either. VALIDATED AT LOAD against the role ladder in dsl/rbac exactly as on a query, mutation or logic, and resolved at call time through the same ladder, so a custom role is admitted by its rank. It judges the PERSON and never the agent -- @requiresAgentRole is that gate -- and it replaces the person half of the deprecated @allowedRoles."
 )
 
 // Keyword key sets, shared by the placement and its docs.
@@ -318,7 +322,9 @@ var placementTable = concat(
 		{Receiver: Tool, Name: "executionTime", Forms: FormString, Example: `@executionTime("fast")`},
 		{Receiver: Tool, Name: "handler", Forms: FormKeywords, Keys: handlerKeys, Example: `@handler(type="function", name="createTodo")`},
 		{Receiver: Tool, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
+		{Receiver: Tool, Name: "requiresAgentRole", Forms: FormString | FormStrings, Example: `@requiresAgentRole("assistant")`},
 		{Receiver: Tool, Name: "requiresConfirmation", Forms: FormFlag, Example: "@requiresConfirmation"},
+		{Receiver: Tool, Name: "requiresRank", Forms: FormString, Example: `@requiresRank("developer")`, Doc: docRequiresRankOnTool},
 	},
 
 	// ---- Builtin --------------------------------------------------------
@@ -335,7 +341,7 @@ var placementTable = concat(
 	lifecycle(Prompt, "Distil a cluster of episodes into one memory."),
 	[]Placement{
 		{Receiver: Prompt, Name: "defaultProvider", Forms: FormString, Example: `@defaultProvider("fleet")`},
-		{Receiver: Prompt, Name: "level", Forms: FormString, Example: `@level("fast")`, Doc: "How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Every prompt should declare one; a prompt without one is not yet refused at load (memql#5426)."},
+		{Receiver: Prompt, Name: "level", Forms: FormString, Example: `@level("fast")`, Doc: "How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Required on every prompt: one without it is refused at load (`prompt_level_missing`), a @disabled prompt included."},
 		{Receiver: Prompt, Name: "templateFile", Forms: FormString, Example: `@templateFile("prompts/consolidateMemory.tmpl")`, Doc: "The prompt's template: a .tmpl file beside the prompt, rendered with the input fields."},
 	},
 
@@ -431,7 +437,7 @@ var placementTable = concat(
 	// ---- ToolField ------------------------------------------------------
 	[]Placement{
 		{Receiver: ToolField, Name: "autoInjected", Forms: FormFlag, Example: "@autoInjected"},
-		{Receiver: ToolField, Name: "default", Forms: FormString, Example: `@default("5")`, Doc: "The default the tool's input schema advertises to the model."},
+		{Receiver: ToolField, Name: "default", Forms: FormString, Example: `@default("5")`, Doc: "The default the tool's input schema advertises to the model, written quoted: its text converts to the field's type as a call's default always has -- `@default(\"5\")` on an integer field, `@default(\"true\")` on a boolean, one of the values of an enum field -- or the load refuses it (tool_default_type, memql#5430)."},
 		{Receiver: ToolField, Name: "description", Forms: FormString, Example: `@description("Max results to return.")`, Doc: "The field's description, shown to the model in the tool's input schema."},
 		{Receiver: ToolField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("exec", "fs_read")`},
 		{Receiver: ToolField, Name: "required", Forms: FormFlag, Example: "@required"},
@@ -439,7 +445,7 @@ var placementTable = concat(
 
 	// ---- PromptField ----------------------------------------------------
 	[]Placement{
-		{Receiver: PromptField, Name: "default", Forms: FormString | FormNumber, Example: `@default("en")`, Doc: "The default the prompt's input schema declares for the field."},
+		{Receiver: PromptField, Name: "default", Forms: FormString | FormNumber, Example: `@default("en")`, Doc: "The default the prompt's input schema declares for the field: its text -- quoted, or an unquoted number as written -- converts to the field's type by the rule a tool field's does, or the load refuses it (prompt_default_type, memql#5430)."},
 		{Receiver: PromptField, Name: "description", Forms: FormString, Example: `@description("The episodes to distil.")`, Doc: "The field's description, carried into the prompt's input schema."},
 		{Receiver: PromptField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("short", "long")`},
 		{Receiver: PromptField, Name: "required", Forms: FormFlag, Example: "@required"},
@@ -506,7 +512,8 @@ var Docs = map[string]string{
 	"executionTime":        "Expected execution time hint: \"fast\", \"medium\", or \"slow\".",
 	"destructive":          "Mark a tool as destructive (mutates/deletes); the tool loop gates it behind a confirmation.",
 	"requiresConfirmation": "Require explicit user confirmation before the tool executes.",
-	"allowedRoles":         "Restrict the tool to a set of agent roles. Enforced on every path: tool_types.go, component/grpc/server.go and tool_execution.go. It gates the AGENT role (assistant / specialist), which is a different axis from @requiresRank (actor rank) and @requiresCapability (verb over a resource) -- neither can express it.",
+	"allowedRoles":         "DEPRECATED (rule deprecated_allowed_roles, memql#5438): write @requiresAgentRole for an agent kind and @requiresRank for a person's role -- `memqlmigrate --rewrite=allowed-roles` rewrites it. It compares ONE role string whose meaning depends on who is calling: the acting agent's role (assistant / specialist) in an agent's tool loop, and the person's cluster role over MCP. Two axes in one list is why it is leaving: neither list can be read without knowing which path the call arrives by. Until its window closes it keeps that behaviour, on every path a tool is listed or called by -- read by component/memql/tool_gate.go through Tool.IsAllowedForRole (tool_types.go).",
+	"requiresAgentRole":    "The AGENT-KIND gate on a tool: only an agent whose role is one of the values may be offered the tool or call it -- @requiresAgentRole(\"assistant\") (memql#5438). The values are the v1:agents:agent concept's own `role` enum (assistant, specialist), and the load VALIDATES them against that declaration, so a value no agent can hold refuses boot rather than admitting nobody. It is the axis @requiresRank and @requiresCapability cannot express: they judge the PERSON a call is for, this judges WHICH AGENT is calling. A person calling over MCP is not an agent, so a tool carrying it is neither listed nor callable for them. It replaces the agent half of the deprecated @allowedRoles; a tool with neither gate is callable by every agent and by an authenticated person over MCP.",
 	// Builtin.
 	"executor": "Go executor name for builtin functions (integration.X.Y).",
 	"args":     "Parse-time argument contract for builtin functions.",
@@ -560,7 +567,7 @@ var Docs = map[string]string{
 	// Fields.
 	"required":     "The field is required: a concept write without it fails the schema, and a caller must pass an args / tool / prompt / builtin field that carries it. The `!` sigil after the type is the same thing.",
 	"enum":         "The closed set of string values the field accepts: @enum(\"a\", \"b\"). The `enum(\"a\", \"b\")` type is the same constraint in one statement.",
-	"pattern":      "A regular expression a string value must match.",
+	"pattern":      "A regular expression a string value must match, in Go's RE2 syntax. It is compiled at load on a concept field and an args field alike, so an expression that does not compile is refused there (`pattern_invalid`) rather than at the first write or call.",
 	"minLength":    "The fewest characters a string value may carry.",
 	"maxLength":    "The most characters a string value may carry.",
 	"minimum":      "The INCLUSIVE lower bound on a numeric value.",

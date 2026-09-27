@@ -88,8 +88,15 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 			}
 			prop["enum"] = enumAny
 		}
-		if f.Default != "" {
-			prop["default"] = f.Default
+		// A default is a literal of the field's type, published with that
+		// type (memql#5430): `"default": 10` on an integer field, never the
+		// string "10", and never "twenty".
+		if f.HasDefault || f.Default != "" {
+			value, err := toolDefaultValue(decl.Name, f, prop["type"].(string))
+			if err != nil {
+				return nil, err
+			}
+			prop["default"] = value
 		}
 
 		properties[f.Name] = prop
@@ -127,6 +134,14 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 	if len(decl.AllowedRoles) > 0 {
 		tool.AllowedRoles = append([]string(nil), decl.AllowedRoles...)
 	}
+	// The two gates that replace @allowedRoles (memql#5438): which AGENT is
+	// calling, and the rank of the PERSON the call is for. Both are enforced
+	// by toolCallRefusal / toolListed (tool_gate.go) and validated at load by
+	// recordToolGateProblems.
+	if len(decl.RequiresAgentRole) > 0 {
+		tool.RequiresAgentRole = append([]string(nil), decl.RequiresAgentRole...)
+	}
+	tool.RequiresRank = strings.TrimSpace(decl.RequiresRank)
 	if len(decl.Scopes) > 0 {
 		tool.Scopes = append([]string(nil), decl.Scopes...)
 	}

@@ -729,24 +729,24 @@ func AgentRoleSlugsInUseBuild(args AgentRoleSlugsInUseArgs) string {
 	return "query agentRoleSlugsInUse()"
 }
 
-// AgentsForPlan -- The agents raised while working one goal -- every agent whose lineage.originatingRunId names the goal's run, passed as planId. Backs the Nexus map's agent lane (memql#4371). Non-owned by design: v1:agents:agent declares no row-authz tier and a planner-raised specialist carries no reliable owner pointer, so the run id is the narrowing and the residual is recorded in the per-row-authz audit rather than masked by a conjunct that would only ever return an empty map. The plan's own ownerAgentId is resolved separately through agentById.
+// AgentsForRun -- The agents raised while working one run -- every agent whose lineage.originatingRunId names the run passed as runId. Written for the Nexus map's agent lane (memql#4371). Non-owned by design: v1:agents:agent declares no row-authz tier and a planner-raised specialist carries no reliable owner pointer, so the run id is the narrowing and the residual is recorded in the per-row-authz audit rather than masked by a conjunct that would only ever return an empty map. An agent a person created, or one a bootstrap automation provisioned, carries no originating run and is never returned.
 //
-// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentsForPlan"] in generated_concepts.go).
-type AgentsForPlanArgs struct {
-	PlanId string
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentsForRun"] in generated_concepts.go).
+type AgentsForRunArgs struct {
+	RunId string
 }
 
-// AgentsForPlan calls the engine query agentsForPlan.
-func (qc *QueryClient) AgentsForPlan(ctx context.Context, args AgentsForPlanArgs) (*Result, error) {
-	call := AgentsForPlanBuild(args)
-	return qc.executeNamed(ctx, "agentsForPlan", call)
+// AgentsForRun calls the engine query agentsForRun.
+func (qc *QueryClient) AgentsForRun(ctx context.Context, args AgentsForRunArgs) (*Result, error) {
+	call := AgentsForRunBuild(args)
+	return qc.executeNamed(ctx, "agentsForRun", call)
 }
 
-func AgentsForPlanBuild(args AgentsForPlanArgs) string {
+func AgentsForRunBuild(args AgentsForRunArgs) string {
 	var b strings.Builder
-	b.WriteString("query agentsForPlan(")
-	b.WriteString("planId: ")
-	b.WriteString(quoteMemQL(args.PlanId))
+	b.WriteString("query agentsForRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -12102,7 +12102,7 @@ func ValidationLogBuild(args ValidationLogArgs) string {
 	return b.String()
 }
 
-// ValidationQueue -- The validation queue: requests awaiting first-line developer validation. Developer/owner only (forgeDeveloper).
+// ValidationQueue -- The validation queue: requests awaiting first-line developer validation. The forge developer tier only -- the writer rank or above -- and anyone below it is refused rather than shown an empty queue.
 //
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["validationQueue"] in generated_concepts.go).
 type ValidationQueueArgs struct {

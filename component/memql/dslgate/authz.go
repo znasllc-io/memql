@@ -20,6 +20,8 @@ package dslgate
 import (
 	"fmt"
 	"strings"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // construct is one row-accessing declaration located in a file's source.
@@ -31,34 +33,25 @@ type construct struct {
 	Body     string
 }
 
-// forEachConstruct walks every `query` / `mutation` / `seed` declaration in src
-// and calls fn with its header line, annotation preamble and body.
+// eachConstructIn walks every `query` / `mutation` / `seed` declaration in src
+// and calls fn with its header line, annotation preamble and body. The gates
+// read its result once per text (sourceFacts.constructList).
 //
-// The preamble walk goes UPWARD from the header over contiguous `@`- and
-// `//`-prefixed lines, stopping at the first blank or other line, which is
-// where a construct's own annotations live and where a preceding construct's
-// do not.
-func forEachConstruct(src string, fn func(construct)) {
+// The preamble is the shared walk UPWARD from the header over contiguous `@`-
+// and `//`-prefixed lines, a multi-line annotation whole (languageParser.
+// PreambleWalker), stopping at the first blank or other line, which is where a
+// construct's own annotations live and where a preceding construct's do not.
+// Before memql#5426 a multi-line annotation ended the walk, so a @public or a
+// @requiresRank above one was not read.
+func eachConstructIn(src string, fn func(construct)) {
+	preambles := languageParser.NewPreambleWalker(src)
 	for _, m := range ConstructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
 		openIdx := m[1] - 1
 		closeIdx := MatchingClose(src, openIdx)
 		if closeIdx < 0 {
 			continue
 		}
-		preambleStart := m[0]
-		for k := m[0] - 1; k >= 0; k-- {
-			lineStart := strings.LastIndexByte(src[:k], '\n') + 1
-			line := strings.TrimSpace(strings.TrimRight(src[lineStart:k+1], "\r\n"))
-			if strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
-				preambleStart = lineStart
-				k = lineStart - 1
-				continue
-			}
-			if line == "" {
-				break
-			}
-			break
-		}
+		preambleStart := preambles.StartOf(m[0])
 		fn(construct{
 			Kind:     src[m[2]:m[3]],
 			Name:     src[m[4]:m[5]],
@@ -113,24 +106,29 @@ type Classification struct {
 // correctly admin-gated identity query as ungated (memql#2983).
 func ClassifySource(path, src string, opts Options) []Classification {
 	var out []Classification
-	forEachConstruct(src, func(c construct) {
-		bucket, _ := classifyConstruct(path, c, opts)
-		out = append(out, Classification{Kind: c.Kind, Name: c.Name, Line: c.Line, Bucket: bucket})
-	})
+	for _, c := range factsOf(src).constructList() {
+		out = append(out, Classification{Kind: c.Kind, Name: c.Name, Line: c.Line, Bucket: classifyConstruct(path, c, opts)})
+	}
 	return out
 }
 
 // scanConstructAuthz reports the two authorization violations for every
 // construct in one file.
+//
+// What the text decides about each construct is read once per process
+// (source_facts.go); @serverOnly and the exemption table -- the caller's
+// verdict and the file's path -- are applied here, on every scan.
 func scanConstructAuthz(path, src string, opts Options) []Violation {
 	var out []Violation
-	forEachConstruct(src, func(c construct) {
-		bucket, clause := classifyConstruct(path, c, opts)
-		if v, ok := adminCompositionViolation(path, c, clause); ok {
+	for _, c := range factsOf(src).constructList() {
+		bucket := classifyConstruct(path, c, opts)
+		if c.hasComposition {
+			v := c.composition
+			v.File = path
 			out = append(out, v)
 		}
 		if bucket != BucketFlagged {
-			return
+			continue
 		}
 		out = append(out, Violation{
 			Gate:      GateUserScopeSelection,
@@ -144,14 +142,44 @@ func scanConstructAuthz(path, src string, opts Options) []Violation {
 				"with a comment explaining why no caller check applies, or (4) annotating @serverOnly if no client may call it. " +
 				"See docs/public/operate/auth/per-row-authz-audit.md",
 		})
-	})
+	}
 	return out
 }
 
-// classifyConstruct places one construct in its authorization bucket and
-// returns the filter clause it read (empty for a non-query), so the caller can
-// reuse it without extracting it twice.
-func classifyConstruct(path string, c construct, opts Options) (Bucket, string) {
+// classifyConstruct places one construct in its authorization bucket: the
+// caller's @serverOnly verdict first, then what the construct's text decided
+// (constructFactsOf), then the exemption table for the file's path. The order
+// is the classification's, and every step returns on its first answer.
+func classifyConstruct(path string, c constructFacts, opts Options) Bucket {
+	// @serverOnly resolves the same question @public does, from the other
+	// direction (memql#2800): not callable by a client at all, so a
+	// caller-scope filter is neither present nor meaningful. Unlike @public it
+	// is ENFORCED at every dispatch point against auth.CallOrigin, so accepting
+	// it here rests on a runtime guarantee rather than on a promise.
+	if opts.serverOnly(path, c.Name) {
+		return BucketServerOnly
+	}
+	switch {
+	case c.public:
+		return BucketPublic
+	case c.adminRank:
+		return BucketAdmin
+	case c.owned:
+		return BucketOwned
+	case c.adminGate:
+		return BucketAdmin
+	case !c.selectsUser:
+		return BucketOther
+	}
+	if _, exempt := UserScopeSelectionExemptions[path+" "+c.Name]; exempt {
+		return BucketOther
+	}
+	return BucketFlagged
+}
+
+// constructFactsOf is every part of c's classification its text decides, and
+// its admin-gate-composition finding (File unset).
+func constructFactsOf(c construct) constructFacts {
 	// A QUERY's scoping lives in its filter's boolean STRUCTURE, so the
 	// classification evaluates the clause rather than substring-matching the
 	// body (memql#2832). A substring test reads
@@ -166,22 +194,15 @@ func classifyConstruct(path string, c construct, opts Options) (Bucket, string) 
 	// write caller-scoped, so the substring test is the right question for
 	// that kind.
 	isQuery := c.Kind == "query"
-	clause := ""
+	f := constructFacts{construct: c}
 	if isQuery {
-		clause = FilterClauseOf(c.Body)
+		// Cloned: the clause is cut from a comment-blanked copy of the body,
+		// which the memo would otherwise hold whole for as long as it holds
+		// this construct (source_facts.go).
+		f.clause = strings.Clone(FilterClauseOf(c.Body))
 	}
 
-	// @serverOnly resolves the same question @public does, from the other
-	// direction (memql#2800): not callable by a client at all, so a
-	// caller-scope filter is neither present nor meaningful. Unlike @public it
-	// is ENFORCED at every dispatch point against auth.CallOrigin, so accepting
-	// it here rests on a runtime guarantee rather than on a promise.
-	if opts.serverOnly(path, c.Name) {
-		return BucketServerOnly, clause
-	}
-	if strings.Contains(c.Preamble, "@public") {
-		return BucketPublic, clause
-	}
+	f.public = strings.Contains(c.Preamble, "@public")
 	// `@requiresRank("<slug>")` at an admin-or-above floor IS a caller check,
 	// and it is the one this gate could not see (epic memql#5165).
 	//
@@ -201,9 +222,7 @@ func classifyConstruct(path string, c construct, opts Options) (Bucket, string) 
 	// source scan cannot know where a custom slug sits -- and reading an
 	// unknown floor as "probably high enough" is the fail-open direction on a
 	// gate whose whole purpose is to notice a missing caller check.
-	if requiresAdminRankFloor(c.Preamble) {
-		return BucketAdmin, clause
-	}
+	f.adminRank = requiresAdminRankFloor(c.Preamble)
 
 	// Presence test over the SAME leaf vocabulary AdminGateLeaf uses, so the
 	// classification and the composition gate cannot drift about what counts
@@ -217,7 +236,7 @@ func classifyConstruct(path string, c construct, opts Options) (Bucket, string) 
 	if isQuery {
 		// An empty filter guarantees nothing, so a query with no clause can
 		// never classify as owned/admin on this path.
-		hasAdmin = hasAdmin && ClauseGuarantees(clause, AdminGateLeaf)
+		hasAdmin = hasAdmin && ClauseGuarantees(f.clause, AdminGateLeaf)
 		// The COMPOSITE row-authz tier (memql#4312) is spelled
 		// `<owner>==actor.userId || actor.isClusterOwner==true`, on which
 		// neither leaf holds across both arms while their DISJUNCTION holds on
@@ -225,23 +244,13 @@ func classifyConstruct(path string, c construct, opts Options) (Bucket, string) 
 		// flagged bucket -- so the one filter an author adjudicating a
 		// composite-declared read is asked to write would be reported ungated,
 		// which trains a reader to ignore the bucket.
-		hasOwner = hasOwner && (ClauseGuarantees(clause, OwnerScopeLeaf) ||
-			ClauseGuarantees(clause, CallerScopeLeaf))
+		hasOwner = hasOwner && (ClauseGuarantees(f.clause, OwnerScopeLeaf) ||
+			ClauseGuarantees(f.clause, CallerScopeLeaf))
 	}
-	switch {
-	case hasOwner:
-		return BucketOwned, clause
-	case hasAdmin:
-		return BucketAdmin, clause
-	}
-
-	if !SelectsByUserScopeField(c.Body) {
-		return BucketOther, clause
-	}
-	if _, exempt := UserScopeSelectionExemptions[path+" "+c.Name]; exempt {
-		return BucketOther, clause
-	}
-	return BucketFlagged, clause
+	f.owned, f.adminGate = hasOwner, hasAdmin
+	f.selectsUser = SelectsByUserScopeField(c.Body)
+	f.composition, f.hasComposition = adminCompositionViolation("", c, f.clause)
+	return f
 }
 
 // requiresAdminRankFloor reports whether a construct's annotations declare a

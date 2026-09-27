@@ -143,13 +143,13 @@ func TestOrdinaryCommentsAboveALiveConceptStillLoad(t *testing.T) {
 				i, len(got), src)
 			continue
 		}
-		if !strings.Contains(got[0], "concept probeStillLoads") {
-			t.Errorf("case %d: emitted slice does not contain the live concept:\n%s", i, got[0])
+		if !strings.Contains(got[0].Source, "concept probeStillLoads") {
+			t.Errorf("case %d: emitted slice does not contain the live concept:\n%s", i, got[0].Source)
 		}
 		// The comment body must not be re-parsed as DSL. It may appear in the
 		// slice text (cut from the original, by design); what matters is that
 		// the slice still PARSES to exactly one concept.
-		if decls := ExtractConceptDecls(src); len(decls) != 1 {
+		if decls, _ := ExtractConceptDecls(src); len(decls) != 1 {
 			t.Errorf("case %d: ExtractConceptDecls returned %d decls, want 1 -- the comment body "+
 				"reached the parser.\nsrc:\n%s", i, len(decls), src)
 		}

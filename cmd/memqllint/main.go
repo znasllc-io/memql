@@ -78,6 +78,7 @@ import (
 	"github.com/znasllc-io/memql/component/language/deprecation"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql/dslgate"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
 	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
@@ -195,6 +196,9 @@ func run(args []string) int {
 		// declaration below it. Raw-source lane -- by the time a file is an AST
 		// the annotations are already gone, which is the defect.
 		integrityErrs = append(integrityErrs, tree.VerifyPreambleAttachment()...)
+		// memql#5437: a construct declared in a file its loader never reads,
+		// for the files the engine-parity pass below does not reach.
+		integrityErrs = append(integrityErrs, misplacedConstructs(tree, rootDir, target)...)
 	}
 
 	// Engine-parity pass (#2520): dslimports models parse + import-graph
@@ -405,6 +409,61 @@ func deprecatedFormWarnings(tree *dslimports.Tree, target string) []Diagnostic {
 				Level:   "warning",
 				Message: fmt.Sprintf("%s:%d:%d: %s", p, u.Line, u.Column, form.Warning()),
 			})
+		}
+	}
+	return out
+}
+
+// misplacedConstructs is the construct-misplaced verdict (memql#5437) for the
+// files the engine-parity pass cannot give it for, worded as that pass words
+// it, so every mode refuses what boot refuses.
+//
+// The verdict turns on the domain directory a file sits in -- a domain's
+// automations load from <domain>/automations.memql and nowhere else -- and the
+// parity pass mounts each DIRECTORY INSIDE the root as a domain. So it checks
+// every file below one, and none of the files directly in the root: those are
+// every file of `memqllint acmez` and the one file of
+// `memqllint acmez/billing.memql`, where the root is the domain directory
+// itself. Those are read here under the root's own name, the domain boot would
+// read them in; the name does not change the verdict, only the directory does.
+//
+// Directory mode therefore scans the root's own files and leaves the rest to
+// the parity pass, which reads them, so nothing is reported twice. Single-file
+// mode scans its target and nothing else, as every other lane here does. A
+// file whose domain's language line was refused, or a root whose name marks it
+// soft-disabled, is read by no loader at boot, so it has no placement to judge.
+func misplacedConstructs(tree *dslimports.Tree, rootDir, target string) []error {
+	domain := filepath.Base(rootDir)
+	if tree == nil || strings.HasPrefix(domain, "_") {
+		// A directory whose name begins with `_` is soft-disabled: boot reads
+		// nothing in it, so nothing in it has a placement to judge.
+		return nil
+	}
+	paths := make([]string, 0, len(tree.Files))
+	for p := range tree.Files {
+		switch {
+		case target != "" && p != target:
+		case target == "" && strings.Contains(p, "/"):
+			// Below a directory the parity pass mounts; it reports these.
+		case tree.ImportsOnly[p]:
+		default:
+			paths = append(paths, p)
+		}
+	}
+	sort.Strings(paths)
+
+	var out []error
+	for _, p := range paths {
+		src, err := fs.ReadFile(tree.Root, p)
+		if err != nil {
+			continue // unreadable here means the load already said so
+		}
+		for _, v := range dslgate.ScanConstructPlacement(domain+"/"+p, string(src)) {
+			name := v.Construct
+			if name == "" {
+				name = string(v.Gate)
+			}
+			out = append(out, fmt.Errorf("%s: %s %q (contract-gate:%s): line %d: %s", p, v.Kind, name, v.Gate, v.Line, v.Detail))
 		}
 	}
 	return out

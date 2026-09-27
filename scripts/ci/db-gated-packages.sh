@@ -170,6 +170,22 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # (It once HAD to be, because a Go test found the array's end with the first
 # `)` after the declaration; every reader now runs the script instead.)
 #
+# memql#5431 added `component/emailrules`. An event-email rule's fired count
+# was written read-then-plus-one, and two firings that overlapped both wrote
+# N+1. The fix -- a per-rule Postgres advisory lock, a fresh read inside it, and
+# a version stamped after the one it read -- is a claim about what several
+# replicas' writes leave in one table, and every piece of it is the database's:
+# a fake engine serialises because the fake serialises, has no result cache to
+# go stale, and has no clock skew to reorder versions. fired_count_db_test.go
+# fires one rule from two engines over two pools and requires the stored count
+# to equal the firings; a db-gated test outside this selector is one CI never
+# runs.
+#
+# What the complement now means, having looked: `component/emailrules` moves
+# from go-checks to db-tests whole. Nothing is lost -- the lane runs whole
+# packages -- and the generator and activation suites are ordinary unit tests
+# against fakes that now happen to run beside a database they ignore.
+#
 # Connect Shopify (PR 5) added `integrations/sitepreview`. Its readiness answer
 # and the go-live write guard must refuse the same row for the same reason --
 # the Deployables page draws Go live from one and the engine enforces the
@@ -182,6 +198,7 @@ readonly DB_GATED_TREES=(
 	"component/backup"
 	"component/campaigns"
 	"component/database"
+	"component/emailrules"
 	"component/grpc"
 	"component/identity"
 	"component/logstore"

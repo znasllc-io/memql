@@ -23,14 +23,18 @@ import (
 // for the next caller (this matters for in-process test runs; a one-shot CLI
 // could skip it).
 //
-// A top-level entry is mounted only when it is a directory that directly
-// contains at least one .memql file -- the shape of a product namespace
-// directory (concepts.memql, queries.memql, ...). Entries that are files, that
-// begin with "_" or "." (soft-disabled / hidden, matching the walker
-// convention), that carry no .memql file (e.g. a bare prompts/ sidecar dir),
-// or whose name collides with a core embedded domain are skipped. The core
-// collision skip mirrors MountRuntimeDomainsFromEnv: the embedded tree owns
-// that namespace and RegisterTree would panic on the collision.
+// A top-level entry is mounted when it is a directory that holds at least one
+// .memql file the tree walker reads (dslfs.WalkMemqlFiles) -- directly, or in
+// a sub-namespace directory below it (acme/billing/queries.memql is namespace
+// acme/billing). Boot mounts such a domain (MountRuntimeDomainsFromEnv mounts
+// every directory), so a lint or a package analysis that skipped it validated
+// nothing of it and a package deploy never staged it (memql#5426).
+// Entries that are files, that begin with "_" or "." (soft-disabled / hidden,
+// matching the walker convention), that carry no .memql file at any depth
+// (e.g. a bare prompts/ sidecar dir), or whose name collides with a core
+// embedded domain are skipped. The core collision skip mirrors
+// MountRuntimeDomainsFromEnv: the embedded tree owns that namespace and
+// RegisterTree would panic on the collision.
 //
 // Only the core-collision skip is reported back (memql#2782). It is the one a
 // caller cannot infer and would not expect: the directory looks like a
@@ -73,7 +77,13 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 		// "would have mounted but for the collision". A core-named directory
 		// holding no .memql file is not a product domain at all and would be
 		// skipped either way -- reporting it as a collision would be noise.
-		if !directoryHasMemqlFile(root, domain) {
+		//
+		// A domain is a directory holding a .memql file the tree walker reads,
+		// at any depth (dslfs.HoldsMemqlFile) -- the answer boot's loaders
+		// and the editor's workspace graph share. A domain that holds nothing
+		// but sub-namespace directories used to be skipped here while boot
+		// mounted it (memql#5426).
+		if !dslfs.HoldsMemqlFile(root, domain) {
 			continue
 		}
 		if _, isCore := core[domain]; isCore {
@@ -125,25 +135,6 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 	return mounted, skippedCore, unmount
 }
 
-// directoryHasMemqlFile reports whether dir (a top-level entry of root)
-// directly contains at least one .memql file -- the marker that distinguishes
-// a product namespace directory from an incidental sidecar directory.
-func directoryHasMemqlFile(root fs.FS, dir string) bool {
-	entries, err := fs.ReadDir(root, dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if strings.HasSuffix(e.Name(), ".memql") {
-			return true
-		}
-	}
-	return false
-}
-
 // UnreadRootManifestCode ends the diagnostic UnreadRootManifest answers.
 const UnreadRootManifestCode = "language_line_unread"
 
@@ -171,7 +162,7 @@ func UnreadRootManifest(root fs.FS) (string, bool) {
 		if !e.IsDir() || strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
 			continue
 		}
-		if directoryHasMemqlFile(root, name) && !IsCoreDomain(name) {
+		if dslfs.HoldsMemqlFile(root, name) && !IsCoreDomain(name) {
 			return dslfs.ManifestFile + " at the root of this tree is never read: a mount reads domain directories only, " +
 				"so declare the language line in each domain directory as <domain>/" + dslfs.ManifestFile +
 				" and remove this one [" + UnreadRootManifestCode + "]", true

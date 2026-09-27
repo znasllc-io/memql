@@ -139,7 +139,6 @@ integrations/
 ├── identity/          # Delegation lifecycle -- createDelegation, resolveDelegation, revokeDelegation, validateScope
 ├── knowledge/         # Corpus seed + ingest -- ingest, seedStandardDomains, embedDomainItems, ensureKnowledgeBridge
 ├── library/           # Library document version history: the user / assistant / restore appends (memql#1228-1231)
-├── liveknowledge/     # query -- Live Knowledge dispatch to a registered connector
 ├── openai/            # Polyphon ASR/TTS via OpenAI (Realtime transcription + /v1/audio/speech) -- synthesize
 ├── openairealtime/    # Mints OpenAI Realtime ephemeral client secrets for the direct browser<->OpenAI WebRTC path
 ├── planner/           # Planner Agent loop, task fan-out, refresh cron, action substitution (planner build)

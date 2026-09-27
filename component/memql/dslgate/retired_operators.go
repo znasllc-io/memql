@@ -36,7 +36,14 @@ import (
 // A lambda clause goes to the v1 parser (v1RetiredFormViolation), and a
 // finding is the parser's refusal, attributed to the line it names. A clause
 // with no lambda header is itself the retired `filter <predicate>` form.
+//
+// The findings are the text's, derived once per process (source_facts.go).
 func scanRetiredOperators(path, src string) []Violation {
+	return stampFile(path, factsOf(src).retiredOperatorFindings())
+}
+
+// retiredOperatorsIn is the gate over src, reporting against path.
+func retiredOperatorsIn(path, src string) []Violation {
 	var out []Violation
 	lines := strings.Split(BlankComments(src), "\n")
 	for i := 0; i < len(lines); i++ {

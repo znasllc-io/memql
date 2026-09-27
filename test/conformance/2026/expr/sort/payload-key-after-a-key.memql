@@ -1,0 +1,6 @@
+/// The open tickets, by priority, then by a payload field the concept does not declare.
+query ticket soPayloadKeyAfterAKey {
+  filter row => row.status == "open"
+  sort "priority", "payload.effort"
+  paginate 20
+}

@@ -386,7 +386,18 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry, report ...*Lo
 			// no calltool resolution, re-enable by dropping the annotation.
 			// The name is RESERVED so registerFunctionTools cannot
 			// regenerate an ungoverned variant from the backing function.
+			//
+			// It is still CHECKED like any other: a disabled construct is
+			// maintained, and re-enabling it is only removing the
+			// annotation, so a declaration that would not load -- a field
+			// type outside the vocabulary, a @default that is no value of
+			// its field's type (memql#5430), a handler that does not parse
+			// -- is refused while disabled rather than on the day it is
+			// switched back on.
 			if decl.Disabled {
+				if _, convErr := toolDeclToTool(decl, origin); convErr != nil {
+					return nil, convErr
+				}
 				registry.MarkDisabled(decl.Name)
 				if logger != nil {
 					logger.Debug("memql.unifiedToolLoader: skipping @disabled tool",
@@ -529,7 +540,8 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 	tree := memqldsl.Tree()
 	total := 0
 	for _, raw := range baseloader.ReadAll(logger) {
-		for _, slice := range ExtractKeywordSlices(raw.Content, "prompt") {
+		// The offset-bearing slices, so a refusal can name its line.
+		for _, slice := range constructDeclarationSlices(raw.Content, "prompt") {
 			origin := "unified:" + raw.Path + ":" + slice.Name
 			astDecl, err := languageParser.ParsePromptDecl(slice.Source)
 			if err != nil {
@@ -546,7 +558,18 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 					logger.Warn("memql.unifiedPromptLoader: convert failed",
 						"file", raw.Path, "prompt", slice.Name, "error", err)
 				}
-				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPromptLoader", Keyword: "prompt", Name: slice.Name, File: raw.Path, Phase: "convert", Err: err.Error()})
+				rep.AddSkip(baseloader.SkipFor("memql.unifiedPromptLoader", "prompt", slice.Name, raw.Path, "convert", err))
+				continue
+			}
+			// Every prompt declares its level, a @disabled one included
+			// (prompt_level_required.go, memql#5426).
+			if decl.level == "" {
+				levelErr := &PromptLevelMissingError{Line: promptDeclarationLine(raw.Content, slice)}
+				if logger != nil {
+					logger.Warn("memql.unifiedPromptLoader: prompt declares no @level",
+						"file", raw.Path, "prompt", slice.Name, "error", levelErr)
+				}
+				rep.AddSkip(baseloader.SkipFor("memql.unifiedPromptLoader", "prompt", slice.Name, raw.Path, "level", levelErr))
 				continue
 			}
 			// A @disabled prompt is skipped entirely (not registered, no

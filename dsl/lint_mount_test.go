@@ -1,8 +1,12 @@
 package dsl
 
 import (
+	"io/fs"
 	"os"
+	"sort"
+	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 // TestMountOverlayDomainsOverTheRepositoryTree was the memql#4190 regression:
@@ -62,4 +66,51 @@ func registeredPluginDomainCount() int {
 	pluginTreesMu.RLock()
 	defer pluginTreesMu.RUnlock()
 	return len(pluginTrees)
+}
+
+// TestMountOverlayDomainsMountsWhatBootMounts (memql#5426): boot mounts every
+// non-hidden, non-core directory of a MEMQL_DSL_PATH root
+// (MountRuntimeDomainsFromEnv), and the overlay mount memqllint and the
+// package analysis run used to mount only a directory with a .memql file
+// DIRECTLY in it -- so a domain holding nothing but sub-namespace directories
+// was mounted at boot, never checked by the lint's parity pass, and never
+// staged by a package deploy. It is mounted now, at any depth; a directory
+// with no .memql file the walker reads (a sidecar, a soft-disabled tree) is
+// still skipped, as a file and a hidden entry are.
+func TestMountOverlayDomainsMountsWhatBootMounts(t *testing.T) {
+	root := fstest.MapFS{
+		"acmesub/memql.toml":              {Data: []byte("memql = \"1.0\"\nedition = \"2026\"\n")},
+		"acmesub/billing/concepts.memql":  {Data: []byte("concept invoice {\n  total int\n}\n")},
+		"acmedeep/memql.toml":             {Data: []byte("memql = \"1.0\"\nedition = \"2026\"\n")},
+		"acmedeep/a/b/concepts.memql":     {Data: []byte("concept widget {\n  name string\n}\n")},
+		"acmeflat/memql.toml":             {Data: []byte("memql = \"1.0\"\nedition = \"2026\"\n")},
+		"acmeflat/concepts.memql":         {Data: []byte("concept gadget {\n  name string\n}\n")},
+		"sidecars/prompts/reply.tmpl":     {Data: []byte("{{.x}}\n")},
+		"softoff/_retired/concepts.memql": {Data: []byte("concept gone {\n  name string\n}\n")},
+		"_hidden/concepts.memql":          {Data: []byte("concept hidden {\n  name string\n}\n")},
+		"README.md":                       {Data: []byte("not a domain\n")},
+	}
+	mounted, skippedCore, unmount := MountOverlayDomains(nil, root)
+	defer unmount()
+	sort.Strings(mounted)
+	if want := []string{"acmedeep", "acmeflat", "acmesub"}; strings.Join(mounted, ",") != strings.Join(want, ",") {
+		t.Fatalf("mounted %v, want %v", mounted, want)
+	}
+	if len(skippedCore) != 0 {
+		t.Fatalf("no domain here collides with a core one, got %v", skippedCore)
+	}
+	// The mounted domain is readable through the unified tree, nested file
+	// and all -- which is what the parity pass and the stager read.
+	if _, err := fs.ReadFile(Tree(), "acmesub/billing/concepts.memql"); err != nil {
+		t.Fatalf("the nested namespace is not in the merged tree: %v", err)
+	}
+	// A root language line beside such a domain is reported as unread, as
+	// it is beside a domain with a direct .memql file.
+	withRootLine := fstest.MapFS{
+		"memql.toml":                     {Data: []byte("memql = \"1.0\"\nedition = \"2026\"\n")},
+		"acmesub/billing/concepts.memql": {Data: []byte("concept invoice {\n  total int\n}\n")},
+	}
+	if _, unread := UnreadRootManifest(withRootLine); !unread {
+		t.Error("a root memql.toml beside a sub-namespace-only domain was not reported")
+	}
 }

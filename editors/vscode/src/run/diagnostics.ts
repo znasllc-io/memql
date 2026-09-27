@@ -41,6 +41,12 @@ export interface MappedDiagnostic {
   end: DiagnosticPosition;
   /** The engine's message, with the construct named. */
   message: string;
+  /**
+   * The failure's stable rule id (`lower_unknown_field`, ...), or "" when it
+   * carries none (memql#5435). Rendered as the diagnostic's code, the same
+   * field the language server's squiggles carry theirs in.
+   */
+  code: string;
   constructName: string;
   constructKind: string;
 }
@@ -104,6 +110,7 @@ function mapOne(d: AuthoringDiagnostic, bundle: Bundle): MappedDiagnostic {
     start: { line: startLine, character: startCharacter },
     end,
     message: `${d.kind} ${d.name}: ${message}`,
+    code: d.code,
     constructName: d.name,
     constructKind: d.kind,
   };
@@ -165,6 +172,7 @@ function fileLevel(
     // wondering why a diagnostic about line 40's construct is sitting at the
     // top of the file.
     message: `${d.kind} ${d.name}: ${message} (the engine reported no source position for this failure)`,
+    code: d.code,
     constructName: d.name,
     constructKind: d.kind,
   };
@@ -181,4 +189,145 @@ export function groupByFile(
     else bucket.push(d);
   }
   return out;
+}
+
+/**
+ * The language server's diagnostic source -- `lsName` in cmd/memql-lsp. A
+ * run's failures are compared against what that source draws.
+ */
+export const LANGUAGE_SERVER_SOURCE = "memql-lsp";
+
+/** A diagnostic another source already draws: its rule id and its range. */
+export interface ShownDiagnostic {
+  code: string;
+  start: DiagnosticPosition;
+  end: DiagnosticPosition;
+}
+
+/**
+ * dropAlreadyShown removes the run failures the language server already
+ * draws in the same file: the same rule id over an overlapping range
+ * (memql#5434). The server runs the load over the open buffer as the author
+ * types, so a lowering refusal a run reports is usually on screen before the
+ * run, and two squiggles for one fault is noise -- the server's, which stays
+ * current as the buffer changes, is the one kept. A failure with no rule id,
+ * or one the server does not draw (the cluster refused what the workspace
+ * accepts), is kept.
+ *
+ * It answers for one moment. What the server draws changes after a run --
+ * it clears a closed file, and drops a refusal whose line is being edited --
+ * so a caller that filtered once would lose the failure for the rest of the
+ * run. RunDiagnosticsView keeps the run's failures and asks again whenever
+ * the server's diagnostics change.
+ */
+export function dropAlreadyShown(
+  mapped: readonly MappedDiagnostic[],
+  shown: readonly ShownDiagnostic[],
+): MappedDiagnostic[] {
+  return mapped.filter(
+    (d) => d.code === "" || !shown.some((s) => s.code === d.code && rangesOverlap(d, s)),
+  );
+}
+
+type Span = { start: DiagnosticPosition; end: DiagnosticPosition };
+
+// rangesOverlap reports whether two ranges share a character; an empty range
+// covers the one it starts at.
+function rangesOverlap(a: Span, b: Span): boolean {
+  const x = widenEmpty(a);
+  const y = widenEmpty(b);
+  return before(x.start, y.end) && before(y.start, x.end);
+}
+
+function widenEmpty(r: Span): Span {
+  if (before(r.start, r.end)) return r;
+  return { start: r.start, end: { line: r.start.line, character: r.start.character + 1 } };
+}
+
+function before(a: DiagnosticPosition, b: DiagnosticPosition): boolean {
+  return a.line < b.line || (a.line === b.line && a.character < b.character);
+}
+
+/**
+ * Where a RunDiagnosticsView draws: one file's diagnostics at a time, keyed by
+ * absolute path. An empty list clears the file.
+ */
+export interface RunDiagnosticsSink {
+  set(path: string, diagnostics: readonly MappedDiagnostic[]): void;
+  clear(): void;
+}
+
+/**
+ * RunDiagnosticsView holds a run's failures and draws each file's as
+ * dropAlreadyShown leaves them against what the language server shows NOW.
+ *
+ * The filter is not applied once, at publish: the server's squiggle for a
+ * fault can go away while the fault stays -- its file is closed, or an edit
+ * on the line drops the refusal until the next load answers -- and a failure
+ * filtered out against it would then be gone from the Problems panel for the
+ * rest of the run. So the view keeps every failure and redraws a file
+ * whenever the server's diagnostics for it change (refresh), which puts a
+ * failure back when the server stops drawing it and takes it away when the
+ * server starts.
+ *
+ * A file is redrawn only when what the server shows there has changed since it
+ * was last drawn. That is also what keeps it from redrawing forever: drawing
+ * changes the diagnostics of the file, which is an event the caller feeds back
+ * to refresh, and the server's half of that file has not moved.
+ */
+export class RunDiagnosticsView {
+  private failures = new Map<string, { path: string; diagnostics: MappedDiagnostic[] }>();
+  private drawnAgainst = new Map<string, string>();
+
+  /**
+   * shownIn answers what the language server draws in a file now; keyOf
+   * names a file the way refresh is told about it (the identity by default).
+   */
+  constructor(
+    private readonly sink: RunDiagnosticsSink,
+    private readonly shownIn: (path: string) => readonly ShownDiagnostic[],
+    private readonly keyOf: (path: string) => string = (path) => path,
+  ) {}
+
+  /** publish replaces the run's failures and draws every file that has one. */
+  publish(mapped: readonly MappedDiagnostic[]): void {
+    this.failures.clear();
+    this.drawnAgainst.clear();
+    this.sink.clear();
+    for (const [path, diagnostics] of groupByFile(mapped)) {
+      if (path === "") continue;
+      this.failures.set(this.keyOf(path), { path, diagnostics });
+    }
+    for (const key of this.failures.keys()) this.draw(key);
+  }
+
+  /**
+   * refresh redraws the files, named by keyOf, whose language-server
+   * diagnostics changed. A file with no failure, or whose server diagnostics
+   * are as they were when it was last drawn, is left alone.
+   */
+  refresh(keys: readonly string[]): void {
+    for (const key of keys) {
+      if (this.failures.has(key)) this.draw(key);
+    }
+  }
+
+  private draw(key: string): void {
+    const entry = this.failures.get(key);
+    if (entry === undefined) return;
+    const shown = this.shownIn(entry.path);
+    const against = shownKey(shown);
+    if (this.drawnAgainst.get(key) === against) return;
+    this.drawnAgainst.set(key, against);
+    this.sink.set(entry.path, dropAlreadyShown(entry.diagnostics, shown));
+  }
+}
+
+// shownKey names a set of shown diagnostics by everything dropAlreadyShown
+// reads, in a fixed order.
+function shownKey(shown: readonly ShownDiagnostic[]): string {
+  return shown
+    .map((d) => `${d.code}@${d.start.line}:${d.start.character}-${d.end.line}:${d.end.character}`)
+    .sort()
+    .join("|");
 }

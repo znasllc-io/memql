@@ -255,12 +255,17 @@ The heart of the system - executes all MemQL queries.
 - **Function Compilation** - Compile functions once
 - **Query Planning** - Optimize execution plans
 - **Result Cache** - Pure reads are cached BY DEFAULT for 60s
-  (`result_cache_policy.go`); `@cache(N)` overrides, `@nocache` opts out,
+  (`result_cache_policy.go`); `@cache(N)` overrides, `@cache(0)` opts out,
   `v1:identity:` is denylisted from the default path. Freshness is
   event-driven: a write evicts its concept's dependent entries on the
   writing node synchronously and broadcasts `cache.invalidate.<concept>`
   to the rest of the mesh. The TTL is a backstop, not the mechanism. See
   Performance Monitoring below for how to tell whether it is working.
+  **A sibling's eviction is asynchronous**, so Go code doing a
+  read-modify-write under a cross-replica lock reads with
+  `memql.ContextWithFreshRead` (`fresh_read.go`, memql#5431): that one call
+  is answered by the database and neither consults nor fills the cache,
+  while the same query stays cached for every other caller.
 
 ---
 

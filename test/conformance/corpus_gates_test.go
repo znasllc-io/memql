@@ -34,9 +34,11 @@ import (
 )
 
 // The verdicts a completeness gate counts on each side. A case that lowers or
-// evaluates is a form the engine accepts, so it counts as one that loads.
+// evaluates is a form the engine accepts, so it counts as one that loads -- and
+// so does one that loads with a deprecation warning, which is a form the
+// engine still accepts inside its window.
 var (
-	corpusAcceptingVerdicts = map[string]bool{verdictLoadOK: true, verdictLower: true, verdictEvaluate: true}
+	corpusAcceptingVerdicts = map[string]bool{verdictLoadOK: true, verdictLoadWarn: true, verdictLower: true, verdictEvaluate: true}
 	corpusRefusingVerdicts  = map[string]bool{verdictRefuseParse: true, verdictRefuseLoad: true}
 )
 

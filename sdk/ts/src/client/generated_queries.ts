@@ -756,26 +756,26 @@ QueryClient.prototype.agentRoleSlugsInUse = function (this: QueryClient, args: A
   return this.executeNamed("agentRoleSlugsInUse", buildAgentRoleSlugsInUse(args), opts);
 };
 
-/** The agents raised while working one goal -- every agent whose lineage.originatingRunId names the goal's run, passed as planId. Backs the Nexus map's agent lane (memql#4371). Non-owned by design: v1:agents:agent declares no row-authz tier and a planner-raised specialist carries no reliable owner pointer, so the run id is the narrowing and the residual is recorded in the per-row-authz audit rather than masked by a conjunct that would only ever return an empty map. The plan's own ownerAgentId is resolved separately through agentById. */
-// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentsForPlan"] in generated_concepts.ts).
-export interface AgentsForPlanArgs {
-  planId: string;
+/** The agents raised while working one run -- every agent whose lineage.originatingRunId names the run passed as runId. Written for the Nexus map's agent lane (memql#4371). Non-owned by design: v1:agents:agent declares no row-authz tier and a planner-raised specialist carries no reliable owner pointer, so the run id is the narrowing and the residual is recorded in the per-row-authz audit rather than masked by a conjunct that would only ever return an empty map. An agent a person created, or one a bootstrap automation provisioned, carries no originating run and is never returned. */
+// Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentsForRun"] in generated_concepts.ts).
+export interface AgentsForRunArgs {
+  runId: string;
 }
 
-export function buildAgentsForPlan(args: AgentsForPlanArgs): string {
+export function buildAgentsForRun(args: AgentsForRunArgs): string {
   const parts: string[] = [];
-  parts.push("planId: " + renderMemQLValue(args.planId));
-  return "query agentsForPlan(" + parts.join(", ") + ")";
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query agentsForRun(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    agentsForPlan(args: AgentsForPlanArgs, opts?: QueryCallOptions): Promise<Result>;
+    agentsForRun(args: AgentsForRunArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 
-QueryClient.prototype.agentsForPlan = function (this: QueryClient, args: AgentsForPlanArgs = {} as AgentsForPlanArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("agentsForPlan", buildAgentsForPlan(args), opts);
+QueryClient.prototype.agentsForRun = function (this: QueryClient, args: AgentsForRunArgs = {} as AgentsForRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("agentsForRun", buildAgentsForRun(args), opts);
 };
 
 /** Returns all AI agent templates regardless of active status. */
@@ -11432,7 +11432,7 @@ QueryClient.prototype.validationLog = function (this: QueryClient, args: Validat
   return this.executeNamed("validationLog", buildValidationLog(args), opts);
 };
 
-/** The validation queue: requests awaiting first-line developer validation. Developer/owner only (forgeDeveloper). */
+/** The validation queue: requests awaiting first-line developer validation. The forge developer tier only -- the writer rank or above -- and anyone below it is refused rather than shown an empty queue. */
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["validationQueue"] in generated_concepts.ts).
 export interface ValidationQueueArgs {
 }

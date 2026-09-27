@@ -85,28 +85,25 @@ func TestOrdinaryCommentsAboveKeywordConstructsStillParse(t *testing.T) {
 	}
 }
 
-// TestConceptSlicesIsStringBlind pins a PRE-EXISTING limit rather than a fix, so
-// the refactor that closes it has a before/after.
-//
-// conceptSlices counts braces per line with strings.Count, which cannot tell a
-// brace inside a string literal from a real one. The sibling
-// ExtractKeywordSlices can, because it balances through the string-aware
-// findMatchingCloseBraceRune. So the two slicers disagree, and on the concept
-// side the consequence is a SILENT DROP -- not a truncated construct, no
-// concept at all.
-//
-// Latent today: the tree has brace-bearing string literals but none unbalanced.
-// One `@description("use } to close")` in a concepts file would delete that
-// concept from the registry with no diagnostic.
-func TestConceptSlicesIsStringBlind(t *testing.T) {
-	src := "concept probeBraceInString {\n  a string @description(\"a } brace\")\n  b string\n}\n"
-
-	got := conceptSlices(src)
-	if len(got) == 1 && strings.Contains(got[0], "b string") {
-		t.Fatal("conceptSlices is now string-AWARE -- the brace inside the @description no longer " +
-			"closes the slice early. That is the fix this test was pinning the absence of: delete " +
-			"this test and note the change in concepts_only_extractor.go's KNOWN LIMIT paragraph.")
+// TestConceptSlicesAreStringAware: a brace inside a string literal does not
+// move conceptSlices' depth, so the declaration is emitted whole and parses to
+// its concept. The slicer counted braces per line with strings.Count until
+// memql#5426, when a concept whose slice does not parse became a load error:
+// `@description("a } brace")` closed the slice early, and the concept -- which
+// had been dropped from the registry with no diagnostic -- would have been
+// refused instead. It is the shared string-aware slicer now.
+func TestConceptSlicesAreStringAware(t *testing.T) {
+	for _, src := range []string{
+		"concept probeBraceInString {\n  a string @description(\"a } brace\")\n  b string\n}\n",
+		"concept probeOpenBraceInString {\n  a string @description(\"opens { here\")\n  b string\n}\n",
+	} {
+		got := conceptSlices(src)
+		if len(got) != 1 || !strings.Contains(got[0].Source, "b string") {
+			t.Fatalf("a brace inside a string closed the concept early: %d slice(s)\nsrc:\n%s", len(got), src)
+		}
+		decls, unparsed := ExtractConceptDecls(src)
+		if len(unparsed) != 0 || len(decls) != 1 || len(decls[0].Properties) != 2 {
+			t.Fatalf("the slice did not parse to the concept and its two fields: decls=%d unparsed=%v", len(decls), unparsed)
+		}
 	}
-	t.Logf("string-blind as expected: %d slice(s); a brace inside a string literal closes the "+
-		"concept early, so the construct is silently dropped (pre-existing, memql#2868 review)", len(got))
 }

@@ -3,9 +3,10 @@
 // App-native calendar -- the first-party source of truth for a user's
 // events (#642, Epic #633 / Program #629). Distinct from external
 // Google Calendar: native events are canonical here; an external sync
-// (Google etc.) lands LATER through the existing knowledge:liveSource /
-// liveConnector mechanism and writes rows carrying source="externalSync"
-// + externalRef. This domain owns only the native side.
+// (Google etc.) would write rows carrying source="externalSync" +
+// externalRef. No sync path exists: the knowledge:liveSource /
+// liveConnector mechanism once planned for it was retired in memql#5432.
+// This domain owns only the native side.
 //
 // Per-user authz: every calendarEvent carries ownerUserId; queries
 // self-scope on actor.userId, mutations stamp ownerUserId from
@@ -17,8 +18,8 @@ use identity.concepts.{ user }
 /// schedule (#642): the reactive harness's reminder triggers read upcomingEvents over these rows
 /// ('remind me the day before X'), and the calendar tool/skill lets agents create + list + edit
 /// them. source discriminates native (first-party, the only writer in v1) from externalSync (a
-/// future Google/CalDAV sync via knowledge:liveConnector, which stamps externalRef back to the
-/// upstream event id). recurrence is an optional RFC-5545 RRULE string carried verbatim for v1 --
+/// future Google/CalDAV sync, which would stamp externalRef back to the upstream event id; no sync
+/// path exists today). recurrence is an optional RFC-5545 RRULE string carried verbatim for v1 --
 /// expansion into concrete occurrences is a downstream concern, not stored here.
 @displayCard(primary="title", secondary="startsAt", tertiary="location", status="source")
 @rowAuthz(owner="ownerUserId")
@@ -31,7 +32,7 @@ concept calendarEvent {
   location     string  @description("Free-form location text ('Dojo on 5th', 'Zoom', a street address). Not geocoded in v1.")
   notes        string  @description("Free-form notes / agenda / description body for the event.")
   recurrence   string  @description("Optional RFC-5545 RRULE recurrence rule carried verbatim (e.g. 'FREQ=WEEKLY;BYDAY=TU,TH'). Empty = a one-off event. v1 stores the rule but does not expand occurrences server-side; the reminder + listing surfaces treat the row as its next/seed instance.")
-  source       enum("native", "externalSync")! @description("Provenance discriminator. native = created in-app (the only writer in v1; the calendar tool + frontend stamp this). externalSync = mirrored from an external calendar (Google / CalDAV) via the knowledge:liveConnector sync path shipping later; those rows carry externalRef and are owned by the sync, not hand-edited.")
+  source       enum("native", "externalSync")! @description("Provenance discriminator. native = created in-app (the only writer in v1; the calendar tool + frontend stamp this). externalSync = mirrored from an external calendar (Google / CalDAV) by a sync that does not exist yet -- the knowledge:liveConnector path once planned for it was retired in memql#5432; such rows would carry externalRef and be owned by the sync, not hand-edited.")
   externalRef  string  @description("When source=externalSync: the upstream event id (e.g. the Google Calendar event id) this row mirrors. Used by the future sync reconciler for idempotent upsert + deletion-propagation. Empty for native events.")
   deleted      bool @description("Soft-delete flag. The calendar delete action stamps this true rather than hard-deleting so the time-series history survives and a future external-sync reconciler can propagate the deletion upstream. Queries filter it out via isNotDeleted.")
 

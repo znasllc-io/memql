@@ -360,6 +360,7 @@ test("a dry-run's failures land as diagnostics, and the next clean one clears th
         column: 3,
         endLine: 0,
         endColumn: 0,
+        code: "",
       },
     ],
   };
@@ -397,6 +398,7 @@ test("a skipped construct is not a compile error", async () => {
         column: 0,
         endLine: 0,
         endColumn: 0,
+        code: "",
       },
     ],
   };
@@ -424,6 +426,7 @@ test("a positionless diagnostic becomes file-level rather than line 0", async ()
         column: 0,
         endLine: 0,
         endColumn: 0,
+        code: "",
       },
     ],
   };
@@ -1051,6 +1054,7 @@ test("a second action supersedes the first, which then publishes nothing", async
         column: 1,
         endLine: 0,
         endColumn: 0,
+        code: "",
       },
     ],
   };

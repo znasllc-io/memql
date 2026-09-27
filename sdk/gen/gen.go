@@ -88,8 +88,9 @@ var (
 	argsFieldRe = regexp.MustCompile(
 		`(?m)^[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*|enum\([^)]*\)|\[\][A-Za-z_][A-Za-z0-9_]*)(!?)([ \t]+@[^\n]*)?[ \t]*$`,
 	)
-	// Description annotation above a construct.
-	descRe = regexp.MustCompile(`(?m)^@description\("(.*?)"\)`)
+	// Description annotation above a construct -- spread over lines or not
+	// (memql#5426): the string may sit on a line of its own.
+	descRe = regexp.MustCompile(`(?m)^@description\(\s*"(.*?)"\s*\)`)
 	// Shape reference inside a query body: `shape <name>`.
 	shapeRefRe = regexp.MustCompile(`(?m)^[ \t]+shape[ \t]+([A-Za-z_][A-Za-z0-9_]*)`)
 )
@@ -357,6 +358,7 @@ func CollectConstructs(root string) ([]Construct, error) {
 		fileDir := dirForPath(root, path)
 		fileImports := parseUseImports(src)
 		matches := constructHeader.FindAllStringSubmatchIndex(src, -1)
+		preambles := langparser.NewPreambleWalker(src)
 		for _, m := range matches {
 			// m: [headStart, headEnd, kindStart, kindEnd, conceptStart, conceptEnd, nameStart, nameEnd]
 			kind := src[m[2]:m[3]]
@@ -380,7 +382,7 @@ func CollectConstructs(root string) ([]Construct, error) {
 			// it documents the construct as callable and sends whoever
 			// tries it hunting through auth code for a permission
 			// problem that does not exist.
-			if serverOnlyRe.MatchString(attrPreamble(src, m[0])) {
+			if serverOnlyRe.MatchString(attrPreamble(preambles, src, m[0])) {
 				continue
 			}
 
@@ -391,7 +393,7 @@ func CollectConstructs(root string) ([]Construct, error) {
 			// `args { }` block, so parse fields straight off the body.
 			var args []ArgField
 			if kind == "builtin" {
-				if !sdkMarkerRe.MatchString(attrPreamble(src, m[0])) {
+				if !sdkMarkerRe.MatchString(attrPreamble(preambles, src, m[0])) {
 					continue
 				}
 				args = parseFields(body)
@@ -403,7 +405,7 @@ func CollectConstructs(root string) ([]Construct, error) {
 				Kind:        kind,
 				Name:        name,
 				Concept:     concept,
-				Description: descriptionFor(src, m[0]),
+				Description: descriptionFor(preambles, src, m[0]),
 				Args:        args,
 				ShapeName:   shapeRefFor(body),
 				Origin:      path,
@@ -443,7 +445,14 @@ func bodyFor(src string, openIdx int) (string, bool) {
 // immediately preceding the construct header (skipping blank lines).
 // Walks BACKWARDS from the header, stopping at the first
 // non-attribute, non-blank line.
-func attrPreamble(src string, headerStart int) string {
+//
+// A line inside a multi-line annotation's argument list is part of that
+// annotation (memql#5426): it starts with neither `@` nor `///`, so the walk
+// used to stop there and miss every annotation above it -- a `@serverOnly`
+// above a multi-line `@description(` shipped the construct as a client method
+// the engine always refuses, the #2800 failure. preambles is the walker for
+// src, which knows where each such line's annotation opens.
+func attrPreamble(preambles *langparser.PreambleWalker, src string, headerStart int) string {
 	prev := strings.LastIndex(src[:headerStart], "\n")
 	for prev > 0 {
 		lineStart := strings.LastIndex(src[:prev], "\n") + 1
@@ -453,7 +462,12 @@ func attrPreamble(src string, headerStart int) string {
 			continue
 		}
 		if !strings.HasPrefix(line, "@") && !strings.HasPrefix(line, "///") {
-			break
+			opener, ok := preambles.ContinuationStart(lineStart)
+			if !ok {
+				break
+			}
+			prev = opener - 1 // the opener's own line starts with `@`
+			continue
 		}
 		prev = lineStart - 1
 	}
@@ -474,12 +488,12 @@ func attrPreamble(src string, headerStart int) string {
 // annotation anchoring, comment transparency -- are byte-for-byte the
 // engine's (the #2634 review demonstrated three divergences in the earlier
 // hand-rolled walk).
-func descriptionFor(src string, headerStart int) string {
-	slice := src[docContextStart(src, headerStart):]
+func descriptionFor(preambles *langparser.PreambleWalker, src string, headerStart int) string {
+	slice := src[docContextStart(preambles, src, headerStart):]
 	if doc := langparser.LeadingDocComment(slice); doc != "" {
 		return doc
 	}
-	if m := descRe.FindStringSubmatch(attrPreamble(src, headerStart)); len(m) > 1 {
+	if m := descRe.FindStringSubmatch(attrPreamble(preambles, src, headerStart)); len(m) > 1 {
 		return m[1]
 	}
 	return ""
@@ -489,8 +503,9 @@ func descriptionFor(src string, headerStart int) string {
 // comment, and blank lines to the nearest code boundary, so the slice fed
 // to the parser's extraction starts at (or above) the construct's own
 // preamble with its full comment context intact -- including the blank
-// lines the parser needs to see to BREAK detached blocks.
-func docContextStart(src string, headerStart int) int {
+// lines the parser needs to see to BREAK detached blocks. A multi-line
+// annotation is part of that preamble whole, as in attrPreamble.
+func docContextStart(preambles *langparser.PreambleWalker, src string, headerStart int) int {
 	start := strings.LastIndex(src[:headerStart], "\n") + 1
 	for start > 0 {
 		prevEnd := start - 1
@@ -498,6 +513,10 @@ func docContextStart(src string, headerStart int) int {
 		line := strings.TrimSpace(src[lineStart:prevEnd])
 		if line == "" || strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
 			start = lineStart
+			continue
+		}
+		if opener, ok := preambles.ContinuationStart(lineStart); ok {
+			start = opener
 			continue
 		}
 		break

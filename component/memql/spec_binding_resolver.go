@@ -315,11 +315,24 @@ func specBindingRefusal(spec *Spec, shapes *ShapeRegistry, concepts memoryNodes.
 		}
 		if len(imports) > 1 {
 			sort.Strings(imports)
-			return fmt.Errorf("binding %q is declared by more than one domain, and no file-top `use` import says which -- import the one you mean: %s", name, strings.Join(imports, " or "))
+			return &specBindingError{msg: fmt.Sprintf("binding %q is declared by more than one domain, and no file-top `use` import says which -- import the one you mean: %s", name, strings.Join(imports, " or "))}
 		}
 	}
-	return fmt.Errorf("binding %q resolves to neither an imported shape nor a concept -- check the file-top `use` import (use ...shapes.{ %s } for a shape, use ...concepts.{ %s } for a concept)", name, name, name)
+	return &specBindingError{msg: fmt.Sprintf("binding %q resolves to neither an imported shape nor a concept -- check the file-top `use` import (use ...shapes.{ %s } for a shape, use ...concepts.{ %s } for a concept)", name, name, name)}
 }
+
+// specBindingError is a spec whose signature binding does not resolve. It
+// carries the code a query, a mutation, a shape or a seed whose signature
+// concept does not resolve carries (memql#5433): a spec's binding is a shape
+// or a concept, and one that is neither is the same defect -- a signature
+// naming something no import and no domain supplies. The code prints last, in
+// brackets, like every coded refusal's.
+type specBindingError struct{ msg string }
+
+func (e *specBindingError) Error() string { return e.msg + " [" + SignatureConceptCode + "]" }
+
+// RuleCode is the refusal's stable rule id (baseloader.CodedRefusal).
+func (e *specBindingError) RuleCode() string { return SignatureConceptCode }
 
 // shapeFieldMapper builds the bare-field -> underlying-path rewriter for
 // a shape binding. Every bare field in the spec body must be a projected

@@ -158,15 +158,21 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 	// rewriter below synthesises it from struct form), but no .memql
 	// author may write that shape directly. The compiler test fixtures
 	// that consume procedural source bypass this loader entirely.
-	if err := languageParser.RejectLegacyProceduralAuthorForm(content); err != nil {
-		return nil, fmt.Errorf("%s: %w", origin, languageParser.PositionRewriteError(authored, err))
+	//
+	// This refusal, the signature concepts and the struct-form rewrite below
+	// read nothing but the slice's text, so they are read once per process per
+	// text (function_slice_text_memo.go); the refusals are placed against this
+	// call's authored text.
+	text := sliceTextFactsOf(content)
+	if text.legacyForm != nil {
+		return nil, fmt.Errorf("%s: %w", origin, languageParser.PositionRewriteError(authored, text.legacyForm))
 	}
 
 	// Snapshot the signature-bound concepts BEFORE NormaliseAll
 	// rewrites the struct form to procedural -- once the rewrite runs
 	// the `<kind> <Concept> <name> {` shape is gone and the regex
 	// in extractAllSignatureConceptNames has nothing to match.
-	signatureConcepts := extractAllSignatureConceptNames(content)
+	signatureConcepts := text.signatureConcepts
 
 	// Apply every struct-form rewriter defensively here too -- callers
 	// that don't go through loadFlatFunctionFile (tests, ad-hoc uses)
@@ -178,12 +184,12 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 	// named-write form, memql#1055). Keep it and attach it to the parse
 	// failure so the real reason surfaces instead of being swallowed.
 	var rewriteErr error
-	if rewritten, rerr := languageParser.NormaliseAll(content); rerr == nil {
-		content = rewritten
+	if text.rewriteErr == nil {
+		content = text.normalised
 	} else {
 		// Placed at the author's clause, in the file when the slice was
 		// anchored to it.
-		rewriteErr = languageParser.PositionRewriteError(authored, rerr)
+		rewriteErr = languageParser.PositionRewriteError(authored, text.rewriteErr)
 	}
 
 	// Keep the pre-translation source for the declared-usage validator
@@ -254,7 +260,10 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 	// transform above so none of them reads a marker: a refusal names the
 	// author's line and column, not the lowered text's. content itself stays
 	// unmarked for the text-reading validators below.
-	lexed := languageParser.PositionLowering(authored, content)
+	// Keyed by both texts (function_slice_text_memo.go): content is read
+	// AFTER the registry-dependent resolution above, so a registry that
+	// resolves this slice differently is a different key.
+	lexed := positionLoweringOf(authored, content)
 	lexer := languageParser.NewLexer(lexed)
 	tokens, err := lexer.Tokenize()
 	if err != nil {
@@ -631,6 +640,19 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
+			// Every field those annotations name is one the write can shape
+			// (mutation_write_shaping.go, memql#5426).
+			if err := validateWriteShapingFields(registry, mutationConcept, tmpl, string(stmt.Kind), []writeShaping{
+				{annotation: languageParser.AttrCreateOnly, fields: createOnlyFields},
+				{annotation: languageParser.AttrNoUnset, fields: noUnsetFields},
+				{annotation: languageParser.AttrMergeFields, fields: mergeFields, needs: "object"},
+				{annotation: languageParser.AttrAppendFields, fields: appendFields, needs: "list"},
+				{annotation: languageParser.AttrAddToSet, fields: addToSetFields, needs: "list"},
+				{annotation: languageParser.AttrRemoveFromSet, fields: removeFromSetFields, needs: "list"},
+			}); err != nil {
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			}
+
 			scrubPii, err := mutationScrubPii(funcDef, stmt.Kind)
 			if err != nil {
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
@@ -691,8 +713,8 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 				// is not loaded yet, so a predicate application's kind is
 				// checked later, by the Init pass, from fn.V1Filter.
 				var lowerOpts []ASTConverterOption
+				var bound *memoryNodes.Concept
 				if funcDef.Type == languageParser.FunctionTypeQuery {
-					var bound *memoryNodes.Concept
 					if registry != nil && boundConcept != "" {
 						if c, err := registry.Get(boundConcept); err == nil {
 							bound = c
@@ -711,6 +733,15 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 				engineExpr, err := converter.ConvertExpression(parserExpr)
 				if err != nil {
 					return nil, fmt.Errorf("convert function %q body: %w", expectedName, err)
+				}
+				// The sort clause names a declared field or a sortable row
+				// intrinsic, in a direction written "asc" or "desc"
+				// (memql#5429). After the filter, so a query wrong in both
+				// is refused in reading order.
+				if funcDef.Type == languageParser.FunctionTypeQuery {
+					if err := checkQuerySortClause(parserExpr, bound); err != nil {
+						return nil, err
+					}
 				}
 				// Resolve bare `concept` keyword: if the expression (or
 				// any sub-expression) is a SpecReferenceExpression with
@@ -1666,9 +1697,11 @@ func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, erro
 	}
 
 	if field.Pattern != "" {
-		compiled, err := regexp.Compile(field.Pattern)
+		// The one @pattern check a concept field's pattern is held to as
+		// well (memql#5426), so one annotation has one answer and one code.
+		compiled, err := memoryNodes.CompilePattern(field.Pattern)
 		if err != nil {
-			return nil, fmt.Errorf("args field %q: invalid @pattern %q: %w", field.Name, field.Pattern, err)
+			return nil, fmt.Errorf("args field %q: %w", field.Name, err)
 		}
 		result.patternRegex = compiled
 	}

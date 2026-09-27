@@ -9,6 +9,13 @@
       "verdict": "refuse_parse",
       "code": "annotation_form",
       "message": "@default on a tool field takes one string"
+    },
+    {
+      "file": "with-a-word-on-an-integer-field.memql",
+      "verdict": "refuse_load",
+      "code": "tool_default_type",
+      "message": "@default(\"twenty\") is not an integer -- write one, as in @default(\"20\")",
+      "note": "What the annotation MEANS: the quoted text is a literal of the field's type (memql#5430)."
     }
   ]
 }

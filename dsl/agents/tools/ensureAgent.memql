@@ -1,6 +1,6 @@
 // ensureAgent -- the Assistant's agent factory tool.
 //
-// Restricted to the GA via @allowedRoles. Invoked when a conversation
+// Restricted to the GA via @requiresAgentRole. Invoked when a conversation
 // reveals a need that no existing agent fits cleanly. The tool's
 // handler analyzes the goal against the v1:agents:agentRole catalog
 // and the user's existing agents, then matches / extends / creates as
@@ -23,6 +23,13 @@
 // tool-loop turn and can invoke that agent via `agent("name",
 // "prompt", partitionId)` on the next iteration.
 //
+// The owner is SERVER-STAMPED, like its siblings' (produceArtifact,
+// requestUserFeedback): `ownerUserId` is @autoInjected, so whatever the
+// model sends under that name is dropped and the agent runtime puts the
+// turn's owner back (agentContextStamps in integrations/agent). The
+// handler then holds that owner to the caller (integrations/agents
+// owner_scope.go).
+//
 // Why this is a tool and not a builtin the GA calls directly:
 // per the tools-are-agent-only boundary, ALL agent capabilities go
 // through the tool surface so AllowedRoles + the universal agent-
@@ -34,9 +41,9 @@
 /// action, reasoning}.
 @handler(type="function", name="ensureAgentForGoal")
 @executionTime("medium")
-@allowedRoles("assistant")
+@requiresAgentRole("assistant")
 tool ensureAgent {
   goal         string! @description("Free-form description of what the user wants done. The factory's structured-output analysis reads this verbatim to pick the role + domains + tools.")
-  ownerUserId  string! @description("v1:identity:user.id of the user the resulting agent will be owned by. Used to scope the existing-agent lookup and to stamp the created agent's ownerUserId. The GA pulls this from its conversation context.")
+  ownerUserId  string  @autoInjected @description("Session-owner user id: the user the resulting agent will be owned by. Scopes the existing-agent lookup and stamps the created agent's ownerUserId. Server-stamped from the agent runtime's turn context; the central validator drops any LLM-supplied value.")
   partitionId      string  @description("Optional space context. Forwarded to the analysis prompt so the result accounts for what's already in the space; not required by the underlying writes since v1:agents:agent rows are not space-scoped.")
 }

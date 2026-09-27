@@ -110,13 +110,13 @@ MemQL/
 ├── packs/             Storefront packs in the DEFAULT BUILD, governed by
 │                      v1:platform:packState (epic memql#5532). No build tag:
 │                      app/anchor_storefront_packs.go mounts them on every node
-│                      type, above loadPackEnablement so a pack's DECLARED
-│                      DEFAULT is heard before the rows are folded over it. A
-│                      storefront pack ships DISABLED, because enabling one
+│                      type, ABOVE loadPackEnablement so a pack's declared
+│                      default is heard before the rows fold over it. A
+│                      storefront pack ships DISABLED -- enabling one
 │                      publishes a shopper write endpoint and a public read.
 │                      examples/ keeps the tag-gated packs: the two teaching
 │                      ones, which no image loads, and deploypack, which the
-│                      identity node does load through its own node-type tag
+│                      identity node loads through its own node-type tag
 ├── component/         Core Go components (memql, grpc, events, database,
 │   │                  server, auth, edge, language, procedure, ...)
 │   ├── bus/           Channel-based inter-component communication
@@ -535,6 +535,10 @@ needs EXPLICIT plumbing -- it does NOT travel implicitly.
   forwarded** request (`AiForwardRouter`, `proxySI`, `NodeService` forwards)
   does NOT see it -- thread it through the message or metadata and resolve it
   on the receiving side.
+- A read-modify-write of one row across replicas needs a Postgres lock around
+  the read and the write, a read that skips this node's result cache
+  (`memql.ContextWithFreshRead`), and a version stamped after the one it read
+  -- each alone was measured insufficient (memql#5431).
 - Every cross-node event-bus pub/sub needs a **routing rule**
   (`node.RegisterRoutingRule`) or it silently dies in cluster mode.
 - Before calling a feature done, ask: *which node holds this state, and which
@@ -582,18 +586,16 @@ shapes are committed as `deploy/k8s/components/examples/dsl-packages-only` and
 `dsl-bundle-and-packages`, rendered by
 `deploy/k8s/components/dsl-mount/component_test.go`.
 
-**What "never product code" is actually enforced by** -- two narrow guards, not
-a general one, so know their edges (memql#3326):
-
-- `TestEngineIsProductNeutral` (`product_neutrality_test.go`) -- a
-  **banned-names list** of the specific product names this repo shed. It cannot
-  notice a product arriving under a name nobody thought to ban.
-- `TestClientsDirectoryIsAllowlisted` (`clients_allowlist_test.go`) -- an
-  **allowlist of `clients/` inhabitants**. An unlisted directory fails.
-
-Everything else -- generic-vs-product Go in `component/`, a product-shaped
-concept in `dsl/` -- rests on review. Genuinely-bespoke product Go (rare)
-becomes a thin optional `bff/` pack module in the product repo. Full rationale:
+**What "never product code" is actually enforced by** -- two NARROW guards, not
+a general one, so know their edges (memql#3326): `TestEngineIsProductNeutral`
+(`product_neutrality_test.go`) is a **banned-names list** of the specific
+product names this repo shed, and cannot notice a product arriving under a name
+nobody thought to ban; `TestClientsDirectoryIsAllowlisted`
+(`clients_allowlist_test.go`) is an **allowlist of `clients/` inhabitants**, and
+an unlisted directory fails. Everything else -- generic-vs-product Go in
+`component/`, a product-shaped concept in `dsl/` -- rests on review.
+Genuinely-bespoke product Go (rare) becomes a thin optional `bff/` pack module
+in the product repo. Full rationale:
 [docs/internal/design/platform-consolidation.md](docs/internal/design/platform-consolidation.md).
 
 #### Environment parity -- one topology everywhere (NON-NEGOTIABLE)
@@ -626,21 +628,19 @@ comparison, switch case or map key -- and its exemption map is EMPTY.
 `development` / `local` stay outside that gate: they distinguish deploy TARGETS
 (k3d vs AKS), which carry their own field, `provider`.
 
-What makes the local cluster parity rather than a lookalike:
-
-- **Same manifests, same reconciliation as AKS**; each pod carries a unique
-  `MEMQL_NODE_ID` via `fieldRef: metadata.name`.
-- **Clients connect exactly as in the cloud** -- the `api.memql.localhost`
-  traefik front door (TLS on 443, mkcert wildcard, h2c gRPC to `svc/bff:50051`).
-  NO local-only port-forward in the connection path.
-- **The domain is a VALUE** (memql#3593): `make up DOMAIN=lab.example.com`,
-  seeded as the single `MEMQL_DOMAIN` key every node derives its issuer, CORS
-  origins and OAuth redirect URIs from (`component/envregistry/domain.go`).
-  **No file under `deploy/` names a domain.**
-- **The engine bff is a COMPONENT** (`deploy/k8s/components/engine-bff`), so a
-  product cluster's own `bff-<product>` never collides with it.
-- **`make status` is the litmus** -- per-pod node ids plus one shared identity
-  JWKS keyset (divergent keysets fail roughly half of all auth, memql#3400).
+What makes the local cluster parity rather than a lookalike: the **same
+manifests and reconciliation as AKS**, each pod carrying a unique
+`MEMQL_NODE_ID` via `fieldRef: metadata.name`; **clients connecting exactly as
+in the cloud**, through the `api.memql.localhost` traefik front door (TLS on
+443, mkcert wildcard, h2c gRPC to `svc/bff:50051`) with NO local-only
+port-forward in the connection path; **the domain as a VALUE** (memql#3593) --
+`make up DOMAIN=lab.example.com`, seeded as the single `MEMQL_DOMAIN` key every
+node derives its issuer, CORS origins and OAuth redirect URIs from
+(`component/envregistry/domain.go`), so **no file under `deploy/` names a
+domain**; **the engine bff as a COMPONENT** (`deploy/k8s/components/engine-bff`),
+so a product cluster's own `bff-<product>` never collides with it; and
+**`make status` as the litmus** -- per-pod node ids plus one shared identity
+JWKS keyset (divergent keysets fail roughly half of all auth, memql#3400).
 
 ### Component Bus (Channel-Based Communication)
 
@@ -674,12 +674,17 @@ gRPC is the **default and required** protocol for all internal and
 service-to-service endpoints. HTTP endpoints are allowed **only** when an
 external protocol requirement makes gRPC impossible.
 
-1. **Service-to-service call?** → **Must be gRPC** (add a message type to `memql.proto`).
+1. **Service-to-service call?** → **Must be gRPC**: request type onto
+   `MemqlClientMessage.oneof payload` and response type onto
+   `MemqlServerMessage.oneof payload` in `component/grpc/memql.proto`, handler
+   in `component/grpc/server.go`.
 2. **Consumed by a browser client?** → route through the WebSocket bridge
    (`/memql/ws`), which tunnels to `MemqlService.Stream` -- still gRPC underneath.
 3. **Does the external service require HTTP?** (OAuth callbacks, webhooks) →
    HTTP is allowed as a documented exception, below.
-4. **When in doubt:** ask the user. Default answer is gRPC.
+4. **When in doubt:** ask the user; the default answer is gRPC. **Never add a
+   new HTTP endpoint without explicit user approval**, and document the
+   reasoning when you do.
 
 ### Allowed HTTP Exceptions
 
@@ -689,17 +694,17 @@ dictates the wire (a browser, a mail client, a probe, a third-party webhook).
 
 | Category | Endpoints | Reason |
 |----------|-----------|--------|
-| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `POST /auth/landing`, `GET /auth/magic-link/status`, `POST /auth/magic-link/finish`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/{register,login}/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link needs HTTP redirects, browser form posts and JWKS publishing; WebAuthn is a **browser API**; RFC 8628 device grant is **defined over HTTP**; `GET /enroll` is a page a person opens from a link, before any application code exists to speak a protocol. The magic-link three (memql#4302): a GET now renders and never changes state so mail scanners stop burning links, `POST /auth/landing` is the form post it used to do, `/auth/magic-link/status` is the requesting tab's poll gated on the `memql_ml` cookie, and `finish` must be a real form POST because the reply is a 303 the tab must NAVIGATE. All identity routes are declared on the identity server's own route table, not `component/server`'s |
+| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `POST /auth/landing`, `GET /auth/magic-link/status`, `POST /auth/magic-link/finish`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/{register,login}/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link needs HTTP redirects, browser form posts and JWKS publishing; WebAuthn is a **browser API**; RFC 8628 device grant is **defined over HTTP**; `GET /enroll` is a page a person opens from a link, before any application code exists to speak a protocol. The magic-link three (memql#4302): a GET renders and never changes state so mail scanners stop burning links, `POST /auth/landing` is the form post it used to do, `/auth/magic-link/status` is the requesting tab's poll gated on the `memql_ml` cookie, and `finish` must be a real form POST because the reply is a 303 the tab must NAVIGATE. All identity routes are declared on the identity server's own route table, not `component/server`'s |
 | **Health check** | `/healthz` | Docker and Kubernetes probes expect HTTP GET |
-| **GitHub Connect callback** | `GET /auth/github/callback` (identity only) | GitHub redirects a person's BROWSER here after they authorize or install the GitHub App (memql#4912, owner-approved as program decision P11). The OAuth-callback class and the ONLY HTTP surface Connect adds: the flow STARTS over the stream on `githubConnectBegin`, and it writes a `v1:platform:sourceCredential` grant rather than a sign-in. Declared on identity's own route table beside `/auth/oidc/callback` -- declaring it in `component/server` would route it to the bff. State is consumed exactly once under a Postgres advisory lock, so a replayed link is `connect_state_invalid`; an `installation_id` without a valid state updates nothing, because GitHub documents that parameter as spoofable |
-| **GitHub App setup** | `GET /auth/github/app/new`, `GET /auth/github/app/callback` (identity only) | A cluster owner registers the cluster's GitHub App from the product through GitHub's MANIFEST flow (owner-approved 2026-09-20; design record `docs/superpowers/specs/2026-09-20-github-app-setup-design.md`). GitHub dictates both ends: the flow BEGINS with a browser FORM POST to github.com and ENDS with a browser redirect carrying a one-time code, and neither is something the stream can carry. `new` is a PAGE whose one job is that form post -- it exists because MemQL OS is served by the edge under `form-action 'self'`, one policy for every hosted site, so widening it would widen it for all of them; the page carries a policy extended by github.com alone, LOOKS UP a live setup state, composes the manifest from the cluster's own domain (never from the request) and writes nothing. `callback` is the OAuth-callback class, beside `/auth/github/callback`: it spends the state exactly once under the same advisory lock, FOR ITS OWN PURPOSE (a Connect state, which anybody can mint, is a state it has never seen), re-reads that the person is still an active cluster owner, refuses when the environment manages the app, exchanges the code, refuses an app asking for more than contents and metadata read, seals the three credentials under `MEMQL_MASTER_KEY` into `v1:platform:globalSecret`, and sends the browser on to install the app under an ordinary Connect state. The flow still STARTS over the stream, on `githubAppSetupBegin`, which is what binds the state to an authenticated cluster owner. Both are on identity's own route table for the callback's reason -- declared in `component/server` they would route to the bff |
+| **GitHub Connect callback** | `GET /auth/github/callback` (identity only) | GitHub redirects a person's BROWSER here after they authorize or install the GitHub App (memql#4912, program decision P11). The OAuth-callback class and the ONLY HTTP surface Connect adds: the flow STARTS over the stream on `githubConnectBegin`, and it writes a `v1:platform:sourceCredential` grant rather than a sign-in. On identity's own route table beside `/auth/oidc/callback` -- in `component/server` it would route to the bff. State is consumed exactly once under a Postgres advisory lock, so a replayed link is `connect_state_invalid`; an `installation_id` without a valid state updates nothing, because GitHub documents that parameter as spoofable |
+| **GitHub App setup** | `GET /auth/github/app/new`, `GET /auth/github/app/callback` (identity only) | A cluster owner registers the cluster's GitHub App through GitHub's MANIFEST flow (owner-approved 2026-09-20; `docs/superpowers/specs/2026-09-20-github-app-setup-design.md`). GitHub dictates both ends: the flow BEGINS with a browser FORM POST to github.com and ENDS with a browser redirect carrying a one-time code, and neither is something the stream can carry. `new` is a PAGE whose one job is that form post -- MemQL OS is served by the edge under `form-action 'self'`, one policy for every hosted site, so widening it would widen it for all of them; the page carries a policy extended by github.com alone, LOOKS UP a live setup state, composes the manifest from the cluster's own domain (never from the request) and writes nothing. `callback` is the OAuth-callback class: it spends the state exactly once under the same advisory lock FOR ITS OWN PURPOSE (a Connect state, which anybody can mint, is one it has never seen), re-reads that the person is still an active cluster owner, refuses when the environment manages the app, exchanges the code, refuses an app asking for more than contents and metadata read, seals the three credentials under `MEMQL_MASTER_KEY` into `v1:platform:globalSecret`, and sends the browser on to install the app under an ordinary Connect state. The flow still STARTS over the stream, on `githubAppSetupBegin`, which binds the state to an authenticated cluster owner. Both on identity's own route table, for the callback's reason |
 | **Shopify Connect callback** | `GET /auth/shopify/callback` (identity), `GET /auth/shopify/complete` (OS edge → identity) | Shopify redirects a person's BROWSER here after the shop's staff approve Connect Shopify (design record `docs/superpowers/specs/2026-09-23-connect-shopify-design.md`, D2, D10). The OAuth-callback class, beside `/auth/github/callback`, with a relay to the OS-hosted completion route so the host-only session cookie accompanies validation. The signed query is preserved exactly and the relay never spends state; the flow STARTS over the stream on `shopifyConnectBegin`, which names the shop from the storefront's own publishing run, never the browser, and it writes a `v1:shopify:store` row, its sealed credentials and the storefront's binding rather than a sign-in -- a SAVED app moves no store until Shopify's approval promotes it (D12). It rides GitHub Connect's single-use state row under its own purpose, and the order of checks is the security: the state is LOOKED UP without spending and must have been begun by THIS browser's live session (D16, GitHub Connect's `githubSessionMatches` over the HTTP-only refresh cookie), Shopify's HMAC is verified under the client secret the state names and `shop` must be the state's, and only then is the state spent under the advisory lock -- so a forged request cannot burn a real Connect. The person is re-judged at the callback under their row's REAL role (never `ContextWithUserActor`), and the code is exchanged in a POST body with no redirect followed. No code and no state is Shopify opening the App URL: a 303 to the OS that reads, writes and echoes nothing. The Shopify half sits behind `identity.ShopifyConnect`, implemented in `integrations/shopify` and wired in `app/integrations_identity.go`, because `component/identity` cannot import it. On identity's own route table for the GitHub callbacks' reason |
 | **WebSocket upgrades** | `/memql/ws` | Browsers need an HTTP upgrade |
 | **Site bundle publish** | `POST /sites/{id}/bundles` (bff only) | A CI job hands over an arbitrary tree of files -- unknown paths, count and content types -- which is what multipart exists to carry and a fixed protobuf schema does not (memql#3713). `component/edge.Publisher` makes it atomic: the bundle lands under a content-addressed version prefix and only then does the site row's `bundleRef` flip. Authorization is a `class="service_account"` JWT; declared in `HandlerAuthorizedPaths()`, never `PublicPaths()`. Served by the bff, never the edge |
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US and will POST to a URL and nothing else (memql#2957). Deny-by-default source allowlist + per-source HMAC; `HandlerAuthorizedPaths()`. [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
 | **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | Here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348); RFC 8058 is a contract with Gmail / Outlook / Yahoo. The GET/POST split is load-bearing: mail clients PREFETCH links, so a GET with the side effect unsubscribes people who never clicked. Authorization is an HMAC-signed token carrying (owner, recipient, campaign), verified before any row is read. `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` |
-| **Campaign open/click tracking** | `GET /t/o/{token}`, `GET /t/c/{token}` (bff only) | The RECIPIENT'S MAIL CLIENT again (memql#4823, owner-approved under program P3): a pixel is an `<img src>` it fetches and a tracked link is one a reader follows, so both are GETs. Authorization is an HMAC over the unsubscribe key ring under a DIFFERENT context string, and the click destination lives INSIDE the signed payload, which is what makes the redirect open-redirect-proof. Neither ever shows a human a failure: the pixel always answers the 1x1 GIF and a bad click token renders the same "link is not valid" page a bad unsubscribe link gets. **The token must be a SINGLE PATH SEGMENT** -- `SelfAuthenticatedPaths()`' exemption is bounded to one segment, so a token containing `/` is 401'd before the handler runs (base64url, never standard base64). `server.TrackingPaths()` -> `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`; the literals must agree with `campaigns.TrackingOpenPath` / `TrackingClickPath` |
-| **Library artifacts** | `POST /artifacts`, `GET /artifacts/{id}/content`, plus the chunked-session family `POST /artifacts/uploads`, `GET /artifacts/uploads/{id}`, `PUT /artifacts/uploads/{id}/chunks/{n}`, `POST /artifacts/uploads/{id}/complete` (bff only) | Upload is the multipart reasoning (memql#4341, D1); the session family (memql#4782, owner-approved) stages 16 MiB chunks against Azure block blobs -- replica-agnostic, resumable via the inventory `GET`, verified at `complete` -- which is byte transport and exactly what HTTP is for. `GET .../content` STREAMS through the bff after re-resolving the row under the caller's actor, honoring single-range `Range` (206), never a redirect: there are no signed URLs, and a redirect would move authorization from the graph to whoever holds a URL. All are ordinary AUTHENTICATED routes, so they appear in none of the three aggregates; `server.ArtifactPaths()` routes them. Caps: `MEMQL_LIBRARY_MAX_UPLOAD_BYTES` (default 4 GiB, per file) and `MEMQL_LIBRARY_USER_QUOTA_BYTES` (default 100 GiB, per user) |
+| **Campaign open/click tracking** | `GET /t/o/{token}`, `GET /t/c/{token}` (bff only) | The RECIPIENT'S MAIL CLIENT again (memql#4823, program P3): a pixel is an `<img src>` it fetches and a tracked link is one a reader follows, so both are GETs. Authorization is an HMAC over the unsubscribe key ring under a DIFFERENT context string, and the click destination lives INSIDE the signed payload, which is what makes the redirect open-redirect-proof. Neither ever shows a human a failure: the pixel always answers the 1x1 GIF and a bad click token renders the same "link is not valid" page a bad unsubscribe link gets. **The token must be a SINGLE PATH SEGMENT** -- `SelfAuthenticatedPaths()`' exemption is bounded to one segment, so a token containing `/` is 401'd before the handler runs (base64url, never standard base64). `server.TrackingPaths()` -> `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`; the literals must agree with `campaigns.TrackingOpenPath` / `TrackingClickPath` |
+| **Library artifacts** | `POST /artifacts`, `GET /artifacts/{id}/content`, plus the chunked-session family `POST /artifacts/uploads`, `GET /artifacts/uploads/{id}`, `PUT /artifacts/uploads/{id}/chunks/{n}`, `POST /artifacts/uploads/{id}/complete` (bff only) | Upload is the multipart reasoning (memql#4341, D1); the session family (memql#4782, owner-approved) stages 16 MiB chunks against Azure block blobs -- replica-agnostic, resumable via the inventory `GET`, verified at `complete` -- which is byte transport. `GET .../content` STREAMS through the bff after re-resolving the row under the caller's actor, honoring single-range `Range` (206), never a redirect: there are no signed URLs, and a redirect would move authorization from the graph to whoever holds a URL. All are ordinary AUTHENTICATED routes, so they appear in none of the three aggregates; `server.ArtifactPaths()` routes them. Caps: `MEMQL_LIBRARY_MAX_UPLOAD_BYTES` (default 4 GiB, per file) and `MEMQL_LIBRARY_USER_QUOTA_BYTES` (default 100 GiB, per user) |
 | **Shopper forms** | `POST /forms/{pack}/{name}`, `GET /reads/{pack}/{name}` (bff only) | A member of the PUBLIC posting a plain HTML form on a hosted storefront, with no JavaScript and no MemQL identity (epic memql#5532, owner-approved). The first storefront's wholesale form is `method="post"` so a federal tax identifier never reaches a query string, and its served policy is `script-src 'self'`, so a JS submit handler is not available to it -- there is no gRPC form of that conversation, exactly as there is none for `/unsubscribe`. **A shopper is nobody to MemQL**: reach is declared PER ROUTE by a pack (`component/memql/shopper_surface.go`) and nothing undeclared is reachable. Reached ONLY through the edge at `/_memql/forms/*` on a deployable's own origin, which owns the per-site switch (`site.shopperForms`, off by default), the per-address rate limit, the size cap and the stamp -- site, store and owner, stripped then set. `HandlerAuthorizedPaths()` + **`servedButNotExternallyRouted`**, so no front-door rule exists and the edge is the only way in. The stamp is a POINTER, not an assertion: the bff re-reads the site row UNDER the named owner, and the composite-owner tier means a forged owner reads zero rows and refuses itself. The write runs under that owner's borrowed authority and every row carries the `storeId` of the binding it arrived through -- the PREVIEW binding under a grant, which is design D9 falling out of D7 |
 
 ### The front door's HOST set is generated too (memql#3767)
@@ -803,15 +808,6 @@ Everything below lives on `MemqlService.Stream`; cross-node proxying rides
 | **AI service-to-service** | `AiChatMsg`, `AiSuggestMsg` | `ai_handlers.go` |
 | **Streaming transcription** | `AiTranscribeStreamStart` / `Chunk` / `End` + `AiTranscribeStreamDelta` / `Complete` | `ai_transcribe_stream.go` -- multi-message flow keyed by `request_id`, forwarded BFF -> Agent via `AiForwardRouter.ForwardContinuation`. The one caller is MemQL OS's Ask hold-to-talk |
 | **Concepts API** | `ConceptsListMsg`, `ConceptsSubscribeMsg` (+ `follow=true` -> `ConceptsRegistryDelta` stream, memql#4238) | `concepts_handlers.go` |
-
-### For AI Agents and Developers
-
-1. **Never add new HTTP endpoints** without explicit user approval.
-2. **Default to gRPC** -- add message types to `component/grpc/memql.proto`.
-3. If you believe HTTP is needed, **ask the user first** and document the reasoning.
-4. All new gRPC messages follow the existing multiplexed stream pattern: request
-   type to `MemqlClientMessage.oneof payload`, response type to
-   `MemqlServerMessage.oneof payload`, handler in `component/grpc/server.go`.
 
 ---
 
@@ -951,97 +947,32 @@ config writer and its cleanup, Library pull/push, the `open` kind) lives in
 ### Workers (computer_use_headless / computer_use_embodied)
 
 Agents drive the user's own machine: shell exec, filesystem, HTTP fetch, and
-(under the computer-use build) mouse + keyboard + screenshot. Runbook:
-[workers-runbook.md](docs/public/operate/workers-runbook.md). The sandboxed
-first-choice surface for headless work is the Workbench, below.
+(under the computer-use build) mouse + keyboard + screenshot. The FALLBACK for
+what the sandboxed Workbench below cannot do. The full write-up -- capabilities
+and their expansion map, the `WorkerService` gateway and `mql_wkr_` tokens, the
+three-layer permission model, the router and its four strategies, the two label
+maps, cross-node dispatch, row tier and borrowed authority, the Fleet operator
+surface -- is in
+[feature-notes.md](docs/internal/design/feature-notes.md#workers-computer_use_headless--computer_use_embodied);
+the runbook is
+[workers-runbook.md](docs/public/operate/workers-runbook.md). Four rules reach
+outside that write-up:
 
-- **Capabilities:** `computer_use_headless` -> `workerHost`;
-  `computer_use_embodied` -> `workerComputer`; both plus the cross-cutting trio
-  (`workerStatus`, `requestComputerUseScope`, `canvasPublish`). Two slugs so the
-  slices grant independently; authorization stays one decision, because both act
-  on the user's machine. Expansion map: `component/memql/worker_caps.go`.
-- **Gateway:** `WorkerService.Stream` on the agent node, authenticated by
-  `mql_wkr_<43>` tokens (the `worker_token` variant on `v1:identity:identity`),
-  which the interceptor admits on that path only. Mint/revoke server-side via
-  `CreateWorkerTokenMsg` / `RevokeWorkerTokenMsg`; the plain token comes back
-  ONCE and only the SHA-256 hash persists (`component/identity/workertoken/`).
-- **Worker side:** `memql worker run` / `memql worker setup`, run modes of the
-  `memql` command built by `memql-cockpit`. Install:
-  `scripts/install/install-{mac,linux}.sh`.
-- **Per-user routing, and NO machine id.** Every worker is owned by one
-  `v1:identity:user`. The dispatch builtins take `requireLabels` /
-  `preferLabels` and **no `workerId`** (D4): an agent says what the work NEEDS,
-  the owner's policy decides where it lands -- so **a hallucinated machine id is
-  a failure mode this surface does not have**. `no_worker_available` names every
-  machine and why it was ruled out.
-- **Permission model:** three layers checked BEFORE dispatch -- the agent
-  capability flag, standing scope on
-  `v1:agents:agentAuthorization.computerUseScope` (observe / full; `interact` is
-  RETIRED, kept in the enum for old rows and read as `full`), and the per-user
-  kill switch `v1:identity:user.preferences.computerUseEnabled`. Out-of-scope
-  calls park the Plan at `awaitingFeedback` with
-  `feedbackReason=scope_elevation_required`. Consent is decided BEFORE routing,
-  so routing only ever chooses among machines already consented to.
-- **The router** (`integrations/agent/worker/router.go`, epic memql#4349):
-  `v1:worker:routingPolicy`, one active row per user and ABSENT for most (the
-  router then applies `firstFit` + `nextMatching`, the pre-router behaviour).
-  Four strategies -- `firstFit`, `roundRobin`, `leastLoaded`, `labelMatch` --
-  all STABLE sorts over REGISTRATION order taken from the row rather than
-  connection order, so every replica agrees with no shared state.
-  `fallback=nextMatching` re-picks ONLY after a refusal BEFORE start (D5); an
-  exec that lost its stream may have run. Policy and agent requirements are
-  AND-ed and a conflict is left UNSATISFIABLE rather than resolved toward either
-  side. Labels match EXACTLY -- there is no "any value" form.
-- **Two label maps, and they must not become one.** `labels` is reported by the
-  cockpit and OVERWRITTEN from `Register` on every reconnect; `operatorLabels`
-  is the owner's and no register/heartbeat path writes it.
-  `refreshWorkerRegistration` enforces the split by NOT NAMING the field
-  (`update{}` is a read-merge; "completing the field list" is what would break
-  it, and `displayName` is absent for the same reason). Routing matches the
-  MERGE, operator side winning.
+- **Per-user routing, and NO machine id.** The dispatch builtins take
+  `requireLabels` / `preferLabels` and **no `workerId`** (D4), so a
+  hallucinated machine id is a failure mode this surface does not have.
+  Labels match EXACTLY -- there is no "any value" form.
 - **`online` is DERIVED, never stored:** unrevoked AND `lastSeenAt` within
-  `OnlineWindow` = 2 x `HeartbeatBatchInterval` = **30s**. Exactly two
-  implementations, `component/worker.IsOnline` and
+  **30s**. Exactly two implementations, `component/worker.IsOnline` and
   `clients/os/src/apps/fleet/online.ts`, held together by
-  `TestFleetOnlineWindowMatchesTheClients`. Deriving it from the in-memory registry
-  is refused: that answers "connected to ME", and the fleet needs "connected to
-  ANY replica". Beside it, `rttMs` / `rttAt` are the CLUSTER's own evidence
-  of the return path (epic memql#5218, D11): the agent pings the machine
-  `FirstPingDelay` after RegisterAck and every `PingInterval`, the Pong's
-  round trip lands on the row at the next flush, and an ABSENT `rttAt` is
-  "not measured" -- a cockpit predating the message -- never "slow".
-- **Cross-node dispatch (memql#4352):** `connectedNodeId` names the replica
-  holding the stream; any other replica forwards over `WorkerForward*`.
-  `refused_before_start` is the re-pick predicate and the one wire field that
-  must never be guessed. The receiver re-checks only what it alone can know --
-  ownership against the verified `ForwardedAuthority` (never the envelope's
-  owner field) and revocation.
-- **Row tier + borrowed authority.** `v1:worker:registration` and
-  `routingPolicy` declare `@rowAuthz(owner=..., clusterOwner)`, and the READ
-  gate has no internal-origin bypass: an unstamped read returns ZERO ROWS, not
-  an error. A worker authenticates as `worker:<id>`, so `component/worker`'s
-  store runs every registration read and write under `auth.ContextWithUserActor`
-  for the owner named by the token's identity row -- and must NOT stamp internal
-  origin, which is why it is deliberately absent from `call_origin.go`'s
-  allowlist.
-- **Operator surface:** the Fleet app in MemQL OS -- the guided install
-  (a page over the kit rail: mint, install, connect, checks; the registration
-  MATCHED by the mint's identity, never counted; design record
-  `docs/superpowers/specs/2026-09-08-cockpit-install-wizard-design.md`),
-  rename (`displayName`), edit operator labels, remove (revoke plus the
-  uninstall one-liner), edit the routing policy, read each call's `routing`
-  record.
-- **The worker stream reaches the agent by its service prefix** (memql#5224).
-  `WorkerService` is served by the agent and by nothing else, so the front
-  door carries `component/frontdoor.WorkerServicePath` -> `svc/agent:50051`
-  above the bff catch-all in both overlays and on every account api host,
-  gated by render tests; the agent Service carries the same h2c annotation
-  the bff's does.
-- **Audit + hardening:** security signals on `v1:identity:auditEvent`; per-call
-  telemetry on `v1:worker:invocation` (`WORKER_INVOCATION_RETENTION_DAYS`
-  default 90); per-call rlimits on Linux + Darwin via `policy.shell.max_*`;
-  optional setuid drop via `policy.shell.run_as_user`; loopback-only metrics at
-  `127.0.0.1:9100/metrics`.
+  `TestFleetOnlineWindowMatchesTheClients`.
+- **Consent is decided BEFORE routing**, so routing only ever chooses among
+  machines already consented to; `refused_before_start` is the cross-node
+  re-pick predicate and the one wire field that must never be guessed.
+- **Borrowed authority, and no internal-origin stamp.** `component/worker`'s
+  store runs every registration read and write under
+  `auth.ContextWithUserActor` for the token's owner, and is deliberately absent
+  from `call_origin.go`'s allowlist.
 
 ### Workbench (workbench_use)
 
@@ -1298,6 +1229,11 @@ consolidated file per construct kind per namespace; policies are consolidated in
 are CORE, so a pack cannot mount them and a runtime mount colliding with them is
 skipped.
 
+**An automation loads only from its domain's `automations.memql`**
+(memql#5437): one declared in any other file refuses the load
+(`construct_misplaced`, `dsl/construct_placement.go`); it used to load as
+nothing.
+
 ## Argument resolution
 
 All DSL constructs share one model for declaring inputs and one namespace pair
@@ -1358,48 +1294,40 @@ is refused for the same reason a repeated annotation argument is: the map
 collapses last-wins, so the value a reader sees is not the value the engine uses.
 
 **Retired author-side forms (all rejected at parse time).** Every construct is
-authored in the struct form. These shapes are gone and the parser refuses them
-with a migration hint -- do not write them, and do not "restore" them when you
-see one in an old diff:
-
-- receiver-function wrapping (`func (Query) NAME(ctx any)` and its siblings).
-  `func (Receiver)` survives only as the internal rewriter target the engine's
-  parser consumes; authors never write it.
-- The `@use*` annotation family (`@useConcept`, `@useShape`, `@useQuery`, ...)
-  — replaced by file-top `use` imports.
-- `@concepts(...)` / `@shape("name")` bindings — replaced by the
-  two-identifier construct signature.
-- `@input { ... }` — the prompt body IS the field list.
-- `include` in a shape body.
-- The retired body forms (epic memql#5370): `body { }` around a logic's
-  statements, `step` blocks, the terse `=> logic` automation header,
-  `steps.<id>` references, a bare argument read, `partition=` on `@trigger`,
-  the `@schedule` annotation (`@trigger(schedule=...)` is the one spelling),
-  and `mutate` as the mutation declaration keyword (it is `mutation`, D13).
-  `memqlmigrate --rewrite=bodies` rewrites each; the language reference lists
-  them ([memql.md](docs/public/language/memql.md#retired-forms)). The step
-  bodies' accessors -- `step("x")`, `input()`, `item()`, `index()` -- are
-  refused too, and have no rewrite: no tree wrote one in a statement body.
+authored in the struct form. The parser refuses each retired shape and NAMES
+its replacement, so the enumeration lives in the language reference
+([memql.md](docs/public/language/memql.md#retired-forms)) rather than here --
+do not write them, and do not "restore" one when you see it in an old diff.
+The families: receiver-function wrapping (`func (Query) NAME(ctx any)`, which
+survives only as the internal rewriter target the engine's parser consumes),
+the `@use*` annotation family (replaced by file-top `use` imports),
+`@concepts(...)` / `@shape("name")` bindings (replaced by the two-identifier
+construct signature), `@input { ... }`, `include` in a shape body, and the
+retired body forms of epic memql#5370 -- `body { }`, `step` blocks, the terse
+`=> logic` automation header, `steps.<id>`, a bare argument read, `partition=`
+on `@trigger`, the `@schedule` annotation and `mutate` as the mutation keyword
+(it is `mutation`, D13). `memqlmigrate --rewrite=bodies` rewrites the body
+forms; the step accessors (`step("x")`, `input()`, `item()`, `index()`) have
+none, because no tree wrote one in a statement body.
 
 Only `dsl/_reference/*.memql` still shows these, deliberately, as
 don't-do-this skeletons.
 
 **Retired expression spellings (edition 2026).** Each is refused at parse,
-wherever a `.memql` file writes it, with its replacement and
+wherever a `.memql` file writes it, naming its replacement and
 `memqlmigrate --rewrite=expressions`, which rewrites it (in VS Code the
-language server's **Rewrite to edition 2026** quick fix makes the same edit):
-the `when(args.x) { ... }` guard and the `?.` prefix (write
-`args.x == nil || <predicate>`), `;` and `,` as connectives (`&&`, `||`),
-`has` (`v in list`), `not in` (`!(v in list)`), `cond(`, `concat(`,
-`coalesce(`, `exists(`, `len(`, `count(x)` and `contains(s, sub)`
-(`p ? a : b`, `a + b`, `a ?? b`, `x != nil`, `x.count()`, `s.includes(sub)`),
-`null` (`nil`), a filter without its lambda header (`filter row => ...`), a
-`spec` or `trait` body written `{ return ... }` (`= row => ...`), `@filter`
-without a lambda (`@filter(row => ...)`), and `$args.` in a tool handler
-(`args.`). The expression spellings are listed in full in
-[memql.md](docs/public/language/memql.md#retired-spellings);
-`parser.V1RetiredForms` is the one list. The string a client sends to
-`Execute` is the internal query form, which keeps its own grammar.
+language server's **Rewrite to edition 2026** quick fix makes the same edit).
+The full list is
+[memql.md](docs/public/language/memql.md#retired-spellings) and
+`parser.V1RetiredForms` is the one copy of it; the shapes to recognise are the
+`when(args.x) { ... }` guard and the `?.` prefix, `;` and `,` as connectives,
+`has` and `not in`, the `cond(` / `concat(` / `coalesce(` / `exists(` /
+`len(` / `count(x)` / `contains(s, sub)` function family, `null`, a filter or
+`@filter` without its lambda header, a `spec` or `trait` body written
+`{ return ... }`, and `$args.` in a tool handler. The string a client sends to
+`Execute` is the internal query form, which keeps its own grammar -- but it too
+refuses `;` and `,` as connectives (`retired_comma_connective`, memql#5439;
+`parentOf(a, b)` is `parentOf(a || b)`).
 
 ## Levels, policies and rules
 
@@ -1598,7 +1526,9 @@ govern them -- without it every retention sweep and boot seed becomes a
 peer-write and stops.
 
 **`@requiresRank("<role>")` is the SURFACE half** (D6): an actor-rank FLOOR on a
-query / mutation / logic, enforced at execution and validated at LOAD. It gates
+query / mutation / logic / tool (on a tool it judges the person the call is
+for, and decides what is listed to them, memql#5438), enforced at execution and
+validated at LOAD. It gates
 WHO MAY CALL; `@rowAuthz` still decides WHICH ROWS come back. It is the enforced
 counterpart to MemQL OS's per-surface `requires: "app:<id>"` (a capability
 RESOURCE the shell asks its effective set about, epic memql#5289), which stays
@@ -1784,7 +1714,9 @@ author-facing shape (see "Retired author-side forms" above).
 **Concept binding lives in the construct signature.** The two-identifier
 signature `query <Concept> <name>`, `mutation <Concept> <name>`,
 `seed <Concept> <name>` and `shape <Concept> <name>` names the bound concept
-directly; the loader resolves the name through the file's file-top imports.
+directly; the loader resolves the name through the file's file-top imports,
+and one that does not resolve refuses the load naming the import to add
+(`signature_concept_unresolved`, memql#5433).
 
 **Cross-file dependencies go through file-top `use` imports.** Every construct
 another file pulls into local scope (shapes, traits, specs, mutations, queries,
@@ -1830,7 +1762,10 @@ nearest pushdown spelling):
 - Sort keys keep their string form and the `row.` namespace for intrinsics --
   `sort "row.createdAt", "desc"` (`TestSortKeysUseRowNamespace`). Payload sort
   keys stay bare; `provenance` has no sort form; the runtime/SDK sort surface
-  accepts either spelling.
+  accepts either spelling. An authored key must name a declared field or a
+  sortable intrinsic, and a direction is `asc` / `desc` in any case
+  (`sort_key_unknown` / `sort_direction_unknown`); a clause is written once
+  (`query_clause_duplicate` -- a second `filter` used to replace the first).
 - **One boolean grammar:** `&&`, `||`, `!` and parentheses, with the precedence
   [memql.md](docs/public/language/memql.md#operator-precedence) publishes. `!`
   works in every position and negates exactly; there is no truthiness, so a
@@ -1870,8 +1805,9 @@ nearest pushdown spelling):
   field carrying one did not default -- the concept-field form was published as
   the JSON-Schema `default` keyword, which no validator applies. Apply a default
   in the body with `args.X ?? <default>`; `??` is the only mechanism that fills
-  a value. It **stays** on a `tool` / `prompt` / `builtin` field, where the body
-  IS the schema handed to the model and `default` is a value the model reads.
+  a value. It **stays** on a `tool` / `prompt` field (a `builtin` field refuses
+  it as misplaced), where the body IS the schema handed to the model and
+  `default` is a value the model reads -- a literal of the field's type.
   `a ?? b ?? c` returns the first operand that does not fall through, the last
   as the fallback; `coalesce(a, b)` is retired, so `??` is the one spelling.
   **`??` is BLANK-coalescing:** it falls through on an empty OR
@@ -2136,8 +2072,11 @@ tool searchUsers {
   `method`) and `type` is required. `@rateLimit` and `@scopes` are RETIRED
   (epic memql#5375): both were stored on the tool, cloned, advertised on the
   gRPC tool descriptor and enforced nowhere, so each read as a ceiling or an
-  authorization gate while being neither. `@allowedRoles` stays and is the
-  AGENT-role gate, enforced on every path.
+  authorization gate while being neither. `@allowedRoles` is DEPRECATED
+  (memql#5438, refused from 0.26): it mixed the agent's role and the person's.
+  Write `@requiresAgentRole(...)` (which agent calls, held to
+  `v1:agents:agent.role`) and `@requiresRank` (the person);
+  `memqlmigrate --rewrite=allowed-roles` rewrites it.
 - **The handler is validated at load** -- unknown type, missing function name /
   query / URL -- and a tool must carry a handler at all. A query handler is
   parsed there: ONE construct call, or that call inside `paginate(...)`, whose
@@ -2153,11 +2092,14 @@ tool searchUsers {
   at boot (`tool_handler_resolution.go`), so a handler naming a function that
   does not exist is a load problem strict boot refuses, not a mid-turn failure.
   A builtin is reached through `@handler(type="function", name="<builtin>")`;
-  there is no `"builtin"` handler type.
+  there is no `"builtin"` handler type. Every field the builtin REQUIRES must be
+  a tool field too (`tool_handler_arg_undeclared`, memql#5436): no call
+  supplies one the tool does not declare.
 - **Field types and field annotations are closed sets.** An unknown type is
   refused rather than emitted as `"string"` (which would tell the model
   "string", coerce the `@default` to a string, and hand a `@required integer`
-  handler argument `"10"`).
+  handler argument `"10"`). A `@default` must be a literal of the field's type
+  (`tool_default_type`, memql#5430).
 
 ### Integration Capabilities
 
@@ -2179,7 +2121,7 @@ builtin workbenchDispatchHost {
 Available integrations (core, registered via the plug-in system):
 agents, auth, database, deployversion, email, embedding, files,
 azureblob (as `storage`), harnessRecall, identity, knowledge, library,
-liveknowledge, rbac, router, shopify, similarity, timeutil, workbench,
+rbac, router, shopify, similarity, timeutil, workbench,
 workTrace, plus node-type-scoped ones (agent, stt) wired explicitly in
 `app/integrations_*.go` when their dependencies sit outside the stable
 `PluginContext` surface. `training` is a
@@ -2226,7 +2168,8 @@ decided by routing rules plus which binary's build tags compile the subscriber.
 
 Language service for .memql files, exposed via gRPC on `MemqlService.Stream`:
 **Tokenize** (semantic tokens), **Complete** (context-aware autocompletion),
-**Diagnose** (lexer / parser / semantic errors), **Hover** (symbol info) and
+**Diagnose** (lexer / parser / semantic errors; given the file's path under the
+DSL root, also Lower's `lower_*` load refusals, memql#5434), **Hover** (symbol info) and
 **SignatureHelp**. Package: `component/memql/sense/` -- pure Go, no gRPC
 dependency; handlers in `component/grpc/sense_handlers.go`.
 
@@ -2381,339 +2324,41 @@ schema does not say.
 
 ## Feature Notes
 
-### Views, layouts and living pages -- RETIRED (epic memql#4984)
+The per-epic write-ups -- what each shipped feature area is, and the rules
+about it the code does not say -- live in
+[feature-notes.md](docs/internal/design/feature-notes.md): **email campaigns +
+the sending engine**, **the work spine** (goals, runs, steps), **the proving
+suite**, **workers** (computer use, the fleet router, the Fleet app),
+**invitations**, **Nexus**, **views / layouts (retired)** and **planner /
+knowledge / validation**. Read it before touching any of them.
 
-The portal's arrangement system (`PageManifest`, `dsl/portalviews`, the `view`
-concept, the compose / uiAssist prompts) is gone with the portal. **MemQL OS
-has no replacement and is not getting one by default**: its answer is
-hand-built sections under the twelve interface rules in `clients/os/DESIGN.md`,
-and reaching for a runtime arrangement engine there is a design decision.
-`sdk/ts-viewkit` still ships because the VS Code extension consumes its
-vnode / render / styles core; its arrangement layers have no caller, which is
-a fact about the tree rather than a licence to delete them. The retirement
-record, `docs/superpowers/specs/2026-09-06-portal-removal-design.md`, says
-where every portal capability went.
+Three of its rules reach far enough outside their own area to state here:
 
-### Nexus -- being rebuilt on MemQL OS (sub-project B)
-
-Nexus is the living map of a goal: a run and its world, drawn as the system
-works and replayable from the rows' own timestamps. The portal's version was
-DELETED (epic A1, D7); what survived is the pure scene library
-`clients/os/src/nexus/scene/` (functions over rows, tested on fixtures with no
-GPU). Sub-project B re-points `concepts.ts` at `v1:work:run` / `v1:work:step`
-and draws it in 2D -- **the OS carries no WebGL** (epic memql#4785, owner
-requirement), so the Deployables app's 2D map is the shape to adapt. Design
-record: `docs/superpowers/specs/2026-09-05-work-spine-design.md`.
-
-### Invitations (Identity Primitive)
-
-Token-hashed invitation credential, under `v1:identity:invitation` -- the USER
-invitation. The guest flow went with the space concept it scoped to (epic
-memql#4988); `kind` keeps its `guest` value for rows already written and
-nothing produces one. Key files: `dsl/identity/{concepts,queries,shapes}.memql`
-and `integrations/email/` (self-registering plug-in exposing
-`integration.email.sendEmail` -- GraphSender via Microsoft Graph `sendMail`
-preferred, SMTPSender fallback, LogSender for dev; env `AZURE_TENANT_ID` /
-`AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `MAIL_SENDER` / `MAIL_FROM_NAME`,
-or the `SMTP_*` family, or neither).
-
-**"or neither" is a LOCAL-ONLY option (memql#4477).** `LogSender` returned `nil`,
-so mail failed UPWARD: the wizard said the link was sent and the audit row
-recorded success. Log-only is decided from `MEMQL_DOMAIN`: unset, a loopback
-literal, `*.localhost` or `*.local.<domain>` keeps it; anything else REFUSES
-BOOT, naming the four Graph vars and the SMTP pair. Break-glass:
-`MEMQL_EMAIL_ALLOW_LOG_ONLY=true`. Elsewhere a `LogSender` returns a permanent
-`SendError`, the audit row records `outcome=failure` (the ROW and the HTTP
-response stay identical, so a response cannot enumerate registered addresses)
-and the console shows `unhealthy`.
-
-**`Mail.Send` (Application) is tenant-wide until it is scoped** (memql#4478):
-narrowing it to the one sender mailbox needs an Exchange
-`ApplicationAccessPolicy` (Exchange Online PowerShell, not reachable from
-`az`). Any automation that adds a secret must pass `az ad app credential reset
---append`; without it the command DELETES every existing secret on the
-registration.
-[azure-entry-install.md](docs/public/operate/azure-entry-install.md#mailsend-is-tenant-wide-until-you-scope-it).
-
-### Email campaigns + the sending engine
-
-Campaigns are ordinary graph state (memql#3323) plus a Go sending engine
-(memql#3348). **Thirteen** concepts under `dsl/campaigns/`: nine
-operator-facing on the COMPOSITE tier `@rowAuthz(owner="ownerUserId",
-clusterOwner)` (`audience`, `recipient`, `template`, `senderIdentity`,
-`campaign`, `delivery`, `consentEvent`, `engagementEvent`, `emailRule`), four
-engine-owned and clusterOwner-tier (`sendJob`, `suppression`,
-`reputationWindow`, `warmupState`). Runbook:
-[campaign-sending.md](docs/public/operate/campaign-sending.md).
-
-**The composite tier is oversight, not sharing.** A cluster owner READS every
-operator's campaigns and drives the builtins on them (their gate is "can the
-caller read the campaign row") and CANNOT rewrite the rows -- the write guard
-ignores the second argument (memql#4312). A plain owner tier has no
-cluster-owner escape on the READ path, so a fleet-wide campaigns view would
-silently render one person's subset.
-
-**The account tie is a record, never a visibility scope** (accounts D1).
-`accountId` + a `forAccount` relationship on `campaign` / `audience` /
-`template` / `senderIdentity` / `emailRule`; recipients inherit through their
-audience; `campaignsForAccount` is the rollup. **No query narrows a read
-because of it.** Requiring one at create is APP behaviour, not schema.
-
-**A `senderIdentity` is a mailbox declaration with NO secret material.**
-Authentication stays the cluster's one Graph credential. Resolution is
-`campaign.senderIdentityId` -> else the env default, and **the engine never
-infers an identity from `accountId`** -- prefill is UX, resolution is
-explicit. A missing or `disabled` identity is REFUSED, never defaulted: a
-silent fallback mails a client's list from the wrong mailbox under the wrong
-SPF/DKIM and the send looks successful.
-
-**The two identities is the design.** The engine BORROWS the owner's authority
-rather than out-ranking it: `component/campaigns`' drain worker runs its
-clusterOwner-tier reads (job queue, suppression list) under the engine's own
-operator identity and everything owned under
-`auth.ContextWithUserActor(ctx, job.campaignOwnerUserId)` -- a value copied
-off a campaign row the STARTING CALLER had already read under their own actor.
-
-- *Suppression is CLUSTER-WIDE and digest-keyed* -- one deployment, one sending
-  mailbox, one reputation. The row id is the SHA-256 of the normalized address
-  and the only readable field is the domain. Enforced at the POINT OF SEND,
-  before the recipient row's own status.
-- *A hard bounce suppresses; it does NOT delete the membership.* Deleting
-  destroys the audit trail and lets the next import resurrect a dead address.
-- *Idempotency is the ledger.* One `v1:campaigns:delivery` row per (campaign,
-  recipient) at a derived id; the batch is "roster minus ledger, plus retries
-  that are due". The absence of the row IS the work queue.
-- *Two rate limits.* Ours is a per-process token bucket
-  (`MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE`); theirs is the 429, surfaced as a
-  typed `email.SendError` and honoured by parking the job until its
-  `Retry-After`.
-
-**RFC 8058 one-click** rides two headers, which forced the Graph sender onto its
-base64-MIME form (Graph's structured payload only carries `x-` headers).
-
-**The unsubscribe token names its key**
-(`u2.<keyId>.<owner>.<recipient>.<campaign>.<tag>`, memql#3458), verified
-against a ring of two: `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` signs,
-`..._SECRET_PREVIOUS` only verifies. The key id is a truncated HMAC **of the
-key**, not a slot. `_PREVIOUS` is a permanent second reader key, NOT a
-migration window: unsubscribe links never expire, so **the window is counted
-in rotations, not days** -- rotate at most once short of key compromise.
-
-**Open/click tracking rides the SAME key ring under a different context
-string** (see the HTTP exceptions table for `GET /t/o` and `/t/c`), so neither
-token verifies as the other. Hits land on `v1:campaigns:engagementEvent`,
-unique by DELIVERY rather than by address.
-
-**Two figures `campaignStats` refuses to invent.** A unique open/click count
-folded from a bounded read that came back AT its bound reports `unmeasured`
-rather than a floor dressed as a total; there is no per-campaign soft-bounce
-figure at all, because nothing measures one. An absent figure and a zero are
-different answers.
-
-**An event-email rule is a FORM; a generated authored automation is the
-MECHANISM** (memql#4829). `campaignActivateEmailRule` renders a construct
-DETERMINISTICALLY from a `v1:campaigns:emailRule` row (the LLM `authoringEmit`
-path stays off) and arms it through the runtime authoring pipeline, because an
-automation's `@trigger` names ONE concept at load time. **Two lanes, chosen by
-who receives** -- cluster roles ride `stageOutboundRequest` (allowlist, no
-unsubscribe, suppression neither consulted nor written); audience and
-row-address recipients ride `campaignSendToRecipient`. **The actor trap
-applies:** the generated construct runs under `AuthorContext` (author's
-userId, role writer, origin CLIENT), so owned rows are the author's or
-invisible, no `@serverOnly` construct is reachable, and cluster-wide
-questions must be asked from Go.
-
-The scheduler (`campaignScheduleSend`), the evidence-driven warming ramp, and
-bounce/complaint feedback ingestion are all built -- the runbook is current.
-On Graph, nothing dials us: the mailbox reader
-(`MEMQL_EMAIL_NDR_POLL_SECONDS`) stages DSNs from the sending mailbox, and
-they are acted on only once `graph-mailbox=rfc3464` is in
-`MEMQL_CAMPAIGNS_FEEDBACK_SOURCES`. The multi-account campaigns program is
-specced in
-[2026-09-01-email-campaigns-program-design.md](docs/superpowers/specs/2026-09-01-email-campaigns-program-design.md),
-with a record per sub-project:
-[the campaigns backend](docs/superpowers/specs/2026-09-01-campaigns-backend-design.md),
-[integration config](docs/superpowers/specs/2026-09-01-integration-config-design.md),
-[the Campaigns OS app](docs/superpowers/specs/2026-09-01-campaigns-os-app-design.md),
-[event emails](docs/superpowers/specs/2026-09-01-event-emails-design.md).
-
-### The work spine -- goals, runs, steps (epic memql#4966)
-
-A person gives a goal; the system works it out once, records the steps as
-atomic variable-taking units, and from then on replays them without a model
-unless reasoning is genuinely needed. `v1:work:{goal,run,step,modelCall,
-approval,observation}` is that spine, every concept on the composite owner
-tier. Design record:
-[the work spine](docs/superpowers/specs/2026-09-05-work-spine-design.md).
-
-**The layer split is what makes the claims checkable.** `component/work` is a
-leaf module of PURE decisions -- the compile order, the symptom rules table,
-the derived step kind, postcondition derivation, the footprint union, the run
-ceilings, the approval builders, the three replay modes. No engine, no
-provider, no database. So the two headline claims are properties of a
-function over values rather than counts against a mock: an exact catalog hit
-returns `NeedsModel=false`, and a rules-classified symptom returns without
-reaching the classifier prompt. `integrations/work` is the wiring; only it
-touches rows.
-
-- **Compile runs cheapest-first, and the order IS the design.** Catalog exact
-  match on `GoalSignature` (the normalized statement plus the SORTED input arg
-  names), then near match at 0.82 with a gap list, then ONE triage call that
-  answers complexity and sectionability together. An exact hit reaches no model
-  at all -- not even triage. `GoalSignature` is a NEW key, not `CatalogKey`,
-  which hashes construct SOURCE and refuses `automation` outright.
-- **Rules classify before a model does.** `ClassifyByRules` returning
-  `ok=false` is the only path that costs a call. Order inside the table is
-  load-bearing: the stalled-step rule sits ABOVE the transient matchers,
-  because a repeated action that also looks transient must escalate rather
-  than retry forever.
-- **Repair beats resample.** A contract miss re-runs the failed step with the
-  violation as guidance; a plan miss re-plans from that step with the prefix
-  KEPT. Never from the start -- `replanGap` is shown the completed steps as
-  fixed evidence and never re-emits them.
-- **Never a silent edit (D5).** Healing proposes its four typed patches and a
-  person approves them as a `planReview` approval.
-- **One approval concept for every human gate (D6).** `v1:work:approval`
-  replaces the plan's feedback fields, the canvas cards and the safety gate's
-  `v1:safety:approvalRequest` sink. **The artifact hash is the guarantee**: an
-  approval is a decision about one specific command, patch, message or draft,
-  and resume compares the hash, so it can never carry to a modified artifact.
-  The surface is the MemQL OS Work app -- without one, a human gate is
-  invisible, which is exactly what the planner's canvas cards already were in
-  an engine-only cluster.
-- **The three-counter split is inherited from the plan row and means the same
-  thing.** Dollar ceilings (`tokenBudget`, `costCeiling`) EXCLUDE subscription
-  and local spend; loop caps (`maxModelCalls`, `maxRetries`, `maxEvents`,
-  `wallClockMs`) INCLUDE every call. A ceiling of zero is UNSET, never
-  "nothing allowed".
-- **The ceilings are enforced at the MODEL SEAM, and that placement answers
-  three questions at once** (memql#5580). `component/memql`'s `modelSeam` is
-  the one funnel both covered call sites pass through, it reads the run off
-  the context, and it sits BEFORE the provider call -- so the call can still
-  be refused. It asks a `RunCeilingGuard` (implemented by
-  `integrations/work.RunCeilings`, which reads the goal's ceilings and folds
-  the run's `v1:work:modelCall` rows into its spend) and refuses with a typed
-  `*memql.RunCeilingError`. The three:
-  - **A breach PARKS, it does not fail.** The refused call fails its step, and
-    `closeRun` recognises the typed error and parks the run at `waiting` on a
-    `budget` approval carrying `{ceiling, limit, actual, reason}` -- plus the
-    ceiling's name and the run's `spent` on the row. **No `resumeAt`, ever**:
-    only a person changes a ceiling. Nothing in flight is cancelled, because
-    the check runs before the provider is asked.
-  - **Every ANSWER is one model call, whoever answered** -- a provider, a
-    fleet machine, a subscription app, the replay journal, or the ai()
-    runtime's in-process caches (which answer ABOVE the seam, so `Invoke`
-    asks the guard before consulting them). The dollar buckets take only what
-    MemQL was BILLED for, so a replayed or cached answer costs a loop call and
-    nothing else. `component/work.AddCall` is that fold.
-  - **A resumed run continues its first attempt's budget.** The guard seeds
-    from the run's own journal rows, so park-approve-park is not a way to buy
-    another allowance; a replay or a fork is a different run id and rightly
-    gets its own.
-
-  Two edges, stated because silence about them would be the same defect one
-  layer down. **`maxRetries` and `maxEvents` are the EXECUTOR's counters and
-  reach no model call**, so this seam clears them and WARNS rather than
-  clearing them silently against a spend it never sees; and a run whose
-  ceilings **cannot be read** is REFUSED under the sentinel ceiling
-  `unevaluated` -- a limit nobody could read must not read like a limit nobody
-  set. A run with no `goalId` inherits no ceilings and costs the guard no read
-  at all, which is what keeps it off every automation run in the cluster.
-- **Both sweeps are in `maintenanceAutomations`, and that is not optional.**
-  The work concepts declare the composite owner tier, so under the default
-  reader actor these reads answer ZERO ROWS AND NO ERROR: a sweep that resumes
-  nothing is indistinguishable from a cluster with nothing parked.
 - **`v1:planner:plan`, `task` and `taskState` ARE RETIRED** (epic memql#5000).
-  The spine is the only model: `agent()` and `produceArtifact` open goals, a
-  tool call is a `v1:work:observation`, training is a goal.
-  `v1:planner:responsibility` STAYS -- the reactive loop reads it, and its
-  mesh routing rules were NARROWED rather than deleted, because deleting them
-  takes the responsibility intake dark cross-replica, silently.
-  `component/planner` keeps exactly two things: the container-executor seam
-  and the delegation resolver.
-
-### The proving suite -- what the platform measures about itself (epic memql#4993)
-
-A corpus of scenarios and benchmarks answering "does this work, and how well",
-measured as **the platform against the same model in a bare tool loop** with
-its machinery switched off -- no catalog, no journal, no replay, no classifier,
-no healing. No other framework is named or measured. Design record:
-[the proving suite](docs/superpowers/specs/2026-09-06-proving-suite-design.md).
-
-**The numbers must be honest before they are good, and that is a TYPE rather
-than a policy.** `component/proving/figure` carries either a `Stat` or an
-`AbsentReason`, never both and never neither; a `Stat` has `N`, median, spread
-and **no `Mean` field and no single-number constructor**; and `Render` refuses
-a figure whose provenance is incomplete for its tier. So `unmeasured` is a
-value distinct from zero all the way to the pixel, and "medians and spread,
-never a best case" is unrepresentable rather than merely discouraged.
-
-- **Two tiers, and what each may publish is a DECISION** (P1). A CI replay is
-  deterministic by construction, so pass-rate variance is trivially perfect and
-  wall-clock belongs to the runner: both read `notMeasurableOnReplay` until the
-  live tier fills them. The live lane ships **DISARMED** (P3) --
-  `proving-live.yml` is `workflow_dispatch` with no schedule -- and the
-  scorecard's tier table says so rather than leaving empty columns unexplained.
-- **An absent figure names its own reason, and the reason CHANGES rather than
-  the number appearing.** `governance.modelCallsJournaled` is absent as
-  `notMeasurableOnReplay`: the CI tier plays model responses from a cassette
-  through a fake step registry, so no call reaches the journal seam. Reporting
-  "zero provider calls" when nothing in the path calls a provider is a lie that
-  reads exactly like the headline result, and so is 1.0 for a ratio whose
-  denominator is zero. `Render` prints the figure's DETAIL when it has one.
-- **Every zero-claim is paired with a NEGATIVE CONTROL that must produce a
-  non-zero**, and a control reading zero FAILS the suite. Usually the control
-  is the same scenario's baseline arm -- a bare loop with no journal restarts
-  from the beginning, so it re-executes and re-delivers. A counter that never
-  rises on any path reads as zero forever.
-- **The CI gate blocks on STRUCTURAL properties and reports on cost and speed**
-  (P2). A scenario that stops passing, a duplicated side effect, a failed
-  governance property, a dead control, or **a metric that stopped being
-  measured at all** fail the `proving` lane. Cost and speed never do: a
-  threshold that reds the lane for runner noise gets widened until it means
-  nothing, and the structural half dies with it.
-- **`cmd/memql-bench` adopts the capability-script contract**, gated by
-  `component/proving/capability` (whose test reads the printf formats out of
-  `scripts/lib/capability.sh`) rather than by `capability_contract_test.go`,
-  whose walk is `scripts/**/*.sh`.
-- **A claim may not outlive its number** (P4). A published numeric claim in
-  README or `docs/public` carries a `<!-- proving: metric=... value=... -->`
-  marker; `TestPublishedClaimsRestOnAScorecardNumber` fails the build when the
-  committed scorecard does not carry it, reports it unmeasured, or measures it
-  differently. `<!-- proving-pending: ... -->` is the OPPOSITE marker for the
-  "does NOT make yet" table, and the mirror gate fails when one of those has
-  quietly become true. NEGATIVE CONTROLS are excluded from claim checking --
-  without that, every zero-claim is unclaimable.
-- **The pure sub-packages are a BUILD-GRAPH fact.** `figure`, `scenario`,
-  `scorecard`, `capability`, `world` and `cassette` import nothing outside the
-  standard library and each other, asserted by reading `go list -deps`.
-  `component/proving` is deliberately DATABASE-FREE; the database-touching
-  verification is the binary running end to end in the `proving` job.
-- **The journal's per-step cost is MILLISECONDS, not a ratio.** A ratio over a
-  trivial-step scenario has a degenerate denominator and measures something
-  other than its name. The right instrument is the same automation run twice in
-  one process with `Engine` set and nil -- `newWorkJournal` returns nil for a
-  nil executor, so the only difference is whether journal rows are written.
-- Rows: `v1:bench:run` and `v1:bench:sample`,
-  `@rowAuthz(clusterOwner, rankFloor="admin")`, broadcast, every mutation
-  `@serverOnly` -- a client-reachable write here is a primitive for forging the
-  numbers the README rests on. Surfaced at MemQL OS Settings -> Benchmarks
-  (`{ min: "admin" }`), where an absence takes the same room as a number and an
-  unmeasured run draws an OPEN NOTCH rather than a bar of height zero.
-  **`rankFloor=` relaxes the READ and leaves the WRITE at clusterOwner**
-  (memql#5216); without it a non-owner admin was admitted to the screen and
-  served nothing, and the refusal rendered as UNMEASURED. The four reads carry
-  `@requiresRank("admin")` to match, adjudicated in `tierDecidesTheRead`.
+  The work spine -- `v1:work:{goal,run,step,modelCall,approval,observation}`,
+  every concept on the composite owner tier -- is the only model: `agent()` and
+  `produceArtifact` open goals, a tool call is a `v1:work:observation`, and
+  training is a goal. `v1:planner:responsibility` STAYS.
+- **The run ceilings are enforced at the MODEL SEAM** (`component/memql`'s
+  `modelSeam`, memql#5580), and a breach PARKS the run on a `budget` approval
+  rather than failing it. Dollar ceilings EXCLUDE subscription and local spend;
+  loop caps INCLUDE every call, whoever answered it.
+- **MemQL OS has no runtime arrangement engine and is not getting one by
+  default** (epic memql#4984): its answer is hand-built sections under the
+  twelve interface rules in `clients/os/DESIGN.md`.
 
 ### Procedure learning (epic memql#5402)
 
 Recordings generalized into parameterized constructs by a PURE module that
-spends no model. `component/procedure` is a leaf module -- stdlib plus
-`component/work`, a build-graph fact its own `purity_test.go` asserts --
-holding canonicalize / symbolize / mine / structure / generalize / classify /
-score / select as functions over values; `integrations/procedure` is the only
-half that reads a row. Record: section 4 epic C of
-[the recording-and-learning program](docs/superpowers/specs/2026-09-13-app-session-recording-and-learning-program-design.md).
+spends no model. `component/procedure` is a leaf module that requires NOTHING
+-- the standard library alone, a build-graph fact its own `purity_test.go`
+asserts, and a stronger claim than the record's "stdlib and component/work"
+because every goalSignature it groups by is read off a row by the wiring
+rather than derived -- holding canonicalize / symbolize / mine / structure /
+generalize / classify / score / select as functions over values.
+`integrations/procedure` is the only half that reads a row. Record: section 4
+epic C of the [recording-and-learning
+program](docs/superpowers/specs/2026-09-13-app-session-recording-and-learning-program-design.md).
 
 Four rules reach outside the epic:
 
@@ -2796,66 +2441,10 @@ Five rules reach outside it:
   and `run.validation`, never a like; a disagreement with the person is kept
   (D22).
 
-### Planner / Knowledge / Validation
-
-The schema is stable, so new features add fields/automations without migrations.
-Fields are in the `.memql` files; the concepts are `v1:agents:agentAuthorization`
-(standing tiered-trust authorization), the `v1:knowledge:*` family (`document`,
-`spreadsheetRow` / `imageRegion`, the append-only `validationEvent`, and
-`domainEntitySchema` / `entityIndex` for cross-file dedup), plus
-`v1:common:knowledgeDomain` and `v1:common:documentChunk`.
-
-**Every automation execution is journaled** (epic memql#4962): the executor
-opens a `v1:work:run` row before the first step and writes a `v1:work:step`
-row at `running` before each body and again at `done` / `failed` / `skipped`
-after, under a synthetic cluster actor (`component/automations/journal.go`);
-resume reads those rows back on the SAME run id. A step at `running` with no
-receipt is a crash mid-step and resumes from there. A sandboxed dry-run holds
-no journal at all, so a preview leaves nothing resumable.
-
-**Analysis path.** A file's analysis is a system-origin work GOAL running the
-deterministic template (extract, chunk, embed, summarize), so the Training
-app's live feed is `v1:work:run` rows keyed by file id.
-
-**The planner agent loop and the Plan rows are GONE** (memql#5000, memql#5052).
-What is left of `integrations/planner` is the compile pass, the healing
-subscriber, the responsibility intake, the reactive loop and the authoring
-pipeline. The cost-safety layers the loop carried each moved or say where they
-went -- a retirement that quietly drops a ceiling is the failure
-[llm-cost-control.md](docs/public/ai/llm-cost-control.md) exists to prevent:
-the process-wide rate ceiling and identical-request circuit breaker are
-UNTOUCHED at the provider chokepoint (`component/memql/ai_guard.go`); the
-per-Plan budget is REPLACED by `component/work/budget.go` reading the RUN's
-ceilings (dollar ceiling excludes subscription and local spend, loop caps
-include every call, asserted by
-`TestCheckCeilings_TokenBudgetExcludesSubscriptionAndLocal`); complexity triage
-SURVIVES as the compile order's third tier; the specialist-creation gate is
-RECORDED in memql#5063. `produceArtifact` opens a goal naming a deterministic
-template, which reaches no model to decide anything.
-
-**That replacement was written and NOT WIRED for a while, which is worth
-knowing about the sentence above** (memql#5580). `CheckCeilings` had the split,
-had the unit test cited here, and had NO PRODUCTION CALLER -- so a run's
-ceilings were settable fields nothing read, and the only real stop was the
-process-wide guard, which is per-PROCESS and shared with every other caller on
-the node. It is wired now, at the model seam -- the work spine section above
-describes the seam, the park and the three counting rules. **The test
-named above does not hold that property and never did**: it is about the
-function's arithmetic and passes whether or not anything calls it. The one that
-holds it is `TestTheRunCeilingChainHasAProductionCaller`
-(`run_ceilings_have_a_caller_test.go`), which fails when any link of decision /
-wiring / seam goes test-only.
-
 ## Notes for Claude Code CLI
 
-- Use [GLOSSARY.md](GLOSSARY.md) to find specific documentation.
-- Several directories carry their own CLAUDE.md, and it is the first thing to
-  read before editing that tree: `component/`, `component/language/`,
-  `component/node/`, `component/architecture/`, `component/observe/`,
-  `integrations/`, `sdk/go/`, `docs/`. This is a list, not a rule -- a
-  directory without one is normal (memql#4121).
-- The local k3d cluster is self-contained (`make up`; no manual setup needed),
-  and migrations run automatically on startup.
+- Use [GLOSSARY.md](GLOSSARY.md) to find specific documentation, and read a
+  tree's own CLAUDE.md (Key Directories above) before editing that tree.
 
 ### Makefile + shell-script convention
 

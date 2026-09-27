@@ -77,7 +77,7 @@ A newer line reads, for example:
 domain "storefront" declares memql = "1.1", newer than the 1.0 this engine speaks: run an engine that speaks 1.1, or declare memql = "1.0" in storefront/memql.toml [language_version_newer]
 ```
 
-A refused domain is read by no loader at all, so its author sees exactly one refusal per domain rather than everything that reading it under a line it did not declare would produce; fix the line, and the next boot reports what the domain itself holds. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once. Pointed at one domain directory instead of at the bundle (`memqllint bundle/storefront`, or a file inside it), it checks that directory's own `memql.toml` when a mount would read the directory as a domain -- not a sub-namespace, not a `_` or `.` name, not a core domain: a malformed or newer file is refused with its code, and a missing one is a warning, because only the tree the directory is mounted in decides whether it is a domain. Linting the bundle checks every domain exactly as boot does.
+A refused domain is read by no loader at all, so its author sees exactly one refusal per domain rather than everything that reading it under a line it did not declare would produce; fix the line, and the next boot reports what the domain itself holds. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once. Pointed at one domain directory instead of at the bundle (`memqllint bundle/storefront`, or a file inside it), it checks that directory's own `memql.toml` when a mount would read the directory as a domain -- not a sub-namespace, not a `_` or `.` name, not a core domain: a malformed or newer file is refused with its code, and a missing one is a warning, because only the tree the directory is mounted in decides whether it is a domain. Linting the bundle checks every domain exactly as boot does -- a domain that holds nothing but sub-namespace directories included, which boot mounts and a package deploy stages (memql#5426).
 
 ### Adding the line
 
@@ -170,12 +170,38 @@ and, on a running cluster, `memql_dsl_deprecated_uses_total{rule="..."}`.
 
 ```bash
 memqlmigrate --rewrite=slice-syntax -w dsl/
+memqlmigrate --rewrite=allowed-roles -w dsl/
 ```
+
+`@allowedRoles(...)` is the one form whose replacement depends on what it
+names (memql#5438). It compared a single role string that meant the acting
+agent's role in an agent's tool loop and the person's cluster role over MCP,
+so a list was one of two things, and each now has its own annotation: a list
+of agent roles becomes `@requiresAgentRole(...)` with the same values, and a
+list of person roles that forms a floor becomes `@requiresRank("<its lowest
+role>")`. The rewrite leaves a list it cannot carry across exactly -- one
+mixing the two, one naming a value neither vocabulary knows, one that skips a
+rung -- and says why on stderr.
+
+**A person-list rewrite admits more than the list did, and the rewrite says so
+on stderr for every one it makes.** In an agent's tool loop `@allowedRoles`
+compared the AGENT's own role (`assistant`, `specialist`), which no person
+role matches, so a list of person roles refused every agent and only a person
+over MCP could pass it. `@requiresRank` judges the person a call is for, so
+after the rewrite **an agent acting for somebody at or above the floor can
+call the tool** -- and so can a person holding a custom role ranked at or above
+it, which a list of slugs could not name. Both are deliberate (the design
+record for memql#5438), and each is reported so it can be reviewed: no
+annotation keeps a tool from every agent, so a tool that must not be reachable
+by one needs that decided before its rewrite lands. An agent-list rewrite
+admits nothing new: `@requiresAgentRole` compares the same agent role the list
+did.
 
 <!-- deprecation-window:begin -- generated from component/language/deprecation; see deprecation_window_docs_test.go -->
 
 | Form | Write instead | Rewrite | Deprecated in | Stops loading in | Rule |
 |---|---|---|---|---|---|
+| `@allowedRoles(...)` | `@requiresAgentRole(...) or @requiresRank(...)` | `memqlmigrate --rewrite=allowed-roles` | 0.24.0 | 0.26 | `deprecated_allowed_roles` |
 | `array(T)` | `[]T` | `memqlmigrate --rewrite=slice-syntax` | 0.23.0 | 0.25 | `deprecated_array_type` |
 
 <!-- deprecation-window:end -->
@@ -212,6 +238,8 @@ dsl/
 ```
 
 Authoring reference skeletons live under `dsl/_reference/` (`_concept`, `_shape`, `_spec`, `_trait`, `_agent`); files whose path starts with `_` are never loaded.
+
+**Only an automation's file is a load rule.** Every loader reads every `.memql` file of a domain, whatever its name, so for every other kind the per-kind file above is the layout rather than a requirement. An automation is the exception: the automation loader, which wires triggers, reads a domain's automations from its `automations.memql` and from no other file. An automation declared in any other file -- or in a directory whose name begins with `.` -- is refused at load, naming the file it belongs in (`construct_misplaced`), in the embedded tree, a `MEMQL_DSL_PATH` bundle, a pack, a package and `memqllint` alike. Before the refusal existed such an automation passed every gate that reads the whole tree and loaded as nothing, with a clean boot. A directory whose name begins with `_` is different: it is soft-disabled, so no loader and no gate reads anything in it, and an automation there is skipped with everything beside it, without a word -- which is what parking a directory is for.
 
 When `MEMQL_DSL_PATH` is unset, the binary reads its baked-in embedded tree. Setting `MEMQL_DSL_PATH=/path/to/dsl-root` reads from disk instead, with per-namespace fallback to the embedded copy — useful for dev hacking, per-deploy patches, and test fixtures.
 
@@ -327,10 +355,41 @@ Concepts are schemas for nodes (like tables in SQL). Each concept is declared in
 > refused at load and `memqlmigrate --rewrite=attributes` deletes it. Pin a
 > deliberate divergence with `namespace.pin`.
 
+A concept that does not parse refuses boot like any other malformed construct
+(`concept_unparsed`, or the parser's own rule id when its refusal carries one),
+naming the file and the line of its `concept` keyword; it used to be dropped
+with nothing reported, so a node booted without it (memql#5426). A field's
+`@pattern` is a regular expression in Go's RE2 syntax, compiled at load, and one
+that does not compile is refused there (`pattern_invalid`) rather than on the
+concept's first write.
+
 Cross-domain references are imported with a file-top
 `use <domain>.<construct>.{ names }` line. Constructs of the file's
 OWN domain are ambient -- in scope with no import (#2617); the tree
 gate keeps redundant same-domain imports out of the corpus.
+
+The concept a query's or a mutation's signature binds --
+`query <Concept> <name>` -- resolves through the file's imports, then through
+its own domain; a spec's binding resolves to an imported shape or concept.
+Refused at load with the rule id `signature_concept_unresolved`
+(memql#5433):
+
+- a name no import brings in that is not a concept of the file's own domain
+  -- the refusal names the import to add when another domain declares it;
+- a name an import brings in when no mounted domain declares a concept of
+  that name, or when several do and the import's namespace selects none of
+  them. Such an import used to bind the construct to no concept at all, so a
+  query with no filter loaded and matched nothing.
+
+Not refused: an import's namespace is read only to choose between concepts
+that share the name. When exactly one mounted domain declares the concept,
+the import binds it whatever namespace the import names --
+`use crm.concepts.{ lead }` binds `v1:sales:lead` when `sales` alone declares
+a `lead` -- and an import of a shape or a function that shares the name is
+read the same way. A shape and a seed resolve their concept by name across every
+mounted domain -- a shape preferring its own domain when two declare the name,
+a seed as the seed materializer resolves it, which never reads an import --
+and carry the same rule id when no domain supplies it.
 
 <!-- corpus: 2026/examples/memql/concepts/retention-override.memql -->
 ```memql
@@ -819,7 +878,10 @@ one that cannot, and names the node, the position, the nearest pushdown
 spelling and the rule's id: `lower(row.email) == args.email` is refused in a
 filter, and `row.email == lower(args.email)` is the filter that runs. The id is
 printed last, in brackets, and carried as a field on the load report and on an
-authoring diagnostic; the message may be reworded, the id may not:
+authoring diagnostic -- its `code`, in process and over gRPC alike. The editor
+shows each refusal on the node it refuses as you type, with the id as the
+diagnostic's code ([load refusals](sense.md#load-refusals)). The message may be
+reworded, the id may not:
 
 | Rule id | Refused |
 |---|---|
@@ -1030,10 +1092,17 @@ authored language: it keeps bare payload fields, has no lambdas, and refuses
 | Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && active==true`.       |
 | Limit                | Use `paginate(<expr>, limit)` to request an explicit page size; omitting both `paginate` and `sort` caps the read at `MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop). Continuation is via keyset cursors, not an offset skip. |
 
-The legacy parser of this form still reads `;` as AND and `,` as OR
-(memql#3630), which is why a `,` inside parentheses was once an authorization
-bypass (memql#3612). No authored expression can write either: the parser refuses
-both in a `.memql` file, with every other [retired spelling](#retired-spellings).
+`&&` and `||` are the only connectives. The internal form once also read `;`
+as AND and `,` as OR, which is how
+`(ownerUserId==actor.userId, visibility=="public")` became a disjunction and
+an authorization bypass (memql#3612). Both are refused now, in this form as in
+a `.memql` file: `;` since memql#5375 and `,` since memql#5439, the comma with
+the same rule code, `retired_comma_connective`, that the authored language
+refuses it with. A comma still separates arguments, list elements, a
+directive's parameters and a traversal's label from its filter; it never joins
+two conditions. A traversal takes one filter, so two are joined inside it:
+`parentOf(concept==v1:examples:hub || concept==v1:examples:space)`, never
+`parentOf(concept==v1:examples:hub, concept==v1:examples:space)`.
 
 IDs are persisted as `<concept>:<raw-id>`. MemQL supports both full IDs and short IDs (when concept context is provided):
 
@@ -1136,6 +1205,7 @@ Use `sort(<expr>, "<field>", "<direction>?", ...)` to order results. The functio
 - Must wrap the entire query expression (i.e., `sort(...)` should be the outermost call).
 - Supported fields: the row intrinsics `id`, `concept`, `createdAt`, `createdBy`, `type` -- each also addressable through the `row.` namespace (`"row.createdAt"`) -- and bare payload properties (`status`, `metadata.tags`).
 - In an authored `.memql` sort clause the namespaced spelling is required for intrinsics and enforced by CI (memql#2786), because a bare key cannot be told apart from a payload property of the same name. This runtime form still accepts either spelling, so existing SDK and API callers are unaffected.
+- An authored sort clause is also held to the query's concept at load: every key names a declared field or a sortable row intrinsic, and a word written where a direction goes is `"asc"` or `"desc"` ([Sort keys](#sort-keys), memql#5429). A direction is read in any case, here and in an authored clause.
 - Limits and offsets always apply **after** sorting. Sorting on payload properties may cause the engine to fetch up to `MEMQL_MEMORY_ENGINE_MAX_WINDOW` rows to guarantee correctness.
 
 Example:
@@ -1232,6 +1302,14 @@ filter row => childOf(w => w.id == args.worldId) && row.tier == "silver"
 That selects the silver-tier children of the world `args.worldId`. The internal
 form writes the same traversal with a filter as its argument:
 `childOf(concept==v1:examples:world && id=="v1:examples:world:world-aurora") && tier=="silver"`.
+
+A traversal takes ONE lambda (or, in the internal form, one filter), after its
+optional label. Rows that meet either of two conditions are one lambda joined by
+`||` -- `childOf(w => w.id == args.a || w.id == args.b)` -- and never two
+arguments: the internal form's `childOf(a, b)` once read its comma as OR, and is
+refused naming `childOf(a || b)` (memql#5439).
+`memqlmigrate --rewrite=expressions` writes a legacy traversal, comma and all,
+as its lambda.
 
 | Function        | Purpose                                                                                                  |
 |-----------------|----------------------------------------------------------------------------------------------------------|
@@ -1402,7 +1480,7 @@ prompt emitConstruct {
 }
 ```
 
-`@level` is **required on every prompt**, in the embedded tree and in a bundle mounted at `MEMQL_DSL_PATH` alike; a prompt without one refuses to load and the message names all four values. **Modality is never declared** — whether a call is chat, streaming chat, tools, structured output, vision or an embedding is derived from the call itself and interface-checked by the router.
+`@level` is **required on every prompt**, in the embedded tree and in a bundle mounted at `MEMQL_DSL_PATH` alike; a prompt without one refuses to load (`prompt_level_missing`, a `@disabled` prompt included) and the message names all four values. **Modality is never declared** — whether a call is chat, streaming chat, tools, structured output, vision or an embedding is derived from the call itself and interface-checked by the router.
 
 ### Policies
 
@@ -1506,6 +1584,16 @@ Logic prompts (routing / suggest / classification) use the structured-output pat
 **`@level` is required** (see [Levels](#levels) above): a prompt with no level refuses to load, because a guessed level is a routing decision nobody wrote. **`@defaultProvider` survives as an explicit PIN** — it rides the request's explicit-provider field and still wins over every rule — which is why the rule that it may not name a policy still holds. A pin is an override, not the ordinary way to choose: in this repository `TestNoPaidDefault` refuses a prompt pinned to a federated provider, and every concrete provider record shipped here is federated, so a pin naming one routes around the local-first rule the platform ships.
 
 **The body must cover the template, and `@defaultProvider` must name a real provider** (memql#3616). The input schema compiles with `additionalProperties: false` and is validated **before** the template renders, so a variable the `.tmpl` reads but the body omits is a field no caller can ever supply — the load refuses rather than registering a schema that cannot serve its own template. Likewise `@defaultProvider` must name a declared `provider`, never a `policy` slug: a dangling name does not error at call time, it silently falls through to the default provider. A `@disabled` provider still counts as declared. See [authoring rule 28](authoring-rules.md).
+
+**A field's `@default` converts to the field's type** (memql#5430), by the rule
+a [tool field's](#tools) does: `@default("en")` on a `string` field,
+`@default("3")` on an `int` field, `"true"` or `"false"` on a `boolean`, one of
+an `enum(...)` field's values. An unquoted number is read as the text it was
+written as -- `@default(3)` and `@default("3")` are one default, and so are the
+refused `@default(1e3)` and `@default("1e3")` on an `int` field. A default that
+does not convert is refused at load as `prompt_default_type`, naming the prompt,
+the field, its type and the value, and the input schema publishes the default
+with the field's type, an integer keeping every digit.
 
 Two legacy forms are retired (both rejected at parse time):
 - `func (Prompt) name(ctx any) { ... }` — receiver-function wrapping.
@@ -1716,6 +1804,7 @@ mutation folder archiveFolder {
 - Longhand: a bare `args.X` entry spreads the field under its own name; `name: <expr>` assigns explicitly.
 - Engine-provided names are available in the body: `now` (RFC3339 timestamp captured at eval start), `actor.userId` / `actor.role` / `actor.identityId` / `actor.isClusterOwner`, `partition`, and allow-listed `config.X`.
 - A value is any in-process expression: `"si-" + hash(args.agentId)`, `canonicalId(args.folderId, "folder")`, `args.title ?? "Untitled"`, `args.pinned ? "top" : "normal"`. The current time is the bare reserved `now` (no call parens).
+- The write-shaping annotations -- `@createOnly`, `@noUnset`, `@mergeFields`, `@appendFields`, `@addToSet`, `@removeFromSet` -- change how a WRITTEN top-level field meets the stored row, so each field they name is one the write can shape, or the mutation is refused at load (memql#5426): a top-level field the bound concept declares (`write_annotation_undeclared_field`), of a type the annotation shapes -- a list for the three list verbs, an object or map for `@mergeFields` (`write_annotation_field_type`) -- that the block writes (`write_annotation_unwritten_field`). A field the write omits is already kept by the read-merge, so naming one protects nothing. A block whose payload is one caller-supplied object (`payload: args.payload`) is exempt from the last rule.
 
 ## Specs
 
@@ -1808,6 +1897,12 @@ query artifact artifactsInFolder {
 A long filter continues on the lines below it: a line that opens with `&&`,
 `||` or `??` joins the one above it, as the example shows.
 
+Each clause is written once. A second `filter` or `sort` line used to replace
+the first without a word -- dropping its conditions or its keys -- and a clause
+written twice is refused at parse as `query_clause_duplicate`, quoting both
+lines (memql#5429): join the conditions with `&&` in one filter, and list every
+key in one sort clause.
+
 Body directives: `filter` (the predicate), `shape` (named projection), and optional `sort "field", "dir"` / `paginate N` / `refine row => ...` lines ([the refine clause](#the-refine-clause)):
 
 <!-- corpus: 2026/examples/memql/queries/sort-paginate.memql -->
@@ -1826,6 +1921,39 @@ query run newestRunForGoal {
   shape   workRunFull
 }
 ```
+
+#### Sort keys
+
+A sort key names what the query's concept declares, and the load holds it to
+that (memql#5429):
+
+- **A payload field, bare**: `sort "priority", "desc"`. A dotted key names a
+  field inside a declared block, `"routing.queue"`, held hop by hop the way a
+  filter holds `row.routing.queue`: past a field whose keys the declaration
+  does not close -- an open `object`, a map, a union -- the rest of the path is
+  the author's to answer for, and a hop through a scalar or a list names
+  nothing.
+- **A row intrinsic, under `row.`**: `"row.id"`, `"row.concept"`,
+  `"row.type"`, `"row.createdAt"` or `"row.createdBy"`. `row.provenance` is an
+  object and has no order. A bare intrinsic (`"createdAt"`) is refused by its
+  own gate, naming `"row.createdAt"` ([authoring rules](authoring-rules.md)).
+- **A direction, `"asc"` or `"desc"`**, after the key it orders. Lower case
+  is the spelling to write; a direction is read in any case, so `"DESC"`
+  loads and orders descending. A key written with none sorts descending.
+
+Anything else is refused at load, naming the key and the fix, with the rule id
+`sort_key_unknown` for a key and `sort_direction_unknown` for a word written
+where a direction goes that is no direction. A string after a key that is not
+a direction is read as the next key, so `sort "priority", "sideways"` used to
+load as two keys; it is refused as an unknown direction when the concept
+declares no field `sideways`, and the refusal names the field it may have
+meant instead. The runtime `sort(...)` form of the internal query language is
+not an authored clause and keeps its looser reading ([Sorting](#sorting)).
+
+Every authored query binds its concept in its signature, and one whose concept
+does not resolve is refused before its sort clause is read. A load that holds
+no concept registry at all -- an offline tool's -- checks only what needs no
+concept: the `row.` namespace and the reserved names.
 
 ### Temporal queries (`asOf`)
 
@@ -1873,6 +2001,8 @@ use common.traits.{ isActiveRecord, isNotDeleted }
 ```
 
 The dotted path maps to a file on disk (`library.concepts` → `dsl/library/concepts.memql`); the brace list names the constructs imported into local scope.
+
+A `use` line is **file-top**: one written below the file's first construct is refused, by the parser and at load alike (`use_not_file_top`), naming the line. Boot never parses a file whole -- each loader slices out the constructs it owns -- so the load has a gate of its own for it (memql#5426).
 
 #### Aliasing an import (`as`)
 
@@ -2006,6 +2136,8 @@ How names resolve inside a body:
 
 A bare name is never a payload property: see [the lambda parameter and bare names](#the-lambda-parameter-and-bare-names). A shape body is the exception, because it is a list of paths rather than an expression: there a bare `name` is the payload property.
 
+**Every `args.X` a body reads is declared** (memql#3626): a read the `args` block does not declare is refused at load (`args_undeclared`), in a query, mutation or logic body, in an automation's statements, and in an automation's `@filter` and `@loop` `until` -- the trigger payload is bound into the declared arguments before the filter decides, so an undeclared one read absent on every fire (memql#5426).
+
 **Reserved engine names.** `now`, `actor`, `partition`, `config`, `trace` are reserved as top-level identifiers. An `args` field that collides with one of these names is rejected at load time.
 
 > **Retired.** The `ctx` envelope is gone from the author surface — no `ctx.input.X`, no `ctx.X` shorthand, no `ctx.output =` assignment. Authors read caller args as `args.X` and return values directly.
@@ -2117,7 +2249,7 @@ A `for` over a query's rows, with a filter clause and a nested bind:
   }
 ```
 
-**A construct call is a statement of its own**: the whole right-hand side of `:=`, the whole value of `return`, or a line by itself. A call nested inside an expression is refused, because a side effect that is not a statement is not journaled, previewed or retried. Arguments are always named (`logic triple(n: 14)`). A bare call inside an expression is a catalog function (`lower(x)`, `addDuration(now, "PT1H")`) or a spec or trait predicate; anything else is refused at load (`body_call_unknown`), since it could only fail when it runs.
+**A construct call is a statement of its own**: the whole right-hand side of `:=`, the whole value of `return`, or a line by itself. A call nested inside an expression is refused, because a side effect that is not a statement is not journaled, previewed or retried. Arguments are always named (`logic triple(n: 14)`). A bare call inside an expression is a catalog function (`lower(x)`, `addDuration(now, "PT1H")`) or a spec or trait predicate; anything else is refused at load (`body_call_unknown`), since it could only fail when it runs. So is a method no value has -- a method is resolved against the ones a list or a string has (`.count()`, `.includes(s)`), and `row.status.startsWith("x")` names neither (prefix selection is the `startsWith` operator). Both rules hold in an automation's `@filter` and `@loop` `until` as they do in its statements, since one evaluator runs them all (memql#5426).
 
 ### Trailing clauses
 
@@ -2298,6 +2430,22 @@ tool findUsers {
 }
 ```
 
+A field's `@default` is one quoted string, and the text between the quotes must
+convert to the field's type (memql#5430) the way a default has always been
+converted when a call leaves the field out: an integer on an `integer` field
+(`"10"`), a number on a `number` field (`"2.5"`), `"true"` or `"false"` on a
+`boolean` field, one of the declared values on an `enum(...)` field, JSON on an
+`array` or `object` field (`"[]"`), and any text on a `string` field. Those are
+the spellings to write; the other spellings the conversion always read -- `"+10"`
+or `"010"`, `".5"`, `"1"` or `"TRUE"` for a boolean -- still load. The input
+schema publishes the default with its type and in its canonical form --
+`"default": 10`, not `"default": "10"` -- and a call that leaves the field out
+receives that value. A default the conversion cannot read, `@default("twenty")`
+on an `integer` field, is refused at load with the rule id
+`tool_default_type`, naming the tool, the field, its type and the value -- a
+`@disabled` tool's included, since switching it back on is only removing the
+annotation.
+
 The tool loop binds tool-call args to handler args and forwards. A query handler is one construct call -- a query, mutation, logic, builtin or automation -- or that call inside `paginate(...)`, as above, and it is parsed when the tool loads: a handler that is not a call, such as a raw filter, refuses the load. It reads each tool argument as `args.<name>`, as in `@handler(type="query", query="query findEvents(title: args.title)")`, and the call is rendered from the arguments' values, so a caller's text is data whatever it contains; an argument the caller did not supply is left out of the call. The `$args.<name>` text substitution is retired: `$args.x`, bare or quoted as `"$args.x"`, refuses the load -- write `args.x` (`memqlmigrate --rewrite=expressions` rewrites both spellings). The legacy `func (Tool)` form is retired; the parser rejects it with a migration hint.
 
 A webhook handler, `@handler(type="webhook", url=..., method=...)`, is written the same way. Its url is one expression over the tool's arguments: a fixed address is a quoted string, and a caller's value is joined with `+`, as in `url="\"https://api.example.com/items/\" + args.id"`. A bare address refuses the load, and the refusal shows it quoted. With no body template the request body is the tool's arguments as JSON; a body template (a tool registered from Go can carry one) is a map whose string leaves are expressions over `args`, fixed text quoted, and an argument the caller did not supply omits its key. `$args.` is refused in a url or a body leaf exactly as in a query handler, with the same replacement.
@@ -2311,9 +2459,41 @@ tool notifyOnCall {
 }
 ```
 
+### Who may call a tool
+
+A tool is called by an **agent**, in its tool loop, or by an authenticated **person** over the MCP connector, and it can gate each on its own axis (memql#5438):
+
+- `@requiresAgentRole("assistant", ...)` gates WHICH AGENT is calling: the acting agent's role, one of the `v1:agents:agent` concept's own `role` values (`assistant`, `specialist`), checked against that declaration when the tree loads. A person over MCP is not an agent, so a tool carrying it is neither listed nor callable for them.
+- `@requiresRank("<role>")` gates the PERSON the call is for -- the authenticated user over MCP, or the user an agent acts for -- on the same ladder a query, a mutation or a logic floor uses: that role or one ranked above it, a custom role included, validated against the ladder at load.
+
+A tool with neither is callable by every agent and by an authenticated person over MCP; one with both requires both. A tool is listed to a caller exactly when a call from them would be admitted -- an MCP session with no authenticated identity (stdio without `MEMQL_MCP_USER`) is offered none, because it may call none.
+
+**The person is judged at the rank they hold.** An agent often acts under a stand-in role -- borrowed authority, or background work that carries no captured interactive grant, both of which assert `writer` whatever the person holds -- and a floor is never judged against that: the person's role is read from the principal table for the call, so an agent acting for a `reader` does not clear a `writer` floor and one acting for an `admin` clears an `admin` floor. A person the table does not resolve holds no role and clears no floor.
+
+`@allowedRoles(...)`, which compared one role string meaning either of the two, is in a [deprecation window](#forms-in-a-deprecation-window). Rewriting a list of PERSON roles to `@requiresRank` widens the gate: the list refused every agent, and the floor admits an agent acting for a person at or above it.
+
+<!-- corpus: 2026/examples/memql/builtins/tool-gates.memql -->
+```memql
+/// Find users for the conversation; offered to the assistant agent only
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
+@requiresAgentRole("assistant")
+tool findUsersForAssistant {
+  active  boolean  @description("Filter by active status")
+  limit   integer  @default("10") @description("Maximum number of results to return")
+}
+
+/// Find users; for developers and anyone ranked above them
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
+@requiresRank("developer")
+tool findUsersForDevelopers {
+  active  boolean  @description("Filter by active status")
+  limit   integer  @default("10") @description("Maximum number of results to return")
+}
+```
+
 ## Automations
 
-Automations are event- or schedule-triggered workflows declared in `dsl/<namespace>/automations.memql`, written in the [body language](#bodies):
+Automations are event- or schedule-triggered workflows declared in `dsl/<namespace>/automations.memql`, written in the [body language](#bodies). That file is the only one the automation loader reads, and an automation declared anywhere else is refused at load (`construct_misplaced`; see [The DSL Tree](#the-dsl-tree)):
 
 <!-- corpus: 2026/examples/memql/automations/event-trigger.memql -->
 ```memql
@@ -3090,7 +3270,8 @@ prompt summariseDoc { title string  content string! }
 ### The internal query form
 
 A client sends these strings to `Execute`. They keep the older grammar: bare
-payload fields, no `!`, no `in`.
+payload fields, no `!`, no `in`. Their connectives are `&&` and `||` only:
+`;` and `,` are refused, as in a `.memql` file.
 
 ```text
 concept==v1:user && active==true                   # a filter
@@ -3118,6 +3299,8 @@ A small set of legacy runtime shapes is rejected upfront with a typed `ErrUnsupp
 - Trailing `@timestamp` / `@latest` suffix — pin the timestamp via `asOf(...)` or at the DSL definition site.
 - Inline spec definition (`name := expr`) — declare the spec in the DSL and apply it in a declared query.
 - Trailing comma in the query string.
+
+The two retired connectives are refused by the parser itself: `;` as AND since memql#5375, and `,` as OR since memql#5439 -- the comma with the rule code the authored language refuses it with, `retired_comma_connective`, carried by the `*langparser.RetiredFormError` the engine returns (`RuleCode()`). A comma directly inside a traversal is refused naming the call to write, `parentOf(a || b)`.
 
 Cross-parser equivalence for the supported shapes is guarded by `TestParseViaLangparser_Equivalence` in `component/memql/parser_langpath_test.go`. Add a row there if a new caller adopts a shape the corpus doesn't cover.
 

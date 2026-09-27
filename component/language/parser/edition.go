@@ -98,7 +98,11 @@ const EditionStatus = "frozen"
 // than the extension, never older. If you are here because you bumped the
 // extension and wondered whether this should follow, the question to ask is
 // whether GrammarVersion moved. If it did not, leave this alone.
-const EditorRelease = "0.5.1"
+//
+// It moved to 0.6.1 with the agent-role axis (memql#5438): GrammarVersion
+// moved, 0.5.1 and 0.6.0 had shipped, so the grammar needed a release of its
+// own.
+const EditorRelease = "0.6.1"
 
 // FrontEnd is how one edition's source reaches the core parser.
 type FrontEnd struct {

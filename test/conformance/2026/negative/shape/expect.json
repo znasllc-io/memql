@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {
+      "file": "concept-declared-nowhere.memql",
+      "verdict": "refuse_load",
+      "code": "signature_concept_unresolved",
+      "message": "binds concept \"supportCard\", which does not resolve: no registered concept has trailing segment \"supportCard\"",
+      "note": "memql#5433: every construct whose signature binds a concept that does not resolve carries one rule id. A shape resolves its concept by name across every mounted domain, preferring its own on a collision."
+    }
+  ]
+}

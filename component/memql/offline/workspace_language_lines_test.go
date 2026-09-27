@@ -13,14 +13,19 @@ import (
 
 // TestOfflineSense_WorkspaceLanguageLinesNameTheRefusedDomain: of the
 // directories in a workspace, exactly the ones the build mounts are resolved,
-// and the one without a memql.toml is refused with the missing-line code.
+// and each one without a memql.toml is refused with the missing-line code.
 //
-// The two directories the build does NOT mount are the point. identity/ is a
-// core domain -- the embedded tree owns it and it speaks the engine's line --
-// and fixtures/ holds a .memql file only below its top level, which the mount
-// does not take for a domain. The parser's resolver on its own would resolve
-// fixtures/ and refuse it, so an editor keyed on it would flag a directory no
-// build reads.
+// The directories the build does NOT mount are the point. identity/ is a core
+// domain -- the embedded tree owns it and it speaks the engine's line --
+// _drafts/ is soft-disabled, and sidecars/ holds no .memql file at all. The
+// parser's resolver on its own would resolve some of them and refuse them, so
+// an editor keyed on it would flag a directory no build reads.
+//
+// fixtures/ holds a .memql file only below its top level. Boot mounts it --
+// every non-hidden directory of a MEMQL_DSL_PATH root is a domain -- and the
+// build's mount does too since memql#5426, so its missing line is refused
+// here as it is at boot; before, the editor stayed silent about a domain
+// that refused the node.
 func TestOfflineSense_WorkspaceLanguageLinesNameTheRefusedDomain(t *testing.T) {
 	root := fstest.MapFS{
 		"gadgets/traits.memql":          languageLineDomainFile(),
@@ -28,6 +33,8 @@ func TestOfflineSense_WorkspaceLanguageLinesNameTheRefusedDomain(t *testing.T) {
 		"widgets/" + dslfs.ManifestFile: languageLineFile(),
 		"identity/traits.memql":         languageLineDomainFile(),
 		"fixtures/deep/traits.memql":    languageLineDomainFile(),
+		"_drafts/traits.memql":          languageLineDomainFile(),
+		"sidecars/prompts/reply.tmpl":   &fstest.MapFile{Data: []byte("{{.x}}\n")},
 	}
 
 	got := memql.ResolveWorkspaceLanguageLines(root)
@@ -35,30 +42,34 @@ func TestOfflineSense_WorkspaceLanguageLinesNameTheRefusedDomain(t *testing.T) {
 	if got.Root != "" {
 		t.Errorf("Root = %q; want \"\" -- the domains sit at the top of the workspace", got.Root)
 	}
-	if len(got.Lines) != 2 {
-		t.Errorf("Lines = %v; want exactly the two mounted domains, gadgets and widgets", got.Lines)
+	if len(got.Lines) != 3 {
+		t.Errorf("Lines = %v; want exactly the three mounted domains, fixtures, gadgets and widgets", got.Lines)
 	}
-	if line, ok := got.Lines["gadgets"]; !ok || !line.Refused {
-		t.Errorf("gadgets line = %+v (present %v); want a refused line -- it declares none", line, ok)
+	for _, refused := range []string{"gadgets", "fixtures"} {
+		if line, ok := got.Lines[refused]; !ok || !line.Refused {
+			t.Errorf("%s line = %+v (present %v); want a refused line -- it declares none", refused, line, ok)
+		}
 	}
 	if line, ok := got.Lines["widgets"]; !ok || line.Refused {
 		t.Errorf("widgets line = %+v (present %v); want an accepted line -- it declares the engine's", line, ok)
 	}
-	for _, notMounted := range []string{"identity", "fixtures"} {
+	for _, notMounted := range []string{"identity", "_drafts", "sidecars"} {
 		if _, ok := got.Lines[notMounted]; ok {
 			t.Errorf("Lines carries %q, a directory the build does not mount", notMounted)
 		}
 	}
 
-	if len(got.Problems) != 1 {
-		t.Fatalf("Problems = %+v; want exactly one, for gadgets", got.Problems)
+	if len(got.Problems) != 2 {
+		t.Fatalf("Problems = %+v; want exactly two, for fixtures and gadgets", got.Problems)
 	}
-	p := got.Problems[0]
-	if p.Domain != "gadgets" || p.Code != langparser.CodeLanguageLineMissing {
-		t.Errorf("problem = {Domain: %q, Code: %q}; want {gadgets, %s}", p.Domain, p.Code, langparser.CodeLanguageLineMissing)
-	}
-	if want := "gadgets/" + dslfs.ManifestFile; p.Source != want {
-		t.Errorf("problem Source = %q; want %q", p.Source, want)
+	for i, domain := range []string{"fixtures", "gadgets"} {
+		p := got.Problems[i]
+		if p.Domain != domain || p.Code != langparser.CodeLanguageLineMissing {
+			t.Errorf("problem %d = {Domain: %q, Code: %q}; want {%s, %s}", i, p.Domain, p.Code, domain, langparser.CodeLanguageLineMissing)
+		}
+		if want := domain + "/" + dslfs.ManifestFile; p.Source != want {
+			t.Errorf("problem %d Source = %q; want %q", i, p.Source, want)
+		}
 	}
 }
 

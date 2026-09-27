@@ -74,7 +74,10 @@ type Token struct {
 }
 
 // Diagnostic is one entry in the Diagnose result. Severity values:
-// 1=Error, 2=Warning, 3=Info, 4=Hint.
+// 1=Error, 2=Warning, 3=Info, 4=Hint. Code is the diagnostic's stable id --
+// a rule's (`actor-unknown-property`), a retired form's, or, from the
+// load pass, a Lower refusal's (`lower_unknown_field`) -- and is what a
+// caller keys a quick fix on; Message is prose and may be reworded.
 type Diagnostic struct {
 	Severity int
 	Message  string
@@ -96,6 +99,21 @@ type CompletionItem struct {
 	// consumer without snippet support must render a plain-text
 	// degradation rather than inserting the tabstops literally.
 	IsSnippet bool
+	// AdditionalEdits are edits the completion makes ELSEWHERE in the
+	// document, never overlapping where InsertText goes: the file-top
+	// `use` line a concept import adds for a concept the file does not
+	// import yet (memql#5426). A consumer that cannot apply them must not
+	// offer the item -- its InsertText alone is not what its Label
+	// promises.
+	AdditionalEdits []TextEdit
+}
+
+// TextEdit is one edit a completion makes besides its insert text.
+// Positions are 1-based; a Range whose Start and End meet is an
+// insertion.
+type TextEdit struct {
+	Range   Range
+	NewText string
 }
 
 // Hover is the structured response from a Hover request. Contents
@@ -169,10 +187,19 @@ func (c *Client) Tokenize(ctx context.Context, source string) ([]Token, error) {
 // regular language warnings + errors the editor should surface in
 // the gutter. The Go error return is reserved for wire-level
 // failures (dispatcher closed, context cancelled, etc.).
-func (c *Client) Diagnose(ctx context.Context, source string) ([]Diagnostic, error) {
+//
+// filePath is the document's path relative to the DSL root
+// ("planner/queries.memql"). With it the cluster also runs its load over
+// the source and returns Lower's refusals -- a field the concept does not
+// declare, a context spec applied to the row -- as errors whose Code is the
+// refusal's rule id (memql#5434). That pass costs the load of the
+// document's constructs, so a caller diagnosing on every keystroke may
+// send "" and ask with the path when the author pauses or saves. "" skips
+// the pass: without the path a name two domains declare resolves wrongly.
+func (c *Client) Diagnose(ctx context.Context, source, filePath string) ([]Diagnostic, error) {
 	msg := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_SenseDiagnose{
-			SenseDiagnose: &memqlv1.SenseDiagnoseMsg{Source: source},
+			SenseDiagnose: &memqlv1.SenseDiagnoseMsg{Source: source, FilePath: filePath},
 		},
 	}
 	resp, err := c.dispatcher.SendAndWait(ctx, msg)
@@ -216,9 +243,15 @@ func (c *Client) Complete(ctx context.Context, source string, cursor Position) (
 	if result == nil {
 		return nil, nil
 	}
-	out := make([]CompletionItem, 0, len(result.GetItems()))
-	for _, item := range result.GetItems() {
-		out = append(out, CompletionItem{
+	return protoCompletionItems(result.GetItems()), nil
+}
+
+// protoCompletionItems decodes the wire's completion items, each with the
+// edits it makes elsewhere in the document.
+func protoCompletionItems(items []*memqlv1.SenseCompletionItem) []CompletionItem {
+	out := make([]CompletionItem, 0, len(items))
+	for _, item := range items {
+		ci := CompletionItem{
 			Label:         item.GetLabel(),
 			Kind:          item.GetKind(),
 			Detail:        item.GetDetail(),
@@ -226,9 +259,13 @@ func (c *Client) Complete(ctx context.Context, source string, cursor Position) (
 			InsertText:    item.GetInsertText(),
 			SortPriority:  int(item.GetSortPriority()),
 			IsSnippet:     item.GetIsSnippet(),
-		})
+		}
+		for _, e := range item.GetAdditionalEdits() {
+			ci.AdditionalEdits = append(ci.AdditionalEdits, TextEdit{Range: protoRange(e.GetRange()), NewText: e.GetNewText()})
+		}
+		out = append(out, ci)
 	}
-	return out, nil
+	return out
 }
 
 // Hover asks Sense for the symbol-info markdown at the supplied

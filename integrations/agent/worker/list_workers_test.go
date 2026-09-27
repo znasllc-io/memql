@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
@@ -39,7 +40,7 @@ func TestHandleListWorkers_IncludesCapabilityDescriptor(t *testing.T) {
 	})
 
 	integration := NewIntegration(nil, registry, nil, nil)
-	nodes, err := integration.handleListWorkers(context.Background(), map[string]any{"ownerUserId": "user-1"}, 0)
+	nodes, err := integration.handleListWorkers(auth.ContextWithUserActor(context.Background(), "user-1"), map[string]any{"ownerUserId": "user-1"}, 0)
 	if err != nil {
 		t.Fatalf("handleListWorkers: %v", err)
 	}

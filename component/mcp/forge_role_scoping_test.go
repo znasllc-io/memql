@@ -6,7 +6,13 @@ package mcp
 //   - owner/developer sees all 11 forge tools (full developer surface).
 //   - reader sees exactly the 4 all-team tools (submit + browse; no
 //     queues, no transitions, no history, no project registration).
-//   - non-team role (empty -> "specialist" default) sees zero forge tools.
+//   - a caller with no role on the ladder sees zero forge tools.
+//
+// The forge tools gate the PERSON with a rank floor (memql#5438): the
+// developer tools @requiresRank("writer"), the all-team tools
+// @requiresRank("reader"). The fixtures below carry exactly those floors, and
+// the fake engine hands them to the engine's real gate, whose ladder here is
+// the compiled base one (no database).
 //
 // Uses a hand-built fake engine so no live DB/DSL is needed. The real-engine
 // conformance (DSL loaded, @mcp tags correct) is covered by
@@ -14,28 +20,29 @@ package mcp
 // This test focuses on the listMCPTools role-filter path.
 
 import (
-	"context"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/memql"
 )
 
 // forgeToolFixtures returns a fake registry with all 11 forge tools carrying
-// the @allowedRoles split shipped in #1791:
-//   - developer-only (owner/admin/developer/writer): forgeRegisterProject,
+// the rank floors dsl/forge/tools.memql declares (memql#5438; the #1791 split,
+// as floors):
+//   - developer-only (the writer rank and above): forgeRegisterProject,
 //     forgeRequestHistory, forgeValidationQueue, forgeValidateRequest,
 //     forgeApprovalQueue, forgeApproveRequest, forgeRequestChanges.
-//   - all-team (owner/admin/developer/writer/reader): forgeActiveProjects,
+//   - all-team (the reader rank and above): forgeActiveProjects,
 //     forgeSubmitRequest, forgeMyRequests, forgeRequestById.
 func forgeToolFixtures() *fakeRegistry {
-	devRoles := []string{"owner", "admin", "developer", "writer"}
-	allTeam := []string{"owner", "admin", "developer", "writer", "reader"}
+	devRoles := "writer"
+	allTeam := "reader"
 
-	mkTool := func(name string, roles []string) *memql.Tool {
+	mkTool := func(name string, floor string) *memql.Tool {
 		return &memql.Tool{
 			Name:         name,
 			Description:  name + " desc",
-			AllowedRoles: roles,
+			RequiresRank: floor,
 			MCPExposed:   true,
 		}
 	}
@@ -84,7 +91,7 @@ var readerForgeTools = []string{
 // forge tools in the curated MCP surface.
 func TestForgeMCPRoleScoping_OwnerSeesAll(t *testing.T) {
 	eng := &fakeEngine{reg: forgeToolFixtures()}
-	names := toolNames(listMCPTools(eng, "owner", TierSealed, ""))
+	names := toolNames(listMCPTools(asPerson("owner"), eng, "owner", TierSealed, ""))
 
 	for _, name := range allForgeTools {
 		if !names[name] {
@@ -98,7 +105,7 @@ func TestForgeMCPRoleScoping_OwnerSeesAll(t *testing.T) {
 // role sees all 11 forge tools (same developer surface as owner/admin/writer).
 func TestForgeMCPRoleScoping_DeveloperSeesAll(t *testing.T) {
 	eng := &fakeEngine{reg: forgeToolFixtures()}
-	names := toolNames(listMCPTools(eng, "developer", TierSealed, ""))
+	names := toolNames(listMCPTools(asPerson("developer"), eng, "developer", TierSealed, ""))
 
 	for _, name := range allForgeTools {
 		if !names[name] {
@@ -112,7 +119,7 @@ func TestForgeMCPRoleScoping_DeveloperSeesAll(t *testing.T) {
 // tier in traits.memql) sees all 11 forge tools.
 func TestForgeMCPRoleScoping_WriterSeesAll(t *testing.T) {
 	eng := &fakeEngine{reg: forgeToolFixtures()}
-	names := toolNames(listMCPTools(eng, "writer", TierSealed, ""))
+	names := toolNames(listMCPTools(asPerson("writer"), eng, "writer", TierSealed, ""))
 
 	for _, name := range allForgeTools {
 		if !names[name] {
@@ -126,7 +133,7 @@ func TestForgeMCPRoleScoping_WriterSeesAll(t *testing.T) {
 // exactly the 4 all-team tools and NONE of the developer-only tools.
 func TestForgeMCPRoleScoping_ReaderSeesAllTeamOnly(t *testing.T) {
 	eng := &fakeEngine{reg: forgeToolFixtures()}
-	names := toolNames(listMCPTools(eng, "reader", TierSealed, ""))
+	names := toolNames(listMCPTools(asPerson("reader"), eng, "reader", TierSealed, ""))
 
 	// Must see the 4 all-team tools.
 	for _, name := range readerForgeTools {
@@ -149,14 +156,14 @@ func TestForgeMCPRoleScoping_ReaderSeesAllTeamOnly(t *testing.T) {
 	t.Logf("reader forge surface (%d forge, want 4): OK", countForge(names))
 }
 
-// TestForgeMCPRoleScoping_NonTeamSeesNone asserts that a non-team caller
-// (empty role -> "specialist" default in IsAllowedForRole) sees zero forge
-// tools in the curated MCP surface.
+// TestForgeMCPRoleScoping_NonTeamSeesNone asserts that a caller whose role
+// ranks nowhere on the ladder -- none, an agent kind, an unknown slug -- sees
+// zero forge tools in the curated MCP surface.
 func TestForgeMCPRoleScoping_NonTeamSeesNone(t *testing.T) {
 	eng := &fakeEngine{reg: forgeToolFixtures()}
 
 	for _, role := range []string{"", "specialist", "guest", "anon"} {
-		names := toolNames(listMCPTools(eng, role, TierSealed, ""))
+		names := toolNames(listMCPTools(asPerson(role), eng, role, TierSealed, ""))
 		n := countForge(names)
 		if n > 0 {
 			var visible []string
@@ -173,7 +180,8 @@ func TestForgeMCPRoleScoping_NonTeamSeesNone(t *testing.T) {
 
 // TestForgeMCPRoleScoping_ReaderCallsDeveloperToolIsRejected asserts that
 // even if a reader somehow calls a developer-only forge tool, the engine gate
-// rejects it with an error result (IsAllowedForRole enforced at call time).
+// rejects it with an error result -- by RANK, at call time -- while a writer's
+// call to the same tool goes through.
 func TestForgeMCPRoleScoping_ReaderCallsDeveloperToolIsRejected(t *testing.T) {
 	eng := &fakeEngine{reg: forgeToolFixtures()}
 
@@ -183,11 +191,16 @@ func TestForgeMCPRoleScoping_ReaderCallsDeveloperToolIsRejected(t *testing.T) {
 		"forgeApprovalQueue", "forgeApproveRequest", "forgeRequestChanges",
 	}
 	for _, toolName := range devOnlyTools {
-		res := callMCPTool(context.Background(), eng, "reader", TierSealed, "", toolName, nil)
-		// The fake engine's ExecuteToolByName checks IsAllowedForRole and
-		// returns errNotFound; callMCPTool surfaces this as an isError result.
+		res := callMCPTool(asPerson("reader"), eng, "reader", TierSealed, "", toolName, nil)
 		if isErr, _ := res["isError"].(bool); !isErr {
 			t.Errorf("reader calling developer-only tool %q should yield isError; got %v", toolName, res)
+			continue
+		}
+		if text := resultText(res); !strings.Contains(text, `requires the "writer" role or above`) {
+			t.Errorf("reader calling %q was refused, but not by the rank floor: %s", toolName, text)
+		}
+		if res := callMCPTool(asPerson("writer"), eng, "writer", TierSealed, "", toolName, nil); isError(res) {
+			t.Errorf("writer calling developer tool %q was refused: %v", toolName, res)
 		}
 	}
 }

@@ -14,13 +14,31 @@ import (
 // The source must contain exactly one expression. Trailing tokens
 // after the expression (other than EOF / ; / a closing brace that
 // the caller consumed prior to invocation) produce a parse error.
+//
+// The retired connectives, `;` as AND and `,` as OR, are refused
+// (memql#5375, memql#5439).
 func ParseExpression(source string) (ExpressionNode, error) {
+	return parseExpressionSource(source, false)
+}
+
+// parseLegacyExpression is ParseExpression for the one reader that must
+// understand the retired connectives: the expressions rewrite, which reads a
+// clause written before edition 2026 in order to write it again with `&&`
+// and `||`. There `;` still means AND and `,` still means OR, so the rewrite
+// the refusals name is one that can actually read what it is asked to rewrite.
+// Nothing the engine parses goes through here.
+func parseLegacyExpression(source string) (ExpressionNode, error) {
+	return parseExpressionSource(source, true)
+}
+
+func parseExpressionSource(source string, legacyConnectives bool) (ExpressionNode, error) {
 	lex := NewLexer(source)
 	tokens, err := lex.Tokenize()
 	if err != nil {
 		return nil, fmt.Errorf("tokenize: %w", err)
 	}
 	p := NewParser(tokens)
+	p.legacyConnectives = legacyConnectives
 	expr, err := p.parseExpression()
 	if err != nil {
 		return nil, err

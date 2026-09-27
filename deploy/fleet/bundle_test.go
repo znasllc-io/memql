@@ -36,18 +36,39 @@
 // general resolver and does not pretend to be; it exists because that is the
 // class this bundle actually hit, and because a gate whose limits are unstated
 // gets read as proving more than it does.
+//
+// The second gap was worse, and it was found the same way, late (memql#5437).
+// Ten of this bundle's automations -- dunning, the Stripe claim, the whole
+// trial clock and the grace-period teardown -- lived in billing.memql and
+// trial.memql. The automation loader reads a domain's automations from its
+// automations.memql and from no other file, so none of the ten ever loaded,
+// and every pass above was green over them: they parsed, their statements
+// checked, and the bundle mounted with a control plane missing half its
+// behaviour. Two things close it: the engine now refuses an automation
+// declared outside the file its loader reads (construct_misplaced, at load, in
+// every tree), and TestEveryFleetAutomationLoads runs the automation loader
+// itself over this bundle and requires every automation it declares to come
+// back loaded -- which also puts the ten through the loader's own gates, the
+// loop check among them, for the first time.
 package fleet
 
 import (
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/automations"
+	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 func bundleRoot(t *testing.T) string {
@@ -113,6 +134,106 @@ func TestFleetBundleLoadsAndMounts(t *testing.T) {
 
 	if len(problems) > 0 {
 		t.Fatalf("the fleet bundle would not mount cleanly:\n  %s", strings.Join(problems, "\n  "))
+	}
+}
+
+// TestEveryFleetAutomationLoads runs the AUTOMATION LOADER over this bundle --
+// the walker that wires triggers, which none of the passes above is -- and
+// requires every automation the bundle declares, in any of its files, to come
+// back loaded (memql#5437).
+//
+// It is the gate the ten billing and trial automations needed: they were
+// declared, well formed and never loaded, and "declared" and "loaded" are two
+// different lists that nothing compared. It also holds them to the loader's
+// strict gates -- compile, statement order, and the static loop check, which
+// refused claimStripeDelivery's self-trigger the first time it ran.
+func TestEveryFleetAutomationLoads(t *testing.T) {
+	root := os.DirFS(bundleRoot(t))
+
+	// What the bundle declares, read from every file rather than from the one
+	// the loader reads -- the whole point is to see a declaration the loader
+	// would not.
+	declared := map[string]string{} // automation name -> file
+	files, err := filepath.Glob(filepath.Join(bundleRoot(t), "fleet", "*.memql"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no fleet .memql files (%v): this gate would compare nothing", err)
+	}
+	for _, path := range files {
+		src, rerr := os.ReadFile(path)
+		if rerr != nil {
+			t.Fatalf("read %s: %v", path, rerr)
+		}
+		for _, s := range languageParser.TopLevelStatements(string(src)) {
+			if s.Keyword == "automation" {
+				declared[s.Name] = filepath.Base(path)
+			}
+		}
+	}
+	// The floor, measured when this test was written: the controller's six,
+	// billing's four and the six sweeps.
+	if len(declared) < 16 {
+		t.Fatalf("the bundle declares %d automations; 16 were measured -- the declaration read has stopped reaching them", len(declared))
+	}
+
+	// What the loader loads: the bundle mounted over the embedded tree, exactly
+	// as memqllint and a node boot it, and the loader's own walk -- its strict
+	// gate included, so a compile error or an uncovered cycle fails here.
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	_, _, unmount := memqldsl.MountOverlayDomains(quiet, root)
+	defer func() { unmount(); concept.ReplaceAll(nil); _, _ = memql.LoadUnifiedConcepts(quiet) }()
+	if _, err := memql.LoadUnifiedConcepts(quiet); err != nil {
+		t.Fatalf("the bundle's concepts do not load: %v", err)
+	}
+	eng, err := automations.NewOfflineEngine(quiet, concept.DefaultRegistry())
+	if err != nil {
+		t.Fatalf("the engine refuses the bundle: %v", err)
+	}
+	loader := automations.NewLoader(automations.LoaderOptions{Logger: quiet, Registry: concept.DefaultRegistry(), Functions: eng.Functions()})
+	loaded, err := loader.LoadAll()
+	if err != nil {
+		t.Fatalf("the automation loader refuses the bundle:\n%v", err)
+	}
+	got := map[string]bool{}
+	for _, a := range loaded {
+		if strings.Contains(a.Origin, "fleet/") {
+			got[a.Name] = true
+		}
+	}
+
+	var missing []string
+	for name, file := range declared {
+		if !got[name] {
+			missing = append(missing, name+" ("+file+")")
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("%d automation(s) the bundle declares were not loaded by the automation loader:\n  %s\n"+
+			"The loader reads a domain's automations from its automations.memql and from no other file. "+
+			"An automation anywhere else never registers and its trigger never fires -- with a clean lint and a clean boot.",
+			len(missing), strings.Join(missing, "\n  "))
+	}
+
+	// THE OWNER RULING (memql#5677): the six sweeps load, and stay held to
+	// every gate above, but are @disabled until the trial lifecycle is
+	// redesigned -- they read no rows as an automation, and teardownAfterGrace
+	// would destroy any instance suspended for 14 days. Everything else the
+	// bundle declares runs. A sweep switched back on, or a billing automation
+	// switched off, is a decision this makes somebody state.
+	sweep := map[string]bool{}
+	for _, name := range fleetSweeps {
+		sweep[name] = true
+	}
+	for _, a := range loaded {
+		if !strings.Contains(a.Origin, "fleet/") {
+			continue
+		}
+		switch {
+		case sweep[a.Name] && a.IsEnabled():
+			t.Errorf("sweep %s is enabled; the six sweeps stay @disabled pending the trial lifecycle redesign (memql#5677)", a.Name)
+		case !sweep[a.Name] && !a.IsEnabled():
+			t.Errorf("automation %s is @disabled; only the six sweeps are held off (memql#5677)", a.Name)
+		}
 	}
 }
 

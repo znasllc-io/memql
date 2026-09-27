@@ -23,6 +23,26 @@ import "strings"
 //     `toolField` name preserves grep continuity for anyone tracing
 //     the legacy parser surface during the cleanup window.
 
+// promptSchemaType is the JSON-Schema type a prompt field's declared type
+// publishes as: the one mapping toInputSchema and the @default check share,
+// so a default is held to the type the model is told. A type outside the
+// list publishes as a string, as it always has.
+func promptSchemaType(typeName string) string {
+	switch strings.ToLower(typeName) {
+	case "number", "float":
+		return "number"
+	case "integer", "int":
+		return "integer"
+	case "bool", "boolean":
+		return "boolean"
+	case "object":
+		return "object"
+	case "array":
+		return "array"
+	}
+	return "string"
+}
+
 // promptDecl is the unified loader's internal representation of a
 // `prompt NAME { ... }` block.
 type promptDecl struct {
@@ -52,6 +72,14 @@ type toolField struct {
 	description  string
 	enumValues   []string
 	defaultVal   string
+	// defaultSet reports that @default was written (defaultVal may be
+	// empty), defaultNumber that it was written as an unquoted number, and
+	// defaultValue is the literal it reads as in the field's type -- what
+	// the schema publishes (memql#5430). A prompt's converter sets all
+	// three; the check that fills defaultValue is promptDefaultValue.
+	defaultSet    bool
+	defaultNumber bool
+	defaultValue  any
 }
 
 // toInputSchema compiles a promptDecl's field list into the JSON-
@@ -78,26 +106,13 @@ func (d *promptDecl) toInputSchema() (map[string]any, error) {
 	for _, f := range d.fields {
 		prop := map[string]any{}
 
-		switch strings.ToLower(f.typeName) {
-		case "string":
-			prop["type"] = "string"
-		case "number", "float":
-			prop["type"] = "number"
-		case "integer", "int":
-			prop["type"] = "integer"
-		case "bool", "boolean":
-			prop["type"] = "boolean"
-		case "object":
-			prop["type"] = "object"
-		case "array":
-			prop["type"] = "array"
+		prop["type"] = promptSchemaType(f.typeName)
+		if prop["type"] == "array" {
 			// OpenAI requires array schemas to specify "items" with a
 			// "type" field. Default to generic object items when no
 			// nested schema is defined (matches what parsePromptMemQL
 			// emitted).
 			prop["items"] = map[string]any{"type": "object"}
-		default:
-			prop["type"] = "string"
 		}
 
 		if f.description != "" {
@@ -110,7 +125,12 @@ func (d *promptDecl) toInputSchema() (map[string]any, error) {
 			}
 			prop["enum"] = enumAny
 		}
-		if f.defaultVal != "" {
+		// Published with the field's type (memql#5430): `"default": 5` on an
+		// integer field. A field the converter did not check keeps its text.
+		switch {
+		case f.defaultSet && f.defaultValue != nil:
+			prop["default"] = f.defaultValue
+		case f.defaultVal != "":
 			prop["default"] = f.defaultVal
 		}
 

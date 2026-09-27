@@ -1,6 +1,7 @@
 package dslfs
 
 import (
+	"io/fs"
 	"reflect"
 	"testing"
 	"testing/fstest"
@@ -123,4 +124,45 @@ func TestFileBasename(t *testing.T) {
 			t.Errorf("FileBasename(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
+}
+
+// TestHoldsMemqlFile (memql#5426 review) is the one answer to "is this
+// directory a DSL domain": a .memql file the walker reads, at any depth -- a
+// domain of sub-namespace directories included -- and a soft-disabled file or
+// directory counts no more here than in WalkMemqlFiles.
+func TestHoldsMemqlFile(t *testing.T) {
+	root := fstest.MapFS{
+		"nested/billing/concepts.memql":  {Data: []byte("// a")},
+		"direct/concepts.memql":          {Data: []byte("// b")},
+		"parked/_old/concepts.memql":     {Data: []byte("// c")},
+		"parked/_draft.memql":            {Data: []byte("// d")},
+		"sidecar/README.md":              {Data: []byte("# e")},
+		"templates/prompts/reply.tmpl":   {Data: []byte("f")},
+		"_disabled/inner/concepts.memql": {Data: []byte("// g")},
+	}
+	for dir, want := range map[string]bool{
+		"nested":    true,
+		"direct":    true,
+		"parked":    false,
+		"sidecar":   false,
+		"templates": false,
+		"missing":   false,
+	} {
+		if got := HoldsMemqlFile(root, dir); got != want {
+			t.Errorf("HoldsMemqlFile(%q) = %v, want %v", dir, got, want)
+		}
+		files, err := WalkMemqlFiles(mustSub(t, root, dir))
+		if dir != "missing" && err == nil && (len(files) > 0) != want {
+			t.Errorf("HoldsMemqlFile(%q) disagrees with WalkMemqlFiles, which returns %v", dir, files)
+		}
+	}
+}
+
+func mustSub(t *testing.T, root fs.FS, dir string) fs.FS {
+	t.Helper()
+	sub, err := fs.Sub(root, dir)
+	if err != nil {
+		t.Fatalf("fs.Sub(%q): %v", dir, err)
+	}
+	return sub
 }

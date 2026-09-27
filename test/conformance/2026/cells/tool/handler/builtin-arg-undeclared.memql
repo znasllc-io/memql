@@ -1,0 +1,13 @@
+/// Key a ticket by its day in a timezone -- a builtin that requires the timezone.
+@executor("integration.timeutil.dateKeyInTimezone")
+@args(profile="object")
+builtin ticketDayKeyNeedsZone {
+  timezone  string!  @description("An IANA timezone.")
+  now       string   @description("The instant to key, RFC3339.")
+}
+
+/// Name today's ticket -- but the tool never passes the timezone its builtin requires.
+@handler(type="function", name="ticketDayKeyNeedsZone")
+tool ticketDayKeyWithoutZone {
+  zone  string!  @description("The timezone, under a name the builtin does not read.")
+}

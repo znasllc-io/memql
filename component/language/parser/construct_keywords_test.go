@@ -138,3 +138,118 @@ func TestFindUnknownConstructKeywordsStaysInStep(t *testing.T) {
 		t.Errorf("a clean file reported %+v", got)
 	}
 }
+
+// TopLevelStatements reads the same lines FindUnknownConstructKeywords does,
+// and names what each declares in every construct form: the struct forms, a
+// two-identifier signature, a predicate's `=` body, the terse automation
+// header and the loose one whose brace is on the next line. A construct
+// keyword inside a body -- an automation's own `automation x(...)` call, a
+// query statement in a logic, a keyword inside a string or a comment -- is
+// not top level (memql#5437).
+func TestTopLevelStatementsNameWhatEachDeclares(t *testing.T) {
+	src := strings.Join([]string{
+		`use fleet.logic.{ runningInstances }`, // 1
+		``,
+		`/// automation docOnly { is a comment.`, // 3
+		`concept brief {`,                        // 4
+		`  note string @description("automation inString {")`,
+		`}`,
+		`query brief briefsForOwner {`, // 7
+		`  filter row => row.note == "x"`,
+		`}`,
+		`spec brief hasNote = row => row.note != nil`, // 10
+		`trait isOpen = row => row.open == true`,      // 11
+		`@trigger(event="node.created", concept="v1:x:brief")`,
+		`automation strict {`, // 13
+		`  automation nested(x: 1)`,
+		`  sources := query briefsForOwner()`,
+		`}`,
+		`automation loose`, // 17
+		`{`,
+		`}`,
+		`automation terse @trigger(event="a") => logic x`, // 20
+		`seed brief first {`,                              // 21
+		`  note: "automation notADecl {"`,
+		`}`,
+		// A declaration name may carry hyphens -- the seeded role and skill
+		// catalogs are kebab-case -- and the name is all of it, not the
+		// segment after the last hyphen.
+		`seed agentRole row-crop-farmer {`, // 24
+		`}`,
+		`spec brief has-note = row => row.note != nil`,                       // 26
+		`automation night-shift @trigger(schedule="0 0 * * * *") => logic x`, // 27
+	}, "\n")
+	type stmt struct {
+		line          int
+		keyword, name string
+	}
+	var got []stmt
+	for _, s := range TopLevelStatements(src) {
+		got = append(got, stmt{s.Line, s.Keyword, s.Name})
+	}
+	want := []stmt{
+		{1, "use", ""},
+		{4, "concept", "brief"},
+		{7, "query", "briefsForOwner"},
+		{10, "spec", "hasNote"},
+		{11, "trait", "isOpen"},
+		{13, "automation", "strict"},
+		{17, "automation", "loose"},
+		{20, "automation", "terse"},
+		{21, "seed", "first"},
+		{24, "seed", "row-crop-farmer"},
+		{26, "spec", "has-note"},
+		{27, "automation", "night-shift"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("TopLevelStatements =\n  %+v\nwant\n  %+v", got, want)
+	}
+}
+
+// TestFindMisplacedUseLines (memql#5426): a `use` line below the file's first
+// construct is found where the parser refuses it -- at the top level, after a
+// non-`use` statement -- with its line and the module it names; one above
+// every construct, one inside a construct's braces, and one in a comment or a
+// string are not. The parser's own refusal of the line carries the same
+// message and the same rule id, as its cause.
+func TestFindMisplacedUseLines(t *testing.T) {
+	src := `use shop.concepts.{ order }
+
+// use shop.concepts.{ inComment }
+concept a {
+  b string  @description("use shop.concepts.{ inString }")
+}
+
+use shop.queries.{ openOrders }
+
+use shop.shapes.{
+  orderCard
+}
+`
+	got := FindMisplacedUseLines(src)
+	want := []MisplacedUse{
+		{Line: 8, Path: "shop.queries", Message: misplacedUseMessage},
+		{Line: 10, Path: "shop.shapes", Message: misplacedUseMessage},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("finding %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if !strings.HasSuffix(misplacedUseMessage, "["+CodeUseNotFileTop+"]") {
+		t.Errorf("the message does not end with its rule id: %q", misplacedUseMessage)
+	}
+
+	_, err := ParseFile(src)
+	var cause *MisplacedUse
+	if err == nil || !errors.As(err, &cause) || cause.RuleCode() != CodeUseNotFileTop ||
+		!strings.Contains(err.Error(), misplacedUseMessage) {
+		t.Fatalf("the parser's refusal must carry the gate's message and code as its cause; got %v", err)
+	}
+	if clean := FindMisplacedUseLines("use shop.concepts.{ order }\n\nconcept a {\n  b string\n}\n"); len(clean) != 0 {
+		t.Errorf("a file-top use line was reported: %+v", clean)
+	}
+}

@@ -551,7 +551,7 @@ concept emailRule {
   constructName     string   @description("The generated automation construct's name, derived deterministically from the rule id so a regeneration replaces rather than accumulates. What to grep for when somebody asks which automation sent an email.")
   lastError         string   @description("Why generation, validation or activation last refused -- the engine's own sentence, so the app can render it verbatim instead of paraphrasing a failure it does not understand. Empty on a healthy rule.")
   lastFiredAt       datetime  @description("When the generated construct last ran. A LIVENESS field: it moves on its own, so a surface that fingerprints it for arrival cues turns the rules list into a strobe. Display it; do not ring on it.")
-  firedCount        int  @description("How many times the rule has fired since it was first activated. Liveness like lastFiredAt -- shown, never fingerprinted.")
+  firedCount        int  @description("How many times the rule has fired since it was first activated. Each firing re-reads the count under a per-rule database lock and advances it by one, so firings that overlap -- on one replica or on several -- are each counted (memql#5431). A run refused because the rule was not active, and a created rule's second firing for a row it already fired on, are not firings. Liveness like lastFiredAt -- shown, never fingerprinted.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", field="templateId", target=template, direction="outgoing")

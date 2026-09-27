@@ -1,0 +1,5 @@
+/// List the tickets in one status, the open ones unless the caller names another.
+@handler(type="query", query="paginate(query ticketsForToolDefaults(status: args.status), 20)")
+tool listTicketsInStatus {
+  status  enum("open", "closed")  @default("open")  @description("The status to list.")
+}

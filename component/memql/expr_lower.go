@@ -1,7 +1,6 @@
 package memql
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -229,6 +228,14 @@ func (e *LowerError) RuleCode() string {
 //	process and reads the row. Compare against a computed value instead:
 //	`row.email == lower("x")` [lower_refused]
 func (e *LowerError) Error() string {
+	return e.Sentence() + " [" + e.RuleCode() + "]"
+}
+
+// Sentence is the refusal without its rule id: the node, the position, the
+// reason and the fix. It is what an editor shows, beside the id it carries in
+// a field of its own (memql#5434) -- printing the id in the text as well would
+// put it on screen twice.
+func (e *LowerError) Sentence() string {
 	var b strings.Builder
 	b.WriteString("`")
 	b.WriteString(e.Node)
@@ -240,9 +247,6 @@ func (e *LowerError) Error() string {
 		b.WriteString(". ")
 		b.WriteString(e.Fix)
 	}
-	b.WriteString(" [")
-	b.WriteString(e.RuleCode())
-	b.WriteString("]")
 	return b.String()
 }
 
@@ -1026,35 +1030,36 @@ func (l *lowerer) rowField(e *ast.MemberExpr, segs []memberSeg) (lowOperand, err
 // declares keys may still be `@open` -- keys as data -- where reading an
 // undeclared one is legitimate and refusing it would be wrong.
 func closedObjectPaths(c *memoryNodes.Concept) (map[string]bool, error) {
-	out := map[string]bool{}
-	raw, err := c.DefinitionSchema()
+	// Decoded once per distinct schema document (concept_schema_memo.go); the
+	// caller gets its own copy.
+	d, err := decodedSchemaOf(c)
 	if err != nil {
 		return nil, err
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, err
+	if d.err != nil {
+		return nil, d.err
 	}
-	var walk func(prefix string, doc map[string]any)
-	walk = func(prefix string, doc map[string]any) {
-		props, ok := doc["properties"].(map[string]any)
+	return copyClosedPaths(d.closed), nil
+}
+
+// collectClosedObjectPaths records under out every object path of doc, under
+// prefix, whose block is closed (`additionalProperties: false`).
+func collectClosedObjectPaths(prefix string, doc map[string]any, out map[string]bool) {
+	props, ok := doc["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+	for name, value := range props {
+		sub, ok := value.(map[string]any)
 		if !ok {
-			return
+			continue
 		}
-		for name, value := range props {
-			sub, ok := value.(map[string]any)
-			if !ok {
-				continue
-			}
-			path := joinFieldPath(prefix, name)
-			if extra, ok := sub["additionalProperties"].(bool); ok && !extra {
-				out[path] = true
-			}
-			walk(path, sub)
+		path := joinFieldPath(prefix, name)
+		if extra, ok := sub["additionalProperties"].(bool); ok && !extra {
+			out[path] = true
 		}
+		collectClosedObjectPaths(path, sub, out)
 	}
-	walk("", doc)
-	return out, nil
 }
 
 // shapeField resolves a read through a shape binding: only projected keys are
@@ -1469,6 +1474,21 @@ func (l *lowerer) traversal(e *ast.CallExpr) (ExpressionNode, error) {
 	}
 	var label string
 	args := e.Args
+	// Two filters where one belongs -- `parentOf(p => a, p => b)` -- is the
+	// shape the internal form's retired `,` connective folded into
+	// `parentOf(a || b)` (memql#5439). Read as a label and a lambda it would be
+	// refused as a label that is no string, which names the wrong fix: the
+	// conditions are joined inside the one lambda.
+	lambdas := 0
+	for _, a := range args {
+		if lam, ok := ast.Unparen(a).(*ast.LambdaExpr); ok && lam != nil {
+			lambdas++
+		}
+	}
+	if lambdas > 1 {
+		return nil, l.refuse(e, "a traversal takes one lambda, after an optional string label -- not one lambda per condition",
+			"Join the conditions inside one lambda: `"+e.Name+"(p => <first> || <second>)`")
+	}
 	switch len(args) {
 	case 1:
 	case 2:
@@ -1732,6 +1752,13 @@ func (l *lowerer) walkPlanConstant(n ast.ExpressionNode, local map[string]bool, 
 				// The pre-v1 filter's bare payload field (D1): the fix is
 				// mechanical, so the refusal carries it (D24).
 				fix = "A payload field is read through the parameter: write `" + l.rowParam() + "." + e.Name + "`"
+			} else if intrinsic, isIntrinsic := canonicalIntrinsicFieldName(e.Name); isIntrinsic {
+				// A bare row intrinsic -- `id`, `createdAt` -- is the same
+				// mistake with the same mechanical fix. The editor's
+				// bare-row-intrinsic warning names it too, and gives way to
+				// this refusal when both draw (memql#5434), so the fix has to
+				// survive here.
+				fix = "The row's " + intrinsic + " is read through the parameter: write `" + l.rowParam() + "." + intrinsic + "`"
 			}
 			*errp = l.refuseAs(LowerCodeUnknownName, e, fmt.Sprintf("`%s` is not defined here", e.Name), fix)
 		}

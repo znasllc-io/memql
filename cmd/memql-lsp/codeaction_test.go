@@ -385,14 +385,17 @@ func TestCodeAction_RefusedClauseGetsNoAction(t *testing.T) {
 		files[k] = v
 	}
 	const rel = "fylo/folders.memql"
-	refused := "query order folders {\n  filter  childOf(kind == \"folder\")\n}\n"
+	// A traversal nested in another's target: the rewrite converts a
+	// traversal to its lambda (memql#5439), but one inside another is the
+	// author's to write.
+	refused := "query order folders {\n  filter  childOf(parentOf(kind == \"folder\"))\n}\n"
 	files[rel] = refused + "\nquery order open {\n  filter  status == \"open\"\n}\n"
 	root := writeWorkspace(t, files)
 	s := workspaceServer(t, root)
 	uri, text, diags := openWorkspaceDoc(t, s, root, rel)
 
 	if plan, _ := langparser.PlanExpressions([]byte(text), nil); len(plan.Refused) != 1 {
-		t.Fatalf("the codemod does not refuse exactly the traversal: %+v", plan.Refused)
+		t.Fatalf("the codemod does not refuse exactly the nested traversal: %+v", plan.Refused)
 	}
 	d, ok := diagnosticWithCode(diags, "retired_filter_without_lambda")
 	if !ok || d.Range.Start.Line > 2 {

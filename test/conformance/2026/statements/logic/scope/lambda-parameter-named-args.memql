@@ -1,0 +1,6 @@
+logic lambdaParameterNamedArgs {
+  args {
+    items any
+  }
+  return args.items.where(args => args.active == true).count()
+}

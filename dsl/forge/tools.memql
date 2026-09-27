@@ -6,15 +6,16 @@
 // inside the bound mutation (submitter/validator/approver = actor), so no
 // tool call can act as someone else.
 //
-// Gating: submit + "my requests" are open to every authenticated team member.
-// The validation/approval QUEUE tools run developer/owner-gated queries
-// (dsl/forge/specs.memql: forgeDeveloper / forgeApprover), so a non-developer
-// calling them gets an empty list. The hard transition guard (only an owner
-// may approve) is the engine pre-insert follow-up noted in mutations.memql.
-//
-// @allowedRoles below is NOT touched by this pass -- see memql#4112 for the
-// real (narrower) defect in that surface; a prior claim that it made every
-// forge tool unreachable was adjudicated wrong.
+// Gating (memql#5438): every tool here judges the PERSON the call is for with a
+// rank floor. Submit, browse and "my requests" are open to the whole team --
+// @requiresRank("reader"), the lowest rung -- and the developer tools to the
+// writer rank and above, @requiresRank("writer"). A floor admits every role
+// ranked at or above it, a custom one included, which the @allowedRoles lists
+// these replaced could not name. The validation queue query declares the same
+// writer floor and the transition rule reads it (forgeDeveloperFloor), so the
+// tool gate, the queue and the transition name one tier (memql#4112). The
+// approval queue returns rows to the owner alone (forgeApprover), and only an
+// owner may approve (the engine's pre-insert guard).
 //
 // Mentoring: forgeSubmitRequest's description instructs Claude to teach a
 // non-owner submitter about what they're looking at while filing -- the
@@ -27,7 +28,7 @@
 /// projectId. Use this once per app/codebase; requests reference projectId.
 @handler(type="function", name="createProject")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer")
+@requiresRank("writer")
 @mcp
 tool forgeRegisterProject {
   projectId    string! @description("Fresh unique id for the project, e.g. a UUID. The caller mints it so it can reference the row immediately.")
@@ -41,7 +42,7 @@ tool forgeRegisterProject {
 /// List the active forge projects. Use this to resolve a projectId before submitting a request.
 @handler(type="query", query="query activeProjects()")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer", "reader")
+@requiresRank("reader")
 @mcp
 tool forgeActiveProjects {}
 
@@ -51,7 +52,7 @@ tool forgeActiveProjects {}
 /// partition (tenant), so this always returns at most one project.
 @handler(type="query", query="query projectBySlug(slug: args.slug)")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer", "reader")
+@requiresRank("reader")
 @mcp
 tool forgeResolveProject {
   slug  string!  @description("The stable short slug of the project, e.g. 'memql' or 'acme-app'.")
@@ -71,7 +72,7 @@ tool forgeResolveProject {
 /// the explanation as the note). Owner submissions skip the mentoring sequence entirely.
 @handler(type="function", name="createRequest")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer", "reader")
+@requiresRank("reader")
 @mcp
 tool forgeSubmitRequest {
   requestId  string! @description("Fresh unique id for the request, e.g. a UUID. The caller mints it so it can reference the row immediately.")
@@ -85,14 +86,14 @@ tool forgeSubmitRequest {
 /// List the caller's own submitted requests, newest first.
 @handler(type="query", query="query myRequests()")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer", "reader")
+@requiresRank("reader")
 @mcp
 tool forgeMyRequests {}
 
 /// Get a single forge request by id (full detail).
 @handler(type="query", query="query requestById(requestId: args.requestId)")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer", "reader")
+@requiresRank("reader")
 @mcp
 tool forgeRequestById {
   requestId  string! @description("Id of the request to fetch.")
@@ -102,7 +103,7 @@ tool forgeRequestById {
 /// newest first.
 @handler(type="query", query="query requestEvents(requestId: args.requestId)")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer")
+@requiresRank("writer")
 @mcp
 tool forgeRequestHistory {
   requestId  string! @description("Id of the request whose history to fetch.")
@@ -114,7 +115,7 @@ tool forgeRequestHistory {
 /// for others.
 @handler(type="query", query="query validationQueue()")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer")
+@requiresRank("writer")
 @mcp
 tool forgeValidationQueue {}
 
@@ -122,7 +123,7 @@ tool forgeValidationQueue {}
 /// from the caller. Validate from the validation queue.
 @handler(type="function", name="validateRequest")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer")
+@requiresRank("writer")
 @mcp
 tool forgeValidateRequest {
   requestId  string! @description("Id of the request to validate.")
@@ -131,7 +132,7 @@ tool forgeValidateRequest {
 /// List validated requests awaiting owner approval. Owner only -- returns empty for others.
 @handler(type="query", query="query approvalQueue()")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer")
+@requiresRank("writer")
 @mcp
 tool forgeApprovalQueue {}
 
@@ -140,7 +141,7 @@ tool forgeApprovalQueue {}
 /// caller.
 @handler(type="function", name="approveRequest")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer")
+@requiresRank("writer")
 @mcp
 tool forgeApproveRequest {
   requestId  string! @description("Id of the request to approve.")
@@ -150,7 +151,7 @@ tool forgeApproveRequest {
 /// 'changes_requested'.
 @handler(type="function", name="requestChanges")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer")
+@requiresRank("writer")
 @mcp
 tool forgeRequestChanges {
   requestId   string! @description("Id of the request to send back.")
@@ -166,7 +167,7 @@ tool forgeRequestChanges {
 /// 'owner'.
 @handler(type="function", name="recordMentoredEvent")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer", "reader")
+@requiresRank("reader")
 @mcp
 tool forgeRecordMentoring {
   eventId    string  @description("Fresh unique id for the event, e.g. a UUID. Optional -- the engine mints one if absent.")
@@ -182,7 +183,7 @@ tool forgeRecordMentoring {
 /// v1:common:attachment must already exist (uploaded via the space attachments endpoint).
 @handler(type="function", name="attachToRequest")
 @executionTime("fast")
-@allowedRoles("owner", "admin", "developer", "writer", "reader")
+@requiresRank("reader")
 @mcp
 tool forgeAttachToRequest {
   requestId     string! @description("Id of the v1:forge:request to attach to.")

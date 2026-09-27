@@ -1,0 +1,5 @@
+/// A ticket whose second field does not parse.
+concept ticket {
+  title   string
+  status  string  @@description("x")
+}

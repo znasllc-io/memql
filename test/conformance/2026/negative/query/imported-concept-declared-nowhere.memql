@@ -1,0 +1,7 @@
+use crm.concepts.{ supportLead }
+
+/// Every support lead, newest first. The import names a concept no domain declares.
+query supportLead newestSupportLeads {
+  sort "row.createdAt", "desc"
+  paginate 20
+}

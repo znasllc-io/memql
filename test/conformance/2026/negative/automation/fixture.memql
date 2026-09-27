@@ -1,0 +1,8 @@
+/// An invoice the misplaced sweep would have counted.
+concept invoice {
+  open  bool
+}
+
+query invoice openInvoicesForSweep {
+  filter row => row.open == true
+}

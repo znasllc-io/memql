@@ -192,12 +192,32 @@ func compileSortField(field SortField) (compiledSortField, error) {
 	if err != nil {
 		return compiledSortField{}, fmt.Errorf("sort path %q is invalid: %w", name, err)
 	}
+	// Every segment is a field name, held to the rule the filter's path
+	// builders apply (buildJSONPathExpression, jsonTextPathOn): the path is
+	// rendered into the ORDER BY, so a segment that is not a field name is
+	// refused here rather than carried into SQL.
+	if err := checkSortPathSegments(name, path); err != nil {
+		return compiledSortField{}, err
+	}
 	return compiledSortField{
 		kind:        sortFieldPayload,
 		direction:   direction,
 		payloadPath: path,
 		name:        "payload." + strings.ToLower(strings.Join(path, ".")),
 	}, nil
+}
+
+// checkSortPathSegments holds every segment of a sort key's payload path to
+// the field-name rule the filter's path builders apply (isSafePathSegment:
+// letters, digits, `_` and `-`), naming the key and the segment it refuses.
+func checkSortPathSegments(key string, path []string) error {
+	for _, segment := range path {
+		if !isSafePathSegment(strings.TrimSpace(segment)) {
+			return fmt.Errorf("%w: sort key %q: %q is not a field name -- a field name is letters, digits, `_` and `-`",
+				ErrInvalidArgument, key, segment)
+		}
+	}
+	return nil
 }
 
 func normalizeSortDirection(direction SortDirection) SortDirection {
@@ -249,7 +269,15 @@ func (f compiledSortField) sqlOrderExpr() string {
 	case sortFieldType:
 		return "type " + direction
 	case sortFieldPayload:
-		expr := fmt.Sprintf("payload #>> '{%s}'", strings.Join(f.payloadPath, ","))
+		// Rendered by the filter's own path builder, which holds every segment
+		// to isSafePathSegment and escapes it. compileSortField has already
+		// refused a path it would not render, so the error arm is unreachable
+		// from a compiled sort; should a sort field ever be built another way,
+		// it orders by nothing rather than render text that is not a path.
+		expr, err := buildJSONPathExpression(f.payloadPath)
+		if err != nil {
+			return "NULL " + direction
+		}
 		return fmt.Sprintf("(%s) %s", expr, direction)
 	default:
 		return `"createdAt" DESC`

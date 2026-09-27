@@ -17,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/language/deprecation"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // captureRun runs the CLI with args while capturing everything it writes to
@@ -252,19 +253,25 @@ query item queryByStatus {
 	}
 }
 
-// TestRun_RefusedLineOutsideTheParityMountIsStillReported: boot mounts every
-// domain directory, but the parity pass mounts only one that directly holds a
-// .memql file (MountOverlayDomains) -- so a domain holding only a
-// sub-namespace refuses boot without its line and is Load's alone to report.
-// memqllint prints a refusal both passes make once, keeping Load's copy and
-// dropping the parity pass's echo of it: here it reports demo's (mounted,
-// refused by both passes, printed once) and beta's (Load's alone). A dedupe
-// that kept both copies would print demo's twice, and one that dropped Load's
-// copies whenever the parity pass ran would lose beta's.
-func TestRun_RefusedLineOutsideTheParityMountIsStillReported(t *testing.T) {
+// TestRun_ARefusedLineIsReportedOnceForEveryDomainShape: boot mounts every
+// domain directory, and so does the parity pass -- a domain holding only a
+// sub-namespace included, since memql#5426 (MountOverlayDomains mounted only
+// one that directly held a .memql file before, which left beta's refusal to
+// Load alone). memqllint prints a refusal both passes make once, keeping
+// Load's copy and dropping the parity pass's echo of it: here it reports
+// demo's and beta's, each refused by both passes and printed once. A dedupe
+// that kept both copies would print each twice, and one that dropped Load's
+// copies whenever the parity pass ran would lose the file line Load names.
+func TestRun_ARefusedLineIsReportedOnceForEveryDomainShape(t *testing.T) {
 	files := map[string]string{
 		"demo/concepts.memql":     testConcepts,
 		"beta/sub/concepts.memql": "/// A widget.\nconcept widget {\n  label  string\n}\n",
+		// A concept's namespace is a colon-separated identifier, so a nested
+		// directory holding concepts pins the one it declares under (as
+		// dsl/shopify/generated does). Without it boot refuses the concept's
+		// id -- which the parity pass could not see until it mounted a
+		// domain of only sub-namespaces (memql#5426).
+		"beta/sub/namespace.pin": "beta\n",
 	}
 	code, out := captureRun(t, []string{"--json", writeTreeAsIs(t, files)})
 	if code != 1 {
@@ -414,6 +421,9 @@ func TestRun_ASubNamespaceOfADeclaredDomainGetsNoLanguageLineCheck(t *testing.T)
 	bundle := writeTreeAsIs(t, map[string]string{
 		"beta/memql.toml":         dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render(),
 		"beta/sub/concepts.memql": "/// A widget.\nconcept widget {\n  label  string\n}\n",
+		// The nested concept's namespace pin (see
+		// TestRun_ARefusedLineIsReportedOnceForEveryDomainShape).
+		"beta/sub/namespace.pin": "beta\n",
 	})
 	sub := filepath.Join(bundle, "beta", "sub")
 	for _, target := range []string{sub, filepath.Join(sub, "concepts.memql")} {
@@ -1205,6 +1215,244 @@ func TestRun_ADeprecatedFormWarnsOnceInEveryMode(t *testing.T) {
 		}
 		if !strings.Contains(out, deprecation.ArrayType) {
 			t.Errorf("%s: the warning does not name the rule; output:\n%s", name, out)
+		}
+	}
+}
+
+// deprecatedAllowedRolesTools is a tool gated with the deprecated
+// @allowedRoles (memql#5438) over a query the tree declares.
+const deprecatedAllowedRolesTools = `/// Find items by name; the assistant agent only.
+@handler(type="query", query="query queryItems(name: args.name)")
+@allowedRoles("assistant")
+tool findItems {
+  name  string!
+}`
+
+// TestRun_AllowedRolesIsAWarningNamingBothReplacements: @allowedRoles is in
+// its window, so it loads, the lint names where it is and what to write --
+// @requiresAgentRole or @requiresRank -- and the exit code is left alone; past
+// the window the same tree is an error.
+func TestRun_AllowedRolesIsAWarningNamingBothReplacements(t *testing.T) {
+	tree := map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  testQueries,
+		"demo/tools.memql":    deprecatedAllowedRolesTools,
+	}
+	form, _ := deprecation.Lookup(deprecation.AllowedRoles)
+	want := "demo/tools.memql:3:1: " + form.Warning()
+
+	code, out := captureRun(t, []string{writeTree(t, tree)})
+	if code != 0 {
+		t.Fatalf("run() = %d, want 0: a deprecated form loads; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "WARNING: "+want+"\n") {
+		t.Errorf("want the line %q; output:\n%s", "WARNING: "+want, out)
+	}
+	for _, name := range []string{"@requiresAgentRole", "@requiresRank", "memqlmigrate --rewrite=allowed-roles"} {
+		if !strings.Contains(form.Warning(), name) {
+			t.Errorf("the warning does not name %s: %s", name, form.Warning())
+		}
+	}
+
+	restore := deprecation.SetCurrent(form.RefusedFrom() + ".0")
+	defer restore()
+	code, out = captureRun(t, []string{writeTree(t, tree)})
+	if code != 1 || !strings.Contains(out, deprecation.AllowedRoles) || !strings.Contains(out, "@requiresAgentRole") {
+		t.Fatalf("past its window @allowedRoles must refuse naming its replacements, code=%d output:\n%s", code, out)
+	}
+}
+
+// TestRun_TheParityPassChecksADomainOfOnlySubNamespaces (memql#5426): boot
+// mounts every directory of a MEMQL_DSL_PATH root, and reads a domain that
+// holds nothing but sub-namespace directories through them. The parity pass
+// mounted only a directory with a .memql file directly in it, so such a
+// domain was never checked: a refusal only the engine makes -- here a bare
+// call nothing declares, which dslimports cannot see -- linted clean and
+// refused boot.
+func TestRun_TheParityPassChecksADomainOfOnlySubNamespaces(t *testing.T) {
+	root := writeTreeAsIs(t, map[string]string{
+		"warehouse/" + dslfs.ManifestFile: dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render(),
+		"warehouse/nested/logic.memql": `logic probeNestedUnknownCall {
+  args {
+    x string
+  }
+  return definitelyNothing(args.x)
+}`,
+	})
+	code, out := captureRun(t, []string{root})
+	if code != 1 {
+		t.Fatalf("run() = %d, want 1: the nested domain's refusal is the engine's; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "`definitelyNothing(...)` is not a function or a predicate known here") {
+		t.Fatalf("the report does not carry the parity pass's refusal; output:\n%s", out)
+	}
+}
+
+// TestRun_AConceptThatDoesNotParseIsRefusedByBothPasses (memql#5426): a
+// concept that does not parse was refused by the parse pass alone -- the
+// engine-parity pass, like boot, dropped it in silence. The parity pass
+// refuses it now, naming the concept, its line and concept_unparsed, with the
+// parser's refusal placed at the author's line and column: two passes, two
+// copies, as a construct-level parse refusal is reported by both
+// (TestRun_V1RefusalNamesTheAuthorsLineAndColumn).
+func TestRun_AConceptThatDoesNotParseIsRefusedByBothPasses(t *testing.T) {
+	code, report, out := jsonReport(t, writeTree(t, map[string]string{
+		"demo/concepts.memql": "/// A demo item.\nconcept item {\n  name    string\n  status  string  @@description(\"x\")\n}\n",
+	}))
+	if code != 1 || len(report.Errors) != 2 {
+		t.Fatalf("one concept that does not parse: run() = %d, want 1 with the two passes' refusals:\n%s", code, out)
+	}
+	var all strings.Builder
+	for _, e := range report.Errors {
+		all.WriteString(e.Message + "\n")
+	}
+	for _, want := range []string{
+		"demo/concepts.memql: parse: parser error: parse error at line 4, column 20",
+		`demo/concepts.memql: concept "item" DROPPED`,
+		`line 2: concept "item" does not parse, so it is not registered: parse error at line 4, column 20`,
+		"[concept_unparsed]",
+	} {
+		if !strings.Contains(all.String(), want) {
+			t.Errorf("the report does not carry %q; errors:\n%s", want, all.String())
+		}
+	}
+}
+
+// TestRun_AnAllowedRolesRewriteLintsCleanAtFirstBoot (memql#5438): what
+// `memqlmigrate --rewrite=allowed-roles` writes must load on a cluster whose
+// role catalog has not been seeded yet -- the ladder a first boot, and this
+// lint, validate a floor against.
+//
+// The rewrite writes @requiresRank at the list's lowest rung AS THE LIST SPELLS
+// IT, and a list may spell a rung by the catalog's own slug ("user", "viewer")
+// rather than by the alias the user row carries ("writer", "reader"). The
+// compiled ladder knew only the aliases, so a rewritten tree refused to load
+// with requires_rank_unknown: the deprecation window's migration channel wrote
+// a file the engine would not boot.
+func TestRun_AnAllowedRolesRewriteLintsCleanAtFirstBoot(t *testing.T) {
+	vocabulary, err := langparser.RoleVocabularyFromTree(memqldsl.Tree())
+	if err != nil {
+		t.Fatalf("reading the role vocabulary from the embedded tree: %v", err)
+	}
+	const tools = `use demo.queries.{ queryItems }
+
+@description("Members and up, spelled by the catalog's slug.")
+@allowedRoles("owner", "developer", "admin", "user")
+@handler(type="query", query="query queryItems(name: args.name)")
+tool memberTool {
+  name  string  @required @description("Item name.")
+}
+
+@description("Everyone on the ladder, spelled by the catalog's slugs.")
+@allowedRoles("owner", "developer", "admin", "user", "viewer")
+@handler(type="query", query="query queryItems(name: args.name)")
+tool viewerTool {
+  name  string  @required @description("Item name.")
+}
+
+@description("Members and up, spelled by the user row's alias.")
+@allowedRoles("owner", "developer", "admin", "writer")
+@handler(type="query", query="query queryItems(name: args.name)")
+tool writerTool {
+  name  string  @required @description("Item name.")
+}
+
+@description("An assistant agent's tool.")
+@allowedRoles("assistant")
+@handler(type="query", query="query queryItems(name: args.name)")
+tool assistantTool {
+  name  string  @required @description("Item name.")
+}`
+	rewritten, left, _ := langparser.RewriteAllowedRoles(tools, vocabulary)
+	if len(left) != 0 {
+		t.Fatalf("the rewrite left %d use(s) as written: %+v", len(left), left)
+	}
+	for _, want := range []string{`@requiresRank("user")`, `@requiresRank("viewer")`, `@requiresRank("writer")`, `@requiresAgentRole("assistant")`} {
+		if !strings.Contains(rewritten, want) {
+			t.Fatalf("the rewrite did not write %s; it wrote:\n%s", want, rewritten)
+		}
+	}
+	if strings.Contains(rewritten, "@allowedRoles") {
+		t.Fatalf("the rewrite left an @allowedRoles behind:\n%s", rewritten)
+	}
+
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  testQueries,
+		"demo/tools.memql":    rewritten,
+	})
+	code, out := captureRun(t, []string{root})
+	if code != 0 || strings.Contains(out, "requires_rank_unknown") {
+		t.Fatalf("the rewritten tree does not lint clean (exit %d); a first boot would refuse it:\n%s", code, out)
+	}
+}
+
+// misplacedAutomation is an automation that would load cleanly from its
+// domain's automations.memql.
+const misplacedAutomation = `@trigger(event="demo.ping")
+automation pingProbe {
+  publish "demo.pong" { value: 1 }
+}`
+
+// TestRun_AMisplacedConstructIsRefusedInEveryMode (memql#5437): an automation
+// declared outside its domain's automations.memql loads as nothing at boot,
+// and boot refuses it (construct_misplaced). The bundle root reached that
+// verdict through the engine-parity pass; the domain directory and a file in
+// it did not, because the parity pass mounts the directories INSIDE the root
+// and the root there IS the domain. Every mode now refuses it, once, naming
+// the file it is in and the file it belongs in.
+func TestRun_AMisplacedConstructIsRefusedInEveryMode(t *testing.T) {
+	bundle := writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/billing.memql":  misplacedAutomation,
+	})
+	domainDir := filepath.Join(bundle, "demo")
+	for _, target := range []string{bundle, domainDir, filepath.Join(domainDir, "billing.memql")} {
+		code, report, out := jsonReport(t, target)
+		if code != 1 || len(report.Errors) != 1 {
+			t.Errorf("%s: run() = %d with %d errors, want 1 with the one misplaced automation:\n%s", target, code, len(report.Errors), out)
+			continue
+		}
+		msg := report.Errors[0].Message
+		for _, want := range []string{"billing.memql", `automation "pingProbe"`, "demo/automations.memql", "[construct_misplaced]"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("%s: the refusal must carry %q, got %q", target, want, msg)
+			}
+		}
+	}
+
+	// A file of the same domain that declares nothing misplaced is not
+	// reported for its neighbour, as every single-file lane is scoped.
+	if code, report, out := jsonReport(t, filepath.Join(domainDir, "concepts.memql")); code != 0 || len(report.Errors) != 0 {
+		t.Errorf("concepts.memql alone: run() = %d, want 0 with no error:\n%s", code, out)
+	}
+
+	// A soft-disabled directory is read by nothing at boot, so the same file
+	// parked in one has no placement to judge, in any mode.
+	parked := filepath.Join(bundle, "_parked")
+	if err := os.MkdirAll(parked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parked, "billing.memql"), []byte(misplacedAutomation), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{parked, filepath.Join(parked, "billing.memql")} {
+		if _, _, out := jsonReport(t, target); strings.Contains(out, "construct_misplaced") {
+			t.Errorf("%s is soft-disabled, which boot never reads, yet the lint judged its placement:\n%s", target, out)
+		}
+	}
+	if err := os.RemoveAll(parked); err != nil {
+		t.Fatal(err)
+	}
+
+	// Positive control: the same automation in automations.memql lints clean in
+	// every mode, so the refusals above are the file it was in.
+	if err := os.Rename(filepath.Join(domainDir, "billing.memql"), filepath.Join(domainDir, "automations.memql")); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{bundle, domainDir, filepath.Join(domainDir, "automations.memql")} {
+		if code, report, out := jsonReport(t, target); code != 0 || len(report.Errors) != 0 {
+			t.Errorf("%s with the automation in automations.memql: run() = %d, want 0 with no error:\n%s", target, code, out)
 		}
 	}
 }

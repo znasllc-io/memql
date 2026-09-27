@@ -44,7 +44,7 @@ import (
 
 // trainerToolNames is the explicit tool set handed to the Trainer Agent's
 // bounded tool loop. Passing them by name means the filtered tool loop
-// includes exactly these regardless of the standing @allowedRoles gate. Order
+// includes exactly these regardless of the standing @requiresAgentRole gate. Order
 // is irrelevant.
 var trainerToolNames = []string{
 	"webSearch",

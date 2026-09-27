@@ -92,7 +92,7 @@ func TestForgeRequestTransitionDecision_RealUserStillGated(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := forgeRequestTransitionDecision(c.priorStatus, c.newStatus, c.role)
+			err := forgeRequestTransitionDecision(c.priorStatus, c.newStatus, c.role, roleLadder{})
 			if (err != nil) != c.wantErr {
 				t.Fatalf("forgeRequestTransitionDecision(%q, %q, %q) error = %v, wantErr = %v",
 					c.priorStatus, c.newStatus, c.role, err, c.wantErr)

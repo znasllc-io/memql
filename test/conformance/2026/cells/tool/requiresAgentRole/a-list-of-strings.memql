@@ -1,0 +1,6 @@
+/// Open a support ticket; offered to every agent, and to no person over MCP.
+@handler(type="function", name="openTicketRequiresAgentRole")
+@requiresAgentRole("assistant", "specialist")
+tool openSupportTicketAnyAgent {
+  title  string!  @description("The ticket's one-line title.")
+}

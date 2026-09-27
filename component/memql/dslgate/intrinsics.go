@@ -32,8 +32,15 @@ import (
 )
 
 func scanRowIntrinsics(path, src string) []Violation {
+	// The two scans are the text's, run once per process (source_facts.go).
+	return stampFile(path, factsOf(src).rowIntrinsicFindings())
+}
+
+// rowIntrinsicsIn is the gate's findings from the two scans' hits, reported
+// against path.
+func rowIntrinsicsIn(path string, filterHits, sortKeyHits []sense.BareRowIntrinsic) []Violation {
 	var out []Violation
-	for _, hit := range sense.ScanBareRowIntrinsics(src) {
+	for _, hit := range filterHits {
 		out = append(out, Violation{
 			Gate: GateFilterRowIntrinsic,
 			File: path,
@@ -42,7 +49,7 @@ func scanRowIntrinsics(path, src string) []Violation {
 				hit.Text, hit.Name),
 		})
 	}
-	for _, hit := range sense.ScanBareRowIntrinsicSortKeys(src) {
+	for _, hit := range sortKeyHits {
 		out = append(out, Violation{
 			Gate: GateSortRowIntrinsic,
 			File: path,

@@ -1,0 +1,6 @@
+/// Open a support ticket, for a role the ladder does not have.
+@handler(type="function", name="openTicketToolRequiresRank")
+@requiresRank("superuser")
+tool openSupportTicketUnknownRank {
+  title  string!  @description("The ticket's one-line title.")
+}

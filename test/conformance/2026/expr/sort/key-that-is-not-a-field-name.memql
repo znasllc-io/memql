@@ -1,0 +1,6 @@
+/// The open tickets, by a key with a space in it.
+query ticket soKeyWithASpace {
+  filter row => row.status == "open"
+  sort "due date", "asc"
+  paginate 20
+}

@@ -72,7 +72,7 @@ func TestAskSpecialistDoesNotResolveAnotherOwnersSpecialist(t *testing.T) {
 	//
 	// The handler goes on to invoke the prompt, which the stub answers, so a
 	// successful resolve returns a node rather than an error.
-	nodes, err := i.handleAskSpecialist(context.Background(), askArgs(alice, "human-resources"), 0)
+	nodes, err := i.handleAskSpecialist(asPerson(alice), askArgs(alice, "human-resources"), 0)
 	if err != nil {
 		t.Fatalf("the OWNING user could not resolve her own specialist: %v\n\n"+
 			"The negative assertion below would then pass vacuously.", err)
@@ -82,7 +82,7 @@ func TestAskSpecialistDoesNotResolveAnotherOwnersSpecialist(t *testing.T) {
 	}
 
 	// THE ASSERTION.
-	if _, err := i.handleAskSpecialist(context.Background(), askArgs(bob, "human-resources"), 0); err == nil {
+	if _, err := i.handleAskSpecialist(asPerson(bob), askArgs(bob, "human-resources"), 0); err == nil {
 		t.Error("bob resolved a specialist only alice owns.\n\n" +
 			"handleAskSpecialist feeds def.Name / def.Description / def.SystemPrompt into the " +
 			"askSpecialist prompt, so this is one user's assistant being handed another user's " +
@@ -97,7 +97,7 @@ func TestAskSpecialistFailsClosedWithNoOwner(t *testing.T) {
 	i := New(registryWith(t, specialistDef(alice, "v1:agents:agent:a1", "human-resources", "Alice HR")), stubEngine{})
 
 	// POSITIVE CONTROL.
-	if _, err := i.handleAskSpecialist(context.Background(), askArgs(alice, "human-resources"), 0); err != nil {
+	if _, err := i.handleAskSpecialist(asPerson(alice), askArgs(alice, "human-resources"), 0); err != nil {
 		t.Fatalf("control: the owning user cannot resolve her own specialist: %v", err)
 	}
 
@@ -125,7 +125,7 @@ func TestAskSpecialistResolvesTheOwnersOwnSpecialist(t *testing.T) {
 	), stubEngine{})
 
 	for owner, wantName := range map[string]string{alice: "Alice HR", bob: "Bob HR"} {
-		nodes, err := i.handleAskSpecialist(context.Background(), askArgs(owner, "human-resources"), 0)
+		nodes, err := i.handleAskSpecialist(asPerson(owner), askArgs(owner, "human-resources"), 0)
 		if err != nil {
 			t.Fatalf("owner %s: %v", owner, err)
 		}

@@ -1,0 +1,13 @@
+/// Key a ticket by its day in a timezone -- a builtin that requires the timezone.
+@executor("integration.timeutil.dateKeyInTimezone")
+@args(profile="object")
+builtin ticketDayKeyWithZone {
+  timezone  string!  @description("An IANA timezone.")
+  now       string   @description("The instant to key, RFC3339.")
+}
+
+/// Name today's ticket in the caller's timezone.
+@handler(type="function", name="ticketDayKeyWithZone")
+tool ticketDayKeyInZone {
+  timezone  string!  @description("An IANA timezone.")
+}

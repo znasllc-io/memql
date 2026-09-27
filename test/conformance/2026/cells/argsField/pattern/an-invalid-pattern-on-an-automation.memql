@@ -1,0 +1,20 @@
+/// Raise a ticket titled with its region.
+mutation ticket raiseTicketInRegionPattern {
+  args {
+    title  string!
+  }
+  insert {
+    title: args.title
+  }
+}
+
+/// A work-spine template whose region must match a pattern that does not compile.
+@template
+automation raiseRegionTicketBadPattern {
+  args {
+    /// The region, two capitals.
+    region  string!  @pattern("^[A-Z")
+  }
+
+  raise := mutation raiseTicketInRegionPattern(title: args.region)
+}

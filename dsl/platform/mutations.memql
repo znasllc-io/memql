@@ -291,9 +291,12 @@ mutation outboundRequest updateOutboundRequestStatus {
 // Idempotent by requestId, which the receiver derives from (source,
 // digest of the SIGNED payload): a redelivery of the same event
 // re-stages onto the same row and @createOnly preserves the
-// product-owned status / processedAt / lastError rather than resetting
-// handling state back to 'received'. Same shape as
-// stageOutboundRequest's protection of the worker-owned fields.
+// product-owned status rather than resetting handling state back to
+// 'received'. Same shape as stageOutboundRequest's protection of the
+// worker-owned fields. processedAt and lastError need no annotation:
+// this insert never writes them, and the read-merge keeps every field
+// a write omits -- which is why naming them in @createOnly is refused
+// as a field the write never carries (memql#5426).
 //
 // NOT the sender's dedupe header. That header is not covered by the
 // vendor's HMAC, so deriving identity from it let one captured
@@ -310,7 +313,7 @@ mutation outboundRequest updateOutboundRequestStatus {
 /// the source allowlist and signature check have passed; the signing secret is never part of the
 /// row. Idempotent by requestId: a redelivery preserves the product-owned handling state
 /// (@createOnly) instead of replaying it.
-@createOnly("status", "processedAt", "lastError")
+@createOnly("status")
 mutation inboundRequest stageInboundRequest {
   args {
     requestId          string!

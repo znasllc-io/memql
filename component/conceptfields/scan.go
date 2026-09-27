@@ -184,7 +184,12 @@ func Scan(dslRoot string) (Snapshot, error) {
 		if readErr != nil {
 			return Snapshot{}, fmt.Errorf("%s: %w", p, readErr)
 		}
-		decls := memql.ExtractConceptDecls(string(raw))
+		decls, unparsed := memql.ExtractConceptDecls(string(raw))
+		if len(unparsed) > 0 {
+			// Boot refuses a concept that does not parse (memql#5426), so a
+			// snapshot taken without it would record a tree no node runs.
+			return Snapshot{}, fmt.Errorf("%s: %w", p, unparsed[0])
+		}
 		if len(decls) == 0 {
 			continue
 		}

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/ast"
@@ -94,10 +95,11 @@ func TestQueryFilterOrPrecedence(t *testing.T) {
 }
 
 // The comma in `return <value>, <error>` is the return separator, NOT the
-// legacy `,`-as-OR operator. parseLogicalOr folds a comma into an OR unless
-// suppressCommaOr is set, so reaching the OR level here without suppressing it
-// would swallow the error expression and change what the body returns. This is
-// the trap that made entering the chain one level too low look correct.
+// retired `,`-as-OR connective. parseLogicalOr refuses a comma it reaches
+// (memql#5439) -- and before that it folded one into an OR -- so reaching the
+// OR level here through parseLogicalOr would refuse or swallow the error
+// expression rather than leave it for the separator. This is the trap that
+// made entering the chain one level too low look correct.
 func TestQueryReturnCommaIsNotOr(t *testing.T) {
 	// `nil` parses to *ast.NilExpr, so a swallowed return separator shows up as
 	// a NilExpr arm inside the filter -- not as a literal.
@@ -140,26 +142,34 @@ func TestQueryFilterOrIsLeftAssociative(t *testing.T) {
 	}
 }
 
-// The `,`-as-OR form still parses where it always did. An earlier cut of this
-// fix set the global suppressCommaOr flag, which propagates into parseGrouped
-// and parseWhenGuard and silently turned these into parse errors. The local
-// OR loop must not.
-func TestNestedCommaOrStillParses(t *testing.T) {
-	for _, filter := range []string{
-		`(a == args.a, b == args.b)`,
-		`(a == args.a, b == args.b) && c == args.c`,
-		`sort((a == args.a, b == args.b), "createdAt")`,
+// The `,`-as-OR form used to parse inside a group and a directive target, and
+// this test used to pin that it still did. memql#5439 retired it, so the pin
+// is now the other way round: every one of these is refused, naming `||`, and
+// the same filter written with `||` parses (comma_connective_5439_test.go holds
+// the two readings to one tree).
+func TestNestedCommaOrIsRefused(t *testing.T) {
+	for _, tc := range []struct{ comma, pipe string }{
+		{`(a == args.a, b == args.b)`, `(a == args.a || b == args.b)`},
+		{`(a == args.a, b == args.b) && c == args.c`, `(a == args.a || b == args.b) && c == args.c`},
+		{`sort((a == args.a, b == args.b), "createdAt")`, `sort((a == args.a || b == args.b), "createdAt")`},
 	} {
-		if got := queryFilterExpr(t, filter); got == nil {
-			t.Errorf("filter %q parsed to a nil expression", filter)
+		src := "func (Query) q(ctx any) (any, error) {\n  return " + tc.comma + ", nil\n}\n"
+		_, err := ParseFile(src)
+		var rf *RetiredFormError
+		if !errors.As(err, &rf) || rf.Form.Rule != ruleCommaConnective {
+			t.Errorf("filter %q: got %v, want the retired `,` connective refused (%s)", tc.comma, err, ruleCommaConnective)
+		}
+		if got := queryFilterExpr(t, tc.pipe); got == nil {
+			t.Errorf("filter %q parsed to a nil expression", tc.pipe)
 		}
 	}
 }
 
-// The same flag also selects the object-literal value grammar, so setting it
-// would have changed how `{a: 1}` parses inside a query body or directive
-// target: values become wrapped expression nodes instead of plain scalars.
-// Pin that they stay scalars.
+// The flag that makes parseLogicalOr stop at a comma, inCollectionArgs, also
+// selects the object-literal value grammar, so setting it would have changed
+// how `{a: 1}` parses inside a query body or directive target: values become
+// wrapped expression nodes instead of plain scalars. Pin that they stay
+// scalars.
 func TestObjectLiteralGrammarUnchangedInQueryBody(t *testing.T) {
 	for _, filter := range []string{
 		`meta == {a: 1, b: "x"}`,
@@ -192,7 +202,7 @@ func TestObjectLiteralGrammarUnchangedInQueryBody(t *testing.T) {
 		}
 		for k, v := range obj {
 			if _, wrapped := v.(ast.ExpressionNode); wrapped {
-				t.Errorf("filter %q: object key %q parsed to %T, want a plain scalar; the literal value grammar changed (suppressCommaOr leaked into parseObject)", filter, k, v)
+				t.Errorf("filter %q: object key %q parsed to %T, want a plain scalar; the literal value grammar changed (inCollectionArgs leaked into parseObject)", filter, k, v)
 			}
 		}
 	}

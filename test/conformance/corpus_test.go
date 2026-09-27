@@ -87,7 +87,12 @@ import (
 )
 
 const (
-	verdictLoadOK      = "load_ok"
+	verdictLoadOK = "load_ok"
+	// verdictLoadWarn is a case that loads AND warns: a use of a language form
+	// in its deprecation window (component/language/deprecation), which keeps
+	// loading while every use says what to write instead. code and message
+	// name the warning's rule and text (memql#5438).
+	verdictLoadWarn    = "load_warn"
 	verdictRefuseParse = "refuse_parse"
 	verdictRefuseLoad  = "refuse_load"
 	verdictLower       = "lower"
@@ -103,7 +108,8 @@ type corpusExpectFile struct {
 type corpusCase struct {
 	// File is the case file, in the same directory as expect.json.
 	File string `json:"file"`
-	// Verdict is one of load_ok, refuse_parse, refuse_load, lower, evaluate.
+	// Verdict is one of load_ok, load_warn, refuse_parse, refuse_load, lower,
+	// evaluate.
 	Verdict string `json:"verdict"`
 	// Code is the stable refusal code a refuse_* diagnostic must carry, when
 	// the refusal has one.
@@ -135,6 +141,14 @@ type corpusCase struct {
 	// Expect (corpus_call_test.go). Without it an evaluate case's file is a
 	// bare expression.
 	Call string `json:"call,omitempty"`
+	// Mount is the file name the case is mounted under in its domain, for a
+	// case whose verdict depends on it: a construct kind whose loader reads it
+	// from one file of a domain (an automation, from automations.memql) is
+	// refused when it is declared in any other (construct_misplaced,
+	// memql#5437). Without it a case that declares an automation is mounted as
+	// automations.memql and every other case as case.memql, so a load case can
+	// only ever be judged in the file its loader reads.
+	Mount string `json:"mount,omitempty"`
 	// Note says why the case exists. Not checked.
 	Note string `json:"note,omitempty"`
 }
@@ -174,6 +188,10 @@ type corpusRun struct {
 	file      *ast.File // the parsed case file, for a case that is a whole file
 	parseErr  error
 	loadDiags []string
+	// loadWarns is what the load WARNED about the case: a deprecated form it
+	// spells. A warning is not a refusal -- the case loaded -- so it is kept
+	// apart from loadDiags, and only a load_warn case may draw one.
+	loadWarns []string
 	loadRan   bool
 	got       any
 	gotErr    error
@@ -196,7 +214,7 @@ func TestCorpusVerdicts(t *testing.T) {
 		switch {
 		case r.c.Verdict == verdictRefuseParse:
 			r.parseErr = corpusParse(r.line.Edition, r.src)
-		case r.c.Verdict == verdictLoadOK || r.c.Verdict == verdictRefuseLoad || r.c.Call != "":
+		case r.c.Verdict == verdictLoadOK || r.c.Verdict == verdictLoadWarn || r.c.Verdict == verdictRefuseLoad || r.c.Call != "":
 			// A logic an evaluate case calls loads like a load case first.
 			r.file, r.parseErr = corpusParseFile(r.line.Edition, r.src)
 		}
@@ -211,7 +229,7 @@ func TestCorpusVerdicts(t *testing.T) {
 				loads = append(loads, r)
 			}
 			calls = append(calls, r)
-		case r.c.Verdict == verdictLoadOK || r.c.Verdict == verdictRefuseLoad:
+		case r.c.Verdict == verdictLoadOK || r.c.Verdict == verdictLoadWarn || r.c.Verdict == verdictRefuseLoad:
 			if r.parseErr == nil {
 				loads = append(loads, r)
 			}
@@ -254,6 +272,26 @@ func corpusJudge(r *corpusRun) string {
 		}
 		if len(r.loadDiags) > 0 {
 			return "the engine refused the file at load:\n    " + strings.Join(r.loadDiags, "\n    ")
+		}
+		if len(r.loadWarns) > 0 {
+			return "the file loaded with a warning; a case that loads and warns is load_warn, naming the warning's code and message:\n    " +
+				strings.Join(r.loadWarns, "\n    ")
+		}
+	case verdictLoadWarn:
+		if r.parseErr != nil {
+			return "the parser refused the file: " + r.parseErr.Error()
+		}
+		if !r.loadRan {
+			return "the load batch did not run this case"
+		}
+		if len(r.loadDiags) > 0 {
+			return "the engine refused the file at load; the case says it loads and warns:\n    " + strings.Join(r.loadDiags, "\n    ")
+		}
+		if len(r.loadWarns) == 0 {
+			return "the file loaded without a warning; the case says the load warns about it"
+		}
+		if msg := corpusMatchRefusal(r.c, r.loadWarns); msg != "" {
+			return strings.Replace(msg, "refused, but no diagnostic carries", "warned, but no warning carries", 1)
 		}
 	case verdictRefuseLoad:
 		if r.parseErr != nil {
@@ -613,11 +651,23 @@ func corpusValidateCase(dir string, c corpusCase) string {
 	if c.Call != "" && c.Verdict != verdictEvaluate {
 		return "call names a logic to run, which only an evaluate case does"
 	}
+	if c.Mount != "" {
+		if c.Verdict != verdictLoadOK && c.Verdict != verdictRefuseLoad {
+			return "mount names the file a case is loaded from, which only a load_ok or refuse_load case is"
+		}
+		if strings.Contains(c.Mount, "/") || !strings.HasSuffix(c.Mount, ".memql") || c.Mount == "fixture.memql" {
+			return "mount names a .memql file in the case's domain directory, other than fixture.memql"
+		}
+	}
 	if len(c.Calls) > 0 && c.Verdict != verdictEvaluate {
 		return "calls answers the construct calls of an evaluate case; this case evaluates nothing"
 	}
 	switch c.Verdict {
 	case verdictLoadOK:
+	case verdictLoadWarn:
+		if c.Message == "" || c.Code == "" {
+			return "a load_warn case names the rule its warning carries (code) and text the warning must contain (message)"
+		}
 	case verdictRefuseParse, verdictRefuseLoad:
 		if c.Message == "" {
 			return "a refusal names the text its diagnostic must contain (message); the wording is part of the contract"
@@ -632,7 +682,7 @@ func corpusValidateCase(dir string, c corpusCase) string {
 	case verdictLower:
 		return corpusValidateExpression(dir, c)
 	default:
-		return fmt.Sprintf("verdict %q is not one of load_ok, refuse_parse, refuse_load, lower, evaluate", c.Verdict)
+		return fmt.Sprintf("verdict %q is not one of load_ok, load_warn, refuse_parse, refuse_load, lower, evaluate", c.Verdict)
 	}
 	return corpusValidateFile(c)
 }
@@ -724,6 +774,9 @@ func corpusTree(runs []*corpusRun) fstest.MapFS {
 		if corpusAutomationDecl.MatchString(r.src) {
 			name = "automations.memql"
 		}
+		if r.c.Mount != "" {
+			name = r.c.Mount
+		}
 		tree[r.domain+"/"+name] = &fstest.MapFile{Data: []byte(r.src)}
 	}
 	return tree
@@ -736,7 +789,7 @@ func corpusLoad(t *testing.T, runs []*corpusRun) {
 	t.Helper()
 	var accepting, refusing []*corpusRun
 	for _, r := range runs {
-		if r.c.Verdict == verdictLoadOK {
+		if r.c.Verdict == verdictLoadOK || r.c.Verdict == verdictLoadWarn {
 			accepting = append(accepting, r)
 		} else {
 			refusing = append(refusing, r)
@@ -809,30 +862,32 @@ func corpusLoadGroup(t *testing.T, runs []*corpusRun) {
 	if len(runs) == 0 {
 		return
 	}
-	unclaimed := corpusLoadBatch(t, runs)
-	if len(unclaimed) == 0 {
+	unclaimed, unclaimedWarns := corpusLoadBatch(t, runs)
+	if len(unclaimed) == 0 && len(unclaimedWarns) == 0 {
 		return
 	}
 	if len(runs) == 1 {
 		runs[0].loadDiags = append(runs[0].loadDiags, unclaimed...)
+		runs[0].loadWarns = append(runs[0].loadWarns, unclaimedWarns...)
 		return
 	}
+	unclaimed = append(unclaimed, unclaimedWarns...)
 	// One boot per case is slow, so say what forced it: a diagnostic that
 	// names no case, or names two, is a problem this batch cannot attribute.
 	t.Logf("%d diagnostic(s) name no single case; loading these %d cases one boot each:\n    %s",
 		len(unclaimed), len(runs), strings.Join(unclaimed, "\n    "))
 	for _, r := range runs {
-		r.loadDiags, r.loadRan = nil, false
-		if rest := corpusLoadBatch(t, []*corpusRun{r}); len(rest) > 0 {
-			r.loadDiags = append(r.loadDiags, rest...)
-		}
+		r.loadDiags, r.loadWarns, r.loadRan = nil, nil, false
+		rest, restWarns := corpusLoadBatch(t, []*corpusRun{r})
+		r.loadDiags = append(r.loadDiags, rest...)
+		r.loadWarns = append(r.loadWarns, restWarns...)
 	}
 }
 
 // corpusLoadBatch loads runs together and attributes every diagnostic to the
 // one run it names (see the file comment). It returns the diagnostics no
-// single run claims.
-func corpusLoadBatch(t *testing.T, runs []*corpusRun) []string {
+// single run claims: the refusals, then the warnings.
+func corpusLoadBatch(t *testing.T, runs []*corpusRun) (unclaimedDiags, unclaimedWarns []string) {
 	t.Helper()
 	tree := corpusTree(runs)
 	byDomain := map[string]*corpusRun{}
@@ -843,17 +898,23 @@ func corpusLoadBatch(t *testing.T, runs []*corpusRun) []string {
 
 	byName := corpusDeclaredNames(runs)
 	var unclaimed []string
-	claim := func(file, msg string) {
-		if r, ok := byDomain[corpusDomainOf(file, msg, byDomain)]; ok {
-			r.loadDiags = append(r.loadDiags, msg)
-			return
+	claimAs := func(file, msg string, warning bool) {
+		r, ok := byDomain[corpusDomainOf(file, msg, byDomain)]
+		if !ok {
+			r, ok = corpusRunNamed(msg, byName)
 		}
-		if r, ok := corpusRunNamed(msg, byName); ok {
+		switch {
+		case !ok && warning:
+			unclaimedWarns = append(unclaimedWarns, msg)
+		case !ok:
+			unclaimed = append(unclaimed, msg)
+		case warning:
+			r.loadWarns = append(r.loadWarns, msg)
+		default:
 			r.loadDiags = append(r.loadDiags, msg)
-			return
 		}
-		unclaimed = append(unclaimed, msg)
 	}
+	claim := func(file, msg string) { claimAs(file, msg, false) }
 
 	diags, _, err := memql.LintUnifiedTree(corpusQuiet, tree)
 	if err != nil {
@@ -863,7 +924,9 @@ func corpusLoadBatch(t *testing.T, runs []*corpusRun) []string {
 		claim("", err.Error())
 	}
 	for _, d := range diags {
-		claim(d.File, d.Message)
+		// A warning is a use of a deprecated form: it loads, and only a
+		// load_warn case may draw one (corpusJudge).
+		claimAs(d.File, d.Message, d.IsWarning())
 	}
 
 	// The automations loader is its own pass at boot (app/engine.go), so it is
@@ -878,7 +941,7 @@ func corpusLoadBatch(t *testing.T, runs []*corpusRun) []string {
 			claim("", line)
 		}
 	}
-	return unclaimed
+	return unclaimed, unclaimedWarns
 }
 
 // corpusActionDecl matches a top-level `action` or `capability` declaration.
@@ -1070,6 +1133,21 @@ func corpusAutomationProblems(t *testing.T, tree fs.FS) []string {
 	}
 	eng, initErr := automations.NewOfflineEngine(corpusQuiet, memoryNodes.DefaultRegistry())
 	if initErr != nil {
+		// THE STRICT-BOOT AGGREGATE IS NOT A PROBLEM OF ITS OWN. This engine
+		// is the Init the lint pass just ran over this same mounted tree, and
+		// that pass reported each skipped construct and each duplicate one by
+		// one, each claimed by its case -- LintUnifiedTree leaves the
+		// aggregate out for exactly that reason. Returned here as one line it
+		// names every refusing case in the batch at once, so no single case
+		// could claim it, and every batch holding two refusing cases fell back
+		// to one boot per case (102 boots on the DSL v1 follow-ups corpus,
+		// PR #5693). Loop analysis cannot run in this boot; a case whose
+		// refusal only it would find draws nothing here, and
+		// corpusLoadUntilSettled reloads that case without the cases whose
+		// skips refused this boot.
+		if strings.Contains(initErr.Error(), "strict DSL boot refused") {
+			return nil
+		}
 		return []string{"loading functions for loop analysis: " + initErr.Error()}
 	}
 	loader := automations.NewLoader(automations.LoaderOptions{Logger: corpusQuiet, Registry: memoryNodes.DefaultRegistry(), Functions: eng.Functions()})
@@ -1179,7 +1257,7 @@ func corpusCheckRegistered(t *testing.T, runs []*corpusRun) {
 	t.Helper()
 	var oks []*corpusRun
 	for _, r := range runs {
-		if r.c.Verdict == verdictLoadOK && r.loadRan && len(r.loadDiags) == 0 && r.file != nil {
+		if (r.c.Verdict == verdictLoadOK || r.c.Verdict == verdictLoadWarn) && r.loadRan && len(r.loadDiags) == 0 && r.file != nil {
 			oks = append(oks, r)
 		}
 	}

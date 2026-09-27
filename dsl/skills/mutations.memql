@@ -23,6 +23,7 @@ mutation skill mintSkill {
     tags               array
     domainIds          array
     toolSlugs          array
+    /// Inert since memql#5432 retired the live-knowledge mechanism; stored and never resolved.
     liveSourceIds      array
     tier               string!
     instructions       object
@@ -81,6 +82,7 @@ mutation skill createSkill {
     tags           array
     domainIds      array
     toolSlugs      array
+    /// Inert since memql#5432 retired the live-knowledge mechanism; stored and never resolved.
     liveSourceIds  array
     tier           string!
     predefined     bool

@@ -48,6 +48,11 @@ func TestLegacyAndV1ConditionsGenerateTheSameAutomation(t *testing.T) {
 		{`payload.tier in ["a", "b"]`, `row.tier in ["a","b"]`, `row => row.tier in ["a", "b"]`},
 		{`payload.deletedAt == null`, `row.deletedAt == nil`, `row => row.deletedAt == nil`},
 		{`payload.plan != "free" || (payload.seats > 10)`, `row.plan != "free" || row.seats > 10`, `row => row.plan != "free" || row.seats > 10`},
+		// A condition stored before the comma connective was retired
+		// (memql#5439) meant OR by it. The engine refuses the comma now, and
+		// the conversion -- the expressions rewrite, which still reads it --
+		// is what carries a stored rule across rather than refusing it.
+		{`payload.role == "admin", payload.role == "owner"`, `row.role == "admin" || row.role == "owner"`, `row => row.role == "admin" || row.role == "owner"`},
 	} {
 		legacy, v1 := generate(t, c.legacy), generate(t, c.v1)
 		if legacy != v1 {

@@ -9,6 +9,13 @@
       "verdict": "refuse_parse",
       "code": "annotation_form",
       "message": "@mergeFields on a mutation takes one or more strings"
+    },
+    {
+      "file": "a-string-field.memql",
+      "verdict": "refuse_load",
+      "code": "write_annotation_field_type",
+      "message": "@mergeFields(\"title\") names a field declared string: @mergeFields deep-merges a stored object, so it takes an object or map field",
+      "note": "A deep merge has keys to merge only in an object or a map (memql#5426)."
     }
   ]
 }

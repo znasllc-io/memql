@@ -985,13 +985,14 @@ func ConceptHeaders(src string) []ConceptHeader {
 	blanked := blankCommentsAndStrings(src)
 	matches := conceptHeaderRe.FindAllStringSubmatchIndex(blanked, -1)
 	out := make([]ConceptHeader, 0, len(matches))
+	preambles := NewPreambleWalker(src)
 	for _, m := range matches {
 		start := m[0]
 		out = append(out, ConceptHeader{
 			Name:          blanked[m[4]:m[5]],
 			Start:         start,
 			End:           conceptEnd(blanked, start),
-			PreambleStart: preambleStart(src, start),
+			PreambleStart: preambles.StartOf(start),
 			Indent:        blanked[m[2]:m[3]],
 		})
 	}
@@ -1084,7 +1085,7 @@ func RewriteRowAuthz(src []byte, tiers map[string]RowAuthzDecl) ([]byte, error) 
 		// already spoken for.
 		//
 		// The region runs from the previous concept's closing brace,
-		// NOT from h.PreambleStart. preambleStart stops at the first
+		// NOT from h.PreambleStart. The preamble walk stops at the first
 		// blank line, and the parser happily attaches an annotation
 		// separated from its header by one:
 		//

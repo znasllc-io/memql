@@ -1,0 +1,7 @@
+use crm.shapes.{ supportTask }
+
+/// Every support task, newest first. The one import naming supportTask is of a shape.
+query supportTask newestSupportTasks {
+  sort "row.createdAt", "desc"
+  paginate 20
+}

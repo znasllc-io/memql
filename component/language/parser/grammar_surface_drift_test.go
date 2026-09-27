@@ -628,6 +628,48 @@ automation probe {
   logic probe(x: 1)
 }`},
 
+	// ---- the agent-role axis (memql#5438) ----------------------------------
+	// @requiresAgentRole is a new tool annotation and @requiresRank a new
+	// placement on a tool: both WIDENINGS -- before them the first was
+	// annotation_unknown on a tool and the second annotation_misplaced. Which
+	// values they may hold is the load's question (the agent concept's role
+	// enum, the role ladder), which this path does not reach. @allowedRoles is
+	// DEPRECATED, not retired: inside its window it parses exactly as before.
+	{"tool: @requiresAgentRole (memql#5438)", true, `@handler(type="function", name="probe")
+@requiresAgentRole("assistant", "specialist")
+tool probe {
+  a string
+}`},
+	{"tool: @requiresRank (memql#5438)", true, `@handler(type="function", name="probe")
+@requiresRank("developer")
+tool probe {
+  a string
+}`},
+	{"tool: @requiresAgentRole unquoted (annotation_form)", false, `@handler(type="function", name="probe")
+@requiresAgentRole(assistant)
+tool probe {
+  a string
+}`},
+	{"tool: @allowedRoles inside its deprecation window", true, `@handler(type="function", name="probe")
+@allowedRoles("assistant")
+tool probe {
+  a string
+}`},
+
+	// ---- a struct-query clause is written once (memql#5429) ---------------
+	// A NARROWING: a second copy of a clause used to parse, and the second
+	// silently replaced the first -- a second `filter` dropped the first,
+	// ownership test included. Now query_clause_duplicate.
+	{"struct query: sort written twice (query_clause_duplicate)", false, `query thing probe {
+  filter row => row.id != ""
+  sort "row.createdAt", "desc"
+  sort "title", "asc"
+}`},
+	{"struct query: filter written twice (query_clause_duplicate)", false, `query thing probe {
+  filter row => row.id != ""
+  filter row => row.title != ""
+}`},
+
 	// NOT in this corpus: the retired procedural `func (Query) name(ctx any)`
 	// author-side form. It is refused, but NOT by NormaliseAll + ParseFile --
 	// measured here, it parses clean at this layer, so an entry asserting

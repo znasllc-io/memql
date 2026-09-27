@@ -32,14 +32,18 @@ func (a *App) transportMCP() {
 	a.createHTTPServer()
 
 	// The MCP authz knobs:
-	//   MEMQL_MCP_ROLE -- the role a session acts as (Gate B). Empty -> the
-	//     engine's "specialist" default for stdio; on the http transport an
-	//     empty pin means the role is taken from the caller's verified token.
+	//   MEMQL_MCP_ROLE -- the cluster role of the PERSON a session acts as
+	//     (Gate B). On the http transport an empty pin means the role is taken
+	//     from the caller's verified token. It is a person's role, never an
+	//     agent's: a tool gated on an agent kind (@requiresAgentRole) is not
+	//     offered over MCP at all (memql#5438).
 	//   MEMQL_MCP_MODE -- the capability tier sealed/authoring/inline (Gate A).
 	//     Unset/unknown -> authoring (the default tier).
 	//   MEMQL_MCP_USER -- the acting user that session-authored constructs are
 	//     owner-scoped to (Phase 3 #1533). Empty -> for stdio the session has no
-	//     authoring identity; on http it is taken from the caller's token.
+	//     authoring identity, and so no reflected tool will run for it: a tool
+	//     is called by an agent or by an AUTHENTICATED person over MCP
+	//     (memql#5438); on http it is taken from the caller's token.
 	//   MEMQL_MCP_TOOL_TIMEOUT -- per-tools/call execute deadline (#1594). A Go
 	//     duration ("30s", "1m"); unset/invalid -> mcp.DefaultToolTimeout.
 	cfg := mcp.Config{

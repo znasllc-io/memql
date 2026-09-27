@@ -24,8 +24,13 @@ python3 -m http.server 4318 --bind 127.0.0.1 --directory editors/vscode/site/dis
 ```
 
 The build copies static files plus shared `brand/` assets and generates the
-code-theme CSS from the committed native editor themes and interactive panels from `examples/research-desk/research/brief.memql`. The source
-manifest and complete setup guide are included beside the downloadable example. Run its actual linter:
+code-theme CSS from the committed native editor themes and interactive panels
+from the research-desk example's two `.memql` files,
+`examples/research-desk/research/brief.memql` and `automations.memql` -- the
+automation has a file of its own because the automation loader reads a domain's
+automations from `automations.memql` and no other file. The source manifest and
+complete setup guide are included beside the downloadable example files. Run its
+actual linter:
 
 ```bash
 go run ./cmd/memqllint examples/research-desk

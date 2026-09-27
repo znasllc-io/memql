@@ -101,6 +101,14 @@ func (e *MemQLEngine) refuseBelowRequiredRank(ctx context.Context, fn *Function,
 	// is empty -- and "insufficient permissions" sends them to the wrong
 	// place. It does NOT name who could do it: that is a directory
 	// disclosure on a refusal path.
+	if strings.TrimSpace(string(ac.Role)) == "" {
+		// A credential that asserts no role, or a person the principal table
+		// resolves none for (tool_gate.go's toolFloorContext): `holds ""`
+		// would read like a rendering fault rather than an answer.
+		return fmt.Errorf(
+			"%q requires the %q role or above; this caller holds no role",
+			name, required)
+	}
 	return fmt.Errorf(
 		"%q requires the %q role or above; this caller holds %q",
 		name, required, string(ac.Role))
@@ -114,7 +122,8 @@ func (e *MemQLEngine) refuseBelowRequiredRank(ctx context.Context, fn *Function,
 // The check runs against the seeded catalog when one is readable and
 // against the engine's compiled base ladder otherwise, so a first boot --
 // where the catalog is being seeded by the very startup this validates --
-// still accepts the five base slugs rather than refusing to start.
+// still accepts every name the seed gives a base rung, slug or alias, rather
+// than refusing to start.
 func (e *MemQLEngine) validateRequiresRankSlugs(ctx context.Context, fns *FunctionRegistry) []error {
 	if fns == nil {
 		return nil
@@ -138,11 +147,17 @@ func (e *MemQLEngine) validateRequiresRankSlugs(ctx context.Context, fns *Functi
 		if ladder.rankOf(slug) > 0 {
 			continue
 		}
-		problems = append(problems, fmt.Errorf(
-			"%s declares @requiresRank(%q), which names no role in dsl/rbac. "+
+		// Coded (RuleRequiresRankUnknown, tool_gate_load.go) so a load report
+		// and the conformance corpus key on the rule rather than the prose --
+		// the same code a tool's floor is refused with, because it is the same
+		// check (memql#5438).
+		problems = append(problems, &gateLoadRefusal{
+			code: RuleRequiresRankUnknown,
+			message: fmt.Sprintf("%s declares @requiresRank(%q), which names no role in dsl/rbac. "+
 				"A floor that does not resolve ranks 0 and would admit every caller, "+
 				"so this refuses to load. Known roles: %s",
-			name, slug, strings.Join(ladder.knownSlugs(), ", ")))
+				name, slug, strings.Join(ladder.knownSlugs(), ", ")),
+		})
 	}
 	return problems
 }
@@ -157,8 +172,9 @@ func (l roleLadder) knownSlugs() []string {
 	if len(out) == 0 {
 		// No catalog readable: name the compiled base ladder, which
 		// rankOf falls back to, rather than an empty list that reads as
-		// "no roles exist".
-		return []string{"reader", "writer", "admin", "developer", "owner"}
+		// "no roles exist" -- every name it ranks, the seed's slugs and the
+		// user row's aliases (auth.RoleRank).
+		return []string{"viewer", "reader", "user", "writer", "admin", "developer", "owner"}
 	}
 	sort.Slice(out, func(i, j int) bool { return l.ranks[out[i]] < l.ranks[out[j]] })
 	return out

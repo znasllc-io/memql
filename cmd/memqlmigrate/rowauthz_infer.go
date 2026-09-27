@@ -232,6 +232,13 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 		// block comment is not an import, and treating it as one
 		// re-homes every vote in the file to the wrong domain.
 		imports := conceptImports(blanked)
+		// The preamble boundary is read on the RAW source: on the blanked
+		// view a comment line is all spaces and trims to "", so a walk there
+		// stops at it and hides an `@serverOnly` sitting above a comment
+		// line. The annotation MATCHING still happens on the blanked view
+		// (below), so a `@public` inside a block comment is still prose. The
+		// shared walker also reads a multi-line annotation whole (memql#5426).
+		preambles := langparser.NewPreambleWalker(f.src)
 
 		for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(blanked, -1) {
 			kind := blanked[m[2]:m[3]]
@@ -254,7 +261,7 @@ func inferRowAuthz(dslRoot string) (*rowAuthzInference, error) {
 			// indistinguishable from a blank one), content from the
 			// blanked view (so a `@public` inside a block comment is
 			// prose, not an annotation).
-			preamble := blanked[constructPreambleStart(f.src, m[0]):m[0]]
+			preamble := blanked[preambles.StartOf(m[0]):m[0]]
 			// The blanker is length-preserving, so one offset pair
 			// indexes both views. Classification reads the BLANKED
 			// body (a `&&` inside a string must not split a clause);
@@ -540,30 +547,6 @@ func constructBodyRange(blanked string, headerStart int) (int, int) {
 		}
 	}
 	return start, len(blanked)
-}
-
-// constructPreambleStart walks back from a construct header over the
-// contiguous run of annotation and comment lines that belong to it,
-// and returns where that run begins.
-//
-// It must be given the RAW source. On the blanked view a comment line
-// is all spaces, so it trims to "" and the walk stops there -- which
-// made the `//` branch dead code and, worse, hid an `@serverOnly`
-// sitting above a comment line. The annotation MATCHING still happens
-// on the blanked view (see the caller), so a `@public` inside a block
-// comment is still prose; only the boundary is computed on raw text.
-func constructPreambleStart(raw string, headerStart int) int {
-	lineStart := headerStart
-	for lineStart > 0 {
-		prevEnd := lineStart - 1
-		ps := strings.LastIndexByte(raw[:prevEnd], '\n') + 1
-		trimmed := strings.TrimSpace(raw[ps:prevEnd])
-		if trimmed == "" || (!strings.HasPrefix(trimmed, "@") && !strings.HasPrefix(trimmed, "//")) {
-			break
-		}
-		lineStart = ps
-	}
-	return lineStart
 }
 
 // Report renders the run's tier distribution and the abstentions, so a

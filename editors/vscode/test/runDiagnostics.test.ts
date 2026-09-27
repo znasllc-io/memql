@@ -21,7 +21,14 @@ import assert from "node:assert/strict";
 import type { AuthoringDiagnostic } from "@znasllc-io/memql-sdk-core/authoring";
 
 import { assembleBundle, type WorkspaceSources } from "../src/run/bundle.js";
-import { groupByFile, mapBundleDiagnostics } from "../src/run/diagnostics.js";
+import {
+  dropAlreadyShown,
+  groupByFile,
+  mapBundleDiagnostics,
+  RunDiagnosticsView,
+  type MappedDiagnostic,
+  type ShownDiagnostic,
+} from "../src/run/diagnostics.js";
 
 // `imports` stands in for the language server -- since memql#3335 the walk
 // asks `memql/imports` rather than scanning. The fixtures below need exactly
@@ -49,6 +56,7 @@ function diag(overrides: Partial<AuthoringDiagnostic> = {}): AuthoringDiagnostic
     column: 0,
     endLine: 0,
     endColumn: 0,
+    code: "",
     ...overrides,
   };
 }
@@ -204,6 +212,25 @@ test("mapBundleDiagnostics -- an empty error still produces a usable message", a
   assert.match(mapped?.message ?? "", /failed to compile/);
 });
 
+test("mapBundleDiagnostics -- the engine's rule id is carried, positioned or not", async () => {
+  // The code travels in its own field (memql#5435) and becomes the Problems
+  // entry's code, the same one the language server's squiggle for the fault
+  // carries -- so nothing downstream reads it out of the message text.
+  const bundle = await twoFileBundle();
+  const [positioned, fileLevel, uncoded] = mapBundleDiagnostics(
+    [
+      diag({ line: 4, column: 3, code: "lower_unknown_field" }),
+      diag({ line: 0, code: "lower_not_boolean" }),
+      diag({ line: 4, column: 3 }),
+    ],
+    bundle,
+  );
+  assert.equal(positioned?.code, "lower_unknown_field");
+  assert.equal(fileLevel?.fileLevel, true);
+  assert.equal(fileLevel?.code, "lower_not_boolean");
+  assert.equal(uncoded?.code, "");
+});
+
 // -----------------------------------------------------------------------------
 // groupByFile
 // -----------------------------------------------------------------------------
@@ -219,4 +246,110 @@ test("groupByFile -- buckets per file, preserving order", async () => {
   assert.equal(grouped.size, 2);
   assert.equal(grouped.get("/ws/dsl/a/dep.memql")?.length, 1);
   assert.equal(grouped.get("/ws/active.memql")?.length, 2);
+});
+
+// -----------------------------------------------------------------------------
+// dropAlreadyShown
+// -----------------------------------------------------------------------------
+
+test("dropAlreadyShown -- a failure the language server draws is drawn once", async () => {
+  // The server's load pass shows the same lowering refusal as the author types
+  // (memql#5434); a run that reports it again would put a second squiggle on
+  // one fault.
+  const bundle = await twoFileBundle();
+  const mapped = mapBundleDiagnostics(
+    [
+      diag({ name: "q", line: 4, column: 3, endLine: 4, endColumn: 9, code: "lower_unknown_field" }),
+      diag({ name: "q", line: 4, column: 3, endLine: 4, endColumn: 9, code: "lower_not_boolean" }),
+      diag({ name: "q", line: 5, column: 1, endLine: 5, endColumn: 2, code: "lower_unknown_field" }),
+      diag({ name: "q", line: 4, column: 3, endLine: 4, endColumn: 9 }),
+    ],
+    bundle,
+  );
+  const shown = [{ code: "lower_unknown_field", start: { line: 2, character: 4 }, end: { line: 2, character: 12 } }];
+  const kept = dropAlreadyShown(mapped, shown);
+  // Dropped: the same code over the server's range. Kept: another code on the
+  // same token, the same code on another line, and a failure with no code.
+  assert.deepEqual(
+    kept.map((d) => [d.code, d.start.line]),
+    [["lower_not_boolean", 2], ["lower_unknown_field", 3], ["", 2]],
+  );
+  assert.equal(dropAlreadyShown(mapped, []).length, mapped.length, "with nothing shown, nothing is dropped");
+});
+
+// -----------------------------------------------------------------------------
+// RunDiagnosticsView
+// -----------------------------------------------------------------------------
+
+// A Problems panel for one collection, and the language server's diagnostics,
+// both as plain maps the test drives by hand.
+function problemsHarness() {
+  const drawn = new Map<string, readonly MappedDiagnostic[]>();
+  const server = new Map<string, ShownDiagnostic[]>();
+  let sets = 0;
+  const view = new RunDiagnosticsView(
+    {
+      set: (path, diagnostics) => {
+        sets++;
+        drawn.set(path, diagnostics);
+      },
+      clear: () => drawn.clear(),
+    },
+    (path) => server.get(path) ?? [],
+  );
+  return { view, drawn, server, sets: () => sets };
+}
+
+const SHOWN_REFUSAL: ShownDiagnostic = {
+  code: "lower_unknown_field",
+  start: { line: 2, character: 4 },
+  end: { line: 2, character: 12 },
+};
+
+async function refusalFailure(): Promise<MappedDiagnostic[]> {
+  return mapBundleDiagnostics(
+    [diag({ name: "q", line: 4, column: 3, endLine: 4, endColumn: 9, code: "lower_unknown_field" })],
+    await twoFileBundle(),
+  );
+}
+
+test("RunDiagnosticsView -- a failure the server stops drawing comes back", async () => {
+  // The server's squiggle can go while the fault stays: it clears a closed
+  // file, and drops a refusal whose line is being edited. A failure filtered
+  // out once, at publish, would stay gone for the rest of the run.
+  const h = problemsHarness();
+  h.server.set("/ws/active.memql", [SHOWN_REFUSAL]);
+  h.view.publish(await refusalFailure());
+  assert.equal(h.drawn.get("/ws/active.memql")?.length, 0, "drawn once, by the server");
+
+  h.server.set("/ws/active.memql", []); // didClose publishes the empty set
+  h.view.refresh(["/ws/active.memql"]);
+  assert.equal(h.drawn.get("/ws/active.memql")?.length, 1, "the run's failure is back once the server stops drawing it");
+
+  h.server.set("/ws/active.memql", [SHOWN_REFUSAL]); // reopened: the server draws it again
+  h.view.refresh(["/ws/active.memql"]);
+  assert.equal(h.drawn.get("/ws/active.memql")?.length, 0, "and gives way again when the server redraws it");
+});
+
+test("RunDiagnosticsView -- a refresh that changes nothing draws nothing", async () => {
+  // Drawing changes the file's diagnostics, which the extension feeds back to
+  // refresh; a view that redrew on that would redraw forever.
+  const h = problemsHarness();
+  h.view.publish(await refusalFailure());
+  const after = h.sets();
+  h.view.refresh(["/ws/active.memql"]);
+  h.view.refresh(["/ws/active.memql", "/ws/elsewhere.memql"]);
+  assert.equal(h.sets(), after, "the server's half of the file did not move, so nothing is redrawn");
+  assert.equal(h.drawn.get("/ws/active.memql")?.length, 1);
+  assert.equal(h.drawn.has("/ws/elsewhere.memql"), false, "a file the run found nothing in is left alone");
+});
+
+test("RunDiagnosticsView -- a publish replaces the last run's failures", async () => {
+  const h = problemsHarness();
+  h.view.publish(await refusalFailure());
+  h.view.publish([]);
+  assert.equal(h.drawn.size, 0, "a clean run clears what the last one drew");
+  h.server.set("/ws/active.memql", []);
+  h.view.refresh(["/ws/active.memql"]);
+  assert.equal(h.drawn.size, 0, "and a later server change does not bring the old run back");
 });

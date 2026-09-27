@@ -6,6 +6,13 @@
       "code": "construct_unknown",
       "message": "the import ( ... ) block is retired: a construct is imported with a file-top use line, use <domain>.<file>.{ names }",
       "note": "The file-top import block loaded on the engine before epic memql#5356, and no loader ever read it. The construct-keyword gate refuses it at load, by name, naming the use line that replaced it. The parser still reads the block (dslimports builds its import graph from it), so the refusal is at load, not at parse."
+    },
+    {
+      "file": "a-use-line-below-a-construct.memql",
+      "verdict": "refuse_parse",
+      "code": "use_not_file_top",
+      "message": "a use line must come before the file's first construct -- move it to the top of the file",
+      "note": "A use line is file-top. The parser refuses one below a construct; boot never parses a file whole -- each loader slices the constructs it owns and collects the file's use lines wherever they sit -- so the contract gate refuses the same line with the same message and code at load (memql#5426)."
     }
   ]
 }

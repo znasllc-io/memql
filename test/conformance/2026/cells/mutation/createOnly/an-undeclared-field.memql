@@ -1,0 +1,13 @@
+/// Open a ticket, keeping a priority the ticket does not have.
+@createOnly("priority")
+mutation ticket openTicketCreateOnlyUndeclared {
+  args {
+    ticketId  string!
+    title     string!
+  }
+  insert {
+    id: args.ticketId
+    title: args.title
+    status: "open"
+  }
+}

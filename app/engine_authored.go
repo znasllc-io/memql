@@ -209,6 +209,15 @@ func (a *App) rehydratePromotedConstructs() {
 	// twelve constructs the cluster can now run.
 	a.Logger.Info("durably-promoted constructs re-hydrated on boot",
 		"seen", res.Seen, "rehydrated", res.Rehydrated, "staged", res.Staged, "failed", len(res.Failed))
+	// A row that did not come back is not callable until its source is
+	// corrected and re-promoted, or it is demoted (memql#5426). Each was
+	// logged above with its row id, the refusal and the remedy; this line
+	// names them all in one place, which is what an operator greps for after
+	// an upgrade narrows the language.
+	if len(res.Failed) > 0 {
+		a.Logger.Warn("durably-promoted constructs did not re-hydrate -- each is logged as \"durable authored construct quarantined at re-hydration\" with its row id and what to do",
+			"failed", res.Failed)
+	}
 }
 
 // rearmActiveAuthoredBundles re-registers the persisted active authored bundles

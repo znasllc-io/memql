@@ -135,12 +135,13 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        ensureForGoalCapName,
-			Description: "Match-extend-or-create an agent that can handle a goal. Reads the role + agent catalogs, runs the agentFactoryAnalyze structured-output prompt, issues the appropriate write, and returns {agentId, action, reasoning}. Restricted to the Assistant via the wrapping ensureAgent tool's @allowedRoles.",
+			Description: "Match-extend-or-create an agent that can handle a goal. Reads the role + agent catalogs, runs the agentFactoryAnalyze structured-output prompt, issues the appropriate write, and returns {agentId, action, reasoning}. Restricted to the Assistant via the wrapping ensureAgent tool's @requiresAgentRole.",
 			Handler:     i.handleEnsureForGoal,
 			ArgsSchema: map[string]string{
 				"goal":        "string",
 				"ownerUserId": "string",
 				"partitionId": "string",
+				"runId":       "string (optional) -- the v1:work:run a planner-driven caller is working; omitted, the run the call belongs to is recorded",
 			},
 		},
 		{
@@ -156,7 +157,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "requestUserFeedback",
-			Description: "Transition the active Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. The agent calls this BEFORE guessing when it (or a specialist it fronts for) needs missing detail from the user. The user's answer (Plan.feedbackResponse + status->running) resumes the Plan through the existing planner re-invocation path.",
+			Description: "Raise a v1:work:approval of kind feedback against the active run, carrying {question, kind, options?, timeoutAt}. The agent calls this BEFORE guessing when it (or a specialist it fronts for) needs missing detail from the user. The person's answer resumes the run.",
 			Handler:     i.handleRequestUserFeedback,
 			ArgsSchema: map[string]string{
 				"question":    "string (required) -- the question to put to the user",
@@ -165,7 +166,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"timeoutAt":   "string (optional) -- RFC3339 auto-pause deadline",
 				"agentId":     "string (required) -- calling agent id (auto-stamped)",
 				"ownerUserId": "string (required) -- session-owner user id (auto-stamped)",
-				"planId":      "string (required) -- the active Plan to park (auto-stamped)",
+				"runId":       "string (required) -- the active run to park (auto-stamped)",
 				"partitionId": "string (optional) -- target space (auto-stamped)",
 			},
 		},
@@ -234,8 +235,14 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 	// planner dispatches platform agents with no user behind the call, and an
 	// empty owner resolves the shared catalog and nothing else -- never
 	// another user's bucket.
-	ownerUserId, _ := args["ownerUserId"].(string)
-	def, ok := i.agents.Get(strings.TrimSpace(ownerUserId), name)
+	//
+	// The owner is the caller unless the context may act for another user
+	// (memql.CallOwner), decided before the registry is consulted.
+	ownerUserId, err := memql.CallOwner(ctx, fmt.Sprintf("agent(%q)", name), asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
+	def, ok := i.agents.Get(ownerUserId, name)
 	if !ok || def == nil {
 		return nil, fmt.Errorf("agent(%q): no agent registered with that name (loaded names: %v)", name, i.agents.NamesFor(ownerUserId))
 	}
@@ -344,8 +351,14 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 	// handed back is another agent's Description and SystemPrompt verbatim.
 	// Refusing is a visible configuration failure; falling through would be an
 	// invisible cross-tenant one.
-	ownerUserId, _ := args["ownerUserId"].(string)
-	ownerUserId = strings.TrimSpace(ownerUserId)
+	//
+	// The owner is also the caller's own unless the context may act for
+	// another user (memql.CallOwner): the persona handed back is the named
+	// user's.
+	ownerUserId, err := memql.CallOwner(ctx, fmt.Sprintf("askSpecialist(%q)", role), asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
 	if ownerUserId == "" {
 		return nil, fmt.Errorf("askSpecialist(%q): no owner in the call context -- specialists resolve per owner and this call cannot say whose", role)
 	}
@@ -416,9 +429,9 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 	}}, nil
 }
 
-// handleRequestUserFeedback transitions the active Plan to
-// awaitingFeedback / feedback_required so the user is asked for the
-// detail the agent is missing. The generic counterpart to the worker
+// handleRequestUserFeedback raises a v1:work:approval of kind feedback
+// against the active run, so the user is asked for the detail the agent
+// is missing. The generic counterpart to the worker
 // integration's handleRequestScope (scope_elevation_required); this is
 // the feedback_required variant, agent-callable mid-turn.
 //
@@ -428,10 +441,10 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 //	args["timeoutAt"]   string  optional -- RFC3339 auto-pause deadline
 //	args["agentId"]     string  required -- auto-stamped by the streaming loop
 //	args["ownerUserId"] string  required -- auto-stamped by the streaming loop
-//	args["planId"]      string  required -- the active Plan (auto-stamped)
+//	args["runId"]       string  required -- the active run (auto-stamped)
 //
 // Returns ONE MemoryNode whose payload is a small ack
-// {status:"awaiting_user", planId, kind}. The agent reads it, emits a
+// {status:"awaiting_user", runId, approvalId, kind}. The agent reads it, emits a
 // short respondToUser acknowledgement, and ends its turn; the user's
 // answer is the gate.
 func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -457,7 +470,12 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 	if runId == "" {
 		return nil, fmt.Errorf("requestUserFeedback: 'runId' required (auto-injection failed -- no active run in the turn context)")
 	}
-	ownerUserId := strings.TrimSpace(asString(args["ownerUserId"]))
+	// The run is parked AS its owner, so the owner is the caller unless the
+	// context may act for another user (memql.CallOwner).
+	ownerUserId, err := memql.CallOwner(ctx, "requestUserFeedback", asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
 
 	goals := i.workGoalsRef()
 	if goals == nil {
@@ -530,7 +548,12 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	if goal == "" {
 		return nil, fmt.Errorf("produceArtifact: 'goal' is required -- describe the deliverable to produce")
 	}
-	ownerUserId := strings.TrimSpace(asString(args["ownerUserId"]))
+	// The goal is opened FOR its owner, so the owner is the caller unless the
+	// context may act for another user (memql.CallOwner).
+	ownerUserId, err := memql.CallOwner(ctx, "produceArtifact", asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
 	if ownerUserId == "" {
 		return nil, fmt.Errorf("produceArtifact: 'ownerUserId' required (auto-injection failed -- no session owner in the turn context)")
 	}

@@ -131,7 +131,7 @@ func TestRealEngineCuratedToolSurface(t *testing.T) {
 	eng := loadedEngine(t)
 
 	names := map[string]bool{}
-	for _, m := range listMCPTools(asEngine(eng), "assistant", TierSealed, "") {
+	for _, m := range listMCPTools(asPerson("assistant"), asEngine(eng), "assistant", TierSealed, "") {
 		if n, _ := m["name"].(string); n != "" {
 			names[n] = true
 		}

@@ -5,6 +5,11 @@
       "verdict": "load_ok"
     },
     {
+      "file": "above-a-multi-line-annotation.memql",
+      "verdict": "load_ok",
+      "note": "An annotation whose argument list spans lines is one annotation, and the declaration's preamble reads through it: the loaders' walk used to stop at its continuation lines and cut every annotation above it out of the slice, refusing this prompt as declaring no level (memql#5426)."
+    },
+    {
       "file": "with-an-unquoted-value.memql",
       "verdict": "refuse_parse",
       "code": "annotation_form",
@@ -14,6 +19,13 @@
       "file": "an-unknown-level.memql",
       "verdict": "refuse_parse",
       "message": "unknown level \"medium\": a level is one of fast, strong, reasoning, embeddings"
+    },
+    {
+      "file": "with-no-level.memql",
+      "verdict": "refuse_load",
+      "code": "prompt_level_missing",
+      "message": "prompt \"summariseTicketNoLevel\" (level): line 3: no @level declared",
+      "note": "Every prompt declares its level: the router's rules branch on it, and a prompt never names a model (epic memql#5127). The parser leaves an absent @level empty and the loader refuses it, so strict boot does and a bundle mounted at MEMQL_DSL_PATH is held to it too (memql#5426)."
     }
   ]
 }

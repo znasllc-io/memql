@@ -1204,13 +1204,40 @@ message SenseCompletionItem {
   string insert_text = 5;    // text to insert (may differ from label)
   int32 sort_priority = 6;   // lower = higher priority
   bool is_snippet = 7;       // insert_text carries LSP snippet syntax ($1, ${1:name}, $0)
+  // Edits the completion makes ELSEWHERE in the document, never overlapping
+  // where insert_text goes: the file-top `use` line a concept import adds for
+  // a concept the file does not import yet (memql#5359, memql#5426). A client
+  // that cannot apply them must not offer the item -- its insert_text alone is
+  // not what its label promises. The LSP sends the same edits as
+  // additionalTextEdits.
+  repeated SenseTextEdit additional_edits = 8;
+}
+
+// SenseTextEdit is one edit a completion makes besides its insert text.
+// Positions are 1-based, like every Sense position; a range whose start and
+// end meet is an insertion.
+message SenseTextEdit {
+  SenseRange range = 1;
+  string new_text = 2;
 }
 
 // Diagnose -- returns errors and warnings for a document.
 message SenseDiagnoseMsg {
   string request_id = 1;
   string source = 2;
-  string file_path = 3;  // optional, helps resolve version prefix
+  // file_path is the document's path RELATIVE TO THE DSL ROOT, e.g.
+  // "planner/queries.memql" -- the path the load derives a construct's
+  // namespace from. When it places the document in a domain the engine
+  // loaded, Diagnose also runs the engine's load over `source` and returns
+  // Lower's refusals (`lower_unknown_field`, ...) as errors carrying their
+  // rule code (memql#5434), which costs the load of the document's
+  // constructs. A stream runs one such pass at a time: a request that arrives
+  // while one runs waits behind it, and one displaced from that place by a
+  // newer request is answered with Diagnose's diagnostics alone. Optional:
+  // empty, or a path in no loaded domain, skips that pass, because without the
+  // path a name two domains declare would resolve wrongly and the refusals
+  // would be false.
+  string file_path = 3;
 }
 
 message SenseDiagnoseResult {
@@ -1573,6 +1600,12 @@ message AuthoringDiagnostic {
   int32 column = 7;
   int32 end_line = 8;    // 0 when the failure has no end anchor
   int32 end_column = 9;  // 0 when the failure has no end anchor
+  // code is the failure's stable rule id when it carries one -- a lowering
+  // refusal's `lower_*`, an annotation refusal's `annotation_*`, a retired
+  // form's rule -- and empty otherwise (memql#5435). `error` still ends with it
+  // in brackets; this is the field a client keys on, so no client parses the
+  // text. The id is stable, the wording of `error` is not.
+  string code = 10;
 }
 
 // AuthoringConstruct names one construct that a session-define registered.

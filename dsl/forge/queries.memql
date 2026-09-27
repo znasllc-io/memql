@@ -3,10 +3,11 @@
 // Read paths in the `forge` namespace.
 //
 // Gating: "my requests" + "request by id" are open to any authenticated team
-// member (submitters read their own work). The validation + approval QUEUES
-// are gated to developers/owners via the forge role context-specs
-// (dsl/forge/specs.memql: forgeDeveloper / forgeApprover), so a
-// non-developer can never list other people's requests to act on them.
+// member (submitters read their own work). The validation QUEUE is gated to
+// the forge developer tier by its @requiresRank("writer") floor, and the
+// approval queue to the owner by the forgeApprover context-spec
+// (dsl/forge/specs.memql), so a non-developer can never list other people's
+// requests to act on them.
 //
 // ---------------------------------------------------------------------------
 // Multi-project scoping & partition isolation -- design notes
@@ -33,8 +34,8 @@
 // `WHERE partition = $envelope` on every query; that mechanism was retired
 // in #56 and there is no `partition` column on the row store today.
 // Cross-client isolation is now enforced by per-row authorization -- the
-// forge role context-specs (dsl/forge/specs.memql: forgeDeveloper /
-// forgeApprover) plus projectId-scoped queries below. Kept as historical
+// forge queue gates (the validation queue's @requiresRank floor, the
+// forgeApprover spec) plus projectId-scoped queries below. Kept as historical
 // context; see
 // [access-model.md](../../public/operate/auth/access-model.md) and
 // [per-row-authz-audit.md](../../public/operate/auth/per-row-authz-audit.md).
@@ -127,10 +128,17 @@ query request projectRequests {
 
 // ----- developer/owner-gated queues -----
 
-/// The validation queue: requests awaiting first-line developer validation. Developer/owner only
-/// (forgeDeveloper).
+// The validation queue's floor is the one the forge developer tools declare and the transition
+// rule reads (forgeDeveloperFloor, component/memql/forge_request_validation.go): one rank on one
+// ladder, so the three cannot disagree (memql#4112). It replaced the forgeDeveloper spec, a list
+// of role slugs that could not see a custom role, which the tools' rank floor admits (memql#5438).
+
+/// The validation queue: requests awaiting first-line developer validation. The forge developer
+/// tier only -- the writer rank or above -- and anyone below it is refused rather than shown an
+/// empty queue.
+@requiresRank("writer")
 query request validationQueue {
-  filter  row => row.status == "needs_validation" && forgeDeveloper(actor)
+  filter  row => row.status == "needs_validation"
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

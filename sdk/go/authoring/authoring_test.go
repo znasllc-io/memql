@@ -211,3 +211,55 @@ func TestDurableDemoteBundle_SurfacesError(t *testing.T) {
 		t.Error("server rejection error was not surfaced")
 	}
 }
+
+// TestValidateBundle_CarriesTheRuleCode: a diagnostic's stable rule id reaches
+// the SDK's own Diagnostic as Code (memql#5435), so a consumer keys on the id
+// rather than parsing it out of Error -- whose wording may change while the id
+// may not.
+func TestValidateBundle_CarriesTheRuleCode(t *testing.T) {
+	stream := newFakeStream()
+	d := client.NewDispatcher(stream, nil)
+	go d.Run()
+	defer d.Stop()
+
+	c := NewClient(d)
+
+	resCh := make(chan *ValidateResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		res, err := c.ValidateBundle(ctx, "query widget broken { filter row => row.nope == 1 }")
+		resCh <- res
+		errCh <- err
+	}()
+
+	sent := <-stream.sendCh
+	stream.recvCh <- &memqlv1.MemqlServerMessage{
+		CorrelateTo: sent.GetMessageId(),
+		Payload: &memqlv1.MemqlServerMessage_AuthoringValidateBundleResult{
+			AuthoringValidateBundleResult: &memqlv1.AuthoringValidateBundleResult{
+				Ok: false,
+				Diagnostics: []*memqlv1.AuthoringDiagnostic{{
+					Name:   "broken",
+					Kind:   "query",
+					Error:  "`row.nope` does not lower in a query filter: `nope` is not a declared field [lower_unknown_field]",
+					Line:   1,
+					Column: 37,
+					Code:   "lower_unknown_field",
+				}},
+			},
+		},
+	}
+
+	res := <-resCh
+	if err := <-errCh; err != nil {
+		t.Fatalf("ValidateBundle: %v", err)
+	}
+	if res == nil || len(res.Diagnostics) != 1 {
+		t.Fatalf("expected one diagnostic, got %+v", res)
+	}
+	if got := res.Diagnostics[0].Code; got != "lower_unknown_field" {
+		t.Errorf("Diagnostic.Code = %q, want %q -- the rule id must not have to be parsed out of Error", got, "lower_unknown_field")
+	}
+}

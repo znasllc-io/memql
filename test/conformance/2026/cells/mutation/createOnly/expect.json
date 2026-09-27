@@ -14,6 +14,20 @@
       "file": "on-an-update.memql",
       "verdict": "refuse_load",
       "message": "@createOnly is only valid on insert mutations"
+    },
+    {
+      "file": "an-undeclared-field.memql",
+      "verdict": "refuse_load",
+      "code": "write_annotation_undeclared_field",
+      "message": "@createOnly(\"priority\") names a field concept",
+      "note": "A write-shaping annotation names a top-level field of the concept the mutation writes: the executor keys on the name, so one the concept does not declare is never met and the annotation silently does nothing (memql#5426)."
+    },
+    {
+      "file": "a-field-it-does-not-write.memql",
+      "verdict": "refuse_load",
+      "code": "write_annotation_unwritten_field",
+      "message": "@createOnly(\"attempts\") names a field this mutation's insert block does not write",
+      "note": "A field the write never carries is already kept by the read-merge, so naming it here protects nothing; the annotation is refused rather than left to read as a guarantee (memql#5426)."
     }
   ]
 }

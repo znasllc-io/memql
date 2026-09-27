@@ -56,7 +56,7 @@
 /// decision, or a file the user has not provided. After calling it, emit a short acknowledgement
 /// and END YOUR TURN; the user's answer resumes the Plan.
 @handler(type="function", name="requestUserFeedback")
-@allowedRoles("assistant")
+@requiresAgentRole("assistant")
 @executionTime("fast")
 tool requestUserFeedback {
   question     string! @description("The question to put to the user. Be specific and self-contained -- the user sees only this text on the card, not the chat history. State exactly what you need and why.")

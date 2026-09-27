@@ -208,3 +208,30 @@ shape broken {
 			sliceNames(got))
 	}
 }
+
+// TestExtractDeclarationSlicesReportsAnUnterminatedDeclaration (memql#5426
+// review): a declaration whose `{` never closes is reported, by name and
+// header line, and it no longer takes every later declaration with it -- its
+// unclosed brace used to leave the rest of the file one level deep, so the
+// top-level guard refused every header below it.
+func TestExtractDeclarationSlicesReportsAnUnterminatedDeclaration(t *testing.T) {
+	const src = `/// Never closed.
+shape broken {
+  a
+
+/// Closes.
+shape fine {
+  b
+}
+`
+	slices, unterminated := ExtractDeclarationSlicesReporting(src, testShapeHeaderRE)
+	if got := sliceNames(slices); len(got) != 1 || got[0] != "fine" {
+		t.Fatalf("slices = %v, want the declaration below the unterminated one", got)
+	}
+	if len(unterminated) != 1 || unterminated[0].Name != "broken" || unterminated[0].HeaderLine != 2 || unterminated[0].Start != 0 {
+		t.Fatalf("unterminated = %+v, want broken on line 2, its preamble from the top", unterminated)
+	}
+	if got := sliceNames(ExtractDeclarationSlices(src, testShapeHeaderRE)); len(got) != 1 || got[0] != "fine" {
+		t.Fatalf("ExtractDeclarationSlices = %v, want fine as well", got)
+	}
+}

@@ -75,7 +75,16 @@ each one's replacement, are the table in `parser/v1_refusals.go`
 (`V1RetiredForms`). What each position admits is the tier manifest in
 `tiers/`, and what each function means is the catalog in `functions/`. The
 string the rewriter emits is the engine's internal query form -- also what an
-SDK sends to `Execute` -- and its grammar (`ParseExpression`) does not change.
+SDK sends to `Execute` -- and it keeps its own grammar (`ParseExpression`),
+with one thing in common with the authored one: neither has a comma or a
+semicolon connective. `;` as AND (memql#5375) and `,` as OR (memql#5439) are
+refused there too, the comma as `retired_comma_connective`, the v1 code. The
+only reader that still understands them is the expressions rewrite, through
+`parseLegacyExpression` (the `legacyConnectives` parser flag), because it has
+to read the retired spelling to write `&&` / `||` in its place -- never set
+that flag anywhere the engine parses, and never emit a comma between two
+conditions from a lowering (`TestNoLoweringCarriesTheCommaConnective` in
+`test/dslconformance` lowers every tracked file to hold it).
 
 **Before-write automation bodies** use `@trigger(before="create"|"update"|"write", concept="...")` and field writes `row.<field> = <expression>`. `ast.FieldWriteStatement` is a statement kind and `tiers.PositionBeforeWriteValue` its expression position. The compiler captures branch conditions so earlier field writes cannot change the chosen arm. The engine runs the body after read-merge and before schema validation; only read-only query/logic calls are admitted transitively.
 
@@ -130,7 +139,17 @@ mistake this layout exists to prevent:
   the struct-form rewriter's family, the top-level dispatch table and
   `use` -- which the parser's refusal of any other word and the load gate
   `construct_unknown` both read (memql#5356); the clauses each construct
-  takes are `parser.BodyClauses`. `dslspec/` derives both, and hand-authors
+  takes are `parser.BodyClauses`. Which lines OPEN a top-level statement is
+  one scan too, `parser.ReadTopLevel`, and the three load gates that read
+  top-level statements answer from it: `construct_unknown`
+  (`UnknownConstructKeywords`), `construct_misplaced` (`Statements`: keyword,
+  declared name, line -- the gate that refuses an automation declared outside
+  its domain's `automations.memql`, memql#5437, rule in
+  `dsl/construct_placement.go`) and `use_not_file_top` (`MisplacedUseLines`,
+  memql#5426). `TopLevelStatements`, `FindUnknownConstructKeywords` and
+  `FindMisplacedUseLines` are each one read and one question, for a caller
+  with only one to ask; the load reads each file's scan once per process
+  (dslgate's `source_facts.go`). `dslspec/` derives both, and hand-authors
   only what the parser cannot say (each construct's category, doc and
   annotation receiver) plus the keywords, operators, field types and
   legal-next rules. Its drift test fails when that hand-authored remainder

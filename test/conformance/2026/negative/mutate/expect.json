@@ -4,6 +4,13 @@
       "file": "two-write-blocks.memql",
       "verdict": "refuse_parse",
       "message": "mutation body must contain exactly one write block"
+    },
+    {
+      "file": "imported-concept-declared-nowhere.memql",
+      "verdict": "refuse_load",
+      "code": "signature_concept_unresolved",
+      "message": "signature concept \"supportMemo\" does not resolve: `use crm.concepts.{ supportMemo }` imports it",
+      "note": "memql#5433. The mutation used to load with an empty write target."
     }
   ]
 }

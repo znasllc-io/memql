@@ -20,12 +20,12 @@ They depend on those surrounding definitions.
 
 ## Start with the core declarations
 
-The same file declares a **concept** (`researchBrief`) for typed stored data,
-and a **shape** (`researchBriefSummary`) for the returned fields. A **trait**
-(`hasDraftStatus`) is a reusable row predicate whose fields are checked where
-it is applied. A **spec** (`hasResearchAnswer`) binds its predicate to the
-`researchBrief` concept. The cached query below composes both conditions with
-the caller's ownership check and applies the shape.
+The example's `brief.memql` declares a **concept** (`researchBrief`) for typed
+stored data, and a **shape** (`researchBriefSummary`) for the returned fields.
+A **trait** (`hasDraftStatus`) is a reusable row predicate whose fields are
+checked where it is applied. A **spec** (`hasResearchAnswer`) binds its
+predicate to the `researchBrief` concept. The cached query below composes both
+conditions with the caller's ownership check and applies the shape.
 
 **Queries** read; **mutations** write. **Logic** composes calls and returns a
 value; an **automation** runs those steps from an event or schedule. The
@@ -116,11 +116,19 @@ The request mutation creates a row. Its event supplies typed arguments to the
 automation. Named results connect the steps, a branch handles missing evidence,
 and the final mutation saves another version of the same brief.
 
+The automation is the one definition of the domain that is not in
+`brief.memql`: it is in `automations.memql`. The automation loader reads a
+domain's automations from that file and from no other, so an automation
+declared anywhere else would never run, and the engine refuses it at load
+(`construct_misplaced`) rather than booting without it.
+
 <!-- corpus: 2026/examples/research-workflow/brief.memql -->
 ```memql fragment
-/// A request becomes a saved draft. Updates do not retrigger this create event.
+/// A request becomes a saved draft. Only a requested row starts it: saving the
+/// draft writes a new version, which is a create event too, and must not rerun it.
 @actor
 @trigger(event="graph.node.created.v1:research:researchBrief")
+@filter(row => row.status == "requested")
 automation prepareResearchBrief {
   args {
     id       string!
@@ -145,9 +153,13 @@ automation prepareResearchBrief {
 }
 ```
 
-The trigger listens only for creates; saving a draft under the existing ID is
-an update, so it does not repeat the workflow. A failed retrieval or model step
-stops before the final save. Manual retries can make another model call.
+The trigger listens for creates, and saving a draft under the existing ID is
+one as well: a write of a new version of a row publishes a create event. The
+`@filter` is what keeps the workflow from starting again on its own output --
+only a row whose status is `requested` starts it, and the saves write `draft`
+or `no_sources`. Without the filter the engine's loop check refuses the
+automation at load. A failed retrieval or model step stops before the final
+save. Manual retries can make another model call.
 
 ## Author and run it
 

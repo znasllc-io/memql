@@ -69,9 +69,9 @@ constructs carry the annotation's name for that reason (`openTicketsCache`,
 | Field | Meaning |
 |---|---|
 | `file` | The case file, in this directory. |
-| `verdict` | One of the five below. |
-| `code` | The stable rule id a refusal carries, when it carries one -- a retired form's rule and an annotation's `annotation_*` at parse, an annotation's and the lowering's `lower_*` at load, printed last in brackets. A refusal that carries one must have it named here, at parse and at load alike: the id is the part of the contract a reworded message keeps. |
-| `message` | Text the refusal must contain. Required for a refusal: the wording is part of the contract. |
+| `verdict` | One of the six below. |
+| `code` | The stable rule id a refusal carries, when it carries one -- a retired form's rule and an annotation's `annotation_*` at parse, an annotation's and the lowering's `lower_*` at load, printed last in brackets. A refusal that carries one must have it named here, at parse and at load alike: the id is the part of the contract a reworded message keeps. For `load_warn`, the rule the warning carries -- the deprecated form's (`deprecated_*`) -- and required. |
+| `message` | Text the refusal must contain. Required for a refusal: the wording is part of the contract. For `load_warn`, text the warning must contain, and required for the same reason. |
 | `concept` | For `lower` and `evaluate`: the concept, by bare name, the expression is over. The fixture declares it. |
 | `position` | For `lower` and `evaluate`: the expression position. Under `expr/<position>/` it defaults to the directory. |
 | `row`, `args`, `actor` | For `lower` and `evaluate`: the values the expression reads. A case binds only the roots its position has: `args` and `actor` are refused where the position has neither (a spec body, a trigger filter), and a prompt input has no `actor`. |
@@ -79,13 +79,15 @@ constructs carry the annotation's name for that reason (`openTicketsCache`,
 | `sql` | For `lower`: text the lowered SQL must contain. |
 | `expect` | For `evaluate`: the value the expression must produce. An absent result is `null`. |
 | `call` | For `evaluate`: a logic the case file declares, run with `args` instead of evaluating a bare expression; `calls` answers the construct calls it makes that are not to another logic the case declares. |
+| `mount` | For `load_ok` and `refuse_load`: the file name the case is mounted under in its domain, when the verdict depends on it. A case is otherwise mounted as `automations.memql` when it declares an automation -- the one file of a domain the automation loader reads -- and as `case.memql` when it does not, so a case can only be judged somewhere else by naming it: an automation declared in any other file is refused at load (`construct_misplaced`, `negative/automation/`). |
 | `note` | Why the case exists. Not checked. |
 
 ## The verdicts
 
 | Verdict | The engine must |
 |---|---|
-| `load_ok` | parse the file and load it with no problem, and register every query, mutation, logic, spec, trait, tool and concept it declares. |
+| `load_ok` | parse the file and load it with no problem and no warning, and register every query, mutation, logic, spec, trait, tool and concept it declares. |
+| `load_warn` | do what `load_ok` asks, and warn about the file with the rule and text the case names: a form inside its deprecation window (`component/language/deprecation`), which keeps loading while every use says what to write instead. A `load_ok` case that draws a warning fails, so a deprecated spelling cannot hide in a case that claims to be clean. |
 | `refuse_parse` | refuse the file when it parses it in the edition's grammar. |
 | `refuse_load` | parse the file and refuse it at load. |
 | `lower` | lower the expression to SQL containing `sql`. |
@@ -155,8 +157,9 @@ language, each reading only its own subtree through the runner's own reader
 (a malformed file elsewhere fails the runner, once):
 
 - `TestCorpusCoversEveryRegistryCell`: every placement in the annotation
-  registry has its cell, with a case that loads (`load_ok`, `lower` or
-  `evaluate`) and one that is refused (`refuse_parse` or `refuse_load`); a
+  registry has its cell, with a case that loads (`load_ok`, `load_warn`,
+  `lower` or `evaluate`) and one that is refused (`refuse_parse` or
+  `refuse_load`); a
   directory under `cells/` that no placement names fails too.
 - `TestCorpusCoversEveryTierPosition`: every `tiers.Position` has a case that
   loads and one that is refused under `expr/<position>/`.
@@ -197,6 +200,22 @@ Two more read what the corpus holds against the language's own tables:
   retires) that no refused case pins by its rule id with a message naming the
   replacement -- or, where the refusal writes the rewrite out for the author's
   own text (a keyless map entry), that rewrite.
+
+## The editor is held to it too
+
+The editor's load pass (Sense's DiagnoseLoad, memql#5434) shows Lower's
+refusals as the author types, and two tests in
+`test/conformance/editor_load_parity_test.go` hold it to the corpus, with each
+directory's fixture in its own domain and the case as the open buffer:
+
+- `TestCorpusLowerRefusalsReachTheEditor`: every `refuse_load` case with a
+  `lower_*` code is refused by the pass with the same code and a message
+  containing the case's `message`. A case whose refused construct is an
+  automation is left out and counted: a trigger filter's refusal cannot be
+  placed in the author's file, so it stays with the load.
+- `TestCorpusLoadsDrawNoEditorRefusal`: no `load_ok` case draws a refusal from
+  the pass. The editor never says a file will not load when the load says it
+  will.
 
 ## Running it
 

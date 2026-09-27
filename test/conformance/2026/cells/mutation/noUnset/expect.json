@@ -9,6 +9,13 @@
       "verdict": "refuse_parse",
       "code": "annotation_form",
       "message": "@noUnset on a mutation takes one or more strings"
+    },
+    {
+      "file": "a-field-it-does-not-write.memql",
+      "verdict": "refuse_load",
+      "code": "write_annotation_unwritten_field",
+      "message": "@noUnset(\"closedAt\") names a field this mutation's update block does not write",
+      "note": "@noUnset drops a written field that arrives empty over a stored value; a field the update never writes has nothing for it to drop (memql#5426)."
     }
   ]
 }

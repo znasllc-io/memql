@@ -1,6 +1,8 @@
 package memql
 
 import (
+	"context"
+
 	"google.golang.org/grpc/codes"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -69,18 +71,17 @@ func (s *streamSession) handleSenseComplete(envelope *memqlv1.MemqlClientMessage
 	return nil
 }
 
-// senseCompletionItemsToProto maps Sense completions onto the wire.
-// SenseCompletionItem carries no additional edits, so an item that needs one
-// is not offered: its insert text alone is not what its label promises -- a
-// concept import would insert the name and never add the `use` line
-// (memql#5359). The LSP carries the edit (additionalTextEdits).
+// senseCompletionItemsToProto maps Sense completions onto the wire, each with
+// the edits it makes elsewhere in the document. A concept import inserts the
+// concept's name at the cursor and adds its `use` line with the file's
+// imports; the wire could not carry the second edit, so the item used to be
+// dropped here rather than offered half-done (memql#5359). It carries it now
+// (SenseCompletionItem.additional_edits, memql#5426), as the LSP does
+// (additionalTextEdits).
 func senseCompletionItemsToProto(items []sense.CompletionItem) []*memqlv1.SenseCompletionItem {
 	out := make([]*memqlv1.SenseCompletionItem, 0, len(items))
 	for _, item := range items {
-		if len(item.AdditionalEdits) > 0 {
-			continue
-		}
-		out = append(out, &memqlv1.SenseCompletionItem{
+		wire := &memqlv1.SenseCompletionItem{
 			Label:         item.Label,
 			Kind:          item.Kind,
 			Detail:        item.Detail,
@@ -88,7 +89,14 @@ func senseCompletionItemsToProto(items []sense.CompletionItem) []*memqlv1.SenseC
 			InsertText:    item.InsertText,
 			SortPriority:  int32(item.SortPriority),
 			IsSnippet:     item.IsSnippet,
-		})
+		}
+		for _, e := range item.AdditionalEdits {
+			wire.AdditionalEdits = append(wire.AdditionalEdits, &memqlv1.SenseTextEdit{
+				Range:   senseRangeToProto(e.Range),
+				NewText: e.NewText,
+			})
+		}
+		out = append(out, wire)
 	}
 	return out
 }
@@ -106,7 +114,23 @@ func (s *streamSession) handleSenseDiagnose(envelope *memqlv1.MemqlClientMessage
 	}
 
 	go func() {
-		diags := svc.Diagnose(msg.GetSource(), msg.GetFilePath())
+		// Diagnose's own pass, and -- when file_path places the document in the
+		// tree -- the engine's load of it, for Lower's refusals with their
+		// rule codes (memql#5434). One squiggle per fault: the merge drops a
+		// load refusal Diagnose already reports.
+		//
+		// The load is the expensive half, so it runs through the stream's gate
+		// (sense_load_gate.go): one pass in flight per stream, one request
+		// waiting, cancelled with the stream. A request the gate turns away is
+		// still answered, with Diagnose's diagnostics -- the fast answer is
+		// never held back or withheld.
+		source, filePath := msg.GetSource(), msg.GetFilePath()
+		diags := svc.Diagnose(source, filePath)
+		if filePath != "" && svc.CanLoad() {
+			s.senseLoad.run(s.stream.Context(), func(ctx context.Context) {
+				diags = sense.MergeLoadDiagnostics(diags, svc.DiagnoseLoad(ctx, source, filePath))
+			})
+		}
 		protoDiags := make([]*memqlv1.SenseDiagnostic, len(diags))
 		for i, d := range diags {
 			protoDiags[i] = &memqlv1.SenseDiagnostic{

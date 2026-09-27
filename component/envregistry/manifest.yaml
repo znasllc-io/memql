@@ -2854,7 +2854,7 @@ variables:
     component: mcp
     scope: node
     optional: true
-    description: "Acting role for the per-construct gate (Gate B); empty pins the role to the caller's verified token claim on HTTP."
+    description: "Cluster role of the person the MCP session acts as, for the per-construct gate (Gate B) and a reflected tool's @requiresRank floor; empty takes the role from the caller's verified token on HTTP, and on stdio leaves the session with no role, which clears no rank floor."
 
   - name: MEMQL_MCP_TOOL_TIMEOUT
     component: mcp
@@ -2874,7 +2874,7 @@ variables:
     component: mcp
     scope: node
     optional: true
-    description: "Acting user that session-authored constructs are owner-scoped to; empty takes the user from the caller's token on HTTP."
+    description: "The person the MCP session acts as: the identity a reflected tool call runs under and the owner session-authored constructs are scoped to. Empty takes the user from the caller's token on HTTP. A stdio session needs it to run a reflected DSL tool: with no identity, tools/list offers none and tools/call refuses every one (memql#5438)."
 
   # --- observability ---
 

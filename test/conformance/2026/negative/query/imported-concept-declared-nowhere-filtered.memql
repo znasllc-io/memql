@@ -1,0 +1,7 @@
+use crm.concepts.{ salesLead }
+
+/// The open sales leads. The import names a concept no domain declares.
+query salesLead openSalesLeads {
+  filter row => row.status == "open"
+  paginate 20
+}

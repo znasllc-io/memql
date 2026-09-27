@@ -1,7 +1,8 @@
-import { examples, coreExamples } from "./example-data.js";
+import { examples, exampleFiles, coreExamples } from "./example-data.js";
 
 const tabs = [...document.querySelectorAll("[data-example]")];
 const code = document.querySelector("#example-code");
+const file = document.querySelector("#example-file");
 const panel = document.querySelector("#code-panel");
 const description = document.querySelector("#example-description");
 const copy = document.querySelector("#copy-code");
@@ -49,6 +50,7 @@ function select(index, focus = false) {
   });
   panel.setAttribute("aria-labelledby", tabs[index].id);
   highlight(examples[index]);
+  file.textContent = exampleFiles[index];
   description.textContent = descriptions[index];
   copy.textContent = "Copy snippet";
   status.textContent = "";
@@ -80,11 +82,11 @@ copy.addEventListener("click", async () => {
     await navigator.clipboard.writeText(examples[selected]);
     copy.textContent = "Copied";
     status.textContent =
-      "Snippet copied. Download the complete file for all definitions and imports.";
+      "Snippet copied. Download the example's files for all definitions and imports.";
   } catch {
     copy.textContent = "Select text to copy";
     status.textContent =
-      "Clipboard is unavailable. Select the code and copy it, or download the complete file.";
+      "Clipboard is unavailable. Select the code and copy it, or download the example's files.";
   }
   resetCopy = setTimeout(() => {
     copy.textContent = "Copy snippet";

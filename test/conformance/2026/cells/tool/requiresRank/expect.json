@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@requiresRank on a tool takes one string"
+    },
+    {
+      "file": "an-unknown-role.memql",
+      "verdict": "refuse_load",
+      "code": "requires_rank_unknown",
+      "message": "declares @requiresRank(\"superuser\"), which names no role in dsl/rbac",
+      "note": "Validated at load exactly as on a query, mutation or logic: a floor that does not resolve would rank 0 and admit every caller."
+    },
+    {
+      "file": "an-agent-role.memql",
+      "verdict": "refuse_load",
+      "code": "requires_rank_unknown",
+      "message": "declares @requiresRank(\"assistant\"), which names no role in dsl/rbac",
+      "note": "An agent kind does not rank: the gate on which agent is calling is @requiresAgentRole (memql#5438)."
+    }
+  ]
+}

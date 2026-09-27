@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // TestParseArgsBlock_BraceAwareForPatternQuantifiers pins the
@@ -298,6 +300,46 @@ builtin authCheckPermission {
 	}
 	if c.Args[1].Name != "sections" || c.Args[1].Type != "array" {
 		t.Errorf("Args[1] = %+v, want sections array", c.Args[1])
+	}
+}
+
+// TestCollectConstructs_AnnotationsAboveAMultiLineAnnotation (memql#5426
+// review): the preamble walk stopped at a multi-line annotation's continuation
+// lines, so everything above one was invisible -- a @serverOnly mutation
+// shipped as a client method the engine always refuses (the #2800 failure),
+// and an @sdk builtin was left out. Both annotations sit above a @description
+// spread over lines.
+func TestCollectConstructs_AnnotationsAboveAMultiLineAnnotation(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "constructs.memql", `
+@serverOnly
+@description(
+  "Internal write."
+)
+mutation board internalWrite {
+  insert {
+    title: "x"
+  }
+}
+
+@executor("integration.reporting.buildReport")
+@sdk
+@description(
+  "Build a report."
+)
+builtin buildReport {
+  reportId  string  @required
+}
+`)
+	got, err := CollectConstructs(root)
+	if err != nil {
+		t.Fatalf("CollectConstructs: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "buildReport" {
+		t.Fatalf("want only the @sdk builtin, got %+v", got)
+	}
+	if got[0].Description != "Build a report." {
+		t.Errorf("Description = %q, want the multi-line one", got[0].Description)
 	}
 }
 
@@ -598,17 +640,17 @@ func TestEmitGoMethods_OptionalObjectAndArrayArgsAreNilGuarded(t *testing.T) {
 func TestDescriptionFor_DocCommentPrecedence(t *testing.T) {
 	src := "/// Doc channel.\n@description(\"Annot channel.\")\nquery space queryFlipProbe {\n}\n"
 	header := strings.Index(src, "query space")
-	if got := descriptionFor(src, header); got != "Doc channel." {
+	if got := descriptionFor(langparser.NewPreambleWalker(src), src, header); got != "Doc channel." {
 		t.Errorf("both channels: %q, want the /// channel", got)
 	}
 	annotOnly := "@description(\"Annot only.\")\nquery space queryFlipProbe {\n}\n"
 	header = strings.Index(annotOnly, "query space")
-	if got := descriptionFor(annotOnly, header); got != "Annot only." {
+	if got := descriptionFor(langparser.NewPreambleWalker(annotOnly), annotOnly, header); got != "Annot only." {
 		t.Errorf("annotation-only must be identical: %q", got)
 	}
 	docOnly := "/// Doc only.\nquery space queryFlipProbe {\n}\n"
 	header = strings.Index(docOnly, "query space")
-	if got := descriptionFor(docOnly, header); got != "Doc only." {
+	if got := descriptionFor(langparser.NewPreambleWalker(docOnly), docOnly, header); got != "Doc only." {
 		t.Errorf("///-only: %q", got)
 	}
 }
@@ -643,7 +685,7 @@ func TestDescriptionFor_EngineParity(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			header := strings.Index(tc.src, "query space")
-			if got := descriptionFor(tc.src, header); got != tc.want {
+			if got := descriptionFor(langparser.NewPreambleWalker(tc.src), tc.src, header); got != tc.want {
 				t.Errorf("%s: descriptionFor = %q, want %q (engine parity)", name, got, tc.want)
 			}
 		})

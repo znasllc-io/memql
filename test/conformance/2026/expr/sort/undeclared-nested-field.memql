@@ -1,0 +1,6 @@
+/// The open tickets, by a field the routing block does not declare.
+query ticket soUndeclaredRouting {
+  filter row => row.status == "open"
+  sort "routing.team", "asc"
+  paginate 20
+}

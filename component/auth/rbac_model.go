@@ -59,14 +59,34 @@ func roleRank(r Role) int {
 		return rankDeveloper
 	case RoleAdmin:
 		return rankAdmin
-	case RoleWriter:
+	case RoleWriter, seedSlugUser:
 		return rankUser // writer -> member tier
-	case RoleReader:
+	case RoleReader, seedSlugViewer:
 		return rankViewer // reader -> viewer tier
 	default:
 		return rankUnknown
 	}
 }
+
+// The seed's own slugs for the two tiers the user row names by alias
+// (dsl/rbac/seeds.memql: `user` aliases writer, `viewer` aliases reader).
+//
+// THE MIRROR ANSWERS FOR EVERY NAME THE SEED GIVES A RUNG, slug and alias
+// alike, because it is what a floor is validated against before the catalog is
+// readable -- a first boot, and memqllint. Knowing only the aliases, it ranked
+// "user" and "viewer" at 0, so @requiresRank("user") refused to load exactly
+// until the seed it names had been written (memql#5438): the allowed-roles
+// rewrite writes a list's lowest rung as the list spells it, and a list may
+// spell it by the catalog's slug. TestEngineRankModelMatchesTheSeeds holds every
+// seeded slug and alias to its seeded rank.
+//
+// They are NOT Role constants on purpose: the user row carries writer and
+// reader, IsValidRole's mirror still answers for those five, and these two are
+// named here only so a rank is found for them.
+const (
+	seedSlugUser   Role = "user"
+	seedSlugViewer Role = "viewer"
+)
 
 // capabilitySets is THE SEED'S MIRROR, not the model (epic memql#5166, D1).
 //

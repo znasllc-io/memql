@@ -13,7 +13,11 @@ The example saves text for review. It does not publish or send a finished report
 
 ## Source and offline validation
 
-- [brief.memql](research/brief.memql) contains every authored definition and the two core builtin imports.
+- [brief.memql](research/brief.memql) contains every definition except the automation, and the two core builtin imports.
+- [automations.memql](research/automations.memql) contains the automation. The automation loader reads a
+  domain's automations from its `automations.memql` and from no other file, so an automation declared in
+  `brief.memql` would never run -- and the engine refuses it at load (`construct_misplaced`) rather than
+  booting without it.
 - [memql.toml](research/memql.toml) declares the domain's language edition.
 
 From the repository root:
@@ -32,7 +36,8 @@ For a downloaded copy, keep this layout and lint the directory containing `resea
 research-desk/
 └── research/
     ├── memql.toml
-    └── brief.memql
+    ├── brief.memql
+    └── automations.memql
 ```
 
 The domain directory supplies the `research` namespace. The concept ID is
@@ -86,10 +91,11 @@ A model or retrieval failure stops the automation before the final save and
 leaves the requested row available for investigation. The sample does not
 promise automatic recovery or exactly-once inference. Manually rerunning an
 automation can make another model call. Reusing a brief ID appends a version;
-use a fresh ID to request a new brief. Saving the draft emits an update rather
-than another create event, so this trigger does not loop on its own output.
+use a fresh ID to request a new brief. Saving the draft writes a new version of
+the row, which is a create event too; the trigger's filter admits only a
+`requested` row, so the automation does not run again on its own output.
 
-## Core constructs in this file
+## Core constructs in this example
 
 | Construct | Its job here |
 |---|---|
@@ -100,7 +106,7 @@ than another create event, so this trigger does not loop on its own output.
 | `query researchBrief researchBriefs` | Composes the predicates and ownership filter, then returns the chosen shape. |
 | `mutation researchBrief requestResearchBrief` | Writes the request; `saveResearchBrief` appends its outcome. |
 | `logic` | Composes calls and returns a value for another step to use. |
-| `automation prepareResearchBrief` | Starts on a create event and connects the calls into a workflow. |
+| `automation prepareResearchBrief` | Starts on the create event of a `requested` row and connects the calls into a workflow. In `automations.memql`. |
 
 A trait has no fixed concept binding; a spec binds exactly one concept or
 shape. Both are side-effect-free predicates. Neither replaces the explicit

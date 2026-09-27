@@ -986,7 +986,13 @@ the declaration keyword already carries that: `libraryFolders`,
 shipped declarations carrying one. (See naming-conventions.md.)
 Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/<construct>s.memql`), so the file name never
-carries an individual construct's name.
+carries an individual construct's name. For every kind but one that
+is the layout rather than a load rule -- the loaders read every file
+of a domain. The exception is an automation: it is read from its
+domain's `automations.memql` and from no other file, and one declared
+anywhere else is refused at load (`construct_misplaced`). Before that
+refusal existed it loaded as nothing, with a clean lint and a clean
+boot (memql#5437).
 
 ```
 dsl/library/queries.memql       query folder libraryFolders { ... }
@@ -1657,8 +1663,10 @@ digested) is the durable answer, has its own false-positive design
 problem, and is not built.
 
 `@pattern` on an args field is genuinely enforced, unlike some of the
-concept-field annotations: it is compiled at load (`convertArgsField`),
-matched on every call (`validateArgsField`), and
+concept-field annotations: it is compiled at load (`convertArgsField`, and a
+concept field's pattern is compiled at load by the same check since
+memql#5426 -- `pattern_invalid` for either), matched on every call
+(`validateArgsField`), and
 `executeMutationFunctionCall` validates before rendering the template —
 `engine.go`'s call is the only non-test caller of
 `renderMutationTemplate`, so no call path reaches the hash unchecked.
@@ -2125,6 +2133,17 @@ the change. The gates, with their test names:
   keep accepting bare keys from callers -- `compileSortField` still
   resolves them -- exactly as the filter gate leaves the runtime filter
   surface alone.
+- **A sort key names what the concept declares** (memql#5429). Beyond the
+  namespace, an authored sort clause is held to the query's concept at
+  load: a bare key is a declared payload field (a dotted one is walked hop
+  by hop, as a filter walks `row.a.b`), a `row.` key is one of the sortable
+  intrinsics, and a word where a direction goes is `"asc"` or `"desc"` (in
+  any case; lower case is the spelling to write). A key that names nothing
+  is refused as `sort_key_unknown`, a word in a direction's place that is no
+  direction as `sort_direction_unknown`; both name the key and the fix.
+  Before this a misspelled key loaded and ordered on a JSONB path no row
+  carries, and `sort "priority", "sideways"` loaded as two keys. The rules
+  are in [Sort keys](memql.md#sort-keys).
 - **Mandatory trait specs** (`TestNoInlineTraitablePredicates`).
   When a trait in `dsl/common/traits.memql` covers a predicate, the
   filter applies the trait rather than inlining the comparison:
@@ -2178,7 +2197,12 @@ grammar:
   edition-2026 parser now refuses each of the four itself, naming the
   replacement and `memqlmigrate --rewrite=expressions`
   ([memql.md](memql.md#retired-spellings)), and `!` is legal in every
-  expression position.
+  expression position. The internal query form's parser refuses the two
+  connectives as well (`;` since memql#5375, `,` since memql#5439), so
+  no lowering and no string sent to `Execute` can spell them either;
+  `TestNoLoweringCarriesTheCommaConnective`
+  (`test/dslconformance/no_comma_connective_lowering_test.go`) lowers
+  every tracked `.memql` file to prove no rewrite emits the comma.
 - `TestNoInfixWordAndOr` (#973,
   `test/dslconformance/no_word_logical_operators_test.go`): the English `and` / `or`
   infix forms are rejected.
@@ -2385,7 +2409,8 @@ reviewer can see.
 **Caching is ON by default, and an annotation changes the number rather
 than switching the feature on.** A pure read carrying no annotation is
 cached for 60 seconds (memql#1970). Write `@cache(N)` to choose a
-different TTL and `@nocache` to opt out.
+different TTL and `@cache(0)` to opt out (`@nocache` was retired in epic
+memql#5375; `memqlmigrate --rewrite=attributes` rewrites it).
 
 `N` is a **whole number of SECONDS**, written positionally:
 `@cache(300)`. That is the preferred form since memql#2618 and the form
@@ -2600,6 +2625,28 @@ memql#5356):
   (`v1:authoring:construct.grammarVersion`) at promote; re-hydration recompiles
   a stored row first and uses a stale stamp only to explain a failure, so a
   bump never unregisters a construct whose source still parses.
+
+**A stored row a narrowing refuses is reported by its id.** A durably promoted
+row whose source carries a line the grammar it was stored under accepted and
+never read -- an annotation no receiver takes, a clause no loader consumed,
+which the parser now refuses by name -- stops compiling at re-hydration. It is
+quarantined, not fatal, and the report names the row (`row
+v1:authoring:construct:...`, its bundle and owner), the rule id of the refusal,
+and the remedy: delete the line (it changed nothing the construct did) or write
+what the refusal says, then promote the bundle again -- or demote the
+construct so it is not re-hydrated. No `memqlmigrate` rewrite removes such a
+line, and the report says so rather than naming one. After an upgrade, every
+boot logs each such row as `durable authored construct quarantined at
+re-hydration` with its id, rule and remedy, and one WARN line listing them all
+(`durably-promoted constructs did not re-hydrate`), so
+`kubectl logs -n memql deploy/<node> | grep 'did not re-hydrate'` finds them
+(memql#5426). Only a rule that narrowed the language reads this way: an
+annotation refusal, a retired or deprecated form, or one of the spelling
+refusals the DSL v1 follow-ups added. Any other failure keeps the stamp's
+diagnosis, a coded one included -- a syntax error, a bound concept that no
+longer resolves (`signature_concept_unresolved`), a concept that does not
+parse (`concept_unparsed`) -- because deleting a line is no remedy for a
+dependency the tree stopped declaring.
 
 **The migration channel is `memqlmigrate`.** Every rewrite is registered in
 one registry, keyed by the edition it moves a tree onto and the epic that
@@ -3197,8 +3244,12 @@ field too. Neither was ever applied on insert, so a field carrying one
 did not default; the concept-field form was published as the
 JSON-Schema `default` keyword, which no validator applies. `??` is the
 only mechanism that fills a value. (`@default` DOES stay on a `tool` /
-`prompt` / `builtin` field, where the body IS the schema handed to the
-model and `default` is a value the model reads.) Changing the operator under the corpus to settle a
+`prompt` field, where the body IS the schema handed to the model and
+`default` is a value the model reads; a `builtin` field refuses it as
+misplaced. On a tool or prompt field the default must convert to the field's
+type, as a default always has when a call leaves the field out --
+`@default("10")` on an `integer` field, never `@default("ten")` -- or the load
+refuses it as `tool_default_type` / `prompt_default_type`, memql#5430.) Changing the operator under the corpus to settle a
 naming complaint would be the larger defect.
 
 **What to do about it.** When a stored value must survive a caller
@@ -3484,7 +3535,8 @@ against a real Postgres, db-gated).
 ## 33. `@requiresRank` and `@requiresCapability` (epic memql#4832 / memql#5166)
 
 A construct states who may CALL it. Two annotations, on a `query`, a `mutation` or
-a `logic`, and they answer different questions:
+a `logic` -- and `@requiresRank` on a `tool` too, where it judges the person the
+call is for (see below) -- and they answer different questions:
 
 <!-- corpus: 2026/examples/authoring-rules/gates/rank-and-capability.memql -->
 ```memql fragment
@@ -3526,6 +3578,19 @@ the actor's role STRING against literals. Three faults, all closed here:
 A ROLE COMPARISON IS NOT A SPEC ANY MORE. What still belongs in a context-spec
 is a caller predicate no rank and no grant can express -- a question about the
 actor themselves.
+
+### On a tool: two axes, never one list (memql#5438)
+
+A tool is called by an AGENT or by a PERSON over MCP, and asks one question of
+each. `@requiresAgentRole("assistant", ...)` asks which agent is calling -- the
+acting agent's `v1:agents:agent.role`, validated at load against that concept's
+own enum, so a roleSlug such as `system-planner` is refused rather than
+admitting no agent. `@requiresRank("<role>")` asks how senior the person the
+call is for is: the user over MCP, or the user an agent acts for. A person over
+MCP is never an agent kind. `@allowedRoles(...)` answered both questions with
+one string whose meaning depended on the path a call arrived by; it is
+deprecated, and `memqlmigrate --rewrite=allowed-roles` carries each list to the
+annotation that says what it meant.
 
 ## 34. `account="<field>"` is one argument for two field shapes (epic memql#5165)
 

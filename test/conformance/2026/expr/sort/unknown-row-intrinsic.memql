@@ -1,0 +1,6 @@
+/// The open tickets, by an intrinsic rows do not carry.
+query ticket soUnknownIntrinsic {
+  filter row => row.status == "open"
+  sort "row.updatedAt", "desc"
+  paginate 20
+}

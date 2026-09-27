@@ -147,9 +147,17 @@ func TestLanguageStatusAnswersTheLineTheFormsAndWhereTheLoadedTreeUsesThem(t *te
 		}
 	}
 
-	arrayType := row.Forms[0]
-	if arrayType.Rule != deprecation.ArrayType {
-		t.Fatalf("forms[0] is %q, want %q", arrayType.Rule, deprecation.ArrayType)
+	// Found by rule rather than by index: the table is sorted by rule, and
+	// deprecated_allowed_roles (memql#5438) sorts before the array form.
+	var arrayType languageStatusFormRow
+	found := false
+	for _, f := range row.Forms {
+		if f.Rule == deprecation.ArrayType {
+			arrayType, found = f, true
+		}
+	}
+	if !found {
+		t.Fatalf("forms %+v carry no %q", row.Forms, deprecation.ArrayType)
 	}
 	if arrayType.Spelling != "array(T)" || arrayType.Replacement != "[]T" {
 		t.Errorf("the array form reads %+v", arrayType)
