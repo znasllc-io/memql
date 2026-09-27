@@ -97,23 +97,21 @@ func (r *ConceptResolver) ResolveFileWithSignatureConceptsInDomain(file *languag
 	// Augment the symbol table with concepts named in construct
 	// signatures (`<kind> <Concept> <name> { ... }`).
 	//
-	// Every signature concept resolves through the one rule below, an
-	// imported one included (memql#5433). The table already holds an entry
-	// for each import -- resolveUseDeclarations records a name-only one for
-	// an import that resolves to no concept, rightly, since most Form B
-	// imports name shapes, traits and functions -- and skipping the names it
-	// held let a signature bind that entry's empty id (a query with no filter
-	// loaded and matched nothing) or, for an import naming a namespace that
-	// declares no such concept, the one concept of that name some OTHER
-	// namespace declares. ResolveSignatureConceptInNamespace refuses both.
+	// An import already in the table is kept only when it RESOLVED to a
+	// concept (memql#5433). resolveUseDeclarations records a name-only entry
+	// for an import that resolves to no concept -- rightly, since most Form B
+	// imports name shapes, traits and functions -- and skipping every entry
+	// here let a signature bind that entry's empty id: a query with no filter
+	// loaded and matched nothing, and one with a filter was refused as
+	// `concept==""` does not lower, which names neither the concept nor the
+	// import. Resolving it below refuses it by name instead.
 	for _, bareName := range signatureConcepts {
+		if entry, dup := symbols[bareName]; dup && entry.resolvedId != "" {
+			continue
+		}
 		resolvedId, err := r.ResolveSignatureConceptInNamespace(file.Uses, bareName, dir, declaredNS)
 		if err != nil {
 			return err
-		}
-		if entry, imported := symbols[bareName]; imported {
-			entry.resolvedId = resolvedId
-			continue
 		}
 		symbols[bareName] = &symbolEntry{
 			leafName:   bareName,
@@ -178,16 +176,7 @@ func (r *ConceptResolver) ResolveSignatureConceptInNamespace(uses []*languagePar
 	if nsHint, sourceName := namespaceHintForName(uses, bareName); nsHint != "" {
 		id, err := r.resolveBareConceptNameWithNamespace(sourceName, nsHint)
 		if err != nil {
-			return "", r.unresolvedImportedSignature(uses, bareName, sourceName, nsHint, dir, declaredNS, err)
-		}
-		// A concepts import names the namespace it imports FROM, and the
-		// concept must be declared there (memql#5433). The trailing-segment
-		// match consults the namespace only to break a tie, so an import of a
-		// namespace declaring no such concept used to bind the one concept
-		// of that name another namespace declares -- silently, the import
-		// saying crm and the query reading sales.
-		if conceptsImportNaming(uses, bareName) && !namespaceSuppliesConcept(nsHint, id) {
-			return "", r.importedFromTheWrongNamespace(uses, bareName, sourceName, nsHint, dir, declaredNS, id)
+			return "", r.unresolvedImportedSignature(uses, bareName, sourceName, nsHint, err)
 		}
 		return id, nil
 	}
@@ -197,7 +186,7 @@ func (r *ConceptResolver) ResolveSignatureConceptInNamespace(uses []*languagePar
 		id, err := r.resolveBareConceptNameWithNamespace(bareName, "")
 		if err != nil {
 			return "", &SignatureConceptError{Name: bareName, Reason: err.Error(),
-				Fix: r.signatureConceptFix(bareName, "", dir, declaredNS)}
+				Fix: r.signatureConceptFix(bareName, "")}
 		}
 		return id, nil
 	}
@@ -216,7 +205,7 @@ func (r *ConceptResolver) ResolveSignatureConceptInNamespace(uses []*languagePar
 	// 3. Refused.
 	return "", &SignatureConceptError{Name: bareName,
 		Reason: fmt.Sprintf("it is neither imported nor a same-domain concept of %q", dir),
-		Fix:    r.signatureConceptFix(bareName, "", dir, declaredNS)}
+		Fix:    r.signatureConceptFix(bareName, "")}
 }
 
 // SignatureConceptCode is the rule id of a construct whose signature binds a
@@ -258,7 +247,7 @@ func (e *SignatureConceptError) RuleCode() string { return SignatureConceptCode 
 // import names but does not supply: the import's namespace declares no concept
 // of that name, or declares several. The import is quoted as the author wrote
 // it, because it is the line to change.
-func (r *ConceptResolver) unresolvedImportedSignature(uses []*languageParser.UseDeclaration, bareName, sourceName, nsHint, dir, declaredNS string, cause error) error {
+func (r *ConceptResolver) unresolvedImportedSignature(uses []*languageParser.UseDeclaration, bareName, sourceName, nsHint string, cause error) error {
 	written := fmt.Sprintf("use %s.concepts.{ %s }", nsHint, sourceName)
 	for _, u := range uses {
 		if u == nil {
@@ -276,71 +265,7 @@ func (r *ConceptResolver) unresolvedImportedSignature(uses []*languageParser.Use
 		// resolver's own sentence says which, and it is the honest reason.
 		reason = fmt.Sprintf("`%s` imports it, and %v", written, cause)
 	}
-	return &SignatureConceptError{Name: bareName, Reason: reason, Fix: r.signatureConceptFix(sourceName, nsHint, dir, declaredNS)}
-}
-
-// conceptsImportNaming reports whether the import that brings name into scope
-// can be an import of a CONCEPT -- `use crm.concepts.{ lead }`, or a module
-// that declares one on its own (`use shopify.generated.order.{ order }`) --
-// and so says where the concept is declared. An import from a module of
-// another construct kind (`use crm.shapes.{ lead }`: a shape that shares the
-// concept's name) says nothing about the concept, and keeps the hint's old
-// reading. The module kind is the path's last segment, read as the editor
-// reads it (sense's importItemKind): anything that is not another
-// construct's module is a concept's.
-func conceptsImportNaming(uses []*languageParser.UseDeclaration, name string) bool {
-	for _, u := range uses {
-		if u == nil || len(u.Parts) == 0 {
-			continue
-		}
-		if _, ok := u.SourceNameFor(name); ok {
-			return !nonConceptModules[u.Parts[len(u.Parts)-1]]
-		}
-	}
-	return false
-}
-
-// nonConceptModules are the module files of the construct kinds that are not
-// concepts: an import from one names a shape, a spec, a function or the like.
-var nonConceptModules = map[string]bool{
-	"shapes": true, "traits": true, "specs": true, "queries": true, "mutations": true,
-	"logic": true, "builtins": true, "tools": true, "actions": true, "capabilities": true,
-	"providers": true, "prompts": true, "automations": true, "seeds": true,
-	"policies": true, "rules": true,
-}
-
-// namespaceSuppliesConcept reports whether an import of namespace ns -- the
-// first segment of its path -- supplies the concept id: the id's namespace is
-// ns, a colon-extension of it, or the namespace.pin of the directory ns names
-// (a pinned domain is imported by its directory as well as by its pin).
-func namespaceSuppliesConcept(ns, id string) bool {
-	idNS := idNamespace(id)
-	if idNS == "" || ns == "" {
-		return false
-	}
-	if idNS == ns || strings.HasPrefix(idNS, ns+":") {
-		return true
-	}
-	return idNS == declaredNamespaceForDomain(ns)
-}
-
-// importedFromTheWrongNamespace is the refusal of a signature concept a
-// concepts import names from a namespace that declares no concept of that
-// name, while another namespace does.
-func (r *ConceptResolver) importedFromTheWrongNamespace(uses []*languageParser.UseDeclaration, bareName, sourceName, nsHint, dir, declaredNS, id string) error {
-	written := fmt.Sprintf("use %s.concepts.{ %s }", nsHint, sourceName)
-	for _, u := range uses {
-		if u == nil {
-			continue
-		}
-		if src, ok := u.SourceNameFor(bareName); ok && src == sourceName {
-			written = renderUseImport(u, sourceName, bareName)
-			break
-		}
-	}
-	return &SignatureConceptError{Name: bareName,
-		Reason: fmt.Sprintf("`%s` imports it, and namespace %s declares no concept %q; the one of that name is %s, which the import does not name", written, nsHint, sourceName, id),
-		Fix:    r.signatureConceptFix(sourceName, nsHint, dir, declaredNS)}
+	return &SignatureConceptError{Name: bareName, Reason: reason, Fix: r.signatureConceptFix(sourceName, nsHint)}
 }
 
 // renderUseImport renders the one name of a use declaration a refusal is
@@ -376,19 +301,11 @@ func (r *ConceptResolver) conceptCandidates(name string) []string {
 // signatureConceptFix is what to write when a signature concept does not
 // resolve: the import of each namespace that does declare a concept of that
 // name (other than the one an import already names), or, when none does, the
-// declaration the construct is missing. A concept of the file's own domain
-// (dir, declaredNS) needs no import at all -- a same-domain concept is in
-// scope without one -- so it is never suggested as one: an import naming
-// another namespace is dropped instead.
-func (r *ConceptResolver) signatureConceptFix(name, importedNS, dir, declaredNS string) string {
+// declaration the construct is missing.
+func (r *ConceptResolver) signatureConceptFix(name, importedNS string) string {
 	var imports []string
 	seen := map[string]bool{}
-	ownDomain := false
 	for _, id := range r.conceptCandidates(name) {
-		if (dir != "" || declaredNS != "") && idIsInDomainAmbientScope(id, dir, declaredNS) {
-			ownDomain = true
-			continue
-		}
 		// The module path the import writes: the id's namespace, dotted --
 		// the rendering specBindingRefusal names an import with, so the two
 		// refusals never suggest two spellings of one import.
@@ -400,8 +317,6 @@ func (r *ConceptResolver) signatureConceptFix(name, importedNS, dir, declaredNS 
 		imports = append(imports, fmt.Sprintf("`use %s.concepts.{ %s }`", ns, name))
 	}
 	switch {
-	case ownDomain && importedNS != "":
-		return "this file's own domain declares it, and a same-domain concept is in scope with no import: drop the import"
 	case len(imports) == 1:
 		return "import it from the namespace that declares it: " + imports[0]
 	case len(imports) > 1:

@@ -340,11 +340,7 @@ concept. One that does not is refused at load with the rule id
 supply it, and the import to add when another domain declares it
 (memql#5433). That includes an import whose namespace declares no such
 concept: it used to bind the construct to no concept at all, so a query with
-no filter loaded and matched nothing -- or, when one other namespace declared
-a concept of that name, to that one, the import naming one domain and the
-query reading another. A concept's import names the namespace that declares
-it: the concept's own namespace, or, for a pinned domain, its directory or its
-pin. A shape and a seed resolve their concept
+no filter loaded and matched nothing. A shape and a seed resolve their concept
 by name across every mounted domain -- a shape preferring its own domain when
 two declare the name, a seed as the seed materializer resolves it, which never
 reads an import -- and carry the same rule id when no domain supplies it.
