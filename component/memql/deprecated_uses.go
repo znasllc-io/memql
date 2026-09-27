@@ -134,6 +134,7 @@ func recordDeprecatedUses(report *LoadReport, files []baseloader.RawFile, logger
 	// cannot be counted under one reading of the window and judged under
 	// another (component/language/deprecation).
 	trackers := deprecation.Trackers(release)
+	refused := map[string]map[string]bool{} // file -> the rules refused in it
 	for _, rec := range records {
 		form, ok := deprecation.Lookup(rec.Rule)
 		if !ok {
@@ -146,6 +147,10 @@ func recordDeprecatedUses(report *LoadReport, files []baseloader.RawFile, logger
 			use := languageParser.DeprecatedUse{Rule: rec.Rule, Line: rec.Line, Column: rec.Column, Text: rec.Text}
 			report.AddSkip(baseloader.SkipFor(deprecatedFormsComponent, "deprecated form", rec.Text, rec.File, "parse",
 				languageParser.DeprecatedUseRefusal(use, form)))
+			if refused[rec.File] == nil {
+				refused[rec.File] = map[string]bool{}
+			}
+			refused[rec.File][rec.Rule] = true
 			if logger != nil {
 				logger.Error("DSL uses a deprecated form whose window has closed: refused",
 					"component", deprecatedFormsComponent, "rule", form.Rule, "at", at, "detail", form.Refusal())
@@ -171,5 +176,25 @@ func recordDeprecatedUses(report *LoadReport, files []baseloader.RawFile, logger
 
 	report.mu.Lock()
 	report.deprecatedUses = records
+	// ONE USE, ONE PROBLEM. The construct that spells a refused form did not
+	// parse either, and its loader -- which ran before this pass -- recorded
+	// that as a skip carrying the SAME rule: the parser's refusal of the same
+	// spelling, but positioned in the declaration the loader parsed rather
+	// than in the file, so a use at line 19 of a file read "line 3" there
+	// (memql#5438). This pass's refusal is the one with the author's position,
+	// so a loader's coded echo of it is dropped. The construct stays unloaded
+	// -- a skip is a report, not the decision -- and a loader skip saying
+	// something else (a concept DROPPED, which names what fails with it)
+	// carries no rule and is kept.
+	if len(refused) > 0 {
+		kept := report.Skipped[:0]
+		for _, sk := range report.Skipped {
+			if sk.Component != deprecatedFormsComponent && refused[sk.File][sk.Code] {
+				continue
+			}
+			kept = append(kept, sk)
+		}
+		report.Skipped = kept
+	}
 	report.mu.Unlock()
 }
