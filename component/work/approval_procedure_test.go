@@ -63,7 +63,7 @@ func TestProcedurePromotionApprovalPinsTheProcedureHash(t *testing.T) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	want := []string{"constructId", "constructName", "distinctBindings", "procedureHash", "recordedFrom", "shadowMatches", "title"}
+	want := []string{"constructId", "constructName", "distinctBindings", "dryEvidence", "procedureHash", "recordedFrom", "shadowMatches", "target", "title"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("subject keys = %v, want exactly %v", keys, want)
 	}
@@ -82,10 +82,10 @@ func TestProcedurePromotionApprovalPinsTheProcedureHash(t *testing.T) {
 	}
 }
 
-// Every one of the seven keys is always there, even when the lift had no
-// bindings or no provenance to give: a card that shows a field on one
-// promotion and omits it on the next reads as a different kind of decision.
-func TestThePromotionSubjectAlwaysCarriesItsSevenKeys(t *testing.T) {
+// Every key is always there, even when the lift had no bindings, no
+// provenance or no target to give: a card that shows a field on one promotion
+// and omits it on the next reads as a different kind of decision.
+func TestThePromotionSubjectAlwaysCarriesEveryKey(t *testing.T) {
 	p := promotionProposal()
 	p.DistinctBindings, p.RecordedFrom = nil, nil
 	a := ProcedurePromotionApproval(p, t0)
@@ -93,6 +93,65 @@ func TestThePromotionSubjectAlwaysCarriesItsSevenKeys(t *testing.T) {
 		m, ok := a.Subject[k].(map[string]any)
 		if !ok || m == nil || len(m) != 0 {
 			t.Fatalf("subject[%s] = %#v, want an empty object rather than an absent or null one", k, a.Subject[k])
+		}
+	}
+	if got, ok := a.Subject["target"].(string); !ok || got != "" {
+		t.Fatalf("subject[target] = %#v, want an empty string where no target was given", a.Subject["target"])
+	}
+	if got, ok := a.Subject["dryEvidence"].(bool); !ok || got {
+		t.Fatalf("subject[dryEvidence] = %#v, want false where it was not set", a.Subject["dryEvidence"])
+	}
+}
+
+// Where it would run is part of what a person approves: a canary on their own
+// machine acts on their files, one in the workbench acts in a sandbox. And a
+// machine-local procedure's shadow matches were DRY -- the calls it would make
+// compared with the app's, nothing run -- which a person saying yes should
+// know. A target that is absent, or one this build does not know, makes no
+// claim about where; the subject carries what the question claimed, so the
+// card and the question cannot disagree.
+func TestThePromotionQuestionSaysWhereItWouldRunAndWhetherItHasRun(t *testing.T) {
+	const (
+		ask     = `Promote "Export last month's invoices" to canary? `
+		machine = ask + "It matched the app 5 times, and would now run on your machine with the app standing by."
+		bench   = ask + "It matched the app 5 times, and would now run in the workbench, a sandbox in your cluster, with the app standing by."
+		nowhere = ask + "It matched the app 5 times beside it, and would now run for real with the app standing by."
+		dry     = " Those matches compared the commands it would run with the app's own; it has not run by itself yet."
+	)
+	for _, tc := range []struct {
+		name, target  string
+		dryEvidence   bool
+		want, subject string
+	}{
+		{"on the machine, compared dry", "machine", true, machine + dry, "machine"},
+		{"on the machine", "machine", false, machine, "machine"},
+		{"in the workbench", "workbench", false, bench, "workbench"},
+		{"no target given", "", false, nowhere, ""},
+		{"a target this build does not know", "Machine", false, nowhere, ""},
+		{"no target given, compared dry", "", true, nowhere + dry, ""},
+	} {
+		p := promotionProposal()
+		p.Target, p.DryEvidence = tc.target, tc.dryEvidence
+		a := ProcedurePromotionApproval(p, t0)
+		if a.Question != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, a.Question, tc.want)
+		}
+		if a.Subject["target"] != tc.subject || a.Subject["dryEvidence"] != tc.dryEvidence {
+			t.Errorf("%s: subject target=%#v dryEvidence=%#v, want %q and %v", tc.name, a.Subject["target"], a.Subject["dryEvidence"], tc.subject, tc.dryEvidence)
+		}
+	}
+}
+
+// The count reads as English, the way usedPhrase spells a use count: an
+// operator may set m to one, and "matched the app 1 times" is the sentence a
+// reader stops at.
+func TestThePromotionQuestionSpellsASingleMatchAsOnce(t *testing.T) {
+	for _, target := range []string{"machine", "workbench", ""} {
+		p := promotionProposal()
+		p.Target, p.ShadowMatches = target, 1
+		q := ProcedurePromotionApproval(p, t0).Question
+		if !strings.Contains(q, "It matched the app once") || strings.Contains(q, "1 times") {
+			t.Errorf("target %q: question %q, want the single match spelled once", target, q)
 		}
 	}
 }
