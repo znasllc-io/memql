@@ -246,6 +246,14 @@ export function RunPage({
 
   const timelineKeys = useMemo(() => steps.map((step) => step.key), [steps]);
 
+  // WHERE THE UNSEEN-CHANGE MARKER GOES. Every row opens the version area, but
+  // a dot on each of forty rows is a strobe, not a pointer: the marker sits on
+  // the steps a model or an app answered -- where running again with another
+  // intelligence and saying what was wrong matter most -- and on every row
+  // only when a run has none, so the change is always reachable.
+  const modelledStep = (step: StepRow) => kindCalledAModel(step.kind) !== false || step.childRunId !== "";
+  const anyModelled = steps.some(modelledStep);
+
   function stepVersions(step: StepRow): {
     versions: StepVersion[];
     current: number | null;
@@ -726,7 +734,7 @@ export function RunPage({
                     versions={{ count: info.count, current: info.current }}
                     stale={run.staleSteps.includes(step.key)}
                     marker={
-                      terminal ? (
+                      terminal && (!anyModelled || modelledStep(step)) ? (
                         <AttentionMarker appId={NEXUS_APP_ID} sectionId="runs" target={STEP_VERSIONS_TARGET} />
                       ) : null
                     }

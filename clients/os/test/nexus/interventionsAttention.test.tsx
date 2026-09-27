@@ -78,6 +78,9 @@ describe("the interventions marker", () => {
     mount(conn);
     const row = await screen.findByLabelText(/^Step 2, draft,/);
     await waitFor(() => expect(within(row).getByRole("img", { name: "Unseen change" })).toBeTruthy());
+    // On the step a model answered, and not on every row: a dot on each of
+    // forty rows is a strobe, not a pointer.
+    expect(within(screen.getByLabelText(/^Step 1, fetch,/)).queryByRole("img", { name: "Unseen change" })).toBeNull();
     // THE RUN PAGE IS AN ANCESTOR: Runs and the run are both on screen, and
     // neither is the destination.
     await settle();
@@ -89,6 +92,18 @@ describe("the interventions marker", () => {
     await waitFor(() =>
       expect(within(screen.getByLabelText(/^Step 2, draft,/)).queryByRole("img", { name: "Unseen change" })).toBeNull(),
     );
+  });
+
+  it("marks every row of a run no model took part in, so the change is always reachable", async () => {
+    const conn = fakeConnection({
+      runs: [runRow({ id: "run-1" })],
+      steps: [stepRow({ id: "run-1-fetch", runId: "run-1", key: "fetch", seq: 0 })],
+    });
+    mount(conn);
+    const row = await screen.findByLabelText(/^Step 1, fetch,/);
+    await waitFor(() => expect(within(row).getByRole("img", { name: "Unseen change" })).toBeTruthy());
+    fireEvent.click(row);
+    await waitFor(() => expect(acknowledged(conn)).toEqual([{ changeId: CHANGE.id, revision: CHANGE.revision }]));
   });
 
   it("is neither shown nor acknowledged on a run still going -- nothing there can be stepped into yet", async () => {

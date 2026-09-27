@@ -10103,14 +10103,19 @@ a.os-button {
   background: var(--os-ink);
 }
 
-/* The chevron and the unseen-change marker share one anchor at the row's end. */
+/* The chevron and the unseen-change marker share one slot at the row's end.
+ * THE DOT SITS IN THE FLOW, BEFORE THE CHEVRON, not hung off its corner: the
+ * row's end IS the scroller's edge, and a dot positioned past it was clipped
+ * to a sliver nobody would read as a mark. */
 .os-nexus-step-open {
   display: inline-flex;
   align-items: center;
+  gap: 5px;
 }
 .os-nexus-step-open .os-attention-dot {
-  top: -4px;
-  right: -5px;
+  position: static;
+  flex: none;
+  order: -1;
 }
 
 /* THE DISCLOSURE, ATTACHED TO THE SPINE BY A HAIRLINE, holding ONE panel --
