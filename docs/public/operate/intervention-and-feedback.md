@@ -32,6 +32,12 @@ version of every step.
 | **Make current** (`moveRunHead`) | An earlier version becomes current, together with the upstream it was computed from. Every later step that already has a version computed from that same upstream is restored without running; only the first step with no such version, and everything after it, runs again. Going back to a world that still exists runs nothing. |
 | **Branch from here** (`branchRun`) | A new run (mode `fork`) that reuses the steps before the branch point by reference -- they are not executed again -- and runs the branch step live with what you changed, then everything after it. The original run is untouched. |
 
+**Running a step again does its work again.** A new version has its own
+idempotency key, and an app session run again is a new session, so anything the
+step changed outside the run -- a message it sent, a command it ran on a
+machine, a file it wrote -- is done again, and so is anything the steps after it
+changed when they run again. Nexus says so before you run it.
+
 What you can change for one version (the override, `v1:work:step.override`):
 
 - **Level** -- `fast`, `strong` or `reasoning`. Embeddings is never offered: a

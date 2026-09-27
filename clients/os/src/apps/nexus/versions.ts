@@ -256,6 +256,13 @@ export function stepsAfter(order: readonly string[], timeline: readonly string[]
   return index < 0 ? 0 : source.length - index - 1;
 }
 
+// EVERY ACT THAT RUNS A STEP AGAIN DOES ITS WORK AGAIN, outside the run
+// included: a new version has a new idempotency key, and an app session run
+// again is a new session. A message the step sent is sent again, and a command
+// it ran on a machine runs again -- the one consequence a person deciding to
+// re-run cannot see from the timeline, so it is said where the act is taken
+// (SUPERVISED-VISUAL-COMPOSITION.md: never conceal material effects). Said as
+// a conditional, because a step that only answered in words changed nothing.
 export function rerunConsequence(version: number, after: number): string {
   const then =
     after === 0
@@ -263,11 +270,13 @@ export function rerunConsequence(version: number, after: number): string {
       : after === 1
         ? "The step after it runs again."
         : `The ${after} steps after it run again.`;
-  return `Runs as version ${version}. ${then}`;
+  const effects =
+    after === 0 ? "Anything it changed outside the run is done again." : "Anything they changed outside the run is done again.";
+  return `Runs as version ${version}. ${then} ${effects}`;
 }
 
 export const BRANCH_CONSEQUENCE =
-  "Opens a new run from this step. The steps before it are reused, not run again.";
+  "Opens a new run from this step. The steps before it are reused, not run again; from this step on, anything changed outside the run is done again.";
 
 // ---------------------------------------------------------------------------
 // The composer's draft, and the ONLY-WHAT-CHANGED payload

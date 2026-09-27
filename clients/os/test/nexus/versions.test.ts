@@ -194,11 +194,11 @@ describe("the consequence, said before the act", () => {
   });
 
   it("says the version it runs as and what follows it", () => {
-    expect(rerunConsequence(4, 2)).toBe("Runs as version 4. The 2 steps after it run again.");
-    expect(rerunConsequence(2, 1)).toBe("Runs as version 2. The step after it runs again.");
-    expect(rerunConsequence(2, 0)).toBe("Runs as version 2. Nothing after it runs again.");
+    expect(rerunConsequence(4, 2)).toBe("Runs as version 4. The 2 steps after it run again. Anything they changed outside the run is done again.");
+    expect(rerunConsequence(2, 1)).toBe("Runs as version 2. The step after it runs again. Anything they changed outside the run is done again.");
+    expect(rerunConsequence(2, 0)).toBe("Runs as version 2. Nothing after it runs again. Anything it changed outside the run is done again.");
     expect(BRANCH_CONSEQUENCE).toBe(
-      "Opens a new run from this step. The steps before it are reused, not run again.",
+      "Opens a new run from this step. The steps before it are reused, not run again; from this step on, anything changed outside the run is done again.",
     );
   });
 });

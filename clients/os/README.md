@@ -2116,7 +2116,8 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   `Branch from here` open ONE composer (`kit/Dialog`): only the fields a person
   changes are sent, a deterministic step is asked only for its inputs, a session
   step's recorded prompt is prefilled, the floor says the consequence ("Runs as
-  version 4. The step after it runs again."), and a refusal shows verbatim with
+  version 4. The step after it runs again. Anything they changed outside the
+  run is done again."), and a refusal shows verbatim with
   the draft kept. Nexus no longer calls `forkRun`, which re-executes a run from
   its first step with different variables; `branchRun` serves the prefix by
   reference.

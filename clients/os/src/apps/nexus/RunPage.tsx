@@ -424,7 +424,7 @@ export function RunPage({
         label: "Make current",
         icon: <Pin size={13} aria-hidden />,
         busy: head.busy,
-        ariaLabel: `Make version ${selected} of ${key} current. The steps after it that were made from it come back without running; any others run again.`,
+        ariaLabel: `Make version ${selected} of ${key} current. The steps after it that were made from it come back without running; any others run again, and anything they change outside the run is done again.`,
         onAct: () => void head.act({ runId: run.id, stepKey: key, version: selected }),
       });
     }

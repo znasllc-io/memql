@@ -213,7 +213,7 @@ describe("Run again", () => {
     await selectStep("draft");
     const dialog = await composer("Run again");
     expect(within(dialog).getByText("draft, version 3")).toBeTruthy();
-    expect(within(dialog).getByText("Runs as version 4. The step after it runs again.")).toBeTruthy();
+    expect(within(dialog).getByText("Runs as version 4. The step after it runs again. Anything they changed outside the run is done again.")).toBeTruthy();
 
     fireEvent.click(within(dialog).getByRole("combobox", { name: "Level" }));
     fireEvent.click(within(dialog).getByRole("option", { name: "Reasoning" }));
@@ -236,7 +236,7 @@ describe("Run again", () => {
     const conn = await openRun();
     await selectStep("publish");
     const dialog = await composer("Run again");
-    expect(within(dialog).getByText("Runs as version 2. Nothing after it runs again.")).toBeTruthy();
+    expect(within(dialog).getByText("Runs as version 2. Nothing after it runs again. Anything it changed outside the run is done again.")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
     await waitFor(() => expect(conn.query.rerunStep).toHaveBeenCalled());
     expect(conn.query.rerunStep.mock.calls[0]?.[0]).toEqual({ runId: RUN, stepKey: "publish" });
@@ -340,7 +340,7 @@ describe("Branch from here", () => {
     await selectStep("draft");
     const dialog = await composer("Branch from here");
     expect(
-      within(dialog).getByText("Opens a new run from this step. The steps before it are reused, not run again."),
+      within(dialog).getByText("Opens a new run from this step. The steps before it are reused, not run again; from this step on, anything changed outside the run is done again."),
     ).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Branch from here" }));
 
