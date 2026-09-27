@@ -31,3 +31,16 @@ func TestModelMediaReachesTheWorkerStreamAndReturns(t *testing.T) {
 		t.Fatal("media lost after worker stream")
 	}
 }
+
+// The effort survives the last hop, from the worker package's request onto the
+// ModelCallStart the machine's stream receives (epic memql#5414, design D20).
+func TestAModelCallCarriesThePersonsEffortOntoTheStream(t *testing.T) {
+	session, stream := newToolStreamTestSession()
+	defer session.cancel()
+	if _, err := session.openModelCall(context.Background(), ModelCallRequest{RequestId: "effort", Model: "gpt-oss:20b", Kind: "chat", Effort: "high"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stream.sent[0].GetModelCallStart().GetEffort(); got != "high" {
+		t.Fatalf("ModelCallStart.effort = %q on the stream, want the person's effort", got)
+	}
+}
