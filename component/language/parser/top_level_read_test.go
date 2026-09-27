@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // The top-level readers used to cut lines with strings.Split, read each
@@ -136,8 +138,14 @@ func treeSources(t *testing.T) map[string]string {
 	out := map[string]string{}
 	root := "../../../dsl"
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".memql") {
+		if err != nil {
 			return err
+		}
+		if d.IsDir() && repowalk.SkipDir(d.Name()) {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".memql") {
+			return nil
 		}
 		b, err := os.ReadFile(path)
 		if err != nil {
