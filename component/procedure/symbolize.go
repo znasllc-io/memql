@@ -210,13 +210,75 @@ func sameRootedness(a, b *Node) bool {
 	return true
 }
 
+// maxLCSCells bounds the dynamic-programming table lcsPairs builds, (n+1) x
+// (m+1) ints for arrays of n and m elements. A recorded command splits into one
+// element per word, so two long heredoc scripts would otherwise ask for a table
+// of millions of cells on every comparison the symbolizer makes -- memory that
+// grows with the PRODUCT of two recordings' lengths, on whichever node learns.
+const maxLCSCells = 1 << 20
+
 // lcsPairs returns the index pairs of a longest common subsequence, in order.
 // Equality is structural, so a matched element is one both sides actually
 // recorded rather than one that merely sits at the same offset -- and it is
 // sameMeaning rather than Equal, so a rooted path never pairs with a relative
 // one.
+//
+// BOUNDED IN MEMORY. Within maxLCSCells the table is built whole and the
+// answer is exactly what it always was. Past it, the shared prefix and suffix
+// pair directly -- taking a match at either end never shortens a common
+// subsequence, and two recordings of one long command usually differ in a few
+// words -- and only the middle is solved; a middle still past the bound pairs
+// the elements that agree at the same offset, a common subsequence if not the
+// longest. Such arrays generalize worse, never unboundedly.
 func lcsPairs(a, b []*Node) [][2]int {
+	if lcsFits(len(a), len(b)) {
+		return lcsTable(a, b, 0, 0)
+	}
+	lo := 0
+	for lo < len(a) && lo < len(b) && sameMeaning(a[lo], b[lo]) {
+		lo++
+	}
+	ha, hb := len(a), len(b)
+	for ha > lo && hb > lo && sameMeaning(a[ha-1], b[hb-1]) {
+		ha--
+		hb--
+	}
+	var pairs [][2]int
+	for k := 0; k < lo; k++ {
+		pairs = append(pairs, [2]int{k, k})
+	}
+	if lcsFits(ha-lo, hb-lo) {
+		pairs = append(pairs, lcsTable(a[lo:ha], b[lo:hb], lo, lo)...)
+	} else {
+		for k := lo; k < ha && k < hb; k++ {
+			if sameMeaning(a[k], b[k]) {
+				pairs = append(pairs, [2]int{k, k})
+			}
+		}
+	}
+	for i, j := ha, hb; i < len(a) && j < len(b); i, j = i+1, j+1 {
+		pairs = append(pairs, [2]int{i, j})
+	}
+	return pairs
+}
+
+// lcsFits reports whether the table for arrays of n and m elements stays
+// within maxLCSCells. Each length is bounded before the product is taken, so
+// the product cannot overflow.
+func lcsFits(n, m int) bool {
+	if n < 0 || m < 0 || n >= maxLCSCells || m >= maxLCSCells {
+		return false
+	}
+	return (n+1)*(m+1) <= maxLCSCells
+}
+
+// lcsTable is the whole-table LCS of a and b, its pairs offset by (offA,
+// offB). Its caller has checked lcsFits.
+func lcsTable(a, b []*Node, offA, offB int) [][2]int {
 	n, m := len(a), len(b)
+	if n >= maxLCSCells || m >= maxLCSCells {
+		return nil
+	}
 	table := make([][]int, n+1)
 	for i := range table {
 		table[i] = make([]int, m+1)
@@ -235,7 +297,7 @@ func lcsPairs(a, b []*Node) [][2]int {
 	for i < n && j < m {
 		switch {
 		case sameMeaning(a[i], b[j]):
-			pairs = append(pairs, [2]int{i, j})
+			pairs = append(pairs, [2]int{i + offA, j + offB})
 			i++
 			j++
 		case table[i+1][j] >= table[i][j+1]:
@@ -319,8 +381,8 @@ func SymbolSequence(actions []Action, symbols []Symbol) []string {
 }
 
 func unionKeys(a, b []string) []string {
-	seen := make(map[string]bool, len(a)+len(b))
-	out := make([]string, 0, len(a)+len(b))
+	seen := make(map[string]bool, len(a))
+	out := make([]string, 0, len(a))
 	for _, k := range append(append([]string(nil), a...), b...) {
 		if !seen[k] {
 			seen[k] = true
