@@ -114,8 +114,13 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 	if strings.TrimSpace(goal) == "" {
 		return nil, fmt.Errorf("ensureForGoal: 'goal' argument is required")
 	}
-	ownerUserId, _ := args["ownerUserId"].(string)
-	if strings.TrimSpace(ownerUserId) == "" {
+	// The catalog read and written is the owner's, so the owner is the caller
+	// unless the context may act for another user (owner_scope.go).
+	ownerUserId, err := callOwner(ctx, "ensureForGoal", asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
+	if ownerUserId == "" {
 		return nil, fmt.Errorf("ensureForGoal: 'ownerUserId' argument is required")
 	}
 	run := runForFactory(ctx, args)

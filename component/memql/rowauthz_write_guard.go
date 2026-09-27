@@ -106,6 +106,18 @@ func rowAuthzWriteEscape(ctx context.Context) (string, bool) {
 	return rowAuthzWriteEscapeFor(ctx, nil)
 }
 
+// RowAuthzWriteEscape is the same enumeration, for Go outside this package.
+//
+// A handler that acts FOR a user its arguments name -- opens work for them,
+// parks their run, resolves their catalog -- is asking this guard's question
+// one layer up: may this caller act on something that is not theirs? It gets
+// this function's answer rather than a restatement, so the two cannot come to
+// disagree about who is trusted (integrations/agents' owner rule is the first
+// such caller). The reason string is for a log line; the bool is the answer.
+func RowAuthzWriteEscape(ctx context.Context) (reason string, ok bool) {
+	return rowAuthzWriteEscape(ctx)
+}
+
 // rowAuthzWriteEscapeFor is the escape set as it applies to ONE
 // declaration. It is the same two escapes, with one documented
 // subtraction (epic memql#4832, D3).

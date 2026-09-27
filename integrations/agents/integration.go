@@ -235,8 +235,14 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 	// planner dispatches platform agents with no user behind the call, and an
 	// empty owner resolves the shared catalog and nothing else -- never
 	// another user's bucket.
-	ownerUserId, _ := args["ownerUserId"].(string)
-	def, ok := i.agents.Get(strings.TrimSpace(ownerUserId), name)
+	//
+	// The owner is the caller unless the context may act for another user
+	// (owner_scope.go), decided before the registry is consulted.
+	ownerUserId, err := callOwner(ctx, fmt.Sprintf("agent(%q)", name), asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
+	def, ok := i.agents.Get(ownerUserId, name)
 	if !ok || def == nil {
 		return nil, fmt.Errorf("agent(%q): no agent registered with that name (loaded names: %v)", name, i.agents.NamesFor(ownerUserId))
 	}
@@ -345,8 +351,14 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 	// handed back is another agent's Description and SystemPrompt verbatim.
 	// Refusing is a visible configuration failure; falling through would be an
 	// invisible cross-tenant one.
-	ownerUserId, _ := args["ownerUserId"].(string)
-	ownerUserId = strings.TrimSpace(ownerUserId)
+	//
+	// The owner is also the caller's own unless the context may act for
+	// another user (owner_scope.go): the persona handed back is the named
+	// user's.
+	ownerUserId, err := callOwner(ctx, fmt.Sprintf("askSpecialist(%q)", role), asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
 	if ownerUserId == "" {
 		return nil, fmt.Errorf("askSpecialist(%q): no owner in the call context -- specialists resolve per owner and this call cannot say whose", role)
 	}
@@ -458,7 +470,12 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 	if runId == "" {
 		return nil, fmt.Errorf("requestUserFeedback: 'runId' required (auto-injection failed -- no active run in the turn context)")
 	}
-	ownerUserId := strings.TrimSpace(asString(args["ownerUserId"]))
+	// The run is parked AS its owner, so the owner is the caller unless the
+	// context may act for another user (owner_scope.go).
+	ownerUserId, err := callOwner(ctx, "requestUserFeedback", asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
 
 	goals := i.workGoalsRef()
 	if goals == nil {
@@ -531,7 +548,12 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	if goal == "" {
 		return nil, fmt.Errorf("produceArtifact: 'goal' is required -- describe the deliverable to produce")
 	}
-	ownerUserId := strings.TrimSpace(asString(args["ownerUserId"]))
+	// The goal is opened FOR its owner, so the owner is the caller unless the
+	// context may act for another user (owner_scope.go).
+	ownerUserId, err := callOwner(ctx, "produceArtifact", asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
 	if ownerUserId == "" {
 		return nil, fmt.Errorf("produceArtifact: 'ownerUserId' required (auto-injection failed -- no session owner in the turn context)")
 	}
