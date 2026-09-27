@@ -198,6 +198,8 @@ cells/prompt/templateFile/a-missing-file.memql
 cells/prompt/templateFile/a-string.memql
 cells/prompt/templateFile/with-no-value.memql
 cells/promptField/default/a-string.memql
+cells/promptField/default/with-a-number-on-a-string-field.memql
+cells/promptField/default/with-a-word-on-an-int-field.memql
 cells/promptField/default/with-an-unquoted-value.memql
 cells/promptField/description/a-string.memql
 cells/promptField/description/with-no-value.memql
