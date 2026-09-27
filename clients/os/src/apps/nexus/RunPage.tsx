@@ -454,7 +454,7 @@ export function RunPage({
       : waiting
         ? waitingWord(run.waitingOnKind).toLowerCase()
         : terminal && openStep !== null && open !== null && selected !== null
-          ? selectionWords(openStep.key, selected, open.count, open.current)
+          ? selectionWords(openStep.key, selected, Math.max(open.count, selected), open.current)
           : terminal
             ? runStatusDetail(run.status) || "select a step to run it again or branch from it"
             : // A non-terminal run offers no Replay and no step acts, so the
@@ -703,6 +703,9 @@ export function RunPage({
               const info = stepVersions(step);
               const isOpen = step.key === openStepKey;
               const picked = isOpen && selected !== null ? selected : (info.current ?? step.version);
+              // A version just asked for can be picked before its first row
+              // arrives, and "version 4 of 3" is a sentence nobody should read.
+              const known = Math.max(info.count, picked);
               const pickedRow = isOpen ? selectedVersion : null;
               // A version can be judged once it has finished -- done or failed
               // -- and only when a model or an app took part in it: the
@@ -734,7 +737,7 @@ export function RunPage({
                       versions={info.versions}
                       versionsLoading={versionsRead.state === "loading" && info.count > 1}
                       current={info.current}
-                      count={info.count}
+                      count={known}
                       selected={picked}
                       onSelect={(version) => setSelectedVersions((held) => ({ ...held, [step.key]: version }))}
                       selectedVersion={pickedRow}
