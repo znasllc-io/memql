@@ -4,7 +4,8 @@
       "importPath": "example.test/memql",
       "dir": ".",
       "moduleDir": ".",
-      "files": ["main.go", "product_neutrality_test.go", "VERSION"],
+      "files": ["main.go", "VERSION"],
+      "testFiles": ["product_neutrality_test.go"],
       "deps": [
         "example.test/memql/app",
         "example.test/memql/component/mcp",
@@ -22,7 +23,8 @@
       "importPath": "example.test/memql/app",
       "dir": "app",
       "moduleDir": ".",
-      "files": ["app/app.go", "app/build_agent.go", "app/build_default.go", "app/app_test.go"],
+      "files": ["app/app.go", "app/build_agent.go", "app/build_default.go"],
+      "testFiles": ["app/app_test.go"],
       "taggedFiles": ["app/build_agent.go"],
       "deps": [
         "example.test/memql/component/mcp",
@@ -40,7 +42,8 @@
       "importPath": "example.test/memql/component/node",
       "dir": "component/node",
       "moduleDir": "component/node",
-      "files": ["component/node/node.go", "component/node/compiled_agent.go", "component/node/node_test.go"],
+      "files": ["component/node/node.go", "component/node/compiled_agent.go"],
+      "testFiles": ["component/node/node_test.go"],
       "taggedFiles": ["component/node/compiled_agent.go"],
       "deps": []
     },
@@ -48,7 +51,8 @@
       "importPath": "example.test/memql/component/server",
       "dir": "component/server",
       "moduleDir": "component/server",
-      "files": ["component/server/server.go", "component/server/server_test.go"],
+      "files": ["component/server/server.go"],
+      "testFiles": ["component/server/server_test.go"],
       "deps": ["example.test/memql/component/node"]
     },
     {
@@ -62,49 +66,56 @@
       "importPath": "example.test/memql/component/memql",
       "dir": "component/memql",
       "moduleDir": "component/memql",
-      "files": ["component/memql/engine.go", "component/memql/engine_test.go", "component/memql/os_navigation.json"],
+      "files": ["component/memql/engine.go", "component/memql/os_navigation.json"],
+      "testFiles": ["component/memql/engine_test.go"],
       "deps": ["example.test/memql/dsl", "example.test/memql/docs"]
     },
     {
       "importPath": "example.test/memql/component/memql/offline",
       "dir": "component/memql/offline",
       "moduleDir": "component/memql",
-      "files": ["component/memql/offline/offline.go", "component/memql/offline/offline_test.go"],
+      "files": ["component/memql/offline/offline.go"],
+      "testFiles": ["component/memql/offline/offline_test.go"],
       "deps": ["example.test/memql/component/memql", "example.test/memql/dsl", "example.test/memql/docs"]
     },
     {
       "importPath": "example.test/memql/component/packages",
       "dir": "component/packages",
       "moduleDir": ".",
-      "files": ["component/packages/packages.go", "component/packages/packages_test.go"],
+      "files": ["component/packages/packages.go"],
+      "testFiles": ["component/packages/packages_test.go"],
       "deps": ["example.test/memql/component/memql", "example.test/memql/dsl", "example.test/memql/docs"]
     },
     {
       "importPath": "example.test/memql/component/work",
       "dir": "component/work",
       "moduleDir": "component/work",
-      "files": ["component/work/compile.go", "component/work/compile_test.go"],
+      "files": ["component/work/compile.go"],
+      "testFiles": ["component/work/compile_test.go"],
       "deps": []
     },
     {
       "importPath": "example.test/memql/integrations/work",
       "dir": "integrations/work",
       "moduleDir": "integrations",
-      "files": ["integrations/work/runs.go", "integrations/work/goal_db_test.go"],
+      "files": ["integrations/work/runs.go"],
+      "testFiles": ["integrations/work/goal_db_test.go"],
       "deps": ["example.test/memql/component/work"]
     },
     {
       "importPath": "example.test/memql/integrations/agent",
       "dir": "integrations/agent",
       "moduleDir": "integrations",
-      "files": ["integrations/agent/agent.go", "integrations/agent/worker_test.go"],
+      "files": ["integrations/agent/agent.go"],
+      "testFiles": ["integrations/agent/worker_test.go"],
       "deps": ["example.test/memql/component/node"]
     },
     {
       "importPath": "example.test/memql/cmd/memqllint",
       "dir": "cmd/memqllint",
       "moduleDir": ".",
-      "files": ["cmd/memqllint/main.go", "cmd/memqllint/main_test.go"],
+      "files": ["cmd/memqllint/main.go"],
+      "testFiles": ["cmd/memqllint/main_test.go"],
       "deps": ["example.test/memql/component/memql", "example.test/memql/dsl", "example.test/memql/docs"]
     },
     {
@@ -125,14 +136,15 @@
       "importPath": "example.test/memql/scripts/ci",
       "dir": "scripts/ci",
       "moduleDir": ".",
-      "files": ["scripts/ci/pathsfilter.go", "scripts/ci/workflow_gate_test.go"],
+      "files": ["scripts/ci/pathsfilter.go"],
+      "testFiles": ["scripts/ci/workflow_gate_test.go"],
       "deps": []
     },
     {
       "importPath": "example.test/memql/test/conformance",
       "dir": "test/conformance",
       "moduleDir": ".",
-      "files": ["test/conformance/runner_test.go"],
+      "testFiles": ["test/conformance/runner_test.go"],
       "deps": ["example.test/memql/component/memql", "example.test/memql/dsl", "example.test/memql/docs"]
     }
   ]

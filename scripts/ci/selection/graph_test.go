@@ -140,7 +140,7 @@ func TestLoadGraphUnionsConfigurations(t *testing.T) {
 {"ImportPath":"m/b","Dir":"/repo/b","Module":{"Path":"m","Dir":"/repo"},"GoFiles":["b.go"],"EmbedFiles":["data/x.json"],"TestImports":["m/c"]}
 {"ImportPath":"m/c","Dir":"/repo/c","Module":{"Path":"m/c","Dir":"/repo/c"},"GoFiles":["c.go"],"Deps":["m/d"]}
 {"ImportPath":"m/d","Dir":"/repo/d","Module":{"Path":"m/c","Dir":"/repo/c"},"GoFiles":["d.go"]}
-{"ImportPath":"m/e","Dir":"/repo/e","Module":{"Path":"m","Dir":"/repo"},"GoFiles":["e.go"]}
+{"ImportPath":"m/e","Dir":"/repo/e","Module":{"Path":"m","Dir":"/repo"},"GoFiles":["e.go"],"TestGoFiles":["e_test.go"],"IgnoredGoFiles":["agent_test.go"],"TestEmbedFiles":["testdata/golden.txt"]}
 {"ImportPath":"other/x","Dir":"/elsewhere","Module":{"Path":"other","Dir":"/elsewhere"}}
 `
 	tagged := `
@@ -148,7 +148,7 @@ func TestLoadGraphUnionsConfigurations(t *testing.T) {
 {"ImportPath":"m/b","Dir":"/repo/b","Module":{"Path":"m","Dir":"/repo"},"GoFiles":["b.go"]}
 {"ImportPath":"m/c","Dir":"/repo/c","Module":{"Path":"m/c","Dir":"/repo/c"},"GoFiles":["c.go"],"Deps":["m/d"]}
 {"ImportPath":"m/d","Dir":"/repo/d","Module":{"Path":"m/c","Dir":"/repo/c"},"GoFiles":["d.go"]}
-{"ImportPath":"m/e","Dir":"/repo/e","Module":{"Path":"m","Dir":"/repo"},"GoFiles":["e.go"]}
+{"ImportPath":"m/e","Dir":"/repo/e","Module":{"Path":"m","Dir":"/repo"},"GoFiles":["e.go"],"TestGoFiles":["e_test.go","agent_test.go"]}
 `
 	g, err := LoadGraph(context.Background(), root, "m", []string{"agent"},
 		fakeList(map[string]string{"": untagged, "agent": tagged}))
@@ -171,6 +171,16 @@ func TestLoadGraphUnionsConfigurations(t *testing.T) {
 	}
 	if want := []string{"b/b.go", "b/data/x.json"}; !reflect.DeepEqual(b.Files, want) {
 		t.Errorf("m/b files = %v, want %v", b.Files, want)
+	}
+	e, _ := g.Package("m/e")
+	if want := []string{"e/e.go"}; !reflect.DeepEqual(e.Files, want) {
+		t.Errorf("m/e build files = %v, want %v", e.Files, want)
+	}
+	if want := []string{"e/agent_test.go", "e/e_test.go", "e/testdata/golden.txt"}; !reflect.DeepEqual(e.TestFiles, want) {
+		t.Errorf("m/e test files = %v, want %v: test sources, an ignored _test.go and test embeds are TEST scope", e.TestFiles, want)
+	}
+	if want := []string{"e/agent_test.go"}; !reflect.DeepEqual(e.TaggedFiles, want) {
+		t.Errorf("m/e tagged files = %v, want %v", e.TaggedFiles, want)
 	}
 	c, _ := g.Package("m/c")
 	if c.ModuleDir != "c" || c.Dir != "c" {

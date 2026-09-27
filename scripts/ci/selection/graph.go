@@ -46,12 +46,18 @@ type Package struct {
 	// ModuleDir is the directory of the go.mod that owns the package,
 	// repo-relative. The root module is ".".
 	ModuleDir string `json:"moduleDir"`
-	// Files are the repo-relative files some build of the package, or of its
-	// tests, names: Go sources under every configuration CI tests, the files
-	// the default build ignores, and every //go:embed match.
+	// Files are the repo-relative files some BUILD of the package names: its
+	// non-test Go sources under every configuration CI tests (including the
+	// ones the default build ignores), other compiled sources, and every
+	// //go:embed match of its non-test build. A change to one of these
+	// changes what every importer links, so it reaches the importers too.
 	Files []string `json:"files"`
-	// TaggedFiles is the subset of Files that the default build does not
-	// compile and some node-tag build does.
+	// TestFiles are the files only the package's TESTS name: _test.go
+	// sources and the //go:embed matches of its test builds. A change to one
+	// of these changes this package's test binary and no other.
+	TestFiles []string `json:"testFiles,omitempty"`
+	// TaggedFiles is the subset of Files and TestFiles that the default
+	// build does not compile and some node-tag build does.
 	TaggedFiles []string `json:"taggedFiles,omitempty"`
 	// Deps are the first-party packages the package's TEST BINARY depends
 	// on, transitively, under the union of every configuration. Transitive
@@ -62,11 +68,12 @@ type Package struct {
 // Graph is the union package graph. Build one with NewGraph, ReadGraph or
 // LoadGraph; the zero value is not usable.
 type Graph struct {
-	pkgs   map[string]*Package
-	byDir  map[string]string   // dir -> import path
-	owners map[string][]string // file -> import paths naming it
-	rdeps  map[string][]string // import path -> packages whose Deps contain it
-	tagged map[string]bool     // files only a node-tag build compiles
+	pkgs       map[string]*Package
+	byDir      map[string]string   // dir -> import path
+	owners     map[string][]string // build file -> import paths naming it
+	testOwners map[string][]string // test file -> import paths naming it
+	rdeps      map[string][]string // import path -> packages whose Deps contain it
+	tagged     map[string]bool     // files only a node-tag build compiles
 }
 
 // NewGraph validates pkgs and indexes them. It refuses a graph it could
@@ -74,11 +81,12 @@ type Graph struct {
 // no directory, or a dependency on a package the graph does not hold.
 func NewGraph(pkgs []Package) (*Graph, error) {
 	g := &Graph{
-		pkgs:   make(map[string]*Package, len(pkgs)),
-		byDir:  make(map[string]string, len(pkgs)),
-		owners: map[string][]string{},
-		rdeps:  map[string][]string{},
-		tagged: map[string]bool{},
+		pkgs:       make(map[string]*Package, len(pkgs)),
+		byDir:      make(map[string]string, len(pkgs)),
+		owners:     map[string][]string{},
+		testOwners: map[string][]string{},
+		rdeps:      map[string][]string{},
+		tagged:     map[string]bool{},
 	}
 	for i := range pkgs {
 		p := pkgs[i]
@@ -96,6 +104,9 @@ func NewGraph(pkgs []Package) (*Graph, error) {
 		for _, f := range p.Files {
 			g.owners[f] = append(g.owners[f], p.ImportPath)
 		}
+		for _, f := range p.TestFiles {
+			g.testOwners[f] = append(g.testOwners[f], p.ImportPath)
+		}
 		for _, f := range p.TaggedFiles {
 			g.tagged[f] = true
 		}
@@ -111,7 +122,7 @@ func NewGraph(pkgs []Package) (*Graph, error) {
 			g.rdeps[d] = append(g.rdeps[d], ip)
 		}
 	}
-	for _, m := range []map[string][]string{g.owners, g.rdeps} {
+	for _, m := range []map[string][]string{g.owners, g.testOwners, g.rdeps} {
 		for k := range m {
 			sort.Strings(m[k])
 		}
@@ -310,9 +321,10 @@ func decodeList(data []byte) ([]listedPackage, error) {
 // answer confidently about a tree it did not see.
 func LoadGraph(ctx context.Context, root, prefix string, tags []string, list ListFunc) (*Graph, error) {
 	type acc struct {
-		pkg   Package
-		files map[string]bool
-		deps  map[string]bool
+		pkg       Package
+		files     map[string]bool
+		testFiles map[string]bool
+		deps      map[string]bool
 	}
 	byPath := map[string]*acc{}
 	defaultCompiled := map[string]bool{}
@@ -359,9 +371,10 @@ func LoadGraph(ctx context.Context, root, prefix string, tags []string, list Lis
 			a := byPath[lp.ImportPath]
 			if a == nil {
 				a = &acc{
-					pkg:   Package{ImportPath: lp.ImportPath, Dir: dir, ModuleDir: modDir},
-					files: map[string]bool{},
-					deps:  map[string]bool{},
+					pkg:       Package{ImportPath: lp.ImportPath, Dir: dir, ModuleDir: modDir},
+					files:     map[string]bool{},
+					testFiles: map[string]bool{},
+					deps:      map[string]bool{},
 				}
 				byPath[lp.ImportPath] = a
 			} else if a.pkg.Dir != dir || a.pkg.ModuleDir != modDir {
@@ -369,18 +382,38 @@ func LoadGraph(ctx context.Context, root, prefix string, tags []string, list Lis
 					lp.ImportPath, a.pkg.Dir, a.pkg.ModuleDir, dir, modDir, tag)
 			}
 
-			for _, f := range concat(lp.GoFiles, lp.CgoFiles, lp.TestGoFiles, lp.XTestGoFiles) {
-				rf := joinRel(dir, f)
-				a.files[rf] = true
+			compiled := func(f string) {
 				if tag == "" {
-					defaultCompiled[rf] = true
+					defaultCompiled[f] = true
 				} else {
-					taggedCompiled[rf] = true
+					taggedCompiled[f] = true
 				}
 			}
+			for _, f := range concat(lp.GoFiles, lp.CgoFiles) {
+				rf := joinRel(dir, f)
+				a.files[rf] = true
+				compiled(rf)
+			}
+			for _, f := range concat(lp.TestGoFiles, lp.XTestGoFiles) {
+				rf := joinRel(dir, f)
+				a.testFiles[rf] = true
+				compiled(rf)
+			}
 			for _, f := range concat(lp.CFiles, lp.CXXFiles, lp.HFiles, lp.SFiles, lp.SysoFiles,
-				lp.IgnoredGoFiles, lp.IgnoredOtherFiles, lp.EmbedFiles, lp.TestEmbedFiles, lp.XTestEmbedFiles) {
+				lp.IgnoredOtherFiles, lp.EmbedFiles) {
 				a.files[joinRel(dir, f)] = true
+			}
+			for _, f := range concat(lp.TestEmbedFiles, lp.XTestEmbedFiles) {
+				a.testFiles[joinRel(dir, f)] = true
+			}
+			// A file the default build ignores is usually one a node tag
+			// compiles; its name says which build it belongs to.
+			for _, f := range lp.IgnoredGoFiles {
+				if strings.HasSuffix(f, "_test.go") {
+					a.testFiles[joinRel(dir, f)] = true
+				} else {
+					a.files[joinRel(dir, f)] = true
+				}
 			}
 
 			add := func(ip string) {
@@ -410,10 +443,13 @@ func LoadGraph(ctx context.Context, root, prefix string, tags []string, list Lis
 	pkgs := make([]Package, 0, len(byPath))
 	for _, a := range byPath {
 		a.pkg.Files = sortedKeys(a.files)
+		a.pkg.TestFiles = sortedKeys(a.testFiles)
 		var tagged []string
-		for f := range a.files {
-			if taggedCompiled[f] && !defaultCompiled[f] {
-				tagged = append(tagged, f)
+		for _, set := range []map[string]bool{a.files, a.testFiles} {
+			for f := range set {
+				if taggedCompiled[f] && !defaultCompiled[f] {
+					tagged = append(tagged, f)
+				}
 			}
 		}
 		sort.Strings(tagged)

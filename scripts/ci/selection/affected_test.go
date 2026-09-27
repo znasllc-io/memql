@@ -87,11 +87,28 @@ func TestSelectMapsEveryFileOntoAPackage(t *testing.T) {
 				"component/packages", "dsl", "scripts/ci", "test/conformance"),
 		},
 		{
-			name:      "testdata nobody embeds lands on the package that owns the directory",
+			name:      "testdata nobody embeds reaches the package that owns the directory, and not its importers",
 			changed:   []string{"component/memql/testdata/readiness/case.json"},
 			wantSeeds: ips(".", "component/memql", "scripts/ci"),
-			wantAll: ips(".", "app", "cmd/memqllint", "component/mcp", "component/memql", "component/memql/offline",
-				"component/packages", "scripts/ci", "test/conformance"),
+			wantAll:   ips(".", "component/memql", "scripts/ci"),
+		},
+		{
+			name:      "a test file reaches its own package only: importers never link it",
+			changed:   []string{"component/memql/engine_test.go"},
+			wantSeeds: ips("component/memql"),
+			wantAll:   ips("component/memql"),
+		},
+		{
+			name:      "a DELETED test file reaches its own package only",
+			changed:   []string{"component/work/gone_test.go"},
+			wantSeeds: ips("component/work"),
+			wantAll:   ips("component/work"),
+		},
+		{
+			name:      "the gate packages are run, not propagated: a doc beside a build change adds no importers",
+			changed:   []string{"component/work/compile.go", "README.md"},
+			wantSeeds: ips(".", "component/work", "scripts/ci"),
+			wantAll:   ips(".", "app", "component/work", "integrations/work", "scripts/ci"),
 		},
 		{
 			name:      "a file in a DELETED package directory climbs to the nearest package",
