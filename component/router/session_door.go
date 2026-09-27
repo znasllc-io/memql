@@ -58,6 +58,7 @@ func (r *Router) sessionDoorFor(req ResolveRequest, name string, mod providerMod
 		ActingUserId: req.UserId,
 		AgentId:      req.AgentId,
 		Level:        string(req.Level),
+		Effort:       strings.TrimSpace(req.Effort),
 		RunId:        req.RunId,
 		StepId:       req.StepId,
 	}), true, nil

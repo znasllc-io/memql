@@ -1766,6 +1766,7 @@ func (s *streamSession) openModelCall(ctx context.Context, req ModelCallRequest)
 		Purpose:              req.Purpose,
 		Tools:                tools,
 		Audio:                req.Audio, Speech: req.Speech, Image: req.Image, Level: req.Level,
+		Effort: req.Effort,
 		Params: &memqlv1.ModelCallParams{
 			Temperature:     req.Params.Temperature,
 			TemperatureSet:  req.Params.TemperatureSet,

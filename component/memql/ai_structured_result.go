@@ -22,8 +22,21 @@ type StructuredAIResult struct {
 // Go callers declare a level; rules choose the provider on every invocation.
 // There is no response cache before the journal: a work run must record its own
 // call, and a replay must apply its journal policy before anything can answer.
+//
+// A person's override for the step this call serves (epic memql#5414, design
+// D20) is applied HERE rather than by each caller, so a Go call site that
+// builds its own request -- the file composer, a builtin's structured call --
+// honours it exactly as a rendered prompt does: its level, model and effort on
+// the request, its instructions and guidance after the caller's messages. The
+// knobs are idempotent, so a request requestForPrompt already overrode is
+// unchanged by the second pass; the messages are appended only here.
 func (e *MemQLEngine) CallAIStructured(ctx context.Context, req airoute.ResolveRequest, messages []common.ChatMessage, schema common.StructuredSchema) (StructuredAIResult, error) {
 	var out StructuredAIResult
+	req, err := ApplyStepOverride(ctx, req)
+	if err != nil {
+		return out, err
+	}
+	messages = withStepOverrideMessages(ctx, messages)
 	req.Modality = airoute.ModalityStructured
 	req.Needs.Structured = true
 	var input strings.Builder
