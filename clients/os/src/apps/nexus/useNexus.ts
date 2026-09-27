@@ -159,8 +159,8 @@ export function useRunSteps(runId: string): LiveCollectionHandle<Row> {
  * on-demand read the journal gets. `v1:library:artifact` carries broadcast
  * routing rules for all three verbs (component/node/routing.go), so a file
  * that appears while somebody is watching appears on the map. Its sibling
- * `v1:authoring:bundle` carries none, which is why the map draws artifacts
- * and not authored constructs -- see src/nexus/concepts.ts.
+ * `v1:authoring:bundle` broadcasts too (the `v1:authoring:*` rules); the map
+ * does not draw it yet -- see src/nexus/concepts.ts.
  *
  * `artifactsForRun` is `@unbounded` on purpose: the map draws the whole set
  * at once, and a truncated page would silently lose a file from the scene.

@@ -1,5 +1,7 @@
 import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { flatten } from "../../kit/rows";
+
 // The automations catalog, as rows.
 //
 // ===========================================================================
@@ -33,7 +35,11 @@ export interface AutomationRow {
   createdAt: string;
 }
 
-export function automationFromRow(row: Row): AutomationRow {
+export function automationFromRow(wire: Row): AutomationRow {
+  // A seed row arrives shape-flattened and a folded event carries its fields
+  // twice, flattened and under `payload`; a re-read row carries them only
+  // under `payload`. One projection over all three.
+  const row = flatten(wire);
   return {
     id: rowString(row, "id"),
     name: rowString(row, "name"),
@@ -51,7 +57,7 @@ export function automationFromRow(row: Row): AutomationRow {
 }
 
 export function isAutomation(row: Row): boolean {
-  return rowString(row, "kind") === "automation";
+  return rowString(flatten(row), "kind") === "automation";
 }
 
 /**
@@ -72,11 +78,37 @@ export function isAutomation(row: Row): boolean {
 export type Rung = "unproven" | "poor" | "fair" | "good" | "proven";
 
 export function rung(automation: AutomationRow): Rung {
-  if (automation.reinforceCount === 0 && automation.reliability === 0) return "unproven";
-  if (automation.reliability >= 0.9) return "proven";
-  if (automation.reliability >= 0.7) return "good";
-  if (automation.reliability >= 0.4) return "fair";
+  return rungFrom(automation.reliability, automation.reinforceCount);
+}
+
+/**
+ * The same reading from the two figures alone, for a construct that is not an
+ * authored automation -- a learned procedure carries both, and its reliability
+ * is the same 0..1 the one writer (`recordConstructReliability`) keeps for
+ * every construct, so it reads with the same five words.
+ */
+export function rungFrom(reliability: number, reinforceCount: number): Rung {
+  if (reinforceCount === 0 && reliability === 0) return "unproven";
+  if (reliability >= 0.9) return "proven";
+  if (reliability >= 0.7) return "good";
+  if (reliability >= 0.4) return "fair";
   return "poor";
+}
+
+/** A rung's place, for ordering: proven highest. */
+export function rungRank(value: Rung): number {
+  switch (value) {
+    case "proven":
+      return 4;
+    case "good":
+      return 3;
+    case "fair":
+      return 2;
+    case "poor":
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 export function rungWord(value: Rung): string {
@@ -141,16 +173,17 @@ export function statusMeaning(status: string): string {
 }
 
 /**
- * The fingerprint the arrival cue reads.
+ * The fingerprint the arrival cue reads: what a person would call a change to
+ * an authored automation -- a rename, arming or retiring it, or crossing onto
+ * another rung.
  *
- * NO LIVENESS FIELD, and here that rule bites differently than elsewhere: this
- * section is a READ rather than a feed, so there is no cue at all -- but the
- * fingerprint is still what a re-read compares to decide whether anything
- * moved, and naming `lastReinforced` would report a change every time a run
- * touched the ladder without changing where the template stands.
+ * NOT ITS RELIABILITY, ITS RUN COUNT OR `lastReinforced`. All three move on
+ * every run it serves, so a row that rang on them would ring for as long as
+ * anything used it -- the README's "a heartbeat is not news". The rung word
+ * moves only when the template has actually earned or lost standing.
  */
 export function automationFingerprint(automation: AutomationRow): string {
-  return [automation.name, automation.status, rung(automation), automation.reinforceCount].join("|");
+  return [automation.name, automation.status, rung(automation)].join("|");
 }
 
 export function automationMatches(automation: AutomationRow, search: string): boolean {
@@ -159,6 +192,42 @@ export function automationMatches(automation: AutomationRow, search: string): bo
   return (
     automation.name.toLowerCase().includes(needle) ||
     automation.targetNamespace.toLowerCase().includes(needle) ||
-    automation.status.toLowerCase().includes(needle)
+    automation.status.toLowerCase().includes(needle) ||
+    statusWord(automation.status).toLowerCase().includes(needle)
   );
+}
+
+/**
+ * Where an authored automation sits in the merged list, in the bands a
+ * learned procedure sorts into (ladder.ts `procedureBand`): what serves, then
+ * what does not yet, then what serves nothing. An authored automation never
+ * waits on a person, so it never takes the first band. Lower sorts first.
+ */
+export function automationBand(automation: AutomationRow): number {
+  switch (automation.status) {
+    case "active":
+      return 1;
+    case "retired":
+      return 3;
+    default:
+      return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Origin: a FACT on the row and a facet in Refine, never a heading
+// ---------------------------------------------------------------------------
+// A learned procedure is an automation that came from somewhere else -- mined
+// from an app's recorded runs rather than compiled from a goal or written --
+// so it is listed WITH the authored ones and says where it came from. Two
+// headings over two lists would make a person know the origin before they
+// could find the thing, which is the combined list DESIGN.md's "a subset is a
+// filter" was written against.
+
+export type Origin = "authored" | "learned";
+
+export const ORIGINS: readonly Origin[] = ["authored", "learned"];
+
+export function constructOriginWord(origin: Origin): string {
+  return origin === "learned" ? "Learned" : "Authored";
 }

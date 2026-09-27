@@ -332,8 +332,52 @@ export function approvalKindWord(kind: string): string {
       return "Plan change";
     case "inferenceUnavailable":
       return "No model";
+    case "routingReview":
+      return "Routing rule";
+    case "procedurePromotion":
+      return "Promotion";
     default:
       return kind === "" ? "--" : kind;
+  }
+}
+
+/**
+ * Whether deciding this kind resumes -- or fails -- a run parked on it.
+ *
+ * TWO KINDS PARK NOTHING, and every sentence about a decision has to know it.
+ * A routing review is raised by the nightly fold and names no run at all; a
+ * promotion names the shadow run whose comparison met the threshold, and that
+ * run has already FINISHED -- the decide handler skips the resume for it. A
+ * reject button promising "the step fails" on either would describe a
+ * consequence that does not happen.
+ */
+export function approvalParksARun(kind: string): boolean {
+  return kind !== "routingReview" && kind !== "procedurePromotion";
+}
+
+/** What declining does, said on the act before somebody takes it. */
+export function approvalRejectMeaning(kind: string): string {
+  switch (kind) {
+    case "procedurePromotion":
+      return "it goes on replaying beside the app and has to earn a new proposal";
+    case "routingReview":
+      return "routing is left as it is, and the decline is recorded so this evidence does not ask again";
+    default:
+      return "the step fails and the run does not do it";
+  }
+}
+
+/** What is true once it is decided -- the notice under a decided approval. */
+export function approvalDecidedNext(kind: string, decision: string): string {
+  switch (kind) {
+    case "procedurePromotion":
+      return decision === "approved"
+        ? "It moves to canary: it runs for real, with the app standing by to take over."
+        : "It stays in shadow and has to earn a new proposal.";
+    case "routingReview":
+      return decision === "approved" ? "The rule was added." : "Routing was left as it is.";
+    default:
+      return "The run was told, and picked up from where it parked.";
   }
 }
 
@@ -366,6 +410,12 @@ export function approvalKindMeaning(kind: string): string {
       // sentence says so, or a person reads it as a gate only they can lift
       // and stops using their own machines.
       return "No door to a model was open, so the run stopped where it was. It starts again on its own when one opens; approving uses a paid provider now instead.";
+    case "routingReview":
+      // RAISED BY A SWEEP, NOT BY A RUN (epic memql#5146, D5): the nightly
+      // fold read a model failing at a level and proposes the exact rule text.
+      return "The nightly review of routing found a model failing at a level and proposes a rule. Approving adds exactly this rule; nothing is parked on it.";
+    case "procedurePromotion":
+      return "A learned procedure matched the app often enough to run for real, with the app standing by.";
     default:
       return "";
   }

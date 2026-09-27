@@ -13,7 +13,7 @@ const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
 const { answerPayload } = await import("../../src/apps/nexus/ApprovalsSection");
 const { approvalFromRow } = await import("../../src/apps/nexus/rows");
-const { approvalRow, fakeConnection, runRow, withSession } = await import("./harness");
+const { approvalRow, fakeConnection, procedureRow, runRow, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -291,6 +291,200 @@ describe("the queue is live", () => {
     });
     const row = (await screen.findByText("Step chargeCard")).closest("li");
     expect(row?.getAttribute("data-arrival")).toBe("added");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The ladder's one approval (epic memql#5408, #5412)
+// ---------------------------------------------------------------------------
+
+function promotionRow(over: Record<string, unknown> = {}) {
+  return approvalRow({
+    id: "a-promo",
+    kind: "procedurePromotion",
+    runId: "run-shadow",
+    stepKey: "",
+    artifactHash: "sha256:proc-v1",
+    // THE ENGINE'S WORDING: the goal the procedure serves, quoted -- never
+    // the construct's machine name.
+    question:
+      'Promote "Reconcile last month\'s ledger against the bank export" to canary? It matched the app 5 times beside it, and would now run for real with the app standing by.',
+    options: [
+      { label: "Promote to canary", value: "approved" },
+      { label: "Keep it in shadow", value: "rejected" },
+    ],
+    evidence: {
+      tier: "evidence",
+      reason: "matched the app 5 consecutive times in shadow, across at least 2 distinct bindings of every parameter",
+      ruleId: "ladder.promotion",
+      source: "rules",
+    },
+    subject: {
+      constructId: "p1",
+      constructName: "procedureReconcileLedger",
+      procedureHash: "sha256:proc-v1",
+      title: "Reconcile last month's ledger against the bank export",
+      shadowMatches: 5,
+      distinctBindings: { "s0.command.2": 2 },
+      recordedFrom: { app: "claude-code", model: "claude-sonnet-4-5", effort: "high", sessionIds: [], runIds: [] },
+    },
+    ...over,
+  });
+}
+
+/** The question, found by its opening: the goal it serves, quoted. */
+const PROMOTE_QUESTION = /^Promote "Reconcile last month's ledger against the bank export" to canary\?/;
+
+describe("a promotion", () => {
+  it("is named for what it decides, and says it once", async () => {
+    mount(fakeConnection({ approvals: [promotionRow()] }));
+    expect(await screen.findAllByText("Promotion")).not.toHaveLength(0);
+    const line = await screen.findByText(PROMOTE_QUESTION);
+    // The row does not name the goal a second time beside its own question.
+    const row = line.closest("button");
+    expect((row?.textContent ?? "").split("Reconcile last month's ledger").length - 1).toBe(1);
+    fireEvent.click(line);
+    await screen.findByRole("region", { name: "What you are promoting" });
+    // The question already says what promoting does; the kind's meaning is
+    // not stood under it, nor repeated on the bar.
+    expect(
+      screen.queryByText(
+        "A learned procedure matched the app often enough to run for real, with the app standing by.",
+      ),
+    ).toBeNull();
+  });
+
+  it("carries its evidence in one panel, not also in the generic classifier panel", async () => {
+    mount(fakeConnection({ approvals: [promotionRow()] }));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
+    await screen.findByRole("region", { name: "What you are promoting" });
+    expect(screen.queryByRole("region", { name: "Why you were asked" })).toBeNull();
+    expect(screen.queryByText("The classifier's evidence")).toBeNull();
+    expect(screen.queryByText("ladder.promotion")).toBeNull();
+  });
+
+  it("keeps the classifier's evidence on every other kind", async () => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "a1" })] }));
+    fireEvent.click(await screen.findByText("Step sendInvoice"));
+    const why = await screen.findByRole("region", { name: "Why you were asked" });
+    expect(within(why).getByText("The classifier's evidence")).toBeTruthy();
+  });
+
+  it("carries the construct version AND the artifact hash on the card", async () => {
+    mount(fakeConnection({ approvals: [promotionRow()] }));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
+    const card = await screen.findByRole("region", { name: "What you are promoting" });
+    expect(within(card).getByText("Construct version")).toBeTruthy();
+    expect(within(card).getByText("Artifact hash")).toBeTruthy();
+    expect(within(card).getAllByText("sha256:proc-v1")).toHaveLength(2);
+    expect(within(card).getByRole("button", { name: "Copy construct version" })).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "Copy artifact hash" })).toBeTruthy();
+    // Said once: the generic hash block does not repeat it.
+    expect(screen.queryByText("The exact thing you are deciding")).toBeNull();
+  });
+
+  it("shows the evidence, naming each parameter by its goal input once the procedure is in hand", async () => {
+    mount(
+      fakeConnection({
+        approvals: [promotionRow()],
+        learnedProcedures: [procedureRow({ id: "p1" })],
+      }),
+    );
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
+    const card = await screen.findByRole("region", { name: "What you are promoting" });
+    expect(within(card).getByText("5 in a row")).toBeTruthy();
+    // The count leads, so "month 2" is never read as a value of month.
+    const month = await within(card).findByText("month");
+    expect(month.parentElement?.textContent).toMatch(/^\d+ for month$/);
+    const from = within(card).getByText("Recorded from").nextElementSibling;
+    expect(from?.textContent).toBe("Claude Code, claude-sonnet-4-5, high effort");
+  });
+
+  it("links to the procedure's page", async () => {
+    const { navigate } = mount(
+      fakeConnection({ approvals: [promotionRow()], learnedProcedures: [procedureRow({ id: "p1" })] }),
+    );
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
+    const card = await screen.findByRole("region", { name: "What you are promoting" });
+    fireEvent.click(
+      within(card).getByRole("button", { name: "Reconcile last month's ledger against the bank export" }),
+    );
+    expect(navigate).toHaveBeenCalledWith("automations");
+  });
+
+  it("names its acts with the outcomes the ladder offered, and decides through the one verb", async () => {
+    const conn = fakeConnection({ approvals: [promotionRow()] });
+    mount(conn);
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
+    const bar = screen.getByRole("group", { name: "What you can do with this" });
+    // Declining never claims a step fails: the shadow run already finished.
+    const keep = within(bar).getByRole("button", { name: /^Keep it in shadow: it goes on replaying beside the app/ });
+    expect(keep.getAttribute("aria-label") ?? "").not.toMatch(/step fails/);
+    fireEvent.click(within(bar).getByText("Promote to canary"));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalled());
+    expect(conn.query.decideApproval.mock.calls[0]?.[0]).toEqual({ approvalId: "a-promo", decision: "approved" });
+  });
+
+  it("shows the refusal of a changed procedure verbatim, in place", async () => {
+    const conn = fakeConnection({
+      approvals: [promotionRow()],
+      writeError: new Error("work: the approval's artifact changed since it was raised"),
+    });
+    mount(conn);
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
+    fireEvent.click(await screen.findByText("Promote to canary"));
+    const bar = screen.getByRole("group", { name: "What you can do with this" });
+    expect(
+      await within(bar).findByText("work: the approval's artifact changed since it was raised"),
+    ).toBeTruthy();
+    // The act stays offered: the refusal is a fact about this attempt.
+    expect(within(bar).getByText("Promote to canary")).toBeTruthy();
+  });
+
+  it("warns before deciding when the catalog holds a newer version than the one proposed", async () => {
+    mount(
+      fakeConnection({
+        approvals: [promotionRow()],
+        learnedProcedures: [procedureRow({ id: "p1", procedureHash: "sha256:proc-v2" })],
+      }),
+    );
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
+    expect(await screen.findByText("This procedure has changed since it was proposed.")).toBeTruthy();
+  });
+
+  it("does not print its structured subject as a key/value dump", async () => {
+    mount(fakeConnection({ approvals: [promotionRow()] }));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
+    await screen.findByRole("region", { name: "What you are promoting" });
+    expect(screen.queryByText("What it says")).toBeNull();
+    expect(document.body.textContent ?? "").not.toContain('{"s0.command.2"');
+  });
+});
+
+describe("the routing review", () => {
+  it("has a word of its own rather than the raw enum member", async () => {
+    mount(
+      fakeConnection({
+        approvals: [
+          approvalRow({
+            id: "a-route",
+            kind: "routingReview",
+            runId: "",
+            stepKey: "",
+            question: "gpt-x failed 17 of 41 structured calls at strong this week",
+          }),
+        ],
+      }),
+    );
+    expect(await screen.findAllByText("Routing rule")).not.toHaveLength(0);
+    expect(screen.queryByText("routingReview")).toBeNull();
+    fireEvent.click(await screen.findByText("gpt-x failed 17 of 41 structured calls at strong this week"));
+    // There is no run and no step to show, so neither is drawn as an em dash.
+    const attached = await screen.findByRole("region", { name: "What it is attached to" });
+    expect(within(attached).queryByText("Run")).toBeNull();
+    expect(within(attached).queryByText("Step")).toBeNull();
+    const bar = screen.getByRole("group", { name: "What you can do with this" });
+    expect(within(bar).getByRole("button", { name: /^Reject this: routing is left as it is/ })).toBeTruthy();
   });
 });
 
