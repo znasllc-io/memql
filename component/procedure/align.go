@@ -57,12 +57,38 @@ func (a Alignment) FirstDeviation() (Move, bool) {
 // could cost more than the replay it diagnoses.
 const alignStateCap = 100000
 
+// alignMarkingBudget bounds the same search in BYTES of markings. Every state
+// stores a dense marking -- one int per place of the net -- so a count of
+// states alone is not a bound on memory: a procedure of a thousand steps has
+// a thousand places, and a hundred thousand of its states were most of a
+// gigabyte for one diagnosis of a run that went its own way halfway through.
+const alignMarkingBudget = 64 << 20
+
+// alignStatesFor is the state cap for a net of this many places: the smaller
+// of alignStateCap and what alignMarkingBudget holds of its markings. A small
+// net keeps the full cap; a large one gets fewer states, never fewer than one.
+func alignStatesFor(places int) int {
+	perMarking := places * (strconv.IntSize / 8)
+	if perMarking <= 0 {
+		return alignStateCap
+	}
+	n := alignMarkingBudget / perMarking
+	switch {
+	case n < 1:
+		return 1
+	case n > alignStateCap:
+		return alignStateCap
+	}
+	return n
+}
+
 // Align returns an optimal alignment of the trace with the model: Dijkstra
 // over (marking, trace position), a sync or silent move costing 0 and a log or
-// model move costing 1. Over the state cap it returns the best partial with
-// Cost -1 (see alignCapped).
+// model move costing 1. Over the state cap -- alignStatesFor the net's size --
+// it returns the best partial with Cost -1 (see alignCapped).
 func Align(tree *ProcessTree, trace []string) Alignment {
-	return alignCapped(tree, trace, alignStateCap)
+	net := buildNet(tree)
+	return alignNet(net, trace, alignStatesFor(net.places))
 }
 
 // alignState is one discovered search state.
@@ -76,6 +102,11 @@ type alignState struct {
 
 // alignCapped is Align with its cap as a parameter, so the cap's behaviour can
 // be tested without building a model a hundred thousand states wide.
+func alignCapped(tree *ProcessTree, trace []string, maxStates int) Alignment {
+	return alignNet(buildNet(tree), trace, maxStates)
+}
+
+// alignNet is the search over a net already built.
 //
 // Over the cap the search stops and returns the FURTHEST state it settled --
 // the most trace consumed, then the cheapest -- completed into an alignment of
@@ -83,8 +114,7 @@ type alignState struct {
 // model is driven to its final marking by the fewest model moves. Cost is -1,
 // so no caller mistakes it for optimal. Completing it matters: a partial that
 // simply ended where the search stopped would read as a trace that fit.
-func alignCapped(tree *ProcessTree, trace []string, maxStates int) Alignment {
-	net := buildNet(tree)
+func alignNet(net *petriNet, trace []string, maxStates int) Alignment {
 	states := []alignState{{m: net.initial(), prev: -1}}
 	best := map[string]int{stateKey(states[0].m, 0): 0}
 	settled := map[string]bool{}
@@ -167,7 +197,8 @@ func movesTo(states []alignState, idx int) []Move {
 // completionBound bounds the walk that finishes a capped alignment, in
 // markings visited. The walk only has to find SOME route to the end, and in a
 // net built from a tree it finds one without backtracking in practice; the
-// bound is for the tree nobody anticipated.
+// bound is for the tree nobody anticipated. It is held to the marking budget
+// too (alignStatesFor), because every marking it visits is one more copy.
 const completionBound = 10000
 
 // completeToFinal walks from m to the final marking, silent firings first and
@@ -190,7 +221,11 @@ func (n *petriNet) completeToFinal(m marking, at int) []Move {
 	}
 	stack := []frame{{m: m}}
 	seen := map[string]bool{m.key(): true}
-	for len(stack) > 0 && len(seen) <= completionBound {
+	bound := completionBound
+	if byBytes := alignStatesFor(n.places); byBytes < bound {
+		bound = byBytes
+	}
+	for len(stack) > 0 && len(seen) <= bound {
 		top := len(stack) - 1
 		if stack[top].m.isFinal() {
 			var moves []Move

@@ -2,6 +2,8 @@ package procedure
 
 import (
 	"reflect"
+	"runtime"
+	"strconv"
 	"testing"
 )
 
@@ -219,5 +221,51 @@ func TestSequenceTreeIsTheProcedureInOrder(t *testing.T) {
 	}
 	if got := SequenceTree(nil); got == nil || got.Op != OpSeq || len(got.Children) != 0 {
 		t.Fatalf("the empty procedure is the empty sequence; got %s", treeString(got))
+	}
+}
+
+// TestAnAlignmentOfALongProcedureIsBoundedInMemory (E4): the state cap counted
+// STATES, and every state stores a dense marking -- one int per place of the
+// net. A procedure of a thousand steps has a thousand places, so the cap's
+// hundred thousand states were most of a gigabyte of markings for ONE
+// diagnosis of a run that went its own way halfway through. The cap is now
+// scaled by the net's size against a byte budget, and over it the search
+// still returns a completed best-effort alignment that names the first
+// deviation.
+func TestAnAlignmentOfALongProcedureIsBoundedInMemory(t *testing.T) {
+	const steps = 1000
+	symbols := make([]string, steps)
+	for i := range symbols {
+		symbols[i] = "s" + strconv.Itoa(i)
+	}
+	model := SequenceTree(symbols)
+	trace := append([]string(nil), symbols[:steps/2]...)
+	for i := steps / 2; i < steps; i++ {
+		trace = append(trace, "x"+strconv.Itoa(i))
+	}
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	got := Align(model, trace)
+	runtime.ReadMemStats(&after)
+
+	allocated := after.TotalAlloc - before.TotalAlloc
+	t.Logf("one alignment of a %d-step procedure allocated %d MiB (cost %d)", steps, allocated>>20, got.Cost)
+	if allocated > 100<<20 {
+		t.Fatalf("one alignment allocated %d MiB; the budget is ~64 MiB of markings", allocated>>20)
+	}
+	dev, ok := got.FirstDeviation()
+	if !ok || dev.TraceIndex != steps/2 {
+		t.Fatalf("FirstDeviation = %+v, %v; want the run's departure at event %d", dev, ok, steps/2)
+	}
+	var covered int
+	for _, m := range got.Moves {
+		if m.Kind != MoveModel {
+			covered++
+		}
+	}
+	if covered != len(trace) {
+		t.Fatalf("the alignment accounts for %d of %d events", covered, len(trace))
 	}
 }
