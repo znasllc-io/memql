@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -46,16 +45,24 @@ import (
 type lifecycleDispatcher struct {
 	mu    sync.Mutex
 	calls []procedure.DispatchRequest
-	fail  error
-	files map[string]map[string]string
+	// unavailable answers every step as the TARGET not finishing it (no
+	// workbench peer); timeout answers every step as having timed out.
+	unavailable bool
+	timeout     bool
+	files       map[string]map[string]string
 }
 
 func (d *lifecycleDispatcher) Dispatch(_ context.Context, req procedure.DispatchRequest) (procedure.DispatchResult, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.calls = append(d.calls, req)
-	if d.fail != nil {
-		return procedure.DispatchResult{}, d.fail
+	if d.unavailable || d.timeout {
+		failed := true
+		res := procedure.DispatchResult{Observation: work.StepObservation{IsError: &failed}, Output: map[string]any{"errorCode": "timeout"}}
+		if d.unavailable {
+			res.Output, res.Unavailable = map[string]any{"errorCode": "no_workbench_peer"}, true
+		}
+		return res, nil
 	}
 	if d.files == nil {
 		d.files = map[string]map[string]string{}
@@ -224,11 +231,6 @@ func TestProcedureLifecycleDB_RecordedToTrustedAndBackToShadow(t *testing.T) {
 		warnMu.Lock()
 		defer warnMu.Unlock()
 		for _, w := range warned {
-			// The two failed replays of phase 8 are MEANT to fail; their
-			// dispatch error is the one warning the runner may log.
-			if strings.Contains(w, "the workbench is unreachable") {
-				continue
-			}
 			t.Errorf("the procedure integration warned -- a row it wrote may have been refused: %s", w)
 		}
 	})
@@ -376,16 +378,22 @@ func TestProcedureLifecycleDB_RecordedToTrustedAndBackToShadow(t *testing.T) {
 		t.Fatalf("after a refused start: failures %v, rung %v -- want one failure, still trusted", got, construct()["ladder"])
 	}
 
-	// --- 8. A clean replay clears the failures; two failed replays demote.
-	// The workbench refuses the first step both times -- a dispatcher's Go
-	// error means the step did not run -- so each is a refused start, which
-	// the ladder counts as the failed replay it is.
+	// --- 8. A clean replay clears the failures. A target that could not
+	// finish the step (no workbench peer) is NOT the procedure failing: the
+	// goal goes to the app and the ladder counts nothing. Two replays whose
+	// first step timed out -- an ordinary failure -- demote it.
 	prober.set("mkdir", "9.4")
 	if out := serve("h.txt"); !out.Served || numberOf(construct(), "failures") != 0 {
 		t.Fatalf("the clean replay = %+v, failures %v", out, numberOf(construct(), "failures"))
 	}
 	d.mu.Lock()
-	d.fail = errors.New("the workbench is unreachable")
+	d.unavailable = true
+	d.mu.Unlock()
+	if out := serve("h2.txt"); out.Served || construct()["ladder"] != "trusted" || numberOf(construct(), "failures") != 0 {
+		t.Fatalf("an unavailable workbench = %+v, rung %v, failures %v -- want the app served it and nothing counted", out, construct()["ladder"], numberOf(construct(), "failures"))
+	}
+	d.mu.Lock()
+	d.unavailable, d.timeout = false, true
 	d.mu.Unlock()
 	if out := serve("i.txt"); out.Served || construct()["ladder"] != "trusted" {
 		t.Fatalf("one failed replay = %+v, rung %v -- want still trusted", out, construct()["ladder"])
@@ -394,10 +402,10 @@ func TestProcedureLifecycleDB_RecordedToTrustedAndBackToShadow(t *testing.T) {
 		t.Fatalf("the second failed replay = %+v, rung %v -- want demoted to shadow", out.Transition, construct()["ladder"])
 	}
 	d.mu.Lock()
-	d.fail = nil
+	d.timeout = false
 	d.mu.Unlock()
-	if fb.count() != 3 {
-		t.Fatalf("%d hand-backs, want one per goal the procedure did not serve (3)", fb.count())
+	if fb.count() != 4 {
+		t.Fatalf("%d hand-backs, want one per goal the procedure did not serve (4)", fb.count())
 	}
 
 	// --- 9. A machine-local procedure sent to the workbench is refused

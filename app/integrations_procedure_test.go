@@ -75,6 +75,12 @@ func TestTheProcedureIntegrationShipsWithItsCompileGate(t *testing.T) {
 	if integ == nil {
 		t.Fatal("the registered procedure integration is not the expected type")
 	}
+	// The ladder's per-construct lock takes its database handle from the
+	// app's own plugin context: without it every ladder move runs unlocked,
+	// and two replicas finishing replays of one procedure race.
+	if !integ.LadderLockInstalled() {
+		t.Fatal("the procedure factory, built from the app's plugin context, installed no handle for the ladder lock")
+	}
 	if integ.CompileGateInstalled() {
 		t.Fatal("the gate was installed before the wiring ran, so this test would pass having wired nothing")
 	}
