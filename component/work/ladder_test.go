@@ -344,6 +344,76 @@ func TestOneInsufficientPreconditionDemotesImmediately(t *testing.T) {
 	}
 }
 
+func insufficientReplay(at time.Time) LadderEvent {
+	return LadderEvent{Kind: EventReplayed, At: at, Match: false, Insufficient: true}
+}
+
+// D16 makes an insufficient precondition the STRONGER signal -- one demotes
+// where an ordinary failure takes two -- so it can never demote LATER than an
+// ordinary failure would. Counted on its own counter alone, operator values
+// that set the insufficient count above the failure count kept a procedure
+// trusted through divergences that two ordinary failures would have demoted it
+// for. An insufficient replay is a failed replay too, and either threshold
+// demotes.
+func TestAnInsufficientReplayAlsoCountsTowardTheFailuresThatDemote(t *testing.T) {
+	p := LadderPolicy{InsufficientToDemote: 3, FailuresToDemote: 2}
+	for _, rung := range []Rung{RungTrusted, RungCanary} {
+		first := Advance(LadderState{Rung: rung}, insufficientReplay(ladderT0), p)
+		if first.To != rung || first.Demoted {
+			t.Fatalf("%s: one insufficient replay, below both thresholds, demoted: %+v", rung, first)
+		}
+		if first.State.Failures != 1 || first.State.Insufficient != 1 {
+			t.Fatalf("%s: Failures=%d Insufficient=%d, want the insufficient replay counted on both", rung, first.State.Failures, first.State.Insufficient)
+		}
+		if !strings.Contains(first.Reason, "every precondition held") || !strings.Contains(first.Reason, "1 of the 2") {
+			t.Fatalf("%s: the reason must say how far it is from BOTH thresholds; got %q", rung, first.Reason)
+		}
+		second := Advance(first.State, insufficientReplay(ladderT0), p)
+		if second.To != RungShadow || !second.Demoted {
+			t.Fatalf("%s: two failed replays in a row left it %s: the insufficient count had not reached 3, but the failure count reached 2", rung, second.To)
+		}
+		if !strings.Contains(second.Reason, "2 replays failed in a row") {
+			t.Fatalf("%s: the reason must name the failure threshold that demoted it; got %q", rung, second.Reason)
+		}
+	}
+	// An ordinary failure and then an insufficient one are two in a row.
+	failed := Advance(LadderState{Rung: RungTrusted}, replayed(ladderT0, false), p)
+	mixed := Advance(failed.State, insufficientReplay(ladderT0), p)
+	if mixed.To != RungShadow || !strings.Contains(mixed.Reason, "2 replays failed in a row") {
+		t.Fatalf("a failure then an insufficient replay: To=%q reason %q, want demoted by the two failures", mixed.To, mixed.Reason)
+	}
+}
+
+// When one replay reaches both thresholds, the reason names the insufficient
+// precondition: it is the stronger signal, and the one that tells a person the
+// procedure does not know when it applies.
+func TestWhenBothThresholdsDemoteTheReasonNamesTheInsufficientPrecondition(t *testing.T) {
+	p := LadderPolicy{InsufficientToDemote: 2, FailuresToDemote: 2}
+	first := Advance(LadderState{Rung: RungTrusted}, insufficientReplay(ladderT0), p)
+	second := Advance(first.State, insufficientReplay(ladderT0), p)
+	if second.To != RungShadow || !second.Demoted {
+		t.Fatalf("two insufficient replays under thresholds of two did not demote: %+v", second)
+	}
+	if !strings.Contains(second.Reason, "every precondition held, 2 times") || strings.Contains(second.Reason, "failed in a row") {
+		t.Fatalf("the reason must name the insufficient precondition, and how often; got %q", second.Reason)
+	}
+}
+
+// The record's defaults behave exactly as before: one insufficient replay
+// demotes at once, after a clean start or an ordinary failure alike, with the
+// same sentence.
+func TestUnderTheDefaultsOneInsufficientReplayStillDemotesAsBefore(t *testing.T) {
+	const reason = "diverged although every precondition held, so its preconditions are not enough to know when it applies; demoted to shadow to earn its place again"
+	p := DefaultLadderPolicy()
+	failed := Advance(LadderState{Rung: RungCanary}, replayed(ladderT0, false), p)
+	for _, start := range []LadderState{{Rung: RungTrusted}, {Rung: RungCanary}, failed.State} {
+		tr := Advance(start, insufficientReplay(ladderT0), p)
+		if tr.To != RungShadow || !tr.Demoted || tr.Reason != reason {
+			t.Fatalf("from %+v: To=%q Demoted=%v reason %q, want demoted to shadow with %q", start, tr.To, tr.Demoted, tr.Reason, reason)
+		}
+	}
+}
+
 // Failures are CONSECUTIVE. A procedure that fails once a month and succeeds
 // every day in between is reliable; counting its failures cumulatively would
 // demote it for being old.
@@ -401,6 +471,21 @@ func TestTheSweepDemotesOnStoredEvidenceUnderTheCurrentPolicy(t *testing.T) {
 	}
 }
 
+// The sweep names a demotion the way a replay does: where the stored evidence
+// is over both thresholds, the insufficient precondition is the one named.
+// Every insufficient replay is a failure too, so both being over is the
+// ordinary case, not a corner.
+func TestTheSweepNamesTheInsufficientPreconditionWhenBothThresholdsAreOver(t *testing.T) {
+	tr := Advance(LadderState{Rung: RungTrusted, Failures: 3, Insufficient: 1},
+		LadderEvent{Kind: EventSweep, At: ladderT0}, LadderPolicy{FailuresToDemote: 2, InsufficientToDemote: 1})
+	if tr.To != RungShadow || !tr.Demoted {
+		t.Fatalf("evidence over both thresholds was not demoted: %+v", tr)
+	}
+	if !strings.Contains(tr.Reason, "preconditions proved insufficient") {
+		t.Fatalf("the reason must name the insufficient precondition; got %q", tr.Reason)
+	}
+}
+
 // D14: a procedure no goal has used inside the window retires, because a
 // library whose applicability checks cost more than they save is the utility
 // problem. The window is strict and measured from the LAST use; an unknown
@@ -432,6 +517,27 @@ func TestTheSweepRetiresAProcedureUnusedForTheWindow(t *testing.T) {
 		if tc.wantRetired && tr.State.PromotionApprovalId != "" {
 			t.Errorf("%s: a retired procedure cannot be promoted, so an open proposal must be cleared; got %q", tc.name, tr.State.PromotionApprovalId)
 		}
+	}
+}
+
+// A sweep that demotes and retires in one pass says both. The reason is the one
+// sentence a person reads about why the procedure last moved, and naming the
+// retirement alone hides that its replays had also been failing.
+func TestASweepThatDemotesAndRetiresNamesBoth(t *testing.T) {
+	tr := Advance(LadderState{Rung: RungTrusted, Failures: 3},
+		LadderEvent{Kind: EventSweep, At: ladderT0, LastUsedAt: ladderT0.Add(-40 * 24 * time.Hour)},
+		LadderPolicy{FailuresToDemote: 2, RetireAfterDays: 30})
+	if tr.To != RungRetired || !tr.Demoted || !tr.Retired {
+		t.Fatalf("To=%q Demoted=%v Retired=%v, want a demotion and a retirement", tr.To, tr.Demoted, tr.Retired)
+	}
+	if !strings.Contains(tr.Reason, "after 2 failed replays, and this one has 3") || !strings.Contains(tr.Reason, "unused for 40 days") {
+		t.Fatalf("the reason must name the demotion and the retirement; got %q", tr.Reason)
+	}
+	only := Advance(LadderState{Rung: RungTrusted},
+		LadderEvent{Kind: EventSweep, At: ladderT0, LastUsedAt: ladderT0.Add(-40 * 24 * time.Hour)},
+		LadderPolicy{FailuresToDemote: 2, RetireAfterDays: 30})
+	if want := "unused for 40 days, longer than the 30-day window, so it retires"; only.Reason != want {
+		t.Fatalf("a retirement alone: reason %q, want %q", only.Reason, want)
 	}
 }
 
