@@ -1,0 +1,9 @@
+/// The parents of either of two tickets, written as two lambdas.
+query ticket qfParentsOfEitherTwoLambdas {
+  args {
+    firstId   string  @required
+    secondId  string  @required
+  }
+  filter row => parentOf(p => p.id == args.firstId, p => p.id == args.secondId)
+  paginate 20
+}

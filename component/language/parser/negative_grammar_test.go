@@ -370,13 +370,16 @@ func TestNegative_ErrorsCarryPosition(t *testing.T) {
 // ---------------------------------------------------------------------------
 // 5. Retired-operator LAYER BOUNDARY (behavior pin, not a hole).
 //
-//    The retired filter operators `has` / `?.` / `;`-AND / `,`-OR are NOT
-//    rejected by the parser -- they still lex/parse. They are enforced by the
-//    tree-wide grep gate test/dslconformance/no_retired_operators_test.go (and word and/or by
-//    test/dslconformance/no_word_logical_operators_test.go). This test PINS that layer split so
+//    The retired filter operator `has` is NOT rejected by this (procedural)
+//    parser -- it still lexes and parses. It is enforced in a .memql file by
+//    the edition-2026 grammar, and across the tree by
+//    test/dslconformance/no_retired_operators_test.go (and word and/or by
+//    test/dslconformance/no_word_logical_operators_test.go). The two retired
+//    connectives, `;` as AND (memql#5375) and `,` as OR (memql#5439), moved
+//    down a layer: this parser refuses them too. This test PINS that split so
 //    that (a) a future author knows WHERE each form is caught, and (b) if a
-//    later story adds parser-level rejection, this pin fails and forces the doc
-//    + the enforcement note to be updated in lockstep.
+//    later story adds parser-level rejection, this pin fails and forces the
+//    doc + the enforcement note to be updated in lockstep.
 // ---------------------------------------------------------------------------
 
 func TestRetiredOperators_ParserAcceptsToTreeScanGate(t *testing.T) {
@@ -384,9 +387,6 @@ func TestRetiredOperators_ParserAcceptsToTreeScanGate(t *testing.T) {
 	// what rejects them across the live .memql tree.
 	acceptedByParser := []string{
 		`tags has "x"`, // `has` -> enforced by test/dslconformance/no_retired_operators_test.go
-		// `,` as OR stays accepted: still live grammar, and its codemod is
-		// `--rewrite=expressions`, which epic memql#5363 owns.
-		`a == 1 , b == 2`,
 	}
 	for _, src := range acceptedByParser {
 		if _, err := ParseExpression(src); err != nil {
@@ -402,6 +402,16 @@ func TestRetiredOperators_ParserAcceptsToTreeScanGate(t *testing.T) {
 		t.Error("`;` as AND must be refused at the parser level (epic memql#5375)")
 	} else if !strings.Contains(err.Error(), "`&&`") {
 		t.Errorf("the `;` refusal must name `&&` as the replacement, got: %v", err)
+	}
+
+	// `,` as OR followed it (memql#5439), with the rule code the edition-2026
+	// grammar refuses the same comma with in a .memql file.
+	_, err := ParseExpression(`a == 1 , b == 2`)
+	var rf *RetiredFormError
+	if !errors.As(err, &rf) || rf.Form.Rule != ruleCommaConnective {
+		t.Errorf("`,` as OR must be refused at the parser level as %s (memql#5439), got: %v", ruleCommaConnective, err)
+	} else if !strings.Contains(err.Error(), "write ||") {
+		t.Errorf("the `,` refusal must name `||` as the replacement, got: %v", err)
 	}
 }
 

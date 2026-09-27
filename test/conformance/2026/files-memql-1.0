@@ -607,6 +607,8 @@ expr/queryFilter/ternary-over-the-row.memql
 expr/queryFilter/ternary-plan-constant-condition.memql
 expr/queryFilter/title-includes.memql
 expr/queryFilter/trait-reference.memql
+expr/queryFilter/traversal-conditions-in-one-lambda.memql
+expr/queryFilter/traversal-two-lambdas.memql
 expr/queryFilter/unquoted-canonical-id.memql
 expr/queryFilter/urgent-flag.memql
 expr/queryFilter/when-guard.memql

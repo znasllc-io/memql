@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -142,57 +143,55 @@ func TestRelationshipLabelLeavesALoneStringTargetAlone(t *testing.T) {
 	}
 }
 
-// TestNonLabelTwoArgCallIsNotSwallowed pins the other side of the
-// discrimination: a two-argument call whose first argument is NOT a string
-// literal must not lose its second argument.
+// TestNonLabelTwoArgCallIsRefused pins the other side of the discrimination:
+// a two-argument call whose first argument is NOT a string literal is not a
+// labelled traversal, and it is REFUSED rather than read some other way.
 //
-// It does not lose it, and the reason is worth stating plainly because it is
-// the load-bearing fact underneath the whole feature: the comma inside a
-// traversal call was ALREADY meaningful. It is the legacy `,`-as-OR separator
-// -- retired in authored .memql (TestNoRetiredOperatorForms rejects it there)
-// but still live in the runtime grammar -- so `parentOf(a, b)` has always
-// parsed as `parentOf(a || b)`.
-//
-// #3656 therefore did not add a comma to this grammar; it carved ONE shape
-// out of an existing one. `f("someString", <expr>)` used to mean "OR a bare
-// string literal with a filter", which is not a query anybody writes on
-// purpose, and now means a labelled traversal. Everything else the comma
-// could join is untouched, which is what these assertions hold in place: both
-// operands still present, still OR, still unlabelled.
-func TestNonLabelTwoArgCallIsNotSwallowed(t *testing.T) {
-	cases := map[string]string{
-		"twoFilters":         `parentOf(concept==v1:rel:hub, concept==v1:rel:space)`,
-		"identifierThenExpr": `parentOf(someIdentifier, concept==v1:rel:hub)`,
+// It was not always refused, and the history is the reason for the message.
+// The comma inside a traversal call was the legacy `,`-as-OR separator, so
+// `parentOf(a, b)` parsed as `parentOf(a || b)` -- #3656 carved the labelled
+// form out of that grammar rather than adding a comma to it, since
+// `f("someString", <expr>)` had meant "OR a bare string literal with a
+// filter", which nobody writes on purpose. memql#5439 retired the comma
+// connective, so the fold is gone too, and its refusal names the one call the
+// author should have written. What must never happen is the quiet reading
+// this test guarded before: a second argument dropped, or a traversal that
+// ran with half its filter.
+func TestNonLabelTwoArgCallIsRefused(t *testing.T) {
+	cases := map[string]struct{ src, want string }{
+		"twoFilters":         {`parentOf(concept==v1:rel:hub, concept==v1:rel:space)`, `parentOf(a || b)`},
+		"identifierThenExpr": {`parentOf(someIdentifier, concept==v1:rel:hub)`, `parentOf(a || b)`},
+		"labelThenTwo":       {`references("respondsAs", concept==v1:rel:hub, concept==v1:rel:space)`, `references("respondsAs", a || b)`},
 	}
 
-	for name, src := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			expr, err := ParseExpression(src)
-			if err != nil {
-				t.Fatalf("%s failed to parse: %v", src, err)
+			expr, err := ParseExpression(tc.src)
+			if err == nil {
+				t.Fatalf("%s parsed as %#v, want the retired `,` connective refused", tc.src, expr)
 			}
-			rel, ok := expr.(*RelationshipExpr)
-			if !ok {
-				t.Fatalf("%s produced %T, want *RelationshipExpr", src, expr)
+			var rf *RetiredFormError
+			if !errors.As(err, &rf) || rf.Form.Rule != ruleCommaConnective {
+				t.Fatalf("%s: got %v, want a %s refusal", tc.src, err, ruleCommaConnective)
 			}
-			if rel.Label != "" {
-				t.Errorf("%s parsed with Label = %q, want empty -- only a leading STRING "+
-					"LITERAL followed by a comma is a label", src, rel.Label)
-			}
-			logical, ok := rel.Target.(*LogicalExpr)
-			if !ok {
-				t.Fatalf("%s target is %T, want *LogicalExpr -- the second argument was "+
-					"dropped rather than joined by the legacy comma-OR", src, rel.Target)
-			}
-			if logical.Op != LogicalOr {
-				t.Errorf("%s target operator = %v, want OR -- the comma inside a traversal "+
-					"call is the legacy OR separator", src, logical.Op)
-			}
-			if logical.Left == nil || logical.Right == nil {
-				t.Errorf("%s target = OR(%T, %T) -- both operands must survive",
-					src, logical.Left, logical.Right)
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("%s: the refusal must name the call to write, %s; got: %v", tc.src, tc.want, err)
 			}
 		})
+	}
+
+	// The same filter written with `||` is the traversal the comma used to
+	// build: one unlabelled OR target, both operands present.
+	expr, err := ParseExpression(`parentOf(concept==v1:rel:hub || concept==v1:rel:space)`)
+	if err != nil {
+		t.Fatalf("parentOf(a || b) must parse: %v", err)
+	}
+	rel, ok := expr.(*RelationshipExpr)
+	if !ok {
+		t.Fatalf("parentOf(a || b) produced %T, want *RelationshipExpr", expr)
+	}
+	if logical, ok := rel.Target.(*LogicalExpr); !ok || logical.Op != LogicalOr || logical.Left == nil || logical.Right == nil || rel.Label != "" {
+		t.Errorf("parentOf(a || b) target = %#v (label %q), want an unlabelled OR of both operands", rel.Target, rel.Label)
 	}
 }
 

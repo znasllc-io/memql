@@ -549,6 +549,18 @@
       "note": "Every relationship traversal of the catalog, each as the filter of its own query."
     },
     {
+      "file": "traversal-conditions-in-one-lambda.memql",
+      "verdict": "load_ok",
+      "note": "A traversal takes one lambda: rows meeting either condition are one lambda joined by ||. The internal form's parentOf(a, b) once folded its comma into exactly this, and is refused since memql#5439."
+    },
+    {
+      "file": "traversal-two-lambdas.memql",
+      "verdict": "refuse_load",
+      "code": "lower_refused",
+      "message": "a traversal takes one lambda, after an optional string label -- not one lambda per condition",
+      "note": "Two lambdas are two conditions where one filter belongs (memql#5439). Read as a label and a lambda it would be refused as a label that is no string, which names the wrong fix; the refusal names the one lambda joined by ||."
+    },
+    {
       "file": "expires-within-a-day-query.memql",
       "verdict": "load_ok",
       "note": "`addDuration(now, ...)` reads no row, so it is a plan constant: evaluated once per call and bound."

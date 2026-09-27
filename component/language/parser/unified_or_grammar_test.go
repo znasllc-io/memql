@@ -66,7 +66,8 @@ func TestLexerRejectsSinglePipe(t *testing.T) {
 }
 
 // TestOrPrecedenceAndParens covers Go precedence: `!` > comparisons > `&&` > `||`,
-// with parens overriding. `,` keeps its legacy OR meaning at the same level as `||`.
+// with parens overriding. `,` is not an operator (memql#5439): its legacy
+// reading is TestLegacyCommaSitsAtTheOrLevel's.
 func TestOrPrecedenceAndParens(t *testing.T) {
 	cases := []struct {
 		src  string
@@ -83,10 +84,6 @@ func TestOrPrecedenceAndParens(t *testing.T) {
 		{`payload.a == 1 && (payload.b == 2 || payload.c == 3)`, "(payload.a && (payload.b || payload.c))"},
 		// ! binds tighter than &&
 		{`!payload.a == 1 && payload.b == 2`, "(!payload.a && payload.b)"},
-		// legacy `,`-OR sits at the same level as `||`
-		{`payload.a == 1 && payload.b == 2, payload.c == 3`, "((payload.a && payload.b) || payload.c)"},
-		// `||` and `,` interchangeable at the OR level
-		{`payload.a == 1 || payload.b == 2, payload.c == 3`, "((payload.a || payload.b) || payload.c)"},
 	}
 
 	for _, tc := range cases {
@@ -94,6 +91,31 @@ func TestOrPrecedenceAndParens(t *testing.T) {
 			got := renderExpr(parseExprStr(t, tc.src))
 			if got != tc.want {
 				t.Fatalf("precedence mismatch\n src:  %s\n got:  %s\n want: %s", tc.src, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestLegacyCommaSitsAtTheOrLevel pins where the retired `,` connective sat:
+// at the OR level, beside `||`. The engine refuses it now (memql#5439), but
+// the expressions rewrite still READS a legacy clause with it, and what the
+// rewrite writes is only right if that reading keeps this precedence -- a
+// comma read one level too tight would turn `a && b, c` into `a && (b || c)`.
+func TestLegacyCommaSitsAtTheOrLevel(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{`payload.a == 1 && payload.b == 2, payload.c == 3`, "((payload.a && payload.b) || payload.c)"},
+		{`payload.a == 1 || payload.b == 2, payload.c == 3`, "((payload.a || payload.b) || payload.c)"},
+	} {
+		t.Run(tc.src, func(t *testing.T) {
+			legacy, err := parseLegacyExpression(tc.src)
+			if err != nil {
+				t.Fatalf("the legacy reading must accept %q: %v", tc.src, err)
+			}
+			if got := renderExpr(legacy); got != tc.want {
+				t.Fatalf("precedence mismatch\n src:  %s\n got:  %s\n want: %s", tc.src, got, tc.want)
+			}
+			if _, err := ParseExpression(tc.src); err == nil {
+				t.Errorf("the engine's reading must refuse %q", tc.src)
 			}
 		})
 	}

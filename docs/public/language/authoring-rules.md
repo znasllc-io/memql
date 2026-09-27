@@ -2188,7 +2188,12 @@ grammar:
   edition-2026 parser now refuses each of the four itself, naming the
   replacement and `memqlmigrate --rewrite=expressions`
   ([memql.md](memql.md#retired-spellings)), and `!` is legal in every
-  expression position.
+  expression position. The internal query form's parser refuses the two
+  connectives as well (`;` since memql#5375, `,` since memql#5439), so
+  no lowering and no string sent to `Execute` can spell them either;
+  `TestNoLoweringCarriesTheCommaConnective`
+  (`test/dslconformance/no_comma_connective_lowering_test.go`) lowers
+  every tracked `.memql` file to prove no rewrite emits the comma.
 - `TestNoInfixWordAndOr` (#973,
   `test/dslconformance/no_word_logical_operators_test.go`): the English `and` / `or`
   infix forms are rejected.

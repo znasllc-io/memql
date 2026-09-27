@@ -20,9 +20,14 @@ package parser
 //	     canonicalId(v, concept) -> canonicalId(v, "concept")
 //	E. a query tool handler's `$args.x`       -> args.x
 //
+// Inside A, B and C the retired connectives become the operators they meant
+// (`;` -> &&, `,` -> ||), and inside A a traversal's target filter becomes its
+// lambda: `parentOf(a, b)` -> `parentOf(p => a || b)` (memql#5439).
+//
 // A, B and C are PARSED, never spliced as text: the old clause is read by the
-// legacy grammar (ParseExpression, which is what the engine loads it with
-// today), converted node by node, and printed by ast.FormatExpr. A precedence
+// legacy grammar (parseLegacyExpression: the engine's procedural grammar, with
+// the retired `;` and `,` connectives still read as AND and OR), converted
+// node by node, and printed by ast.FormatExpr. A precedence
 // the two grammars disagree about therefore cannot slip through as text -- the
 // printer parenthesises whatever the new grammar would read differently. D and
 // E are byte-level, in the null_coalesce_migrate.go style, because those
@@ -1067,7 +1072,10 @@ func xmConvertChecked(src string, c xmConverter) (ast.ExpressionNode, error) {
 }
 
 func (c xmConverter) convert(src string) (ast.ExpressionNode, error) {
-	legacy, err := ParseExpression(src)
+	// The legacy reading keeps the retired connectives' meanings -- `,` as
+	// OR, `;` as AND -- which the engine's own parse refuses: this is the
+	// rewrite those refusals name, so it must read them (memql#5439).
+	legacy, err := parseLegacyExpression(src)
 	if err != nil {
 		return nil, fmt.Errorf("the legacy grammar does not read it: %w", err)
 	}
@@ -1226,9 +1234,51 @@ func (c xmConverter) leaf(n ast.ExpressionNode) (ast.ExpressionNode, error) {
 	case *ast.BinaryComparisonExpr:
 		return nil, errors.New("an expression-led comparison (an arithmetic, literal or call on the left) is refused by the legacy filter surface, so this clause never loaded")
 	case *ast.RelationshipExpr:
-		return nil, fmt.Errorf("the %s(...) traversal takes a lambda in edition 2026; migrate it by hand", e.Function)
+		return c.traversal(e)
 	}
 	return nil, fmt.Errorf("%T has no edition-2026 form this rewrite writes", n)
+}
+
+// xmTraversalParam is the parameter a converted traversal's lambda names its
+// row by. The target is a filter over a row of its own, and edition 2026
+// refuses a reference to the outer row inside it, so the name only has to
+// differ from `row`; `p` is the name the language reference writes.
+const xmTraversalParam = "p"
+
+// traversal converts a legacy relationship traversal, whose target was a
+// filter of its own -- `parentOf(concept==v1:crm:account)`,
+// `references("assignedTo", id==args.id)` -- into the edition-2026 call, whose
+// target is a lambda over the traversed row: `parentOf(p => p.concept ==
+// "v1:crm:account")`. The comma inside the legacy call was OR, so
+// `parentOf(a, b)` meant `parentOf(a || b)`, and that is what is written
+// (memql#5439); a leading string label stays the label.
+//
+// A query filter's own traversals only, one level deep. A traversal in a spec
+// body or a trigger filter, one inside another traversal's target, and a
+// target that can vanish whole -- nothing but when(args.x) guards, which the
+// engine deleted when their argument was absent, leaving a traversal of no
+// filter at all -- are left for the author: none has a spelling the rewrite
+// can show to mean what the engine did.
+func (c xmConverter) traversal(e *ast.RelationshipExpr) (ast.ExpressionNode, error) {
+	if c.mode != xmFilter || c.param != "row" {
+		return nil, fmt.Errorf("the %s(...) traversal takes a lambda in edition 2026; migrate it by hand", e.Function)
+	}
+	sub := c
+	sub.param = xmTraversalParam
+	sub.bound = ""
+	form, err := sub.boolean(e.Target)
+	if err != nil {
+		return nil, fmt.Errorf("the %s(...) traversal's target: %w", e.Function, err)
+	}
+	if form.d != nil {
+		return nil, fmt.Errorf("the %s(...) traversal's target is nothing but when(args.<field>) guards, which the engine deleted when their argument was absent -- a traversal of no filter has no edition-2026 form; migrate it by hand", e.Function)
+	}
+	var args []ast.ExpressionNode
+	if e.Label != "" {
+		args = append(args, &ast.LiteralExpr{Value: e.Label})
+	}
+	args = append(args, &ast.LambdaExpr{Params: []string{xmTraversalParam}, Body: ast.Unparen(form.t)})
+	return &ast.CallExpr{Name: string(e.Function), Args: args}, nil
 }
 
 // predicate converts a bare predicate conjunct into its application.
@@ -1241,6 +1291,10 @@ func (c xmConverter) predicate(name string) (ast.ExpressionNode, error) {
 		return nil, fmt.Errorf("%s is a spec over %s, which no shape and no concept declares, so nothing says whether it applies to row or to actor", name, info.Unbound)
 	}
 	arg := "row"
+	if c.mode == xmFilter {
+		// A filter's own row, or a traversal target's (traversal).
+		arg = c.param
+	}
 	if info.Actor {
 		arg = "actor"
 	}
@@ -1285,7 +1339,9 @@ func (c xmConverter) comparison(e *ast.ComparisonExpr) (ast.ExpressionNode, erro
 	return nil, fmt.Errorf("the operator %q has no edition-2026 form", e.Operator)
 }
 
-// field converts a comparison's left-hand path.
+// field converts a comparison's left-hand path. In a filter the row it reads
+// is c.param: `row` for the query's own filter, the lambda parameter for a
+// traversal target (traversal).
 func (c xmConverter) field(parts []string) (ast.ExpressionNode, error) {
 	for _, p := range parts {
 		if !xmIdent.MatchString(p) {
@@ -1317,7 +1373,7 @@ func (c xmConverter) field(parts []string) (ast.ExpressionNode, error) {
 		if !ok {
 			return nil, fmt.Errorf("row.%s is not a row intrinsic, and the legacy engine refuses it", parts[1])
 		}
-		return xmPath("row", append([]string{canon}, parts[2:]...)...), nil
+		return xmPath(c.param, append([]string{canon}, parts[2:]...)...), nil
 	case "actor", "args":
 		// `actor.x` is the caller; `args.x` on the left is a caller flag
 		// (memql#4814). Both keep their roots.
@@ -1332,7 +1388,7 @@ func (c xmConverter) field(parts []string) (ast.ExpressionNode, error) {
 		if _, ok := xmIntrinsic(parts[1]); ok {
 			return nil, fmt.Errorf("payload.%s names the PAYLOAD field %s while row.%s names the row intrinsic; migrate it by hand", parts[1], parts[1], parts[1])
 		}
-		return xmPath("row", parts[1:]...), nil
+		return xmPath(c.param, parts[1:]...), nil
 	}
 	if c.bound != "" && head == c.bound && len(parts) > 1 {
 		// `<boundConcept>.<field>`: before bare payload access (epic #2292) a
@@ -1342,18 +1398,18 @@ func (c xmConverter) field(parts []string) (ast.ExpressionNode, error) {
 		// (TestFilterSyntaxCanonical), but Go fixtures and bundles do.
 		rest := parts[1:]
 		if canon, ok := xmIntrinsic(rest[0]); ok {
-			return xmPath("row", append([]string{canon}, rest[1:]...)...), nil
+			return xmPath(c.param, append([]string{canon}, rest[1:]...)...), nil
 		}
-		return xmPath("row", rest...), nil
+		return xmPath(c.param, rest...), nil
 	}
 	if xmReservedHead(head) {
 		return nil, fmt.Errorf("%s is a reserved engine name, not a field of the row", head)
 	}
 	if canon, ok := xmIntrinsic(head); ok {
 		// A bare intrinsic in a filter IS the intrinsic (reservedFilterHead).
-		return xmPath("row", append([]string{canon}, parts[1:]...)...), nil
+		return xmPath(c.param, append([]string{canon}, parts[1:]...)...), nil
 	}
-	return xmPath("row", parts...), nil
+	return xmPath(c.param, parts...), nil
 }
 
 // xmReservedHead is the rest of the engine's reservedFilterHeadNames -- names a

@@ -1469,6 +1469,21 @@ func (l *lowerer) traversal(e *ast.CallExpr) (ExpressionNode, error) {
 	}
 	var label string
 	args := e.Args
+	// Two filters where one belongs -- `parentOf(p => a, p => b)` -- is the
+	// shape the internal form's retired `,` connective folded into
+	// `parentOf(a || b)` (memql#5439). Read as a label and a lambda it would be
+	// refused as a label that is no string, which names the wrong fix: the
+	// conditions are joined inside the one lambda.
+	lambdas := 0
+	for _, a := range args {
+		if lam, ok := ast.Unparen(a).(*ast.LambdaExpr); ok && lam != nil {
+			lambdas++
+		}
+	}
+	if lambdas > 1 {
+		return nil, l.refuse(e, "a traversal takes one lambda, after an optional string label -- not one lambda per condition",
+			"Join the conditions inside one lambda: `"+e.Name+"(p => <first> || <second>)`")
+	}
 	switch len(args) {
 	case 1:
 	case 2:

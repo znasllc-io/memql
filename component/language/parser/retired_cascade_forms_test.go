@@ -9,10 +9,10 @@ import (
 // TestRetiredCascadeFormsRefuse is one negative cell per form D17 removes
 // from the parse cascade (issue #5376's acceptance criterion).
 //
-// `,` AS OR IS DEFERRED, not retired, so it has no cell here: it is still
-// live grammar (two filters folding into one traversal argument) and its
-// codemod is `--rewrite=expressions`, which epic memql#5363 owns. See
-// parseLogicalOr.
+// `,` as OR was deferred out of D17 -- it was still live grammar, two filters
+// folding into one traversal argument -- and retired on its own by memql#5439
+// once no producer was left, with the edition-2026 rule code rather than this
+// file's message shape. Its cells are comma_connective_5439_test.go's.
 //
 // Two of the three ALREADY failed before memql#5375, and that is the point of
 // testing all four together: `?.` failed as "unexpected token" and
@@ -63,11 +63,12 @@ func TestRetiredCascadeFormsRefuse(t *testing.T) {
 	})
 }
 
-// TestCommaStaysASeparator is the over-rejection guard, and the one this
-// change could plausibly break. Retiring `,` as a boolean OR must not touch
-// the comma in an argument list, a sort clause, a field list or an @enum --
-// suppressCommaOr is what tells the two apart, and refusing outside that
-// guard would reject most of the tree.
+// TestCommaStaysASeparator is the over-rejection guard, and the one retiring
+// `,` as a boolean OR (memql#5439) could plausibly break. It must not touch
+// the comma in an argument list, a sort clause, a field list or an @enum:
+// each of those parses its own commas, and parseLogicalOr refuses only a
+// comma none of them owns -- refusing more would reject most of the tree.
+// comma_connective_5439_test.go carries the full list of separator positions.
 func TestCommaStaysASeparator(t *testing.T) {
 	for _, src := range []string{
 		`coalesce(args.a, args.b)`,

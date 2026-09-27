@@ -85,17 +85,17 @@ func (p *Parser) parseCollectionMethodCall(recvPath, method string) (ExpressionN
 // method call. Each argument is either an arrow lambda or a plain
 // expression. The terminating `)` is left for the caller to consume.
 //
-// While parsing args the legacy `,`-as-OR separator is suppressed so a
-// comma reliably terminates one argument (see Parser.suppressCommaOr).
+// While parsing args, a comma at the OR level ends one argument rather than
+// being refused as the retired `,` connective (see Parser.inCollectionArgs).
 func (p *Parser) parseMethodArgList() ([]ExpressionNode, error) {
 	// A method's arguments are a level down (nesting_bound.go).
 	if err := p.enterNesting(siteExpression); err != nil {
 		return nil, err
 	}
 	defer p.leaveNesting()
-	prev := p.suppressCommaOr
-	p.suppressCommaOr = true
-	defer func() { p.suppressCommaOr = prev }()
+	prev := p.inCollectionArgs
+	p.inCollectionArgs = true
+	defer func() { p.inCollectionArgs = prev }()
 
 	var args []ExpressionNode
 	for !p.check(TokenParenClose) && !p.check(TokenEOF) {
