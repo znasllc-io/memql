@@ -1149,6 +1149,7 @@ Use `sort(<expr>, "<field>", "<direction>?", ...)` to order results. The functio
 - Must wrap the entire query expression (i.e., `sort(...)` should be the outermost call).
 - Supported fields: the row intrinsics `id`, `concept`, `createdAt`, `createdBy`, `type` -- each also addressable through the `row.` namespace (`"row.createdAt"`) -- and bare payload properties (`status`, `metadata.tags`).
 - In an authored `.memql` sort clause the namespaced spelling is required for intrinsics and enforced by CI (memql#2786), because a bare key cannot be told apart from a payload property of the same name. This runtime form still accepts either spelling, so existing SDK and API callers are unaffected.
+- An authored sort clause is also held to the query's concept at load: every key names a declared field or a sortable row intrinsic, and a direction is `"asc"` or `"desc"` in lower case ([Sort keys](#sort-keys), memql#5429). This runtime form reads a direction in any case.
 - Limits and offsets always apply **after** sorting. Sorting on payload properties may cause the engine to fetch up to `MEMQL_MEMORY_ENGINE_MAX_WINDOW` rows to guarantee correctness.
 
 Example:
@@ -1839,6 +1840,37 @@ query run newestRunForGoal {
   shape   workRunFull
 }
 ```
+
+#### Sort keys
+
+A sort key names what the query's concept declares, and the load holds it to
+that (memql#5429):
+
+- **A payload field, bare**: `sort "priority", "desc"`. A dotted key names a
+  field inside a declared block, `"routing.queue"`, held hop by hop the way a
+  filter holds `row.routing.queue`: past a field whose keys the declaration
+  does not close -- an open `object`, a map, a union -- the rest of the path is
+  the author's to answer for, and a hop through a scalar or a list names
+  nothing.
+- **A row intrinsic, under `row.`**: `"row.id"`, `"row.concept"`,
+  `"row.type"`, `"row.createdAt"` or `"row.createdBy"`. `row.provenance` is an
+  object and has no order. A bare intrinsic (`"createdAt"`) is refused by its
+  own gate, naming `"row.createdAt"` ([authoring rules](authoring-rules.md)).
+- **A direction, `"asc"` or `"desc"`**, in lower case, after the key it
+  orders. A key written with none sorts descending.
+
+Anything else is refused at load, naming the key and the fix, with the rule id
+`sort_key_unknown` for a key and `sort_direction_unknown` for a direction
+written in another case (`"DESC"`). A string after a key that is not a
+direction is the next key, so `sort "priority", "sideways"` is refused as a key
+the concept does not declare, and the refusal says it is not a direction
+either. The runtime `sort(...)` form of the internal query language is not an
+authored clause and keeps its looser reading ([Sorting](#sorting)).
+
+Every authored query binds its concept in its signature, and one whose concept
+does not resolve is refused before its sort clause is read. A load that holds
+no concept registry at all -- an offline tool's -- checks only what needs no
+concept: the `row.` namespace, the reserved names and the direction.
 
 ### Temporal queries (`asOf`)
 

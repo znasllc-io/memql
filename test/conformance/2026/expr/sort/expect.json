@@ -99,6 +99,73 @@
       "file": "bare-intrinsic.memql",
       "verdict": "refuse_load",
       "message": "sort key names the row intrinsic \"createdAt\" bare -- write \"row.createdAt\""
+    },
+    {
+      "file": "nested-declared-field.memql",
+      "verdict": "load_ok",
+      "note": "A dotted key names a field inside a declared block, hop by hop, as a filter reads row.routing.queue."
+    },
+    {
+      "file": "into-an-open-object.memql",
+      "verdict": "load_ok",
+      "note": "An open object declares no keys, so the path past it is the author's to answer for -- the rule the filter lowering applies to row.details.severity."
+    },
+    {
+      "file": "undeclared-field.memql",
+      "verdict": "refuse_load",
+      "code": "sort_key_unknown",
+      "message": "declares no field \"priorty\" -- did you mean \"priority\"?",
+      "note": "memql#5429: a sort key the concept does not declare ordered on a JSONB path no row carries -- a silent no-op ordering."
+    },
+    {
+      "file": "unknown-row-intrinsic.memql",
+      "verdict": "refuse_load",
+      "code": "sort_key_unknown",
+      "message": "sort key \"row.updatedAt\": row.updatedAt is not a sortable row intrinsic"
+    },
+    {
+      "file": "payload-field-under-row.memql",
+      "verdict": "refuse_load",
+      "code": "sort_key_unknown",
+      "message": "a payload field is named bare in a sort key: write \"priority\""
+    },
+    {
+      "file": "unknown-direction.memql",
+      "verdict": "refuse_load",
+      "code": "sort_key_unknown",
+      "message": "sort key \"sideways\": it is not a direction, which is \"asc\" or \"desc\"",
+      "note": "A string after a key that is not a direction starts the next key, so the grammar reads \"sideways\" as a key -- one the concept does not declare. The refusal says both."
+    },
+    {
+      "file": "direction-in-capitals.memql",
+      "verdict": "refuse_load",
+      "code": "sort_direction_unknown",
+      "message": "sort direction \"DESC\": a direction is \"asc\" or \"desc\", written in lower case -- write \"desc\"",
+      "note": "The grammar reads a direction in any case, which a runtime query string keeps; an authored clause has one spelling."
+    },
+    {
+      "file": "path-through-a-string.memql",
+      "verdict": "refuse_load",
+      "code": "sort_key_unknown",
+      "message": "sort key \"title.first\": \"title\" is a string, and a string has no fields -- sort by \"title\" itself"
+    },
+    {
+      "file": "undeclared-nested-field.memql",
+      "verdict": "refuse_load",
+      "code": "sort_key_unknown",
+      "message": "declares no field \"routing.team\""
+    },
+    {
+      "file": "reserved-name.memql",
+      "verdict": "refuse_load",
+      "code": "sort_key_unknown",
+      "message": "sort key \"provenance\": \"provenance\" is a reserved engine name, which no concept may declare as a field"
+    },
+    {
+      "file": "provenance-under-row.memql",
+      "verdict": "refuse_load",
+      "code": "sort_key_unknown",
+      "message": "sort key \"row.provenance\": row.provenance is an object, and an object has no order"
     }
   ]
 }

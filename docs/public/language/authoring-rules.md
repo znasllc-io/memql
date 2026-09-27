@@ -2125,6 +2125,16 @@ the change. The gates, with their test names:
   keep accepting bare keys from callers -- `compileSortField` still
   resolves them -- exactly as the filter gate leaves the runtime filter
   surface alone.
+- **A sort key names what the concept declares** (memql#5429). Beyond the
+  namespace, an authored sort clause is held to the query's concept at
+  load: a bare key is a declared payload field (a dotted one is walked hop
+  by hop, as a filter walks `row.a.b`), a `row.` key is one of the sortable
+  intrinsics, and a direction is `"asc"` or `"desc"` in lower case. A key
+  that names nothing is refused as `sort_key_unknown`, a direction in
+  another case as `sort_direction_unknown`; both name the key and the fix.
+  Before this a misspelled key loaded and ordered on a JSONB path no row
+  carries, and `sort "priority", "sideways"` loaded as two keys. The rules
+  are in [Sort keys](memql.md#sort-keys).
 - **Mandatory trait specs** (`TestNoInlineTraitablePredicates`).
   When a trait in `dsl/common/traits.memql` covers a predicate, the
   filter applies the trait rather than inlining the comparison:

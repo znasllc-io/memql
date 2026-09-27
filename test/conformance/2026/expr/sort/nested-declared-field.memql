@@ -1,0 +1,6 @@
+/// The open tickets, by the queue they are routed to: a declared field inside a block.
+query ticket openTicketsByQueue {
+  filter row => row.status == "open"
+  sort "routing.queue", "asc"
+  paginate 20
+}

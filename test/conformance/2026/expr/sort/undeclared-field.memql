@@ -1,0 +1,6 @@
+/// The open tickets, most urgent first, the field misspelled.
+query ticket soMisspelledPriority {
+  filter row => row.status == "open"
+  sort "priorty", "desc"
+  paginate 20
+}

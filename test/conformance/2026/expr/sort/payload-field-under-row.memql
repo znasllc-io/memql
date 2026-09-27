@@ -1,0 +1,6 @@
+/// The open tickets, most urgent first, the payload field written under row.
+query ticket soPayloadUnderRow {
+  filter row => row.status == "open"
+  sort "row.priority", "desc"
+  paginate 20
+}

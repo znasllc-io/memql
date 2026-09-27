@@ -1,0 +1,6 @@
+/// The open tickets, by priority, in a direction that is not one.
+query ticket soSidewaysPriority {
+  filter row => row.status == "open"
+  sort "priority", "sideways"
+  paginate 20
+}

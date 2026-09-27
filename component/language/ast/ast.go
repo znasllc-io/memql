@@ -94,6 +94,13 @@ const (
 type SortField struct {
 	Field     string
 	Direction SortDirection
+	// DirectionText is the direction literal as written, "" when the key was
+	// written with none (Direction is then the default, desc). The grammar
+	// reads a direction without regard to case -- a runtime query string's
+	// "ASC" orders ascending -- and an authored query's sort clause is held
+	// to the lower-case spelling at load (memql#5429), which needs the
+	// spelling the author wrote rather than the one it was read as.
+	DirectionText string
 }
 
 // RelationshipFunction enumerates supported relationship traversal functions.

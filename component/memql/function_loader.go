@@ -691,8 +691,8 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 				// is not loaded yet, so a predicate application's kind is
 				// checked later, by the Init pass, from fn.V1Filter.
 				var lowerOpts []ASTConverterOption
+				var bound *memoryNodes.Concept
 				if funcDef.Type == languageParser.FunctionTypeQuery {
-					var bound *memoryNodes.Concept
 					if registry != nil && boundConcept != "" {
 						if c, err := registry.Get(boundConcept); err == nil {
 							bound = c
@@ -711,6 +711,15 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 				engineExpr, err := converter.ConvertExpression(parserExpr)
 				if err != nil {
 					return nil, fmt.Errorf("convert function %q body: %w", expectedName, err)
+				}
+				// The sort clause names a declared field or a sortable row
+				// intrinsic, in a direction written "asc" or "desc"
+				// (memql#5429). After the filter, so a query wrong in both
+				// is refused in reading order.
+				if funcDef.Type == languageParser.FunctionTypeQuery {
+					if err := checkQuerySortClause(parserExpr, bound); err != nil {
+						return nil, err
+					}
 				}
 				// Resolve bare `concept` keyword: if the expression (or
 				// any sub-expression) is a SpecReferenceExpression with

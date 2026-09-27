@@ -1,0 +1,6 @@
+/// The open tickets, by the provenance intrinsic, which is an object.
+query ticket soByRowProvenance {
+  filter row => row.status == "open"
+  sort "row.provenance", "desc"
+  paginate 20
+}
