@@ -305,18 +305,29 @@ func TestAStepWithAReceiptIsNeverDispatchedAgain(t *testing.T) {
 }
 
 // TestADivergenceHandsTheAppThePartialTraceAndNeverRedoesACompletedStep (D16,
-// Review Focus 5): the report's write comes back with bytes no recording
-// wrote. The replay STOPS there; the app is told, before it starts, which
-// steps already ran -- with their idempotency keys, the command's side effect
-// among them -- and where and why the replay stopped: repair, not resample.
-// The procedure diverged although every precondition held, so they proved
-// insufficient and it is demoted at once; and executing the statement again
-// hands nothing over twice.
+// Review Focus 5): a machine-local procedure's command RAN on the person's
+// machine -- the dispatcher says its effect was delivered -- and then the
+// report's write came back with bytes no recording wrote. The replay STOPS
+// there; the app is told, before it starts, which steps already ran with
+// their idempotency keys, which of them it must never repeat, and where and
+// why the replay stopped: repair, not resample. The procedure diverged
+// although every precondition held, so they proved insufficient and it is
+// demoted at once; and executing the statement again hands nothing over
+// twice.
 func TestADivergenceHandsTheAppThePartialTraceAndNeverRedoesACompletedStep(t *testing.T) {
 	w := newReplayWorld(t, "trusted")
-	w.d.alter["step1"] = func(r *DispatchResult) {
+	w.withProcedure(t, func(p map[string]any) {
+		p["footprint"] = map[string]any{"files": true, "machine": true}
+		p["target"] = "machine"
+	})
+	machine := newFakeDispatcher()
+	machine.delivers = true
+	machine.alter["step1"] = func(r *DispatchResult) {
 		r.Observation.Contents[0].Digest = "sha256:" + strings.Repeat("0", 64)
 	}
+	w.i.SetDispatcher(work.TargetMachine, machine)
+	w.i.SetProber(machineProber())
+
 	req := ReplayRequest{OwnerUserId: replayOwner, ConstructId: w.constructId, Mode: ReplayTrusted,
 		GoalRunId: goalRunId, StepKey: "replayed", Input: map[string]any{"file": goalFile}}
 	out, err := w.i.Replay(context.Background(), req)
@@ -328,7 +339,7 @@ func TestADivergenceHandsTheAppThePartialTraceAndNeverRedoesACompletedStep(t *te
 	}
 	key0 := work.IdempotencyKey(out.ReplayRunId, "step0", 1)
 	if len(out.Completed) != 1 || out.Completed[0].IdempotencyKey != key0 || !out.Completed[0].SideEffect {
-		t.Fatalf("completed = %+v, want step 0 with its key and its side effect", out.Completed)
+		t.Fatalf("completed = %+v, want step 0 with its key and its delivered effect", out.Completed)
 	}
 	fb := w.f.recorded()
 	if len(fb) != 1 {
@@ -353,7 +364,7 @@ func TestADivergenceHandsTheAppThePartialTraceAndNeverRedoesACompletedStep(t *te
 	if w.lc.get("ladder") != "shadow" || !out.Transition.Demoted {
 		t.Errorf("ladder = %v: one precondition that proved insufficient demotes a trusted procedure", w.lc.get("ladder"))
 	}
-	if keys := dispatchedKeys(w.d.recorded()); !reflect.DeepEqual(keys, []string{"step0", "step1"}) {
+	if keys := dispatchedKeys(machine.recorded()); !reflect.DeepEqual(keys, []string{"step0", "step1"}) {
 		t.Fatalf("dispatched %v", keys)
 	}
 
@@ -361,27 +372,57 @@ func TestADivergenceHandsTheAppThePartialTraceAndNeverRedoesACompletedStep(t *te
 	if err != nil {
 		t.Fatalf("Replay again: %v", err)
 	}
-	if !again.AlreadyDone || !again.FellBack || len(w.f.recorded()) != 1 || len(w.d.recorded()) != 2 {
+	if !again.AlreadyDone || !again.FellBack || len(w.f.recorded()) != 1 || len(machine.recorded()) != 2 {
 		t.Fatalf("executing the statement again redid work: %+v, hand-backs %d, dispatches %d",
-			again, len(w.f.recorded()), len(w.d.recorded()))
+			again, len(w.f.recorded()), len(machine.recorded()))
 	}
 }
 
-// TestADispatchFailureIsAFailedReplayNotAnInsufficientPrecondition: a step the
-// executor could not run at all says nothing about the preconditions, so it
-// counts as a failed replay -- two of which demote -- and not as the one
-// insufficiency that demotes at once.
-func TestADispatchFailureIsAFailedReplayNotAnInsufficientPrecondition(t *testing.T) {
+// TestAWorkbenchStepIsNotOneTheAppMaySkip: on the workbench nothing a step did
+// reached the app -- the replay runs in a workspace of its own -- so a
+// divergence there lists the steps that ran as ones whose effects did not
+// reach it, and tells the app to skip nothing it would then never do.
+func TestAWorkbenchStepIsNotOneTheAppMaySkip(t *testing.T) {
 	w := newReplayWorld(t, "trusted")
-	w.d.fail["step0"] = errors.New("the workbench is unreachable")
+	w.d.alter["step1"] = func(r *DispatchResult) {
+		r.Observation.Contents[0].Digest = "sha256:" + strings.Repeat("0", 64)
+	}
 	out := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
-	if !out.Diverged || out.Insufficient || out.DivergedStep != 0 || !out.FellBack {
-		t.Fatalf("outcome = %+v", out)
+	if !out.Diverged || len(out.Completed) != 1 || out.Completed[0].SideEffect {
+		t.Fatalf("outcome = %+v, want step 0 completed and delivered nowhere", out)
+	}
+	prompt := w.f.recorded()[0].Guidance.Prompt
+	if strings.Contains(prompt, "do not repeat them") || !containsAll(prompt, "in its own workspace, which you do not share", out.Completed[0].IdempotencyKey) {
+		t.Fatalf("a workbench step was handed over as one to skip:\n%s", prompt)
+	}
+}
+
+// TestARefusedStepIsAFailedReplayNotAnInsufficientPrecondition: a Go error from
+// a dispatcher means the step did NOT run -- a gate, a scope, a spelling the
+// executor does not support. After a step ran it is a divergence that
+// delivered nothing; before any ran it is a refused START. Neither says the
+// preconditions were insufficient, so each counts as one failed replay --
+// two of which demote -- rather than the one insufficiency that demotes at
+// once.
+func TestARefusedStepIsAFailedReplayNotAnInsufficientPrecondition(t *testing.T) {
+	w := newReplayWorld(t, "trusted")
+	w.d.fail["step1"] = errors.New("denied_by_scope")
+	out := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
+	if !out.Diverged || out.Insufficient || out.DivergedStep != 1 || !out.FellBack || len(out.Completed) != 1 {
+		t.Fatalf("a step refused after another ran = %+v, want a divergence that delivered nothing", out)
 	}
 	if w.lc.get("ladder") != "trusted" || w.lc.get("failures") != float64(1) {
 		t.Fatalf("ladder %v failures %v, want still trusted with one failure", w.lc.get("ladder"), w.lc.get("failures"))
 	}
+
+	w.d.fail = map[string]error{"step0": errors.New("command_not_allowed")}
 	second := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
+	if !second.StartRefused || second.Diverged || second.Code != codeStartRefused {
+		t.Fatalf("a first step refused before it ran = %+v, want a refused start", second)
+	}
+	if !strings.Contains(w.f.recorded()[1].Guidance.Prompt, "did not start, so nothing has been done") {
+		t.Fatalf("the app was not told nothing ran:\n%s", w.f.recorded()[1].Guidance.Prompt)
+	}
 	if !second.Transition.Demoted || w.lc.get("ladder") != "shadow" {
 		t.Fatalf("two failed replays did not demote: %+v, ladder %v", second.Transition, w.lc.get("ladder"))
 	}

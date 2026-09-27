@@ -3,10 +3,12 @@ package procedure
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/work"
 )
 
@@ -213,5 +215,96 @@ func TestTheLearnHandlerComparesOnlyAfterAnUnchangedLift(t *testing.T) {
 	}
 	if _, compared := reply["shadowCompared"]; compared || len(fresh.callsTo("procedureConstructsForGoalSignature")) != 0 {
 		t.Fatalf("a created lift was compared: %v", reply)
+	}
+}
+
+// TestAShadowComparisonOnANodeWithNoWorkbenchIsNotCompared: a run's
+// completion event is broadcast, so the comparison runs on whichever replica
+// claimed it -- and a planner, an mcp node or a bff without a remote
+// workbench has no dispatcher to replay on. That is NOT a mismatch: nothing
+// is written, the streak stands, and the next recording's comparison on a
+// node that can make it counts as it would have. A streak must not depend on
+// which replica heard the event.
+func TestAShadowComparisonOnANodeWithNoWorkbenchIsNotCompared(t *testing.T) {
+	rec := recording1("c.txt", testNow.Add(-10*time.Minute))
+	w := shadowWorld(t, rec)
+	w.lc.set("shadowMatches", float64(1))
+	w.i.seams.mu.Lock()
+	w.i.seams.dispatchers = nil
+	w.i.seams.mu.Unlock()
+
+	outs, err := w.i.ShadowCompare(personCtx(testOwner), rec.runId)
+	if err != nil {
+		t.Fatalf("ShadowCompare: %v", err)
+	}
+	if len(outs) != 1 || !outs[0].NotCompared || outs[0].Match || outs[0].Diverged || outs[0].Code != codeNoWorkbench {
+		t.Fatalf("outcomes = %+v, want one comparison not made here", outs)
+	}
+	for _, name := range []string{"createWorkRun", "recordConstructLadder", "recordConstructReliability"} {
+		if n := len(w.eng.callsTo(name)); n != 0 {
+			t.Fatalf("a comparison not made here wrote %s %d time(s)", name, n)
+		}
+	}
+	if w.lc.get("shadowMatches") != float64(1) {
+		t.Fatalf("shadowMatches = %v: the streak must stand", w.lc.get("shadowMatches"))
+	}
+}
+
+// TestAShadowWhoseFirstStepTheSandboxRefusesIsNotCompared: the sandbox saying
+// no to the first step means nothing ran on this node, which says nothing
+// about whether the procedure does what the app does.
+func TestAShadowWhoseFirstStepTheSandboxRefusesIsNotCompared(t *testing.T) {
+	rec := recording1("c.txt", testNow.Add(-10*time.Minute))
+	w := shadowWorld(t, rec)
+	w.lc.set("shadowMatches", float64(1))
+	w.d.fail["step0"] = errors.New("sandbox refused the command")
+	outs, err := w.i.ShadowCompare(personCtx(testOwner), rec.runId)
+	if err != nil {
+		t.Fatalf("ShadowCompare: %v", err)
+	}
+	if len(outs) != 1 || !outs[0].NotCompared || outs[0].Match {
+		t.Fatalf("outcomes = %+v, want a comparison not made", outs)
+	}
+	if len(w.eng.callsTo("recordConstructLadder")) != 0 || w.lc.get("shadowMatches") != float64(1) {
+		t.Fatalf("a refused first step moved the ladder: shadowMatches %v", w.lc.get("shadowMatches"))
+	}
+}
+
+// TestTheDispatcherSeesTheOwnersForwardedAuthorityOnTheShadowPath: with the
+// workbench on its own node, a step is FORWARDED over the mesh, and the
+// forward fails closed without an assertion of whose work it is. A shadow
+// comparison runs from the completion trigger with only the borrowed owner,
+// so the replay binds the writer-scoped assertion the work spine gives
+// background work -- for the OWNER -- before it probes or dispatches. A
+// served replay runs inside the goal's work dispatch, which bound one
+// already, and that one is kept, not replaced.
+func TestTheDispatcherSeesTheOwnersForwardedAuthorityOnTheShadowPath(t *testing.T) {
+	rec := recording1("c.txt", testNow.Add(-10*time.Minute))
+	w := shadowWorld(t, rec)
+	if _, err := w.i.ShadowCompare(personCtx(testOwner), rec.runId); err != nil {
+		t.Fatalf("ShadowCompare: %v", err)
+	}
+	seen := append(append([]forwardedSeen(nil), w.p.authorities...), w.d.authorities...)
+	if len(w.d.authorities) != 2 || len(w.p.authorities) != 1 {
+		t.Fatalf("probes %d, dispatches %d; want one probe and both steps", len(w.p.authorities), len(w.d.authorities))
+	}
+	for n, a := range seen {
+		if !a.present || !sameUser(a.subject, testOwner) || a.credentialClass != auth.ForwardedClassUser {
+			t.Fatalf("seam call %d saw %+v, want the owner's writer-scoped user authority", n, a)
+		}
+	}
+
+	served := newReplayWorld(t, "trusted")
+	bound := auth.ContextWithForwardedAuthority(personCtx(replayOwner), auth.ForwardedAuthority{
+		Subject: replayOwner, CredentialClass: auth.ForwardedClassPat,
+	})
+	if _, err := served.i.Replay(bound, ReplayRequest{OwnerUserId: replayOwner, ConstructId: served.constructId,
+		Mode: ReplayTrusted, GoalRunId: goalRunId, Input: map[string]any{"file": goalFile}}); err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	for n, a := range served.d.authorities {
+		if !a.present || a.credentialClass != auth.ForwardedClassPat {
+			t.Fatalf("served dispatch %d saw %+v, want the work dispatch's own authority kept", n, a)
+		}
 	}
 }

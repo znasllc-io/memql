@@ -376,7 +376,10 @@ func TestProcedureLifecycleDB_RecordedToTrustedAndBackToShadow(t *testing.T) {
 		t.Fatalf("after a refused start: failures %v, rung %v -- want one failure, still trusted", got, construct()["ladder"])
 	}
 
-	// --- 8. A clean replay clears the failures; two failed replays demote. ---
+	// --- 8. A clean replay clears the failures; two failed replays demote.
+	// The workbench refuses the first step both times -- a dispatcher's Go
+	// error means the step did not run -- so each is a refused start, which
+	// the ladder counts as the failed replay it is.
 	prober.set("mkdir", "9.4")
 	if out := serve("h.txt"); !out.Served || numberOf(construct(), "failures") != 0 {
 		t.Fatalf("the clean replay = %+v, failures %v", out, numberOf(construct(), "failures"))

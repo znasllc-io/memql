@@ -327,13 +327,18 @@ func (i *Integration) handleLearnFromRun(ctx context.Context, args map[string]an
 	// happened, and the automation must not be retried into a second one.
 	if res.Lift == LiftUnchanged && run != nil {
 		outs, serr := i.shadowCompareRun(ctx, run)
-		reply["shadowCompared"] = len(outs)
-		matched := 0
+		compared, matched := 0, 0
 		for _, o := range outs {
+			if o.NotCompared {
+				// Not made on this node -- no evidence either way.
+				continue
+			}
+			compared++
 			if o.Match {
 				matched++
 			}
 		}
+		reply["shadowCompared"] = compared
 		reply["shadowMatched"] = matched
 		if serr != nil {
 			i.log().Warn("procedure: the shadow comparison after a lift failed", "runId", runId, "error", serr)

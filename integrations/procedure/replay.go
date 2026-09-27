@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	proc "github.com/znasllc-io/memql/component/procedure"
 	"github.com/znasllc-io/memql/component/work"
@@ -183,6 +184,12 @@ type ReplayOutcome struct {
 	// AlreadyDone: the replay run had already finished, and this call ran,
 	// counted and handed over nothing that had been done.
 	AlreadyDone bool
+	// NotCompared (shadow): the comparison was not made ON THIS NODE -- no
+	// workbench dispatcher is installed here, or the sandbox refused the
+	// first step -- so nothing was recorded and the ladder did not move. A
+	// run's completion event reaches whichever replica claims it, and a
+	// streak must not depend on which one that was.
+	NotCompared bool
 }
 
 // Outcome codes, as the replay run's errorCode carries them.
@@ -317,6 +324,9 @@ type replay struct {
 	dry    bool
 	target work.ReplayTarget
 	d      Dispatcher
+	// seam is the context the prober and the dispatcher run under: the
+	// owner's actor and a forwarded authority for the owner (bindAuthority).
+	seam context.Context
 
 	// resuming: a replay of this very statement had started and not
 	// finished, and this one continues it from its receipts.
@@ -332,6 +342,18 @@ type replay struct {
 	// differed, which -- with the preconditions held -- is what D16 calls a
 	// precondition that proved insufficient.
 	ranAndDiffered bool
+	// startRefusedMidway: the first step's dispatch was refused, which ended
+	// the replay as a refused start from inside the step loop.
+	startRefusedMidway bool
+}
+
+// seamContext is the context a seam runs under: the one bindAuthority bound,
+// or -- for a replay that binds none (a dry comparison) -- the owner's actor.
+func (r *replay) seamContext(ctx context.Context) context.Context {
+	if r.seam != nil {
+		return r.seam
+	}
+	return ownerActor(ctx, r.req.OwnerUserId)
 }
 
 // run is stages 2 to 8, after the one question that comes before all of them:
@@ -351,6 +373,9 @@ func (r *replay) run(ctx context.Context) {
 	if !r.gateRung(ctx) {
 		return
 	}
+	if r.mode == ReplayShadow && !r.resuming && !r.comparableHere() {
+		return
+	}
 	if !r.resuming && !r.open(ctx) {
 		return
 	}
@@ -364,11 +389,45 @@ func (r *replay) run(ctx context.Context) {
 		r.finish(ctx)
 		return
 	}
-	if !r.checkTarget(ctx) || !r.bindParameters(ctx) || !r.checkPreconditions(ctx) {
+	if !r.checkTarget(ctx) || !r.bindAuthority(ctx) || !r.bindParameters(ctx) || !r.checkPreconditions(ctx) {
 		return
 	}
 	r.runSteps(ctx)
+	if r.startRefusedMidway || r.out.NotCompared {
+		// The first step was refused before it ran: the start refusal (or,
+		// in shadow, the comparison not made) is already the whole answer.
+		return
+	}
 	r.finish(ctx)
+}
+
+// comparableHere decides, BEFORE anything is written, whether this node can
+// make a shadow comparison at all. A run's completion event is broadcast, so
+// the comparison runs on whichever replica claimed it -- a planner, an mcp or
+// an edge node, a bff with no remote workbench -- and a node with no
+// workbench dispatcher answers "not compared here": no replay run, no ladder
+// event, no streak reset. A procedure's evidence must not depend on which
+// replica heard the event. A comparison that needs no dispatcher -- a dry one
+// for a machine-local procedure, or a recording the procedure does not fit --
+// is made anywhere.
+func (r *replay) comparableHere() bool {
+	if strings.TrimSpace(r.req.Unfit) != "" || r.c.p.Footprint.Machine {
+		return true
+	}
+	if r.i.dispatcherFor(work.TargetWorkbench) != nil {
+		return true
+	}
+	r.notCompared(codeNoWorkbench, "No workbench dispatcher is installed on this node, so the comparison was not made here and the ladder is where it was.")
+	return false
+}
+
+// notCompared records a shadow comparison this node could not make.
+func (r *replay) notCompared(code, diagnosis string) {
+	r.out.NotCompared = true
+	r.out.Code = code
+	r.out.Diagnosis = diagnosis
+	r.i.log().Info("procedure: a shadow comparison was not made on this node",
+		"constructId", r.c.id, "recording", r.req.GoalRunId, "code", code)
 }
 
 // --- stage 2: the rung --------------------------------------------------------
@@ -696,6 +755,31 @@ func (r *replay) checkTarget(ctx context.Context) bool {
 	return true
 }
 
+// bindAuthority is the context the seams run under: the owner's actor, and a
+// FORWARDED AUTHORITY for the owner. The workbench is reached over the mesh
+// when it runs on its own node, and that forward fails closed without an
+// assertion of whose work it is. A served replay runs inside the goal's work
+// dispatch, which already bound one for the run's owner, and it is kept; a
+// shadow comparison runs from the completion trigger with only the borrowed
+// owner, so it is given the writer-scoped assertion the work spine gives
+// background work -- no captured grant, so never more than a writer.
+func (r *replay) bindAuthority(ctx context.Context) bool {
+	if r.dry {
+		return true
+	}
+	owner := r.req.OwnerUserId
+	if fa, ok := auth.ForwardedAuthorityFromContext(ctx); ok && sameUser(fa.Subject, owner) {
+		r.seam = ownerActor(ctx, owner)
+		return true
+	}
+	bound, err := auth.ContextWithPersistedOwner(ctx, owner, nil, nil)
+	if err != nil {
+		return r.refuseStart(ctx, codeStartRefused, "The owner's authority could not be bound for the replay's steps: "+err.Error()+".", false)
+	}
+	r.seam = bound
+	return true
+}
+
 func parseTarget(s string) (work.ReplayTarget, bool) {
 	switch t := work.ReplayTarget(strings.TrimSpace(s)); t {
 	case work.TargetWorkbench, work.TargetMachine:
@@ -753,7 +837,7 @@ func (r *replay) checkPreconditions(ctx context.Context) bool {
 	)
 	if needsProbe := !proc.CheckPreconditions(r.c.learned, proc.Preconditions{}, target).Held; needsProbe {
 		if p := r.i.prober(); p != nil {
-			observed, probeErr = p.Probe(ownerActor(ctx, r.req.OwnerUserId), r.target, r.req.OwnerUserId, r.runId, r.c.learned)
+			observed, probeErr = p.Probe(r.seamContext(ctx), r.target, r.req.OwnerUserId, r.runId, r.c.learned)
 		} else {
 			probeErr = errors.New("no prober is installed on this node")
 		}
@@ -885,20 +969,40 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		r.writeStepIntent(ctx, idx, key, idem)
 	default:
 		r.writeStepIntent(ctx, idx, key, idem)
-		res, derr := r.d.Dispatch(ownerActor(ctx, r.req.OwnerUserId), DispatchRequest{
+		res, derr := r.d.Dispatch(r.seamContext(ctx), DispatchRequest{
 			Target: r.target, OwnerUserId: r.req.OwnerUserId, RunId: r.runId,
 			StepKey: key, IdempotencyKey: idem, Tool: step.Tool, Args: args,
 			Sandbox: r.mode == ReplayShadow,
 		})
 		if derr != nil {
+			// A GO ERROR MEANS THE STEP DID NOT RUN -- a gate or scope
+			// refusal, a missing surface, a spelling the executor does not
+			// support, the sandbox saying no. Before anything has run that is
+			// a refused START (and, in shadow, a comparison not made here);
+			// after, it is a divergence that delivered nothing.
 			r.writeStepReceipt(ctx, key, "failed", done, nil, nil, derr.Error(), false, "")
-			return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) could not be run: %v.", idx, step.Tool, summary, derr), false)
+			if len(r.out.Completed) == 0 {
+				if r.mode == ReplayShadow {
+					r.notCompared(codeStartRefused, fmt.Sprintf("Its first step (%s: %s) was refused before it ran on this node (%v), so the comparison was not made.", step.Tool, summary, derr))
+					r.outcome = r.baseOutcome()
+					r.outcome["notCompared"] = true
+					r.outcome["diagnosis"] = r.out.Diagnosis
+					r.closeRun(ctx, "failed", codeStartRefused, r.out.Diagnosis)
+					return false
+				}
+				r.refuseStart(ctx, codeStartRefused, fmt.Sprintf("Its first step (%s: %s) was refused before it ran: %v.", step.Tool, summary, derr), true)
+				r.startRefusedMidway = true
+				return false
+			}
+			return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) was refused before it ran: %v.", idx, step.Tool, summary, derr), false)
 		}
 		obs, output = res.Observation, res.Output
-		// A SIDE EFFECT is anything the step may have touched: what its
-		// footprint says a call of its kind writes, or what the dispatcher
-		// reports reached the world. The app is told not to repeat it.
-		done.SideEffect = res.Delivered || work.ActionFootprint(step.Tool, ".", pathsInArgs(args)).IsSideEffect()
+		// A SIDE EFFECT is what the DISPATCHER says reached the world beyond
+		// the replay's own workspace -- a machine's file or command, an MCP
+		// call that wrote -- and the app is told never to repeat it. A step
+		// that only touched the workbench's workspace delivered nothing the
+		// app shares: it runs in a workspace of its own.
+		done.SideEffect = res.Delivered
 	}
 
 	match, why := r.compare(idx, step.Tool, args, obs)
@@ -1491,9 +1595,26 @@ func renderGuidance(statement string, g Guidance, started bool, stoppedAt int) s
 		b.WriteString(g.Diagnosis)
 		return b.String()
 	}
-	if len(g.Completed) > 0 {
+	var delivered, local []CompletedStep
+	for _, s := range g.Completed {
+		if s.SideEffect {
+			delivered = append(delivered, s)
+		} else {
+			local = append(local, s)
+		}
+	}
+	if len(delivered) > 0 {
 		b.WriteString("A learned procedure already ran these steps -- do not repeat them:\n")
-		for _, s := range g.Completed {
+		for _, s := range delivered {
+			fmt.Fprintf(&b, "- step %d (%s): %s [idempotency key %s]\n", s.Index, s.Tool, s.Summary, s.IdempotencyKey)
+		}
+	}
+	if len(local) > 0 {
+		// THESE ARE NOT THE APP'S TO SKIP. They ran in the replay's own
+		// workspace, which the app does not share, so nothing they did
+		// reached it; the app redoes whatever of them the goal still needs.
+		b.WriteString("It also ran these steps in its own workspace, which you do not share, so their effects did not reach you:\n")
+		for _, s := range local {
 			fmt.Fprintf(&b, "- step %d (%s): %s [idempotency key %s]\n", s.Index, s.Tool, s.Summary, s.IdempotencyKey)
 		}
 	}

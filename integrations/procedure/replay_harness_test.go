@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	proc "github.com/znasllc-io/memql/component/procedure"
 	"github.com/znasllc-io/memql/component/work"
 )
@@ -38,16 +39,30 @@ type fakeDispatcher struct {
 	// alter rewrites what a step reports, by step key: the world answering
 	// differently from every recording.
 	alter map[string]func(*DispatchResult)
+	// delivers reports every write and command as reaching the world -- what
+	// a MACHINE dispatcher says, where the workbench's never does.
+	delivers bool
+	// authorities are the forwarded authority each dispatch saw, and
+	// whether there was one.
+	authorities []forwardedSeen
+}
+
+type forwardedSeen struct {
+	present         bool
+	subject         string
+	credentialClass string
 }
 
 func newFakeDispatcher() *fakeDispatcher {
 	return &fakeDispatcher{files: map[string]map[string]string{}, fail: map[string]error{}, alter: map[string]func(*DispatchResult){}}
 }
 
-func (d *fakeDispatcher) Dispatch(_ context.Context, req DispatchRequest) (DispatchResult, error) {
+func (d *fakeDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (DispatchResult, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.calls = append(d.calls, req)
+	fa, present := auth.ForwardedAuthorityFromContext(ctx)
+	d.authorities = append(d.authorities, forwardedSeen{present: present, subject: fa.Subject, credentialClass: fa.CredentialClass})
 	if err := d.fail[req.StepKey]; err != nil {
 		return DispatchResult{}, err
 	}
@@ -64,12 +79,14 @@ func (d *fakeDispatcher) Dispatch(_ context.Context, req DispatchRequest) (Dispa
 		res.Observation.ExitCode = &zero
 		res.Observation.ResultType = work.InferTextType("")
 		res.Output = map[string]any{"stdout": "", "exitCode": 0}
+		res.Delivered = d.delivers
 	case "fs_write":
 		p := path.Clean(str(req.Args, "file_path"))
 		content := str(req.Args, "content")
 		ws[p] = content
 		res.Observation.Contents = []work.ContentDigest{{Op: "write", Path: p, Digest: proc.Digest([]byte(content))}}
 		res.Output = map[string]any{"written": p}
+		res.Delivered = d.delivers
 	case "fs_read":
 		p := path.Clean(str(req.Args, "file_path"))
 		res.Observation.Contents = []work.ContentDigest{{Op: "read", Path: p, Digest: proc.Digest([]byte(ws[p]))}}
@@ -87,19 +104,31 @@ func (d *fakeDispatcher) recorded() []DispatchRequest {
 	return append([]DispatchRequest(nil), d.calls...)
 }
 
-// fakeProber reports a fixed environment, and counts the probes.
+// fakeProber reports a fixed environment, and counts the probes and the
+// forwarded authority each one saw.
 type fakeProber struct {
-	mu       sync.Mutex
-	observed proc.Preconditions
-	err      error
-	calls    int
+	mu          sync.Mutex
+	observed    proc.Preconditions
+	err         error
+	calls       int
+	authorities []forwardedSeen
 }
 
-func (p *fakeProber) Probe(context.Context, work.ReplayTarget, string, string, proc.Preconditions) (proc.Preconditions, error) {
+func (p *fakeProber) Probe(ctx context.Context, _ work.ReplayTarget, _, _ string, _ proc.Preconditions) (proc.Preconditions, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.calls++
+	fa, present := auth.ForwardedAuthorityFromContext(ctx)
+	p.authorities = append(p.authorities, forwardedSeen{present: present, subject: fa.Subject, credentialClass: fa.CredentialClass})
 	return p.observed, p.err
+}
+
+// machineProber is matchingProber on the recording machine: the platform is
+// compared there, so it is reported too.
+func machineProber() *fakeProber {
+	p := matchingProber()
+	p.observed.Platform = map[string]string{"os": "darwin", "arch": "arm64"}
+	return p
 }
 
 // matchingProber reports exactly what the fixture corpus learned: the two
