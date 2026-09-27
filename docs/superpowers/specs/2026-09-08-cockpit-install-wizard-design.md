@@ -210,6 +210,19 @@ in three places: the machine page's **Remove this machine** (revoke, then the li
 wizard's revoke question (a person who already ran the install has a worker retrying with
 a dead token), and the runbook. Paste-safe curl one-liners live in the workers runbook Uninstall section.
 
+**Amended 2026-09-27.** The line carries `--cluster=<url>` (the install line's own
+`https://api.<domain>`) on both platforms. The uninstallers became multi-home aware after D12 was
+written -- one enrollment per cluster in `workers.yaml`, removed with `memql worker unpair` -- and
+`uninstall-mac.sh` refused a line that named no enrollment ("choose --cluster=URL or --all-homes",
+exit 2). That refusal was copied verbatim from the machine page, which is the failure D12 exists
+to prevent, so the OS states the cluster it knows. The machine page also stops asking where
+Cockpit was installed: the registration does not report it and the person removing a machine
+cannot be expected to know it, so the uninstallers detect the installed shape (account-only,
+system-wide, or both) and remove what is there; the wizard's cancel path still passes
+`--user-local` because it printed that install line moments before. Given no flags at all the
+uninstallers act on a single enrollment, remove the runtime when there is none, and list several
+rather than guess.
+
 ### D13 -- Local models from the OS: the second command, then the pull
 
 `worker setup --inference` cannot install a runtime unattended (it needs a person for the
