@@ -12,8 +12,11 @@
 // reachable by any authenticated caller, on a publicly-readable concept, whose
 // `messageCredits` field is the allowance that same caller would then be
 // serving under. Seeding makes a price change a reviewed, deployed, revertible
-// change instead. Materialized by the SeedMaterializer at engine startup;
-// idempotent.
+// change instead. Materialized by the SeedMaterializer at engine startup,
+// through createTierSpec -- @serverOnly, so the seed path is its only writer;
+// idempotent. Until createTierSpec existed none of these rows materialized: a
+// seed is written through create<Concept> and nothing else (memql#5437 review;
+// deploy/fleet/pricelist_db_test.go).
 //
 // WHERE THE NUMBERS COME FROM (the 2026-08-14 pricing analysis, epic memql#3852):
 // market-anchored against the per-seat AI-agent products (Chatbase, CustomGPT,

@@ -42,7 +42,7 @@
 // (resuming something that was torn down) a mutation that does not exist rather
 // than an argument nobody validated.
 
-use fleet.concepts.{ instance, subscriber, subscription, usageMeter }
+use fleet.concepts.{ instance, subscriber, subscription, tierSpec, usageMeter }
 
 // =============================================================================
 //   subscriber -- the account
@@ -555,10 +555,11 @@ mutation usageMeter markUsageMeterReported {
 }
 
 // =============================================================================
-//   tierSpec -- the price list has NO mutation, deliberately
+//   tierSpec -- the price list has NO CLIENT-REACHABLE mutation, deliberately
 // =============================================================================
 //
-// There is no `publishTierSpec` here, and the omission is the design.
+// There is no `publishTierSpec` a caller can reach, and the omission is the
+// design.
 //
 // The obvious shape -- an owner/admin-gated mutation that writes a tier row --
 // cannot actually BE owner/admin-gated in this domain. A mutation carries no
@@ -587,6 +588,46 @@ mutation usageMeter markUsageMeterReported {
 // rather than editing the row in place: existing subscriptions name a tier by
 // value, so editing the row they name re-prices them retroactively and
 // silently.
+//
+// THE ONE MUTATION, createTierSpec, IS @serverOnly -- the gate the paragraphs
+// above say a bundle has no Go for. A seed is materialized by the
+// SeedMaterializer through `create<Concept>` and nothing else
+// (component/memql/seed_materializer.go), so with no create there was no
+// price list at all: every `seed tierSpec` failed at boot with the mutation
+// missing, and the pricing page, Orbit and the allowance read an empty catalog.
+// The materializer calls it at internal origin, which @serverOnly admits; a
+// client-originated call is refused before it runs, so the catalog is written
+// by the seed path and by nothing a caller can reach.
+
+/// Materialize one row of the price list from a `seed tierSpec` declaration (seeds.memql). SERVER
+/// ONLY: the SeedMaterializer names a seed's write `create<Concept>`, passes the seed body field for
+/// field with the seed's name as `tierSpecId`, and runs at internal origin; a client-originated call
+/// is refused, because a caller who could write a tier row could mint themselves an allowance (see
+/// the section above). Re-running it with the same seed rewrites the same row, which is what makes
+/// the seed idempotent.
+@serverOnly
+mutation tierSpec createTierSpec {
+  args {
+    tierSpecId               string!
+    tier                     string!  @enum("trial", "node", "graph", "mesh", "enterprise")
+    displayName              string!
+    monthlyPriceUsd          float!
+    messageCredits           float!
+    overageMessagesUsdPer1k  float!
+    overagePolicy            string!  @enum("meter", "throttle")
+    instanceProfile          string!  @enum("solo", "standard", "dedicated")
+    dbPreset                 string!  @enum("entry", "mid", "top")
+    haIncluded               bool
+    haAvailable              bool
+    status                   string!  @enum("available", "grandfathered", "hidden")
+  }
+  insert {
+    accept { tier, displayName, monthlyPriceUsd, messageCredits, overageMessagesUsdPer1k, overagePolicy, instanceProfile, dbPreset, haIncluded, haAvailable, status }
+    stamp {
+      id: args.tierSpecId
+    }
+  }
+}
 
 // =============================================================================
 //   Lifecycle COMMANDS -- the writes that make the controller act
