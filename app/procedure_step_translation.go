@@ -341,6 +341,18 @@ func procedureWorkspaceRelative(p string) (string, error) {
 	return clean, nil
 }
 
+// procedurePathClimbs reports whether a path has a `..` segment -- for an
+// absolute path, the one spelling that names somewhere other than the
+// directory it is written under.
+func procedurePathClimbs(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
 // procedureFileEdit is one exact-string replacement, in Claude Code's terms.
 type procedureFileEdit struct {
 	Old        string

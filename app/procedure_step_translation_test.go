@@ -148,6 +148,22 @@ func TestAWorkspacePathIsReportedRelativeAndMayNotLeave(t *testing.T) {
 	}
 }
 
+func TestAPathClimbsOnlyThroughADotDotSegment(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/Users/x/notes/../../.ssh/authorized_keys": true,
+		"/Users/x/..":                  true,
+		"../x":                         true,
+		"/Users/x/notes/today.md":      false,
+		"/Users/x/./notes/today.md":    false,
+		"/Users/x/notes/..hidden/a.md": false,
+		"/Users/x/notes/a..b.md":       false,
+	} {
+		if got := procedurePathClimbs(p); got != want {
+			t.Errorf("%q climbs = %v, want %v", p, got, want)
+		}
+	}
+}
+
 func TestTheWriteShapeDecidesWriteEditOrMultiEdit(t *testing.T) {
 	write, err := procedureWritePlanOf(map[string]any{"file_path": "a", "content": "hi\n"})
 	if err != nil || write.Kind != "write" || write.Content != "hi\n" {

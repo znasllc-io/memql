@@ -238,6 +238,67 @@ func TestAMachineGateDenialIsAnError(t *testing.T) {
 	}
 }
 
+// A GOAL SUPPLIES A PARAMETER, AND A PARAMETER CAN SIT IN A PATH. Whatever the
+// value, a relative path that climbs out of the replay's workspace is refused
+// before anything is sent -- the one directory a replay owns on the person's
+// machine -- and one that stays inside lands there.
+func TestAMachinePathThatLeavesTheReplaysWorkspaceIsRefused(t *testing.T) {
+	for _, p := range []string{"../.ssh/authorized_keys", "a/../../x", "./out/../../x"} {
+		for tool, args := range map[string]map[string]any{
+			"fs_write": {"file_path": p, "content": "ssh-ed25519 AAAA planted\n"},
+			"fs_read":  {"file_path": p},
+		} {
+			m := newFakeMachine()
+			_, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(), machineStep(tool, args))
+			if err == nil || !strings.Contains(err.Error(), "leaves the replay's workspace") {
+				t.Errorf("%s %q -> %v, want a refusal that it leaves the workspace", tool, p, err)
+			}
+			if len(m.calls) != 0 {
+				t.Errorf("%s %q reached the machine: %v", tool, p, m.actions())
+			}
+		}
+	}
+
+	m := newFakeMachine()
+	res, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(),
+		machineStep("fs_write", map[string]any{"file_path": "./out/a.txt", "content": "a\n"}))
+	if err != nil {
+		t.Fatalf("a path inside the workspace = %v", err)
+	}
+	if args := m.lastArgs(); args["path"] != testMachineRoot+"/replay1/out/a.txt" {
+		t.Fatalf("fs_write args = %+v, want the file in the replay's workspace", args)
+	}
+	if o := res.Observation; len(o.Contents) != 1 || o.Contents[0].Path != "out/a.txt" {
+		t.Fatalf("observation = %+v", o)
+	}
+}
+
+// AN ABSOLUTE PATH IS USED AS THE RECORDING WROTE IT -- it is what makes the
+// procedure machine-local -- and the one way a goal-supplied value could move
+// it is a `..` segment climbing out of the directory it names. That is
+// refused; the path as written is not.
+func TestAnAbsoluteMachinePathIsLiteralAndMayNotClimb(t *testing.T) {
+	for _, p := range []string{"/Users/someone/notes/../../.ssh/authorized_keys", "/Users/someone/notes/.."} {
+		m := newFakeMachine()
+		_, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(),
+			machineStep("fs_write", map[string]any{"file_path": p, "content": "x"}))
+		if err == nil || !strings.Contains(err.Error(), "..") {
+			t.Errorf("%q -> %v, want it refused for climbing", p, err)
+		}
+		if len(m.calls) != 0 {
+			t.Errorf("%q reached the machine: %v", p, m.actions())
+		}
+	}
+	m := newFakeMachine()
+	if _, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(),
+		machineStep("fs_write", map[string]any{"file_path": "/Users/someone/notes/./today.md", "content": "x"})); err != nil {
+		t.Fatalf("an absolute path that climbs nowhere = %v", err)
+	}
+	if args := m.lastArgs(); args["path"] != "/Users/someone/notes/today.md" {
+		t.Fatalf("fs_write args = %+v", args)
+	}
+}
+
 func TestAHomePathOnTheMachineIsRefused(t *testing.T) {
 	m := newFakeMachine()
 	if _, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(),

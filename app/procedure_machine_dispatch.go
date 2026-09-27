@@ -167,6 +167,14 @@ func (h *machineProcedureHost) workspace(ctx context.Context) (string, error) {
 
 // resolvePath uses an absolute path as recorded and puts a relative one in
 // the replay's workspace.
+//
+// A GOAL SUPPLIES PARAMETERS, AND A PARAMETER CAN SIT IN A PATH. The values are
+// checked where they are bound; this is the second lock, on the path the
+// machine is actually asked for. A relative path must stay inside the replay's
+// workspace (procedureWorkspaceRelative), and an absolute one -- literal as the
+// recording wrote it -- may not climb out of the directory it names: a `..`
+// segment is the one way a bound value could move it somewhere else, and it is
+// refused rather than cleaned away.
 func (h *machineProcedureHost) resolvePath(ctx context.Context, p string) (string, string, error) {
 	p = strings.TrimSpace(p)
 	switch {
@@ -175,6 +183,9 @@ func (h *machineProcedureHost) resolvePath(ctx context.Context, p string) (strin
 	case strings.HasPrefix(p, "~"):
 		return "", "", fmt.Errorf("%q names a home directory, which a replay cannot resolve for the machine", p)
 	case path.IsAbs(p):
+		if procedurePathClimbs(p) {
+			return "", "", fmt.Errorf("%q climbs out of the directory it names with `..`; an absolute path is run as the recording wrote it, never resolved somewhere else", p)
+		}
 		clean := path.Clean(p)
 		return clean, clean, nil
 	}
