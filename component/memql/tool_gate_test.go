@@ -169,6 +169,11 @@ func TestAToolIsListedExactlyWhenItIsCallable(t *testing.T) {
 		"writer over MCP":       personOverMCP("writer"),
 		"reader over MCP":       personOverMCP("reader"),
 		"assistant over MCP (a person whose role string is an agent kind)": personOverMCP("assistant"),
+		// A person over MCP with NO identity is refused every call, so they
+		// are offered no tool either -- the ungated one included (memql#5438).
+		"a person over MCP with no identity":  WithMCPHumanCaller(context.Background(), "owner"),
+		"an anonymous person over MCP":        WithMCPHumanCaller(auth.ContextWithAccess(context.Background(), auth.AnonymousActor()), "reader"),
+		"a person over MCP with a blank user": WithMCPHumanCaller(auth.ContextWithAccess(context.Background(), &auth.AccessContext{Role: auth.RoleOwner}), "owner"),
 	}
 	for name, ctx := range callers {
 		for _, tool := range tools {

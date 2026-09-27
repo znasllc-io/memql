@@ -70,3 +70,17 @@ func TestAnMCPSessionWithNoIdentityRunsNoTool(t *testing.T) {
 		t.Fatalf("a session with no identity ran a tool: %v", res)
 	}
 }
+
+// ...and, listing and calling being one decision, is OFFERED none: tools/list
+// used to reflect every ungated tool to a session whose every tools/call was
+// refused. The same role with an identity is offered the ungated tool, so an
+// empty listing here is the identity rule and not an empty registry.
+func TestAnMCPSessionWithNoIdentityIsOfferedNoTool(t *testing.T) {
+	eng := &fakeEngine{reg: agentKindFixtures()}
+	if names := toolNames(listMCPTools(context.Background(), eng, "owner", TierSealed, "")); names["openTicket"] {
+		t.Fatalf("a session with no identity was offered a tool it cannot call: %v", names)
+	}
+	if names := toolNames(listMCPTools(asPerson("owner"), eng, "owner", TierSealed, "")); !names["openTicket"] {
+		t.Fatalf("an authenticated owner was not offered the ungated tool: %v", names)
+	}
+}

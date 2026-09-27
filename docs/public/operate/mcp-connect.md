@@ -94,6 +94,19 @@ No bearer auth on stdio: the protocol owns stdout (the binary redirects its own
 logs to stderr so the JSON-RPC wire stays clean), and the trust boundary is the
 local process.
 
+**Name the person the session acts as, or it runs no reflected tool.** With no
+bearer there is no token to take an identity from, so a stdio session is a
+person only when `MEMQL_MCP_USER` names one (and holds a role only when
+`MEMQL_MCP_ROLE` names one). A tool is called by an agent or by an
+authenticated person (memql#5438), so a session with no identity is offered no
+reflected DSL tool by `tools/list` and refused every one by `tools/call`:
+
+```bash
+claude mcp add memql-local \
+  -e MEMQL_MCP_USER=<your user id> -e MEMQL_MCP_ROLE=developer \
+  -- /absolute/path/to/bin/memql-mcp
+```
+
 ### HTTP locally (exercise the remote path)
 
 To test the network transport locally you also need a reachable identity
@@ -140,8 +153,8 @@ than a longer-lived bearer up front. See
 | `MEMQL_MCP_TRANSPORT` | `stdio` | `stdio` (local subprocess) or `http` (network listener). |
 | `MEMQL_MCP_HTTP_ADDR` | `:8090` | Bind address for the HTTP transport. |
 | `MEMQL_MCP_MODE` | `authoring` | Capability tier (Gate A): `sealed` / `authoring` / `inline`. See [build-tags.md](../build/build-tags.md#mcp-node-configuration-epic-memql1529). |
-| `MEMQL_MCP_ROLE` | (token claim) | Acting role (Gate B). On HTTP, **empty = taken from the caller's verified token**; a non-empty value pins a conservative deployment role. |
-| `MEMQL_MCP_USER` | (token claim) | Acting user that session-authored constructs are owner-scoped to. On HTTP, empty = taken from the caller's token. |
+| `MEMQL_MCP_ROLE` | (token claim) | The cluster role of the person the session acts as (Gate B) -- what a reflected tool's `@requiresRank` floor judges. On HTTP, **empty = taken from the caller's verified token**; a non-empty value pins a conservative deployment role. On stdio, empty = no role, which clears no rank floor. |
+| `MEMQL_MCP_USER` | (token claim) | The person the session acts as: the identity a reflected tool call runs under, and the owner session-authored constructs are scoped to. On HTTP, empty = taken from the caller's token. **On stdio it is required to run a reflected DSL tool**: a session with no identity is offered none and refused every `tools/call` (memql#5438). |
 
 ## Auth + capability posture
 

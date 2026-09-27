@@ -35,11 +35,11 @@ package memql
 // # Listed and callable are one decision, asked twice
 //
 // ToolListed and ToolCallRefusal share every gate, so a caller is never shown
-// a tool it cannot call nor refused one it was shown. The one difference is
-// the caller-kind rule: only a CALL must come from an agent or an
-// authenticated person over MCP -- a listing is a description, and the gRPC
-// ListTools surface has always described the tool set to callers that stamp
-// neither.
+// a tool it cannot call nor refused one it was shown -- a person over MCP with
+// no authenticated identity included, who is offered no tool because they may
+// call none. The one difference is a caller that is NEITHER kind: a call from
+// one is refused, while a listing is a description, and the gRPC ListTools
+// surface has always described the tool set to callers that stamp neither.
 //
 // # Enforced on every path
 //
@@ -103,18 +103,34 @@ func notAnAgentPhrase(c ToolCaller) string {
 	return "this call carries no acting agent"
 }
 
-// ToolListed reports whether the caller on ctx may be offered t: its
-// agent-kind gate, the deprecated @allowedRoles, and its rank floor against
-// the person the call would be for. It is ToolCallRefusal without the
-// caller-kind rule (see the file comment).
+// ToolListed reports whether the caller on ctx may be offered t: a person
+// over MCP must be authenticated, then its agent-kind gate, the deprecated
+// @allowedRoles, and its rank floor against the person the call would be for.
+// It is ToolCallRefusal less one rule: a caller that is neither an agent nor a
+// person over MCP is described the tool set (see the file comment).
 func (e *MemQLEngine) ToolListed(ctx context.Context, t *Tool) bool {
 	if t == nil {
 		return false
 	}
-	if t.callerRefusal(ToolCallerFromContext(ctx)) != nil {
+	caller := ToolCallerFromContext(ctx)
+	if caller.Kind == ToolCallerMCPHuman && mcpCallerUnidentified(ctx) {
+		return false
+	}
+	if t.callerRefusal(caller) != nil {
 		return false
 	}
 	return e.toolRankRefusal(ctx, t) == nil
+}
+
+// mcpCallerUnidentified reports whether a person over MCP has no authenticated
+// identity on ctx. The HTTP head verifies a bearer before a session exists; a
+// stdio session is a person only once MEMQL_MCP_USER names one. A session with
+// no identity has nobody for @requiresRank to judge and nobody for the
+// handler's writes to belong to, so it may call no tool -- and, listing and
+// calling being one decision, is offered none.
+func mcpCallerUnidentified(ctx context.Context) bool {
+	ac, ok := auth.AccessFromContext(ctx)
+	return !ok || ac == nil || strings.TrimSpace(ac.UserId) == "" || ac.IsAnonymousActor()
 }
 
 // ToolCallRefusal is the whole call-time decision for t, or nil when the
@@ -128,12 +144,8 @@ func (e *MemQLEngine) ToolCallRefusal(ctx context.Context, t *Tool) error {
 	switch caller.Kind {
 	case ToolCallerAgent:
 	case ToolCallerMCPHuman:
-		// "An AUTHENTICATED person over MCP": the HTTP head verifies a bearer
-		// before a session exists, and a stdio session is a person only once
-		// MEMQL_MCP_USER names one. A session with no identity has nobody for
-		// @requiresRank to judge and nobody for the handler's writes to
-		// belong to.
-		if ac, ok := auth.AccessFromContext(ctx); !ok || ac == nil || strings.TrimSpace(ac.UserId) == "" || ac.IsAnonymousActor() {
+		// "An AUTHENTICATED person over MCP" (mcpCallerUnidentified).
+		if mcpCallerUnidentified(ctx) {
 			return fmt.Errorf("tool %q: tools are agent-only outside an authenticated MCP session, and this MCP session has no authenticated identity (a stdio session names one with MEMQL_MCP_USER)", t.Name)
 		}
 	default:
