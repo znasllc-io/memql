@@ -263,8 +263,8 @@ func TestCanDispatchStoredRunRecovery(t *testing.T) {
 // within the lease of the dispatch before it -- a person reads the answer and
 // asks for another. Claimed on the run id alone it would lose to that lease on
 // every replica, and the sweep would then close the silent run as abandoned. So
-// each request claims for itself, and a run that carries no request -- or a
-// cleared one -- claims on its id exactly as before.
+// each request claims for itself, once, and a run that carries no request -- or
+// a cleared one -- claims on its id exactly as before.
 func TestARerunIsClaimedUnderItsOwnRequest(t *testing.T) {
 	i, d, c := newDispatchProbe(t, true)
 
@@ -283,6 +283,12 @@ func TestARerunIsClaimedUnderItsOwnRequest(t *testing.T) {
 
 	if want := []string{"run-7#rerun:req-3", "run-8"}; len(c.keys) != 2 || c.keys[0] != want[0] || c.keys[1] != want[1] {
 		t.Fatalf("claim keys = %v, want %v", c.keys, want)
+	}
+	// The request's claim is once: a leased one would let the re-run's own
+	// receipt events hand it to a second replica once it outlived the lease.
+	// The run's claim keeps its lease.
+	if c.ttls[0] != 0 || c.ttls[1] != runClaimTTL {
+		t.Fatalf("claim leases = %v, want [0 %v]", c.ttls, runClaimTTL)
 	}
 	if seen := d.seen(); len(seen) != 2 || seen[0].RerunRequestId != "req-3" || seen[1].RerunRequestId != "" {
 		t.Fatalf("dispatched %+v -- the seam must be told which request it was claimed for", seen)
