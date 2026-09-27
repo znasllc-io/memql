@@ -661,7 +661,14 @@ expr/rowAuthzArgument/owner-names-no-field.memql
 expr/rowAuthzArgument/owner-or-cluster-owner.memql
 expr/rowAuthzArgument/owner-the-concept-does-not-declare.memql
 expr/sort/bare-intrinsic.memql
+expr/sort/direction-in-capitals.memql
+expr/sort/into-an-open-object.memql
+expr/sort/nested-declared-field.memql
+expr/sort/path-through-a-string.memql
+expr/sort/payload-field-under-row.memql
 expr/sort/payload-field.memql
+expr/sort/provenance-under-row.memql
+expr/sort/reserved-name.memql
 expr/sort/row-namespace.memql
 expr/sort/sort-by-a-call.memql
 expr/sort/sort-by-a-construct-call.memql
@@ -678,6 +685,10 @@ expr/sort/sort-by-optional-member.memql
 expr/sort/sort-by-parenthesised-key.memql
 expr/sort/sort-by-two-keys.memql
 expr/sort/sort-by-unary-minus.memql
+expr/sort/undeclared-field.memql
+expr/sort/undeclared-nested-field.memql
+expr/sort/unknown-direction.memql
+expr/sort/unknown-row-intrinsic.memql
 expr/specBody/actor-spec.memql
 expr/specBody/args-in-a-spec.memql
 expr/specBody/closed-before-tomorrow.memql
