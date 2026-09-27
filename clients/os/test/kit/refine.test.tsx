@@ -64,6 +64,37 @@ describe("Refine (rule 2: filters are questions, not furniture)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove Documents" }));
     expect(onRemove).toHaveBeenCalledOnce();
   });
+
+  it("a facet's portalled listbox is inside the panel: the mouse can choose an option (SVC: mouse and keyboard reach every action)", () => {
+    // The kit's Select draws its list through a portal on <body> (the
+    // containing-block trap select.test.tsx pins), so its options are OUTSIDE
+    // this Refine's DOM subtree even though they are inside its React
+    // subtree. A pointerdown on one used to read as "clicked elsewhere",
+    // collapse the panel, and unmount the list before the click that would
+    // have committed the choice -- nine sections' facets were keyboard-only.
+    function Facets() {
+      const [search, setSearch] = useState("");
+      const [category, setCategory] = useState("all");
+      return (
+        <Refine search={search} onSearch={setSearch} label="Refine events">
+          <Select id="facet-category" label="Category" value={category} onChange={setCategory}>
+            <option value="all">Every category</option>
+            <option value="configuration">configuration</option>
+          </Select>
+        </Refine>
+      );
+    }
+    render(<Facets />);
+    fireEvent.click(screen.getByRole("button", { name: "Refine events" }));
+    fireEvent.click(screen.getByRole("combobox", { name: "Category" }));
+    const option = screen.getByRole("option", { name: "configuration" });
+    expect(option.closest(".os-refine")).toBeNull(); // the trap: portalled out of the panel's subtree
+    fireEvent.pointerDown(option);
+    fireEvent.mouseDown(option);
+    fireEvent.click(option);
+    expect(screen.getByRole("combobox", { name: "Category" }).textContent).toContain("configuration");
+    expect(screen.getByPlaceholderText("Search")).toBeTruthy(); // the panel stayed open
+  });
 });
 
 describe("SortControl (rule 3: sort is not a button)", () => {
