@@ -130,6 +130,45 @@ func TestAnExpectationKeepsAbsentAndZeroApartThroughItsStoredForm(t *testing.T) 
 	}
 }
 
+// The stored keys are a contract: a replay, the OS and the proving driver read
+// them, and construct.procedureHash is computed over them. Every key a later
+// change added is omitempty, so an expectation that does not use it is stored
+// -- and hashed -- exactly as before, and a row written before the key existed
+// reads back as it did.
+func TestTheStoredExpectationKeysArePinned(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		exp  StepExpectation
+		want string
+	}{
+		{
+			"the original keys, unchanged by every later one",
+			StepExpectation{NoError: true, ExitCode: intp(0), ResultType: "string", Contents: []ContentDigest{wrote("a.txt", contentA)}, Exact: true},
+			`{"noError":true,"exitCode":0,"resultType":"string","contents":[{"op":"write","path":"a.txt","digest":"` + contentA + `"}],"exact":true}`,
+		},
+		{
+			"a failure every recording agreed on",
+			StepExpectation{Error: true, ResultType: "string", Exact: true},
+			`{"error":true,"resultType":"string","exact":true}`,
+		},
+	} {
+		raw, err := json.Marshal(tc.exp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(raw) != tc.want {
+			t.Errorf("%s:\n got %s\nwant %s", tc.name, raw, tc.want)
+		}
+		var back StepExpectation
+		if err := json.Unmarshal([]byte(tc.want), &back); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(back, tc.exp) {
+			t.Errorf("%s: %s read back as %+v, want %+v", tc.name, tc.want, back, tc.exp)
+		}
+	}
+}
+
 // A replay whose command exited differently from every recording did not do
 // what the recordings did, whatever its output looked like.
 func TestCompareRefusesADifferentExitCode(t *testing.T) {
@@ -151,6 +190,81 @@ func TestCompareRefusesAnErrorWhereTheRecordingsHadNone(t *testing.T) {
 	got.IsError = boolp(true)
 	if ok, why := Compare(exp, got); ok || len(why) == 0 {
 		t.Fatalf("an error where every recording had none matched (why=%v)", why)
+	}
+}
+
+// notFound is a lookup that failed in the recording -- the "not found" a
+// procedure goes on to act on by creating the thing.
+func notFound() StepObservation { return StepObservation{IsError: boolp(true), ResultType: "string"} }
+
+// The other direction. A step every recording saw FAIL is a step whose failure
+// is part of the procedure, and for an mcp or fetch step the error flag and
+// the result type are all a replay can report. A replay in which the lookup
+// SUCCEEDED has not done what the recordings did: the steps after it would
+// run on a state no recording saw.
+func TestCompareRefusesACleanReplayOfAStepEveryRecordingSawFail(t *testing.T) {
+	exp := ExpectationFrom([]StepObservation{notFound(), notFound()})
+	ok, why := Compare(exp, StepObservation{IsError: boolp(false), ResultType: "string"})
+	if ok {
+		t.Fatal("a clean replay matched a step every recording saw fail")
+	}
+	if !strings.Contains(strings.Join(why, "; "), "no error where every recording had one") {
+		t.Fatalf("the reason must say the replay did not fail where every recording did; got %v", why)
+	}
+	if ok, why := Compare(exp, notFound()); !ok {
+		t.Fatalf("a replay that failed where every recording failed was refused: %v", why)
+	}
+	if ok, _ := Compare(exp, StepObservation{ResultType: "string"}); ok {
+		t.Fatal("a replay that never reported its error flag matched a step every recording saw fail")
+	}
+}
+
+// The flag is held only where every recording reported it, one way. A flag the
+// recordings split on, or one a recording never reported, is held in neither
+// direction -- and is not a sign of determinism either.
+func TestAnExpectationHoldsTheErrorFlagOnlyWhereEveryRecordingAgreed(t *testing.T) {
+	clean := StepObservation{IsError: boolp(false), ResultType: "string"}
+	silent := StepObservation{ResultType: "string"}
+	for _, tc := range []struct {
+		name                   string
+		recordings             []StepObservation
+		noError, failed, exact bool
+	}{
+		{"every recording failed", []StepObservation{notFound(), notFound()}, false, true, true},
+		{"every recording was clean", []StepObservation{clean, clean}, true, false, true},
+		{"the recordings split", []StepObservation{notFound(), clean}, false, false, false},
+		{"one recording never said", []StepObservation{notFound(), silent}, false, false, false},
+	} {
+		exp := ExpectationFrom(tc.recordings)
+		if exp.NoError != tc.noError || exp.Error != tc.failed || exp.Exact != tc.exact {
+			t.Errorf("%s: NoError=%v Error=%v Exact=%v, want NoError=%v Error=%v Exact=%v",
+				tc.name, exp.NoError, exp.Error, exp.Exact, tc.noError, tc.failed, tc.exact)
+		}
+	}
+}
+
+// ExpectationFrom never writes both flags, but a stored row is a value anyone
+// could have written. One claiming both is a contradiction no replay can meet,
+// and it must refuse every replay rather than be read whichever way suits it.
+func TestAnExpectationClaimingBothFlagsRefusesEveryReplay(t *testing.T) {
+	both := StepExpectation{NoError: true, Error: true, ResultType: "string"}
+	for _, flag := range []bool{false, true} {
+		if ok, _ := Compare(both, StepObservation{IsError: boolp(flag), ResultType: "string"}); ok {
+			t.Fatalf("isError=%v met an expectation claiming both a clean and a failed step", flag)
+		}
+	}
+}
+
+// An agreed failure is something the recordings agreed on, so a step whose
+// only agreed observable is its failure is verifiable -- by that failure --
+// rather than refused as a step nobody can check.
+func TestAnAgreedFailureAloneMakesAStepVerifiable(t *testing.T) {
+	exp := ExpectationFrom([]StepObservation{{IsError: boolp(true)}, {IsError: boolp(true)}})
+	if ok, why := Compare(exp, StepObservation{IsError: boolp(true)}); !ok {
+		t.Fatalf("a failure every recording agreed on was not enough to verify the step: %v", why)
+	}
+	if ok, _ := Compare(exp, StepObservation{IsError: boolp(false)}); ok {
+		t.Fatal("a clean replay matched a step whose one agreed observable is its failure")
 	}
 }
 
@@ -330,11 +444,68 @@ func TestCompareShadowFallsBackToTheRecordingsWhereTheAppIsSilent(t *testing.T) 
 	silent := StepObservation{Contents: []ContentDigest{wrote("out/report.txt", contentA)}}
 	bad := cleanRun(contentA)
 	bad.ExitCode = intp(1)
-	if ok, _ := CompareShadow(exp, silent, bad); ok {
+	ok, why := CompareShadow(exp, silent, bad)
+	if ok {
 		t.Fatal("exit 1 matched because the app did not report an exit code, although every recording exited 0")
+	}
+	// The reason names what the replay was held to: the app reported no exit
+	// code, so "where the app exited 0" would be a claim about nothing.
+	if !reflect.DeepEqual(why, []string{"exit code 1 where every recording exited 0"}) {
+		t.Fatalf("why = %v, want the exit code held to every recording's", why)
 	}
 	if ok, why := CompareShadow(exp, silent, cleanRun(contentA)); !ok {
 		t.Fatalf("a replay agreeing with the recordings where the app was silent was refused: %v", why)
+	}
+}
+
+// Shadow holds the error flag to the APP's, exactly, in both directions and
+// whatever the recordings agreed on: the app is the reference for this goal,
+// and a replay that failed where it succeeded, or succeeded where it failed,
+// did not do what the app did.
+func TestCompareShadowHoldsTheAppsErrorFlagExactly(t *testing.T) {
+	clean := StepObservation{IsError: boolp(false), ResultType: "string"}
+	for _, tc := range []struct {
+		name string
+		exp  StepExpectation
+	}{
+		{"every recording failed", ExpectationFrom([]StepObservation{notFound(), notFound()})},
+		{"every recording was clean", ExpectationFrom([]StepObservation{clean, clean})},
+		{"the recordings split", ExpectationFrom([]StepObservation{notFound(), clean})},
+	} {
+		if ok, why := CompareShadow(tc.exp, notFound(), notFound()); !ok {
+			t.Errorf("%s: a replay that failed where the app failed was refused: %v", tc.name, why)
+		}
+		if ok, why := CompareShadow(tc.exp, clean, clean); !ok {
+			t.Errorf("%s: a clean replay beside a clean app was refused: %v", tc.name, why)
+		}
+		if ok, _ := CompareShadow(tc.exp, notFound(), clean); ok {
+			t.Errorf("%s: a clean replay matched an app that failed", tc.name)
+		}
+		if ok, _ := CompareShadow(tc.exp, clean, notFound()); ok {
+			t.Errorf("%s: a failed replay matched an app that succeeded", tc.name)
+		}
+	}
+}
+
+// Where the app did not report its flag, the recordings' agreed flag stands in
+// -- in either direction -- and the reason names the recordings, since the
+// app said nothing to differ from.
+func TestCompareShadowHoldsTheRecordingsErrorFlagWhereTheAppIsSilent(t *testing.T) {
+	clean := StepObservation{IsError: boolp(false), ResultType: "string"}
+	silent := StepObservation{ResultType: "string"}
+	failedEverywhere := ExpectationFrom([]StepObservation{notFound(), notFound()})
+	ok, why := CompareShadow(failedEverywhere, silent, clean)
+	if ok {
+		t.Fatal("a clean replay matched a step every recording saw fail, because the app did not report its flag")
+	}
+	if joined := strings.Join(why, "; "); !strings.Contains(joined, "every recording") || strings.Contains(joined, "the app") {
+		t.Fatalf("the reason must name the recordings that stood in for the silent app; got %v", why)
+	}
+	if ok, why := CompareShadow(failedEverywhere, silent, notFound()); !ok {
+		t.Fatalf("a failed replay of a step every recording saw fail was refused: %v", why)
+	}
+	if ok, _ := CompareShadow(ExpectationFrom([]StepObservation{clean, clean}), silent, notFound()); ok {
+		t.Fatal("a failed replay matched a step no recording saw fail, because the app did not report its flag")
 	}
 }
 

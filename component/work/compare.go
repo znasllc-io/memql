@@ -30,7 +30,9 @@ package work
 //
 // "By type" relaxes the BYTES, never the outcome: the error flag and the exit
 // code are held in both modes, because a failed command is never the same
-// step as a clean one however much the successful recordings varied elsewhere.
+// step as a clean one however much the successful recordings varied elsewhere
+// -- and that runs both ways: a step every recording saw fail is held to
+// failing, never waved through when a replay of it succeeds.
 
 import (
 	"encoding/json"
@@ -81,6 +83,11 @@ type StepObservation struct {
 type StepExpectation struct {
 	// NoError: every recording reported isError=false.
 	NoError bool `json:"noError,omitempty"`
+	// Error: every recording reported isError=true. A step every recording
+	// saw fail is a step whose FAILURE is the contract -- a lookup answering
+	// "not found" before the next step creates the thing -- and a replay in
+	// which it succeeded carries on into a state no recording saw.
+	Error bool `json:"error,omitempty"`
 	// ExitCode: every recording reported this same exit code.
 	ExitCode *int `json:"exitCode,omitempty"`
 	// ResultType: every recording agreed on this result type.
@@ -93,10 +100,20 @@ type StepExpectation struct {
 	Exact bool `json:"exact,omitempty"`
 }
 
-// holdsNothing reports whether the expectation demands nothing at all.
+// holdsNothing reports whether the expectation demands nothing at all. An
+// agreed failure is a demand like any other: a step whose one agreed
+// observable is that it failed is verified by failing.
 func (e StepExpectation) holdsNothing() bool {
-	return !e.NoError && e.ExitCode == nil && e.ResultType == "" && len(e.Contents) == 0
+	return !e.NoError && !e.Error && e.ExitCode == nil && e.ResultType == "" && len(e.Contents) == 0
 }
+
+// The two references a reason names. Each observable names the one it was
+// actually held to: where the app said nothing and the recordings stood in,
+// "the app" would be a claim about something the app never reported.
+const (
+	everyRecording = "every recording"
+	theApp         = "the app"
+)
 
 // unverifiableStep is the refusal for a step the recordings agreed on nothing
 // about.
@@ -124,7 +141,10 @@ func ExpectationFrom(recordings []StepObservation) StepExpectation {
 			}
 		}
 	}
+	// Agreed one way or the other: clean everywhere is NoError, failed
+	// everywhere is Error, and a split or a silence is neither.
 	exp.NoError = carried == n && errored == 0
+	exp.Error = carried == n && errored == n
 	if carried != 0 && (carried != n || (errored != 0 && errored != n)) {
 		exact = false
 	}
@@ -218,16 +238,12 @@ func Compare(exp StepExpectation, got StepObservation) (bool, []string) {
 	if exp.holdsNothing() {
 		return false, []string{unverifiableStep}
 	}
-	const who = "every recording"
 	var why []string
-	if exp.NoError {
-		f := false
-		why = append(why, compareErrorFlag(&f, got.IsError, who)...)
-	}
-	why = append(why, compareExitCode(exp.ExitCode, got.ExitCode, who)...)
-	why = append(why, compareResultType(exp.ResultType, got.ResultType, who)...)
+	why = append(why, compareAgreedErrorFlag(exp, got.IsError)...)
+	why = append(why, compareExitCode(exp.ExitCode, got.ExitCode, everyRecording)...)
+	why = append(why, compareResultType(exp.ResultType, got.ResultType, everyRecording)...)
 	why = append(why, compareContents(exp.Contents, got.Contents,
-		func(_ contentKey, recorded string) string { return recorded }, exp.Exact, who)...)
+		func(_ contentKey, recorded string) string { return recorded }, exp.Exact, everyRecording)...)
 	return len(why) == 0, why
 }
 
@@ -237,8 +253,9 @@ func Compare(exp StepExpectation, got StepObservation) (bool, []string) {
 //
 //   - the error flag, the exit code and the result type are held exactly in
 //     both modes. Where the app's observation did not report one, the
-//     recordings' agreed value stands in, so the app's silence never excuses
-//     the replay.
+//     recordings' agreed value stands in -- a failure every recording saw
+//     included -- so the app's silence never excuses the replay, and the
+//     reason names the recordings, since the app said nothing to differ from.
 //   - every file the app read or wrote must be read or written by the replay.
 //     Its bytes are held exactly on a deterministic step, and on any step
 //     where the recordings agreed on that file's bytes; by presence where they
@@ -249,27 +266,25 @@ func CompareShadow(exp StepExpectation, app, replay StepObservation) (bool, []st
 	if exp.holdsNothing() {
 		return false, []string{unverifiableStep}
 	}
-	const who = "the app"
 	var why []string
 
-	refErr := app.IsError
-	if refErr == nil && exp.NoError {
-		f := false
-		refErr = &f
+	if app.IsError != nil {
+		why = append(why, compareErrorFlag(app.IsError, replay.IsError, theApp)...)
+	} else {
+		why = append(why, compareAgreedErrorFlag(exp, replay.IsError)...)
 	}
-	why = append(why, compareErrorFlag(refErr, replay.IsError, who)...)
 
-	refCode := app.ExitCode
-	if refCode == nil {
-		refCode = exp.ExitCode
+	if app.ExitCode != nil {
+		why = append(why, compareExitCode(app.ExitCode, replay.ExitCode, theApp)...)
+	} else {
+		why = append(why, compareExitCode(exp.ExitCode, replay.ExitCode, everyRecording)...)
 	}
-	why = append(why, compareExitCode(refCode, replay.ExitCode, who)...)
 
-	refType := app.ResultType
-	if refType == "" {
-		refType = exp.ResultType
+	if app.ResultType != "" {
+		why = append(why, compareResultType(app.ResultType, replay.ResultType, theApp)...)
+	} else {
+		why = append(why, compareResultType(exp.ResultType, replay.ResultType, everyRecording)...)
 	}
-	why = append(why, compareResultType(refType, replay.ResultType, who)...)
 
 	recorded := contentIndex(exp.Contents)
 	why = append(why, compareContents(app.Contents, replay.Contents, func(k contentKey, appDigest string) string {
@@ -281,8 +296,25 @@ func CompareShadow(exp StepExpectation, app, replay StepObservation) (bool, []st
 			return appDigest
 		}
 		return agreedDigest
-	}, exp.Exact, who)...)
+	}, exp.Exact, theApp)...)
 	return len(why) == 0, why
+}
+
+// compareAgreedErrorFlag holds got to the error flag every recording agreed
+// on, in whichever direction they agreed. The two checks are independent, so
+// an expectation claiming both -- which ExpectationFrom never writes -- is one
+// no replay can meet, rather than one read whichever way suits the replay.
+func compareAgreedErrorFlag(exp StepExpectation, got *bool) []string {
+	var why []string
+	if exp.NoError {
+		clean := false
+		why = append(why, compareErrorFlag(&clean, got, everyRecording)...)
+	}
+	if exp.Error {
+		failed := true
+		why = append(why, compareErrorFlag(&failed, got, everyRecording)...)
+	}
+	return why
 }
 
 // compareErrorFlag holds got to want, when there is a want.
