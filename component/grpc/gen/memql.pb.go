@@ -8322,10 +8322,16 @@ type AuthoringDiagnostic struct {
 	// sandbox slices + lowers it). All four are ZERO when a reliable position
 	// could not be computed -- a wrong position is never emitted, so consumers
 	// MUST treat 0 as "no position" (never line 0 / column 0). #2375.
-	Line          int32 `protobuf:"varint,6,opt,name=line,proto3" json:"line,omitempty"`
-	Column        int32 `protobuf:"varint,7,opt,name=column,proto3" json:"column,omitempty"`
-	EndLine       int32 `protobuf:"varint,8,opt,name=end_line,json=endLine,proto3" json:"end_line,omitempty"`       // 0 when the failure has no end anchor
-	EndColumn     int32 `protobuf:"varint,9,opt,name=end_column,json=endColumn,proto3" json:"end_column,omitempty"` // 0 when the failure has no end anchor
+	Line      int32 `protobuf:"varint,6,opt,name=line,proto3" json:"line,omitempty"`
+	Column    int32 `protobuf:"varint,7,opt,name=column,proto3" json:"column,omitempty"`
+	EndLine   int32 `protobuf:"varint,8,opt,name=end_line,json=endLine,proto3" json:"end_line,omitempty"`       // 0 when the failure has no end anchor
+	EndColumn int32 `protobuf:"varint,9,opt,name=end_column,json=endColumn,proto3" json:"end_column,omitempty"` // 0 when the failure has no end anchor
+	// code is the failure's stable rule id when it carries one -- a lowering
+	// refusal's `lower_*`, an annotation refusal's `annotation_*`, a retired
+	// form's rule -- and empty otherwise (memql#5435). `error` still ends with it
+	// in brackets; this is the field a client keys on, so no client parses the
+	// text. The id is stable, the wording of `error` is not.
+	Code          string `protobuf:"bytes,10,opt,name=code,proto3" json:"code,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8421,6 +8427,13 @@ func (x *AuthoringDiagnostic) GetEndColumn() int32 {
 		return x.EndColumn
 	}
 	return 0
+}
+
+func (x *AuthoringDiagnostic) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
 }
 
 // AuthoringConstruct names one construct that a session-define registered.
@@ -18223,7 +18236,7 @@ const file_memql_proto_rawDesc = "" +
 	"\venum_values\x18\x04 \x03(\tR\n" +
 	"enumValues\x12 \n" +
 	"\vdescription\x18\x05 \x01(\tR\vdescription\x12#\n" +
-	"\rauto_injected\x18\x06 \x01(\bR\fautoInjected\"\xe3\x01\n" +
+	"\rauto_injected\x18\x06 \x01(\bR\fautoInjected\"\xf7\x01\n" +
 	"\x13AuthoringDiagnostic\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x0e\n" +
@@ -18234,7 +18247,9 @@ const file_memql_proto_rawDesc = "" +
 	"\x06column\x18\a \x01(\x05R\x06column\x12\x19\n" +
 	"\bend_line\x18\b \x01(\x05R\aendLine\x12\x1d\n" +
 	"\n" +
-	"end_column\x18\t \x01(\x05R\tendColumn\"<\n" +
+	"end_column\x18\t \x01(\x05R\tendColumn\x12\x12\n" +
+	"\x04code\x18\n" +
+	" \x01(\tR\x04code\"<\n" +
 	"\x12AuthoringConstruct\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"m\n" +
