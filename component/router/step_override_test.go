@@ -116,6 +116,11 @@ func TestEffortReachesOnlyTheDoorsThatHaveTheKnob(t *testing.T) {
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{"p": {"vendorModel"}})
 	r := New(providers, policies, testRules(t, defaultRule("p")), nil, nil)
 	messages := []common.ChatMessage{{Role: "user", Content: "draft it"}}
+	// The app and fleet doors pass the process-wide LLM guard, whose
+	// interactive rate bucket every test in this package shares; these calls
+	// ride the background lane's own bucket so they cannot exhaust it for a
+	// test that runs after this one.
+	callCtx := memql.ContextWithBackgroundLane(context.Background())
 
 	chatOn := func(pin string) {
 		t.Helper()
@@ -131,7 +136,7 @@ func TestEffortReachesOnlyTheDoorsThatHaveTheKnob(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolve %s: %v", pin, err)
 		}
-		if _, err := client.CallChat(context.Background(), messages); err != nil {
+		if _, err := client.CallChat(callCtx, messages); err != nil {
 			t.Fatalf("CallChat on %s: %v", pin, err)
 		}
 	}
@@ -166,7 +171,7 @@ func TestEffortReachesOnlyTheDoorsThatHaveTheKnob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveWithTools: %v", err)
 	}
-	if _, err := tools.CallChatWithTools(context.Background(), messages, nil); err != nil {
+	if _, err := tools.CallChatWithTools(callCtx, messages, nil); err != nil {
 		t.Fatalf("CallChatWithTools: %v", err)
 	}
 	if delegate.got.Effort != "max" {
@@ -180,7 +185,7 @@ func TestEffortReachesOnlyTheDoorsThatHaveTheKnob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
-	if _, err := client.CallChat(context.Background(), messages); err != nil {
+	if _, err := client.CallChat(callCtx, messages); err != nil {
 		t.Fatalf("CallChat: %v", err)
 	}
 	if apps.got.Effort != "" {
