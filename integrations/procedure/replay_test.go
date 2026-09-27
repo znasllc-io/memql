@@ -564,11 +564,15 @@ func TestAMachineLocalProcedureIsComparedDryInShadow(t *testing.T) {
 // TestACallThatDoesNotReadBackAsItsStepIsRefusedBeforeDispatch (D16's
 // content-addressed input check): the call about to be dispatched must read
 // back as its template step, bound to exactly the values the replay bound.
-// Here the report's file name is a parameter inside a PATH, and the goal's
-// input carries a separator -- "sub/report.txt" would write one directory
-// deeper than any recording did, a different call wearing the right values.
-// The write is refused before it is dispatched; the command before it ran,
-// and is what the app is told about. The control: a plain name serves.
+// Here the report's file name is a parameter inside a PATH. A goal input
+// carrying a separator -- "sub/report.txt" would write one directory deeper
+// than any recording did, a different call wearing the right values -- is
+// refused as it is written out, since a path-segment parameter takes one
+// segment (component/procedure.Materialize); and a value that is written out
+// but does not read back as itself -- a number parameter given "1.0", which
+// goes out as 1 -- is refused by the input check. Either way the write never
+// reaches the dispatcher; the command before it ran, and is what the app is
+// told about. The control: a plain name serves.
 func TestACallThatDoesNotReadBackAsItsStepIsRefusedBeforeDispatch(t *testing.T) {
 	withNameHole := func(w *replayWorld) {
 		w.withDecoded(t, func(p *Procedure) {
@@ -582,18 +586,45 @@ func TestACallThatDoesNotReadBackAsItsStepIsRefusedBeforeDispatch(t *testing.T) 
 			p.InputMap["s1.file_path.2"] = "name"
 		})
 	}
+	withCountHole := func(w *replayWorld) {
+		w.withDecoded(t, func(p *Procedure) {
+			args := p.Steps[1].Args
+			for n, k := range args.Keys {
+				if k == "content" {
+					args.Kids[n] = proc.HoleNode("s1.content", "number")
+				}
+			}
+			p.Holes = append(p.Holes, proc.Hole{Id: "s1.content", StepIndex: 1, Path: []string{"content"}, Type: "number", Class: proc.HoleFree})
+			p.FreeParameters = append(p.FreeParameters, "s1.content")
+			p.InputMap["s1.content"] = "count"
+		})
+	}
 
-	w := newReplayWorld(t, "trusted")
-	withNameHole(w)
-	out := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile, "name": "sub/report.txt"})
-	if !out.Diverged || out.DivergedStep != 1 || out.Insufficient || !strings.Contains(out.Diagnosis, "would not have made the call") {
-		t.Fatalf("outcome = %+v, want the write refused before it ran, as a plain failure", out)
-	}
-	if keys := dispatchedKeys(w.d.recorded()); !reflect.DeepEqual(keys, []string{"step0"}) {
-		t.Fatalf("dispatched %v: the write must never reach the dispatcher", keys)
-	}
-	if len(out.Completed) != 1 || out.Completed[0].Index != 0 {
-		t.Fatalf("completed = %+v, want the command that ran", out.Completed)
+	for _, c := range []struct {
+		name  string
+		shape func(*replayWorld)
+		input map[string]any
+		says  []string
+	}{
+		{"a separator in a path segment", withNameHole, map[string]any{"file": goalFile, "name": "sub/report.txt"},
+			[]string{"could not be written out", "s1.file_path.2", "not one segment"}},
+		{"a value that does not read back as itself", withCountHole, map[string]any{"file": goalFile, "count": "1.0"},
+			[]string{"would not have made the call", "s1.content"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newReplayWorld(t, "trusted")
+			c.shape(w)
+			out := w.serve(t, ReplayTrusted, c.input)
+			if !out.Diverged || out.DivergedStep != 1 || out.Insufficient || !containsAll(out.Diagnosis, c.says...) {
+				t.Fatalf("outcome = %+v, want the write refused before it ran, as a plain failure saying %q", out, c.says)
+			}
+			if keys := dispatchedKeys(w.d.recorded()); !reflect.DeepEqual(keys, []string{"step0"}) {
+				t.Fatalf("dispatched %v: the write must never reach the dispatcher", keys)
+			}
+			if len(out.Completed) != 1 || out.Completed[0].Index != 0 {
+				t.Fatalf("completed = %+v, want the command that ran", out.Completed)
+			}
+		})
 	}
 
 	control := newReplayWorld(t, "trusted")
