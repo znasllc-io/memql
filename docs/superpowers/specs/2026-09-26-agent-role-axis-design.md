@@ -2,7 +2,8 @@
 
 - **Date:** 2026-09-26
 - **Status:** approved by the owner ("split into two gates"); implemented for
-  memql#5438 in the dsl-v1-followups epic.
+  memql#5438 in the dsl-v1-followups epic, and revised by its review round
+  (items 1-6, marked where they land below).
 - **Scope:** how a `tool` says WHO may be offered it and WHO may call it. Two
   new gates, the caller kinds they read, the load-time checks, the
   deprecation of `@allowedRoles`, its rewrite, and the forge surface that was
@@ -74,8 +75,9 @@ context says who is calling (`ToolCaller`, `component/memql/tool_context.go`):
 `ExecuteTool`'s rule "tools are agent-only" becomes **"an agent, or an
 authenticated person over MCP"**: the person needs an identity on the context
 (the HTTP head verifies a bearer; a stdio session names one with
-`MEMQL_MCP_USER`). A person is not an agent kind, so `@requiresAgentRole`
-refuses them and hides the tool from their `tools/list`.
+`MEMQL_MCP_USER`), and a session with none is offered no tool as well as
+refused every call (review round, item 4). A person is not an agent kind, so
+`@requiresAgentRole` refuses them and hides the tool from their `tools/list`.
 
 ### Enforcement points
 
@@ -85,10 +87,10 @@ One decision (`component/memql/tool_gate.go`), asked on every path:
   agent loop, the engine's own tool loop, `CallToolMsg` and MCP `tools/call`
   are all held to it. `handleCallTool` asks it first only to answer cleanly.
 - **Listing:** gRPC `ListToolsMsg` and MCP `tools/list` ask `ToolListed`, which
-  is the call decision without the caller-kind rule -- a listing describes
-  tools, and the gRPC surface has always described them to callers that stamp
-  neither kind. `TestAToolIsListedExactlyWhenItIsCallable` holds the two to
-  one decision.
+  is the call decision less one rule: a caller that is NEITHER kind is
+  described the tool set, as the gRPC surface always described it to callers
+  that stamp neither. A person over MCP is held to the identity rule in both.
+  `TestAToolIsListedExactlyWhenItIsCallable` holds the two to one decision.
 - Every refusal reads as a PERMISSION refusal to `ClassifyToolError`, so the
   agent loop's repeat-failure breaker treats it as one.
 
@@ -102,11 +104,26 @@ resolves its actor the way `handleExecuteQuery` does. An agent turn forwarded
 to the agent node carries the person the same way. No state lives on one node
 that another needs.
 
-A tool's floor is judged exactly as a query's is, through
-`refuseBelowRequiredRank`: an internal-origin call passes it, and a work run's
-borrowed actor (`auth.ContextWithUserActor`, whose role is the synthetic
-`writer`) is judged at that rank, as a query floor under borrowed authority
-already is.
+A tool's floor is enforced through `refuseBelowRequiredRank`, so an
+internal-origin call passes it and an unresolvable floor or caller fails
+closed, as on a query. **It judges the PERSON at the rank they hold, never a
+stand-in role** (review round, item 1). Two actors carry one:
+borrowed authority (`auth.ContextWithUserActor`) and work restored without a
+captured grant (`auth.ContextWithPersistedOwner`) both assert `writer`
+whatever the person holds, and judged as they stood an agent acting for a
+reader cleared a writer floor while one acting for an admin failed an admin
+floor. Both now say so (`AccessContext.RoleStandIn`), and `toolFloorContext`
+reads the person's role from the principal table instead --
+`organizationUserRole`, the read the account scope already makes for the same
+borrowed actor -- once per tool caller (a memo the two caller stamps open). A
+person the table does not resolve holds no role and clears no floor; the
+stand-in is never the fallback. The replacement is for the judgment only: the
+call still runs under the stand-in, which bounds what the work may write. The
+marker is process-local -- `ForwardedAuthority` carries no field for it, and
+no tool loop runs on the far side of a mesh hop today. A QUERY floor under
+borrowed authority is unchanged, so a tool admitted at its person's rank can
+still meet a handler query whose own floor the stand-in fails; that refusal is
+closed, not open.
 
 ### Load-time checks
 
@@ -162,11 +179,31 @@ by the rewrite
 "specialist")`, which is what makes them callable by the planner. `packs/`,
 `examples/`, `deploy/fleet` and the product bundles carry no use.
 
-The rewrite writes the lowest role AS WRITTEN (`writer`, `reader`), not its
-catalog slug (`user`, `viewer`). A first boot validates floors before the
-catalog is seeded, against the compiled base ladder, which knows the legacy
-slugs and not `user` / `viewer`; `@requiresRank("user")` is refused there and
-by the offline lint. The two spellings name one rung.
+The rewrite writes the lowest role AS WRITTEN -- `writer` and `reader` in this
+tree, `user` or `viewer` in a list that spelled the catalog's slug. A first
+boot validates floors before the catalog is seeded, against the compiled base
+ladder (`auth.RoleRank`), which knew only the legacy slugs, so
+`@requiresRank("user")` refused to load there and in the offline lint. The
+compiled ladder now ranks every name the seed gives a rung, slug and alias
+alike (review round, item 2), `TestEngineRankModelMatchesTheSeeds` holds each
+to its seeded rank, and a memqllint test lints a rewritten tree clean.
+
+**Every person-list rewrite widens its gate, and the rewrite says so** (review
+round, item 3). In an agent's tool loop `@allowedRoles` compared the agent's
+own role, which no person role matches, so a person list refused every agent;
+`@requiresRank` judges the person an agent acts for, so after the rewrite an
+agent acting for somebody at or above the floor can call the tool -- and so
+can a custom role ranked there. Each such rewrite is reported on stderr beside
+the uses left (`AllowedRolesRewrite.Note`); an agent-list rewrite admits
+nothing new and is not.
+
+**Comments inside a list survive the rewrite** (review round, item 6). An
+agent list keeps its argument list exactly as written under the new name; a
+person list's rung carries each note as a block comment; a line comment that
+would end that block early leaves the use for its author. Past the window, one
+use is ONE strict-boot problem, at the author's position: the tool loader's
+coded echo of the same parser refusal, positioned in the declaration it parsed,
+is dropped by the deprecated-form pass.
 
 ## Forge: the deliberate change in meaning
 
@@ -196,6 +233,27 @@ the developer tools `@requiresRank("writer")`, the team tools
   (`forgeApprover` stays, and is exact -- owner is the top rung and nothing
   aliases it), and only an owner may approve.
 
+## Procedure replay (review round, item 5)
+
+A learned procedure's replay of a recorded MCP step (`runProcedureMCP`,
+`app/procedure_dispatch.go`) ran the call as the owner's reasoning AGENT,
+stamped with the agent row's roleSlug (`assistant`, or `system-planner`, which
+is no agent role), so every gate was decided on the wrong axis. Only an app
+session records, and the MCP surface calls a tool as a PERSON, so the replay
+is now a person over MCP (`WithMCPHumanCaller`) decided by the actor the
+surface built for the recording: **the owner, holding no role** -- an
+app-session credential carries no role claim, and the HTTP head takes a
+session's role from the claim.
+
+Deliberately not the owner's own rank, which the stand-in resolution above
+would give a borrowed actor: that would admit a rank-floored read the
+recording was refused, and a replay asks for no more than its recording had.
+`TestAnAppSessionActsAsItsOwnerHoldingNoRole` (`component/mcp`) pins the
+app session's actor and says the replay must change with it; whether an app
+session SHOULD hold its owner's role over MCP, as the gRPC surface resolves the
+same credential to, is a separate decision (below). The server's owner and
+agent still win over recorded ones as tool arguments.
+
 ## Findings recorded, not changed here
 
 - `CallToolMsg`'s `agent_role` metadata is read from the client envelope as
@@ -203,6 +261,12 @@ the developer tools `@requiresRank("writer")`, the team tools
   so a direct stream client can assert an agent kind. The rank floor still
   judges the person the stream authenticated as. Pre-existing; worth its own
   issue.
-- The compiled base ladder's missing `user` / `viewer` (above) is why the
-  rewrite keeps the legacy spellings; teaching the fallback the catalog slugs
-  would let a floor name them on a first boot.
+- An app session is resolved differently by the two surfaces: gRPC's
+  `LoadFromClaims` gives the credential its owner's stored role (surface-pinned
+  to reads), while the MCP head takes the role from the token's claim, which an
+  app-session credential does not carry -- so over MCP it clears no rank floor
+  and no `@allowedRoles` person list. The replay follows the MCP answer
+  (above). Aligning the two is an authorization decision, not a refactor.
+- Work restored without a captured grant asserts `writer` for DATA whatever
+  its owner holds, so a reader's background run writes as a writer. The tool
+  floor no longer reads that role; the data authority is unchanged here.
