@@ -132,6 +132,9 @@ func (e *AutomationExecutor) Execute(ctx context.Context, step *automations.Step
 			return result, fmt.Errorf("automation %q argument resolution failed: %w", automationName, err)
 		}
 	}
+	// A person's inputs for this version (epic memql#5414) replace the
+	// evaluated arguments they name, and may name one the call left out.
+	callArgs = withOverrideInputs(ctx, callArgs)
 	if len(callArgs) > 0 {
 		execResult, err = stepCtx.AutomationTrigger.TriggerAutomationWithArgs(ctx, automationName, callArgs)
 	} else {
