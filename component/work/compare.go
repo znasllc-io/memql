@@ -279,8 +279,7 @@ func Compare(exp StepExpectation, got StepObservation) (bool, []string) {
 	why = append(why, compareAgreedErrorFlag(exp, got.IsError)...)
 	why = append(why, compareExitCode(exp.ExitCode, got.ExitCode, everyRecording)...)
 	why = append(why, compareResultType(exp.ResultType, got.ResultType, everyRecording)...)
-	why = append(why, compareContents(exp.Contents, got.Contents,
-		func(_ contentKey, recorded string) string { return recorded }, exp.Exact, everyRecording)...)
+	why = append(why, compareRecordedContents(exp, got.Contents)...)
 	why = append(why, compareWriteFloor(exp.MinWrites, got.Contents)...)
 	return len(why) == 0, why
 }
@@ -297,9 +296,13 @@ func Compare(exp StepExpectation, got StepObservation) (bool, []string) {
 //   - every file the app read or wrote must be read or written by the replay.
 //     Its bytes are held exactly on a deterministic step, and on any step
 //     where the recordings agreed on that file's bytes; by presence where they
-//     varied.
+//     varied. Where the app reported no file at all, the recordings' agreed
+//     files stand in, held exactly as Compare holds them.
 //   - on a deterministic step, a file only the replay touched is a divergence:
 //     a deterministic step that does something extra is not the same step.
+//     Beside an app that reported no file, "only the replay" means no
+//     recording touched it -- never every file, merely because the app named
+//     none.
 //   - where the recordings did not all write the same files, the replay must
 //     report at least the fewest writes any of them made, whatever the app
 //     reported. The floor is the procedure's own, and a replay below it is
@@ -329,17 +332,27 @@ func CompareShadow(exp StepExpectation, app, replay StepObservation) (bool, []st
 		why = append(why, compareResultType(exp.ResultType, replay.ResultType, everyRecording)...)
 	}
 
-	recorded := contentIndex(exp.Contents)
-	why = append(why, compareContents(app.Contents, replay.Contents, func(k contentKey, appDigest string) string {
-		agreedDigest := recorded[k]
-		if !exp.Exact && agreedDigest == "" {
-			return ""
-		}
-		if appDigest != "" {
-			return appDigest
-		}
-		return agreedDigest
-	}, exp.Exact, theApp)...)
+	if len(app.Contents) == 0 {
+		// THE APP REPORTED NO FILES -- a content that was never stored, or an
+		// observation that never carried any -- and that silence is not
+		// "wrote nothing". Held to the app's empty list, a deterministic step
+		// would flag every file the replay wrote as an extra and a varied one
+		// would check none of them; the recordings stand in instead, as they
+		// do for every other observable the app did not report.
+		why = append(why, compareRecordedContents(exp, replay.Contents)...)
+	} else {
+		recorded := contentIndex(exp.Contents)
+		why = append(why, compareContents(app.Contents, replay.Contents, func(k contentKey, appDigest string) string {
+			agreedDigest := recorded[k]
+			if !exp.Exact && agreedDigest == "" {
+				return ""
+			}
+			if appDigest != "" {
+				return appDigest
+			}
+			return agreedDigest
+		}, exp.Exact, theApp)...)
+	}
 	why = append(why, compareWriteFloor(exp.MinWrites, replay.Contents)...)
 	return len(why) == 0, why
 }
@@ -402,6 +415,14 @@ func compareResultType(want, got, who string) []string {
 	return nil
 }
 
+// compareRecordedContents holds got's files to the ones every recording agreed
+// on: each must be there, with the recordings' bytes where they agreed on
+// them, and on a deterministic step nothing else may be.
+func compareRecordedContents(exp StepExpectation, got []ContentDigest) []string {
+	return compareContents(exp.Contents, got,
+		func(_ contentKey, recorded string) string { return recorded }, exp.Exact, everyRecording)
+}
+
 // compareContents holds got's files to the reference set. digestFor answers
 // the digest a reference file's bytes are held to, "" for presence only; strict
 // also refuses a file only got touched.
@@ -426,11 +447,21 @@ func compareContents(ref, got []ContentDigest, digestFor func(k contentKey, refD
 	if strict {
 		for _, k := range sortedContentKeys(gotIdx) {
 			if _, ok := refIdx[k]; !ok {
-				why = append(why, fmt.Sprintf("an extra %s of %s that %s never made", k.op, k.path, who))
+				why = append(why, fmt.Sprintf("an extra %s of %s that %s", k.op, k.path, neverMade(who)))
 			}
 		}
 	}
 	return why
+}
+
+// neverMade says a reference did not make an effect. "The app never made"
+// reads as a sentence; "every recording never made" does not, and a reason is
+// shown to a person verbatim.
+func neverMade(who string) string {
+	if who == everyRecording {
+		return "no recording made"
+	}
+	return who + " never made"
 }
 
 // compareWriteFloor holds got to at least floor distinct writes, when there is

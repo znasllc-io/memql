@@ -592,6 +592,55 @@ func TestCompareShadowHoldsTheAppsErrorFlagExactly(t *testing.T) {
 	}
 }
 
+// Where the app reported no files at all -- a content that was never stored,
+// an observation that never carried any -- its silence is not "wrote
+// nothing". The recordings' agreed files stand in, held exactly as Compare
+// holds them: a deterministic step must not flag every file the replay wrote
+// as an extra "the app never made", and a varied one must not leave the
+// replay's files unchecked.
+func TestCompareShadowHoldsTheReplaysFilesToTheRecordingsWhereTheAppReportedNone(t *testing.T) {
+	noFiles := StepObservation{IsError: boolp(false), ExitCode: intp(0), ResultType: "string"}
+	missing := cleanRun(contentA)
+	missing.Contents = nil
+
+	exact := ExpectationFrom([]StepObservation{cleanRun(contentA), cleanRun(contentA)})
+	if ok, why := CompareShadow(exact, noFiles, cleanRun(contentA)); !ok {
+		t.Fatalf("a replay that wrote what every recording wrote was refused beside an app that reported no files: %v", why)
+	}
+	ok, why := CompareShadow(exact, noFiles, cleanRun(contentB))
+	if ok {
+		t.Fatal("different bytes from a deterministic step matched because the app reported no files")
+	}
+	if joined := strings.Join(why, "; "); !strings.Contains(joined, "where every recording had") {
+		t.Fatalf("the reason must hold the bytes to the recordings'; got %v", why)
+	}
+	ok, why = CompareShadow(exact, noFiles, missing)
+	if ok {
+		t.Fatal("a replay that never wrote the file every recording wrote matched beside an app that reported no files")
+	}
+	if !reflect.DeepEqual(why, []string{"missing the write of out/report.txt that every recording made"}) {
+		t.Fatalf("why = %v, want the missing write named against the recordings", why)
+	}
+	extra := cleanRun(contentA)
+	extra.Contents = append(extra.Contents, wrote("elsewhere.txt", contentB))
+	ok, why = CompareShadow(exact, noFiles, extra)
+	if ok {
+		t.Fatal("a deterministic step whose replay wrote a file no recording wrote matched")
+	}
+	if !reflect.DeepEqual(why, []string{"an extra write of elsewhere.txt that no recording made"}) {
+		t.Fatalf("why = %v, want only the file no recording made flagged as extra", why)
+	}
+
+	varied := ExpectationFrom([]StepObservation{cleanRun(contentA), cleanRun(contentB)})
+	if ok, _ := CompareShadow(varied, noFiles, missing); ok {
+		t.Fatal("a replay that never wrote the file every recording wrote matched beside an app that reported no files")
+	}
+	const other = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	if ok, why := CompareShadow(varied, noFiles, cleanRun(other)); !ok {
+		t.Fatalf("where the recordings' bytes varied, any bytes will do beside a silent app; refused: %v", why)
+	}
+}
+
 // Shadow holds the same floor. Beside an app that did not report the file it
 // wrote, the recordings' count is the only thing saying the step writes at
 // all, and a replay that reported no write is held to it rather than excused
