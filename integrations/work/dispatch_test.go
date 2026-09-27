@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -292,5 +293,30 @@ func TestARerunIsClaimedUnderItsOwnRequest(t *testing.T) {
 	}
 	if seen := d.seen(); len(seen) != 2 || seen[0].RerunRequestId != "req-3" || seen[1].RerunRequestId != "" {
 		t.Fatalf("dispatched %+v -- the seam must be told which request it was claimed for", seen)
+	}
+}
+
+// A refused re-run ends its request: FailRun clears `rerun` so nothing draws a
+// re-run in flight on a run that has stopped, and leaves staleSteps alone.
+func TestFailRunEndsAPendingRerun(t *testing.T) {
+	eng := newRecordingEngine()
+	i := New(eng, nil)
+	if err := i.FailRun(context.Background(), "v1:identity:user:u1", "run-1", "step_nested", "the step is inside another step"); err != nil {
+		t.Fatal(err)
+	}
+	var update string
+	for _, c := range eng.calls {
+		if c.Name() == "updateWorkRun" {
+			update = c.Query
+		}
+	}
+	if update == "" {
+		t.Fatal("FailRun wrote no run update")
+	}
+	if !strings.Contains(update, "rerun: {}") {
+		t.Errorf("the run update must clear the pending re-run; got %s", update)
+	}
+	if strings.Contains(update, "staleSteps") {
+		t.Errorf("a refused re-run leaves the stale steps as stale as it found them; got %s", update)
 	}
 }

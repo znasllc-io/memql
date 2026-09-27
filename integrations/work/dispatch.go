@@ -416,6 +416,13 @@ func (i *Integration) FailRun(ctx context.Context, ownerUserId, runId, code, mes
 		"errorCode":    code,
 		"errorMessage": message,
 		"finishedAt":   rfc(i.now()),
+		// A failed run carries no live re-run request (epic memql#5414): a
+		// refusal at dispatch -- a nested step, a branch whose source moved on
+		// -- ends the request as surely as a close does, and leaving it on the
+		// row would draw a re-run in flight on a run that has stopped.
+		// staleSteps stays: a refused head-move re-run leaves those steps as
+		// stale as it found them, and that is the true state.
+		"rerun": map[string]any{},
 	})
 }
 
