@@ -399,6 +399,6 @@ func TestEveryStatementTheReplayRendersParses(t *testing.T) {
 		"createWorkRun", "updateWorkRun", "createWorkStep", "updateWorkStep", "workStepsForOwnerRun",
 		"recordConstructLadder", "recordConstructReliability", "createWorkApproval",
 		"procedureConstructsForGoalSignature", "workObservationsForOwnerRun", "libraryFileById",
-		"workApprovalById", "usersForSeedSweep", "learnedProceduresForOwner",
+		"workApprovalById", "usersForSeedSweep", "learnedProceduresForOwner", "workDescriptionGuidance",
 	})
 }

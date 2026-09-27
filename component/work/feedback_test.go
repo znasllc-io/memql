@@ -99,3 +99,46 @@ func TestFeedbackContentIsOneReadableSentence(t *testing.T) {
 		}
 	}
 }
+
+func dislikeRow(reason string, axes Axes) map[string]any {
+	return map[string]any{"data": map[string]any{"verdict": "dislike", "reason": reason, "axes": axes.Object()}}
+}
+
+// D23's description half: the owner's dislikes become one framed message, a
+// complaint is carried once, and a dislike with no reason says nothing.
+func TestDescriptionGuidanceCarriesEachComplaintOnce(t *testing.T) {
+	got := DescriptionGuidance([]map[string]any{
+		dislikeRow("the totals were in the wrong currency", Axes{Product: true}),
+		dislikeRow("", Axes{Process: true}),
+		dislikeRow("the totals were in the wrong currency", Axes{Product: true}),
+		dislikeRow("it asked me three times", Axes{Performance: true, Process: true}),
+	})
+	want := DescriptionGuidanceHeading + "\n" +
+		"- (product) the totals were in the wrong currency\n" +
+		"- (process, performance) it asked me three times"
+	if got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestDescriptionGuidanceLeavesOutWhatTheCallAlreadyCarries(t *testing.T) {
+	repair := DislikeLine(Axes{Product: true}, "the totals were in the wrong currency")
+	got := DescriptionGuidance([]map[string]any{dislikeRow("the totals were in the wrong currency", Axes{Product: true})}, repair)
+	if got != "" {
+		t.Errorf("the re-run's own repair guidance is already on the call; got %q", got)
+	}
+}
+
+func TestDescriptionGuidanceIsBoundedAndEmptyWhenNothingSpeaks(t *testing.T) {
+	var rows []map[string]any
+	for i := 0; i < DescriptionGuidanceLimit+3; i++ {
+		rows = append(rows, dislikeRow("reason "+strings.Repeat("x", i+1), Axes{Product: true}))
+	}
+	got := DescriptionGuidance(rows)
+	if n := strings.Count(got, "\n- "); n != DescriptionGuidanceLimit {
+		t.Errorf("carried %d complaints, want %d:\n%s", n, DescriptionGuidanceLimit, got)
+	}
+	if got := DescriptionGuidance([]map[string]any{dislikeRow("  ", Axes{Product: true}), {}}); got != "" {
+		t.Errorf("no reason anywhere is no guidance; got %q", got)
+	}
+}

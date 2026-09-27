@@ -177,3 +177,64 @@ func FeedbackContent(v Verdict, stepKey string, version int, axes Axes, reason s
 	}
 	return s
 }
+
+// DescriptionGuidanceLimit is how many of an owner's earlier dislikes one
+// model call carries (D23). The query keeps twenty; five is what a model can
+// act on without the goal's own prompt being buried under old complaints.
+const DescriptionGuidanceLimit = 5
+
+// DescriptionGuidanceHeading introduces an owner's earlier dislikes. It says
+// what they are and what to do with them, because a list of complaints with no
+// frame reads as the user's current request.
+const DescriptionGuidanceHeading = "What the owner disliked about earlier answers to this goal (take it into account; do not repeat these problems):"
+
+// DislikeLine renders one dislike as a line of description guidance, or ""
+// when it gave no reason: a reason is the text a model can act on, and a
+// dislike that gave none still counts on the ladder but says nothing here.
+func DislikeLine(axes Axes, reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ""
+	}
+	if names := axes.Names(); len(names) > 0 {
+		return "- (" + strings.Join(names, ", ") + ") " + reason
+	}
+	return "- " + reason
+}
+
+// DescriptionGuidance renders a goal signature's accumulated dislikes -- the
+// feedback observation rows its query returns, newest first -- as ONE message,
+// or "" when none of them gave a reason (D23: dislike reasons accumulate on
+// the goal signature and reach a model only when one is genuinely used for
+// that goal again, never a replay).
+//
+// A complaint is carried once. carried are lines the call already holds -- a
+// re-run's own repair guidance -- and a row saying the same thing as one of
+// them, or as a newer row, is left out, because naming one complaint twice
+// would weigh it as two. At most DescriptionGuidanceLimit lines are kept.
+func DescriptionGuidance(rows []map[string]any, carried ...string) string {
+	seen := map[string]bool{}
+	for _, line := range carried {
+		if line != "" {
+			seen[line] = true
+		}
+	}
+	lines := make([]string, 0, DescriptionGuidanceLimit)
+	for _, row := range rows {
+		if len(lines) == DescriptionGuidanceLimit {
+			break
+		}
+		data, _ := row["data"].(map[string]any)
+		reason, _ := data["reason"].(string)
+		line := DislikeLine(ParseAxes(data["axes"]), reason)
+		if line == "" || seen[line] {
+			continue
+		}
+		seen[line] = true
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return DescriptionGuidanceHeading + "\n" + strings.Join(lines, "\n")
+}

@@ -132,6 +132,12 @@ type Guidance struct {
 	// from delivering a side effect twice.
 	Completed []CompletedStep
 	Alignment []proc.Move
+	// DescriptionGuidance is the owner's earlier dislikes on this goal's
+	// signature, framed as one message (epic memql#5414, D23), or "" when
+	// there are none. The app taking the goal back is a model genuinely used
+	// for that goal, which is when they reach one; the replay itself never
+	// reads them.
+	DescriptionGuidance string
 	// Prompt is the rendered guidance appended to the goal statement.
 	Prompt string
 }
