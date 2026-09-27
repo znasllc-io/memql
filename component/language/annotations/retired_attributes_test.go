@@ -100,7 +100,11 @@ func TestRetiredSetIsTheD17Set(t *testing.T) {
 	for _, tc := range []struct{ name, reader string }{
 		{"displayCard", "clients/os reads it (src/apps/concepts/displayCard.ts, RowsPanel.tsx)"},
 		{"composable", "clients/os reads it (src/apps/materializer/useCompose.ts via integration.compose.composableConcepts)"},
-		{"allowedRoles", "the agent-role gate enforces it (tool_types.go, grpc/server.go, tool_execution.go)"},
+		// DEPRECATED, not retired (memql#5438): it leaves through the
+		// deprecation window (component/language/deprecation), which keeps it
+		// loading and enforced until the window is spent -- a retirement
+		// would refuse it at once.
+		{"allowedRoles", "it is in its deprecation window and still enforced (component/memql/tool_gate.go)"},
 	} {
 		for _, r := range Retirements() {
 			if r.Name == tc.name {

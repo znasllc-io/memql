@@ -3,33 +3,34 @@
 // forge-namespace specs. Under the spec/shape binding redesign (epic
 // #2281) a caller / role predicate is a `spec` bound to an @actor shape
 // in its signature (it reads the projected envelope key by bare name and
-// evaluates against the auth context). These gate the developer/owner-
-// only read paths (the validation + approval queues) at the query layer,
-// so non-developers literally cannot list other people's requests to act
-// on them. Submission and "my own requests" stay open to every
-// authenticated team member.
+// evaluates against the auth context). forgeApprover gates the owner-only
+// read path (the approval queue) at the query layer, so a non-owner
+// cannot list the requests awaiting approval. Submission and "my own
+// requests" stay open to every authenticated team member.
 //
-// Cluster roles are owner/admin/developer/writer/reader
-// (dsl/identity/concepts.memql) -- there IS a literal "developer" role, and
-// this comment used to deny it while the spec below silently excluded it
-// (memql#4112). The forge personas map on:
+// The forge personas map onto the cluster's role ladder:
 //   owner     -> approver / fast-track
 //   admin     -> senior developer (validate + approve)
 //   developer -> senior developer (engineering power; validate)
 //   writer    -> junior developer (validate)
 //   reader    -> non-developer employee (submit-only, mentored)
 //
-// Keep forgeDeveloper in step with dsl/forge/tools.memql's @allowedRoles and
-// with forgeRequestRoleAllowed (component/memql/forge_request_validation.go).
-// When they disagree, the caller does NOT get an error: the MCP tool gate
-// admits the call and the query's forgeDeveloper conjunct filters every row,
-// so a legitimately-permissioned role reads it as "the queue is empty".
+// THE DEVELOPER TIER IS A RANK, NOT A SPEC (memql#5438). It was the
+// forgeDeveloper spec -- `actor.role` compared with four slugs -- and three
+// gates had to name the same tier: the tools' @allowedRoles, this spec on the
+// validation queue, and forgeRequestRoleAllowed on the transition. When they
+// disagreed the caller got no error, only an empty queue (memql#4112). The
+// tools now declare @requiresRank("writer"), which admits a custom role by its
+// rank; a spec cannot read a rank, so it could not have agreed with them. The
+// validation queue declares the same @requiresRank("writer"), and the
+// transition rule reads the same floor (forgeDeveloperFloor,
+// component/memql/forge_request_validation.go) through the same ladder -- one
+// floor, so the three cannot disagree.
+//
+// forgeApprover stays a slug comparison because it is exact: owner is the top
+// rung, nothing aliases it, and no role can be created at or above it.
 
 use common.shapes.{ actorEnvelope }
-
-/// Caller is a forge developer (owner/admin/developer/writer) -- may see the validation queue and
-/// validate requests.
-spec actorEnvelope forgeDeveloper = actor => actor.role == "owner" || actor.role == "admin" || actor.role == "developer" || actor.role == "writer"
 
 /// Caller is a forge approver (owner) -- holds final approval + fast-track authority.
 spec actorEnvelope forgeApprover = actor => actor.role == "owner"

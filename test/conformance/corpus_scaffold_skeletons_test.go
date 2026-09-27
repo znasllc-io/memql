@@ -183,7 +183,9 @@ var scaffoldDocs = map[string]string{
 	"Tool/executionTime":        "Open a support ticket; it answers quickly.",
 	"Tool/handler":              "Open a support ticket for the caller.",
 	"Tool/mcp":                  "Open a support ticket, on the curated MCP connector surface.",
+	"Tool/requiresAgentRole":    "Open a support ticket; offered to the assistant agent only.",
 	"Tool/requiresConfirmation": "Close a ticket; the caller confirms before it runs.",
+	"Tool/requiresRank":         "Open a support ticket, for developers and anyone ranked above them.",
 
 	"Builtin/alias":              "Today's date key in a timezone, for naming a daily ticket; also callable as ticketDayKey.",
 	"Builtin/args":               "Today's date key in a timezone, for naming a daily ticket; called with one object argument.",

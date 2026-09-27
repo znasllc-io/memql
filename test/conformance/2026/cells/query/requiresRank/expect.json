@@ -13,6 +13,7 @@
     {
       "file": "an-unknown-role.memql",
       "verdict": "refuse_load",
+      "code": "requires_rank_unknown",
       "message": "declares @requiresRank(\"superuser\"), which names no role in dsl/rbac",
       "note": "A floor that does not resolve would rank 0 and admit every caller, so the load refuses it."
     }

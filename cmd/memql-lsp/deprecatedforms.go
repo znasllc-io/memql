@@ -19,13 +19,31 @@ package main
 
 import (
 	"strings"
+	"sync"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	"github.com/znasllc-io/memql/component/language/deprecation"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/sense"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
+
+// embeddedRoleVocabulary is what an @allowedRoles quick fix decides with
+// (memql#5438): the agent roles and the role ladder, read once from their
+// declarations in the embedded tree. Both domains are core, so no workspace
+// can redeclare them. nil when the tree cannot be read, which leaves every
+// @allowedRoles use without a quick fix rather than with a guessed one.
+var embeddedRoleVocabulary = sync.OnceValue(func() *langparser.RoleVocabulary {
+	v, err := langparser.RoleVocabularyFromTree(memqldsl.Tree())
+	if err != nil {
+		return nil
+	}
+	return v
+})
+
+// roleVocabulary is the vocabulary an @allowedRoles quick fix decides with.
+func (s *server) roleVocabulary() *langparser.RoleVocabulary { return embeddedRoleVocabulary() }
 
 // deprecatedFormCodeActions answers a code-action request with one preferred
 // quick fix per use of a deprecated form that one of the request's diagnostics
@@ -45,7 +63,7 @@ func (s *server) deprecatedFormCodeActions(params *protocol.CodeActionParams) []
 		if !ok {
 			continue
 		}
-		replacement, ok := use.Replacement()
+		replacement, ok := use.Replacement(s.roleVocabulary())
 		if !ok {
 			continue
 		}

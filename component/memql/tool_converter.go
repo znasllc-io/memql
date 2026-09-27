@@ -134,6 +134,14 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 	if len(decl.AllowedRoles) > 0 {
 		tool.AllowedRoles = append([]string(nil), decl.AllowedRoles...)
 	}
+	// The two gates that replace @allowedRoles (memql#5438): which AGENT is
+	// calling, and the rank of the PERSON the call is for. Both are enforced
+	// by toolCallRefusal / toolListed (tool_gate.go) and validated at load by
+	// recordToolGateProblems.
+	if len(decl.RequiresAgentRole) > 0 {
+		tool.RequiresAgentRole = append([]string(nil), decl.RequiresAgentRole...)
+	}
+	tool.RequiresRank = strings.TrimSpace(decl.RequiresRank)
 	if len(decl.Scopes) > 0 {
 		tool.Scopes = append([]string(nil), decl.Scopes...)
 	}

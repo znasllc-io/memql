@@ -388,6 +388,9 @@ reader, so each is KEPT with its reader named in its registry doc string:
   `tool_execution.go`). Substituting rank for agent role would let every specialist
   call the assistant-only tools, which `dsl/skills/seeds/foundational.memql` depends
   on in as many words. Recorded as an open program decision rather than executed.
+  (Decided in memql#5438: split into `@requiresAgentRole` for the agent kind and
+  `@requiresRank` on a tool for the person, with `@allowedRoles` deprecated --
+  [2026-09-26-agent-role-axis-design.md](2026-09-26-agent-role-axis-design.md).)
 - **`@default` on a field** -- retired on a CONCEPT field, where it was published as
   the JSON-Schema `default` keyword that nothing applies. KEPT on a `tool` /
   `prompt` / `builtin` field, where the body IS the schema handed to the model and

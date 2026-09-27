@@ -88,7 +88,7 @@ func TestInlineQuery_Listing(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.role+"/"+c.tier.String(), func(t *testing.T) {
-			names := toolNames(listMCPTools(eng, c.role, c.tier, ""))
+			names := toolNames(listMCPTools(asPerson(c.role), eng, c.role, c.tier, ""))
 			if names[toolQuery] != c.want {
 				t.Errorf("query listed=%v, want %v", names[toolQuery], c.want)
 			}

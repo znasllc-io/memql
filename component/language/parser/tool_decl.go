@@ -93,16 +93,29 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 			if v := attrArgString(attr, "method"); v != "" {
 				decl.HandlerMethod = strings.ToUpper(v)
 			}
-		// @allowedRoles is the AGENT-role gate and it STAYS. D17 proposed
-		// replacing it with @requiresRank + @requiresCapability, but those
-		// gate the human actor's catalog rank and their grants over a
-		// resource -- a different axis. This one is enforced on every path
-		// (Tool.AllowedRoles in component/memql/tool_types.go, applied by
-		// component/grpc/server.go and tool_execution.go), and substituting
-		// rank for agent role would let every specialist call the
-		// assistant-only tools. Re-verified live in memql#5375 and kept.
+		// @allowedRoles is DEPRECATED (memql#5438) and still enforced while
+		// its window runs: it compared one role string that was the acting
+		// agent's role in an agent loop and the person's cluster role over
+		// MCP, so one list mixed two axes. Its two halves are the two
+		// annotations below. D17 had proposed @requiresRank + @requiresCapability
+		// alone, which cannot name an agent kind: substituting rank for agent
+		// role would let every specialist call the assistant-only tools. The
+		// window itself -- the warning, the count, the refusal once it is
+		// spent -- is component/language/deprecation's, and the parser's half
+		// of it is parseAttributeArgs.
 		case "allowedRoles":
 			decl.AllowedRoles = attrStringListValue(attr)
+		// @requiresAgentRole gates WHICH AGENT is calling: the acting agent's
+		// v1:agents:agent.role. Which values are legal is that concept's own
+		// enum, read by the engine's load (component/memql, tool_gate.go),
+		// because the parser holds no concept.
+		case "requiresAgentRole":
+			decl.RequiresAgentRole = attrStringListValue(attr)
+		// @requiresRank gates the PERSON the call is for, exactly as it does on
+		// a query, a mutation and a logic; the engine validates the slug
+		// against the role ladder at load.
+		case "requiresRank":
+			decl.RequiresRank = strings.TrimSpace(attrStringValue(attr))
 		case "mcp":
 			decl.MCPExposed = true
 		}

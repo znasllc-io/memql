@@ -1,0 +1,6 @@
+/// Open a support ticket, for developers and anyone ranked above them.
+@handler(type="function", name="openTicketToolRequiresRank")
+@requiresRank("developer")
+tool openSupportTicketRequiresRank {
+  title  string!  @description("The ticket's one-line title.")
+}

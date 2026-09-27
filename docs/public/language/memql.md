@@ -170,12 +170,25 @@ and, on a running cluster, `memql_dsl_deprecated_uses_total{rule="..."}`.
 
 ```bash
 memqlmigrate --rewrite=slice-syntax -w dsl/
+memqlmigrate --rewrite=allowed-roles -w dsl/
 ```
+
+`@allowedRoles(...)` is the one form whose replacement depends on what it
+names (memql#5438). It compared a single role string that meant the acting
+agent's role in an agent's tool loop and the person's cluster role over MCP,
+so a list was one of two things, and each now has its own annotation: a list
+of agent roles becomes `@requiresAgentRole(...)` with the same values, and a
+list of person roles that forms a floor becomes `@requiresRank("<its lowest
+role>")`, which also admits a custom role ranked at or above it. The rewrite
+leaves a list it cannot carry across exactly -- one mixing the two, one naming
+a value neither vocabulary knows, one that skips a rung -- and says why on
+stderr.
 
 <!-- deprecation-window:begin -- generated from component/language/deprecation; see deprecation_window_docs_test.go -->
 
 | Form | Write instead | Rewrite | Deprecated in | Stops loading in | Rule |
 |---|---|---|---|---|---|
+| `@allowedRoles(...)` | `@requiresAgentRole(...) or @requiresRank(...)` | `memqlmigrate --rewrite=allowed-roles` | 0.24.0 | 0.26 | `deprecated_allowed_roles` |
 | `array(T)` | `[]T` | `memqlmigrate --rewrite=slice-syntax` | 0.23.0 | 0.25 | `deprecated_array_type` |
 
 <!-- deprecation-window:end -->
@@ -2384,6 +2397,34 @@ A webhook handler, `@handler(type="webhook", url=..., method=...)`, is written t
 @handler(type="webhook", url="\"https://hooks.example.com/notify\"", method="post")
 tool notifyOnCall {
   message  string  @required @description("What to tell the on-call channel")
+}
+```
+
+### Who may call a tool
+
+A tool is called by an **agent**, in its tool loop, or by an authenticated **person** over the MCP connector, and it can gate each on its own axis (memql#5438):
+
+- `@requiresAgentRole("assistant", ...)` gates WHICH AGENT is calling: the acting agent's role, one of the `v1:agents:agent` concept's own `role` values (`assistant`, `specialist`), checked against that declaration when the tree loads. A person over MCP is not an agent, so a tool carrying it is neither listed nor callable for them.
+- `@requiresRank("<role>")` gates the PERSON the call is for -- the authenticated user over MCP, or the user an agent acts for -- exactly as it does on a query, a mutation or a logic: that role or one ranked above it, a custom role included, validated against the ladder at load.
+
+A tool with neither is callable by every agent and by an authenticated person over MCP; one with both requires both. A tool is listed to a caller exactly when a call from them would be admitted. `@allowedRoles(...)`, which compared one role string meaning either of the two, is in a [deprecation window](#forms-in-a-deprecation-window).
+
+<!-- corpus: 2026/examples/memql/builtins/tool-gates.memql -->
+```memql
+/// Find users for the conversation; offered to the assistant agent only
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
+@requiresAgentRole("assistant")
+tool findUsersForAssistant {
+  active  boolean  @description("Filter by active status")
+  limit   integer  @default("10") @description("Maximum number of results to return")
+}
+
+/// Find users; for developers and anyone ranked above them
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
+@requiresRank("developer")
+tool findUsersForDevelopers {
+  active  boolean  @description("Filter by active status")
+  limit   integer  @default("10") @description("Maximum number of results to return")
 }
 ```
 

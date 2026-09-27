@@ -2,7 +2,17 @@
   "cases": [
     {
       "file": "a-list-of-strings.memql",
-      "verdict": "load_ok"
+      "verdict": "load_warn",
+      "code": "deprecated_allowed_roles",
+      "message": "`@allowedRoles(...)` is deprecated and stops loading in 0.26; write `@requiresAgentRole(...) or @requiresRank(...)` instead",
+      "note": "In its deprecation window (memql#5438): it loads and gates exactly as before, and every use warns naming the two annotations it splits into and the rewrite. `memqlmigrate --rewrite=allowed-roles` writes @requiresAgentRole(\"assistant\", \"specialist\") here."
+    },
+    {
+      "file": "a-list-of-person-roles.memql",
+      "verdict": "load_warn",
+      "code": "deprecated_allowed_roles",
+      "message": "`memqlmigrate --rewrite=allowed-roles` rewrites it",
+      "note": "The same form with a list of person roles: the rewrite writes @requiresRank(\"writer\"), the list's lowest rung."
     },
     {
       "file": "with-unquoted-values.memql",

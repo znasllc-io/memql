@@ -12,7 +12,7 @@
 // onto the Plan lives in
 // integrations/planner/train_specialist_dispatch.go. It passes these
 // tool names explicitly to the filtered tool loop, so the tools are
-// available to the Trainer regardless of the standing @allowedRoles
+// available to the Trainer regardless of the standing @requiresAgentRole
 // filter (which gates the tool-list path).
 //
 // Tool -> handler wiring:
@@ -28,7 +28,7 @@
 /// wired in-repo yet -- the call returns an empty result set with a note. Fall back to fetchUrl on
 /// URLs you already know.
 @handler(type="function", name="webSearch")
-@allowedRoles("specialist")
+@requiresAgentRole("specialist")
 @executionTime("medium")
 tool webSearch {
   query        string! @description("The search query. Be specific -- name the topic + the kind of source you want (e.g. 'GAAP revenue recognition ASC 606 official guidance').")
@@ -39,7 +39,7 @@ tool webSearch {
 /// truncated}. Read more than you write -- pull the primary source, then distill it into grounded
 /// chunks via writeKnowledgeChunk with the URL as the sourceRef.
 @handler(type="function", name="fetchUrl")
-@allowedRoles("specialist")
+@requiresAgentRole("specialist")
 @executionTime("medium")
 tool fetchUrl {
   url  string! @description("The absolute URL to fetch (http/https). Must be a real, consultable source -- its URL becomes the chunk's sourceRef.")
@@ -49,7 +49,7 @@ tool fetchUrl {
 /// 'trainerAgent' and the chunk lands validated (canonical). sourceRef is REQUIRED and MUST point
 /// at a real URL or named source you consulted -- no fabricated citations.
 @handler(type="function", name="writeKnowledgeChunk")
-@allowedRoles("specialist")
+@requiresAgentRole("specialist")
 @executionTime("fast")
 tool writeKnowledgeChunk {
   chunkId      string! @description("Stable chunk id. Use a deterministic id (e.g. a hash of domainId+sourceRef+seq) so re-runs are idempotent.")
@@ -65,7 +65,7 @@ tool writeKnowledgeChunk {
 /// stops surfacing it; the row is preserved for audit. Pair with a fresh writeKnowledgeChunk when
 /// you have replacement content.
 @handler(type="function", name="markChunkSuperseded")
-@allowedRoles("specialist")
+@requiresAgentRole("specialist")
 @executionTime("fast")
 tool markChunkSuperseded {
   chunkId       string! @description("Id of the existing chunk to deprecate (from the existingCorpus you were given).")
@@ -78,7 +78,7 @@ tool markChunkSuperseded {
 /// the same chunk is harmless. Call it after each writeKnowledgeChunk so the corpus is immediately
 /// searchable.
 @handler(type="function", name="embedChunk")
-@allowedRoles("specialist")
+@requiresAgentRole("specialist")
 @executionTime("fast")
 tool embedChunk {
   chunkId  string! @description("Id of the chunk to embed (from a prior writeKnowledgeChunk call).")

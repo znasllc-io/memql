@@ -155,13 +155,13 @@ func TestRunInlineAutomation_Listed(t *testing.T) {
 		}
 		return false
 	}
-	if tools := listMCPTools(eng, "owner", TierInline, ""); !has(tools, toolRunInlineAutomation) {
+	if tools := listMCPTools(asPerson("owner"), eng, "owner", TierInline, ""); !has(tools, toolRunInlineAutomation) {
 		t.Errorf("run_inline_automation should be listed at the inline tier for owner")
 	}
-	if tools := listMCPTools(eng, "owner", TierAuthoring, ""); has(tools, toolRunInlineAutomation) {
+	if tools := listMCPTools(asPerson("owner"), eng, "owner", TierAuthoring, ""); has(tools, toolRunInlineAutomation) {
 		t.Errorf("run_inline_automation must NOT be listed below the inline tier")
 	}
-	if tools := listMCPTools(eng, "writer", TierInline, ""); has(tools, toolRunInlineAutomation) {
+	if tools := listMCPTools(asPerson("writer"), eng, "writer", TierInline, ""); has(tools, toolRunInlineAutomation) {
 		t.Errorf("run_inline_automation must NOT be listed for a non-inline role")
 	}
 }
@@ -188,7 +188,7 @@ func TestPromotedAutomation_DispatchedByName(t *testing.T) {
 func TestPromotedFunction_Listed(t *testing.T) {
 	eng := newFakeEngine()
 	eng.promotedFnTools = []map[string]any{{"name": "mySpaces", "description": "d", "inputSchema": map[string]any{"type": "object"}}}
-	names := toolNames(listMCPTools(eng, "reader", TierSealed, ""))
+	names := toolNames(listMCPTools(asPerson("reader"), eng, "reader", TierSealed, ""))
 	if !names["mySpaces"] {
 		t.Error("@mcp-promoted function should appear in tools/list (even in sealed tier -- it's a run-class op)")
 	}

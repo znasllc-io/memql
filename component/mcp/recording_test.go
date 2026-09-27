@@ -206,11 +206,12 @@ func TestASuccessfulCallRecordsNoResultText(t *testing.T) {
 }
 
 // TestTheRecordingDoesNotInheritTheToolExecutionMarks. callMCPTool derives
-// its context three times after the recording is deferred -- the acting-agent
-// role, strict unknown args, and the MCP-tool-execution mark. A deferred
-// closure captures the VARIABLE, so writing `ctx` rather than binding it
-// would hand the recorder all three, on writes this package is not making on
-// the caller's behalf.
+// its context three times after the recording is deferred -- the MCP caller
+// mark (memql#5438; it was the acting-agent role before a person over MCP
+// stopped being stamped as an agent), strict unknown args, and the
+// MCP-tool-execution mark. A deferred closure captures the VARIABLE, so
+// writing `ctx` rather than binding it would hand the recorder all three, on
+// writes this package is not making on the caller's behalf.
 func TestTheRecordingDoesNotInheritTheToolExecutionMarks(t *testing.T) {
 	rec := &markCapturingRecorder{}
 	base := withMCPAppSessionRecorder(context.Background(), rec)
@@ -221,22 +222,29 @@ func TestTheRecordingDoesNotInheritTheToolExecutionMarks(t *testing.T) {
 	if !rec.called {
 		t.Fatal("nothing was recorded, so this test measures nothing")
 	}
-	// The acting role is the one of the three with an exported reader, and it
+	// The caller mark is the one of the three with an exported reader, and it
 	// stands for all three: they are set on consecutive lines, so a context
 	// carrying none of them cannot be carrying the other two.
-	if rec.actingRole != "" {
-		t.Errorf("the recording inherited the acting agent role %q, so it inherited the "+
-			"strict-unknown-args and tool-execution marks beside it", rec.actingRole)
+	if rec.caller.Kind != memql.ToolCallerNone {
+		t.Errorf("the recording inherited the tool caller mark %+v, so it inherited the "+
+			"strict-unknown-args and tool-execution marks beside it", rec.caller)
+	}
+	// And the mark is really set on the dispatch context, or the assertion
+	// above holds of a context nothing ever marked.
+	eng := newFakeEngine()
+	callMCPTool(asPerson("assistant"), eng, "assistant", TierAuthoring, "", "openTool", nil)
+	if eng.callerSeen.Kind != memql.ToolCallerMCPHuman {
+		t.Fatalf("the dispatch context carried caller %+v, so the recording's absence of one measures nothing", eng.callerSeen)
 	}
 }
 
 type markCapturingRecorder struct {
-	called     bool
-	actingRole string
+	called bool
+	caller memql.ToolCaller
 }
 
 func (m *markCapturingRecorder) RecordToolCall(ctx context.Context, _ AppSessionToolCall) error {
 	m.called = true
-	m.actingRole = memql.ActingAgentRoleFromContext(ctx)
+	m.caller = memql.ToolCallerFromContext(ctx)
 	return nil
 }

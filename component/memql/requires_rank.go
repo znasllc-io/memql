@@ -138,11 +138,17 @@ func (e *MemQLEngine) validateRequiresRankSlugs(ctx context.Context, fns *Functi
 		if ladder.rankOf(slug) > 0 {
 			continue
 		}
-		problems = append(problems, fmt.Errorf(
-			"%s declares @requiresRank(%q), which names no role in dsl/rbac. "+
+		// Coded (RuleRequiresRankUnknown, tool_gate_load.go) so a load report
+		// and the conformance corpus key on the rule rather than the prose --
+		// the same code a tool's floor is refused with, because it is the same
+		// check (memql#5438).
+		problems = append(problems, &gateLoadRefusal{
+			code: RuleRequiresRankUnknown,
+			message: fmt.Sprintf("%s declares @requiresRank(%q), which names no role in dsl/rbac. "+
 				"A floor that does not resolve ranks 0 and would admit every caller, "+
 				"so this refuses to load. Known roles: %s",
-			name, slug, strings.Join(ladder.knownSlugs(), ", ")))
+				name, slug, strings.Join(ladder.knownSlugs(), ", ")),
+		})
 	}
 	return problems
 }

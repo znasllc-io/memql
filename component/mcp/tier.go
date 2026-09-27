@@ -2,10 +2,12 @@ package mcp
 
 // Capability-tier gate (MCP epic #1529 §2-3, Phase 2 #1532) -- "Gate A". A
 // coarse, per-deployment switch (MEMQL_MCP_MODE) deciding which CLASSES of
-// operation the server permits at all, orthogonal to the per-construct role
-// gate ("Gate B", Tool.IsAllowedForRole / CanAuthor / CanRunInline). A call is
-// allowed only if the tier enables the op class AND the caller's role passes
-// the construct gate. Both are enforced server-side.
+// operation the server permits at all, orthogonal to the per-construct gate
+// ("Gate B": a tool's own gates -- @requiresRank against the person, and a
+// person over MCP is never an agent for @requiresAgentRole, memql#5438 --
+// and CanAuthor / CanRunInline for the authoring ops). A call is allowed only
+// if the tier enables the op class AND the caller passes the construct gate.
+// Both are enforced server-side.
 
 import (
 	"strings"

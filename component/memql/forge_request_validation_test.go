@@ -163,7 +163,7 @@ func TestForgeRequestRoleAllowed(t *testing.T) {
 	for _, c := range cases {
 		name := fmt.Sprintf("role_%s_status_%s", emptyAsDash(c.role), c.status)
 		t.Run(name, func(t *testing.T) {
-			got := forgeRequestRoleAllowed(c.status, c.role)
+			got := forgeRequestRoleAllowed(c.status, c.role, roleLadder{})
 			if got != c.want {
 				t.Errorf("forgeRequestRoleAllowed(%q, %q) = %v, want %v (%s)",
 					c.status, c.role, got, c.want, c.note)
@@ -294,7 +294,7 @@ func TestForgeRoleXTransitionMatrix(t *testing.T) {
 	for _, c := range cases {
 		name := fmt.Sprintf("role_%s_to_%s", c.role, c.status)
 		t.Run(name, func(t *testing.T) {
-			gotRole := forgeRequestRoleAllowed(c.status, c.role)
+			gotRole := forgeRequestRoleAllowed(c.status, c.role, roleLadder{})
 			if gotRole != c.wantRole {
 				t.Errorf("forgeRequestRoleAllowed(%q, %q) = %v, want %v",
 					c.status, c.role, gotRole, c.wantRole)

@@ -545,16 +545,19 @@ func formatToolValidationError(toolName string, msg string) error {
 // ExecuteTool executes a tool definition with the provided arguments.
 // This is the shared execution path for internal callers (cognition) and gRPC.
 //
-// Tools are an agent-only invocation surface. Every entry point that
-// reaches this function MUST stamp an acting-agent role onto ctx
-// (via WithActingAgentRole). Callers that need to do non-agent work
-// at the engine layer should use queries, mutations, or integration
-// capabilities directly -- not tools. This boundary keeps "tools"
-// meaningful as the orchestration surface agents reason about and
-// makes the role-based AllowedRoles gate load-bearing on every path.
+// Tools are called by an AGENT or by an authenticated PERSON OVER MCP, and
+// by nothing else (memql#5438). Every entry point that reaches this function
+// MUST say which: an agent's loop stamps the acting agent's role
+// (WithActingAgentRole), the MCP surface stamps the person
+// (WithMCPHumanCaller). Callers that need to do other work at the engine
+// layer should use queries, mutations, or integration capabilities directly
+// -- not tools. The boundary keeps "tools" meaningful as the orchestration
+// surface agents reason about, and it is what makes the tool gates
+// (@requiresAgentRole, @requiresRank, the deprecated @allowedRoles;
+// tool_gate.go) load-bearing on every path.
 //
 // The enforcement is a hard reject (returns an error) rather than a
-// log-only warning so non-agent callers fail loudly during development
+// log-only warning so other callers fail loudly during development
 // instead of silently bypassing the contract.
 func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[string]any) (*ToolCallResult, error) {
 	if tool == nil {
@@ -572,18 +575,15 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 	// (ai_tool_loop.go), so it is safe defense-in-depth there too.
 	args = applyToolDefaults(ctx, tool, args, common.ToolDefaultsFromContext(ctx))
 
-	// Universal agent-only enforcement. Without an acting-agent role
-	// on ctx, the call is by definition not from an agent and the
-	// tool layer rejects it. The role string is what AllowedRoles
-	// downstream checks against; absence of a role here means there
-	// is no agent at all.
-	callerRole := ActingAgentRoleFromContext(ctx)
-	if callerRole == "" {
-		return nil, fmt.Errorf("tool %q: tools are agent-only -- no acting agent on context. Use queries, mutations, or integration capabilities for non-agent paths", tool.Name)
+	// Universal caller enforcement (tool_gate.go). The call must come from an
+	// agent or an authenticated person over MCP, and pass the tool's gates:
+	// @requiresAgentRole against the acting agent, @requiresRank against the
+	// person the call is for, and the deprecated @allowedRoles against the one
+	// role string it has always compared.
+	if err := e.ToolCallRefusal(ctx, tool); err != nil {
+		return nil, err
 	}
-	if !tool.IsAllowedForRole(callerRole) {
-		return nil, fmt.Errorf("tool %q is not allowed for caller role %q", tool.Name, callerRole)
-	}
+	callerRole := ToolCallerFromContext(ctx).LegacyRole
 
 	// No handler: the tool cannot run. ValidateTool refuses this at load
 	// (memql#3625), so reaching here means a tool built in Go rather than

@@ -1,0 +1,15 @@
+/// Find users for the conversation; offered to the assistant agent only
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
+@requiresAgentRole("assistant")
+tool findUsersForAssistant {
+  active  boolean  @description("Filter by active status")
+  limit   integer  @default("10") @description("Maximum number of results to return")
+}
+
+/// Find users; for developers and anyone ranked above them
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
+@requiresRank("developer")
+tool findUsersForDevelopers {
+  active  boolean  @description("Filter by active status")
+  limit   integer  @default("10") @description("Maximum number of results to return")
+}

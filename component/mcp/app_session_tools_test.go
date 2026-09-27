@@ -48,14 +48,14 @@ func TestOnlyAnAppSessionCredentialNamesASession(t *testing.T) {
 func TestTheBackChannelToolsAreListedOnlyForAnAppSession(t *testing.T) {
 	eng := newFakeEngine()
 
-	browser := toolNames(listMCPTools(eng, "owner", TierInline, ""))
+	browser := toolNames(listMCPTools(asPerson("owner"), eng, "owner", TierInline, ""))
 	for _, name := range []string{toolSubmit, toolNextTask} {
 		if browser[name] {
 			t.Errorf("%q must not be listed for a session that is not an app: it can only fail", name)
 		}
 	}
 
-	app := toolNames(listMCPTools(eng, "owner", TierInline, "s1"))
+	app := toolNames(listMCPTools(asPerson("owner"), eng, "owner", TierInline, "s1"))
 	for _, name := range []string{toolSubmit, toolNextTask} {
 		if !app[name] {
 			t.Errorf("%q must be listed for an app-session bearer; got %v", name, app)

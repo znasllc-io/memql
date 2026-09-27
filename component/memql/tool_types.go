@@ -49,10 +49,24 @@ type Tool struct {
 	// global deny-list and the per-tool confirmation UI.
 	Scopes []string `json:"scopes,omitempty"`
 
-	// AllowedRoles restricts which agent roles may call the tool.
-	// Empty = no restriction. Used to gate Operator tools to
-	// assistant-role agents.
+	// AllowedRoles is the DEPRECATED @allowedRoles (memql#5438): one list
+	// compared against ONE role string -- the acting agent's role in an
+	// agent's tool loop, the person's cluster role over MCP (see ToolCaller).
+	// Empty = no restriction. It keeps that behaviour while its deprecation
+	// window runs; RequiresAgentRole and RequiresRank are its two halves.
 	AllowedRoles []string `json:"allowedRoles,omitempty"`
+
+	// RequiresAgentRole is @requiresAgentRole: the acting agent's
+	// v1:agents:agent.role must be one of these. A caller that is not an
+	// agent (a person over MCP) is refused and not listed. Empty = no
+	// agent-kind restriction.
+	RequiresAgentRole []string `json:"requiresAgentRole,omitempty"`
+
+	// RequiresRank is @requiresRank on a tool: the PERSON the call is for --
+	// the authenticated user over MCP, the user an agent acts for -- must hold
+	// this role or one ranked above it, resolved through the engine's role
+	// ladder exactly as a query's floor is. Empty = no floor.
+	RequiresRank string `json:"requiresRank,omitempty"`
 
 	// AutoInjectedFields enumerates argument names marked
 	// `@autoInjected` in the tool definition -- fields whose value
@@ -195,6 +209,10 @@ func (t *Tool) clone() *Tool {
 	if len(t.AllowedRoles) > 0 {
 		cloned.AllowedRoles = append([]string(nil), t.AllowedRoles...)
 	}
+	if len(t.RequiresAgentRole) > 0 {
+		cloned.RequiresAgentRole = append([]string(nil), t.RequiresAgentRole...)
+	}
+	cloned.RequiresRank = t.RequiresRank
 	if len(t.AutoInjectedFields) > 0 {
 		cloned.AutoInjectedFields = append([]string(nil), t.AutoInjectedFields...)
 	}

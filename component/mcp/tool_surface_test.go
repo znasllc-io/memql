@@ -7,11 +7,13 @@ package mcp
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/component"
 )
 
 // --- fakes ------------------------------------------------------------------
@@ -36,9 +38,14 @@ type fakeEngine struct {
 	reg *fakeRegistry
 
 	// recorded for assertions
-	toolName      string
-	toolArgs      map[string]any
-	roleSeen      string
+	toolName string
+	toolArgs map[string]any
+	// roleSeen is the ACTING AGENT role on the context a call reached the
+	// engine with. Over MCP it must be empty: a person is not an agent, and
+	// stamping their cluster role as an agent's is what memql#5438 removed.
+	roleSeen string
+	// callerSeen is the tool caller that context carries (memql#5438).
+	callerSeen    memql.ToolCaller
 	actorUserSeen string // auth.AccessContext.UserId observed during ExecuteToolByName
 	actorRoleSeen string // auth.AccessContext.Role observed during ExecuteToolByName
 	query         string
@@ -62,9 +69,27 @@ type fakeEngine struct {
 
 func (e *fakeEngine) Tools() ToolLister { return e.reg }
 
+// gateEngine is a bare engine the fakes hand the tool gates to, so these tests
+// run the REAL decision (component/memql/tool_gate.go) rather than a
+// restatement of it that could agree with itself and nothing else. It has no
+// database, so its role ladder is the compiled base ladder (owner, developer,
+// admin, writer, reader).
+var gateEngine = func() *memql.MemQLEngine {
+	eng, err := memql.New(nil, (&component.Component{}).WithLoggerWriter(io.Discard))
+	if err != nil {
+		panic(err)
+	}
+	return eng
+}()
+
+func (e *fakeEngine) ToolListed(ctx context.Context, t *memql.Tool) bool {
+	return gateEngine.ToolListed(ctx, t)
+}
+
 func (e *fakeEngine) ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error) {
 	e.toolName, e.toolArgs = name, args
 	e.roleSeen = memql.ActingAgentRoleFromContext(ctx)
+	e.callerSeen = memql.ToolCallerFromContext(ctx)
 	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
 		e.actorUserSeen = ac.UserId
 		e.actorRoleSeen = string(ac.Role)
@@ -73,9 +98,9 @@ func (e *fakeEngine) ExecuteToolByName(ctx context.Context, name string, args ma
 	if err != nil {
 		return "", err
 	}
-	// Simulate the engine's per-tool role gate (tool_execution.go:319).
-	if !tool.IsAllowedForRole(e.roleSeen) {
-		return "", errNotFound{name + " (role " + e.roleSeen + ")"}
+	// The engine's own call gate, as ExecuteTool asks it.
+	if refusal := gateEngine.ToolCallRefusal(ctx, tool); refusal != nil {
+		return "", refusal
 	}
 	return `{"content":[{"type":"text","text":"ok"}],"isError":false}`, nil
 }
@@ -83,6 +108,7 @@ func (e *fakeEngine) ExecuteToolByName(ctx context.Context, name string, args ma
 func (e *fakeEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
 	e.query = query
 	e.roleSeen = memql.ActingAgentRoleFromContext(ctx)
+	e.callerSeen = memql.ToolCallerFromContext(ctx)
 	return &memql.ExecuteResult{}, nil
 }
 
@@ -138,6 +164,15 @@ func tool(name string, roles []string) *memql.Tool {
 	return &memql.Tool{Name: name, Description: name + " desc", AllowedRoles: roles}
 }
 
+// asPerson is the context an MCP session's tools/list and tools/call carry:
+// the authenticated person Server.withActorEnvelope stamps, with their role.
+func asPerson(role string) context.Context {
+	return auth.ContextWithAccess(context.Background(), &auth.AccessContext{
+		UserId: "v1:identity:user:mcp-person",
+		Role:   auth.Role(role),
+	})
+}
+
 func newFakeEngine() *fakeEngine {
 	return &fakeEngine{reg: &fakeRegistry{tools: []*memql.Tool{
 		tool("openTool", nil),                 // unrestricted
@@ -173,7 +208,7 @@ func TestListMCPTools_RoleFilterAndMetaTools(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run("role="+tc.role, func(t *testing.T) {
-			names := toolNames(listMCPTools(eng, tc.role, TierAuthoring, ""))
+			names := toolNames(listMCPTools(asPerson(tc.role), eng, tc.role, TierAuthoring, ""))
 			if names["openTool"] != tc.wantOpen {
 				t.Errorf("openTool visible=%v, want %v", names["openTool"], tc.wantOpen)
 			}
@@ -193,17 +228,25 @@ func TestListMCPTools_RoleFilterAndMetaTools(t *testing.T) {
 	}
 }
 
+// TestCallMCPTool_ReflectedTool: a reflected tool is dispatched by name, and
+// the caller reaches the engine as a PERSON over MCP whose role is the one the
+// session carries -- never as an acting agent (memql#5438). gaTool carries the
+// deprecated @allowedRoles("assistant"), which compares that role string
+// exactly as it always did while its window runs.
 func TestCallMCPTool_ReflectedTool(t *testing.T) {
 	eng := newFakeEngine()
-	res := callMCPTool(context.Background(), eng, "assistant", TierAuthoring, "", "gaTool", map[string]any{"x": 1})
+	res := callMCPTool(asPerson("assistant"), eng, "assistant", TierAuthoring, "", "gaTool", map[string]any{"x": 1})
 	if isErr, _ := res["isError"].(bool); isErr {
 		t.Fatalf("expected success, got error result: %v", res)
 	}
 	if eng.toolName != "gaTool" {
 		t.Errorf("ExecuteToolByName name = %q, want gaTool", eng.toolName)
 	}
-	if eng.roleSeen != "assistant" {
-		t.Errorf("acting role threaded to ctx = %q, want assistant", eng.roleSeen)
+	if eng.roleSeen != "" {
+		t.Errorf("the MCP surface stamped %q as an ACTING AGENT role; a person over MCP is not an agent", eng.roleSeen)
+	}
+	if want := (memql.ToolCaller{Kind: memql.ToolCallerMCPHuman, LegacyRole: "assistant"}); eng.callerSeen != want {
+		t.Errorf("tool caller threaded to ctx = %+v, want %+v", eng.callerSeen, want)
 	}
 }
 
@@ -227,8 +270,11 @@ func TestCallMCPTool_RunQueryBuildsInvocation(t *testing.T) {
 	if !strings.HasPrefix(eng.query, "activeSpaces(") || !strings.Contains(eng.query, `limit: 5`) {
 		t.Errorf("run_query built %q, want activeSpaces(limit: 5)", eng.query)
 	}
-	if eng.roleSeen != "reader" {
-		t.Errorf("run_query acting role = %q, want reader", eng.roleSeen)
+	if eng.roleSeen != "" {
+		t.Errorf("run_query stamped %q as an ACTING AGENT role; a person over MCP is not an agent", eng.roleSeen)
+	}
+	if want := (memql.ToolCaller{Kind: memql.ToolCallerMCPHuman, LegacyRole: "reader"}); eng.callerSeen != want {
+		t.Errorf("run_query tool caller = %+v, want %+v", eng.callerSeen, want)
 	}
 }
 
@@ -294,7 +340,7 @@ func TestListMCPTools_CuratedAllowlist(t *testing.T) {
 			tool("alpha", nil),
 			tool("beta", nil),
 		}}}
-		names := toolNames(listMCPTools(eng, "assistant", TierSealed, ""))
+		names := toolNames(listMCPTools(asPerson("assistant"), eng, "assistant", TierSealed, ""))
 		if !names["alpha"] || !names["beta"] {
 			t.Fatalf("with zero @mcp tools, full surface must show; got %v", names)
 		}
@@ -307,7 +353,7 @@ func TestListMCPTools_CuratedAllowlist(t *testing.T) {
 			mcpTool("notesCreate"),    // curated -> shown
 			tool("clusterSweep", nil), // untagged infra -> hidden
 		}}}
-		names := toolNames(listMCPTools(eng, "assistant", TierSealed, ""))
+		names := toolNames(listMCPTools(asPerson("assistant"), eng, "assistant", TierSealed, ""))
 		if !names["notesCreate"] {
 			t.Errorf("@mcp tool notesCreate must be in the curated surface; got %v", names)
 		}
@@ -328,7 +374,7 @@ func TestListMCPTools_CuratedAllowlist(t *testing.T) {
 			mcpTool("notesCreate"),
 			restricted,
 		}}}
-		names := toolNames(listMCPTools(eng, "specialist", TierSealed, ""))
+		names := toolNames(listMCPTools(asPerson("specialist"), eng, "specialist", TierSealed, ""))
 		if !names["notesCreate"] {
 			t.Errorf("notesCreate should be visible to specialist; got %v", names)
 		}

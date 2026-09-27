@@ -135,7 +135,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        ensureForGoalCapName,
-			Description: "Match-extend-or-create an agent that can handle a goal. Reads the role + agent catalogs, runs the agentFactoryAnalyze structured-output prompt, issues the appropriate write, and returns {agentId, action, reasoning}. Restricted to the Assistant via the wrapping ensureAgent tool's @allowedRoles.",
+			Description: "Match-extend-or-create an agent that can handle a goal. Reads the role + agent catalogs, runs the agentFactoryAnalyze structured-output prompt, issues the appropriate write, and returns {agentId, action, reasoning}. Restricted to the Assistant via the wrapping ensureAgent tool's @requiresAgentRole.",
 			Handler:     i.handleEnsureForGoal,
 			ArgsSchema: map[string]string{
 				"goal":        "string",

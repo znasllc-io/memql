@@ -296,6 +296,7 @@ cells/spec/description/with-no-value.memql
 cells/spec/disabled/on-a-later-trait.memql
 cells/spec/disabled/with-true.memql
 cells/spec/disabled/written-bare.memql
+cells/tool/allowedRoles/a-list-of-person-roles.memql
 cells/tool/allowedRoles/a-list-of-strings.memql
 cells/tool/allowedRoles/with-unquoted-values.memql
 cells/tool/description/a-string.memql
@@ -311,8 +312,17 @@ cells/tool/handler/names-nothing.memql
 cells/tool/handler/with-a-positional-value.memql
 cells/tool/mcp/with-true.memql
 cells/tool/mcp/written-bare.memql
+cells/tool/requiresAgentRole/a-list-of-strings.memql
+cells/tool/requiresAgentRole/a-person-role.memql
+cells/tool/requiresAgentRole/a-role-slug.memql
+cells/tool/requiresAgentRole/a-string.memql
+cells/tool/requiresAgentRole/with-an-unquoted-value.memql
 cells/tool/requiresConfirmation/with-true.memql
 cells/tool/requiresConfirmation/written-bare.memql
+cells/tool/requiresRank/a-string.memql
+cells/tool/requiresRank/an-agent-role.memql
+cells/tool/requiresRank/an-unknown-role.memql
+cells/tool/requiresRank/with-an-unquoted-value.memql
 cells/toolField/autoInjected/with-true.memql
 cells/toolField/autoInjected/written-bare.memql
 cells/toolField/default/a-string.memql
@@ -412,6 +422,7 @@ examples/memql/automations/event-trigger.memql
 examples/memql/automations/filter-annotation.memql
 examples/memql/bodies/logic-ternary.memql
 examples/memql/builtins/builtin.memql
+examples/memql/builtins/tool-gates.memql
 examples/memql/builtins/tool-query.memql
 examples/memql/builtins/tool-webhook.memql
 examples/memql/cheatsheet/authored-expressions.memql

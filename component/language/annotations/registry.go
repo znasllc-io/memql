@@ -155,6 +155,10 @@ func lifecycle(r Receiver, description string) []Placement {
 const (
 	docActorOnFunction = "Declares that the body reads the authenticated actor (actor.userId, actor.role, actor.identityId, actor.isClusterOwner, actor.primaryEmail, actor.now). The actor-binding load rule refuses a body that reads actor.* without it (memql#2621)."
 	docActorOnShape    = "Shape kind marker: the shape projects the authenticated actor's envelope (actor.userId / actor.role / ...), and carries no signature concept."
+	// docRequiresRankOnTool is @requiresRank on a tool, which differs from the
+	// function placements in WHOSE rank it reads and in also deciding what is
+	// listed (memql#5438).
+	docRequiresRankOnTool = "The person-rank FLOOR on a tool: a call is admitted only when the person it is for -- the authenticated user over MCP, or the user an agent acts for in its tool loop -- holds this role or one ranked above it, and a tool above the caller's rank is not listed to them either. VALIDATED AT LOAD against the role ladder in dsl/rbac exactly as on a query, mutation or logic, and resolved at call time through the same ladder, so a custom role is admitted by its rank. It judges the PERSON and never the agent -- @requiresAgentRole is that gate -- and it replaces the person half of the deprecated @allowedRoles."
 )
 
 // Keyword key sets, shared by the placement and its docs.
@@ -318,7 +322,9 @@ var placementTable = concat(
 		{Receiver: Tool, Name: "executionTime", Forms: FormString, Example: `@executionTime("fast")`},
 		{Receiver: Tool, Name: "handler", Forms: FormKeywords, Keys: handlerKeys, Example: `@handler(type="function", name="createTodo")`},
 		{Receiver: Tool, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
+		{Receiver: Tool, Name: "requiresAgentRole", Forms: FormString | FormStrings, Example: `@requiresAgentRole("assistant")`},
 		{Receiver: Tool, Name: "requiresConfirmation", Forms: FormFlag, Example: "@requiresConfirmation"},
+		{Receiver: Tool, Name: "requiresRank", Forms: FormString, Example: `@requiresRank("developer")`, Doc: docRequiresRankOnTool},
 	},
 
 	// ---- Builtin --------------------------------------------------------
@@ -506,7 +512,8 @@ var Docs = map[string]string{
 	"executionTime":        "Expected execution time hint: \"fast\", \"medium\", or \"slow\".",
 	"destructive":          "Mark a tool as destructive (mutates/deletes); the tool loop gates it behind a confirmation.",
 	"requiresConfirmation": "Require explicit user confirmation before the tool executes.",
-	"allowedRoles":         "Restrict the tool to a set of agent roles. Enforced on every path: tool_types.go, component/grpc/server.go and tool_execution.go. It gates the AGENT role (assistant / specialist), which is a different axis from @requiresRank (actor rank) and @requiresCapability (verb over a resource) -- neither can express it.",
+	"allowedRoles":         "DEPRECATED (rule deprecated_allowed_roles, memql#5438): write @requiresAgentRole for an agent kind and @requiresRank for a person's role -- `memqlmigrate --rewrite=allowed-roles` rewrites it. It compares ONE role string whose meaning depends on who is calling: the acting agent's role (assistant / specialist) in an agent's tool loop, and the person's cluster role over MCP. Two axes in one list is why it is leaving: neither list can be read without knowing which path the call arrives by. Until its window closes it keeps that behaviour, on every path a tool is listed or called by -- read by component/memql/tool_gate.go through Tool.IsAllowedForRole (tool_types.go).",
+	"requiresAgentRole":    "The AGENT-KIND gate on a tool: only an agent whose role is one of the values may be offered the tool or call it -- @requiresAgentRole(\"assistant\") (memql#5438). The values are the v1:agents:agent concept's own `role` enum (assistant, specialist), and the load VALIDATES them against that declaration, so a value no agent can hold refuses boot rather than admitting nobody. It is the axis @requiresRank and @requiresCapability cannot express: they judge the PERSON a call is for, this judges WHICH AGENT is calling. A person calling over MCP is not an agent, so a tool carrying it is neither listed nor callable for them. It replaces the agent half of the deprecated @allowedRoles; a tool with neither gate is callable by every agent and by an authenticated person over MCP.",
 	// Builtin.
 	"executor": "Go executor name for builtin functions (integration.X.Y).",
 	"args":     "Parse-time argument contract for builtin functions.",

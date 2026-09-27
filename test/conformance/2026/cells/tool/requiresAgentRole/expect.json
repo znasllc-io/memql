@@ -1,0 +1,33 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "a-list-of-strings.memql",
+      "verdict": "load_ok",
+      "note": "Every value of the v1:agents:agent role enum: callable by any agent, and by no person over MCP, who is not an agent kind."
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@requiresAgentRole on a tool takes one or more strings"
+    },
+    {
+      "file": "a-role-slug.memql",
+      "verdict": "refuse_load",
+      "code": "requires_agent_role_unknown",
+      "message": "\"system-planner\" is not an agent role: v1:agents:agent.role is one of assistant, specialist",
+      "note": "The values are the agent concept's own role enum. A roleSlug is not a role: no agent's role is ever \"system-planner\", so the value would admit no agent (memql#5438)."
+    },
+    {
+      "file": "a-person-role.memql",
+      "verdict": "refuse_load",
+      "code": "requires_agent_role_unknown",
+      "message": "or @requiresRank(\"<role>\") if the gate is on the person the call is for rather than on the agent",
+      "note": "A person's role on the agent axis is refused naming the gate it belongs to."
+    }
+  ]
+}

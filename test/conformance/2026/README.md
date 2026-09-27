@@ -69,9 +69,9 @@ constructs carry the annotation's name for that reason (`openTicketsCache`,
 | Field | Meaning |
 |---|---|
 | `file` | The case file, in this directory. |
-| `verdict` | One of the five below. |
-| `code` | The stable rule id a refusal carries, when it carries one -- a retired form's rule and an annotation's `annotation_*` at parse, an annotation's and the lowering's `lower_*` at load, printed last in brackets. A refusal that carries one must have it named here, at parse and at load alike: the id is the part of the contract a reworded message keeps. |
-| `message` | Text the refusal must contain. Required for a refusal: the wording is part of the contract. |
+| `verdict` | One of the six below. |
+| `code` | The stable rule id a refusal carries, when it carries one -- a retired form's rule and an annotation's `annotation_*` at parse, an annotation's and the lowering's `lower_*` at load, printed last in brackets. A refusal that carries one must have it named here, at parse and at load alike: the id is the part of the contract a reworded message keeps. For `load_warn`, the rule the warning carries -- the deprecated form's (`deprecated_*`) -- and required. |
+| `message` | Text the refusal must contain. Required for a refusal: the wording is part of the contract. For `load_warn`, text the warning must contain, and required for the same reason. |
 | `concept` | For `lower` and `evaluate`: the concept, by bare name, the expression is over. The fixture declares it. |
 | `position` | For `lower` and `evaluate`: the expression position. Under `expr/<position>/` it defaults to the directory. |
 | `row`, `args`, `actor` | For `lower` and `evaluate`: the values the expression reads. A case binds only the roots its position has: `args` and `actor` are refused where the position has neither (a spec body, a trigger filter), and a prompt input has no `actor`. |
@@ -86,7 +86,8 @@ constructs carry the annotation's name for that reason (`openTicketsCache`,
 
 | Verdict | The engine must |
 |---|---|
-| `load_ok` | parse the file and load it with no problem, and register every query, mutation, logic, spec, trait, tool and concept it declares. |
+| `load_ok` | parse the file and load it with no problem and no warning, and register every query, mutation, logic, spec, trait, tool and concept it declares. |
+| `load_warn` | do what `load_ok` asks, and warn about the file with the rule and text the case names: a form inside its deprecation window (`component/language/deprecation`), which keeps loading while every use says what to write instead. A `load_ok` case that draws a warning fails, so a deprecated spelling cannot hide in a case that claims to be clean. |
 | `refuse_parse` | refuse the file when it parses it in the edition's grammar. |
 | `refuse_load` | parse the file and refuse it at load. |
 | `lower` | lower the expression to SQL containing `sql`. |
@@ -156,8 +157,9 @@ language, each reading only its own subtree through the runner's own reader
 (a malformed file elsewhere fails the runner, once):
 
 - `TestCorpusCoversEveryRegistryCell`: every placement in the annotation
-  registry has its cell, with a case that loads (`load_ok`, `lower` or
-  `evaluate`) and one that is refused (`refuse_parse` or `refuse_load`); a
+  registry has its cell, with a case that loads (`load_ok`, `load_warn`,
+  `lower` or `evaluate`) and one that is refused (`refuse_parse` or
+  `refuse_load`); a
   directory under `cells/` that no placement names fails too.
 - `TestCorpusCoversEveryTierPosition`: every `tiers.Position` has a case that
   loads and one that is refused under `expr/<position>/`.

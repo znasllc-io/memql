@@ -1,0 +1,6 @@
+/// Open a support ticket; meant for the planner agent, named by its roleSlug.
+@handler(type="function", name="openTicketRequiresAgentRole")
+@requiresAgentRole("assistant", "system-planner")
+tool openSupportTicketPlannerSlug {
+  title  string!  @description("The ticket's one-line title.")
+}

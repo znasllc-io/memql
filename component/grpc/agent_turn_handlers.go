@@ -179,8 +179,11 @@ func (s *streamSession) handleAgentGenerateTurn(envelope *memqlv1.MemqlClientMes
 	ctx = contextWithEnvelopeProvenance(ctx, envelope)
 	// engine.ExecuteTool can round-trip tool calls back to
 	// the originating browser. Also attach the acting agent's
-	// guardrail role so engine.ExecuteTool can enforce
-	// Tool.AllowedRoles without re-reading envelope metadata.
+	// guardrail role, which is what makes this turn's tool calls an
+	// AGENT's: engine.ExecuteTool enforces @requiresAgentRole (and the
+	// deprecated @allowedRoles) against it without re-reading envelope
+	// metadata, and @requiresRank against the person the forwarded
+	// authority on this stream names (memql#5438).
 	if acting := msg.GetActingAgent(); acting != nil {
 		if role := strings.TrimSpace(acting.GetRole()); role != "" {
 			ctx = memqlengine.WithActingAgentRole(ctx, role)

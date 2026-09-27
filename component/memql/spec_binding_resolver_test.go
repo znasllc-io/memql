@@ -44,9 +44,11 @@ func TestSpecBindingsResolveAcrossFullTree(t *testing.T) {
 	// role STRING against literals, which cannot see a custom role at all, and
 	// dsl/common/specs.memql no longer declares them: a role question is
 	// `@requiresRank` (a floor) or `@requiresCapability` (a grant), neither of
-	// which is a spec. What is left here is every context-spec the tree still
-	// declares.
-	for _, name := range []string{"requiresOwner", "forgeDeveloper", "forgeApprover"} {
+	// which is a spec. A FOURTH LEFT IN memql#5438 for the same reason:
+	// `forgeDeveloper` listed four slugs, and the forge developer tier is now
+	// the @requiresRank floor its tools and its queue declare. What is left
+	// here is every context-spec the tree still declares.
+	for _, name := range []string{"requiresOwner", "forgeApprover"} {
 		s, err := specs.Get(name)
 		if err != nil || s == nil {
 			t.Errorf("expected context-spec %q to be registered: %v", name, err)

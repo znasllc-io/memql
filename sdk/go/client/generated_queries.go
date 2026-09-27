@@ -12085,7 +12085,7 @@ func ValidationLogBuild(args ValidationLogArgs) string {
 	return b.String()
 }
 
-// ValidationQueue -- The validation queue: requests awaiting first-line developer validation. Developer/owner only (forgeDeveloper).
+// ValidationQueue -- The validation queue: requests awaiting first-line developer validation. The forge developer tier only -- the writer rank or above -- and anyone below it is refused rather than shown an empty queue.
 //
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["validationQueue"] in generated_concepts.go).
 type ValidationQueueArgs struct {

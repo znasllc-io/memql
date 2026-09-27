@@ -2317,11 +2317,16 @@ func (s *streamSession) handleListTools(envelope *memqlv1.MemqlClientMessage, ms
 	var toolDefs []*memqlv1.ToolDefinition
 
 	if registry != nil {
-		callerRole := callerRoleFromMetadata(envelope)
+		// The listing is the call's decision asked in advance (tool_gate.go):
+		// the tool's agent-kind gate against the agent the envelope names,
+		// the deprecated @allowedRoles against that same string, and its
+		// rank floor against the person this stream is for -- so nothing is
+		// listed that a call from here would be refused.
+		ctx := s.toolCallerContext(s.stream.Context(), envelope)
 		tools := registry.List()
 		toolDefs = make([]*memqlv1.ToolDefinition, 0, len(tools))
 		for _, tool := range tools {
-			if !tool.IsAllowedForRole(callerRole) {
+			if !s.service.engine.ToolListed(ctx, tool) {
 				continue
 			}
 			toolDefs = append(toolDefs, &memqlv1.ToolDefinition{
@@ -2379,29 +2384,26 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 		return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, fmt.Sprintf("tool %q not found", toolName))
 	}
 
-	// Role gate: tools with AllowedRoles reject callers outside the allowed set.
-	callerRole := callerRoleFromMetadata(envelope)
-	// The role arrives THREADED on the CallToolMsg: a bff stamps it before
-	// forwarding, because handleCallTool runs on the agent node, which has no
-	// local session for the originating caller. An empty role is "no declared
-	// role", which IsAllowedForRole reads as "specialist".
-	if !tool.IsAllowedForRole(callerRole) {
-		return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, fmt.Sprintf("tool %q is not allowed for caller role %q", toolName, callerRole))
-	}
-
-	ctx := s.stream.Context()
 	// Re-hydrate cross-node provenance for tool calls that arrived via
 	// proxyAI / AiForward. Any row this tool writes via the engine will
 	// stamp the originating caller's provenance instead of a fresh
 	// per-tool default.
-	ctx = contextWithEnvelopeProvenance(ctx, envelope)
-	args := msg.GetArguments()
+	ctx := contextWithEnvelopeProvenance(s.stream.Context(), envelope)
+	// The caller: the acting agent the envelope names, and the person this
+	// stream is for. The agent role arrives THREADED on the CallToolMsg,
+	// because handleCallTool runs on the agent node, which has no local
+	// session for the originating caller; the person arrives as the
+	// forwarded authority the mesh bound onto this stream's context.
+	ctx = s.toolCallerContext(ctx, envelope)
 
-	// Attach the caller role so any nested engine.ExecuteTool call is gated
-	// against the same role this one was.
-	if callerRole != "" {
-		ctx = memqlengine.WithActingAgentRole(ctx, callerRole)
+	// Every gate the tool carries, asked before dispatch so the refusal is
+	// answered cleanly (tool_gate.go). ExecuteTool asks the same question
+	// again: this is not the enforcement, only the early answer.
+	if refusal := s.service.engine.ToolCallRefusal(ctx, tool); refusal != nil {
+		return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, refusal.Error())
 	}
+
+	args := msg.GetArguments()
 	result, execErr := s.executeTool(ctx, s.service.engine, tool, args)
 	if execErr != nil {
 		return s.sendCallToolResult(envelope.GetMessageId(), requestId, nil, true, execErr.Error())
@@ -2410,10 +2412,33 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 	return s.sendCallToolResult(envelope.GetMessageId(), requestId, result, false, "")
 }
 
+// toolCallerContext is ctx carrying the tool caller a ListToolsMsg or a
+// CallToolMsg speaks for (memql#5438): the acting agent the envelope's
+// metadata names, when it names one, and the person the call is for, as the
+// AccessContext @requiresRank reads.
+//
+// WHICH person. A request forwarded across the mesh arrives on the agent node
+// with its VERIFIED authority already bound (bindForwardedContext): the
+// principal as the originating node proved it, role ceiling included. A
+// re-resolution from its claims could only disagree with that, so an actor
+// already on the context is kept. A direct stream carries only claims, and
+// gets the actor this stream resolves -- the one handleExecuteQuery binds, so
+// a tool's floor and a query's are judged against one person.
+func (s *streamSession) toolCallerContext(ctx context.Context, envelope *memqlv1.MemqlClientMessage) context.Context {
+	if ac, ok := auth.AccessFromContext(ctx); !ok || ac == nil || (strings.TrimSpace(ac.UserId) == "" && !ac.IsAnonymousActor()) {
+		ctx = auth.ContextWithAccess(ctx, s.ensureAccess(ctx))
+	}
+	if role := callerRoleFromMetadata(envelope); role != "" {
+		ctx = memqlengine.WithActingAgentRole(ctx, role)
+	}
+	return ctx
+}
+
 // callerRoleFromMetadata pulls the caller's agent role (if any) from
 // envelope metadata. An agent node attaches this when forwarding a
-// CallToolMsg on behalf of an agent. Empty string means "no declared
-// role" -- Tool.IsAllowedForRole treats that as "specialist".
+// CallToolMsg on behalf of an agent. Empty string means "no acting agent":
+// such a call is refused, and the deprecated @allowedRoles reads the empty
+// string in a listing as "specialist", as it always has.
 func callerRoleFromMetadata(envelope *memqlv1.MemqlClientMessage) string {
 	if envelope == nil {
 		return ""
