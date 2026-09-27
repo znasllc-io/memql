@@ -261,6 +261,11 @@ func parseComplianceJob(topic string, store Store, req memqlsync.InboundRequest,
 	if err != nil {
 		return ComplianceJob{}, fmt.Errorf("shopify: %s delivery is not JSON", topic)
 	}
+	// A managed app shares one signing secret across stores. A path or header
+	// alone cannot bind a privacy request to a tenant; the signed body must.
+	if domain := firstString(obj, "shop_domain"); domain == "" || !strings.EqualFold(domain, store.Domain) {
+		return ComplianceJob{}, fmt.Errorf("shopify: compliance delivery shop does not match the store")
+	}
 	job := ComplianceJob{
 		Topic:      strings.ToLower(strings.TrimSpace(topic)),
 		StoreID:    store.ID,

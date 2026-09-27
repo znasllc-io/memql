@@ -70,6 +70,9 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"inboundRequestId": "string - staged v1:platform:inboundRequest row id",
 				"source":           "string - the /inbound/{source} name the delivery arrived under",
 				"body":             "string - the verified raw request body",
+				"topic":            "string - optional delivery topic",
+				"headersJson":      "string - allowlisted delivery metadata as JSON",
+				"receivedAt":       "string - original receipt time in RFC3339",
 			},
 		},
 		{
@@ -125,6 +128,18 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 		Topic:      strings.TrimSpace(argString(args, "topic")),
 		Body:       []byte(argString(args, "body")),
 		ReceivedAt: time.Now().UTC(),
+	}
+	if raw := argString(args, "headersJson"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &req.Headers); err != nil {
+			return nil, fmt.Errorf("datasync: invalid staged delivery headers")
+		}
+	}
+	if raw := argString(args, "receivedAt"); raw != "" {
+		at, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return nil, fmt.Errorf("datasync: invalid staged delivery timestamp")
+		}
+		req.ReceivedAt = at.UTC()
 	}
 	res, err := i.dispatcher.Dispatch(ctx, req)
 	if err != nil {

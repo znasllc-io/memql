@@ -175,13 +175,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	headers, err := deliveryHeaders(src, r.Header)
+	if err != nil {
+		http.Error(w, "invalid delivery metadata", http.StatusBadRequest)
+		return
+	}
 	received := h.now().UTC()
 	requestID := requestIDFor(name, identityKeyFor(src, r.Header, body))
 	mutation := fmt.Sprintf(
 		`mutation stageInboundRequest(requestId: %s, source: %s, medium: "webhook", body: %s, `+
-			`contentType: %s, dedupeKey: %s, signatureVerified: %t, receivedAt: %s)`,
+			`contentType: %s, headersJson: %s, dedupeKey: %s, signatureVerified: %t, receivedAt: %s)`,
 		memqlString(requestID), memqlString(name), memqlString(string(body)),
-		memqlString(r.Header.Get("Content-Type")), memqlString(dedupeKey), verified,
+		memqlString(r.Header.Get("Content-Type")), memqlString(headers), memqlString(dedupeKey), verified,
 		memqlString(received.Format(time.RFC3339)))
 
 	if _, err := h.engine.Execute(systemActorContext(r.Context()), mutation); err != nil {
@@ -279,6 +284,7 @@ func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig,
 		SignatureHeader: src.SignatureHeader,
 		SignaturePrefix: src.SignaturePrefix,
 		DedupeHeader:    src.DedupeHeader,
+		ForwardHeaders:  src.ForwardHeaders,
 	}, true
 }
 

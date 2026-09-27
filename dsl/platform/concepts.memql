@@ -176,6 +176,7 @@ concept inboundRequest {
   dedupeKey     string  @description("The sender's own idempotency key when it supplies one via MEMQL_INBOUND_SOURCE_<NAME>_DEDUPE_HEADER, otherwise the SHA-256 of the raw body. RECORDED for a product automation to read; it does NOT decide the row id. Identity is the digest of the SIGNED payload, because the vendor signs the body and not this header -- deriving the id from an unsigned header let one captured delivery mint unbounded rows (memql#2957 landing review).")
   signatureVerified bool @description("Whether the HMAC signature was checked and matched. Supplied by the receiver through stageInboundRequest rather than stamped; an absent value reads as false. Only ever true, or false for a source explicitly configured scheme='none'; a FAILED check is refused at the edge and never staged, so this records which sources are running unverified rather than which requests failed.")
   receivedAt    datetime @description("When the receiver accepted the request.")
+  headersJson   string @description("Allowlisted non-secret delivery headers as a JSON object with lowercase keys. Header values are metadata, not proof of identity; body HMAC does not sign them.")
   processedAt   datetime @description("When the product finished handling the row.")
   lastError     string  @description("Most recent product-side handling error, truncated to 4KB. Empty on success.")
 }

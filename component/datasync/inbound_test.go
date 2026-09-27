@@ -120,7 +120,7 @@ func TestVersionsAreComparedAsInstantsNotStrings(t *testing.T) {
 func testDispatcher(engine *fakeEngine, writer MirrorWriter, c *fakeConnector) *Dispatcher {
 	store := NewStore(engine)
 	d := NewDispatcher(store, NewApplier(store, writer))
-	d.lookup = func(name string) (memqlsync.Connector, bool) {
+	d.lookup = func(_ context.Context, name string) (memqlsync.Connector, bool) {
 		if name == c.name {
 			return c, true
 		}

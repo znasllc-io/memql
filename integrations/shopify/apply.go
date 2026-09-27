@@ -90,12 +90,6 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		c.logger.Warn("shopify: delivery for an unknown store", "source", req.Source, "topic", req.Topic)
 		return nil, nil
 	}
-	if !store.Ingests() {
-		// A paused store still STAGES -- the receiver recorded the
-		// delivery -- so a pause loses telemetry rather than events, and
-		// resuming does not need a backfill.
-		return nil, nil
-	}
 
 	topic := req.Topic
 	if topic == "" {
@@ -104,6 +98,13 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 	if isComplianceTopic(topic) {
 		return nil, c.enqueueComplianceJob(ctx, store, topic, req)
 	}
+	if !store.Ingests() {
+		// A paused store still STAGES -- the receiver recorded the
+		// delivery -- so a pause loses telemetry rather than events, and
+		// resuming does not need a backfill.
+		return nil, nil
+	}
+
 	enum := generated.TopicHeaderToEnum(topic)
 	if enum == generated.TopicBulkOperationsFinish {
 		return nil, c.onBulkOperationFinish(ctx, store, req)

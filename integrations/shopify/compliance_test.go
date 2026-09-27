@@ -57,11 +57,11 @@ func TestAComplianceDeliveryIsQueuedNotRunInline(t *testing.T) {
 }
 
 func TestTheHoldsAreTheRegulatedOnes(t *testing.T) {
-	store := Store{ID: testStoreID}
+	store := Store{ID: testStoreID, Domain: "acme-widgets.myshopify.com"}
 	received := time.Date(2026, 8, 23, 12, 0, 0, 0, time.UTC)
 
 	shop, err := parseComplianceJob(TopicShopRedact, store,
-		complianceDelivery(TopicShopRedact, map[string]any{"shop_domain": "x"}), received)
+		complianceDelivery(TopicShopRedact, map[string]any{"shop_domain": store.Domain}), received)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestTheHoldsAreTheRegulatedOnes(t *testing.T) {
 	}
 
 	redact, err := parseComplianceJob(TopicRedact, store,
-		complianceDelivery(TopicRedact, map[string]any{"customer": map[string]any{"id": 1}}), received)
+		complianceDelivery(TopicRedact, map[string]any{"shop_domain": store.Domain, "customer": map[string]any{"id": 1}}), received)
 	if err != nil {
 		t.Fatal(err)
 	}

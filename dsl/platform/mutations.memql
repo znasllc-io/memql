@@ -313,7 +313,7 @@ mutation outboundRequest updateOutboundRequestStatus {
 /// the source allowlist and signature check have passed; the signing secret is never part of the
 /// row. Idempotent by requestId: a redelivery preserves the product-owned handling state
 /// (@createOnly) instead of replaying it.
-@createOnly("status")
+@createOnly("status", "headersJson", "receivedAt")
 mutation inboundRequest stageInboundRequest {
   args {
     requestId          string!
@@ -321,12 +321,13 @@ mutation inboundRequest stageInboundRequest {
     medium             string!
     body               string!
     contentType        string
+    headersJson        string
     dedupeKey          string
     signatureVerified  bool
     receivedAt         string
   }
   insert {
-    accept { source, medium, body, contentType, dedupeKey, signatureVerified, receivedAt }
+    accept { source, medium, body, contentType, headersJson, dedupeKey, signatureVerified, receivedAt }
     stamp {
       id: args.requestId
       status: "received"
