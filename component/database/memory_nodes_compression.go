@@ -184,7 +184,12 @@ func ensureMemoryNodesCompression(ctx context.Context, db *bun.DB, logger *slog.
 			logger.Warn("MemoryNodes compression not enabled on this boot; the next boot tries again",
 				"table", memoryNodesTableName, "error", err)
 		case strings.HasPrefix(outcome, compressionBlockedPrefix):
-			logger.Warn("MemoryNodes compression is blocked: TimescaleDB refuses compression on a hypertable "+
+			// INFO, not WARN: this is the schema's standing state on every
+			// node's every boot until the trigger is redesigned, and nothing
+			// an operator does to this cluster changes it. A warning that
+			// fires forever and asks for nothing teaches people to ignore
+			// the ones that do. The status row keeps the record either way.
+			logger.Info("MemoryNodes compression is blocked: TimescaleDB refuses compression on a hypertable "+
 				"carrying a DELETE trigger with a transition table, so the 90-day policy the migrations intend "+
 				"cannot be enabled; nothing was changed (memql#5421)",
 				"table", memoryNodesTableName, "triggers", strings.TrimPrefix(outcome, compressionBlockedPrefix))
