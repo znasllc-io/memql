@@ -35,6 +35,13 @@ func (s *server) publishDiagnostics(notify glsp.NotifyFunc, uri protocol.Documen
 	s.publishMu.Lock()
 	text, ok := s.docs.get(uri)
 	if ok {
+		if !s.canLoadDocument(uri) {
+			// The build cannot load this document -- a rebuild failed, or the
+			// document left the tree -- so no pass will replace what an
+			// earlier build found, and carrying it would go on drawing
+			// refusals nothing is keeping true, fixed ones included.
+			s.loads.forget(uri)
+		}
 		s.publishLocked(notify, uri, text)
 	}
 	s.publishMu.Unlock()

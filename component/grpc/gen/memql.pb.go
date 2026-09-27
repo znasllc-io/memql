@@ -6682,9 +6682,12 @@ type SenseDiagnoseMsg struct {
 	// loaded, Diagnose also runs the engine's load over `source` and returns
 	// Lower's refusals (`lower_unknown_field`, ...) as errors carrying their
 	// rule code (memql#5434), which costs the load of the document's
-	// constructs. Optional: empty, or a path in no loaded domain, skips that
-	// pass, because without the path a name two domains declare would resolve
-	// wrongly and the refusals would be false.
+	// constructs. A stream runs one such pass at a time: a request that arrives
+	// while one runs waits behind it, and one displaced from that place by a
+	// newer request is answered with Diagnose's diagnostics alone. Optional:
+	// empty, or a path in no loaded domain, skips that pass, because without the
+	// path a name two domains declare would resolve wrongly and the refusals
+	// would be false.
 	FilePath      string `protobuf:"bytes,3,opt,name=file_path,json=filePath,proto3" json:"file_path,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

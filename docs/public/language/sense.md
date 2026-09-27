@@ -483,9 +483,14 @@ takes about 90 ms. So neither surface makes a keystroke wait on it:
   lines after it, and one on an edited line is dropped rather than drawn on the
   wrong text -- so a squiggle does not blink off at every pause in typing.
 - **The gRPC Diagnose** runs the pass when `SenseDiagnoseMsg.file_path` carries
-  the document's tree path, and replies once with both. A client diagnosing on
-  every keystroke may send no path and ask with it when the author pauses or
-  saves (`sdk/go/sense.Client.Diagnose` takes the path as its third argument).
+  the document's tree path, and replies once with both. A stream runs one pass
+  at a time: a request that arrives while one runs waits behind it, a newer one
+  takes its place, and the request it displaces is answered at once with
+  Diagnose's diagnostics and no load refusals -- the newer request's pass
+  answers for the document. The pass in flight and the one waiting stop when
+  the stream ends. A client diagnosing on every keystroke may send no path and
+  ask with it when the author pauses or saves (`sdk/go/sense.Client.Diagnose`
+  takes the path as its third argument).
 
 The offline build models the engine a node boots, storefront packs included
 (`packs/anchor`), so a product domain relating a concept to a pack's

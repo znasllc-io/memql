@@ -11,6 +11,7 @@ package memql
 // shows errors the load never makes.
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"sync"
@@ -102,7 +103,7 @@ func TestLowerRefusals_TwoDomainsOneName_NoFalseError(t *testing.T) {
 		if !strings.HasSuffix(path, ".memql") {
 			continue
 		}
-		if got := e.LowerRefusals(string(file.Data), path); len(got) != 0 {
+		if got := e.LowerRefusals(context.Background(), string(file.Data), path); len(got) != 0 {
 			t.Errorf("%s loads clean, yet the pass refused it: %+v", path, got)
 		}
 	}
@@ -120,7 +121,7 @@ query widget shiningBetaWidgets {
   filter row => row.shine == true
 }
 `
-	got := e.LowerRefusals(src, "beta/queries.memql")
+	got := e.LowerRefusals(context.Background(), src, "beta/queries.memql")
 	if len(got) != 1 {
 		t.Fatalf("want exactly one refusal of `row.shine` in beta, got %d: %+v", len(got), got)
 	}
@@ -142,7 +143,7 @@ query widget shiningBetaWidgets {
 		t.Errorf("the range covers %q, not the refused node", string([]rune(line)[d.Column-1:d.EndColumn-1]))
 	}
 
-	if got := e.LowerRefusals(src, "alpha/queries.memql"); len(got) != 0 {
+	if got := e.LowerRefusals(context.Background(), src, "alpha/queries.memql"); len(got) != 0 {
 		t.Errorf("in alpha the same text reads a field alpha's widget declares, so nothing is refused: %+v", got)
 	}
 }
@@ -164,12 +165,12 @@ concept gadget {
 /// Big gadgets.
 spec gadget isBig = row => row.size > 1
 `
-	if got := e.LowerRefusals(src, "gamma/gadgets.memql"); len(got) != 0 {
+	if got := e.LowerRefusals(context.Background(), src, "gamma/gadgets.memql"); len(got) != 0 {
 		t.Errorf("gamma's gadget declares size, so nothing is refused; a refusal here is the false error of a document placed in the wrong domain: %+v", got)
 	}
 	// Control: the same spec in alpha binds alpha's gadget, which has no size.
 	spec := "/// Big gadgets.\nspec gadget isBig = row => row.size > 1\n"
-	got := e.LowerRefusals(spec, "alpha/specs.memql")
+	got := e.LowerRefusals(context.Background(), spec, "alpha/specs.memql")
 	if len(got) != 1 || got[0].Code != LowerCodeUnknownField || !strings.Contains(got[0].Error, "v1:alpha:gadget") {
 		t.Errorf("control: in alpha the spec binds alpha's gadget and `row.size` is refused, got %+v", got)
 	}
@@ -191,11 +192,11 @@ query widget shiningBetaWidgets {
 		"_reference/queries.memql", // a directory no loader reads
 		"beta/notes.txt",           // not a .memql file
 	} {
-		if got := e.LowerRefusals(src, path); got != nil {
+		if got := e.LowerRefusals(context.Background(), src, path); got != nil {
 			t.Errorf("path %q places the document in no loaded domain, yet the pass answered: %+v", path, got)
 		}
 	}
-	if got := e.LowerRefusals(src, "beta/queries.memql"); len(got) != 1 {
+	if got := e.LowerRefusals(context.Background(), src, "beta/queries.memql"); len(got) != 1 {
 		t.Errorf("control: placed in beta, the same text must be refused once, got %+v", got)
 	}
 }
@@ -215,7 +216,7 @@ spec actorEnvelope isShiny = actor => actor.role == "admin"
 /// Widgets that shine.
 spec widget isShinyWidget = row => isShiny(row)
 `
-	got := e.LowerRefusals(src, "alpha/specs.memql")
+	got := e.LowerRefusals(context.Background(), src, "alpha/specs.memql")
 	if len(got) != 1 || got[0].Code != LowerCodeContextSpecOnRow {
 		t.Fatalf("want one %s on `isShiny(row)`, got %+v", LowerCodeContextSpecOnRow, got)
 	}
@@ -227,7 +228,7 @@ spec widget isShinyWidget = row => isShiny(row)
 	removed := `/// Widgets that shine.
 spec widget isShinyWidget = row => isShiny(row)
 `
-	got = e.LowerRefusals(removed, "alpha/specs.memql")
+	got = e.LowerRefusals(context.Background(), removed, "alpha/specs.memql")
 	if len(got) != 1 || got[0].Code != LowerCodeUnknownName {
 		t.Fatalf("isShiny was removed from its file, so applying it is %s; got %+v", LowerCodeUnknownName, got)
 	}
@@ -238,11 +239,11 @@ spec widget isShinyWidget = row => isShiny(row)
 func TestLowerRefusals_ValidatesTheTextGiven(t *testing.T) {
 	e := twoWidgetEngine(t)
 	broken := strings.Replace(string(twoWidgetDomains["beta/queries.memql"].Data), "row.weight > 2", "row.weigth > 2", 1)
-	got := e.LowerRefusals(broken, "beta/queries.memql")
+	got := e.LowerRefusals(context.Background(), broken, "beta/queries.memql")
 	if len(got) != 1 || got[0].Code != LowerCodeUnknownField {
 		t.Fatalf("the typo in the buffer must be refused, got %+v", got)
 	}
-	if got := e.LowerRefusals(string(twoWidgetDomains["beta/queries.memql"].Data), "beta/queries.memql"); len(got) != 0 {
+	if got := e.LowerRefusals(context.Background(), string(twoWidgetDomains["beta/queries.memql"].Data), "beta/queries.memql"); len(got) != 0 {
 		t.Errorf("the fixed buffer must be clean: %+v", got)
 	}
 }
@@ -256,7 +257,7 @@ func TestLowerRefusals_DisabledSpecBody(t *testing.T) {
 @disabled
 spec widget isLabelled = row => row.labell != ""
 `
-	got := e.LowerRefusals(src, "alpha/specs.memql")
+	got := e.LowerRefusals(context.Background(), src, "alpha/specs.memql")
 	if len(got) != 1 || got[0].Code != LowerCodeUnknownField {
 		t.Fatalf("want the disabled body's %s, got %+v", LowerCodeUnknownField, got)
 	}
@@ -282,7 +283,7 @@ query gadget noSuchConcept {
   filter row => row.label != ""
 }
 `
-	got := e.LowerRefusals(src, "beta/queries.memql")
+	got := e.LowerRefusals(context.Background(), src, "beta/queries.memql")
 	if len(got) != 1 {
 		t.Fatalf("Lower stops at a filter's first refusal, and the unresolved concept is not Lower's to report: want 1, got %+v", got)
 	}
@@ -304,8 +305,8 @@ func TestLowerRefusals_LeavesTheEngineAsItWas(t *testing.T) {
 /// Now a question about the caller.
 spec actorEnvelope isShiny = actor => actor.role == "admin"
 `
-	_ = e.LowerRefusals(src, "alpha/specs.memql")
-	_ = e.LowerRefusals("/// Changed.\nconcept widget {\n  /// Label.\n  label string @required\n}\n", "alpha/concepts.memql")
+	_ = e.LowerRefusals(context.Background(), src, "alpha/specs.memql")
+	_ = e.LowerRefusals(context.Background(), "/// Changed.\nconcept widget {\n  /// Label.\n  label string @required\n}\n", "alpha/concepts.memql")
 	after, err := e.specs.Get("alpha.isShiny")
 	if err != nil || after.Kind != spec.Kind || after.BoundName != spec.BoundName {
 		t.Errorf("the pass changed the engine's isShiny: before %s/%s, after %+v (%v)", spec.Kind, spec.BoundName, after, err)
@@ -327,7 +328,7 @@ query widget shiningBetaWidgets {
   filter row => row.shine == true
 }
 `
-	got := a.LoadDiagnostics(src, "beta/queries.memql")
+	got := a.LoadDiagnostics(context.Background(), src, "beta/queries.memql")
 	if len(got) != 1 {
 		t.Fatalf("want one diagnostic, got %+v", got)
 	}
@@ -343,7 +344,7 @@ query widget shiningBetaWidgets {
 /// Wrong parameter.
 spec actorEnvelope isAdminCaller = row => row.role == "admin"
 `
-	got = a.LoadDiagnostics(anchored, "alpha/specs.memql")
+	got = a.LoadDiagnostics(context.Background(), anchored, "alpha/specs.memql")
 	if len(got) != 1 {
 		t.Fatalf("want one diagnostic, got %+v", got)
 	}
@@ -385,7 +386,7 @@ query widget widgetById {
 `
 	const path = "beta/queries.memql"
 	fast := svc.Diagnose(src, path)
-	load := svc.DiagnoseLoad(src, path)
+	load := svc.DiagnoseLoad(context.Background(), src, path)
 	if len(load) != 1 || load[0].Code != LowerCodeUnknownName {
 		t.Fatalf("the load refuses the bare `id` and nothing else, got %+v", load)
 	}
@@ -418,4 +419,26 @@ query widget widgetById {
 // rangesMeet reports whether two Sense ranges share a line and overlap on it.
 func rangesMeet(a, b sense.Range) bool {
 	return a.Start.Line == b.Start.Line && a.Start.Column < b.End.Column && b.Start.Column < a.End.Column
+}
+
+// A cancelled pass answers nothing: its caller has gone (a closed stream) or
+// moved on, and a partial answer would read as a complete one.
+func TestLowerRefusals_StopsWithItsContext(t *testing.T) {
+	e := twoWidgetEngine(t)
+	src := `@unbounded("fixture")
+query widget shiningBetaWidgets {
+  filter row => row.shine == true
+}
+`
+	if got := e.LowerRefusals(context.Background(), src, "beta/queries.memql"); len(got) != 1 {
+		t.Fatalf("control: a live pass refuses `row.shine` once, got %+v", got)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := e.LowerRefusals(ctx, src, "beta/queries.memql"); got != nil {
+		t.Errorf("a cancelled pass must answer nothing, got %+v", got)
+	}
+	if got := sense.New(NewSenseAdapter(e)).DiagnoseLoad(ctx, src, "beta/queries.memql"); got != nil {
+		t.Errorf("Sense's DiagnoseLoad passes the cancellation on, got %+v", got)
+	}
 }
