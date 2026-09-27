@@ -317,6 +317,7 @@ cells/toolField/autoInjected/with-true.memql
 cells/toolField/autoInjected/written-bare.memql
 cells/toolField/default/a-string.memql
 cells/toolField/default/with-a-number.memql
+cells/toolField/default/with-a-word-on-an-integer-field.memql
 cells/toolField/description/a-string.memql
 cells/toolField/description/with-no-value.memql
 cells/toolField/enum/a-list-of-strings.memql
@@ -732,8 +733,17 @@ expr/stepArgument/open-or-listed.memql
 expr/stepArgument/optional-owner.memql
 expr/stepArgument/priority-band.memql
 expr/stepArgument/ticket-count.memql
+expr/toolDefault/a-boolean.memql
+expr/toolDefault/a-decimal-on-a-number-field.memql
+expr/toolDefault/a-decimal-on-an-integer-field.memql
 expr/toolDefault/a-number.memql
 expr/toolDefault/a-quoted-number.memql
+expr/toolDefault/a-value-of-the-enum.memql
+expr/toolDefault/a-value-outside-the-enum.memql
+expr/toolDefault/a-word-on-a-boolean-field.memql
+expr/toolDefault/a-word-on-a-number-field.memql
+expr/toolDefault/a-word-on-an-integer-field.memql
+expr/toolDefault/an-empty-default-on-an-integer-field.memql
 expr/toolDefault/default-and.memql
 expr/toolDefault/default-arithmetic.memql
 expr/toolDefault/default-coalesce.memql
