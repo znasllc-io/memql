@@ -792,11 +792,20 @@ export function Refine({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
+  // The last pointerdown React delivered THROUGH this subtree. A facet's
+  // `Select` draws its listbox through a portal on <body>, so by DOM
+  // containment one of its options is "elsewhere" while by the React tree it
+  // is ours -- and the DOM test used to collapse the panel on the pointerdown,
+  // unmounting the list before the click that would have committed the
+  // choice, which left every Select facet keyboard-only. The capture handler
+  // on the root sees the event either way; the document listener defers to it.
+  const pointerWithin = useRef<Event | null>(null);
   const hosted = useWindowSearchTarget(rootRef, () => { returnFocus.current = document.activeElement as HTMLElement; setOpen(true); rootRef.current?.querySelector("input")?.focus(); });
 
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (event: PointerEvent) => {
+      if (pointerWithin.current === event) return;
       if (rootRef.current && event.target instanceof Node && !rootRef.current.contains(event.target)) {
         setOpen(false);
       }
@@ -819,7 +828,7 @@ export function Refine({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="os-refine" role="group" aria-label={label} data-os-page-context={search || chips.length ? JSON.stringify({ search, filters: chips.map(chip => chip.label) }) : undefined}>
+    <div ref={rootRef} className="os-refine" role="group" aria-label={label} data-os-page-context={search || chips.length ? JSON.stringify({ search, filters: chips.map(chip => chip.label) }) : undefined} onPointerDownCapture={(event) => { pointerWithin.current = event.nativeEvent; }}>
       {chips.map((chip) => (
         <span key={chip.id} className="os-chip os-chip-editable" data-tone="accent">
           {chip.label}
