@@ -837,7 +837,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       - name: go test (path routing + CI-configuration guards)
@@ -884,16 +885,22 @@ jobs:
       RUN_GO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
       RUN_DSL: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
       RUN_PROTO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.proto == 'true' }}
-      # Only when the FULL suite is not already running. `go test ./...` under
-      # RUN_GO covers every gate package, so firing both would just run them
-      # twice (memql#2972).
-      RUN_GATES: ${{ github.event_name == 'pull_request' && needs.changes.outputs.ci != 'true' && needs.changes.outputs.go != 'true' && needs.changes.outputs.gates == 'true' }}
+      # Only when the planner is NOT running (memql#2972, memql#5484). Whenever
+      # it runs -- ci, go, dsl or proto -- go-tests and db-tests carry every
+      # gate package for any non-Go change (scripts/ci/selection adds them),
+      # so firing this step too would just run them twice. What remains is
+      # exactly the diff the planner never sees: docs, manifests, scripts.
+      RUN_GATES: ${{ github.event_name == 'pull_request' && needs.changes.outputs.ci != 'true' && needs.changes.outputs.go != 'true' && needs.changes.outputs.dsl != 'true' && needs.changes.outputs.proto != 'true' && needs.changes.outputs.gates == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      # THIS job is the shared Go cache's one writer: see the save step at the
+      # end, and .github/actions/go-cache for why there is exactly one.
+      - uses: ./.github/actions/go-cache
+        id: go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
 
@@ -1195,172 +1202,231 @@ jobs:
           fuzz ./test/conformance FuzzParse
           echo "SUCCESS: bounded fuzz completed with no new failing inputs"
 
-  # Test lane (memql#3161 / design D5.3c). Split out of go-checks so that lane's
-  # duration becomes max(test, build+vet+drift) rather than their sum: `go test`
-  # was 223s of go-checks' 364s and the drift checks (15s combined) sat behind
-  # it for no reason.
+      # THE SHARED GO CACHE'S ONE WRITER (memql#5482). Last, so what it saves
+      # holds the whole module's build and vet plus the fuzz-instrumented
+      # builds; only on a green push to main, so every pull request and every
+      # other lane restores a cache made from main, and nothing a pull request
+      # compiled is ever served to another. Skipped when the day's key already
+      # exists: a cache is immutable per key, and a second writer would only
+      # race the first. .github/actions/go-cache carries the reasoning and
+      # scripts/dev/go_cache_single_writer_test.go holds it.
+      - name: save the shared Go cache (push to main only)
+        if: ${{ success() && github.event_name == 'push' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.go-cache.outputs.paths }}
+          key: ${{ steps.go-cache.outputs.key }}
+
+  # THE PLANNER (epic memql#5476, #5484/#5485; design record
+  # docs/superpowers/specs/2026-09-16-pipelines-program-design.md, section 4,
+  # epic 1). One job decides, for every Go lane downstream of it, WHAT runs
+  # and HOW it is split:
   #
-  # BE PRECISE ABOUT WHAT THIS BUYS. It does NOT take time-to-green to ~3.5m.
-  # Every lane fans out in parallel from `changes`, and db-tests is 5.8m (audit
-  # section 5) -- so once this lane drops to ~4m, db-tests becomes the binding
-  # constraint at 0.1 + 5.8 + 0.1 = 6.0m. The design's "~3.5m" is the go-checks
-  # LANE figure, not the pipeline figure. Nothing in this epic shortens db-tests.
+  #   go-tests / db-tests  a JSON matrix of shards (go_matrix / db_matrix)
+  #   go-tests-tags        whether the seven node-tag passes run (tags)
+  #   module-boundaries    which modules to build and tidy with GOWORK=off
   #
-  # The intra-run warm GOCACHE from ce366821 is partly given up: `go build` in
-  # go-checks no longer warms this lane within the same run. Both lanes still
-  # restore GOCACHE through actions/setup-go's cache, so what is lost is the
-  # same-run warmth, not caching.
-  go-tests:
-    name: go-tests
-    timeout-minutes: 20
+  # `go run ./scripts/ci/affected plan` builds the import graph over the
+  # default build and every node tag, maps the pull request's changed files
+  # onto packages, closes over reverse test-binary dependencies, and places
+  # the result into budget classes and shards from scripts/ci/shard-timings.tsv.
+  # Every decision lives in scripts/ci/selection and is tested on a recorded
+  # graph fixture; the job summary prints the plan.
+  #
+  # ONLY A PULL REQUEST IS NARROWED. push and merge_group plan everything, so
+  # the merge queue still runs the full suite once on the exact tree that
+  # lands (design D1). A pull request whose change the planner cannot reason
+  # about -- a go.mod or go.sum, anything under .github/, the Makefile, the
+  # selector itself, an unreadable diff -- plans everything too. The planner
+  # REFUSES (and this job, and so ci-required, goes red) only when no plan can
+  # be trusted: a graph or a full lane under its floor, or a disagreement with
+  # scripts/ci/db-gated-packages.sh about which packages are db-gated.
+  #
+  # BE EXACT ABOUT WHAT NARROWING BUYS HERE, because it is less than the
+  # design record projected. Prototyped over the 25 pull requests merged
+  # before this landed: 11 were full runs anyway, and every heavy package
+  # (component/memql 496s, cmd/memqllint 446s, cmd/memql-lsp 346s,
+  # test/conformance 283s, the root 111s) was affected by all 14 others,
+  # because they sit downstream of nearly everything. SHARDING is where the
+  # time comes back; narrowing mostly skips the long tail. docs/internal/ops/
+  # ci-design.md D6 records the numbers.
+  plan:
+    name: plan
+    timeout-minutes: 10
     needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' || needs.changes.outputs.proto == 'true' }}
     runs-on: ubuntu-latest
-    env:
-      RUN_GO: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' }}
-      RUN_DSL: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      go_matrix: ${{ steps.plan.outputs.go_matrix }}
+      go_count: ${{ steps.plan.outputs.go_count }}
+      db_matrix: ${{ steps.plan.outputs.db_matrix }}
+      db_count: ${{ steps.plan.outputs.db_count }}
+      tags: ${{ steps.plan.outputs.tags }}
+      modules: ${{ steps.plan.outputs.modules }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A pull request's checkout is the merge commit; depth 2 brings its
+          # first parent, the base, so `base...HEAD` needs no further fetch.
+          fetch-depth: 2
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false # the shared cache below replaces it (memql#5482)
+      # `go list` resolves every dependency to build the graph, so it needs
+      # the module cache the shared cache carries.
+      - uses: ./.github/actions/go-cache
+      # component/identity/web embeds static/app.css by name; `go list`
+      # reports the missing file as a package error, which the planner
+      # refuses rather than planning over a broken load.
+      - uses: ./.github/actions/identity-css
+      - name: plan the Go lanes
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          # The packages whose tests read repository files by PATH, which no
+          # import graph can see: added to the plan for any non-Go change.
+          # The SAME list as go-checks' gate-inputs step, held to it by
+          # scripts/dev/gate_inputs_lane_scope_test.go.
+          GATE_PACKAGES: ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+          # The trees whose packages the node-tag passes test. A selected
+          # package under one of them (or a changed file only a node tag
+          # compiles) runs the tag passes; scripts/ci/selection's live test
+          # holds every go-tests-tags package to being reached through one.
+          TAG_TREES: app component/node component/server
+          # THE BUDGET CLASSES. A shard never mixes classes: `go test -timeout`
+          # applies to every package of one invocation, so a shard holding
+          # component/memql and the fast db packages would hand the fast ones
+          # the slow one's budget. The numbers are the per-package budgets the
+          # unsharded lanes carried, unchanged -- see the go-tests and db-tests
+          # jobs below for where each came from. Never raise one to make a
+          # red lane green; split by concern.
+          CLASSES: |
+            # lane  class     trees               timeout  mode      shards
+            go      root      .                   300s     uncached  1
+            go      default   -                   600s     -         3
+            db      memql     component/memql     600s     serial    2
+            db      packages  component/packages  300s     -         1
+            db      default   -                   180s     -         2
+        run: >-
+          go run ./scripts/ci/affected plan
+          --event="$EVENT" --base="$BASE_SHA"
+          --classes="$CLASSES" --timings=scripts/ci/shard-timings.tsv
+          --gate-packages="$GATE_PACKAGES" --tag-trees="$TAG_TREES"
+          --github-output="$GITHUB_OUTPUT" --summary="$GITHUB_STEP_SUMMARY"
+
+  # The untagged Go suite, sharded (memql#5485). Every package NOT under a
+  # db-gated tree -- db-tests owns those whole (memql#3160) -- spread over the
+  # planner's shards, balanced on the measured seconds in
+  # scripts/ci/shard-timings.tsv. A package the table does not know yet runs
+  # in the lightest shard of its class. ci-required needs this job, and a
+  # matrix job's result is every shard's: one red shard reds the lane.
+  #
+  # THE ROOT PACKAGE RUNS ALONE AND UNCACHED (memql#3162). Seven gates there
+  # sweep `git ls-files` and read what it returns; Go's cache records the files
+  # a test OPENS but not the SET a subprocess returned, so a newly added `.md`
+  # leaves the cache key unchanged and the gate reports a stale green over a
+  # file it never read. Its class carries `uncached`, which is what puts
+  # -count=1 on its command line and on no other shard's.
+  #
+  # THE PER-PACKAGE TIMEOUT IS 600s (epic memql#4794), measured rather than
+  # preferred: cmd/memql-lsp ran at 209s and 245s of an earlier 300s. If a
+  # package approaches 600s, make it cheaper; do not raise the budget, and
+  # never partition one package by -run -- a test matching no shard's pattern
+  # silently never runs.
+  #
+  # An empty matrix is an ERROR, not a skip: on a pull request that selected
+  # nothing for this lane the `if:` skips the job; on push and merge_group the
+  # `if:` is unconditional, so a planner that emitted nothing there fails the
+  # run instead of reporting green over no tests.
+  go-tests:
+    name: go-tests (${{ matrix.name }})
+    timeout-minutes: 30
+    needs: [changes, plan]
+    if: ${{ github.event_name != 'pull_request' || needs.plan.outputs.go_count != '0' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.go_matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
-      # Runs the COMPLEMENT of the db-gated trees, not `./...` (memql#3160 /
-      # design D5.3b). Those six trees carry 543+ test files that db-tests owns
-      # and re-runs in full, so testing them here compiled and executed the same
-      # files twice on every PR. Their non-DB tests are not lost: db-tests runs
-      # the whole package, not just the gated cases.
-      #
-      # The set is canonical in scripts/ci/db-gated-packages.sh; db-tests keeps
-      # literal arguments because scripts/cidb/dbgate_test.go derives its
-      # selector from them. The two cannot drift -- scripts/ci asserts they are
-      # identical.
-      # The root package KEEPS -count=1 (memql#3162). Seven gates there sweep
-      # `git ls-files` and read what it returns; Go's cache records the files a
-      # test OPENS but not the SET a subprocess returned, so a newly added `.md`
-      # leaves the cache key unchanged and the gate reports a stale green over a
-      # file it never read -- the memql#2972 fail-open, reopened by caching.
-      - name: go test (root package, deliberately uncached -- sweeps git ls-files)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -count=1 -timeout=300s .
-      # Everything else drops -count=1 so the Go test cache actually works
-      # (memql#3162 / design D5.3a). actions/setup-go already restores GOCACHE,
-      # where Go stores test results -- the cache was being populated on every
-      # run and then explicitly ignored. Open item O1 resolved this as original
-      # boilerplate: it entered in the first CI commit (98667d60) with no
-      # rationale recorded, and the one commit that reasons about it (5be808a1)
-      # documents it MASKING a defect CI "would never have caught (fresh
-      # container, -count=1)".
-      #
-      # The package list is captured into a variable BEFORE `go test` sees it,
-      # and that is load-bearing (memql#3165). Inlined as
-      # `go test $(script)`, a script that exits non-zero does NOT fail the
-      # step: `bash -e` does not abort on a command substitution inside an
-      # argument list, so `go test` runs with NO package arguments, tests the
-      # current directory, and exits 0. A broken selector would report a green
-      # lane over 169 untested packages -- the memql#2972 fail-open shape. As
-      # an assignment, the substitution's exit status IS the statement's, so
-      # `bash -e` aborts and the lane goes red. The empty check covers the
-      # other half: a script that exits 0 with no output.
-      # THE PER-PACKAGE TIMEOUT IS 600s, RAISED FROM 300s (epic memql#4794),
-      # and the reason is a measurement rather than a preference.
-      #
-      # `-timeout` is per PACKAGE, and cmd/memql-lsp was already running at
-      # 209s and 245s of the 300s budget on green main runs -- 70% and 82%.
-      # That is not a margin: it makes every lane red a coin flip on runner
-      # speed, and it makes the NEXT change to the DSL tree the one that gets
-      # blamed. The packages epic added ~30 constructs, which grows every tree
-      # load that package makes, and tipped it -- twice, with a pass in
-      # between, which is the signature of a budget sitting at its limit rather
-      # than of a hang.
-      #
-      # 600s is 2.4x the worst observed rather than a round number pulled from
-      # nowhere. It does not hide a genuinely hung test: the JOB carries
-      # `timeout-minutes: 20` above, so a deadlock still fails the lane -- this
-      # only stops a SLOW package being reported as a hung one.
-      #
-      # If a package ever approaches 600s, the answer is to make it cheaper
-      # rather than to raise this again. cmd/memql-lsp is slow because most of
-      # its cases build a full engine from the embedded DSL tree.
-      - name: go test (excluding the db-gated trees db-tests owns)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: |
-          pkgs="$(scripts/ci/db-gated-packages.sh --complement-cacheable)"
-          test -n "$pkgs" || { echo "::error::db-gated-packages.sh produced an empty package list"; exit 1; }
-          go test -timeout=600s $pkgs
-      # Build-tagged test lanes (#1338, #2903). The untagged `go test ./...`
-      # above never RUNS a //go:build-tagged test file, so a tagged suite is
-      # CI-invisible without an explicit -tags run.
-      #
-      # This used to carry a hand-maintained audit of which tags have test
-      # files and which lane covers each. It drifted on FOUR tags at once (mcp
-      # omitted entirely with three files; three more covered by a closing "no
-      # other build tag carries test files today" that was false of each),
-      # which is how three mcp-tagged suites went their whole life without
-      # executing -- including the file the #2888 vulnerability lives in.
-      #
-      # The audit is now EXECUTABLE: scripts/citags reads the tags actually
-      # present on *_test.go files and the `go test -tags ...` invocations
-      # actually present in this directory, and fails the untagged lane when
-      # they disagree. Add a tagged suite without a lane and CI goes red with
-      # the file list. Do not reintroduce a prose audit here; a second
-      # hand-maintained copy is the defect that gate exists to prevent.
-      #
-      # WHAT THAT AUDIT CANNOT SEE, and why ./component/node/ is on every lane
-      # below (memql#5115): it scores TAGGED TEST FILES. component/node has
-      # none -- every test there is untagged -- but its SUBJECT is tag-selected
-      # (`compiled_<type>.go` sets what the binary reports itself as), so the
-      # same untagged test file means a different thing under each tag. Running
-      # it untagged answers for exactly one of the seven. Four of the other six
-      # failed it from the day the file was written, and nothing was red,
-      # because no lane named the package. An untagged test over tag-selected
-      # code is invisible to a tag audit by construction; the fix is to run the
-      # package under every tag, which is cheap and is what these lanes now do.
-      #
-      # These lanes are CGO-free, so they ride the warm go-checks cache.
-      # ./app/ joined the list in epic memql#5396: the app-session content
-      # store -- the Library half of the recording -- is agent-tagged and its
-      # tests are the only place the content-addressing property is measured.
-      # Without it here they compile in no lane and assert nothing on any PR,
-      # which scripts/citags refuses by name.
-      - name: go test -tags agent (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags agent -timeout=300s ./app/ ./integrations/agent/ ./integrations/agent/worker/ ./component/node/
-      # RUN_GO or RUN_DSL: component/mcp/real_engine_surface_test.go pins DSL
-      # contracts (e.g. @mcp on readyHarnessStep), so a DSL-only change can red
-      # this lane. Mirrors the engine-load-check step's gating.
-      - name: go test -tags mcp (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' || env.RUN_DSL == 'true' }}
-        run: go test -tags mcp -timeout=300s ./app/ ./component/mcp/ ./component/node/
-      - name: go test -tags identity (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags identity -timeout=300s ./app/ ./component/node/
-      - name: go test -tags edge (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags edge -timeout=300s ./app/ ./component/server/ ./component/node/
-      # POST /sites/{id}/bundles (memql#3713): app/transport_sites_test.go is
-      # //go:build bff and would otherwise never execute -- the exact defect
-      # this audit exists to catch, caught against this PR before merge
-      # rather than after.
-      - name: go test -tags bff (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags bff -timeout=300s ./app/ ./component/server/ ./component/node/
-      # planner and workbench were the two node tags with NO test lane at all
-      # (memql#5003). build-node-tags COMPILES both, and scripts/citags would
-      # have gone red the moment somebody added a tagged test under either --
-      # so the gap was reported, not silent. But "reported" means a red build
-      # and a CI edit landing on whoever writes that test, which is the worst
-      # moment to ask for one. Both lanes pass today, so they exist now and the
-      # test can just be written. cognition was the third tag named in that
-      # issue and is not here: it went with epic memql#4988.
-      - name: go test -tags planner (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags planner -timeout=300s ./app/ ./component/node/
-      - name: go test -tags workbench (build-tagged suites)
-        if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags workbench -timeout=300s ./app/ ./component/node/
+      - name: go test (${{ matrix.name }})
+        run: go test ${{ matrix.uncached && '-count=1' || '' }} -p=${{ matrix.parallel }} -timeout=${{ matrix.timeout }} ${{ matrix.packages }}
+
+  # Build-tagged test lanes (#1338, #2903; a matrix since memql#5483). The
+  # untagged go-tests never RUNS a //go:build-tagged test file, so a tagged
+  # suite is CI-invisible without an explicit -tags run. Seven entries, one per
+  # node type, in parallel -- they used to run serially inside go-tests and
+  # rebuild app and component/node seven times on its critical path.
+  #
+  # The audit is EXECUTABLE, not prose: scripts/citags reads the tags actually
+  # present on *_test.go files and the `go test -tags ...` runs actually here
+  # -- expanding this matrix's entries -- and fails the build when they
+  # disagree. scripts/ci/node_type_lists_test.go holds the tag list to the
+  # node types (app/build_<type>.go), so a retired or added node type cannot
+  # leave this matrix behind.
+  #
+  # WHY ./component/node/ IS IN EVERY ENTRY (memql#5115): its tests are
+  # untagged, but their SUBJECT is tag-selected (`compiled_<type>.go` sets what
+  # the binary reports itself as), so the same test means a different thing
+  # under each tag, and a tag audit cannot see that by construction. ./app/
+  # is in every entry for the same reason and because the agent-tagged
+  # app-session content store (epic memql#5396) is tested nowhere else.
+  #
+  # GATED ON THE PLANNER on a pull request (memql#5483): the passes run when
+  # the change reaches a package under app/, component/node/ or
+  # component/server/ -- which, over the union import graph, is every package
+  # an entry below tests -- or touches a file only a node tag compiles.
+  go-tests-tags:
+    name: go-tests -tags ${{ matrix.tag }}
+    timeout-minutes: 15
+    needs: [changes, plan]
+    if: ${{ github.event_name != 'pull_request' || needs.plan.outputs.tags == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tag: agent
+            packages: ./app/ ./integrations/agent/ ./integrations/agent/worker/ ./component/node/
+          # POST /sites/{id}/bundles (memql#3713): app/transport_sites_test.go
+          # is //go:build bff.
+          - tag: bff
+            packages: ./app/ ./component/server/ ./component/node/
+          - tag: edge
+            packages: ./app/ ./component/server/ ./component/node/
+          - tag: identity
+            packages: ./app/ ./component/node/
+          # component/mcp/real_engine_surface_test.go pins DSL contracts, so a
+          # DSL-only change reaches this entry through the dsl package.
+          - tag: mcp
+            packages: ./app/ ./component/mcp/ ./component/node/
+          # planner and workbench have no tagged test file yet (memql#5003);
+          # their entries exist so one can simply be written.
+          - tag: planner
+            packages: ./app/ ./component/node/
+          - tag: workbench
+            packages: ./app/ ./component/node/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
+      # component/identity/web embeds static/app.css by name; generate it.
+      - uses: ./.github/actions/identity-css
+      - name: go test -tags ${{ matrix.tag }} (build-tagged suites)
+        run: go test -tags ${{ matrix.tag }} -timeout=300s ${{ matrix.packages }}
 
   # Node-tag compile lane (#1584). go-checks builds/tests with the DEFAULT
   # build tags, so a file gated behind a node build tag
@@ -1388,7 +1454,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       - name: go build -tags ${{ matrix.tag }}
@@ -1422,7 +1489,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       # Needed here since memql#4302, when the cross-replica magic-link gate
       # started importing that package -- vet fails with "pattern
@@ -1447,6 +1515,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
+          # npm's download cache, keyed on the lockfiles this lane installs
+          # (memql#5482): an unchanged lockfile installs from the runner
+          # instead of the registry.
+          cache: npm
+          cache-dependency-path: |
+            sdk/ts/package-lock.json
       # Retried (memql#3166 / design D4.3): dependency install is a network op.
       # The typecheck and test steps below are deliberately NOT retried --
       # retrying a test is how a flake becomes invisible.
@@ -1470,6 +1544,12 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
+          # npm's download cache, keyed on the lockfiles this lane installs
+          # (memql#5482): an unchanged lockfile installs from the runner
+          # instead of the registry.
+          cache: npm
+          cache-dependency-path: |
+            sdk/ts-viewkit/package-lock.json
       - name: install
         run: scripts/ci/retry.sh -- make viewkit-install
       - name: typecheck
@@ -1502,6 +1582,13 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '22'
+          # npm's download cache, keyed on the lockfiles this lane installs
+          # (memql#5482): an unchanged lockfile installs from the runner
+          # instead of the registry.
+          cache: npm
+          cache-dependency-path: |
+            clients/os/package-lock.json
+            sdk/ts/package-lock.json
       # Retried (memql#3166 / design D4.3): dependency install is a network
       # op. The three steps below are deliberately NOT retried -- retrying a
       # test is how a flake becomes invisible.
@@ -1605,7 +1692,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       # Create the extensions the migrations expect (mirrors docker/init-db.sql,
@@ -1657,29 +1745,41 @@ jobs:
   # the rules, and the gate's own output when it fails. memql#3030 tightened it
   # from LOGGING uncovered packages to FAILING on them.
   #
-  # The packages below run as PARALLEL processes against this ONE shared DB, so
-  # each must migrate the schema through a TestMain calling dbtest.EnsureSchema
-  # (a cross-process advisory lock serializes it); otherwise the suites race on
-  # a half-created schema and fail with `relation "MemoryNodes" does not exist`
-  # (memql#2551). A new db-gated package needs both an entry below AND that
-  # TestMain -- and adding the TestMain without the entry now fails the gate.
+  # THE SELECTOR IS THE PLANNER'S (memql#5485). The job runs as a matrix of
+  # shards over `needs.plan.outputs.db_matrix`, so the step carries no literal
+  # package list: the set is scripts/ci/db-gated-packages.sh's DB_GATED_TREES,
+  # which the planner reads and partitions, and scripts/cidb derives its
+  # coverage assertions from that same script when the step takes
+  # `${{matrix.packages}}` -- refusing a step that mixes literals in. Each
+  # shard starts its OWN Postgres service.
+  #
+  # Within a shard the packages still run as PARALLEL processes against that
+  # shard's one database, so each must migrate the schema through a TestMain
+  # calling dbtest.EnsureSchema (a cross-process advisory lock serializes it);
+  # otherwise the suites race on a half-created schema and fail with
+  # `relation "MemoryNodes" does not exist` (memql#2551). A new db-gated
+  # package needs both its tree in DB_GATED_TREES AND that TestMain -- and
+  # adding the TestMain without the tree fails the gate.
   db-tests:
-    name: db-tests
-    # 40, not the 20 the 2026-08-06 audit sized against a 5.8-minute lane. The
-    # lane's measured median is now 19.4 min (13 successful runs on main and
-    # PRs, 2026-09-13, spread 15.3-19.9 by runner), and two runs -- one of them
-    # a push to main -- were cancelled AT 20 having never failed a test.
-    # scripts/ci/workflow_timeout_test.go holds every timeout to at least 2x
-    # its lane's median, because a cap that cancels a healthy run turns a slow
-    # runner into a red required check; the median it checks is recorded there.
-    # This bounds a HANG. The per-step go test budgets below are what bound the
-    # tests, and they are unchanged.
+    name: db-tests (${{ matrix.name }})
+    # 40, not the 20 the 2026-08-06 audit sized against a 5.8-minute lane: the
+    # unsharded lane's measured median was 19.4 min (13 successful runs on main
+    # and PRs, 2026-09-13, spread 15.3-19.9 by runner), and two runs -- one of
+    # them a push to main -- were cancelled AT 20 having never failed a test.
+    # scripts/ci/workflow_timeout_test.go holds every timeout to at least 2x its
+    # lane's RECORDED median, which is still that unsharded one; each shard is
+    # far shorter, so move the median (and then this cap) only once a week of
+    # sharded runs has measured it. This bounds a HANG. The per-package budgets
+    # in the planner's class table bound the tests, and they are unchanged.
     timeout-minutes: 40
-    needs: changes
-    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.dsl == 'true' }}
+    needs: [changes, plan]
+    if: ${{ github.event_name != 'pull_request' || needs.plan.outputs.db_count != '0' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.db_matrix) }}
     services:
-      # Same image the dev cluster + conformance use; bundles
+      # One per shard. Same image the dev cluster + conformance use; bundles
       # TimescaleDB + pgvector so the memory-nodes migrations (hypertable +
       # vector) apply. GHCR mirror, pinned by digest -- see the note on the
       # mcp-conformance service above (memql#2793).
@@ -1722,7 +1822,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       # Create the extensions the migrations expect (mirrors docker/init-db.sql,
@@ -1739,295 +1840,44 @@ jobs:
           CREATE EXTENSION IF NOT EXISTS "pgcrypto";
           CREATE EXTENSION IF NOT EXISTS vector;
           SQL
-      # NOTHING GOT SLOW. memql#3257 asked what added the time between the last
-      # green run and the first red one, and the answer, measured against a real
-      # Postgres across exactly that boundary, is nothing:
+      # THE BUDGETS ARE THE CLASS TABLE'S, AND THEIR HISTORY IS WHY THEY ARE NOT
+      # RAISED. component/memql runs serialised (-p=1) with its own 600s; the
+      # deploy pipeline (component/packages) has 300s; every other db-gated
+      # package 180s -- the numbers the unsharded lane's three steps carried,
+      # moved into the planner's `CLASSES` so a shard never mixes them. The
+      # measured record behind each (memql#3257, #4075, #4569, #4885) is in this
+      # file's history; three rules survive it and still govern:
       #
-      #   8b8db012 (last green)   component/memql  133.9s
-      #   c650da97 (first red)    component/memql  123.6s
+      #   1. A budget is a tripwire, not a target. When a package approaches
+      #      its budget, SPLIT IT BY CONCERN -- the way memql#4075 split
+      #      engine-mutating tests from engine-borrowing ones and memql#4756
+      #      moved per-test engine boots to one per file -- and never raise it.
+      #      Every recorded breach blamed an author who was not the cause,
+      #      because a budget with no headroom goes red on SOME run whatever
+      #      anyone commits.
+      #   2. Never partition one package by -run. A test function matching no
+      #      shard's pattern does not fail: it silently never runs, forever,
+      #      while every shard stays green. Shards here split PACKAGES only.
+      #   3. The next candidates to split in component/memql, measured:
+      #      lint_parity_test.go (14.2s / 10 tests), staged_write_test.go
+      #      (14.5s / 6), build_offline_sense_test.go (10.4s / 4),
+      #      contract_gates_3629_test.go (10.3s / 3). A file whose tests all
+      #      mount the SAME fixture can share one engine, but only under a
+      #      parent test -- a package-level sync.Once cannot, because those
+      #      mounts restore the process-wide concept registry through t.Cleanup.
       #
-      # It got ~10s FASTER. The suspected commits (concept_parser.go +211 and
-      # ten dsl/*/concepts.memql, memql#3196 / #3197 / #3198) cost nothing
-      # measurable. Nor is CI's 2.4x over local a contention artefact: pinned to
-      # two cores with GOMAXPROCS=2, mirroring this runner, the package still
-      # finishes in 120.3s. It is simply slower here -- a hosted runner's cores
-      # and its Postgres round-trips.
-      #
-      # What actually happened is that the budget was a coin flip. Two runs of
-      # IDENTICAL code, four minutes apart:
-      #
-      #   run 31206771705   290s
-      #   run 31210413414   310s
-      #
-      # ~7% run-to-run variance against a 300s budget the package was already
-      # consuming ~295s of. There was under 10s of headroom, so it was going to
-      # go red on SOME run no matter what anyone committed -- and when it did,
-      # the panic named whichever 1-second test held the clock, which reads as a
-      # flake in an unrelated test rather than as a budget. The author blamed is
-      # never the cause, because there is no cause to find.
-      #
-      # So the fix is the lane's SHAPE, which is what memql#3257 asked for
-      # second and is the half that generalises:
-      #
-      #   1. SPLIT THE STEP. component/memql gets its own budget, named as its
-      #      own. The other five need seconds, so they get a tight one -- a hang
-      #      in any of them now surfaces in ~2 minutes instead of taking the
-      #      slow package's 10. Previously one number covered all six, sized for
-      #      the worst, which made the other five's timeout meaningless.
-      #
-      #   2. REPORT HEADROOM. "How much room is left" required a bisect against
-      #      a live database to answer; memql#3257 called that out as its own
-      #      problem, and it was the reason nobody saw the cliff coming. Each
-      #      step now prints elapsed against budget, so the answer is in the log
-      #      of every run.
-      #
-      #   3. WARN BEFORE THE CLIFF, don't just fail at it. Crossing
-      #      DB_HEADROOM_WARN_PCT annotates the run. A warning is deliberate
-      #      rather than a failure: a slow runner is not a broken PR, and
-      #      failing on it would hand the next author exactly the unearned blame
-      #      this comment exists to explain. It is the advance notice that was
-      #      missing.
-      #
-      # Do NOT raise a budget in response to a warning. The warning means the
-      # package is growing into its budget, and the answer is to split the
-      # package by concern -- the way memql#4075 split engine-MUTATING tests
-      # (private boot) from engine-BORROWING ones (one shared engine) when a
-      # full engine boot per db-gated test, the cost driver of both breaches
-      # recorded here, had eaten this budget twice.
-      #
-      # THE 600s BUDGET WAS BREACHED, NOT WARNED ABOUT (memql#4075). On
-      # 2026-08-17 a green run on main printed `used 628s of its 600s budget`
-      # -- step time including compile, i.e. the test binary finishing at
-      # ~595-599s of exactly 600 -- and the next PR (#4074, touching no Go this
-      # lane compiles) drew two slow runners in a row and panicked at 10m both
-      # times, each panic naming whichever 1-second test held the clock. That
-      # is memql#3257's signature repeating at the doubled number: no headroom
-      # means it goes red on SOME run no matter what anyone committed, and the
-      # author blamed is never the cause. So 600 -> 900 is the recorded BRIDGE,
-      # not a burial of the rule above: the warn machinery needs headroom to
-      # exist before it can warn, and the split (memql#4075) remains the fix
-      # for the cost itself.
-      #
-      # THE BRIDGE IS RETIRED: memql#4075 landed that split. 83 of the 103
-      # per-test engine boots (~2.1s each, ~216s of identical boots) now
-      # borrow ONE package-shared engine (sharedReadMergeEngine in
-      # component/memql/executor_mutation_readmerge_db_test.go); only
-      # engine-MUTATING tests still boot privately. Measured on the machine
-      # and database that measured 504.7s before the split, the same
-      # `go test -count=1 ./component/memql/...` runs in ~322s after it --
-      # so the 600s budget below is RESTORED with real headroom, not
-      # re-bridged.
-      #
-      # THE BRIDGE IS BACK, AND THE HEADROOM IT WAS RESTORED WITH IS SPENT
-      # (2026-08-25). The package has grown from the ~322s that justified the
-      # restore to 594.969s, and the two numbers that show it come from ONE
-      # commit run twice: PR memql#4562 reported
-      # `ok github.com/znasllc-io/memql/component/memql 594.969s` and passed;
-      # the same tree on main reported 600.460s and panicked. Five seconds of
-      # variance, on either side of the line. Nothing in that diff touches
-      # this package -- it depends on the change only through two new scalar
-      # fields on one generated proto message -- so the author blamed was not
-      # the cause, which is memql#3257's signature for the third time.
-      #
-      # 600 -> 900 again, and again as a BRIDGE. The rule above stands: the
-      # fix for the cost is to split by CONCERN, and that is memql#4569. This
-      # buys the headroom the warn machinery needs to exist before it can
-      # warn, which is the same reason the first bridge was taken.
-      #
-      # WHAT THE COST ACTUALLY IS, MEASURED (memql#4569). The issue asked for
-      # the ~270s of new growth to be FOUND before a fourth bridge, and it has
-      # been. Against the pinned CI database image, `go test -count=1 -v`:
-      #
-      #   1974 top-level tests                     268.3s
-      #     119 tests at >= 1.0s                   215.4s   (80% of the package)
-      #     102 of them in the 1-2s band           164.1s   (61% of the package)
-      #     1745 tests at < 0.1s                    10.2s   ( 4% of the package)
-      #
-      #   BenchmarkDblessEngineInit                  1.428s/op
-      #   LoadUnifiedConcepts alone                  0.025s/op
-      #
-      # So the 1-2s band IS one operation, once per test: the DB-LESS engine
-      # boot -- LoadUnifiedConcepts + New(nil) + Init -- for a test that only
-      # wants to ASK the engine something. It is not the tree parse (25ms), and
-      # it is not any single slow test (the worst is 7.3s).
-      #
-      # THAT IS memql#4075's FINDING IN THE HALF IT DID NOT COVER. #4075 moved
-      # the DB-GATED boots onto sharedReadMergeEngine; the db-less ones kept
-      # booting privately, and there are now about a hundred of them. The same
-      # remedy applies and is now in the tree: sharedDblessEngine
-      # (component/memql/shared_dbless_engine_test.go), with
-      # TestSharedDblessEngine_SharesOneBoot asserting the sharing as a COUNT
-      # rather than as wall time -- a regression measured in duration only goes
-      # red months later, which is this issue's own shape three times over.
-      #
-      # EIGHT HELPERS MIGRATED SO FAR, and the effect is measured rather than
-      # projected: 268.3s -> 235.9s on the same machine and database, -12%.
-      # The remaining ~90 sites are mechanical and are the rest of the saving;
-      # they are per-test inline boots rather than shared helpers, which is why
-      # they are a follow-on rather than one sweep.
-      #
-      # THE BRIDGE IS RETIRED (2026-08-31, memql#4569), AFTER THE SPLIT THAT
-      # EARNED IT. This paragraph replaces one that argued for keeping it; both
-      # readings are kept below because the second only makes sense against the
-      # first.
-      #
-      # WHAT WAS TRIED AND WITHDRAWN. The retirement condition was "a CI run
-      # reports the package comfortably under 600s". One did -- 472.018s -- and
-      # 600 was restored on it. Every subsequent run of the same lane, on diffs
-      # containing nothing but a comment, came in higher:
-      #
-      #   472.018s   482.423s   532.794s   539.025s      (before the split)
-      #   range 67.0s; max/min 1.142
-      #
-      # 539.025s leaves 10.2% under 600, less than that spread, so the restore
-      # was withdrawn. The error was not the number; it was reasoning from ONE
-      # sample as though it were the mean, when it was the best case.
-      #
-      # WHAT CHANGED: THE SPLIT, NOT THE RUNNER. component/memql's fixture-
-      # mounting test files booted one engine PER TEST over the same fixture --
-      # eleven identical boots in one file. They now boot once per file, under a
-      # parent test whose cleanup keeps the isolation the per-test mounts
-      # provided. Local: 233.909s -> 191.454s, -18.2%, full suite green, no test
-      # removed (25 became subtests keeping their own names).
-      #
-      # MEASURED ON CI, THREE TIMES, ON THE NEW TREE:
-      #
-      #   425.940s   (PR memql#4756)
-      #   419.276s   (main, post-merge)
-      #   420.878s   (PR memql#4757 -- the first run under this 600s ceiling)
-      #
-      # range 6.7s, 1.6% -- against 14.2% before the split. The spread did not
-      # merely shift down, it COLLAPSED, which is itself evidence about where
-      # the variance was coming from: the per-test engine boots. Fewer boots,
-      # less to vary.
-      #
-      # THE DECISION RULE, stated so it can be checked rather than trusted.
-      # Three tight samples still do not bound a distribution -- that is the
-      # lesson above, and 1.6% over three runs is exactly what 472/482 looked
-      # like before 539 arrived. So the bound does NOT come from these samples.
-      # It comes from the OLD regime's worst observed spread (max/min 1.142)
-      # applied to the NEW regime's minimum, i.e. assuming every sample so far
-      # sits at the bottom of the range:
-      #
-      #   419.276s x 1.142 = 478.8s worst case, 20.2% under 600
-      #
-      # And for 600 to be breached at all, the package would have to reach
-      # 419.276 x 1.431 -- a 43% swing, where the largest ever seen on this lane
-      # is 14.2%. That is three times the worst spread on record, which is the
-      # margin the previous restore did not have (it needed only 10%).
-      #
-      # IF THIS WARNS AGAIN, SPLIT BY CONCERN AGAIN -- never raise it, never
-      # partition by -run. The next candidates, measured, with the reason each
-      # was left alone this time:
-      #
-      #   14.2s / 10 tests  lint_parity_test.go        -- each test builds a
-      #                                                   DIFFERENT fstest.MapFS
-      #                                                   root; the boot IS the
-      #                                                   thing under test
-      #   14.5s /  6 tests  staged_write_test.go
-      #   10.4s /  4 tests  build_offline_sense_test.go -- as lint_parity
-      #   10.3s /  3 tests  contract_gates_3629_test.go -- feeds Init a
-      #                                                   deliberately violating
-      #                                                   bundle
-      #
-      # And the shape that worked, for whoever needs it next: a file whose tests
-      # all mount the SAME fixture can share one engine, but ONLY under a parent
-      # test. A package-level sync.Once cannot be used -- those mounts restore
-      # the process-wide concept registry through t.Cleanup, and other tests here
-      # walk memorynodes.All() (rowauthz_pii_unbound_test.go,
-      # rowauthz_shadow_test.go). Leaving a fixture concept in front of them is a
-      # correctness bug, not a slow test.
-      #
-      # -run SHARDING WAS CONSIDERED FOR THIS STEP AND REJECTED. Partitioning
-      # one package's tests across several `go test -run <pattern>` blocks
-      # would hand each shard its own budget, but the partition is maintained
-      # by nothing: a test function matching NO shard's pattern does not fail
-      # -- it silently never runs, forever, while every shard stays green.
-      # That fail-open is a shape this repo keeps getting bitten by (the
-      # `./...` selector that never compiled the engine, memql#4032; the
-      # wrapper-script rule in the next paragraph, which exists because a
-      # refactor quietly disarmed this very lane's gate). The shared engine
-      # removes the boot-per-test growth driver without minting that
-      # landmine; if this budget tightens again, split by CONCERN again --
-      # never by -run partition.
-      #
-      # Kept as two PLAIN `go test` blocks on purpose. scripts/cidb/dbgate_test.go
-      # derives this lane's selector by parsing literal `./`-prefixed arguments
-      # out of these `run:` blocks, and treats a block containing a shell control
-      # keyword (`if`, `for`, `exit`, `cd`, `source`, ...) as non-plain. Moving
-      # the invocation behind a wrapper script empties its derived package list
-      # and silently disarms the gate -- confirmed while writing this: a
-      # `bash scripts/...` form reds dbgate_test.go with "no `go test` step, so
-      # the env key it sets guards nothing". Keep `go test` and its patterns
-      # literal and inline. scripts/ci/db-gated-packages.sh carries the same
-      # warning for the same reason.
-      #
-      # The `start=$SECONDS` / trailing `echo` pair is the headroom report, and
-      # is deliberately the most that fits: capturing the status to also print on
-      # FAILURE needs `|| status=$?` plus `exit "$status"`, and `exit` is one of
-      # the control keywords above. On a timeout the step NAME already carries
-      # the attribution that was missing, so the loss is small.
-      #
-      # THE REPORT COMPARED TWO DIFFERENT THINGS, WHICH IS WHY IT NEVER
-      # WARNED (2026-08-25). `$SECONDS` is STEP wall time -- compile plus test
-      # -- and the budget bounds the TEST ONLY, so the line read
-      # `used 642s of its 600s budget` on a run that PASSED with 594.969s of
-      # test. A report that is over budget on every green run is a report
-      # nobody can act on, and it printed exactly that through both recorded
-      # breaches (memql#4075 quotes `used 628s of its 600s budget` from one).
-      #
-      # It states what it measures now, and points at the number the budget is
-      # actually about -- go test's own per-package line. It is also a
-      # `::notice::`, so it lands in the run SUMMARY rather than only in a log
-      # that gets opened after something is already red. Still no conditional:
-      # `if` is one of the control keywords that would disarm this lane's gate.
-      # Public offline language-tooling tests now live in component/memql/offline.
-      # Keep the recursive selector and every assertion. Serialize packages on
-      # this two-core runner so independent engine boots do not consume each
-      # other's per-package wall-clock budget. This changes neither coverage
-      # nor the 600s timeout; no -run partitions or retry-to-green are involved.
-      - name: db-gated -- component/memql (own budget, the slow one)
+      # KEEP THE STEP PLAIN. scripts/cidb reads this job's `go test` line and
+      # refuses a block with shell control flow, exit-status suppression or a
+      # wrapper script, because text is all it can see; `${{matrix.packages}}`
+      # is the one planned form it accepts, written without spaces so it stays
+      # one argument. The trailing notice is the headroom report: step wall
+      # time (compile + test) against a budget that bounds TEST time only, so
+      # read the budget off go test's own `ok <package> <N>s` lines.
+      - name: db-gated -- ${{ matrix.name }} (${{ matrix.timeout }} per package)
         run: |
           start=$SECONDS
-          go test -p=1 -count=1 -timeout=600s ./component/memql/...
-          echo "::notice::component/memql step wall time (compile + test): $((SECONDS - start))s. The 600s budget bounds the TEST ONLY -- read that off the 'ok github.com/znasllc-io/memql/component/memql <N>s' line in this step's log. After the per-file engine split (memql#4756) CI measured 425.940s, 419.276s and 420.878s -- a 1.6% spread, against 472-539s and 14.2% before it; the 900s bridge was retired on that (memql#4569). If this warns, SPLIT BY CONCERN -- the measured candidates and the working pattern are in the comment above. Never raise it, and never partition by -run."
-      # Named for the budget, not the count (memql#3985). It was "the fast
-      # five", and then TWO packages joined within a day of each other --
-      # integrations/embedding (memql#4037) and component/backup, when its
-      # export path got its first db-gated coverage. Neither author was wrong
-      # to leave the label; it just quietly became a number that was still
-      # being read as authoritative, in both the step name and its own echo.
-      # So the name states what the step actually asserts -- the 180s budget --
-      # which holds with room to spare: component/backup runs in ~0.5s,
-      # migrations included.
-      - name: db-gated -- the fast packages (tight budget)
-        run: |
-          start=$SECONDS
-          go test -count=1 -timeout=180s ./app/... ./component/automations/... ./component/backup/... ./component/campaigns/... ./component/database/... ./component/grpc/... ./component/identity/... ./component/logstore/... ./component/node/... ./component/sitetraffic/... ./component/sitehealth/... ./component/worker/fleetcatalog/... ./examples/referencepack/... ./packs/... ./integrations/compose/... ./integrations/embedding/... ./integrations/groups/... ./integrations/planner/... ./integrations/procedure/... ./integrations/shopify/... ./integrations/sitepreview/... ./integrations/work/...
-          echo "headroom: the fast packages used $((SECONDS - start))s of their 180s budget"
-
-      # SPLIT OUT RATHER THAN ADMITTED (epic memql#4885). component/packages
-      # joined the fast lane when this epic gave it its first db-gated
-      # coverage, and the first CI run said what a local run had not: the
-      # package takes 152s on its own and the eleven-package step took 258s of
-      # a 180s budget. Two things were wrong with leaving it there, and only
-      # the second one is loud. The step's whole claim -- the one its name and
-      # its own echo assert -- had quietly become false. And 152s against the
-      # 180s per-BINARY timeout it shared is 84% of it, so a slower runner does
-      # not print a warning, it fails the lane, and it fails it for a package
-      # that was merely sharing a room.
-      #
-      # The fix the step above prescribes for its sibling is the one taken
-      # here: split by concern, never raise the number. The fast lane keeps its
-      # 180s and gets its claim back; this one gets a budget with real headroom
-      # over what was measured. If THIS warns, split it -- the credential
-      # story's db cases and the pipeline's are separable -- rather than
-      # raising 300.
-      - name: db-gated -- packages (the deploy pipeline)
-        run: |
-          start=$SECONDS
-          go test -count=1 -timeout=300s ./component/packages/...
-          echo "headroom: component/packages used $((SECONDS - start))s of its 300s budget (152s when this step was split out)"
+          go test -count=1 -p=${{matrix.parallel}} -timeout=${{matrix.timeout}} ${{matrix.packages}}
+          echo "::notice::db-tests ${{matrix.name}}: step wall time (compile + test) $((SECONDS - start))s. The ${{matrix.timeout}} budget bounds each package's TEST time; read it off the ok lines above. If one nears it, SPLIT BY CONCERN -- never raise a budget, never partition by -run."
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
   # checked-in editors/vscode assets, then build the offline LSP binary
@@ -2091,7 +1941,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       - name: create required Postgres extensions
@@ -2150,12 +2001,21 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
+          # npm's download cache, keyed on the lockfiles this lane installs
+          # (memql#5482): an unchanged lockfile installs from the runner
+          # instead of the registry.
+          cache: npm
+          cache-dependency-path: |
+            sdk/ts/package-lock.json
+            sdk/ts-viewkit/package-lock.json
+            editors/vscode/package-lock.json
       # Every drift guard over a checked-in editors/vscode asset lives under
       # cmd/memql-lsp (grammar, language configuration, extension manifest).
       # Run the whole tree, not just the grammar package: an editors/vscode-only
@@ -2165,13 +2025,15 @@ jobs:
       - name: editors/vscode drift checks (grammar, language config, manifest)
         run: go test -count=1 ./cmd/memql-lsp/...
       # `vscode-test` depends on `vscode-deps` in the Makefile so it stays
-      # self-sufficient from a clean checkout. A standalone retry-wrapped
-      # "build deps" step here would run the same npm installs a SECOND time,
-      # unretried, as vscode-test's own prerequisite -- defeating the retry.
-      # Wrap the single remaining invocation instead so the one place the
-      # flaky-registry calls actually happen is retried.
+      # self-sufficient from a clean checkout, which is why its npm installs
+      # happen INSIDE the test target. This step used to be wrapped in
+      # scripts/ci/retry.sh for those installs alone -- which retried the
+      # extension's TESTS too, the one thing retry.sh's own header forbids,
+      # since a retried flake is an invisible one. With the npm cache above
+      # the installs come from the runner, so the wrapper is gone (memql#5482)
+      # and a red test is red the first time.
       - name: extension unit tests
-        run: scripts/ci/retry.sh -- make vscode-test
+        run: make vscode-test
       # DELIBERATELY NOT PASSING --skip-deps, even though the step above has
       # already built the workspace deps (memql#3340). This step used to pass
       # ONLY because of that: package.sh built no `file:` dependency of its own,
@@ -2235,10 +2097,19 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
         with:
           node-version: '20'
+          # npm's download cache, keyed on the lockfiles this lane installs
+          # (memql#5482): an unchanged lockfile installs from the runner
+          # instead of the registry.
+          cache: npm
+          cache-dependency-path: |
+            sdk/ts/package-lock.json
+            sdk/ts-viewkit/package-lock.json
+            editors/vscode/package-lock.json
       # Electron needs a display and a handful of shared libraries the runner
       # image does not carry. libasound's package was renamed in Ubuntu 24.04
       # (the t64 time_t transition), so both spellings are attempted rather than
@@ -2299,13 +2170,14 @@ jobs:
   # say it is a comment. It ships with the FIRST module rather than later, so
   # every tier that follows is verified as it lands instead of retro-fitted.
   #
-  # Deliberately NOT path-filtered beyond `go`/`ci`: the whole point is that any
-  # Go change can introduce an upward import, so narrowing this by directory
-  # would let the violation it exists to catch skip the lane.
+  # Deliberately NOT path-filtered beyond `go`/`ci`/`proto`: any Go change can
+  # introduce an upward import, so narrowing by DIRECTORY BUCKET would let the
+  # violation it exists to catch skip the lane. What the planner narrows is
+  # different -- see "choose the modules to check" below.
   module-boundaries:
     name: module-boundaries
     timeout-minutes: 15
-    needs: changes
+    needs: [changes, plan]
     if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.go == 'true' || needs.changes.outputs.proto == 'true' }}
     runs-on: ubuntu-latest
     steps:
@@ -2313,7 +2185,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.27.1'
-          cache: true
+          cache: false # the shared cache below replaces it (memql#5482)
+      - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
       - name: go.work lists every module in the tree
@@ -2333,6 +2206,28 @@ jobs:
             exit 1
           fi
           echo "go.work covers all $(echo "$on_disk" | wc -l) modules"
+      # WHICH MODULES (memql#5484). On a pull request the planner narrows the
+      # two per-module checks below to the modules holding a package its
+      # change reaches, and that is sound for both: a dependency-direction
+      # violation lives in the module whose file changed, and a go.mod made
+      # stale by a sibling's CODE (memql#3280's shape without a go.mod edit)
+      # belongs to a module importing the changed package, which the reverse
+      # closure includes. A go.mod or go.sum change plans everything. push and
+      # merge_group, and any plan the job cannot read, check every module on
+      # disk, as before.
+      - name: choose the modules to check
+        env:
+          MODE: ${{ needs.plan.outputs.mode }}
+          MODULES: ${{ needs.plan.outputs.modules }}
+        run: |
+          set -euo pipefail
+          list="$RUNNER_TEMP/modules.txt"
+          if [ "$MODE" = "affected" ] && [ -n "$MODULES" ]; then
+            printf '%s\n' $MODULES > "$list"
+          else
+            find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort > "$list"
+          fi
+          echo "checking $(wc -l < "$list") module(s) (plan: ${MODE:-none})"
       # `scripts/ci/module-boundaries.sh` runs THIS step locally, and is the
       # thing to point somebody at when they ask how they could have known.
       # Nothing a developer runs resolves outside the workspace, so an import
@@ -2352,7 +2247,7 @@ jobs:
               status=1
             fi
             echo "::endgroup::"
-          done < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort)
+          done < "$RUNNER_TEMP/modules.txt"
           exit "$status"
       # A nested module's go.mod is a function of its RELATIVE-PATH SIBLINGS,
       # not only of its own file (memql#3280). component/database carries
@@ -2372,12 +2267,10 @@ jobs:
       # merge conflict: two individually-green PRs that are red together.
       #
       # No lane can catch that pre-merge, because the failing tree is not the
-      # tree either PR tested. The structural fix is the merge queue
-      # (`merge_group` is already a trigger in this file) or
-      # `strict_required_status_checks_policy` on the `default` ruleset. Both
-      # are repo settings rather than workflow. (That policy read false when
-      # this was written; it is true as of 2026-09-06, which is why a PR whose
-      # base has moved now reports BEHIND.)
+      # tree either PR tested. The structural fix is the merge queue: a
+      # merge_group run builds and tests the combination itself, before it
+      # lands. (docs/internal/ops/ruleset-baseline.md records the ruleset's
+      # strict up-to-date policy, the other shape of the same fix.)
       # What this step buys is DIAGNOSIS: `go mod tidy -diff` prints the exact
       # go.mod/go.sum delta and exits non-zero WITHOUT writing, so the failure
       # names what is stale instead of the bare "updates to go.mod needed" that
@@ -2405,7 +2298,7 @@ jobs:
               status=1
             fi
             echo "::endgroup::"
-          done < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sed 's|^\./||;s|^\.$|.|' | sort)
+          done < "$RUNNER_TEMP/modules.txt"
           exit "$status"
       - name: every module is on the workspace's version set
         run: |
@@ -2494,8 +2387,10 @@ jobs:
     needs:
       - changes
       - path-routing
+      - plan
       - go-checks
       - go-tests
+      - go-tests-tags
       - build-node-tags
       - build-clustere2e
       - sdk-ts-typecheck

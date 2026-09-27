@@ -12,6 +12,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -124,7 +125,11 @@ type workflowDoc struct {
 		Env             map[string]any `yaml:"env"`
 		If              string         `yaml:"if"`
 		ContinueOnError any            `yaml:"continue-on-error"`
-		Defaults        struct {
+		Needs           any            `yaml:"needs"`
+		Strategy        struct {
+			Matrix yaml.Node `yaml:"matrix"`
+		} `yaml:"strategy"`
+		Defaults struct {
 			Run struct {
 				WorkingDirectory string `yaml:"working-directory"`
 			} `yaml:"run"`
@@ -146,7 +151,23 @@ type goTestStep struct {
 	continueOnError any
 	pkgs            []string
 	flags           []string
+	// planned marks a step whose package argument is the planner's
+	// `${{matrix.packages}}` (memql#5485): its packages are chosen at run
+	// time, from the canonical set, by scripts/ci/affected.
+	planned bool
 }
+
+// plannedToken is the one spelling of the planner's package argument this
+// gate accepts; plannedRef normalises a spaced form to it before the argument
+// string is split into fields, so `${{ matrix.packages }}` is one argument
+// rather than three flags.
+const plannedToken = "${{matrix.packages}}"
+
+var plannedRef = regexp.MustCompile(`\$\{\{\s*matrix\.packages\s*\}\}`)
+
+// plannerMatrix is the only strategy.matrix a planned db-tests job may read:
+// the db shards the plan job computed. Compared with whitespace removed.
+const plannerMatrix = "${{fromJSON(needs.plan.outputs.db_matrix)}}"
 
 // zeroExecutionFlag returns the first flag on this step that makes `go test`
 // exit 0 having run nothing, or "".
@@ -181,7 +202,10 @@ func jobIfIsPathRouting(cond string) bool {
 	if cond == "" {
 		return true // no condition: the lane always runs
 	}
-	if !strings.Contains(cond, "needs.changes.outputs") {
+	// The planner (memql#5485) is routing too: on a pull request it decides
+	// from the change which shards run, exactly as the changes job's buckets
+	// decide which lanes do.
+	if !strings.Contains(cond, "needs.changes.outputs") && !strings.Contains(cond, "needs.plan.outputs") {
 		return false
 	}
 	for _, f := range strings.Fields(strings.NewReplacer("(", " ", ")", " ", "!", " ").Replace(cond)) {
@@ -219,6 +243,20 @@ type laneSpec struct {
 	// unparsedRun holds run blocks that mention `go test` but not as the first
 	// word of a line, so the scanner could not read their packages.
 	unparsedRun []string
+	// matrix is the job's strategy.matrix when it is computed (a scalar
+	// expression), whitespace removed; needs are the job's dependencies.
+	matrix string
+	needs  []string
+}
+
+// planned reports whether any `go test` step takes the planner's packages.
+func (l laneSpec) planned() bool {
+	for _, s := range l.steps {
+		if s.planned {
+			return true
+		}
+	}
+	return false
 }
 
 // pkgs returns every package argument across the lane's `go test` steps.
@@ -504,6 +542,10 @@ func parseDBTestsJob(data []byte) (laneSpec, error) {
 		jobIf:           job.If,
 		continueOnError: job.ContinueOnError,
 		workingDir:      strings.TrimSpace(job.Defaults.Run.WorkingDirectory),
+		needs:           stringList(job.Needs),
+	}
+	if m := job.Strategy.Matrix; m.Kind == yaml.ScalarNode {
+		spec.matrix = strings.Join(strings.Fields(m.Value), "")
 	}
 	for _, step := range job.Steps {
 		// Only blocks that MENTION `go test` are policed. The fail-closed
@@ -536,7 +578,7 @@ func parseDBTestsJob(data []byte) (laneSpec, error) {
 		}
 		gs := goTestStep{ifCond: step.If, env: step.Env, continueOnError: step.ContinueOnError}
 		for _, a := range args {
-			fields := strings.Fields(a)
+			fields := strings.Fields(plannedRef.ReplaceAllString(a, plannedToken))
 			for i := 0; i < len(fields); i++ {
 				f := fields[i]
 				// A value-taking flag consumes the next argument, which is
@@ -544,6 +586,10 @@ func parseDBTestsJob(data []byte) (laneSpec, error) {
 				if valueTakingFlags[f] && i+1 < len(fields) {
 					gs.flags = append(gs.flags, f, fields[i+1])
 					i++
+					continue
+				}
+				if f == plannedToken {
+					gs.planned = true
 					continue
 				}
 				// ONLY a ./-prefixed argument is a package. Loosening this to
@@ -559,6 +605,23 @@ func parseDBTestsJob(data []byte) (laneSpec, error) {
 		spec.steps = append(spec.steps, gs)
 	}
 	return spec, nil
+}
+
+// stringList reads a YAML value that may be one string or a list of them.
+func stringList(v any) []string {
+	switch x := v.(type) {
+	case string:
+		return []string{x}
+	case []any:
+		var out []string
+		for _, e := range x {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // loadDBTestsJob reads ci.yml from disk and parses the db-tests job out of it.
@@ -1060,6 +1123,39 @@ func laneRunFindings(lane laneSpec) []string {
 			"`|| true`, backgrounding, or an unguarded pipe. This lane must run "+
 			"UNCONDITIONALLY and must fail when the suite fails (memql#2886).", dbTestsJob, line))
 	}
+	// A PLANNED lane (memql#5485) takes every package from the planner, so the
+	// static coverage assertions below derive its selector from the canonical
+	// set instead of from literals. That substitution is only sound while the
+	// packages really do come from the planner, which is what these hold.
+	if lane.planned() {
+		if lane.matrix != plannerMatrix {
+			out = append(out, fmt.Sprintf("the %q job runs `go test ... %s` but its strategy.matrix is %q, "+
+				"not the planner's %s -- the packages would come from somewhere this gate cannot see "+
+				"(memql#5485).", dbTestsJob, plannedToken, lane.matrix, plannerMatrix))
+		}
+		hasPlan := false
+		for _, n := range lane.needs {
+			if n == "plan" {
+				hasPlan = true
+			}
+		}
+		if !hasPlan {
+			out = append(out, fmt.Sprintf("the %q job reads the planner's matrix but does not `needs: plan` "+
+				"(needs: %v), so the matrix it reads is empty (memql#5485).", dbTestsJob, lane.needs))
+		}
+		for i, s := range lane.steps {
+			switch {
+			case !s.planned:
+				out = append(out, fmt.Sprintf("`go test` step %d of the %q job names packages literally beside "+
+					"the planned step; in a sharded lane it would run once PER SHARD. Every db-gated package "+
+					"reaches the lane through the planner (memql#5485).", i, dbTestsJob))
+			case len(s.pkgs) > 0:
+				out = append(out, fmt.Sprintf("`go test` step %d of the %q job mixes literal packages %v into "+
+					"the planner's %s; the planner already places every db-gated package, so these would run "+
+					"once per shard (memql#5485).", i, dbTestsJob, s.pkgs, plannedToken))
+			}
+		}
+	}
 	for i, s := range lane.steps {
 		if strings.TrimSpace(s.ifCond) != "" {
 			out = append(out, fmt.Sprintf("`go test` step %d of the %q job carries `if: %s` -- a "+
@@ -1109,6 +1205,13 @@ func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 	root := repoRoot(t)
 	lane := loadDBTestsJob(t, root)
 	pkgs := lane.pkgs()
+	if lane.planned() {
+		// A planned lane runs exactly the canonical set, partitioned: its
+		// selector IS db-gated-packages.sh's patterns. laneRunFindings holds
+		// the wiring that makes that substitution true, and
+		// TestPlannerPlacesEveryProvisionedPackage holds the partition.
+		pkgs = canonicalPatterns(t, root)
+	}
 
 	all := scanDBGatedTests(t, root)
 	if len(all) == 0 {
@@ -1168,4 +1271,27 @@ func TestDBTestsLaneRunsAtLeastOneDBGatedTest(t *testing.T) {
 	}
 	t.Logf("%q covers %d Test functions in dbtest-importing files across the selector %v",
 		dbTestsJob, len(covered), pkgs)
+}
+
+// canonicalPatterns runs scripts/ci/db-gated-packages.sh --patterns: the same
+// canonical set the planner reads, read the same way, so this gate and the
+// planner cannot disagree about what the lane owns.
+func canonicalPatterns(t *testing.T, root string) []string {
+	t.Helper()
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "ci", "db-gated-packages.sh"), "--patterns")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("db-gated-packages.sh --patterns: %v", err)
+	}
+	var pkgs []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			pkgs = append(pkgs, l)
+		}
+	}
+	if len(pkgs) == 0 {
+		t.Fatal("db-gated-packages.sh --patterns printed nothing: the planned lane would own no package")
+	}
+	return pkgs
 }

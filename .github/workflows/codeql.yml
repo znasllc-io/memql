@@ -1,19 +1,33 @@
 name: CodeQL
 
+# OFF THE PULL-REQUEST PATH (epic memql#5476, memql#5482; design record
+# docs/superpowers/specs/2026-09-16-pipelines-program-design.md, section 1).
+#
+# CodeQL ran three languages on every pull-request push with no path
+# filter -- measured 2026-09-27 over the last eight such runs, `Analyze (go)`
+# took 7 to 10 minutes on an ordinary pull request and 43 on a large one,
+# JavaScript about 2.5, Python about 1 -- three runners per push, and no
+# merge waits on any of them: the ruleset requires exactly one context,
+# `ci-required`. Each run also saved its own ~1 GB `codeql-dependencies`
+# cache, which held the repository's cache store at its 10 GB limit and
+# evicted the caches the pull-request lanes actually read.
+#
+# What remains is the coverage the old merge_group no-op already leaned on
+# (memql#2973): EVERY PUSH TO MAIN -- the tree that lands -- and the weekly
+# scan. A finding surfaces minutes after a merge instead of on the pull
+# request, in the same Security tab. The merge_group trigger and its no-op
+# step (memql#1539) are gone with the pull_request one: the no-op existed
+# only to report an `Analyze` context the queue would otherwise wait on,
+# and no ruleset requires one. scripts/dev/codeql_merge_group_coverage_test.go
+# holds this shape; re-adding pull_request is a new decision, not a fix.
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-  # Merge queue (Tier 3, #858): if the "Analyze" checks are required for
-  # merge, they must also run on the queue's merge candidate or the queue
-  # would stall on a never-reported required check.
-  merge_group:
   schedule:
     - cron: "0 6 * * 1"  # weekly Mondays 06:00 UTC
 
-# Cancel a superseded CodeQL run when a new commit is pushed to the
-# same PR; main pushes key off the commit SHA so they never cancel.
+# main pushes key off the commit SHA, so an analysis of one tree is never
+# cancelled by the next.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
@@ -47,23 +61,8 @@ jobs:
         language: [go, python, javascript-typescript]
 
     steps:
-      # Merge-queue fast pass (memql#1539): on `merge_group` we do NOT re-run
-      # CodeQL. The analyze step uploads SARIF keyed to the ephemeral
-      # `gh-readonly-queue/main/pr-*` ref, which the merge queue tears down
-      # before the upload lands -- the upload then errors with "ref ... not
-      # found" and the `Analyze (<lang>)` checks go red, wedging the queue.
-      # Re-analysis on the merge candidate adds no coverage anyway: the
-      # same tree was already analyzed on the PR, and push-to-main + the weekly
-      # cron re-scan after merge. So on `merge_group` the job is a no-op that
-      # simply reports each `Analyze (<lang>)` context green; the real
-      # CodeQL run stays on pull_request / push:main / schedule.
-      - name: merge-queue no-op (CodeQL already ran on the PR)
-        if: github.event_name == 'merge_group'
-        run: echo "CodeQL is not re-run on merge_group; PR + push:main + weekly schedule provide coverage (memql#1539)."
-      - if: github.event_name != 'merge_group'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - if: github.event_name != 'merge_group'
-        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           languages: ${{ matrix.language }}
           config-file: ./.github/codeql/codeql-config.yml
@@ -133,9 +132,8 @@ jobs:
       # javascript-typescript are interpreted -- CodeQL extracts them without
       # a build, so autobuild is at best a no-op and at worst a spurious
       # failure against them.
-      - if: github.event_name != 'merge_group' && matrix.language == 'go'
-        uses: github/codeql-action/autobuild@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
-      - if: github.event_name != 'merge_group'
-        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+      - if: matrix.language == 'go'
+        uses: github/codeql-action/autobuild@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: "/language:${{ matrix.language }}"

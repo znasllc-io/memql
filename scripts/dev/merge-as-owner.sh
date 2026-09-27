@@ -250,11 +250,11 @@ function report_pr() {
 # a red build.
 #
 # RED WHERE IT COUNTS (memql#5016). This counted EVERY failing check, including
-# lanes the ruleset does not require -- and this repository has two that are
-# red for reasons no pull request can fix: CodeQL's `Analyze (go)`, which
-# crashes on a 2GiB query result above roughly 300 changed files and is red on
-# pristine `main`, and `install-cluster-e2e`, whose scheduled run on `main`
-# fails independently of anyone's branch.
+# lanes the ruleset does not require -- and this repository had two that were
+# red for reasons no pull request could fix: CodeQL's `Analyze (go)`, which
+# crashed on a 2GiB query result above roughly 300 changed files (it has since
+# left the pull-request path entirely, memql#5482), and `install-cluster-e2e`,
+# whose scheduled run on `main` fails independently of anyone's branch.
 #
 # An earlier version of this comment said install-cluster-e2e "installs a
 # PINNED RELEASED STACK rather than the branch under test". That is wrong and
@@ -333,13 +333,15 @@ function guard_readiness() {
     # reassurance, and then merge nothing, because the ordinary path cannot
     # satisfy a code-owner review the author is not allowed to give.
     #
-    #   BEHIND  -- the ruleset sets strict_required_status_checks_policy=true, so
-    #              a PR whose base has moved and is blocked by NOTHING ELSE
-    #              reads BEHIND. It SHOULD be refused: forcing it with --admin
-    #              would merge a tree CI never tested against the current base,
-    #              which is the one thing `strict` exists to prevent. Kept as
-    #              the name-level half of the pair; the measured check above is
-    #              what catches the far commoner case where BLOCKED hides it.
+    #   BEHIND  -- a PR whose base has moved, reported by name only while the
+    #              ruleset's strict up-to-date policy is on. It is OFF by
+    #              decision (memql#5481, docs/internal/ops/ruleset-baseline.md):
+    #              the queue tests the tree that lands. But THIS script's
+    #              bypass skips the queue, so a behind branch must still be
+    #              refused -- forcing it with --admin would merge a tree CI
+    #              never tested against the current base. Kept as the
+    #              name-level half of the pair, for the day the policy returns;
+    #              the measured check above is what actually fires.
     #   UNKNOWN -- GitHub is still recomputing mergeability, which it does for a
     #              few seconds after anything lands on the base. Merging two
     #              pull requests back to back is how you meet it.

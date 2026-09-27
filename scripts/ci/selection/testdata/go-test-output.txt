@@ -1,0 +1,11 @@
+2026-09-27T08:07:36.0015422Z ##[group]Run go test -p=4 -timeout=600s ./cmd/memqllint ./cmd/memqlfmt
+2026-09-27T08:11:15.2506224Z ok  	example.test/memql	114.859s
+2026-09-27T08:11:18.7434329Z ok  	example.test/memql/cmd/memqlfmt	0.005s
+2026-09-27T08:12:01.0000000Z ok  	example.test/memql/cmd/memqllint	458.829s
+2026-09-27T08:12:02.0000000Z ok  	example.test/memql/cmd/memqlbreaking	(cached)
+2026-09-27T08:12:03.0000000Z FAIL	example.test/memql/cmd/memqlmigrate	37.335s
+2026-09-27T08:12:04.0000000Z ?   	example.test/memql/cmd/nothing	[no test files]
+2026-09-27T08:12:05.0000000Z ok  	github.com/elsewhere/tool	3.000s
+ok  	example.test/memql/cmd/memqllint	432.100s
+--- FAIL: TestSomething (0.00s)
+    something_test.go:12: ok  	example.test/memql/fake	1.0s is not a result line of its own
