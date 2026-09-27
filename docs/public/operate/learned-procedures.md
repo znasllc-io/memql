@@ -190,7 +190,11 @@ See the [proving scorecard](../overview/proving-scorecard.md).
   machine only if its connection is held by the node running the replay; with
   two agent replicas that is about half the time, and otherwise the goal fails
   with the reason recorded.
-- **Replaying or forking a goal that a procedure served runs the procedure
-  again**, for real.
+- **Replaying a goal run that a procedure served runs the procedure again**,
+  for real, rather than reading back what it did.
+- **A step compared without running produces nothing.** In shadow, a later
+  step that reads a file such a step would have written cannot match, so a
+  procedure that posts with `curl -X POST ... -o reply.json` and then reads the
+  reply does not climb.
 - **An owner with several machines** may see one replay's steps routed to
   different machines.
