@@ -3,12 +3,14 @@ import { useEffect } from "react";
 import { useBranchRun, useRerunStep, type BranchReply, type RerunReply } from "./actions";
 import { Composer } from "./Composer";
 import type { Axes } from "./feedback";
-import type { Head, StepRow } from "./rows";
+import { overridden, type Head, type StepRow } from "./rows";
 import { useSessionPrompt } from "./useInterventions";
 import {
   BRANCH_CONSEQUENCE,
+  askedFor,
   composerArgs,
   freshDraft,
+  inputText,
   nextVersion,
   rerunConsequence,
   stepsAfter,
@@ -53,6 +55,7 @@ export function ComposerHost({
   step,
   versions,
   current,
+  currentVersion = null,
   session,
   ownLevel,
   passedOn,
@@ -72,6 +75,8 @@ export function ComposerHost({
   step: StepRow | null;
   versions: readonly StepVersion[];
   current: number | null;
+  /** The current version's row, when this page has it: what it was run with. */
+  currentVersion?: StepRow | null;
   session: boolean;
   ownLevel: string;
   passedOn: { axes: Axes; reason: string } | null;
@@ -139,6 +144,54 @@ export function ComposerHost({
         )
       : BRANCH_CONSEQUENCE;
 
+  // WHAT THE VERSION BEING REPLACED WAS RUN WITH. An override is one
+  // version's and never carries, so a person who changed the level last time
+  // and presses Run again would otherwise be surprised to find it gone -- the
+  // form says so, and one click starts from it.
+  const override = currentVersion?.override ?? null;
+  // Only what the form can hold: a dislike that rode along as guidance is not
+  // a field, and the server attaches the newest one on its own.
+  const copyable =
+    override !== null &&
+    overridden(override) &&
+    (override.level !== "" || override.model !== "" || override.effort !== "" || override.prompt !== "" || Object.keys(override.inputs).length > 0);
+  const carried =
+    override === null || !copyable
+      ? null
+      : {
+          summary: [
+            askedFor(override),
+            override.prompt === "" ? "" : session ? "its own prompt" : "instructions",
+            Object.keys(override.inputs).length === 0
+              ? ""
+              : `${Object.keys(override.inputs).length} ${Object.keys(override.inputs).length === 1 ? "input" : "inputs"}`,
+          ]
+            .filter((part) => part !== "")
+            .join(", "),
+          onApply: () => {
+            const inputs = draft.inputs.map((row) =>
+              Object.prototype.hasOwnProperty.call(override.inputs, row.key)
+                ? { ...row, value: inputText(override.inputs[row.key]) }
+                : row,
+            );
+            for (const [inputKey, value] of Object.entries(override.inputs)) {
+              if (inputs.some((row) => row.key === inputKey)) continue;
+              inputs.push({ id: `carried:${inputKey}`, key: inputKey, value: inputText(value), original: null });
+            }
+            onDrafts({
+              ...drafts,
+              [key]: {
+                ...draft,
+                level: override.level || draft.level,
+                model: override.model || draft.model,
+                effort: override.effort || draft.effort,
+                text: override.prompt === "" ? draft.text : override.prompt,
+                inputs,
+              },
+            });
+          },
+        };
+
   function forget(): void {
     const next = { ...drafts };
     delete next[key];
@@ -170,6 +223,7 @@ export function ComposerHost({
       baseline={{ session, state: prompt.state, prompt: prompt.prompt, error: prompt.error }}
       ownLevel={ownLevel}
       passedOn={passedOn}
+      carried={carried}
       draft={draft}
       onDraft={(next) => onDrafts({ ...drafts, [key]: next })}
       busy={busy}

@@ -59,6 +59,12 @@ export interface ComposerProps {
   ownLevel: string;
   /** The newest dislike of the version being replaced: the server passes it on. */
   passedOn: { axes: Axes; reason: string } | null;
+  /**
+   * What the version being replaced was run WITH, when somebody changed it --
+   * an override applies to one version and never carries to the next, so the
+   * form says so and offers to start from it.
+   */
+  carried: { summary: string; onApply: () => void } | null;
   draft: ComposerDraft;
   onDraft: (next: ComposerDraft) => void;
   busy: boolean;
@@ -82,6 +88,7 @@ export function Composer({
   baseline,
   ownLevel,
   passedOn,
+  carried,
   draft,
   onDraft,
   busy,
@@ -115,6 +122,9 @@ export function Composer({
       onDismiss={onDismiss}
       busy={busy}
       className="os-dialog os-nexus-composer"
+      // THE FIRST FIELD, not the first focusable thing: "Start from them" sits
+      // above the fields and rewrites the form in one click.
+      initialFocus={(dialog) => dialog.querySelector<HTMLElement>(".os-nexus-composer-pair .os-select")}
       floor={
         <>
           {error === "" ? null : (
@@ -138,6 +148,16 @@ export function Composer({
         </>
       }
     >
+      {carried === null ? null : (
+        <p className="os-nexus-carried">
+          {fromVersion === null ? "The version it replaces" : `Version ${fromVersion}`} ran with changes:{" "}
+          {carried.summary}. {mode === "rerun" ? "A new version starts without them." : "The branch starts without them."}{" "}
+          <button type="button" className="os-nexus-link" onClick={carried.onApply}>
+            Start from them
+          </button>
+        </p>
+      )}
+
       <div className="os-nexus-composer-pair">
         <Field label="Level">
           <Select

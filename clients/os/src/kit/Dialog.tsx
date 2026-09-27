@@ -43,6 +43,7 @@ export function Dialog({
   closeLabel,
   children,
   floor,
+  initialFocus,
 }: {
   title: string;
   /** Which thing, under the act's own name -- a dialog that did not say would invite the change to the wrong one. */
@@ -60,6 +61,12 @@ export function Dialog({
   children: ReactNode;
   /** The floor, pinned below the scrolling body: the ActionBar with the one act. */
   floor?: ReactNode;
+  /**
+   * Where focus goes when it opens. The platform's own choice is the FIRST
+   * focusable thing, which in a form can be a one-click act rather than the
+   * first field -- and an Enter pressed by habit would then take it.
+   */
+  initialFocus?: (dialog: HTMLDialogElement) => HTMLElement | null;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -67,6 +74,8 @@ export function Dialog({
   dismissRef.current = onDismiss;
   const busyRef = useRef(busy);
   busyRef.current = busy;
+  const focusRef = useRef(initialFocus);
+  focusRef.current = initialFocus;
   // Set while THIS component is closing the dialog, so the platform's queued
   // `close` event is not mistaken for a close somebody asked for.
   const closing = useRef(false);
@@ -83,6 +92,7 @@ export function Dialog({
     // behaviour behind it.
     if (typeof dialog.showModal === "function") dialog.showModal();
     else dialog.setAttribute("open", "");
+    focusRef.current?.(dialog)?.focus();
     return () => {
       closing.current = true;
       if (dialog.hasAttribute("open")) {

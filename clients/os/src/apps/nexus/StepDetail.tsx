@@ -17,7 +17,7 @@ import {
 import { NEXUS_APP_ID } from "./concepts";
 import { formatMoney, formatTokens, type StepRow } from "./rows";
 import { answeredBy, askedFor, overrideFacts, resultLine, type StepVersion } from "./versions";
-import { stepKindMeaning, stepKindWord, stepStatusWord, symptomMeaning, symptomWord } from "./words";
+import { kindCalledAModel, stepKindMeaning, stepKindWord, stepStatusWord, symptomMeaning, symptomWord } from "./words";
 
 // One step, opened (epic memql#5414: now with its versions).
 //
@@ -54,6 +54,7 @@ export function StepDetail({
   session,
   viewerId,
   reachable,
+  continues,
   onOpenRun,
   verdict,
 }: {
@@ -72,15 +73,22 @@ export function StepDetail({
   viewerId: string;
   /** The run is one a person can step into: the change marker is acknowledged only then. */
   reachable: boolean;
+  /** More steps follow, so the spine's thread runs on past this disclosure. */
+  continues: boolean;
   onOpenRun: (runId: string) => void;
-  /** The verdict control for the picked version, with the validator's line inside it. */
-  verdict: ReactNode;
+  /**
+   * The picked version's verdict, in its two halves: the pills for the
+   * heading line, and what sits under it (the question, what was said, the
+   * validator). Null when the version cannot be judged -- still running, or a
+   * step no model or app took part in.
+   */
+  verdict: { choices: ReactNode; below: ReactNode } | null;
 }) {
   const shown = selectedVersion;
   const pickable = versions.length > 1;
 
   return (
-    <div className="os-nexus-step-detail">
+    <div className="os-nexus-step-detail" data-continues={continues || undefined}>
       <p className="os-nexus-step-meaning">
         <strong>{stepKindWord(step.kind)}</strong> -- {stepKindMeaning(step.kind)}
       </p>
@@ -122,15 +130,22 @@ export function StepDetail({
         ) : null}
 
         <Panel label={`Version ${selected} of ${step.key}`}>
-          <Subhead meta={count > 1 && selected === current ? "current" : count > 1 ? `of ${count}` : undefined}>
-            Version {selected}
-          </Subhead>
+          {/* THE VERDICT IS ON THE HEADING LINE, where a person opening the
+              step finds it without scrolling past the evidence -- which is
+              right below it, starting with what the version asked for and
+              what it produced. */}
+          <div className="os-nexus-version-head">
+            <Subhead meta={count > 1 && selected === current ? "current" : count > 1 ? `of ${count}` : undefined}>
+              Version {selected}
+            </Subhead>
+            {verdict?.choices ?? null}
+          </div>
+          {verdict?.below ?? null}
           {shown === null ? (
             <ContentSkeleton kind="detail" label={`Loading version ${selected}`} />
           ) : (
             <VersionFacts version={shown} session={session} viewerId={viewerId} />
           )}
-          {verdict}
         </Panel>
       </AttentionDestination>
 
@@ -185,30 +200,47 @@ function VersionFacts({
       : viewerId !== "" && version.authoredBy === viewerId
         ? "You"
         : version.authoredBy;
+  // WHO ANSWERED IS ONLY A QUESTION FOR A STEP A MODEL OR AN APP MAY HAVE
+  // ANSWERED. On a step that called none, "Answered by --" reads as something
+  // missing; on one that did and recorded nothing, the dash is the answer.
+  const askable = answered !== "" || kindCalledAModel(version.kind) !== false || version.childRunId !== "";
+  const ran =
+    version.startedAt === ""
+      ? ""
+      : version.durationMs === null || version.durationMs <= 0
+        ? formatMoment(version.startedAt)
+        : `${formatMoment(version.startedAt)}, for ${formatDuration(version.durationMs)}`;
+  const ranTitle = [
+    version.startedAt === "" ? "" : `Started ${version.startedAt}`,
+    version.finishedAt === "" ? "" : `finished ${version.finishedAt}`,
+  ]
+    .filter((part) => part !== "")
+    .join(", ");
+  // ABSENT IS NOT ZERO. A step that reported neither renders no row, rather
+  // than "0 tokens" beside a model call that happened.
+  const spent = [
+    version.tokens === null ? "" : `${formatTokens(version.tokens)} tokens`,
+    version.cost === null ? "" : formatMoney(version.cost),
+  ]
+    .filter((part) => part !== "")
+    .join(", ");
+  const calls =
+    version.callName === ""
+      ? version.stepType
+      : version.stepType === ""
+        ? version.callName
+        : `${version.callName} (${version.stepType})`;
   return (
     <Facts>
       <Fact label="Status" value={stepStatusWord(version.status)} />
       {asked === "" ? null : <Fact label="Asked for" value={asked} />}
-      <Fact label="Answered by" value={answered} />
+      {askable ? <Fact label="Answered by" value={answered} /> : null}
       {changes.map((change) => (
         <Fact key={change.label} label={change.label} value={change.value} title={change.title} mono={change.mono} />
       ))}
       {author === "" ? null : <Fact label="Written by" value={author} mono={author !== "You"} />}
-      <Fact
-        label="Started"
-        value={version.startedAt === "" ? "" : formatMoment(version.startedAt)}
-        title={version.startedAt}
-      />
-      <Fact
-        label="Finished"
-        value={version.finishedAt === "" ? "" : formatMoment(version.finishedAt)}
-        title={version.finishedAt}
-      />
-      <Fact label="Duration" value={version.durationMs === null ? "" : formatDuration(version.durationMs)} mono />
-      {/* ABSENT IS NOT ZERO. A step that reported no tokens renders no row,
-          rather than "0 tokens" beside a model call that happened. */}
-      {version.tokens === null ? null : <Fact label="Tokens" value={formatTokens(version.tokens)} mono />}
-      {version.cost === null ? null : <Fact label="Cost" value={formatMoney(version.cost)} mono />}
+      <Fact label="Ran" value={ran} title={ranTitle || undefined} />
+      {spent === "" ? null : <Fact label="Spent" value={spent} />}
       {result === "" ? null : <Fact label="Result" value={result} mono />}
       {/* A POSTCONDITION HAS THREE ANSWERS AND THE THIRD IS NOT "false".
           Absent means this step declares none; rendering that as "did not
@@ -227,8 +259,7 @@ function VersionFacts({
           has its own, and a resume can ask the far side whether it already
           holds a receipt for exactly this one. */}
       <Fact label="Idempotency key" value={version.idempotencyKey} mono />
-      <Fact label="Type" value={version.stepType} mono />
-      <Fact label="Calls" value={version.callName} mono />
+      <Fact label="Calls" value={calls} mono />
     </Facts>
   );
 }

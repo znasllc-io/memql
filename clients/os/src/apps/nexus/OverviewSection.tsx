@@ -3,11 +3,12 @@ import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
 import { Waypoints } from "lucide-react";
 
 import { Button, Caption, ContentSkeleton, EmptyState, Notice } from "../../kit";
+import { InfoDetail } from "../../kit/InfoDetail";
 import { absent, figureOf, type Figure } from "../../kit/measure";
 import { Overview, OverviewBreakdown, type OverviewMetric } from "../../kit/Overview";
 import { anyLabelled, reuseTally } from "./reuse";
 import { approvalFromRow, goalFromRow, runFromRow, runIsTerminal } from "./rows";
-import { useReuseLibrary } from "./useInterventions";
+import { useReusableAfter, useReuseLibrary } from "./useInterventions";
 import { reuseWord } from "./words";
 
 // Nexus's Overview (epic memql#5414): what is open, what is moving, what is
@@ -44,6 +45,7 @@ export function OverviewSection({
   navigate: (sectionId: string) => void;
 }) {
   const library = useReuseLibrary();
+  const reusableAfter = useReusableAfter();
 
   const openGoals = useMemo(
     () => goals.rows.map(goalFromRow).filter((goal) => goal.id !== "" && goal.status !== "closed").length,
@@ -96,7 +98,30 @@ export function OverviewSection({
   const nothingAtAll = everythingSettled && goals.rows.length === 0 && runs.rows.length === 0 && tally.total === 0;
 
   return (
-    <Overview metrics={metrics}>
+    <Overview
+      metrics={metrics}
+      actions={
+        /* THE RULES BEHIND THE FIGURES, ONE CLICK AWAY rather than standing
+           under them (DESIGN.md rule 7): what each counts, and the reuse
+           threshold as the cluster's own policy states it. */
+        <InfoDetail title="About this overview">
+          <p>
+            <strong>Goals open</strong> are the ones not closed yet. <strong>Runs in flight</strong> are working
+            something out, running, or waiting. <strong>Approvals waiting</strong> are runs stopped on you.
+          </p>
+          <p>
+            <strong>Reusable to goal-specific</strong> counts your automations, the ones you authored and the ones
+            the system learned.{" "}
+            {reusableAfter === null
+              ? "An automation is reusable once enough different goals have used it."
+              : `An automation is reusable once ${reusableAfter} different goals have used it.`}{" "}
+            One used by a single goal is for that goal; one tied to a single account is for that account. A label you
+            gave an automation yourself counts instead of the evidence.
+          </p>
+          <p>Not yet labelled means nothing has looked at its evidence yet. It is not counted as either.</p>
+        </InfoDetail>
+      }
+    >
       {goals.error || runs.error || approvals.error ? (
         <Notice
           tone="warn"
@@ -127,13 +152,9 @@ export function OverviewSection({
               { label: reuseWord("reusable"), count: tally.reusable, tone: "good" },
               { label: reuseWord("goalSpecific"), count: tally.goalSpecific },
               { label: reuseWord("accountSpecific"), count: tally.accountSpecific },
-              { label: reuseWord(""), count: tally.unlabelled },
+              { label: reuseWord(""), count: tally.unlabelled, tone: "unknown" },
             ]}
           />
-          <Caption>
-            An automation is reusable once two different goals have used it. Your own label, set on
-            the automation, wins over the evidence.
-          </Caption>
         </>
       ) : libraryKnown && !nothingAtAll ? (
         <Caption>No automations have been kept yet. A goal that finishes is kept as one.</Caption>

@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Minus, ShieldAlert, ShieldCheck, ThumbsDown, ThumbsUp } from "lucide-react";
 
 import { Button, Caption, InlineSkeleton, Notice } from "../../kit";
@@ -37,31 +37,24 @@ import { AXES, VERDICTS, axisWord, verdictWord, type Axis, type Verdict } from "
 // dislike: the pill is pressed only for what was saved, and the open question
 // is carried by `aria-expanded` and a dashed edge -- two different states,
 // neither of them drawn like selection or like keyboard focus.
+//
+// ===========================================================================
+// TWO PARTS, BECAUSE THEY SIT IN TWO PLACES
+// ===========================================================================
+// The pills sit on the version's own heading line, where a person opening a
+// step finds them without scrolling past the evidence; what a dislike asks,
+// what was said last time and what the validator found sit under that line.
+// They share one set of props, so the two halves cannot disagree about what
+// is saved or what is being asked.
 
 export interface DislikeDraft {
   axes: Axes;
   reason: string;
 }
 
-const ICONS: Record<Verdict, ReactNode> = {
-  like: <ThumbsUp size={13} aria-hidden />,
-  dislike: <ThumbsDown size={13} aria-hidden />,
-  neutral: <Minus size={13} aria-hidden />,
-};
-
-export function VerdictControl({
-  label,
-  scope,
-  saved,
-  state,
-  readError = "",
-  draft,
-  onDraft,
-  busy,
-  error,
-  onRecord,
-  children,
-}: {
+export interface VerdictProps {
+  /** A DOM-safe id for this target, unique on the page: it names the open question. */
+  id: string;
   /** "Your verdict", or "Your verdict on this run". */
   label: string;
   /** What a dislike's reason does next, in words: it differs between a step and a run. */
@@ -79,22 +72,28 @@ export function VerdictControl({
   /** The server's refusal for this target, verbatim. */
   error: string;
   onRecord: (verdict: Verdict, axes?: Axes, reason?: string) => void;
-  /** The validator's line, when it spoke about this target. */
-  children?: ReactNode;
-}) {
-  const questionId = useId();
-  const reasonId = useId();
+}
+
+const ICONS: Record<Verdict, ReactNode> = {
+  like: <ThumbsUp size={13} aria-hidden />,
+  dislike: <ThumbsDown size={13} aria-hidden />,
+  neutral: <Minus size={13} aria-hidden />,
+};
+
+/** The label and the three pills. */
+export function VerdictChoices({ id, label, saved, state, draft, onDraft, busy, onRecord }: VerdictProps) {
   const pressed = saved?.verdict ?? null;
+  const questionId = `${id}-question`;
 
   function choose(verdict: Verdict): void {
     if (busy) return;
     if (verdict === "dislike") {
-      // Open the question, starting from what was said last time when that was
-      // a dislike -- changing the reason is the common reason to come back.
       if (draft !== null) {
         onDraft(null);
         return;
       }
+      // Open the question from what was said last time when that was a
+      // dislike -- changing the reason is the common reason to come back.
       onDraft(
         saved?.verdict === "dislike"
           ? { axes: { ...saved.axes }, reason: saved.reason }
@@ -107,49 +106,72 @@ export function VerdictControl({
     onRecord(verdict);
   }
 
+  return (
+    <div className="os-nexus-verdict-line" role="group" aria-label={label}>
+      <span className="os-nexus-verdict-label" aria-hidden>
+        {label}
+      </span>
+      {state === "loading" ? (
+        <InlineSkeleton label="Loading your earlier verdict" />
+      ) : (
+        <span className="os-nexus-verdict-choices">
+          {VERDICTS.map((verdict) => (
+            <button
+              key={verdict}
+              type="button"
+              className="os-choice os-nexus-verdict-choice"
+              data-verdict={verdict}
+              aria-pressed={pressed === verdict}
+              aria-expanded={verdict === "dislike" ? draft !== null : undefined}
+              aria-controls={verdict === "dislike" && draft !== null ? questionId : undefined}
+              data-open={(verdict === "dislike" && draft !== null) || undefined}
+              disabled={busy}
+              aria-busy={busy || undefined}
+              onClick={() => choose(verdict)}
+            >
+              {ICONS[verdict]}
+              {verdictWord(verdict)}
+            </button>
+          ))}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What sits under the pills: the dislike question while it is open, what was
+ * said last time, a refusal, and the validator's line (`children`).
+ * Renders nothing when there is nothing to say.
+ */
+export function VerdictBelow({
+  id,
+  scope,
+  saved,
+  readError = "",
+  draft,
+  onDraft,
+  busy,
+  error,
+  onRecord,
+  children,
+}: VerdictProps & { children?: ReactNode }) {
+  const summary = draft === null ? dislikeSummary(saved) : "";
+  const reasonId = `${id}-reason`;
+
   function toggle(axis: Axis): void {
     if (draft === null) return;
     onDraft({ ...draft, axes: { ...draft.axes, [axis]: !draft.axes[axis] } });
   }
 
-  const summary = draft === null ? dislikeSummary(saved) : "";
+  if (summary === "" && draft === null && error === "" && readError === "" && !children) return null;
 
   return (
-    <div className="os-nexus-verdict" role="group" aria-label={label}>
-      <div className="os-nexus-verdict-line">
-        <span className="os-nexus-verdict-label" aria-hidden>
-          {label}
-        </span>
-        {state === "loading" ? (
-          <InlineSkeleton label="Loading your earlier verdict" />
-        ) : (
-          <span className="os-nexus-verdict-choices">
-            {VERDICTS.map((verdict) => (
-              <button
-                key={verdict}
-                type="button"
-                className="os-choice os-nexus-verdict-choice"
-                data-verdict={verdict}
-                aria-pressed={pressed === verdict}
-                aria-expanded={verdict === "dislike" ? draft !== null : undefined}
-                aria-controls={verdict === "dislike" && draft !== null ? questionId : undefined}
-                data-open={(verdict === "dislike" && draft !== null) || undefined}
-                disabled={busy}
-                aria-busy={busy || undefined}
-                onClick={() => choose(verdict)}
-              >
-                {ICONS[verdict]}
-                {verdictWord(verdict)}
-              </button>
-            ))}
-          </span>
-        )}
-      </div>
-
+    <div className="os-nexus-verdict">
       {summary === "" ? null : <p className="os-nexus-verdict-said">{summary}</p>}
 
       {draft === null ? null : (
-        <div id={questionId} className="os-nexus-dislike" role="group" aria-label="What was wrong?">
+        <div id={`${id}-question`} className="os-nexus-dislike" role="group" aria-label="What was wrong?">
           <div className="os-nexus-dislike-ask">
             <span>What was wrong?</span>
             <InfoDetail title="What was wrong?">
@@ -235,7 +257,8 @@ export function VerdictControl({
  *
  * AN ICON AND WORDS, never a colour alone: the shield says "a check ran" and
  * its two shapes say which way it came out; the sentence says the same thing
- * for anybody the shapes do not reach.
+ * for anybody the shapes do not reach. The act that follows a flag is part of
+ * the sentence, so it reads as what to do about it.
  */
 export function ValidatorLine({
   verdict,
@@ -259,12 +282,15 @@ export function ValidatorLine({
       <span className="os-nexus-validator-words">
         {validatorSentence(verdict, entry, stepKey)}
         {disagreesWithYou ? <strong className="os-nexus-validator-disagrees"> It disagrees with you.</strong> : null}
+        {flagged && onRunAgain ? (
+          <>
+            {" "}
+            <button type="button" className="os-nexus-link os-nexus-validator-act" onClick={onRunAgain}>
+              Run again with this
+            </button>
+          </>
+        ) : null}
       </span>
-      {flagged && onRunAgain ? (
-        <button type="button" className="os-nexus-link os-nexus-validator-act" onClick={onRunAgain}>
-          Run again with this
-        </button>
-      ) : null}
     </p>
   );
 }

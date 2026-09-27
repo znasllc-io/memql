@@ -20,7 +20,7 @@ import { KindBand } from "./KindBand";
 import { StepSpineRow } from "./StepSpine";
 import { StepDetail, STEP_VERSIONS_TARGET } from "./StepDetail";
 import { ComposerHost, type ComposerRequest } from "./ComposerHost";
-import { ValidatorLine, VerdictControl, type DislikeDraft } from "./Verdict";
+import { ValidatorLine, VerdictBelow, VerdictChoices, type DislikeDraft, type VerdictProps } from "./Verdict";
 import { NEXUS_APP_ID } from "./concepts";
 import { useMoveRunHead, useRecordFeedback, type DeriveRunState, type RerunReply } from "./actions";
 import {
@@ -59,6 +59,7 @@ import {
   type StepVersion,
 } from "./versions";
 import {
+  kindCalledAModel,
   rerunInFlightWords,
   runModeDetail,
   runModeWord,
@@ -321,32 +322,36 @@ export function RunPage({
       });
   }
 
-  function verdictFor(target: FeedbackTarget, scope: "step" | "run", label: string, validatorLine: ReactNode) {
+  /** The props one target's verdict shares between its two halves. */
+  function verdictProps(target: FeedbackTarget, scope: "step" | "run", label: string): VerdictProps {
     const key = targetKey(target);
-    const saved = newestVerdict(verdicts.feedback, target);
-    return (
-      <VerdictControl
-        label={label}
-        scope={scope}
-        saved={saved}
-        state={verdicts.state}
-        readError={scope === "run" && verdicts.state === "error" ? verdicts.error : ""}
-        draft={dislikeDrafts[key] ?? null}
-        onDraft={(next) =>
-          setDislikeDrafts((held) => {
-            const copy = { ...held };
-            if (next === null) delete copy[key];
-            else copy[key] = next;
-            return copy;
-          })
-        }
-        busy={feedback.recording === key}
-        error={feedback.errors[key] ?? ""}
-        onRecord={(verdict, axes, reason) => recordVerdict(target, verdict, axes, reason)}
-      >
-        {validatorLine}
-      </VerdictControl>
-    );
+    return {
+      id: `nexus-verdict-${key.replace(/[^A-Za-z0-9_-]/g, "-")}`,
+      label,
+      scope,
+      saved: newestVerdict(verdicts.feedback, target),
+      state: verdicts.state,
+      readError: scope === "run" && verdicts.state === "error" ? verdicts.error : "",
+      draft: dislikeDrafts[key] ?? null,
+      onDraft: (next) =>
+        setDislikeDrafts((held) => {
+          const copy = { ...held };
+          if (next === null) delete copy[key];
+          else copy[key] = next;
+          return copy;
+        }),
+      busy: feedback.recording === key,
+      error: feedback.errors[key] ?? "",
+      onRecord: (verdict, axes, reason) => recordVerdict(target, verdict, axes, reason),
+    };
+  }
+
+  function verdictFor(target: FeedbackTarget, scope: "step" | "run", label: string, validatorLine: ReactNode) {
+    const props = verdictProps(target, scope, label);
+    return {
+      choices: <VerdictChoices {...props} />,
+      below: <VerdictBelow {...props}>{validatorLine}</VerdictBelow>,
+    };
   }
 
   /** The validator's line for a target, when the validator judged it. */
@@ -680,7 +685,15 @@ export function RunPage({
             that might change what they do next. */}
         {judgeable ? (
           <Panel label="Your verdict on this run">
-            {verdictFor(RUN_TARGET, "run", "Your verdict on this run", validatorLineFor(RUN_TARGET, true))}
+            {(() => {
+              const verdict = verdictFor(RUN_TARGET, "run", "Your verdict on this run", validatorLineFor(RUN_TARGET, true));
+              return (
+                <>
+                  {verdict.choices}
+                  {verdict.below}
+                </>
+              );
+            })()}
           </Panel>
         ) : null}
 
@@ -691,9 +704,12 @@ export function RunPage({
               const isOpen = step.key === openStepKey;
               const picked = isOpen && selected !== null ? selected : (info.current ?? step.version);
               const pickedRow = isOpen ? selectedVersion : null;
-              // A version can be judged once it has finished -- done or failed.
-              // One still running has nothing to judge yet.
+              // A version can be judged once it has finished -- done or failed
+              // -- and only when a model or an app took part in it: the
+              // framework's three questions are about work an AI did, and a
+              // query that ran a filter has no approach to dislike.
               const finished = pickedRow !== null && (pickedRow.status === "done" || pickedRow.status === "failed");
+              const judgeableStep = step.kind !== "human" && (kindCalledAModel(step.kind) !== false || step.childRunId !== "");
               const target: FeedbackTarget = { stepKey: step.key, version: picked };
               return (
                 <li key={step.id || step.key} className="os-nexus-step-item">
@@ -725,9 +741,10 @@ export function RunPage({
                       session={isSession(pickedRow ?? step)}
                       viewerId={viewerId}
                       reachable={terminal}
+                      continues={index < steps.length - 1}
                       onOpenRun={onOpenRun}
                       verdict={
-                        judgeable && finished
+                        judgeable && finished && judgeableStep
                           ? verdictFor(target, "step", "Your verdict", validatorLineFor(target, false))
                           : null
                       }
@@ -788,8 +805,9 @@ export function RunPage({
         step={composerStep}
         versions={composerVersions?.versions ?? []}
         current={composerVersions?.current ?? null}
+        currentVersion={composerCurrent}
         session={isSession(composerCurrent ?? composerStep)}
-        ownLevel={ownLevelOf(composerCurrent ?? composerStep)}
+        ownLevel={ownLevelOf(composerVersions?.versions ?? [])}
         passedOn={composerDislike !== null && composerDislike.verdict === "dislike" ? composerDislike : null}
         drafts={composerDrafts}
         onDrafts={setComposerDrafts}
@@ -822,10 +840,19 @@ function selectionWords(key: string, selected: number, count: number, current: n
   return current !== null && current !== selected ? `${base} -- version ${current} is current` : base;
 }
 
-/** The level a version asked for, or the one recorded as serving it. "" when nothing says. */
-function ownLevelOf(step: StepRow | null): string {
-  if (step === null) return "";
-  if (step.override.level !== "") return step.override.level;
-  const level = step.binding?.["level"];
-  return typeof level === "string" ? level : "";
+/**
+ * The step's OWN level, as recorded serving a version nobody asked a level
+ * for. Never an override's: an override applies to one version and never
+ * carries to the next, so a re-run that leaves the level alone runs at the
+ * step's own -- and naming the last version's override here would promise the
+ * wrong one. "" when no version says.
+ */
+function ownLevelOf(versions: readonly StepVersion[]): string {
+  for (let i = versions.length - 1; i >= 0; i -= 1) {
+    const version = versions[i] as StepVersion;
+    if (version.override.level !== "") continue;
+    const level = version.binding?.["level"];
+    if (typeof level === "string" && level !== "") return level;
+  }
+  return "";
 }

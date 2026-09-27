@@ -75,7 +75,7 @@ export interface SpineVersions {
 }
 
 /** More ticks than this read as a bar, not as versions; the count is in the name either way. */
-const MAX_TICKS = 6;
+const MAX_TICKS = 5;
 
 export interface StepSpineRowProps {
   step: StepRow;
@@ -159,7 +159,8 @@ export function StepSpineRow({
     .filter((part) => part !== "")
     .join(", ");
 
-  // Oldest at the bottom, newest at the top: a stack grows upward.
+  // Oldest first, newest last: the tally reads left to right, and past the
+  // cap it shows the newest ones.
   const shown = Math.min(count, MAX_TICKS);
   const firstShown = count - shown + 1;
 
@@ -177,26 +178,28 @@ export function StepSpineRow({
     >
       <span className="os-nexus-step-spine" aria-hidden>
         <span className="os-nexus-step-line" data-head />
-        <span className="os-nexus-step-node" />
-        {/* THE VERSIONS, ON THE SPINE ITSELF. A quiet stack of ticks beside
-            the node, one per version, the current one inked -- the thread's
-            own vocabulary of weight rather than hue, so it survives
-            greyscale and every theme pack, and a run of forty steps shows the
-            three somebody stepped into before a word is read. */}
-        {count > 1 ? (
-          <span className="os-nexus-step-ticks">
-            {Array.from({ length: shown }, (_, index) => {
-              const version = firstShown + index;
-              return (
-                <span
-                  key={version}
-                  className="os-nexus-step-tick"
-                  data-current={version === current || undefined}
-                />
-              );
-            })}
-          </span>
-        ) : null}
+        <span className="os-nexus-step-knot">
+          <span className="os-nexus-step-node" />
+          {/* THE VERSIONS, ON THE SPINE ITSELF. A quiet stack of ticks beside
+              the node, one per version, the current one inked -- the thread's
+              own vocabulary of weight rather than hue, so it survives
+              greyscale and every theme pack, and a run of forty steps shows
+              the three somebody stepped into before a word is read. */}
+          {count > 1 ? (
+            <span className="os-nexus-step-ticks">
+              {Array.from({ length: shown }, (_, index) => {
+                const version = firstShown + index;
+                return (
+                  <span
+                    key={version}
+                    className="os-nexus-step-tick"
+                    data-current={version === current || undefined}
+                  />
+                );
+              })}
+            </span>
+          ) : null}
+        </span>
         {last ? null : <span className="os-nexus-step-line" data-tail />}
       </span>
 

@@ -41,7 +41,13 @@ export function Overview({ metrics, scope, children, actions }: {
   </section>;
 }
 
-export interface OverviewSegment { label: string; count: number; tone?: "good" | "warn" | "quiet" }
+/**
+ * `unknown` is an ABSENT answer rather than a value -- things nothing has
+ * classified yet. It draws as a hatch and a hollow dot, the way the Nexus
+ * kind band draws its unclassified steps, so it can never be read as one of
+ * the classes beside it.
+ */
+export interface OverviewSegment { label: string; count: number; tone?: "good" | "warn" | "quiet" | "unknown" }
 
 /** A current distribution, never a fabricated activity history. */
 export function OverviewBreakdown({ title, segments }: { title: string; segments: readonly OverviewSegment[] }) {

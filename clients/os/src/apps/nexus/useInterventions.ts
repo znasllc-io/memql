@@ -287,3 +287,32 @@ export function useReuseLibrary(): ReuseLibrary {
   }));
   return { catalog, procedures };
 }
+
+/**
+ * How many distinct goals make an automation reusable -- a VALUE on the seeded
+ * `v1:work:feedbackPolicy:primary` row, never a constant here (the plan's
+ * "values, not constants"). Null until read, and null when the read is
+ * refused: a person below the reader rung is told the rule without the
+ * number rather than a number this window guessed.
+ */
+export function useReusableAfter(): number | null {
+  const connection = useOsConnection();
+  const [value, setValue] = useState<number | null>(null);
+  useEffect(() => {
+    const query = connection?.query ?? null;
+    if (query === null) return;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const result = await query.feedbackPolicyCurrent({}, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        const raw = flatten(result.rows()[0] ?? {})["reusableAfterSignatures"];
+        setValue(typeof raw === "number" && Number.isFinite(raw) && raw >= 1 ? Math.round(raw) : null);
+      } catch {
+        if (!controller.signal.aborted) setValue(null);
+      }
+    })();
+    return () => controller.abort();
+  }, [connection]);
+  return value;
+}
