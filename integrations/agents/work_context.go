@@ -121,15 +121,19 @@ func descriptionGuidance(ctx context.Context, engine interface {
 	if err != nil {
 		return "", fmt.Errorf("work context: reading the goal's description guidance: %w", err)
 	}
-	// The dislike a re-run's own guidance came from is already on this turn,
-	// as the repair message after the prompt; naming it twice would weigh one
-	// complaint as two.
+	// A complaint is carried once. The dislike a re-run's own guidance came
+	// from is already on this turn, as the repair message after the prompt, so
+	// it -- and any other dislike saying the same thing -- is left out here;
+	// naming one complaint twice would weigh it as two.
+	seen := map[string]bool{}
 	var repairedFrom string
-	if run.Override != nil {
-		repairedFrom = memql.BareShortId(strings.TrimSpace(run.Override.FeedbackId))
+	if ov := run.Override; ov != nil {
+		repairedFrom = memql.BareShortId(strings.TrimSpace(ov.FeedbackId))
+		if line := guidanceLine(work.AxesFromNames(ov.GuidanceAxes).Names(), ov.GuidanceReason); line != "" {
+			seen[line] = true
+		}
 	}
 	lines := make([]string, 0, descriptionGuidanceLimit)
-	seen := map[string]bool{}
 	for _, row := range memql.MaterializeRows(result) {
 		if len(lines) == descriptionGuidanceLimit {
 			break
@@ -138,17 +142,8 @@ func descriptionGuidance(ctx context.Context, engine interface {
 			continue
 		}
 		data, _ := row["data"].(map[string]any)
-		// A reason is the text a model can act on. A dislike that gave none
-		// still counts on the ladder, and says nothing here.
-		reason := strings.TrimSpace(asString(data["reason"]))
-		if reason == "" {
-			continue
-		}
-		line := "- " + reason
-		if axes := work.ParseAxes(data["axes"]).Names(); len(axes) > 0 {
-			line = "- (" + strings.Join(axes, ", ") + ") " + reason
-		}
-		if seen[line] {
+		line := guidanceLine(work.ParseAxes(data["axes"]).Names(), asString(data["reason"]))
+		if line == "" || seen[line] {
 			continue
 		}
 		seen[line] = true
@@ -158,4 +153,18 @@ func descriptionGuidance(ctx context.Context, engine interface {
 		return "", nil
 	}
 	return descriptionGuidanceHeading + "\n" + strings.Join(lines, "\n"), nil
+}
+
+// guidanceLine renders one dislike as a line of the guidance message, or ""
+// when it gave no reason: a reason is the text a model can act on, and a
+// dislike that gave none still counts on the ladder but says nothing here.
+func guidanceLine(axes []string, reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ""
+	}
+	if len(axes) == 0 {
+		return "- " + reason
+	}
+	return "- (" + strings.Join(axes, ", ") + ") " + reason
 }
