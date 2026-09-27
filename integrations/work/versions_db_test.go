@@ -13,6 +13,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
@@ -410,3 +411,43 @@ func TestTheValidatorsRowsLand(t *testing.T) {
 }
 
 func bareShort(id string) string { return bareRunId(id) }
+
+// The switch the validator obeys is the ROW, read under the borrowed owner's
+// actor -- measured here because a policy row that actor could not read would
+// answer the seeded defaults, and a cluster that turned the validator off
+// would go on spending a model call on every goal. The row is written the way
+// the seed materializer writes it and put back to the seeded value after.
+func TestTheValidatorObeysThePolicyRow(t *testing.T) {
+	a := openActsDB(t)
+	seed := auth.ContextWithUserActor(context.Background(), "system:seed")
+	seed = auth.ContextWithInternalOrigin(auth.ContextWithAccess(seed, &auth.AccessContext{
+		UserId: "system:seed", Role: auth.RoleOwner, Synthetic: true, Unranked: true,
+	}))
+	setPolicy := func(on bool) {
+		t.Helper()
+		if _, err := a.eng.Execute(seed, "mutation "+call("createFeedbackPolicy", map[string]any{
+			"feedbackPolicyId": "primary", "validateAnswers": on, "reusableAfterSignatures": 2,
+		})); err != nil {
+			t.Fatalf("write the policy row: %v", err)
+		}
+	}
+	setPolicy(false)
+	t.Cleanup(func() { setPolicy(true) })
+
+	a.i.engine = &dbJudge{MemQLEngine: a.eng, prompts: realPrompts(t)}
+	runId := a.openRun(t, nil)
+	a.writeVersion(t, runId, runId, "draft", 0, 1, nil, "An answer.", nil)
+	a.finishRun(t, runId, []string{"draft"}, nil)
+	a.write(t, "updateWorkRun", map[string]any{"runId": runId, "spent": map[string]any{"modelCalls": 1}})
+
+	nodes, err := a.i.handleValidateAnswer(validatorCaller(), map[string]any{"runId": runId, "ownerUserId": a.owner}, 0)
+	if err != nil {
+		t.Fatalf("workValidateAnswer: %v", err)
+	}
+	if reason := rowString(decodeReply(t, nodes), "skipped"); !strings.Contains(reason, "feedbackPolicy") {
+		t.Fatalf("reply = %v; the policy row says the validator is off", decodeReply(t, nodes))
+	}
+	if v := rowMap(a.runRow(t, runId), "validation"); len(v) != 0 {
+		t.Errorf("run.validation = %v; a switched-off validator writes nothing", v)
+	}
+}
