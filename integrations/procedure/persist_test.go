@@ -125,10 +125,12 @@ func TestTheLiftWritesTheProcedurePayloadTheRunnerNeeds(t *testing.T) {
 		t.Errorf("recordedFrom = %+v", p.RecordedFrom)
 	}
 
-	// The template it decodes to binds a THIRD recording of the same goal.
+	// The template it decodes to binds a THIRD recording of the same goal --
+	// recorded in ANOTHER workspace, and read the way the loader reads every
+	// recording: relative to its own (relativize.go).
 	third := proc.Canonicalize([]proc.Step{
-		{StepType: "exec", Input: map[string]any{"command": "mkdir -p out && echo hello > c.txt"}},
-		{StepType: "fs_write", Input: map[string]any{"file_path": reportPath, "content": "hello\n"}},
+		{StepType: "exec", Input: relativizeArgs(map[string]any{"command": "mkdir -p out && echo hello > c.txt"}, "/w/other")},
+		{StepType: "fs_write", Input: relativizeArgs(map[string]any{"file_path": "/w/other/out/report.txt", "content": "hello\n"}, "/w/other")},
 	})
 	bound, ok := proc.BindInstance(p.Template(), third)
 	if !ok || bound["s0.command.7"] != "c.txt" {

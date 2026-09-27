@@ -428,20 +428,26 @@ func TestMineCorpusRefusesAPersonNamingAnotherOwner(t *testing.T) {
 	}
 }
 
-// TestTheStubsSayTheyAreNotWiredYet: importing the plug-in makes the boot
-// audit demand every executor dsl/procedure names, so the four the ladder
-// adds are registered before their runner exists -- and each refuses BY NAME
-// rather than doing something plausible.
-func TestTheStubsSayTheyAreNotWiredYet(t *testing.T) {
+// TestNoCapabilitySaysItIsNotWiredYet: importing the plug-in makes the boot
+// audit demand every executor dsl/procedure names, and the four the ladder
+// adds were first registered as stubs that refused by name. A stub passes the
+// audit with the certification ladder INERT, so every capability is driven
+// here with arguments that reach its handler, and none may answer with the
+// stub's words -- or with no handler at all.
+func TestNoCapabilitySaysItIsNotWiredYet(t *testing.T) {
 	caps := map[string]bool{}
-	for _, c := range New(nil, nil).Capabilities() {
+	for _, c := range New(newFakeEngine(), nil).Capabilities() {
 		caps[c.Name] = true
-		switch c.Name {
-		case "step", "replay", "ladderSweep", "decidePromotion":
-			_, err := c.Handler(context.Background(), map[string]any{}, 0)
-			if err == nil || err.Error() != "procedure: "+c.Name+" is not wired yet" {
-				t.Errorf("%s answered %v, want the not-wired-yet refusal", c.Name, err)
-			}
+		if c.Handler == nil {
+			t.Errorf("capability %s has no handler", c.Name)
+			continue
+		}
+		_, err := c.Handler(maintenanceCtx("demoteProcedures"), map[string]any{
+			"runId": "v1:work:run:x", "constructId": "v1:authoring:construct:x",
+			"sweep": "demotion", "approvalId": "v1:work:approval:x", "ownerUserId": testOwner,
+		}, 0)
+		if err != nil && strings.Contains(err.Error(), "not wired yet") {
+			t.Errorf("%s still answers as a stub: %v", c.Name, err)
 		}
 	}
 	for _, name := range []string{"learnFromRun", "mineCorpus", "step", "replay", "ladderSweep", "decidePromotion"} {

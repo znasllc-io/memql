@@ -119,17 +119,25 @@ func newWorkspaceStore(engine memql.IntegrationEngineAccess) *workspaceStore {
 
 func (s *workspaceStore) available() bool { return s != nil && s.exec != nil }
 
-// planRow reads the parent run. The single planById reader in this package:
-// the workspace owner and the Library promotion's owner are the same value by
-// the same memql#952 rule (payload.requestedBy over the row-intrinsic
-// createdBy), and two readers would be two places for that rule to drift.
+// planRow reads the parent run: the v1:work:run the runId names, through the
+// OWNED read under the caller's own actor. The single run reader in this
+// package: the workspace owner and the Library promotion's owner are the same
+// value by the same rule, and two readers would be two places for that rule to
+// drift.
+//
+// It read planById until epic memql#5408 found it: v1:planner:plan was
+// retired with the work spine (epic memql#5000), planById went with it, and
+// every dispatch since has been refused as workspace_owner_unresolved while
+// the fakes in this package's tests went on answering the query that no longer
+// exists. The owned read fails the way the rest of this file wants: a caller
+// who does not own the run reads nothing, and nothing is provisioned for it.
 func (s *workspaceStore) planRow(ctx context.Context, runId string) (map[string]any, error) {
 	if !s.available() {
 		return nil, nil
 	}
-	rows, err := s.exec(ctx, fmt.Sprintf(`query planById(runId:%s)`, langparser.QuoteString(runId)))
+	rows, err := s.exec(ctx, fmt.Sprintf(`query workRunForOwner(runId:%s)`, langparser.QuoteString(runId)))
 	if err != nil {
-		return nil, fmt.Errorf("workbench: planById: %w", err)
+		return nil, fmt.Errorf("workbench: workRunForOwner: %w", err)
 	}
 	for _, row := range rows {
 		if row != nil {

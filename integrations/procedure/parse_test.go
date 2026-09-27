@@ -7,12 +7,14 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 )
 
 // parse_test.go -- every statement this package hands the engine, run through
@@ -164,13 +166,20 @@ func everyRenderedStatement(t *testing.T) []recordedCall {
 // called under internal origin, or it is refused in production with one WARN
 // and the row is never written.
 func TestEveryStatementTheLiftRendersParses(t *testing.T) {
-	calls := everyRenderedStatement(t)
-	want := []string{
+	assertStatementsParseAndResolve(t, everyRenderedStatement(t), []string{
 		"workRunForOwner", "workRunsForOwnerGoalSignature", "workStepsForOwnerRun",
 		"workObservationsForOwnerRun", "libraryFileById", "workGoalForOwner", "procedureConstructByName",
 		"createAuthoringBundle", "createAuthoringConstruct", "recordProcedure", "recordBundleValidation",
 		"recordConstructLadder", "recordConstructGoalSignature", "usersForSeedSweep", "workRunsForOwner",
-	}
+	})
+}
+
+// assertStatementsParseAndResolve holds every recorded call to the real front
+// end and the loaded registry, and every @serverOnly one to internal origin.
+// want names the constructs the drivers must have rendered, so a driver that
+// silently stopped reaching one cannot turn the guard vacuous.
+func assertStatementsParseAndResolve(t *testing.T, calls []recordedCall, want []string) {
+	t.Helper()
 	seen := map[string]bool{}
 	for _, c := range calls {
 		seen[c.Name()] = true
@@ -293,4 +302,79 @@ func TestRecordBundleValidationCallTextParses(t *testing.T) {
 	if args["status"] != "failed" {
 		t.Errorf("status = %v, want failed", args["status"])
 	}
+}
+
+// everyReplayStatement drives every production path epic memql#5408's runner
+// adds -- serving a goal, a divergence handed to the app, a refused start,
+// a shadow comparison that proposes the promotion, a resumed replay, the
+// promotion decision and both sweeps -- and returns what they handed the
+// engine. The rows these statements carry are the widest this package writes:
+// outcomes holding lists of objects and prose with backticks and quotes,
+// binding digests keyed by dotted hole ids, an approval's options and
+// evidence.
+func everyReplayStatement(t *testing.T) []recordedCall {
+	t.Helper()
+	var out []recordedCall
+
+	// Served from the statement, then resumed-and-finished, then a
+	// divergence handed to the app.
+	served := newReplayWorld(t, "trusted")
+	if _, err := served.i.handleProcedureReplay(inGoalRun(replayOwner), map[string]any{"constructId": served.constructId}, 0); err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	if _, err := served.i.handleProcedureReplay(inGoalRun(replayOwner), map[string]any{"constructId": served.constructId}, 0); err != nil {
+		t.Fatalf("serve again: %v", err)
+	}
+	out = append(out, served.eng.recorded()...)
+
+	diverged := newReplayWorld(t, "trusted")
+	diverged.d.alter["step1"] = func(r *DispatchResult) { r.Observation.Contents[0].Digest = strings.Repeat("0", 64) }
+	diverged.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
+	out = append(out, diverged.eng.recorded()...)
+
+	refused := newReplayWorld(t, "trusted")
+	refused.p.observed.Tools["mkdir"] = "9.3"
+	refused.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
+	out = append(out, refused.eng.recorded()...)
+
+	// Two shadow comparisons, the second proposing the promotion, through
+	// ShadowCompare's own read of the recording.
+	shadow := shadowWorld(t, recording1("c.txt", testNow.Add(-2*time.Minute)), recording1("d.txt", testNow.Add(-time.Minute)))
+	shadow.policy(work.LadderPolicy{ShadowMatches: 2, DistinctBindings: 2, CanaryMatches: 1, FailuresToDemote: 2, InsufficientToDemote: 1, RetireAfterDays: 30})
+	for _, runId := range []string{"v1:work:run:rec-c", "v1:work:run:rec-d"} {
+		if _, err := shadow.i.ShadowCompare(personCtx(testOwner), runId); err != nil {
+			t.Fatalf("ShadowCompare: %v", err)
+		}
+	}
+	if len(shadow.eng.callsTo("createWorkApproval")) != 1 {
+		t.Fatalf("the shadow driver raised %d approvals, want the one this guard parses", len(shadow.eng.callsTo("createWorkApproval")))
+	}
+	out = append(out, shadow.eng.recorded()...)
+
+	decide := promotionWorld(t, "approved", "")
+	decideAsCluster(t, decide)
+	out = append(out, decide.eng.recorded()...)
+
+	sweeps := newSweepWorld(t, 100)
+	sweeps.rows[testOwner] = []map[string]any{
+		procedureOn("over", "trusted", map[string]any{"failures": float64(3)}),
+		procedureOn("stale", "shadow", map[string]any{"lastReplayAt": testNow.Add(-90 * 24 * time.Hour).Format(timeLayout)}),
+	}
+	sweepAsCluster(t, sweeps, SweepDemotion)
+	sweepAsCluster(t, sweeps, SweepRetirement)
+	out = append(out, sweeps.eng.recorded()...)
+	return out
+}
+
+// TestEveryStatementTheReplayRendersParses is TestEveryStatementTheLiftRendersParses
+// for the certification ladder's paths: the real parser, the loaded registry,
+// and internal origin on every @serverOnly construct.
+func TestEveryStatementTheReplayRendersParses(t *testing.T) {
+	assertStatementsParseAndResolve(t, everyReplayStatement(t), []string{
+		"authoringConstructById", "ladderPolicyCurrent", "workRunForOwner", "workGoalForOwner",
+		"createWorkRun", "updateWorkRun", "createWorkStep", "updateWorkStep", "workStepsForOwnerRun",
+		"recordConstructLadder", "recordConstructReliability", "createWorkApproval",
+		"procedureConstructsForGoalSignature", "workObservationsForOwnerRun", "libraryFileById",
+		"workApprovalById", "usersForSeedSweep", "learnedProceduresForOwner",
+	})
 }

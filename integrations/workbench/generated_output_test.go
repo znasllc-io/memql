@@ -123,13 +123,13 @@ func TestPromoteWorkbenchOutput_ResolvesPlanOwner(t *testing.T) {
 		map[string]any{"path": "/ws/out.txt"}, true)
 
 	if len(ce.queries) != 1 {
-		t.Fatalf("expected exactly one planById call, got %d: %v", len(ce.queries), ce.queries)
+		t.Fatalf("expected exactly one run read, got %d: %v", len(ce.queries), ce.queries)
 	}
-	if !strings.HasPrefix(ce.queries[0], "query planById(") {
-		t.Errorf("expected planById, got %q", ce.queries[0])
+	if !strings.HasPrefix(ce.queries[0], "query workRunForOwner(") {
+		t.Errorf("expected the owned run read workRunForOwner, got %q", ce.queries[0])
 	}
 	if !strings.Contains(ce.queries[0], "plan-1") {
-		t.Errorf("planById missing runId: %q", ce.queries[0])
+		t.Errorf("the run read is missing the runId: %q", ce.queries[0])
 	}
 }
 

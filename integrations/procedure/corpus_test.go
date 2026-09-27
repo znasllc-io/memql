@@ -41,8 +41,10 @@ func TestTheCorpusReadsArgumentsFromTheObservation(t *testing.T) {
 	if got, want := exec.Input["command"], "mkdir -p out && echo hello > a.txt"; got != want {
 		t.Fatalf("exec arguments = %v, want the observation's %q", exec.Input, want)
 	}
-	if got := recs[0].Steps[1].Input["file_path"]; got != reportPath {
-		t.Fatalf("fs_write arguments = %v, want the observation's file_path", recs[0].Steps[1].Input)
+	// The observation's file_path, written as the WORKSPACE (relativize.go):
+	// the recording ran in testWorkspace, and a replay runs in its own.
+	if got := recs[0].Steps[1].Input["file_path"]; got != relativeReportPath {
+		t.Fatalf("fs_write arguments = %v, want the observation's file_path relative to the workspace", recs[0].Steps[1].Input)
 	}
 	ev := recs[0].Evidence[exec.Key].Observation
 	if ev.ExitCode == nil || *ev.ExitCode != 0 || ev.IsError == nil || *ev.IsError || ev.ResultType != "string" {
@@ -73,8 +75,11 @@ func TestTheCorpusResolvesContentDigestsFromTheLibrary(t *testing.T) {
 			t.Fatalf("recording %d: contents = %+v, want %+v", n, got, want)
 		}
 		paths := rec.Evidence[write.Key].Paths
-		if len(paths) == 0 || paths[len(paths)-1] != reportPath {
-			t.Fatalf("recording %d: the footprint's paths are %v, want the recorded %s", n, paths, reportPath)
+		if len(paths) == 0 || paths[len(paths)-1] != relativeReportPath {
+			t.Fatalf("recording %d: the footprint's paths are %v, want the recorded %s relative to the workspace", n, paths, reportPath)
+		}
+		if ws := rec.Evidence[write.Key].Workspace; ws != testWorkspace {
+			t.Fatalf("recording %d: the evidence was read against %q, want the fingerprint's workspace", n, ws)
 		}
 	}
 	for _, c := range eng.callsTo("libraryFileById") {

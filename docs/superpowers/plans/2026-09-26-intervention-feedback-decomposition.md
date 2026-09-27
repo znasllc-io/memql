@@ -503,3 +503,9 @@ Each stream works only in its files, commits `Issue #<N>: ...`, and reports what
 - `forkRun` is still present; it is retired when the Nexus stream moves to `branchRun` (coordinator, at that merge).
 - A fresh worktree needs `bash scripts/identity/build-css.sh` before the root package builds.
 - Gates already satisfied by Task 0: maintenance pin, automation count 73, goldens, server-only pins, prompt level pin, row-authz adjudication of `feedbackPolicyCurrent`, embed inventory 433, SDK, snapshot, arch model, proto.
+
+### Task 1, head.go (coordinator), landed at `8c68487f1`
+- As section 1.3, plus: `VersionOf(order, key, version, storedBasis any, status) StepVersion` builds a version from a row and reconstructs an omitted (pristine) basis; `NewestHead(order, versions) Head` is the head of a run that stored none (each key's newest version); `ErrVersionNotDone` refuses making a version current that did not finish (status other than done/skipped).
+- `MoveHead` makes a version current WITH THE UPSTREAM IT WAS COMPUTED FROM: every earlier key its basis names takes that entry. The caller re-asserts EVERY key whose entry changed (diff the old head against the new), upstream included.
+- `ParseHead` answers nil for an absent or unreadable head; `Head.Object()` is never nil (`{}` clears).
+- Top-level keys only: a key containing `/` is `ErrNestedStep`.
