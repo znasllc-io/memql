@@ -386,7 +386,18 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry, report ...*Lo
 			// no calltool resolution, re-enable by dropping the annotation.
 			// The name is RESERVED so registerFunctionTools cannot
 			// regenerate an ungoverned variant from the backing function.
+			//
+			// It is still CHECKED like any other: a disabled construct is
+			// maintained, and re-enabling it is only removing the
+			// annotation, so a declaration that would not load -- a field
+			// type outside the vocabulary, a @default that is no value of
+			// its field's type (memql#5430), a handler that does not parse
+			// -- is refused while disabled rather than on the day it is
+			// switched back on.
 			if decl.Disabled {
+				if _, convErr := toolDeclToTool(decl, origin); convErr != nil {
+					return nil, convErr
+				}
 				registry.MarkDisabled(decl.Name)
 				if logger != nil {
 					logger.Debug("memql.unifiedToolLoader: skipping @disabled tool",

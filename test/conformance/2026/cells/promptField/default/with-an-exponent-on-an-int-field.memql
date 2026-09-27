@@ -1,0 +1,7 @@
+/// A digest of a ticket, as long as the reader asked for, the default written in exponent form.
+@level("fast")
+@templateFile("ticketDigest.tmpl")
+prompt ticketDigestDefault {
+  title      string!  @description("The ticket's title.")
+  sentences  int  @default(1e3)  @description("How many sentences to write.")
+}

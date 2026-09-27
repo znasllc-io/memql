@@ -437,7 +437,7 @@ var placementTable = concat(
 	// ---- ToolField ------------------------------------------------------
 	[]Placement{
 		{Receiver: ToolField, Name: "autoInjected", Forms: FormFlag, Example: "@autoInjected"},
-		{Receiver: ToolField, Name: "default", Forms: FormString, Example: `@default("5")`, Doc: "The default the tool's input schema advertises to the model, written quoted: its text is a literal of the field's type -- `@default(\"5\")` on an integer field, `@default(\"true\")` on a boolean, one of the values of an enum field -- or the load refuses it (tool_default_type, memql#5430)."},
+		{Receiver: ToolField, Name: "default", Forms: FormString, Example: `@default("5")`, Doc: "The default the tool's input schema advertises to the model, written quoted: its text converts to the field's type as a call's default always has -- `@default(\"5\")` on an integer field, `@default(\"true\")` on a boolean, one of the values of an enum field -- or the load refuses it (tool_default_type, memql#5430)."},
 		{Receiver: ToolField, Name: "description", Forms: FormString, Example: `@description("Max results to return.")`, Doc: "The field's description, shown to the model in the tool's input schema."},
 		{Receiver: ToolField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("exec", "fs_read")`},
 		{Receiver: ToolField, Name: "required", Forms: FormFlag, Example: "@required"},
@@ -445,7 +445,7 @@ var placementTable = concat(
 
 	// ---- PromptField ----------------------------------------------------
 	[]Placement{
-		{Receiver: PromptField, Name: "default", Forms: FormString | FormNumber, Example: `@default("en")`, Doc: "The default the prompt's input schema declares for the field: a literal of the field's type -- quoted text that parses as it, or an unquoted number on a numeric field -- or the load refuses it (prompt_default_type, memql#5430)."},
+		{Receiver: PromptField, Name: "default", Forms: FormString | FormNumber, Example: `@default("en")`, Doc: "The default the prompt's input schema declares for the field: its text -- quoted, or an unquoted number as written -- converts to the field's type by the rule a tool field's does, or the load refuses it (prompt_default_type, memql#5430)."},
 		{Receiver: PromptField, Name: "description", Forms: FormString, Example: `@description("The episodes to distil.")`, Doc: "The field's description, carried into the prompt's input schema."},
 		{Receiver: PromptField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("short", "long")`},
 		{Receiver: PromptField, Name: "required", Forms: FormFlag, Example: "@required"},

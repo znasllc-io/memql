@@ -41,27 +41,36 @@ func TestToolDefaultIsALiteralOfTheFieldType(t *testing.T) {
 		{typ: "integer", text: "twenty", fault: "is not an integer"},
 		{typ: "integer", text: "2.5", fault: "is not an integer"},
 		{typ: "integer", text: "1e3", fault: "is not an integer"},
-		{typ: "integer", text: "007", fault: "is not an integer"},
-		{typ: "integer", text: "+5", fault: "is not an integer"},
+		// What the call-time conversion always read loads, canonical.
+		{typ: "integer", text: "007", want: int64(7)},
+		{typ: "integer", text: "+5", want: int64(5)},
+		{typ: "integer", text: "-0", want: int64(0)},
 		{typ: "integer", text: " 5", fault: "is not an integer"},
 		{typ: "integer", text: "", fault: "is not an integer"},
 		{typ: "integer", text: "99999999999999999999", fault: "is outside the integers a field can hold"},
 		// number (and its alias float).
 		{typ: "number", text: "2.5", want: 2.5},
 		{typ: "number", text: "20", want: float64(20)},
+		{typ: "number", text: "9007199254740993", want: float64(9007199254740993)}, // compared through JSON below
 		{typ: "number", text: "-1.5e3", want: -1500.0},
 		{typ: "float", text: "0.5", want: 0.5},
 		{typ: "number", text: "high", fault: "is not a number"},
-		{typ: "number", text: "NaN", fault: "is not a number"},
-		{typ: "number", text: "Inf", fault: "is not a number"},
-		{typ: "number", text: ".5", fault: "is not a number"},
+		{typ: "number", text: ".5", want: 0.5},
+		{typ: "number", text: "1.", want: 1.0},
+		{typ: "number", text: "+1e3", want: 1000.0},
+		// NaN and infinity have no JSON form: the text is published, and the
+		// call-time conversion reads it as it always did.
+		{typ: "number", text: "NaN", want: "NaN"},
+		{typ: "number", text: "Inf", want: "Inf"},
 		{typ: "number", text: "1e999", fault: "is outside the numbers a field can hold"},
 		// boolean (and its alias bool).
 		{typ: "boolean", text: "true", want: true},
 		{typ: "bool", text: "false", want: false},
 		{typ: "boolean", text: "yes", fault: "is not true or false"},
-		{typ: "boolean", text: "TRUE", fault: "is not true or false"},
-		{typ: "boolean", text: "1", fault: "is not true or false"},
+		{typ: "boolean", text: "TRUE", want: true},
+		{typ: "boolean", text: "1", want: true},
+		{typ: "boolean", text: "F", want: false},
+		{typ: "boolean", text: "no", fault: "is not true or false"},
 		// array and object: JSON, since the value is published in a JSON Schema.
 		{typ: "array", text: "[]", want: []any{}},
 		{typ: "array", text: `["a", 1]`, want: []any{"a", float64(1)}},
@@ -121,6 +130,23 @@ func TestToolDefaultIsALiteralOfTheFieldType(t *testing.T) {
 	}
 }
 
+// An integer default keeps every digit in the published schema, on a number
+// field as on an integer field: a float64 would publish 9007199254740993 as
+// ...992.
+func TestToolDefaultPublishesIntegersExactly(t *testing.T) {
+	for _, typ := range []string{"integer", "number"} {
+		decl := &ast.ToolDecl{Name: "probeExact", HandlerType: "function", HandlerName: "x",
+			Fields: []ast.ToolFieldDecl{{Name: "f", Type: typ, Default: "9007199254740993", HasDefault: true}}}
+		tools, err := toolDeclToTool(decl, "unified:probe/tools.memql:probeExact")
+		if err != nil {
+			t.Fatalf("%s: %v", typ, err)
+		}
+		if !strings.Contains(string(tools[0].InputSchema), `"default":9007199254740993`) {
+			t.Errorf("%s field: published %s, want the default's every digit", typ, tools[0].InputSchema)
+		}
+	}
+}
+
 // The handler receives the typed value, whether the schema publishes it typed
 // (an authored tool, since memql#5430) or as a string (a schema built by hand):
 // an integer arrives as the int64 it always did.
@@ -172,6 +198,43 @@ tool tdListTwenty5430 {
 	for _, other := range diags {
 		if strings.Contains(other.Message, "tdListTwenty5430") {
 			t.Errorf("a default that is an integer was refused:\n  %s", other.Message)
+		}
+	}
+}
+
+// A @disabled tool is not registered, but it is still checked: a disabled
+// construct is maintained, and switching it back on is only removing the
+// annotation.
+func TestDisabledToolDefaultIsChecked(t *testing.T) {
+	diags := lint(t, sigTree(map[string]string{
+		"tooldisabled5430/concepts.memql": "/// A ticket.\nconcept tdOffTicket5430 {\n  title  string\n}\n",
+		"tooldisabled5430/queries.memql": `/// Every ticket.
+query tdOffTicket5430 tdOffTickets5430 {
+  sort "row.createdAt", "desc"
+}
+`,
+		"tooldisabled5430/tools.memql": `/// List the tickets, the default in words. Switched off.
+@handler(type="query", query="paginate(query tdOffTickets5430(), args.limit)")
+@disabled
+tool tdOffInWords5430 {
+  limit  integer  @default("twenty")  @description("How many.")
+}
+
+/// List the tickets, twenty unless asked. Switched off.
+@handler(type="query", query="paginate(query tdOffTickets5430(), args.limit)")
+@disabled
+tool tdOffTwenty5430 {
+  limit  integer  @default("20")  @description("How many.")
+}
+`,
+	}))
+	d := sigRefusal(t, diags, `"tdOffInWords5430"`)
+	if d.Code != ToolDefaultCode {
+		t.Errorf("code = %q, want %q: %s", d.Code, ToolDefaultCode, d.Message)
+	}
+	for _, other := range diags {
+		if strings.Contains(other.Message, "tdOffTwenty5430") {
+			t.Errorf("a disabled tool with a valid default was refused:\n  %s", other.Message)
 		}
 	}
 }

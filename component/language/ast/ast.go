@@ -786,6 +786,12 @@ type Attribute struct {
 	// in it as `true`, the same entry `key=true` makes (memql#5359). The
 	// parser fills it; an attribute built in Go may leave it nil.
 	ArgKeys []ArgKey
+	// Literal is the argument as written when it is one bare number --
+	// `@default(1e3)` -- whose parsed value Value holds as an int64 or a
+	// float64. A reader that holds the argument to a type reads this text,
+	// not the parsed value: 1e3 parses to 1000 and 9007199254740993 does not
+	// survive a float64, and the author wrote neither (memql#5430).
+	Literal string
 }
 
 // ArgKey is one keyword argument as it was written.
