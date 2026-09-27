@@ -260,3 +260,21 @@ func TestThePromotionQuestionNamesTheGoalNotTheConstruct(t *testing.T) {
 		}
 	}
 }
+
+// TestThePromotionReasonReadsAtTheLowestValues: an operator may set m and k to
+// one, and the evidence line a person reads must still be a sentence.
+func TestThePromotionReasonReadsAtTheLowestValues(t *testing.T) {
+	cases := []struct {
+		p    PromotionProposal
+		want string
+	}{
+		{PromotionProposal{ShadowMatches: 1}, "matched the app once in shadow, with no parameter to vary"},
+		{PromotionProposal{ShadowMatches: 1, DistinctBindings: map[string]int{"h1": 1}}, "matched the app once in shadow, across at least 1 distinct binding of every parameter"},
+		{PromotionProposal{ShadowMatches: 5, DistinctBindings: map[string]int{"h1": 2, "h2": 3}}, "matched the app 5 consecutive times in shadow, across at least 2 distinct bindings of every parameter"},
+	}
+	for _, c := range cases {
+		if got := promotionReason(c.p); got != c.want {
+			t.Errorf("promotionReason(%+v) = %q, want %q", c.p, got, c.want)
+		}
+	}
+}

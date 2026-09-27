@@ -181,7 +181,7 @@ func promotionSubjectName(p PromotionProposal) string {
 // the rule a single value could not have satisfied.
 func promotionReason(p PromotionProposal) string {
 	if len(p.DistinctBindings) == 0 {
-		return fmt.Sprintf("matched the app %d consecutive times in shadow, with no parameter to vary", p.ShadowMatches)
+		return fmt.Sprintf("matched the app %s in shadow, with no parameter to vary", streakPhrase(p.ShadowMatches))
 	}
 	fewest := -1
 	for _, n := range p.DistinctBindings {
@@ -189,5 +189,22 @@ func promotionReason(p PromotionProposal) string {
 			fewest = n
 		}
 	}
-	return fmt.Sprintf("matched the app %d consecutive times in shadow, across at least %d distinct bindings of every parameter", p.ShadowMatches, fewest)
+	return fmt.Sprintf("matched the app %s in shadow, across at least %s of every parameter", streakPhrase(p.ShadowMatches), bindingsPhrase(fewest))
+}
+
+// streakPhrase spells a run of matches: an operator may set the ladder's m to
+// one, and "1 consecutive times" is not a sentence.
+func streakPhrase(n int) string {
+	if n == 1 {
+		return "once"
+	}
+	return fmt.Sprintf("%d consecutive times", n)
+}
+
+// bindingsPhrase spells a count of distinct bindings, singular at one.
+func bindingsPhrase(n int) string {
+	if n == 1 {
+		return "1 distinct binding"
+	}
+	return fmt.Sprintf("%d distinct bindings", n)
 }

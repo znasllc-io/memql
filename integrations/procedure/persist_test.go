@@ -344,7 +344,7 @@ func TestADislikedInstanceStepHoldsTheLiftAtCandidate(t *testing.T) {
 		t.Fatalf("rung = %s, want candidate", res.Rung)
 	}
 	reason := argsOf(t, eng.callTo(t, "recordConstructLadder"))["ladderReason"].(string)
-	if !strings.Contains(reason, "instance 1, step 1") {
+	if !strings.Contains(reason, "instance 2, step 2") {
 		t.Fatalf("reason %q must name the instance and the step", reason)
 	}
 

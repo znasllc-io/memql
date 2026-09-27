@@ -101,7 +101,10 @@ func CandidateGate(e CandidateEvidence) (ready bool, reason string) {
 	for i, instance := range e.Instances {
 		for j, step := range instance {
 			if step.heldByDislike() {
-				return false, fmt.Sprintf("instance %d, step %d was disliked and has no liked or neutral version since", i, j)
+				// Counted from one, as a person counts: the sentence is read in
+				// Nexus, where "instance 0, step 0" names nothing anybody can
+				// find. Only the text moves; the indexes stay the gate's own.
+				return false, fmt.Sprintf("instance %d, step %d was disliked and has no liked or neutral version since", i+1, j+1)
 			}
 		}
 	}
