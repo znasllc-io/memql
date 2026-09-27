@@ -21,8 +21,8 @@ func withCommand(t *testing.T, w *replayWorld, idx int, command string) {
 		t.Fatalf("canonicalizing %q gave %d actions", command, len(acts))
 	}
 	w.withDecoded(t, func(p *Procedure) {
-		p.Steps[idx].Args = acts[0].Args
-		p.Symbols[idx].Template = acts[0].Args
+		p.Steps[idx].Tool, p.Steps[idx].Args = "exec", acts[0].Args
+		p.Symbols[idx].Tool, p.Symbols[idx].Template = "exec", acts[0].Args
 	})
 }
 

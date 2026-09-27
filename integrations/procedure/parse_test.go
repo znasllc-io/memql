@@ -337,6 +337,30 @@ func everyReplayStatement(t *testing.T) []recordedCall {
 	refused.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
 	out = append(out, refused.eng.recorded()...)
 
+	// The stops the ladder does not count: a target that stopped answering,
+	// a resume that found a step in flight on a machine, and a replay whose
+	// version was re-lifted under it.
+	unavailable := newReplayWorld(t, "trusted")
+	unavailable.d.alter["step1"] = func(r *DispatchResult) {
+		yes := true
+		*r = DispatchResult{Observation: work.StepObservation{IsError: &yes}, Unavailable: true,
+			Output: map[string]any{"errorCode": "worker_disconnected", "errorMessage": "the stream dropped"}}
+	}
+	unavailable.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
+	out = append(out, unavailable.eng.recorded()...)
+
+	interrupted, _ := machineReplayWorld(t)
+	interruptedAfterStep0(t, interrupted, servedReq(interrupted), "running")
+	if _, err := interrupted.i.Replay(context.Background(), servedReq(interrupted)); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	out = append(out, interrupted.eng.recorded()...)
+
+	replaced := newReplayWorld(t, "trusted")
+	replaced.d.alter["step0"] = func(*DispatchResult) { reliftTo(replaced, "shadow", "sha256:the-relifted-version") }
+	replaced.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
+	out = append(out, replaced.eng.recorded()...)
+
 	// Two shadow comparisons, the second proposing the promotion, through
 	// ShadowCompare's own read of the recording.
 	shadow := shadowWorld(t, recording1("c.txt", testNow.Add(-2*time.Minute)), recording1("d.txt", testNow.Add(-time.Minute)))

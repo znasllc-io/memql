@@ -70,9 +70,15 @@ import (
 // later RESUMED -- its node died mid-replay -- executes the replay statement
 // again. The replay run's id is DERIVED from the goal run and that statement,
 // so the second execution finds the first one's run, skips every step whose
-// receipt exists, re-dispatches an unfinished one under the SAME idempotency
-// key, and -- when the first one finished -- answers what it answered without
-// running, counting or handing anything over twice.
+// receipt exists, and -- when the first one finished -- answers what it
+// answered without running, counting or handing anything over twice. A step
+// that was IN FLIGHT when the node died (an intent, no receipt) is re-sent
+// under the same idempotency key only when it could have touched nothing but
+// the replay's own workbench workspace: no production dispatcher deduplicates
+// on the key, so one that could have reached the world -- a machine's file or
+// command, a tool call that writes, a command that sends something out -- is
+// not sent again. The replay stops there and hands the goal back, naming it as
+// a step that MAY HAVE RUN (review finding I5).
 
 // Preconditions is component/procedure's learned initiation set -- what a
 // Prober is handed and answers -- named here so a node that implements the
@@ -188,6 +194,11 @@ type ReplayOutcome struct {
 	// AlreadyDone: the replay run had already finished, and this call ran,
 	// counted and handed over nothing that had been done.
 	AlreadyDone bool
+	// Interrupted: a resumed replay found a step that was in flight when its
+	// node died and could have reached beyond its workspace; it was not sent
+	// again, the goal went to the app naming it as one that MAY HAVE RUN, and
+	// the ladder did not count it.
+	Interrupted bool
 	// TargetUnavailable: the target could not finish a step for a reason
 	// that says nothing about the procedure, so the replay stopped there and
 	// the ladder did not count it.
@@ -218,6 +229,10 @@ const (
 	// the procedure: the ladder does not count either (review finding I1).
 	codeTargetUnavailable = "procedure_target_unavailable"
 	codeNoProber          = "no_prober"
+	// codeInterrupted is a resumed replay that stopped at a step that was in
+	// flight when its node died and may have reached the world (review
+	// finding I5). Not counted either: a node dying is not the procedure.
+	codeInterrupted = "procedure_interrupted"
 )
 
 const (
@@ -359,7 +374,10 @@ type replay struct {
 	free     map[string]string
 	outputs  map[int]any
 	receipts map[string]stepReceipt
-	trace    []string
+	// intents are a resumed run's steps that were sent and left no receipt
+	// -- in flight when its node died -- by step key.
+	intents map[string]stepIntent
+	trace   []string
 	// outcome is what the replay run's outcome field says.
 	outcome map[string]any
 	// ranAndDiffered: the replay stopped at a step that RAN and whose outcome
@@ -422,7 +440,7 @@ func (r *replay) run(ctx context.Context) {
 		// in shadow, the comparison not made) is already the whole answer.
 		return
 	}
-	if r.out.TargetUnavailable {
+	if r.out.TargetUnavailable || r.out.Interrupted {
 		r.finishUncounted(ctx)
 		return
 	}
@@ -585,6 +603,7 @@ func (r *replay) reenterReplaced(ctx context.Context, run map[string]any, ran st
 // and hands the goal to the app with every step the receipts say ran.
 func (r *replay) handBackResumed(ctx context.Context) {
 	r.out.Completed = append(r.out.Completed, r.ranSteps()...)
+	r.out.Completed = append(r.out.Completed, r.inFlightSteps()...)
 	started := len(r.out.Completed) > 0
 	r.out.StartRefused = !started
 	r.out.DivergedStep = len(r.out.Completed)
@@ -680,6 +699,15 @@ func terminalRunStatus(s string) bool {
 	return false
 }
 
+// stepIntent is a step a replay run sent and has no receipt for: its node
+// died with it in flight, or its target stopped answering. Whether it ran is
+// unknown.
+type stepIntent struct {
+	index          int
+	tool           string
+	idempotencyKey string
+}
+
 // stepReceipt is a step a replay run already ran, as its receipt says. It
 // carries what a resume needs to go on -- the observation to compare and the
 // output a later data-flow hole reads -- and what the app must be told about
@@ -703,22 +731,159 @@ func (r *replay) ranSteps() []CompletedStep {
 	return out
 }
 
+// inFlightSteps are a resumed run's intents that could have reached beyond
+// the replay's own workspace, as steps that MAY HAVE RUN -- what a hand-back
+// after an interruption tells the app to check before repeating. An intent
+// that could only have touched the workbench's workspace is not listed: its
+// effects never reached the app, whatever they were.
+func (r *replay) inFlightSteps() []CompletedStep {
+	target := r.target
+	if target == "" {
+		target = r.intendedTarget()
+	}
+	var out []CompletedStep
+	for key, in := range r.intents {
+		if _, done := r.receipts[key]; done {
+			continue
+		}
+		args, known := r.bestEffortArgs(in.index, in.tool)
+		sends := in.tool == "exec" // a command nobody can read back may send
+		if known && in.tool == "exec" {
+			sends, _ = sendsOutside(args)
+		}
+		if !r.mayHaveReachedOutside(target, in.tool, sends) {
+			continue
+		}
+		summary := firstNonEmpty(in.tool, "a step")
+		if known {
+			summary = stepSummary(in.tool, args)
+		}
+		out = append(out, CompletedStep{Index: in.index, Tool: in.tool, IdempotencyKey: in.idempotencyKey, Summary: summary, MayHaveRun: true})
+	}
+	sort.SliceStable(out, func(a, b int) bool { return out[a].Index < out[b].Index })
+	return out
+}
+
+// bestEffortArgs writes a step's call out again for a hand-back, from what a
+// resumed run knows without running anything: the goal's input, the
+// constants, and the outputs its receipts kept. False when any hole cannot be
+// bound, or the step is not the one the intent was for (another version's).
+func (r *replay) bestEffortArgs(idx int, tool string) (map[string]any, bool) {
+	if r.out.VersionReplaced || idx < 0 || idx >= len(r.c.template.Steps) || r.c.template.Steps[idx].Tool != tool {
+		return nil, false
+	}
+	step := r.c.template.Steps[idx]
+	values := map[string]string{}
+	ok := true
+	walkHoleIds(step.Args, func(holeId string) {
+		if _, done := values[holeId]; !ok || done {
+			return
+		}
+		h, known := r.c.holes[holeId]
+		switch {
+		case !known:
+			ok = false
+		case h.Class == proc.HoleConstant:
+			values[holeId] = h.Const
+		case h.Class == proc.HoleDataFlow:
+			if h.Ref == nil {
+				ok = false
+				return
+			}
+			rec, has := r.receipts[replayStepKey(h.Ref.StepIndex)]
+			v, found := outputValueAt(rec.output, h.Ref.Path)
+			if !has || !found {
+				ok = false
+				return
+			}
+			values[holeId] = v
+		default:
+			if v, bound := r.free[holeId]; bound {
+				values[holeId] = v
+				return
+			}
+			lit, litOK := proc.InputLiteral(r.req.Input[r.c.p.InputMap[holeId]])
+			if !litOK || strings.TrimSpace(lit) == "" {
+				ok = false
+				return
+			}
+			values[holeId] = lit
+		}
+	})
+	if !ok {
+		return nil, false
+	}
+	raw, err := proc.Materialize(step.Args, values)
+	if err != nil {
+		return nil, false
+	}
+	args, _ := raw.(map[string]any)
+	return args, args != nil
+}
+
+// mayHaveReachedOutside reports whether a step that was sent and never
+// answered for could have changed something beyond the replay's own workspace
+// -- which decides whether a resume may send it again (review finding I5). A
+// shadow never reaches outside: it runs in the sandbox, a command that may
+// send is compared dry, and its tool calls are queries. Served, a read
+// changes nothing wherever it ran; a tool call may write a row, and which do
+// is not the runner's to tell; and a command or a write reaches the world on
+// a machine, or from anywhere when the command sends something out.
+func (r *replay) mayHaveReachedOutside(target work.ReplayTarget, tool string, sends bool) bool {
+	if r.mode == ReplayShadow {
+		return false
+	}
+	switch tool {
+	case "fs_read", "fetch":
+		return false
+	case "mcp":
+		return true
+	}
+	return target == work.TargetMachine || sends
+}
+
+// intendedTarget is where a serving replay's steps run, decided as
+// checkTarget decides it -- for the hand-back paths that stop before it runs.
+func (r *replay) intendedTarget() work.ReplayTarget {
+	if r.mode == ReplayShadow {
+		return work.TargetWorkbench
+	}
+	target := work.ReplayTargetFor(r.c.p.Footprint)
+	if stored, ok := parseTarget(r.c.p.Target); ok {
+		target = stored
+	}
+	return target
+}
+
 // loadReceipts reads the steps a resumed replay run already ran. A step with a
-// receipt is NEVER dispatched again; one left at `running` is re-dispatched
-// under the same idempotency key, which is what lets a dispatcher refuse the
-// duplicate of an effect that landed before the node died.
+// receipt is NEVER dispatched again. One left at `running` -- or failed
+// because its target stopped answering, which is the same unknown -- is an
+// INTENT: sent, and whether it ran is unknown (runStep decides whether it may
+// be sent again).
 func (r *replay) loadReceipts(actorCtx context.Context) {
 	rows, err := r.i.store.query(actorCtx, "query "+call("workStepsForOwnerRun", map[string]any{"runId": r.runId}))
 	if err != nil {
 		r.i.log().Warn("procedure: could not read a resumed replay's steps", "run", r.runId, "error", err)
 		return
 	}
+	if r.intents == nil {
+		r.intents = map[string]stepIntent{}
+	}
 	for _, row := range rows {
-		if status := str(row, "status"); status != "done" && status != "skipped" {
-			continue
-		}
 		key := str(row, "key")
 		payload := obj(obj(row, "result"), "result")
+		status := str(row, "status")
+		mayHaveRun, _ := payload["mayHaveRun"].(bool)
+		if status == "running" || (status == "failed" && mayHaveRun) {
+			r.intents[key] = stepIntent{
+				index: intOf(row, "seq"), tool: firstNonEmpty(str(obj(row, "call"), "tool"), str(payload, "tool")),
+				idempotencyKey: str(row, "idempotencyKey"),
+			}
+			continue
+		}
+		if status != "done" && status != "skipped" {
+			continue
+		}
 		rec := stepReceipt{output: payload["output"]}
 		if o := payload["observation"]; o != nil {
 			_ = decodeInto(o, &rec.observation)
@@ -749,6 +914,7 @@ func (r *replay) reenterFinished(ctx context.Context, run map[string]any) {
 		// receipts are the only record of what ran.
 		r.loadReceipts(ownerActor(ctx, r.req.OwnerUserId))
 		r.out.Completed = append(r.out.Completed, r.ranSteps()...)
+		r.out.Completed = append(r.out.Completed, r.inFlightSteps()...)
 		r.out.Diagnosis = fmt.Sprintf("A replay of this goal was interrupted (its run is %s) after %d step(s), and the app takes it from there.",
 			firstNonEmpty(str(run, "status"), "closed"), len(r.out.Completed))
 		r.out.DivergedStep = len(r.out.Completed)
@@ -810,10 +976,7 @@ func (r *replay) checkTarget(ctx context.Context) bool {
 		}
 		r.target = work.TargetWorkbench
 	} else {
-		r.target = work.ReplayTargetFor(fp)
-		if stored, ok := parseTarget(r.c.p.Target); ok {
-			r.target = stored
-		}
+		r.target = r.intendedTarget()
 		// BEFORE THE FIRST STEP (D4): a machine-local procedure that failed at
 		// step three on the workbench has already run steps one and two
 		// somewhere they mean nothing.
@@ -1081,6 +1244,12 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		r.dryStep[idx] = true
 	}
 	receipt, ran := r.receipts[key]
+	if _, inFlight := r.intents[key]; inFlight && !ran && !stepDry && r.mayHaveReachedOutside(r.target, step.Tool, sends) {
+		// SENT, AND NEVER ANSWERED FOR: the node died with this step in
+		// flight. It could have reached the world, and no dispatcher
+		// deduplicates on the idempotency key -- so it is not sent again.
+		return r.stopInterrupted(ctx, idx, done)
+	}
 	switch {
 	case ran:
 		// A RECEIPT EXISTS: this step ran before this replay run was resumed.
@@ -1278,6 +1447,30 @@ func (r *replay) stopUnavailable(ctx context.Context, idx int, key string, done 
 	return false
 }
 
+// stopInterrupted stops a resumed replay at a step that was in flight when its
+// node died and could have reached the world (review finding I5). It is not
+// sent again; the goal goes to the app naming it as one that MAY HAVE RUN,
+// and the ladder does not count it -- a node dying is not the procedure.
+func (r *replay) stopInterrupted(ctx context.Context, idx int, done CompletedStep) bool {
+	done.MayHaveRun = true
+	diagnosis := fmt.Sprintf("A replay of this goal was interrupted while step %d (%s: %s) was in flight, and whether it ran is unknown; "+
+		"it could have reached beyond the replay's own workspace, so it was not sent again.", idx+1, done.Tool, done.Summary)
+	if r.mode == ReplayShadow {
+		r.notCompared(codeInterrupted, diagnosis)
+		r.outcome = r.baseOutcome()
+		r.outcome["notCompared"] = true
+		r.outcome["diagnosis"] = r.out.Diagnosis
+		r.closeRun(ctx, "failed", codeInterrupted, r.out.Diagnosis)
+		return false
+	}
+	r.out.Interrupted = true
+	r.out.Code = codeInterrupted
+	r.out.DivergedStep = idx
+	r.out.Diagnosis = diagnosis
+	r.out.Completed = append(r.out.Completed, done)
+	return false
+}
+
 // targetName is where the replay's steps run, as a sentence says it.
 func (r *replay) targetName() string {
 	if r.target == "" {
@@ -1287,15 +1480,20 @@ func (r *replay) targetName() string {
 }
 
 // finishUncounted closes a served replay that stopped for a reason that says
-// nothing about the procedure, and hands the goal to the app with every step
-// that ran or may have. No ladder event: the target, not the procedure, is
-// what failed.
+// nothing about the procedure -- its target stopped answering, or its node
+// died with a step in flight -- and hands the goal to the app with every step
+// that ran or may have. No ladder event: the procedure is not what failed.
 func (r *replay) finishUncounted(ctx context.Context) {
 	r.outcome = r.divergenceOutcome()
 	r.outcome["code"] = r.out.Code
 	r.outcome["diagnosis"] = r.out.Diagnosis
 	r.outcome["stoppedAt"] = r.out.DivergedStep
-	r.outcome["targetUnavailable"] = true
+	if r.out.TargetUnavailable {
+		r.outcome["targetUnavailable"] = true
+	}
+	if r.out.Interrupted {
+		r.outcome["interrupted"] = true
+	}
 	if r.i.appFallback() == nil {
 		r.out.Code = codeFallbackUnavailable
 		r.outcome["fallback"] = "no app fallback is installed on this node, so nothing served the goal"
@@ -1753,14 +1951,21 @@ func (r *replay) recordHandover(ctx context.Context) {
 func (r *replay) writeStepIntent(ctx context.Context, idx int, key, idem string) {
 	actorCtx := ownerActor(ctx, r.req.OwnerUserId)
 	now := r.now()
+	tool := ""
+	if idx < len(r.c.template.Steps) {
+		tool = r.c.template.Steps[idx].Tool
+	}
 	if err := r.i.store.writeInternal(actorCtx, "mutation "+call("createWorkStep", map[string]any{
-		"stepId":         r.stepId(key),
-		"runId":          r.runId,
-		"key":            key,
-		"seq":            idx,
-		"stepType":       replayStepType,
-		"kind":           string(work.KindDeterministic),
-		"call":           map[string]any{"construct": replayConstructKind, "name": r.c.name},
+		"stepId":   r.stepId(key),
+		"runId":    r.runId,
+		"key":      key,
+		"seq":      idx,
+		"stepType": replayStepType,
+		"kind":     string(work.KindDeterministic),
+		// The TOOL is named on the intent, as the construct is: a resume
+		// that finds the intent and no receipt must say what was in flight,
+		// even when the version it ran has since been replaced.
+		"call":           map[string]any{"construct": replayConstructKind, "name": r.c.name, "tool": tool},
 		"status":         "running",
 		"attempt":        1,
 		"idempotencyKey": idem,
