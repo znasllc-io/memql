@@ -74,7 +74,10 @@ type Token struct {
 }
 
 // Diagnostic is one entry in the Diagnose result. Severity values:
-// 1=Error, 2=Warning, 3=Info, 4=Hint.
+// 1=Error, 2=Warning, 3=Info, 4=Hint. Code is the diagnostic's stable id --
+// a rule's (`actor-unknown-property`), a retired form's, or, from the
+// load pass, a Lower refusal's (`lower_unknown_field`) -- and is what a
+// caller keys a quick fix on; Message is prose and may be reworded.
 type Diagnostic struct {
 	Severity int
 	Message  string
@@ -169,10 +172,19 @@ func (c *Client) Tokenize(ctx context.Context, source string) ([]Token, error) {
 // regular language warnings + errors the editor should surface in
 // the gutter. The Go error return is reserved for wire-level
 // failures (dispatcher closed, context cancelled, etc.).
-func (c *Client) Diagnose(ctx context.Context, source string) ([]Diagnostic, error) {
+//
+// filePath is the document's path relative to the DSL root
+// ("planner/queries.memql"). With it the cluster also runs its load over
+// the source and returns Lower's refusals -- a field the concept does not
+// declare, a context spec applied to the row -- as errors whose Code is the
+// refusal's rule id (memql#5434). That pass costs the load of the
+// document's constructs, so a caller diagnosing on every keystroke may
+// send "" and ask with the path when the author pauses or saves. "" skips
+// the pass: without the path a name two domains declare resolves wrongly.
+func (c *Client) Diagnose(ctx context.Context, source, filePath string) ([]Diagnostic, error) {
 	msg := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_SenseDiagnose{
-			SenseDiagnose: &memqlv1.SenseDiagnoseMsg{Source: source},
+			SenseDiagnose: &memqlv1.SenseDiagnoseMsg{Source: source, FilePath: filePath},
 		},
 	}
 	resp, err := c.dispatcher.SendAndWait(ctx, msg)
