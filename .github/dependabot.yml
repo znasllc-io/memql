@@ -8,6 +8,16 @@ updates:
     labels:
       - "dependencies"
       - "go"
+    ignore:
+      # grpc 1.84.0 carries GO-2026-6443 (CVE-2026-84445): a server panic on a
+      # request with neither :authority nor Host. The fix reached 1.82.2, 1.83.2
+      # and master, but not the 1.84 branch, so 1.84.0 is the one release that
+      # REINTRODUCES it. #5669 took it from #5605 and govulncheck went red on
+      # main -- the lane runs on push and merge_group only, so no PR sees it.
+      # Exact version only: a 1.84.x or 1.85.0 carrying the fix is still
+      # proposed. Delete this entry once main moves past 1.84.0.
+      - dependency-name: "google.golang.org/grpc"
+        versions: ["1.84.0"]
 
   # WHY THERE IS NO SEPARATE ENTRY FOR THE NESTED MODULES (memql#3300).
   #
