@@ -1389,6 +1389,11 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 		prop.description = attrString(attr)
 	case "pattern":
 		prop.pattern = attrString(attr)
+		// Compiled here rather than at the concept's first write, where
+		// the schema compiler would refuse it for every write (memql#5426).
+		if _, err := CompilePattern(prop.pattern); err != nil {
+			return err
+		}
 	case "minLength":
 		n, err := toInt64(attrNumeric(attr))
 		if err != nil {

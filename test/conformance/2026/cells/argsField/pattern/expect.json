@@ -13,8 +13,9 @@
     {
       "file": "an-invalid-pattern.memql",
       "verdict": "refuse_load",
+      "code": "pattern_invalid",
       "message": "args field \"region\": invalid @pattern \"^[A-Z\": error parsing regexp: missing closing ]",
-      "note": "An args field's pattern is compiled once at load. (A concept field's @pattern is not compiled at load today: the same mistake on a concept field loads.)"
+      "note": "An args field's pattern is compiled once at load, by the check a concept field's pattern is held to as well (cells/conceptField/pattern), under the same rule id."
     }
   ]
 }

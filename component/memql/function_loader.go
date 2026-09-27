@@ -1666,9 +1666,11 @@ func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, erro
 	}
 
 	if field.Pattern != "" {
-		compiled, err := regexp.Compile(field.Pattern)
+		// The one @pattern check a concept field's pattern is held to as
+		// well (memql#5426), so one annotation has one answer and one code.
+		compiled, err := memoryNodes.CompilePattern(field.Pattern)
 		if err != nil {
-			return nil, fmt.Errorf("args field %q: invalid @pattern %q: %w", field.Name, field.Pattern, err)
+			return nil, fmt.Errorf("args field %q: %w", field.Name, err)
 		}
 		result.patternRegex = compiled
 	}
