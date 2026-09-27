@@ -857,11 +857,17 @@ func (r *replay) intendedTarget() work.ReplayTarget {
 	if r.mode == ReplayShadow {
 		return work.TargetWorkbench
 	}
-	target := work.ReplayTargetFor(r.c.p.Footprint)
-	if stored, ok := parseTarget(r.c.p.Target); ok {
-		target = stored
+	return procedureTarget(r.c.p)
+}
+
+// procedureTarget is where a procedure replays when it serves: the target the
+// lift stored, or -- for a payload that stored none it can read -- the one its
+// footprint names (D4).
+func procedureTarget(p Procedure) work.ReplayTarget {
+	if stored, ok := parseTarget(p.Target); ok {
+		return stored
 	}
-	return target
+	return work.ReplayTargetFor(p.Footprint)
 }
 
 // loadReceipts reads the steps a resumed replay run already ran. A step with a
@@ -1823,7 +1829,7 @@ func (r *replay) advanceFrom(ctx context.Context, fresh map[string]any, ev work.
 	before := ladderStateOf(fresh)
 	t := work.Advance(before, ev, r.policy)
 	if t.Propose {
-		approvalId, err := r.i.raisePromotion(ctx, r.req.OwnerUserId, r.c, r.runId, t)
+		approvalId, err := r.i.raisePromotion(ctx, r.req.OwnerUserId, r.c, r.runId, t, r.dry || len(r.dryStep) > 0)
 		if err != nil {
 			// The ladder still moves -- the evidence is real -- and the
 			// proposal is made again on the next match, because the state

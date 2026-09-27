@@ -183,11 +183,11 @@ func TestThePromotionApprovalIdIsDerivedFromWhatProposedIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr := work.Transition{From: work.RungShadow, To: work.RungShadow, Propose: true, State: work.LadderState{Rung: work.RungShadow, ShadowMatches: 5}}
-	first, err := w.i.raisePromotion(context.Background(), replayOwner, c, shadowRun, tr)
+	first, err := w.i.raisePromotion(context.Background(), replayOwner, c, shadowRun, tr, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := w.i.raisePromotion(context.Background(), replayOwner, c, shadowRun, tr)
+	second, err := w.i.raisePromotion(context.Background(), replayOwner, c, shadowRun, tr, false)
 	if err != nil {
 		t.Fatal(err)
 	}

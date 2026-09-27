@@ -33,7 +33,11 @@ import (
 
 // raisePromotion writes the procedurePromotion approval a transition
 // proposed, under the owner's actor and the one stamp, and returns its id.
-func (i *Integration) raisePromotion(ctx context.Context, owner string, c *loaded, shadowRunId string, t work.Transition) (string, error) {
+// dryEvidence says the comparison that proposed it held calls to the app's
+// own rather than replaying them -- every comparison of a machine-local
+// procedure, and any whose step may send something out of the sandbox -- so
+// the person deciding can see what the streak did and did not exercise.
+func (i *Integration) raisePromotion(ctx context.Context, owner string, c *loaded, shadowRunId string, t work.Transition, dryEvidence bool) (string, error) {
 	distinct := make(map[string]int, len(t.State.DistinctBindings))
 	for holeId, digests := range t.State.DistinctBindings {
 		distinct[holeId] = len(digests)
@@ -58,6 +62,11 @@ func (i *Integration) raisePromotion(ctx context.Context, owner string, c *loade
 		DistinctBindings: distinct,
 		RecordedFrom:     recordedFrom,
 		Title:            c.p.Title,
+		// TODO(coordinator): component/work.PromotionProposal gains Target
+		// and DryEvidence on the epic branch (F2). Once this branch sits on
+		// it, name where the procedure runs and whether its evidence was dry:
+		//	Target:      string(procedureTarget(c.p)),
+		//	DryEvidence: dryEvidence,
 	}, i.clock().UTC())
 	if err := work.ValidateApprovalKind(req); err != nil {
 		return "", err
