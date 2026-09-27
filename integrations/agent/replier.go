@@ -349,6 +349,23 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 			return nil, err
 		}
 		routerReq = overridden
+		// A PINNED MODEL NAMES ITS STEP. A tool turn resolved to an app door
+		// becomes a session subrun (design D7), and the session door refuses
+		// a request that names no step, because it has nothing to hand over.
+		// Prompt calls get their run and step from applyCallAttribution; this
+		// turn builds its request itself, so a person who pinned an app for a
+		// re-run step would otherwise be refused at resolution with nothing
+		// else in the one-entry chain to fall to. Only an explicit pin names
+		// the step here: default routing of every other work turn is epic
+		// memql#5391's to change, not this override's.
+		if rc, ok := common.RunFromContext(ctx); ok && rc.Override != nil && strings.TrimSpace(rc.Override.Model) != "" {
+			if strings.TrimSpace(routerReq.RunId) == "" {
+				routerReq.RunId = rc.RunId
+			}
+			if strings.TrimSpace(routerReq.StepId) == "" {
+				routerReq.StepId = rc.StepKey
+			}
+		}
 	}
 	// Provider resolution + the tool loop are the lane-specific caller's
 	// job (handleStreaming resolves stream-with-tools; handleBackground

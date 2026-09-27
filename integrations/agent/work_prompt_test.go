@@ -101,6 +101,11 @@ func TestAWorkTurnRunsAtItsOverridesLevelModelAndEffort(t *testing.T) {
 	if got := prepared.routerReq; got.Level != airoute.LevelReasoning || got.ExplicitProvider != "app:claude-code:opus" || got.Effort != "high" {
 		t.Fatalf("the re-run turn resolves with level=%q pin=%q effort=%q", got.Level, got.ExplicitProvider, got.Effort)
 	}
+	// A pinned app is a session door, and the session door hands over a STEP:
+	// without the run and step on the request it refuses at resolution.
+	if got := prepared.routerReq; got.RunId != "run" || got.StepId != "draft" {
+		t.Fatalf("a pinned model's turn must name its step for the session door; run=%q step=%q", got.RunId, got.StepId)
+	}
 
 	// The control: the same turn nobody re-ran is the ordinary strong turn.
 	plain, err := turn(nil)
@@ -109,6 +114,9 @@ func TestAWorkTurnRunsAtItsOverridesLevelModelAndEffort(t *testing.T) {
 	}
 	if got := plain.routerReq; got.Level != airoute.LevelStrong || got.ExplicitProvider != "" || got.Effort != "" {
 		t.Fatalf("a turn nobody re-ran resolves with level=%q pin=%q effort=%q", got.Level, got.ExplicitProvider, got.Effort)
+	}
+	if got := plain.routerReq; got.RunId != "" || got.StepId != "" {
+		t.Fatalf("default routing of a turn nobody pinned is unchanged; run=%q step=%q", got.RunId, got.StepId)
 	}
 
 	// A level no step is re-run at refuses the turn rather than running it at
