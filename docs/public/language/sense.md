@@ -134,7 +134,7 @@ live in `component/grpc/sense_handlers.go`.
 |---|---|
 | **Tokenize** | Semantic tokens for syntax highlighting -- keywords, identifiers, strings, annotations, concept ids, and the operators (`\|\|`, `.?` and `=>` each one token) |
 | **Complete** | Context-aware autocompletion -- constructs, annotations, concepts, builtins, keywords; at an expression position, exactly what the tier manifest admits there (see [Expressions](#expressions-position-aware-completion-and-hover)) |
-| **Diagnose** | Errors and warnings from the lexer, parser, and semantic validation. A retired spelling is a parser error whose code is the parser's rule id (`retired_cond_call`), which the language server's [rewrite quick fix](#the-rewrite-quick-fix) keys on |
+| **Diagnose** | Errors and warnings from the lexer, parser, and semantic validation. A retired spelling is a parser error whose code is the parser's rule id (`retired_cond_call`), which the language server's [rewrite quick fix](#the-rewrite-quick-fix) keys on. Given the document's path in the tree, the engine's load of the document as well: [load refusals](#load-refusals), each coded with its `lower_*` rule id |
 | **Hover** | Symbol info at the cursor -- function docs, concept schemas, annotation docs, tool and prompt docs, and cards for operators, catalog functions and retired spellings that say where the item runs at the cursor's position. Resolves a BARE concept short name too (#2753): `candidate` in `shape candidate candidateFull` is ambient under rule 25, so it is matched by trailing segment against the registry. A collision across namespaces (`invocation` is both `v1:worker:invocation` and `v1:observability:invocation`) is broken by the document's own domain; where that cannot decide, hover returns nothing rather than the wrong concept. The domain comes from the document path, carried by `SenseHoverMsg.file_path` on the gRPC surface (#2760) and by the document URI over LSP |
 | **SignatureHelp** | Parameter help inside call arguments, from the function catalog first, then the builtins and the registry's declared args |
 | **Definition** | Go-to-definition (F12) -- resolves the construct reference under the cursor to the file and position that declares it (#2754). Backed by `dslimports.Index.DeclarationSites`, which finds the declaring file from the declaration index and recovers the line/column by re-lexing that file's raw source (the AST carries no positions). Colliding names are narrowed by the referencing file's own domain, and where that cannot decide it returns nothing rather than jumping to the wrong file. Exposed on both surfaces: `textDocument/definition` over LSP and `SenseDefinitionMsg` / `SenseDefinitionResult` over gRPC (#2760). The result carries a WORKSPACE-RELATIVE path, never a URI -- the LSP maps it to `file://` while the Cockpit addresses pack files as `(domain, path)`, so the wire stays neutral between them |
@@ -428,6 +428,70 @@ There is no `discarded-args-description` rule any more (memql#3336). `@descripti
 
 The two import checks resolve against the [workspace graph](#the-workspace-graph-cross-reference-resolution) rather than the flat registry, and they run even in the registry-less fallback (a workspace whose engine boot tripped) because the graph needs no registry. They are deliberately conservative: a reference the workspace cannot *prove* wrong -- an id under an external engine namespace the bundle imports but does not carry, or anything when the graph is absent -- resolves inconclusively and is left silent, so a legitimate cross-namespace import never squiggles. That is why they are Warnings, not Errors.
 
+### Load refusals
+
+Diagnose finds what lexing, parsing and rewriting find. What the load's
+lowering refuses -- a field the bound concept does not declare, a context spec
+applied to the row, a read through an optional object written with `.`, an
+in-process expression over its cost budget -- needs the engine's registries, so
+Sense runs it as a second pass, **DiagnoseLoad**, over the document's text
+(memql#5434). Each refusal is an Error on the node it refuses, its message is
+the refusal's own sentence (the node, the position, the reason and the fix),
+and its code is the stable rule id the [language reference](memql.md) lists:
+`lower_unknown_field`, `lower_context_spec_on_row`, `lower_optional_hop`,
+`lower_cost_over_budget`, and the rest of the `lower_*` family. A code action
+keys on the code, never on the message.
+
+What makes it the load's answer rather than a guess:
+
+- **The document's path in the tree is required**, relative to the DSL root
+  (`planner/queries.memql`). It is what the load derives a construct's
+  namespace from: a query's bare concept resolves through its own domain, a
+  spec's binding through its own domain first. Without it a name two domains
+  declare (`account`, `run`) binds to the wrong one or to none, and the pass
+  would show errors the load never makes -- so a document with no path, or
+  whose directory is no domain the engine loaded (an untitled buffer, a file
+  outside the tree, `_reference/`), gets no pass at all.
+- **The document replaces its file.** The engine already holds the file as
+  saved; the pass answers what the load would say were the buffer saved there.
+  The buffer's concepts, shapes and specs take the place of the file's, and a
+  spec the buffer no longer declares is gone. Unsaved text is what is loaded.
+- **One squiggle per fault.** Where a load refusal overlaps a diagnostic
+  Diagnose already reports, the more severe of the two is kept, and Diagnose's
+  on a tie: a bare `id` in a filter is Diagnose's `bare-row-intrinsic` warning
+  and the load's `lower_unknown_name` error, and the error -- which names the
+  same fix, `row.id` -- replaces the warning (`sense.MergeLoadDiagnostics`).
+- **Only what Lower reads is compiled**: concepts and shapes as the scope, and
+  the queries, specs and traits that hold the lowered positions. A construct
+  that fails before Lower sees it (a parse error, a concept that does not
+  resolve) is Diagnose's to report or the load's, never this pass's, and one
+  construct's parse error does not hide another's refusal. An automation's
+  trigger filter is not covered: the automations loader re-parses the filter
+  from compiled text and cannot say where in the author's file the refused node
+  is, so those refusals stay with the load (memqllint, boot).
+
+The pass costs the load of the document's constructs. Over the 320 files of
+this repository's tree the median is under a millisecond and the 90th
+percentile about 3 ms; the largest file of queries, `identity/queries.memql`,
+takes about 90 ms. So neither surface makes a keystroke wait on it:
+
+- **The language server** publishes Diagnose's diagnostics as it always did,
+  then runs the load off the request path, one pass per document at a time,
+  and publishes again with both when the pass answers for the text still in
+  the buffer. Until then the last pass's refusals are carried across the edit
+  -- one on a line the edit did not touch keeps its place, or moves with the
+  lines after it, and one on an edited line is dropped rather than drawn on the
+  wrong text -- so a squiggle does not blink off at every pause in typing.
+- **The gRPC Diagnose** runs the pass when `SenseDiagnoseMsg.file_path` carries
+  the document's tree path, and replies once with both. A client diagnosing on
+  every keystroke may send no path and ask with it when the author pauses or
+  saves (`sdk/go/sense.Client.Diagnose` takes the path as its third argument).
+
+The offline build models the engine a node boots, storefront packs included
+(`packs/anchor`), so a product domain relating a concept to a pack's
+(`use wholesale.concepts.{ application }`) builds with its registry and its
+load pass instead of refusing every file.
+
 ### Snippet completions (#2629)
 
 Completion items can carry LSP snippet syntax. `CompletionItem` has an
@@ -650,6 +714,7 @@ check the contract version without parsing the document.
 | The spec (source of truth) | `component/language/dslspec/` (`spec.go`, `constructs.go`, `lexicon.go`, `nextrules.go`, `punctuation.go`, `json.go`) |
 | The drift guard | `component/language/dslspec/drift_test.go` |
 | Sense core (pure Go) | `component/memql/sense/` |
+| The load pass | `component/memql/sense_load_pass.go` (the engine's side), `component/memql/sense/diagnose_load.go` (DiagnoseLoad and the merge), `cmd/memql-lsp/loadpass.go` (the editor's scheduling) |
 | Sense gRPC handlers | `component/grpc/sense_handlers.go` |
 | Spec fetch SDK | `sdk/go/dslspec/` |
 | Sense SDK (Tokenize / Hover / ...) | `sdk/go/sense/` |

@@ -819,8 +819,10 @@ one that cannot, and names the node, the position, the nearest pushdown
 spelling and the rule's id: `lower(row.email) == args.email` is refused in a
 filter, and `row.email == lower(args.email)` is the filter that runs. The id is
 printed last, in brackets, and carried as a field on the load report and on an
-authoring diagnostic -- its `code`, in process and over gRPC alike; the message
-may be reworded, the id may not:
+authoring diagnostic -- its `code`, in process and over gRPC alike. The editor
+shows each refusal on the node it refuses as you type, with the id as the
+diagnostic's code ([load refusals](sense.md#load-refusals)). The message may be
+reworded, the id may not:
 
 | Rule id | Refused |
 |---|---|
