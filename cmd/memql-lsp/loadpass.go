@@ -177,15 +177,24 @@ func (s *server) treePath(uri protocol.DocumentUri, lines memql.WorkspaceLanguag
 	return rel, true
 }
 
-// scheduleLoadPass starts the load of a document's buffer, unless the service
-// cannot load or the document is not in the tree -- then there is nothing to
-// add to what Diagnose published.
-func (s *server) scheduleLoadPass(notify glsp.NotifyFunc, uri protocol.DocumentUri) {
+// canLoadDocument reports whether the current build can run the load over a
+// document: it has an engine behind it (a workspace whose build failed has
+// none) and the document is in its tree.
+func (s *server) canLoadDocument(uri protocol.DocumentUri) bool {
 	svc, lines := s.getBuild()
 	if !svc.CanLoad() {
-		return
+		return false
 	}
-	if _, placed := s.treePath(uri, lines); !placed {
+	_, placed := s.treePath(uri, lines)
+	return placed
+}
+
+// scheduleLoadPass starts the load of a document's buffer, unless the service
+// cannot load or the document is not in the tree -- then there is nothing to
+// add to what Diagnose published, and publishDiagnostics has already dropped
+// what an earlier build found.
+func (s *server) scheduleLoadPass(notify glsp.NotifyFunc, uri protocol.DocumentUri) {
+	if !s.canLoadDocument(uri) {
 		return
 	}
 	if !s.loads.begin(uri) {
@@ -227,6 +236,12 @@ func (s *server) loadOnce(notify glsp.NotifyFunc, uri protocol.DocumentUri) {
 	defer s.publishMu.Unlock()
 	if current, open := s.docs.get(uri); !open || current != text {
 		return // the buffer moved on; its own edit schedules the next pass
+	}
+	if current, _ := s.getBuild(); current != svc {
+		// A rebuild replaced the build this pass loaded against, and has
+		// republished the document under its own: what this pass found is
+		// the old build's answer.
+		return
 	}
 	if s.loads.store(uri, loadResult{text: text, diags: diags}) {
 		s.publishLocked(notify, uri, text)

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -412,5 +414,119 @@ query applicationNote notesByTitle {
 	s.publishDiagnostics(notify, uri)
 	if refusals := loadCoded((*got)[len(*got)-1].Diagnostics); len(refusals) != 1 || diagnosticCode(refusals[0]) != "lower_unknown_field" {
 		t.Errorf("the load pass runs in the workspace and refuses `row.title`, got %+v", (*got)[len(*got)-1].Diagnostics)
+	}
+}
+
+// A rebuild that fails leaves a service with no engine, so no load can run --
+// and nothing may go on drawing what the last good build found: refusals
+// nothing keeps true any more, fixed ones included. The republish after the
+// failed rebuild carries none.
+func TestLoadPass_AFailedRebuildDropsTheLastBuildsRefusals(t *testing.T) {
+	root := twoWidgetWorkspace(t)
+	s := initializedServer(t, root)
+	s.loads.start = func(fn func()) { fn() }
+	uri := docURI(root, "dsl/beta/queries.memql")
+	s.docs.open(uri, shiningWidgets)
+	notify, got := capturingNotify()
+	s.publishDiagnostics(notify, uri)
+	if n := len(loadCoded((*got)[len(*got)-1].Diagnostics)); n != 1 {
+		t.Fatalf("control: the good build refuses `row.shine` once, got %d", n)
+	}
+
+	// The refusal is fixed in another file -- beta's widget gains `shine` --
+	// while the workspace breaks elsewhere: alpha loses its language line, so
+	// the rebuild fails its strict boot. Rebuild as a save does: build, then
+	// republish every open document.
+	writeWorkspaceFile(t, root, "dsl/beta/concepts.memql", `/// A beta widget.
+concept widget {
+  /// Label.
+  label   string  @required
+  /// Weight.
+  weight  float
+  /// Whether it shines.
+  shine   bool
+}
+`)
+	if err := os.Remove(filepath.Join(root, "dsl", "alpha", "memql.toml")); err != nil {
+		t.Fatal(err)
+	}
+	s.buildSense(nil)
+	if svc, _ := s.getBuild(); svc.CanLoad() {
+		t.Fatal("control: the broken workspace must fail its build, leaving no engine to load with")
+	}
+	s.publishDiagnostics(notify, uri)
+	if refusals := loadCoded((*got)[len(*got)-1].Diagnostics); len(refusals) != 0 {
+		t.Errorf("a failed rebuild must not keep drawing the last build's refusals -- this one was fixed in another file -- got %+v", refusals)
+	}
+	if carried := s.loads.carried(uri, shiningWidgets); carried != nil {
+		t.Errorf("the document's load result must be forgotten, got %+v", carried)
+	}
+}
+
+// A pass that loaded against a build a rebuild has since replaced does not
+// store or publish what it found: the rebuild republished the document under
+// its own build, and the old answer would overwrite it.
+func TestLoadPass_APassAgainstAReplacedBuildIsDiscarded(t *testing.T) {
+	s, root := widgetServer(t)
+	uri := docURI(root, "dsl/beta/queries.memql")
+	s.docs.open(uri, shiningWidgets)
+	_, lines := s.getBuild()
+	swapping := &buildSwappingLoads{onLoad: func() { s.setBuild(sense.New(nil), lines) }}
+	s.setBuild(sense.New(swapping), lines)
+
+	notify, got := capturingNotify()
+	s.publishDiagnostics(notify, uri)
+	if !swapping.called {
+		t.Fatal("control: the pass must have run and swapped the build")
+	}
+	for _, p := range *got {
+		if refusals := loadCoded(p.Diagnostics); len(refusals) != 0 {
+			t.Errorf("a pass against the replaced build published its answer: %+v", refusals)
+		}
+	}
+	if carried := s.loads.carried(uri, shiningWidgets); carried != nil {
+		t.Errorf("a pass against the replaced build stored its answer: %+v", carried)
+	}
+}
+
+// buildSwappingLoads is a registry that can load, and that replaces the
+// server's build in the middle of its pass -- as a rebuild finishing under a
+// running pass does -- before answering with a refusal.
+type buildSwappingLoads struct {
+	onLoad func()
+	called bool
+}
+
+func (b *buildSwappingLoads) LoadDiagnostics(context.Context, string, string) []sense.Diagnostic {
+	b.called = true
+	b.onLoad()
+	return []sense.Diagnostic{{
+		Range:    sense.Range{Start: sense.Position{Line: 4, Column: 17}, End: sense.Position{Line: 4, Column: 26}},
+		Severity: sense.SeverityError,
+		Message:  "`row.shine` does not lower in a query filter",
+		Code:     "lower_unknown_field",
+	}}
+}
+
+func (*buildSwappingLoads) FunctionNames() []string                        { return nil }
+func (*buildSwappingLoads) FunctionGet(string) (*sense.FunctionInfo, bool) { return nil, false }
+func (*buildSwappingLoads) ConceptNames() []string                         { return nil }
+func (*buildSwappingLoads) ConceptGet(string) (*sense.ConceptInfo, bool)   { return nil, false }
+func (*buildSwappingLoads) SpecNames() []string                            { return nil }
+func (*buildSwappingLoads) SpecGet(string) (*sense.SpecInfo, bool)         { return nil, false }
+func (*buildSwappingLoads) ToolNames() []string                            { return nil }
+func (*buildSwappingLoads) ToolGet(string) (*sense.ToolInfo, bool)         { return nil, false }
+func (*buildSwappingLoads) PromptNames() []string                          { return nil }
+func (*buildSwappingLoads) PromptGet(string) (*sense.PromptInfo, bool)     { return nil, false }
+func (*buildSwappingLoads) ProviderNames() []string                        { return nil }
+func (*buildSwappingLoads) ProviderGet(string) (*sense.ProviderInfo, bool) { return nil, false }
+func (*buildSwappingLoads) ShapeNames() []string                           { return nil }
+func (*buildSwappingLoads) ShapeGet(string) (*sense.ShapeInfo, bool)       { return nil, false }
+func (*buildSwappingLoads) IntegrationCapabilities() []string              { return nil }
+
+func writeWorkspaceFile(t *testing.T, root, rel, text string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
