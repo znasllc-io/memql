@@ -7,7 +7,7 @@ go 1.26.1
 toolchain go1.27.1
 
 require (
-	github.com/openai/openai-go/v3 v3.65.0
+	github.com/openai/openai-go/v3 v3.66.0
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0

@@ -252,7 +252,13 @@ func (c *Ceremony) FinishLogin(challengeId string, body io.Reader, resolve Crede
 	if err != nil {
 		return nil, fmt.Errorf("webauthn: assertion verification failed: %w", err)
 	}
-	if !verified.Flags.UserVerified {
+	// Whether THIS ceremony verified the user is a property of its
+	// authenticator data, never of verified.Flags: that is the credential
+	// RECORD after the §7.2 update, whose UserVerified is the spec's
+	// uvInitialized. Since go-webauthn 0.18.2 it advances only under
+	// WithLoginAuthorizeUVInitialization, and ToWebAuthnCredential never
+	// restores it, so reading it here refused every passkey login.
+	if !parsed.Response.AuthenticatorData.Flags.UserVerified() {
 		return nil, ErrUserVerification
 	}
 	if verified.Authenticator.CloneWarning {
