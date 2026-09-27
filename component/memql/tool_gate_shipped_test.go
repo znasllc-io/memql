@@ -11,11 +11,10 @@ import (
 )
 
 func TestTheShippedToolsFollowTheAxes(t *testing.T) {
-	registry := loadedConceptRegistry(t)
-	eng := newQuietEngine(t)
-	if err := eng.Init(registry); err != nil {
-		t.Fatalf("Init over the embedded tree: %v", err)
-	}
+	// The shipped tree, read and never changed: exactly the boot the package's
+	// shared db-less engine is (shared_dbless_engine_test.go), so this test
+	// borrows it rather than booting a private copy of it.
+	eng := sharedDblessEngine(t)
 
 	agentKind := map[string]bool{}
 	for _, tool := range eng.Tools().List() {
