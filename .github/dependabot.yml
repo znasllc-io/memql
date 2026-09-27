@@ -18,6 +18,16 @@ updates:
       # proposed. Delete this entry once main moves past 1.84.0.
       - dependency-name: "google.golang.org/grpc"
         versions: ["1.84.0"]
+      # livekit/protocol 1.51.0 changed TransferSIPParticipant to return a
+      # TransferSIPParticipantResponse instead of emptypb.Empty, and every
+      # tagged livekit/server-sdk-go (v2.18.1 at the time) still pins protocol
+      # 1.49.0 and returns the old type -- so a protocol-only bump fails to
+      # compile integrations/voice (#5675, declined). Protocol has to move WITH
+      # server-sdk-go, and a server-sdk-go bump brings it along by MVS; this
+      # entry only stops the protocol-alone proposals that cannot build.
+      # Delete it once a tagged server-sdk-go requires protocol >= 1.51.
+      - dependency-name: "github.com/livekit/protocol"
+        versions: [">= 1.51.0"]
 
   # WHY THERE IS NO SEPARATE ENTRY FOR THE NESTED MODULES (memql#3300).
   #
