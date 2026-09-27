@@ -343,13 +343,19 @@ func rerunOverride(t *testing.T, eng *recordingEngine) map[string]any {
 // nobody registered and leave the corpus), a run that never compiled, and a
 // run with no goal.
 func TestAnActOnARunTheExecutorCannotRunIsRefused(t *testing.T) {
-	cases := map[string]func(map[string]any){
-		"a recording": func(r map[string]any) {
+	type refusalCase struct {
+		mutate func(map[string]any)
+		code   string
+	}
+	cases := map[string]refusalCase{
+		"a recording": {func(r map[string]any) {
 			r["automationName"] = appSessionTemplate
 			r["parentRunId"] = "v1:work:run:r-parent"
-		},
-		"a run that never compiled": func(r map[string]any) { r["automationName"] = compilingAutomationName },
-		"a run with no goal":        func(r map[string]any) { r["goalId"] = "" },
+		}, codeRunNotExecutable},
+		"a run that never compiled": {func(r map[string]any) { r["automationName"] = compilingAutomationName }, codeRunNotExecutable},
+		// The executor's own code, so the person reads one code whichever
+		// side refused.
+		"a run with no goal": {func(r map[string]any) { r["goalId"] = "" }, codeRerunNeedsGoal},
 	}
 	acts := map[string]func(*Integration) error{
 		"rerunStep": func(i *Integration) error {
@@ -365,18 +371,18 @@ func TestAnActOnARunTheExecutorCannotRunIsRefused(t *testing.T) {
 			return err
 		},
 	}
-	for name, mutate := range cases {
+	for name, tc := range cases {
 		for act, call := range acts {
 			t.Run(name+"/"+act, func(t *testing.T) {
 				i, eng, store := newActsIntegration(t)
 				addPristineRun(store, actRunId, "fetch", "draft", "publish")
 				run := actRunRow(runStatusSucceeded)
-				mutate(run)
+				tc.mutate(run)
 				eng.reply("workRunForOwner", run)
 				err := call(i)
 				var refusal *ActRefusal
-				if !errors.As(err, &refusal) || refusal.Code != codeRunNotExecutable {
-					t.Fatalf("err = %v, want %s", err, codeRunNotExecutable)
+				if !errors.As(err, &refusal) || refusal.Code != tc.code {
+					t.Fatalf("err = %v, want %s", err, tc.code)
 				}
 				if writes := mutationsIn(eng); len(writes) != 0 {
 					t.Errorf("a refused act wrote: %s", eng.summary())

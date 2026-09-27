@@ -45,6 +45,10 @@ const (
 	codeVersionNotFound        = "version_not_found"
 	codeVersionNotDone         = "version_not_done"
 	codeFeedbackTargetNotFound = "feedback_target_not_found"
+	// codeRerunNeedsGoal is the executor's own code for the same refusal --
+	// it refuses a request on a run with no goal -- so a person reads one code
+	// whichever side refused.
+	codeRerunNeedsGoal = "rerun_needs_goal"
 )
 
 // Rerun reasons, run.rerun.reason's closed set.
@@ -161,7 +165,7 @@ func (r actRun) requireExecutable() error {
 	case name == "" || name == compilingAutomationName:
 		return refuse(codeRunNotExecutable, "run %s never chose a template, so there is nothing to run again", r.id)
 	case rowString(r.row, "goalId") == "":
-		return refuse(codeRunNotExecutable, "run %s serves no goal; only a goal's run is executed again on a person's word", r.id)
+		return refuse(codeRerunNeedsGoal, "run %s serves no goal; only a goal's run is executed again on a person's word", r.id)
 	}
 	return nil
 }
