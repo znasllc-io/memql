@@ -113,3 +113,40 @@ func TestDecidingAPromotionNeverTouchesTheShadowRun(t *testing.T) {
 		})
 	}
 }
+
+// TestAnAnsweredPromotionIsRefused: a promotion takes two decisions --
+// approved and rejected, its two options -- and the ladder moves on exactly
+// those. `answered` was accepted and recorded, which SPENT the approval, and
+// DecidePromotion then read it as undecided: the construct went on waiting on
+// an approval nobody could decide again, and the ladder stuck. The approval on
+// the same row is the control: without it, a fixture that never reached the
+// decision would pass for a refusal.
+func TestAnAnsweredPromotionIsRefused(t *testing.T) {
+	i, eng := newTestIntegration(t)
+	eng.reply("workApprovalsForOwner", promotionApprovalRow("sha256:aaa"))
+	eng.reply("authoringConstructById", map[string]any{"id": promotionConstruct, "procedureHash": "sha256:aaa"})
+
+	_, err := i.handleDecideApproval(callerContext("u-alice"), map[string]any{
+		"approvalId": promotionApprovalId, "decision": "answered", "answer": map[string]any{"text": "go ahead"},
+	}, 0)
+	if err == nil {
+		t.Fatal("an answered promotion was accepted; the ladder moves only on approved or rejected, so the approval is spent and the procedure stays in shadow")
+	}
+	for _, decision := range []string{"approved", "rejected"} {
+		if !strings.Contains(err.Error(), decision) {
+			t.Errorf("the refusal %q does not name %q, one of the two decisions a promotion takes", err, decision)
+		}
+	}
+	if n := len(eng.callsTo("decideWorkApproval")); n != 0 {
+		t.Fatalf("the refused answer was recorded (%d calls), which spends the approval", n)
+	}
+
+	if _, err := i.handleDecideApproval(callerContext("u-alice"), map[string]any{
+		"approvalId": promotionApprovalId, "decision": "approved",
+	}, 0); err != nil {
+		t.Fatalf("the control: approving the same promotion was refused: %v", err)
+	}
+	if n := len(eng.callsTo("decideWorkApproval")); n != 1 {
+		t.Fatalf("the control: the approval was recorded %d times, want 1", n)
+	}
+}
