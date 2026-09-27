@@ -15,7 +15,7 @@ Every named thing in the MemQL language -- construct, annotation, keyword, opera
 
 It is the companion to the [grammar](grammar.md): the grammar says what may be written, this says what each written thing does. Together they are what a model is given before it is asked to write MemQL.
 
-Edition `2026`, grammar version `2026.09-dsl-v1-agent-role-axis-e3f94bad`.
+Edition `2026`, grammar version `2026.09-dsl-v1-followups-9f344ecf`.
 
 | Section | Entries |
 |---|---:|

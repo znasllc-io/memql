@@ -16,7 +16,7 @@
   "memql": {
     "edition": "2026",
     "status": "frozen",
-    "grammarVersion": "2026.09-dsl-v1-agent-role-axis-e3f94bad"
+    "grammarVersion": "2026.09-dsl-v1-followups-9f344ecf"
   },
   "categories": [
     "Programming Languages"

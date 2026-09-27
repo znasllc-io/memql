@@ -6,7 +6,7 @@
   gains `@requiresAgentRole("assistant", ...)` on a tool -- the acting agent's
   role -- and `@requiresRank("<role>")` becomes legal on a tool, where it
   judges the person the call is for. Completion and hover offer both. Grammar
-  `2026.09-dsl-v1-agent-role-axis-e3f94bad`; the language is still edition 2026.
+  `2026.09-dsl-v1-followups-9f344ecf`; the language is still edition 2026.
 - **`@allowedRoles(...)` is deprecated.** It still loads, and the editor now
   warns on every use naming the two annotations it splits into; the quick fix
   writes `@requiresAgentRole(...)` for a list of agent roles and
@@ -28,6 +28,10 @@
   fail the language server's build, which left every file of the workspace
   without hover or registry-backed completion. The server now links the packs a
   cluster links.
+- **A query clause written twice is an error.** A second `filter` or `sort`
+  line in a query used to replace the first without a word, so a query could
+  lose its ownership filter and still look right. The editor now underlines the
+  second copy (`query_clause_duplicate`) and says to merge the two.
 
 ## 0.6.0
 
