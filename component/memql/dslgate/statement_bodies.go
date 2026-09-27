@@ -29,7 +29,6 @@ package dslgate
 import (
 	"fmt"
 	"regexp"
-	"strings"
 
 	"github.com/znasllc-io/memql/component/config"
 	"github.com/znasllc-io/memql/component/language/ast"
@@ -53,16 +52,14 @@ var statementHeader = regexp.MustCompile(`(?m)^[ \t]*(logic|automation)[ \t]+([A
 func scanStatementBodies(files []SourceFile) []Violation {
 	predicates, constructs := map[string]bool{}, map[string]string{}
 	for _, f := range files {
-		for _, m := range declLineRe.FindAllStringSubmatch(codeOnly(f.Content), -1) {
-			name := m[2]
-			if m[3] != "" {
-				name = m[3] // two-identifier signature: `spec <bound> <name>`
-			}
-			switch m[1] {
+		// A two-identifier signature (`spec <bound> <name>`) declares its
+		// second identifier (declFact.name).
+		for _, d := range factsOf(f.Content).declarations() {
+			switch d.kind {
 			case "spec", "trait":
-				predicates[name] = true
+				predicates[d.name] = true
 			case "query", "mutation", "logic", "builtin":
-				constructs[name] = m[1]
+				constructs[d.name] = d.kind
 			}
 		}
 	}
@@ -253,32 +250,24 @@ func StatementBodiesRead(files []SourceFile) []string {
 // starts on. Each declaration is parsed alone, from the first line of its
 // annotation preamble to its closing brace, so an automation's header
 // lambdas -- @filter and @loop's until -- are read with its statements.
+//
+// Where each declaration's text starts and ends is the file's, found once per
+// process (sourceFacts.statementDeclarations); the parse is per scan, so no
+// two scans share an AST.
 func eachStatementBody(files []SourceFile, visit func(f SourceFile, kind, name string, startLine int, def *ast.AutomationDef)) {
 	for _, f := range files {
-		if !strings.Contains(f.Content, "logic") && !strings.Contains(f.Content, "automation") {
-			continue
-		}
-		view := languageParser.BlankCommentsAndStrings(f.Content)
-		preambles := languageParser.NewPreambleWalker(f.Content)
-		for _, loc := range statementHeader.FindAllStringSubmatchIndex(view, -1) {
-			closeAt := closingBraceAt(view, loc[1]-1)
-			if closeAt < 0 {
-				continue // the loader reports the unbalanced construct
-			}
-			start := preambles.StartOf(loc[0])
-			startLine := 1 + strings.Count(f.Content[:start], "\n")
-			kind, name := f.Content[loc[2]:loc[3]], f.Content[loc[4]:loc[5]]
-			pf, err := languageParser.ParseFile(f.Content[start : closeAt+1])
+		for _, d := range factsOf(f.Content).statementDeclarations() {
+			pf, err := languageParser.ParseFile(d.text)
 			if err != nil {
 				continue // a refusal the loader reports
 			}
-			for _, d := range pf.Definitions {
-				fn, ok := d.(*ast.FunctionDef)
-				if !ok || fn.Name != name {
+			for _, def := range pf.Definitions {
+				fn, ok := def.(*ast.FunctionDef)
+				if !ok || fn.Name != d.name {
 					continue
 				}
 				if auto, ok := fn.Body.(*ast.AutomationDef); ok && auto.Body != nil {
-					visit(f, kind, name, startLine, auto)
+					visit(f, d.kind, d.name, d.startLine, auto)
 				}
 			}
 		}

@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"path"
 
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -51,7 +50,7 @@ func ScanConstructPlacement(p, src string) []Violation {
 // scanConstructPlacement runs the gate over one file.
 func scanConstructPlacement(p, src string) []Violation {
 	var out []Violation
-	for _, s := range languageParser.TopLevelStatements(src) {
+	for _, s := range factsOf(src).topLevelStatements() {
 		if _, restricted := memqldsl.ConstructFile(s.Keyword); !restricted {
 			continue
 		}

@@ -7,27 +7,18 @@ package dslgate
 // every mounted bundle alike. The rule and its message are the parser's
 // (parser.FindUnknownConstructKeywords): the language owns its keywords.
 
-import languageParser "github.com/znasllc-io/memql/component/language/parser"
-
 // GateUnknownConstructKeyword -- a top-level statement opens with a word that
 // is not a construct keyword.
 const GateUnknownConstructKeyword Gate = "construct-unknown"
 
 // scanUnknownConstructKeywords runs the gate over one file. It is per-file:
 // what opens a statement depends on that file's text alone.
+//
+// The findings are the text's, read from the file's one top-level scan
+// (parser.ReadTopLevel), which the construct-placement and late-`use` gates
+// share, once per process (source_facts.go).
 func scanUnknownConstructKeywords(path, src string) []Violation {
-	var out []Violation
-	for _, u := range languageParser.FindUnknownConstructKeywords(src) {
-		out = append(out, Violation{
-			Gate:      GateUnknownConstructKeyword,
-			File:      path,
-			Line:      u.Line,
-			Kind:      "construct",
-			Construct: u.Keyword,
-			Detail:    u.Message,
-		})
-	}
-	return out
+	return stampFile(path, factsOf(src).unknownKeywordFindings())
 }
 
 // GateMisplacedUse -- a `use` line written below the file's first construct.
@@ -39,17 +30,8 @@ const GateMisplacedUse Gate = "use-not-file-top"
 // file's `use` lines wherever they sit, so boot accepted the line memqllint's
 // import pass refused. The rule and its message are the parser's
 // (parser.FindMisplacedUseLines), as the construct-keyword gate's are.
+//
+// Read from the same one top-level scan per file as the two gates beside it.
 func scanMisplacedUseLines(path, src string) []Violation {
-	var out []Violation
-	for _, m := range languageParser.FindMisplacedUseLines(src) {
-		out = append(out, Violation{
-			Gate:      GateMisplacedUse,
-			File:      path,
-			Line:      m.Line,
-			Kind:      "use",
-			Construct: m.Path,
-			Detail:    m.Message,
-		})
-	}
-	return out
+	return stampFile(path, factsOf(src).misplacedUseFindings())
 }

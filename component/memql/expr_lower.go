@@ -1,7 +1,6 @@
 package memql
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -1031,35 +1030,36 @@ func (l *lowerer) rowField(e *ast.MemberExpr, segs []memberSeg) (lowOperand, err
 // declares keys may still be `@open` -- keys as data -- where reading an
 // undeclared one is legitimate and refusing it would be wrong.
 func closedObjectPaths(c *memoryNodes.Concept) (map[string]bool, error) {
-	out := map[string]bool{}
-	raw, err := c.DefinitionSchema()
+	// Decoded once per distinct schema document (concept_schema_memo.go); the
+	// caller gets its own copy.
+	d, err := decodedSchemaOf(c)
 	if err != nil {
 		return nil, err
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, err
+	if d.err != nil {
+		return nil, d.err
 	}
-	var walk func(prefix string, doc map[string]any)
-	walk = func(prefix string, doc map[string]any) {
-		props, ok := doc["properties"].(map[string]any)
+	return copyClosedPaths(d.closed), nil
+}
+
+// collectClosedObjectPaths records under out every object path of doc, under
+// prefix, whose block is closed (`additionalProperties: false`).
+func collectClosedObjectPaths(prefix string, doc map[string]any, out map[string]bool) {
+	props, ok := doc["properties"].(map[string]any)
+	if !ok {
+		return
+	}
+	for name, value := range props {
+		sub, ok := value.(map[string]any)
 		if !ok {
-			return
+			continue
 		}
-		for name, value := range props {
-			sub, ok := value.(map[string]any)
-			if !ok {
-				continue
-			}
-			path := joinFieldPath(prefix, name)
-			if extra, ok := sub["additionalProperties"].(bool); ok && !extra {
-				out[path] = true
-			}
-			walk(path, sub)
+		path := joinFieldPath(prefix, name)
+		if extra, ok := sub["additionalProperties"].(bool); ok && !extra {
+			out[path] = true
 		}
+		collectClosedObjectPaths(path, sub, out)
 	}
-	walk("", doc)
-	return out, nil
 }
 
 // shapeField resolves a read through a shape binding: only projected keys are

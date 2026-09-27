@@ -81,6 +81,9 @@ var (
 	automationDeclStrict = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 	automationDeclLoose  = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$`)
 	automationDeclTerse  = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+@trigger\(`)
+
+	// automationDeclForms is the three, in the order every reader walks them.
+	automationDeclForms = []*regexp.Regexp{automationDeclStrict, automationDeclLoose, automationDeclTerse}
 )
 
 // THE CALL FORM. `automation NAME(` -- the trailer is the whole discriminator
@@ -101,7 +104,7 @@ var automationCall = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A
 func enclosingAutomation(code string, offset int) string {
 	head := code[:offset]
 	name, at := "", -1
-	for _, re := range []*regexp.Regexp{automationDeclStrict, automationDeclLoose, automationDeclTerse} {
+	for _, re := range automationDeclForms {
 		for _, m := range re.FindAllStringSubmatchIndex(head, -1) {
 			// The LAST declaration to open before the call site is the one the
 			// call sits inside. Compared across all three forms, so a terse
@@ -121,8 +124,13 @@ func enclosingAutomation(code string, offset int) string {
 // sits, named (`x := automation y(...)`), inside a block or on a one-line
 // `if`, which no line pattern can follow.
 func scanSubAutomationCalls(files []SourceFile) []Violation {
-	code := make(map[string]string, len(files))
+	// Each file's declarations and call sites are read off its stripped text
+	// once per process (source_facts.go). The text is stripped of strings
+	// first, then comments -- the same order imports.go uses, and for the same
+	// reason: blanking comments first lets a `//` inside a string literal eat
+	// the rest of a real line.
 	paths := make([]string, 0, len(files))
+	facts := make(map[string]*sourceFacts, len(files))
 	var scanned []SourceFile
 	for _, f := range files {
 		if skipForAutomationScan(f.Path) {
@@ -130,19 +138,13 @@ func scanSubAutomationCalls(files []SourceFile) []Violation {
 		}
 		scanned = append(scanned, f)
 		paths = append(paths, f.Path)
-		// Strings first, then comments -- the same order imports.go uses, and
-		// for the same reason: blanking comments first lets a `//` inside a
-		// string literal eat the rest of a real line.
-		code[f.Path] = codeOnly(f.Content)
+		facts[f.Path] = factsOf(f.Content)
 	}
 
 	declared := map[string]struct{}{}
 	for _, p := range paths {
-		src := code[p]
-		for _, re := range []*regexp.Regexp{automationDeclStrict, automationDeclLoose, automationDeclTerse} {
-			for _, m := range re.FindAllStringSubmatch(src, -1) {
-				declared[m[1]] = struct{}{}
-			}
+		for _, name := range facts[p].declaredAutomations() {
+			declared[name] = struct{}{}
 		}
 	}
 
@@ -168,13 +170,12 @@ func scanSubAutomationCalls(files []SourceFile) []Violation {
 		})
 	}
 	for _, p := range paths {
-		src := code[p]
-		for _, m := range automationCall.FindAllStringSubmatchIndex(src, -1) {
-			callee := src[m[2]:m[3]]
-			if _, ok := declared[callee]; ok {
+		src := facts[p].codeOnly()
+		for _, c := range facts[p].automationCallSites() {
+			if _, ok := declared[c.callee]; ok {
 				continue
 			}
-			report(p, strings.Count(src[:m[0]], "\n")+1, enclosingAutomation(src, m[0]), callee)
+			report(p, strings.Count(src[:c.at], "\n")+1, enclosingAutomation(src, c.at), c.callee)
 		}
 	}
 	eachStatementBody(scanned, func(f SourceFile, kind, name string, startLine int, def *ast.AutomationDef) {
