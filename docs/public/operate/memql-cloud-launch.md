@@ -48,7 +48,7 @@ These are checked:
 | The runbook's price table matches the price list | `TestThePublishedPriceTableMatchesTheSeeds` |
 | No public copy calls MemQL a database | `TestNoDatabaseProductClaims` |
 | The teardown sweep cannot act on the whole fleet | `TestEverySweepNarrowsItsCandidates` |
-| Every automation the fleet bundle declares loads | `TestEveryFleetAutomationLoads` |
+| Every automation the fleet bundle declares loads, and the six sweeps load `@disabled` (memql#5677) | `TestEveryFleetAutomationLoads` |
 | Cross-tenant reads are impossible | `deploy/fleet/authz_test.go` |
 
 ```bash
@@ -81,10 +81,10 @@ go test ./deploy/... ./test/dslconformance/ .
       restore drill runs from one.
 - [ ] Wildcard DNS and TLS cover `*.<domain>` for tenant hostnames.
 - [ ] The teardown path proven to take a final backup, and to **abort** when it fails.
-- [ ] The fleet's instance and subscription rows read before the first deploy
-      that loads the trial sweeps: their first run acts on every row already past
-      its date, teardown included — see
-      [trials](memql-cloud-trials.md#before-the-first-deploy-that-loads-them).
+- [ ] The trial lifecycle decided (memql#5677). The six scheduled sweeps -- the
+      trial nudges, expiry and teardown, and idle hibernation -- are `@disabled`
+      until then, so a trial is moved through its life by an operator; see
+      [trials](memql-cloud-trials.md#the-trial-end-to-end).
 
 ### Copy
 
@@ -111,7 +111,8 @@ go test ./deploy/... ./test/dslconformance/ .
 **"Every automation exercised in production."** The lifecycle automations and
 the trial sweeps are authored, load through the automation loader
 (`TestEveryFleetAutomationLoads`), and are gated — but their *step-result
-semantics at runtime* are proven by running them, not by loading them. The
+semantics at runtime* are proven by running them, not by loading them, and the
+sweeps are `@disabled` pending memql#5677. The
 parity-cluster run is the first item under Tenants and it is the one that
 closes this. (Until memql#5437 "load" was not true either: the trial sweeps and
 the billing automations sat in files the automation loader never reads, and
