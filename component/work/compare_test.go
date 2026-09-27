@@ -151,6 +151,11 @@ func TestTheStoredExpectationKeysArePinned(t *testing.T) {
 			StepExpectation{Error: true, ResultType: "string", Exact: true},
 			`{"error":true,"resultType":"string","exact":true}`,
 		},
+		{
+			"a write whose path varied",
+			StepExpectation{NoError: true, MinWrites: 1},
+			`{"noError":true,"minWrites":1}`,
+		},
 	} {
 		raw, err := json.Marshal(tc.exp)
 		if err != nil {
@@ -297,6 +302,106 @@ func TestCompareAcceptsAnyDigestWhereRecordingsVaried(t *testing.T) {
 	const other = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	if ok, why := Compare(exp, cleanRun(other)); !ok {
 		t.Fatalf("where the recordings' bytes varied, any bytes will do; refused: %v", why)
+	}
+}
+
+// reportFor is a recording of a step that wrote the report its own goal named:
+// the path is a parameter, so no two recordings wrote the same file.
+func reportFor(month, digest string) StepObservation {
+	return StepObservation{IsError: boolp(false), Contents: []ContentDigest{wrote("reports/"+month+".txt", digest)}}
+}
+
+// A write whose path is a parameter is in no two recordings' intersection, so
+// Contents cannot hold it. Without a count the step would expect no write at
+// all, and a canary or trusted replay that reported NONE would match -- an
+// absent measurement read as agreement, the one reading this file refuses.
+func TestAWriteWhosePathVariedIsStillExpected(t *testing.T) {
+	exp := ExpectationFrom([]StepObservation{reportFor("2026-07", contentA), reportFor("2026-08", contentB)})
+	ok, why := Compare(exp, StepObservation{IsError: boolp(false)})
+	if ok {
+		t.Fatal("a replay that reported no write matched a step in which every recording wrote a file")
+	}
+	if !reflect.DeepEqual(why, []string{"reported no write where every recording wrote at least 1 file"}) {
+		t.Fatalf("why = %v, want the missing write named against what every recording wrote", why)
+	}
+	if ok, why := Compare(exp, reportFor("2026-09", "")); !ok {
+		t.Fatalf("a replay that wrote this goal's own report was refused: %v", why)
+	}
+
+	// The floor alone verifies a step: recordings that reported no error
+	// flag still agreed that the step writes a file.
+	unflagged := ExpectationFrom([]StepObservation{
+		{Contents: []ContentDigest{wrote("x.txt", contentA)}},
+		{Contents: []ContentDigest{wrote("y.txt", contentA)}},
+	})
+	if ok, why := Compare(unflagged, StepObservation{Contents: []ContentDigest{wrote("z.txt", "")}}); !ok {
+		t.Fatalf("a step whose one agreed observable is that it writes was not verifiable by a write: %v", why)
+	}
+	if ok, _ := Compare(unflagged, StepObservation{}); ok {
+		t.Fatal("a replay that reported nothing matched a step every recording wrote a file in")
+	}
+}
+
+// The floor counts EVERY write, the files the recordings agreed on included:
+// each recording wrote the shared log and a report of its own, so a replay
+// that wrote the log alone did less than any of them. And a file reported
+// twice is one write, the way contentIndex reads it.
+func TestAReplayWithFewerWritesThanEveryRecordingIsNotAMatch(t *testing.T) {
+	logged := func(month, digest string) StepObservation {
+		r := reportFor(month, digest)
+		r.Contents = append(r.Contents, wrote("run.log", contentA))
+		return r
+	}
+	exp := ExpectationFrom([]StepObservation{logged("2026-07", contentA), logged("2026-08", contentB)})
+	onlyLog := StepObservation{IsError: boolp(false), Contents: []ContentDigest{wrote("run.log", contentA)}}
+	ok, why := Compare(exp, onlyLog)
+	if ok {
+		t.Fatal("a replay that wrote the log alone matched recordings that each wrote the log and a report")
+	}
+	if !reflect.DeepEqual(why, []string{"reported 1 write where every recording wrote at least 2 files"}) {
+		t.Fatalf("why = %v, want the one write named against the two every recording made", why)
+	}
+	twice := onlyLog
+	twice.Contents = append(twice.Contents, wrote("./run.log", contentA))
+	if ok, _ := Compare(exp, twice); ok {
+		t.Fatal("one file reported twice counted as two writes")
+	}
+	if ok, why := Compare(exp, logged("2026-09", contentB)); !ok {
+		t.Fatalf("a replay that wrote the log and its own report was refused: %v", why)
+	}
+}
+
+// The floor is the FEWEST writes any one recording made, counted as distinct
+// files, and it is stated only where the recordings did not all write the same
+// files -- where they did, Contents already holds every one of them.
+func TestMinWritesIsTheFewestWritesWhereTheWrittenFilesVaried(t *testing.T) {
+	read := func(p string) ContentDigest { return ContentDigest{Op: "read", Path: p, Digest: contentA} }
+	did := func(cs ...ContentDigest) StepObservation { return StepObservation{IsError: boolp(false), Contents: cs} }
+	for _, tc := range []struct {
+		name       string
+		recordings []StepObservation
+		want       int
+	}{
+		{"the same file every time", []StepObservation{did(wrote("a.txt", contentA)), did(wrote("a.txt", contentB))}, 0},
+		{"a different file every time", []StepObservation{did(wrote("x.txt", contentA)), did(wrote("y.txt", contentA))}, 1},
+		{"two files, then three", []StepObservation{
+			did(wrote("x.txt", contentA), wrote("y.txt", contentA)),
+			did(wrote("x.txt", contentA), wrote("z.txt", contentA), wrote("w.txt", contentA)),
+		}, 2},
+		{"one recording wrote a file the other did not", []StepObservation{
+			did(wrote("a.txt", contentA)),
+			did(wrote("a.txt", contentA), wrote("b.txt", contentA)),
+		}, 1},
+		{"a recording that wrote nothing sets no floor", []StepObservation{did(), did(wrote("a.txt", contentA))}, 0},
+		{"one file reported twice is one write", []StepObservation{
+			did(wrote("x.txt", contentA), wrote("./x.txt", contentA)),
+			did(wrote("y.txt", contentA), wrote("z.txt", contentA)),
+		}, 1},
+		{"reads that varied are not writes", []StepObservation{did(read("x.txt")), did(read("y.txt"))}, 0},
+	} {
+		if got := ExpectationFrom(tc.recordings).MinWrites; got != tc.want {
+			t.Errorf("%s: MinWrites = %d, want %d", tc.name, got, tc.want)
+		}
 	}
 }
 
@@ -484,6 +589,41 @@ func TestCompareShadowHoldsTheAppsErrorFlagExactly(t *testing.T) {
 		if ok, _ := CompareShadow(tc.exp, clean, notFound()); ok {
 			t.Errorf("%s: a failed replay matched an app that succeeded", tc.name)
 		}
+	}
+}
+
+// Shadow holds the same floor. Beside an app that did not report the file it
+// wrote, the recordings' count is the only thing saying the step writes at
+// all, and a replay that reported no write is held to it rather than excused
+// by the app's silence. The floor is the procedure's own, so it holds beside
+// an app that did less, too: a canary replay of the same goal would be refused
+// by it, and shadow must not count as evidence what a canary refuses.
+func TestCompareShadowHoldsTheWriteFloor(t *testing.T) {
+	exp := ExpectationFrom([]StepObservation{reportFor("2026-07", contentA), reportFor("2026-08", contentB)})
+	silent := StepObservation{IsError: boolp(false)}
+	ok, why := CompareShadow(exp, silent, StepObservation{IsError: boolp(false)})
+	if ok {
+		t.Fatal("a replay that reported no write matched because the app did not report the write every recording made")
+	}
+	if !strings.Contains(strings.Join(why, "; "), "every recording wrote at least 1 file") {
+		t.Fatalf("the reason must name the recordings' floor; got %v", why)
+	}
+	if ok, why := CompareShadow(exp, silent, reportFor("2026-09", contentA)); !ok {
+		t.Fatalf("a replay that wrote this goal's report beside a silent app was refused: %v", why)
+	}
+	if ok, why := CompareShadow(exp, reportFor("2026-09", contentA), reportFor("2026-09", contentB)); !ok {
+		t.Fatalf("a replay that wrote the app's own file was refused: %v", why)
+	}
+
+	logged := func(month string) StepObservation {
+		r := reportFor(month, contentA)
+		r.Contents = append(r.Contents, wrote("run.log", contentA))
+		return r
+	}
+	both := ExpectationFrom([]StepObservation{logged("2026-07"), logged("2026-08")})
+	onlyLog := StepObservation{IsError: boolp(false), Contents: []ContentDigest{wrote("run.log", contentA)}}
+	if ok, _ := CompareShadow(both, onlyLog, onlyLog); ok {
+		t.Fatal("a replay below the recordings' floor matched because the app did less too")
 	}
 }
 

@@ -44,6 +44,10 @@ import (
 	"strings"
 )
 
+// opWrite is the Op of a file a step wrote -- the spelling every recorder and
+// dispatcher in the tree writes.
+const opWrite = "write"
+
 // ContentDigest is one file a step read or wrote, identified by its bytes.
 type ContentDigest struct {
 	// Op is "read" or "write".
@@ -95,6 +99,12 @@ type StepExpectation struct {
 	// Contents: one entry per (op, path) seen in EVERY recording, its Digest
 	// empty where the recordings' bytes varied.
 	Contents []ContentDigest `json:"contents,omitempty"`
+	// MinWrites: the fewest files any one recording wrote, stated where the
+	// recordings did not all write the same files. A write whose path is a
+	// parameter -- each recording wrote the report its own goal named -- is in
+	// no two recordings' intersection, so Contents cannot hold it; without a
+	// count the step would expect no write at all.
+	MinWrites int `json:"minWrites,omitempty"`
 	// Exact: the recordings agreed on every observable they carried -- a
 	// deterministic step, held to the same bytes rather than the same shape.
 	Exact bool `json:"exact,omitempty"`
@@ -104,7 +114,7 @@ type StepExpectation struct {
 // agreed failure is a demand like any other: a step whose one agreed
 // observable is that it failed is verified by failing.
 func (e StepExpectation) holdsNothing() bool {
-	return !e.NoError && !e.Error && e.ExitCode == nil && e.ResultType == "" && len(e.Contents) == 0
+	return !e.NoError && !e.Error && e.ExitCode == nil && e.ResultType == "" && len(e.Contents) == 0 && e.MinWrites <= 0
 }
 
 // The two references a reason names. Each observable names the one it was
@@ -227,6 +237,33 @@ func ExpectationFrom(recordings []StepObservation) StepExpectation {
 		exp.Contents = append(exp.Contents, ContentDigest{Op: k.op, Path: k.path, Digest: digest})
 	}
 
+	// THE WRITE FLOOR. A write whose path is a parameter is in no two
+	// recordings' intersection, so the loop above drops it, and the step
+	// would expect no write at all -- which a replay reporting none would
+	// meet. Where the recordings did not all write the same files, the fewest
+	// writes any one of them made is held instead. The intersection is a
+	// subset of every recording's writes, so a recording wrote the same files
+	// as the rest exactly when it wrote as many as the intersection holds.
+	agreedWrites := 0
+	for _, c := range exp.Contents {
+		if c.Op == opWrite {
+			agreedWrites++
+		}
+	}
+	fewest, varied := -1, false
+	for _, idx := range indexes {
+		n := writeCount(idx)
+		if n != agreedWrites {
+			varied = true
+		}
+		if fewest < 0 || n < fewest {
+			fewest = n
+		}
+	}
+	if varied {
+		exp.MinWrites = fewest
+	}
+
 	exp.Exact = exact
 	return exp
 }
@@ -244,6 +281,7 @@ func Compare(exp StepExpectation, got StepObservation) (bool, []string) {
 	why = append(why, compareResultType(exp.ResultType, got.ResultType, everyRecording)...)
 	why = append(why, compareContents(exp.Contents, got.Contents,
 		func(_ contentKey, recorded string) string { return recorded }, exp.Exact, everyRecording)...)
+	why = append(why, compareWriteFloor(exp.MinWrites, got.Contents)...)
 	return len(why) == 0, why
 }
 
@@ -262,6 +300,11 @@ func Compare(exp StepExpectation, got StepObservation) (bool, []string) {
 //     varied.
 //   - on a deterministic step, a file only the replay touched is a divergence:
 //     a deterministic step that does something extra is not the same step.
+//   - where the recordings did not all write the same files, the replay must
+//     report at least the fewest writes any of them made, whatever the app
+//     reported. The floor is the procedure's own, and a replay below it is
+//     one a canary of the same goal would refuse -- which shadow must never
+//     count as evidence for promoting it to canary.
 func CompareShadow(exp StepExpectation, app, replay StepObservation) (bool, []string) {
 	if exp.holdsNothing() {
 		return false, []string{unverifiableStep}
@@ -297,6 +340,7 @@ func CompareShadow(exp StepExpectation, app, replay StepObservation) (bool, []st
 		}
 		return agreedDigest
 	}, exp.Exact, theApp)...)
+	why = append(why, compareWriteFloor(exp.MinWrites, replay.Contents)...)
 	return len(why) == 0, why
 }
 
@@ -387,6 +431,50 @@ func compareContents(ref, got []ContentDigest, digestFor func(k contentKey, refD
 		}
 	}
 	return why
+}
+
+// compareWriteFloor holds got to at least floor distinct writes, when there is
+// a floor. The floor is always the recordings': ExpectationFrom is its only
+// writer. A replay that reported no writes has reported none -- an absent
+// measurement is never a match.
+func compareWriteFloor(floor int, got []ContentDigest) []string {
+	if floor <= 0 {
+		return nil
+	}
+	if n := writeCount(contentIndex(got)); n < floor {
+		return []string{fmt.Sprintf("reported %s where %s wrote at least %s", writesPhrase(n), everyRecording, filesPhrase(floor))}
+	}
+	return nil
+}
+
+// writeCount is the distinct files an index says were written.
+func writeCount(idx map[contentKey]string) int {
+	n := 0
+	for k := range idx {
+		if k.op == opWrite {
+			n++
+		}
+	}
+	return n
+}
+
+// writesPhrase and filesPhrase spell a count the way a person reads it: a
+// reason is shown verbatim, and "1 writes" is the sentence a reader stops at.
+func writesPhrase(n int) string {
+	switch n {
+	case 0:
+		return "no write"
+	case 1:
+		return "1 write"
+	}
+	return fmt.Sprintf("%d writes", n)
+}
+
+func filesPhrase(n int) string {
+	if n == 1 {
+		return "1 file"
+	}
+	return fmt.Sprintf("%d files", n)
 }
 
 // contentKey is one file one way: a read and a write of the same path are
