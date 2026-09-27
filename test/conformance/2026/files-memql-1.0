@@ -307,6 +307,8 @@ cells/tool/disabled/with-true.memql
 cells/tool/disabled/written-bare.memql
 cells/tool/executionTime/a-string.memql
 cells/tool/executionTime/with-an-unquoted-value.memql
+cells/tool/handler/builtin-arg-declared.memql
+cells/tool/handler/builtin-arg-undeclared.memql
 cells/tool/handler/keyword-arguments.memql
 cells/tool/handler/names-nothing.memql
 cells/tool/handler/with-a-positional-value.memql

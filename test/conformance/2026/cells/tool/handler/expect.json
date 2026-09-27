@@ -14,6 +14,16 @@
       "file": "names-nothing.memql",
       "verdict": "refuse_load",
       "message": "@handler names \"openTicketNobodyWrote\", which is not a registered function, query, mutation or builtin"
+    },
+    {
+      "file": "builtin-arg-declared.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "builtin-arg-undeclared.memql",
+      "verdict": "refuse_load",
+      "code": "tool_handler_arg_undeclared",
+      "message": "@handler calls builtin \"ticketDayKeyNeedsZone\", which requires \"timezone\", and the tool declares no field \"timezone\""
     }
   ]
 }

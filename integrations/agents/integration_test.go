@@ -66,7 +66,7 @@ func TestCapabilities_InvokeEnsureForGoalAskSpecialist(t *testing.T) {
 			}
 		}
 		if c.Name == "requestUserFeedback" {
-			for _, key := range []string{"question", "kind", "planId"} {
+			for _, key := range []string{"question", "kind", "runId"} {
 				if _, ok := c.ArgsSchema[key]; !ok {
 					t.Errorf("requestUserFeedback ArgsSchema missing %q", key)
 				}

@@ -157,7 +157,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "requestUserFeedback",
-			Description: "Transition the active Plan to awaitingFeedback / feedback_required with a feedbackRequest{question, kind, options?, timeoutAt}. The agent calls this BEFORE guessing when it (or a specialist it fronts for) needs missing detail from the user. The user's answer (Plan.feedbackResponse + status->running) resumes the Plan through the existing planner re-invocation path.",
+			Description: "Raise a v1:work:approval of kind feedback against the active run, carrying {question, kind, options?, timeoutAt}. The agent calls this BEFORE guessing when it (or a specialist it fronts for) needs missing detail from the user. The person's answer resumes the run.",
 			Handler:     i.handleRequestUserFeedback,
 			ArgsSchema: map[string]string{
 				"question":    "string (required) -- the question to put to the user",
@@ -166,7 +166,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"timeoutAt":   "string (optional) -- RFC3339 auto-pause deadline",
 				"agentId":     "string (required) -- calling agent id (auto-stamped)",
 				"ownerUserId": "string (required) -- session-owner user id (auto-stamped)",
-				"planId":      "string (required) -- the active Plan to park (auto-stamped)",
+				"runId":       "string (required) -- the active run to park (auto-stamped)",
 				"partitionId": "string (optional) -- target space (auto-stamped)",
 			},
 		},
@@ -417,9 +417,9 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 	}}, nil
 }
 
-// handleRequestUserFeedback transitions the active Plan to
-// awaitingFeedback / feedback_required so the user is asked for the
-// detail the agent is missing. The generic counterpart to the worker
+// handleRequestUserFeedback raises a v1:work:approval of kind feedback
+// against the active run, so the user is asked for the detail the agent
+// is missing. The generic counterpart to the worker
 // integration's handleRequestScope (scope_elevation_required); this is
 // the feedback_required variant, agent-callable mid-turn.
 //
@@ -429,10 +429,10 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 //	args["timeoutAt"]   string  optional -- RFC3339 auto-pause deadline
 //	args["agentId"]     string  required -- auto-stamped by the streaming loop
 //	args["ownerUserId"] string  required -- auto-stamped by the streaming loop
-//	args["planId"]      string  required -- the active Plan (auto-stamped)
+//	args["runId"]       string  required -- the active run (auto-stamped)
 //
 // Returns ONE MemoryNode whose payload is a small ack
-// {status:"awaiting_user", planId, kind}. The agent reads it, emits a
+// {status:"awaiting_user", runId, approvalId, kind}. The agent reads it, emits a
 // short respondToUser acknowledgement, and ends its turn; the user's
 // answer is the gate.
 func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

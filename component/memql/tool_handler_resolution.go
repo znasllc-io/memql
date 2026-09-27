@@ -19,6 +19,7 @@ package memql
 // is the same operator break-glass.
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -60,9 +61,13 @@ func toolHandlerTargets(tool *Tool) []string {
 }
 
 // validateToolHandlerTargets returns one error per tool whose handler names a
-// function, mutation, query or builtin that the registry does not carry.
-// Deterministic order (tool name, then target) so a boot failure reads the
-// same on every replica.
+// function, mutation, query or builtin that the registry does not carry, and
+// one per argument a builtin handler REQUIRES that the tool does not declare
+// (toolHandlerArgError). Deterministic order (tool name, then target, then
+// field) so a boot failure reads the same on every replica.
+//
+// It walks each tool ONCE. The lookup index holds a tool under its qualified
+// name and its bare alias, and walking the index reported one problem twice.
 func validateToolHandlerTargets(tools *ToolRegistry, functions *FunctionRegistry) []error {
 	if tools == nil || functions == nil {
 		return nil
@@ -75,18 +80,92 @@ func validateToolHandlerTargets(tools *ToolRegistry, functions *FunctionRegistry
 	sort.Strings(names)
 
 	var errs []error
+	seen := make(map[*Tool]bool, len(snapshot))
 	for _, name := range names {
 		tool := snapshot[name]
+		if tool == nil || seen[tool] {
+			continue
+		}
+		seen[tool] = true
 		for _, target := range toolHandlerTargets(tool) {
-			if functionOrAliasExists(functions, target) {
+			fn := resolveFunctionOrAlias(functions, target)
+			if fn == nil {
+				errs = append(errs, fmt.Errorf(
+					"tool %q (%s): @handler names %q, which is not a registered function, query, mutation or builtin -- the tool registers and is advertised to the model anyway, and fails only when a model calls it",
+					tool.Name, describeToolOrigin(tool), target))
 				continue
 			}
-			errs = append(errs, fmt.Errorf(
-				"tool %q (%s): @handler names %q, which is not a registered function, query, mutation or builtin -- the tool registers and is advertised to the model anyway, and fails only when a model calls it",
-				tool.Name, describeToolOrigin(tool), target))
+			errs = append(errs, undeclaredBuiltinArgs(tool, fn)...)
 		}
 	}
 	return errs
+}
+
+// ruleToolHandlerArgUndeclared is the code of a tool whose builtin handler
+// requires an argument the tool never passes.
+const ruleToolHandlerArgUndeclared = "tool_handler_arg_undeclared"
+
+// toolHandlerArgError is a tool whose `@handler(type="function")` names a
+// builtin that REQUIRES a field the tool does not declare (memql#5436).
+//
+// A builtin's required fields are enforced on every call
+// (validateBuiltinCallArgs), and a tool call hands its builtin the tool's own
+// fields -- what the model writes, plus the ones the server stamps
+// @autoInjected. So a required field the tool does not declare is one no call
+// supplies, and the tool fails on every use while loading, registering and
+// being advertised to the model as if it worked. That is how
+// requestUserFeedback went dark: its tool moved to `runId` with the work spine
+// and its builtin still required `planId`.
+type toolHandlerArgError struct {
+	tool, origin, builtin, field string
+}
+
+func (e *toolHandlerArgError) Error() string {
+	return fmt.Sprintf(
+		"tool %q (%s): @handler calls builtin %q, which requires %q, and the tool declares no field %q -- so every call fails with \"%s() requires '%s' field in argument\". Declare %q on the tool (an @autoInjected field when the server stamps it), or rename the builtin's field to the one the tool passes [%s]",
+		e.tool, e.origin, e.builtin, e.field, e.field, e.builtin, e.field, e.field, ruleToolHandlerArgUndeclared)
+}
+
+// RuleCode implements baseloader.CodedRefusal.
+func (e *toolHandlerArgError) RuleCode() string { return ruleToolHandlerArgUndeclared }
+
+// undeclaredBuiltinArgs returns one error per field fn requires that tool's
+// input schema does not declare, or nil when fn is not a builtin with a
+// declared contract (a query, a mutation and a logic take the tool's
+// arguments through their own args blocks).
+func undeclaredBuiltinArgs(tool *Tool, fn *Function) []error {
+	if tool == nil || fn == nil || !fn.IsBuiltin() || fn.BuiltinArgs == nil || len(fn.BuiltinArgs.Required) == 0 {
+		return nil
+	}
+	declared := toolDeclaredFields(tool)
+	var errs []error
+	for _, field := range fn.BuiltinArgs.Required {
+		if _, ok := declared[field]; ok {
+			continue
+		}
+		errs = append(errs, &toolHandlerArgError{
+			tool: tool.Name, origin: describeToolOrigin(tool), builtin: fn.Name, field: field,
+		})
+	}
+	return errs
+}
+
+// toolDeclaredFields is the set of field names a tool's input schema declares.
+func toolDeclaredFields(tool *Tool) map[string]struct{} {
+	out := map[string]struct{}{}
+	if tool == nil || len(tool.InputSchema) == 0 {
+		return out
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
+		return out
+	}
+	for name := range schema.Properties {
+		out[name] = struct{}{}
+	}
+	return out
 }
 
 // functionOrAliasExists resolves a name the way the runtime does: exact match
@@ -97,18 +176,23 @@ func validateToolHandlerTargets(tools *ToolRegistry, functions *FunctionRegistry
 // A gate that refuses a boot must not be narrower than the resolver it stands
 // in front of, or it invents a failure the runtime would not have had.
 func functionOrAliasExists(functions *FunctionRegistry, name string) bool {
+	return resolveFunctionOrAlias(functions, name) != nil
+}
+
+// resolveFunctionOrAlias is functionOrAliasExists returning what it found.
+func resolveFunctionOrAlias(functions *FunctionRegistry, name string) *Function {
 	trimmed := strings.TrimSpace(name)
-	if functions.Has(trimmed) {
-		return true
+	if fn, err := functions.Get(trimmed); err == nil && fn != nil {
+		return fn
 	}
-	found := false
+	var found *Function
 	functions.Range(func(_ string, cand *Function) bool {
 		if cand == nil || !cand.IsBuiltin() {
 			return true
 		}
 		for _, alias := range cand.BuiltinAliases {
 			if strings.EqualFold(alias, trimmed) {
-				found = true
+				found = cand
 				return false
 			}
 		}
@@ -138,6 +222,7 @@ func recordToolHandlerTargetProblems(report *LoadReport, tools *ToolRegistry, fu
 			Keyword:   "tool",
 			Phase:     "resolve",
 			Err:       err.Error(),
+			Code:      baseloader.RuleCode(err),
 		})
 	}
 	return errs

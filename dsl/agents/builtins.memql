@@ -172,12 +172,18 @@ builtin ai {
 //
 // Bridges the requestUserFeedback tool (dsl/agents/tools/
 // requestUserFeedback.memql) to the agents Go integration's
-// `requestUserFeedback` capability. The integration transitions the
-// active Plan (planId is auto-stamped by the agent streaming loop's
-// agentContextStamps, so the LLM never has to supply it) to
-// status=awaitingFeedback / feedbackReason=feedback_required via
-// requestPlanFeedback, and returns a small ack payload
-// {status:"awaiting_user", planId, kind}.
+// `requestUserFeedback` capability. The integration raises a
+// v1:work:approval of kind feedback against the active run (runId is
+// auto-stamped by the agent streaming loop's agentContextStamps, so the
+// LLM never has to supply it) and returns a small ack payload
+// {status:"awaiting_user", runId, approvalId, kind}.
+//
+// The run id arrives as `runId` because the tool declares it under that
+// name. This builtin required `planId` until memql#5436, after the tool
+// had moved to the run: every call was refused before it reached the
+// integration ("requestUserFeedback() requires 'planId' field in
+// argument"), and nothing said so at load. The tool_handler_arg_undeclared
+// load refusal now does.
 //
 // Mirrors the worker integration's requestComputerUseScope /
 // agentworkerRequestScope pair (the scope_elevation_required
@@ -185,7 +191,7 @@ builtin ai {
 
 @executor("integration.agents.requestUserFeedback")
 @args(profile="object")
-@description("Transition the active Plan to awaitingFeedback (feedbackReason=feedback_required) with a feedbackRequest{question, kind, options?, timeoutAt}. The agent calls this when it needs the user to supply missing detail mid-task; the user's answer (stamped via Plan.feedbackResponse + status->running) resumes the Plan through the existing planner re-invocation path.")
+@description("Raise a v1:work:approval of kind feedback against the active run, carrying the question {question, kind, options?, timeoutAt}. The agent calls this when it needs the user to supply missing detail mid-task; the person's answer resumes the run.")
 builtin requestUserFeedback {
   question     string!
   kind         string!
@@ -193,7 +199,7 @@ builtin requestUserFeedback {
   timeoutAt    string
   agentId      string!
   ownerUserId  string!
-  planId       string!
+  runId        string!
   partitionId      string
 }
 
