@@ -63,7 +63,7 @@ export function ReusePanel({ constructId, facts }: ReusePanelProps) {
 
   return (
     <Panel label="Reuse">
-      <div className="os-record-heading">
+      <div className="os-record-heading os-nexus-reuse-heading">
         <Subhead>Reuse</Subhead>
         <InfoDetail title="Reuse labels">
           <Facts>

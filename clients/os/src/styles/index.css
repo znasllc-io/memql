@@ -10492,9 +10492,24 @@ a.os-button {
  * The person's label as the shell's selection pills, the evidence's under it
  * as Facts. The pills wrap: the panel is a quarter of a wide page, or the
  * narrow aside beside the Automations list. */
+/* The heading stands exactly as tall as a plain Subhead, so "Reuse" sits on
+ * the same line as its neighbours' headings in the procedure's grid; the info
+ * control overflows the row rather than growing it. */
+.os-nexus-reuse-heading {
+  min-height: 0;
+}
+.os-nexus-reuse-heading .os-info-detail {
+  margin: -6px 0;
+}
+/* Four choices, laid out evenly: all four across when the panel has room, two
+ * by two when it does not -- never three and a stray one on a second line. */
 .os-nexus-reuse-choices {
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
   margin: 2px 0 10px;
+}
+.os-nexus-reuse-choices .os-choice {
+  justify-content: center;
 }
 .os-nexus-reuse-error {
   margin: 0 0 8px;
