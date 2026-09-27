@@ -344,29 +344,10 @@ func toolResultsByStep(observations []map[string]any) map[string]map[string]any 
 // is kept as {"_raw": value} -- what the app sent, in the one shape a template
 // can hold -- rather than dropped.
 func observationArgs(o map[string]any) (map[string]any, bool) {
-	data := obj(o, "data")
-	if truncated, _ := data["argsTruncated"].(bool); truncated {
-		return nil, false
-	}
-	switch raw := data["args"].(type) {
-	case nil:
-		return map[string]any{}, true
-	case map[string]any:
-		return raw, true
-	case string:
-		if strings.TrimSpace(raw) == "" {
-			return map[string]any{}, true
-		}
-		var decoded any
-		if err := json.Unmarshal([]byte(raw), &decoded); err == nil {
-			if m, ok := decoded.(map[string]any); ok {
-				return m, true
-			}
-		}
-		return map[string]any{"_raw": raw}, true
-	default:
-		return map[string]any{"_raw": raw}, true
-	}
+	// One reading of the recording format, in component/work (epic
+	// memql#5414): the branch snapshot and the learner read an action's
+	// arguments the same way, or one of them is wrong about a recording.
+	return work.RecordedArgs(obj(o, "data"))
 }
 
 // stepEvidenceOf builds what one action reported, in the executor-independent
@@ -484,70 +465,22 @@ func preferArgPath(base string, argPaths []string) string {
 // parseOmitted reads one `contentOmitted` entry: "<path>: <why>", with
 // " (sha256 <hex>)" at the end when the digest was measured.
 func parseOmitted(entry string) (string, string) {
-	p, rest, found := strings.Cut(entry, ": ")
-	if !found {
-		return "", ""
-	}
-	digest := ""
-	const marker = "(sha256 "
-	if i := strings.LastIndex(rest, marker); i >= 0 && strings.HasSuffix(rest, ")") {
-		digest = strings.ToLower(strings.TrimSpace(rest[i+len(marker) : len(rest)-1]))
-	}
-	return strings.TrimSpace(p), digest
-}
-
-// pathKeys are the argument names whose string value is a file path, for the
-// footprint. Named rather than sniffed: an argument that merely LOOKS like a
-// path -- the old_string of an edit that begins with "//" -- is content, and
-// reading it as a path would send a portable procedure to somebody's machine.
-var pathKeys = map[string]bool{
-	"path": true, "file": true, "file_path": true, "filePath": true, "filepath": true,
-	"filename": true, "targetPath": true, "target_path": true, "directory": true,
-	"dir": true, "cwd": true, "notebook_path": true,
+	p, _, digest := work.ParseOmitted(entry)
+	return p, digest
 }
 
 // pathsInArgs collects every path-keyed string in an action's arguments,
 // nested ones included, sorted.
 func pathsInArgs(args map[string]any) []string {
-	var out []string
-	var walk func(map[string]any)
-	walk = func(m map[string]any) {
-		for k, v := range m {
-			switch t := v.(type) {
-			case string:
-				if pathKeys[k] && strings.TrimSpace(t) != "" {
-					out = append(out, strings.TrimSpace(t))
-				}
-			case map[string]any:
-				walk(t)
-			case []any:
-				for _, e := range t {
-					if sub, ok := e.(map[string]any); ok {
-						walk(sub)
-					}
-				}
-			}
-		}
-	}
-	walk(args)
-	sort.Strings(out)
-	return out
+	// component/work.RecordedPaths is the one list of path-keyed arguments:
+	// the branch snapshot restores exactly the files this footprint names.
+	return work.RecordedPaths(args)
 }
 
 // workspaceRelative writes an absolute path inside the workspace relative to
 // it; anything else is returned cleaned and as it was.
 func workspaceRelative(workspace, p string) string {
-	p = strings.TrimSpace(p)
-	ws := strings.TrimSpace(workspace)
-	if p == "" || !path.IsAbs(p) || !path.IsAbs(ws) {
-		return cleanPath(p)
-	}
-	ws = path.Clean(ws)
-	abs := path.Clean(p)
-	if ws != "/" && strings.HasPrefix(abs, ws+"/") {
-		return strings.TrimPrefix(abs, ws+"/")
-	}
-	return abs
+	return work.WorkspaceRelative(workspace, p)
 }
 
 func cleanPath(p string) string {
