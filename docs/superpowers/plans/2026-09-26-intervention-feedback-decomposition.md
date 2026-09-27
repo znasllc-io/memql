@@ -529,3 +529,28 @@ Each stream works only in its files, commits `Issue #<N>: ...`, and reports what
 - Every executor-journaled run now writes `version` on each intent, a non-pristine basis, and the whole head at each receipt; `reopenRun` refreshes `heartbeatAt`.
 - Coordinator: a person's `Inputs` are laid over the targeted step's evaluated arguments by name in the function and automation step executors (`component/automations/steps/step_inputs.go`).
 - Known limits: a strict replay of a BRANCH diverges at the prefix (the branch never made those calls); a replay's own step rows do not record the override they ran with (context only).
+
+### Task 3 (acts), merged at `fe8e7ba3b` (+ coordinator `cd88b149b`, `4cf7a5cf4`)
+- `component/work/recorded.go`: `ParseOmitted(s) (path, why, digest)`, `RecordedPaths(args)`, `RecordedArgs(data) (args, reproducible)`, `WorkspaceRelative(workspace, p)`; the corpus now delegates to them (coordinator).
+- Refusals are `*ActRefusal{Code, Message}` printed `work: <code>: <message>`; new codes `version_not_done`, `run_not_executable` (an app-session recording run, or a run that never compiled), `rerun_needs_goal`.
+- A re-run's update also clears `finishedAt`, `errorCode`, `errorMessage`, `cancelRequested` (false), `cancelledBy`, `waitingOn` -- a re-run of a cancelled run would otherwise cancel itself at its first step.
+- Workspaces: `<bareRunId>-v<version>` for a re-run, the fork's bare id for a branch; a snapshot only for a session step. `workStepVersions` node ids `<step short id>@v<version>`; nested steps included; a fork's shared prefix is not (it lives in the source).
+- StepVersions refuses a run with more than 20000 raw row-versions rather than answering part of it.
+- The validator calls `CallAIStructured` with the level set (answer step's binding level, then its override's, then the prompt's), in a live RunContext so the call is journaled on the run and counted against its ceilings (a ceiling refusal is a skip); replay runs are skipped; `answerTruncated` is recorded.
+- Coordinator: `reassertWorkStepVersion` gained `actualFootprint, approvalId, resumeAt, externalKey, input, fingerprint`.
+
+### Task 5 (decomposition, reuse, corpus), merged at `8e81f4f11` (+ coordinator `414e8213e`, `0635aa6ad`)
+- Learned procedures are NOT section candidates (replayLearnedProcedure serves a whole goal); the section tiers ask the authored catalog only.
+- `MineWeighted(sequences, weights []float64, minSupport, gap)`: the tie-break after coverage and cohesion compares only what a weight adds above one; nil/all-ones is exactly the old ranking (no re-lift).
+- A catalogued section is `automation <name>(...)` with its whole bundle carried in the draft; an input or required argument that cannot be bound, or a draft Gate 1 refuses, plans the section live. A text goal served entirely from the catalog ends on `return sections`.
+- Near-tier text is the construct's intent (catalogMatchText's `intent:`, else its doc comment, else its name as words).
+- The reuse sweep labels catalogued automations and learned procedures (retired skipped); a procedure's own replay runs are not uses; reply `changed` is a list of ids plus `errors`.
+- Corpus: an unreadable parent run judges the recording by its own verdicts (logged), never fails the load.
+- Coordinator: a section with no effects takes its own text as its output (an old-shape triage answer keeps the cheap fan-out); triage is given the goal's `inputKeys`, and its description names the decomposition shape.
+
+### Task 6 (Nexus), merged at `4e250ae37`
+- New: `versions.ts`, `feedback.ts`, `reuse.ts`, `useInterventions.ts`, `Composer.tsx`, `ComposerHost.tsx`, `StepDetail.tsx`, `Verdict.tsx`, `OverviewSection.tsx`; kit `Dialog.tsx` (promoted from DetailDialog, which is now a wrapper); `Overview` gains `format`, `loading` and an `unknown` segment tone.
+- `defaultSection` is now `overview` (as Fleet and Campaigns); saved preferences are unaffected. `component/memql/os_navigation.json` regenerated for the new section.
+- The overview reads constructs through its own feeds (`cataloguedConstructsForOwner` + `learnedProceduresForOwner`); after D merges point it at D's feeds.
+- Feedback is offered on steps a model or app took part in, and on the run; the validator line appears beside the verdict it is compared with (run level and the validated version).
+- Not done by design: the per-construct reuse fact and override on Automations (D's files) -- Task 7.
