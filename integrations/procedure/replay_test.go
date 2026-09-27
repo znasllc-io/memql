@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -658,5 +659,86 @@ func TestAStoredPreconditionThisReplicaCannotCheckRefusesTheReplay(t *testing.T)
 	}
 	if _, err := DecodePreconditions(map[string]any{"tools": map[string]any{"mkdir": "9.4"}}); err != nil {
 		t.Fatalf("the control: a known predicate must still decode: %v", err)
+	}
+}
+
+// TestAGoalValueNoRecordingWasShapedLikeRefusesTheStart (B5): the fixture's
+// parameter is a file name every recording spelled plainly. A goal that gives
+// it an option, an absolute path, a home directory or a parent directory
+// asks for a call no recording made: the start is refused naming the
+// parameter and the value, nothing is dispatched, the goal goes to the app
+// once, and the ladder counts it -- the procedure was chosen for this goal and
+// could not serve it.
+func TestAGoalValueNoRecordingWasShapedLikeRefusesTheStart(t *testing.T) {
+	for _, v := range []string{"-rf", "/etc/passwd", "~/x", ".."} {
+		t.Run(v, func(t *testing.T) {
+			w := newReplayWorld(t, "trusted")
+			out := w.serve(t, ReplayTrusted, map[string]any{"file": v})
+			if !out.StartRefused || out.Served || out.Code != codeStartRefused || !containsAll(out.Diagnosis, "s0.command.7", strconv.Quote(v)) {
+				t.Fatalf("outcome = %+v, want a refused start naming the parameter and the value", out)
+			}
+			if len(w.d.recorded()) != 0 {
+				t.Fatalf("a refused value dispatched %v", dispatchedKeys(w.d.recorded()))
+			}
+			if len(w.f.recorded()) != 1 {
+				t.Fatalf("the app was handed the goal %d time(s), want once", len(w.f.recorded()))
+			}
+			if w.lc.get("failures") != float64(1) {
+				t.Errorf("failures = %v, want the refused start counted", w.lc.get("failures"))
+			}
+		})
+	}
+}
+
+// TestAGoalValueThatIsShellTextReplaysAsOneArgument (B5): a value that holds
+// shell code, an operator or a glob is not refused -- nothing about it is an
+// option or a path no recording showed -- and it reaches the command as
+// exactly one argument, never as code: the dispatched command quotes it.
+func TestAGoalValueThatIsShellTextReplaysAsOneArgument(t *testing.T) {
+	for v, quoted := range map[string]string{
+		"x;rm${IFS}-rf${IFS}$HOME": `'x;rm${IFS}-rf${IFS}$HOME'`,
+		"$(id)":                    `'$(id)'`,
+		"`id`":                     "'`id`'",
+		"R&D.txt":                  `'R&D.txt'`,
+		"*.txt":                    `'*.txt'`,
+		"a|b":                      `'a|b'`,
+	} {
+		t.Run(v, func(t *testing.T) {
+			w := newReplayWorld(t, "trusted")
+			out := w.serve(t, ReplayTrusted, map[string]any{"file": v})
+			if !out.Served {
+				t.Fatalf("outcome = %+v, want served", out)
+			}
+			calls := w.d.recorded()
+			if got, want := calls[0].Args["command"], "mkdir -p out && echo hello > "+quoted; got != want {
+				t.Fatalf("dispatched %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestAShadowRecordingWithAValueNoRecordingWasShapedLikeIsAMismatch (B5): in
+// shadow the app's own action bound the parameter, and a value shaped like
+// nothing the procedure was learned from makes the recording something other
+// than an instance of it -- a MISMATCH, recorded like an unfit recording's,
+// with nothing replayed and the streak started again.
+func TestAShadowRecordingWithAValueNoRecordingWasShapedLikeIsAMismatch(t *testing.T) {
+	w := newReplayWorld(t, "shadow")
+	w.lc.set("shadowMatches", float64(1))
+	out := w.shadowOf(t, "v1:work:run:rec-x", "-rf")
+	if out.Match || !out.Diverged || out.StartRefused || out.Code != codeMismatch || !containsAll(out.Diagnosis, "s0.command.7", `"-rf"`) {
+		t.Fatalf("outcome = %+v, want a mismatch naming the parameter and the value", out)
+	}
+	if out.DivergedStep != 0 {
+		t.Errorf("DivergedStep = %d, want the parameter's step", out.DivergedStep)
+	}
+	if len(w.d.recorded()) != 0 {
+		t.Fatalf("a mismatched recording dispatched %v", dispatchedKeys(w.d.recorded()))
+	}
+	if w.lc.get("shadowMatches") != float64(0) {
+		t.Fatalf("shadowMatches = %v: a mismatch starts the streak again", w.lc.get("shadowMatches"))
+	}
+	if run := w.work.run(out.ReplayRunId); run == nil || run["errorCode"] != codeMismatch {
+		t.Fatalf("the mismatch was not recorded: %v", run)
 	}
 }

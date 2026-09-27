@@ -56,10 +56,24 @@ func CheckBindings(t Template, values map[string]string) error {
 			why = "was never recorded climbing to a parent directory"
 		}
 		if why != "" {
-			return fmt.Errorf("parameter %s %s, and this goal gave it %s", h.Id, why, shownValue(v))
+			return &BindingRefusal{Hole: h.Id, Step: h.StepIndex, Value: v, Why: why}
 		}
 	}
 	return nil
+}
+
+// BindingRefusal is CheckBindings' refusal: the parameter, the step it belongs
+// to -- which a shadow comparison records as where the recording stopped being
+// an instance -- the value, and why. Its Error is the one sentence.
+type BindingRefusal struct {
+	Hole  string
+	Step  int
+	Value string
+	Why   string
+}
+
+func (e *BindingRefusal) Error() string {
+	return fmt.Sprintf("parameter %s %s, and this goal gave it %s", e.Hole, e.Why, shownValue(e.Value))
 }
 
 // shownValueLimit bounds how much of a refused value a sentence quotes: the

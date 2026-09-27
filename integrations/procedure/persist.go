@@ -165,6 +165,15 @@ func (i *Integration) prepareVersion(ctx context.Context, k corpusKey, mined *mi
 	v.report, v.gateRan = i.compile(source, v.name)
 	v.reRunnable = v.gateRan && v.report.OK && everyStepWritten && compiledAutomation(v.report, v.name)
 	v.rung, v.reason = work.EntryRung(candidateEvidence(win, t, insts, mined.recs))
+	// A VERSION A REPLAY COULD NOT RUN SAFELY NEVER CLIMBS: a parameter that is
+	// a shell's script or an interpreter's code, one the recordings reached
+	// through an expansion, a recording the template does not even bind
+	// (component/procedure.ReplayRisks). Its shadow comparisons could match
+	// every time, and the one approval would ask a person to vouch for what
+	// the steps do not show. It stays a candidate, the first risk its reason.
+	if risks := proc.ReplayRisks(t, actionsOf(insts)); len(risks) > 0 {
+		v.rung, v.reason = work.RungCandidate, risks[0]
+	}
 	// A VERSION NO DISPATCHER CAN RUN NEVER CLIMBS (replayable.go). Its
 	// shadow comparisons could still match -- a dry comparison of arguments
 	// needs no dispatcher -- and the one approval would then ask a person to

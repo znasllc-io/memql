@@ -475,3 +475,30 @@ func TestTheLiftReadsNothingAsTheCluster(t *testing.T) {
 		t.Fatalf("calls not made as the owner: %v", reads)
 	}
 }
+
+// TestAVersionWithAReplayRiskStaysACandidateNamingIt (B5): the recordings
+// ran their command through `bash -c "<script>"`, so the parameter the
+// template learned is the SCRIPT -- a goal's input would choose the code that
+// runs, however it is quoted. The version is lifted (it is what the
+// recordings did) and held at candidate, the ladder's reason the first
+// sentence of component/procedure.ReplayRisks, however cleanly the candidate
+// gate and Gate 1 pass.
+func TestAVersionWithAReplayRiskStaysACandidateNamingIt(t *testing.T) {
+	recs := twoRecordings()
+	for n := range recs {
+		recs[n].execCommand = `bash -c "mkdir -p out && echo hello > ` + recs[n].file + `"`
+	}
+	eng, res := liftFixture(t, recs...)
+	if res.Rung != work.RungCandidate {
+		t.Fatalf("rung = %s, want candidate: a version whose parameter is a script never climbs", res.Rung)
+	}
+	reason := argsOf(t, eng.callTo(t, "recordConstructLadder"))["ladderReason"].(string)
+	if !containsAll(reason, "step 0", "script bash runs") {
+		t.Fatalf("reason %q must be ReplayRisks' sentence naming the step and the script", reason)
+	}
+
+	// The control: the same goal recorded without the wrapper enters shadow.
+	if _, ok := liftFixture(t, twoRecordings()...); ok.Rung != work.RungShadow {
+		t.Fatalf("the control lifted to %s, so the hold above proves nothing", ok.Rung)
+	}
+}
