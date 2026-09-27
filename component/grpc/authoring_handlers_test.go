@@ -167,3 +167,46 @@ func TestAuthoringSessionDefine_FailRegistersNothing(t *testing.T) {
 		assert.Equal(t, 0, s.authoredSession.Count(), "nothing should be registered on failure")
 	}
 }
+
+// authLowerRefusedSrc declares a query whose filter reads a field the concept
+// does not declare -- a lowering refusal, which carries the stable rule id
+// `lower_unknown_field`.
+const authLowerRefusedSrc = `use c1grpc.concepts.{ c1Widget }
+
+@description("C1 grpc widgets by a field the concept does not declare")
+@unbounded("fixture")
+query c1Widget c1WidgetsByNope {
+  filter row => row.nope == "x"
+}`
+
+// The rule id travels in its own field (memql#5435). It used to reach the wire
+// only inside the error text, so a client keying on it had to parse prose whose
+// wording is not a contract. Every reply that carries diagnostics is built by
+// authoringDiagnosticsToProto, so the validate path proves the field for all of
+// them.
+func TestAuthoringValidate_DiagnosticCarriesTheRuleCode(t *testing.T) {
+	s, cs := newAuthoringSession(t, auth.RoleDeveloper, "u1")
+	require.NoError(t, dispatchValidate(s, authConceptSrc+"\n\n"+authLowerRefusedSrc))
+
+	res := cs.lastSent().GetAuthoringValidateBundleResult()
+	require.NotNil(t, res)
+	assert.False(t, res.GetOk())
+	var refused *memqlv1.AuthoringDiagnostic
+	for _, d := range res.GetDiagnostics() {
+		if d.GetName() == "c1WidgetsByNope" {
+			refused = d
+		}
+	}
+	require.NotNil(t, refused, "the query's diagnostic must be on the reply: %v", res.GetDiagnostics())
+	assert.False(t, refused.GetOk())
+	assert.Equal(t, "lower_unknown_field", refused.GetCode(), "the rule id must be on the wire as its own field; error=%q", refused.GetError())
+	assert.Contains(t, refused.GetError(), "[lower_unknown_field]", "the error text keeps its wording; the field is added beside it")
+	assert.Greater(t, refused.GetLine(), int32(0), "the refusal is positioned on the author's line")
+
+	// A construct that compiled carries no code.
+	for _, d := range res.GetDiagnostics() {
+		if d.GetOk() {
+			assert.Empty(t, d.GetCode(), "a clean construct has no rule id: %s %s", d.GetKind(), d.GetName())
+		}
+	}
+}

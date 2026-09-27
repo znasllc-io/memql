@@ -49,6 +49,7 @@ function diag(overrides: Partial<AuthoringDiagnostic> = {}): AuthoringDiagnostic
     column: 0,
     endLine: 0,
     endColumn: 0,
+    code: "",
     ...overrides,
   };
 }
@@ -202,6 +203,25 @@ test("mapBundleDiagnostics -- a successful construct is not a diagnostic", async
 test("mapBundleDiagnostics -- an empty error still produces a usable message", async () => {
   const [mapped] = mapBundleDiagnostics([diag({ line: 4, column: 1, error: "" })], (await twoFileBundle()));
   assert.match(mapped?.message ?? "", /failed to compile/);
+});
+
+test("mapBundleDiagnostics -- the engine's rule id is carried, positioned or not", async () => {
+  // The code travels in its own field (memql#5435) and becomes the Problems
+  // entry's code, the same one the language server's squiggle for the fault
+  // carries -- so nothing downstream reads it out of the message text.
+  const bundle = await twoFileBundle();
+  const [positioned, fileLevel, uncoded] = mapBundleDiagnostics(
+    [
+      diag({ line: 4, column: 3, code: "lower_unknown_field" }),
+      diag({ line: 0, code: "lower_not_boolean" }),
+      diag({ line: 4, column: 3 }),
+    ],
+    bundle,
+  );
+  assert.equal(positioned?.code, "lower_unknown_field");
+  assert.equal(fileLevel?.fileLevel, true);
+  assert.equal(fileLevel?.code, "lower_not_boolean");
+  assert.equal(uncoded?.code, "");
 });
 
 // -----------------------------------------------------------------------------

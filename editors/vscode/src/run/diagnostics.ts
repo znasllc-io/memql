@@ -41,6 +41,12 @@ export interface MappedDiagnostic {
   end: DiagnosticPosition;
   /** The engine's message, with the construct named. */
   message: string;
+  /**
+   * The failure's stable rule id (`lower_unknown_field`, ...), or "" when it
+   * carries none (memql#5435). Rendered as the diagnostic's code, the same
+   * field the language server's squiggles carry theirs in.
+   */
+  code: string;
   constructName: string;
   constructKind: string;
 }
@@ -104,6 +110,7 @@ function mapOne(d: AuthoringDiagnostic, bundle: Bundle): MappedDiagnostic {
     start: { line: startLine, character: startCharacter },
     end,
     message: `${d.kind} ${d.name}: ${message}`,
+    code: d.code,
     constructName: d.name,
     constructKind: d.kind,
   };
@@ -165,6 +172,7 @@ function fileLevel(
     // wondering why a diagnostic about line 40's construct is sitting at the
     // top of the file.
     message: `${d.kind} ${d.name}: ${message} (the engine reported no source position for this failure)`,
+    code: d.code,
     constructName: d.name,
     constructKind: d.kind,
   };

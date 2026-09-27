@@ -112,6 +112,13 @@ export interface AuthoringDiagnostic {
   column: number;
   endLine: number;
   endColumn: number;
+  /**
+   * The failure's stable rule id -- `lower_unknown_field`, an `annotation_*`
+   * refusal, a retired form's rule -- or "" when it carries none
+   * (memql#5435). Key on this, never on the wording of `error`: the id is
+   * stable, the prose is not.
+   */
+  code: string;
 }
 
 /** One construct a session-define registered, by kind and name. */
@@ -628,6 +635,7 @@ function diagnosticFromWire(d: AuthoringDiagnosticWire): AuthoringDiagnostic {
     column: numberOrZero(d.column),
     endLine: numberOrZero(d.endLine),
     endColumn: numberOrZero(d.endColumn),
+    code: d.code ?? "",
   };
 }
 

@@ -1573,6 +1573,12 @@ message AuthoringDiagnostic {
   int32 column = 7;
   int32 end_line = 8;    // 0 when the failure has no end anchor
   int32 end_column = 9;  // 0 when the failure has no end anchor
+  // code is the failure's stable rule id when it carries one -- a lowering
+  // refusal's `lower_*`, an annotation refusal's `annotation_*`, a retired
+  // form's rule -- and empty otherwise (memql#5435). `error` still ends with it
+  // in brackets; this is the field a client keys on, so no client parses the
+  // text. The id is stable, the wording of `error` is not.
+  string code = 10;
 }
 
 // AuthoringConstruct names one construct that a session-define registered.

@@ -369,7 +369,7 @@ test("run -- a failing validation publishes diagnostics and never defines or inv
   h.engine.validateResult = {
     ok: false,
     diagnostics: [
-      { name: "q", kind: "query", ok: false, skipped: false, error: "unexpected token", line: 2, column: 3, endLine: 0, endColumn: 0 },
+      { name: "q", kind: "query", ok: false, skipped: false, error: "unexpected token", line: 2, column: 3, endLine: 0, endColumn: 0, code: "" },
     ],
   };
   const outcome = await h.orchestrator.run(target(), { spaceId: "s1" });
@@ -394,7 +394,7 @@ test("run -- a SKIPPED construct does not fail the run", async () => {
   h.engine.validateResult = {
     ok: true,
     diagnostics: [
-      { name: "s", kind: "shape", ok: false, skipped: true, error: "kind not compiled", line: 1, column: 1, endLine: 0, endColumn: 0 },
+      { name: "s", kind: "shape", ok: false, skipped: true, error: "kind not compiled", line: 1, column: 1, endLine: 0, endColumn: 0, code: "" },
     ],
   };
   const outcome = await h.orchestrator.run(target(), { spaceId: "s1" });
@@ -419,7 +419,7 @@ test("run -- a failing DEFINE surfaces its diagnostics too", async () => {
     ok: false,
     defined: [],
     diagnostics: [
-      { name: "q", kind: "query", ok: false, skipped: false, error: "bind failed", line: 2, column: 3, endLine: 0, endColumn: 0 },
+      { name: "q", kind: "query", ok: false, skipped: false, error: "bind failed", line: 2, column: 3, endLine: 0, endColumn: 0, code: "" },
     ],
     error: "",
   };
@@ -457,7 +457,7 @@ test("run -- a tool's buffer is still VALIDATED", async () => {
   h.engine.validateResult = {
     ok: false,
     diagnostics: [
-      { name: "other", kind: "query", ok: false, skipped: false, error: "boom", line: 1, column: 1, endLine: 0, endColumn: 0 },
+      { name: "other", kind: "query", ok: false, skipped: false, error: "boom", line: 1, column: 1, endLine: 0, endColumn: 0, code: "" },
     ],
   };
   const outcome = await h.orchestrator.run(target({ kind: "tool", name: "searchUsers", args: [] }), {});

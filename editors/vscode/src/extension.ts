@@ -3946,6 +3946,9 @@ function publishRunDiagnostics(
           DiagnosticSeverity.Error
         );
         diagnostic.source = 'memql (run)';
+        // The rule id, where the engine gave one (memql#5435): the same code
+        // the language server's squiggle for the same fault carries.
+        if (d.code !== '') diagnostic.code = d.code;
         return diagnostic;
       })
     );

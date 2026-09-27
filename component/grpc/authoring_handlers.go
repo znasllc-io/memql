@@ -428,7 +428,10 @@ func (s *streamSession) requireAuthoringRole(requestId, correlate string) (bool,
 
 // authoringDiagnosticsToProto maps the engine-side SandboxDiagnostics onto the
 // wire form. Kept here (not in the SDK) because it is the server-side
-// translation; the SDK owns the inverse.
+// translation; the SDK owns the inverse. It is the ONE builder of the wire
+// message -- validate, session define, stage, promote and demote all reply
+// through it -- so a field added to the diagnostic is carried on every path by
+// being carried here (memql#5435: the rule code).
 func authoringDiagnosticsToProto(diags []memqlengine.SandboxDiagnostic) []*memqlv1.AuthoringDiagnostic {
 	out := make([]*memqlv1.AuthoringDiagnostic, 0, len(diags))
 	for _, d := range diags {
@@ -442,6 +445,7 @@ func authoringDiagnosticsToProto(diags []memqlengine.SandboxDiagnostic) []*memql
 			Column:    int32(d.Column),
 			EndLine:   int32(d.EndLine),
 			EndColumn: int32(d.EndColumn),
+			Code:      d.Code,
 		})
 	}
 	return out
