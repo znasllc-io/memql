@@ -20,6 +20,10 @@ package parser
 //	     canonicalId(v, concept) -> canonicalId(v, "concept")
 //	E. a query tool handler's `$args.x`       -> args.x
 //
+// Inside A, B and C the retired connectives become the operators they meant
+// (`;` -> &&, `,` -> ||), and inside A a traversal's target filter becomes its
+// lambda: `parentOf(a, b)` -> `parentOf(p => a || b)` (memql#5439).
+//
 // A, B and C are PARSED, never spliced as text: the old clause is read by the
 // legacy grammar (parseLegacyExpression: the engine's procedural grammar, with
 // the retired `;` and `,` connectives still read as AND and OR), converted

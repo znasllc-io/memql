@@ -106,7 +106,7 @@ var registry = []rewrite{
 		doc:  "delete @namespace, which memql#5375 retired -- redundancy depends on the directory's namespace.pin, so it cannot be decided from the file alone",
 		path: rewriteAttributesNamespace},
 	{name: "expressions", edition: "2026", epic: "dsl-v1-expressions",
-		doc:  "filters, spec and trait bodies and @filter -> lambdas (filter row => ...); cond / concat / exists / null -> ? : / + / != nil / nil; $args.x in query tool handlers -> args.x",
+		doc:  "filters, spec and trait bodies and @filter -> lambdas (filter row => ...), the `;` / `,` connectives -> && / || and a traversal's filter -> its lambda on the way; cond / concat / exists / null -> ? : / + / != nil / nil; $args.x in query tool handlers -> args.x",
 		tree: rewriteExpressions},
 }
 
