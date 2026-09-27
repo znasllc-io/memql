@@ -3,6 +3,7 @@ package procedure
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -237,7 +238,8 @@ func (i *Integration) createProcedure(ctx context.Context, k corpusKey, v versio
 }
 
 // keepProcedure is the same version: nothing is written, with two exceptions
-// that are both RECOVERIES rather than changes.
+// that are both RECOVERIES rather than changes -- and the dispatch hints,
+// which are not the version (refreshHints).
 //
 //   - A version on no rung, or still a candidate, re-enters with the evidence
 //     as it stands now. The first is a lift interrupted before its ladder
@@ -261,7 +263,47 @@ func (i *Integration) keepProcedure(ctx context.Context, k corpusKey, v version,
 			return out, err
 		}
 	}
+	if err := i.refreshHints(ctx, constructId, v, existing); err != nil {
+		return out, err
+	}
 	return out, nil
+}
+
+// refreshHints writes a kept version's dispatch hints when the corpus now says
+// something else -- a later recording let a command run longer than any
+// before, and the next replay must not be cut off where the app was not
+// (payload.go's header, review finding I2). The hints are outside the hash, so
+// this is not a new version: only the stored payload's `hints` key changes,
+// and the source, the preconditions, the provenance, the hash and the ladder
+// are written back exactly as stored. The same hints write nothing.
+func (i *Integration) refreshHints(ctx context.Context, constructId string, v version, existing map[string]any) error {
+	stored, ok := existing["procedure"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	want := v.procedure["hints"]
+	if reflect.DeepEqual(stored["hints"], want) {
+		return nil
+	}
+	updated := make(map[string]any, len(stored)+1)
+	for key, val := range stored {
+		updated[key] = val
+	}
+	if want == nil {
+		delete(updated, "hints")
+	} else {
+		updated["hints"] = want
+	}
+	if err := i.store.writeInternal(ctx, "mutation "+call("recordProcedure", map[string]any{
+		"constructId":   constructId,
+		"source":        str(existing, "source"),
+		"procedure":     updated,
+		"preconditions": existing["preconditions"],
+		"procedureHash": str(existing, "procedureHash"),
+	})); err != nil {
+		return fmt.Errorf("record procedure hints: %w", err)
+	}
+	return nil
 }
 
 // reliftProcedure writes a changed version in place: the ladder FIRST, so the

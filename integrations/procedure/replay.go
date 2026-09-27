@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -1067,7 +1069,7 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		res, derr := r.d.Dispatch(r.seamContext(ctx), DispatchRequest{
 			Target: r.target, OwnerUserId: r.req.OwnerUserId, RunId: r.runId,
 			StepKey: key, IdempotencyKey: idem, Tool: step.Tool, Args: args,
-			Sandbox: r.mode == ReplayShadow,
+			Sandbox: r.mode == ReplayShadow, Timeout: r.stepTimeout(idx),
 		})
 		if derr != nil {
 			// A GO ERROR MEANS THE STEP DID NOT RUN -- a gate or scope
@@ -1137,6 +1139,21 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 	r.outputs[idx] = output
 	r.out.Completed = append(r.out.Completed, done)
 	return true
+}
+
+// stepTimeout is the time limit a step is dispatched with: the longest any
+// recording of it asked for (payload.go's hints), or zero -- the executor's
+// own default -- when none did.
+func (r *replay) stepTimeout(idx int) time.Duration {
+	h := r.c.p.Hints
+	if h == nil || idx >= len(h.TimeoutsMs) || h.TimeoutsMs[idx] <= 0 {
+		return 0
+	}
+	ms := int64(h.TimeoutsMs[idx])
+	if ms > math.MaxInt64/int64(time.Millisecond) {
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 // compare holds one step to its reference: what every recording agreed on

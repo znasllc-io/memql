@@ -111,6 +111,9 @@ type stepEvidence struct {
 	// SAME directory the arguments were relativized against, or a path the
 	// rewrite made relative would be judged against a different root.
 	Workspace string
+	// TimeoutMs is the time limit the call asked for, read off its raw
+	// arguments before semanticArgs drops it; 0 when it asked for none.
+	TimeoutMs int
 }
 
 // stepVerdict is one feedback row on one step version.
@@ -249,7 +252,9 @@ func (i *Integration) loadRecording(ctx context.Context, run map[string]any, lev
 			// for a recording that carried none -- the action's own.
 			ws := actionWorkspace(rec.Workspace, o)
 			input = relativizeArgs(semanticArgs(stepType, args), ws)
-			rec.Evidence[key] = i.stepEvidenceOf(ctx, stepType, o, input, ws)
+			ev := i.stepEvidenceOf(ctx, stepType, o, input, ws)
+			ev.TimeoutMs = recordedTimeoutMs(stepType, args)
+			rec.Evidence[key] = ev
 		}
 		result := obj(r, "result")
 		steps = append(steps, proc.Step{
