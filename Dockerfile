@@ -276,7 +276,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # bookworm-slim rather than alpine: scripts/os/build.sh is a bash script (per
 # the Makefile+shell convention in CLAUDE.md) and alpine ships no bash.
 # Builder-only, so image size is irrelevant.
-FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS spa-build
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS spa-build
 
 WORKDIR /src
 
@@ -358,7 +358,7 @@ FROM ${SPA_DIST_STAGE} AS spa-dist
 # go and read. The engine runs as root, so a build running as root could read
 # /proc/1/environ and take every secret the pod holds. It runs as uid 10001
 # instead, which cannot.
-FROM debian:12-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS workbench-runtime
+FROM debian:12-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS workbench-runtime
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -371,8 +371,8 @@ RUN apt-get update && \
 # The Node toolchain, from the same pinned image the SPA build uses. Both
 # are bookworm, so the C library matches and the binaries run as they were
 # built.
-COPY --from=node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 /usr/local/bin/node /usr/local/bin/node
-COPY --from=node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
     node --version && npm --version && git --version

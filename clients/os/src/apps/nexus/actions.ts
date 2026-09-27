@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../live/connection";
 import { idTail } from "./rows";
@@ -192,24 +193,25 @@ export function useCancelGoal(): CancelGoalState {
 }
 
 // ---------------------------------------------------------------------------
-// replayRun and forkRun
+// replayRun
 // ---------------------------------------------------------------------------
 
 export interface DeriveRunState extends WriteState {
-  /** The NEW run the last successful call opened. Both verbs make one. */
+  /** The NEW run the last successful call opened. */
   derivedRunId: string;
   replay: (runId: string) => Promise<string>;
-  fork: (runId: string, atStepKey: string) => Promise<string>;
 }
 
 /**
- * Replay a run, or fork it at a step.
+ * Replay a run: a NEW run served from the journal, the source untouched.
  *
- * ONE HOOK FOR BOTH, because they are one act with two settings from this
- * surface's side -- each reads a source run and returns a NEW run id, each
- * leaves the source untouched, and each lands the person on a different run.
- * Two hooks would mean two busy flags and two error slots for one control
- * cluster on one bar.
+ * `forkRun` USED TO BE CALLED HERE, AND NEXUS NO LONGER CALLS IT (epic
+ * memql#5414). Its fork re-executes every step from step 1 and only serves the
+ * model calls before the fork point -- which is what an API caller re-running
+ * a goal with different variables wants, and why the builtin stays; a person
+ * stepping into a run wants `branchRun` below, which serves the prefix BY
+ * REFERENCE and takes the same overrides a re-run does, so a branch is a
+ * re-run into a new run.
  *
  * `policy` is left UNSENT rather than sent as `"strict"`: strict is the
  * declared default and the builtin applies it, so naming it here would put a
@@ -254,36 +256,263 @@ export function useDeriveRun(): DeriveRunState {
     [connection, call],
   );
 
-  const fork = useCallback(
-    async (runId: string, atStepKey: string): Promise<string> => {
-      const query = connection?.query ?? null;
-      if (query === null) {
-        setError(NOT_CONNECTED);
-        return "";
-      }
-      if (atStepKey.trim() === "") {
-        // `atStepKey` is `string!` on the builtin, and a fork with no step to
-        // diverge at is not a thing -- it is a replay. Saying so beats a
-        // refusal that reads like the fork failed.
-        setError("Pick the step to fork at first.");
-        return "";
-      }
-      return call(() => query.forkRun({ runId, atStepKey }));
-    },
-    [connection, call],
-  );
-
   return {
     busy,
     error,
     derivedRunId,
     replay,
-    fork,
     reset: () => {
       setError("");
       setDerivedRunId("");
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// rerunStep, branchRun and moveRunHead (epic memql#5414, design D18-D20)
+// ---------------------------------------------------------------------------
+//
+// THREE HOOKS, THREE ERROR SLOTS. "Run again" and "Branch from here" refuse
+// INSIDE the composer, where the person is looking at what they changed;
+// "Make current" refuses on the bar that offered it. One shared slot would put
+// a composer's refusal on the bar under a control that did not cause it.
+//
+// NOTHING IS PATCHED LOCALLY. The act writes `run.rerun` (or the head) and the
+// run row broadcasts, so the state the page draws next is the cluster's -- a
+// local "running" that the cluster had not confirmed would be this window
+// inventing progress.
+
+/** What a person may change for the one version a re-run or branch makes. */
+export interface InterventionArgs {
+  runId: string;
+  stepKey: string;
+  level?: string;
+  model?: string;
+  effort?: string;
+  prompt?: string;
+  inputs?: Record<string, unknown>;
+}
+
+export interface RerunReply {
+  runId: string;
+  stepKey: string;
+  version: number | null;
+  staleSteps: string[];
+}
+
+export interface BranchReply {
+  /** The NEW run -- the branch. */
+  runId: string;
+  forkedFromRunId: string;
+  forkAtStepKey: string;
+}
+
+export interface HeadReply {
+  runId: string;
+  stepKey: string;
+  version: number | null;
+  staleSteps: string[];
+}
+
+interface ActState<A, R> extends WriteState {
+  act: (args: A) => Promise<R | null>;
+}
+
+type ReplyRow = Record<string, unknown> | null;
+
+function firstReply(result: { rows: () => Record<string, unknown>[] }): ReplyRow {
+  return result.rows()[0] ?? null;
+}
+
+function str(row: ReplyRow, key: string): string {
+  const v = row?.[key];
+  return typeof v === "string" ? v : "";
+}
+
+function num(row: ReplyRow, key: string): number | null {
+  const v = row?.[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+function strings(row: ReplyRow, key: string): string[] {
+  const v = row?.[key];
+  return Array.isArray(v) ? v.filter((m): m is string => typeof m === "string") : [];
+}
+
+/**
+ * One write with its own busy flag and its own refusal.
+ *
+ * THE REFUSAL IS THE SERVER'S SENTENCE, VERBATIM. `run_not_finished`,
+ * `step_nested`, `override_model_invalid`, `snapshot_content_omitted` naming
+ * the file -- each is the only fact that tells somebody what to do next, and a
+ * paraphrase would be this window's guess at it.
+ */
+function useAct<A, R>(run: (query: QueryClient, args: A) => Promise<R>): ActState<A, R> {
+  const connection = useOsConnection();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const act = useCallback(
+    async (args: A): Promise<R | null> => {
+      const query = connection?.query ?? null;
+      if (query === null) {
+        setError(NOT_CONNECTED);
+        return null;
+      }
+      setBusy(true);
+      setError("");
+      try {
+        return await run(query, args);
+      } catch (err: unknown) {
+        setError(describe(err));
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [connection, run],
+  );
+  return { busy, error, act, reset: () => setError("") };
+}
+
+async function rerunStep(query: QueryClient, args: InterventionArgs): Promise<RerunReply> {
+  const row = firstReply(await query.rerunStep(args));
+  return {
+    runId: str(row, "runId") || args.runId,
+    stepKey: str(row, "stepKey") || args.stepKey,
+    version: num(row, "version"),
+    staleSteps: strings(row, "staleSteps"),
+  };
+}
+
+async function branchRun(query: QueryClient, args: InterventionArgs): Promise<BranchReply> {
+  const row = firstReply(await query.branchRun(args));
+  const runId = str(row, "runId");
+  // A branch that answered no run id opened nothing this window can go to, and
+  // "success" with nowhere to land is a failure somebody would not see.
+  if (runId === "") throw new Error("The branch answered without naming the run it opened.");
+  return {
+    runId,
+    forkedFromRunId: str(row, "forkedFromRunId") || args.runId,
+    forkAtStepKey: str(row, "forkAtStepKey") || args.stepKey,
+  };
+}
+
+export interface HeadArgs {
+  runId: string;
+  stepKey: string;
+  version: number;
+}
+
+async function moveRunHead(query: QueryClient, args: HeadArgs): Promise<HeadReply> {
+  const row = firstReply(await query.moveRunHead(args));
+  return {
+    runId: str(row, "runId") || args.runId,
+    stepKey: str(row, "stepKey") || args.stepKey,
+    version: num(row, "version") ?? args.version,
+    staleSteps: strings(row, "staleSteps"),
+  };
+}
+
+export type RerunStepState = ActState<InterventionArgs, RerunReply>;
+export type BranchRunState = ActState<InterventionArgs, BranchReply>;
+export type MoveRunHeadState = ActState<HeadArgs, HeadReply>;
+
+/** Run one step again, as a new version, with whatever the person changed. */
+export function useRerunStep(): RerunStepState {
+  return useAct(rerunStep);
+}
+
+/** Branch a run at a step into a NEW run: the prefix reused, the step on run live. */
+export function useBranchRun(): BranchRunState {
+  return useAct(branchRun);
+}
+
+/** Make an earlier (or later) version of a step current again: going back. */
+export function useMoveRunHead(): MoveRunHeadState {
+  return useAct(moveRunHead);
+}
+
+// ---------------------------------------------------------------------------
+// recordFeedback (design D21)
+// ---------------------------------------------------------------------------
+
+export interface FeedbackArgs {
+  runId: string;
+  stepKey?: string;
+  version?: number;
+  verdict: "like" | "dislike" | "neutral";
+  product?: boolean;
+  process?: boolean;
+  performance?: boolean;
+  reason?: string;
+}
+
+export interface FeedbackReply {
+  observationId: string;
+  verdict: string;
+  validatorDisagrees: boolean;
+}
+
+export interface RecordFeedbackState {
+  /** The target being written, keyed like `targetKey`, so one control goes busy and not every one. */
+  recording: string;
+  /** The server's refusal, per target -- a refusal renders beside the control that produced it. */
+  errors: Readonly<Record<string, string>>;
+  record: (target: string, args: FeedbackArgs) => Promise<FeedbackReply | null>;
+  clear: (target: string) => void;
+}
+
+/**
+ * Say what a run, or one version of a step, was like.
+ *
+ * PER TARGET, like approvals are per approval: the run's verdict and a step's
+ * are two controls on one page, and a refusal written to a shared slot would
+ * sit under the one somebody did not touch. A dislike with no axis is refused
+ * by the server (`feedback_axis_required`) and never sent from here -- the
+ * control offers no Save until an axis is chosen -- but the refusal would
+ * still arrive verbatim if a newer server asked for more.
+ */
+export function useRecordFeedback(): RecordFeedbackState {
+  const connection = useOsConnection();
+  const [recording, setRecording] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const record = useCallback(
+    async (target: string, args: FeedbackArgs): Promise<FeedbackReply | null> => {
+      const query = connection?.query ?? null;
+      if (query === null) {
+        setErrors((held) => ({ ...held, [target]: NOT_CONNECTED }));
+        return null;
+      }
+      setRecording(target);
+      setErrors((held) => ({ ...held, [target]: "" }));
+      try {
+        const row = firstReply(await query.recordFeedback(args));
+        return {
+          observationId: str(row, "observationId"),
+          verdict: str(row, "verdict") || args.verdict,
+          validatorDisagrees: row?.["validatorDisagrees"] === true,
+        };
+      } catch (err: unknown) {
+        setErrors((held) => ({ ...held, [target]: describe(err) }));
+        return null;
+      } finally {
+        setRecording("");
+      }
+    },
+    [connection],
+  );
+
+  const clear = useCallback((target: string) => {
+    setErrors((held) => {
+      if (!held[target]) return held;
+      const next = { ...held };
+      delete next[target];
+      return next;
+    });
+  }, []);
+
+  return { recording, errors, record, clear };
 }
 
 // ---------------------------------------------------------------------------

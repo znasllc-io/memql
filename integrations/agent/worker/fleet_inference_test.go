@@ -240,3 +240,23 @@ var structuredSchemaFixture = common.StructuredSchema{
 	Schema: []byte(`{"type":"object"}`),
 	Strict: true,
 }
+
+// A person's effort for one call rides ModelCallStart.effort (epic
+// memql#5414, design D20). It is rendered once in buildStart, and it survives
+// the start being projected back onto the worker package's request on the
+// replica that holds the machine's stream. A call nobody asked an effort of
+// carries none, so the runtime's own default decides.
+func TestEffortReachesTheFleetDoorsModelCallStart(t *testing.T) {
+	f := &FleetInference{}
+	start := f.buildStart(memqlengine.FleetCallRequest{Kind: memqlengine.FleetKindChat, ModelId: "gpt-oss:20b", Effort: "high"})
+	if got := start.GetEffort(); got != "high" {
+		t.Fatalf("ModelCallStart.effort = %q, want the person's effort", got)
+	}
+	if got := modelCallRequestFromProto("local-1", start, time.Minute).Effort; got != "high" {
+		t.Fatalf("the receiving replica's request dropped the effort, got %q", got)
+	}
+	plain := f.buildStart(memqlengine.FleetCallRequest{Kind: memqlengine.FleetKindChat, ModelId: "gpt-oss:20b"})
+	if got := plain.GetEffort(); got != "" {
+		t.Fatalf("a call with no effort asked of it carried %q", got)
+	}
+}

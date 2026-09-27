@@ -505,6 +505,18 @@ message AppSessionStart {
   // an embedding must come from the embedder of the index it is written
   // into, and no app exposes one.
   string level = 14;
+  // model and effort are a PERSON'S explicit choice for this one session
+  // (epic memql#5414, design D20): a step re-run or branched with a
+  // different model or effort. They OVERRIDE the level's knobs for this
+  // session only and never change the table. model is the app's own model
+  // name or alias (Claude Code's --model, Codex's model); effort is one of
+  // low, medium, high, xhigh or max (Claude Code's --effort, Codex's
+  // model_reasoning_effort). EMPTY MEANS THE LEVEL DECIDES, which is every
+  // session nobody overrode. A cockpit that predates these fields ignores
+  // them, and what the app actually ran at is what it REPORTS on
+  // AppSessionEnd -- which is what the version records.
+  string model = 15;
+  string effort = 16;
 }
 
 // AppSessionLimits are the policy ceilings a session runs under.
@@ -696,6 +708,11 @@ message ModelCallStart {
   // which has knobs, while a runtime has only the model it was asked for.
   // Empty means the engine named none.
   string level = 16;
+  // effort is a PERSON'S explicit effort for this one call (epic
+  // memql#5414, design D20): low, medium, high, xhigh or max, for a step
+  // re-run with a different effort. EMPTY MEANS THE LEVEL DECIDES. An app
+  // with no such knob, or a cockpit that predates the field, ignores it.
+  string effort = 17;
 }
 
 // ModelCallTool is one function the model may call, as the caller

@@ -124,6 +124,18 @@ type ResolveRequest struct {
 	// refused at load when it names a policy.
 	ExplicitProvider string
 
+	// Effort is a PERSON'S explicit reasoning effort for this one call (epic
+	// memql#5414, design D20): low, medium, high, xhigh or max, from a step
+	// re-run or branched with a different effort. EMPTY MEANS THE LEVEL
+	// DECIDES, which is every call nobody overrode.
+	//
+	// NOTHING ROUTES ON IT. It is a knob on the door the rules (or a pin)
+	// chose, never an input to choosing one: the router binds it on a door
+	// that has an effort knob -- an app door, where it rides AppSessionStart,
+	// and the fleet door, where it rides ModelCallStart -- and a door without
+	// one ignores it.
+	Effort string
+
 	// Attribution, unchanged in meaning from the pre-rules router.
 	RequestId string
 	UserId    string

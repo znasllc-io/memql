@@ -1,0 +1,29 @@
+// seeds.memql
+//
+// The values epic memql#5414 decides by (issue #5416 and #5418).
+//
+// ONE GLOBAL SEED at the literal id `primary`: seed names are unique across
+// the whole tree and v1:authoring:ladderPolicy's seed already holds the name
+// `primary`, so this one is named feedbackPolicyPrimary and carries its id in
+// its body. It materializes v1:work:feedbackPolicy:primary through
+// createFeedbackPolicy, and every read (feedbackPolicyCurrent) pins that
+// literal id.
+//
+// REFRESHED ON EVERY BOOT. The seed materializer re-asserts every global seed
+// on every node at startup, and the fields a seed declares win, so these
+// values are the ones the system applies after any restart. A write that does
+// not change a value is skipped, so an unchanged seed costs one read per node
+// per boot and appends no version.
+//
+// THE SAME VALUES LIVE IN GO EXACTLY ONCE, as
+// component/work.DefaultFeedbackPolicy(), and only for a row that is absent or
+// unreadable. Changing a value here changes the behaviour; changing it there
+// changes nothing while this row exists.
+
+/// The validator checks a goal run's answer before a person sees it, and two distinct goal
+/// signatures make a construct reusable.
+seed feedbackPolicy feedbackPolicyPrimary {
+  id:                       "primary"
+  validateAnswers:          true
+  reusableAfterSignatures:  2
+}

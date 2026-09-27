@@ -89,9 +89,12 @@ func (e *MemQLEngine) InvokeAIChatWithTools(ctx context.Context, templateId stri
 	}
 
 	tools := e.toolsForToolCalling()
-	messages := []common.ChatMessage{
+	// A person's instructions and guidance for the step this turn serves
+	// follow the prompt (epic memql#5414, design D20); nothing when the step
+	// carries no override.
+	messages := withStepOverrideMessages(ctx, []common.ChatMessage{
 		{Role: "system", Content: systemText},
-	}
+	})
 
 	maxIterations := defaultAIToolLoopMaxIterations
 	maxToolCallsPerIt := defaultAIToolLoopMaxToolCallsPerIt
@@ -342,6 +345,9 @@ func (e *MemQLEngine) InvokeAIChatWithFilteredToolsOpts(ctx context.Context, tem
 			messages = append(messages, common.ChatMessage{Role: role, Content: content})
 		}
 	}
+	// A person's instructions and guidance for the step this turn serves
+	// follow the conversation (epic memql#5414, design D20).
+	messages = withStepOverrideMessages(ctx, messages)
 
 	maxIterations := defaultAIToolLoopMaxIterations
 	maxToolCallsPerIt := defaultAIToolLoopMaxToolCallsPerIt

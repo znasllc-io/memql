@@ -106,7 +106,10 @@ func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source st
 		}
 	}
 	if summary == "" {
-		summary, err = e.InvokeAIStructured(ctx, "workContextCheckpoint", map[string]any{"source": source}, "workCheckpoint", json.RawMessage(workCheckpointSchema), true)
+		// Not the step's answer, so not its override (epic memql#5414): the
+		// checkpoint is reused by fingerprint, and a person's instructions
+		// for one version must not be summarized into what later ones read.
+		summary, err = e.InvokeAIStructured(withoutStepOverride(ctx), "workContextCheckpoint", map[string]any{"source": source}, "workCheckpoint", json.RawMessage(workCheckpointSchema), true)
 		if err != nil {
 			return "", fmt.Errorf("context checkpoint failed; history retained: %w", err)
 		}

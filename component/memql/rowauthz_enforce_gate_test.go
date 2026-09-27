@@ -228,6 +228,12 @@ var tierDecidesTheRead = map[string]string{
 	// (ladder_policy_seed_db_test.go), which asserts BOTH halves against the
 	// real tier.
 	"ladderPolicyCurrent": "epic memql#5408, as benchRuns: an ownerless clusterOwner-tier concept read at exactly its rankFloor, here the reader rung every predefined role clears.",
+	// feedbackPolicyCurrent (epic memql#5414) is ladderPolicyCurrent's twin in
+	// every respect: v1:work:feedbackPolicy is an ownerless singleton declared
+	// @rowAuthz(clusterOwner, rankFloor="reader") and the query carries
+	// @requiresRank("reader"), so the tier decides every row for every caller
+	// the floor admits.
+	"feedbackPolicyCurrent": "epic memql#5414, as ladderPolicyCurrent: an ownerless clusterOwner-tier singleton read at exactly its rankFloor, the reader rung every predefined role clears.",
 
 	// The Deployables reads (memql#5303, design
 	// docs/superpowers/specs/2026-09-11-app-access-grants-design.md, D4 /

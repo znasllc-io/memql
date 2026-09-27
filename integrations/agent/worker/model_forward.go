@@ -446,6 +446,7 @@ func modelCallRequestFromProto(localId string, start *memqlv1.ModelCallStart, ti
 		StepId:               start.GetStepId(),
 		Purpose:              start.GetPurpose(),
 		Audio:                start.GetAudio(), Speech: start.GetSpeech(), Image: start.GetImage(), Level: start.GetLevel(),
+		Effort: start.GetEffort(),
 	}
 	for _, m := range start.GetMessages() {
 		req.Messages = append(req.Messages, workerservice.ModelCallMessage{

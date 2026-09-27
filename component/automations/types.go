@@ -744,6 +744,23 @@ type AutomationExecution struct {
 
 	// InputFingerprint is the deterministic hash of the input query result.
 	InputFingerprint string `json:"inputFingerprint,omitempty"`
+
+	// rerun is the re-run request this execution serves (epic memql#5414),
+	// nil for every other. It rides the execution rather than the context so
+	// that it reaches this run's steps and journal writes and nothing else: a
+	// sub-automation a step starts is an execution of its own, and a context
+	// value would follow it there.
+	rerun *RerunSpec
+
+	// overrides are the recorded overrides a replay applies, by top-level
+	// step key (epic memql#5414), for rerun's reason riding the execution.
+	overrides map[string]*common.StepOverride
+
+	// head is the run's head while it executes (rerun.go), advanced at each
+	// top-level step's intent and written whole on every receipt. Nil on an
+	// execution that journals no run of its own -- a logic's statements inside
+	// a caller's run -- and every method on a nil head is a no-op.
+	head *runHead
 }
 
 // NewExecution creates a new automation execution.

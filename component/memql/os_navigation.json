@@ -405,6 +405,10 @@
     "requires": "app:nexus",
     "sections": [
       {
+        "id": "overview",
+        "name": "Overview"
+      },
+      {
         "id": "goals",
         "name": "Goals"
       },

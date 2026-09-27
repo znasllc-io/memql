@@ -1,26 +1,29 @@
 // automations.memql
 //
 // Epic C's two triggers -- one on a session subrun reaching `succeeded`, one
-// schedule over the corpus -- and epic D's certification ladder (epic
+// schedule over the corpus -- epic D's certification ladder (epic
 // memql#5408): the template a trusted or canary procedure serves a goal
-// through, the promotion decision, and the ladder's two sweeps.
+// through, the promotion decision, and the ladder's two sweeps -- and epic E's
+// reuse (epic memql#5414): the catalogue of a succeeded goal's live sections
+// and the reuse-label sweep.
 //
 // Nothing here ACTIVATES a learned procedure. A learned procedure is never an
 // ordinary automation: it is served only through replayLearnedProcedure, only
 // on a rung the ladder decides serves, and it reaches that rung only through
 // shadow evidence and one person's approval.
 //
-// FOUR OF THE SIX RUN UNDER THE MAINTENANCE PRINCIPAL. Each one must read a
+// FIVE OF THE EIGHT RUN UNDER THE MAINTENANCE PRINCIPAL. Each one must read a
 // row -- an approval, the list of owners -- BEFORE it can know whose it is,
 // and every one of those rows declares a composite owner tier, so the default
 // RoleReader system actor would read zero rows and no error: a ladder that
 // never moves looks exactly like one with nothing to move. Each handler then
 // does every other read under the owner's own actor. The entries, with their
 // reasons, are in component/auth/maintenance_actor.go, compiled in so a
-// mounted product bundle cannot grant itself one. The other two need none:
-// learnFromSucceededRun's event carries the run's owner, which the handler
-// borrows (and re-verifies with an owner-filtered read), and
-// replayLearnedProcedure runs inside the goal's own run, as its owner.
+// mounted product bundle cannot grant itself one. The other three need none:
+// the events of learnFromSucceededRun and catalogSucceededSections carry the
+// run's owner, which each handler borrows (and re-verifies with an
+// owner-filtered read), and replayLearnedProcedure runs inside the goal's own
+// run, as its owner.
 
 /// On a run TRANSITIONING to `succeeded`, mine the corpus it belongs to -- and, once the lift is
 /// done, compare the recording against every learned procedure in shadow for the same goal, which
@@ -50,6 +53,35 @@ automation learnFromSucceededRun {
   }
 
   learned := builtin procedureLearnFromRun(runId: args.id ?? "", ownerUserId: args.ownerUserId ?? "")
+}
+
+/// On a goal run TRANSITIONING to `succeeded`, catalogue the sections its draft worked out live (epic
+/// memql#5414, design D24: decomposition spends intelligence once). Compile writes every section it
+/// plans live as an automation of its own, named by the section's signature; once the run has
+/// succeeded, the builtin writes each whose current version stands into the owner's catalog, where
+/// the next goal asking for the same section finds it instead of planning it again. Everything else
+/// -- a run that is stale or disliked, a section re-run with an override, one already catalogued --
+/// is the builtin's to decide, and it answers with what it left out and why rather than failing.
+///
+/// THE OWNER TRAVELS WITH THE EVENT, exactly as for learnFromSucceededRun: the handler borrows that one
+/// owner's authority only for this trigger and re-reads the run under it, so it needs no maintenance
+/// principal, and a hint that does not own the run reads nothing.
+///
+/// THE FILTER NAMES THE TRANSITION, for learnFromSucceededRun's reason: a run keeps being written
+/// after it succeeds, and a node.updated on each of those writes must not catalogue again. It also
+/// requires a goal and a compiled draft (templateConstructId), since only a draft compiled for a goal
+/// holds sections -- a goal served whole from the catalog, and every automation's own run, are
+/// dropped before any handler runs.
+@trigger(event="node.updated", concept="v1:work:run")
+@filter(row => row.status == "succeeded" && args.oldStatus != "succeeded" && row.ownerUserId != "" && row.goalId != "" && row.templateConstructId != "")
+automation catalogSucceededSections {
+  args {
+    id           any
+    oldStatus    any
+    ownerUserId  any
+  }
+
+  catalogued := builtin procedureCatalogSections(runId: args.id ?? "", ownerUserId: args.ownerUserId ?? "")
 }
 
 /// Every six hours: mine the second corpus level, where an automation invocation is a symbol like
@@ -119,4 +151,14 @@ automation demoteProcedures {
 @trigger(schedule="0 30 3 * * *")
 automation retireProcedures {
   sweep := builtin procedureLadderSweep(sweep: "retirement")
+}
+
+/// Every six hours, at twenty past: decide every construct's reuse label from the evidence (epic
+/// memql#5414, design D24). Runs under the maintenance principal (component/auth/maintenance_actor.go)
+/// because constructs sit on the plain owner tier with no cluster-owner arm: under the default
+/// system actor every read would answer zero rows and no error, and a sweep that labels nothing
+/// looks exactly like a catalog with nothing reused.
+@trigger(schedule="0 20 */6 * * *")
+automation sweepConstructReuse {
+  sweep := builtin procedureReuseSweep(dryRun: false)
 }

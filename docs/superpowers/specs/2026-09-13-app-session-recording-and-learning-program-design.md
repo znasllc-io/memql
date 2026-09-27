@@ -867,6 +867,58 @@ section ending mid-effect is refused and that a section with a catalogued reusab
 automation spends no model. A reuse-label test that two goal signatures make a
 construct reusable and an override is a version.
 
+**What shipped differently, recorded 2026-09-26 when epic E landed.** Eleven things this
+section named that the implementation resolved otherwise, each for a reason found while
+building it:
+
+- **`run.forkedFrom` is the existing pair**, `forkedFromRunId` and `forkAtStepKey`. A
+  branch is a fork run whose prefix steps are served from the source run's rows by
+  reference and never executed.
+- **The head is re-asserted, not only recorded.** Every read of a step collapses to its
+  newest row-version, so moving the head writes the chosen version AGAIN as the newest
+  (`reassertWorkStepVersion`); the timeline, the corpus and resume's journal loader all
+  answer with the head without learning what a head is. A version also carries
+  `step.basis`, the upstream versions it was computed from (omitted when pristine), and
+  a version made current brings that upstream with it.
+- **The re-run request rides the run row** (`run.rerun`: a request id, the plan's
+  versions, the override, a snapshot and workspace for a session step), and the agent
+  claims `runId#rerun:<requestId>`: the act runs on whichever node the person reached,
+  and the executing replica holds none of its memory.
+- **An override's prompt means two things.** For a step an app session answered it is
+  the whole prompt that session ran with, as the person edited it; for any other step it
+  is instructions added to the step's own prompt. The act decides which from the version
+  it replaces (`wholePrompt`), because a session handed only instructions loses its goal.
+- **A replay cannot honour an override.** A learned procedure replays what it learned,
+  so re-running its step with anything changed hands the goal to the app, with the
+  person's words and the dislike's guidance; nothing on the ladder moves. An unchanged
+  re-run replays.
+- **Effort needs the cockpit.** `AppSessionStart` gains `model` and `effort`, and
+  `ModelCallStart` gains `effort`, contrary to "none beyond epic A". Honouring them is a
+  `memql-cockpit` follow-up; until then a version shows the model and effort the app
+  reported.
+- **A session snapshot lands as Library artifacts in a fresh directory, with a restore
+  preamble** mapping each landed name to the path it came from, because
+  `AppSessionStart.inputs` names artifacts and the snapshot holds file ids.
+- **Section near matching is lexical and spends no model**: a Dice similarity of at least
+  0.6 between the section's purpose and a reusable construct's intent, which must also
+  cover the section's inputs. Learned procedures are not section candidates; they serve
+  whole goals.
+- **A section worked out live becomes a catalogued automation in a bundle of its own.**
+  The section tiers take only active constructs whose whole bundle is active, and a
+  run's draft bundle holds its template and every sibling section in draft, so the
+  catalogue writes a copy -- validated, active, never activated -- when the run
+  succeeds. A replay, a disliked or unfinished section, and a section re-run with
+  changes catalogue nothing.
+- **The validator is an automation on run success**, not a step inside the run
+  (`validateGoalAnswer`). It runs only for a goal asked through Nexus or the API, only
+  when the run reached a model, at most once per answer version, never for a replay run,
+  and at the answer step's level in a live run context, so it is journaled on the run and
+  counted against its ceilings.
+- **Description guidance is a read, not a store**: `workDescriptionGuidance` answers the
+  owner's dislikes whose run served the goal signature, newest first. It reaches an agent
+  turn of a live run, compile's triage and design calls, and the app a learned procedure
+  hands a goal back to, and never a replay or a fork's shared prefix.
+
 ## 5. Cross-cutting rules
 
 - **Cross-node.** Rows are written on the agent node and read on the bff; the new fields

@@ -202,6 +202,14 @@ var maintenanceAutomations = map[string]string{
 		"clear the same handler floor. Without it nothing retires, and a procedure recorded against an " +
 		"environment long gone stays servable for good -- a claim about the person's work that nobody is " +
 		"still checking",
+	"sweepConstructReuse": "the six-hourly reuse sweep (epic memql#5414, design D24). A construct's " +
+		"reuse label is decided by the distinct goal signatures of ITS OWNER's runs that used it, and a " +
+		"cron firing carries no owner, so the handler lists owners and reads each one's runs, goals and " +
+		"constructs under that owner's own actor -- v1:authoring:construct is the plain owner tier, and " +
+		"no cluster-wide read of it exists. Without the principal the sweep is refused every six hours " +
+		"and no construct is ever labelled: a catalog in which nothing is reusable looks exactly like one " +
+		"in which nothing has been reused yet, and the section near tier, which asks only reusable " +
+		"automations, finds nothing to serve",
 	"onProcedurePromotionDecided": "the ladder's promotion decision (epic memql#5408), fired when a " +
 		"procedurePromotion approval is decided. It must read the approval -- which names the construct " +
 		"and its owner -- before it can know whose decision it is, and the by-id approval read is " +

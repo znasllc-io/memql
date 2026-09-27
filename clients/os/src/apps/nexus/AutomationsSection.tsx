@@ -48,6 +48,9 @@ import {
   type ProcedureRow,
 } from "./ladder";
 import { ProcedurePage } from "./ProcedurePage";
+import { effectiveLabel, type ReuseFacts } from "./reuse";
+import { ReusePanel } from "./ReusePanel";
+import { reuseWord, type ReuseLabel } from "./words";
 import {
   CATALOG_PAGE_BOUND,
   PROCEDURE_PAGE_BOUND,
@@ -138,11 +141,21 @@ function entryFingerprint(entry: Entry): string {
  * the row, so it holds raw wire rows, and a projection is what makes a seeded
  * row and a folded one read alike.
  */
+/** The reuse facet: a label, the automations not labelled yet, or "" for any. */
+export type ReuseFacet = "" | ReuseLabel | "unlabelled";
+
+function reuseMatches(facts: ReuseFacts, facet: ReuseFacet): boolean {
+  if (facet === "") return true;
+  const label = effectiveLabel(facts);
+  return facet === "unlabelled" ? label === "" : label === facet;
+}
+
 function entriesOf(
   catalogRows: readonly Row[],
   learnedRows: readonly Row[],
   search: string,
   origin: "" | Origin,
+  reuse: ReuseFacet,
 ): Entry[] {
   const needle = search.trim().toLowerCase();
   const out: Entry[] = [];
@@ -153,6 +166,7 @@ function entriesOf(
       if (!isAutomation(row) || isLearnedProcedure(row)) continue;
       const automation = automationFromRow(row);
       if (automation.id === "" || !automationMatches(automation, search)) continue;
+      if (!reuseMatches(automation.reuse, reuse)) continue;
       out.push({
         origin: "authored",
         key: `a:${automation.id}`,
@@ -166,7 +180,7 @@ function entriesOf(
   if (origin !== "authored") {
     for (const row of learnedRows) {
       const procedure = procedureFromRow(row);
-      if (procedure.id === "") continue;
+      if (procedure.id === "" || !reuseMatches(procedure.reuse, reuse)) continue;
       const title = procedureTitle(procedure);
       const haystack = [title, procedure.name, ladderWord(procedure.ladder), "learned"].join(" ").toLowerCase();
       if (needle !== "" && !haystack.includes(needle)) continue;
@@ -238,6 +252,7 @@ export function AutomationsSection({
   const now = useNow(30_000);
   const [search, setSearch] = useState("");
   const [origin, setOrigin] = useState<"" | Origin>("");
+  const [reuse, setReuse] = useState<ReuseFacet>("");
   // A LINK THAT NAMES A PROCEDURE THIS CATALOG DOES NOT HOLD is answered once
   // and let go: holding the id open would pop the page open by itself the day
   // the feed happened to deliver it, which is navigation nobody asked for.
@@ -264,12 +279,12 @@ export function AutomationsSection({
   // KEYED ON THE QUESTION: a new search or facet re-baselines the arrival cue,
   // so revealing rows the browser already had is not announced as the cluster
   // sending them (README, "a resync is not an arrival").
-  const viewKey = `${search.trim().toLowerCase()}|${origin}`;
+  const viewKey = `${search.trim().toLowerCase()}|${origin}|${reuse}`;
   const view = useTwoFeedView<Row, Row, Entry>(
     feeds.catalog.source,
     feeds.procedures.source,
     viewKey,
-    (catalogRows, learnedRows) => entriesOf(catalogRows, learnedRows, search, origin),
+    (catalogRows, learnedRows) => entriesOf(catalogRows, learnedRows, search, origin, reuse),
   );
   const listSource = useErrorsSaidAbove(view);
   const snapshot = useSyncExternalStore(
@@ -347,13 +362,17 @@ export function AutomationsSection({
   // still arriving, disconnected, or partly refused (the notices say which).
   const unanswered = entries.length === 0 && !settled;
   const refused = catalogFeed.error !== "" || learnedFeed.error !== "";
-  const filtered = search.trim() !== "" || origin !== "";
+  const filtered = search.trim() !== "" || origin !== "" || reuse !== "";
   const tone: ActionBarTone =
     selected === null ? "none" : selected.status === "active" ? "live" : "paused";
-  const chips =
-    origin === ""
+  const chips = [
+    ...(origin === ""
       ? []
-      : [{ id: "origin", label: origin === "learned" ? "learned" : "authored", onRemove: () => setOrigin("") }];
+      : [{ id: "origin", label: origin === "learned" ? "learned" : "authored", onRemove: () => setOrigin("") }]),
+    ...(reuse === ""
+      ? []
+      : [{ id: "reuse", label: reuseWord(reuse === "unlabelled" ? "" : reuse).toLowerCase(), onRemove: () => setReuse("") }]),
+  ];
 
   return (
     <div className="os-nexus-automations">
@@ -371,6 +390,24 @@ export function AutomationsSection({
               <option value="">Authored and learned</option>
               <option value="authored">Authored only</option>
               <option value="learned">Learned only</option>
+            </Select>
+            <Select
+              id="automations-facet-reuse"
+              label="Reuse"
+              value={reuse}
+              onChange={(next) =>
+                setReuse(
+                  next === "reusable" || next === "goalSpecific" || next === "accountSpecific" || next === "unlabelled"
+                    ? next
+                    : "",
+                )
+              }
+            >
+              <option value="">Any reuse</option>
+              <option value="reusable">{reuseWord("reusable")}</option>
+              <option value="goalSpecific">{reuseWord("goalSpecific")}</option>
+              <option value="accountSpecific">{reuseWord("accountSpecific")}</option>
+              <option value="unlabelled">{reuseWord("")}</option>
             </Select>
           </Refine>
         )}
@@ -515,6 +552,8 @@ export function AutomationsSection({
               </dl>
             </Panel>
 
+            <ReusePanel key={selected.id} constructId={selected.id} facts={selected.reuse} />
+
             {selected.source === "" ? null : (
               <Panel label="What it does">
                 <pre className="os-nexus-source os-mono">{selected.source}</pre>
@@ -606,6 +645,7 @@ function AuthoredRow({
       onOpen={onOpen}
     >
       <span>{rungWord(rung(automation))}</span>
+      <ReuseFact facts={automation.reuse} />
     </RecordRow>
   );
 }
@@ -655,7 +695,23 @@ function LearnedRow({
       <span className="os-nexus-evidence-line" data-tone={line.tone}>
         {line.text}
       </span>
+      <ReuseFact facts={procedure.reuse} />
     </RecordRow>
+  );
+}
+
+/**
+ * The reuse label as a quiet fact on a row -- once there is one. An
+ * automation nobody has labelled says nothing here: "not yet labelled" on
+ * every new row would be a column of the same non-fact.
+ */
+function ReuseFact({ facts }: { facts: ReuseFacts }) {
+  const label = effectiveLabel(facts);
+  if (label === "") return null;
+  return (
+    <span className="os-nexus-reuse-fact" title={facts.override !== "" ? "Your label" : "From its use"}>
+      {reuseWord(label)}
+    </span>
   );
 }
 

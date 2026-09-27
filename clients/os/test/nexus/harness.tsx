@@ -18,6 +18,42 @@ export function rowsResult(rows: Row[]): Result {
   return new Result({ data: rows } as never);
 }
 
+/**
+ * A BUILTIN'S reply, in the builtin's WIRE shape: ONE value keyed by node id,
+ * each entry a node envelope with the fields under `payload` -- which the
+ * SDK's `Result.rows()` unwraps. Answering a builtin with flat rows would hide
+ * exactly the unwrap the surface depends on (memory: a builtin reply is one
+ * id-keyed map). `idOf` names each node; a builtin answering several rows
+ * gives each a DISTINCT id, or the map collapses them into one.
+ */
+export function builtinReply(name: string, rows: Row[], idOf: (row: Row, index: number) => string = (row, index) => (typeof row["id"] === "string" && row["id"] !== "" ? (row["id"] as string) : `${name}-${index}`)): Result {
+  const wrapper: Record<string, unknown> = {};
+  rows.forEach((row, index) => {
+    const id = idOf(row, index);
+    const { id: _own, ...payload } = row as Record<string, unknown>;
+    void _own;
+    wrapper[id] = {
+      id,
+      concept: `integration:work:${name}`,
+      type: "object",
+      // Monotonically DECREASING in slice order, the engine's own stamp for a
+      // handler that preserves order (executor_builtin.go, mapToSortedSlice).
+      createdAt: `2026-01-01T00:00:00.${String(999_999_999 - index).padStart(9, "0")}Z`,
+      payload,
+    };
+  });
+  return new Result({ data: rows.length === 0 ? [] : [wrapper] } as never);
+}
+
+/**
+ * `workStepVersions`' reply: one entry PER VERSION, keyed `<stepId>@v<version>`
+ * -- the distinct id per version the contract names -- with the step row's
+ * fields and `current` in the payload.
+ */
+export function versionsReply(rows: Row[]): Result {
+  return builtinReply("stepVersions", rows, (row) => `${String(row["id"])}@v${String(row["version"])}`);
+}
+
 export function bundleResult(rows: Row[]): Result {
   const nodes = rows.map((row) => {
     const { id, createdAt, ...fields } = row as Record<string, unknown>;
@@ -76,7 +112,7 @@ export interface FakeSeed {
   writeError?: Error;
   /** What `createGoal` answers with. The builtin returns {goalId, runId}. */
   createReply?: Row;
-  /** What `forkRun` / `replayRun` answer with. */
+  /** What `replayRun` answers with. */
   deriveReply?: Row;
   /** The authoring catalog the Automations section reads. */
   constructs?: Row[] | Error;
@@ -84,9 +120,25 @@ export interface FakeSeed {
   learnedProcedures?: Row[] | Error;
   /** The ladder's values: at most one row (`ladderPolicyCurrent`). */
   ladderPolicy?: Row[] | Error;
+  // --- epic memql#5414: stepping into a run -------------------------------
+  /** Every version of every step (`workStepVersions`), as `stepVersionRow`s. EMPTY by default. */
+  versions?: Row[] | Error;
+  /** What `rerunStep` answers: `{runId, stepKey, version, staleSteps}`. */
+  rerunReply?: Row;
+  /** What `branchRun` answers: `{runId, forkedFromRunId, forkAtStepKey}`. */
+  branchReply?: Row;
+  /** What `moveRunHead` answers: `{runId, stepKey, version, staleSteps}`. */
+  headReply?: Row;
+  /** What `recordFeedback` answers: `{observationId, verdict, validatorDisagrees}`. */
+  feedbackReply?: Row;
+  /** The app sessions a step opened (`appSessionsForStep`). */
+  sessions?: Row[] | Error;
+  /** The override version `setConstructReuse` answers with. 1 by default. */
+  reuseVersion?: number;
 }
 
 export function fakeConnection(seed: FakeSeed = {}) {
+  const receipts: Row[] = [];
   const read = (rows: Row[] | Error | undefined) =>
     vi.fn(async (_args: Record<string, unknown>) => {
       if (rows instanceof Error) throw rows;
@@ -96,6 +148,13 @@ export function fakeConnection(seed: FakeSeed = {}) {
     vi.fn(async (_args: Record<string, unknown>) => {
       if (seed.writeError) throw seed.writeError;
       return rowsResult(reply ? [reply] : []);
+    });
+  // A BUILTIN write, answered in the builtin wire shape. Refuses with
+  // `writeError` like every other write here.
+  const builtinWrite = (name: string, reply: (args: Record<string, unknown>) => Row) =>
+    vi.fn(async (args: Record<string, unknown>, _opts?: unknown) => {
+      if (seed.writeError) throw seed.writeError;
+      return builtinReply(name, [reply(args)]);
     });
   return {
     query: {
@@ -129,6 +188,46 @@ export function fakeConnection(seed: FakeSeed = {}) {
       learnedProceduresForOwner: read(seed.learnedProcedures),
       ladderPolicyCurrent: read(seed.ladderPolicy),
       setConstructStatus: write(),
+      // Every version of every step: a BUILTIN, so it answers in the wire
+      // shape -- one map keyed `<stepId>@v<version>`.
+      workStepVersions: vi.fn(async (_args: Record<string, unknown>, _opts?: unknown) => {
+        if (seed.versions instanceof Error) throw seed.versions;
+        return versionsReply(seed.versions ?? []);
+      }),
+      appSessionsForStep: read(seed.sessions),
+      rerunStep: builtinWrite("rerunStep", (args) =>
+        seed.rerunReply ?? { id: "rerun", runId: args["runId"], stepKey: args["stepKey"], version: 2, staleSteps: [] },
+      ),
+      branchRun: builtinWrite("branchRun", (args) =>
+        seed.branchReply ?? {
+          id: "branch",
+          runId: "run-branch",
+          forkedFromRunId: args["runId"],
+          forkAtStepKey: args["stepKey"],
+        },
+      ),
+      moveRunHead: builtinWrite("moveRunHead", (args) =>
+        seed.headReply ?? { id: "head", runId: args["runId"], stepKey: args["stepKey"], version: args["version"], staleSteps: [] },
+      ),
+      recordFeedback: builtinWrite("recordFeedback", (args) =>
+        seed.feedbackReply ?? { id: "obs-new", observationId: "obs-new", verdict: args["verdict"], validatorDisagrees: false },
+      ),
+      // THE HANDLER'S OWN REPLY: the effective label, and the override it
+      // wrote -- "" for a hand-back to the evidence -- at the next version.
+      setConstructReuse: builtinWrite("setConstructReuse", (args) => ({
+        id: String(args["constructId"]),
+        constructId: args["constructId"],
+        reuse: args["label"] === "evidence" ? "goalSpecific" : args["label"],
+        override: {
+          label: args["label"] === "evidence" ? "" : args["label"],
+          by: "v1:identity:user:me",
+          at: "2026-09-26T10:00:00Z",
+          version: seed.reuseVersion ?? 1,
+        },
+      })),
+      feedbackPolicyCurrent: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
+        rowsResult([{ id: "v1:work:feedbackPolicy:primary", validateAnswers: true, reusableAfterSignatures: 2 }]),
+      ),
       workModelCallsForOwnerRun: read(seed.modelCalls),
       workObservationsForOwnerRun: read(seed.observations),
       // TYPED ARGS, so `.mock.calls[0][0]` is a record rather than `never` --
@@ -136,9 +235,22 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // through a `vi.fn(async () => ...)` whose parameter list is empty.
       createGoal: write(seed.createReply),
       cancelGoal: write(),
+      // Nexus no longer calls `forkRun` (epic memql#5414), and it is
+      // deliberately still answered here, so a test can assert NOTHING in the
+      // app calls it -- a method the fake did not have would fail the call
+      // loudly and prove less.
       forkRun: write(seed.deriveReply),
       replayRun: write(seed.deriveReply),
       decideApproval: write(),
+      // The shared attention service's two calls (src/attention), so a suite
+      // can mount the real AttentionProvider over this connection.
+      myAttentionReceipts: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
+        builtinReply("myAttentionReceipts", receipts),
+      ),
+      acknowledgeAttention: vi.fn(async (args: Record<string, unknown>) => {
+        receipts.push({ id: `${String(args["changeId"])}:${String(args["revision"])}`, ...args });
+        return builtinReply("acknowledgeAttention", []);
+      }),
       executeNamed: vi.fn(async (_name: string, filter: string) => {
         const match = /id==(\S+)/.exec(filter);
         const wanted = match?.[1] ?? "";
@@ -393,6 +505,112 @@ export function approvalRow(over: Partial<Row> & { id: string }): Row {
     expiresAt: "",
     requestedAt: "2026-09-01T09:04:00Z",
     createdAt: "2026-09-01T09:04:00Z",
+    ...over,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Stepping into a run (epic memql#5414)
+// ---------------------------------------------------------------------------
+
+/**
+ * One VERSION of one step, as `workStepVersions` answers it: the step row's
+ * fields plus `version` and `current`. `id` is the STEP's row id -- the reply
+ * keys each version `<id>@v<version>` itself (see `versionsReply`). Version 1,
+ * current and untouched by default, so a test has to ASK for an override, an
+ * author or an earlier head.
+ */
+export function stepVersionRow(
+  over: Partial<Row> & { id: string; key: string; seq: number; version: number },
+): Row {
+  return {
+    ...stepRow({ id: over.id, key: over.key, seq: over.seq }),
+    attempt: over.version,
+    override: {},
+    authoredBy: "",
+    current: true,
+    ...over,
+  };
+}
+
+/** A person's verdict as the journal holds it: a `feedback` observation in D's shape. */
+export function feedbackObservation(
+  over: Partial<Row> & {
+    id: string;
+    verdict: "like" | "dislike" | "neutral";
+    stepKey?: string;
+    version?: number;
+    axes?: { product?: boolean; process?: boolean; performance?: boolean };
+    reason?: string;
+    validatorDisagrees?: boolean;
+  },
+): Row {
+  const { verdict, stepKey, version, axes, reason, validatorDisagrees, ...rest } = over;
+  return {
+    ownerUserId: "v1:identity:user:me",
+    runId: "run-1",
+    stepKey: stepKey ?? "",
+    kind: "feedback",
+    content: `${verdict} ${stepKey ?? "the run"}`,
+    data: {
+      verdict,
+      axes: { product: false, process: false, performance: false, ...axes },
+      reason: reason ?? "",
+      target: stepKey === undefined ? {} : { stepKey, version: version ?? 1 },
+      ...(validatorDisagrees === undefined ? {} : { validatorDisagrees }),
+    },
+    createdAt: "2026-09-01T10:00:00Z",
+    ...rest,
+  };
+}
+
+/** The validator's `decision` observation: an axis set to true is a problem found on it. */
+export function validatorObservation(
+  over: Partial<Row> & {
+    id: string;
+    verdict: "pass" | "flag";
+    stepKey: string;
+    version: number;
+    axes?: { product?: boolean; process?: boolean; performance?: boolean };
+    reason?: string;
+  },
+): Row {
+  const { verdict, stepKey, version, axes, reason, ...rest } = over;
+  return {
+    ownerUserId: "v1:identity:user:me",
+    runId: "run-1",
+    stepKey,
+    kind: "decision",
+    content: `validator ${verdict}`,
+    data: {
+      validator: {
+        verdict,
+        axes: { product: false, process: false, performance: false, ...axes },
+        reason: reason ?? "",
+      },
+      target: { stepKey, version },
+      level: "strong",
+      model: "claude-sonnet-4-5",
+    },
+    createdAt: "2026-09-01T09:06:00Z",
+    ...rest,
+  };
+}
+
+/** One app session a step opened, as `appSessionsForStep` answers it. */
+export function sessionRow(over: Partial<Row> & { id: string }): Row {
+  return {
+    ownerUserId: "v1:identity:user:me",
+    workerId: "v1:worker:registration:w1",
+    app: "claude-code",
+    kind: "run",
+    runId: "run-1",
+    stepId: "run-1-draft",
+    status: "ended",
+    prompt: "Draft the weekly report from the fetched figures.",
+    sessionRunId: "run-session-1",
+    startedAt: "2026-09-01T09:01:00Z",
+    createdAt: "2026-09-01T09:01:00Z",
     ...over,
   };
 }

@@ -22,6 +22,9 @@ const (
 	scnFreshGoal      = "amortizedCost.control-a-fresh-goal-reaches-a-model"
 	scnDivergence     = "durability.a-divergence-duplicates-no-side-effect"
 	scnDivergeControl = "durability.control-a-divergence-without-guidance-duplicates"
+	// A person's correction (epic memql#5414, task memql#5420).
+	scnCorrected       = "amortizedCost.a-corrected-step-teaches-the-procedure"
+	scnDislikedControl = "amortizedCost.control-a-disliked-recording-teaches-nothing"
 )
 
 func lifecycleProv() figure.Provenance {
@@ -37,7 +40,7 @@ func lifecycles(t *testing.T) map[string]scenario.Scenario {
 			out[s.Id] = s
 		}
 	}
-	for _, id := range []string{scnTrusted, scnShadowOnly, scnFreshGoal, scnDivergence, scnDivergeControl} {
+	for _, id := range []string{scnTrusted, scnShadowOnly, scnFreshGoal, scnDivergence, scnDivergeControl, scnCorrected, scnDislikedControl} {
 		if _, ok := out[id]; !ok {
 			t.Fatalf("the committed corpus has no lifecycle scenario %s", id)
 		}
@@ -128,6 +131,9 @@ func TestTheLifecycleFiguresReadWhatTheRecordSays(t *testing.T) {
 		{scnFreshGoal, figure.MetricProviderCalls, 1, 1},
 		{scnDivergence, figure.MetricDuplicatedAcrossDivergence, 0, 1},
 		{scnDivergeControl, figure.MetricDuplicatedAcrossDivergence, 0, 1},
+		{scnCorrected, figure.MetricReplaysWithoutModel, 1, 0},
+		{scnCorrected, figure.MetricProviderCalls, 0, 1},
+		{scnDislikedControl, figure.MetricReplaysWithoutModel, 0, 0},
 	} {
 		t.Run(tc.scenario+"/"+string(tc.metric), func(t *testing.T) {
 			s := all[tc.scenario]

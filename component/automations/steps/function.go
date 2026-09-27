@@ -65,6 +65,9 @@ func (e *FunctionExecutor) Execute(ctx context.Context, step *automations.Step, 
 		result.Duration = result.CompletedAt.Sub(result.StartedAt)
 		return result, fmt.Errorf("function %q argument resolution failed: %w", funcName, resolveErr)
 	}
+	// A person's inputs for this version (epic memql#5414) replace the
+	// evaluated arguments they name; the rest keep their values.
+	args = withOverrideInputs(ctx, args)
 	query := funcName + "(" + renderV1CallArgs(args) + ")"
 	execResult, err := stepCtx.Engine.Execute(ctx, query)
 	if err != nil {

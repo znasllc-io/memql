@@ -174,7 +174,7 @@ describe("what a run's bar offers", () => {
     fireEvent.click(await screen.findByText("nightlyReconcile"));
     await screen.findByLabelText("What this run did, in order");
     expect(screen.queryByText("Replay")).toBeNull();
-    expect(screen.getByText(/replay and fork wait until it finishes/)).toBeTruthy();
+    expect(screen.getByText(/replay and branching wait until it finishes/)).toBeTruthy();
     first.view.unmount();
 
     const done = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: fiveSteps() });
@@ -183,22 +183,24 @@ describe("what a run's bar offers", () => {
     expect(await screen.findByText("Replay")).toBeTruthy();
   });
 
-  it("offers a Fork only once a step is picked, and forks at THAT step", async () => {
+  it("offers Branch from here only once a step is picked, and branches at THAT step", async () => {
+    // `forkRun` is retired (epic memql#5414): the act is "Branch from here",
+    // through the composer, and it reaches `branchRun`.
     const conn = fakeConnection({
       runs: [runRow({ id: "run-1" })],
       steps: fiveSteps(),
-      deriveReply: { runId: "run-2" },
     });
     const timeline = await openRun(conn);
-    expect(screen.queryByText(/^Fork from/)).toBeNull();
+    expect(screen.queryByText("Branch from here")).toBeNull();
 
     fireEvent.click(within(timeline).getByLabelText(/Step 3, classify/));
-    fireEvent.click(await screen.findByText("Fork from classify"));
-    await waitFor(() => expect(conn.query.forkRun).toHaveBeenCalled());
-    expect(conn.query.forkRun.mock.calls[0]?.[0]).toEqual({
-      runId: "run-1",
-      atStepKey: "classify",
-    });
+    fireEvent.click(await screen.findByText("Branch from here"));
+    const dialog = await screen.findByRole("dialog", { name: /Branch from here/ });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Branch from here" }));
+    await waitFor(() => expect(conn.query.branchRun).toHaveBeenCalled());
+    // NOTHING CHANGED, SO NOTHING BUT THE STEP IS SENT.
+    expect(conn.query.branchRun.mock.calls[0]?.[0]).toEqual({ runId: "run-1", stepKey: "classify" });
+    expect(conn.query.forkRun).not.toHaveBeenCalled();
   });
 
   it("carries NO cancel, because the verb stops every run of the goal", async () => {

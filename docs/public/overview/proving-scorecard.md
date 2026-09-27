@@ -17,8 +17,8 @@ commit and date it came from. A figure that was not measured says so, in
 its own words, rather than reporting a zero -- an absent figure and a zero
 are different answers.
 
-- **Scorecard** `2026-09-27` at commit `b60d656bd`
-- **Corpus** `38d4510b53a2aa15` -- two scorecards with different corpus fingerprints measured different things and are not a trend
+- **Scorecard** `2026-09-27` at commit `9a93b7682`
+- **Corpus** `7de1803c5d73266a` -- two scorecards with different corpus fingerprints measured different things and are not a trend
 
 ## The two tiers
 
@@ -70,6 +70,8 @@ CI and stay that way until the live tier fills them.
 |---|---|---|---|
 | `amortizedCost.a-catalog-hit-makes-no-model-call` | `amortizedCost.compileCallsOnCatalogHit` | platform | 0 (0-0, N=1) |
 | `amortizedCost.control-a-catalog-miss-reaches-a-model` | `amortizedCost.compileCallsOnCatalogHit` | platform | 1 (1-1, N=1) |
+| `amortizedCost.a-corrected-step-teaches-the-procedure` | `amortizedCost.providerCalls` | baseline | 1 (1-1, N=1) |
+| `amortizedCost.a-corrected-step-teaches-the-procedure` | `amortizedCost.providerCalls` | platform | 0 (0-0, N=1) |
 | `amortizedCost.a-local-fleet-serves-every-call` | `amortizedCost.providerCalls` | baseline | 0 (0-0, N=1) |
 | `amortizedCost.a-local-fleet-serves-every-call` | `amortizedCost.providerCalls` | platform | 0 (0-0, N=1) |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.providerCalls` | baseline | 2 (2-2, N=1) |
@@ -80,8 +82,12 @@ CI and stay that way until the live tier fills them.
 | `amortizedCost.control-a-fresh-goal-reaches-a-model` | `amortizedCost.providerCalls` | platform | 1 (1-1, N=1) |
 | `amortizedCost.control-a-reasoning-step-does-reach-a-provider` | `amortizedCost.providerCalls` | baseline | 1 (1-1, N=1) |
 | `amortizedCost.control-a-reasoning-step-does-reach-a-provider` | `amortizedCost.providerCalls` | platform | 1 (1-1, N=1) |
+| `amortizedCost.a-corrected-step-teaches-the-procedure` | `amortizedCost.replaysServedWithoutModel` | baseline | 0 (0-0, N=1) |
+| `amortizedCost.a-corrected-step-teaches-the-procedure` | `amortizedCost.replaysServedWithoutModel` | platform | 1 (1-1, N=1) |
 | `amortizedCost.a-trusted-procedure-replays-without-a-model` | `amortizedCost.replaysServedWithoutModel` | baseline | 0 (0-0, N=1) |
 | `amortizedCost.a-trusted-procedure-replays-without-a-model` | `amortizedCost.replaysServedWithoutModel` | platform | 1 (1-1, N=1) |
+| `amortizedCost.control-a-disliked-recording-teaches-nothing` | `amortizedCost.replaysServedWithoutModel` | baseline | 0 (0-0, N=1) |
+| `amortizedCost.control-a-disliked-recording-teaches-nothing` | `amortizedCost.replaysServedWithoutModel` | platform | 0 (0-0, N=1) |
 | `amortizedCost.control-a-shadow-procedure-serves-no-goal` | `amortizedCost.replaysServedWithoutModel` | baseline | 0 (0-0, N=1) |
 | `amortizedCost.control-a-shadow-procedure-serves-no-goal` | `amortizedCost.replaysServedWithoutModel` | platform | 0 (0-0, N=1) |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.stepsServedFromJournal` | baseline | 5 (5-5, N=1) |
@@ -97,12 +103,15 @@ Platform against the bare-loop baseline:
 |---|---|---|
 | `amortizedCost.a-catalog-hit-makes-no-model-call` | `amortizedCost.compileCallsOnCatalogHit` | not comparable: the baseline arm produced no figure |
 | `amortizedCost.control-a-catalog-miss-reaches-a-model` | `amortizedCost.compileCallsOnCatalogHit` | not comparable: the baseline arm produced no figure |
+| `amortizedCost.a-corrected-step-teaches-the-procedure` | `amortizedCost.providerCalls` | improved (-100.0%) |
 | `amortizedCost.a-local-fleet-serves-every-call` | `amortizedCost.providerCalls` | unchanged |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.providerCalls` | improved (-50.0%) |
 | `amortizedCost.a-trusted-procedure-replays-without-a-model` | `amortizedCost.providerCalls` | improved (-100.0%) |
 | `amortizedCost.control-a-fresh-goal-reaches-a-model` | `amortizedCost.providerCalls` | unchanged |
 | `amortizedCost.control-a-reasoning-step-does-reach-a-provider` | `amortizedCost.providerCalls` | unchanged |
+| `amortizedCost.a-corrected-step-teaches-the-procedure` | `amortizedCost.replaysServedWithoutModel` | improved (+1 absolute; no relative figure, the earlier value was zero) |
 | `amortizedCost.a-trusted-procedure-replays-without-a-model` | `amortizedCost.replaysServedWithoutModel` | improved (+1 absolute; no relative figure, the earlier value was zero) |
+| `amortizedCost.control-a-disliked-recording-teaches-nothing` | `amortizedCost.replaysServedWithoutModel` | unchanged |
 | `amortizedCost.control-a-shadow-procedure-serves-no-goal` | `amortizedCost.replaysServedWithoutModel` | unchanged |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.stepsServedFromJournal` | unchanged |
 | `amortizedCost.a-resume-does-not-recall-the-model` | `amortizedCost.tokensPerGoal` | undecidable (the earlier figure is notMeasurableOnReplay) |

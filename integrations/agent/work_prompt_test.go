@@ -12,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -71,5 +72,56 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("actual work turn has no file tool")
+	}
+}
+
+// A work turn a person re-ran runs at the level they asked for, on the model
+// they pinned -- over the agent's own stored preference -- and at their effort
+// (epic memql#5414, design D20), through the same ApplyStepOverride the
+// prompt paths use.
+func TestAWorkTurnRunsAtItsOverridesLevelModelAndEffort(t *testing.T) {
+	registry := memql.NewPromptRegistry()
+	if _, err := memql.LoadUnifiedPrompts(nil, registry, template.New("partials")); err != nil {
+		t.Fatal(err)
+	}
+	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true}}, prompts: registry}
+	r := newTestReplier(engine)
+	owner := "v1:identity:user:work-override-owner"
+	turn := func(ov *common.StepOverride) (*preparedTurn, error) {
+		ctx := auth.ContextWithUserActor(context.Background(), owner)
+		ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "run", GoalId: "goal", StepKey: "draft", OwnerUserId: owner, Override: ov})
+		msg := &memqlv1.AgentGenerateTurnMsg{AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Draft the report"}}}
+		return r.prepareTurn(ctx, msg, time.Now())
+	}
+
+	prepared, err := turn(&common.StepOverride{Level: "reasoning", Model: "app:claude-code:opus", Effort: "high"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prepared.routerReq; got.Level != airoute.LevelReasoning || got.ExplicitProvider != "app:claude-code:opus" || got.Effort != "high" {
+		t.Fatalf("the re-run turn resolves with level=%q pin=%q effort=%q", got.Level, got.ExplicitProvider, got.Effort)
+	}
+	// A pinned app is a session door, and the session door hands over a STEP:
+	// without the run and step on the request it refuses at resolution.
+	if got := prepared.routerReq; got.RunId != "run" || got.StepId != "draft" {
+		t.Fatalf("a pinned model's turn must name its step for the session door; run=%q step=%q", got.RunId, got.StepId)
+	}
+
+	// The control: the same turn nobody re-ran is the ordinary strong turn.
+	plain, err := turn(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plain.routerReq; got.Level != airoute.LevelStrong || got.ExplicitProvider != "" || got.Effort != "" {
+		t.Fatalf("a turn nobody re-ran resolves with level=%q pin=%q effort=%q", got.Level, got.ExplicitProvider, got.Effort)
+	}
+	if got := plain.routerReq; got.RunId != "" || got.StepId != "" {
+		t.Fatalf("default routing of a turn nobody pinned is unchanged; run=%q step=%q", got.RunId, got.StepId)
+	}
+
+	// A level no step is re-run at refuses the turn rather than running it at
+	// strong and recording that it asked for something else.
+	if _, err := turn(&common.StepOverride{Level: "embeddings"}); err == nil {
+		t.Fatal("an embeddings override prepared a turn")
 	}
 }

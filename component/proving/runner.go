@@ -402,6 +402,10 @@ func runNamedCheck(name string, s scenario.Scenario, w *world.World, res ArmResu
 		return checkTrustedReplayReachedNoModel(res.lifecycle)
 	case "aDivergedReplayHandedOverItsCompletedSteps":
 		return checkDivergedReplayHandedOver(res.lifecycle)
+	case scenario.CheckLiftedFromTheLikedVersion:
+		return checkLiftedFromTheLikedVersion(res.lifecycle, s)
+	case scenario.CheckDislikedVersionReadable:
+		return checkDislikedVersionReadable(res.lifecycle)
 	case "approvalRefusesAChangedArtifact":
 		// The hash comparison itself is a property of component/work, proved
 		// there over values. What this checks is that the scenario reached the

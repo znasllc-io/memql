@@ -105,6 +105,16 @@ concept construct {
   ladderReason         string @description("Why the ladder last moved, as one sentence a person reads in Nexus -- the Reason of the last component/work.Transition written.")
   ladderChangedAt      datetime @description("When the rung last CHANGED. A write that kept the rung and only moved the evidence leaves this alone.")
 
+  // REUSE (epic memql#5414, design D24): whether a construct serves many goals
+  // or one. The decomposer PROPOSES a reuse intent for each section it cuts,
+  // the EVIDENCE decides the label (the reuse sweep, integrations/procedure),
+  // and a person may OVERRIDE it -- the override is a version and the evidence
+  // keeps counting, so Nexus can show both. Every field is optional and
+  // ADDITIVE: a construct the sweep has not looked at yet carries none of them.
+  reuse                enum("reusable", "goalSpecific", "accountSpecific") @description("What the EVIDENCE says about this construct (design D24): reusable once at least the feedbackPolicy's reusableAfterSignatures DISTINCT goal signatures of its owner have used it; accountSpecific when every use is tied to one account; goalSpecific otherwise. Written only by the reuse sweep (recordConstructReuse). ABSENT until the sweep has looked. The label a person sees is reuseOverride.label when that is set, and this otherwise.")
+  reuseEvidence        object @description("What the sweep counted (D24): {goalSignatures: [string] -- the distinct signatures that used it, at most 20 kept --, signatureCount: int, accountIds: [string], uses: int, decidedAt}. Replaced whole on every sweep that changed it.")
+  reuseOverride        object @description("A person's own label (D24): {label: reusable|goalSpecific|accountSpecific or \"\" to follow the evidence, by, at, version}. version counts every override written, so a later label is a new version rather than a rewrite. The evidence keeps counting underneath and is never changed by this.")
+
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="bundleId", target=bundle, direction="outgoing")
   @relationship(type="references", field="catalogedFromBundleId", target=bundle, direction="outgoing")

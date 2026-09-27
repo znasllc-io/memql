@@ -95,6 +95,13 @@ type RunSpec struct {
 	// the translation into the app's own knobs. Empty means no level was
 	// named and the app runs at its own defaults.
 	Level string
+	// Model and Effort are a PERSON'S explicit choice for this one session
+	// (epic memql#5414, design D20): a step re-run or branched with a
+	// different model or effort. They ride AppSessionStart beside the level
+	// and override its knobs for this session only. Empty means the level
+	// decides.
+	Model  string
+	Effort string
 }
 
 // RunResult is what a completed run reports back.
@@ -277,6 +284,8 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 		// The level the CALL declared (design D8). The cockpit translates it
 		// into this app's own knobs; the engine never names a model here.
 		Level:         spec.Level,
+		Model:         spec.Model,
+		Effort:        spec.Effort,
 		RunId:         spec.RunId,
 		StepId:        spec.StepId,
 		AppSessionRef: spec.AppSessionRef,

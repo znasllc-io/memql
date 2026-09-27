@@ -12,6 +12,7 @@ import {
   type ProcedureRow,
 } from "./ladder";
 import { idTail } from "./rows";
+import type { ReuseLabel } from "./words";
 
 // The automations catalog: three LIVE feeds over the authoring domain.
 //
@@ -243,4 +244,80 @@ export function useSetAutomationStatus(): SetAutomationStatusState {
   );
 
   return { busy, error, set, reset: () => setError("") };
+}
+
+/** What a person may say about an automation's reuse: a label, or "follow the evidence" again. */
+export type ReuseChoice = ReuseLabel | "evidence";
+
+/** A label the server confirmed it recorded. */
+export interface ReuseWrite {
+  constructId: string;
+  /** The person's label as recorded; "" is "follow the evidence". */
+  label: ReuseLabel | "";
+  /** The override version the write made -- the feed has caught up once the row carries it. */
+  version: number;
+}
+
+export interface SetConstructReuseState {
+  /** The construct whose label is being written, or "". */
+  busy: string;
+  /** The server's refusal, per construct, verbatim. */
+  errors: Readonly<Record<string, string>>;
+  set: (constructId: string, choice: ReuseChoice) => Promise<ReuseWrite | null>;
+}
+
+/**
+ * Label one automation reusable, for one goal or for one account -- or hand
+ * the label back to the evidence (epic memql#5414, design D24).
+ *
+ * `setConstructReuse` reads the construct under the caller's own actor, so a
+ * person labels their own catalog and nobody else's. Each call writes the next
+ * override VERSION and the evidence keeps counting underneath, which is why
+ * the page shows both. PER CONSTRUCT, for `useSetAutomationStatus`'s reason.
+ */
+export function useSetConstructReuse(): SetConstructReuseState {
+  const connection = useOsConnection();
+  const [busy, setBusy] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const set = useCallback(
+    async (constructId: string, choice: ReuseChoice): Promise<ReuseWrite | null> => {
+      const query = connection?.query ?? null;
+      if (query === null) {
+        setErrors((held) => ({ ...held, [constructId]: "Not connected to the cluster, so nothing was written." }));
+        return null;
+      }
+      setBusy(constructId);
+      setErrors((held) => ({ ...held, [constructId]: "" }));
+      try {
+        const result = await query.setConstructReuse({ constructId, label: choice });
+        const reply = flatten(result.rows()[0] ?? {});
+        const override = reply["override"];
+        const recorded =
+          override !== null && typeof override === "object" && !Array.isArray(override)
+            ? (override as Record<string, unknown>)
+            : {};
+        const label = recorded["label"];
+        const version = recorded["version"];
+        return {
+          constructId,
+          label:
+            label === "reusable" || label === "goalSpecific" || label === "accountSpecific"
+              ? label
+              : choice === "evidence"
+                ? ""
+                : choice,
+          version: typeof version === "number" && Number.isFinite(version) ? version : 0,
+        };
+      } catch (err: unknown) {
+        setErrors((held) => ({ ...held, [constructId]: err instanceof Error ? err.message : String(err) }));
+        return null;
+      } finally {
+        setBusy("");
+      }
+    },
+    [connection],
+  );
+
+  return { busy, errors, set };
 }

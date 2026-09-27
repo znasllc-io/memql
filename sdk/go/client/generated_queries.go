@@ -3517,6 +3517,23 @@ func ExternalConnectionsMineBuild(args ExternalConnectionsMineArgs) string {
 	return "query externalConnectionsMine()"
 }
 
+// FeedbackPolicyCurrent -- The epic memql#5414 values: the one row `seed feedbackPolicy feedbackPolicyPrimary` writes (dsl/work/seeds.memql), pinned to its literal id so a row at any other id is never read as the policy. Readable from the `reader` rung up -- every predefined role -- and @requiresRank bounds the callers to exactly the concept's read floor, so the tier decides the whole row set for every caller this admits. The Go reader treats an absent or refused row as component/work.DefaultFeedbackPolicy(), which carries the seed's values.
+//
+// Bound concept: v1:work:feedbackPolicy (machine-readable: BoundConcepts["feedbackPolicyCurrent"] in generated_concepts.go).
+type FeedbackPolicyCurrentArgs struct {
+}
+
+// FeedbackPolicyCurrent calls the engine query feedbackPolicyCurrent.
+func (qc *QueryClient) FeedbackPolicyCurrent(ctx context.Context, args FeedbackPolicyCurrentArgs) (*Result, error) {
+	call := FeedbackPolicyCurrentBuild(args)
+	return qc.executeNamed(ctx, "feedbackPolicyCurrent", call)
+}
+
+func FeedbackPolicyCurrentBuild(args FeedbackPolicyCurrentArgs) string {
+	_ = args
+	return "query feedbackPolicyCurrent()"
+}
+
 // FindEvents -- Find the caller's own events by exact title. Self-scoped via actor.userId. Backs the calendar tool's `find` action ('find my dentist appointment'); the agent passes the title it captured. Exact match keeps the predicate SQL-pushdownable -- substring / semantic search is a downstream concern (the agent can list a window via upcomingEvents and filter conversationally).
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["findEvents"] in generated_concepts.go).
@@ -12141,6 +12158,23 @@ func WorkApprovalsForOwnerBuild(args WorkApprovalsForOwnerArgs) string {
 	return "query workApprovalsForOwner()"
 }
 
+// WorkAutomationStepsForOwner -- The caller's steps that invoked an AUTOMATION, newest first -- the other half of the reuse evidence (epic memql#5414, D24): a section a decomposed goal served from the catalog is an automation step of the goal's run, so a construct used that way counts for the goal it served. Owned, for the reason workSignedRunsForOwner gives. Bounded at 2000, the most recent.
+//
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workAutomationStepsForOwner"] in generated_concepts.go).
+type WorkAutomationStepsForOwnerArgs struct {
+}
+
+// WorkAutomationStepsForOwner calls the engine query workAutomationStepsForOwner.
+func (qc *QueryClient) WorkAutomationStepsForOwner(ctx context.Context, args WorkAutomationStepsForOwnerArgs) (*Result, error) {
+	call := WorkAutomationStepsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workAutomationStepsForOwner", call)
+}
+
+func WorkAutomationStepsForOwnerBuild(args WorkAutomationStepsForOwnerArgs) string {
+	_ = args
+	return "query workAutomationStepsForOwner()"
+}
+
 // WorkCheckpointForOwner -- Reuse a checkpoint only for these exact source bytes and this owner.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workCheckpointForOwner"] in generated_concepts.go).
@@ -12159,6 +12193,28 @@ func WorkCheckpointForOwnerBuild(args WorkCheckpointForOwnerArgs) string {
 	b.WriteString("query workCheckpointForOwner(")
 	b.WriteString("fingerprint: ")
 	b.WriteString(quoteMemQL(args.Fingerprint))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkDescriptionGuidance -- The DESCRIPTION GUIDANCE a goal shape has accumulated (epic memql#5414, design D23): the caller's own dislikes whose run served this goal signature, newest first, each carrying the axes and the reason the person gave. It is read only when a MODEL is about to be used for that goal again -- an agent turn of a live run, compile's triage and design calls, the app a learned procedure hands the goal back to -- and never by a replay, a fork's shared prefix or a construct-served goal, because a replay reads rows and text is not a row it can act on. Owned: guidance mined from somebody else's dislikes would steer a person's goal by another person's taste. Bounded at 20, the most recent, because the reader keeps five.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDescriptionGuidance"] in generated_concepts.go).
+type WorkDescriptionGuidanceArgs struct {
+	GoalSignature string
+}
+
+// WorkDescriptionGuidance calls the engine query workDescriptionGuidance.
+func (qc *QueryClient) WorkDescriptionGuidance(ctx context.Context, args WorkDescriptionGuidanceArgs) (*Result, error) {
+	call := WorkDescriptionGuidanceBuild(args)
+	return qc.executeNamed(ctx, "workDescriptionGuidance", call)
+}
+
+func WorkDescriptionGuidanceBuild(args WorkDescriptionGuidanceArgs) string {
+	var b strings.Builder
+	b.WriteString("query workDescriptionGuidance(")
+	b.WriteString("goalSignature: ")
+	b.WriteString(quoteMemQL(args.GoalSignature))
 	b.WriteString(")")
 	return b.String()
 }
@@ -12370,6 +12426,23 @@ func WorkRunsForOwnerGoalSignatureBuild(args WorkRunsForOwnerGoalSignatureArgs) 
 	b.WriteString(quoteMemQL(args.GoalSignature))
 	b.WriteString(")")
 	return b.String()
+}
+
+// WorkSignedRunsForOwner -- The caller's SUCCEEDED runs that carry a goal signature, newest first -- the reuse sweep's read (epic memql#5414, design D24). A construct's reuse evidence is the set of distinct goal signatures that used it, and this is where the signatures are: pushed down on the status and the signature's presence rather than paging the owner's whole history. Owned, and the sweep reads it under each owner's own actor, because evidence counted across two people's work would call a construct reusable that neither of them has reused. Bounded at 1000, the most recent.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workSignedRunsForOwner"] in generated_concepts.go).
+type WorkSignedRunsForOwnerArgs struct {
+}
+
+// WorkSignedRunsForOwner calls the engine query workSignedRunsForOwner.
+func (qc *QueryClient) WorkSignedRunsForOwner(ctx context.Context, args WorkSignedRunsForOwnerArgs) (*Result, error) {
+	call := WorkSignedRunsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workSignedRunsForOwner", call)
+}
+
+func WorkSignedRunsForOwnerBuild(args WorkSignedRunsForOwnerArgs) string {
+	_ = args
+	return "query workSignedRunsForOwner()"
 }
 
 // WorkStepsForOwnerRun -- Every step of one of the caller's runs -- the run timeline. Bounded by the run; the client orders by seq, because @unbounded and sort cannot be combined.

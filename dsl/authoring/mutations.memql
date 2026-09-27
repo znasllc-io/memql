@@ -428,6 +428,53 @@ mutation construct recordConstructLadder {
   }
 }
 
+/// Record what the reuse EVIDENCE says about a construct (epic memql#5414, design D24): the label
+/// and the counts behind it. Written only by the reuse sweep, per owner, under that owner's actor, and
+/// only when the label or the evidence changed. reuseOverride is deliberately not an argument: the
+/// evidence never touches a person's label.
+///
+/// Server-only, and scoping to actor.userId is not the fix: the construct IS the owner's, but the
+/// label is a claim about how often it was reused, and a caller who could write it could make any
+/// of their constructs a near-match candidate for every future section -- the catalog's ranking is
+/// what this field decides, so only the sweep that counted may write it.
+@serverOnly
+mutation construct recordConstructReuse {
+  args {
+    constructId    string!
+    reuse          string!
+    reuseEvidence  object!
+  }
+  update {
+    accept { reuse, reuseEvidence }
+    stamp {
+      id: args.constructId
+    }
+  }
+}
+
+/// Record a person's own reuse label on one of their constructs (epic memql#5414, D24). The
+/// setConstructReuse builtin writes it after checking the caller owns the construct, computing the
+/// next version from the stored one; the evidence (reuse, reuseEvidence) is not an argument and
+/// keeps counting underneath.
+///
+/// Server-only, and scoping to actor.userId is not the fix: the construct IS the caller's, so an
+/// actor.userId conjunct would admit exactly the write this must refuse -- the caller choosing the
+/// version number, and so rewriting an earlier override instead of adding a new one. The version is
+/// the SERVER's count, which is the property D24 names ("the override is a version").
+@serverOnly
+mutation construct recordConstructReuseOverride {
+  args {
+    constructId    string!
+    reuseOverride  object!
+  }
+  update {
+    accept { reuseOverride }
+    stamp {
+      id: args.constructId
+    }
+  }
+}
+
 /// Create the certification ladder's values -- the seed materializer's write for `seed
 /// ladderPolicy primary` (dsl/authoring/seeds.memql), which calls create<Concept> with
 /// <concept>Id by convention and re-asserts the row on every boot.

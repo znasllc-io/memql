@@ -52,6 +52,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // RunAdoption names the existing run an execution should take over.
@@ -77,6 +78,14 @@ type RunAdoption struct {
 	// Journal restores the original context when recovering a scheduler run.
 	// Goal runs retain the caller-origin boundary for compiled variables.
 	Journal *RunJournal
+
+	// Overrides are the overrides a REPLAY applies, by top-level step key
+	// (epic memql#5414): the replayed run's StepOverrides. The model calls a
+	// replay serves were journaled with each step's override applied, and
+	// the request hash covers what the override added, so a step replayed
+	// without its override asks a different question and diverges. Each
+	// reaches its own step alone (withRunContext).
+	Overrides map[string]*common.StepOverride
 }
 
 // ExecuteAdopted runs an automation as an EXISTING run.

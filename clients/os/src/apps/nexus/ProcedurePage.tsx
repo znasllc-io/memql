@@ -48,6 +48,7 @@ import {
   type LadderPolicy,
   type ProcedureRow,
 } from "./ladder";
+import { ReusePanel } from "./ReusePanel";
 import { idTail, runTitle, type ApprovalRow, type RunRow } from "./rows";
 
 // ONE LEARNED PROCEDURE: where it stands, what it has proven, and the one
@@ -89,7 +90,9 @@ import { idTail, runTitle, type ApprovalRow, type RunRow } from "./rows";
 // made on the approval, beside its evidence -- so the only act here is the way
 // to it, offered only while one is open. Nothing on this page arms, retires or
 // promotes: `procedureStep` refuses outside a replay, and a learned procedure
-// is served through the ladder and nothing else.
+// is served through the ladder and nothing else. The reuse label is not a
+// lifecycle act -- it moves nothing on the ladder -- so it is chosen in its
+// own panel, where the evidence it overrules stands beside it (ReusePanel).
 
 export interface ProcedurePageProps {
   procedure: ProcedureRow;
@@ -202,6 +205,7 @@ export function ProcedurePage({
 
         <div className="os-nexus-procedure-grid">
           <EvidencePanel procedure={p} now={now} />
+          <ReusePanel key={p.id} constructId={p.id} facts={p.reuse} />
           <RecordedFromPanel procedure={p} runs={runs} onOpenRun={onOpenRun} />
           <PreconditionsPanel procedure={p} />
         </div>

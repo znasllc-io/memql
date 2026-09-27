@@ -195,6 +195,11 @@ type AppCallRequest struct {
 	// knows which app, at which version, is installed. Empty means no level
 	// was named, which is what every session did before the field existed.
 	Level string
+	// Effort is a PERSON'S explicit effort for this one call (epic
+	// memql#5414, design D20), bound per resolution the way Level is. It rides
+	// AppSessionStart.effort and overrides the level's effort knob on the far
+	// side. Empty means the level decides.
+	Effort string
 	// Inputs are Library artifact ids the cockpit pulls into the session
 	// workspace before the run starts.
 	Inputs []string
@@ -414,6 +419,9 @@ type appProvider struct {
 	// one call's, so binding it on the entry would let a `fast` turn run at
 	// whatever the last `reasoning` turn asked for.
 	level string
+	// effort is a person's explicit effort for this one call (epic
+	// memql#5414), bound per resolution for the reason level is.
+	effort string
 
 	lastMu      sync.Mutex
 	lastSurface string
@@ -466,6 +474,9 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 	}
 	if strings.TrimSpace(req.Level) == "" {
 		req.Level = p.level
+	}
+	if strings.TrimSpace(req.Effort) == "" {
+		req.Effort = p.effort
 	}
 	req.ActingUserId = p.actingUserId
 	if strings.TrimSpace(req.ActingUserId) == "" {
@@ -520,6 +531,26 @@ func (p *appProvider) WithLevel(level string) any {
 		actingUserId: p.actingUserId,
 		wildcard:     p.wildcard,
 		level:        strings.TrimSpace(level),
+		effort:       p.effort,
+	}
+}
+
+// WithEffort binds one resolution's effort (epic memql#5414, design D20), for
+// WithLevel's reasons: the entry is shared and an effort is one call's. Each
+// binding carries the other forward, so the order the router applies them in
+// cannot drop one.
+func (p *appProvider) WithEffort(effort string) any {
+	if p == nil {
+		return p
+	}
+	return &appProvider{
+		registry:     p.registry,
+		appId:        p.appId,
+		model:        p.model,
+		actingUserId: p.actingUserId,
+		wildcard:     p.wildcard,
+		level:        p.level,
+		effort:       strings.TrimSpace(effort),
 	}
 }
 

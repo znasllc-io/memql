@@ -108,6 +108,11 @@ type AppSessionRequest struct {
 	// `open` still does. A level is never invented here: a session run at a
 	// level nobody chose reports a model nobody asked for.
 	Level string
+	// Model and Effort are a PERSON'S explicit choice for this one session
+	// (epic memql#5414, design D20), overriding the level's knobs on the far
+	// side. EMPTY MEANS THE LEVEL DECIDES.
+	Model  string
+	Effort string
 }
 
 // AppSessionLimits are the policy ceilings the session runs under.
