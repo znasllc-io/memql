@@ -51,6 +51,17 @@ import {
   shareDirectoryRow,
   withSession as fleetSession,
 } from "../test/fleet/harness";
+import { NexusApp } from "../src/apps/nexus/NexusApp";
+import { LocalNexusSettingsStore } from "../src/apps/nexus/settings";
+import { AutomationsSection } from "../src/apps/nexus/AutomationsSection";
+import { useAutomationFeeds } from "../src/apps/nexus/useAutomations";
+import {
+  constructRow as nexusConstructRow,
+  fakeConnection as nexusConnection,
+  ladderPolicyRow as nexusLadderPolicyRow,
+  procedureRow as nexusProcedureRow,
+  withSession as nexusSession,
+} from "../test/nexus/harness";
 import { OriginsSection } from "../src/apps/cluster/origins/OriginsSection";
 import { MeshSection } from "../src/apps/cluster/mesh/MeshSection";
 import {
@@ -521,6 +532,47 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  // NEXUS (epic memql#5414): what an automation is for. The procedure's page
+  // in the three readings its Reuse panel has -- the evidence deciding, a
+  // person's own label over evidence that disagrees, and nothing counted yet
+  // -- then the list with every label on it, an authored automation's detail,
+  // and the Overview's ratio.
+  "nexus-procedure-evidence": {
+    connect: () => nexusConnection({
+      learnedProcedures: [nexusProcedureRow({ id: "p1", reuse: "goalSpecific", reuseEvidence: { goalSignatures: ["sig-a"], signatureCount: 1, accountIds: [], uses: 4 } })],
+      ladderPolicy: [nexusLadderPolicyRow()],
+    }),
+    wrap: (el, role) => nexusSession(el, { role }),
+    render: () => <NexusPane section="automations" intent={{ id: "qa", payload: { procedureId: "p1" } }} />,
+  },
+  "nexus-procedure-overridden": {
+    connect: () => nexusConnection({
+      learnedProcedures: [nexusProcedureRow({ id: "p1", reuse: "goalSpecific", reuseOverride: { label: "reusable", version: 2, at: "2026-09-20T09:00:00Z" }, reuseEvidence: { goalSignatures: ["sig-a"], signatureCount: 1, accountIds: ["acme"], uses: 4 } })],
+      ladderPolicy: [nexusLadderPolicyRow()],
+    }),
+    wrap: (el, role) => nexusSession(el, { role }),
+    render: () => <NexusPane section="automations" intent={{ id: "qa", payload: { procedureId: "p1" } }} />,
+  },
+  "nexus-procedure-unlabelled": {
+    connect: () => nexusConnection({ learnedProcedures: [nexusProcedureRow({ id: "p1" })], ladderPolicy: [nexusLadderPolicyRow()] }),
+    wrap: (el, role) => nexusSession(el, { role }),
+    render: () => <NexusPane section="automations" intent={{ id: "qa", payload: { procedureId: "p1" } }} />,
+  },
+  "nexus-automations": {
+    connect: () => nexusConnection(nexusLibrary()),
+    wrap: (el, role) => nexusSession(el, { role }),
+    render: () => <NexusPane section="automations" />,
+  },
+  "nexus-automation-detail": {
+    connect: () => nexusConnection(nexusLibrary()),
+    wrap: (el, role) => nexusSession(el, { role }),
+    render: () => <NexusAutomationDetail selectedId="c2" />,
+  },
+  "nexus-overview": {
+    connect: () => nexusConnection(nexusLibrary()),
+    wrap: (el, role) => nexusSession(el, { role }),
+    render: () => <NexusPane section="overview" />,
+  },
   accounts: {
     connect: () => accountConnection({ clientAccountsAll: [
       accountRow({ id: "v1:accounts:account:self", name: "Our Studio", domain: "studio.example.com", primaryContactName: "Dana" }),
@@ -1088,6 +1140,57 @@ function MeshPane({ nodeId }: { nodeId?: string }) {
   return (
     <div className="os-window-content">
       <MeshSection intent={nodeId ? { id: "qa-open", payload: { nodeId } } : undefined} consumeIntent={() => {}} />
+    </div>
+  );
+}
+
+/** A library with every reuse reading on it: evidence, a person's own label, none yet. */
+function nexusLibrary() {
+  return {
+    constructs: [
+      nexusConstructRow({ id: "c1", name: "summariseInvoices", reuse: "reusable", reuseEvidence: { goalSignatures: ["a", "b", "c"], signatureCount: 3, uses: 9 } }),
+      nexusConstructRow({ id: "c2", name: "closeAcmeBooks", reuse: "goalSpecific", reuseOverride: { label: "accountSpecific", version: 1 }, reuseEvidence: { goalSignatures: ["a"], signatureCount: 1, accountIds: ["acme"], uses: 2 } }),
+      nexusConstructRow({ id: "c3", name: "fileQuarterlyReport", status: "retired", reliability: 0.3, reinforceCount: 2 }),
+      nexusConstructRow({ id: "c4", name: "draftBoardNarrative", reuse: "goalSpecific", reliability: 0, reinforceCount: 0, reuseEvidence: { goalSignatures: ["d"], signatureCount: 1, uses: 1 } }),
+    ],
+    learnedProcedures: [nexusProcedureRow({ id: "p1", reuse: "reusable", reuseEvidence: { goalSignatures: ["x", "y"], signatureCount: 2, uses: 6 } })],
+    ladderPolicy: [nexusLadderPolicyRow()],
+  };
+}
+
+function NexusPane({ section, intent }: { section: string; intent?: { id: string; payload: Record<string, unknown> } }) {
+  return (
+    <div className="os-window-content">
+      <NexusApp
+        sectionId={section}
+        navigate={() => {}}
+        askContext={() => {}}
+        intent={intent}
+        consumeIntent={() => {}}
+        store={new LocalNexusSettingsStore(null)}
+      />
+    </div>
+  );
+}
+
+/** An authored automation's detail, selected -- a capture cannot click a row. */
+function NexusAutomationDetail({ selectedId }: { selectedId: string }) {
+  const feeds = useAutomationFeeds(true);
+  return (
+    <div className="os-window-content">
+      <AutomationsSection
+        feeds={feeds}
+        selectedId={selectedId}
+        onSelect={() => {}}
+        openProcedureId=""
+        onOpenProcedure={() => {}}
+        onCloseProcedure={() => {}}
+        approvals={[]}
+        approvalsKnown
+        runs={[]}
+        onOpenApproval={() => {}}
+        onOpenRun={() => {}}
+      />
     </div>
   );
 }

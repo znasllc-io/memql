@@ -82,17 +82,44 @@ func TestRegistrationNameIsTheLiteral(t *testing.T) {
 //
 // The names are read out of dsl/work/automations.memql rather than restated,
 // so a renamed automation fails here rather than silently losing its principal.
+//
+// ONLY THE SCHEDULED ONES. validateGoalAnswer (epic memql#5414) is fired by a
+// run's completion event, which CARRIES the run's owner, and its handler
+// borrows exactly that owner -- narrower than a cluster-wide principal, and the
+// shape learnFromSucceededRun already has. So it must NOT be on the list: a
+// principal it does not need is a principal a bug in it could use.
 func TestSweepAutomationsAreOnTheMaintenanceList(t *testing.T) {
 	names := automationNamesInDSL(t)
-	if len(names) != 2 {
-		t.Fatalf("expected 2 automations in dsl/work/automations.memql, found %v", names)
+	scheduled := scheduledAutomationNamesInDSL(t)
+	if len(scheduled) != 2 {
+		t.Fatalf("expected 2 scheduled automations in dsl/work/automations.memql, found %v (of %v)", scheduled, names)
 	}
-	for _, name := range names {
+	for _, name := range scheduled {
 		if !auth.IsMaintenanceAutomation(name) {
 			t.Errorf("automation %q is not on component/auth/maintenance_actor.go's list; under the default reader actor its reads answer ZERO ROWS AND NO ERROR, and a sweep that does nothing looks exactly like a cluster with nothing to do", name)
 		}
 	}
+	for _, name := range names {
+		if name == "validateGoalAnswer" && auth.IsMaintenanceAutomation(name) {
+			t.Errorf("validateGoalAnswer borrows the owner its event carries and must not hold the maintenance principal")
+		}
+	}
 }
+
+// scheduledAutomationNamesInDSL is the automations whose trigger is a
+// schedule: the sweeps, which carry no owner and so need the principal.
+func scheduledAutomationNamesInDSL(t *testing.T) []string {
+	t.Helper()
+	src := readRepoFile(t, filepath.Join("dsl", "work", "automations.memql"))
+	var out []string
+	for _, m := range scheduledAutomationPattern.FindAllStringSubmatch(src, -1) {
+		out = append(out, m[1])
+	}
+	sort.Strings(out)
+	return out
+}
+
+var scheduledAutomationPattern = regexp.MustCompile(`@trigger\(schedule="[^"]*"\)\s*\n\s*automation\s+([A-Za-z0-9_]+)`)
 
 // ---------------------------------------------------------------------------
 

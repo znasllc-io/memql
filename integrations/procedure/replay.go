@@ -2194,6 +2194,7 @@ func (r *replay) fallBack(ctx context.Context, g Guidance, started bool) {
 	}
 	goalId, statement := r.goalContext(ctx)
 	g.Procedure = r.c.name
+	g.DescriptionGuidance = r.descriptionGuidance(ctx)
 	g.Prompt = renderGuidance(statement, g, started, r.out.DivergedStep)
 	// Every seam sees the OWNER's actor, as the dispatcher does: the goal is
 	// theirs, and so is whatever the app does with it.
@@ -2241,10 +2242,53 @@ func (r *replay) goalContext(ctx context.Context) (string, string) {
 	return goalId, firstNonEmpty(statement, r.c.p.Title)
 }
 
+// descriptionGuidance is the goal's accumulated dislikes (epic memql#5414,
+// D23) for the app taking it back. Text reaches only a model call, and this is
+// one: the app is about to be genuinely used for the goal, where the replay
+// that stopped read rows and could act on no text.
+//
+// The signature is the goal run's, read under the owner's actor like every
+// other read here; a replay that names no goal run, or a run carrying none,
+// falls to the construct's own -- the goal shape it was learned for, which is
+// the goal's signature whenever the exact tier served it.
+//
+// BEST EFFORT. Guidance that cannot be read costs the app a hint and is
+// logged; it never costs the goal its hand-back.
+func (r *replay) descriptionGuidance(ctx context.Context) string {
+	return r.i.descriptionGuidance(ctx, r.req.OwnerUserId, r.req.GoalRunId, r.c.signature)
+}
+
+// descriptionGuidance reads a goal's accumulated dislikes for whoever takes
+// it over: the goal run's signature, else the construct's, under the owner's
+// actor. "" when there are none, and when they cannot be read (logged).
+func (i *Integration) descriptionGuidance(ctx context.Context, owner, goalRunId, constructSignature string) string {
+	actorCtx := ownerActor(ctx, owner)
+	var sig string
+	if runId := strings.TrimSpace(goalRunId); runId != "" {
+		if run, err := i.runForOwner(actorCtx, runId); err == nil && run != nil {
+			sig = strings.TrimSpace(str(run, "goalSignature"))
+		}
+	}
+	if sig == "" {
+		sig = strings.TrimSpace(constructSignature)
+	}
+	if sig == "" {
+		return ""
+	}
+	rows, err := i.store.query(actorCtx, "query "+call("workDescriptionGuidance", map[string]any{"goalSignature": sig}))
+	if err != nil {
+		i.log().Warn("procedure: could not read the goal's description guidance; the app takes the goal without it",
+			"run", goalRunId, "error", err)
+		return ""
+	}
+	return work.DescriptionGuidance(rows)
+}
+
 // renderGuidance is the text the app reads before it starts, appended to the
 // goal statement: every step that already ran with its idempotency key, and
 // where and why the replay stopped -- repair, not resample (D16). A replay
-// that ran nothing says so, and that nothing has been done.
+// that ran nothing says so, and that nothing has been done. The owner's
+// earlier dislikes on the goal (D23) close it, when there are any.
 func renderGuidance(statement string, g Guidance, started bool, stoppedAt int) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(statement))
@@ -2252,6 +2296,7 @@ func renderGuidance(statement string, g Guidance, started bool, stoppedAt int) s
 	if !started {
 		b.WriteString("A learned procedure for this goal did not start, so nothing has been done yet: ")
 		b.WriteString(g.Diagnosis)
+		writeDescriptionGuidance(&b, g.DescriptionGuidance)
 		return b.String()
 	}
 	var delivered, local, unknown []CompletedStep
@@ -2290,7 +2335,17 @@ func renderGuidance(statement string, g Guidance, started bool, stoppedAt int) s
 		}
 	}
 	fmt.Fprintf(&b, "It stopped at step %d because: %s", stoppedAt+1, g.Diagnosis)
+	writeDescriptionGuidance(&b, g.DescriptionGuidance)
 	return b.String()
+}
+
+// writeDescriptionGuidance closes the hand-back with the owner's earlier
+// dislikes, as their own paragraph, when there are any.
+func writeDescriptionGuidance(b *strings.Builder, guidance string) {
+	if guidance = strings.TrimSpace(guidance); guidance != "" {
+		b.WriteString("\n\n")
+		b.WriteString(guidance)
+	}
 }
 
 // journalStepId is the goal run's step as the automation journal writes it --

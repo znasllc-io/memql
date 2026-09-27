@@ -144,3 +144,9 @@ Provide EITHER `dependencies` (single-phase) OR `phases` (multi-phase),
 not both. The chosen list must be non-empty and each phase's dependency
 list must be non-empty. Keep every closure to the minimal set truly
 needed.
+
+{{if .guidance}}
+## WHAT WAS WRONG BEFORE WITH THIS GOAL
+The person who owns this goal disliked earlier answers to it. Do not repeat these problems:
+{{range .guidance}}- {{if .axes}}({{.axes}}) {{end}}{{.reason}}
+{{end}}{{end}}

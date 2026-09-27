@@ -235,6 +235,9 @@ func (f *FleetInference) buildStart(req memqlengine.FleetCallRequest) *memqlv1.M
 		RunId:          req.RunId,
 		StepId:         req.StepId,
 		Purpose:        req.Purpose,
+		// A person's explicit effort for this one call (epic memql#5414,
+		// design D20). A runtime with no such knob ignores it.
+		Effort: req.Effort,
 		// Deliberately temperature 0 by default for the platform's own
 		// operations: every one of them (conductor, planner, suggest) parses
 		// what comes back, and a sampled answer to a structured prompt is a

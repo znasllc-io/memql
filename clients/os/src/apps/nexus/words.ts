@@ -144,7 +144,13 @@ export function waitsOnAPerson(kind: string): boolean {
   return kind === "approval" || kind === "feedback";
 }
 
-/** How a run served its model calls. */
+/**
+ * How a run served its model calls.
+ *
+ * `fork` READS "Branch" (epic memql#5414). The enum member stayed and the act
+ * that makes one is "Branch from here", and an act keeps its name through the
+ * whole flow -- so the run it opens is called what the act said it would be.
+ */
 export function runModeWord(mode: string): string {
   switch (mode) {
     case "live":
@@ -152,7 +158,7 @@ export function runModeWord(mode: string): string {
     case "replay":
       return "Replay";
     case "fork":
-      return "Fork";
+      return "Branch";
     default:
       return mode === "" ? "--" : mode;
   }
@@ -165,10 +171,181 @@ export function runModeDetail(mode: string): string {
     case "replay":
       return "every model call was served from the journal -- no provider was reached";
     case "fork":
-      return "the shared prefix came from the journal; everything from the fork step ran live";
+      return "the steps before the branch point were reused from the run it came from; from there on it ran live";
     default:
       return "";
   }
+}
+
+// ===========================================================================
+// INTERVENTION -- re-run, branch and go back (epic memql#5414)
+// ===========================================================================
+
+/** The three levels a person may ask a step for. Embeddings is never offered (D10). */
+export const OVERRIDE_LEVELS = ["fast", "strong", "reasoning"] as const;
+
+export function levelWord(level: string): string {
+  switch (level) {
+    case "fast":
+      return "Fast";
+    case "strong":
+      return "Strong";
+    case "reasoning":
+      return "Reasoning";
+    case "embeddings":
+      return "Embeddings";
+    default:
+      return level;
+  }
+}
+
+/** The five efforts an app can be asked for. */
+export const OVERRIDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+export function effortWord(effort: string): string {
+  switch (effort) {
+    case "low":
+      return "Low";
+    case "medium":
+      return "Medium";
+    case "high":
+      return "High";
+    case "xhigh":
+      return "Extra high";
+    case "max":
+      return "Max";
+    default:
+      return effort;
+  }
+}
+
+/**
+ * What a re-run in flight is doing, in the words of the act that started it.
+ *
+ * THE ACT KEEPS ITS NAME: "Run again" becomes "running draft again as version
+ * 3" and then the version appears. A head move with nothing stale never lands
+ * here -- nothing runs -- so "going back" always has steps behind it.
+ */
+export function rerunInFlightWords(reason: string, stepKey: string, version: number | null): string {
+  const step = stepKey === "" ? "a step" : stepKey;
+  switch (reason) {
+    case "headMove":
+      return `went back in ${step}; running the steps that depend on it again`;
+    case "branch":
+      return `running from ${step} on; the steps before it are reused`;
+    default:
+      return version === null ? `running ${step} again` : `running ${step} again as version ${version}`;
+  }
+}
+
+// ===========================================================================
+// FEEDBACK -- the AI Fluency framework's Discernment, in a person's words
+// ===========================================================================
+// The framework names three things to judge in anything an AI made: its
+// PRODUCT, its PROCESS and its PERFORMANCE. Those are the wire's field names
+// and the framework's own terms, and they are not what a person calls them:
+// "The result", "The approach" and "The behaviour" are. The framework's names
+// live in the explanation beside the question, where somebody who knows it
+// can find it.
+
+export type Verdict = "like" | "dislike" | "neutral";
+
+export const VERDICTS: readonly Verdict[] = ["like", "dislike", "neutral"];
+
+export function verdictWord(verdict: string): string {
+  switch (verdict) {
+    case "like":
+      return "Like";
+    case "dislike":
+      return "Dislike";
+    case "neutral":
+      return "Neutral";
+    default:
+      return verdict;
+  }
+}
+
+export type Axis = "product" | "process" | "performance";
+
+export const AXES: readonly Axis[] = ["product", "process", "performance"];
+
+/** The pill's own label. */
+export function axisWord(axis: Axis): string {
+  switch (axis) {
+    case "product":
+      return "The result";
+    case "process":
+      return "The approach";
+    case "performance":
+      return "The behaviour";
+  }
+}
+
+/**
+ * The axes as a phrase inside a sentence: "the approach", "the result and the
+ * approach", "the result, the approach and the behaviour". Empty for none, so
+ * a caller can say "a problem" instead.
+ */
+export function axesPhrase(axes: { product: boolean; process: boolean; performance: boolean }): string {
+  const named = AXES.filter((axis) => axes[axis]).map((axis) => axisWord(axis).toLowerCase());
+  if (named.length <= 1) return named[0] ?? "";
+  return `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+}
+
+// ===========================================================================
+// REUSE -- what the evidence, or the person, says an automation is for (D24)
+// ===========================================================================
+
+export type ReuseLabel = "reusable" | "goalSpecific" | "accountSpecific";
+
+export function reuseWord(label: string): string {
+  switch (label) {
+    case "reusable":
+      return "Reusable";
+    case "goalSpecific":
+      return "For one goal";
+    case "accountSpecific":
+      return "For one account";
+    default:
+      return "Not yet labelled";
+  }
+}
+
+/**
+ * What a label means, for the information control beside the choice. "" is
+ * the automatic label. The threshold is the cluster's own value, never a
+ * number this window assumes -- unread, the sentence says "enough".
+ */
+export function reuseMeaning(label: ReuseLabel | "", reusableAfter: number | null): string {
+  switch (label) {
+    case "reusable":
+      return `Used for ${reusableAfter === null ? "enough different" : `at least ${reusableAfter}`} kinds of goal. When a goal is split into sections, each section looks for a reusable automation before a model is used.`;
+    case "goalSpecific":
+      return "Used for one kind of goal so far.";
+    case "accountSpecific":
+      return "Every use so far was for the same account.";
+    default:
+      return "The label follows how the automation has been used, and is checked again every six hours.";
+  }
+}
+
+/**
+ * How much use the evidence counted: "1 kind of goal in 4 runs; reusable at 2
+ * kinds". The threshold is said only while the evidence has not reached it,
+ * and only when the cluster's value has been read.
+ */
+export function usedForSentence(
+  kinds: number,
+  runs: number | null,
+  reusableAfter: number | null,
+  evidence: ReuseLabel | "",
+): string {
+  let s = `${kinds} ${kinds === 1 ? "kind" : "kinds"} of goal`;
+  if (runs !== null && runs > 0) s += ` in ${runs} ${runs === 1 ? "run" : "runs"}`;
+  if (evidence !== "reusable" && reusableAfter !== null && kinds < reusableAfter) {
+    s += `; reusable at ${reusableAfter} kinds`;
+  }
+  return s;
 }
 
 // ===========================================================================

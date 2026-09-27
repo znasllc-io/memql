@@ -54,3 +54,21 @@ prompt replanGap {
   catalog        []object  @description("[{name, kind, purpose}] of the caller's catalogued constructs, to compose rather than author.")
   now            string!   @description("RFC3339 wall-clock at invocation.")
 }
+
+/// Check one step's ANSWER against what the step was asked for, before a person looks (epic
+/// memql#5414, design D22), on the AI Fluency framework's three Discernment axes: the product (what
+/// it produced), the process (how it went about it) and the performance (how it behaved). A
+/// PRE-FILTER and nothing more: its verdict never counts as a like, never certifies anything and
+/// never moves a procedure's ladder, and a person's own verdict outranks it -- the literature is
+/// unambiguous that a model judge is a pre-filter, not a certifier (Reflexion, SkillLearnBench). The
+/// caller runs it at the RUN's level, which it passes as an override; `strong` is only the level for
+/// a run that recorded none.
+@level("strong")
+@templateFile("prompts/validateStepAnswer.tmpl")
+prompt validateStepAnswer {
+  goal         string!  @description("The goal in the person's own words.")
+  stepKey      string   @description("The step whose answer is checked.")
+  description  object   @description("What the step was asked for, as far as the run recorded it: {prompt, purpose, responseSchema, postcondition}. An absent key was not recorded -- judge only what is present.")
+  answer       string!  @description("The step's answer, as the person would read it.")
+  now          string!  @description("RFC3339 wall-clock at invocation.")
+}

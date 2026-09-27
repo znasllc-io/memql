@@ -122,6 +122,11 @@ type DispatchRequest struct {
 	// disagree, which is the difference between "a race" and "a bug".
 	Status string
 
+	// RerunRequestId is the re-run request the event's row carried
+	// (run.rerun.requestId, epic memql#5414), empty for every other run. The
+	// claim is keyed on it -- see runClaimKey -- and the seam serves the
+	// request only under a claim for that request.
+	RerunRequestId string
 	// TriggeredBy is the run's triggeredBy, as the event or the sweep's row
 	// read carried it. Unlike Status it is not a hint: createWorkRun writes it
 	// once and updateWorkRun does not accept it, so every copy of it is the
@@ -347,7 +352,8 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 	// The claim key is the RUN ID, which is the identity of the work. Keying
 	// on the automation name instead would let one run of a template block
 	// every other run of the same template.
-	if !claimer.ClaimWithTTL(ctx, runClaimName, req.RunId, runClaimTTL) {
+	key, ttl := runClaimKey(req)
+	if !claimer.ClaimWithTTL(ctx, runClaimName, key, ttl) {
 		return false
 	}
 
@@ -361,6 +367,34 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 	// own run, and ownerActor says so.
 	d.Dispatch(ownerActor(ctx, req.OwnerUserId), req)
 	return true
+}
+
+// runClaimKey is the key a dispatch claims under, and its lease: the run id
+// under runClaimTTL, and for a re-run the request too, with no lease (epic
+// memql#5414).
+//
+// A re-run executes a FINISHED run again under its own id, usually within
+// minutes of the run's first dispatch -- a person reads the answer and asks
+// for another. Keyed on the run id alone, that dispatch would meet the first
+// execution's lease (runClaimTTL, four minutes from its claim), every replica
+// would lose, and the sweep, finding the run silent and the lease held, would
+// close it as abandoned. Each request is a new unit of work on the run, so each
+// claims for itself; the seam refuses to serve a request under a claim taken
+// for another (or for none), which keeps one request to one replica.
+//
+// The request's claim is ONCE, not leased. A re-run resumes a run with no
+// failed step -- the one refusal that stops an ordinary run's own receipt
+// events, arriving after its lease has lapsed, from starting it a second time
+// on another replica between two of its steps -- so a leased request claim
+// would let a re-run longer than the lease be taken over while it ran. Once
+// means only the first claimant serves it from an event. A claimant that dies
+// is not stranded by that: its heartbeat goes stale, and the sweep's recovery
+// claims the RUN (leased, as ever) and resumes the request where it stopped.
+func runClaimKey(req DispatchRequest) (string, time.Duration) {
+	if id := strings.TrimSpace(req.RerunRequestId); id != "" {
+		return req.RunId + "#rerun:" + id, 0
+	}
+	return req.RunId, runClaimTTL
 }
 
 // idOnly reports the shape runEventFields produces for an event that carried
@@ -401,6 +435,9 @@ func runEventFields(ev events.Event) (DispatchRequest, bool) {
 	req.OwnerUserId, _ = payload["ownerUserId"].(string)
 	req.GoalId, _ = payload["goalId"].(string)
 	req.Variables, _ = payload["variables"].(map[string]any)
+	if rerun, ok := payload["rerun"].(map[string]any); ok {
+		req.RerunRequestId, _ = rerun["requestId"].(string)
+	}
 	req.TriggeredBy, _ = payload["triggeredBy"].(string)
 	return req, true
 }
@@ -423,6 +460,13 @@ func (i *Integration) FailRun(ctx context.Context, ownerUserId, runId, code, mes
 		"errorCode":    code,
 		"errorMessage": message,
 		"finishedAt":   rfc(i.now()),
+		// A failed run carries no live re-run request (epic memql#5414): a
+		// refusal at dispatch -- a nested step, a branch whose source moved on
+		// -- ends the request as surely as a close does, and leaving it on the
+		// row would draw a re-run in flight on a run that has stopped.
+		// staleSteps stays: a refused head-move re-run leaves those steps as
+		// stale as it found them, and that is the true state.
+		"rerun": map[string]any{},
 	})
 }
 

@@ -532,6 +532,137 @@ func TestAHigherIsBetterRatioIsNotDemandedAControl(t *testing.T) {
 	}
 }
 
+// --- A person's correction (epic memql#5414, task memql#5420) --------------
+
+// validCorrection is a lifecycle in which a person corrects one goal: a wrong
+// answer, disliked, run again at another level, and the new version liked.
+// Built fresh per call, like validProcedure().
+func validCorrection() Scenario {
+	s := validProcedure()
+	s.Id = "amortizedCost.a-corrected-lifecycle"
+	s.Procedure.Goals = []ProcedureGoal{
+		{Variables: map[string]string{"account": "acme"},
+			Answer: map[string]string{"reconcile": "reconcile.sh --account {{account}} --period monthly"}},
+		{Feedback: &Feedback{Verdict: VerdictDislike, Axes: []string{"product"}, Reason: "It reconciled the monthly ledger."}},
+		{Rerun: &Rerun{Level: "strong"}},
+		{Feedback: &Feedback{Verdict: VerdictLike}},
+		{Variables: map[string]string{"account": "globex"}},
+		{Decide: DecideApproved},
+		{Variables: map[string]string{"account": "stark"}, Measure: true},
+	}
+	s.Verify = []Check{
+		{Rows: "v1:authoring:construct", Where: map[string]string{"ladder": "trusted"}, Count: intp(1)},
+		{Named: CheckLiftedFromTheLikedVersion, Count: intp(1)},
+		{Named: CheckDislikedVersionReadable, Count: intp(1)},
+	}
+	return s
+}
+
+func TestTheValidCorrectionFixtureIsValid(t *testing.T) {
+	// The negative control for every break below.
+	s := validCorrection()
+	if err := s.Validate(); err != nil {
+		t.Fatalf("the correction fixture every other test breaks one field of does not itself validate: %v", err)
+	}
+	if !s.Procedure.Intervenes() {
+		t.Fatal("a lifecycle with a verdict and a re-run does not say it intervenes, so the driver would serve its goals on the path with no step to judge")
+	}
+	if validProcedure().Procedure.Intervenes() {
+		t.Fatal("a lifecycle with no verdict and no re-run says it intervenes; epic D's lifecycles would leave their committed path")
+	}
+}
+
+func TestEveryCorrectionRuleRefusesItsBreak(t *testing.T) {
+	goals := func(s *Scenario) []ProcedureGoal { return s.Procedure.Goals }
+	for _, tc := range []struct {
+		name   string
+		break_ func(*Scenario)
+		want   string
+	}{
+		{"a verdict before any goal", func(s *Scenario) {
+			s.Procedure.Goals = append([]ProcedureGoal{{Feedback: &Feedback{Verdict: VerdictLike}}}, s.Procedure.Goals...)
+		}, "no goal has been served before it"},
+		{"a re-run before any goal", func(s *Scenario) {
+			s.Procedure.Goals = append([]ProcedureGoal{{Rerun: &Rerun{Level: "fast"}}}, s.Procedure.Goals...)
+		}, "no goal has been served before it"},
+		{"a verdict carrying a goal", func(s *Scenario) { goals(s)[1].Variables = map[string]string{"account": "x"} }, "gives a verdict and also carries a goal"},
+		{"a re-run that is measured", func(s *Scenario) { goals(s)[2].Measure = true }, "re-runs a step and also carries a goal"},
+		{"an entry that is a verdict and a re-run", func(s *Scenario) { goals(s)[2].Feedback = &Feedback{Verdict: VerdictLike} }, "more than one of a decision, a verdict and a re-run"},
+		{"a decision that re-runs", func(s *Scenario) { goals(s)[5].Rerun = &Rerun{} }, "more than one of a decision, a verdict and a re-run"},
+		{"a decision carrying a wrong answer", func(s *Scenario) {
+			goals(s)[5].Answer = map[string]string{"reconcile": "reconcile.sh --account x"}
+		}, "decides a promotion and also carries a goal"},
+		{"an unknown verdict", func(s *Scenario) { goals(s)[3].Feedback.Verdict = "love" }, "is not one of like, dislike, neutral"},
+		{"an unknown axis", func(s *Scenario) { goals(s)[1].Feedback.Axes = []string{"vibe"} }, "the axis \"vibe\""},
+		{"an axis named twice", func(s *Scenario) { goals(s)[1].Feedback.Axes = []string{"product", "product"} }, "twice"},
+		{"a dislike naming no axis", func(s *Scenario) { goals(s)[1].Feedback.Axes = nil }, "names no axis"},
+		{"a like naming an axis", func(s *Scenario) { goals(s)[3].Feedback.Axes = []string{"process"} }, "a like names none"},
+		{"a reason the platform refuses", func(s *Scenario) {
+			goals(s)[1].Feedback.Reason = strings.Repeat("x", MaxFeedbackReasonBytes+1)
+		}, "refuses a longer one"},
+		{"an unknown level", func(s *Scenario) { goals(s)[2].Rerun.Level = "genius" }, "is not one of fast, strong, reasoning"},
+		{"the embeddings level", func(s *Scenario) { goals(s)[2].Rerun.Level = "embeddings" }, "different vector space"},
+		{"a re-run of a goal a procedure may serve", func(s *Scenario) {
+			g := s.Procedure.Goals
+			s.Procedure.Goals = append(append(append([]ProcedureGoal{}, g[:6]...),
+				ProcedureGoal{Variables: map[string]string{"account": "hooli"}}, ProcedureGoal{Rerun: &Rerun{}}), g[6:]...)
+		}, "follows an approved promotion"},
+		{"a wrong answer naming no action", func(s *Scenario) {
+			goals(s)[0].Answer = map[string]string{"reconcil": "reconcile.sh --account {{account}}"}
+		}, "not an action in this scenario"},
+		{"a wrong answer running another script", func(s *Scenario) {
+			goals(s)[0].Answer["reconcile"] = "notify.sh --account {{account}}"
+		}, "the same action done wrongly"},
+		{"a wrong answer that is the action as written", func(s *Scenario) {
+			goals(s)[0].Answer["reconcile"] = s.Steps[0].Target
+		}, "is the action as written"},
+		{"an empty wrong answer", func(s *Scenario) { goals(s)[0].Answer["reconcile"] = " " }, "is empty"},
+		{"a wrong answer with an unbound placeholder", func(s *Scenario) {
+			goals(s)[0].Answer["reconcile"] = "reconcile.sh --account {{account}} --period {{period}}"
+		}, "does not bind {{period}}"},
+		{"a wrong answer a procedure may never let the app give", func(s *Scenario) {
+			goals(s)[6].Answer = map[string]string{"reconcile": "reconcile.sh --account {{account}} --period daily"}
+		}, "the app never performs the answer"},
+		{"a verdict after the measured goal", func(s *Scenario) {
+			s.Procedure.Goals = append(s.Procedure.Goals, ProcedureGoal{Feedback: &Feedback{Verdict: VerdictLike}})
+		}, "is not the last goal"},
+		{"a lifted-from-the-liked check with nothing liked", func(s *Scenario) { goals(s)[3].Feedback.Verdict = VerdictNeutral }, "no liked version to tell"},
+		{"a lifted-from-the-liked check where only the replaced version is liked", func(s *Scenario) {
+			goals(s)[1].Feedback = &Feedback{Verdict: VerdictLike}
+			goals(s)[3].Feedback = &Feedback{Verdict: VerdictDislike, Axes: []string{"process"}}
+		}, "no liked version to tell"},
+		{"a disliked-version check with no re-run", func(s *Scenario) {
+			s.Procedure.Goals = append(s.Procedure.Goals[:2:2], s.Procedure.Goals[4:]...)
+		}, "no replaced version is left to read"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := validCorrection()
+			tc.break_(&s)
+			err := s.Validate()
+			if err == nil {
+				t.Fatal("Validate() accepted the break")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %v\nwant it to contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestAWrongAnswerNeedsNoCorrection(t *testing.T) {
+	// The boundary, pinned: a goal the app answers wrongly and nobody judges
+	// is a lifecycle the format can say -- the recording is then learned from
+	// like any other -- and it does not intervene, so it keeps epic D's path.
+	s := validProcedure()
+	s.Procedure.Goals[0].Answer = map[string]string{"notify": "notify.sh --to audit --account {{account}}"}
+	if err := s.Validate(); err != nil {
+		t.Fatalf("a wrong answer nobody corrected was refused: %v", err)
+	}
+	if s.Procedure.Intervenes() {
+		t.Fatal("a wrong answer alone made the lifecycle intervene")
+	}
+}
+
 func TestPlaceholdersAndRenderReadTheSameSpelling(t *testing.T) {
 	s := "Reconcile {{account}} for {{ period }} and {{account}} again, not {{missing}}"
 	if got := Placeholders(s); strings.Join(got, ",") != "account,period,missing" {

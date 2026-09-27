@@ -239,45 +239,7 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 		}
 	}
 
-	workspace := req.Workspace
-	if workspace == "" && policy.WorkspaceRoot != "" {
-		// The per-plan directory convention mirrors the workbench's:
-		// one tree per unit of work, so a run cannot read the previous
-		// one's leftovers by accident.
-		workspace = strings.TrimRight(policy.WorkspaceRoot, "/") + "/" + req.RunId
-	}
-
-	spec := workerservice.RunSpec{
-		SessionId:          "v1:worker:appSession:" + id.NewShortId(),
-		OwnerUserId:        ownerUserId,
-		App:                appId,
-		Kind:               workerservice.AppSessionKindRun,
-		Prompt:             promptFromInput(req),
-		Workspace:          workspace,
-		Inputs:             req.Inputs,
-		RunId:              req.RunId,
-		StepId:             req.StepId,
-		RequireLabels:      mergeRequireLabels(req.RequireLabels, appId),
-		CredentialLifetime: policy.CredentialLifetime,
-		MaxDuration:        defaultAppSessionMaxDuration,
-		// The task's output contract, when it declared one (design D7). A
-		// harness that supports a structured answer is asked for one; the rest
-		// carry it and ignore it, which is why nothing here gates on the
-		// descriptor -- the answer is a bonus, not a requirement, on this
-		// path.
-		ResponseSchema: responseSchemaFromInput(req),
-		// The call's LEVEL, when the caller named one (epic memql#5391,
-		// design D8). A task that named none leaves it empty and the app runs
-		// at its own defaults, which is what every delegated task did before
-		// the field existed. The COCKPIT translates it; nothing here maps a
-		// level to a model, because the knob names are the app's.
-		Level: stringFromInput(req, "level"),
-		// The subrun the session's actions are recorded into (epic
-		// memql#5396). The step-handover path opens it and stamps childRunId
-		// on the delegating step; a delegated TASK opens no run at all and
-		// leaves this empty, and the recorder opens one for itself.
-		RecordingRunId: stringFromInput(req, "recordingRunId"),
-	}
+	spec := sessionRunSpec(req, appId, ownerUserId, sessionWorkspace(req, policy.WorkspaceRoot), policy.CredentialLifetime)
 
 	// Machine selection goes through the FLEET ROUTER (memql#4350), not
 	// through anything this file invents: it applies the owner's routing
@@ -336,6 +298,86 @@ func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorReques
 		return out, fmt.Errorf("cockpit-app: %s run failed: %w", appId, runErr)
 	}
 	return out, nil
+}
+
+// sessionRunSpec is the session a Task opens, built from the request alone --
+// a function rather than a literal inside Run so what reaches AppSessionStart
+// can be read without standing up the consent gates in front of it.
+func sessionRunSpec(req planner.ExecutorRequest, appId, ownerUserId, workspace string, credentialLifetime time.Duration) workerservice.RunSpec {
+	return workerservice.RunSpec{
+		SessionId:          "v1:worker:appSession:" + id.NewShortId(),
+		OwnerUserId:        ownerUserId,
+		App:                appId,
+		Kind:               workerservice.AppSessionKindRun,
+		Prompt:             promptFromInput(req),
+		Workspace:          workspace,
+		Inputs:             req.Inputs,
+		RunId:              req.RunId,
+		StepId:             req.StepId,
+		RequireLabels:      mergeRequireLabels(req.RequireLabels, appId),
+		CredentialLifetime: credentialLifetime,
+		MaxDuration:        defaultAppSessionMaxDuration,
+		// The task's output contract, when it declared one (design D7). A
+		// harness that supports a structured answer is asked for one; the rest
+		// carry it and ignore it, which is why nothing here gates on the
+		// descriptor -- the answer is a bonus, not a requirement, on this
+		// path.
+		ResponseSchema: responseSchemaFromInput(req),
+		// The call's LEVEL, when the caller named one (epic memql#5391,
+		// design D8). A task that named none leaves it empty and the app runs
+		// at its own defaults, which is what every delegated task did before
+		// the field existed. The COCKPIT translates it; nothing here maps a
+		// level to a model, because the knob names are the app's.
+		Level: stringFromInput(req, "level"),
+		// The model an `app:<id>:<model>` pin names and a person's explicit
+		// effort (epic memql#5414, design D20). Both override the level's
+		// knobs on the far side for this session only; empty lets it decide.
+		Model:  stringFromInput(req, "model"),
+		Effort: stringFromInput(req, "effort"),
+		// The subrun the session's actions are recorded into (epic
+		// memql#5396). The step-handover path opens it and stamps childRunId
+		// on the delegating step; a delegated TASK opens no run at all and
+		// leaves this empty, and the recorder opens one for itself.
+		RecordingRunId: stringFromInput(req, "recordingRunId"),
+	}
+}
+
+// sessionWorkspace is the directory an app session runs in.
+//
+// A Task that named a directory gets it. Otherwise it is one directory per
+// unit of work under the owner's workspaceRoot -- the per-plan convention the
+// workbench also keeps, so a run cannot read the previous one's leftovers by
+// accident. That directory is the run's own, or, when a re-run or a branch
+// asked for a FRESH one (epic memql#5414, design D19), the directory that
+// request named: the new session must not run inside the tree the previous
+// version's later steps changed. A name that is not one plain directory name
+// is never joined, since it could place the workspace outside the root the
+// owner chose; the delegate refuses such a name before it gets here. With no
+// root the session names no workspace, exactly as before.
+func sessionWorkspace(req planner.ExecutorRequest, root string) string {
+	if w := strings.TrimSpace(req.Workspace); w != "" {
+		return w
+	}
+	root = strings.TrimRight(strings.TrimSpace(root), "/")
+	if root == "" {
+		return ""
+	}
+	dir := req.RunId
+	if fresh := stringFromInput(req, "freshWorkspace"); isWorkspaceDirName(fresh) {
+		dir = fresh
+	}
+	return root + "/" + dir
+}
+
+// isWorkspaceDirName reports whether name is one plain directory name, which
+// is what a re-run's fresh workspace is: no separator, not "." or "..", no
+// surrounding space -- nothing that, joined to a root, lands anywhere but
+// directly inside it.
+func isWorkspaceDirName(name string) bool {
+	if name == "" || name == "." || name == ".." || strings.TrimSpace(name) != name {
+		return false
+	}
+	return !strings.ContainsAny(name, "/\\\x00")
 }
 
 // selectMachine asks the Fleet router for a machine that can run appId.

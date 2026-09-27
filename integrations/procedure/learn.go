@@ -116,7 +116,15 @@ func (i *Integration) runPipeline(ctx context.Context, k corpusKey) (LearnResult
 		sequences[r] = sliceSymbols(flat, symbols, offsets[r], offsets[r]+len(corpus[r]))
 	}
 
-	patterns := proc.Mine(sequences, i.params)
+	// A LIKED RECORDING RANKS HIGHER AND IS STILL ONE USE (D23): its weight
+	// breaks ties between patterns and never clears D14's floor, which counts
+	// recordings. The occurrences keep sequence order, so a like changes which
+	// pattern wins a tie and never the instances a winner is generalized from.
+	weights := make([]float64, len(recs))
+	for r, rec := range recs {
+		weights[r] = float64(rec.weight())
+	}
+	patterns := proc.MineWeighted(sequences, weights, i.params.MinSupport, i.params.Gap)
 	out.Candidates = len(patterns)
 	if len(patterns) == 0 {
 		out.Reason = "nothing recurred across the corpus"

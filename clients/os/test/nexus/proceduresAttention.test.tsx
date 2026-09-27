@@ -40,11 +40,14 @@ beforeEach(() => {
 });
 
 describe("the learned-procedures marker in the registry", () => {
-  it("declares one change on Nexus, destined for Automations", () => {
+  it("declares the learned-procedures change on Nexus, destined for Automations", () => {
     const nexus = OS_REGISTRY.apps.find((a) => a.id === "nexus")!;
-    expect(nexus.attentionChanges).toEqual([
+    // Found by its id rather than pinned as the whole list: Nexus declares
+    // other changes beside it (epic memql#5414's re-run and feedback marker),
+    // each with its own destination and its own test.
+    expect(nexus.attentionChanges?.find((c) => c.id === "nexus:procedures")).toEqual(
       { id: "nexus:procedures", revision: "procedures-1", sectionId: "automations", label: "Learned procedures" },
-    ]);
+    );
     // A section every Nexus reader reaches, empty cluster included: it
     // carries no requirement of its own.
     expect(nexus.sections!.find((s) => s.id === "automations")?.requires).toBeUndefined();
@@ -70,11 +73,15 @@ describe("the marker on Automations", () => {
 
     fireEvent.click(button);
     await screen.findByRole("heading", { name: "Automations" });
-    await waitFor(() =>
-      expect(stub.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(1),
-    );
-    const [, call] = stub.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")!;
-    expect(call).toContain('changeId: "nexus:procedures"');
+    // ITS OWN ACKNOWLEDGEMENT, ONCE. Automations is also where the reuse
+    // labels' change is read (nexus:reuse), so the section acknowledges that
+    // one too; this test is about the learned procedures'.
+    const ownAcknowledgements = () =>
+      stub.executeNamed.mock.calls.filter(
+        ([name, call]) => name === "acknowledgeAttention" && String(call).includes('changeId: "nexus:procedures"'),
+      );
+    await waitFor(() => expect(ownAcknowledgements()).toHaveLength(1));
+    const [, call] = ownAcknowledgements()[0]!;
     expect(call).toContain('revision: "procedures-1"');
     await waitFor(() =>
       expect(within(automationsNavButton()).queryByRole("img", { name: "Unseen change" })).toBeNull(),

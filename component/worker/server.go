@@ -1571,6 +1571,10 @@ func (s *streamSession) openAppSession(ctx context.Context, req AppSessionReques
 		// (design D8). The two are different answers and only one of them is
 		// refused on the far side.
 		Level: req.Level,
+		// A person's explicit model and effort for this one session (epic
+		// memql#5414); empty lets the level decide on the far side.
+		Model:  req.Model,
+		Effort: req.Effort,
 	}
 	if err := s.send(&memqlv1.WorkerServerMessage{
 		Payload: &memqlv1.WorkerServerMessage_AppSessionStart{AppSessionStart: start},
@@ -1762,6 +1766,7 @@ func (s *streamSession) openModelCall(ctx context.Context, req ModelCallRequest)
 		Purpose:              req.Purpose,
 		Tools:                tools,
 		Audio:                req.Audio, Speech: req.Speech, Image: req.Image, Level: req.Level,
+		Effort: req.Effort,
 		Params: &memqlv1.ModelCallParams{
 			Temperature:     req.Params.Temperature,
 			TemperatureSet:  req.Params.TemperatureSet,

@@ -43,10 +43,15 @@ prompt reactiveConductor {
 /// be produced concurrently and assembled -- the planner then GENERATES a parallel plan-automation
 /// instead of a serial decompose chain. Fast/cheap tier (chat54Mini) by design. Output contract:
 /// {complexity: 'trivial'|'moderate'|'complex', reasoning: '<one short sentence>', requiresFile: bool, sectionable?:
-/// bool, fileName?: string, fileFormat?: string, assembly?: '<one sentence>', sections?: [{label, instruction}]}.
+/// bool, fileName?: string, fileFormat?: string, assembly?: '<one sentence>', sections?: [{label, instruction, purpose,
+/// inputs, outputs, reuseIntent, effects, postcondition}]} -- the sections are a DECOMPOSITION (epic memql#5414, design
+/// D24): in order, each with the inputs it reads (goal input names or earlier outputs), what it produces, a one-line
+/// purpose the catalog is asked with, the decomposer's reuse intent, what it changes and how its end is checked.
 @level("fast")
 @templateFile("prompts/goalComplexityTriage.tmpl")
 prompt goalComplexityTriage {
-  goal  string! @description("The user-stated goal driving the Plan, verbatim. The single most important input -- the classification is inferred from it.")
-  now   string            @description("Optional RFC3339 wall-clock; opaque, never required.")
+  goal      string! @description("The user-stated goal driving the Plan, verbatim. The single most important input -- the classification is inferred from it.")
+  now       string            @description("Optional RFC3339 wall-clock; opaque, never required.")
+  guidance  []object          @description("DESCRIPTION GUIDANCE (epic memql#5414, design D23): what the goal's owner disliked about earlier answers to this same goal shape -- [{axes, reason}], newest first, at most five. Present only when a model is genuinely being used for the goal again; empty on a goal nobody disliked.")
+  inputKeys []string          @description("The names of the inputs the goal supplies (epic memql#5414, design D24). A section that reads a goal input names it EXACTLY as here, because a section's catalog signature is its purpose plus its input names: a section that respells one would miss the automation that already does its work.")
 }

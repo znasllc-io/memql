@@ -271,6 +271,10 @@ type ModelCallRequest struct {
 	Speech *memqlv1.ModelCallSpeech
 	Image  *memqlv1.ModelCallImageRequest
 	Level  string
+	// Effort is a PERSON'S explicit effort for this one call (epic
+	// memql#5414, design D20), carried onto ModelCallStart.effort. Empty
+	// means the level decides; a runtime with no such knob ignores it.
+	Effort string
 }
 
 // ModelCallDelta is one piece of streamed output handed to the caller.

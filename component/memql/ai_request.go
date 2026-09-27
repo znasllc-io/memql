@@ -84,5 +84,13 @@ func requestForPrompt(ctx context.Context, prompt *PromptTemplate, invocation *A
 	if req.ExplicitProvider == "" {
 		req.ExplicitProvider = strings.TrimSpace(prompt.DefaultProvider)
 	}
+	// A PERSON'S OVERRIDE FOR THIS STEP comes last, so its model outranks
+	// both pins above for the one version it was asked for (epic memql#5414,
+	// design D20). ai_step_override.go states what each knob becomes and why
+	// a level alone clears no pin.
+	req, err = ApplyStepOverride(ctx, req)
+	if err != nil {
+		return airoute.ResolveRequest{}, fmt.Errorf("prompt %q: %w", prompt.Name, err)
+	}
 	return applyCallAttribution(ctx, req), nil
 }

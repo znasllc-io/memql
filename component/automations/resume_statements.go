@@ -22,6 +22,14 @@ package automations
 // journaled under the statement that called it -- is never a resume point
 // (runJournalFromRows drops it): resume re-runs the calling statement, never
 // into it.
+//
+// A RE-RUN SERVES ITS PREFIX STRICTER (epic memql#5414). The steps before the
+// resume point are the head's versions, and none of them runs again: a step
+// its condition skipped stays skipped rather than being decided afresh, and a
+// read too large to record is read again WITHOUT a row, so the version the
+// head names stays the version the run shows. Every step from the resume point
+// on -- and any step that does run -- runs one past the highest version it
+// recorded (rerunBases).
 
 import "strings"
 
@@ -48,9 +56,14 @@ func statementResumePoint(j *RunJournal, automation *Automation) string {
 }
 
 // resumedStatements is what the body knows from its journal when it resumes
-// at automation.Steps[at] (see the file comment).
-func resumedStatements(j *RunJournal, automation *Automation, at int) *resumedList {
+// at automation.Steps[at] (see the file comment). rerun is the request a
+// re-run serves, nil for an ordinary resume.
+func resumedStatements(j *RunJournal, automation *Automation, at int, rerun *RerunSpec) *resumedList {
 	r := &resumedList{done: map[string]*MinimalStepResult{}, continued: map[string]bool{}}
+	if rerun != nil {
+		r.reread = map[string]bool{}
+		r.bases = rerunBases(j, automation, rerun, at)
+	}
 	for i, step := range automation.Steps {
 		if step == nil {
 			continue
@@ -62,11 +75,25 @@ func resumedStatements(j *RunJournal, automation *Automation, at int) *resumedLi
 		switch state := j.StepStates[step.ID]; {
 		case state.Status == "done":
 			m := j.Steps[step.ID]
-			if m == nil || (m.Value == nil && step.Binds != "" && isQueryStatement(step)) {
+			unrecorded := m == nil || (m.Value == nil && step.Binds != "")
+			if unrecorded && isQueryStatement(step) {
+				if rerun != nil {
+					r.reread[step.ID] = true
+				}
 				continue // read again
+			}
+			if m == nil {
+				if rerun == nil {
+					continue // run again, as a resume always has
+				}
+				// A re-run never runs a finished prefix step again: one
+				// that recorded no result binds nothing.
+				m = &MinimalStepResult{StepId: step.ID, Status: "completed"}
 			}
 			r.done[step.ID] = m
 		case state.Status == "failed" && step.OnError == ErrorStrategyContinue:
+			r.continued[step.ID] = true
+		case state.Status == "skipped" && rerun != nil:
 			r.continued[step.ID] = true
 		}
 	}

@@ -65,8 +65,13 @@ type AppSessionHandover struct {
 	// Level is the call's level, one of core/airoute's closed four. The
 	// COCKPIT owns the translation into the app's own knobs.
 	Level string
+	// Effort is a PERSON'S explicit effort for this step (epic memql#5414,
+	// design D20), carried from the request the way Level is. Empty means the
+	// level decides.
+	Effort string
 	// RunId and StepId name the step being handed over. StepId is required:
-	// see ErrAppSessionNoStep.
+	// see ErrAppSessionNoStep. It is the step's KEY -- the one the run context
+	// names -- and the delegate derives the step ROW's id from it and RunId.
 	RunId  string
 	StepId string
 	// Prompt is the conversation, flattened. An app takes a prompt, not a
@@ -162,6 +167,7 @@ type SessionRequest struct {
 	ActingUserId string
 	AgentId      string
 	Level        string
+	Effort       string
 	RunId        string
 	StepId       string
 }
@@ -230,6 +236,7 @@ func (p *sessionProvider) run(
 		AppId:          p.appId,
 		Model:          p.model,
 		Level:          p.req.Level,
+		Effort:         p.req.Effort,
 		RunId:          p.req.RunId,
 		StepId:         p.req.StepId,
 		Prompt:         flattenForSession(messages),

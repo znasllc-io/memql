@@ -15,7 +15,7 @@ func TestCompileGoalForRun_DeterministicRoutesPersistRunnableDraft(t *testing.T)
 		want   work.Route
 	}{
 		{"trivial", map[string]any{"complexity": "trivial", "requiresFile": false}, work.RouteTrivial},
-		{"sectionable", map[string]any{"complexity": "moderate", "requiresFile": false, "sectionable": true, "sections": []map[string]any{{"label": "one", "instruction": "write the first section"}, {"label": "two", "instruction": "write the second section"}}}, work.RouteSectionable},
+		{"sectionable", map[string]any{"complexity": "moderate", "requiresFile": false, "sectionable": true, "sections": []map[string]any{{"label": "one", "instruction": "write the first section", "outputs": []string{"first"}}, {"label": "two", "instruction": "write the second section", "outputs": []string{"second"}}}}, work.RouteSectionable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eng := &countingCompileEngine{triage: tc.triage}

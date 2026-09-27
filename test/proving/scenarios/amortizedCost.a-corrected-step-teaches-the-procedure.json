@@ -1,0 +1,147 @@
+{
+  "id": "amortizedCost.a-corrected-step-teaches-the-procedure",
+  "family": "amortizedCost",
+  "title": "A person corrects one step, and the procedure learned from the correction climbs to trusted and serves a goal with no model",
+  "description": "The app is the proving suite's FIXTURE APP: a fake harness that performs the goal's actions on the fake machine and reports each one as the cockpit does, through the same session writer a delegated app session is recorded through. It is not a provider and plays no cassette; every session it runs counts as one model reach. Because a person steps in, every goal the app serves is EXECUTED through the platform's automation executor: the goal's run adopts one step, the step is handed to the app, the session is recorded beneath the run and stamped as the step's childRunId, and the journal keeps every version of the step. The first goal's first session reconciles the MONTHLY ledger where the goal asks for the weekly one. The person dislikes that version on the product axis, runs the step again at the strong level -- the work spine's own rerunStep act, served as an agent serves it, the dislike's reason riding to the app as guidance -- and likes the new version. The learning corpus judges each recording by the version of the step that made it: the first recording was replaced and disliked and leaves it, the re-run's was liked and stays, so the procedure is lifted from the corrected recording and the second goal's, and it climbs the ladder exactly as the trusted scenario's does. Running a step again is a new session under new idempotency keys, so the first goal's notice and archive are delivered a second time: the two duplicates the world counts are those, and no other goal delivers anything twice.",
+  "goal": "Reconcile the weekly ledger for {{account}} and notify the operators",
+  "variables": [],
+  "steps": [
+    {
+      "key": "reconcile",
+      "type": "exec",
+      "target": "reconcile.sh --account {{account}} --period weekly",
+      "effect": "machine"
+    },
+    {
+      "key": "notify",
+      "type": "exec",
+      "target": "notify.sh --to ops --account {{account}}",
+      "effect": "machine"
+    },
+    {
+      "key": "archive",
+      "type": "exec",
+      "target": "archive.sh --account {{account}}",
+      "effect": "machine"
+    }
+  ],
+  "procedure": {
+    "policy": {
+      "shadowMatches": 2,
+      "distinctBindings": 2,
+      "canaryMatches": 1
+    },
+    "goals": [
+      {
+        "variables": {
+          "account": "acme"
+        },
+        "answer": {
+          "reconcile": "reconcile.sh --account {{account}} --period monthly"
+        }
+      },
+      {
+        "feedback": {
+          "verdict": "dislike",
+          "axes": [
+            "product"
+          ],
+          "reason": "It reconciled the monthly ledger; this goal is the weekly one."
+        }
+      },
+      {
+        "rerun": {
+          "level": "strong"
+        }
+      },
+      {
+        "feedback": {
+          "verdict": "like"
+        }
+      },
+      {
+        "variables": {
+          "account": "globex"
+        }
+      },
+      {
+        "variables": {
+          "account": "initech"
+        }
+      },
+      {
+        "variables": {
+          "account": "umbrella"
+        }
+      },
+      {
+        "decide": "approved"
+      },
+      {
+        "variables": {
+          "account": "hooli"
+        }
+      },
+      {
+        "variables": {
+          "account": "stark"
+        },
+        "measure": true
+      }
+    ]
+  },
+  "world": {
+    "machine": {
+      "labels": {
+        "os": "linux"
+      },
+      "scripts": {
+        "reconcile.sh": "{\"lines\": 42, \"balanced\": true}\n",
+        "notify.sh": "notice queued\n",
+        "archive.sh": "archived\n"
+      }
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:authoring:construct",
+      "where": {
+        "ladder": "trusted"
+      },
+      "count": 1
+    },
+    {
+      "rows": "v1:work:approval",
+      "where": {
+        "kind": "procedurePromotion",
+        "decision": "approved"
+      },
+      "count": 1
+    },
+    {
+      "check": "aTrustedReplayReachedNoModel",
+      "count": 1
+    },
+    {
+      "check": "aLiftedProcedureCameFromTheLikedVersion",
+      "count": 1
+    },
+    {
+      "check": "theDislikedVersionIsStillReadable",
+      "count": 1
+    },
+    {
+      "effects": "machine.run",
+      "count": 21
+    },
+    {
+      "effects": "machine.duplicates",
+      "count": 2
+    }
+  ],
+  "claims": [
+    "amortizedCost.replaysServedWithoutModel",
+    "amortizedCost.providerCalls"
+  ]
+}

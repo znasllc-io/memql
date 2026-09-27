@@ -324,6 +324,30 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "authoring/mutations.memql", Name: "recordConstructLadder"}: true,
 		{Path: "authoring/mutations.memql", Name: "createLadderPolicy"}:    true,
 
+		// epic memql#5414, intervention, feedback and reuse.
+		//
+		// reassertWorkStepVersion is createWorkStep's argument: a step row is
+		// the engine's testimony about what ran, and which version is current is
+		// the run's head, decided by integrations/work after it checked the
+		// caller owns the run. An owner able to write it could re-assert a
+		// version with any content they typed -- a forged execution record,
+		// however correctly attributed.
+		//
+		// recordConstructReuse and recordConstructReuseOverride are the reuse
+		// label's two writers. The label decides which constructs the section
+		// near tier may serve a future goal from, so only the sweep that counted
+		// may write the evidence, and the override's VERSION is the server's
+		// count -- a caller-scoped write would let a client choose the version
+		// and rewrite an earlier override instead of adding one.
+		//
+		// createFeedbackPolicy is createLadderPolicy's twin: the values are the
+		// deployment's, the concept carries no owner field, and the one writer is
+		// the seed materializer under internal origin.
+		{Path: "work/mutations.memql", Name: "reassertWorkStepVersion"}:           true,
+		{Path: "authoring/mutations.memql", Name: "recordConstructReuse"}:         true,
+		{Path: "authoring/mutations.memql", Name: "recordConstructReuseOverride"}: true,
+		{Path: "work/mutations.memql", Name: "createFeedbackPolicy"}:              true,
+
 		// epic memql#4819 / memql#4820 D15. The six campaign-lifecycle and
 		// progress writers. Every one of them is reached ONLY through the
 		// `campaign*` builtins, which do the authorization first -- an owned-tier

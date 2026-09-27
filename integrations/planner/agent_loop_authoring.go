@@ -188,6 +188,14 @@ func (p designPlan) authorCount() int {
 // When nil, the fuzzy tier is skipped and an exact miss falls straight to
 // AUTHOR -- bounded + deterministic, never a hard failure.
 func (l *PlannerAgentLoop) runDesignPass(ctx context.Context, statement, ownerUserId string, near authoringNearMatcher) (designPlan, error) {
+	return l.runDesignPassGuided(ctx, statement, ownerUserId, near, nil)
+}
+
+// runDesignPassGuided is runDesignPass with the goal's DESCRIPTION GUIDANCE
+// (epic memql#5414, design D23): what the owner disliked about earlier answers
+// to this goal shape, handed to the design prompt so the model designing for
+// it again is told. Passed only when there is some.
+func (l *PlannerAgentLoop) runDesignPassGuided(ctx context.Context, statement, ownerUserId string, near authoringNearMatcher, guidance []map[string]any) (designPlan, error) {
 	if strings.TrimSpace(statement) == "" {
 		return designPlan{}, fmt.Errorf("authoring design pass: empty responsibility statement")
 	}
@@ -203,11 +211,15 @@ func (l *PlannerAgentLoop) runDesignPass(ctx context.Context, statement, ownerUs
 		catalog = nil
 	}
 
-	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "authoringDesign", map[string]any{
+	data := map[string]any{
 		"responsibility": statement,
 		"catalog":        catalogSummary(catalog),
 		"now":            time.Now().UTC().Format(time.RFC3339),
-	})
+	}
+	if len(guidance) > 0 {
+		data["guidance"] = guidance
+	}
+	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "authoringDesign", data)
 	if err != nil {
 		return designPlan{}, fmt.Errorf("authoringDesign prompt: %w", err)
 	}

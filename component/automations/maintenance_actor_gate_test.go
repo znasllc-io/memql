@@ -122,6 +122,10 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		"routingEvidenceFold",
 		"seedSelfAccount",
 		"sweepAbandonedPackageDeployments",
+		// sweepConstructReuse (epic memql#5414) reads before it knows whose,
+		// for mineProcedureCorpusAcrossAutomations' reason: a schedule carries
+		// no owner, so it lists owners and borrows each one's actor.
+		"sweepConstructReuse",
 		"sweepWaitingWorkRuns",
 		"workJournalRetentionSweep",
 		"workerInvocationRetentionSweep",

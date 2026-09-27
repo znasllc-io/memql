@@ -107,6 +107,14 @@ func (i *Integration) handleProcedureReplay(ctx context.Context, args map[string
 		}
 	}
 
+	// A PERSON ASKED FOR THIS GOAL AGAIN, with something a replay cannot
+	// honour (epic memql#5414): it goes to the app, with all of it.
+	if needsTheApp(rc.Override) {
+		return i.handBackRerun(ctx, rerunHandBack{
+			owner: owner, constructId: constructId, row: row, run: rc, goalId: goalId, statement: statement,
+		})
+	}
+
 	rung := storedRung(row)
 	mode := ReplayTrusted
 	if v := work.DecideServe(work.ReplayContext{Mode: "live", ConstructRung: rung}); v.Standby {

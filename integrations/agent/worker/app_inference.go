@@ -343,6 +343,11 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		// the effort a `reasoning` one asked for merely because this door
 		// serves a turn rather than a step.
 		Level: req.Level,
+		// The model a policy or a person pinned with `app:<id>:<model>`, and
+		// a person's explicit effort (epic memql#5414, design D20). Both
+		// override the level's knobs on the far side; empty lets it decide.
+		Model:  req.Model,
+		Effort: req.Effort,
 		// Library artifacts the cockpit pulls into the workspace before the
 		// run. Empty for an ordinary chat turn; a vision turn's staged images
 		// are appended, which is the whole of what the wire needed for this

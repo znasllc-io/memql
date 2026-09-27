@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -260,6 +261,68 @@ func TestCanDispatchStoredRunRecovery(t *testing.T) {
 				t.Fatalf("got %v want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestARerunIsClaimedUnderItsOwnRequest pins the claim grain of a re-run (epic
+// memql#5414). A re-run executes a FINISHED run again under its own id, usually
+// within the lease of the dispatch before it -- a person reads the answer and
+// asks for another. Claimed on the run id alone it would lose to that lease on
+// every replica, and the sweep would then close the silent run as abandoned. So
+// each request claims for itself, once, and a run that carries no request -- or
+// a cleared one -- claims on its id exactly as before.
+func TestARerunIsClaimedUnderItsOwnRequest(t *testing.T) {
+	i, d, c := newDispatchProbe(t, true)
+
+	ev := runEvent("run-7", runStatusRunning, "drafts", "u1")
+	ev.Payload["payload"].(map[string]any)["rerun"] = map[string]any{"requestId": "req-3", "reason": "rerun", "stepKey": "b"}
+	req, ok := runEventFields(ev)
+	if !ok || req.RerunRequestId != "req-3" {
+		t.Fatalf("runEventFields = %+v, want the request id off the row", req)
+	}
+	i.dispatchRun(context.Background(), req)
+
+	cleared := runEvent("run-8", runStatusRunning, "drafts", "u1")
+	cleared.Payload["payload"].(map[string]any)["rerun"] = map[string]any{}
+	req, _ = runEventFields(cleared)
+	i.dispatchRun(context.Background(), req)
+
+	if want := []string{"run-7#rerun:req-3", "run-8"}; len(c.keys) != 2 || c.keys[0] != want[0] || c.keys[1] != want[1] {
+		t.Fatalf("claim keys = %v, want %v", c.keys, want)
+	}
+	// The request's claim is once: a leased one would let the re-run's own
+	// receipt events hand it to a second replica once it outlived the lease.
+	// The run's claim keeps its lease.
+	if c.ttls[0] != 0 || c.ttls[1] != runClaimTTL {
+		t.Fatalf("claim leases = %v, want [0 %v]", c.ttls, runClaimTTL)
+	}
+	if seen := d.seen(); len(seen) != 2 || seen[0].RerunRequestId != "req-3" || seen[1].RerunRequestId != "" {
+		t.Fatalf("dispatched %+v -- the seam must be told which request it was claimed for", seen)
+	}
+}
+
+// A refused re-run ends its request: FailRun clears `rerun` so nothing draws a
+// re-run in flight on a run that has stopped, and leaves staleSteps alone.
+func TestFailRunEndsAPendingRerun(t *testing.T) {
+	eng := newRecordingEngine()
+	i := New(eng, nil)
+	if err := i.FailRun(context.Background(), "v1:identity:user:u1", "run-1", "step_nested", "the step is inside another step"); err != nil {
+		t.Fatal(err)
+	}
+	var update string
+	for _, c := range eng.calls {
+		if c.Name() == "updateWorkRun" {
+			update = c.Query
+		}
+	}
+	if update == "" {
+		t.Fatal("FailRun wrote no run update")
+	}
+	if !strings.Contains(update, "rerun: {}") {
+		t.Errorf("the run update must clear the pending re-run; got %s", update)
+	}
+	if strings.Contains(update, "staleSteps") {
+		t.Errorf("a refused re-run leaves the stale steps as stale as it found them; got %s", update)
 	}
 }
 

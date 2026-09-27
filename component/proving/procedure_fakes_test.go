@@ -21,6 +21,16 @@ package proving
 // measure is the DRIVER -- that it serves each goal as the ladder decides,
 // counts what the goal cost, and publishes the right number.
 //
+// A person stepping in (epic memql#5414) is faked the same way: a goal run's
+// step keeps its versions and verdicts in memory, a re-run puts the dislike it
+// replaces on the step's context as the executor does, and the corpus a
+// procedure is lifted from keeps the platform's two rules -- a recording whose
+// parent version was replaced, or disliked, is left out. What the fake calls a
+// lifted procedure's steps is the recordings it was lifted from, written back
+// token by token with each goal's input as a placeholder: enough for the
+// correction's check to see WHICH recordings a procedure came from, never a
+// claim about the real learner's templates.
+//
 // Each knob below breaks one behaviour on purpose, for a negative control run
 // on the TEST: the figure that depends on the behaviour must move.
 
@@ -28,11 +38,13 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/znasllc-io/memql/component/proving/scenario"
 	"github.com/znasllc-io/memql/component/work"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // fakeKnobs break one behaviour each.
@@ -48,6 +60,19 @@ type fakeKnobs struct {
 	// serveShadow serves a goal from a procedure on SHADOW -- the counter lie
 	// the zero-reading control exists to catch.
 	serveShadow bool
+
+	// ignoreDislikes keeps a recording a person disliked in the corpus, and
+	// ignoreSuperseded one whose version a re-run replaced.
+	ignoreDislikes   bool
+	ignoreSuperseded bool
+	// dropRerunGuidance runs a step again without telling the app what the
+	// person disliked about the version it replaces.
+	dropRerunGuidance bool
+	// forgetReplacedVersions reads back only each step's current version, as
+	// a store that rewrote a version in place would.
+	forgetReplacedVersions bool
+	// headStays leaves a re-run's step head on the version it replaced.
+	headStays bool
 }
 
 // fakeHarness is the LifecycleHarness the tests install.
@@ -83,7 +108,8 @@ func (h *fakeHarness) Open(_ context.Context, owner string, overlay work.LadderP
 			*f.dst = f.v
 		}
 	}
-	spine := &fakeSpine{goals: map[string]fakeGoalRun{}, approvals: map[string]*ApprovalState{}, closed: map[string]bool{}}
+	spine := &fakeSpine{goals: map[string]fakeGoalRun{}, approvals: map[string]*ApprovalState{}, closed: map[string]bool{},
+		steps: map[string]*fakeStep{}, knobs: h.knobs}
 	rec := &fakeRecorder{runs: map[string]*fakeRecording{}}
 	return &LifecyclePlatform{
 		Recorder: rec,
@@ -121,6 +147,35 @@ type fakeSpine struct {
 	order     []string
 	// closed records every goal run closed, and whether it was served.
 	closed map[string]bool
+
+	knobs fakeKnobs
+	// steps are the executed goal runs' one step each, by run.
+	steps map[string]*fakeStep
+	// verdicts are every verdict given, in order; a later one is newer.
+	verdicts []fakeVerdict
+}
+
+// fakeStep is one goal run's step: its versions, oldest first, and the one
+// that is current.
+type fakeStep struct {
+	key      string
+	versions []fakeStepVersion
+	head     int
+}
+
+type fakeStepVersion struct {
+	version    int
+	status     string
+	childRunId string
+	level      string
+}
+
+type fakeVerdict struct {
+	id, runId, stepKey string
+	version            int
+	verdict            string
+	axes               []string
+	reason             string
 }
 
 func (s *fakeSpine) OpenGoal(_ context.Context, g GoalOrder) (string, string, error) {
@@ -203,6 +258,162 @@ func (s *fakeSpine) goal(runId string) (fakeGoalRun, bool) {
 	return g, ok
 }
 
+// ExecuteAppGoal is the executor's side of a goal the app serves: one step,
+// version 1, handed to the app with a run context naming the run and the step,
+// and the run closed as the session ended.
+func (s *fakeSpine) ExecuteAppGoal(ctx context.Context, step GoalStep, serve AppStepServer) (StepRun, error) {
+	s.mu.Lock()
+	_, opened := s.goals[step.RunId]
+	_, started := s.steps[step.RunId]
+	_, closed := s.closed[step.RunId]
+	s.mu.Unlock()
+	switch {
+	case !opened:
+		return StepRun{}, fmt.Errorf("no goal run %q", step.RunId)
+	case started || closed:
+		return StepRun{}, fmt.Errorf("goal run %q executed twice", step.RunId)
+	}
+	ans, err := serve(common.ContextWithRun(ctx, common.RunContext{
+		RunId: step.RunId, StepKey: step.StepKey, OwnerUserId: step.OwnerUserId, Mode: common.RunModeLive,
+	}), AppStep{RunId: step.RunId, StepKey: step.StepKey, StepId: step.RunId + "-" + step.StepKey})
+	if err != nil {
+		return StepRun{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.steps[step.RunId] = &fakeStep{key: step.StepKey, head: 1,
+		versions: []fakeStepVersion{{version: 1, status: fakeStepStatus(ans), childRunId: ans.ChildRunId}}}
+	s.closed[step.RunId] = !ans.Failed
+	return StepRun{Version: 1, Status: fakeRunStatus(ans)}, nil
+}
+
+// RerunStep is the act and the executor together: a new version, one past
+// every version the step has, run with the level asked for and the newest
+// dislike on the version it replaces as guidance -- on the step's context
+// alone, as the executor puts it there.
+func (s *fakeSpine) RerunStep(ctx context.Context, o RerunOrder, serve AppStepServer) (StepRun, error) {
+	s.mu.Lock()
+	st, ok := s.steps[o.RunId]
+	if !ok || st.key != o.StepKey {
+		s.mu.Unlock()
+		return StepRun{}, fmt.Errorf("run %q has no step %q to run again", o.RunId, o.StepKey)
+	}
+	override := &common.StepOverride{Level: o.Level, RequestedBy: o.OwnerUserId}
+	if v := s.newestVerdictLocked(o.RunId, o.StepKey, st.head); v != nil && v.verdict == scenario.VerdictDislike && !s.knobs.dropRerunGuidance {
+		override.GuidanceAxes, override.GuidanceReason, override.FeedbackId = v.axes, v.reason, v.id
+	}
+	version := len(st.versions) + 1
+	s.mu.Unlock()
+	if override.Empty() {
+		override = nil
+	}
+	ans, err := serve(common.ContextWithRun(ctx, common.RunContext{
+		RunId: o.RunId, StepKey: o.StepKey, OwnerUserId: o.OwnerUserId, Mode: common.RunModeLive,
+		Override: override, Workspace: fmt.Sprintf("%s-v%d", strings.TrimPrefix(o.RunId, "v1:work:run:"), version),
+	}), AppStep{RunId: o.RunId, StepKey: o.StepKey, StepId: o.RunId + "-" + o.StepKey})
+	if err != nil {
+		return StepRun{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st.versions = append(st.versions, fakeStepVersion{version: version, status: fakeStepStatus(ans), childRunId: ans.ChildRunId, level: o.Level})
+	if !s.knobs.headStays {
+		st.head = version
+	}
+	s.closed[o.RunId] = !ans.Failed
+	return StepRun{Version: version, Status: fakeRunStatus(ans)}, nil
+}
+
+// RecordFeedback keeps a verdict as the act does, refusing what it refuses: a
+// version the step never had, and a dislike naming no axis.
+func (s *fakeSpine) RecordFeedback(_ context.Context, o FeedbackOrder) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.steps[o.RunId]
+	switch {
+	case !ok || st.key != o.StepKey || o.Version < 1 || o.Version > len(st.versions):
+		return "", fmt.Errorf("feedback_target_not_found: run %q records no version %d of %q", o.RunId, o.Version, o.StepKey)
+	case o.Verdict == scenario.VerdictDislike && len(o.Axes) == 0:
+		return "", fmt.Errorf("feedback_axis_required")
+	}
+	id := fmt.Sprintf("v1:work:observation:%d", len(s.verdicts)+1)
+	s.verdicts = append(s.verdicts, fakeVerdict{id: id, runId: o.RunId, stepKey: o.StepKey, version: o.Version,
+		verdict: o.Verdict, axes: append([]string(nil), o.Axes...), reason: o.Reason})
+	return id, nil
+}
+
+// StepVersions answers every version of the run's step, the current one
+// marked.
+func (s *fakeSpine) StepVersions(_ context.Context, _ string, runId string) ([]StepVersionState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.steps[runId]
+	if !ok {
+		return nil, fmt.Errorf("run %q has no step", runId)
+	}
+	var out []StepVersionState
+	for _, v := range st.versions {
+		if s.knobs.forgetReplacedVersions && v.version != st.head {
+			continue
+		}
+		out = append(out, StepVersionState{StepKey: st.key, Version: v.version, Status: v.status,
+			Current: v.version == st.head, ChildRunId: v.childRunId, Level: v.level})
+	}
+	return out, nil
+}
+
+// newestVerdictLocked is the newest verdict on one version of one step.
+func (s *fakeSpine) newestVerdictLocked(runId, stepKey string, version int) *fakeVerdict {
+	var newest *fakeVerdict
+	for i := range s.verdicts {
+		v := &s.verdicts[i]
+		if v.runId == runId && v.stepKey == stepKey && v.version == version {
+			newest = v
+		}
+	}
+	return newest
+}
+
+// excludes is the corpus's judgment of a recording by its parent step version
+// (integrations/procedure parent_version.go): left out when that version is no
+// longer the step's current one, or when its newest verdict is a dislike. A
+// recording no step delegated is judged by nothing.
+func (s *fakeSpine) excludes(parentRunId, recordingRunId string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.steps[parentRunId]
+	if !ok {
+		return false
+	}
+	for _, v := range st.versions {
+		if v.childRunId != recordingRunId {
+			continue
+		}
+		if v.version != st.head && !s.knobs.ignoreSuperseded {
+			return true
+		}
+		if nv := s.newestVerdictLocked(parentRunId, st.key, v.version); nv != nil && nv.verdict == scenario.VerdictDislike && !s.knobs.ignoreDislikes {
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+func fakeStepStatus(a AppStepAnswer) string {
+	if a.Failed {
+		return "failed"
+	}
+	return "done"
+}
+
+func fakeRunStatus(a AppStepAnswer) string {
+	if a.Failed {
+		return "failed"
+	}
+	return "succeeded"
+}
+
 // --- The recorder ------------------------------------------------------------------
 
 type fakeRecording struct {
@@ -271,6 +482,10 @@ type fakeConstruct struct {
 	state work.LadderState
 	// recordings are the succeeded recordings learned from.
 	recordings int
+	// recordedFrom are the recordings the construct was lifted from, and
+	// steps their actions as the fake writes them back (lifted).
+	recordedFrom []string
+	steps        []string
 }
 
 type fakeLadder struct {
@@ -283,8 +498,11 @@ type fakeLadder struct {
 
 	mu         sync.Mutex
 	constructs map[string]*fakeConstruct // by goal signature
-	recordings map[string]int            // succeeded recordings per signature
-	replays    int
+	// learned are the succeeded recordings the driver asked to learn from, in
+	// order, by signature: the corpus, before the platform's rules leave any
+	// out.
+	learned map[string][]string
+	replays int
 	// orders are every replay the driver asked for, as it asked.
 	orders []ReplayOrder
 }
@@ -312,23 +530,89 @@ func (l *fakeLadder) LearnFromRun(_ context.Context, _ string, runId string) (Le
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.recordings == nil {
-		l.recordings = map[string]int{}
+	if l.learned == nil {
+		l.learned = map[string][]string{}
 	}
-	l.recordings[g.sig]++
+	l.learned[g.sig] = append(l.learned[g.sig], runId)
+	corpus := l.corpusLocked(g.sig)
 	c, ok := l.constructs[g.sig]
 	switch {
 	case ok:
 		c.recordings++
 		return LearnReport{ConstructId: c.id, Lift: LiftUnchanged, Rung: string(c.state.Rung)}, nil
-	case l.recordings[g.sig] < 2:
+	case len(corpus) < 2:
 		return LearnReport{Reason: "fewer than two recorded runs for this signature"}, nil
 	}
-	rung, reason := work.EntryRung(work.CandidateEvidence{Uses: l.recordings[g.sig]})
+	rung, reason := work.EntryRung(work.CandidateEvidence{Uses: len(corpus)})
 	c = &fakeConstruct{id: fmt.Sprintf("v1:authoring:construct:%d", len(l.constructs)+1), sig: g.sig,
-		state: work.LadderState{Rung: rung, DistinctBindings: map[string][]string{}}, recordings: l.recordings[g.sig]}
+		state: work.LadderState{Rung: rung, DistinctBindings: map[string][]string{}}, recordings: len(corpus),
+		recordedFrom: corpus, steps: l.lifted(corpus)}
 	l.constructs[g.sig] = c
 	return LearnReport{ConstructId: c.id, Lift: LiftCreated, Rung: string(rung), Reason: reason}, nil
+}
+
+// corpusLocked is one signature's corpus as it stands NOW: every recording
+// learned from, less those the platform's rules leave out -- the corpus is read
+// afresh at every lift, so a verdict given after a recording was learned from
+// still decides whether the next lift sees it.
+func (l *fakeLadder) corpusLocked(sig string) []string {
+	var out []string
+	for _, id := range l.learned[sig] {
+		rec, ok := l.rec.recording(id)
+		if !ok || l.spine.excludes(rec.open.ParentRunId, id) {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// lifted is the fake's account of a lifted procedure's steps: each
+// recording's actions, the goal's input values written back as placeholders,
+// and a position the recordings disagree on written {{?}} -- which is where
+// the real learner would open a hole no goal input binds.
+func (l *fakeLadder) lifted(corpus []string) []string {
+	var steps []string
+	for n, id := range corpus {
+		rec, g, err := l.recordingGoal(id)
+		if err != nil {
+			return nil
+		}
+		mine := make([]string, 0, len(rec.actions))
+		for _, a := range rec.actions {
+			cmd, _ := a.Action.Args["command"].(string)
+			argv := splitCommand(cmd)
+			for i, word := range argv {
+				for k, v := range g.variables {
+					if word == v {
+						argv[i] = "{{" + k + "}}"
+					}
+				}
+			}
+			mine = append(mine, strings.Join(argv, " "))
+		}
+		if n == 0 {
+			steps = mine
+			continue
+		}
+		if len(mine) < len(steps) {
+			steps = steps[:len(mine)]
+		}
+		for i := range steps {
+			a, b := strings.Fields(steps[i]), strings.Fields(mine[i])
+			if len(a) != len(b) {
+				steps[i] = "{{?}}"
+				continue
+			}
+			for j := range a {
+				if a[j] != b[j] {
+					a[j] = "{{?}}"
+				}
+			}
+			steps[i] = strings.Join(a, " ")
+		}
+	}
+	return steps
 }
 
 // freeParameters are the fixture's placeholders: the fake's stand-in for the
@@ -478,7 +762,8 @@ func (l *fakeLadder) Constructs(context.Context, string) ([]ConstructState, erro
 	defer l.mu.Unlock()
 	out := make([]ConstructState, 0, len(l.constructs))
 	for _, c := range l.constructs {
-		out = append(out, ConstructState{ConstructId: c.id, GoalSignature: c.sig, Rung: string(c.state.Rung), PromotionApprovalId: c.state.PromotionApprovalId})
+		out = append(out, ConstructState{ConstructId: c.id, GoalSignature: c.sig, Rung: string(c.state.Rung), PromotionApprovalId: c.state.PromotionApprovalId,
+			RecordedFrom: append([]string(nil), c.recordedFrom...), Steps: append([]string(nil), c.steps...)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ConstructId < out[j].ConstructId })
 	return out, nil

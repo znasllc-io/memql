@@ -891,6 +891,19 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 	if levelled, ok := client.(interface{ WithLevel(string) any }); ok {
 		client = levelled.WithLevel(string(req.Level))
 	}
+	// And the EFFORT a person asked for, when they asked for one (epic
+	// memql#5414, design D20). It is a knob on the door already chosen, never
+	// a reason to choose it, so a door without the knob -- a vendor record --
+	// serves the call at its own settings and says so only at debug: the
+	// decision record's servedEffort already shows what actually ran.
+	if effort := strings.TrimSpace(req.Effort); effort != "" {
+		if knobbed, ok := client.(interface{ WithEffort(string) any }); ok {
+			client = knobbed.WithEffort(effort)
+		} else if r != nil && r.logger != nil {
+			r.logger.Debug("router: this door has no effort knob; the requested effort is not applied",
+				"provider", entry.Config.Name, "effort", effort, "requestId", req.RequestId)
+		}
+	}
 	return client, resolved, true
 }
 
