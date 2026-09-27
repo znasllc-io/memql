@@ -1701,11 +1701,27 @@ func sessionConnParams() map[string]any {
 // outlive them has to be written for that: the latest-row index build takes a
 // session lock its orphan keeps holding and verifies the catalog after waiting
 // for it (latest_row_index.go).
+//
+// And without TimescaleDB's cap on DML decompression. "MemoryNodes" compresses
+// its 90-day-cold tail (memory_nodes_compression.go, memql#5421), and a
+// migration that UPDATEs or DELETEs rows in a compressed chunk decompresses
+// them, capped per transaction at 100000 tuples by default -- measured to
+// refuse a 150000-row, concept-scoped `payload - '<field>'` repair outright,
+// which is exactly the shape a retired concept field's repair migration takes.
+// The cap guards request traffic from an accidental mass decompression, so the
+// request pool keeps it; a migration's bulk DML is deliberate. 0 is unlimited.
+// TimescaleDB has carried the setting since 2.11 (the operand image ships 2.28
+// and 2.29); a server without TimescaleDB takes it as an unused placeholder.
 func migrationConnParams() map[string]any {
 	params := sessionConnParams()
 	delete(params, "statement_timeout")
+	params[migrationDecompressionCapParam] = "0"
 	return params
 }
+
+// migrationDecompressionCapParam is TimescaleDB's per-transaction cap on
+// tuples decompressed by DML, lifted for the migration runner only.
+const migrationDecompressionCapParam = "timescaledb.max_tuples_decompressed_per_dml_transaction"
 
 // dbApplicationName derives the Postgres application_name so pg_stat_activity
 // attributes each backend to a node type (memql#1817 -- turns a 53300 triage

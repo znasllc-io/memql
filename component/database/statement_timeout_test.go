@@ -57,3 +57,16 @@ func TestACustomOpenerOwnsTheMigrationPoolToo(t *testing.T) {
 		t.Fatalf("a custom sqlOpener must clear the default migration opener, or migrations would dial a real DSN a test never meant to open")
 	}
 }
+
+// The migration pool lifts TimescaleDB's DML decompression cap and a
+// request-serving backend keeps it (memql#5421): a concept-scoped repair
+// migration over a compressed tail is deliberate bulk DML, while the cap is
+// what stops a request from decompressing a whole chunk by accident.
+func TestMigrationsLiftTheDecompressionCapAndRequestsKeepIt(t *testing.T) {
+	if got := migrationConnParams()[migrationDecompressionCapParam]; got != "0" {
+		t.Fatalf("the migration pool's %s = %v, want \"0\" (unlimited)", migrationDecompressionCapParam, got)
+	}
+	if got, ok := sessionConnParams()[migrationDecompressionCapParam]; ok {
+		t.Fatalf("a request-serving backend sets %s = %v; it must keep TimescaleDB's default", migrationDecompressionCapParam, got)
+	}
+}
