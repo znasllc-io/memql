@@ -73,6 +73,10 @@ func TestToolCallRefusalAppliesEachGateToItsOwnAxis(t *testing.T) {
 		{"specialist calls an assistant tool", agentFor("specialist", "owner"), assistantOnly, `not allowed for caller role "specialist"`},
 		{"specialist calls an any-agent tool", agentFor("specialist", "reader"), anyAgent, ""},
 		{"a person over MCP is not an agent kind", personOverMCP("owner"), anyAgent, "a person calling over MCP is not an agent"},
+		// The old MCP surface stamped a person's role as the acting agent's, so
+		// a role string that happened to read "assistant" passed an
+		// assistant-only gate. A person is not an agent however it is spelled.
+		{"a person whose role string reads like an agent kind", personOverMCP("assistant"), assistantOnly, "a person calling over MCP is not an agent"},
 
 		// @requiresRank: the PERSON the call is for, whoever is calling.
 		{"owner over MCP clears a writer floor", personOverMCP("owner"), writerFloor, ""},

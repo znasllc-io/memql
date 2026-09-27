@@ -25,7 +25,7 @@ package memql
 //
 // # Listed and callable are one decision, asked twice
 //
-// toolListed and toolCallRefusal share every gate, so a caller is never shown
+// ToolListed and ToolCallRefusal share every gate, so a caller is never shown
 // a tool it cannot call nor refused one it was shown. The one difference is
 // the caller-kind rule: only a CALL must come from an agent or an
 // authenticated person over MCP -- a listing is a description, and the gRPC
@@ -95,7 +95,7 @@ func notAnAgentPhrase(c ToolCaller) string {
 
 // ToolListed reports whether the caller on ctx may be offered t: its
 // agent-kind gate, the deprecated @allowedRoles, and its rank floor against
-// the person the call would be for. It is toolCallRefusal without the
+// the person the call would be for. It is ToolCallRefusal without the
 // caller-kind rule (see the file comment).
 func (e *MemQLEngine) ToolListed(ctx context.Context, t *Tool) bool {
 	if t == nil {

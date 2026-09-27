@@ -251,7 +251,7 @@ func (v *RoleVocabulary) RewriteAllowedRoles(values []string) AllowedRolesRewrit
 			"the list admits %q but not %s, ranked above it, so it is not a floor and @requiresRank(%q) would admit what it excluded",
 			lowest, quoteJoin(skipped), lowest)}
 	}
-	return AllowedRolesRewrite{Annotation: fmt.Sprintf("@requiresRank(%q)", lowest)}
+	return AllowedRolesRewrite{Annotation: "@requiresRank(" + QuoteString(lowest) + ")"}
 }
 
 // quoteJoin renders values as an annotation's argument list: "a", "b".
