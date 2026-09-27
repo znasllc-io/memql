@@ -41,7 +41,7 @@ require (
 	github.com/frostbyte73/core v0.1.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.4 // indirect
 	github.com/gammazero/deque v1.2.1 // indirect
-	github.com/go-logr/logr v1.4.3 // indirect
+	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
@@ -59,11 +59,11 @@ require (
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
 	github.com/lib/pq v1.12.3 // indirect
-	github.com/lithammer/shortuuid/v4 v4.2.0 // indirect
+	github.com/lithammer/shortuuid/v4 v4.3.0 // indirect
 	github.com/livekit/mageutil v0.0.0-20250511045019-0f1ff63f7731 // indirect
 	github.com/livekit/mediatransportutil v0.0.0-20260605212259-862d4a7bcb1e // indirect
-	github.com/livekit/protocol v1.49.0 // indirect
-	github.com/livekit/psrpc v0.7.2 // indirect
+	github.com/livekit/protocol v1.52.0 // indirect
+	github.com/livekit/psrpc v0.7.7 // indirect
 	github.com/livekit/server-sdk-go/v2 v2.18.1 // indirect
 	github.com/magefile/mage v1.17.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
@@ -94,7 +94,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/puzpuzpuz/xsync/v4 v4.5.0 // indirect
-	github.com/redis/go-redis/v9 v9.20.0 // indirect
+	github.com/redis/go-redis/v9 v9.22.0 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
@@ -144,7 +144,7 @@ require (
 	github.com/natefinch/atomic v1.0.1 // indirect
 	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
-	github.com/petermattis/goid v0.0.0-20250813065127-a731cc31b4fe // indirect
+	github.com/petermattis/goid v0.0.0-20260820044319-269ab09b5261 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/common v0.70.1 // indirect
 	github.com/prometheus/procfs v0.21.1 // indirect
