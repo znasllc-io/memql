@@ -135,9 +135,13 @@ type ProcedureStep struct {
 // RecordedFrom is where a procedure came from. App, Model and Effort are what
 // every recording agreed on and are ABSENT when the recordings disagreed or
 // the app reported nothing -- a value borrowed from one recording would claim
-// something about the others. Workspaces are the recordings' working
-// directories, which is what a dispatcher rebases a recorded absolute path
-// inside a workspace against.
+// something about the others. RunIds are the recordings the version was
+// generalized from, which is also what keeps a recording from being compared
+// with a version it taught (shadow.go). Workspaces are the recordings' working
+// directories, and they are PROVENANCE ONLY: no dispatcher reads them. The
+// corpus loader rewrites every path inside a recording's workspace relative to
+// it before anything is learned (relativize.go), so a replay's steps name
+// paths relative to the replay's own workspace and nothing is left to rebase.
 type RecordedFrom struct {
 	App        string   `json:"app,omitempty"`
 	Model      string   `json:"model,omitempty"`

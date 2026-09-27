@@ -26,6 +26,17 @@ import (
 // onProcedurePromotionDecided automation calls DecidePromotion, which moves
 // shadow to canary on a yes and spends the streak on a no.
 //
+// RAISING WRITES createWorkApproval ITSELF, not through integrations/work's
+// RaiseApproval, which the plan named. RaiseApproval is a method on the work
+// plug-in's REGISTERED INSTANCE, and plug-ins are constructed independently:
+// this one holds no handle to it, and app/ wiring for one mutation would couple
+// the two plug-ins' construction for nothing it adds. The row is built by the
+// same component/work.ProcedurePromotionApproval, checked by the same
+// ValidateApprovalKind, and written under the owner's actor through this
+// package's one internal-origin stamp (store.go) -- exactly the row
+// RaiseApproval would write. Its id is this package's to derive
+// (promotionApprovalId), so a proposal delivered twice writes one row.
+//
 // Deciding it is integrations/work's (handleDecideApproval): only the owner
 // decides, a changed construct refuses with the artifact-changed error, and
 // the shadow run the approval names is never touched. Nothing here decides
