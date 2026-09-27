@@ -47,6 +47,13 @@ import (
 // metric: a misspelling should be a compile error, not a use that names no form.
 const ArrayType = "deprecated_array_type"
 
+// AllowedRoles is the rule of `@allowedRoles(...)`, the tool gate that
+// compared ONE role string whose meaning depended on the caller -- an agent's
+// role in its tool loop, a person's cluster role over MCP (memql#5438). Its two
+// halves are @requiresAgentRole (which agent is calling) and @requiresRank (the
+// rank of the person the call is for). A constant for ArrayType's reason.
+const AllowedRoles = "deprecated_allowed_roles"
+
 // Form is one deprecated spelling and the two releases that bound its window.
 type Form struct {
 	// Rule is the stable id: the diagnostic code, the metric's label, and what
@@ -73,6 +80,15 @@ type Form struct {
 // MinimumMinorReleases is 2, so Window.expiresAt puts the refusal at
 // 0.23 + 2 = 0.25. Nothing here states 0.25; RefusedFrom derives it, which is
 // what stops the table and the window disagreeing about the same form.
+//
+// `@allowedRoles(...)` is deprecated in 0.24.0 for the same reason: VERSION is
+// 0.23.5, so the next minor to ship is 0.24, and RefusedFrom puts the refusal
+// at 0.26. Its replacement is two annotations rather than one spelling, and
+// which one a use becomes depends on what its list names -- agent kinds become
+// @requiresAgentRole, person roles @requiresRank at the list's lowest rung --
+// so the rewrite decides per use, and leaves a list it cannot carry across
+// exactly (one that mixes the two, or names a value it does not know) for the
+// author, saying why.
 var shipped = []Form{
 	{
 		Rule:         ArrayType,
@@ -80,6 +96,13 @@ var shipped = []Form{
 		Replacement:  "[]T",
 		Migrator:     "memqlmigrate --rewrite=slice-syntax",
 		DeprecatedIn: "0.23.0",
+	},
+	{
+		Rule:         AllowedRoles,
+		Spelling:     "@allowedRoles(...)",
+		Replacement:  "@requiresAgentRole(...) or @requiresRank(...)",
+		Migrator:     "memqlmigrate --rewrite=allowed-roles",
+		DeprecatedIn: "0.24.0",
 	},
 }
 

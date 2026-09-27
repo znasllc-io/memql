@@ -3484,7 +3484,8 @@ against a real Postgres, db-gated).
 ## 33. `@requiresRank` and `@requiresCapability` (epic memql#4832 / memql#5166)
 
 A construct states who may CALL it. Two annotations, on a `query`, a `mutation` or
-a `logic`, and they answer different questions:
+a `logic` -- and `@requiresRank` on a `tool` too, where it judges the person the
+call is for (see below) -- and they answer different questions:
 
 <!-- corpus: 2026/examples/authoring-rules/gates/rank-and-capability.memql -->
 ```memql fragment
@@ -3526,6 +3527,19 @@ the actor's role STRING against literals. Three faults, all closed here:
 A ROLE COMPARISON IS NOT A SPEC ANY MORE. What still belongs in a context-spec
 is a caller predicate no rank and no grant can express -- a question about the
 actor themselves.
+
+### On a tool: two axes, never one list (memql#5438)
+
+A tool is called by an AGENT or by a PERSON over MCP, and asks one question of
+each. `@requiresAgentRole("assistant", ...)` asks which agent is calling -- the
+acting agent's `v1:agents:agent.role`, validated at load against that concept's
+own enum, so a roleSlug such as `system-planner` is refused rather than
+admitting no agent. `@requiresRank("<role>")` asks how senior the person the
+call is for is: the user over MCP, or the user an agent acts for. A person over
+MCP is never an agent kind. `@allowedRoles(...)` answered both questions with
+one string whose meaning depended on the path a call arrived by; it is
+deprecated, and `memqlmigrate --rewrite=allowed-roles` carries each list to the
+annotation that says what it meant.
 
 ## 34. `account="<field>"` is one argument for two field shapes (epic memql#5165)
 

@@ -1,0 +1,6 @@
+/// Open a support ticket; for the team's developers, as a list of person roles.
+@handler(type="function", name="openTicketAllowedRoles")
+@allowedRoles("owner", "admin", "developer", "writer")
+tool openSupportTicketAllowedPersonRoles {
+  title  string!  @description("The ticket's one-line title.")
+}

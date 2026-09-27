@@ -108,7 +108,7 @@ func TestADeprecatedUseNamesItsReplacementAsWritten(t *testing.T) {
 		"array(array(int))":        "[]array(int)",
 		"array(map[string]int)":    "[]map[string]int",
 	} {
-		got, ok := DeprecatedUse{Rule: deprecation.ArrayType, Line: 1, Column: 1, Text: text}.Replacement()
+		got, ok := DeprecatedUse{Rule: deprecation.ArrayType, Line: 1, Column: 1, Text: text}.Replacement(nil)
 		if !ok || got != want {
 			t.Errorf("Replacement of %q = %q, %v; want %q", text, got, ok, want)
 		}
@@ -118,7 +118,7 @@ func TestADeprecatedUseNamesItsReplacementAsWritten(t *testing.T) {
 		{Rule: deprecation.ArrayType, Text: "list(string)"},
 		{Rule: "deprecated_no_such_form", Text: "array(string)"},
 	} {
-		if got, ok := u.Replacement(); ok {
+		if got, ok := u.Replacement(nil); ok {
 			t.Errorf("Replacement of %+v = %q; want none", u, got)
 		}
 	}

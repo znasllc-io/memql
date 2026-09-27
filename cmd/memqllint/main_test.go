@@ -1208,3 +1208,46 @@ func TestRun_ADeprecatedFormWarnsOnceInEveryMode(t *testing.T) {
 		}
 	}
 }
+
+// deprecatedAllowedRolesTools is a tool gated with the deprecated
+// @allowedRoles (memql#5438) over a query the tree declares.
+const deprecatedAllowedRolesTools = `/// Find items by name; the assistant agent only.
+@handler(type="query", query="query queryItems(name: args.name)")
+@allowedRoles("assistant")
+tool findItems {
+  name  string!
+}`
+
+// TestRun_AllowedRolesIsAWarningNamingBothReplacements: @allowedRoles is in
+// its window, so it loads, the lint names where it is and what to write --
+// @requiresAgentRole or @requiresRank -- and the exit code is left alone; past
+// the window the same tree is an error.
+func TestRun_AllowedRolesIsAWarningNamingBothReplacements(t *testing.T) {
+	tree := map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  testQueries,
+		"demo/tools.memql":    deprecatedAllowedRolesTools,
+	}
+	form, _ := deprecation.Lookup(deprecation.AllowedRoles)
+	want := "demo/tools.memql:3:1: " + form.Warning()
+
+	code, out := captureRun(t, []string{writeTree(t, tree)})
+	if code != 0 {
+		t.Fatalf("run() = %d, want 0: a deprecated form loads; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "WARNING: "+want+"\n") {
+		t.Errorf("want the line %q; output:\n%s", "WARNING: "+want, out)
+	}
+	for _, name := range []string{"@requiresAgentRole", "@requiresRank", "memqlmigrate --rewrite=allowed-roles"} {
+		if !strings.Contains(form.Warning(), name) {
+			t.Errorf("the warning does not name %s: %s", name, form.Warning())
+		}
+	}
+
+	restore := deprecation.SetCurrent(form.RefusedFrom() + ".0")
+	defer restore()
+	code, out = captureRun(t, []string{writeTree(t, tree)})
+	if code != 1 || !strings.Contains(out, deprecation.AllowedRoles) || !strings.Contains(out, "@requiresAgentRole") {
+		t.Fatalf("past its window @allowedRoles must refuse naming its replacements, code=%d output:\n%s", code, out)
+	}
+}

@@ -817,6 +817,16 @@ func (p *Parser) parseAttributeArgs() (*Attribute, error) {
 
 	// Check for optional arguments: (...)
 	if p.check(TokenParenOpen) {
+		// @allowedRoles is in a deprecation window (memql#5438): it parses
+		// exactly as it always did until the window is spent, and is then
+		// refused here, naming @requiresAgentRole / @requiresRank and the
+		// rewrite. The scan that warns about it meanwhile is
+		// ScanDeprecatedUses (deprecated_uses.go).
+		if name == allowedRolesName {
+			if err := p.refuseDeprecatedForm(ruleDeprecatedAllowedRoles, atTok); err != nil {
+				return nil, err
+			}
+		}
 		p.advance()
 
 		// Empty parens: @name()
