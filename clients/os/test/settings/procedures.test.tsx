@@ -119,8 +119,9 @@ describe("Settings -> Procedures: the ladder's values", () => {
     expect(screen.getByText("1 replay")).toBeTruthy();
     expect(screen.getByText("Unused this long, it retires")).toBeTruthy();
     expect(screen.getByText("30 days")).toBeTruthy();
-    // It says why there is nothing to edit here.
-    expect(screen.getByText(/The seed writes them again on every boot/)).toBeTruthy();
+    // Why there is nothing to edit here is guidance, so it is behind the
+    // information control rather than standing under the values (rule 7).
+    expect(screen.getByText(/The seed writes them again on every boot/).closest("dialog")).not.toBeNull();
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
@@ -146,6 +147,17 @@ describe("Settings -> Procedures: the ladder's values", () => {
     h.state.error = new Error("PERMISSION_DENIED: below the reader rung");
     await renderProcedures();
     expect(await screen.findByText("PERMISSION_DENIED: below the reader rung")).toBeTruthy();
+  });
+
+  it("paints no loading words while the values arrive", async () => {
+    h.connection.query.ladderPolicyCurrent.mockImplementationOnce(() => new Promise<never>(() => {}));
+    await renderProcedures();
+    expect(screen.queryByText(/Asking the cluster|Loading/)).not.toBeNull();
+    // ...and that one is announced, not painted.
+    const status = screen.getByRole("status");
+    expect(status.getAttribute("aria-busy")).toBe("true");
+    expect(status.className).toContain("os-sr-only");
+    expect(screen.queryByText(/Asking the cluster/)).toBeNull();
   });
 
   it("explains the ladder behind the one information control", async () => {

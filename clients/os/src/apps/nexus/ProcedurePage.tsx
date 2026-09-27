@@ -1,8 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
-import { Check, RefreshCw } from "lucide-react";
+import { Check } from "lucide-react";
+import type { LiveState } from "@znasllc-io/memql-sdk-core/client";
 
 import {
-  Button,
   Caption,
   Chip,
   CopyValue,
@@ -16,6 +16,7 @@ import {
   formatMoment,
   useNow,
 } from "../../kit";
+import { InfoDetail } from "../../kit/InfoDetail";
 import { ActionBar, type Act, type ActionBarTone } from "../../kit/ActionBar";
 import { rungFrom, rungWord as reliabilityWord } from "./automations";
 import {
@@ -33,9 +34,11 @@ import {
   parameterName,
   procedureTitle,
   promotionWaiting,
+  LADDER_RUNGS,
   rungMeaning,
   rungStates,
   sentence,
+  sentenceNeedsPolicy,
   stepArgs,
   toolMeaning,
   toolWord,
@@ -70,6 +73,15 @@ import { idTail, runTitle, type ApprovalRow, type RunRow } from "./rows";
 // the ladder first and finds the record where it expects it.
 //
 // ===========================================================================
+// IT IS LIVE, SO IT SAYS NOTHING ABOUT WHEN IT LOOKED
+// ===========================================================================
+// The procedure, the policy and the approvals are all feeds (useAutomations.ts
+// has the routing rule), so a rung that moves while somebody reads the page
+// moves on it. The page is kept to the record, its state and its one act
+// (DESIGN.md rule 7): what each rung means is one tap away in the ladder's
+// information control rather than standing under every rung.
+//
+// ===========================================================================
 // ONE ACT, AND ONLY WHEN IT EXISTS (rule 12)
 // ===========================================================================
 // A procedure climbs and falls on its own evidence. The one decision a person
@@ -83,17 +95,18 @@ export interface ProcedurePageProps {
   procedure: ProcedureRow;
   /** The cluster's ladder values, or null when it published none. */
   policy: LadderPolicy | null;
-  /** The policy read's own refusal, verbatim. */
+  /** Whether `policy` is an answer -- null before the feed settles is not "none". */
+  policyKnown: boolean;
+  /** The policy feed's own refusal, verbatim. */
   policyError: string;
+  /** The learned-procedure feed's condition: behind means "last known", said once. */
+  feedState: LiveState;
   /** The pending approvals feed, to tell an open promotion from a decided one. */
   approvals: readonly ApprovalRow[];
   /** Whether that feed has answered at all -- until it has, it proves nothing. */
   approvalsKnown: boolean;
   runs: readonly RunRow[];
-  readAt: string;
-  reading: boolean;
   onBack: () => void;
-  onLookAgain: () => void;
   onOpenApproval: (approvalId: string) => void;
   onOpenRun: (runId: string) => void;
 }
@@ -101,28 +114,27 @@ export interface ProcedurePageProps {
 export function ProcedurePage({
   procedure: p,
   policy,
+  policyKnown,
   policyError,
+  feedState,
   approvals,
   approvalsKnown,
   runs,
-  readAt,
-  reading,
   onBack,
-  onLookAgain,
   onOpenApproval,
   onOpenRun,
 }: ProcedurePageProps) {
   const now = useNow(30_000);
   const waiting = promotionWaiting(p);
-  // THE CATALOG IS A READ AND THE APPROVALS ARE A FEED, so they can disagree:
-  // a promotion decided a minute ago leaves the feed at once, while this row
-  // still names it until the catalog is read again. An act that opened an
-  // approval nobody is waiting on would be a door to an empty room, so once
-  // the feed has answered it is what says whether the proposal is still open.
+  // TWO FEEDS, TWO WRITES: deciding a promotion removes the approval from the
+  // pending feed at once, and the ladder records the answer on the procedure
+  // a moment later. An act that opened an approval nobody is waiting on would
+  // be a door to an empty room, so once the approvals feed has answered it is
+  // what says whether the proposal is still open.
   const approvalOpen =
     waiting &&
     (!approvalsKnown || approvals.some((a) => idTail(a.id) === idTail(p.promotionApprovalId)));
-  const decidedSinceRead = waiting && !approvalOpen;
+  const decidedNotRecorded = waiting && !approvalOpen;
 
   const acts: Act[] = [];
   if (approvalOpen) {
@@ -142,26 +154,47 @@ export function ProcedurePage({
 
   return (
     <div className="os-nexus-automations os-nexus-procedure">
-      <Head title={procedureTitle(p)} meta={ladderWord(p.ladder)} back={{ label: "Automations", onSelect: onBack }}>
-        <Button onClick={onLookAgain} busy={reading}>
-          <RefreshCw size={13} aria-hidden />
-          Look again
-        </Button>
-      </Head>
+      {/* THE STATE IS SAID BY THE LADDER AND THE BAR, not a third time as the
+          Head's meta (rule 7). */}
+      <Head title={procedureTitle(p)} back={{ label: "Automations", onSelect: onBack }} />
 
       <div className="os-nexus-procedure-body">
+        {feedState === "degraded" || feedState === "disconnected" ? (
+          <Notice
+            tone="warn"
+            sentence={
+              feedState === "disconnected"
+                ? "Not connected to the cluster -- this is where it stood when the connection dropped."
+                : "Live updates degraded -- this is the last known state."
+            }
+          />
+        ) : null}
         <Panel label="Where it stands">
-          <Subhead>Where it stands</Subhead>
+          <div className="os-record-heading">
+            <Subhead>Where it stands</Subhead>
+            <InfoDetail title="The certification ladder">
+              <Facts>
+                {LADDER_RUNGS.map((rung) => (
+                  <Fact key={rung} label={ladderWord(rung)} value={rungMeaning(rung)} />
+                ))}
+                <Fact label="Retired" value="Unused too long; it serves nothing" />
+              </Facts>
+            </InfoDetail>
+          </div>
           {climbingRung(p.ladder) === null ? (
             <OffTheLadder procedure={p} now={now} />
           ) : (
-            <Ladder procedure={p} policy={policy} decidedSinceRead={decidedSinceRead} />
+            <Ladder
+              procedure={p}
+              policy={policy}
+              policyKnown={policyKnown && policyError === ""}
+              decidedNotRecorded={decidedNotRecorded}
+            />
           )}
           {policyError === "" ? null : (
             <Notice
               tone="warn"
-              sentence="The ladder's values could not be read."
-              next="The counts above are this procedure's own; how many each rung needs is not shown."
+              sentence="The ladder's values could not be read, so how many each rung needs is not shown."
               detail={policyError}
             />
           )}
@@ -174,42 +207,14 @@ export function ProcedurePage({
         </div>
 
         <StepsPanel procedure={p} />
-
-        <Caption>
-          {readAt === "" ? "Not read yet." : `Read ${formatFreshness(readAt, now)}.`} Not live: the
-          catalog broadcasts nothing, so this page is as of that read. The ladder moves on its own
-          evidence between reads.
-        </Caption>
       </div>
 
-      <ActionBar
-        state={ladderWord(p.ladder)}
-        detail={barDetail(p, approvalOpen, decidedSinceRead)}
-        tone={tone}
-        acts={acts}
-      />
+      {/* THE STATE WORD AND THE ONE ACT, AND NOTHING SAID TWICE (rule 7): a
+          promotion waiting, or decided and not yet recorded, is the ladder's
+          next-rung sentence to say, and "Review promotion" names what waits. */}
+      <ActionBar state={ladderWord(p.ladder)} tone={tone} acts={acts} />
     </div>
   );
-}
-
-/** What the bar says the state MEANS -- and why nothing else is offered. */
-function barDetail(p: ProcedureRow, approvalOpen: boolean, decidedSinceRead: boolean): string {
-  if (approvalOpen) return "promotion to canary is waiting for your decision";
-  if (decidedSinceRead) return "the promotion was decided; look again to see where it stands";
-  switch (p.ladder) {
-    case "candidate":
-      return "learned from your runs; it climbs on its own evidence";
-    case "shadow":
-      return "replays beside the app, which still answers every goal";
-    case "canary":
-      return "runs for real, with the app standing by to take over";
-    case "trusted":
-      return "runs without a model; the app takes over if a replay diverges";
-    case "retired":
-      return "serves nothing; a changed procedure comes back as a new candidate";
-    default:
-      return "never served";
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -219,19 +224,27 @@ function barDetail(p: ProcedureRow, approvalOpen: boolean, decidedSinceRead: boo
 function Ladder({
   procedure: p,
   policy,
-  decidedSinceRead,
+  policyKnown,
+  decidedNotRecorded,
 }: {
   procedure: ProcedureRow;
   policy: LadderPolicy | null;
-  decidedSinceRead: boolean;
+  /** False while the policy feed settles or after its read was refused. */
+  policyKnown: boolean;
+  decidedNotRecorded: boolean;
 }) {
   const states = rungStates(p.ladder);
   const at = states.findIndex((s) => s.state === "current");
-  const waiting = promotionWaiting(p) && !decidedSinceRead;
+  const waiting = promotionWaiting(p) && !decidedNotRecorded;
   const counts = evidenceCounts(p, policy);
-  const next = decidedSinceRead
-    ? "The promotion it was waiting on has been decided. Look again to see which way."
-    : nextRungSentence(p, policy);
+  // THE NEXT RUNG IS SAID FROM AN ANSWER OR NOT AT ALL. Before the policy row
+  // has arrived -- or when it could not be read -- "this cluster has not
+  // published its ladder values" would be a claim nobody checked.
+  const next = decidedNotRecorded
+    ? "The promotion it was waiting on has been decided; the ladder has not recorded the answer yet."
+    : policyKnown || !sentenceNeedsPolicy(p)
+      ? nextRungSentence(p, policy)
+      : "";
   const noParameter = p.ladder === "shadow" && freeParametersOf(p).length === 0;
 
   return (
@@ -254,7 +267,6 @@ function Ladder({
                 {state === "passed" ? <Check size={11} strokeWidth={2.5} /> : null}
               </span>
               <span className="os-nexus-ladder-name">{ladderWord(rung)}</span>
-              <span className="os-nexus-ladder-meaning">{rungMeaning(rung)}</span>
               {state === "current" ? (
                 <span className="os-nexus-ladder-now">{currentStateWords(p)}</span>
               ) : (
@@ -295,7 +307,7 @@ function Ladder({
           {noParameter ? (
             <p className="os-nexus-ladder-aside">No parameter to vary: every run passes it the same values.</p>
           ) : null}
-          <p className="os-nexus-ladder-next">{next}</p>
+          {next === "" ? null : <p className="os-nexus-ladder-next">{next}</p>}
         </div>
       </div>
     </div>
@@ -354,18 +366,13 @@ function OffTheLadder({ procedure: p, now }: { procedure: ProcedureRow; now: Dat
     const when = p.ladderChangedAt === "" ? "" : ` ${formatFreshness(p.ladderChangedAt, now)}`;
     return (
       <div className="os-nexus-ladder-off">
-        <p className="os-nexus-ladder-off-line">
-          Retired{when}. It serves nothing now, on any rung.
+        <p
+          className="os-nexus-ladder-off-line"
+          title={p.ladderChangedAt === "" ? undefined : formatMoment(p.ladderChangedAt)}
+        >
+          Retired{when}.
         </p>
-        {p.ladderReason === "" ? null : (
-          <p className="os-caption" title={p.ladderChangedAt === "" ? undefined : formatMoment(p.ladderChangedAt)}>
-            {sentence(p.ladderReason)}
-          </p>
-        )}
-        <p className="os-caption">
-          A retired procedure does not climb back. If what it learned changes, the next recording
-          that shows it brings it back as a new candidate.
-        </p>
+        {p.ladderReason === "" ? null : <p className="os-caption">{sentence(p.ladderReason)}</p>}
       </div>
     );
   }
@@ -373,11 +380,8 @@ function OffTheLadder({ procedure: p, now }: { procedure: ProcedureRow; now: Dat
     <div className="os-nexus-ladder-off">
       <p className="os-nexus-ladder-off-line">
         {p.ladder === ""
-          ? "It is not on the certification ladder, so nothing serves it."
+          ? "Not on the certification ladder, so nothing serves it."
           : `Its rung reads "${p.ladder}", which this window does not know, so it is shown as not served.`}
-      </p>
-      <p className="os-caption">
-        A procedure is served only from the canary or trusted rung, and this one stands on neither.
       </p>
     </div>
   );
@@ -446,27 +450,26 @@ function EvidencePanel({ procedure: p, now }: { procedure: ProcedureRow; now: Da
   return (
     <Panel label="Evidence">
       <Subhead>Evidence</Subhead>
-      {/* WHY IT LAST MOVED IS A SENTENCE, NOT A VALUE, so it leads the panel
-          at a sentence's measure rather than squeezing into the value column
-          beside six short facts. Off the ladder the notice above carries it
-          as its headline instead. */}
-      {!onLadder || p.ladderReason === "" ? null : (
-        <div className="os-nexus-procedure-group">
-          <p className="os-nexus-procedure-group-name">Why it last moved</p>
-          <p className="os-nexus-procedure-reason">
-            {sentence(p.ladderReason)}
-            {p.ladderChangedAt === "" ? null : (
-              <>
-                {" "}
-                <span className="os-nexus-procedure-when" title={formatMoment(p.ladderChangedAt)}>
-                  {formatFreshness(p.ladderChangedAt, now)}
-                </span>
-              </>
-            )}
-          </p>
-        </div>
-      )}
       <Facts>
+        {/* Off the ladder the notice above already says why it moved. */}
+        {!onLadder || p.ladderReason === "" ? null : (
+          <Fact
+            label="Last moved"
+            value={
+              <>
+                {sentence(p.ladderReason)}
+                {p.ladderChangedAt === "" ? null : (
+                  <>
+                    {" "}
+                    <span className="os-nexus-procedure-when" title={formatMoment(p.ladderChangedAt)}>
+                      {formatFreshness(p.ladderChangedAt, now)}
+                    </span>
+                  </>
+                )}
+              </>
+            }
+          />
+        )}
         <Fact
           label="Last replay"
           value={p.lastReplayAt === "" ? "never" : formatFreshness(p.lastReplayAt, now)}
@@ -664,11 +667,6 @@ function PreconditionsPanel({ procedure: p }: { procedure: ProcedureRow }) {
               </Facts>
             </div>
           )}
-          <Caption>
-            {checked
-              ? "A check that does not hold sends the goal to the app instead. What is only recorded describes where the app ran, not where a replay runs."
-              : "What is only recorded describes where the app ran, not where a replay runs."}
-          </Caption>
         </>
       )}
     </Panel>
@@ -704,7 +702,6 @@ function footprintWords(p: ProcedureRow): string {
 }
 
 function StepsPanel({ procedure: p }: { procedure: ProcedureRow }) {
-  const hasHoles = p.holes.length > 0;
   return (
     <Panel label="Steps">
       <Subhead>Steps</Subhead>
@@ -746,12 +743,6 @@ function StepsPanel({ procedure: p }: { procedure: ProcedureRow }) {
           })}
         </ol>
       )}
-      {hasHoles ? (
-        <Caption>
-          A value in a chip changes from goal to goal. Its name is the goal input that supplies it;
-          &quot;from step&quot; is taken from an earlier step&apos;s result.
-        </Caption>
-      ) : null}
     </Panel>
   );
 }

@@ -305,8 +305,10 @@ function promotionRow(over: Record<string, unknown> = {}) {
     runId: "run-shadow",
     stepKey: "",
     artifactHash: "sha256:proc-v1",
+    // THE ENGINE'S WORDING: the goal the procedure serves, quoted -- never
+    // the construct's machine name.
     question:
-      "Promote procedureReconcileLedger to canary? It matched the app 5 times beside it, and would now run for real with the app standing by.",
+      'Promote "Reconcile last month\'s ledger against the bank export" to canary? It matched the app 5 times beside it, and would now run for real with the app standing by.',
     options: [
       { label: "Promote to canary", value: "approved" },
       { label: "Keep it in shadow", value: "rejected" },
@@ -330,21 +332,47 @@ function promotionRow(over: Record<string, unknown> = {}) {
   });
 }
 
+/** The question, found by its opening: the goal it serves, quoted. */
+const PROMOTE_QUESTION = /^Promote "Reconcile last month's ledger against the bank export" to canary\?/;
+
 describe("a promotion", () => {
-  it("is named for what it decides, and says what deciding it does", async () => {
+  it("is named for what it decides, and says it once", async () => {
     mount(fakeConnection({ approvals: [promotionRow()] }));
     expect(await screen.findAllByText("Promotion")).not.toHaveLength(0);
-    fireEvent.click(await screen.findByText(/Promote procedureReconcileLedger to canary\?/));
+    const line = await screen.findByText(PROMOTE_QUESTION);
+    // The row does not name the goal a second time beside its own question.
+    const row = line.closest("button");
+    expect((row?.textContent ?? "").split("Reconcile last month's ledger").length - 1).toBe(1);
+    fireEvent.click(line);
+    await screen.findByRole("region", { name: "What you are promoting" });
+    // The question already says what promoting does; the kind's meaning is
+    // not stood under it, nor repeated on the bar.
     expect(
-      (await screen.findAllByText(
+      screen.queryByText(
         "A learned procedure matched the app often enough to run for real, with the app standing by.",
-      )).length,
-    ).toBeGreaterThan(0);
+      ),
+    ).toBeNull();
+  });
+
+  it("carries its evidence in one panel, not also in the generic classifier panel", async () => {
+    mount(fakeConnection({ approvals: [promotionRow()] }));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
+    await screen.findByRole("region", { name: "What you are promoting" });
+    expect(screen.queryByRole("region", { name: "Why you were asked" })).toBeNull();
+    expect(screen.queryByText("The classifier's evidence")).toBeNull();
+    expect(screen.queryByText("ladder.promotion")).toBeNull();
+  });
+
+  it("keeps the classifier's evidence on every other kind", async () => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "a1" })] }));
+    fireEvent.click(await screen.findByText("Step sendInvoice"));
+    const why = await screen.findByRole("region", { name: "Why you were asked" });
+    expect(within(why).getByText("The classifier's evidence")).toBeTruthy();
   });
 
   it("carries the construct version AND the artifact hash on the card", async () => {
     mount(fakeConnection({ approvals: [promotionRow()] }));
-    fireEvent.click(await screen.findByText(/Promote procedureReconcileLedger to canary\?/));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
     const card = await screen.findByRole("region", { name: "What you are promoting" });
     expect(within(card).getByText("Construct version")).toBeTruthy();
     expect(within(card).getByText("Artifact hash")).toBeTruthy();
@@ -362,7 +390,7 @@ describe("a promotion", () => {
         learnedProcedures: [procedureRow({ id: "p1" })],
       }),
     );
-    fireEvent.click(await screen.findByText(/Promote procedureReconcileLedger to canary\?/));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
     const card = await screen.findByRole("region", { name: "What you are promoting" });
     expect(within(card).getByText("5 in a row")).toBeTruthy();
     // The count leads, so "month 2" is never read as a value of month.
@@ -376,7 +404,7 @@ describe("a promotion", () => {
     const { navigate } = mount(
       fakeConnection({ approvals: [promotionRow()], learnedProcedures: [procedureRow({ id: "p1" })] }),
     );
-    fireEvent.click(await screen.findByText(/Promote procedureReconcileLedger to canary\?/));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
     const card = await screen.findByRole("region", { name: "What you are promoting" });
     fireEvent.click(
       within(card).getByRole("button", { name: "Reconcile last month's ledger against the bank export" }),
@@ -387,7 +415,7 @@ describe("a promotion", () => {
   it("names its acts with the outcomes the ladder offered, and decides through the one verb", async () => {
     const conn = fakeConnection({ approvals: [promotionRow()] });
     mount(conn);
-    fireEvent.click(await screen.findByText(/Promote procedureReconcileLedger to canary\?/));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
     const bar = screen.getByRole("group", { name: "What you can do with this" });
     // Declining never claims a step fails: the shadow run already finished.
     const keep = within(bar).getByRole("button", { name: /^Keep it in shadow: it goes on replaying beside the app/ });
@@ -403,7 +431,7 @@ describe("a promotion", () => {
       writeError: new Error("work: the approval's artifact changed since it was raised"),
     });
     mount(conn);
-    fireEvent.click(await screen.findByText(/Promote procedureReconcileLedger to canary\?/));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
     fireEvent.click(await screen.findByText("Promote to canary"));
     const bar = screen.getByRole("group", { name: "What you can do with this" });
     expect(
@@ -420,13 +448,13 @@ describe("a promotion", () => {
         learnedProcedures: [procedureRow({ id: "p1", procedureHash: "sha256:proc-v2" })],
       }),
     );
-    fireEvent.click(await screen.findByText(/Promote procedureReconcileLedger to canary\?/));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
     expect(await screen.findByText("This procedure has changed since it was proposed.")).toBeTruthy();
   });
 
   it("does not print its structured subject as a key/value dump", async () => {
     mount(fakeConnection({ approvals: [promotionRow()] }));
-    fireEvent.click(await screen.findByText(/Promote procedureReconcileLedger to canary\?/));
+    fireEvent.click(await screen.findByText(PROMOTE_QUESTION));
     await screen.findByRole("region", { name: "What you are promoting" });
     expect(screen.queryByText("What it says")).toBeNull();
     expect(document.body.textContent ?? "").not.toContain('{"s0.command.2"');

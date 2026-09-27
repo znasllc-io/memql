@@ -121,11 +121,11 @@ export function fakeConnection(seed: FakeSeed = {}) {
         rowsResult(seed.accounts ?? []),
       ),
       workStepsForOwnerRun: read(seed.steps),
-      // The authoring catalog. NOT a feed -- `v1:authoring:construct` carries
-      // no broadcast routing rule -- so the section reads it and dates itself.
+      // The authoring catalog's three SEEDS. Each is a live collection's first
+      // read -- `v1:authoring:*` broadcasts -- so a test moves a row by emitting
+      // on `subscriptions`, and a second call here would be a re-read nobody
+      // should need.
       cataloguedConstructsForOwner: read(seed.constructs),
-      // The same concept, read the same way: the learned procedures and the
-      // seeded policy singleton share the catalog's one "Look again".
       learnedProceduresForOwner: read(seed.learnedProcedures),
       ladderPolicyCurrent: read(seed.ladderPolicy),
       setConstructStatus: write(),
@@ -267,6 +267,8 @@ export function procedureRow(over: Partial<Row> & { id: string }): Row {
     ownerUserId: "v1:identity:user:me",
     name: "procedureReconcileLedger",
     kind: "automation",
+    // The read's own narrowing, so an emitted update stays in the feed's scope.
+    targetNamespace: "procedure",
     status: "draft",
     ladder: "shadow",
     shadowMatches: 3,

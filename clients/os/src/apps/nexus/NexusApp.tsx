@@ -13,7 +13,7 @@ import { RunsSection } from "./RunsSection";
 import { defaultRunId } from "./world";
 import { NEXUS_APP_ID, NEXUS_LOG_CONCEPTS } from "./concepts";
 import { PROCEDURE_PROMOTION } from "./ladder";
-import { useAutomations } from "./useAutomations";
+import { useAutomationFeeds } from "./useAutomations";
 import {
   useCancelGoal,
   useCreateGoal,
@@ -76,9 +76,9 @@ import { useSession } from "../../chrome/access";
 // they were. A learned procedure's page is the fourth (epic memql#5408): its
 // promotion is decided in Approvals, and its approval card links back to it.
 //
-// THE CATALOG IS READ HERE TOO, for the same reason: the Automations list and
-// a promotion's approval card both read it, and two reads of one catalog at
-// two moments would be two answers about where a procedure stands.
+// THE CATALOG'S FEEDS ARE HELD HERE TOO, for the same reason: the Automations
+// list and a promotion's approval card both follow them, and two collections
+// over one catalog would be free to disagree about where a procedure stands.
 
 /** The concepts this app owns, for its Logs section's subject scope. */
 const LOG_CONCEPTS = NEXUS_LOG_CONCEPTS;
@@ -137,21 +137,18 @@ export function NexusApp({
     return byId;
   }, [goalRows]);
 
-  // THE CATALOG, READ WHILE A VISIBLE SURFACE NEEDS IT (see useAutomations).
-  // Automations always does; Approvals does only while a promotion waits in
-  // it, because only that card names a procedure it has to find.
-  const catalog = useAutomations(
+  // THE CATALOG, FOLLOWED WHILE A VISIBLE SURFACE NEEDS IT (see
+  // useAutomations). Automations always does; Approvals does only while a
+  // promotion waits in it, because only that card names a procedure it has to
+  // find.
+  const feeds = useAutomationFeeds(
     sectionId === "automations" ||
       (sectionId === "approvals" && approvalRows.some((a) => a.kind === PROCEDURE_PROMOTION)),
   );
-  // Which procedure's page is open, and WHEN it was asked for. A link can
-  // name a procedure the catalog in hand predates -- the page then waits for
-  // a read that started after the ask before it says the procedure is not
-  // there, rather than judging it against rows read before it existed.
-  const [openProcedure, setOpenProcedure] = useState<{ id: string; since: string }>({
-    id: "",
-    since: "",
-  });
+  // Which procedure's page is open. A link naming one the feed does not hold
+  // yet is kept until the feed has answered; the section then opens it or says
+  // it is not there.
+  const [openProcedureId, setOpenProcedureId] = useState("");
 
   function openRun(runId: string) {
     if (runId.trim() === "") return;
@@ -177,12 +174,7 @@ export function NexusApp({
 
   function openProcedureById(constructId: string) {
     if (constructId.trim() === "") return;
-    const held = catalog.procedures.some((p) => idTail(p.id) === idTail(constructId));
-    setOpenProcedure({ id: constructId, since: held ? "" : new Date().toISOString() });
-    // A PROCEDURE THE CATALOG IN HAND DOES NOT HOLD is looked for again rather
-    // than declared missing: the link came from a live row, and the read is
-    // the one that is behind.
-    if (!held) catalog.read();
+    setOpenProcedureId(constructId);
     askContext(`nexus procedure:${idTail(constructId)}`);
     navigate("automations");
   }
@@ -256,13 +248,12 @@ export function NexusApp({
   if (sectionId === "automations") {
     return (
       <AutomationsSection
-        catalog={catalog}
+        feeds={feeds}
         selectedId={selectedAutomationId}
         onSelect={setSelectedAutomationId}
-        openProcedureId={openProcedure.id}
-        openProcedureSince={openProcedure.since}
+        openProcedureId={openProcedureId}
         onOpenProcedure={openProcedureById}
-        onCloseProcedure={() => setOpenProcedure({ id: "", since: "" })}
+        onCloseProcedure={() => setOpenProcedureId("")}
         approvals={approvalRows}
         approvalsKnown={approvals.snapshot.state === "live"}
         runs={runRows}
@@ -280,12 +271,8 @@ export function NexusApp({
         selectedApprovalId={selectedApprovalId}
         onSelectApproval={setSelectedApprovalId}
         onOpenRun={openRun}
-        procedures={catalog.procedures}
+        procedures={feeds.procedureRows}
         onOpenProcedure={openProcedureById}
-        // A DECIDED PROMOTION MOVES THE LADDER, and the catalog is a read: this
-        // window caused the change, so it looks again rather than showing the
-        // procedure still waiting on a decision already made.
-        onPromotionDecided={catalog.read}
       />
     );
   }

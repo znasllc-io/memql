@@ -15,6 +15,7 @@ const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings"
 const { approvalRow, fakeConnection, ladderPolicyRow, procedureRow, runRow, withSession } = await import(
   "./harness"
 );
+const { CONSTRUCT_CONCEPT } = await import("../../src/apps/nexus/concepts");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -105,8 +106,9 @@ describe("the ladder", () => {
     expect(within(rung("candidate")).getByText("Passed")).toBeTruthy();
     expect(within(rung("canary")).getByText("Not reached")).toBeTruthy();
     expect(within(rung("trusted")).getByText("Not reached")).toBeTruthy();
-    // Every rung says what it means.
-    expect(within(rung("trusted")).getByText("Runs without a model")).toBeTruthy();
+    // What each rung means is one tap away, not stood under every rung.
+    expect(within(rung("trusted")).queryByText("Runs without a model")).toBeNull();
+    expect(screen.getByRole("button", { name: "About The certification ladder" })).toBeTruthy();
     // Retired is not a fifth rung.
     expect(within(screen.getByRole("list", { name: /The certification ladder/ })).getAllByRole("listitem")).toHaveLength(4);
   });
@@ -142,7 +144,7 @@ describe("the ladder", () => {
   it("invents no threshold when the cluster published no policy", async () => {
     await openPage(fakeConnection({ learnedProcedures: [SHADOW], ladderPolicy: [] }));
     expect(
-      screen.getByText("How far it has to go is not shown: this cluster has not published its ladder values."),
+      await screen.findByText("How far it has to go is not shown: this cluster has not published its ladder values."),
     ).toBeTruthy();
     expect(screen.getByRole("img", { name: "Matches beside the app: 3" })).toBeTruthy();
     expect(screen.queryByText(/of 5/)).toBeNull();
@@ -155,8 +157,21 @@ describe("the ladder", () => {
         ladderPolicy: new Error("PERMISSION_DENIED: below the reader rung"),
       }),
     );
-    expect(screen.getByText("PERMISSION_DENIED: below the reader rung")).toBeTruthy();
+    expect(await screen.findByText("PERMISSION_DENIED: below the reader rung")).toBeTruthy();
     expect(screen.getByRole("img", { name: "Matches beside the app: 3" })).toBeTruthy();
+    // A refused read is not an absent policy: the page does not say the
+    // cluster published none.
+    expect(screen.queryByText(/has not published its ladder values/)).toBeNull();
+  });
+
+  it("says nothing about the next rung until the policy has answered", async () => {
+    const conn = fakeConnection({ learnedProcedures: [SHADOW], ladderPolicy: [ladderPolicyRow()] });
+    // The policy read never settles in this test.
+    conn.query.ladderPolicyCurrent = vi.fn(() => new Promise<never>(() => {}));
+    await openPage(conn);
+    expect(screen.getByRole("img", { name: "Matches beside the app: 3" })).toBeTruthy();
+    expect(screen.queryByText(/has not published its ladder values/)).toBeNull();
+    expect(screen.queryByText(/^It needs/)).toBeNull();
   });
 
   it("counts clean replays on a canary toward trust", async () => {
@@ -217,7 +232,8 @@ describe("retired is a notice, not a rung", () => {
       ladderReason: "unused for 31 days, longer than the 30-day window, so it retires",
     });
     mountPage(fakeConnection({ learnedProcedures: [retired], ladderPolicy: [ladderPolicyRow()] }));
-    expect(await screen.findByText(/It serves nothing now, on any rung/)).toBeTruthy();
+    // When, as a fact; why, in the ladder's own words -- and nothing more.
+    expect(await screen.findByText(/^Retired .+ ago\.$/)).toBeTruthy();
     expect(screen.getByText("Unused for 31 days, longer than the 30-day window, so it retires.")).toBeTruthy();
     expect(screen.queryByRole("list", { name: /The certification ladder/ })).toBeNull();
     const bar = screen.getByRole("group", { name: "What you can do with this" });
@@ -255,14 +271,32 @@ describe("the one act", () => {
     expect(screen.queryByText("Retire it")).toBeNull();
   });
 
-  it("withdraws the act once the live feed shows the promotion was decided", async () => {
-    // The catalog still names the approval; the approvals feed, which is live,
-    // no longer holds it -- so it was decided since the catalog was read.
+  it("withdraws the act once the approvals feed shows the promotion was decided", async () => {
+    // The procedure still names the approval; the approvals feed no longer
+    // holds it -- decided, and the ladder has not written the answer yet.
     await openPage(
       fakeConnection({ learnedProcedures: [WAITING], ladderPolicy: [ladderPolicyRow()], approvals: [] }),
     );
     await waitFor(() => expect(screen.queryByRole("button", { name: /Review promotion/ })).toBeNull());
-    expect(screen.getByText(/The promotion it was waiting on has been decided/)).toBeTruthy();
+    expect(
+      screen.getByText("The promotion it was waiting on has been decided; the ladder has not recorded the answer yet."),
+    ).toBeTruthy();
+  });
+
+  it("follows the ladder when it records the answer, without a re-read", async () => {
+    const conn = fakeConnection({ learnedProcedures: [WAITING], ladderPolicy: [ladderPolicyRow()], approvals: [] });
+    await openPage(conn);
+    await screen.findByText(/has not recorded the answer yet/);
+    act(() => {
+      conn.subscriptions.emit(
+        CONSTRUCT_CONCEPT,
+        procedureRow({ id: "p1", ladder: "canary", shadowMatches: 5, promotionApprovalId: "" }),
+      );
+    });
+    await waitFor(() => expect(rung("canary").getAttribute("aria-current")).toBe("step"));
+    expect(within(rung("shadow")).getByText("Passed")).toBeTruthy();
+    expect(screen.queryByText(/has not recorded the answer yet/)).toBeNull();
+    expect(conn.query.learnedProceduresForOwner).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -384,7 +418,7 @@ describe("the record", () => {
 });
 
 describe("a link to a procedure the catalog does not hold", () => {
-  it("looks again before it says so, and then lets the link go", async () => {
+  it("says so once the feed has answered, and then lets the link go", async () => {
     const conn = fakeConnection({ learnedProcedures: [SHADOW], ladderPolicy: [ladderPolicyRow()] });
     mountPage(conn, "nope");
     expect(await screen.findByText("That procedure is not in your catalog.")).toBeTruthy();

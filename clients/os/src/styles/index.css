@@ -10412,24 +10412,6 @@ a.os-button {
   flex-direction: column;
   min-height: 100%;
 }
-/* The catalog is a PLAIN list, not a LiveList: `v1:authoring:construct` has no
- * routing rule to subscribe to. So it needs the reset every list in this shell
- * gets from `.os-livelist-rows` and does not inherit here -- without it the
- * browser draws its own bullets and indent, which no other list in the OS
- * does. Found by looking at it; jsdom applies no stylesheet at all. */
-.os-nexus-catalog {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.os-nexus-row-sub {
-  color: var(--os-muted);
-  font-size: var(--os-text-xs);
-}
 .os-nexus-rung-line {
   margin: 0 0 10px;
   font-size: var(--os-text-base);
@@ -15184,13 +15166,6 @@ button.os-cluster-mesh-peer:focus-visible {
   font-size: var(--os-text-xs);
   color: var(--os-muted);
 }
-.os-nexus-procedure-reason {
-  margin: 0;
-  max-width: 62ch;
-  font-size: var(--os-text-base);
-  line-height: 1.45;
-  color: var(--os-ink);
-}
 /* One label column across both groups, so the values line up down the panel
  * rather than each group settling its own. */
 .os-nexus-procedure-group .os-facts {
@@ -15286,12 +15261,6 @@ button.os-cluster-mesh-peer:focus-visible {
   font-size: var(--os-text-md);
   font-weight: 600;
   color: var(--os-ink);
-}
-.os-nexus-ladder-meaning {
-  font-size: var(--os-text-sm);
-  line-height: 1.4;
-  color: var(--os-muted);
-  text-wrap: pretty;
 }
 .os-nexus-ladder-now {
   margin-top: 5px;
@@ -15666,10 +15635,18 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-nexus-automations .os-caption {
   max-width: 90ch;
 }
-/* A control's label is one line: in a narrow window "Look again" broke into
- * two words stacked inside its own button. The heading wraps instead. */
-.os-nexus-automations .os-head-actions .os-button {
-  white-space: nowrap;
+/* Record rows draw their own hairline; the live list's row gap would put a
+ * sliver of page between every pair of them (the Cluster Mesh list's rule). */
+.os-nexus-automations .os-livelist-rows {
+  gap: 0;
+}
+/* THE LIST SCROLLS IN ITS OWN COLUMN (rule 11). In a wrapping split a flex
+ * line is as tall as its tallest item, so a long list -- or a short one made
+ * tall by the detail beside it in a narrow window -- grew past the window and
+ * ran under the action bar, its rows painting over the bar's own words. The
+ * aside was already bounded this way; the list was not. */
+.os-nexus-automations .os-nexus-column {
+  max-height: 100%;
 }
 /* An authored automation's detail stands BESIDE the list, so the row it
  * belongs to says so in the shell's one selection language. The flat record
@@ -15684,9 +15661,6 @@ button.os-cluster-mesh-peer:focus-visible {
   display: grid;
   gap: 12px;
   align-content: start;
-}
-.os-settings-procedures > .os-caption {
-  margin: 0;
 }
 .os-settings-procedures-absent {
   margin: 0;

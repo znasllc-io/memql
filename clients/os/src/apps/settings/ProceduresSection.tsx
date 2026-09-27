@@ -1,4 +1,4 @@
-import { Caption, Fact, Facts, Head, Notice, Panel, Subhead } from "../../kit";
+import { Fact, Facts, Head, Notice, Panel, Subhead } from "../../kit";
 import { InfoDetail } from "../../kit/InfoDetail";
 import { useSession } from "../../chrome/access";
 import type { LadderPolicy } from "../nexus/ladder";
@@ -17,11 +17,14 @@ import { useLadderPolicy } from "./useLadderPolicy";
 // rather than as a bare field name and a number.
 //
 // ===========================================================================
-// NO ACTS, AND THE PAGE SAYS WHY
+// NO ACTS, AND THE INFORMATION CONTROL SAYS WHY
 // ===========================================================================
 // The seed writes the row again on every boot, so a value edited anywhere but
 // the seed would not survive the next restart. Offering a field here would be
-// offering a change that silently reverts; the values move with a deploy.
+// offering a change that silently reverts; the values move with a deploy. That
+// is general guidance rather than something to decide now, so it lives behind
+// the section's information control with the ladder itself (DESIGN.md rule 7),
+// and the page is the values.
 //
 // ===========================================================================
 // AN ABSENT ROW IS SAID, NEVER FILLED IN
@@ -50,16 +53,11 @@ export function ProceduresSection() {
   return (
     <div className="os-settings os-settings-procedures">
       <Head title="Procedures" />
-      <p className="os-caption">
-        A learned procedure is work the system watched an app do more than once, turned into steps
-        it can replay without a model. It earns that on its own evidence, and asks you once.
-      </p>
 
       {read.state === "error" ? (
         <Notice
           tone="warn"
           sentence={`The cluster declined this read for ${access?.role || "your role"}.`}
-          next="Without it this page cannot say how much evidence each rung takes."
           detail={read.error}
         />
       ) : null}
@@ -69,8 +67,10 @@ export function ProceduresSection() {
           <Subhead>Certification ladder</Subhead>
           <InfoDetail title="The certification ladder">
             <p>
-              A learned procedure starts as a candidate. In shadow it replays beside the app, which
-              still answers, and every step is compared with what the app did.
+              A learned procedure is work the system watched an app do more than once, turned into
+              steps it can replay without a model. It starts as a candidate. In shadow it replays
+              beside the app, which still answers, and every step is compared with what the app
+              did.
             </p>
             <p>
               When it has matched enough times, across enough different values, promotion is put
@@ -81,31 +81,28 @@ export function ProceduresSection() {
               Failed replays demote it back to shadow without asking, and a procedure left unused
               retires. A changed procedure starts again as a new candidate.
             </p>
+            <p>
+              These values are the cluster&apos;s seeded policy. The seed writes them again on every
+              boot, so they change with a deploy rather than here; a cluster whose engine has not
+              written them yet uses built-in values it does not publish.
+            </p>
           </InfoDetail>
         </div>
         {read.state === "loading" ? (
-          <Caption>Asking the cluster.</Caption>
+          // THE SHAPE OF THE WAIT IS SILENT (DESIGN.md, "Loading is the shape
+          // of the content, never a message"): announced, never painted.
+          <p className="os-sr-only" role="status" aria-busy="true">
+            Loading the ladder&apos;s values
+          </p>
         ) : read.state === "error" ? null : read.policy === null ? (
+          // STATED WITHOUT THE NUMBERS. The engine does fall back to values of
+          // its own; printing them would present its fallback as this
+          // cluster's policy.
           <p className="os-settings-procedures-absent">
             This cluster has not published its ladder policy yet, so no values are shown.
           </p>
         ) : (
           <PolicyFacts policy={read.policy} />
-        )}
-        {read.state === "ready" && read.policy === null ? (
-          // STATED WITHOUT THE NUMBERS. The engine does fall back to values of
-          // its own, and saying so tells a person the ladder still works;
-          // printing them would present its fallback as this cluster's policy.
-          <Caption>
-            The seed writes this row on every boot, so a cluster without it is running an engine
-            that has not written it yet. Until it does, the ladder uses the engine&apos;s built-in
-            values.
-          </Caption>
-        ) : (
-          <Caption>
-            These are the cluster&apos;s seeded values. The seed writes them again on every boot, so
-            they change with a deploy rather than here.
-          </Caption>
         )}
       </Panel>
     </div>

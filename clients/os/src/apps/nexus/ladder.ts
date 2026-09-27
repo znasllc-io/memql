@@ -460,6 +460,37 @@ export function zeroCountWord(ladder: string, earnedOn: LadderRung): string | nu
   return LADDER_RUNGS.indexOf(at) > LADDER_RUNGS.indexOf(earnedOn) ? null : "none yet";
 }
 
+/** A rung's place, for ordering: trusted highest, off the ladder below every rung. */
+export function ladderRank(ladder: string): number {
+  const at = climbingRung(ladder);
+  return at === null ? -1 : LADDER_RUNGS.indexOf(at);
+}
+
+/**
+ * What a person would call a change to a learned procedure: it moved to another
+ * rung, or a promotion arrived or was answered.
+ *
+ * NEVER ITS EVIDENCE. The counts, the last replay and the reason the ladder
+ * last wrote move on every shadow comparison and every replay, and a row that
+ * rang on them would ring on every evidence tick -- the strobe the OS README's
+ * arrival-cue rule exists to prevent ("a heartbeat is not news"). The marks
+ * and the freshness already show those continuously.
+ */
+export function procedureFingerprint(p: ProcedureRow): string {
+  return `${p.ladder}|${p.promotionApprovalId}`;
+}
+
+/**
+ * Whether the next-rung sentence needs the policy's numbers.
+ *
+ * A candidate's gate is code and a waiting promotion is a fact about the row,
+ * so both can be said before the policy row has arrived -- or when it could not
+ * be read. Every other rung's sentence is counted against the policy.
+ */
+export function sentenceNeedsPolicy(p: ProcedureRow): boolean {
+  return p.ladder !== "candidate" && !promotionWaiting(p) && climbingRung(p.ladder) !== null;
+}
+
 /** Whether a promotion is open on this procedure -- the one thing it waits on you for. */
 export function promotionWaiting(p: ProcedureRow): boolean {
   return p.ladder === "shadow" && p.promotionApprovalId.trim() !== "";

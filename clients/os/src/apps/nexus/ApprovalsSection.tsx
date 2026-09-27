@@ -94,8 +94,6 @@ export interface ApprovalsSectionProps {
    */
   procedures?: readonly ProcedureRow[];
   onOpenProcedure?: (constructId: string) => void;
-  /** Called once a promotion is decided, so the ladder the catalog shows is read again. */
-  onPromotionDecided?: () => void;
 }
 
 export function ApprovalsSection({
@@ -107,7 +105,6 @@ export function ApprovalsSection({
   onOpenRun,
   procedures = [],
   onOpenProcedure,
-  onPromotionDecided,
 }: ApprovalsSectionProps) {
   const [search, setSearch] = useState("");
   const [choice, setChoice] = useState("");
@@ -180,11 +177,9 @@ export function ApprovalsSection({
       }
     } else {
       const labels = decisionLabels(selected);
-      const promotion = selected.kind === PROCEDURE_PROMOTION;
-      const decideIt = (decision: "approved" | "rejected") =>
-        void decide.decide(selected.id, decision).then((ok) => {
-          if (ok && promotion) onPromotionDecided?.();
-        });
+      // A DECIDED PROMOTION MOVES THE LADDER ON ITS OWN: the procedure is a
+      // feed, so its page and its row follow the answer without a re-read.
+      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision);
       acts.push({
         label: labels.reject,
         busy: decide.deciding === idTail(selected.id),
@@ -275,7 +270,10 @@ export function ApprovalsSection({
               ? hasOptions
                 ? "pick an answer above to send it"
                 : "write an answer above to send it"
-              : approvalKindMeaning(selected.kind)
+              : selected.kind === PROCEDURE_PROMOTION
+                ? // SAID ONCE: a promotion's question already says what it does.
+                  undefined
+                : approvalKindMeaning(selected.kind)
           }
           tone={selected.decision === "" ? "paused" : "none"}
           acts={acts}
@@ -409,7 +407,8 @@ function ApprovalDetail({
     <>
       <Panel label="What is being asked">
         <p className="os-nexus-approval-ask">{approvalSubjectLine(approval)}</p>
-        <Caption>{approvalKindMeaning(approval.kind)}</Caption>
+        {/* SAID ONCE: a promotion's question already says what promoting does. */}
+        {approval.kind === PROCEDURE_PROMOTION ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
 
         {isFeedback ? (
           approval.options.length > 0 ? (
@@ -496,24 +495,29 @@ function ApprovalDetail({
       {/* THE EVIDENCE, VERBATIM AND IN THE DATA VOICE. This is the classifier's
           own account of why the run stopped rather than carrying on, and the
           rule id is where somebody goes to change the policy. A paraphrase
-          would be this window's opinion about a decision the engine made. */}
-      <Panel label="Why you were asked">
-        <Subhead>The classifier's evidence</Subhead>
-        <Facts>
-          <Fact label="Tier" value={approval.evidenceTier} mono />
-          <Fact label="Reason" value={approval.evidenceReason} />
-          <Fact label="Rule" value={approval.evidenceRuleId} mono />
-          <Fact label="Source" value={approval.evidenceSource} mono />
-        </Facts>
-        {approval.evidenceTier === "" &&
-        approval.evidenceReason === "" &&
-        approval.evidenceRuleId === "" ? (
-          <Caption>
-            No evidence was recorded with this one. That is a fact about the row rather than about
-            the decision -- it does not mean the gate fired for no reason.
-          </Caption>
-        ) : null}
-      </Panel>
+          would be this window's opinion about a decision the engine made.
+          SAID ONCE on a promotion: "What you are promoting" carries its
+          evidence -- the matches and the bindings the ladder counted -- and
+          the generic panel would repeat the same reason in the data voice. */}
+      {approval.kind === PROCEDURE_PROMOTION ? null : (
+        <Panel label="Why you were asked">
+          <Subhead>The classifier's evidence</Subhead>
+          <Facts>
+            <Fact label="Tier" value={approval.evidenceTier} mono />
+            <Fact label="Reason" value={approval.evidenceReason} />
+            <Fact label="Rule" value={approval.evidenceRuleId} mono />
+            <Fact label="Source" value={approval.evidenceSource} mono />
+          </Facts>
+          {approval.evidenceTier === "" &&
+          approval.evidenceReason === "" &&
+          approval.evidenceRuleId === "" ? (
+            <Caption>
+              No evidence was recorded with this one. That is a fact about the row rather than about
+              the decision -- it does not mean the gate fired for no reason.
+            </Caption>
+          ) : null}
+        </Panel>
+      )}
 
       <Panel label="What it is attached to">
         <Facts>
@@ -620,10 +624,9 @@ function ApprovalDetail({
  */
 function approvalContext(approval: ApprovalRow, run: RunRow | null): string {
   if (approval.kind === "routingReview") return "the nightly routing review";
-  const promotion = promotionSubject(approval);
-  if (promotion !== null) {
-    return promotion.title.trim() || promotion.constructName.trim() || "a learned procedure";
-  }
+  // SAID ONCE: a promotion's question names the goal the procedure serves, so
+  // the row does not name it a second time beside it.
+  if (approval.kind === PROCEDURE_PROMOTION) return "";
   return run === null ? "a run" : runTitle(run);
 }
 
@@ -741,14 +744,6 @@ function PromotionPanel({
           }
         />
       </Facts>
-      <Caption>
-        {procedure !== null && !changed && procedure.procedureHash === approval.artifactHash
-          ? "This is the version in your catalog now. "
-          : ""}
-        The decision is about exactly this version: promoted, it runs for real with the app
-        standing by to take over. If the procedure changes before the decision reaches it, the
-        decision is refused rather than carried over.
-      </Caption>
     </Panel>
   );
 }

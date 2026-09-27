@@ -1,5 +1,7 @@
 import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { flatten } from "../../kit/rows";
+
 // The automations catalog, as rows.
 //
 // ===========================================================================
@@ -33,7 +35,11 @@ export interface AutomationRow {
   createdAt: string;
 }
 
-export function automationFromRow(row: Row): AutomationRow {
+export function automationFromRow(wire: Row): AutomationRow {
+  // A seed row arrives shape-flattened and a folded event carries its fields
+  // twice, flattened and under `payload`; a re-read row carries them only
+  // under `payload`. One projection over all three.
+  const row = flatten(wire);
   return {
     id: rowString(row, "id"),
     name: rowString(row, "name"),
@@ -51,7 +57,7 @@ export function automationFromRow(row: Row): AutomationRow {
 }
 
 export function isAutomation(row: Row): boolean {
-  return rowString(row, "kind") === "automation";
+  return rowString(flatten(row), "kind") === "automation";
 }
 
 /**
@@ -87,6 +93,22 @@ export function rungFrom(reliability: number, reinforceCount: number): Rung {
   if (reliability >= 0.7) return "good";
   if (reliability >= 0.4) return "fair";
   return "poor";
+}
+
+/** A rung's place, for ordering: proven highest. */
+export function rungRank(value: Rung): number {
+  switch (value) {
+    case "proven":
+      return 4;
+    case "good":
+      return 3;
+    case "fair":
+      return 2;
+    case "poor":
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 export function rungWord(value: Rung): string {
@@ -151,16 +173,17 @@ export function statusMeaning(status: string): string {
 }
 
 /**
- * The fingerprint the arrival cue reads.
+ * The fingerprint the arrival cue reads: what a person would call a change to
+ * an authored automation -- a rename, arming or retiring it, or crossing onto
+ * another rung.
  *
- * NO LIVENESS FIELD, and here that rule bites differently than elsewhere: this
- * section is a READ rather than a feed, so there is no cue at all -- but the
- * fingerprint is still what a re-read compares to decide whether anything
- * moved, and naming `lastReinforced` would report a change every time a run
- * touched the ladder without changing where the template stands.
+ * NOT ITS RELIABILITY, ITS RUN COUNT OR `lastReinforced`. All three move on
+ * every run it serves, so a row that rang on them would ring for as long as
+ * anything used it -- the README's "a heartbeat is not news". The rung word
+ * moves only when the template has actually earned or lost standing.
  */
 export function automationFingerprint(automation: AutomationRow): string {
-  return [automation.name, automation.status, rung(automation), automation.reinforceCount].join("|");
+  return [automation.name, automation.status, rung(automation)].join("|");
 }
 
 export function automationMatches(automation: AutomationRow, search: string): boolean {
