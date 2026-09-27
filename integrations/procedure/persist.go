@@ -113,13 +113,15 @@ func (i *Integration) lift(ctx context.Context, k corpusKey, mined *minedCorpus)
 	if err != nil {
 		return lifted{}, err
 	}
-	existing, err := i.procedureByName(actorCtx, v.name)
+	existing, release, err := i.lockedProcedureByName(actorCtx, v.name)
 	if err != nil {
 		return lifted{}, err
 	}
-	switch {
-	case existing == nil:
+	if existing == nil {
 		return i.createProcedure(actorCtx, k, v)
+	}
+	defer release()
+	switch {
 	case storedRung(existing) == work.RungRetired && str(existing, "procedureHash") != v.hash:
 		// Retirement is terminal. A changed procedure is a NEW candidate,
 		// written as a new construct, never a resurrection of the retired
@@ -348,6 +350,41 @@ func (i *Integration) recordSignature(ctx context.Context, constructId string, k
 		return fmt.Errorf("record goal signature: %w", err)
 	}
 	return nil
+}
+
+// lockedProcedureByName is the owner's construct of this name read INSIDE its
+// ladder lock, and the lock's release; nil with no lock when there is none.
+//
+// A CONSTRUCT THAT EXISTS IS MOVED UNDER ITS LADDER LOCK (ladder.go, review
+// finding C1), decided from the row read inside it. A re-lift writes the entry
+// rung and then the new version, and a replay finishing in between would write
+// the rung it loaded back over the first -- serving the second, which nobody
+// has shadowed or approved, with no model. The lock is keyed by the construct
+// the name named when the lift looked; if the name names ANOTHER construct by
+// the time the lock is held (a lift elsewhere created a newer one), the
+// decision is made again, once, against that one.
+func (i *Integration) lockedProcedureByName(ctx context.Context, name string) (map[string]any, func(), error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		existing, err := i.procedureByName(ctx, name)
+		if err != nil || existing == nil {
+			return nil, nil, err
+		}
+		constructId := str(existing, "id")
+		release, err := i.lockLadder(ctx, constructId)
+		if err != nil {
+			return nil, nil, fmt.Errorf("procedure: the lift could not take %s's ladder: %w", constructId, err)
+		}
+		fresh, err := i.procedureByName(ctx, name)
+		switch {
+		case err != nil:
+			release()
+			return nil, nil, err
+		case fresh != nil && str(fresh, "id") == constructId:
+			return fresh, release, nil
+		}
+		release()
+	}
+	return nil, nil, fmt.Errorf("procedure: the construct named %s changed while the lift took its ladder, twice", name)
 }
 
 // procedureByName is the owner's construct of this name, or nil

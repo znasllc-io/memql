@@ -2,6 +2,7 @@ package procedure
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -61,7 +62,7 @@ func (i *Integration) raisePromotion(ctx context.Context, owner string, c *loade
 	if err := work.ValidateApprovalKind(req); err != nil {
 		return "", err
 	}
-	approvalId := "v1:work:approval:" + id.NewShortId()
+	approvalId := promotionApprovalId(c.id, c.hash, shadowRunId)
 	if err := i.store.writeInternal(ownerActor(ctx, owner), "mutation "+call("createWorkApproval", map[string]any{
 		"approvalId":   approvalId,
 		"runId":        req.RunId,
@@ -81,6 +82,22 @@ func (i *Integration) raisePromotion(ctx context.Context, owner string, c *loade
 	i.log().Info("procedure: proposed a promotion to canary",
 		"constructId", c.id, "approvalId", approvalId, "shadowRunId", shadowRunId, "shadowMatches", t.State.ShadowMatches)
 	return approvalId, nil
+}
+
+// promotionApprovalId is a procedurePromotion approval's id: DERIVED from
+// the construct, the version it pins and the shadow run whose comparison
+// proposed it (review finding C1). A proposal delivered twice -- a comparison
+// finished by two executions, a retry after a write whose reply was lost --
+// writes the SAME row rather than a second card for one version; any of the
+// three differing is a different proposal and a different row. Bare and
+// canonical spellings of one construct or run derive one id.
+func promotionApprovalId(constructId, procedureHash, shadowRunId string) string {
+	return "v1:work:approval:" + string(id.New().MustFromMap(map[string]any{
+		"kind":      work.ApprovalKindProcedurePromotion,
+		"construct": memql.BareShortId(strings.TrimSpace(constructId)),
+		"version":   strings.TrimSpace(procedureHash),
+		"shadowRun": memql.BareShortId(strings.TrimSpace(shadowRunId)),
+	}))
 }
 
 // DecidePromotion applies a decided procedurePromotion approval to the ladder
@@ -126,10 +143,22 @@ func (i *Integration) DecidePromotion(ctx context.Context, approvalId string) (w
 	if owner == "" || constructId == "" {
 		return noop("the approval names no owner or no construct")
 	}
-	state, row, err := i.readLadder(ctx, owner, constructId)
+	// THE DECISION IS APPLIED TO THE CONSTRUCT AS IT IS NOW, under its ladder
+	// lock (ladder.go): a comparison finishing while this runs must not write
+	// its stale `shadow` back over the canary this moves to, and this must not
+	// promote a streak a concurrent mismatch just spent.
+	row, release, err := i.lockedConstruct(ctx, owner, constructId)
 	if err != nil {
-		return noop("the construct is not readable as its owner")
+		if errors.Is(err, errConstructUnreadable) {
+			return noop("the construct is not readable as its owner")
+		}
+		// Not a no-op: the person decided, and a decision dropped here would
+		// leave the construct waiting on an approval nobody will decide
+		// again. Failing lets the automation say so.
+		return work.Transition{}, fmt.Errorf("procedure.decidePromotion: %w", err)
 	}
+	defer release()
+	state := ladderStateOf(row)
 	if memql.BareShortId(state.PromotionApprovalId) != memql.BareShortId(approvalId) {
 		return noop("the construct is not waiting on this approval")
 	}

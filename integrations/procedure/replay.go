@@ -184,6 +184,9 @@ type ReplayOutcome struct {
 	// AlreadyDone: the replay run had already finished, and this call ran,
 	// counted and handed over nothing that had been done.
 	AlreadyDone bool
+	// VersionReplaced: the construct was re-lifted to another version while
+	// this replay ran, so the ladder did not count it.
+	VersionReplaced bool
 	// NotCompared (shadow): the comparison was not made ON THIS NODE -- no
 	// workbench dispatcher is installed here, or the sandbox refused the
 	// first step -- so nothing was recorded and the ladder did not move. A
@@ -319,11 +322,14 @@ type replay struct {
 	out    *ReplayOutcome
 	policy work.LadderPolicy
 
-	mode   ReplayMode // shadow, or the serving rung that actually runs
-	runId  string
-	dry    bool
-	target work.ReplayTarget
-	d      Dispatcher
+	mode  ReplayMode // shadow, or the serving rung that actually runs
+	runId string
+	// derived: runId is derived from what the replay is for, so another
+	// execution of the same thing can hold the same run (settle checks).
+	derived bool
+	dry     bool
+	target  work.ReplayTarget
+	d       Dispatcher
 	// seam is the context the prober and the dispatcher run under: the
 	// owner's actor and a forwarded authority for the owner (bindAuthority).
 	seam context.Context
@@ -497,6 +503,7 @@ func (r *replay) reenter(ctx context.Context) (finished bool) {
 	if !derived {
 		return false
 	}
+	r.derived = true
 	actorCtx := ownerActor(ctx, r.req.OwnerUserId)
 	existing, err := r.i.runForOwner(actorCtx, runId)
 	if err != nil {
@@ -538,7 +545,7 @@ func (r *replay) handBackResumed(ctx context.Context) {
 
 // open opens a new replay run and reports whether it did.
 func (r *replay) open(ctx context.Context) bool {
-	r.runId, _ = r.replayRunId()
+	r.runId, r.derived = r.replayRunId()
 	r.out.ReplayRunId = r.runId
 	actorCtx := ownerActor(ctx, r.req.OwnerUserId)
 	args := map[string]any{
@@ -661,23 +668,8 @@ func (r *replay) loadReceipts(actorCtx context.Context) {
 // still has to be served, and tells the app every step the receipts say ran.
 func (r *replay) reenterFinished(ctx context.Context, run map[string]any) {
 	o := obj(run, "outcome")
-	r.out.AlreadyDone = true
-	r.out.Served = str(o, "servedBy") == "procedure"
-	r.out.Match, _ = o["match"].(bool)
-	r.out.Diverged, _ = o["diverged"].(bool)
-	r.out.StartRefused, _ = o["startRefused"].(bool)
-	r.out.Diagnosis = str(o, "diagnosis")
-	r.out.Code = str(run, "errorCode")
-	if r.out.Diverged {
-		r.out.DivergedStep = intOf(o, "divergedStep")
-	}
-	r.out.Completed = completedFrom(o["completed"])
-	if child := str(o, "repairRunId"); child != "" {
-		r.out.FellBack = true
-		r.out.Fallback = FallbackOutcome{ChildRunId: child}
-		return
-	}
-	if r.mode == ReplayShadow || r.out.Served {
+	r.adoptFinished(run)
+	if r.out.FellBack || r.mode == ReplayShadow || r.out.Served {
 		return
 	}
 	if o == nil {
@@ -704,6 +696,29 @@ func (r *replay) reenterFinished(ctx context.Context, run map[string]any) {
 	}
 	r.fallBack(ctx, Guidance{Diagnosis: r.out.Diagnosis, Completed: r.out.Completed}, started)
 	r.recordHandover(ctx)
+}
+
+// adoptFinished answers what a finished replay run's row says it did, and
+// marks the answer as one that ran, counted and handed over nothing now.
+func (r *replay) adoptFinished(run map[string]any) {
+	o := obj(run, "outcome")
+	r.out.AlreadyDone = true
+	r.out.Served = str(o, "servedBy") == "procedure"
+	r.out.Match, _ = o["match"].(bool)
+	r.out.Diverged, _ = o["diverged"].(bool)
+	r.out.StartRefused, _ = o["startRefused"].(bool)
+	r.out.VersionReplaced, _ = o["versionReplaced"].(bool)
+	r.out.Diagnosis = str(o, "diagnosis")
+	r.out.Code = str(run, "errorCode")
+	r.out.DivergedStep = -1
+	if r.out.Diverged {
+		r.out.DivergedStep = intOf(o, "divergedStep")
+	}
+	r.out.Completed = completedFrom(o["completed"])
+	if child := str(o, "repairRunId"); child != "" {
+		r.out.FellBack = true
+		r.out.Fallback = FallbackOutcome{ChildRunId: child}
+	}
 }
 
 // --- stage 4: the target --------------------------------------------------------
@@ -897,9 +912,12 @@ func (r *replay) refuseStart(ctx context.Context, code, diagnosis string, counts
 		r.out.Code = codeFallbackUnavailable
 		r.outcome["fallback"] = "no app fallback is installed on this node, so nothing served the goal"
 	}
-	r.closeRun(ctx, "failed", r.out.Code, diagnosis)
+	var ev *work.LadderEvent
 	if counts && serving {
-		r.advance(ctx, work.LadderEvent{Kind: work.EventStartRefused, At: r.i.clock().UTC()}, false, false)
+		ev = &work.LadderEvent{Kind: work.EventStartRefused, At: r.i.clock().UTC()}
+	}
+	if !r.settle(ctx, "failed", r.out.Code, diagnosis, ev, false, false) {
+		return false
 	}
 	if serving {
 		r.fallBack(ctx, Guidance{Diagnosis: diagnosis}, false)
@@ -1231,7 +1249,10 @@ func alignmentSentence(m proc.Move) string {
 // finish closes the run and moves the ladder. The RUN IS CLOSED FIRST: it is
 // the record that this replay happened, and the ladder is derived from what
 // happened. A node that dies between the two undercounts -- the direction
-// that never promotes on evidence nobody can read afterwards.
+// that never promotes on evidence nobody can read afterwards. Both happen in
+// ONE critical section (settle), and the goal, when the procedure did not
+// serve it, is handed back only after it -- the app's session can run for
+// minutes, and nothing about it needs the lock.
 func (r *replay) finish(ctx context.Context) {
 	if r.mode == ReplayShadow {
 		r.finishShadow(ctx)
@@ -1243,8 +1264,7 @@ func (r *replay) finish(ctx context.Context) {
 		r.outcome = r.divergenceOutcome()
 		r.outcome["servedBy"] = "procedure"
 		r.outcome["steps"] = len(r.c.template.Steps)
-		r.closeRun(ctx, "succeeded", "", "")
-		r.advance(ctx, work.LadderEvent{Kind: work.EventReplayed, At: now, Match: true}, true, true)
+		r.settle(ctx, "succeeded", "", "", &work.LadderEvent{Kind: work.EventReplayed, At: now, Match: true}, true, true)
 		return
 	}
 	r.out.Insufficient = r.ranAndDiffered
@@ -1255,8 +1275,10 @@ func (r *replay) finish(ctx context.Context) {
 		r.out.Code = codeFallbackUnavailable
 		r.outcome["fallback"] = "no app fallback is installed on this node, so nothing served the goal"
 	}
-	r.closeRun(ctx, "failed", r.out.Code, r.out.Diagnosis)
-	r.advance(ctx, work.LadderEvent{Kind: work.EventReplayed, At: now, Match: false, Insufficient: r.out.Insufficient}, true, false)
+	ev := work.LadderEvent{Kind: work.EventReplayed, At: now, Match: false, Insufficient: r.out.Insufficient}
+	if !r.settle(ctx, "failed", r.out.Code, r.out.Diagnosis, &ev, true, false) {
+		return
+	}
 	r.fallBack(ctx, Guidance{
 		Diagnosis: r.out.Diagnosis,
 		Completed: append([]CompletedStep(nil), r.out.Completed...),
@@ -1273,12 +1295,11 @@ func (r *replay) finishShadow(ctx context.Context) {
 	r.out.Match = !r.out.Diverged
 	r.outcome = r.divergenceOutcome()
 	r.outcome["match"] = r.out.Match
-	if r.out.Match {
-		r.closeRun(ctx, "succeeded", "", "")
-	} else {
+	status, code, message := "succeeded", "", ""
+	if !r.out.Match {
 		r.out.Code = codeMismatch
 		r.outcome["code"] = codeMismatch
-		r.closeRun(ctx, "failed", codeMismatch, r.out.Diagnosis)
+		status, code, message = "failed", codeMismatch, r.out.Diagnosis
 	}
 	bindings := map[string]string{}
 	for _, holeId := range r.c.p.FreeParameters {
@@ -1286,16 +1307,87 @@ func (r *replay) finishShadow(ctx context.Context) {
 			bindings[holeId] = v
 		}
 	}
-	r.advance(ctx, work.LadderEvent{
+	r.settle(ctx, status, code, message, &work.LadderEvent{
 		Kind: work.EventShadowCompared, At: r.i.clock().UTC(), Match: r.out.Match,
 		Bindings: bindings, FreeParameters: append([]string(nil), r.c.p.FreeParameters...),
 	}, true, r.out.Match)
 }
 
-// advance moves the ladder by one event -- raising the promotion when the move
-// proposes one -- and reinforces the reliability when the event was a replay.
-func (r *replay) advance(ctx context.Context, ev work.LadderEvent, reinforce, success bool) {
-	t := work.Advance(r.c.state, ev, r.policy)
+// settle closes the replay run and moves the ladder by ev as ONE critical
+// section: under the construct's ladder lock, from the construct read FRESH
+// inside it (ladder.go, review finding C1). It reports false when another
+// finisher of this same replay run closed it first -- this one then answers
+// what that one recorded, and must hand nothing over.
+//
+// Three things are decided on the fresh read, never on what the replay loaded:
+//
+//   - WHETHER THIS FINISH IS THE FIRST. A derived run can be finished by two
+//     executions of the same statement (a resumed goal run whose first
+//     executor was still alive, a comparison asked for twice at once). The
+//     second finds the run terminal and counts nothing.
+//   - WHETHER THE VERSION IS STILL THE ONE THAT RAN. A re-lift while the
+//     replay was in flight put a NEW version on the entry rung; evidence
+//     about the old one is no evidence about it, and writing the loaded state
+//     back would put the new version on the old one's rung. The event is
+//     dropped, and the run says why.
+//   - WHERE THE LADDER STANDS. The event is advanced from the fresh state, so
+//     a promotion decided, a streak advanced or a demotion made meanwhile is
+//     kept -- and an event the rung no longer takes changes nothing.
+//
+// A lock that cannot be taken, or a construct that cannot be read, still
+// closes the run -- the record that the replay happened -- and moves no
+// ladder.
+func (r *replay) settle(ctx context.Context, status, code, message string, ev *work.LadderEvent, reinforce, success bool) bool {
+	fresh, release, err := r.i.lockedConstruct(ctx, r.req.OwnerUserId, r.c.id)
+	if err != nil {
+		if ev != nil {
+			r.i.log().Warn("procedure: the ladder could not be moved after a replay; the replay is recorded and not counted",
+				"construct", r.c.id, "run", r.runId, "error", err)
+			if r.outcome != nil {
+				r.outcome["ladderNotMoved"] = err.Error()
+			}
+		}
+		r.closeRun(ctx, status, code, message)
+		return true
+	}
+	defer release()
+	if r.derived && r.runId != "" {
+		if run, rerr := r.i.runForOwner(ownerActor(ctx, r.req.OwnerUserId), r.runId); rerr == nil && run != nil && terminalRunStatus(str(run, "status")) {
+			r.i.log().Info("procedure: a replay run was finished by another execution first; this one counts nothing",
+				"construct", r.c.id, "run", r.runId)
+			r.adoptFinished(run)
+			return false
+		}
+	}
+	if current := str(fresh, "procedureHash"); current != r.c.hash {
+		if ev != nil {
+			r.out.VersionReplaced = true
+			if r.outcome != nil {
+				r.outcome["versionReplaced"] = true
+				r.outcome["replacedBy"] = current
+			}
+			r.i.log().Info("procedure: the procedure was re-lifted while a replay of it ran; the ladder did not count the replay",
+				"construct", r.c.id, "run", r.runId, "ran", r.c.hash, "current", current)
+		}
+		r.closeRun(ctx, status, code, message)
+		return true
+	}
+	r.closeRun(ctx, status, code, message)
+	if ev != nil {
+		r.advanceFrom(ctx, fresh, *ev, reinforce, success)
+	}
+	return true
+}
+
+// advanceFrom moves the ladder by one event from a construct read inside its
+// lock -- raising the promotion when the move proposes one -- and reinforces
+// the reliability when the event was a replay. Only a transition that changes
+// something is written: an event the fresh rung no longer takes (a comparison
+// of a procedure promoted meanwhile) is no move, and writing its sentence
+// would overwrite the reason the rung actually moved.
+func (r *replay) advanceFrom(ctx context.Context, fresh map[string]any, ev work.LadderEvent, reinforce, success bool) {
+	before := ladderStateOf(fresh)
+	t := work.Advance(before, ev, r.policy)
 	if t.Propose {
 		approvalId, err := r.i.raisePromotion(ctx, r.req.OwnerUserId, r.c, r.runId, t)
 		if err != nil {
@@ -1309,14 +1401,16 @@ func (r *replay) advance(ctx context.Context, ev work.LadderEvent, reinforce, su
 			r.out.ApprovalId = approvalId
 		}
 	}
-	if err := r.i.writeLadder(ctx, r.req.OwnerUserId, r.c.id, t); err != nil {
-		r.i.log().Warn("procedure: could not write the ladder after a replay", "construct", r.c.id, "error", err)
-	} else {
-		r.c.state = t.State
-	}
 	r.out.Transition = t
+	if ladderMoved(before, t) {
+		if err := r.i.writeLadder(ctx, r.req.OwnerUserId, r.c.id, t); err != nil {
+			r.i.log().Warn("procedure: could not write the ladder after a replay", "construct", r.c.id, "error", err)
+		} else {
+			r.c.state = t.State
+		}
+	}
 	if reinforce {
-		if err := r.i.reinforce(ctx, r.req.OwnerUserId, r.c.id, r.c.row, success); err != nil {
+		if err := r.i.reinforce(ctx, r.req.OwnerUserId, r.c.id, fresh, success); err != nil {
 			r.i.log().Warn("procedure: could not reinforce after a replay", "construct", r.c.id, "error", err)
 		}
 	}

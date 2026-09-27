@@ -29,6 +29,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/memql"
 	proc "github.com/znasllc-io/memql/component/procedure"
 	"github.com/znasllc-io/memql/component/work"
@@ -80,6 +82,13 @@ type Integration struct {
 	// seams are what a replay needs from the node it runs on (seams.go):
 	// the dispatchers, the prober and the app fallback. app/ installs them.
 	seams seams
+	// lockDB is the handle the ladder's per-construct advisory lock is taken
+	// on (ladder.go) -- the DIRECT endpoint, because a transaction pooler
+	// recycles the server backend between statements and would drop a held
+	// session lock. Nil, or answering nil, runs every ladder move unlocked:
+	// a test over a fake engine, or a node with no database, which could not
+	// write the ladder anyway.
+	lockDB func() *bun.DB
 }
 
 // New builds the integration.
@@ -100,8 +109,28 @@ func init() {
 		if pctx.Engine == nil {
 			return nil, fmt.Errorf("procedure plug-in: no engine in plugin context")
 		}
-		return New(pctx.Engine, pctx.Logger), nil
+		i := New(pctx.Engine, pctx.Logger)
+		// The ladder's lock is SESSION-scoped, so it is taken on the direct
+		// endpoint (PluginContext.DirectBunDB, which itself falls back to the
+		// main pool when no direct DSN is configured). A context built before
+		// that getter existed offers only the pool.
+		if pctx.DirectBunDB != nil {
+			i.SetLadderLockDB(pctx.DirectBunDB)
+		} else {
+			i.SetLadderLockDB(pctx.BunDB)
+		}
+		return i, nil
 	})
+}
+
+// SetLadderLockDB installs the database handle the ladder's per-construct
+// advisory lock is taken on. The plug-in factory installs the direct endpoint
+// on every node; a test installs its own. A nil getter is ignored, for
+// SetCompiler's reason.
+func (i *Integration) SetLadderLockDB(db func() *bun.DB) {
+	if i != nil && db != nil {
+		i.lockDB = db
+	}
 }
 
 // SetDeriver installs the one bounded model call. Called once, from the node
