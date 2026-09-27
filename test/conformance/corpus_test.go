@@ -1133,6 +1133,21 @@ func corpusAutomationProblems(t *testing.T, tree fs.FS) []string {
 	}
 	eng, initErr := automations.NewOfflineEngine(corpusQuiet, memoryNodes.DefaultRegistry())
 	if initErr != nil {
+		// THE STRICT-BOOT AGGREGATE IS NOT A PROBLEM OF ITS OWN. This engine
+		// is the Init the lint pass just ran over this same mounted tree, and
+		// that pass reported each skipped construct and each duplicate one by
+		// one, each claimed by its case -- LintUnifiedTree leaves the
+		// aggregate out for exactly that reason. Returned here as one line it
+		// names every refusing case in the batch at once, so no single case
+		// could claim it, and every batch holding two refusing cases fell back
+		// to one boot per case (102 boots on the DSL v1 follow-ups corpus,
+		// PR #5693). Loop analysis cannot run in this boot; a case whose
+		// refusal only it would find draws nothing here, and
+		// corpusLoadUntilSettled reloads that case without the cases whose
+		// skips refused this boot.
+		if strings.Contains(initErr.Error(), "strict DSL boot refused") {
+			return nil
+		}
 		return []string{"loading functions for loop analysis: " + initErr.Error()}
 	}
 	loader := automations.NewLoader(automations.LoaderOptions{Logger: corpusQuiet, Registry: memoryNodes.DefaultRegistry(), Functions: eng.Functions()})
