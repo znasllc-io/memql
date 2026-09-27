@@ -16,7 +16,7 @@
 // through createTierSpec -- @serverOnly, so the seed path is its only writer;
 // idempotent. Until createTierSpec existed none of these rows materialized: a
 // seed is written through create<Concept> and nothing else (memql#5437 review;
-// deploy/fleet/pricelist_db_test.go).
+// component/automations/fleet_pricelist_db_test.go, in the db-tests lane).
 //
 // WHERE THE NUMBERS COME FROM (the 2026-08-14 pricing analysis, epic memql#3852):
 // market-anchored against the per-seat AI-agent products (Chatbase, CustomGPT,
