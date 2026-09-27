@@ -158,15 +158,21 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 	// rewriter below synthesises it from struct form), but no .memql
 	// author may write that shape directly. The compiler test fixtures
 	// that consume procedural source bypass this loader entirely.
-	if err := languageParser.RejectLegacyProceduralAuthorForm(content); err != nil {
-		return nil, fmt.Errorf("%s: %w", origin, languageParser.PositionRewriteError(authored, err))
+	//
+	// This refusal, the signature concepts and the struct-form rewrite below
+	// read nothing but the slice's text, so they are read once per process per
+	// text (function_slice_text_memo.go); the refusals are placed against this
+	// call's authored text.
+	text := sliceTextFactsOf(content)
+	if text.legacyForm != nil {
+		return nil, fmt.Errorf("%s: %w", origin, languageParser.PositionRewriteError(authored, text.legacyForm))
 	}
 
 	// Snapshot the signature-bound concepts BEFORE NormaliseAll
 	// rewrites the struct form to procedural -- once the rewrite runs
 	// the `<kind> <Concept> <name> {` shape is gone and the regex
 	// in extractAllSignatureConceptNames has nothing to match.
-	signatureConcepts := extractAllSignatureConceptNames(content)
+	signatureConcepts := text.signatureConcepts
 
 	// Apply every struct-form rewriter defensively here too -- callers
 	// that don't go through loadFlatFunctionFile (tests, ad-hoc uses)
@@ -178,12 +184,12 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 	// named-write form, memql#1055). Keep it and attach it to the parse
 	// failure so the real reason surfaces instead of being swallowed.
 	var rewriteErr error
-	if rewritten, rerr := languageParser.NormaliseAll(content); rerr == nil {
-		content = rewritten
+	if text.rewriteErr == nil {
+		content = text.normalised
 	} else {
 		// Placed at the author's clause, in the file when the slice was
 		// anchored to it.
-		rewriteErr = languageParser.PositionRewriteError(authored, rerr)
+		rewriteErr = languageParser.PositionRewriteError(authored, text.rewriteErr)
 	}
 
 	// Keep the pre-translation source for the declared-usage validator
@@ -254,7 +260,10 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 	// transform above so none of them reads a marker: a refusal names the
 	// author's line and column, not the lowered text's. content itself stays
 	// unmarked for the text-reading validators below.
-	lexed := languageParser.PositionLowering(authored, content)
+	// Keyed by both texts (function_slice_text_memo.go): content is read
+	// AFTER the registry-dependent resolution above, so a registry that
+	// resolves this slice differently is a different key.
+	lexed := positionLoweringOf(authored, content)
 	lexer := languageParser.NewLexer(lexed)
 	tokens, err := lexer.Tokenize()
 	if err != nil {
