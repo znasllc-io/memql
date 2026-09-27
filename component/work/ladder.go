@@ -506,7 +506,15 @@ func advanceSweep(t *Transition, e LadderEvent, p LadderPolicy) {
 			// A retired procedure cannot be promoted, so an open proposal
 			// would be a card whose decision reaches nothing.
 			st.PromotionApprovalId = ""
-			t.Reason = fmt.Sprintf("unused for %d days, longer than the %d-day window, so it retires", int(idle.Hours()/24), p.RetireAfterDays)
+			retirement := fmt.Sprintf("unused for %d days, longer than the %d-day window, so it retires", int(idle.Hours()/24), p.RetireAfterDays)
+			if t.Demoted {
+				// Both happened in this pass, and the reason is the one
+				// sentence a person reads about it: the retirement alone would
+				// hide that its replays had also been failing.
+				t.Reason += "; it was also " + retirement
+			} else {
+				t.Reason = retirement
+			}
 		}
 	}
 	if !t.Demoted && !t.Retired {

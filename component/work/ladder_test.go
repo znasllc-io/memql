@@ -520,6 +520,27 @@ func TestTheSweepRetiresAProcedureUnusedForTheWindow(t *testing.T) {
 	}
 }
 
+// A sweep that demotes and retires in one pass says both. The reason is the one
+// sentence a person reads about why the procedure last moved, and naming the
+// retirement alone hides that its replays had also been failing.
+func TestASweepThatDemotesAndRetiresNamesBoth(t *testing.T) {
+	tr := Advance(LadderState{Rung: RungTrusted, Failures: 3},
+		LadderEvent{Kind: EventSweep, At: ladderT0, LastUsedAt: ladderT0.Add(-40 * 24 * time.Hour)},
+		LadderPolicy{FailuresToDemote: 2, RetireAfterDays: 30})
+	if tr.To != RungRetired || !tr.Demoted || !tr.Retired {
+		t.Fatalf("To=%q Demoted=%v Retired=%v, want a demotion and a retirement", tr.To, tr.Demoted, tr.Retired)
+	}
+	if !strings.Contains(tr.Reason, "after 2 failed replays, and this one has 3") || !strings.Contains(tr.Reason, "unused for 40 days") {
+		t.Fatalf("the reason must name the demotion and the retirement; got %q", tr.Reason)
+	}
+	only := Advance(LadderState{Rung: RungTrusted},
+		LadderEvent{Kind: EventSweep, At: ladderT0, LastUsedAt: ladderT0.Add(-40 * 24 * time.Hour)},
+		LadderPolicy{FailuresToDemote: 2, RetireAfterDays: 30})
+	if want := "unused for 40 days, longer than the 30-day window, so it retires"; only.Reason != want {
+		t.Fatalf("a retirement alone: reason %q, want %q", only.Reason, want)
+	}
+}
+
 // A window long enough to overflow a time.Duration must mean "a very long
 // time", never wrap negative and retire every procedure on the next sweep.
 func TestAnEnormousRetirementWindowNeverRetiresEverything(t *testing.T) {
