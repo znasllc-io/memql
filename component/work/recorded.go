@@ -18,6 +18,7 @@ package work
 
 import (
 	"encoding/json"
+	"path"
 	"sort"
 	"strings"
 )
@@ -79,6 +80,30 @@ func RecordedPaths(args map[string]any) []string {
 	walk(args)
 	sort.Strings(out)
 	return out
+}
+
+// WorkspaceRelative writes an absolute path inside the workspace relative to
+// it; anything else is returned cleaned and otherwise as it was. A recording
+// names files the way the app saw them, usually absolute under the directory
+// the session ran in, and a snapshot restored into a FRESH workspace -- or a
+// replay compared in a different one -- has to name them relative to it, or
+// every restored file would be written back into the directory the branch
+// exists to leave alone.
+func WorkspaceRelative(workspace, p string) string {
+	p = strings.TrimSpace(p)
+	ws := strings.TrimSpace(workspace)
+	if p == "" {
+		return ""
+	}
+	if !path.IsAbs(p) || !path.IsAbs(ws) {
+		return path.Clean(p)
+	}
+	ws = path.Clean(ws)
+	abs := path.Clean(p)
+	if ws != "/" && strings.HasPrefix(abs, ws+"/") {
+		return strings.TrimPrefix(abs, ws+"/")
+	}
+	return abs
 }
 
 // RecordedArgs reads an action's arguments off its tool_result data.

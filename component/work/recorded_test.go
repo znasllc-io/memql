@@ -81,6 +81,24 @@ func TestRecordedArgsDecodesTheStoredStringAndRefusesATruncatedOne(t *testing.T)
 	}
 }
 
+func TestWorkspaceRelativeNamesAFileInsideTheWorkspaceRelativeToIt(t *testing.T) {
+	cases := []struct{ ws, p, want string }{
+		{"/ws/run-1", "/ws/run-1/src/a.go", "src/a.go"},
+		{"/ws/run-1/", "/ws/run-1/./src/../b.go", "b.go"},
+		{"/ws/run-1", "/ws/run-10/c.go", "/ws/run-10/c.go"},
+		{"/ws/run-1", "/etc/hosts", "/etc/hosts"},
+		{"/ws/run-1", "rel/./d.go", "rel/d.go"},
+		{"", "/ws/run-1/e.go", "/ws/run-1/e.go"},
+		{"/", "/f.go", "/f.go"},
+		{"/ws", "  ", ""},
+	}
+	for _, tc := range cases {
+		if got := WorkspaceRelative(tc.ws, tc.p); got != tc.want {
+			t.Errorf("WorkspaceRelative(%q, %q) = %q, want %q", tc.ws, tc.p, got, tc.want)
+		}
+	}
+}
+
 // The three helpers compose into what a snapshot needs from one recorded
 // action: the file the content belongs to, from the arguments of the SAME
 // action.
