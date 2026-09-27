@@ -229,6 +229,14 @@ func (e *LowerError) RuleCode() string {
 //	process and reads the row. Compare against a computed value instead:
 //	`row.email == lower("x")` [lower_refused]
 func (e *LowerError) Error() string {
+	return e.Sentence() + " [" + e.RuleCode() + "]"
+}
+
+// Sentence is the refusal without its rule id: the node, the position, the
+// reason and the fix. It is what an editor shows, beside the id it carries in
+// a field of its own (memql#5434) -- printing the id in the text as well would
+// put it on screen twice.
+func (e *LowerError) Sentence() string {
 	var b strings.Builder
 	b.WriteString("`")
 	b.WriteString(e.Node)
@@ -240,9 +248,6 @@ func (e *LowerError) Error() string {
 		b.WriteString(". ")
 		b.WriteString(e.Fix)
 	}
-	b.WriteString(" [")
-	b.WriteString(e.RuleCode())
-	b.WriteString("]")
 	return b.String()
 }
 
@@ -1732,6 +1737,13 @@ func (l *lowerer) walkPlanConstant(n ast.ExpressionNode, local map[string]bool, 
 				// The pre-v1 filter's bare payload field (D1): the fix is
 				// mechanical, so the refusal carries it (D24).
 				fix = "A payload field is read through the parameter: write `" + l.rowParam() + "." + e.Name + "`"
+			} else if intrinsic, isIntrinsic := canonicalIntrinsicFieldName(e.Name); isIntrinsic {
+				// A bare row intrinsic -- `id`, `createdAt` -- is the same
+				// mistake with the same mechanical fix. The editor's
+				// bare-row-intrinsic warning names it too, and gives way to
+				// this refusal when both draw (memql#5434), so the fix has to
+				// survive here.
+				fix = "The row's " + intrinsic + " is read through the parameter: write `" + l.rowParam() + "." + intrinsic + "`"
 			}
 			*errp = l.refuseAs(LowerCodeUnknownName, e, fmt.Sprintf("`%s` is not defined here", e.Name), fix)
 		}
