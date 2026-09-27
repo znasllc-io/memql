@@ -46,6 +46,9 @@ func (i *Integration) handleRerunStep(ctx context.Context, args map[string]any, 
 	if err := run.requireFinished(); err != nil {
 		return nil, err
 	}
+	if err := run.requireExecutable(); err != nil {
+		return nil, err
+	}
 	if err := run.requireTopLevel(stepKey); err != nil {
 		return nil, err
 	}

@@ -298,3 +298,26 @@ func validatorDecisionRow(id, stepKey string, version int, axes work.Axes, reaso
 		},
 	}
 }
+
+// A recording run's actions are steps with no step order, and a verdict on
+// one is exactly what epic D's candidate gate reads -- so the act that judges
+// a version does not ask for a place in the order, only for the version to be
+// recorded.
+func TestAVerdictOnARecordedActionIsRecorded(t *testing.T) {
+	i, eng, store := newActsIntegration(t)
+	addVersion(store, actRunId, "action-a1", 0, 1, "done", nil, nil)
+	run := actRunRow(runStatusSucceeded)
+	run["automationName"] = appSessionTemplate
+	delete(run, "stepOrder")
+	eng.reply("workRunForOwner", run)
+
+	if _, err := i.handleRecordFeedback(callerContext(actOwner), map[string]any{
+		"runId": actRunId, "stepKey": "action-a1", "verdict": "dislike", "product": true,
+	}, 0); err != nil {
+		t.Fatalf("recordFeedback on a recorded action: %v", err)
+	}
+	target := rowMap(rowMap(argsOf(t, eng, "createWorkObservation"), "data"), "target")
+	if target["stepKey"] != "action-a1" || target["version"] != float64(1) {
+		t.Errorf("target = %v", target)
+	}
+}

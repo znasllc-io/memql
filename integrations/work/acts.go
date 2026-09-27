@@ -39,6 +39,7 @@ import (
 const (
 	codeRunNotFound            = "run_not_found"
 	codeRunNotFinished         = "run_not_finished"
+	codeRunNotExecutable       = "run_not_executable"
 	codeStepNotInRun           = "step_not_in_run"
 	codeStepNested             = "step_nested"
 	codeVersionNotFound        = "version_not_found"
@@ -141,6 +142,28 @@ func (r actRun) requireFinished() error {
 		status = "in an unknown state"
 	}
 	return refuse(codeRunNotFinished, "run %s is %s; a run is changed only after it has stopped, never under a live execution", r.id, status)
+}
+
+// requireExecutable refuses a run the executor cannot run again. An app
+// session's RECORDING is the record of a session, not an automation:
+// dispatched, it would fail on a template nobody registered, and the failed
+// status would take the recording out of the procedure corpus it belongs to.
+// A run that never chose a template has nothing to run, and a run with no goal
+// is one the dispatcher leaves to the scheduler that owns it.
+func (r actRun) requireExecutable() error {
+	switch name := rowString(r.row, "automationName"); {
+	case name == appSessionTemplate:
+		where := ""
+		if parent := rowString(r.row, "parentRunId"); parent != "" {
+			where = " in run " + parent
+		}
+		return refuse(codeRunNotExecutable, "run %s is an app session's recording; re-run or branch the step that delegated it%s", r.id, where)
+	case name == "" || name == compilingAutomationName:
+		return refuse(codeRunNotExecutable, "run %s never chose a template, so there is nothing to run again", r.id)
+	case rowString(r.row, "goalId") == "":
+		return refuse(codeRunNotExecutable, "run %s serves no goal; only a goal's run is executed again on a person's word", r.id)
+	}
+	return nil
 }
 
 // requireTopLevel refuses a step key that is not one of the run's own

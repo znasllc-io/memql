@@ -301,3 +301,51 @@ func rerunOverride(t *testing.T, eng *recordingEngine) map[string]any {
 	override, _ := rerun["override"].(map[string]any)
 	return override
 }
+
+// A run the executor cannot run again is refused by every act that would ask
+// it to: an app session's recording (dispatched, it would fail on a template
+// nobody registered and leave the corpus), a run that never compiled, and a
+// run with no goal.
+func TestAnActOnARunTheExecutorCannotRunIsRefused(t *testing.T) {
+	cases := map[string]func(map[string]any){
+		"a recording": func(r map[string]any) {
+			r["automationName"] = appSessionTemplate
+			r["parentRunId"] = "v1:work:run:r-parent"
+		},
+		"a run that never compiled": func(r map[string]any) { r["automationName"] = compilingAutomationName },
+		"a run with no goal":        func(r map[string]any) { r["goalId"] = "" },
+	}
+	acts := map[string]func(*Integration) error{
+		"rerunStep": func(i *Integration) error {
+			_, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0)
+			return err
+		},
+		"branchRun": func(i *Integration) error {
+			_, err := i.handleBranchRun(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0)
+			return err
+		},
+		"moveRunHead": func(i *Integration) error {
+			_, err := i.handleMoveRunHead(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft", "version": float64(1)}, 0)
+			return err
+		},
+	}
+	for name, mutate := range cases {
+		for act, call := range acts {
+			t.Run(name+"/"+act, func(t *testing.T) {
+				i, eng, store := newActsIntegration(t)
+				addPristineRun(store, actRunId, "fetch", "draft", "publish")
+				run := actRunRow(runStatusSucceeded)
+				mutate(run)
+				eng.reply("workRunForOwner", run)
+				err := call(i)
+				var refusal *ActRefusal
+				if !errors.As(err, &refusal) || refusal.Code != codeRunNotExecutable {
+					t.Fatalf("err = %v, want %s", err, codeRunNotExecutable)
+				}
+				if writes := mutationsIn(eng); len(writes) != 0 {
+					t.Errorf("a refused act wrote: %s", eng.summary())
+				}
+			})
+		}
+	}
+}

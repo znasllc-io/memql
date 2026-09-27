@@ -260,3 +260,63 @@ func TestAStepNoAppAnsweredCarriesNoSnapshot(t *testing.T) {
 		t.Errorf("rerun = %v; only a session step moves to a fresh workspace", rerun)
 	}
 }
+
+// multiFileFixture: plan's recording holds ONE action that changed two files
+// and stored both contents. The Library row keeps only a name, so each
+// content is placed by matching the name's base against the action's own
+// paths. unplaceable stores a content whose name matches neither.
+func multiFileFixture(t *testing.T, unplaceable bool) (*Integration, *recordingEngine) {
+	t.Helper()
+	i, eng, store := newActsIntegration(t)
+	addVersion(store, actRunId, "plan", 0, 1, "done", nil, map[string]any{"childRunId": "v1:work:run:rec-plan"})
+	addVersion(store, actRunId, "code", 1, 1, "done", nil, map[string]any{"childRunId": "v1:work:run:rec-code"})
+	eng.reply("workRunForOwner", actRunRow(runStatusSucceeded, "plan", "code"))
+	for _, rec := range []string{"rec-plan", "rec-code"} {
+		eng.replyWhen("workRunForOwner", rec, map[string]any{"id": "v1:work:run:" + rec, "automationName": appSessionTemplate})
+	}
+	eng.replyWhen("workStepsForOwnerRun", "rec-plan", map[string]any{"key": "action-o-1", "seq": float64(0), "fingerprint": map[string]any{"cwd": "/ws/r-acts"}})
+	second := "b.txt.s-1.act-o-1"
+	if unplaceable {
+		second = "zzz.bin.s-1.act-o-1"
+	}
+	eng.replyWhen("libraryFileById", "f-a", map[string]any{"id": "v1:library:file:f-a", "name": "a.txt.s-1.act-o-1"})
+	eng.replyWhen("libraryFileById", "f-b", map[string]any{"id": "v1:library:file:f-b", "name": second})
+	eng.replyWhen("workObservationsForOwnerRun", "rec-plan", toolResult("o-1", 0, "apply_patch",
+		`{"changes":[{"path":"/ws/r-acts/docs/a.txt","kind":"add"},{"path":"/ws/r-acts/docs/b.txt","kind":"update"}]}`,
+		[]any{"v1:library:file:f-a", "v1:library:file:f-b"}, nil))
+	return i, eng
+}
+
+func TestASnapshotPlacesEachContentByItsStoredName(t *testing.T) {
+	i, eng := multiFileFixture(t, false)
+	if _, err := i.handleBranchRun(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "code"}, 0); err != nil {
+		t.Fatalf("branchRun: %v", err)
+	}
+	rerun, _ := argsOf(t, eng, "createWorkRun")["rerun"].(map[string]any)
+	snapshot := work.ParseSnapshot(rerun["snapshot"])
+	want := []work.SnapshotFile{
+		{Path: "docs/a.txt", FileId: "v1:library:file:f-a"},
+		{Path: "docs/b.txt", FileId: "v1:library:file:f-b"},
+	}
+	if snapshot == nil || !reflect.DeepEqual(snapshot.Files, want) {
+		t.Errorf("snapshot = %v, want %v", snapshot, want)
+	}
+	if snapshot != nil && snapshot.UnrecordedCommands != 0 {
+		t.Errorf("unrecordedCommands = %d; a file change is not a command", snapshot.UnrecordedCommands)
+	}
+}
+
+// A content the recording kept but cannot place is refused like an omitted
+// one, naming what the recording does know: restoring it anywhere would be a
+// guess.
+func TestASnapshotRefusesAContentItCannotPlace(t *testing.T) {
+	i, eng := multiFileFixture(t, true)
+	_, err := i.handleBranchRun(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "code"}, 0)
+	var omitted *work.SnapshotOmittedError
+	if !errors.As(err, &omitted) || omitted.Path != "zzz.bin" {
+		t.Fatalf("err = %v, want a refusal naming zzz.bin", err)
+	}
+	if writes := mutationsIn(eng); len(writes) != 0 {
+		t.Errorf("wrote %s", eng.summary())
+	}
+}
