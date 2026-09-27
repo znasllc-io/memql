@@ -112,10 +112,18 @@ func (s *RerunSpec) targets(key string) bool {
 	return s != nil && s.StepKey != "" && topLevelKey(key) == s.StepKey
 }
 
-// authored reports whether the person wrote this version's input (D20): a
-// prompt or inputs, as against a level, a model or an effort.
-func (s *RerunSpec) authored() bool {
-	return s != nil && s.Override != nil && (s.Override.Prompt != "" || len(s.Override.Inputs) > 0)
+// author is who the targeted version names as having written its input (D20):
+// the requester, when the override carries a prompt or inputs -- as against a
+// level, a model or an effort, which change how the system answers rather than
+// what it was asked. Empty otherwise.
+func (s *RerunSpec) author() string {
+	if s == nil || s.Override == nil || (s.Override.Prompt == "" && len(s.Override.Inputs) == 0) {
+		return ""
+	}
+	if s.RequestedBy != "" {
+		return s.RequestedBy
+	}
+	return s.Override.RequestedBy
 }
 
 // overrideObject is the stored form of the override for the targeted

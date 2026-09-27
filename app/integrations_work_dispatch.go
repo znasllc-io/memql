@@ -247,6 +247,10 @@ func (d *workRunDispatcher) Dispatch(ctx context.Context, req workspine.Dispatch
 // handed to automations.PrepareRerun, which serves those steps from their
 // rows and never executes them.
 func (d *workRunDispatcher) dispatchRerun(ctx context.Context, req workspine.DispatchRequest, executor *automations.Executor, auto *automations.Automation, journal, source *automations.RunJournal) {
+	if code, err := workRerunRefusal(journal); err != nil {
+		d.failRun(ctx, req, code, err.Error())
+		return
+	}
 	var sources []*automations.RunJournal
 	for _, id := range automations.RerunSources(journal, auto) {
 		if source != nil && memql.BareShortId(source.RunId) == memql.BareShortId(id) {

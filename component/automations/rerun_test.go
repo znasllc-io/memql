@@ -660,3 +660,23 @@ func TestARerunTargetMustBeOneOfTheRunsOwnSteps(t *testing.T) {
 		t.Fatalf("ResumeFrom with a nested target: %v", err)
 	}
 }
+
+// A head move's re-run (D18) runs the first stale step and everything after
+// it with nothing overridden: the versions the move made current are served.
+func TestAHeadMoveRerunRunsTheStaleStepsWithNoOverride(t *testing.T) {
+	run, steps := finishedRun("r1")
+	run["status"], run["staleSteps"] = "running", []any{"publish"}
+	run["rerun"] = map[string]any{"requestId": "req-hm", "reason": RerunReasonHeadMove, "stepKey": "publish", "override": map[string]any{}}
+	probe, rec, _ := runAgain(t, run, steps)
+
+	if got := probe.callees(); !reflect.DeepEqual(got, []string{"publish"}) {
+		t.Fatalf("calls %v, want the stale step alone", got)
+	}
+	if o := probe.runOf(t, "publish").Override; o != nil {
+		t.Fatalf("a head move's re-run carried an override: %+v", o)
+	}
+	publish := intentOf(t, rec, "publish")
+	if stepVersion(publish) != 2 || !reflect.DeepEqual(publish["override"], map[string]any{}) || publish["authoredBy"] != "" {
+		t.Fatalf("the stale step's new version: %v", publish)
+	}
+}

@@ -89,25 +89,11 @@ func workRerunServable(req workspine.DispatchRequest, j *automations.RunJournal)
 // from (automations.RerunSources), already loaded by the caller; each must be
 // the same goal's and the same owner's, for workExecutionContext's reason.
 func workRerunResumption(j *automations.RunJournal, sources []*automations.RunJournal, auto *automations.Automation) (*automations.RunJournal, *automations.ResumeOptions, string, error) {
-	spec := j.Rerun
-	if spec == nil {
+	if j.Rerun == nil {
 		return nil, nil, "", nil
 	}
-	if strings.TrimSpace(j.GoalId) == "" {
-		// A goalless run is a scheduler's journal: its trigger, its trust and
-		// its owner are the scheduler's, and a person's request has nothing to
-		// borrow them from. The event path never dispatches one; the sweep's
-		// recovery can, which is why this is refused rather than assumed.
-		return nil, nil, workRerunNeedsGoal, fmt.Errorf("run %s carries a re-run request but serves no goal; only a goal's run can be re-run", j.RunId)
-	}
-	switch spec.Reason {
-	case automations.RerunReasonRerun, automations.RerunReasonHeadMove:
-	case automations.RerunReasonBranch:
-		if j.Mode != common.RunModeFork || strings.TrimSpace(j.ForkedFromRunId) == "" {
-			return nil, nil, workRerunReasonInvalid, fmt.Errorf("run %s carries a branch request but is not a fork of another run", j.RunId)
-		}
-	default:
-		return nil, nil, workRerunReasonInvalid, fmt.Errorf("run %s carries a re-run request with reason %q, which this node does not serve", j.RunId, spec.Reason)
+	if code, err := workRerunRefusal(j); err != nil {
+		return nil, nil, code, err
 	}
 	for _, s := range sources {
 		if s == nil || s.OwnerUserId != j.OwnerUserId || memql.BareShortId(s.GoalId) != memql.BareShortId(j.GoalId) {
@@ -130,4 +116,30 @@ func workRerunResumption(j *automations.RunJournal, sources []*automations.RunJo
 		return nil, nil, workRerunPrefixUnserved, err
 	}
 	return nil, nil, workRerunRefused, err
+}
+
+// workRerunRefusal is what the row alone refuses a re-run request for, asked
+// before any other run is read for the request's prefix.
+func workRerunRefusal(j *automations.RunJournal) (string, error) {
+	spec := j.Rerun
+	if spec == nil {
+		return "", nil
+	}
+	if strings.TrimSpace(j.GoalId) == "" {
+		// A goalless run is a scheduler's journal: its trigger, its trust and
+		// its owner are the scheduler's, and a person's request has nothing to
+		// borrow them from. The event path never dispatches one; the sweep's
+		// recovery can, which is why this is refused rather than assumed.
+		return workRerunNeedsGoal, fmt.Errorf("run %s carries a re-run request but serves no goal; only a goal's run can be re-run", j.RunId)
+	}
+	switch spec.Reason {
+	case automations.RerunReasonRerun, automations.RerunReasonHeadMove:
+	case automations.RerunReasonBranch:
+		if j.Mode != common.RunModeFork || strings.TrimSpace(j.ForkedFromRunId) == "" {
+			return workRerunReasonInvalid, fmt.Errorf("run %s carries a branch request but is not a fork of another run", j.RunId)
+		}
+	default:
+		return workRerunReasonInvalid, fmt.Errorf("run %s carries a re-run request with reason %q, which this node does not serve", j.RunId, spec.Reason)
+	}
+	return "", nil
 }

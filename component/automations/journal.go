@@ -517,8 +517,8 @@ func versionArgs(exec *AutomationExecution, step *Step, version int, args map[st
 	targeted := exec.rerun != nil && !isNestedStepKey(key) && key == exec.rerun.StepKey
 	if targeted {
 		args["override"] = exec.rerun.overrideObject()
-		if exec.rerun.authored() && exec.rerun.RequestedBy != "" {
-			args["authoredBy"] = exec.rerun.RequestedBy
+		if author := exec.rerun.author(); author != "" {
+			args["authoredBy"] = author
 		}
 	}
 	if version <= 1 {
