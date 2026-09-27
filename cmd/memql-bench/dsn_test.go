@@ -48,7 +48,7 @@ func TestTheDsnFlagIsPublishedForTheMigrationStep(t *testing.T) {
 
 	// 127.0.0.1:1 refuses immediately, so openEngine fails at the ping. That
 	// is fine and expected -- the publish happens before it.
-	eng, closer, code := openEngine(c)
+	eng, _, closer, code := openEngine(c)
 	if eng != nil || code == capability.ExitOK {
 		if closer != nil {
 			closer()
@@ -74,7 +74,7 @@ func TestTheEnvironmentIsUsedWhenNoDsnFlagIsGiven(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if _, closer, code := openEngine(c); code == capability.ExitOK {
+	if _, _, closer, code := openEngine(c); code == capability.ExitOK {
 		if closer != nil {
 			closer()
 		}

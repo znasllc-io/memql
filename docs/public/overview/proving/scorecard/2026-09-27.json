@@ -1,8 +1,8 @@
 {
   "version": 1,
   "date": "2026-09-27",
-  "commit": "b60d656bd",
-  "corpusFingerprint": "38d4510b53a2aa15",
+  "commit": "9a93b7682",
+  "corpusFingerprint": "7de1803c5d73266a",
   "tiers": {
     "ci": {
       "lastRun": "2026-09-27",
@@ -32,7 +32,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -56,13 +56,61 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
         }
       },
       "control": true
+    },
+    {
+      "scenario": "amortizedCost.a-corrected-step-teaches-the-procedure",
+      "family": "amortizedCost",
+      "arm": "baseline",
+      "figure": {
+        "metric": "amortizedCost.providerCalls",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "9a93b7682",
+          "date": "2026-09-27",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "amortizedCost.a-corrected-step-teaches-the-procedure",
+      "family": "amortizedCost",
+      "arm": "platform",
+      "figure": {
+        "metric": "amortizedCost.providerCalls",
+        "unit": "calls",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "9a93b7682",
+          "date": "2026-09-27",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
     },
     {
       "scenario": "amortizedCost.a-local-fleet-serves-every-call",
@@ -81,7 +129,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -105,7 +153,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -129,7 +177,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -154,7 +202,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -179,7 +227,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -203,7 +251,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -227,7 +275,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -252,7 +300,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -277,7 +325,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -302,13 +350,61 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
         }
       },
       "control": true
+    },
+    {
+      "scenario": "amortizedCost.a-corrected-step-teaches-the-procedure",
+      "family": "amortizedCost",
+      "arm": "baseline",
+      "figure": {
+        "metric": "amortizedCost.replaysServedWithoutModel",
+        "unit": "count",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "9a93b7682",
+          "date": "2026-09-27",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
+    },
+    {
+      "scenario": "amortizedCost.a-corrected-step-teaches-the-procedure",
+      "family": "amortizedCost",
+      "arm": "platform",
+      "figure": {
+        "metric": "amortizedCost.replaysServedWithoutModel",
+        "unit": "count",
+        "stat": {
+          "n": 1,
+          "median": 1,
+          "p10": 1,
+          "p90": 1,
+          "min": 1,
+          "max": 1,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "9a93b7682",
+          "date": "2026-09-27",
+          "tier": "ci",
+          "runner": "local"
+        }
+      }
     },
     {
       "scenario": "amortizedCost.a-trusted-procedure-replays-without-a-model",
@@ -327,7 +423,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -351,12 +447,62 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
         }
       }
+    },
+    {
+      "scenario": "amortizedCost.control-a-disliked-recording-teaches-nothing",
+      "family": "amortizedCost",
+      "arm": "baseline",
+      "figure": {
+        "metric": "amortizedCost.replaysServedWithoutModel",
+        "unit": "count",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "9a93b7682",
+          "date": "2026-09-27",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
+    },
+    {
+      "scenario": "amortizedCost.control-a-disliked-recording-teaches-nothing",
+      "family": "amortizedCost",
+      "arm": "platform",
+      "figure": {
+        "metric": "amortizedCost.replaysServedWithoutModel",
+        "unit": "count",
+        "stat": {
+          "n": 1,
+          "median": 0,
+          "p10": 0,
+          "p90": 0,
+          "min": 0,
+          "max": 0,
+          "mad": 0
+        },
+        "provenance": {
+          "commit": "9a93b7682",
+          "date": "2026-09-27",
+          "tier": "ci",
+          "runner": "local"
+        }
+      },
+      "control": true
     },
     {
       "scenario": "amortizedCost.control-a-shadow-procedure-serves-no-goal",
@@ -375,7 +521,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -400,7 +546,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -425,7 +571,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -449,7 +595,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -466,7 +612,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "a replayed run's tokens are the cassette's recorded tokens, not this run's",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -483,7 +629,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "a replayed run's tokens are the cassette's recorded tokens, not this run's",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -500,7 +646,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "a replayed run spends nothing; the recorded cost belongs to the capture",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -517,7 +663,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "a replayed run spends nothing; the recorded cost belongs to the capture",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -541,7 +687,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -565,7 +711,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -589,7 +735,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -614,7 +760,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -639,7 +785,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -663,7 +809,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -687,7 +833,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -712,7 +858,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -737,7 +883,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -761,7 +907,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -785,7 +931,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -810,7 +956,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -835,7 +981,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -859,7 +1005,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -883,7 +1029,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -907,7 +1053,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -931,7 +1077,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -955,7 +1101,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -972,7 +1118,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "the CI tier's model responses come from a cassette through a fake step registry, so no call reaches the journal seam; the live tier calls a provider down the real path and can count it",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -996,7 +1142,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1020,7 +1166,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1044,7 +1190,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1068,7 +1214,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1085,7 +1231,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "dollars per goal need a live provider; a replay spends nothing",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1102,7 +1248,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "dollars per goal need a live provider; a replay spends nothing",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1126,7 +1272,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1150,7 +1296,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1174,7 +1320,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1198,7 +1344,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1222,7 +1368,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1247,7 +1393,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1272,7 +1418,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1296,7 +1442,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1320,7 +1466,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1344,7 +1490,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1368,7 +1514,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1392,7 +1538,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1416,7 +1562,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1440,7 +1586,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1464,7 +1610,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1488,7 +1634,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1512,7 +1658,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1536,7 +1682,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1560,7 +1706,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1584,7 +1730,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1608,7 +1754,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1633,7 +1779,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1651,7 +1797,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "wall-clock on a shared CI runner belongs to the runner",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1668,7 +1814,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "wall-clock on a shared CI runner belongs to the runner",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1692,7 +1838,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1716,7 +1862,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1740,7 +1886,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1764,7 +1910,7 @@
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1781,7 +1927,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "a replay is deterministic, so its variance is zero by construction rather than by measurement",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1798,7 +1944,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "a replay is deterministic, so its variance is zero by construction rather than by measurement",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1815,7 +1961,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "the first run and the replay would both be replays here",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1832,7 +1978,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "the first run and the replay would both be replays here",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1848,15 +1994,15 @@
         "unit": "ms",
         "stat": {
           "n": 1,
-          "median": 19.50041475,
-          "p10": 19.50041475,
-          "p90": 19.50041475,
-          "min": 19.50041475,
-          "max": 19.50041475,
+          "median": 20.18422525,
+          "p10": 20.18422525,
+          "p90": 20.18422525,
+          "min": 20.18422525,
+          "max": 20.18422525,
           "mad": 0
         },
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1873,7 +2019,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "wall-clock on a shared CI runner belongs to the runner",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1890,7 +2036,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "wall-clock on a shared CI runner belongs to the runner",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1907,7 +2053,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "wall-clock on a shared CI runner belongs to the runner",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"
@@ -1924,7 +2070,7 @@
         "absent": "notMeasurableOnReplay",
         "detail": "wall-clock on a shared CI runner belongs to the runner",
         "provenance": {
-          "commit": "b60d656bd",
+          "commit": "9a93b7682",
           "date": "2026-09-27",
           "tier": "ci",
           "runner": "local"

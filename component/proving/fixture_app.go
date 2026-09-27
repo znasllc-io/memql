@@ -23,6 +23,14 @@ package proving
 // guidance asks of a real app, and it is what makes the durability figure a
 // measurement of the GUIDANCE: if the replay named the wrong steps, or none,
 // the app redoes a delivered one and the world records the duplicate.
+//
+// IT CAN BE WRONG ONCE, AND TOLD SO (epic memql#5414, task memql#5420). A goal
+// may carry a wrong ANSWER: the goal's first session performs it instead of
+// the action as written, and every later session of the goal -- a person's
+// re-run -- performs the actions as written. Handed a step to serve (a goal
+// run the executor runs), it reads the step's own context the way the session
+// delegate does: the level a re-run asked for, and what a dislike on the
+// version it replaces said was wrong, which it is told in its prompt.
 
 import (
 	"context"
@@ -34,9 +42,11 @@ import (
 	"sync"
 	"time"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/proving/scenario"
 	"github.com/znasllc-io/memql/component/work"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 const (
@@ -65,6 +75,9 @@ type FixtureApp struct {
 	calls     int
 	goals     map[string]appGoal
 	handovers []handoverSeen
+	// served counts the sessions each goal run has had, so a goal's wrong
+	// answer is given in its FIRST session only.
+	served map[string]int
 }
 
 // appGoal is a goal as the app is given it.
@@ -76,6 +89,9 @@ type appGoal struct {
 	GoalRunId string
 	Statement string
 	Variables map[string]string
+	// Answer is what the goal's first session performs instead of the named
+	// actions (scenario.ProcedureGoal.Answer).
+	Answer map[string]string
 }
 
 // appSession is what one session did.
@@ -88,6 +104,21 @@ type appSession struct {
 	// Failed reports that an action failed and the session stopped there.
 	Failed   bool
 	FailedAt int
+	// Prompt is what the session was started with, and Level the level it
+	// was asked to serve at ("" for the step's own).
+	Prompt string
+	Level  string
+}
+
+// sessionOpts are what a session is started with beyond its goal.
+type sessionOpts struct {
+	// parentStepId is the step ROW the session serves, which the recorder
+	// stamps the recording on as its childRunId.
+	parentStepId string
+	// workspace is a fresh workspace's directory name, "" for the session's
+	// own.
+	workspace string
+	level     string
 }
 
 // handoverSeen is one goal handed back to the app, and what the app then did.
@@ -99,8 +130,9 @@ type handoverSeen struct {
 func newFixtureApp(pw *ProcedureWorld, steps []scenario.Step, recorder workerservice.SessionRecorder, owner string) *FixtureApp {
 	return &FixtureApp{
 		world: pw, recorder: recorder, steps: steps, owner: owner,
-		now:   func() time.Time { return time.Now().UTC() },
-		goals: map[string]appGoal{},
+		now:    func() time.Time { return time.Now().UTC() },
+		goals:  map[string]appGoal{},
+		served: map[string]int{},
 	}
 }
 
@@ -138,7 +170,49 @@ func (a *FixtureApp) handoverCount() int {
 
 // Serve performs a goal from its first action: an ordinary session.
 func (a *FixtureApp) Serve(ctx context.Context, g appGoal) (appSession, error) {
-	return a.session(ctx, g, nil, scenario.Render(g.Statement, g.Variables))
+	return a.session(ctx, g, nil, scenario.Render(g.Statement, g.Variables), sessionOpts{})
+}
+
+// ServeStep performs a goal as the app handed ONE STEP of the goal's run: the
+// step the platform's executor is running, whose context it is given. The
+// session is recorded beneath the goal's run and stamped onto the step's row
+// by the recorder, which is where the session delegate stamps it.
+//
+// The step's context is read as the delegate reads it (planSession): a re-run
+// names a fresh workspace, and the version it runs as carries the person's
+// override -- the level asked for, and what they disliked about the version it
+// replaces, which the session is told in its prompt in the delegate's own
+// words (component/memql's StepOverrideGuidance). The fixture app does not
+// reason with any of it; it is told, and the driver checks that it was.
+func (a *FixtureApp) ServeStep(ctx context.Context, g appGoal, step AppStep) (appSession, error) {
+	prompt := scenario.Render(g.Statement, g.Variables)
+	opts := sessionOpts{parentStepId: step.StepId}
+	if rc, ok := common.RunFromContext(ctx); ok {
+		opts.workspace = strings.TrimSpace(rc.Workspace)
+		if ov := rc.Override; ov != nil {
+			opts.level = strings.TrimSpace(ov.Level)
+			prompt = overriddenPrompt(prompt, ov)
+		}
+	}
+	return a.session(ctx, g, nil, prompt, opts)
+}
+
+// overriddenPrompt is the prompt a session is started with under a person's
+// override, composed as the session delegate composes it (applyOverride): a
+// whole prompt the person wrote replaces the goal's, instructions are added to
+// it, and the guidance a dislike carried is added once.
+func overriddenPrompt(prompt string, ov *common.StepOverride) string {
+	if strings.TrimSpace(ov.Prompt) != "" {
+		if ov.WholePrompt {
+			prompt = ov.Prompt
+		} else if instructions := memqlengine.StepOverrideInstructions(ov); !strings.Contains(prompt, instructions) {
+			prompt = strings.TrimRight(prompt, "\n") + "\n\n" + instructions
+		}
+	}
+	if guidance := memqlengine.StepOverrideGuidance(ov); guidance != "" && !strings.Contains(prompt, guidance) {
+		prompt = strings.TrimRight(prompt, "\n") + "\n\n" + guidance
+	}
+	return prompt
 }
 
 // Handover is the app's side of a fallback (AppHandover): a goal a replay
@@ -167,7 +241,7 @@ func (a *FixtureApp) Handover(ctx context.Context, h HandoverOrder) (HandoverRes
 	if strings.TrimSpace(prompt) == "" {
 		prompt = scenario.Render(g.Statement, g.Variables)
 	}
-	sess, err := a.session(ctx, g, skip, prompt)
+	sess, err := a.session(ctx, g, skip, prompt, sessionOpts{})
 	a.mu.Lock()
 	a.handovers = append(a.handovers, handoverSeen{Order: h, Session: sess})
 	a.mu.Unlock()
@@ -182,23 +256,32 @@ func (a *FixtureApp) Handover(ctx context.Context, h HandoverOrder) (HandoverRes
 // past it. A recording error is RETURNED, and the lifecycle treats it as the
 // harness failing: in production a lost row costs a recording, but here the
 // recording is the thing under test.
-func (a *FixtureApp) session(ctx context.Context, g appGoal, skip map[int]bool, prompt string) (appSession, error) {
+//
+// The goal's FIRST session gives the goal's wrong answer where it has one;
+// every later session performs the actions as written.
+func (a *FixtureApp) session(ctx context.Context, g appGoal, skip map[int]bool, prompt string, opts sessionOpts) (appSession, error) {
 	a.mu.Lock()
 	a.calls++
 	n := a.calls
+	first := a.served[g.GoalRunId] == 0
+	a.served[g.GoalRunId]++
 	a.mu.Unlock()
 
-	sess := appSession{SessionId: fmt.Sprintf("fixture-%s-%d", a.owner, n), FailedAt: -1}
+	sess := appSession{SessionId: fmt.Sprintf("fixture-%s-%d", a.owner, n), FailedAt: -1, Prompt: prompt, Level: opts.level}
 	workspace := "/workspace/" + sess.SessionId
+	if opts.workspace != "" {
+		workspace = "/workspace/" + opts.workspace
+	}
 
 	if a.recorder != nil {
 		runId, err := a.recorder.OpenRecording(ctx, workerservice.RecordingOpen{
-			SessionId:   sess.SessionId,
-			OwnerUserId: g.OwnerUserId,
-			App:         fixtureAppId,
-			Prompt:      prompt,
-			Workspace:   workspace,
-			ParentRunId: g.GoalRunId,
+			SessionId:    sess.SessionId,
+			OwnerUserId:  g.OwnerUserId,
+			App:          fixtureAppId,
+			Prompt:       prompt,
+			Workspace:    workspace,
+			ParentRunId:  g.GoalRunId,
+			ParentStepId: opts.parentStepId,
 		})
 		if err != nil {
 			return sess, fmt.Errorf("proving: opening the fixture app's recording: %w", err)
@@ -211,7 +294,11 @@ func (a *FixtureApp) session(ctx context.Context, g appGoal, skip map[int]bool, 
 		if skip[i] {
 			continue
 		}
-		command := scenario.Render(st.Target, g.Variables)
+		target := st.Target
+		if wrong, ok := g.Answer[st.Key]; ok && first {
+			target = wrong
+		}
+		command := scenario.Render(target, g.Variables)
 		started := a.now()
 		ans := a.world.exec(command, fmt.Sprintf("%s:%s:1", sess.SessionId, st.Key), false)
 		seq++

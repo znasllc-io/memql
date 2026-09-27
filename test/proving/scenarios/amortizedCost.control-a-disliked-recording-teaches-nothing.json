@@ -1,0 +1,151 @@
+{
+  "id": "amortizedCost.control-a-disliked-recording-teaches-nothing",
+  "family": "amortizedCost",
+  "title": "The control: recordings a person disliked teach no procedure, so every goal reaches the app",
+  "description": "The app is the proving suite's FIXTURE APP: a fake harness that performs the goal's actions on the fake machine and reports each one as the cockpit does, through the same session writer a delegated app session is recorded through. It is not a provider and plays no cassette; every session it runs counts as one model reach. The same fixture, the same executed goal runs and the same ladder values as the correction scenario, and no correction: every goal but the measured one is DISLIKED right after the app serves it, and nobody decides anything. The learning corpus judges each recording by the version of the step that made it, and a disliked version's recording leaves the corpus. The learner is asked after every goal, before that goal's verdict, so at no lift does the corpus hold two recordings a person has not disliked, and no procedure is ever lifted. The row assertion that no construct exists is this control's point -- a corpus that ignored a dislike lifts a procedure at the second goal -- and the replays-without-a-model counter must read ZERO on the platform arm, since the measured goal reaches the app.",
+  "goal": "Reconcile the weekly ledger for {{account}} and notify the operators",
+  "variables": [],
+  "steps": [
+    {
+      "key": "reconcile",
+      "type": "exec",
+      "target": "reconcile.sh --account {{account}} --period weekly",
+      "effect": "machine"
+    },
+    {
+      "key": "notify",
+      "type": "exec",
+      "target": "notify.sh --to ops --account {{account}}",
+      "effect": "machine"
+    },
+    {
+      "key": "archive",
+      "type": "exec",
+      "target": "archive.sh --account {{account}}",
+      "effect": "machine"
+    }
+  ],
+  "procedure": {
+    "policy": {
+      "shadowMatches": 2,
+      "distinctBindings": 2,
+      "canaryMatches": 1
+    },
+    "goals": [
+      {
+        "variables": {
+          "account": "acme"
+        }
+      },
+      {
+        "feedback": {
+          "verdict": "dislike",
+          "axes": [
+            "product"
+          ],
+          "reason": "The reconciliation left the late adjustments out."
+        }
+      },
+      {
+        "variables": {
+          "account": "globex"
+        }
+      },
+      {
+        "feedback": {
+          "verdict": "dislike",
+          "axes": [
+            "process"
+          ],
+          "reason": "It reconciled before the period had closed."
+        }
+      },
+      {
+        "variables": {
+          "account": "initech"
+        }
+      },
+      {
+        "feedback": {
+          "verdict": "dislike",
+          "axes": [
+            "performance"
+          ],
+          "reason": "It notified every operator instead of the finance rota."
+        }
+      },
+      {
+        "variables": {
+          "account": "umbrella"
+        }
+      },
+      {
+        "feedback": {
+          "verdict": "dislike",
+          "axes": [
+            "product",
+            "process"
+          ],
+          "reason": "The archive holds last week's ledger, not this one."
+        }
+      },
+      {
+        "variables": {
+          "account": "hooli"
+        }
+      },
+      {
+        "feedback": {
+          "verdict": "dislike",
+          "axes": [
+            "product"
+          ]
+        }
+      },
+      {
+        "variables": {
+          "account": "stark"
+        },
+        "measure": true
+      }
+    ]
+  },
+  "world": {
+    "machine": {
+      "labels": {
+        "os": "linux"
+      },
+      "scripts": {
+        "reconcile.sh": "{\"lines\": 42, \"balanced\": true}\n",
+        "notify.sh": "notice queued\n",
+        "archive.sh": "archived\n"
+      }
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:authoring:construct",
+      "count": 0
+    },
+    {
+      "rows": "v1:work:approval",
+      "where": {
+        "kind": "procedurePromotion"
+      },
+      "count": 0
+    },
+    {
+      "effects": "machine.run",
+      "count": 18
+    },
+    {
+      "effects": "machine.duplicates",
+      "count": 0
+    }
+  ],
+  "claims": [
+    "amortizedCost.replaysServedWithoutModel"
+  ],
+  "negativeControlFor": "amortizedCost.replaysServedWithoutModel"
+}

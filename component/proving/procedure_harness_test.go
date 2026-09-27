@@ -2,10 +2,14 @@ package proving
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/automations"
+	proc "github.com/znasllc-io/memql/component/procedure"
+	"github.com/znasllc-io/memql/component/proving/scenario"
 	"github.com/znasllc-io/memql/component/work"
 	procedure "github.com/znasllc-io/memql/integrations/procedure"
 )
@@ -175,3 +179,134 @@ func (h recordingHandler) Handle(_ context.Context, r slog.Record) error {
 }
 func (h recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h recordingHandler) WithGroup(string) slog.Handler      { return h }
+
+// --- A person stepping in (epic memql#5414, task memql#5420) ----------------------
+
+func TestTheWorkSpinesLogFollowsTheLifecycleRunningNow(t *testing.T) {
+	// The work spine is registered on the engine once and outlives every
+	// lifecycle, so its warnings must reach the lifecycle that made them --
+	// a verifier failure there -- and none after it.
+	var seen []string
+	sw := &logSwitch{fallback: slog.New(recordingHandler{seen: &seen})}
+	l := slog.New(switchHandler{s: sw}).With("component", "work")
+	first, second := newWarningLog(nil), newWarningLog(nil)
+	sw.set(first)
+	l.Warn("refused in the first")
+	sw.set(second)
+	l.Warn("refused in the second")
+	sw.set(nil)
+	l.Warn("refused between lifecycles")
+	if got := first.warnings(); len(got) != 1 || !strings.Contains(got[0], "refused in the first") || !strings.Contains(got[0], "component=work") {
+		t.Errorf("the first lifecycle kept %q", got)
+	}
+	if got := second.warnings(); len(got) != 1 || !strings.Contains(got[0], "refused in the second") {
+		t.Errorf("the second lifecycle kept %q", got)
+	}
+	if len(seen) != 1 || seen[0] != "refused between lifecycles" {
+		t.Errorf("the bench's own logger saw %q; a warning with no lifecycle running belongs to it", seen)
+	}
+}
+
+func TestTheAppIsServedTheStepOnItsJournalRow(t *testing.T) {
+	// The recording is stamped on the step ROW, whose id is the journal's --
+	// the run's short id and the key -- or it points at no row at all, which
+	// is the defect the session delegate's own stamp once had.
+	var got AppStep
+	r := appStepRegistry{serve: func(_ context.Context, step AppStep) (AppStepAnswer, error) {
+		got = step
+		return AppStepAnswer{ChildRunId: "v1:work:run:rec"}, nil
+	}}
+	exec := &automations.AutomationExecution{ID: "v1:work:run:goal-7"}
+	res, err := r.Execute(context.Background(), &automations.Step{ID: appStepKey}, &automations.StepContext{Execution: exec})
+	if result, _ := res.Result.(map[string]any); err != nil || res.Status != "completed" || result["childRunId"] != "v1:work:run:rec" {
+		t.Fatalf("Execute = %+v, %v", res, err)
+	}
+	if want := automations.WorkStepId(exec.ID, appStepKey); got.StepId != want || want != "goal-7-"+appStepKey || got.RunId != exec.ID {
+		t.Fatalf("the app was served %+v; the journal writes the step's row as %s", got, want)
+	}
+
+	// A session that failed is a failed step, with the app's own words.
+	r.serve = func(context.Context, AppStep) (AppStepAnswer, error) {
+		return AppStepAnswer{Failed: true, Error: "the app's session failed at its action notify"}, nil
+	}
+	if res, err := r.Execute(context.Background(), &automations.Step{ID: appStepKey}, &automations.StepContext{Execution: exec}); err == nil || res.Status != "failed" || !strings.Contains(res.Error, "notify") {
+		t.Fatalf("a failed session executed as %+v, %v", res, err)
+	}
+	// And a step outside any execution has no run to be recorded beneath.
+	if _, err := r.Execute(context.Background(), &automations.Step{ID: appStepKey}, nil); err == nil {
+		t.Fatal("a step outside an execution was served")
+	}
+}
+
+func TestALearnedProcedureReadsBackAsTheScenarioWritesAnAction(t *testing.T) {
+	// The procedure is read back with the runner's own reader and written out
+	// with the runner's own writer, a free parameter as the placeholder of the
+	// goal input that binds it -- so a step compares with the action as the
+	// scenario writes it. Built here through the learner's own functions over
+	// the correction fixture's two corrected recordings.
+	s := lifecycles(t)[scnCorrected]
+	var (
+		corpus [][]proc.Action
+		inputs []map[string]any
+	)
+	for r, account := range []string{"acme", "globex"} {
+		steps := make([]proc.Step, 0, len(s.Steps))
+		for i, st := range s.Steps {
+			steps = append(steps, proc.Step{
+				RunId: "run" + string(rune('a'+r)), Key: st.Key, Seq: i + 1, StepType: st.Type,
+				Call: proc.Call{Construct: "app", Name: st.Type}, Input: map[string]any{"command": scenario.Render(st.Target, map[string]string{"account": account})},
+			})
+		}
+		acts := proc.Canonicalize(steps)
+		proc.SortActions(acts)
+		corpus = append(corpus, acts)
+		inputs = append(inputs, map[string]any{"account": account})
+	}
+	win, instances := minePipeline(corpus)
+	if win == nil {
+		t.Fatal("the learner lifts nothing from the correction fixture")
+	}
+	p := procedure.Procedure{
+		V: 1, GoalSignature: "sig-1", Holes: win.Holes, InputMap: proc.LearnInputMap(*win, instances, inputs),
+		RecordedFrom: procedure.RecordedFrom{RunIds: []string{"v1:work:run:rec-2", "v1:work:run:rec-3"}},
+	}
+	for _, st := range win.Steps {
+		p.Steps = append(p.Steps, procedure.ProcedureStep{Tool: st.Tool, Args: st.Args})
+	}
+	row := func(p procedure.Procedure) map[string]any {
+		raw, err := json.Marshal(p)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return map[string]any{"procedure": m}
+	}
+
+	cs := withProcedure(ConstructState{ConstructId: "c1"}, row(p))
+	if cs.Unreadable != "" || cs.GoalSignature != "sig-1" || strings.Join(cs.RecordedFrom, ",") != "v1:work:run:rec-2,v1:work:run:rec-3" {
+		t.Fatalf("read back as %+v; a row whose signature is held back takes the payload's", cs)
+	}
+	if len(cs.Steps) != len(s.Steps) {
+		t.Fatalf("%d steps read back, want %d: %q", len(cs.Steps), len(s.Steps), cs.Steps)
+	}
+	for i, st := range s.Steps {
+		if !sameCommand(cs.Steps[i], st.Target) {
+			t.Errorf("step %d reads back as %q, and the action is written %q", i, cs.Steps[i], st.Target)
+		}
+	}
+
+	// A free parameter no goal input binds is written as one, never as a
+	// value it could be mistaken for.
+	p.InputMap = map[string]string{}
+	cs = withProcedure(ConstructState{}, row(p))
+	if !strings.Contains(strings.Join(cs.Steps, " "), "{{?") {
+		t.Fatalf("an unbound parameter read back as %q", cs.Steps)
+	}
+	// And a construct with no procedure says so.
+	if cs := withProcedure(ConstructState{}, map[string]any{}); cs.Unreadable == "" {
+		t.Fatal("a construct with no procedure read back as readable")
+	}
+}

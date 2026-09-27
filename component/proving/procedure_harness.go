@@ -22,6 +22,9 @@ package proving
 // else. The promotion decision as onProcedurePromotionDecided's maintenance
 // principal, under the internal origin the automation runtime gives every
 // automation from the registered tree. The person's decision as that person.
+//
+// A person stepping into a goal -- the goal's run executed, a step run again,
+// a verdict -- is procedure_harness_steps.go's, over the same engine.
 
 import (
 	"context"
@@ -32,6 +35,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -62,12 +67,23 @@ const (
 // engineLifecycle is the LifecycleHarness over the engine.
 type engineLifecycle struct {
 	e      *memqlengine.MemQLEngine
+	db     *bun.DB
 	logger *slog.Logger
+
+	// The work spine as a node materializes it, registered on the engine the
+	// first time a lifecycle opens (procedure_harness_steps.go workActs), and
+	// the switch that routes its log to the lifecycle running now.
+	once    sync.Once
+	work    memqlengine.IntegrationProvider
+	workErr error
+	workLog *logSwitch
 }
 
 // NewEngineLifecycle is the harness cmd/memql-bench installs on the Runner.
-func NewEngineLifecycle(e *memqlengine.MemQLEngine, logger *slog.Logger) LifecycleHarness {
-	return &engineLifecycle{e: e, logger: logger}
+// db is the engine's own database handle: the work spine's version history
+// reads it directly, as it does on a node.
+func NewEngineLifecycle(e *memqlengine.MemQLEngine, db *bun.DB, logger *slog.Logger) LifecycleHarness {
+	return &engineLifecycle{e: e, db: db, logger: logger, workLog: &logSwitch{fallback: logger}}
 }
 
 // Open writes the ladder's values the run is to climb under, proves the
@@ -81,6 +97,13 @@ func (h *engineLifecycle) Open(ctx context.Context, owner string, overlay work.L
 	owner = strings.TrimSpace(owner)
 	if owner == "" {
 		return nil, fmt.Errorf("proving: a lifecycle needs an owner; every row it writes is somebody's")
+	}
+	// Before anything is written: a harness that cannot be the platform must
+	// not leave the ladder's row on this run's values, and Close runs only
+	// after an Open that succeeded.
+	acts, err := h.workActs()
+	if err != nil {
+		return nil, err
 	}
 	current, _, err := h.readPolicy(ctx, owner)
 	if err != nil {
@@ -100,7 +123,8 @@ func (h *engineLifecycle) Open(ctx context.Context, owner string, overlay work.L
 	}
 
 	log := newWarningLog(h.logger)
-	spine := &engineSpine{e: h.e, wi: workspine.New(h.e, log.logger())}
+	h.workLog.set(log)
+	spine := &engineSpine{e: h.e, wi: workspine.New(h.e, log.logger()), acts: acts, log: log.logger()}
 	return &LifecyclePlatform{
 		Recorder: workspine.NewSessionWriter(h.e, log.logger()),
 		Spine:    spine,
@@ -115,7 +139,10 @@ func (h *engineLifecycle) Open(ctx context.Context, owner string, overlay work.L
 		// The SEEDED defaults, not the row Open found: no later scenario may
 		// inherit this one's values, and the seed is what every node
 		// re-asserts on its next boot anyway.
-		Close:    func(ctx context.Context) error { return h.writePolicy(ctx, work.DefaultLadderPolicy()) },
+		Close: func(ctx context.Context) error {
+			h.workLog.set(nil)
+			return h.writePolicy(ctx, work.DefaultLadderPolicy())
+		},
 		Warnings: log.warnings,
 	}, nil
 }
@@ -187,6 +214,12 @@ func overlayPolicy(current, overlay work.LadderPolicy) work.LadderPolicy {
 type engineSpine struct {
 	e  *memqlengine.MemQLEngine
 	wi *workspine.Integration
+	// acts is the work spine as the engine has it registered -- a node's
+	// materialization, with its database handle and row-admission gate --
+	// which the person's acts are called on (procedure_harness_steps.go).
+	acts memqlengine.IntegrationProvider
+	// log is the lifecycle's, for the executor a goal's run is executed by.
+	log *slog.Logger
 }
 
 func (s *engineSpine) OpenGoal(ctx context.Context, g GoalOrder) (string, string, error) {
@@ -410,7 +443,7 @@ func (l *engineLadder) Constructs(ctx context.Context, owner string) ([]Construc
 	}
 	out := make([]ConstructState, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, constructStateOf(r))
+		out = append(out, withProcedure(constructStateOf(r), r))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ConstructId < out[j].ConstructId })
 	return out, nil
