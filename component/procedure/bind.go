@@ -96,7 +96,9 @@ func bindNode(tmpl, inst *Node, out map[string]string) bool {
 		}
 		return true
 	case KindArray:
-		if inst.Kind != KindArray || len(inst.Kids) != len(tmpl.Kids) {
+		// A path's root is meaning: a template learned from /tmp/x/... does
+		// not fit a recording that wrote tmp/x/..., whatever the segments.
+		if inst.Kind != KindArray || len(inst.Kids) != len(tmpl.Kids) || rootednessDiffers(tmpl, inst) {
 			return false
 		}
 		for i := range tmpl.Kids {

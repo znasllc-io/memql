@@ -66,6 +66,14 @@ func AntiUnify(a, b *Node, next holeNamer) (*Node, int) {
 	if a.Kind != b.Kind {
 		return HoleNode(next(), widenType(typeOf(a), typeOf(b))), maxInt(a.Size(), b.Size())
 	}
+	if rootednessDiffers(a, b) {
+		// Two paths with the same segments, one rooted and one not, name
+		// different files. The root lives in the Form, which Equal ignores,
+		// so without this they generalized with no hole at all and replayed
+		// whichever the first recording said. The whole path is the hole:
+		// it goes back as the one string it is.
+		return HoleNode(next(), "string"), maxInt(a.Size(), b.Size())
+	}
 	switch a.Kind {
 	case KindLit:
 		if a.Lit == b.Lit {
@@ -170,9 +178,43 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 	return g, dist
 }
 
+// rootednessDiffers reports that exactly one of two nodes is a rooted path.
+// Every other reading Form records is spelling -- a command recorded as a
+// line and as a vector is one command -- but /tmp/x and tmp/x are two files.
+func rootednessDiffers(a, b *Node) bool {
+	return (a.Form == FormRootedPath) != (b.Form == FormRootedPath)
+}
+
+// sameMeaning is Equal plus the one reading that is meaning, rootedness,
+// anywhere in the two trees. It is what the common subsequence pairs
+// elements by: an element paired as common is cloned into the template from
+// the left, unexamined, so a pairing that ignored the root would carry a
+// rooted path over a relative one with no hole.
+func sameMeaning(a, b *Node) bool {
+	return a.Equal(b) && sameRootedness(a, b)
+}
+
+// sameRootedness walks two Equal trees together.
+func sameRootedness(a, b *Node) bool {
+	if a == nil || b == nil {
+		return true
+	}
+	if rootednessDiffers(a, b) {
+		return false
+	}
+	for i := range a.Kids {
+		if i < len(b.Kids) && !sameRootedness(a.Kids[i], b.Kids[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // lcsPairs returns the index pairs of a longest common subsequence, in order.
 // Equality is structural, so a matched element is one both sides actually
-// recorded rather than one that merely sits at the same offset.
+// recorded rather than one that merely sits at the same offset -- and it is
+// sameMeaning rather than Equal, so a rooted path never pairs with a relative
+// one.
 func lcsPairs(a, b []*Node) [][2]int {
 	n, m := len(a), len(b)
 	table := make([][]int, n+1)
@@ -181,7 +223,7 @@ func lcsPairs(a, b []*Node) [][2]int {
 	}
 	for i := n - 1; i >= 0; i-- {
 		for j := m - 1; j >= 0; j-- {
-			if a[i].Equal(b[j]) {
+			if sameMeaning(a[i], b[j]) {
 				table[i][j] = table[i+1][j+1] + 1
 			} else {
 				table[i][j] = maxInt(table[i+1][j], table[i][j+1])
@@ -192,7 +234,7 @@ func lcsPairs(a, b []*Node) [][2]int {
 	i, j := 0, 0
 	for i < n && j < m {
 		switch {
-		case a[i].Equal(b[j]):
+		case sameMeaning(a[i], b[j]):
 			pairs = append(pairs, [2]int{i, j})
 			i++
 			j++

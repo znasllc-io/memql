@@ -189,3 +189,56 @@ func TestClassify_IsDeterministicInHoleOrder(t *testing.T) {
 		}
 	}
 }
+
+// pathStep is one fs_write whose `path` is the given string.
+func pathStep(p string) []Action {
+	return Canonicalize([]Step{{StepType: "fs_write", Consumed: true, Input: map[string]any{"path": p, "content": "hi"}}})
+}
+
+// TestARootedAndARelativePathNeverGeneralizeAsOne (E1): /tmp/x/a.txt and
+// tmp/x/a.txt have the same SEGMENTS and name different files -- one under
+// the root, one under wherever the replay runs. The leading slash lives in the
+// Form, which Equal ignores, so the two used to generalize with no hole at all
+// and replay whichever the first recording said. Rootedness is meaning, so
+// the whole path is a hole.
+func TestARootedAndARelativePathNeverGeneralizeAsOne(t *testing.T) {
+	tmpl := Generalize([][]Action{pathStep("/tmp/x/a.txt"), pathStep("tmp/x/a.txt")})
+	n, _ := tmpl.Steps[0].Args.At([]string{"path"})
+	if n == nil || n.Kind != KindHole {
+		t.Fatalf("path = %+v, want a hole for the whole path", n)
+	}
+	if len(tmpl.Holes) != 1 || tmpl.Holes[0].Id != "s0.path" {
+		t.Fatalf("holes = %+v, want the one hole s0.path", tmpl.Holes)
+	}
+	a, _ := pathStep("/tmp/x/a.txt")[0].Args.At([]string{"path"})
+	b, _ := pathStep("tmp/x/a.txt")[0].Args.At([]string{"path"})
+	if _, dist := AntiUnify(a, b, newHoleNamer()); dist == 0 {
+		t.Fatal("a rooted and a relative path are not the same path; distance 0")
+	}
+	if !a.Equal(b) {
+		t.Fatal("Equal is unchanged: it still reads the two as the same segments")
+	}
+
+	// Inside a LIST the elements are paired by a common subsequence, which
+	// must not pair them either.
+	list := func(p string) []Action {
+		return Canonicalize([]Step{{StepType: "fs_write", Consumed: true, Input: map[string]any{"path": []any{p}}}})
+	}
+	inList := Generalize([][]Action{list("/tmp/a"), list("tmp/a")})
+	if len(inList.Holes) == 0 {
+		t.Fatal("a rooted and a relative path inside a list generalized with no hole")
+	}
+}
+
+// TestBindRefusesAPathWhoseRootednessDiffers (E1): a template learned from
+// rooted paths does not fit a recording that wrote a relative one, whatever
+// its segments -- the file it wrote is not the file the template writes.
+func TestBindRefusesAPathWhoseRootednessDiffers(t *testing.T) {
+	tmpl := Generalize([][]Action{pathStep("/tmp/x/a.txt"), pathStep("/tmp/x/b.txt")})
+	if _, ok := Bind(tmpl, 0, pathStep("/tmp/x/c.txt")[0]); !ok {
+		t.Fatal("the control: a rooted path of the same shape must bind")
+	}
+	if got, ok := Bind(tmpl, 0, pathStep("tmp/x/c.txt")[0]); ok {
+		t.Fatalf("a relative path bound to a rooted template: %v", got)
+	}
+}
