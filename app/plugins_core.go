@@ -81,7 +81,6 @@ import (
 	// requires and integrations could not import back.
 	_ "github.com/znasllc-io/memql/component/logstore"
 	_ "github.com/znasllc-io/memql/integrations/library"
-	_ "github.com/znasllc-io/memql/integrations/liveknowledge"
 	// Procedure automations load on every node and consume work-run events;
 	// their executors must be present wherever those events arrive.
 	_ "github.com/znasllc-io/memql/integrations/procedure"

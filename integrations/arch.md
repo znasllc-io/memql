@@ -38,7 +38,6 @@ integrations/
 ├── identity/                           # identity-side helpers
 ├── knowledge/                          # corpus seed + lookup helpers
 ├── library/                            # action-library capability
-├── liveknowledge/                      # Live Knowledge dispatch -- routes integration.liveknowledge.query
 ├── openai/      asr.go, tts.go         # Polyphon ASR/TTS via OpenAI Realtime + /v1/audio/speech
 ├── openairealtime/                     # OpenAI Realtime ephemeral client-secret minting
 ├── planner/                            # planner-node Task/Plan lifecycle orchestration + agent decompose loop

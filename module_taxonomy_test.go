@@ -201,13 +201,12 @@ var pluginKinds = map[string]moduleKind{
 	"compose": kindComponent,
 
 	// --- PACKS: product features with a coherent "off". ---
-	"agents":        kindPack,
-	"library":       kindPack,
-	"knowledge":     kindPack, // see the note below
-	"liveknowledge": kindPack,
-	"similarity":    kindPack,
-	"files":         kindPack,
-	"workbench":     kindPack, // see the note below
+	"agents":     kindPack,
+	"library":    kindPack,
+	"knowledge":  kindPack, // see the note below
+	"similarity": kindPack,
+	"files":      kindPack,
+	"workbench":  kindPack, // see the note below
 
 	// --- The two the harness pack left behind (work spine A1). ---
 	//
