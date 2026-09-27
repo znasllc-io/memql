@@ -182,7 +182,7 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 			// A directory NAME under the owner's workspace root, not a path:
 			// sessionWorkspace composes it, exactly as it composes the run's
 			// own directory when no fresh one was asked for.
-			"workspace":      plan.workspace,
+			"freshWorkspace": plan.workspace,
 			"responseSchema": schemaJSON(h.ResponseSchema),
 			// THE SUBRUN OPENED ABOVE IS WHERE THE SESSION IS RECORDED (epic
 			// memql#5396). It is the run childRunId now points at, so the

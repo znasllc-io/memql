@@ -535,7 +535,7 @@ func TestASessionOverrideReplacesThePromptAndSetsTheKnobs(t *testing.T) {
 	wantPrompt := "Revise report.md and put the totals in bold.\n\n" +
 		"What was wrong with the previous version (product): the totals are missing"
 	for key, want := range map[string]string{
-		"prompt": wantPrompt, "level": "reasoning", "model": "opus", "effort": "xhigh", "workspace": "r1-v2",
+		"prompt": wantPrompt, "level": "reasoning", "model": "opus", "effort": "xhigh", "freshWorkspace": "r1-v2",
 	} {
 		if got := ex.got.Input[key]; got != want {
 			t.Errorf("Input[%s] = %v, want %q", key, got, want)
@@ -579,7 +579,7 @@ func TestASessionOverrideReplacesThePromptAndSetsTheKnobs(t *testing.T) {
 		t.Fatalf("RunStep: %v", err)
 	}
 	if ex.got.Input["prompt"] != "Revise the report." || ex.got.Input["level"] != "strong" ||
-		ex.got.Input["effort"] != "" || ex.got.Input["workspace"] != "" {
+		ex.got.Input["effort"] != "" || ex.got.Input["freshWorkspace"] != "" {
 		t.Fatalf("a step nobody re-ran was changed: %+v", ex.got.Input)
 	}
 }

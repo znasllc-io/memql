@@ -363,7 +363,7 @@ func sessionWorkspace(req planner.ExecutorRequest, root string) string {
 		return ""
 	}
 	dir := req.RunId
-	if fresh := stringFromInput(req, "workspace"); isWorkspaceDirName(fresh) {
+	if fresh := stringFromInput(req, "freshWorkspace"); isWorkspaceDirName(fresh) {
 		dir = fresh
 	}
 	return root + "/" + dir
