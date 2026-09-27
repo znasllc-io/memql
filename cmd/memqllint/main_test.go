@@ -1243,3 +1243,33 @@ func TestRun_TheParityPassChecksADomainOfOnlySubNamespaces(t *testing.T) {
 		t.Fatalf("the report does not carry the parity pass's refusal; output:\n%s", out)
 	}
 }
+
+// TestRun_AConceptThatDoesNotParseIsRefusedByBothPasses (memql#5426): a
+// concept that does not parse was refused by the parse pass alone -- the
+// engine-parity pass, like boot, dropped it in silence. The parity pass
+// refuses it now, naming the concept, its line and concept_unparsed, with the
+// parser's refusal placed at the author's line and column: two passes, two
+// copies, as a construct-level parse refusal is reported by both
+// (TestRun_V1RefusalNamesTheAuthorsLineAndColumn).
+func TestRun_AConceptThatDoesNotParseIsRefusedByBothPasses(t *testing.T) {
+	code, report, out := jsonReport(t, writeTree(t, map[string]string{
+		"demo/concepts.memql": "/// A demo item.\nconcept item {\n  name    string\n  status  string  @@description(\"x\")\n}\n",
+	}))
+	if code != 1 || len(report.Errors) != 2 {
+		t.Fatalf("one concept that does not parse: run() = %d, want 1 with the two passes' refusals:\n%s", code, out)
+	}
+	var all strings.Builder
+	for _, e := range report.Errors {
+		all.WriteString(e.Message + "\n")
+	}
+	for _, want := range []string{
+		"demo/concepts.memql: parse: parser error: parse error at line 4, column 20",
+		`demo/concepts.memql: concept "item" DROPPED`,
+		`line 2: concept "item" does not parse, so it is not registered: parse error at line 4, column 20`,
+		"[concept_unparsed]",
+	} {
+		if !strings.Contains(all.String(), want) {
+			t.Errorf("the report does not carry %q; errors:\n%s", want, all.String())
+		}
+	}
+}
