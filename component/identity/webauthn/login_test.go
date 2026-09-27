@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-webauthn/webauthn/protocol"
+	gowebauthn "github.com/go-webauthn/webauthn/webauthn"
 	"github.com/stretchr/testify/require"
 )
 
@@ -239,6 +241,33 @@ func TestFinishLogin_RejectsAnAssertionWithoutUserVerification(t *testing.T) {
 
 	_, err = c.FinishLogin(challenge.ChallengeId, bytes.NewReader(body), resolverFor(row))
 	require.Error(t, err)
+}
+
+// The test above is refused by go-webauthn itself, because BeginLogin asks
+// for userVerification=required, so FinishLogin's OWN check never runs
+// there. This plants a session that only PREFERS verification: the library
+// accepts the UV-less assertion, and the refusal has to come from
+// FinishLogin reading the ceremony's authenticator data. A check that read
+// anything else (the credential record, the UP flag) would pass the tests
+// above and fail this one.
+func TestFinishLogin_OwnCheckRefusesACeremonyThatDidNotVerify(t *testing.T) {
+	c := newTestCeremony(t)
+	a := newSoftwareAuthenticator(t)
+	row := storedRow(a, testUserId, 0)
+
+	assertion, session, err := c.rp.BeginDiscoverableLogin(
+		gowebauthn.WithUserVerification(protocol.VerificationPreferred),
+	)
+	require.NoError(t, err)
+	challengeId, _, err := c.challenges.Put("", CeremonyLogin, session, OAuthContext{})
+	require.NoError(t, err)
+
+	a.signCount = 1
+	a.flags &^= flagUserVerified
+	body := a.Assert(assertion.Response.Challenge.String(), testRPID, testOrigin, testUserId)
+
+	_, err = c.FinishLogin(challengeId, bytes.NewReader(body), resolverFor(row))
+	require.ErrorIs(t, err, ErrUserVerification)
 }
 
 func TestFinishLogin_RejectsAWrongOrigin(t *testing.T) {
