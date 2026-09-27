@@ -1702,8 +1702,9 @@ func sessionConnParams() map[string]any {
 // session lock its orphan keeps holding and verifies the catalog after waiting
 // for it (latest_row_index.go).
 //
-// And without TimescaleDB's cap on DML decompression. "MemoryNodes" compresses
-// its 90-day-cold tail (memory_nodes_compression.go, memql#5421), and a
+// And without TimescaleDB's cap on DML decompression. "MemoryNodes" is meant to
+// compress its 90-day-cold tail (memory_nodes_compression.go, memql#5421 --
+// blocked today by a DELETE transition trigger), and once it does, a
 // migration that UPDATEs or DELETEs rows in a compressed chunk decompresses
 // them, capped per transaction at 100000 tuples by default -- measured to
 // refuse a 150000-row, concept-scoped `payload - '<field>'` repair outright,

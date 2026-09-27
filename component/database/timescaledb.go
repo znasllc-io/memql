@@ -198,7 +198,8 @@ func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
 		// The compression 20260609 intended and no install ever got, applied
 		// where the conversion above happens (memory_nodes_compression.go,
 		// memql#5421). Self-guarding: it acts only on a hypertable with no
-		// compression settings, and never fails the boot.
+		// compression settings and no DELETE trigger carrying a transition
+		// table, records what it decided, and never fails the boot.
 		compression := map[string]string{
 			memoryNodesTableName: ensureMemoryNodesCompression(ctx, bunDB, logger),
 		}
