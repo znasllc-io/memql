@@ -90,18 +90,22 @@ func scanDuplicateImportNames(file, src string) []Violation {
 	if skipForAutomationScan(file) {
 		return nil
 	}
+	// The findings are the text's alone, derived once per process
+	// (source_facts.go); the file they are reported against is this call's.
+	return stampFile(file, factsOf(src).duplicateImportFindings())
+}
 
-	code := codeOnly(src)
+// duplicateImportNamesIn is the gate over one file's `use` lines, reporting
+// against file.
+func duplicateImportNamesIn(file string, uses []useFact) []Violation {
 	first := map[string]importBinding{}
 	// Report at most one violation per local name: a name bound three times is
 	// one decision to make, not two.
 	reported := map[string]bool{}
 	var out []Violation
 
-	for _, m := range useLineRe.FindAllStringSubmatchIndex(code, -1) {
-		modulePath := code[m[2]:m[3]]
-		line := strings.Count(code[:m[0]], "\n") + 1
-		for _, b := range parseImportBraceList(code[m[4]:m[5]], modulePath, line) {
+	for _, u := range uses {
+		for _, b := range parseImportBraceList(u.names, u.path, u.line) {
 			prior, dup := first[b.local]
 			if !dup {
 				first[b.local] = b

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // CodeConstructUnknown ends every UnknownConstructKeyword message.
@@ -72,28 +73,21 @@ func (m *MisplacedUse) RuleCode() string { return CodeUseNotFileTop }
 // the same message, found over the same top-level statement scan
 // FindUnknownConstructKeywords makes.
 func FindMisplacedUseLines(source string) []MisplacedUse {
+	return ReadTopLevel(source).MisplacedUseLines()
+}
+
+// MisplacedUseLines is FindMisplacedUseLines over one read of a source.
+func (t TopLevel) MisplacedUseLines() []MisplacedUse {
 	var out []MisplacedUse
 	constructSeen := false
-	depth := 0
-	for i, line := range strings.Split(BlankCommentsAndStrings(source), "\n") {
-		if depth == 0 {
-			if m := statementHead.FindStringSubmatch(line); m != nil && isConstructKeyword(m[1]) {
-				if m[1] != "use" {
-					constructSeen = true
-				} else if constructSeen {
-					out = append(out, MisplacedUse{Line: i + 1, Path: usePath(line), Message: misplacedUseMessage})
-				}
-			}
+	for _, h := range t.heads {
+		if !isConstructKeyword(h.word) {
+			continue
 		}
-		for _, c := range line {
-			switch c {
-			case '{', '(', '[':
-				depth++
-			case '}', ')', ']':
-				if depth > 0 {
-					depth--
-				}
-			}
+		if h.word != "use" {
+			constructSeen = true
+		} else if constructSeen {
+			out = append(out, MisplacedUse{Line: h.line, Path: usePath(h.text), Message: misplacedUseMessage})
 		}
 	}
 	return out
@@ -139,8 +133,60 @@ func ConstructKeywords() []string {
 	return sortedKeys(set)
 }
 
-// statementHead is the first word of a line.
-var statementHead = regexp.MustCompile(`^[ \t]*([A-Za-z_][A-Za-z0-9_]*)`)
+// constructKeywordTable is ConstructKeywords as the top-level readers use it:
+// the set they look a line's first word up in, the sorted list, and the list
+// joined for a refusal. The tables it derives from are fixed once the package
+// has initialised, so it is built once rather than once per line (every file
+// of every boot asks it of each of its top-level lines).
+//
+// Guarded by a sync.Once rather than initialised as a package variable: the
+// keyword tables are themselves derived from the parser's own dispatch tables,
+// and an initialiser here would join their initialisation graph.
+var constructKeywordTable struct {
+	once   sync.Once
+	set    map[string]bool
+	list   []string
+	joined string
+}
+
+// constructKeywords returns the table, building it on first use. The list is
+// shared: callers read it and never modify it.
+func constructKeywords() (set map[string]bool, list []string, joined string) {
+	t := &constructKeywordTable
+	t.once.Do(func() {
+		t.list = ConstructKeywords()
+		t.set = make(map[string]bool, len(t.list))
+		for _, k := range t.list {
+			t.set[k] = true
+		}
+		t.joined = strings.Join(t.list, ", ")
+	})
+	return t.set, t.list, t.joined
+}
+
+// lineHead is the word a line opens with, `^[ \t]*([A-Za-z_][A-Za-z0-9_]*)`,
+// read without a regular expression: the top-level readers ask it of every
+// line of every file a boot loads, and a regexp's per-call setup was most of
+// what they cost.
+func lineHead(line string) (string, bool) {
+	i := 0
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	if i == len(line) || !headWordStart(line[i]) {
+		return "", false
+	}
+	j := i + 1
+	for j < len(line) && (headWordStart(line[j]) || (line[j] >= '0' && line[j] <= '9')) {
+		j++
+	}
+	return line[i:j], true
+}
+
+// headWordStart reports whether b may open a line's head word: [A-Za-z_].
+func headWordStart(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
 
 // FindUnknownConstructKeywords reports every top-level statement of source
 // opened by a word that is not a construct keyword.
@@ -154,15 +200,15 @@ var statementHead = regexp.MustCompile(`^[ \t]*([A-Za-z_][A-Za-z0-9_]*)`)
 // with its migration hint (RejectLegacyProceduralAuthorForm), so one line is
 // refused once.
 func FindUnknownConstructKeywords(source string) []UnknownConstructKeyword {
-	keywords := ConstructKeywords()
-	known := make(map[string]bool, len(keywords))
-	for _, k := range keywords {
-		known[k] = true
-	}
-	all := strings.Join(keywords, ", ")
+	return ReadTopLevel(source).UnknownConstructKeywords()
+}
 
+// UnknownConstructKeywords is FindUnknownConstructKeywords over one read of a
+// source.
+func (t TopLevel) UnknownConstructKeywords() []UnknownConstructKeyword {
+	known, keywords, all := constructKeywords()
 	var out []UnknownConstructKeyword
-	for _, h := range topLevelHeads(source) {
+	for _, h := range t.heads {
 		if !known[h.word] && !(h.word == "func" && legacyProceduralAuthorForm.MatchString(h.text)) {
 			out = append(out, UnknownConstructKeyword{
 				Line:    h.line,
@@ -200,12 +246,36 @@ type TopLevelStatement struct {
 // parsing it, so a file the parser would refuse is still read for the
 // statements it opens (memql#5437: the construct-misplaced gate).
 func TopLevelStatements(source string) []TopLevelStatement {
-	heads := topLevelHeads(source)
-	out := make([]TopLevelStatement, 0, len(heads))
-	for _, h := range heads {
+	return ReadTopLevel(source).Statements()
+}
+
+// Statements is TopLevelStatements over one read of a source.
+func (t TopLevel) Statements() []TopLevelStatement {
+	out := make([]TopLevelStatement, 0, len(t.heads))
+	for _, h := range t.heads {
 		out = append(out, TopLevelStatement{Line: h.line, Keyword: h.word, Name: statementName(h.word, h.text)})
 	}
 	return out
+}
+
+// TopLevel is one read of a source's top-level statements -- the scan every
+// top-level reader answers from: UnknownConstructKeywords (the construct_unknown
+// gate), Statements (construct_misplaced) and MisplacedUseLines
+// (use_not_file_top).
+//
+// A caller that asks more than one of them reads the file once, and the three
+// cannot disagree about which lines are top level, because there is one scan
+// to disagree with. FindUnknownConstructKeywords, TopLevelStatements and
+// FindMisplacedUseLines are each a single read and a single question, for a
+// caller that has only one to ask. A TopLevel is immutable, so one read may be
+// shared.
+type TopLevel struct {
+	heads []topLevelHead
+}
+
+// ReadTopLevel reads source's top-level statements once.
+func ReadTopLevel(source string) TopLevel {
+	return TopLevel{heads: topLevelHeads(source)}
 }
 
 // topLevelHead is one top-level statement as the scan meets it: its line, its
@@ -215,20 +285,34 @@ type topLevelHead struct {
 	word, text string
 }
 
-// topLevelHeads is the one scan both readers above share, so the gate that
-// lists declarations and the gate that refuses an unknown keyword cannot
-// disagree about which lines are top level.
+// topLevelHeads is the one scan every top-level reader shares, so the gate
+// that lists declarations, the gate that refuses an unknown keyword and the
+// gate that refuses a late `use` line cannot disagree about which lines are
+// top level.
+//
+// Lines are cut with IndexByte and the brackets counted byte by byte: every
+// delimiter the depth counts is ASCII, and no byte of a multi-byte UTF-8
+// sequence is, so this reads exactly the lines and depths a split into runes
+// would.
 func topLevelHeads(source string) []topLevelHead {
 	var out []topLevelHead
 	depth := 0 // braces, parentheses and brackets, which nest together
-	for i, line := range strings.Split(BlankCommentsAndStrings(source), "\n") {
+	view := BlankCommentsAndStrings(source)
+	for i, lineNo := 0, 1; i <= len(view); lineNo++ {
+		end := strings.IndexByte(view[i:], '\n')
+		if end < 0 {
+			end = len(view)
+		} else {
+			end += i
+		}
+		line := view[i:end]
 		if depth == 0 {
-			if m := statementHead.FindStringSubmatch(line); m != nil {
-				out = append(out, topLevelHead{line: i + 1, word: m[1], text: line})
+			if word, ok := lineHead(line); ok {
+				out = append(out, topLevelHead{line: lineNo, word: word, text: line})
 			}
 		}
-		for _, c := range line {
-			switch c {
+		for j := 0; j < len(line); j++ {
+			switch line[j] {
 			case '{', '(', '[':
 				depth++
 			case '}', ')', ']':
@@ -237,6 +321,7 @@ func topLevelHeads(source string) []topLevelHead {
 				}
 			}
 		}
+		i = end + 1
 	}
 	return out
 }

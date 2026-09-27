@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/znasllc-io/memql/component/language/ast"
 )
@@ -104,18 +105,15 @@ func scanBuiltinStepArgs(files []SourceFile, opts Options) []Violation {
 		scanned = append(scanned, f)
 		// Strings first, then comments -- the same order the sibling gates
 		// use, and for the same reason: blanking comments first lets a `//`
-		// inside a string literal eat the rest of a real line.
-		src := codeOnly(f.Content)
-		code[f.Path] = src
-		for _, m := range builtinStepCall.FindAllStringSubmatchIndex(src, -1) {
-			name := src[m[2]:m[3]]
-			args, ok := callArgs(src, m[1]-1)
-			if !ok {
-				// An unbalanced call is a parse problem the parser reports
-				// better than this gate could.
-				continue
-			}
-			check(f.Path, strings.Count(src[:m[0]], "\n")+1, "automation", enclosingAutomation(src, m[0]), name, args)
+		// inside a string literal eat the rest of a real line. The strip and
+		// the call sites are the text's, read once per process
+		// (source_facts.go); an unbalanced call is left out there, a parse
+		// problem the parser reports better than this gate could. The verdict
+		// is the caller's (opts), asked on every scan.
+		facts := factsOf(f.Content)
+		code[f.Path] = facts.codeOnly()
+		for _, c := range facts.builtinStepCalls() {
+			check(f.Path, c.line, "automation", c.caller, c.name, c.args)
 		}
 	}
 	eachStatementBody(scanned, func(f SourceFile, kind, construct string, startLine int, def *ast.AutomationDef) {
@@ -153,12 +151,25 @@ func builtinCallArgsOnLine(src string, line int, name string) (string, bool) {
 	if nl := strings.IndexByte(src[start:], '\n'); nl >= 0 {
 		end = start + nl
 	}
-	re := regexp.MustCompile(`\bbuiltin[ \t]+` + regexp.QuoteMeta(name) + `[ \t]*\(`)
-	m := re.FindStringIndex(src[start:end])
+	m := builtinCallPattern(name).FindStringIndex(src[start:end])
 	if m == nil {
 		return "", false
 	}
 	return callArgs(src, start+m[1]-1)
+}
+
+// builtinCallPatterns caches builtinCallPattern: one compiled pattern per
+// builtin name, rather than one compile per call site per scan.
+var builtinCallPatterns sync.Map // name -> *regexp.Regexp
+
+// builtinCallPattern matches a call to builtin name: `builtin name (`.
+func builtinCallPattern(name string) *regexp.Regexp {
+	if re, ok := builtinCallPatterns.Load(name); ok {
+		return re.(*regexp.Regexp)
+	}
+	re, _ := builtinCallPatterns.LoadOrStore(name,
+		regexp.MustCompile(`\bbuiltin[ \t]+`+regexp.QuoteMeta(name)+`[ \t]*\(`))
+	return re.(*regexp.Regexp)
 }
 
 // callArgs returns the text between the `(` at open and its matching `)`,

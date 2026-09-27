@@ -775,8 +775,8 @@ func (p *Parser) refuseTopLevelToken() error {
 		return err
 	}
 	if tok.Type == TokenIdentifier || isKeywordToken(tok.Type) {
-		if m := statementHead.FindStringSubmatch(tok.Literal); m != nil && !isConstructKeyword(m[1]) {
-			u := unknownConstruct(tok.Line, m[1])
+		if word, ok := lineHead(tok.Literal); ok && !isConstructKeyword(word) {
+			u := unknownConstruct(tok.Line, word)
 			return &ParseError{Message: u.Message, Pos: tok.Pos, Line: tok.Line, Column: tok.Column, Cause: u}
 		}
 	}
@@ -799,12 +799,8 @@ func declarationKeywords() []string {
 
 // isConstructKeyword reports whether word opens a top-level statement.
 func isConstructKeyword(word string) bool {
-	for _, k := range ConstructKeywords() {
-		if k == word {
-			return true
-		}
-	}
-	return false
+	set, _, _ := constructKeywords()
+	return set[word]
 }
 
 // parseAttribute parses a Python-style @attribute decorator.
