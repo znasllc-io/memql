@@ -16,11 +16,30 @@ type countingCompileEngine struct {
 	queries   []string
 	aiCalls   []string
 	catalogue []map[string]any
-	triage    any
+	// procedures answers procedureConstructsForGoalSignature, filtered by
+	// the signature the same way the catalogue is (epic memql#5408).
+	procedures []map[string]any
+	triage     any
 }
 
 func (e *countingCompileEngine) Execute(_ context.Context, q string) (any, error) {
 	e.queries = append(e.queries, q)
+	if strings.Contains(q, "procedureConstructsForGoalSignature") {
+		want := ""
+		if i := strings.Index(q, `goalSignature: "`); i >= 0 {
+			rest := q[i+len(`goalSignature: "`):]
+			if j := strings.Index(rest, `"`); j >= 0 {
+				want = rest[:j]
+			}
+		}
+		out := []map[string]any{}
+		for _, r := range e.procedures {
+			if s, _ := r["goalSignature"].(string); s == want {
+				out = append(out, r)
+			}
+		}
+		return out, nil
+	}
 	if strings.Contains(q, "cataloguedConstructsForGoalSignature") {
 		// Model the query's own filter. A fake that returns its whole
 		// fixture regardless of the argument tests the fake, not the code.

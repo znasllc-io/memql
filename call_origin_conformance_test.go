@@ -137,7 +137,25 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// Without the stamp the function validator refuses those writes with ONE
 		// WARN and nothing above it hears: the suite would report a clean run
 		// and the published record would stay permanently empty.
-		"component/proving": "the proving suite's benchmark row writer -- server-initiated from a CI binary; its two writers are @serverOnly and refused without it (memql#4993)",
+		//
+		// THE LEARNED-PROCEDURE LIFECYCLES ADD THREE USES (epic memql#5408,
+		// memql#5413), each server-initiated from the same binary and each the
+		// only way the platform itself does the thing:
+		//   - createLadderPolicy, @serverOnly behind a cluster-owner write rule:
+		//     the ladder's values a lifecycle scenario climbs under, written
+		//     before its first goal and put back to the SEEDED defaults after
+		//     its last (procedure_harness.go), so no later scenario inherits
+		//     them. The seed materializer is the only other writer.
+		//   - workApprovalById, the @serverOnly read of one approval: a decided
+		//     promotion leaves its owner's pending list, and this is the read
+		//     that answers what it became. A read, inline, one row.
+		//   - the promotion decision (integrations/procedure DecidePromotion),
+		//     called as onProcedurePromotionDecided's maintenance principal
+		//     under the internal origin the automation runtime gives every
+		//     automation from the registered tree -- the one call here whose
+		//     stamped context flows into further calls, exactly as the
+		//     automation's does in production.
+		"component/proving": "the proving suite's benchmark row writer, and a procedure lifecycle's ladder values, approval read-back and promotion decision -- server-initiated from a CI binary; every construct it stamps for is @serverOnly or cluster-principal-only (memql#4993, memql#5413)",
 		// The work spine's journal for SERVER-STARTED passes (epic
 		// memql#4970, spec section G). SERVER-INITIATED: its one caller today
 		// is the Library's file analysis pass, which runs on a detached

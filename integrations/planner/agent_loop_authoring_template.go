@@ -297,3 +297,23 @@ func memqlTypeOf(t string) string {
 		return "string"
 	}
 }
+
+// The pieces integrations/procedure renders a learned procedure's source with
+// (epic memql#5408, gap G8). EXPORTED RATHER THAN COPIED: a procedure's source
+// and a template's spell a hole the same way -- a free parameter as
+// args.<name>, a data-flow hole as call<n>.<path>, a constant as its literal --
+// and two spellings of one hole would be two readings of one procedure.
+
+// TemplateValue writes one template node as a MemQL value, holes spelled by
+// their class; false when some part has no spelling.
+func TemplateValue(n *proc.Node, t proc.Template) (string, bool) { return templateValue(n, t) }
+
+// ParamName is the args-block field name a free hole is read as.
+func ParamName(h proc.Hole) string { return paramName(h) }
+
+// MemQLTypeOf is the args-block type a hole's observed type is declared as.
+func MemQLTypeOf(holeType string) string { return memqlTypeOf(holeType) }
+
+// ProvenanceComment renders D9's stamp as the comment block a learned
+// construct's source opens with.
+func ProvenanceComment(p TemplateProvenance) string { return provenanceComment(p) }

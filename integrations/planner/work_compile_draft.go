@@ -17,13 +17,47 @@ import (
 // reasoningAgent resolves the owner's existing assistant without another model
 // call. Its named query filters on the explicit owner under that owner's actor.
 func (l *PlannerAgentLoop) reasoningAgent(ctx context.Context, owner string) (string, error) {
-	res, err := l.engine.Execute(ownerActorContext(ctx, owner), "query assistantAgentForUser("+encodeArgs(map[string]any{"ownerUserId": owner})+")")
+	agent, err := ResolveReasoningAgent(ctx, l.engine, owner)
+	return agent.Id, err
+}
+
+// ReasoningAgentQuerier is the one engine method ResolveReasoningAgent needs.
+type ReasoningAgentQuerier interface {
+	Execute(ctx context.Context, query string) (any, error)
+}
+
+// ReasoningAgent is the agent an owner's reasoning runs under, with the role
+// slug its row carries: "assistant", or "system-planner" for the seeded
+// planner.
+type ReasoningAgent struct {
+	Id       string
+	RoleSlug string
+}
+
+// The two role slugs a reasoning agent resolves to.
+const (
+	reasoningAssistantRole = "assistant"
+	reasoningPlannerRole   = "system-planner"
+)
+
+// ResolveReasoningAgent is the ONE resolution of an owner's reasoning agent:
+// their active assistant, else the planner seeded for them.
+//
+// EXPORTED SO THAT IT IS NOT COPIED. A learned procedure's replay acts for the
+// owner outside compile -- it dispatches to their machine and hands a diverged
+// goal back to their app (epic memql#5408) -- and must answer with the agent
+// compile would, whose standing computer-use scope is the consent both of
+// those paths are gated on. A second copy of this rule is a second answer to
+// "which agent is this person's", and the two would disagree exactly when a
+// product bundle supplies the assistant.
+func ResolveReasoningAgent(ctx context.Context, engine ReasoningAgentQuerier, owner string) (ReasoningAgent, error) {
+	res, err := engine.Execute(ownerActorContext(ctx, owner), "query assistantAgentForUser("+encodeArgs(map[string]any{"ownerUserId": owner})+")")
 	if err != nil {
-		return "", fmt.Errorf("work compile: resolve reasoning agent: %w", err)
+		return ReasoningAgent{}, fmt.Errorf("work compile: resolve reasoning agent: %w", err)
 	}
 	for _, row := range memql.MaterializeRows(res) {
 		if getString(row, "id") != "" {
-			return getString(row, "id"), nil
+			return ReasoningAgent{Id: getString(row, "id"), RoleSlug: reasoningAssistantRole}, nil
 		}
 	}
 	// Core installations seed a planner for every user; an assistant may
@@ -31,16 +65,16 @@ func (l *PlannerAgentLoop) reasoningAgent(ctx context.Context, owner string) (st
 	// before using it, so neither a missing seed nor another owner's agent
 	// can turn into a synthetic successful dispatch.
 	plannerId := "plannerAgent-" + memql.BareShortId(owner)
-	res, err = l.engine.Execute(ownerActorContext(ctx, owner), "query agentById("+encodeArgs(map[string]any{"agentId": plannerId})+")")
+	res, err = engine.Execute(ownerActorContext(ctx, owner), "query agentById("+encodeArgs(map[string]any{"agentId": plannerId})+")")
 	if err != nil {
-		return "", fmt.Errorf("work compile: resolve seeded reasoning agent: %w", err)
+		return ReasoningAgent{}, fmt.Errorf("work compile: resolve seeded reasoning agent: %w", err)
 	}
 	for _, row := range memql.MaterializeRows(res) {
-		if memql.BareShortId(getString(row, "id")) == plannerId && memql.BareShortId(getString(row, "ownerUserId")) == memql.BareShortId(owner) && row["active"] == true && row["deleted"] != true && row["roleSlug"] == "system-planner" {
-			return getString(row, "id"), nil
+		if memql.BareShortId(getString(row, "id")) == plannerId && memql.BareShortId(getString(row, "ownerUserId")) == memql.BareShortId(owner) && row["active"] == true && row["deleted"] != true && row["roleSlug"] == reasoningPlannerRole {
+			return ReasoningAgent{Id: getString(row, "id"), RoleSlug: reasoningPlannerRole}, nil
 		}
 	}
-	return "", fmt.Errorf("work compile: no active assistant or seeded planner exists for this goal's owner")
+	return ReasoningAgent{}, fmt.Errorf("work compile: no active assistant or seeded planner exists for this goal's owner")
 }
 
 // File delivery uses the known Materializer capability directly. Other reasoning

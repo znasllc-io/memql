@@ -121,13 +121,49 @@ type DispatchRequest struct {
 	// has moved. Carried so the seam can say what it was told when the two
 	// disagree, which is the difference between "a race" and "a bug".
 	Status string
+
+	// TriggeredBy is the run's triggeredBy, as the event or the sweep's row
+	// read carried it. Unlike Status it is not a hint: createWorkRun writes it
+	// once and updateWorkRun does not accept it, so every copy of it is the
+	// stored value. It is what marks a procedure's replay run
+	// (ProcedureReplayTriggerPrefix).
+	TriggeredBy string
+}
+
+// ProcedureReplayTriggerPrefix marks a run a learned procedure's REPLAY RUNNER
+// opened: its triggeredBy is `procedure:<mode>` (integrations/procedure,
+// replay.go). Such a run is that runner's and never this dispatcher's (epic
+// memql#5408).
+//
+// It names an automation -- the construct it replays -- and carries no goal,
+// which is exactly the shape the sweep's backstop offers back on recovery and
+// the admission below takes. Taken, it is run a SECOND time: the template
+// executor cannot load a procedure's bundle as a template, so it FAILS the live
+// replay `automation_not_runnable`, and the terminal status releases the
+// replay's workbench mid-step. So no recovery path offers one, and neither
+// check of the admission takes one. The one judgment the sweep still makes of
+// a replay run is the one it makes of every run: its heartbeat.
+//
+// integrations/procedure cannot be imported from here -- it imports this
+// package through integrations/planner -- so it spells the prefix itself, and
+// its learn_test.go pins the two spellings together.
+const ProcedureReplayTriggerPrefix = "procedure:"
+
+// isProcedureReplay reports a triggeredBy a learned procedure's replay runner
+// wrote.
+func isProcedureReplay(triggeredBy string) bool {
+	return strings.HasPrefix(strings.TrimSpace(triggeredBy), ProcedureReplayTriggerPrefix)
 }
 
 // CanDispatchStoredRun rechecks an event or explicit recovery request against
 // the authoritative row. Ordinary journals belong to their scheduler; only
 // the sweep can take one over. A waiting run is eligible solely for a due
-// inference retry explicitly requested by that sweep, never a stale event.
+// inference retry explicitly requested by that sweep, never a stale event. A
+// procedure's replay run is never eligible (ProcedureReplayTriggerPrefix).
 func (r DispatchRequest) CanDispatchStoredRun(goalId, status string, waitingOn map[string]any, now time.Time) bool {
+	if isProcedureReplay(r.TriggeredBy) {
+		return false
+	}
 	if status == runStatusRunning {
 		return r.Status == runStatusRunning && (strings.TrimSpace(goalId) != "" || r.Recovery)
 	}
@@ -287,6 +323,14 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 	if d == nil {
 		return false
 	}
+	if isProcedureReplay(req.TriggeredBy) {
+		// Refused BEFORE the claim: the run is its replay runner's
+		// (ProcedureReplayTriggerPrefix), and a lease taken for it would be
+		// one this node never uses. Silent, because the refusal is the design
+		// rather than an incident: the caller -- the sweep's backstop -- goes
+		// on to judge the run by its heartbeat and says what it did.
+		return false
+	}
 	claimer := i.runClaimerRef()
 	if claimer == nil {
 		// REFUSED, not degraded. Running unclaimed on a multi-replica agent
@@ -357,6 +401,7 @@ func runEventFields(ev events.Event) (DispatchRequest, bool) {
 	req.OwnerUserId, _ = payload["ownerUserId"].(string)
 	req.GoalId, _ = payload["goalId"].(string)
 	req.Variables, _ = payload["variables"].(map[string]any)
+	req.TriggeredBy, _ = payload["triggeredBy"].(string)
 	return req, true
 }
 

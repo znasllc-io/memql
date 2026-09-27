@@ -146,6 +146,24 @@ provider at all -- not even the cheap triage classifier.
 Its control is a scenario whose goal the catalog does not hold, which must
 reach one.
 
+### 3c. A goal a trusted learned procedure serves reaches no model and no app
+
+A procedure learned from an app's own recordings climbs from shadow to
+canary to trusted on its own evidence and one human approval, and once
+trusted it serves its goal by replaying its steps, with no model call and no
+app session.
+<!-- proving: metric=amortizedCost.replaysServedWithoutModel arm=platform value=1 -->
+
+It is measured end to end against the real learner, ladder and replay runner:
+a fixture app's goal is recorded twice, the procedure lifted from the
+recordings is compared beside the app across two new bindings, promoted by
+the one approval, replayed on canary, and then serves the measured goal
+trusted. Its control is the same evidence with no approval given: a procedure
+nobody promoted must serve no goal, however often it matched.
+
+`test/proving/scenarios/amortizedCost.a-trusted-procedure-replays-without-a-model.json`
+and its two controls. The figure is on [the scorecard](proving-scorecard.md).
+
 ### 4. A safety and cost spine that is on by default
 
 - **A process-wide LLM rate ceiling** at the provider chokepoint
@@ -196,7 +214,7 @@ their tests are green on `main`, and not before.
 | Claim | Proven by | Lands in |
 |---|---|---|
 | Every model call a run makes is journaled | a `v1:work:modelCall` row per request, counted against the calls actually made. The writer EXISTS since memql#4999 -- the engine's model seam journals every call that reaches it and serves a replay from the journal -- but this suite still cannot count it: the CI tier's model responses come from a cassette through a fake step registry, so a scenario's model call never touches the provider chain or the seam. Counting rows against calls would be 0/0 dressed as a ratio, so the figure reports `notMeasurableOnReplay` and names why. <!-- proving-pending: metric=governance.modelCallsJournaled arm=platform value=1 --> | the live tier, which calls a provider down the real path |
-| A REPLAY serves every model call from the journal | `component/work.DecideServe` exists and is pure; its one caller -- the executor's model-call seam -- does not, so a run opened in replay mode records its intent and serves nothing. What the suite measures today is the adjacent and genuinely-built claim above: a RESUME re-executes no completed step | the remaining half of epic A2 |
+| A REPLAY run serves every model call from the journal | the seam is built since memql#4999: `component/work.DecideServe` has its caller in the engine's model seam, and a run opened in replay mode is served from `v1:work:modelCall`. This tier cannot count it, for the reason the row above gives -- a scenario's model call comes from a cassette through a fake step registry and never reaches the seam. (A learned procedure replaying with no model is a different claim, and it is made above.) | the live tier, which calls a provider down the real path |
 | Skill selection reads the capability graph structurally, not by vector match alone | typed `v1:skills:skillEdge` neighbours, proposed at compile and committed by a successful run | epic A3 |
 
 ## How developers use it

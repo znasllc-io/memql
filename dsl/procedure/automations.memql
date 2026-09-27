@@ -1,19 +1,51 @@
 // automations.memql
 //
-// The two triggers of epic C's wiring paragraph: one on a session subrun
-// reaching `succeeded`, and one schedule over the corpus.
+// Epic C's two triggers -- one on a session subrun reaching `succeeded`, one
+// schedule over the corpus -- and epic D's certification ladder (epic
+// memql#5408): the template a trusted or canary procedure serves a goal
+// through, the promotion decision, and the ladder's two sweeps.
 //
-// Neither activates anything. A learned procedure is persisted as a validated
-// bundle whose construct stays a candidate on the trust ladder; promotion is a
-// person's, and epic D owns it.
+// Nothing here ACTIVATES a learned procedure. A learned procedure is never an
+// ordinary automation: it is served only through replayLearnedProcedure, only
+// on a rung the ladder decides serves, and it reaches that rung only through
+// shadow evidence and one person's approval.
+//
+// FOUR OF THE SIX RUN UNDER THE MAINTENANCE PRINCIPAL. Each one must read a
+// row -- an approval, the list of owners -- BEFORE it can know whose it is,
+// and every one of those rows declares a composite owner tier, so the default
+// RoleReader system actor would read zero rows and no error: a ladder that
+// never moves looks exactly like one with nothing to move. Each handler then
+// does every other read under the owner's own actor. The entries, with their
+// reasons, are in component/auth/maintenance_actor.go, compiled in so a
+// mounted product bundle cannot grant itself one. The other two need none:
+// learnFromSucceededRun's event carries the run's owner, which the handler
+// borrows (and re-verifies with an owner-filtered read), and
+// replayLearnedProcedure runs inside the goal's own run, as its owner.
 
-/// Mine only completed recordings. The owner travels with the event; the handler borrows that
-/// one owner's authority and rechecks the persisted run before reading their corpus.
+/// On a run TRANSITIONING to `succeeded`, mine the corpus it belongs to -- and, once the lift is
+/// done, compare the recording against every learned procedure in shadow for the same goal, which
+/// is the evidence the ladder climbs on. The builtin itself decides whether there is anything to
+/// learn: a corpus of fewer than two recordings answers `accepted: false` with the reason rather
+/// than failing.
+///
+/// THE OWNER TRAVELS WITH THE EVENT. The handler borrows exactly that one owner's authority -- only
+/// for this trusted completion trigger -- and re-reads the run under it, so an owner hint that does
+/// not own the run reads nothing. A run with no owner or no goal signature has no corpus, and the
+/// filter drops it before any handler runs.
+///
+/// THE FILTER NAMES THE TRANSITION, not merely the state. node.updated fires on every write to a
+/// run, and a run keeps being written after it succeeds -- the retention sweep folds its summary
+/// onto it -- so `row.status == "succeeded"` alone would fire again on each of those writes, and a
+/// shadow comparison run twice for one recording would count one match as two. oldStatus is the
+/// prior version's status, which the engine publishes on every update for exactly this; a prior
+/// version with no status reads as unset, and unset is not `succeeded`, so a first write still
+/// fires.
 @trigger(event="node.updated", concept="v1:work:run")
-@filter(row => row.status == "succeeded" && row.ownerUserId != "" && row.goalSignature != "")
+@filter(row => row.status == "succeeded" && args.oldStatus != "succeeded" && row.ownerUserId != "" && row.goalSignature != "")
 automation learnFromSucceededRun {
   args {
     id           any
+    oldStatus    any
     ownerUserId  any
   }
 
@@ -22,9 +54,11 @@ automation learnFromSucceededRun {
 
 /// Every six hours: mine the second corpus level, where an automation invocation is a symbol like
 /// any action, so a repeated sequence of automations becomes a higher automation by the same
-/// compression rule (design D24). It runs per owner; the sweep reads no rows of its own and the
-/// builtin refuses a blank ownerUserId, because a read with no actor returns zero rows and no
-/// error -- which would look exactly like a cluster that has learned everything there is.
+/// compression rule (design D24). A cron firing carries no arguments, so ownerUserId arrives blank:
+/// the automation runs under the maintenance principal, and the handler answers a blank owner from
+/// THAT principal by iterating owners and mining each one's corpus under that owner's own actor. A
+/// blank owner from anybody else is still refused, because a read with no actor returns zero rows
+/// and no error -- which would look exactly like a cluster that has learned everything there is.
 @trigger(schedule="0 0 */6 * * *")
 automation mineProcedureCorpusAcrossAutomations {
   args {
@@ -32,4 +66,57 @@ automation mineProcedureCorpusAcrossAutomations {
   }
 
   mined := builtin procedureMineCorpus(ownerUserId: args.ownerUserId ?? "", level: 2)
+}
+
+/// Serve a goal from a learned procedure (epic memql#5408): the ONE template compile names when the
+/// certification ladder says a procedure serves -- trusted, or canary with the app standing by.
+///
+/// @template, NOT @trigger: a run that NAMED it invokes it, the way invokeAgent and produceArtifact
+/// are reached, and the load-time gate refuses a template that also carries a trigger. Compile
+/// writes no templateConstructId for this route, so the run executes this embedded automation, and
+/// passes the construct as procedureConstructId in the run's variables. Everything else is
+/// procedureReplay's, including the one check compile cannot make: the rung is re-read at
+/// execution, so a procedure demoted or re-lifted since compile chose it falls back to the app.
+@template
+automation replayLearnedProcedure {
+  args {
+    /// The learned procedure compile chose: a construct owned by the run's owner, on canary or
+    /// trusted when compile read it.
+    procedureConstructId  string!
+  }
+
+  replayed := builtin procedureReplay(constructId: args.procedureConstructId)
+}
+
+/// When a procedurePromotion approval is DECIDED, apply the decision to the ladder: approved moves
+/// the procedure from shadow to canary, rejected keeps it in shadow to re-earn the proposal. The
+/// filter reads the kind and a non-empty decision, so neither the approval being raised nor any
+/// other kind of gate fires it; the handler is idempotent, so a second delivery of the same
+/// decision changes nothing.
+@trigger(event="node.updated", concept="v1:work:approval")
+@filter(row => row.kind == "procedurePromotion" && row.decision != "")
+automation onProcedurePromotionDecided {
+  args {
+    id  any
+  }
+
+  decided := builtin procedureDecidePromotion(approvalId: args.id ?? "")
+}
+
+/// Every fifteen minutes: re-evaluate every canary and trusted procedure's stored evidence against
+/// the CURRENT ladder policy. A replay already applies the policy to the procedure it served; this
+/// is what reaches a procedure that is not being served -- a threshold that tightened, or evidence
+/// written before it did -- so a procedure that no longer clears the policy stops serving within a
+/// quarter of an hour rather than at its next failure.
+@trigger(schedule="0 */15 * * * *")
+automation demoteProcedures {
+  sweep := builtin procedureLadderSweep(sweep: "demotion")
+}
+
+/// Nightly 03:30 UTC: retire every learned procedure unused for longer than the policy's window, on
+/// any rung. Retirement sets the rung and leaves the construct's lifecycle status alone, so a
+/// retired procedure is still shown and still readable -- it simply stops being served.
+@trigger(schedule="0 30 3 * * *")
+automation retireProcedures {
+  sweep := builtin procedureLadderSweep(sweep: "retirement")
 }

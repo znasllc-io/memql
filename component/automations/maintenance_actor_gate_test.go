@@ -85,14 +85,32 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 	// exists -- and workJournalRetentionSweep must fold each run's summary
 	// before its detail ages out, so a read that sees nothing does not merely
 	// skip a delete, it destroys the evidence it was there to preserve.
+	//
+	// Procedure learning and the certification ladder added four in epic
+	// memql#5408 (closing epic memql#5402's gap G10), and they share ONE
+	// argument rather than four: each must read a row BEFORE it can know whose
+	// it is. onProcedurePromotionDecided is fired by an event that names an
+	// approval, a composite-owner row behind a cluster-owner-scoped by-id read,
+	// so the default reader actor sees it as ABSENT and an approval a person
+	// gave is applied to nothing. mineProcedureCorpusAcrossAutomations,
+	// demoteProcedures and retireProcedures are fired by a schedule, which
+	// carries no owner at all, so they list owners and walk each one. What none
+	// of them does is read one person's rows as anybody else: every read after
+	// the first borrows the owner's own actor, because a procedure mined across
+	// two people's recordings is correct about neither. learnFromSucceededRun
+	// is absent on purpose: its event carries the owner, which it borrows.
 	want := []string{
 		"auditEventRetentionSweep",
 		"checkDeployableHealth",
+		"demoteProcedures",
 		"logsRetentionSweep",
+		"mineProcedureCorpusAcrossAutomations",
+		"onProcedurePromotionDecided",
 		// The engine-owned repository poll discovers sources across owners
 		// before borrowing each source owner's credential/deploy authority.
 		// A reader actor silently sees no packages and reports checked=0.
 		"pollPackageUpstreams",
+		"retireProcedures",
 		// routingEvidenceFold (epic memql#5146) is the one entry here whose
 		// read spans owners because the QUESTION does. It asks how a model
 		// behaved across the fleet, and a model's behaviour is not one

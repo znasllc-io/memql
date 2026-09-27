@@ -9,14 +9,15 @@ import (
 // generalization of every member.
 type Symbol struct {
 	// Id is the symbol's name in every sequence downstream.
-	Id string
+	Id string `json:"id"`
 	// Tool is the identity every member shares.
-	Tool string
+	Tool string `json:"tool"`
 	// Template is the anti-unification of all Members' argument trees.
-	Template *Node
+	Template *Node `json:"template"`
 	// Members are indices into the actions slice Symbolize was given, in
-	// ascending order.
-	Members []int
+	// ascending order. They index a corpus, so a stored procedure has no use
+	// for them and they are omitted when empty.
+	Members []int `json:"members,omitempty"`
 }
 
 // holeNamer hands out hole ids. It is a closure rather than a counter field so
@@ -63,19 +64,31 @@ func AntiUnify(a, b *Node, next holeNamer) (*Node, int) {
 		return HoleNode(next(), typeOf(present)), present.Size()
 	}
 	if a.Kind != b.Kind {
-		return HoleNode(next(), "mixed"), maxInt(a.Size(), b.Size())
+		return HoleNode(next(), widenType(typeOf(a), typeOf(b))), maxInt(a.Size(), b.Size())
+	}
+	if rootednessDiffers(a, b) {
+		// Two paths with the same segments, one rooted and one not, name
+		// different files. The root lives in the Form, which Equal ignores,
+		// so without this they generalized with no hole at all and replayed
+		// whichever the first recording said. The whole path is the hole:
+		// it goes back as the one string it is.
+		return HoleNode(next(), "string"), maxInt(a.Size(), b.Size())
 	}
 	switch a.Kind {
 	case KindLit:
 		if a.Lit == b.Lit {
-			return Lit(a.Lit), 0
+			// The LEFT operand's hints survive: a number both sides agree on
+			// is still a number, or the template renders and materializes it
+			// as a string -- and an argument both sides agree on is still
+			// spelled the way the first instance spelled it.
+			return &Node{Kind: KindLit, Lit: a.Lit, LitType: a.LitType, Raw: a.Raw, Form: a.Form}, 0
 		}
-		return HoleNode(next(), "string"), 1
+		return HoleNode(next(), widenType(typeOf(a), typeOf(b))), 1
 	case KindHole:
 		if a.HoleId == b.HoleId {
 			return HoleNode(a.HoleId, a.HoleType), 0
 		}
-		return HoleNode(next(), "mixed"), 1
+		return HoleNode(next(), widenType(a.HoleType, b.HoleType)), 1
 	case KindObject:
 		return antiUnifyObject(a, b, next)
 	default:
@@ -100,7 +113,12 @@ func antiUnifyObject(a, b *Node, next holeNamer) (*Node, int) {
 			m[k], dist = HoleNode(next(), typeOf(bv)), dist+bv.Size()
 		}
 	}
-	return Obj(m), dist
+	g := Obj(m)
+	// The generalization of two JSON documents is a JSON document. Form is a
+	// hint Equal ignores, so the LEFT operand's is kept: the template reads
+	// the way its first instance was read.
+	g.Form = a.Form
+	return g, dist
 }
 
 // antiUnifyArray aligns two arrays on their longest common subsequence and
@@ -112,6 +130,9 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 		dist int
 		ai   int
 		bi   int
+		// inserted: some element came from the right alone, so the
+		// generalization's elements are no longer the left's one for one.
+		inserted bool
 	)
 	// emitGap generalizes the unmatched runs before the next matched pair.
 	emitGap := func(untilA, untilB int) {
@@ -131,6 +152,7 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 				kids = append(kids, HoleNode(next(), typeOf(b.Kids[bi])))
 				dist += b.Kids[bi].Size()
 				bi++
+				inserted = true
 			}
 		}
 	}
@@ -141,21 +163,129 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 		bi++
 	}
 	emitGap(len(a.Kids), len(b.Kids))
-	return Arr(kids...), dist
+	g := Arr(kids...)
+	// A generalized command line is still a command line: without the Form a
+	// template's argv would materialize as a list, and a shell cannot run one.
+	g.Form = a.Form
+	// The left's SEPARATORS survive only while every element is the left's,
+	// one for one and in order: they are the text between THOSE elements. An
+	// element the right inserted has no gap in the left, and the command line
+	// falls back to single spaces rather than borrowing one that was never
+	// recorded.
+	if !inserted && a.Seps != nil && len(a.Seps) == len(a.Kids)+1 {
+		g.Seps = append(make([]string, 0, len(a.Seps)), a.Seps...)
+	}
+	return g, dist
 }
+
+// rootednessDiffers reports that exactly one of two nodes is a rooted path.
+// Every other reading Form records is spelling -- a command recorded as a
+// line and as a vector is one command -- but /tmp/x and tmp/x are two files.
+func rootednessDiffers(a, b *Node) bool {
+	return (a.Form == FormRootedPath) != (b.Form == FormRootedPath)
+}
+
+// sameMeaning is Equal plus the one reading that is meaning, rootedness,
+// anywhere in the two trees. It is what the common subsequence pairs
+// elements by: an element paired as common is cloned into the template from
+// the left, unexamined, so a pairing that ignored the root would carry a
+// rooted path over a relative one with no hole.
+func sameMeaning(a, b *Node) bool {
+	return a.Equal(b) && sameRootedness(a, b)
+}
+
+// sameRootedness walks two Equal trees together.
+func sameRootedness(a, b *Node) bool {
+	if a == nil || b == nil {
+		return true
+	}
+	if rootednessDiffers(a, b) {
+		return false
+	}
+	for i := range a.Kids {
+		if i < len(b.Kids) && !sameRootedness(a.Kids[i], b.Kids[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// maxLCSCells bounds the dynamic-programming table lcsPairs builds, (n+1) x
+// (m+1) ints for arrays of n and m elements. A recorded command splits into one
+// element per word, so two long heredoc scripts would otherwise ask for a table
+// of millions of cells on every comparison the symbolizer makes -- memory that
+// grows with the PRODUCT of two recordings' lengths, on whichever node learns.
+const maxLCSCells = 1 << 20
 
 // lcsPairs returns the index pairs of a longest common subsequence, in order.
 // Equality is structural, so a matched element is one both sides actually
-// recorded rather than one that merely sits at the same offset.
+// recorded rather than one that merely sits at the same offset -- and it is
+// sameMeaning rather than Equal, so a rooted path never pairs with a relative
+// one.
+//
+// BOUNDED IN MEMORY. Within maxLCSCells the table is built whole and the
+// answer is exactly what it always was. Past it, the shared prefix and suffix
+// pair directly -- taking a match at either end never shortens a common
+// subsequence, and two recordings of one long command usually differ in a few
+// words -- and only the middle is solved; a middle still past the bound pairs
+// the elements that agree at the same offset, a common subsequence if not the
+// longest. Such arrays generalize worse, never unboundedly.
 func lcsPairs(a, b []*Node) [][2]int {
+	if lcsFits(len(a), len(b)) {
+		return lcsTable(a, b, 0, 0)
+	}
+	lo := 0
+	for lo < len(a) && lo < len(b) && sameMeaning(a[lo], b[lo]) {
+		lo++
+	}
+	ha, hb := len(a), len(b)
+	for ha > lo && hb > lo && sameMeaning(a[ha-1], b[hb-1]) {
+		ha--
+		hb--
+	}
+	var pairs [][2]int
+	for k := 0; k < lo; k++ {
+		pairs = append(pairs, [2]int{k, k})
+	}
+	if lcsFits(ha-lo, hb-lo) {
+		pairs = append(pairs, lcsTable(a[lo:ha], b[lo:hb], lo, lo)...)
+	} else {
+		for k := lo; k < ha && k < hb; k++ {
+			if sameMeaning(a[k], b[k]) {
+				pairs = append(pairs, [2]int{k, k})
+			}
+		}
+	}
+	for i, j := ha, hb; i < len(a) && j < len(b); i, j = i+1, j+1 {
+		pairs = append(pairs, [2]int{i, j})
+	}
+	return pairs
+}
+
+// lcsFits reports whether the table for arrays of n and m elements stays
+// within maxLCSCells. Each length is bounded before the product is taken, so
+// the product cannot overflow.
+func lcsFits(n, m int) bool {
+	if n < 0 || m < 0 || n >= maxLCSCells || m >= maxLCSCells {
+		return false
+	}
+	return (n+1)*(m+1) <= maxLCSCells
+}
+
+// lcsTable is the whole-table LCS of a and b, its pairs offset by (offA,
+// offB). Its caller has checked lcsFits.
+func lcsTable(a, b []*Node, offA, offB int) [][2]int {
 	n, m := len(a), len(b)
+	if n >= maxLCSCells || m >= maxLCSCells {
+		return nil
+	}
 	table := make([][]int, n+1)
 	for i := range table {
 		table[i] = make([]int, m+1)
 	}
 	for i := n - 1; i >= 0; i-- {
 		for j := m - 1; j >= 0; j-- {
-			if a[i].Equal(b[j]) {
+			if sameMeaning(a[i], b[j]) {
 				table[i][j] = table[i+1][j+1] + 1
 			} else {
 				table[i][j] = maxInt(table[i+1][j], table[i][j+1])
@@ -166,8 +296,8 @@ func lcsPairs(a, b []*Node) [][2]int {
 	i, j := 0, 0
 	for i < n && j < m {
 		switch {
-		case a[i].Equal(b[j]):
-			pairs = append(pairs, [2]int{i, j})
+		case sameMeaning(a[i], b[j]):
+			pairs = append(pairs, [2]int{i + offA, j + offB})
 			i++
 			j++
 		case table[i+1][j] >= table[i][j+1]:
@@ -251,8 +381,8 @@ func SymbolSequence(actions []Action, symbols []Symbol) []string {
 }
 
 func unionKeys(a, b []string) []string {
-	seen := make(map[string]bool, len(a)+len(b))
-	out := make([]string, 0, len(a)+len(b))
+	seen := make(map[string]bool, len(a))
+	out := make([]string, 0, len(a))
 	for _, k := range append(append([]string(nil), a...), b...) {
 		if !seen[k] {
 			seen[k] = true
@@ -281,7 +411,39 @@ func typeOf(n *Node) string {
 	case KindHole:
 		return n.HoleType
 	default:
+		// A literal is the type it was recorded as, when that is a type a
+		// hole can carry. A null and an unrecorded type read as a string,
+		// the safe reading for a value that has to be sent somewhere.
+		if n.LitType == "number" || n.LitType == "bool" {
+			return n.LitType
+		}
 		return "string"
+	}
+}
+
+// scalarTypes are the hole types a literal can have. Canonicalization spells
+// every scalar as a string, which is why two DIFFERENT scalar types widen to
+// "string" rather than to "mixed": the one spelling they share is a string.
+var scalarTypes = map[string]bool{"string": true, "number": true, "bool": true}
+
+// widenType is the widest of two observed types, which is HoleType's own
+// contract.
+//
+// It replaced a fixed answer -- every literal hole was "string" and every
+// hole re-unified against a literal was "mixed" -- and the difference is not
+// cosmetic. Generalize anti-unifies the growing template against each further
+// instance, so from the THIRD instance on every hole met a literal and became
+// "mixed", which the renderer writes as `any` and Materialize can only send as
+// a string. A number hole meeting one more number has observed nothing wider.
+// The distance and the hole numbering are unchanged; only the type is.
+func widenType(a, b string) string {
+	switch {
+	case a == b:
+		return a
+	case scalarTypes[a] && scalarTypes[b]:
+		return "string"
+	default:
+		return "mixed"
 	}
 }
 

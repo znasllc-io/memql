@@ -234,6 +234,27 @@ query run workRunsForGoal {
   shape   workRunFull
 }
 
+/// The caller's SUCCEEDED runs for one goal signature, newest first -- the procedure corpus read
+/// (epic memql#5408). Learning mines the recordings of one owner's goal, and this is how it finds
+/// them: pushed down on the signature rather than paging the owner's whole run history and folding
+/// in Go, which is what it replaces. Owned rather than cluster-owner-scoped, and that is the point:
+/// a corpus mined across two people's runs produces a procedure correct about neither, so the lift
+/// reads this under the owner's own actor. Only `succeeded` runs are a corpus -- a failed or
+/// cancelled run shows what did NOT work. Bounded at 200, the most recent, because the miner needs
+/// recurrence rather than history, and the shape a person repeats is in their recent work.
+@actor
+query run workRunsForOwnerGoalSignature {
+  args {
+    goalSignature  string!
+  }
+  filter   row => row.ownerUserId == actor.userId
+               && row.goalSignature == args.goalSignature
+               && row.status == "succeeded"
+  sort     "row.createdAt", "desc"
+  paginate 200
+  shape    workRunFull
+}
+
 /// One of the caller's runs by id.
 @actor
 @unbounded("one run by id -- bounded to a single row")

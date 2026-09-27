@@ -127,3 +127,25 @@ func TestGoalSignature_IsStableAcrossCalls(t *testing.T) {
 		}
 	}
 }
+
+// A learned procedure reaches compile as an exact catalog candidate carrying
+// its ladder rung (epic memql#5408). The planner has already filtered it
+// through DecideServe, so Decide treats it like any exact hit -- the catalog
+// route, no model, no triage -- and hands back the rung, which is what routes
+// the run to the replay automation rather than to the construct by name. A
+// decision that lost the rung would run a learned procedure as though a person
+// had authored it.
+func TestDecide_AnExactHitOnALearnedProcedureKeepsItsRungAndReachesNoModel(t *testing.T) {
+	for _, rung := range []Rung{RungNone, RungCanary, RungTrusted} {
+		d := Decide(CompileInput{
+			Statement: "export last month's invoices",
+			Exact:     []CatalogCandidate{{ConstructId: "v1:authoring:construct:c1", Name: "exportInvoices", Signature: "sig", Rung: rung}},
+		})
+		if d.Route != RouteCatalogExact || d.NeedsModel || d.NeedsTriage {
+			t.Fatalf("rung %q: an exact hit is the catalog route and reaches no model; got %+v", rung, d)
+		}
+		if d.Candidate == nil || d.Candidate.Rung != rung {
+			t.Fatalf("rung %q: the decision must carry the candidate's rung; got %+v", rung, d.Candidate)
+		}
+	}
+}

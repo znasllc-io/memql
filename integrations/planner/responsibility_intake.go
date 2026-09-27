@@ -44,11 +44,13 @@
 package planner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -559,13 +561,18 @@ func buildAnswerList(row map[string]any) []map[string]any {
 	return out
 }
 
-// encodeArgs renders a MemQL named-argument object literal from a Go map.
 // encodeArgs renders a mutation/query argument map as the named-args
 // invocation body `k: v, ...` (Story 9 / #2335: NOT the legacy object-literal
 // wrapper `{...}` -- the parser rejects it). It is always used as the FULL
 // argument list of a `name(<encodeArgs(args)>)` call, so the braces are
-// dropped; nested object VALUES keep their JSON braces via json.Marshal. Keys
-// sorted for a deterministic call string. Empty map renders "" -> `name()`.
+// dropped; nested object VALUES keep their braces. Keys sorted for a
+// deterministic call string. Empty map renders "" -> `name()`. A value JSON
+// cannot encode is left out, as it always was.
+//
+// EVERY STRING IS SPELLED BY THE LANGUAGE -- an argument, a string nested in an
+// object or a list, and an object's key -- through langparser.QuoteString, the
+// one definition of what the lexer reads back. json.Marshal is a second one: it
+// agrees on most text and spells <, > and & its own way.
 func encodeArgs(args map[string]any) string {
 	if len(args) == 0 {
 		return ""
@@ -578,8 +585,8 @@ func encodeArgs(args map[string]any) string {
 	var b strings.Builder
 	first := true
 	for _, k := range keys {
-		v, err := json.Marshal(args[k])
-		if err != nil {
+		v, ok := argLiteral(args[k])
+		if !ok {
 			continue
 		}
 		if !first {
@@ -588,7 +595,72 @@ func encodeArgs(args map[string]any) string {
 		first = false
 		b.WriteString(k)
 		b.WriteString(": ")
-		b.Write(v)
+		b.WriteString(v)
 	}
 	return b.String()
+}
+
+// argLiteral writes one argument value as a MemQL literal. A value that is not
+// a plain string is reduced to its JSON structure first -- so a struct, a time
+// or a typed slice is written as encoding/json writes it -- and every string in
+// that structure is then written by writeLiteral. ok is false for a value JSON
+// cannot encode.
+func argLiteral(v any) (string, bool) {
+	if s, isString := v.(string); isString {
+		return langparser.QuoteString(s), true
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return "", false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var decoded any
+	if err := dec.Decode(&decoded); err != nil {
+		return "", false
+	}
+	var b strings.Builder
+	writeLiteral(&b, decoded)
+	return b.String(), true
+}
+
+// writeLiteral writes a decoded JSON value in the structure JSON gives it,
+// with every string, key or value, quoted by langparser.QuoteString and every
+// number kept as the text JSON wrote.
+func writeLiteral(b *strings.Builder, v any) {
+	switch x := v.(type) {
+	case string:
+		b.WriteString(langparser.QuoteString(x))
+	case json.Number:
+		b.WriteString(x.String())
+	case bool:
+		b.WriteString(strconv.FormatBool(x))
+	case []any:
+		b.WriteByte('[')
+		for i, item := range x {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			writeLiteral(b, item)
+		}
+		b.WriteByte(']')
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		b.WriteByte('{')
+		for i, k := range keys {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(langparser.QuoteString(k))
+			b.WriteByte(':')
+			writeLiteral(b, x[k])
+		}
+		b.WriteByte('}')
+	default:
+		b.WriteString("null")
+	}
 }

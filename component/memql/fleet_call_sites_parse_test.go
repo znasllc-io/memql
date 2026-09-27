@@ -110,6 +110,10 @@ func fleetCallSites() []struct {
 		{"provisionWorkspace", []string{"workspaceId", "runId", "storageRoot", "nodeId"}, "workbench/workspace_store.go"},
 		{"touchWorkspace", []string{"workspaceId"}, "workbench/workspace_store.go"},
 		{"releaseWorkspace", []string{"workspaceId", "reason"}, "workbench/workspace_store.go"},
+		// The workspace's owner is read from its run (epic memql#5408): the
+		// retired planById answered nothing, so every dispatch was refused
+		// workspace_owner_unresolved.
+		{"workRunForOwner", []string{"runId"}, "workbench/workspace_store.go"},
 
 		// The local-apps call sites (epic memql#4358). Same table, same
 		// reason: these run against a fake stream in their own tests, which

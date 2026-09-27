@@ -63,6 +63,11 @@ shape run workRunFull {
   startedAt
   finishedAt
   summary
+  // epic memql#5408. A body-carrying shape projects ONLY what it lists, and
+  // the lift and the replay runner read runs through this shape: without
+  // these two a delegated recording could not name the goal it served or the
+  // run that delegated it, however faithfully the row stored them.
+  parentRunId
 }
 
 /// What a run the loop protection stopped says about the stop, and nothing else: the fields the
@@ -94,6 +99,10 @@ shape step workStepFull {
   input
   result
   resultFingerprint
+  // The environment a session's first step ran against (epic memql#5408, gap
+  // G4): what a learned procedure's preconditions are learned from, so the
+  // lift has to be able to read it back.
+  fingerprint
   binding
   expectedFootprint
   actualFootprint

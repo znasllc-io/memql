@@ -202,6 +202,24 @@ func firstContentText(result map[string]any) string {
 	return ""
 }
 
+// RecordedToolObservables answers what the recording writes for a tool call
+// whose result is raw -- the engine's marshalled ToolCallResult, exactly as
+// ExecuteToolByName returns it: the error flag, and the result type.
+//
+// EXPORTED FOR A REPLAY (epic memql#5408). A learned procedure's `mcp` step is
+// compared on these two observables, and the recording typed the result with
+// inferResultType: a PREFIX rule that can answer "empty", which is not
+// component/work.InferTextType. A replay typing its own result any other way
+// would disagree with every recording of the same call exactly where the two
+// rules differ ("42", "", "null"), and a procedure containing that call could
+// never climb. One function, over the recorder's own path, so the two cannot
+// drift.
+func RecordedToolObservables(raw string) (isError bool, resultType string) {
+	result := toolResultFromJSON(raw)
+	_, kind := digestToolResult(result)
+	return result["isError"] == true, kind
+}
+
 // toolResultText pulls the text out of an MCP tool result, for the error
 // field. Empty unless the call failed -- a successful result's text is the
 // content the digest stands for, and copying it onto the row would put the

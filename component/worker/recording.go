@@ -204,7 +204,10 @@ func StepTypeForTool(tool string) string {
 		return StepTypeMCP
 	}
 	switch name {
-	case "fs_write", "write", "write_file", "edit", "str_replace", "apply_patch", "file_change":
+	// MultiEdit is an Edit applied several times to one file: a write. Were it
+	// left to the `exec` default, its step would name no command and the
+	// replay's MultiEdit translation would never be reached.
+	case "fs_write", "write", "write_file", "edit", "multiedit", "str_replace", "apply_patch", "file_change":
 		return StepTypeFSWrite
 	case "fs_read", "read", "read_file", "cat", "view":
 		return StepTypeFSRead
@@ -368,7 +371,15 @@ type RecordingClose struct {
 	DroppedActions  int
 	// TranscriptFileId is the Library file the session's prose went to.
 	TranscriptFileId string
-	FinishedAt       time.Time
+	// Model and Effort are what the APP REPORTED serving the session with
+	// (design D9), empty when it said nothing. They ride onto the recording
+	// run's summary because that is the row a later lift reads under the
+	// owner's actor: a learned procedure's provenance says "recorded from app
+	// X, model Y, effort Z", and the Library file that also carries the stamp
+	// is projected by no read a lift can make (epic memql#5408).
+	Model      string
+	Effort     string
+	FinishedAt time.Time
 }
 
 // SessionRecorder writes an app session's actions into the work spine.

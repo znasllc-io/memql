@@ -18,6 +18,7 @@
               "id": "v1:cluster:node:n1",
               "type": "agent"
             },
+            "oldStatus": "s-oldStatus",
             "ownerUserId": "s-ownerUserId",
             "partitionId": "space-1",
             "recordType": "contact",
@@ -65,6 +66,7 @@
               "id": "v1:cluster:node:n1",
               "type": "agent"
             },
+            "oldStatus": "s-oldStatus",
             "ownerUserId": "s-ownerUserId",
             "partitionId": "space-1",
             "recordType": "contact",
@@ -112,6 +114,7 @@
               "id": "v1:cluster:node:n1",
               "type": "bff"
             },
+            "oldStatus": "s-oldStatus",
             "ownerUserId": "s-ownerUserId",
             "partitionId": "space-1",
             "recordType": "contact",
@@ -159,6 +162,7 @@
               "id": "v1:cluster:node:n1",
               "type": "bff"
             },
+            "oldStatus": "s-oldStatus",
             "ownerUserId": "s-ownerUserId",
             "partitionId": "space-1",
             "recordType": "contact",

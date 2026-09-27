@@ -4017,6 +4017,46 @@ QueryClient.prototype.knowledgeDomainsAll = function (this: QueryClient, args: K
   return this.executeNamed("knowledgeDomainsAll", buildKnowledgeDomainsAll(args), opts);
 };
 
+/** The certification ladder's values: the one row `seed ladderPolicy primary` writes (dsl/authoring/seeds.memql), pinned to its literal id so a row at any other id is never read as the policy. Readable from the `reader` rung up -- every predefined role -- and @requiresRank bounds the callers to exactly the concept's read floor, so the tier decides the whole row set for every caller this admits. The Go reader treats an absent or refused row as component/work.DefaultLadderPolicy(), which carries the seed's numbers. */
+// Bound concept: v1:authoring:ladderPolicy (machine-readable: BoundConcepts["ladderPolicyCurrent"] in generated_concepts.ts).
+export interface LadderPolicyCurrentArgs {
+}
+
+export function buildLadderPolicyCurrent(args: LadderPolicyCurrentArgs): string {
+  void args;
+  return "query ladderPolicyCurrent()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    ladderPolicyCurrent(args?: LadderPolicyCurrentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.ladderPolicyCurrent = function (this: QueryClient, args: LadderPolicyCurrentArgs = {} as LadderPolicyCurrentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("ladderPolicyCurrent", buildLadderPolicyCurrent(args), opts);
+};
+
+/** The caller's learned procedures, newest first, on every rung -- retired included, because Nexus shows where each one stands and the ladder's sweeps walk them all, page by page. A learned procedure is a construct the lift wrote into the `procedure` target namespace; nothing authored is ever written there. */
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["learnedProceduresForOwner"] in generated_concepts.ts).
+export interface LearnedProceduresForOwnerArgs {
+}
+
+export function buildLearnedProceduresForOwner(args: LearnedProceduresForOwnerArgs): string {
+  void args;
+  return "query learnedProceduresForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    learnedProceduresForOwner(args?: LearnedProceduresForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.learnedProceduresForOwner = function (this: QueryClient, args: LearnedProceduresForOwnerArgs = {} as LearnedProceduresForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("learnedProceduresForOwner", buildLearnedProceduresForOwner(args), opts);
+};
+
 /** The Bin's population: the caller's ARCHIVED artifact index rows, newest first (memql#4784).
 `row.archived == true` rather than the `!= true` spelling its siblings use, and the asymmetry is not a slip. Every artifact promoted before memql#4340 has no `archived` member at all, so `!= true` is the null-safe way to ask "not archived" and returns them; asking "IS archived" is a positive test, and a row with no member genuinely is not archived. The two are inverses of each other in meaning but not in spelling, and `== false` -- which looks like the third member of the family -- is the one that silently excludes every pre-field row and belongs to neither.
 A DEDICATED READ rather than a client-side fold over libraryArtifactsByLens, which is what the Files app browse does. The reasoning inverts here: Files needs the whole population because its archived TOGGLE has to answer from a set that does not depend on when you looked, while the Bin IS the archived set and nothing in the window ever shows anything else. Seeding it from the whole Library would pull every row the person owns to render the few they threw away. The live feed still works, because a subscription is scoped by CONCEPT rather than by query: an archive arrives as an update, the fold admits it, and the row rises in the Bin at the moment it leaves Files. */
@@ -6030,6 +6070,51 @@ declare module "./query.js" {
 
 QueryClient.prototype.policy = function (this: QueryClient, args: PolicyArgs = {} as PolicyArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("policy", buildPolicy(args), opts);
+};
+
+/** One of the caller's learned procedures by NAME -- the idempotent lift (epic memql#5408, G15). The name is derived from the corpus key, so a re-mine of the same corpus proposes the same name, and the lift reads this before it writes: absent means create, present with the same procedureHash means write nothing, present with a different one means re-lift in place.
+NEWEST FIRST, AND ONE ROW. Before the lift became idempotent every re-mine minted a fresh construct under the same name, so an owner can hold several; the most recently written is the one the lift continues. The older ones carry no rung and nothing serves them. */
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["procedureConstructByName"] in generated_concepts.ts).
+export interface ProcedureConstructByNameArgs {
+  name: string;
+}
+
+export function buildProcedureConstructByName(args: ProcedureConstructByNameArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  return "query procedureConstructByName(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    procedureConstructByName(args: ProcedureConstructByNameArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.procedureConstructByName = function (this: QueryClient, args: ProcedureConstructByNameArgs = {} as ProcedureConstructByNameArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("procedureConstructByName", buildProcedureConstructByName(args), opts);
+};
+
+/** The caller's learned procedures on a SERVABLE rung for one goal signature -- the ladder's half of compile's exact-match tier (epic memql#5408). Compile reads it beside cataloguedConstructsForGoalSignature and runs every row through component/work.DecideServe, which is what decides whether a rung serves: shadow is returned so that decision can say "the app serves and the construct replays beside it", and candidate and retired are excluded here because nothing ever serves from either. A learned procedure is served through the LADDER, never by being catalogued, which is why this does not ask `catalogued`. The shadow comparison reads it too, to find the procedures a succeeded recording is compared against. */
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["procedureConstructsForGoalSignature"] in generated_concepts.ts).
+export interface ProcedureConstructsForGoalSignatureArgs {
+  goalSignature: string;
+}
+
+export function buildProcedureConstructsForGoalSignature(args: ProcedureConstructsForGoalSignatureArgs): string {
+  const parts: string[] = [];
+  parts.push("goalSignature: " + renderMemQLValue(args.goalSignature));
+  return "query procedureConstructsForGoalSignature(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    procedureConstructsForGoalSignature(args: ProcedureConstructsForGoalSignatureArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.procedureConstructsForGoalSignature = function (this: QueryClient, args: ProcedureConstructsForGoalSignatureArgs = {} as ProcedureConstructsForGoalSignatureArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("procedureConstructsForGoalSignature", buildProcedureConstructsForGoalSignature(args), opts);
 };
 
 /** Product copy for one mirrored product. */
@@ -11605,6 +11690,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workRunsForOwner = function (this: QueryClient, args: WorkRunsForOwnerArgs = {} as WorkRunsForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workRunsForOwner", buildWorkRunsForOwner(args), opts);
+};
+
+/** The caller's SUCCEEDED runs for one goal signature, newest first -- the procedure corpus read (epic memql#5408). Learning mines the recordings of one owner's goal, and this is how it finds them: pushed down on the signature rather than paging the owner's whole run history and folding in Go, which is what it replaces. Owned rather than cluster-owner-scoped, and that is the point: a corpus mined across two people's runs produces a procedure correct about neither, so the lift reads this under the owner's own actor. Only `succeeded` runs are a corpus -- a failed or cancelled run shows what did NOT work. Bounded at 200, the most recent, because the miner needs recurrence rather than history, and the shape a person repeats is in their recent work. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsForOwnerGoalSignature"] in generated_concepts.ts).
+export interface WorkRunsForOwnerGoalSignatureArgs {
+  goalSignature: string;
+}
+
+export function buildWorkRunsForOwnerGoalSignature(args: WorkRunsForOwnerGoalSignatureArgs): string {
+  const parts: string[] = [];
+  parts.push("goalSignature: " + renderMemQLValue(args.goalSignature));
+  return "query workRunsForOwnerGoalSignature(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunsForOwnerGoalSignature(args: WorkRunsForOwnerGoalSignatureArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunsForOwnerGoalSignature = function (this: QueryClient, args: WorkRunsForOwnerGoalSignatureArgs = {} as WorkRunsForOwnerGoalSignatureArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunsForOwnerGoalSignature", buildWorkRunsForOwnerGoalSignature(args), opts);
 };
 
 /** Every step of one of the caller's runs -- the run timeline. Bounded by the run; the client orders by seq, because @unbounded and sort cannot be combined. */

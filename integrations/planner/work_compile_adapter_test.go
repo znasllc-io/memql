@@ -126,6 +126,29 @@ func TestWorkCompiler_RecordsTheTemplateItChose(t *testing.T) {
 	}
 }
 
+// TestCompileStampsTheGoalSignatureOnTheRun (epic memql#5408, gap G2). The
+// goal signature is the key procedure learning groups recordings by, and
+// compile is the one place that computes it -- so the run compile moves to
+// `running` must carry it, or a delegated session's child run has nothing to
+// inherit and every recording is skipped as belonging to no goal. The value is
+// the one component/work.GoalSignature computes over the statement and the
+// input keys, not a second derivation that could drift from it.
+func TestCompileStampsTheGoalSignatureOnTheRun(t *testing.T) {
+	sig := work.GoalSignature(adapterReq().Statement, []string{"day"})
+	eng := &countingCompileEngine{catalogue: []map[string]any{
+		{"id": "v1:authoring:construct:c1", "name": "summariseTickets", "goalSignature": sig, "reliability": 0.9},
+	}}
+	w := &recordingRunWriter{}
+	NewWorkCompiler(&PlannerAgentLoop{engine: eng}, w).Compile(context.Background(), adapterReq())
+
+	if len(w.fields) != 1 {
+		t.Fatalf("expected one write, got %d", len(w.fields))
+	}
+	if got := w.fields[0]["goalSignature"]; got != sig {
+		t.Fatalf("goalSignature on the run = %v, want %q", got, sig)
+	}
+}
+
 // A compiler that decides correctly and cannot record the decision is worse
 // than none: the run moves to `running` in the log and never in the graph.
 func TestNewWorkCompiler_RefusesWithoutALoopOrAWriter(t *testing.T) {
@@ -221,5 +244,54 @@ func TestCallCapGate(t *testing.T) {
 func TestUnboundedBudgetNeverBlocks(t *testing.T) {
 	if blocked, reason := unboundedBudget(context.Background(), 999); blocked {
 		t.Errorf("the unbounded gate blocked at %q; it is the gate that means there is no ceiling", reason)
+	}
+}
+
+// TestCompileMergesTheProcedureVariablesOverTheGoalInput (epic memql#5408):
+// a goal served by a learned procedure runs replayLearnedProcedure, the ONE
+// template every procedure is served through, so the run's variables must
+// carry both the goal's input -- the procedure binds its parameters from it
+// -- and the construct compile chose. And compile's choice WINS over an input
+// of the same name: a goal must not pick, by what its input happens to be
+// called, which procedure serves it without a model.
+func TestCompileMergesTheProcedureVariablesOverTheGoalInput(t *testing.T) {
+	eng := &countingCompileEngine{procedures: []map[string]any{learnedRow("v1:authoring:construct:p1", "trusted", 0.5)}}
+	w := &recordingRunWriter{}
+	req := adapterReq()
+	req.Input = map[string]any{"day": "2026-09-04"}
+	NewWorkCompiler(&PlannerAgentLoop{engine: eng}, w).Compile(context.Background(), req)
+
+	if len(w.fields) != 1 {
+		t.Fatalf("expected one write, got %d", len(w.fields))
+	}
+	f := w.fields[0]
+	if f["automationName"] != replayProcedureAutomation {
+		t.Fatalf("automationName = %v, want the replay template", f["automationName"])
+	}
+	vars, _ := f["variables"].(map[string]any)
+	if vars["day"] != "2026-09-04" || vars["procedureConstructId"] != "v1:authoring:construct:p1" {
+		t.Fatalf("variables = %v, want the goal's input AND the construct", f["variables"])
+	}
+	if _, present := f["templateConstructId"]; present {
+		t.Fatal("a procedure route must write no templateConstructId: the run executes the embedded replay template")
+	}
+	if _, polluted := req.Input["procedureConstructId"]; polluted {
+		t.Fatal("the merge wrote into the goal's own input map")
+	}
+
+	// An input of the same name does not choose the procedure. (Through
+	// Compile it cannot arise at all -- an input carrying that key is a goal
+	// of another signature, which this procedure never matches -- so the
+	// precedence is held on the merge itself.)
+	input := map[string]any{"day": "2026-09-04", "procedureConstructId": "v1:authoring:construct:someone-elses"}
+	merged := mergeVariables(input, map[string]any{"procedureConstructId": "v1:authoring:construct:p1"})
+	if merged["procedureConstructId"] != "v1:authoring:construct:p1" || merged["day"] != "2026-09-04" {
+		t.Fatalf("merged = %v: compile's choice must win and the input survive", merged)
+	}
+	if input["procedureConstructId"] != "v1:authoring:construct:someone-elses" {
+		t.Fatal("the merge wrote through into the goal's input")
+	}
+	if mergeVariables(nil, nil) != nil {
+		t.Fatal("nothing to merge must write no variables at all")
 	}
 }

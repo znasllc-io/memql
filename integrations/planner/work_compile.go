@@ -76,7 +76,24 @@ type CompileOutcome struct {
 	// ModelCalls is how many provider calls compile made. Zero on an
 	// exact catalog hit, and asserted as zero by the headline test.
 	ModelCalls int
+	// Variables are what the chosen template must run with BESIDES the
+	// goal's own input. Today that is only a learned procedure's construct
+	// id: replayLearnedProcedure is ONE embedded automation that serves every
+	// procedure on the ladder, so it has to be told which (epic memql#5408).
+	// WorkCompiler.Compile merges them over the goal's input. A key added here
+	// is one no goal supplied, so it belongs in component/work's
+	// replayOnlyVariables too: a recording opened from the goal's run inherits
+	// the variables as the goal's input.
+	Variables map[string]any
 }
+
+// replayProcedureAutomation is the embedded template a learned procedure is
+// served through (dsl/procedure/automations.memql). A procedure is NEVER run
+// as its own authored automation: it is served only through the ladder, and
+// the runner behind this automation re-reads the rung at execution, so a
+// procedure demoted between compile and dispatch falls back to the app
+// instead of running on a decision that is no longer true.
+const replayProcedureAutomation = "replayLearnedProcedure"
 
 // catalogReader is the narrow seam compile needs for its exact tier. The
 // near tier already has one (authoringNearMatcher), and this is its
@@ -118,7 +135,14 @@ func (l *PlannerAgentLoop) CompileGoalForRun(ctx context.Context, req CompileReq
 		// problem. Logged and treated as a miss.
 		l.warnCompile("work compile: exact catalog read failed; falling through to the paid tiers", req, err)
 	}
-	in.Exact = exact
+	// The ladder's half of the same tier (epic memql#5408): learned
+	// procedures on a rung DecideServe serves from, ranked ahead of the
+	// authored catalog. A failed read is a miss for the same reason as above.
+	procedures, perr := l.servableProceduresForSignature(ctx, req.OwnerUserId, sig)
+	if perr != nil {
+		l.warnCompile("work compile: learned-procedure read failed; the ladder is skipped for this goal", req, perr)
+	}
+	in.Exact = append(procedures, exact...)
 
 	// Tier 2: near. Only consulted when the exact tier missed, because
 	// building the candidate list costs a vector search.
@@ -176,6 +200,17 @@ func (l *PlannerAgentLoop) finishCompile(ctx context.Context, req CompileRequest
 
 	switch d.Route {
 	case work.RouteCatalogExact, work.RouteCatalogNear:
+		if d.Route == work.RouteCatalogExact && d.Candidate != nil && d.Candidate.Rung != work.RungNone {
+			// A LEARNED PROCEDURE on a servable rung. It is served through
+			// the one embedded replay template, never as its own construct:
+			// no templateConstructId (the template loader would try to run
+			// the procedure's bundle, which was validated for another run),
+			// and the construct id rides the run's variables instead.
+			out.AutomationName = replayProcedureAutomation
+			out.ConstructId = ""
+			out.Variables = map[string]any{work.ProcedureConstructVariable: d.Candidate.ConstructId}
+			return out, nil
+		}
 		// The template is the catalogue's. Nothing more to author; the
 		// near route's gap list is closed by the run's own reasoning
 		// steps rather than by a second compile pass.
@@ -277,6 +312,66 @@ func (l *PlannerAgentLoop) cataloguedForSignature(ctx context.Context, ownerUser
 		return reliabilityOf(rows, out[i].ConstructId) > reliabilityOf(rows, out[j].ConstructId)
 	})
 	return out, nil
+}
+
+// servableProceduresForSignature is the ladder's half of the exact tier: the
+// owner's learned procedures for this signature that DecideServe says to
+// serve FROM THE CONSTRUCT -- trusted, then canary. A shadow procedure is not
+// a candidate at all: the app serves that goal, and the procedure is
+// compared beside it when the recording succeeds. Candidate, retired and any
+// rung this build does not know are never served.
+//
+// The rung is decided HERE, not trusted from the query's own filter, for the
+// reason cataloguedForSignature re-checks the signature: an exact hit is
+// served without a model, so a row that should not be served must be dropped
+// by the one decision that owns the question.
+func (l *PlannerAgentLoop) servableProceduresForSignature(ctx context.Context, ownerUserId, signature string) ([]work.CatalogCandidate, error) {
+	if l.engine == nil || ownerUserId == "" {
+		return nil, nil
+	}
+	res, err := l.engine.Execute(ownerActorContext(ctx, ownerUserId),
+		"query procedureConstructsForGoalSignature("+encodeArgs(map[string]any{"goalSignature": signature})+")")
+	if err != nil {
+		return nil, err
+	}
+	rows := memql.MaterializeRows(res)
+	out := make([]work.CatalogCandidate, 0, len(rows))
+	for _, r := range rows {
+		if getString(r, "goalSignature") != signature {
+			continue
+		}
+		rung, known := work.ParseRung(getString(r, "ladder"))
+		if !known || rung == work.RungNone {
+			continue
+		}
+		verdict := work.DecideServe(work.ReplayContext{Mode: "live", ConstructRung: rung})
+		if verdict.Source != work.ServeConstruct {
+			continue
+		}
+		out = append(out, work.CatalogCandidate{
+			ConstructId: getString(r, "id"),
+			Name:        getString(r, "name"),
+			Signature:   signature,
+			Similarity:  1,
+			Rung:        rung,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if ri, rj := rungOrder(out[i].Rung), rungOrder(out[j].Rung); ri != rj {
+			return ri < rj
+		}
+		return reliabilityOf(rows, out[i].ConstructId) > reliabilityOf(rows, out[j].ConstructId)
+	})
+	return out, nil
+}
+
+// rungOrder ranks trusted ahead of canary: a canary still has the app on
+// standby, and when both exist for one goal the proven one serves.
+func rungOrder(r work.Rung) int {
+	if r == work.RungTrusted {
+		return 0
+	}
+	return 1
 }
 
 func reliabilityOf(rows []map[string]any, id string) float64 {

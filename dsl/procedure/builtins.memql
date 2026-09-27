@@ -1,30 +1,35 @@
 // builtins.memql
 //
-// Procedure learning's two entry points (design record
+// Procedure learning's entry points (design record
 // docs/superpowers/specs/2026-09-13-app-session-recording-and-learning-program-design.md,
-// section 4 epic C). Executors live in integrations/procedure; the pure
-// algorithms they call live in component/procedure and reach no model.
+// section 4 epics C and D). Executors live in integrations/procedure; the pure
+// algorithms they call live in component/procedure and component/work, and
+// reach no model.
 //
-// NEITHER CARRIES @serverOnly, AND THAT IS NOT AN OVERSIGHT. @serverOnly is
+// NONE CARRIES @serverOnly, AND THAT IS NOT AN OVERSIGHT. @serverOnly is
 // refused on a builtin at parse -- it is accepted on a query and a mutation --
-// so the gate these two need lives in their HANDLERS, which is the same place
+// so the gate each of these needs lives in its HANDLER, which is the same place
 // the log store's reads put theirs and for the same reason: a builtin's
 // annotation set carries no rank or origin gate.
 //
-// The gate they need is real. Learning writes a construct into somebody's
+// The gates they need are real. Learning writes a construct into somebody's
 // catalog with a goalSignature attached, which is the key compile's
-// exact-match tier serves a later goal from WITHOUT A MODEL. A caller able to
-// drive learning on an arbitrary run could point any goal at a template of
-// their choosing. The handlers therefore refuse a blank ownerUserId, run every
-// read under the NAMED owner's actor, and reach the @serverOnly authoring
-// mutations only through the one internal-origin stamp in store.go -- so a
-// caller who is not that owner reads zero rows and mines nothing.
+// exact-match tier serves a later goal from WITHOUT A MODEL; the ladder
+// builtins move a procedure toward serving goals unreviewed. A caller able to
+// drive either on somebody else's rows could point a goal at a template of
+// their choosing. The handlers therefore run every read under the NAMED owner's
+// actor, admit the maintenance principal (component/auth/maintenance_actor.go)
+// only where a scheduled or event-fired automation has no person to name, and
+// reach the @serverOnly authoring mutations only through the one
+// internal-origin stamp in store.go -- so a caller who is not that owner reads
+// zero rows and moves nothing.
 
 /// Mine the corpus a finished run belongs to. Reads that run's owner's recorded runs for the same
 /// goal signature, mines the recurring shape, generalizes it into a template with classified holes,
 /// and -- when an abstraction clears the compression floor of at least two uses -- lifts it into a
-/// validated bundle carrying its provenance. Nothing auto-activates: the construct enters the trust
-/// ladder as a candidate. Returns {runId, goalSignature, sequences, candidates, constructId,
+/// validated bundle carrying its provenance. Nothing auto-activates: the construct enters the
+/// certification ladder on the rung its evidence earns, and only a person's approval moves it from
+/// shadow toward serving. Returns {runId, goalSignature, sequences, candidates, constructId,
 /// accepted, reason}. A corpus of fewer than two runs is the ORDINARY answer, not a failure.
 @executor("integration.procedure.learnFromRun")
 builtin procedureLearnFromRun {
@@ -41,4 +46,56 @@ builtin procedureMineCorpus {
   ownerUserId    string!  @description("Whose corpus to mine. Every read runs as this person: the composite owner tier would otherwise blend two people's recordings into one template.")
   goalSignature  string   @description("Restrict to one goal's runs. Empty mines every signature the owner has.")
   level          integer  @description("1 actions (default); 2 automation invocations.")
+}
+
+/// The statement every step of a rendered learned procedure is (epic memql#5408). The lift renders a
+/// procedure as MemQL source -- the auditable artifact a promotion approval pins beside the template
+/// and the preconditions -- and each of its steps is one call to this builtin, naming the recorded
+/// action and its arguments with every hole spelled as what it stands for.
+///
+/// IT NEVER RUNS AS AN ORDINARY STATEMENT: the handler refuses outside a replay ("procedureStep runs
+/// only inside replayLearnedProcedure"). A learned procedure is served through the certification
+/// ladder and never activated as an automation, because the ladder's shadow evidence and its one
+/// human approval are what stand between a recording and an action taken again on somebody's
+/// machine. What a replay executes is the template stored on the construct; this statement is how
+/// the source SAYS what that template does.
+@executor("integration.procedure.step")
+builtin procedureStep {
+  step  integer!  @description("The step's index into the procedure template's steps, as the lift rendered it.")
+  tool  string!   @description("The action the app took: exec, fs_write, fs_read, fetch or mcp.")
+  args  object    @description("The action's arguments, every hole spelled as the goal input, constant or earlier result it stands for.")
+}
+
+/// Serve the current work run from a learned procedure (epic memql#5408) -- the one statement of
+/// replayLearnedProcedure. The handler reads the run it executes in and refuses outside one,
+/// refuses a construct owned by anybody but that run's owner, and RE-READS the construct's rung: a
+/// procedure demoted or re-lifted since compile chose it falls back to the app instead of replaying.
+/// Otherwise it binds the goal's input to the procedure's free parameters, checks the learned
+/// preconditions on the target, and replays the template step by step -- stopping at the first
+/// divergence and handing the app the steps that already ran, so none is repeated. Returns
+/// {servedBy, constructId, rung, diverged, repairRunId}; servedBy is procedure or app.
+@executor("integration.procedure.replay")
+builtin procedureReplay {
+  constructId  string!  @description("The learned procedure to replay: a v1:authoring:construct owned by the run's owner.")
+}
+
+/// One of the certification ladder's two maintenance sweeps (epic memql#5408). `demotion`
+/// re-evaluates every canary and trusted procedure's stored evidence against the CURRENT ladder
+/// policy, so a threshold that tightened demotes a procedure without waiting for its next replay;
+/// `retirement` retires a procedure unused for longer than the policy's window, on any rung. The
+/// handler refuses every caller but the cluster's maintenance principal and trusted server-side Go,
+/// and reads each owner's procedures under that owner's own actor.
+@executor("integration.procedure.ladderSweep")
+builtin procedureLadderSweep {
+  sweep  enum("demotion", "retirement")!  @description("Which sweep to run.")
+}
+
+/// Apply a person's decision on a procedurePromotion approval to the ladder (epic memql#5408):
+/// approved moves the procedure from shadow to canary, rejected keeps it in shadow and makes it
+/// re-earn the proposal. IDEMPOTENT -- a construct no longer waiting on this approval, or no longer in
+/// shadow, is left exactly as it is -- and it never touches the finished shadow run the approval
+/// names.
+@executor("integration.procedure.decidePromotion")
+builtin procedureDecidePromotion {
+  approvalId  string!  @description("The decided v1:work:approval, of kind procedurePromotion.")
 }

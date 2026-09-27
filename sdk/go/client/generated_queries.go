@@ -4047,6 +4047,40 @@ func KnowledgeDomainsAllBuild(args KnowledgeDomainsAllArgs) string {
 	return "query knowledgeDomainsAll()"
 }
 
+// LadderPolicyCurrent -- The certification ladder's values: the one row `seed ladderPolicy primary` writes (dsl/authoring/seeds.memql), pinned to its literal id so a row at any other id is never read as the policy. Readable from the `reader` rung up -- every predefined role -- and @requiresRank bounds the callers to exactly the concept's read floor, so the tier decides the whole row set for every caller this admits. The Go reader treats an absent or refused row as component/work.DefaultLadderPolicy(), which carries the seed's numbers.
+//
+// Bound concept: v1:authoring:ladderPolicy (machine-readable: BoundConcepts["ladderPolicyCurrent"] in generated_concepts.go).
+type LadderPolicyCurrentArgs struct {
+}
+
+// LadderPolicyCurrent calls the engine query ladderPolicyCurrent.
+func (qc *QueryClient) LadderPolicyCurrent(ctx context.Context, args LadderPolicyCurrentArgs) (*Result, error) {
+	call := LadderPolicyCurrentBuild(args)
+	return qc.executeNamed(ctx, "ladderPolicyCurrent", call)
+}
+
+func LadderPolicyCurrentBuild(args LadderPolicyCurrentArgs) string {
+	_ = args
+	return "query ladderPolicyCurrent()"
+}
+
+// LearnedProceduresForOwner -- The caller's learned procedures, newest first, on every rung -- retired included, because Nexus shows where each one stands and the ladder's sweeps walk them all, page by page. A learned procedure is a construct the lift wrote into the `procedure` target namespace; nothing authored is ever written there.
+//
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["learnedProceduresForOwner"] in generated_concepts.go).
+type LearnedProceduresForOwnerArgs struct {
+}
+
+// LearnedProceduresForOwner calls the engine query learnedProceduresForOwner.
+func (qc *QueryClient) LearnedProceduresForOwner(ctx context.Context, args LearnedProceduresForOwnerArgs) (*Result, error) {
+	call := LearnedProceduresForOwnerBuild(args)
+	return qc.executeNamed(ctx, "learnedProceduresForOwner", call)
+}
+
+func LearnedProceduresForOwnerBuild(args LearnedProceduresForOwnerArgs) string {
+	_ = args
+	return "query learnedProceduresForOwner()"
+}
+
 // LibraryArchivedArtifacts -- The Bin's population: the caller's ARCHIVED artifact index rows, newest first (memql#4784).
 // `row.archived == true` rather than the `!= true` spelling its siblings use, and the asymmetry is not a slip. Every artifact promoted before memql#4340 has no `archived` member at all, so `!= true` is the null-safe way to ask "not archived" and returns them; asking "IS archived" is a positive test, and a row with no member genuinely is not archived. The two are inverses of each other in meaning but not in spelling, and `== false` -- which looks like the third member of the family -- is the one that silently excludes every pre-field row and belongs to neither.
 // A DEDICATED READ rather than a client-side fold over libraryArtifactsByLens, which is what the Files app browse does. The reasoning inverts here: Files needs the whole population because its archived TOGGLE has to answer from a set that does not depend on when you looked, while the Bin IS the archived set and nothing in the window ever shows anything else. Seeding it from the whole Library would pull every row the person owns to render the few they threw away. The live feed still works, because a subscription is scoped by CONCEPT rather than by query: an archive arrives as an update, the fold admits it, and the row rises in the Bin at the moment it leaves Files.
@@ -6061,6 +6095,51 @@ func PolicyBuild(args PolicyArgs) string {
 		b.WriteString("partitionId: ")
 		b.WriteString(quoteMemQL(args.PartitionId))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ProcedureConstructByName -- One of the caller's learned procedures by NAME -- the idempotent lift (epic memql#5408, G15). The name is derived from the corpus key, so a re-mine of the same corpus proposes the same name, and the lift reads this before it writes: absent means create, present with the same procedureHash means write nothing, present with a different one means re-lift in place.
+// NEWEST FIRST, AND ONE ROW. Before the lift became idempotent every re-mine minted a fresh construct under the same name, so an owner can hold several; the most recently written is the one the lift continues. The older ones carry no rung and nothing serves them.
+//
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["procedureConstructByName"] in generated_concepts.go).
+type ProcedureConstructByNameArgs struct {
+	Name string
+}
+
+// ProcedureConstructByName calls the engine query procedureConstructByName.
+func (qc *QueryClient) ProcedureConstructByName(ctx context.Context, args ProcedureConstructByNameArgs) (*Result, error) {
+	call := ProcedureConstructByNameBuild(args)
+	return qc.executeNamed(ctx, "procedureConstructByName", call)
+}
+
+func ProcedureConstructByNameBuild(args ProcedureConstructByNameArgs) string {
+	var b strings.Builder
+	b.WriteString("query procedureConstructByName(")
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ProcedureConstructsForGoalSignature -- The caller's learned procedures on a SERVABLE rung for one goal signature -- the ladder's half of compile's exact-match tier (epic memql#5408). Compile reads it beside cataloguedConstructsForGoalSignature and runs every row through component/work.DecideServe, which is what decides whether a rung serves: shadow is returned so that decision can say "the app serves and the construct replays beside it", and candidate and retired are excluded here because nothing ever serves from either. A learned procedure is served through the LADDER, never by being catalogued, which is why this does not ask `catalogued`. The shadow comparison reads it too, to find the procedures a succeeded recording is compared against.
+//
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["procedureConstructsForGoalSignature"] in generated_concepts.go).
+type ProcedureConstructsForGoalSignatureArgs struct {
+	GoalSignature string
+}
+
+// ProcedureConstructsForGoalSignature calls the engine query procedureConstructsForGoalSignature.
+func (qc *QueryClient) ProcedureConstructsForGoalSignature(ctx context.Context, args ProcedureConstructsForGoalSignatureArgs) (*Result, error) {
+	call := ProcedureConstructsForGoalSignatureBuild(args)
+	return qc.executeNamed(ctx, "procedureConstructsForGoalSignature", call)
+}
+
+func ProcedureConstructsForGoalSignatureBuild(args ProcedureConstructsForGoalSignatureArgs) string {
+	var b strings.Builder
+	b.WriteString("query procedureConstructsForGoalSignature(")
+	b.WriteString("goalSignature: ")
+	b.WriteString(quoteMemQL(args.GoalSignature))
 	b.WriteString(")")
 	return b.String()
 }
@@ -12269,6 +12348,28 @@ func (qc *QueryClient) WorkRunsForOwner(ctx context.Context, args WorkRunsForOwn
 func WorkRunsForOwnerBuild(args WorkRunsForOwnerArgs) string {
 	_ = args
 	return "query workRunsForOwner()"
+}
+
+// WorkRunsForOwnerGoalSignature -- The caller's SUCCEEDED runs for one goal signature, newest first -- the procedure corpus read (epic memql#5408). Learning mines the recordings of one owner's goal, and this is how it finds them: pushed down on the signature rather than paging the owner's whole run history and folding in Go, which is what it replaces. Owned rather than cluster-owner-scoped, and that is the point: a corpus mined across two people's runs produces a procedure correct about neither, so the lift reads this under the owner's own actor. Only `succeeded` runs are a corpus -- a failed or cancelled run shows what did NOT work. Bounded at 200, the most recent, because the miner needs recurrence rather than history, and the shape a person repeats is in their recent work.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsForOwnerGoalSignature"] in generated_concepts.go).
+type WorkRunsForOwnerGoalSignatureArgs struct {
+	GoalSignature string
+}
+
+// WorkRunsForOwnerGoalSignature calls the engine query workRunsForOwnerGoalSignature.
+func (qc *QueryClient) WorkRunsForOwnerGoalSignature(ctx context.Context, args WorkRunsForOwnerGoalSignatureArgs) (*Result, error) {
+	call := WorkRunsForOwnerGoalSignatureBuild(args)
+	return qc.executeNamed(ctx, "workRunsForOwnerGoalSignature", call)
+}
+
+func WorkRunsForOwnerGoalSignatureBuild(args WorkRunsForOwnerGoalSignatureArgs) string {
+	var b strings.Builder
+	b.WriteString("query workRunsForOwnerGoalSignature(")
+	b.WriteString("goalSignature: ")
+	b.WriteString(quoteMemQL(args.GoalSignature))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkStepsForOwnerRun -- Every step of one of the caller's runs -- the run timeline. Bounded by the run; the client orders by seq, because @unbounded and sort cannot be combined.

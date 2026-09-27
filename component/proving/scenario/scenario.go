@@ -110,6 +110,12 @@ type Scenario struct {
 	Family figure.Family `json:"family"`
 	// Title is one line a person reads on the scorecard.
 	Title string `json:"title"`
+	// Description is a paragraph for the REVIEWER of the corpus: what the
+	// scenario proves, and what in it stands in for what. The page does not
+	// print it. A scenario whose stand-ins are not obvious -- the fixture app
+	// of a procedure lifecycle, which reaches no provider -- says so here
+	// rather than leaving the next reader to work it out from Go.
+	Description string `json:"description,omitempty"`
 	// Goal is the goal statement, with {{name}} placeholders bound from
 	// Variables.
 	Goal string `json:"goal"`
@@ -119,7 +125,17 @@ type Scenario struct {
 	Variables []map[string]string `json:"variables"`
 	// Steps is the authored plan the platform arm executes and the baseline
 	// arm is measured against. Named steps, so an injection can point at one.
+	//
+	// In a PROCEDURE scenario (Procedure below) the steps are instead the
+	// FIXTURE APP's actions: what the app does, in order, to serve one goal,
+	// each a command on the fake machine. They are what a learned procedure
+	// is learned from and then replays.
 	Steps []Step `json:"steps"`
+	// Procedure, when set, makes this a LEARNED-PROCEDURE LIFECYCLE scenario
+	// (epic memql#5408): a sequence of goals, each served by whatever the
+	// platform's own certification ladder decides, from the first recordings
+	// to a trusted replay. See Procedure.
+	Procedure *Procedure `json:"procedure,omitempty"`
 	// World is the fake external world this scenario runs against.
 	World World `json:"world"`
 	// Inject are the failures to inject. Empty for a scenario that measures a
@@ -131,10 +147,13 @@ type Scenario struct {
 	// Floors are per-metric minimum sample counts. Below the floor the figure
 	// is `belowFloor` rather than a median of three.
 	Floors map[string]int `json:"floors,omitempty"`
-	// NegativeControlFor names the metric whose zero-claim this scenario is
-	// the control for. A counter that is never incremented on ANY path reads
-	// as zero forever, so every zero-claim scenario is paired with one that
-	// must produce a non-zero -- and CorpusControls asserts the pairing.
+	// NegativeControlFor names the metric whose claim this scenario is the
+	// control for. A counter that is never incremented on ANY path reads as
+	// zero forever, so every zero-claim scenario is paired with one that must
+	// produce a non-zero -- and a counter that reads its claim on every path
+	// reads it forever, so a positive count's claim is paired with one that
+	// must produce a zero (figure.Spec.Control says which). CorpusControls
+	// asserts the pairing; the runner asserts the reading.
 	NegativeControlFor figure.Metric `json:"negativeControlFor,omitempty"`
 	// Claims are the metrics this scenario produces. Declared rather than
 	// discovered, so a scenario that silently stops emitting a metric is a
@@ -209,6 +228,210 @@ type Injection struct {
 	// Once injects only on the first attempt, which is what makes a retry
 	// observable: a failure that never stops is a failure, not a recovery.
 	Once bool `json:"once,omitempty"`
+}
+
+// Procedure is a learned-procedure lifecycle (epic memql#5408, the program
+// record's section 7): the same fixture app serving a sequence of goals while
+// the platform records it, learns a procedure from it, compares that
+// procedure beside the app, asks a person once, and finally serves a goal from
+// the procedure alone.
+//
+// THE SCENARIO NEVER SAYS WHICH RUNG SERVES A GOAL. Each goal is served by
+// whatever the platform's own serve decision answers for it at that moment --
+// the app, the app with the procedure compared beside it, or the procedure --
+// and the scenario's verifier then asserts where the ladder ended up. A
+// scenario that dictated "now replay it trusted" would measure the driver's
+// obedience rather than the ladder's.
+type Procedure struct {
+	// Policy is the certification ladder's values for this run, written to
+	// the ladder's own row before the first goal and put back after the last.
+	// A value left out is the deployment's default.
+	Policy LadderPolicy `json:"policy"`
+	// Goals are served in order. Exactly one is measured, and it is the last.
+	Goals []ProcedureGoal `json:"goals"`
+}
+
+// LadderPolicy mirrors v1:authoring:ladderPolicy. Pointers, because a value
+// left out (the deployment's default) and a value written as zero (refused:
+// the concept's own floor is one) are different statements.
+type LadderPolicy struct {
+	ShadowMatches        *int `json:"shadowMatches,omitempty"`
+	DistinctBindings     *int `json:"distinctBindings,omitempty"`
+	CanaryMatches        *int `json:"canaryMatches,omitempty"`
+	FailuresToDemote     *int `json:"failuresToDemote,omitempty"`
+	InsufficientToDemote *int `json:"insufficientToDemote,omitempty"`
+	RetireAfterDays      *int `json:"retireAfterDays,omitempty"`
+}
+
+// ProcedureGoal is one entry of a lifecycle: a goal a person asks for, or a
+// person's decision on the promotion the ladder proposed.
+type ProcedureGoal struct {
+	// Decide is a person's decision on the procedurePromotion approval the
+	// ladder raised: "approved" or "rejected". An entry that decides carries
+	// nothing else -- it is not a goal.
+	Decide string `json:"decide,omitempty"`
+	// Goal overrides the scenario's goal statement for this one goal. A
+	// different statement is a different goal signature, so this is how a
+	// scenario asks for a FRESH goal on the same fixture.
+	Goal string `json:"goal,omitempty"`
+	// Variables are the goal's input: they bind the statement's placeholders
+	// and the fixture app's actions', and they are what a learned procedure's
+	// free parameters are bound from.
+	Variables map[string]string `json:"variables,omitempty"`
+	// Measure marks the one goal whose figures the scenario publishes.
+	Measure bool `json:"measure,omitempty"`
+	// Inject are failures injected into THIS goal's world only -- the fake
+	// machine's answer to one action, whoever performs it first. Goal-scoped
+	// because a scenario-wide injection would fire in whichever goal reached
+	// the action first, which is a recording, not the goal being measured.
+	Inject []Injection `json:"inject,omitempty"`
+}
+
+// Decision values a lifecycle entry may carry.
+const (
+	DecideApproved = "approved"
+	DecideRejected = "rejected"
+)
+
+// The rows a lifecycle's verifier may assert on. A lifecycle keeps no journal
+// run of its own; it answers from the ladder's rows, read back from the
+// platform after the last goal.
+const (
+	RowConstruct = "v1:authoring:construct"
+	RowApproval  = "v1:work:approval"
+	// ApprovalKindPromotion is the one approval kind a lifecycle raises.
+	ApprovalKindPromotion = "procedurePromotion"
+	// DecisionPending is how the verifier spells an undecided approval: an
+	// empty where-value would read as "any".
+	DecisionPending = "pending"
+)
+
+// lifecycleRows is the CLOSED vocabulary of a lifecycle verifier's row
+// assertions: each row, the where-keys it answers, and each key's legal
+// values. A lifecycle runs only in the database lane, and a misspelled key
+// found there is a red lane an hour later; found here, it is a refusal at
+// load.
+var lifecycleRows = map[string]map[string][]string{
+	RowConstruct: {"ladder": {"candidate", "shadow", "canary", "trusted", "retired"}},
+	RowApproval: {
+		"kind":     {ApprovalKindPromotion},
+		"decision": {DecideApproved, DecideRejected, DecisionPending},
+	},
+}
+
+// LifecycleRows returns the vocabulary, for the test that holds the runner to
+// answering every key it admits.
+func LifecycleRows() map[string]map[string][]string {
+	out := make(map[string]map[string][]string, len(lifecycleRows))
+	for row, keys := range lifecycleRows {
+		out[row] = map[string][]string{}
+		for k, vals := range keys {
+			out[row][k] = append([]string(nil), vals...)
+		}
+	}
+	return out
+}
+
+// lifecycleChecks are the named checks that read a lifecycle's record. Only a
+// lifecycle may name them, and a lifecycle may name no other: the scripted
+// checks read a journal run a lifecycle does not have.
+var lifecycleChecks = map[string]bool{
+	"aTrustedReplayReachedNoModel":               true,
+	"aDivergedReplayHandedOverItsCompletedSteps": true,
+}
+
+// procedureTools is the CLOSED set of tools the fixture app speaks. One, and
+// the reason is the learning pipeline's rather than the fixture's:
+// component/procedure drops a pure read (fetch, fs_read, mcp) that no later
+// step consumes, so a lifecycle made of them would learn nothing, and the fake
+// world has no filesystem for fs_write to reach. A command on the fake machine
+// is performed, recorded, counted and replayable.
+var procedureTools = map[string]bool{"exec": true}
+
+// procedureInjectionKinds are the injections a lifecycle goal may carry: the
+// fake machine answering one action with a failure, once. A kill stops a
+// journaled run and has no meaning for an app session; a human injection is
+// the classifier's input, which no lifecycle reaches.
+var procedureInjectionKinds = map[Kind]bool{KindTransient: true, KindEnvironment: true, KindContract: true}
+
+// lifecycleClaims are the metrics a procedure lifecycle produces, and
+// lifecycleOnly the ones nothing else produces. Both are closed: a lifecycle
+// claiming a figure its driver never computes would publish a zero it did not
+// measure, and so would the automation runner claiming a lifecycle's.
+var (
+	lifecycleClaims = map[figure.Metric]bool{
+		figure.MetricReplaysWithoutModel:        true,
+		figure.MetricProviderCalls:              true,
+		figure.MetricDuplicatedAcrossDivergence: true,
+	}
+	lifecycleOnly = map[figure.Metric]bool{
+		figure.MetricReplaysWithoutModel:        true,
+		figure.MetricDuplicatedAcrossDivergence: true,
+	}
+)
+
+// Script is the script a fixture-app step runs on the fake machine: the base
+// name of its command's first word. It is also what the learning pipeline
+// calls the tool a step invokes (component/procedure.UsedTools), and what a
+// goal's injection is aimed at.
+func (st Step) Script() string {
+	fields := strings.Fields(st.Target)
+	if len(fields) == 0 {
+		return ""
+	}
+	return path.Base(fields[0])
+}
+
+// Placeholders lists the {{name}} placeholders in s, in order of first
+// appearance.
+func Placeholders(s string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for rest := s; ; {
+		open := strings.Index(rest, "{{")
+		if open < 0 {
+			return out
+		}
+		closing := strings.Index(rest[open+2:], "}}")
+		if closing < 0 {
+			return out
+		}
+		name := strings.TrimSpace(rest[open+2 : open+2+closing])
+		if name != "" && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+		rest = rest[open+2+closing+2:]
+	}
+}
+
+// Render binds s's placeholders from vars. A placeholder vars does not bind is
+// left as written, which the loader makes unreachable for a procedure
+// scenario: every goal must bind every placeholder its statement and actions
+// carry.
+func Render(s string, vars map[string]string) string {
+	var b strings.Builder
+	rest := s
+	for {
+		open := strings.Index(rest, "{{")
+		if open < 0 {
+			b.WriteString(rest)
+			return b.String()
+		}
+		closing := strings.Index(rest[open+2:], "}}")
+		if closing < 0 {
+			b.WriteString(rest)
+			return b.String()
+		}
+		end := open + 2 + closing + 2
+		b.WriteString(rest[:open])
+		if v, ok := vars[strings.TrimSpace(rest[open+2:open+2+closing])]; ok {
+			b.WriteString(v)
+		} else {
+			b.WriteString(rest[open:end])
+		}
+		rest = rest[end:]
+	}
 }
 
 // CheckForm is which kind of assertion a Check is.
@@ -286,6 +509,9 @@ var namedChecks = map[string]string{
 	"approvalRefusesAChangedArtifact": "the governance property needs a SECOND resume attempt against a mutated artifact, which is a sequence rather than a state",
 	"resumedRunKeepsItsRunId":         "the assertion is that two executions share one id, which is a relation between rows rather than a predicate over one",
 	"journalIsCompleteForEveryStep":   "the assertion quantifies over the step list, which the row form has no syntax for",
+	// The procedure lifecycle's two (epic memql#5408).
+	"aTrustedReplayReachedNoModel":               "the assertion relates the replay's own model-call count and the fixture app's call counter over one goal of a lifecycle -- two instruments over one interval, which no row predicate or world counter holds",
+	"aDivergedReplayHandedOverItsCompletedSteps": "the assertion relates where a replay stopped, the guidance the app was handed and the actions the app then performed -- three records of one handover, which no single row or counter holds",
 }
 
 // NamedChecks returns the registered check names, sorted.
@@ -394,6 +620,8 @@ func (s Scenario) Validate() error {
 		case FormNamed:
 			if _, ok := NamedCheckReason(c.Named); !ok {
 				bad("verifier %d names the check %q, which is not registered; the registry is closed (%v) so that a scenario which cannot be verified fails at LOAD rather than reporting a pass", i, c.Named, NamedChecks())
+			} else if lifecycleChecks[c.Named] && s.Procedure == nil {
+				bad("verifier %d names %q, which reads a procedure lifecycle's record; this scenario has no `procedure`", i, c.Named)
 			}
 		case FormEffects:
 			facet, _, ok := strings.Cut(c.Effects, ".")
@@ -411,17 +639,35 @@ func (s Scenario) Validate() error {
 		}
 	}
 
+	claimed := map[figure.Metric]bool{}
 	for _, m := range s.Claims {
+		claimed[m] = true
 		if _, ok := figure.MetricSpec(m); !ok {
 			bad("claims %q, which is not a registered metric", m)
 		} else if spec, _ := figure.MetricSpec(m); spec.Family != s.Family {
 			bad("claims %q, which belongs to family %q, not this scenario's %q", m, spec.Family, s.Family)
 		}
+		switch {
+		case s.Procedure != nil && !lifecycleClaims[m]:
+			bad("claims %q, which a procedure lifecycle does not produce (it produces %v); the figure would be a zero nobody measured", m, sortedMetrics(lifecycleClaims))
+		case s.Procedure == nil && lifecycleOnly[m]:
+			bad("claims %q, which only a procedure lifecycle produces; this scenario has no `procedure`, so the figure would be a zero by construction", m)
+		}
 	}
 	if s.NegativeControlFor != "" {
-		if _, ok := figure.MetricSpec(s.NegativeControlFor); !ok {
+		if spec, ok := figure.MetricSpec(s.NegativeControlFor); !ok {
 			bad("negativeControlFor names %q, which is not a registered metric", s.NegativeControlFor)
+		} else {
+			if spec.Control() == figure.ControlNone {
+				bad("negativeControlFor names %q, which declares no better direction, so no reading of a control could mean anything", s.NegativeControlFor)
+			}
+			if !claimed[s.NegativeControlFor] {
+				bad("negativeControlFor names %q, which this scenario does not claim; a control that produces no figure checks nothing, and the runner would find that out only after running the whole corpus", s.NegativeControlFor)
+			}
 		}
+	}
+	if s.Procedure != nil {
+		validateProcedure(s, claimed, bad)
 	}
 	for m, floor := range s.Floors {
 		if _, ok := figure.MetricSpec(figure.Metric(m)); !ok {
@@ -448,6 +694,206 @@ func (s Scenario) expectsFailure() bool {
 		}
 	}
 	return false
+}
+
+// validateProcedure refuses a lifecycle the driver could not run honestly.
+// Every rule here is one whose absence produces a figure that LOOKS measured:
+// an unbound placeholder is a command the app runs literally, a second
+// measured goal is two numbers under one name, and an injection the measured
+// goal does not carry makes "nothing was delivered twice" true of a goal in
+// which nothing diverged.
+func validateProcedure(s Scenario, claimed map[figure.Metric]bool, bad func(string, ...any)) {
+	p := s.Procedure
+	if len(s.Variables) > 0 {
+		bad("a procedure scenario binds its variables per goal (procedure.goals[].variables); the top-level `variables` would be a second binding nobody reads")
+	}
+	if len(s.Inject) > 0 {
+		bad("a procedure scenario injects into ONE goal (procedure.goals[].inject); a scenario-wide injection would fire in whichever goal reached the action first -- a recording, not the goal being measured")
+	}
+	for name, v := range map[string]*int{
+		"shadowMatches": p.Policy.ShadowMatches, "distinctBindings": p.Policy.DistinctBindings,
+		"canaryMatches": p.Policy.CanaryMatches, "failuresToDemote": p.Policy.FailuresToDemote,
+		"insufficientToDemote": p.Policy.InsufficientToDemote, "retireAfterDays": p.Policy.RetireAfterDays,
+	} {
+		if v != nil && *v < 1 {
+			bad("procedure.policy.%s = %d; the ladder's values are at least one (v1:authoring:ladderPolicy refuses less), and a value left out is the deployment's", name, *v)
+		}
+	}
+
+	// The fixture app's actions.
+	var world map[string]string
+	if s.World.Machine != nil {
+		world = s.World.Machine.Scripts
+	}
+	scripts := map[string]int{}
+	placeholders := map[string]bool{}
+	for _, st := range s.Steps {
+		if !procedureTools[st.Type] {
+			bad("procedure step %q has type %q; a procedure scenario's steps are the fixture app's actions, and the fixture app speaks %v -- the learning pipeline drops a pure read no later step consumes, and the fake world has no filesystem to write to", st.Key, st.Type, sortedKeys(procedureTools))
+		}
+		if st.Effect != FacetMachine {
+			bad("procedure step %q must declare `effect: machine`: every action the fixture app performs is a command on the fake machine, which is what records and counts it", st.Key)
+		}
+		if st.Reasoning {
+			bad("procedure step %q is marked reasoning; the fixture app is not a provider -- its model reach is the session itself, counted once per session -- so a reasoning step would ask for a cassette nothing plays", st.Key)
+		}
+		if len(st.DependsOn) > 0 {
+			bad("procedure step %q declares dependsOn; the fixture app performs its actions in the order written, which is also the order a learned procedure replays them", st.Key)
+		}
+		script := st.Script()
+		switch {
+		case script == "":
+			bad("procedure step %q has no command in `target`", st.Key)
+		case strings.Contains(script, "{{"):
+			bad("procedure step %q runs a script named by a placeholder; the script an action runs is fixed, and an injection aimed at it would be a guess", st.Key)
+		default:
+			if _, ok := world[script]; !ok {
+				bad("procedure step %q runs %q, which the fake machine does not declare (it declares: %s)", st.Key, script, strings.Join(sortedKeys(world), ", "))
+			}
+			scripts[script]++
+		}
+		for _, ph := range Placeholders(st.Target) {
+			placeholders[ph] = true
+		}
+	}
+
+	// The goals.
+	measured := -1
+	for i, g := range p.Goals {
+		if g.Measure {
+			if measured >= 0 {
+				bad("procedure.goals[%d] and [%d] are both measured; a lifecycle publishes ONE goal's figures, and two would be two numbers under one name", measured, i)
+			}
+			measured = i
+		}
+		if g.Decide != "" {
+			if g.Decide != DecideApproved && g.Decide != DecideRejected {
+				bad("procedure.goals[%d] decides %q, which is not %q or %q", i, g.Decide, DecideApproved, DecideRejected)
+			}
+			if g.Goal != "" || len(g.Variables) > 0 || g.Measure || len(g.Inject) > 0 {
+				bad("procedure.goals[%d] decides a promotion and also carries a goal; a decision is a person answering an approval, not a goal anything serves", i)
+			}
+			continue
+		}
+		statement := s.Goal
+		if g.Goal != "" {
+			statement = g.Goal
+		}
+		want := map[string]bool{}
+		for ph := range placeholders {
+			want[ph] = true
+		}
+		for _, ph := range Placeholders(statement) {
+			want[ph] = true
+		}
+		for ph := range want {
+			if _, ok := g.Variables[ph]; !ok {
+				bad("procedure.goals[%d] does not bind {{%s}}; the fixture app would run the placeholder as written", i, ph)
+			}
+		}
+		for k := range g.Variables {
+			if !want[k] {
+				bad("procedure.goals[%d] binds %q, which neither its statement nor any action uses; an input nothing reads still changes the goal's signature", i, k)
+			}
+		}
+		for j, in := range g.Inject {
+			if !procedureInjectionKinds[in.Kind] {
+				bad("procedure.goals[%d].inject[%d] has kind %q; a lifecycle goal injects the fake machine's failure to answer one action (%v)", i, j, in.Kind, sortedKinds(procedureInjectionKinds))
+			}
+			if !in.Once {
+				bad("procedure.goals[%d].inject[%d] must be `once: true`: the injection is the divergence the app then repairs, and one that fired on the repair too would measure a goal nobody could serve", i, j)
+			}
+			if strings.TrimSpace(in.Message) == "" {
+				bad("procedure.goals[%d].inject[%d] has no message; it is the error the diverged step reports and the diagnosis quotes", i, j)
+			}
+			var target *Step
+			for k := range s.Steps {
+				if s.Steps[k].Key == in.At {
+					target = &s.Steps[k]
+				}
+			}
+			switch {
+			case target == nil:
+				bad("procedure.goals[%d].inject[%d] fires at %q, which is not an action in this scenario", i, j, in.At)
+			case scripts[target.Script()] != 1:
+				bad("procedure.goals[%d].inject[%d] fires at %q, whose script %q more than one action runs; the fake machine could not tell which of them the failure is for", i, j, in.At, target.Script())
+			}
+		}
+	}
+	switch {
+	case len(p.Goals) == 0:
+		bad("procedure.goals is empty; a lifecycle with no goals measures nothing")
+	case measured < 0:
+		bad("no procedure goal is measured; mark the one whose figures this scenario publishes with `measure: true`")
+	case measured != len(p.Goals)-1:
+		bad("procedure.goals[%d] is measured but is not the last goal; what follows the measured goal would run unmeasured, and a reader would take the published figure for the end state", measured)
+	}
+
+	// The verifier: a lifecycle answers the ladder's rows and its own named
+	// checks, and nothing a scripted run's journal would.
+	for i, c := range s.Verify {
+		switch {
+		case c.Rows != "":
+			keys, ok := lifecycleRows[c.Rows]
+			if !ok {
+				bad("verifier %d asserts on %s; a lifecycle answers %s", i, c.Rows, strings.Join(sortedKeys(lifecycleRows), " and "))
+				continue
+			}
+			for k, v := range c.Where {
+				legal, known := keys[k]
+				if !known {
+					bad("verifier %d filters %s on %q; it answers %s", i, c.Rows, k, strings.Join(sortedKeys(keys), ", "))
+					continue
+				}
+				if !containsString(legal, v) {
+					bad("verifier %d filters %s on %s=%q; the legal values are %s", i, c.Rows, k, v, strings.Join(legal, ", "))
+				}
+			}
+		case c.Named != "" && !lifecycleChecks[c.Named]:
+			bad("verifier %d names %q, which reads a scripted run's journal; a lifecycle's checks are %s", i, c.Named, strings.Join(sortedKeys(lifecycleChecks), ", "))
+		case c.Effects != "" && !strings.HasPrefix(c.Effects, string(FacetMachine)+"."):
+			bad("verifier %d asserts on %s; every action a lifecycle performs is on the fake machine", i, c.Effects)
+		}
+	}
+	if claimed[figure.MetricDuplicatedAcrossDivergence] && measured >= 0 && len(p.Goals[measured].Inject) == 0 {
+		bad("claims %s, but the measured goal injects no failure: nothing diverges, and \"nothing was delivered twice\" would be true of every goal", figure.MetricDuplicatedAcrossDivergence)
+	}
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func containsString(list []string, s string) bool {
+	for _, e := range list {
+		if e == s {
+			return true
+		}
+	}
+	return false
+}
+
+func sortedKinds(m map[Kind]bool) []Kind {
+	out := make([]Kind, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func sortedMetrics(m map[figure.Metric]bool) []figure.Metric {
+	out := make([]figure.Metric, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 // has reports whether the world declares the named facet.
@@ -564,9 +1010,17 @@ func fingerprint(ss []Scenario) string {
 }
 
 // CorpusControls checks the negative-control pairing across the whole corpus:
-// every metric whose registered direction makes zero the good answer must have
-// at least one scenario that produces a NON-zero, or the counter behind it
-// could be dead and nothing would notice.
+// every claimed metric the registry says needs a control
+// (figure.Spec.NeedsControl) must have at least one scenario that is its
+// control, or the counter behind it could be dead and nothing would notice.
+//
+// IT IS DIRECTION-AWARE, because a counter can be dead in two ways. One whose
+// good answer is ZERO -- duplicated effects, provider calls on a replay -- is
+// dead when it never rises, and its control must produce a non-zero. One whose
+// good answer is a POSITIVE COUNT -- goals a trusted procedure served with no
+// model -- is dead when it reads its claim on every path, and its control must
+// produce a zero. The runner holds each control to its reading
+// (proving.checkNegativeControl); this holds the corpus to having one.
 //
 // It is a corpus-level rule rather than a per-scenario one because the pairing
 // is between two scenarios, and it is here rather than in the runner because
@@ -585,11 +1039,11 @@ func (c Corpus) CorpusControls() error {
 	var missing []string
 	for m := range claimed {
 		spec, ok := figure.MetricSpec(m)
-		if !ok || spec.Direction != figure.LowerIsBetter || !spec.Blocking {
+		if !ok || !spec.NeedsControl() {
 			continue
 		}
 		if !controlled[m] {
-			missing = append(missing, string(m))
+			missing = append(missing, fmt.Sprintf("%s (its control must read %s)", m, controlWords(spec.Control())))
 		}
 	}
 	if len(missing) == 0 {
@@ -597,8 +1051,21 @@ func (c Corpus) CorpusControls() error {
 	}
 	sort.Strings(missing)
 	return fmt.Errorf(
-		"proving/scenario: %d blocking metric(s) whose good answer is zero have no negative control: %s.\n"+
-			"A counter that is never incremented on ANY path reads as zero forever, so a green suite with a dead counter is indistinguishable from a working one. "+
+		"proving/scenario: %d blocking counter(s) have no negative control: %s.\n"+
+			"A counter that is never incremented on ANY path reads as zero forever, and one incremented on every path reads its claim forever, "+
+			"so a green suite with a dead counter is indistinguishable from a working one. "+
 			"Add a scenario with `negativeControlFor` set to each",
 		len(missing), strings.Join(missing, ", "))
+}
+
+// controlWords says what a control reading means, for an error a corpus
+// author acts on.
+func controlWords(r figure.ControlReading) string {
+	switch r {
+	case figure.ControlNonZero:
+		return "non-zero: the counter must be seen to rise"
+	case figure.ControlZero:
+		return "zero: the counter must be seen to stay down where the event does not happen"
+	}
+	return "nothing: the metric has no better direction"
 }

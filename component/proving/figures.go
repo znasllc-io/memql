@@ -87,7 +87,25 @@ func Figures(s scenario.Scenario, results map[figure.Arm]ArmResult, overhead *Ov
 			// consumed. That is the honest reading: both arms replay, so what
 			// is measured is how many model exchanges the run NEEDED, not what
 			// they cost.
-			if err := measured(arm, figure.MetricProviderCalls, float64(res.RecordedResponses)); err != nil {
+			//
+			// A PROCEDURE LIFECYCLE has no cassette. Its intelligence is the
+			// fixture app, and every app session is one model reach -- so for
+			// a lifecycle the figure is the sessions the measured goal needed.
+			calls := res.RecordedResponses
+			if s.Procedure != nil {
+				calls = res.AppCalls
+			}
+			if err := measured(arm, figure.MetricProviderCalls, float64(calls)); err != nil {
+				return nil, nil, err
+			}
+		}
+		if want(figure.MetricReplaysWithoutModel) {
+			// Measured on BOTH arms. The bare loop has no ladder, so its zero
+			// is structural -- which is exactly what the platform's one is
+			// compared against. The control that proves this counter can read
+			// zero where a replay did not happen is on the PLATFORM arm
+			// (checkNegativeControl), because that is where it could lie.
+			if err := measured(arm, figure.MetricReplaysWithoutModel, float64(res.ReplaysServedWithoutModel)); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -177,6 +195,11 @@ func Figures(s scenario.Scenario, results map[figure.Arm]ArmResult, overhead *Ov
 		// ---- Durability -------------------------------------------------
 		if want(figure.MetricDuplicatedEffects) {
 			if err := measured(arm, figure.MetricDuplicatedEffects, float64(res.Duplicates)); err != nil {
+				return nil, nil, err
+			}
+		}
+		if want(figure.MetricDuplicatedAcrossDivergence) {
+			if err := measured(arm, figure.MetricDuplicatedAcrossDivergence, float64(res.DuplicatedAcrossDivergence)); err != nil {
 				return nil, nil, err
 			}
 		}
