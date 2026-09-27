@@ -129,17 +129,41 @@ func workSection(sp sectionPlan) work.Section {
 	if name == "" {
 		name = sp.Name
 	}
+	effects := footprintOf(s.Effects)
+	outputs := append([]string(nil), s.Outputs...)
+	// A SECTION THAT CHANGES NOTHING ENDS ON ITS OWN TEXT. Every section runs
+	// as a turn that answers, and a section with no effects has no other end:
+	// what it produced IS its output, bound under its statement name. So a
+	// triage answer that names no outputs -- the {label, instruction} shape
+	// every sectionable goal had before decomposition, and what a smaller model
+	// still writes -- keeps fanning out instead of being refused as endless and
+	// sent to the far dearer author route. The boundary rule then refuses only
+	// what it exists for: a section with an EFFECT and no postcondition.
+	if len(nonEmptyNames(outputs)) == 0 && !effects.IsSideEffect() {
+		outputs = []string{sp.Name}
+	}
 	return work.Section{
 		Name:          name,
 		Label:         s.Label,
 		Instruction:   s.Instruction,
 		Purpose:       strings.TrimSpace(s.Purpose),
 		Inputs:        append([]string(nil), s.Inputs...),
-		Outputs:       append([]string(nil), s.Outputs...),
+		Outputs:       outputs,
 		ReuseIntent:   s.ReuseIntent,
-		Effects:       footprintOf(s.Effects),
+		Effects:       effects,
 		Postcondition: strings.TrimSpace(s.Postcondition),
 	}
+}
+
+// nonEmptyNames is names with the blanks dropped.
+func nonEmptyNames(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if n = strings.TrimSpace(n); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // footprintOf reads a section's declared effects. An effect this build does

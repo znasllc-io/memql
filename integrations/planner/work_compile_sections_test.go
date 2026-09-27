@@ -676,3 +676,37 @@ func TestACataloguedSectionIsNotCalledWithoutAnArgumentItRequires(t *testing.T) 
 		t.Fatalf("with the goal supplying it the call must bind it: %+v\n%s", out.Sections[1], src)
 	}
 }
+
+// TestAnOldShapeTriageAnswerStillFansOut: a triage answer that names no
+// outputs, effects or postconditions -- the {label, instruction} shape every
+// sectionable goal had before decomposition, and what a smaller model still
+// writes -- keeps the cheap fan-out. Refusing it as "no end" would send every
+// such goal to the author route, a design pass and an emit at a dearer level,
+// which is a cost regression on the goals the fan-out exists for. A section
+// that CHANGES something without a postcondition is still refused
+// (TestAMidEffectDecompositionFallsBackToAuthoring).
+func TestAnOldShapeTriageAnswerStillFansOut(t *testing.T) {
+	req := CompileRequest{
+		GoalId: "v1:work:goal:g2", RunId: "v1:work:run:r2", OwnerUserId: "u1",
+		Statement: "Write ten folk tales, each a complete story",
+	}
+	triage := map[string]any{"complexity": "moderate", "requiresFile": false, "sectionable": true,
+		"assembly": "collect the tales in order",
+		"sections": []map[string]any{
+			{"label": "tale one", "instruction": "Tell the first tale."},
+			{"label": "tale two", "instruction": "Tell the second tale."},
+		}}
+	eng := newSectionCatalogEngine(triage)
+	out, err := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Route != work.RouteSectionable || out.DecompositionRefused != "" {
+		t.Fatalf("route = %q refused = %q: an old-shape answer must keep the fan-out", out.Route, out.DecompositionRefused)
+	}
+	for _, c := range eng.aiCalls {
+		if c == "authoringDesign" {
+			t.Fatalf("model calls = %v: the author route was reached", eng.aiCalls)
+		}
+	}
+}
