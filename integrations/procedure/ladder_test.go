@@ -17,11 +17,11 @@ import (
 
 const ladderConstruct = "v1:authoring:construct:c1"
 
-// TestReadLadderReadsEveryEvidenceFieldUnderTheOwner: the construct has NO
-// cluster-owner arm, so the read runs as its owner and is never stamped --
-// and every field Advance reads comes off the row, the stored binding digests
-// included.
-func TestReadLadderReadsEveryEvidenceFieldUnderTheOwner(t *testing.T) {
+// TestTheLockedReadReadsEveryEvidenceFieldUnderTheOwner: the construct has NO
+// cluster-owner arm, so the read inside the ladder's lock runs as its owner
+// and is never stamped -- and every field Advance reads comes off the row, the
+// stored binding digests included.
+func TestTheLockedReadReadsEveryEvidenceFieldUnderTheOwner(t *testing.T) {
 	eng := newFakeEngine()
 	eng.reply("authoringConstructById", map[string]any{
 		"id": ladderConstruct, "ladder": "canary", "shadowMatches": float64(4), "canaryMatches": float64(2),
@@ -29,10 +29,12 @@ func TestReadLadderReadsEveryEvidenceFieldUnderTheOwner(t *testing.T) {
 		"failures":         float64(1), "insufficient": float64(0),
 		"promotionApprovalId": "v1:work:approval:p1", "lastReplayAt": "2026-09-22T10:00:00Z",
 	})
-	st, row, err := newTestIntegration(eng).readLadder(context.Background(), testOwner, ladderConstruct)
+	row, release, err := newTestIntegration(eng).lockedConstruct(context.Background(), testOwner, ladderConstruct)
 	if err != nil || row == nil {
-		t.Fatalf("readLadder: %v", err)
+		t.Fatalf("lockedConstruct: %v", err)
 	}
+	release()
+	st := ladderStateOf(row)
 	want := work.LadderState{
 		Rung: work.RungCanary, ShadowMatches: 4, CanaryMatches: 2,
 		DistinctBindings: map[string][]string{"s0.command.7": {"sha256:aa", "sha256:bb"}},
@@ -52,10 +54,15 @@ func TestReadLadderReadsEveryEvidenceFieldUnderTheOwner(t *testing.T) {
 }
 
 // TestAConstructNobodyCanReadIsAnError: zero rows is the answer for somebody
-// else's construct, and the ladder must not read it as "no evidence".
+// else's construct, and the ladder must not read it as "no evidence" -- nor as
+// a read that failed, which a caller may retry.
 func TestAConstructNobodyCanReadIsAnError(t *testing.T) {
-	if _, _, err := newTestIntegration(newFakeEngine()).readLadder(context.Background(), testOwner, ladderConstruct); err == nil {
+	_, _, err := newTestIntegration(newFakeEngine()).lockedConstruct(context.Background(), testOwner, ladderConstruct)
+	if err == nil {
 		t.Fatal("an unreadable construct read as an empty ladder")
+	}
+	if !errors.Is(err, errConstructUnreadable) {
+		t.Fatalf("err = %v, want it named as unreadable", err)
 	}
 }
 

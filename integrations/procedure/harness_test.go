@@ -298,6 +298,9 @@ type recFixture struct {
 	// execVector records the exec step's command as an argument VECTOR, the
 	// way Codex records every command.
 	execVector []any
+	// execTimeoutMs is the per-call timeout the app recorded on the exec
+	// step, in milliseconds (Claude Code's Bash `timeout`); zero records none.
+	execTimeoutMs float64
 }
 
 type stepFeedback struct {
@@ -422,11 +425,15 @@ func (r recFixture) observationRows(t *testing.T) []map[string]any {
 	t.Helper()
 	var out []map[string]any
 	if !r.noToolResult {
+		execArgs := map[string]any{"command": r.command()}
+		if r.execTimeoutMs != 0 {
+			execArgs["timeout"] = r.execTimeoutMs
+		}
 		data := map[string]any{
 			"tool": "exec", "appActionId": "toolu_exec_" + strings.TrimSuffix(r.file, ".txt"),
 			"sessionId": r.sessionId, "seq": float64(1), "isError": r.execExit != 0,
 			"exitCode": float64(r.execExit), "resultType": "string", "cwd": testWorkspace,
-			"args": argsJSON(t, map[string]any{"command": r.command()}),
+			"args": argsJSON(t, execArgs),
 		}
 		if r.execVector != nil {
 			data["args"] = argsJSON(t, map[string]any{"command": r.execVector})

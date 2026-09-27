@@ -47,6 +47,18 @@ import (
 // writes nothing when the hash is unchanged, so they name the recordings the
 // version was first learned from. Anyone can recompute the hash from the
 // stored row with procedureHash below.
+//
+// A THIRD THING IS LEFT OUT, and it is not provenance: procedure.hints, what
+// a dispatcher is told BESIDE a step's template (review finding I2). Today it
+// is one value, hints.timeoutsMs -- per step, the longest time limit any
+// recording's call asked for, 0 where none did. The app picks a different
+// limit nearly every call, so it cannot be a parameter (semantic.go drops it
+// from the arguments), and no replay's behaviour is judged by it: a replay is
+// handed it as DispatchRequest.Timeout, so a command the app let run for five
+// minutes is not cut off at the executor's default. Being outside the hash, a
+// longer limit a later recording asks for is the one thing a kept version
+// rewrites (persist.go's keepProcedure) -- the version, its ladder and its
+// provenance stay as they are.
 
 // procedurePayloadVersion is the payload's `v`.
 const procedurePayloadVersion = 1
@@ -57,7 +69,8 @@ const procedurePayloadVersion = 1
 //	{v, level, title, goalSignature, inputKeys, steps: [{tool, args, symbol}],
 //	 holes, expect, inputMap, freeParameters, footprint, target,
 //	 symbols: [{id, tool, template}], model,
-//	 recordedFrom: {app, model, effort, sessionIds, runIds, workspaces}}
+//	 recordedFrom: {app, model, effort, sessionIds, runIds, workspaces},
+//	 hints: {timeoutsMs}}
 type Procedure struct {
 	V int `json:"v"`
 	// Level is the CORPUS level the procedure was mined at: 1 for the actions
@@ -98,6 +111,18 @@ type Procedure struct {
 	Model   *proc.ProcessTree `json:"model"`
 	// RecordedFrom is D9's provenance. It is NOT hashed; see the file header.
 	RecordedFrom RecordedFrom `json:"recordedFrom"`
+	// Hints are what a dispatcher is told beside a step's template. NOT
+	// hashed; see the file header.
+	Hints *ProcedureHints `json:"hints,omitempty"`
+}
+
+// ProcedureHints are values the recordings varied in that no goal input
+// supplies and no replay's behaviour is judged by, kept beside the template
+// rather than in it.
+type ProcedureHints struct {
+	// TimeoutsMs is, per step, the LONGEST per-call timeout any recording of
+	// that step asked for, in milliseconds; 0 where none recorded one.
+	TimeoutsMs []int `json:"timeoutsMs,omitempty"`
 }
 
 // ProcedureStep is one step: the tool, its argument template, and its symbol.
@@ -110,9 +135,13 @@ type ProcedureStep struct {
 // RecordedFrom is where a procedure came from. App, Model and Effort are what
 // every recording agreed on and are ABSENT when the recordings disagreed or
 // the app reported nothing -- a value borrowed from one recording would claim
-// something about the others. Workspaces are the recordings' working
-// directories, which is what a dispatcher rebases a recorded absolute path
-// inside a workspace against.
+// something about the others. RunIds are the recordings the version was
+// generalized from, which is also what keeps a recording from being compared
+// with a version it taught (shadow.go). Workspaces are the recordings' working
+// directories, and they are PROVENANCE ONLY: no dispatcher reads them. The
+// corpus loader rewrites every path inside a recording's workspace relative to
+// it before anything is learned (relativize.go), so a replay's steps name
+// paths relative to the replay's own workspace and nothing is left to rebase.
 type RecordedFrom struct {
 	App        string   `json:"app,omitempty"`
 	Model      string   `json:"model,omitempty"`
@@ -232,9 +261,9 @@ func procedureHash(source string, procedure, preconditions map[string]any) (stri
 	return proc.Digest(canonical), nil
 }
 
-// unhashedProcedureKeys are the payload keys outside the version: provenance
-// and presentation, never behaviour.
-var unhashedProcedureKeys = map[string]bool{"recordedFrom": true, "title": true}
+// unhashedProcedureKeys are the payload keys outside the version: provenance,
+// presentation and the dispatch hints -- never behaviour.
+var unhashedProcedureKeys = map[string]bool{"recordedFrom": true, "title": true, "hints": true}
 
 // canonicalJSON encodes with sorted keys (encoding/json sorts map keys), no
 // indentation and no HTML escaping -- `<` written as < is the same
@@ -322,6 +351,24 @@ func (i *Integration) buildProcedure(ctx context.Context, k corpusKey, t proc.Te
 			}
 		}
 		p.Expect = append(p.Expect, work.ExpectationFrom(observed))
+	}
+
+	// THE LONGEST TIME LIMIT any instance of a step asked for, as a hint
+	// beside the template (the file header says why it is not hashed).
+	timeouts := make([]int, len(t.Steps))
+	anyTimeout := false
+	for j := range t.Steps {
+		for _, in := range insts {
+			if j >= len(in.actions) {
+				continue
+			}
+			if ms := recs[in.seq].Evidence[in.actions[j].Key].TimeoutMs; ms > timeouts[j] {
+				timeouts[j], anyTimeout = ms, true
+			}
+		}
+	}
+	if anyTimeout {
+		p.Hints = &ProcedureHints{TimeoutsMs: timeouts}
 	}
 
 	inputs := make([]map[string]any, len(insts))

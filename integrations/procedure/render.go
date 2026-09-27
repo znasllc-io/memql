@@ -76,8 +76,10 @@ func renderProcedureSource(name, title string, t proc.Template, freeParams []pro
 			continue
 		}
 		everyStepWritten = false
+		// The statement's name keeps the stored 0-based index, as `step:` does
+		// above; the prose numbers the step from 1, as MemQL OS lists them.
 		fmt.Fprintf(&b, "  // call%d: step %d, tool %s -- an argument has no MemQL spelling, so no statement writes this step\n",
-			idx, idx, oneLine(step.Tool))
+			idx, idx+1, oneLine(step.Tool))
 	}
 	b.WriteString("}\n")
 	return b.String(), everyStepWritten

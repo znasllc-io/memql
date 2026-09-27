@@ -53,7 +53,12 @@ type DispatchRequest struct {
 	// Translating them to an executor's actions is the dispatcher's job.
 	Args map[string]any
 	// Sandbox marks a shadow replay: never the person's machine, never a
-	// write to a MemQL row, never a delivery outside the workbench.
+	// write to a MemQL row, never a delivery outside the workbench. The
+	// workbench itself has full egress, so a command that may send something
+	// out of it (network.go: a POST, a push, a publish, a cloud CLI) is never
+	// dispatched in shadow at all -- it is compared dry. A script such a step
+	// runs can still reach the network; nothing reading the command line can
+	// see into it.
 	Sandbox bool
 	// AgentId is the agent the machine dispatch runs under (its standing
 	// computer-use scope is the consent). Empty on the workbench.
@@ -138,6 +143,11 @@ type CompletedStep struct {
 	IdempotencyKey string
 	Summary        string
 	SideEffect     bool
+	// MayHaveRun: the step was sent and whether it ran is unknown -- its
+	// target stopped answering, or the node running the replay died before
+	// its receipt was written. The app is told to check before repeating it,
+	// never that it did not run.
+	MayHaveRun bool
 }
 
 // FallbackOutcome is what the app's session produced.
