@@ -91,9 +91,34 @@ type Node struct {
 	// rendering hint and never a semantic one, and an empty value means
 	// "nobody said", which renders as a string.
 	LitType string
+	// Raw is an argv token's exact source spelling -- `"$HOME/My Docs"` for
+	// the argument $HOME/My Docs -- set on the arguments of a FormArgv
+	// command line and nowhere else. The value (Lit) is what the program
+	// received after quote removal; the spelling is what the SHELL was handed,
+	// expansions, kept backslashes and all, and it is the only thing that can
+	// send that command again: a tree re-quoted from its values turns
+	// `"$(date +%F)"` into the literal text and `"\d+"` into d+.
+	//
+	// Equal DELIBERATELY IGNORES IT, for the reason it ignores LitType: two
+	// recordings of one argument spelled differently are the same argument,
+	// and they must generalize. A rendering hint, never a semantic one; empty
+	// means a payload from before it, which Materialize re-quotes as it
+	// always did.
+	Raw string
 	// Keys are sorted for KindObject and align with Kids.
 	Keys []string
 	Kids []*Node
+	// Seps is the exact text around a FormArgv command line's arguments, one
+	// more entry than Kids: before the first, each gap, after the last. With
+	// the spelling of every argument it IS the recorded command, byte for
+	// byte -- the newlines of a heredoc, a line continuation, the spacing --
+	// where single spaces would collapse a heredoc onto one line.
+	//
+	// Equal DELIBERATELY IGNORES IT, like Raw and Form; nil means a payload
+	// from before it (or a generalization whose arguments are no longer the
+	// first instance's one for one), which Materialize joins with single
+	// spaces.
+	Seps []string
 	// HoleId names the hole for KindHole; Classify fills in the rest.
 	HoleId string
 	// HoleType is the widest type observed at this position: string, number,
@@ -115,7 +140,9 @@ type Node struct {
 // The readings canonicalization records on a parsed string (Node.Form).
 const (
 	// FormArgv is a command line split into arguments. It materializes as
-	// ONE shell-quoted string.
+	// ONE string: the recorded spelling of every argument (Raw) and the text
+	// between them (Seps) where the recording kept them, so a command the
+	// template holds whole is sent exactly as it was recorded.
 	FormArgv = "argv"
 	// FormPath is a relative path split on "/". It materializes joined.
 	FormPath = "path"
@@ -163,7 +190,8 @@ func HoleNode(id, typ string) *Node { return &Node{Kind: KindHole, HoleId: id, H
 
 // Equal reports structural equality. A hole equals only a hole with the same
 // id: two templates open at different positions are different templates.
-// LitType and Form describe spelling, not identity, and are not compared.
+// LitType, Raw, Seps and Form describe spelling, not identity, and are not
+// compared.
 func (n *Node) Equal(o *Node) bool {
 	switch {
 	case n == nil || o == nil:
@@ -271,9 +299,12 @@ func (n *Node) Clone() *Node {
 	if n == nil {
 		return nil
 	}
-	c := &Node{Kind: n.Kind, Lit: n.Lit, LitType: n.LitType, HoleId: n.HoleId, HoleType: n.HoleType, Form: n.Form}
+	c := &Node{Kind: n.Kind, Lit: n.Lit, LitType: n.LitType, Raw: n.Raw, HoleId: n.HoleId, HoleType: n.HoleType, Form: n.Form}
 	if len(n.Keys) > 0 {
 		c.Keys = append([]string(nil), n.Keys...)
+	}
+	if n.Seps != nil {
+		c.Seps = append(make([]string, 0, len(n.Seps)), n.Seps...)
 	}
 	if len(n.Kids) > 0 {
 		c.Kids = make([]*Node, len(n.Kids))

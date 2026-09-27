@@ -19,8 +19,8 @@ func sameNode(t *testing.T, path string, a, b *Node) {
 	if a == nil {
 		return
 	}
-	if a.Kind != b.Kind || a.Lit != b.Lit || a.LitType != b.LitType || a.Form != b.Form ||
-		a.HoleId != b.HoleId || a.HoleType != b.HoleType {
+	if a.Kind != b.Kind || a.Lit != b.Lit || a.LitType != b.LitType || a.Raw != b.Raw || a.Form != b.Form ||
+		a.HoleId != b.HoleId || a.HoleType != b.HoleType || !reflect.DeepEqual(a.Seps, b.Seps) {
 		t.Fatalf("%s: %+v\n     vs %+v", path, *a, *b)
 	}
 	if len(a.Keys) != len(b.Keys) || len(a.Kids) != len(b.Kids) {
@@ -38,8 +38,9 @@ func sameNode(t *testing.T, path string, a, b *Node) {
 
 // everyFieldTemplate exercises every Node field and every Hole field.
 func everyFieldTemplate() Template {
-	argv := Arr(Lit("echo"), HoleNode("s0.command.1", "string"), Lit(">"), Lit("out.txt"))
+	argv := Arr(Lit("echo"), HoleNode("s0.command.1", "string"), Lit(">"), &Node{Kind: KindLit, Lit: "out file.txt", Raw: `"out file.txt"`})
 	argv.Form = FormArgv
+	argv.Seps = []string{"", "  ", " ", " ", "\n"}
 	rooted := Arr(Lit(""), Lit("cdn.example.com"), Lit("x"))
 	rooted.Form = FormRootedPath
 	rel := Arr(Lit("."), Lit("a"))
@@ -58,7 +59,8 @@ func everyFieldTemplate() Template {
 			{Tool: "mcp", Args: Obj(map[string]*Node{"payload": doc, "target": rel, "empty": Obj(nil), "none": Arr()})},
 		},
 		Holes: []Hole{
-			{Id: "s0.command.1", StepIndex: 0, Path: []string{"command", "1"}, Type: "string", Class: HoleFree, Evidence: 2},
+			{Id: "s0.command.1", StepIndex: 0, Path: []string{"command", "1"}, Type: "string", Class: HoleFree, Evidence: 2,
+				Shape: &HoleShape{Dash: true, DotDot: true}},
 			{Id: "s1.payload.list.1", StepIndex: 1, Path: []string{"payload", "list", "1"}, Type: "number",
 				Class: HoleDataFlow, Ref: &DataFlowRef{StepIndex: 0, Path: []string{"id"}}, Evidence: 3,
 				Derivation: `basename(ref(0, "path"))`},
@@ -189,6 +191,30 @@ func TestTheWireShapeIsPinned(t *testing.T) {
 	if want := `{"id":"s0","tool":"exec","template":{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"echo"},{"kind":"hole","holeId":"s0.command.1","holeType":"string"}]}}`; string(sb) != want {
 		t.Fatalf("symbol wire shape changed:\n got %s\nwant %s", sb, want)
 	}
+
+	// A hole's shape rides beside its class, a feature at a time.
+	hb, err := MarshalTemplate(Template{Holes: []Hole{{Id: "s0.command.1", StepIndex: 0, Path: []string{"command", "1"},
+		Type: "string", Class: HoleFree, Shape: &HoleShape{Dash: true}}}})
+	if err != nil {
+		t.Fatalf("MarshalTemplate: %v", err)
+	}
+	if want := `{"steps":null,"holes":[{"id":"s0.command.1","stepIndex":0,"path":["command","1"],"type":"string","class":"free","shape":{"dash":true}}]}`; string(hb) != want {
+		t.Fatalf("hole wire shape changed:\n got %s\nwant %s", hb, want)
+	}
+
+	// A command line canonicalized from a recording carries its spelling:
+	// each token's `raw` beside its `lit`, and the argv's `seps` beside its
+	// `kids`. Both are omitted when absent, so every payload written before
+	// them encodes, and decodes, exactly as it did.
+	spelled := execStep(`echo  "a b"`).Args
+	pb, err := json.Marshal(spelled)
+	if err != nil {
+		t.Fatalf("marshal a spelled command: %v", err)
+	}
+	if want := `{"kind":"object","keys":["command"],"kids":[{"kind":"array","form":"argv",` +
+		`"kids":[{"kind":"lit","lit":"echo","raw":"echo"},{"kind":"lit","lit":"a b","raw":"\"a b\""}],"seps":["","  ",""]}]}`; string(pb) != want {
+		t.Fatalf("spelled wire shape changed:\n got %s\nwant %s", pb, want)
+	}
 }
 
 // TestUnmarshalRefusesWhatItCannotReplay: a stored procedure is executed, and
@@ -225,6 +251,62 @@ func TestUnmarshalRefusesWhatItCannotReplay(t *testing.T) {
 	}
 }
 
+// TestAPayloadWrittenBeforeTheSpellingDecodesAsBefore: a stored argv with no
+// `raw` and no `seps` is a payload from before them. It decodes with neither,
+// and replays as it always did -- its tokens re-quoted by the lenient rule and
+// joined by single spaces.
+func TestAPayloadWrittenBeforeTheSpellingDecodesAsBefore(t *testing.T) {
+	old := `{"steps":[{"tool":"exec","args":{"kind":"object","keys":["command"],"kids":[` +
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"echo"},{"kind":"lit","lit":"a b"}]}]}}],"holes":[]}`
+	tmpl, err := UnmarshalTemplate([]byte(old))
+	if err != nil {
+		t.Fatalf("UnmarshalTemplate: %v", err)
+	}
+	argv, _ := tmpl.Steps[0].Args.At([]string{"command"})
+	if argv.Seps != nil || argv.Kids[1].Raw != "" {
+		t.Fatalf("an old payload decoded with a spelling it never carried: %q / %q", argv.Seps, argv.Kids[1].Raw)
+	}
+	if cmd := materializedCommand(t, tmpl.Steps[0].Args, nil); cmd != "echo 'a b'" {
+		t.Fatalf("command = %q, want the tokens re-quoted and joined as before", cmd)
+	}
+}
+
+// TestUnmarshalRefusesASpellingThatDisagreesWithItsTree: the spelling is what
+// a replay SENDS, and the tree is what a person approved and what Bind reads.
+// A `raw` that does not read back as its own `lit` -- one word with that value
+// -- or `seps` that are not pure separator text, or not one more than the
+// tokens, would send a command the tree does not describe; it is refused on
+// the way in and on the way out.
+func TestUnmarshalRefusesASpellingThatDisagreesWithItsTree(t *testing.T) {
+	for _, bad := range []string{
+		// A spelling that is two words, or another value.
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"x","raw":"x; rm -rf ~"}]}`,
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"x","raw":"'y'"}]}`,
+		// A spelling on something that is not an argv token.
+		`{"kind":"array","form":"path","kids":[{"kind":"lit","lit":"x","raw":"x"}]}`,
+		`{"kind":"hole","holeId":"h","raw":"x"}`,
+		// Separators of the wrong count, carrying text, or empty between tokens.
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"a"}],"seps":[""]}`,
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"a"},{"kind":"lit","lit":"b"}],"seps":["","; rm -rf ~ ",""]}`,
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"a"},{"kind":"lit","lit":"b"}],"seps":["","",""]}`,
+		`{"kind":"array","form":"path","kids":[{"kind":"lit","lit":"a"}],"seps":["",""]}`,
+	} {
+		var n Node
+		if err := json.Unmarshal([]byte(bad), &n); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	good := `{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"a b","raw":"a\\ b"},{"kind":"lit","lit":"c"}],"seps":[" ","\\\n\t",""]}`
+	var n Node
+	if err := json.Unmarshal([]byte(good), &n); err != nil {
+		t.Fatalf("a consistent spelling was refused: %v", err)
+	}
+	bad := &Node{Kind: KindArray, Form: FormArgv, Kids: []*Node{{Kind: KindLit, Lit: "x", Raw: "$(id)"}}}
+	if _, err := json.Marshal(bad); err == nil {
+		t.Fatal("MarshalJSON must refuse a spelling that disagrees with its value")
+	}
+}
+
 // TestMarshalRefusesANodeItCouldNotReadBack: the check runs on the way IN as
 // well as out, so a malformed tree fails where it was built rather than on the
 // replica that later tries to replay it.
@@ -255,5 +337,56 @@ func TestDigestIsTheSha256PrefixedHexOfItsBytes(t *testing.T) {
 	}
 	if got := Digest(nil); !strings.HasPrefix(got, "sha256:") || len(got) != len("sha256:")+64 {
 		t.Fatalf("Digest(nil) = %q, want sha256: and 64 hex digits", got)
+	}
+}
+
+// TestDecodingIsStrictAboutWhatAnOlderReplicaCannotRead (E5): a stored
+// procedure is replayed by whichever replica serves the goal, and a replica
+// older than the writer must REFUSE what it cannot check rather than read it
+// as something close:
+//
+//   - a hole class it does not know -- read as nothing in particular, the
+//     hole would reach the replay as an unexplained guess;
+//   - an object whose keys are not sorted, or repeat -- Bind pairs keys
+//     positionally against Obj's sorted order, so either would bind one
+//     argument's value into another's position;
+//   - a precondition it does not know -- skipped, it would be a predicate the
+//     recordings needed and the replay never checked.
+func TestDecodingIsStrictAboutWhatAnOlderReplicaCannotRead(t *testing.T) {
+	for _, bad := range []string{
+		`{"steps":[],"holes":[{"id":"h","stepIndex":0,"path":[],"class":"guessed"}]}`,
+		`{"steps":[{"tool":"exec","args":{"kind":"object","keys":["b","a"],"kids":[{"kind":"lit"},{"kind":"lit"}]}}],"holes":[]}`,
+		`{"steps":[{"tool":"exec","args":{"kind":"object","keys":["a","a"],"kids":[{"kind":"lit"},{"kind":"lit"}]}}],"holes":[]}`,
+	} {
+		if _, err := UnmarshalTemplate([]byte(bad)); err == nil {
+			t.Errorf("UnmarshalTemplate accepted %s", bad)
+		}
+	}
+	for _, class := range []HoleClass{"", HoleDataFlow, HoleConstant, HoleFree, HoleUnexplained} {
+		b, err := MarshalTemplate(Template{Holes: []Hole{{Id: "h", Class: class}}})
+		if err != nil {
+			t.Fatalf("class %q: %v", class, err)
+		}
+		if _, err := UnmarshalTemplate(b); err != nil {
+			t.Errorf("class %q does not round-trip: %v", class, err)
+		}
+	}
+	if _, err := MarshalTemplate(Template{Holes: []Hole{{Id: "h", Class: "guessed"}}}); err == nil {
+		t.Error("MarshalTemplate accepted an unknown hole class")
+	}
+	unsorted := &Node{Kind: KindObject, Keys: []string{"b", "a"}, Kids: []*Node{Lit("1"), Lit("2")}}
+	if _, err := json.Marshal(unsorted); err == nil {
+		t.Error("MarshalJSON accepted an object whose keys are not sorted")
+	}
+
+	var p Preconditions
+	if err := json.Unmarshal([]byte(`{"tools":{"node":"22.1.0"},"kernel":{"min":"6.1"}}`), &p); err == nil {
+		t.Error("a precondition this replica cannot check was skipped rather than refused")
+	}
+	if err := json.Unmarshal([]byte(`{"platform":{"os":"darwin"},"tools":{"node":"22.1.0"},"variables":{"PATH":"unset"},"emptyWorkspace":true}`), &p); err != nil {
+		t.Fatalf("every known predicate must still decode: %v", err)
+	}
+	if p.Tools["node"] != "22.1.0" || p.EmptyWorkspace == nil || !*p.EmptyWorkspace {
+		t.Fatalf("decoded %+v", p)
 	}
 }

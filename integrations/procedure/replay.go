@@ -817,6 +817,31 @@ func (r *replay) bindParameters(ctx context.Context) bool {
 		}
 		r.free[h.Id] = lit
 	}
+	// WHAT A VALUE MEANS is judged before anything runs. Strict quoting makes
+	// every value one argument; a value shaped like nothing the recordings put
+	// there -- an option, an absolute path, a parent directory -- is still a
+	// call no recording made (component/procedure.CheckBindings).
+	if err := proc.CheckBindings(r.c.template, r.free); err != nil {
+		sentence := err.Error()
+		if sentence != "" {
+			sentence = strings.ToUpper(sentence[:1]) + sentence[1:]
+		}
+		if r.mode == ReplayShadow {
+			// The app's own action bound it, so the RECORDING is not an
+			// instance of the procedure: a MISMATCH, recorded like an unfit
+			// recording's, with nothing replayed.
+			r.out.Diverged = true
+			r.out.DivergedStep = 0
+			var refusal *proc.BindingRefusal
+			if errors.As(err, &refusal) {
+				r.out.DivergedStep = refusal.Step
+			}
+			r.out.Diagnosis = sentence + ", so the app did this goal some other way."
+			r.finish(ctx)
+			return false
+		}
+		return r.refuseStart(ctx, codeStartRefused, sentence+".", true)
+	}
 	return true
 }
 

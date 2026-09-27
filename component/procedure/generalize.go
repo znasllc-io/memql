@@ -53,6 +53,41 @@ type Hole struct {
 	// Derivation is set when a checked proposal from the one model call
 	// explained the hole. Empty otherwise.
 	Derivation string `json:"derivation,omitempty"`
+	// Shape is what the values recorded at the hole looked like, read off
+	// EVERY instance by Classify. It is what CheckBindings judges a value a
+	// goal supplies against: a parameter no recording ever gave an option is
+	// not handed one. Nil on a hole from a payload written before shapes,
+	// which is judged as if no recording showed any feature.
+	Shape *HoleShape `json:"shape,omitempty"`
+}
+
+// HoleShape is what the values recorded at one hole LOOKED like, in the few
+// ways that change what a program does with a value. Each field is true when
+// SOME recorded value had the feature -- a feature is allowed at replay only
+// if a recording showed it -- except Expands, which says the recorded value is
+// not the value the program received at all.
+//
+// Strict quoting (Materialize) already makes any value ONE argument; the
+// shape is about what that argument means. `-rf` is a single argument and
+// still an option to cp, and `../../x` is a single argument and still a
+// different directory.
+type HoleShape struct {
+	// Dash: a recorded value began with "-" -- the program read it as an
+	// option.
+	Dash bool `json:"dash,omitempty"`
+	// Rooted: a recorded value began with "/", an absolute path.
+	Rooted bool `json:"rooted,omitempty"`
+	// Home: a recorded value began with "~".
+	Home bool `json:"home,omitempty"`
+	// DotDot: a recorded value, split on "/", had a ".." segment -- it
+	// climbed to a parent directory.
+	DotDot bool `json:"dotDot,omitempty"`
+	// Expands: a recorded argument of a command line at this hole was
+	// SPELLED with a shell expansion -- an unescaped $ or backtick outside
+	// single quotes, an unquoted leading ~, or an unquoted *, ? or [ -- so the
+	// value the program received is not the value recorded, and no value a
+	// goal gives can stand for it.
+	Expands bool `json:"expands,omitempty"`
 }
 
 // TemplateStep is one step of a template.
@@ -175,6 +210,9 @@ func classify(t Template, instances [][]Action, includeAgreed bool) []Hole {
 }
 
 func classifyOne(h Hole, t Template, instances [][]Action) Hole {
+	// The shape is read before any class is decided: a hole the classes below
+	// give up on early is still a parameter somebody may bind.
+	h.Shape = shapeOf(h, instances)
 	values := make([]string, 0, len(instances))
 	for _, in := range instances {
 		if h.StepIndex >= len(in) {
@@ -221,6 +259,52 @@ func classifyOne(h Hole, t Template, instances [][]Action) Hole {
 
 	// 3. FREE.
 	return freeHole(h, len(instances))
+}
+
+// shapeOf reads a hole's shape off every instance's literal at its position.
+// A position that is not a literal in some instance contributes nothing there;
+// such a hole cannot bind its own instances, which ReplayRisks reports.
+func shapeOf(h Hole, instances [][]Action) *HoleShape {
+	s := &HoleShape{}
+	var parentPath []string
+	if len(h.Path) > 0 {
+		parentPath = h.Path[:len(h.Path)-1]
+	}
+	for _, in := range instances {
+		if h.StepIndex < 0 || h.StepIndex >= len(in) || in[h.StepIndex].Args == nil {
+			continue
+		}
+		args := in[h.StepIndex].Args
+		n, ok := args.At(h.Path)
+		if !ok || n.Kind != KindLit {
+			continue
+		}
+		v := n.Lit
+		s.Dash = s.Dash || strings.HasPrefix(v, "-")
+		s.Rooted = s.Rooted || strings.HasPrefix(v, "/")
+		s.Home = s.Home || strings.HasPrefix(v, "~")
+		s.DotDot = s.DotDot || hasParentSegment(v)
+		if parent, ok := args.At(parentPath); ok && len(h.Path) > 0 && parent.Kind == KindArray && parent.Form == FormArgv {
+			spelling := n.Raw
+			if spelling == "" {
+				// A token with no recorded spelling is read as if it were
+				// written bare -- the reading that finds the most expansions.
+				spelling = n.Lit
+			}
+			s.Expands = s.Expands || spelledWithExpansion(spelling)
+		}
+	}
+	return s
+}
+
+// hasParentSegment reports a ".." segment when the value is split on "/".
+func hasParentSegment(v string) bool {
+	for _, seg := range strings.Split(v, "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func freeHole(h Hole, evidence int) Hole {

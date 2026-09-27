@@ -1,6 +1,7 @@
 package procedure
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -16,10 +17,11 @@ import (
 // So the encoding is a contract with three readers, and three rules follow:
 //
 //   - It is EXPLICIT. A Node is {"kind": "lit"|"object"|"array"|"hole", ...}
-//     with lowerCamelCase fields named after the Go ones (lit, litType, form,
-//     keys, kids, holeId, holeType), omitted when empty, so a TypeScript
-//     reader needs no knowledge of Go's enum values. serialize_test.go pins
-//     the exact bytes.
+//     with lowerCamelCase fields named after the Go ones (lit, litType, raw,
+//     form, keys, kids, seps, holeId, holeType), omitted when empty, so a
+//     TypeScript reader needs no knowledge of Go's enum values -- and a
+//     payload written before a field existed encodes and decodes exactly as
+//     it did. serialize_test.go pins the exact bytes.
 //   - It is STABLE. The same value always encodes to the same bytes -- object
 //     keys stay in the node's own (sorted) order -- because a hash over it is
 //     a version pin.
@@ -107,9 +109,11 @@ type wireNode struct {
 	Kind     string   `json:"kind"`
 	Lit      string   `json:"lit,omitempty"`
 	LitType  string   `json:"litType,omitempty"`
+	Raw      string   `json:"raw,omitempty"`
 	Form     string   `json:"form,omitempty"`
 	Keys     []string `json:"keys,omitempty"`
 	Kids     []*Node  `json:"kids,omitempty"`
+	Seps     []string `json:"seps,omitempty"`
 	HoleId   string   `json:"holeId,omitempty"`
 	HoleType string   `json:"holeType,omitempty"`
 }
@@ -123,9 +127,11 @@ func (n Node) MarshalJSON() ([]byte, error) {
 		Kind:     kindNames[n.Kind],
 		Lit:      n.Lit,
 		LitType:  n.LitType,
+		Raw:      n.Raw,
 		Form:     n.Form,
 		Keys:     n.Keys,
 		Kids:     n.Kids,
+		Seps:     n.Seps,
 		HoleId:   n.HoleId,
 		HoleType: n.HoleType,
 	})
@@ -145,9 +151,11 @@ func (n *Node) UnmarshalJSON(b []byte) error {
 		Kind:     kind,
 		Lit:      w.Lit,
 		LitType:  w.LitType,
+		Raw:      w.Raw,
 		Form:     w.Form,
 		Keys:     w.Keys,
 		Kids:     w.Kids,
+		Seps:     w.Seps,
 		HoleId:   w.HoleId,
 		HoleType: w.HoleType,
 	}
@@ -157,6 +165,13 @@ func (n *Node) UnmarshalJSON(b []byte) error {
 // check is what a stored node must satisfy. Every field belongs to exactly
 // the kinds that use it: a literal carrying children, or a hole with no id,
 // is a tree Materialize and Bind would each read differently.
+//
+// The spelling of a command line is held to its tree here, in both
+// directions. A spelling is what a replay SENDS; the tree is what a person
+// approved and what the replay's input check reads. So an argument's spelling
+// must read back as exactly its own value, and the separators must be only
+// the whitespace between the arguments -- a spelling the tree does not
+// describe is a command that would run unseen.
 func (n Node) check() error {
 	if _, ok := kindNames[n.Kind]; !ok {
 		return fmt.Errorf("procedure: unknown node kind %d", n.Kind)
@@ -184,12 +199,94 @@ func (n Node) check() error {
 		return fmt.Errorf("procedure: an array node carries keys")
 	case n.Kind == KindObject && len(n.Keys) != len(n.Kids):
 		return fmt.Errorf("procedure: an object node has %d keys and %d values", len(n.Keys), len(n.Kids))
+	case n.Kind == KindObject && !strictlySorted(n.Keys):
+		// Bind pairs an object's keys positionally against Obj's sorted
+		// order, so keys out of order or repeated would bind one argument's
+		// value into another's place.
+		return fmt.Errorf("procedure: an object node's keys %q are not sorted and distinct", n.Keys)
+	case n.Kind != KindLit && n.Raw != "":
+		return fmt.Errorf("procedure: a %s node carries a spelling", kindNames[n.Kind])
+	case n.Seps != nil && !(n.Kind == KindArray && n.Form == FormArgv):
+		return fmt.Errorf("procedure: a %s node that is not a command line carries separators", kindNames[n.Kind])
 	}
-	for i, k := range n.Kids {
-		if k == nil {
-			return fmt.Errorf("procedure: child %d of a %s node is null", i, kindNames[n.Kind])
+	if n.Seps != nil {
+		if err := checkSeps(n.Seps, len(n.Kids)); err != nil {
+			return err
 		}
 	}
+	argv := n.Kind == KindArray && n.Form == FormArgv
+	for i, k := range n.Kids {
+		switch {
+		case k == nil:
+			return fmt.Errorf("procedure: child %d of a %s node is null", i, kindNames[n.Kind])
+		case k.Raw != "" && !argv:
+			return fmt.Errorf("procedure: child %d carries a spelling, and only a command line's arguments have one", i)
+		case k.Raw != "" && !spelledAs(k.Raw, k.Lit):
+			return fmt.Errorf("procedure: argument %d is spelled %q, which does not read back as its value %q", i, k.Raw, k.Lit)
+		}
+	}
+	return nil
+}
+
+// strictlySorted reports that keys are in increasing order with no repeat.
+func strictlySorted(keys []string) bool {
+	for i := 1; i < len(keys); i++ {
+		if keys[i-1] >= keys[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// --- Hole -------------------------------------------------------------------
+
+// knownHoleClasses are D13's answers, and "" -- a position Generalize opened
+// that Classify has not answered yet.
+var knownHoleClasses = map[HoleClass]bool{"": true, HoleDataFlow: true, HoleConstant: true, HoleFree: true, HoleUnexplained: true}
+
+// holeFields is Hole without its methods, so encoding it does not recurse.
+type holeFields Hole
+
+// MarshalJSON encodes one hole after checking its class.
+func (h Hole) MarshalJSON() ([]byte, error) {
+	if !knownHoleClasses[h.Class] {
+		return nil, fmt.Errorf("procedure: hole %s has an unknown class %q", h.Id, h.Class)
+	}
+	return json.Marshal(holeFields(h))
+}
+
+// UnmarshalJSON decodes one hole and REFUSES a class this code does not know.
+// Read as nothing in particular, it would reach a replay as a parameter bound
+// from wherever the default branch looks, and a class a newer writer added is
+// one whose meaning this replica cannot honour.
+func (h *Hole) UnmarshalJSON(b []byte) error {
+	var f holeFields
+	if err := json.Unmarshal(b, &f); err != nil {
+		return err
+	}
+	if !knownHoleClasses[f.Class] {
+		return fmt.Errorf("procedure: hole %s has an unknown class %q", f.Id, f.Class)
+	}
+	*h = Hole(f)
+	return nil
+}
+
+// shapeFields is HoleShape without its methods, so decoding it does not
+// recurse.
+type shapeFields HoleShape
+
+// UnmarshalJSON decodes a hole's shape and REFUSES a feature this code does
+// not know. A writer records a feature because it checks values against it,
+// and a replica that dropped the feature would bind a value the writer's check
+// refuses.
+func (s *HoleShape) UnmarshalJSON(b []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var f shapeFields
+	if err := dec.Decode(&f); err != nil {
+		return fmt.Errorf("procedure: decoding a hole's shape: %w", err)
+	}
+	*s = HoleShape(f)
 	return nil
 }
 
