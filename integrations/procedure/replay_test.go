@@ -526,7 +526,7 @@ func TestAShadowMatchingMTimesAcrossKBindingsRaisesExactlyOnePromotion(t *testin
 }
 
 // TestAShadowReplayIsNeverCountedTwice: the replay run of a comparison is
-// derived from the recording and the version, so a comparison that is run
+// derived from the recording and the construct, so a comparison that is run
 // again for the same recording finds its run and counts nothing.
 func TestAShadowReplayIsNeverCountedTwice(t *testing.T) {
 	w := newReplayWorld(t, "shadow")
@@ -534,6 +534,65 @@ func TestAShadowReplayIsNeverCountedTwice(t *testing.T) {
 	again := w.shadowOf(t, "v1:work:run:rec-c", "c.txt")
 	if !again.AlreadyDone || w.lc.get("shadowMatches") != float64(1) || len(w.eng.callsTo("recordConstructLadder")) != 1 {
 		t.Fatalf("the same recording was counted twice: %+v, shadowMatches %v", again, w.lc.get("shadowMatches"))
+	}
+}
+
+// TestARecordingIsComparedOncePerConstructWhateverTheVersion: a recording is
+// evidence about a procedure ONCE. Compared against one version, then asked
+// about again after the procedure was re-lifted (procedureLearnFromRun called
+// a second time, the proving driver comparing again), it finds the comparison
+// it already made -- its replay run is derived from the recording and the
+// construct, not the version -- answers what that one answered, and moves
+// nothing: the recording must not count a second time, against a version it
+// may itself have been learned into.
+func TestARecordingIsComparedOncePerConstructWhateverTheVersion(t *testing.T) {
+	w := newReplayWorld(t, "shadow")
+	first := w.shadowOf(t, "v1:work:run:rec-c", "c.txt")
+	if !first.Match || w.lc.get("shadowMatches") != float64(1) {
+		t.Fatalf("first comparison = %+v, shadowMatches %v", first, w.lc.get("shadowMatches"))
+	}
+	// A re-lift: a new version on the entry rung, its streak empty.
+	reliftTo(w, "shadow", "sha256:the-relifted-version")
+	dispatches, ladderWrites := len(w.d.recorded()), len(w.eng.callsTo("recordConstructLadder"))
+
+	again := w.shadowOf(t, "v1:work:run:rec-c", "c.txt")
+	if !again.AlreadyDone || again.ReplayRunId != first.ReplayRunId || !again.Match {
+		t.Fatalf("the same recording compared again = %+v, want the first comparison's answer", again)
+	}
+	if len(w.d.recorded()) != dispatches || len(w.eng.callsTo("recordConstructLadder")) != ladderWrites {
+		t.Fatal("the same recording was replayed or counted a second time")
+	}
+	if w.lc.get("shadowMatches") != float64(0) {
+		t.Fatalf("shadowMatches = %v: the new version's streak counted a recording already counted", w.lc.get("shadowMatches"))
+	}
+}
+
+// TestAComparisonOfAReplacedVersionIsClosedNotResumed: a comparison started
+// against one version and was interrupted; by the time it is asked for again
+// the procedure has been re-lifted. Its receipts are the OLD version's steps,
+// so resuming it would compare the new version's template against them. It is
+// closed, saying a newer version replaced the one it ran, and counts nothing.
+func TestAComparisonOfAReplacedVersionIsClosedNotResumed(t *testing.T) {
+	w := newReplayWorld(t, "shadow")
+	req := ReplayRequest{OwnerUserId: replayOwner, ConstructId: w.constructId, Mode: ReplayShadow, GoalRunId: "v1:work:run:rec-c"}
+	runId, derived := (&replay{mode: ReplayShadow, req: req, c: &loaded{id: w.constructId, hash: w.hash}}).replayRunId()
+	if !derived {
+		t.Fatal("a shadow comparison of a recording must derive its run id")
+	}
+	w.work.putRun(map[string]any{
+		"id": runId, "ownerUserId": replayOwner, "status": "running", "triggeredBy": "procedure:shadow",
+		"input": map[string]any{"constructId": w.constructId, "procedureHash": "sha256:the-version-it-started-on", "mode": "shadow"},
+	})
+	out := w.shadowOf(t, "v1:work:run:rec-c", "c.txt")
+	if !out.NotCompared || out.Match || !out.VersionReplaced {
+		t.Fatalf("outcome = %+v, want the stale comparison closed as not compared", out)
+	}
+	if len(w.d.recorded()) != 0 || len(w.eng.callsTo("recordConstructLadder")) != 0 {
+		t.Fatalf("a comparison of a replaced version dispatched %d step(s) or moved the ladder", len(w.d.recorded()))
+	}
+	run := w.work.run(runId)
+	if o, _ := run["outcome"].(map[string]any); run["status"] != "failed" || o["versionReplaced"] != true {
+		t.Fatalf("the stale comparison's run = %v, want it closed saying the version was replaced", run)
 	}
 }
 

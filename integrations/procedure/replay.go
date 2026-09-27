@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -205,6 +206,7 @@ const (
 	codeNoWorkbench         = "no_workbench_dispatcher"
 	codeFallbackUnavailable = "procedure_fallback_unavailable"
 	codeFallbackFailed      = "procedure_fallback_failed"
+	codeVersionReplaced     = "procedure_version_replaced"
 )
 
 const (
@@ -518,19 +520,51 @@ func (r *replay) reenter(ctx context.Context) (finished bool) {
 		r.reenterFinished(ctx, existing)
 		return true
 	}
+	if ran := ranVersion(existing); ran != "" && ran != r.c.hash {
+		r.reenterReplaced(ctx, existing, ran)
+		return true
+	}
 	r.resuming = true
 	r.loadReceipts(actorCtx)
 	return false
 }
 
+// ranVersion is the procedure version a replay run was opened against.
+func ranVersion(run map[string]any) string {
+	return firstNonEmpty(str(obj(run, "input"), "procedureHash"), str(run, "templateVersion"))
+}
+
+// reenterReplaced closes a replay that started against a version the
+// construct no longer is. Its receipts are that version's steps, and resuming
+// would hold the current template to them -- so nothing runs and nothing is
+// counted: a comparison is closed as not made, and a served goal goes to the
+// app with every step the receipts say ran.
+func (r *replay) reenterReplaced(ctx context.Context, run map[string]any, ran string) {
+	r.out.VersionReplaced = true
+	r.out.Code = codeVersionReplaced
+	r.out.Diagnosis = "A replay of this procedure started on a version a re-lift has since replaced, so it was closed rather than resumed against the new one."
+	r.i.log().Info("procedure: a replay run of a replaced version was closed rather than resumed",
+		"construct", r.c.id, "run", r.runId, "ran", ran, "current", r.c.hash)
+	if r.mode == ReplayShadow {
+		r.out.NotCompared = true
+		r.outcome = r.baseOutcome()
+		r.outcome["procedureHash"] = ran
+		r.outcome["versionReplaced"] = true
+		r.outcome["replacedBy"] = r.c.hash
+		r.outcome["notCompared"] = true
+		r.outcome["diagnosis"] = r.out.Diagnosis
+		r.closeRun(ctx, "failed", r.out.Code, r.out.Diagnosis)
+		return
+	}
+	r.resuming = true
+	r.loadReceipts(ownerActor(ctx, r.req.OwnerUserId))
+	r.handBackResumed(ctx)
+}
+
 // handBackResumed closes a resumed replay the procedure can no longer finish
 // and hands the goal to the app with every step the receipts say ran.
 func (r *replay) handBackResumed(ctx context.Context) {
-	for idx := range r.c.template.Steps {
-		if rec, ok := r.receipts[replayStepKey(idx)]; ok {
-			r.out.Completed = append(r.out.Completed, rec.completed)
-		}
-	}
+	r.out.Completed = append(r.out.Completed, r.ranSteps()...)
 	started := len(r.out.Completed) > 0
 	r.out.StartRefused = !started
 	r.out.DivergedStep = len(r.out.Completed)
@@ -538,6 +572,9 @@ func (r *replay) handBackResumed(ctx context.Context) {
 	r.outcome["diagnosis"] = r.out.Diagnosis
 	r.outcome["code"] = r.out.Code
 	r.outcome["completed"] = completedList(r.out.Completed)
+	if r.out.VersionReplaced {
+		r.outcome["versionReplaced"] = true
+	}
 	r.closeRun(ctx, "failed", r.out.Code, r.out.Diagnosis)
 	r.fallBack(ctx, Guidance{Diagnosis: r.out.Diagnosis, Completed: r.out.Completed}, started)
 	r.recordHandover(ctx)
@@ -593,15 +630,18 @@ func (r *replay) open(ctx context.Context) bool {
 
 // replayRunId is the replay run's id: DERIVED from what the replay is for when
 // that is known -- the goal run and its statement, or the recording and the
-// procedure version it is compared against -- so a second execution of the
-// same thing finds the first one's run; fresh otherwise.
+// procedure it is compared against -- so a second execution of the same thing
+// finds the first one's run; fresh otherwise.
 func (r *replay) replayRunId() (string, bool) {
 	scope := map[string]any{"construct": memql.BareShortId(r.c.id)}
 	switch {
 	case r.mode == ReplayShadow && strings.TrimSpace(r.req.GoalRunId) != "":
+		// NOT the version: a recording is evidence about a procedure once. A
+		// comparison asked for again after a re-lift finds the one it already
+		// made, rather than counting the recording a second time against a
+		// version it may have been learned into.
 		scope["kind"] = "procedureShadow"
 		scope["recording"] = memql.BareShortId(r.req.GoalRunId)
-		scope["version"] = r.c.hash
 	case r.mode != ReplayShadow && strings.TrimSpace(r.req.GoalRunId) != "" && strings.TrimSpace(r.req.StepKey) != "":
 		scope["kind"] = "procedureReplay"
 		scope["run"] = memql.BareShortId(r.req.GoalRunId)
@@ -629,6 +669,18 @@ type stepReceipt struct {
 	observation work.StepObservation
 	output      any
 	completed   CompletedStep
+}
+
+// ranSteps are the steps the loaded receipts say ran, in order -- read off
+// the receipts themselves rather than the current template, whose steps a
+// replay of another version need not share.
+func (r *replay) ranSteps() []CompletedStep {
+	out := make([]CompletedStep, 0, len(r.receipts))
+	for _, rec := range r.receipts {
+		out = append(out, rec.completed)
+	}
+	sort.SliceStable(out, func(a, b int) bool { return out[a].Index < out[b].Index })
+	return out
 }
 
 // loadReceipts reads the steps a resumed replay run already ran. A step with a
@@ -676,11 +728,7 @@ func (r *replay) reenterFinished(ctx context.Context, run map[string]any) {
 		// Closed with no outcome: the run never reached its own finish. Its
 		// receipts are the only record of what ran.
 		r.loadReceipts(ownerActor(ctx, r.req.OwnerUserId))
-		for idx := range r.c.template.Steps {
-			if rec, ok := r.receipts[replayStepKey(idx)]; ok {
-				r.out.Completed = append(r.out.Completed, rec.completed)
-			}
-		}
+		r.out.Completed = append(r.out.Completed, r.ranSteps()...)
 		r.out.Diagnosis = fmt.Sprintf("A replay of this goal was interrupted (its run is %s) after %d step(s), and the app takes it from there.",
 			firstNonEmpty(str(run, "status"), "closed"), len(r.out.Completed))
 		r.out.DivergedStep = len(r.out.Completed)

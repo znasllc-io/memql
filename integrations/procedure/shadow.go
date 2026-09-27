@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	proc "github.com/znasllc-io/memql/component/procedure"
 	"github.com/znasllc-io/memql/component/work"
 )
@@ -33,9 +34,14 @@ import (
 //
 // WHAT IS NOT COMPARED, AND IS NOT A MISMATCH EITHER: a run that holds no
 // actions at this level (the goal's own run, whose steps are statements), a
-// recording a person disliked, and one whose calls cannot be read back whole.
-// None of them says anything about whether the procedure does what the app
-// does.
+// recording a person disliked, one whose calls cannot be read back whole, and
+// one the version was learned FROM. None of them says anything about whether
+// the procedure does what the app does.
+//
+// A RECORDING IS EVIDENCE ONCE PER PROCEDURE. Its comparison's replay run is
+// derived from the recording and the construct -- not the version -- so a
+// comparison asked for again (a second learnFromRun, a driver comparing after
+// a re-lift) finds the one already made and counts nothing.
 //
 // CALLED FROM THE LEARN HANDLER, AFTER THE LIFT, ONLY WHEN THE LIFT LEFT THE
 // VERSION UNCHANGED (LearnResult.Lift == LiftUnchanged): a recording that
@@ -122,6 +128,16 @@ func (i *Integration) shadowCompareRun(ctx context.Context, run map[string]any) 
 				"constructId", constructId, "error", err)
 			continue
 		}
+		if learnedFrom(p, runId) {
+			// A RECORDING THE VERSION WAS LEARNED FROM IS NOT EVIDENCE ABOUT
+			// IT. The completion trigger never compares one -- the lift that
+			// learned it was not unchanged -- but a second learnFromRun on the
+			// same run finds the lift unchanged, and would count the recording
+			// toward the procedure it taught.
+			i.log().Debug("procedure: a recording is not compared with a version learned from it",
+				"constructId", constructId, "runId", runId)
+			continue
+		}
 		req := ReplayRequest{Mode: ReplayShadow, OwnerUserId: owner, ConstructId: constructId, GoalRunId: runId}
 		inst, bindings, unfit, step := i.instanceOf(p, actions)
 		if unfit != "" {
@@ -141,6 +157,17 @@ func (i *Integration) shadowCompareRun(ctx context.Context, run map[string]any) 
 		outs = append(outs, out)
 	}
 	return outs, nil
+}
+
+// learnedFrom reports whether a procedure's version was learned from a run:
+// its provenance names the recordings its instances came from.
+func learnedFrom(p Procedure, runId string) bool {
+	for _, id := range p.RecordedFrom.RunIds {
+		if memql.BareShortId(id) == memql.BareShortId(runId) {
+			return true
+		}
+	}
+	return false
 }
 
 // instanceOf finds the run of a recording's actions that is an instance of the

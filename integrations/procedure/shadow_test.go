@@ -308,3 +308,31 @@ func TestTheDispatcherSeesTheOwnersForwardedAuthorityOnTheShadowPath(t *testing.
 		}
 	}
 }
+
+// TestARecordingTheVersionWasLearnedFromIsNotEvidenceAboutIt: the recording
+// that created (or re-lifted) a version is part of that version's corpus. The
+// completion trigger never compares it -- the lift was not unchanged -- but a
+// second procedureLearnFromRun on the same run finds the lift unchanged and
+// would compare it, counting a recording toward the very procedure it taught.
+// The version's own recordedFrom names it, and it is not compared.
+func TestARecordingTheVersionWasLearnedFromIsNotEvidenceAboutIt(t *testing.T) {
+	rec := recording1("c.txt", testNow.Add(-10*time.Minute))
+	w := shadowWorld(t, rec)
+	w.withProcedure(t, func(p map[string]any) {
+		from, _ := p["recordedFrom"].(map[string]any)
+		from["runIds"] = append(from["runIds"].([]any), rec.runId)
+	})
+	outs, err := w.i.ShadowCompare(personCtx(testOwner), rec.runId)
+	if err != nil {
+		t.Fatalf("ShadowCompare: %v", err)
+	}
+	if len(outs) != 0 || len(w.d.recorded()) != 0 || len(w.eng.callsTo("recordConstructLadder")) != 0 {
+		t.Fatalf("a recording the version was learned from was compared with it: %+v", outs)
+	}
+
+	// The control: the same recording, not among the version's own, is.
+	control := shadowWorld(t, rec)
+	if outs, err := control.i.ShadowCompare(personCtx(testOwner), rec.runId); err != nil || len(outs) != 1 || !outs[0].Match {
+		t.Fatalf("the control compared %+v, %v -- so the refusal above proves nothing", outs, err)
+	}
+}
