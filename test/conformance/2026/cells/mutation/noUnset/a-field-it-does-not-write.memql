@@ -1,0 +1,11 @@
+/// Close a ticket, guarding a closedAt this update never writes.
+@noUnset("closedAt")
+mutation ticket closeTicketNoUnsetUnwritten {
+  args {
+    ticketId  string!
+  }
+  update {
+    id: args.ticketId
+    status: "closed"
+  }
+}

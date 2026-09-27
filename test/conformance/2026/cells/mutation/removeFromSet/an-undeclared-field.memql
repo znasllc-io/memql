@@ -1,0 +1,12 @@
+/// Remove tags from a ticket, which has labels and no tags.
+@removeFromSet("tags")
+mutation ticket untagTicketRemoveFromSet {
+  args {
+    ticketId  string!
+    labels    []string!
+  }
+  update {
+    id: args.ticketId
+    labels: args.labels
+  }
+}

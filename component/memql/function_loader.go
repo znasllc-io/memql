@@ -631,6 +631,19 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
+			// Every field those annotations name is one the write can shape
+			// (mutation_write_shaping.go, memql#5426).
+			if err := validateWriteShapingFields(registry, mutationConcept, tmpl, string(stmt.Kind), []writeShaping{
+				{annotation: languageParser.AttrCreateOnly, fields: createOnlyFields},
+				{annotation: languageParser.AttrNoUnset, fields: noUnsetFields},
+				{annotation: languageParser.AttrMergeFields, fields: mergeFields, needs: "object"},
+				{annotation: languageParser.AttrAppendFields, fields: appendFields, needs: "list"},
+				{annotation: languageParser.AttrAddToSet, fields: addToSetFields, needs: "list"},
+				{annotation: languageParser.AttrRemoveFromSet, fields: removeFromSetFields, needs: "list"},
+			}); err != nil {
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			}
+
 			scrubPii, err := mutationScrubPii(funcDef, stmt.Kind)
 			if err != nil {
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)

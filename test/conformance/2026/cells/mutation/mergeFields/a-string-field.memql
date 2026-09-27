@@ -1,0 +1,12 @@
+/// Retitle a ticket, merging a title as though it were an object.
+@mergeFields("title")
+mutation ticket retitleTicketMergeFields {
+  args {
+    ticketId  string!
+    title     string!
+  }
+  update {
+    id: args.ticketId
+    title: args.title
+  }
+}

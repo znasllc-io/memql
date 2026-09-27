@@ -9,6 +9,13 @@
       "verdict": "refuse_parse",
       "code": "annotation_form",
       "message": "@removeFromSet on a mutation takes one or more strings"
+    },
+    {
+      "file": "an-undeclared-field.memql",
+      "verdict": "refuse_load",
+      "code": "write_annotation_undeclared_field",
+      "message": "@removeFromSet(\"tags\") names a field concept",
+      "note": "The concept declares labels, not tags: an annotation naming a field the concept does not declare is never met by the write (memql#5426)."
     }
   ]
 }

@@ -1,0 +1,12 @@
+/// Retitle a ticket, adding to a title as though it were a list.
+@addToSet("title")
+mutation ticket retitleTicketAddToSet {
+  args {
+    ticketId  string!
+    title     string!
+  }
+  update {
+    id: args.ticketId
+    title: args.title
+  }
+}
