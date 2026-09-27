@@ -213,6 +213,12 @@ export interface ShownDiagnostic {
  * current as the buffer changes, is the one kept. A failure with no rule id,
  * or one the server does not draw (the cluster refused what the workspace
  * accepts), is kept.
+ *
+ * It answers for one moment. What the server draws changes after a run --
+ * it clears a closed file, and drops a refusal whose line is being edited --
+ * so a caller that filtered once would lose the failure for the rest of the
+ * run. RunDiagnosticsView keeps the run's failures and asks again whenever
+ * the server's diagnostics change.
  */
 export function dropAlreadyShown(
   mapped: readonly MappedDiagnostic[],
@@ -240,4 +246,88 @@ function widenEmpty(r: Span): Span {
 
 function before(a: DiagnosticPosition, b: DiagnosticPosition): boolean {
   return a.line < b.line || (a.line === b.line && a.character < b.character);
+}
+
+/**
+ * Where a RunDiagnosticsView draws: one file's diagnostics at a time, keyed by
+ * absolute path. An empty list clears the file.
+ */
+export interface RunDiagnosticsSink {
+  set(path: string, diagnostics: readonly MappedDiagnostic[]): void;
+  clear(): void;
+}
+
+/**
+ * RunDiagnosticsView holds a run's failures and draws each file's as
+ * dropAlreadyShown leaves them against what the language server shows NOW.
+ *
+ * The filter is not applied once, at publish: the server's squiggle for a
+ * fault can go away while the fault stays -- its file is closed, or an edit
+ * on the line drops the refusal until the next load answers -- and a failure
+ * filtered out against it would then be gone from the Problems panel for the
+ * rest of the run. So the view keeps every failure and redraws a file
+ * whenever the server's diagnostics for it change (refresh), which puts a
+ * failure back when the server stops drawing it and takes it away when the
+ * server starts.
+ *
+ * A file is redrawn only when what the server shows there has changed since it
+ * was last drawn. That is also what keeps it from redrawing forever: drawing
+ * changes the diagnostics of the file, which is an event the caller feeds back
+ * to refresh, and the server's half of that file has not moved.
+ */
+export class RunDiagnosticsView {
+  private failures = new Map<string, { path: string; diagnostics: MappedDiagnostic[] }>();
+  private drawnAgainst = new Map<string, string>();
+
+  /**
+   * shownIn answers what the language server draws in a file now; keyOf
+   * names a file the way refresh is told about it (the identity by default).
+   */
+  constructor(
+    private readonly sink: RunDiagnosticsSink,
+    private readonly shownIn: (path: string) => readonly ShownDiagnostic[],
+    private readonly keyOf: (path: string) => string = (path) => path,
+  ) {}
+
+  /** publish replaces the run's failures and draws every file that has one. */
+  publish(mapped: readonly MappedDiagnostic[]): void {
+    this.failures.clear();
+    this.drawnAgainst.clear();
+    this.sink.clear();
+    for (const [path, diagnostics] of groupByFile(mapped)) {
+      if (path === "") continue;
+      this.failures.set(this.keyOf(path), { path, diagnostics });
+    }
+    for (const key of this.failures.keys()) this.draw(key);
+  }
+
+  /**
+   * refresh redraws the files, named by keyOf, whose language-server
+   * diagnostics changed. A file with no failure, or whose server diagnostics
+   * are as they were when it was last drawn, is left alone.
+   */
+  refresh(keys: readonly string[]): void {
+    for (const key of keys) {
+      if (this.failures.has(key)) this.draw(key);
+    }
+  }
+
+  private draw(key: string): void {
+    const entry = this.failures.get(key);
+    if (entry === undefined) return;
+    const shown = this.shownIn(entry.path);
+    const against = shownKey(shown);
+    if (this.drawnAgainst.get(key) === against) return;
+    this.drawnAgainst.set(key, against);
+    this.sink.set(entry.path, dropAlreadyShown(entry.diagnostics, shown));
+  }
+}
+
+// shownKey names a set of shown diagnostics by everything dropAlreadyShown
+// reads, in a fixed order.
+function shownKey(shown: readonly ShownDiagnostic[]): string {
+  return shown
+    .map((d) => `${d.code}@${d.start.line}:${d.start.character}-${d.end.line}:${d.end.character}`)
+    .sort()
+    .join("|");
 }

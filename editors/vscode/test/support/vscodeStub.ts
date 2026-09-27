@@ -1020,4 +1020,16 @@ export const languages = {
   registerCodeLensProvider(_selector: unknown, _provider: unknown): StubDisposable {
     return { dispose: () => undefined };
   },
+
+  // The run and training views redraw their failures against what the
+  // language server draws (run/diagnostics.ts, RunDiagnosticsView), so they
+  // read the diagnostics and listen for changes to them. The stub has no
+  // language server: nothing is drawn, and nothing changes.
+  getDiagnostics(_uri: unknown): never[] {
+    return [];
+  },
+
+  onDidChangeDiagnostics(_listener: unknown): StubDisposable {
+    return { dispose: () => undefined };
+  },
 };

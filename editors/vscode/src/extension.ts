@@ -195,7 +195,7 @@ import {
   parseImports,
 } from './constructs/imports.js';
 import type { MappedDiagnostic, ShownDiagnostic } from './run/diagnostics.js';
-import { dropAlreadyShown, groupByFile, LANGUAGE_SERVER_SOURCE } from './run/diagnostics.js';
+import { LANGUAGE_SERVER_SOURCE, RunDiagnosticsView } from './run/diagnostics.js';
 import { RunOrchestrator, type RunCluster, type RunEngine } from './run/orchestrator.js';
 import {
   runConfigPath,
@@ -2971,6 +2971,7 @@ function registerRunSurface(
   // republishes.
   const runDiagnostics = languages.createDiagnosticCollection('memql-run');
   context.subscriptions.push(runDiagnostics);
+  const runFailures = runDiagnosticsView(runDiagnostics, context.subscriptions);
 
   // The concept descriptors the result view renders rows against. Refreshed on
   // connect rather than fetched per result: it is per-cluster data that
@@ -2989,7 +2990,7 @@ function registerRunSurface(
       const answer = await window.showWarningMessage(message, { modal: true }, 'Run');
       return answer === 'Run';
     },
-    publishDiagnostics: (mapped) => publishRunDiagnostics(runDiagnostics, mapped),
+    publishDiagnostics: (mapped) => runFailures.publish(mapped),
   });
   runOrchestrator = orchestrator;
   // Warm the name -> config cache the synchronous cluster() read depends on,
@@ -3014,6 +3015,7 @@ function registerRunSurface(
   // channel keeps the record.
   const trainingOutput = window.createOutputChannel('MemQL Training');
   context.subscriptions.push(trainingDiagnostics, trainingOutput);
+  const trainingFailures = runDiagnosticsView(trainingDiagnostics, context.subscriptions);
 
   // `refreshTrainingSurfaces` is MODULE-LEVEL (see its declaration): the
   // Deployments page has to reach it after a rebuild, and it lives in a
@@ -3040,7 +3042,7 @@ function registerRunSurface(
     // button naming its own consequence. TrainingActions keeps the two channels
     // apart so an ordinary yes can never answer this one.
     confirmOverride: (prompt) => showTrainingModal(prompt),
-    publishDiagnostics: (mapped) => publishRunDiagnostics(trainingDiagnostics, mapped),
+    publishDiagnostics: (mapped) => trainingFailures.publish(mapped),
     display: (p) => displayPath(workspaceRoot, p),
     catalogChanged: () => refreshTrainingSurfaces(),
   });
@@ -3922,42 +3924,49 @@ function resolveImportPath(
   return undefined;
 }
 
-// publishRunDiagnostics writes the mapped failures into the Problems panel.
+// runDiagnosticsView puts a run's (or a training action's) failures into the
+// Problems panel, through a collection of its own.
 //
-// The collection is CLEARED first, on every publish including the empty one.
-// Without that a failure fixed on the next run would stay on screen until some
-// later run happened to fail in the same file.
+// Every publish replaces the whole set, the empty one included: without that
+// a failure fixed on the next run would stay on screen until some later run
+// happened to fail in the same file.
 //
 // A failure the language server already draws -- its load pass shows the same
-// lowering refusal as the author types -- is left to the server's squiggle
-// (dropAlreadyShown), so one fault is drawn once.
-function publishRunDiagnostics(
+// lowering refusal as the author types -- is left to the server's squiggle, so
+// one fault is drawn once. And because what the server draws keeps changing
+// after the run (a closed file is cleared, an edited line drops its refusal
+// until the next load answers), the view keeps the failures and asks again on
+// every change to the server's diagnostics, which puts a failure back the
+// moment the server stops drawing it (RunDiagnosticsView).
+function runDiagnosticsView(
   collection: ReturnType<typeof languages.createDiagnosticCollection>,
-  mapped: MappedDiagnostic[]
-): void {
-  collection.clear();
-  for (const [file, diagnostics] of groupByFile(mapped)) {
-    if (file === '') continue;
-    const uri = Uri.file(file);
-    collection.set(
-      uri,
-      dropAlreadyShown(diagnostics, languageServerDiagnostics(uri)).map((d) => {
-        const diagnostic = new Diagnostic(
-          new Range(
-            new Position(d.start.line, d.start.character),
-            new Position(d.end.line, d.end.character)
-          ),
-          d.message,
-          DiagnosticSeverity.Error
-        );
-        diagnostic.source = 'memql (run)';
-        // The rule id, where the engine gave one (memql#5435): the same code
-        // the language server's squiggle for the same fault carries.
-        if (d.code !== '') diagnostic.code = d.code;
-        return diagnostic;
-      })
-    );
-  }
+  subscriptions: { dispose(): unknown }[]
+): RunDiagnosticsView {
+  const view = new RunDiagnosticsView(
+    {
+      set: (file, diagnostics) => collection.set(Uri.file(file), diagnostics.map(toRunDiagnostic)),
+      clear: () => collection.clear(),
+    },
+    (file) => languageServerDiagnostics(Uri.file(file)),
+    (file) => Uri.file(file).toString()
+  );
+  subscriptions.push(
+    languages.onDidChangeDiagnostics((e) => view.refresh(e.uris.map((uri) => uri.toString())))
+  );
+  return view;
+}
+
+function toRunDiagnostic(d: MappedDiagnostic): Diagnostic {
+  const diagnostic = new Diagnostic(
+    new Range(new Position(d.start.line, d.start.character), new Position(d.end.line, d.end.character)),
+    d.message,
+    DiagnosticSeverity.Error
+  );
+  diagnostic.source = 'memql (run)';
+  // The rule id, where the engine gave one (memql#5435): the same code the
+  // language server's squiggle for the same fault carries.
+  if (d.code !== '') diagnostic.code = d.code;
+  return diagnostic;
 }
 
 // languageServerDiagnostics is what the language server draws in a file, in
