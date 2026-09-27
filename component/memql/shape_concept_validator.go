@@ -40,6 +40,11 @@ type shapeBindingViolation struct {
 	Shape  string
 	Origin string
 	Detail string
+	// Code is the refusal's stable rule id, when it carries one: a binding
+	// that does not resolve is SignatureConceptCode, the code a query, a
+	// mutation or a seed whose signature concept does not resolve carries
+	// (memql#5433). Detail ends with it in brackets.
+	Code string
 }
 
 // resolveShapeBoundConcept resolves the concept a shape's signature binds
@@ -128,7 +133,8 @@ func validateShapeConceptBindings(shapes *ShapeRegistry, concepts memoryNodes.Re
 			out = append(out, shapeBindingViolation{
 				Shape:  shape.Name,
 				Origin: shape.Origin,
-				Detail: fmt.Sprintf("binds concept %q, which does not resolve: %v", bare, err),
+				Detail: fmt.Sprintf("binds concept %q, which does not resolve: %v [%s]", bare, err, SignatureConceptCode),
+				Code:   SignatureConceptCode,
 			})
 			continue
 		}

@@ -332,6 +332,19 @@ Cross-domain references are imported with a file-top
 OWN domain are ambient -- in scope with no import (#2617); the tree
 gate keeps redundant same-domain imports out of the corpus.
 
+The concept a query's or a mutation's signature binds --
+`query <Concept> <name>` -- must resolve to a concept an import supplies, or to
+one of the file's own domain; a spec's binding, to an imported shape or
+concept. One that does not is refused at load with the rule id
+`signature_concept_unresolved`, naming the concept, the import that failed to
+supply it, and the import to add when another domain declares it
+(memql#5433). That includes an import whose namespace declares no such
+concept: it used to bind the construct to no concept at all, so a query with
+no filter loaded and matched nothing. A shape and a seed resolve their concept
+by name across every mounted domain -- a shape preferring its own domain when
+two declare the name, a seed as the seed materializer resolves it, which never
+reads an import -- and carry the same rule id when no domain supplies it.
+
 <!-- corpus: 2026/examples/memql/concepts/retention-override.memql -->
 ```memql
 use agents.concepts.{ agent }

@@ -1,0 +1,5 @@
+/// A support card, of a concept no domain declares.
+@row
+shape supportCard supportCardFull {
+  title
+}

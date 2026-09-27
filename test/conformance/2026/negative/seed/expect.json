@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {
+      "file": "concept-declared-nowhere.memql",
+      "verdict": "refuse_load",
+      "code": "signature_concept_unresolved",
+      "message": "signature concept \"welcomeBanner\" does not resolve: no mounted domain declares a concept \"welcomeBanner\", and the seed writes its row through createWelcomeBanner",
+      "note": "memql#5433. A seed of a concept nothing declares loaded clean and failed at materialization on every boot, as a log line."
+    }
+  ]
+}

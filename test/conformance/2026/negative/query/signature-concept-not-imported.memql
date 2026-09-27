@@ -1,0 +1,5 @@
+/// Every support note, newest first, of a concept neither imported nor declared here.
+query supportNote newestSupportNotes {
+  sort "row.createdAt", "desc"
+  paginate 20
+}

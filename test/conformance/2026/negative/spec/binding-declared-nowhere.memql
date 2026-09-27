@@ -1,0 +1,2 @@
+/// An open support case, over a binding no import and no domain supplies.
+spec supportCase isOpenSupportCase = row => row.status == "open"
