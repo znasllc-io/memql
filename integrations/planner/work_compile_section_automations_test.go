@@ -381,3 +381,28 @@ func TestReadSectionAutomationIsTheOneReading(t *testing.T) {
 		t.Fatalf("a section automation with no purpose was read: %v", err)
 	}
 }
+
+// TestACataloguedSectionIsNeverServedAsAWholeGoal: a catalogued section is
+// signed with its SECTION's signature, which a goal whose statement and
+// inputs normalize to the section's purpose and inputs shares. The goal tier
+// passes it over -- served whole, its bundle is no run's draft and the
+// executing node refuses it -- and the goal is triaged instead. The control is
+// the same row catalogued as a goal's own template, which the tier serves.
+func TestACataloguedSectionIsNeverServedAsAWholeGoal(t *testing.T) {
+	sig := work.GoalSignature(compileReq().Statement, []string{"day"})
+	row := func(catalogKey string) map[string]any {
+		return map[string]any{"id": "v1:authoring:construct:s1", "name": SectionAutomationPrefix + sig[:8] + "_summary",
+			"goalSignature": sig, "catalogKey": catalogKey, "reliability": 0.9}
+	}
+	eng := &countingCompileEngine{catalogue: []map[string]any{row(SectionCatalogKeyPrefix + sig)}}
+	out, _ := (&PlannerAgentLoop{engine: eng}).CompileGoalForRun(context.Background(), compileReq(), nil, nil)
+	if out.Route == work.RouteCatalogExact || out.ModelCalls == 0 {
+		t.Fatalf("a catalogued section was served as the whole goal: %+v", out)
+	}
+
+	control := &countingCompileEngine{catalogue: []map[string]any{row("")}}
+	out, err := (&PlannerAgentLoop{engine: control}).CompileGoalForRun(context.Background(), compileReq(), nil, nil)
+	if err != nil || out.Route != work.RouteCatalogExact || out.ConstructId != "v1:authoring:construct:s1" {
+		t.Fatalf("the control -- the row as a goal's own template -- was not served: %+v %v", out, err)
+	}
+}

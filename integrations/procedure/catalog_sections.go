@@ -67,9 +67,6 @@ import (
 // automation's name).
 const catalogAutomationActor = "system:automation:catalogSucceededSections"
 
-// sectionCatalogKeyPrefix begins a catalogued section's catalogKey.
-const sectionCatalogKeyPrefix = "section:"
-
 // maxSectionTitleRunes bounds a catalogued section's bundle title.
 const maxSectionTitleRunes = 120
 
@@ -329,7 +326,7 @@ func (i *Integration) writeCataloguedSection(ctx context.Context, run map[string
 		{"setConstructStatus", map[string]any{"constructId": constructId, "status": "active"}},
 		{"catalogueConstruct", map[string]any{
 			"constructId":      constructId,
-			"catalogKey":       sectionCatalogKeyPrefix + sec.Signature,
+			"catalogKey":       planner.SectionCatalogKeyPrefix + sec.Signature,
 			"catalogMatchText": "kind:automation intent:" + sec.Purpose,
 			"fromBundleId":     draftBundle,
 		}},

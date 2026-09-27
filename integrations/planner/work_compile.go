@@ -432,6 +432,15 @@ func (l *PlannerAgentLoop) cataloguedForSignature(ctx context.Context, ownerUser
 				fmt.Errorf("row %s carries %q, asked for %q", getString(r, "id"), got, signature))
 			continue
 		}
+		// A CATALOGUED SECTION ANSWERS A SECTION, NOT A GOAL (D24). A goal
+		// whose statement and inputs normalize to a section's purpose and
+		// inputs shares its signature, and served whole it would run as its
+		// template an automation whose bundle holds nothing but it and was
+		// never any run's draft -- which the executing node refuses, failing
+		// the goal. The section tier serves it; this tier passes it over.
+		if strings.HasPrefix(getString(r, "catalogKey"), SectionCatalogKeyPrefix) {
+			continue
+		}
 		out = append(out, work.CatalogCandidate{
 			ConstructId: getString(r, "id"),
 			Name:        getString(r, "name"),

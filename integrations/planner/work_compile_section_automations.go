@@ -51,6 +51,12 @@ import (
 // reasons.
 const SectionAutomationPrefix = "section_"
 
+// SectionCatalogKeyPrefix begins the catalogKey a catalogued section
+// automation is written with (integrations/procedure, catalogSections). Its
+// goalSignature is the SECTION's, so the goal tier tells it from a whole
+// goal's template by this.
+const SectionCatalogKeyPrefix = "section:"
+
 // sectionGoalArg is the argument a section automation is told the goal it
 // serves through: context for the model, never an input and never part of
 // the signature.
