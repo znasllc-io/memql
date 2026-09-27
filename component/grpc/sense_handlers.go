@@ -106,7 +106,14 @@ func (s *streamSession) handleSenseDiagnose(envelope *memqlv1.MemqlClientMessage
 	}
 
 	go func() {
-		diags := svc.Diagnose(msg.GetSource(), msg.GetFilePath())
+		// Diagnose's own pass, and -- when file_path places the document in the
+		// tree -- the engine's load of it, for Lower's refusals with their
+		// rule codes (memql#5434). One squiggle per fault: the merge drops a
+		// load refusal Diagnose already reports.
+		diags := sense.MergeLoadDiagnostics(
+			svc.Diagnose(msg.GetSource(), msg.GetFilePath()),
+			svc.DiagnoseLoad(msg.GetSource(), msg.GetFilePath()),
+		)
 		protoDiags := make([]*memqlv1.SenseDiagnostic, len(diags))
 		for i, d := range diags {
 			protoDiags[i] = &memqlv1.SenseDiagnostic{

@@ -177,6 +177,29 @@ test("validateBundle -- stringified int32 positions decode to numbers", async ()
   assert.equal(d.column, 4);
 });
 
+test("validateBundle -- the rule code decodes, and is the empty string when absent", async () => {
+  const { mock, client } = newClient();
+  const promise = client.validateBundle("query q { }");
+  // The rule id rides in its own field (memql#5435), so a consumer keys on it
+  // rather than parsing the bracketed id out of `error`. protojson omits an
+  // empty string, so a diagnostic with no rule id arrives without the field --
+  // and must still land as "", never undefined.
+  mock.reply({
+    authoringValidateBundleResult: {
+      requestId: "r",
+      ok: false,
+      diagnostics: [
+        { name: "q", kind: "query", ok: false, error: "`row.nope` does not lower [lower_unknown_field]", code: "lower_unknown_field" },
+        { name: "m", kind: "mutation", ok: false, error: "boom" },
+      ],
+    },
+  });
+  const [refused, uncoded] = (await promise).diagnostics;
+  assert.ok(refused && uncoded);
+  assert.equal(refused.code, "lower_unknown_field");
+  assert.equal(uncoded.code, "");
+});
+
 test("validateBundle -- ok=true with no diagnostics array yields an empty list", async () => {
   const { mock, client } = newClient();
   const promise = client.validateBundle("query q { }");
@@ -248,9 +271,9 @@ test("AuthoringClient -- refuses construction without a dispatcher", () => {
 
 test("failedDiagnostics -- a skipped construct is not a failure", () => {
   const diagnostics = [
-    { name: "s", kind: "shape", ok: false, skipped: true, error: "kind not compiled", line: 0, column: 0, endLine: 0, endColumn: 0 },
-    { name: "q", kind: "query", ok: true, skipped: false, error: "", line: 0, column: 0, endLine: 0, endColumn: 0 },
-    { name: "m", kind: "mutation", ok: false, skipped: false, error: "boom", line: 3, column: 1, endLine: 0, endColumn: 0 },
+    { name: "s", kind: "shape", ok: false, skipped: true, error: "kind not compiled", line: 0, column: 0, endLine: 0, endColumn: 0, code: "" },
+    { name: "q", kind: "query", ok: true, skipped: false, error: "", line: 0, column: 0, endLine: 0, endColumn: 0, code: "" },
+    { name: "m", kind: "mutation", ok: false, skipped: false, error: "boom", line: 3, column: 1, endLine: 0, endColumn: 0, code: "" },
   ];
   const failed = failedDiagnostics(diagnostics);
   assert.equal(failed.length, 1);
@@ -259,7 +282,7 @@ test("failedDiagnostics -- a skipped construct is not a failure", () => {
 
 test("failedDiagnostics -- an all-clean set yields nothing", () => {
   const failed = failedDiagnostics([
-    { name: "q", kind: "query", ok: true, skipped: false, error: "", line: 0, column: 0, endLine: 0, endColumn: 0 },
+    { name: "q", kind: "query", ok: true, skipped: false, error: "", line: 0, column: 0, endLine: 0, endColumn: 0, code: "" },
   ]);
   assert.deepEqual(failed, []);
 });

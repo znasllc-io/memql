@@ -26,10 +26,25 @@ MemQL edition 2026 is frozen, and this release is the editor that speaks it.
   completion and diagnostics speak. It is the one MemQL command that works in a
   folder you have not trusted, because it reads no credential and opens no
   connection.
-- **No change to the language features.** Highlighting, completion,
-  diagnostics, hover and signature help are as they were in 0.5.1; the language
-  server, TextMate grammar and language configuration regenerate byte-identical
-  against the frozen edition.
+- **The editor now shows what the load refuses.** A field the concept does not
+  declare, a context spec applied to the row, a read that needs `.?`, an
+  expression over its cost budget: until now these appeared only when the tree
+  loaded (memqllint, boot). The language server now runs the engine's load over
+  the file you have open -- the text in the buffer, placed where the file sits
+  in the tree, so a name two domains share means what the load says it means --
+  and underlines the refused expression with the load's own sentence and its
+  rule id (`lower_unknown_field`) as the code. It runs after the syntax
+  diagnostics have appeared, never before them, and one fault draws one
+  squiggle. A problem found by a run or a training action now carries the same
+  code.
+- **A workspace that relates to a storefront pack builds.** A product domain
+  importing a pack's concept (`use wholesale.concepts.{ application }`) used to
+  fail the language server's build, which left every file of the workspace
+  without hover or registry-backed completion. The server now links the packs a
+  cluster links.
+- **No change to the language.** Highlighting and completion are as they were
+  in 0.5.1; the TextMate grammar and language configuration regenerate
+  byte-identical against the frozen edition.
 
 ## 0.5.1
 

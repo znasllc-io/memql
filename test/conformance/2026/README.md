@@ -198,6 +198,22 @@ Two more read what the corpus holds against the language's own tables:
   replacement -- or, where the refusal writes the rewrite out for the author's
   own text (a keyless map entry), that rewrite.
 
+## The editor is held to it too
+
+The editor's load pass (Sense's DiagnoseLoad, memql#5434) shows Lower's
+refusals as the author types, and two tests in
+`test/conformance/editor_load_parity_test.go` hold it to the corpus, with each
+directory's fixture in its own domain and the case as the open buffer:
+
+- `TestCorpusLowerRefusalsReachTheEditor`: every `refuse_load` case with a
+  `lower_*` code is refused by the pass with the same code and a message
+  containing the case's `message`. A case whose refused construct is an
+  automation is left out and counted: a trigger filter's refusal cannot be
+  placed in the author's file, so it stays with the load.
+- `TestCorpusLoadsDrawNoEditorRefusal`: no `load_ok` case draws a refusal from
+  the pass. The editor never says a file will not load when the load says it
+  will.
+
 ## Running it
 
 ```bash

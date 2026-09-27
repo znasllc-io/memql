@@ -71,6 +71,11 @@ type Diagnostic struct {
 	Column    int
 	EndLine   int
 	EndColumn int
+	// Code is the failure's stable rule id when it carries one -- a lowering
+	// refusal's `lower_*`, an annotation refusal's `annotation_*`, a retired
+	// form's rule -- and "" otherwise (memql#5435). Key on this, never on the
+	// wording of Error: the id is stable and the prose is not.
+	Code string
 }
 
 // Construct names one construct that a session-define registered (now callable
@@ -589,6 +594,7 @@ func protoDiagnostics(in []*memqlv1.AuthoringDiagnostic) []Diagnostic {
 			Column:    int(d.GetColumn()),
 			EndLine:   int(d.GetEndLine()),
 			EndColumn: int(d.GetEndColumn()),
+			Code:      d.GetCode(),
 		})
 	}
 	return out

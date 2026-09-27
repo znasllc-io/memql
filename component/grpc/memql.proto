@@ -1210,7 +1210,16 @@ message SenseCompletionItem {
 message SenseDiagnoseMsg {
   string request_id = 1;
   string source = 2;
-  string file_path = 3;  // optional, helps resolve version prefix
+  // file_path is the document's path RELATIVE TO THE DSL ROOT, e.g.
+  // "planner/queries.memql" -- the path the load derives a construct's
+  // namespace from. When it places the document in a domain the engine
+  // loaded, Diagnose also runs the engine's load over `source` and returns
+  // Lower's refusals (`lower_unknown_field`, ...) as errors carrying their
+  // rule code (memql#5434), which costs the load of the document's
+  // constructs. Optional: empty, or a path in no loaded domain, skips that
+  // pass, because without the path a name two domains declare would resolve
+  // wrongly and the refusals would be false.
+  string file_path = 3;
 }
 
 message SenseDiagnoseResult {
@@ -1573,6 +1582,12 @@ message AuthoringDiagnostic {
   int32 column = 7;
   int32 end_line = 8;    // 0 when the failure has no end anchor
   int32 end_column = 9;  // 0 when the failure has no end anchor
+  // code is the failure's stable rule id when it carries one -- a lowering
+  // refusal's `lower_*`, an annotation refusal's `annotation_*`, a retired
+  // form's rule -- and empty otherwise (memql#5435). `error` still ends with it
+  // in brackets; this is the field a client keys on, so no client parses the
+  // text. The id is stable, the wording of `error` is not.
+  string code = 10;
 }
 
 // AuthoringConstruct names one construct that a session-define registered.

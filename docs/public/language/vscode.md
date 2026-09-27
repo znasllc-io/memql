@@ -106,6 +106,7 @@ short product tour.
     - LSP front end (tliron/glsp)
     - workspace loader: BuildOfflineSense(os.DirFS(root)) -- DB-free
     - per request: buffer text -> sense.{Tokenize,Diagnose,Complete,Hover,SignatureHelp}
+    - after Diagnose publishes: buffer text + tree path -> sense.DiagnoseLoad
                    |  in-process Go calls (no gRPC, no network)
                    v
   component/memql/sense   (the UNCHANGED brain)
@@ -127,6 +128,15 @@ short product tour.
 - **Registry refresh.** On save / watched-file change the server rebuilds
   Sense (debounced) and atomically swaps it, so a concept or shape added in one
   file becomes visible to completion/hover in the others.
+- **Load refusals.** Beside Diagnose's syntax and rule diagnostics, the
+  server runs the engine's load over the open buffer and shows what the load's
+  lowering refuses -- a field the concept does not declare, a context spec
+  applied to the row -- as errors on the refused node, coded with the rule id
+  (`lower_unknown_field`). The load runs off the request path after Diagnose
+  has published, so a syntax error never waits on it, and its last result is
+  carried across an edit until the next one answers. A file outside the DSL
+  tree gets no load, because the load needs the file's place in the tree to
+  resolve names two domains share. See [load refusals](sense.md#load-refusals).
 - **The extension** (`editors/vscode`) is a thin `vscode-languageclient`. It
   resolves the server binary in order: the `memql.lsp.serverPath` **user**
   setting, then a bundled `bin/<platform>-<arch>/memql-lsp`, then `memql-lsp`

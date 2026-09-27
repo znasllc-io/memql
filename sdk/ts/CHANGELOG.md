@@ -49,6 +49,12 @@ elapsed time on this machine's clock. Browser skew cancels out entirely.
   defaulting to 30 000 ms. Intended for a harness driving deliberately
   short-lived tokens; lowering it in a browser re-opens the storm the floor
   closes. A non-positive or non-finite value is ignored rather than honoured.
+- `AuthoringDiagnostic.code` -- the failure's stable rule id
+  (`lower_unknown_field`, an `annotation_*` refusal, a retired form's rule), or
+  `""` when it carries none (memql#5435). It used to reach the client only
+  inside `error`'s text, in brackets at the end; key on the field instead, since
+  the id is stable and the wording is not. A consumer that builds an
+  `AuthoringDiagnostic` literal (a test fixture) now supplies `code` too.
 
 ### Not changed, and checked
 

@@ -1122,6 +1122,11 @@ export interface AutomationRunCompleteWire {
 // `skipped` constructs (a kind this pass does not compile) report ok=false
 // AND skipped=true, and do NOT fail the bundle -- so "is this a failure" is
 // `!ok && !skipped`, never `!ok`.
+//
+// `code` is the failure's stable rule id (`lower_unknown_field`,
+// `annotation_*`, a retired form's rule), absent when it carries none
+// (memql#5435). protojson omits an empty string, exactly as it omits a zero
+// position.
 export interface AuthoringDiagnosticWire {
   name?: string;
   kind?: string;
@@ -1132,6 +1137,7 @@ export interface AuthoringDiagnosticWire {
   column?: number;
   endLine?: number;
   endColumn?: number;
+  code?: string;
 }
 
 export interface AuthoringConstructWire {

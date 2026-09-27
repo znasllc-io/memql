@@ -41,6 +41,12 @@ export interface MappedDiagnostic {
   end: DiagnosticPosition;
   /** The engine's message, with the construct named. */
   message: string;
+  /**
+   * The failure's stable rule id (`lower_unknown_field`, ...), or "" when it
+   * carries none (memql#5435). Rendered as the diagnostic's code, the same
+   * field the language server's squiggles carry theirs in.
+   */
+  code: string;
   constructName: string;
   constructKind: string;
 }
@@ -104,6 +110,7 @@ function mapOne(d: AuthoringDiagnostic, bundle: Bundle): MappedDiagnostic {
     start: { line: startLine, character: startCharacter },
     end,
     message: `${d.kind} ${d.name}: ${message}`,
+    code: d.code,
     constructName: d.name,
     constructKind: d.kind,
   };
@@ -165,6 +172,7 @@ function fileLevel(
     // wondering why a diagnostic about line 40's construct is sitting at the
     // top of the file.
     message: `${d.kind} ${d.name}: ${message} (the engine reported no source position for this failure)`,
+    code: d.code,
     constructName: d.name,
     constructKind: d.kind,
   };
@@ -181,4 +189,55 @@ export function groupByFile(
     else bucket.push(d);
   }
   return out;
+}
+
+/**
+ * The language server's diagnostic source -- `lsName` in cmd/memql-lsp. A
+ * run's failures are compared against what that source draws.
+ */
+export const LANGUAGE_SERVER_SOURCE = "memql-lsp";
+
+/** A diagnostic another source already draws: its rule id and its range. */
+export interface ShownDiagnostic {
+  code: string;
+  start: DiagnosticPosition;
+  end: DiagnosticPosition;
+}
+
+/**
+ * dropAlreadyShown removes the run failures the language server already
+ * draws in the same file: the same rule id over an overlapping range
+ * (memql#5434). The server runs the load over the open buffer as the author
+ * types, so a lowering refusal a run reports is usually on screen before the
+ * run, and two squiggles for one fault is noise -- the server's, which stays
+ * current as the buffer changes, is the one kept. A failure with no rule id,
+ * or one the server does not draw (the cluster refused what the workspace
+ * accepts), is kept.
+ */
+export function dropAlreadyShown(
+  mapped: readonly MappedDiagnostic[],
+  shown: readonly ShownDiagnostic[],
+): MappedDiagnostic[] {
+  return mapped.filter(
+    (d) => d.code === "" || !shown.some((s) => s.code === d.code && rangesOverlap(d, s)),
+  );
+}
+
+type Span = { start: DiagnosticPosition; end: DiagnosticPosition };
+
+// rangesOverlap reports whether two ranges share a character; an empty range
+// covers the one it starts at.
+function rangesOverlap(a: Span, b: Span): boolean {
+  const x = widenEmpty(a);
+  const y = widenEmpty(b);
+  return before(x.start, y.end) && before(y.start, x.end);
+}
+
+function widenEmpty(r: Span): Span {
+  if (before(r.start, r.end)) return r;
+  return { start: r.start, end: { line: r.start.line, character: r.start.character + 1 } };
+}
+
+function before(a: DiagnosticPosition, b: DiagnosticPosition): boolean {
+  return a.line < b.line || (a.line === b.line && a.character < b.character);
 }
