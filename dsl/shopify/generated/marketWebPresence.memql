@@ -40,10 +40,10 @@ concept marketWebPresence {
   deleted    bool
   /// The parent's GID, from the nested selection on a fetch and from __parentId on a bulk stream.
   parentGid  string!
-  /// Admin GraphQL alternateLocales. GIDs of the mirrored ShopLocale rows.
-  alternateLocalesGids       []string
-  /// Admin GraphQL defaultLocale. GID of the mirrored ShopLocale row.
-  defaultLocaleGid           string
+  /// Admin GraphQL alternateLocales.
+  alternateLocales           []object
+  /// Admin GraphQL defaultLocale.
+  defaultLocale              object
   /// Admin GraphQL domain.
   domain                     object
   /// Admin GraphQL rootUrls.

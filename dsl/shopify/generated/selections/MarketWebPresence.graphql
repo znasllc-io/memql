@@ -9,8 +9,8 @@ query ShopifyFetchMarketWebPresence($id: ID!) {
     __typename
     ... on MarketWebPresence {
       id
-      alternateLocales { id }
-      defaultLocale { id }
+      alternateLocales { locale marketWebPresences { id } name primary published }
+      defaultLocale { locale marketWebPresences { id } name primary published }
       domain { host id localization { alternateLocales country defaultLocale } marketWebPresence { id } sslEnabled url }
       rootUrls { locale url }
       subfolderSuffix

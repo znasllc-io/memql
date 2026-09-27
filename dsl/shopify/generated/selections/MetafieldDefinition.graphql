@@ -28,28 +28,3 @@ query ShopifyFetchMetafieldDefinition($id: ID!) {
     }
   }
 }
-
-query ShopifyListMetafieldDefinition($first: Int!, $after: String, $query: String) {
-  metafieldDefinitions(first: $first, after: $after, query: $query) {
-    pageInfo { hasNextPage endCursor }
-    nodes {
-      id
-      access { admin customerAccount storefront }
-      capabilities { adminFilterable { eligible enabled status } analyticsQueryable { eligible enabled } cartToOrderCopyable { eligible enabled } smartCollectionCondition { eligible enabled } uniqueValues { eligible enabled } }
-      constraints { key }
-      description
-      key
-      metafields(first: 50) { nodes { namespace key type value jsonValue } }
-      metafieldsCount
-      name
-      namespace
-      ownerType
-      pinnedPosition
-      type { category name supportedValidations { name type } supportsDefinitionMigrations }
-      standardTemplate { description id key name namespace ownerTypes type { category name supportsDefinitionMigrations } validations { name type value } visibleToStorefrontApi }
-      useAsCollectionCondition
-      validationStatus
-      validations { name type value }
-    }
-  }
-}

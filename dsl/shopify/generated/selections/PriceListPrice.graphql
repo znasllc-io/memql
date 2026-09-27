@@ -8,7 +8,6 @@ query ShopifyFetchPriceListPrice($id: ID!) {
   node(id: $id) {
     __typename
     ... on PriceListPrice {
-      id
       compareAtPrice { amount currencyCode }
       originType
       price { amount currencyCode }

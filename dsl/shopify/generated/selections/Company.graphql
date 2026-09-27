@@ -30,7 +30,7 @@ query ShopifyFetchCompany($id: ID!) {
         nodes {
           id
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
-          buyerExperienceConfiguration { checkoutToDraft deposit { __typename } editableShippingAddress paymentTermsTemplate { id } }
+          buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
           catalogsCount { count precision }
           catalogs(first: 25) { nodes { id } }
           company { id }
@@ -93,7 +93,7 @@ query ShopifyListCompany($first: Int!, $after: String, $query: String) {
         nodes {
           id
           billingAddress { address1 address2 city companyName country countryCode createdAt firstName formattedAddress formattedArea id lastName phone province recipient updatedAt zip zoneCode }
-          buyerExperienceConfiguration { checkoutToDraft deposit { __typename } editableShippingAddress paymentTermsTemplate { id } }
+          buyerExperienceConfiguration { checkoutToDraft deposit { __typename ... on DepositPercentage { percentage } } editableShippingAddress paymentTermsTemplate { id } }
           catalogsCount { count precision }
           catalogs(first: 25) { nodes { id } }
           company { id }

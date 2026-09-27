@@ -16,7 +16,6 @@ query ShopifyFetchPriceList($id: ID!) {
       parent { adjustment { type value } settings { compareAtMode } }
       prices(first: 100) {
         nodes {
-          id
           compareAtPrice { amount currencyCode }
           originType
           price { amount currencyCode }
@@ -25,7 +24,6 @@ query ShopifyFetchPriceList($id: ID!) {
       }
       quantityRules(first: 100) {
         nodes {
-          id
           increment
           isDefault
           maximum
@@ -38,8 +36,8 @@ query ShopifyFetchPriceList($id: ID!) {
   }
 }
 
-query ShopifyListPriceList($first: Int!, $after: String, $query: String) {
-  priceLists(first: $first, after: $after, query: $query) {
+query ShopifyListPriceList($first: Int!, $after: String) {
+  priceLists(first: $first, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
@@ -50,7 +48,6 @@ query ShopifyListPriceList($first: Int!, $after: String, $query: String) {
       parent { adjustment { type value } settings { compareAtMode } }
       prices(first: 100) {
         nodes {
-          id
           compareAtPrice { amount currencyCode }
           originType
           price { amount currencyCode }
@@ -59,7 +56,6 @@ query ShopifyListPriceList($first: Int!, $after: String, $query: String) {
       }
       quantityRules(first: 100) {
         nodes {
-          id
           increment
           isDefault
           maximum

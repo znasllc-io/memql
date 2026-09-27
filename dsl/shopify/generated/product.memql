@@ -97,11 +97,11 @@ concept product {
   publishedAt                string
   /// Admin GraphQL requiresSellingPlan.
   requiresSellingPlan        bool
+  /// Admin GraphQL resourcePublications. Inline ResourcePublication rows
+  /// (reference connection, first 25): the type has no id to keep a GID of.
+  resourcePublications       []object
   /// Admin GraphQL resourcePublicationsCount.
   resourcePublicationsCount  object
-  /// Admin GraphQL resourcePublications. GIDs only (reference connection,
-  /// first 25).
-  resourcePublicationsGids   []string
   /// Admin GraphQL sellingPlanGroupsCount.
   sellingPlanGroupsCount     object
   /// Admin GraphQL sellingPlanGroups. GIDs only (reference connection, first

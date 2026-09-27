@@ -218,10 +218,22 @@ type TypeSpec struct {
 	// QueryRoot field that returns the one object.
 	ListQuery string
 	Singleton string
+	// ListFilterable says ListQuery accepts a query: argument, so ListOp
+	// declares $query and an updated_at sweep can pass an updated_at:>
+	// filter through it. When false, ListOp declares NO $query variable
+	// and a caller must not send one: an undeclared variable is a GraphQL
+	// validation error on every page, not an ignored input.
+	ListFilterable bool
 	// Fetchable says the type implements Node, so node(id:) resolves it.
 	// A type that does not is only ever reached through its parent or a
 	// bulk stream -- and a webhook naming it has nothing to fetch.
 	Fetchable bool
+	// HasID says the Admin type declares an id field, which is where a
+	// mirror row's gid is read from. A type without one (a price list's
+	// prices and quantity rules) is selected without id, so its objects
+	// arrive with no gid of their own and the apply path has to key them
+	// by their parent plus what makes them unique.
+	HasID bool
 
 	Bulk      bool
 	Reconcile string
@@ -322,7 +334,11 @@ func emitTypeSpec(p *TypePlan, doc, bulkDoc string, bulkOps []string) string {
 	fmt.Fprintf(&b, "\t\tShape:       %q,\n", shapeName(p))
 	fmt.Fprintf(&b, "\t\tListQuery:   %q,\n", p.Entry.Query)
 	fmt.Fprintf(&b, "\t\tSingleton:   %q,\n", p.Entry.Singleton)
+	if p.Entry.Query != "" {
+		fmt.Fprintf(&b, "\t\tListFilterable: %t,\n", p.ListFilterable)
+	}
 	fmt.Fprintf(&b, "\t\tFetchable:   %t,\n", p.Fetchable())
+	fmt.Fprintf(&b, "\t\tHasID:       %t,\n", p.HasID)
 	fmt.Fprintf(&b, "\t\tBulk:        %t,\n", p.Entry.Bulk)
 	fmt.Fprintf(&b, "\t\tReconcile:   %q,\n", p.Entry.Reconcile)
 	fmt.Fprintf(&b, "\t\tCadence:     %q,\n", p.Entry.Cadence)

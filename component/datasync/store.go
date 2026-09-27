@@ -3,6 +3,7 @@ package datasync
 import (
 	"context"
 	"fmt"
+	"github.com/znasllc-io/memql/core/id"
 	"strings"
 	"time"
 
@@ -93,20 +94,38 @@ type SyncState struct {
 	LastInboundAt   time.Time
 	LagSeconds      int
 	LastReconcileAt time.Time
+	LastAttemptAt   time.Time
 	DriftCount      int
 	OutboxDepth     int
 	DeadLetterCount int
 	Paused          bool
 	LastError       string
+	// Stored says a row came back from the database; false is the empty
+	// state SyncStateFor hands out for a domain nothing has written yet,
+	// which already carries the id it WOULD have.
+	Stored bool
 }
+
+// syncIDs derives the health row ids. Untracked: a hash-only caller keeps
+// no generation history.
+var syncIDs = id.NewUntracked()
 
 // SyncStateID is the deterministic row id for one domain.
 //
 // Deterministic so the append-only history of that id IS the health
 // timeline for that domain: every write is another version of the same
 // row rather than a new row nobody can correlate with the last one.
+//
+// It is derived through core/id from the tuple, not the tuple spelled out.
+// The first form, "<concept>|<connector>|<direction>", carried the concept
+// id's colons, and the engine's identifier rule
+// (docs/public/concepts/identifiers.md) refuses a short id with a colon in
+// it. Every health write was refused, every caller discarded the refusal,
+// and a cluster ran for weeks with no health row at all: every domain due
+// on every tick, no cadence honoured, no sweep failure ever shown. The tuple
+// stays readable on the row's own fields.
 func SyncStateID(conceptID, connector, direction string) string {
-	return fmt.Sprintf("%s|%s|%s", strings.TrimSpace(conceptID), strings.TrimSpace(connector), strings.TrimSpace(direction))
+	return string(syncIDs.FromString(strings.TrimSpace(conceptID) + "|" + strings.TrimSpace(connector) + "|" + strings.TrimSpace(direction)))
 }
 
 // PendingOutbox returns the entries one connector still owes delivery
@@ -179,7 +198,9 @@ func (s *Store) SyncStateFor(ctx context.Context, conceptID, connector, directio
 			Direction: direction,
 		}, nil
 	}
-	return syncStateFromRow(rows[0]), nil
+	st := syncStateFromRow(rows[0])
+	st.Stored = true
+	return st, nil
 }
 
 // WriteSyncState persists one domain's health.
@@ -210,6 +231,9 @@ func (s *Store) WriteSyncState(ctx context.Context, st SyncState) error {
 	}
 	if !st.LastReconcileAt.IsZero() {
 		args = append(args, arg{"lastReconcileAt", st.LastReconcileAt.UTC().Format(time.RFC3339)})
+	}
+	if !st.LastAttemptAt.IsZero() {
+		args = append(args, arg{"lastAttemptAt", st.LastAttemptAt.UTC().Format(time.RFC3339)})
 	}
 	_, err := s.exec(ctx, call("mutation", "upsertSyncState", args...))
 	return err
@@ -303,6 +327,7 @@ func syncStateFromRow(r map[string]any) SyncState {
 		LastInboundAt:   timeField(r, "lastInboundAt"),
 		LagSeconds:      intField(r, "lagSeconds"),
 		LastReconcileAt: timeField(r, "lastReconcileAt"),
+		LastAttemptAt:   timeField(r, "lastAttemptAt"),
 		DriftCount:      intField(r, "driftCount"),
 		OutboxDepth:     intField(r, "outboxDepth"),
 		DeadLetterCount: intField(r, "deadLetterCount"),

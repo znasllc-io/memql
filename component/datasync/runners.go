@@ -111,7 +111,7 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID str
 	st.ConceptID, st.Connector, st.Direction = conceptID, connectorName, string(memqlsync.DirectionInbound)
 	st.BackfillStatus = "running"
 	st.LastError = ""
-	_ = r.store.WriteSyncState(opCtx, st)
+	r.writeState(opCtx, st)
 
 	connCtx := auth.ContextWithConnectorActor(ctx, connectorName)
 	cursor := st.BackfillCursor
@@ -133,7 +133,7 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID str
 			st.BackfillStatus = "failed"
 			st.LastError = pageErr.Error()
 			st.BackfillCursor = cursor
-			_ = r.store.WriteSyncState(opCtx, st)
+			r.writeState(opCtx, st)
 			return out, fmt.Errorf("datasync: backfilling %s from %q: %w", conceptID, connectorName, pageErr)
 		}
 		out.Pages++
@@ -145,7 +145,7 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID str
 			st.BackfillStatus = "failed"
 			st.LastError = applyErr.Error()
 			st.BackfillCursor = cursor
-			_ = r.store.WriteSyncState(opCtx, st)
+			r.writeState(opCtx, st)
 			return out, applyErr
 		}
 
@@ -153,7 +153,7 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID str
 		st.BackfillCursor = cursor
 		// Persisted per PAGE. See the file header: a restart mid-backfill
 		// has to resume, not restart.
-		_ = r.store.WriteSyncState(opCtx, st)
+		r.writeState(opCtx, st)
 
 		if page.Done || strings.TrimSpace(cursor) == "" {
 			out.Done = true
@@ -172,12 +172,25 @@ func (r *Runner) StartBackfill(ctx context.Context, connectorName, conceptID str
 			"connector", connectorName, "concept", conceptID, "pages", out.Pages)
 	}
 	st.BackfillCursor = cursor
-	_ = r.store.WriteSyncState(opCtx, st)
+	r.writeState(opCtx, st)
 
 	r.logger.Info("datasync backfill: pass complete",
 		"connector", connectorName, "concept", conceptID,
 		"pages", out.Pages, "applied", out.Applied, "stale", out.Stale, "done", out.Done)
 	return out, nil
+}
+
+// writeState persists a domain's health and SAYS SO when it cannot.
+//
+// Every caller used to discard the error. That is how a refused row id kept
+// every health write off the database for weeks with nothing in any log --
+// the sweep ran, the runner "recorded" its result, and the Data origins page
+// showed an empty table. A health write that fails is itself health news.
+func (r *Runner) writeState(ctx context.Context, st SyncState) {
+	if err := r.store.WriteSyncState(ctx, st); err != nil && r.logger != nil {
+		r.logger.Warn("datasync: could not record a domain's health",
+			"connector", st.Connector, "concept", st.ConceptID, "error", err)
+	}
 }
 
 // ReconcileResult is what one reconciliation sweep found.
@@ -215,23 +228,57 @@ func (r *Runner) Reconcile(ctx context.Context, connectorName, conceptID string)
 
 	st.ConceptID, st.Connector, st.Direction = conceptID, connectorName, string(memqlsync.DirectionInbound)
 	if reconcileErr != nil {
-		if memqlsync.IsNotImplemented(reconcileErr) {
+		switch {
+		case memqlsync.IsNotImplemented(reconcileErr):
 			// A connector that does not reconcile is a configuration
 			// fact, not a failure. Recorded as such and not written onto
 			// lastError, which is for things that went wrong.
 			out.Skipped = true
 			return out, nil
+		case memqlsync.IsNotGranted(reconcileErr):
+			// The origin never granted this deployment the domain (an
+			// access scope the connection was made without). Skipped like
+			// a connector that does not reconcile -- and unlike it,
+			// RECORDED, so the Data origins page says why the domain is
+			// idle and what a grant would change. Written when the reason
+			// changes and otherwise no more than once per
+			// notGrantedRecheck: the health row is an append-only
+			// timeline, and 22 domains restating the same reason every
+			// ten minutes is a table nobody asked for. The attempt stamp
+			// is what holds the domain to its cadence between writes.
+			out.Skipped = true
+			msg := truncateError(reconcileErr.Error())
+			if st.LastError != msg || r.now().UTC().Sub(st.LastAttemptAt) >= notGrantedRecheck {
+				st.LastError = msg
+				st.LastAttemptAt = r.now().UTC()
+				r.writeState(opCtx, st)
+			}
+			return out, nil
+		case memqlsync.IsPermanent(reconcileErr):
+			// A refusal the next tick cannot change: a generated query the
+			// origin rejects. Still reported -- somebody has to fix the
+			// query -- and stamped as an ATTEMPT, so the domain waits its
+			// own cadence instead of repeating the identical refusal on
+			// every tick. lastReconcileAt is left alone: it is the
+			// updated_at watermark the next sweep narrows on, and moving
+			// it for a sweep that never ran would skip the drift between
+			// the last real sweep and the refusal once the refusal clears.
+			st.LastError = reconcileErr.Error()
+			st.LastAttemptAt = r.now().UTC()
+			r.writeState(opCtx, st)
+			return out, fmt.Errorf("datasync: reconciling %s against %q: %w", conceptID, connectorName, reconcileErr)
 		}
 		st.LastError = reconcileErr.Error()
-		_ = r.store.WriteSyncState(opCtx, st)
+		r.writeState(opCtx, st)
 		return out, fmt.Errorf("datasync: reconciling %s against %q: %w", conceptID, connectorName, reconcileErr)
 	}
 
 	out.Checked, out.Drifted, out.Healed = report.Checked, report.Drifted, report.Healed
 	st.LastReconcileAt = r.now().UTC()
+	st.LastAttemptAt = st.LastReconcileAt
 	st.DriftCount = report.Drifted
 	st.LastError = ""
-	_ = r.store.WriteSyncState(opCtx, st)
+	r.writeState(opCtx, st)
 
 	// Logged at Warn when drift was found even though it was healed:
 	// recurring drift is a webhook stream that is not arriving, and the
@@ -260,11 +307,24 @@ func (r *Runner) ReconcileDue(ctx context.Context, connectorName string, spec me
 	if err != nil || st.Paused {
 		return false
 	}
-	if st.LastReconcileAt.IsZero() {
+	// The cadence runs from the last ATTEMPT when that is later than the
+	// last finished sweep: a refused or not-granted domain waits its
+	// interval like any other, while `since` keeps pointing at the last
+	// sweep that ran.
+	last := st.LastReconcileAt
+	if st.LastAttemptAt.After(last) {
+		last = st.LastAttemptAt
+	}
+	if last.IsZero() {
 		return true
 	}
-	return r.now().UTC().Sub(st.LastReconcileAt) >= spec.ReconcileInterval
+	return r.now().UTC().Sub(last) >= spec.ReconcileInterval
 }
+
+// notGrantedRecheck bounds how often a not-granted domain re-writes its
+// unchanged reason: a standing fact restated a few times a day, not on
+// every tick.
+const notGrantedRecheck = 6 * time.Hour
 
 // SetPaused flips a domain's pause switch, stopping both runners and the
 // drain for it.
@@ -274,11 +334,13 @@ func (r *Runner) SetPaused(ctx context.Context, connectorName, conceptID string,
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(st.ID) == "" {
-		// The domain has no health row yet, so there is nothing to flip.
-		// Write one carrying the pause rather than failing: pausing a
-		// domain before its first delivery is a legitimate thing to want.
-		st.ID = SyncStateID(conceptID, connectorName, string(memqlsync.DirectionInbound))
+	if !st.Stored {
+		// The domain has no health row yet, so there is nothing to flip:
+		// setSyncPaused is an update, and the engine refuses an update of
+		// a row that does not exist. Write one carrying the pause rather
+		// than failing: pausing a domain before its first delivery is a
+		// legitimate thing to want. (The empty state already carries the
+		// id it would have, so an empty-id check here never fired.)
 		st.ConceptID, st.Connector, st.Direction = conceptID, connectorName, string(memqlsync.DirectionInbound)
 		st.Paused = paused
 		return r.store.WriteSyncState(opCtx, st)

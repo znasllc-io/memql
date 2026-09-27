@@ -3,6 +3,7 @@ package datasync
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -179,11 +180,20 @@ type Dispatcher struct {
 	applier *Applier
 	lookup  func(name string) (memqlsync.Connector, bool)
 	now     func() time.Time
+	logger  *slog.Logger
 }
 
 // NewDispatcher builds the inbound router.
 func NewDispatcher(store *Store, applier *Applier) *Dispatcher {
 	return &Dispatcher{store: store, applier: applier, lookup: memqlsync.Lookup, now: time.Now}
+}
+
+// WithLogger gives the dispatcher somewhere to say that a health write was
+// refused; without one the refusal is dropped, which is how the first
+// SyncStateID kept every health row off the database unnoticed.
+func (d *Dispatcher) WithLogger(logger *slog.Logger) *Dispatcher {
+	d.logger = logger
+	return d
 }
 
 // DispatchResult is what one staged request produced.
@@ -305,7 +315,10 @@ func (d *Dispatcher) recordInboundHealth(
 		st.LastInboundAt = now
 		st.LagSeconds = lag
 		st.LastError = ""
-		_ = d.store.WriteSyncState(ctx, st)
+		if err := d.store.WriteSyncState(ctx, st); err != nil && d.logger != nil {
+			d.logger.Warn("datasync: could not record a domain's inbound health",
+				"connector", connector.Name(), "concept", conceptID, "error", err)
+		}
 	}
 }
 

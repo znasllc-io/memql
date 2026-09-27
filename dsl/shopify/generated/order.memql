@@ -119,9 +119,9 @@ concept order {
   customerJourneySummary     object
   /// Admin GraphQL customerLocale.
   customerLocale             string
-  /// Admin GraphQL discountApplications. GIDs only (reference connection,
-  /// first 25).
-  discountApplicationsGids   []string
+  /// Admin GraphQL discountApplications. Inline DiscountApplication rows
+  /// (reference connection, first 25): the type has no id to keep a GID of.
+  discountApplications       []object
   /// Admin GraphQL discountCode.
   discountCode               string
   /// Admin GraphQL discountCodes.

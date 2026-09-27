@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -144,6 +145,14 @@ type Connector struct {
 	// definitions remembers which metafield definitions have been
 	// created, per store.
 	definitions *definitionCache
+
+	// pageSizes remembers, per (store, domain), the list page a cost
+	// refusal taught; see listPage.
+	pageSizes sync.Map
+	// denied is what the store's grant has refused field by field, per
+	// store then domain; see noteDeniedFields.
+	deniedMu sync.Mutex
+	denied   map[string]map[string][]string
 
 	// deliver overrides the webhook delivery URL. Tests only.
 	deliver func(store Store) string

@@ -32,6 +32,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -154,6 +155,16 @@ func generate(root, version string, list *Allowlist, set *PlanSet) (int, error) 
 	write := func(path, body string) error {
 		keep[path] = true
 		count++
+		if strings.HasSuffix(path, ".go") {
+			// Emitted Go goes through gofmt, so the generated model reads
+			// like the hand-written code beside it and a formatter never
+			// produces a diff the generator would then undo.
+			formatted, err := format.Source([]byte(body))
+			if err != nil {
+				return fmt.Errorf("%s: generated Go does not parse: %w", path, err)
+			}
+			body = string(formatted)
+		}
 		return os.WriteFile(path, []byte(body), 0o644)
 	}
 
