@@ -5,7 +5,8 @@
 // a cluster to its instance row (task memql#3853), BILLING, which turns events
 // from two outside systems into graph writes (task memql#3854), and the TRIAL
 // CLOCK and IDLE HIBERNATION, scheduled sweeps that act when a date passes
-// (task memql#3856).
+// (task memql#3856) -- all six @disabled pending the trial lifecycle redesign
+// (memql#5677; the section says why).
 //
 // ONE FILE, BECAUSE THE LOADER READS ONE FILE. The automation loader reads a
 // domain's automations from its automations.memql and from no other file. The
@@ -398,8 +399,10 @@ automation welcomeOnInstanceRunning {
 /// node.created for its new version, so the `failed` stamp below is itself a delivery this trigger
 /// sees; without `row.status == "received"` the automation re-triggers on it until the chain-depth
 /// cap stops the run. The loop gate refused exactly that the first time this automation loaded
-/// (memql#5437 -- it had lived in a file the loader never read). A redelivery restages the row as
-/// `received`, so it is claimed again, which is the at-least-once contract the receiver documents.
+/// (memql#5437 -- it had lived in a file the loader never read). A redelivery re-stages the SAME row
+/// but keeps the status it already has -- stageInboundRequest is @createOnly("status") -- so a
+/// delivery this automation already stamped `failed` stays `failed` and is NOT claimed again; only
+/// a delivery the receiver has just staged, still `received`, is.
 ///
 /// WHAT IT DELIBERATELY DOES NOT DO is act on the event. It stamps `failed` with a reason and stops.
 ///
@@ -499,23 +502,24 @@ automation dunningNoticeOnPaymentFailure {
 /// A subscription recovered: clear the account's delinquency. `activateSubscription` already
 /// cleared the grace clock -- a subscription that is active is not in any grace period by
 /// definition, and a stale `graceEndsAt` is how a recovered account gets torn down a week later.
+///
+/// FIRES ON THE TRANSITION, past_due to active, and on nothing else. Every write to an active
+/// subscription is a node.updated event -- a period roll, a mirrored Stripe field -- and firing
+/// on the STATE rewrote the subscriber on each of them, and returned an account to `active` that
+/// an operator had set otherwise. `oldStatus` is the prior version's status, the same reading the
+/// tree's other transition automations use (dsl/work, dsl/procedure).
 @trigger(event="node.updated", concept="v1:fleet:subscription")
+@filter(row => row.status == "active" && args.oldStatus == "past_due")
 automation clearDelinquencyOnRecovery {
   args {
-    id           any
     subscriberId any
-    status       any
+    oldStatus    any
   }
 
-  switch args.status {
-    case "active" {
-      mutation setSubscriberStatus(
-        subscriberId: args.subscriberId,
-        status:       "active"
-      )
-    }
-    default { }
-  }
+  mutation setSubscriberStatus(
+    subscriberId: args.subscriberId,
+    status:       "active"
+  )
 }
 
 /// A payment failed: tell the person who pays.
@@ -571,6 +575,22 @@ automation dunningEmailOnPaymentFailure {
 // instance of any tier. They lived in trial.memql until memql#5437, and none of
 // them had ever loaded (see the head of this file).
 //
+// ALL SIX ARE @disabled, PENDING THE TRIAL LIFECYCLE REDESIGN (memql#5677).
+// They load and are checked like every other construct -- a disabled construct
+// is maintained -- but the scheduler does not run them. Two findings decided it,
+// both measured once the sweeps loaded:
+//
+//   - THEY READ NOTHING. Their candidate queries (instancesByStatus,
+//     subscriptionsByStatus) are owner-tier reads, and an automation runs as its
+//     own synthetic actor (`system:automation:<name>`), which owns no row. See
+//     "how they are allowed to read" below.
+//   - FIXING THE READ WOULD EXPOSE THE DAMAGE. teardownAfterGrace would destroy
+//     any instance suspended for 14 days -- a customer's own pause, a
+//     hibernation, a dunning suspension -- while its subscription is still
+//     billed; trialExpirySuspend and the nudges key off `instance.trialEndsAt`,
+//     which nothing updates after a conversion or an extension. The lifecycle
+//     has to be designed as a whole before any of it runs.
+//
 // =============================================================================
 //   Why these are sweeps at all, and how they are allowed to read
 // =============================================================================
@@ -581,14 +601,19 @@ automation dunningEmailOnPaymentFailure {
 // never do, because an automation's actor is not the row's owner and a
 // caller-scoped read from inside one returns nothing while looking correct.
 //
-// What makes it legal is the pair of annotations on the queries they call
-// (queries.memql, "Internal sweeps"): `@serverOnly` refuses a client-originated
-// call outright, and `@unbounded` declares that reading every row is the intent
-// -- with the reason recorded, so the pagination gate does not silently truncate
-// a sweep to its first page and leave the tail of the fleet unswept. That is the
-// same shape `usersInDeletionCooldown` has carried in the identity domain, and
-// deploy/fleet/authz_test.go checks BOTH annotations are present, because either
-// alone is a defect wearing the other's clothes.
+// The queries they call carry a pair of annotations (queries.memql, "Internal
+// sweeps"): `@serverOnly` refuses a client-originated call outright, and
+// `@unbounded` declares that reading every row is the intent -- with the reason
+// recorded, so the pagination gate does not silently truncate a sweep to its
+// first page and leave the tail of the fleet unswept. deploy/fleet/authz_test.go
+// checks BOTH annotations are present, because either alone is a defect wearing
+// the other's clothes.
+//
+// That pair makes the CALL reachable from an automation; it does not widen the
+// concept's owner tier. The row-authz layer still admits only the rows the
+// caller owns, and an automation's synthetic actor owns none -- so these reads
+// return nothing, which is the first reason the sweeps are disabled (above).
+// Giving them a reach they can use is part of memql#5677.
 //
 // =============================================================================
 //   Every sweep reads exactly ONE concept, and that is why the clocks are
@@ -640,6 +665,11 @@ automation dunningEmailOnPaymentFailure {
 /// The email is keyed on the instance AND the milestone, so the two nudges are different outbound
 /// rows and neither suppresses the other -- `stageOutboundRequest` is idempotent by requestId, so a
 /// shared key would mean the day-12 message silently never sent.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): nudges key off
+/// `instance.trialEndsAt`, which nothing updates after a conversion or an extension, and its
+/// candidate read returns nothing to an automation.
+@disabled
 @trigger(schedule="0 0 9 * * *")
 automation trialNudgeDay7 {
   decide := logic runningInstances(event: event)
@@ -658,6 +688,10 @@ automation trialNudgeDay7 {
 /// Daily 09:00 UTC: the two-days-out nudge. Deliberately a different message from the day-7 one --
 /// this is the last one before the instance pauses, and it says what happens next rather than
 /// repeating the invitation.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): the same stale
+/// `instance.trialEndsAt` as trialNudgeDay7, and the same empty read.
+@disabled
 @trigger(schedule="0 0 9 * * *")
 automation trialNudgeDay12 {
   decide := logic runningInstances(event: event)
@@ -685,6 +719,11 @@ automation trialNudgeDay12 {
 /// other. They are eventually consistent with each other, and the order does not matter: a paused
 /// instance whose subscription is still `trialing` for a few hours is a customer who cannot use a
 /// service they are not paying for, which is the intended state either way.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): it keys off `instance.trialEndsAt`,
+/// which nothing updates after a conversion or an extension, so it would pause a customer who
+/// converted.
+@disabled
 @trigger(schedule="0 0 2 * * *")
 automation trialExpirySuspend {
   decide := logic runningInstances(event: event)
@@ -699,6 +738,10 @@ automation trialExpirySuspend {
 /// `paused`, not `cancelled`. The customer did not cancel -- they ran out of trial, which is a
 /// different fact about the same person and the one that decides whether "convert" or "resubscribe"
 /// is the right word in every message that follows.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): its candidate read returns nothing
+/// to an automation, and it closes subscriptions on the trial clock the redesign replaces.
+@disabled
 @trigger(schedule="0 0 2 * * *")
 automation trialExpiryClose {
   decide := logic trialingSubscriptions(event: event)
@@ -727,6 +770,11 @@ automation trialExpiryClose {
 /// the tenant's traffic. An instance that has never reported activity therefore has an empty field
 /// and is skipped rather than hibernated -- fail-safe in the direction that costs money rather than
 /// the one that surprises a customer.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): a hibernated instance is
+/// `suspended`, and teardownAfterGrace would destroy it 14 days later while its subscription is
+/// still billed.
+@disabled
 @trigger(schedule="0 0 3 * * *")
 automation hibernateIdleInstances {
   decide := logic runningInstances(event: event)
@@ -753,6 +801,11 @@ automation hibernateIdleInstances {
 /// `suspendedAt` is the clock, and it is the instance's OWN field rather than the subscription's
 /// `graceEndsAt`. The two normally agree; where they do not, this one is the honest one -- it
 /// measures how long the data has actually been cold, which is the thing the grace period is about.
+///
+/// DISABLED pending the trial lifecycle redesign (memql#5677): it would destroy ANY instance
+/// suspended for 14 days -- a customer's own pause, a hibernation, a dunning suspension -- while
+/// its subscription is still billed.
+@disabled
 @trigger(schedule="0 0 4 * * *")
 automation teardownAfterGrace {
   decide := logic suspendedInstances(event: event)
