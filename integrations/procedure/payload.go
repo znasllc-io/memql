@@ -339,11 +339,18 @@ func (i *Integration) buildProcedure(ctx context.Context, k corpusKey, t proc.Te
 	// THE FOOTPRINT is measured per recording, against THAT recording's
 	// workspace (the fingerprint's cwd, not a directory a command moved to):
 	// a path inside the workspace a session ran in is portable, and the same
-	// path read against another session's workspace would not be.
+	// path read against another session's workspace would not be. It is the
+	// workspace the action's arguments were relativized against, so a path
+	// the rewrite made relative and one it left absolute are judged alike.
 	for _, in := range insts {
 		rec := recs[in.seq]
 		for _, a := range in.actions {
-			p.Footprint = unionFootprint(p.Footprint, work.ActionFootprint(a.Tool, rec.Workspace, rec.Evidence[a.Key].Paths))
+			ev := rec.Evidence[a.Key]
+			ws := ev.Workspace
+			if ws == "" {
+				ws = rec.Workspace
+			}
+			p.Footprint = unionFootprint(p.Footprint, work.ActionFootprint(a.Tool, ws, ev.Paths))
 		}
 	}
 	p.Target = string(work.ReplayTargetFor(p.Footprint))

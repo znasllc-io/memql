@@ -102,8 +102,15 @@ type stepEvidence struct {
 	StepType    string
 	Observation work.StepObservation
 	// Paths are every file path the action named -- in its arguments and in
-	// its contents -- as recorded, for the footprint.
+	// its contents -- for the footprint. A path inside the workspace is
+	// already written relative to it (relativize.go).
 	Paths []string
+	// Workspace is the directory the action's paths were read against: the
+	// recording's fingerprint cwd, or -- for a recording that carried no
+	// fingerprint -- the action's own. The footprint is measured against the
+	// SAME directory the arguments were relativized against, or a path the
+	// rewrite made relative would be judged against a different root.
+	Workspace string
 }
 
 // stepVerdict is one feedback row on one step version.
@@ -237,8 +244,12 @@ func (i *Integration) loadRecording(ctx context.Context, run map[string]any, lev
 					"runId", runId, "stepKey", key)
 				return rec, false, nil
 			}
-			input = args
-			rec.Evidence[key] = i.stepEvidenceOf(ctx, stepType, o, args, rec.Workspace)
+			// THE WORKSPACE IS WRITTEN AS THE WORKSPACE before anything is
+			// canonicalized (relativize.go): the fingerprint's cwd, or --
+			// for a recording that carried none -- the action's own.
+			ws := actionWorkspace(rec.Workspace, o)
+			input = relativizeArgs(args, ws)
+			rec.Evidence[key] = i.stepEvidenceOf(ctx, stepType, o, input, ws)
 		}
 		result := obj(r, "result")
 		steps = append(steps, proc.Step{
@@ -341,7 +352,7 @@ func observationArgs(o map[string]any) (map[string]any, bool) {
 // its output, not the files it touched.
 func (i *Integration) stepEvidenceOf(ctx context.Context, stepType string, o, args map[string]any, workspace string) stepEvidence {
 	data := obj(o, "data")
-	ev := stepEvidence{StepType: stepType}
+	ev := stepEvidence{StepType: stepType, Workspace: workspace}
 	if b, ok := data["isError"].(bool); ok {
 		ev.Observation.IsError = &b
 	}

@@ -65,10 +65,45 @@ type fakeEngine struct {
 	// only to calls made as that actor, and nothing to anybody else -- the
 	// composite tier's answer, zero rows and no error.
 	ownedBy map[string]string
+	// dynamic answers a read from live state, taking precedence over every
+	// static reply when it HANDLES the call, and may answer the next page's
+	// cursor: a fake that cannot page cannot test a walk that must. A call it
+	// does not handle falls through to the static replies.
+	dynamic map[string]func(call recordedCall, cursor string) ([]map[string]any, string, bool)
+	// hooks see every write to a construct after it is recorded -- how a
+	// test keeps the row a later read answers in step with what was written.
+	hooks map[string]func(call recordedCall)
 }
 
 func newFakeEngine() *fakeEngine {
-	return &fakeEngine{replies: map[string][]map[string]any{}, fail: map[string]error{}, ownedBy: map[string]string{}}
+	return &fakeEngine{
+		replies: map[string][]map[string]any{}, fail: map[string]error{}, ownedBy: map[string]string{},
+		dynamic: map[string]func(recordedCall, string) ([]map[string]any, string, bool){},
+		hooks:   map[string]func(recordedCall){},
+	}
+}
+
+// answer installs a live read that handles every call to the construct.
+func (e *fakeEngine) answer(name string, fn func(call recordedCall, cursor string) ([]map[string]any, string)) {
+	e.answerSome(name, func(c recordedCall, cursor string) ([]map[string]any, string, bool) {
+		rows, next := fn(c, cursor)
+		return rows, next, true
+	})
+}
+
+// answerSome installs a live read that handles only the calls it says it
+// does, the rest falling through to the static replies.
+func (e *fakeEngine) answerSome(name string, fn func(call recordedCall, cursor string) ([]map[string]any, string, bool)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.dynamic[name] = fn
+}
+
+// onWrite installs a write hook.
+func (e *fakeEngine) onWrite(name string, fn func(call recordedCall)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.hooks[name] = fn
 }
 
 // ownedRead makes a construct answer only its owner.
@@ -93,20 +128,35 @@ func (e *fakeEngine) Execute(ctx context.Context, query string) (*memql.ExecuteR
 			break
 		}
 	}
+	dyn, hook := e.dynamic[name], e.hooks[name]
 	if owner, owned := e.ownedBy[name]; owned && c.Actor != owner {
-		rows = nil
+		rows, dyn = nil, nil
 	}
 	err := e.fail[name]
 	e.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
+	next := ""
+	if dyn != nil {
+		if live, cursor, handled := dyn(c, memql.CursorFromContext(ctx)); handled {
+			rows, next = live, cursor
+		}
+	}
+	if hook != nil {
+		hook(c)
+	}
 	// A shaped read answers `output` rows, the shape every read here has.
 	payload := make([]any, 0, len(rows))
 	for _, r := range rows {
 		payload = append(payload, r)
 	}
-	return memql.NewResultWithOutput(payload), nil
+	res := memql.NewResultWithOutput(payload)
+	if next != "" {
+		res.SetCursor(next)
+		res.SetHasMore(true)
+	}
+	return res, nil
 }
 
 func (e *fakeEngine) reply(name string, rows ...map[string]any) {
@@ -239,6 +289,12 @@ type recFixture struct {
 	noFingerprint bool
 	// execExit overrides the exec exit code.
 	execExit int
+	// writeArgs overrides the fs_write step's arguments -- another app's
+	// spelling of a write, or one no dispatcher applies.
+	writeArgs map[string]any
+	// execCommand overrides the exec step's command: the app doing the goal
+	// some other way.
+	execCommand string
 }
 
 type stepFeedback struct {
@@ -258,6 +314,14 @@ func recording1(file string, created time.Time) recFixture {
 	}
 }
 
+// command is the exec step's command line.
+func (r recFixture) command() string {
+	if r.execCommand != "" {
+		return r.execCommand
+	}
+	return "mkdir -p out && echo hello > " + r.file
+}
+
 func (r recFixture) execKey() string {
 	return "action-toolu_exec_" + strings.TrimSuffix(r.file, ".txt")
 }
@@ -270,8 +334,13 @@ func (r recFixture) writeKey() string {
 // under the name the FIRST session's action composed.
 const reportFileId = "v1:library:file:f-report"
 
-// reportPath is where every recording wrote the report.
-const reportPath = testWorkspace + "/out/report.txt"
+// reportPath is where every recording wrote the report, and
+// relativeReportPath is the same file as the corpus loader writes it: relative
+// to the recording's workspace (relativize.go).
+const (
+	reportPath         = testWorkspace + "/out/report.txt"
+	relativeReportPath = "./out/report.txt"
+)
 
 // helloDigest is sha256("hello\n"), the bytes every recording wrote.
 const helloDigest = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
@@ -354,19 +423,23 @@ func (r recFixture) observationRows(t *testing.T) []map[string]any {
 			"tool": "exec", "appActionId": "toolu_exec_" + strings.TrimSuffix(r.file, ".txt"),
 			"sessionId": r.sessionId, "seq": float64(1), "isError": r.execExit != 0,
 			"exitCode": float64(r.execExit), "resultType": "string", "cwd": testWorkspace,
-			"args": argsJSON(t, map[string]any{"command": "mkdir -p out && echo hello > " + r.file}),
+			"args": argsJSON(t, map[string]any{"command": r.command()}),
 		}
 		if r.argsTruncated {
 			data["argsTruncated"] = true
 		}
 		out = append(out, map[string]any{"kind": "tool_result", "stepKey": r.execKey(), "data": data})
 	}
+	writeArgs := r.writeArgs
+	if writeArgs == nil {
+		writeArgs = map[string]any{"file_path": reportPath, "content": "hello\n"}
+	}
 	out = append(out, map[string]any{
 		"kind": "tool_result", "stepKey": r.writeKey(),
 		"data": map[string]any{
 			"tool": "fs_write", "appActionId": "toolu_write_" + strings.TrimSuffix(r.file, ".txt"),
 			"sessionId": r.sessionId, "seq": float64(2), "isError": false, "resultType": "string",
-			"args":        argsJSON(t, map[string]any{"file_path": reportPath, "content": "hello\n"}),
+			"args":        argsJSON(t, writeArgs),
 			"contentRefs": []any{reportFileId},
 		},
 	})
