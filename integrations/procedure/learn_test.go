@@ -9,6 +9,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	proc "github.com/znasllc-io/memql/component/procedure"
 	"github.com/znasllc-io/memql/component/work"
+	workspine "github.com/znasllc-io/memql/integrations/work"
 )
 
 // failingDeriver fails the test if it is ever asked. It is the instrument for
@@ -465,5 +466,19 @@ func TestTheReplayTargetsAgreeWithComponentWork(t *testing.T) {
 	if string(work.TargetWorkbench) != proc.TargetWorkbench || string(work.TargetMachine) != proc.TargetMachine {
 		t.Fatalf("component/work targets %q/%q, component/procedure %q/%q",
 			work.TargetWorkbench, work.TargetMachine, proc.TargetWorkbench, proc.TargetMachine)
+	}
+}
+
+// TestTheReplayTriggerIsTheOneTheWorkSpineLeavesAlone pins the two spellings of
+// a replay run's trigger together. This package WRITES it on every replay run,
+// and integrations/work reads it to keep the run away from the template
+// executor -- which would otherwise fail the live replay automation_not_runnable
+// (epic memql#5408). integrations/work cannot import this package, so each
+// spells the prefix, and a drift between them would bring that failure back
+// with every test on both sides still green.
+func TestTheReplayTriggerIsTheOneTheWorkSpineLeavesAlone(t *testing.T) {
+	if replayTriggerPrefix != workspine.ProcedureReplayTriggerPrefix {
+		t.Fatalf("replay runs are opened with %q, and integrations/work leaves runs triggered by %q to their runner",
+			replayTriggerPrefix, workspine.ProcedureReplayTriggerPrefix)
 	}
 }
