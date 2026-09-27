@@ -1,0 +1,5 @@
+/// The banner every cluster starts with, of a concept no domain declares.
+seed welcomeBanner defaultWelcomeBanner {
+  id: "welcome"
+  text: "Welcome"
+}

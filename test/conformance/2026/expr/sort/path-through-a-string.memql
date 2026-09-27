@@ -1,0 +1,6 @@
+/// The open tickets, by a field of a field that is a string.
+query ticket soThroughATitle {
+  filter row => row.status == "open"
+  sort "title.first", "asc"
+  paginate 20
+}

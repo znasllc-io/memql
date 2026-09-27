@@ -1,0 +1,6 @@
+/// The open tickets, by a reserved engine name.
+query ticket soByProvenance {
+  filter row => row.status == "open"
+  sort "provenance", "desc"
+  paginate 20
+}

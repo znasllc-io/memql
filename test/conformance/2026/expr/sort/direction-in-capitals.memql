@@ -1,0 +1,6 @@
+/// The open tickets, most urgent first, the direction in capitals.
+query ticket soShoutedDirection {
+  filter row => row.status == "open"
+  sort "priority", "DESC"
+  paginate 20
+}

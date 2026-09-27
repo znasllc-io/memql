@@ -1,0 +1,6 @@
+/// The open tickets, by a key inside their open details object, which declares no keys.
+query ticket openTicketsBySeverity {
+  filter row => row.status == "open"
+  sort "details.severity", "desc"
+  paginate 20
+}

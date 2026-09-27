@@ -2,6 +2,7 @@ package memql
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -95,8 +96,17 @@ func (r *ConceptResolver) ResolveFileWithSignatureConceptsInDomain(file *languag
 
 	// Augment the symbol table with concepts named in construct
 	// signatures (`<kind> <Concept> <name> { ... }`).
+	//
+	// An import already in the table is kept only when it RESOLVED to a
+	// concept (memql#5433). resolveUseDeclarations records a name-only entry
+	// for an import that resolves to no concept -- rightly, since most Form B
+	// imports name shapes, traits and functions -- and skipping every entry
+	// here let a signature bind that entry's empty id: a query with no filter
+	// loaded and matched nothing, and one with a filter was refused as
+	// `concept==""` does not lower, which names neither the concept nor the
+	// import. Resolving it below refuses it by name instead.
 	for _, bareName := range signatureConcepts {
-		if _, dup := symbols[bareName]; dup {
+		if entry, dup := symbols[bareName]; dup && entry.resolvedId != "" {
 			continue
 		}
 		resolvedId, err := r.ResolveSignatureConceptInNamespace(file.Uses, bareName, dir, declaredNS)
@@ -166,7 +176,7 @@ func (r *ConceptResolver) ResolveSignatureConceptInNamespace(uses []*languagePar
 	if nsHint, sourceName := namespaceHintForName(uses, bareName); nsHint != "" {
 		id, err := r.resolveBareConceptNameWithNamespace(sourceName, nsHint)
 		if err != nil {
-			return "", fmt.Errorf("signature concept %q: %w", bareName, err)
+			return "", r.unresolvedImportedSignature(uses, bareName, sourceName, nsHint, err)
 		}
 		return id, nil
 	}
@@ -175,7 +185,8 @@ func (r *ConceptResolver) ResolveSignatureConceptInNamespace(uses []*languagePar
 	if dir == "" && declaredNS == "" {
 		id, err := r.resolveBareConceptNameWithNamespace(bareName, "")
 		if err != nil {
-			return "", fmt.Errorf("signature concept %q: %w", bareName, err)
+			return "", &SignatureConceptError{Name: bareName, Reason: err.Error(),
+				Fix: r.signatureConceptFix(bareName, "")}
 		}
 		return id, nil
 	}
@@ -192,7 +203,128 @@ func (r *ConceptResolver) ResolveSignatureConceptInNamespace(uses []*languagePar
 	}
 
 	// 3. Refused.
-	return "", fmt.Errorf("signature concept %q is neither imported nor a same-domain concept of %q -- add a file-top `use <ns>.concepts.{ %s }` import", bareName, dir, bareName)
+	return "", &SignatureConceptError{Name: bareName,
+		Reason: fmt.Sprintf("it is neither imported nor a same-domain concept of %q", dir),
+		Fix:    r.signatureConceptFix(bareName, "")}
+}
+
+// SignatureConceptCode is the rule id of a construct whose signature binds a
+// concept that does not resolve (memql#5433): `query lead openLeads { ... }`
+// where no import and no same-domain declaration supplies `lead`, or where the
+// import that names it supplies no concept of that name. Stable: the load
+// report, memqllint and the conformance corpus key on it, and the wording may
+// be revised around it.
+const SignatureConceptCode = "signature_concept_unresolved"
+
+// SignatureConceptError refuses a construct signature whose concept does not
+// resolve. It names the concept, why it did not resolve, and the import or
+// declaration that fixes it, with the rule id last in brackets -- the
+// convention the annotation registry and the lowering share, so a caller that
+// prefixes the construct leaves the code findable at the end.
+type SignatureConceptError struct {
+	// Name is the concept as the signature writes it (the local name, for an
+	// aliased import).
+	Name string
+	// Reason says why it did not resolve.
+	Reason string
+	// Fix says what to write instead.
+	Fix string
+}
+
+// Error prints the refusal as one sentence.
+func (e *SignatureConceptError) Error() string {
+	msg := fmt.Sprintf("signature concept %q does not resolve: %s", e.Name, e.Reason)
+	if e.Fix != "" {
+		msg += " -- " + e.Fix
+	}
+	return msg + " [" + SignatureConceptCode + "]"
+}
+
+// RuleCode is the refusal's stable rule id (baseloader.CodedRefusal).
+func (e *SignatureConceptError) RuleCode() string { return SignatureConceptCode }
+
+// unresolvedImportedSignature is the refusal of a signature concept a file-top
+// import names but does not supply: the import's namespace declares no concept
+// of that name, or declares several. The import is quoted as the author wrote
+// it, because it is the line to change.
+func (r *ConceptResolver) unresolvedImportedSignature(uses []*languageParser.UseDeclaration, bareName, sourceName, nsHint string, cause error) error {
+	written := fmt.Sprintf("use %s.concepts.{ %s }", nsHint, sourceName)
+	for _, u := range uses {
+		if u == nil {
+			continue
+		}
+		if src, ok := u.SourceNameFor(bareName); ok && src == sourceName {
+			written = renderUseImport(u, sourceName, bareName)
+			break
+		}
+	}
+	reason := fmt.Sprintf("`%s` imports it, and namespace %s declares no concept %q", written, nsHint, sourceName)
+	if candidates := r.conceptCandidates(sourceName); len(candidates) > 1 {
+		// The import's namespace narrows nothing when it supplies none of
+		// them, and more than one when it supplies several: either way the
+		// resolver's own sentence says which, and it is the honest reason.
+		reason = fmt.Sprintf("`%s` imports it, and %v", written, cause)
+	}
+	return &SignatureConceptError{Name: bareName, Reason: reason, Fix: r.signatureConceptFix(sourceName, nsHint)}
+}
+
+// renderUseImport renders the one name of a use declaration a refusal is
+// about, as the author wrote it: `use crm.concepts.{ lead }`, or
+// `use crm.concepts.{ lead as crmLead }` for an aliased import.
+func renderUseImport(u *languageParser.UseDeclaration, source, local string) string {
+	name := source
+	if local != "" && local != source {
+		name = source + " as " + local
+	}
+	return fmt.Sprintf("use %s.{ %s }", u.Path, name)
+}
+
+// conceptCandidates is every registered concept id whose trailing segment is
+// name, sorted.
+func (r *ConceptResolver) conceptCandidates(name string) []string {
+	if r.registry == nil {
+		return nil
+	}
+	var out []string
+	for _, c := range r.registry.List() {
+		if c == nil {
+			continue
+		}
+		if idx := strings.LastIndex(c.Name, ":"); idx >= 0 && c.Name[idx+1:] == name {
+			out = append(out, c.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// signatureConceptFix is what to write when a signature concept does not
+// resolve: the import of each namespace that does declare a concept of that
+// name (other than the one an import already names), or, when none does, the
+// declaration the construct is missing.
+func (r *ConceptResolver) signatureConceptFix(name, importedNS string) string {
+	var imports []string
+	seen := map[string]bool{}
+	for _, id := range r.conceptCandidates(name) {
+		// The module path the import writes: the id's namespace, dotted --
+		// the rendering specBindingRefusal names an import with, so the two
+		// refusals never suggest two spellings of one import.
+		ns := strings.ReplaceAll(idNamespace(id), ":", ".")
+		if ns == "" || ns == importedNS || seen[ns] {
+			continue
+		}
+		seen[ns] = true
+		imports = append(imports, fmt.Sprintf("`use %s.concepts.{ %s }`", ns, name))
+	}
+	switch {
+	case len(imports) == 1:
+		return "import it from the namespace that declares it: " + imports[0]
+	case len(imports) > 1:
+		return "import it from the namespace that declares it, one of " + strings.Join(imports, ", ")
+	case importedNS != "":
+		return fmt.Sprintf("no mounted domain declares a concept %q: declare it in %s, or correct the name", name, importedNS)
+	}
+	return fmt.Sprintf("no mounted domain declares a concept %q: declare it, or add a file-top `use <ns>.concepts.{ %s }` import naming the domain that does", name, name)
 }
 
 // resolveBareConceptName looks up a bare concept name (e.g. "space")

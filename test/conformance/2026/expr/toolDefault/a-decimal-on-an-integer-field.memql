@@ -1,0 +1,5 @@
+/// List the open tickets, the default limit a fraction.
+@handler(type="query", query="paginate(query openTicketsForTool(), args.limit)")
+tool tdListTicketsByHalves {
+  limit  integer  @default("2.5")  @description("The most tickets to return.")
+}

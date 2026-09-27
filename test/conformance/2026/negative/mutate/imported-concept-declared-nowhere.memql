@@ -1,0 +1,11 @@
+use crm.concepts.{ supportMemo }
+
+/// Record a support memo. The import names a concept no domain declares.
+mutation supportMemo createSupportMemo {
+  args {
+    text  string!
+  }
+  insert {
+    text: args.text
+  }
+}

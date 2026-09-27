@@ -4,6 +4,27 @@
       "file": "unknown-clause.memql",
       "verdict": "refuse_parse",
       "message": "unknown struct-query field on line \"project title\""
+    },
+    {
+      "file": "imported-concept-declared-nowhere.memql",
+      "verdict": "refuse_load",
+      "code": "signature_concept_unresolved",
+      "message": "signature concept \"supportLead\" does not resolve: `use crm.concepts.{ supportLead }` imports it, and namespace crm declares no concept \"supportLead\" -- no mounted domain declares a concept \"supportLead\": declare it in crm, or correct the name",
+      "note": "memql#5433. The import is the authorization for a foreign signature concept, and one that supplies nothing used to bind the query to an EMPTY concept: with no filter it loaded and matched nothing."
+    },
+    {
+      "file": "imported-concept-declared-nowhere-filtered.memql",
+      "verdict": "refuse_load",
+      "code": "signature_concept_unresolved",
+      "message": "signature concept \"salesLead\" does not resolve: `use crm.concepts.{ salesLead }` imports it",
+      "note": "memql#5433. With a filter the empty binding was refused as `concept==\"\"` does not lower, which named neither the concept nor the import."
+    },
+    {
+      "file": "signature-concept-not-imported.memql",
+      "verdict": "refuse_load",
+      "code": "signature_concept_unresolved",
+      "message": "signature concept \"supportNote\" does not resolve: it is neither imported nor a same-domain concept",
+      "note": "The unimported half of the same rule, refused before memql#5433 and carrying its code since."
     }
   ]
 }

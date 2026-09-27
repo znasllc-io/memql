@@ -1,0 +1,5 @@
+/// List the open tickets, the default limit spelled out in words.
+@handler(type="query", query="paginate(query openTicketsForTool(), args.limit)")
+tool tdListTicketsInWords {
+  limit  integer  @default("twenty")  @description("The most tickets to return.")
+}

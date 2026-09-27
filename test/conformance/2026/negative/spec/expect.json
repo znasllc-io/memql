@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {
+      "file": "binding-declared-nowhere.memql",
+      "verdict": "refuse_load",
+      "code": "signature_concept_unresolved",
+      "message": "binding \"supportCase\" resolves to neither an imported shape nor a concept",
+      "note": "memql#5433: a spec binds a shape or a concept, and one that is neither carries the rule id every unresolved signature concept does."
+    }
+  ]
+}

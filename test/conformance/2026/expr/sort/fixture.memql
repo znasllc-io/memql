@@ -3,4 +3,8 @@ concept ticket {
   title     string
   status    string
   priority  int
+  details   object
+  routing {
+    queue  string
+  }
 }

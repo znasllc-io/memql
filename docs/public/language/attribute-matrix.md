@@ -542,7 +542,7 @@ On an insert (create-or-upsert) mutation: write the named payload fields ONLY wh
 | [prompt field](#prompt-field) | one string or one number | `@default("en")` |
 
 - On a provider: Mark this provider as the default for its modality.
-- On a tool field: The default the tool's input schema advertises to the model.
+- On a tool field: The default the tool's input schema advertises to the model, written quoted: its text is a literal of the field's type -- `@default("5")` on an integer field, `@default("true")` on a boolean, one of the values of an enum field -- or the load refuses it (tool_default_type, memql#5430).
 - On a prompt field: The default the prompt's input schema declares for the field.
 
 ### @defaultProvider

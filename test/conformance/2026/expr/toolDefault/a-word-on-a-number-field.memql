@@ -1,0 +1,5 @@
+/// List the tickets at or above a priority, the default priority written as a word.
+@handler(type="query", query="paginate(query ticketsForToolDefaults(minPriority: args.minPriority), 20)")
+tool tdListTicketsAboveHigh {
+  minPriority  number  @default("high")  @description("The lowest priority to list.")
+}

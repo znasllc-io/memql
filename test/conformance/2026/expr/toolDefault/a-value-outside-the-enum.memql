@@ -1,0 +1,5 @@
+/// List the tickets in one status, the default a status the field does not offer.
+@handler(type="query", query="paginate(query ticketsForToolDefaults(status: args.status), 20)")
+tool tdListTicketsPending {
+  status  enum("open", "closed")  @default("pending")  @description("The status to list.")
+}

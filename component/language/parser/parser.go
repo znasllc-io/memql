@@ -4896,13 +4896,15 @@ func (p *Parser) parseSortFunction() (ExpressionNode, error) {
 		p.advance()
 
 		direction := SortDesc
+		directionText := ""
 		if p.check(TokenComma) && p.peekAhead(1).Type == TokenString && isSortDirectionLiteral(p.peekAhead(1).Literal) {
 			p.advance() // consume comma
 			direction = parseSortDirection(p.current.Literal)
+			directionText = p.current.Literal
 			p.advance() // consume direction literal
 		}
 
-		fields = append(fields, SortField{Field: field, Direction: direction})
+		fields = append(fields, SortField{Field: field, Direction: direction, DirectionText: directionText})
 
 		if p.check(TokenParenClose) {
 			break
