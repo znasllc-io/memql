@@ -17,10 +17,10 @@ It exists to be given to a model -- as grammar-in-prompt, or as the grammar a co
 
 Two things are deliberately absent. The internal query form -- the string an SDK sends to `Execute` -- has its own grammar; a reader given both would have no way to tell which one their file is written in. And which annotation is legal on which construct, in which argument form, is the [attribute matrix](attribute-matrix.md), not a syntax rule. What each name MEANS is the [vocabulary](vocabulary.md).
 
-Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
+Edition `2026`, grammar version `2026.09-dsl-v1-agent-role-axis-e3f94bad`.
 
 ```ebnf
-(* MemQL authoring grammar. Edition 2026, grammar version 2026.09-before-write-error-accessor-77cda60c.
+(* MemQL authoring grammar. Edition 2026, grammar version 2026.09-dsl-v1-agent-role-axis-e3f94bad.
    GENERATED from the parser, the annotation registry and the function
    catalog -- do not edit. Run `make docs-grammar` to refresh it.
 
@@ -160,7 +160,8 @@ Edition `2026`, grammar version `2026.09-before-write-error-accessor-77cda60c`.
 <spec-annotation>     ::= ( "@description" | "@disabled" ) [ <annotation-args> ]
 <tool-annotation>     ::= ( "@allowedRoles" | "@description" | "@destructive"
                         | "@disabled" | "@executionTime" | "@handler" | "@mcp"
-                        | "@requiresConfirmation" ) [ <annotation-args> ]
+                        | "@requiresAgentRole" | "@requiresConfirmation"
+                        | "@requiresRank" ) [ <annotation-args> ]
 <trait-annotation>    ::= ( "@description" | "@disabled" ) [ <annotation-args> ]
 <concept-body-annotation> ::= ( "@relationship" ) [ <annotation-args> ]
 <declaration-annotation> ::= <action-annotation> | <automation-annotation>

@@ -94,7 +94,9 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@policy`](#policy-1) |  |  |  | string |  |
 | [`@precedence`](#precedence) |  |  |  | number |  |
 | [`@primary`](#primary) |  |  | string |  |  |
+| [`@requiresAgentRole`](#requiresagentrole) |  |  |  |  | strings |
 | [`@requiresConfirmation`](#requiresconfirmation) |  |  |  |  | flag |
+| [`@requiresRank`](#requiresrank) |  |  |  |  | string |
 | [`@templateFile`](#templatefile) | string |  |  |  |  |
 | [`@vendor`](#vendor) |  | string |  |  |  |
 | [`@when`](#when) |  |  |  | empty or keywords |  |
@@ -305,7 +307,9 @@ The fields in its body take the annotations under [prompt field](#prompt-field).
 | [`@executionTime`](#executiontime) | one string | `@executionTime("fast")` |
 | [`@handler`](#handler) | keyword arguments | `@handler(type="function", name="createTodo")` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
+| [`@requiresAgentRole`](#requiresagentrole) | one or more strings | `@requiresAgentRole("assistant")` |
 | [`@requiresConfirmation`](#requiresconfirmation) | no arguments | `@requiresConfirmation` |
+| [`@requiresRank`](#requiresrank) | one string | `@requiresRank("developer")` |
 
 The fields in its body take the annotations under [tool field](#tool-field).
 
@@ -451,7 +455,7 @@ Additional name the builtin is registered under. Repeatable.
 |---|---|---|
 | [tool](#tool) | one or more strings | `@allowedRoles("assistant", "specialist")` |
 
-Restrict the tool to a set of agent roles. Enforced on every path: tool_types.go, component/grpc/server.go and tool_execution.go. It gates the AGENT role (assistant / specialist), which is a different axis from @requiresRank (actor rank) and @requiresCapability (verb over a resource) -- neither can express it.
+DEPRECATED (rule deprecated_allowed_roles, memql#5438): write @requiresAgentRole for an agent kind and @requiresRank for a person's role -- `memqlmigrate --rewrite=allowed-roles` rewrites it. It compares ONE role string whose meaning depends on who is calling: the acting agent's role (assistant / specialist) in an agent's tool loop, and the person's cluster role over MCP. Two axes in one list is why it is leaving: neither list can be read without knowing which path the call arrives by. Until its window closes it keeps that behaviour, on every path a tool is listed or called by -- read by component/memql/tool_gate.go through Tool.IsAllowedForRole (tool_types.go).
 
 ### @appendFields
 
@@ -974,6 +978,14 @@ Both follow the same rules:
 - On a concept field, a tool field, a prompt field or a builtin field: The field is required: a concept write without it fails the schema, and a caller must pass an args / tool / prompt / builtin field that carries it. The `!` sigil after the type is the same thing.
 - On an args field: The caller must pass the argument. The `!` sigil after the type is the same thing.
 
+### @requiresAgentRole
+
+| On | Written as | Example |
+|---|---|---|
+| [tool](#tool) | one or more strings | `@requiresAgentRole("assistant")` |
+
+The AGENT-KIND gate on a tool: only an agent whose role is one of the values may be offered the tool or call it -- @requiresAgentRole("assistant") (memql#5438). The values are the v1:agents:agent concept's own `role` enum (assistant, specialist), and the load VALIDATES them against that declaration, so a value no agent can hold refuses boot rather than admitting nobody. It is the axis @requiresRank and @requiresCapability cannot express: they judge the PERSON a call is for, this judges WHICH AGENT is calling. A person calling over MCP is not an agent, so a tool carrying it is neither listed nor callable for them. It replaces the agent half of the deprecated @allowedRoles; a tool with neither gate is callable by every agent and by an authenticated person over MCP.
+
 ### @requiresCapability
 
 | On | Written as | Example |
@@ -996,10 +1008,11 @@ Require explicit user confirmation before the tool executes.
 
 | On | Written as | Example |
 |---|---|---|
-| [query](#query) | one string | `@requiresRank("developer")` |
+| [query](#query), [tool](#tool) | one string | `@requiresRank("developer")` |
 | [mutation](#mutation), [logic](#logic) | one string | `@requiresRank("admin")` |
 
-The actor-rank FLOOR: only a caller holding this role, or one ranked above it, may invoke the construct -- @requiresRank("developer") (epic memql#4832, D6). ENFORCED at execution and VALIDATED AT LOAD against the role ladder in dsl/rbac, so a typo refuses boot rather than gating on rank 0 and admitting everyone. This is the server-side counterpart to MemQL OS's per-surface role requirement: the shell keeps hiding what a caller cannot reach (hiding an action beats letting them click it and reading a refusal) and this makes the hidden surface a REFUSED one. Declared on the CONSTRUCT because a surface is a set of constructs and an app id from a browser is a claim, not a fact. It gates WHO MAY CALL; @rowAuthz still decides WHICH ROWS come back.
+- On a query, a mutation or a logic: The actor-rank FLOOR: only a caller holding this role, or one ranked above it, may invoke the construct -- @requiresRank("developer") (epic memql#4832, D6). ENFORCED at execution and VALIDATED AT LOAD against the role ladder in dsl/rbac, so a typo refuses boot rather than gating on rank 0 and admitting everyone. This is the server-side counterpart to MemQL OS's per-surface role requirement: the shell keeps hiding what a caller cannot reach (hiding an action beats letting them click it and reading a refusal) and this makes the hidden surface a REFUSED one. Declared on the CONSTRUCT because a surface is a set of constructs and an app id from a browser is a claim, not a fact. It gates WHO MAY CALL; @rowAuthz still decides WHICH ROWS come back.
+- On a tool: The person-rank FLOOR on a tool: a call is admitted only when the person it is for -- the authenticated user over MCP, or the user an agent acts for in its tool loop -- holds this role or one ranked above it, and a tool above the caller's rank is not listed to them either. VALIDATED AT LOAD against the role ladder in dsl/rbac exactly as on a query, mutation or logic, and resolved at call time through the same ladder, so a custom role is admitted by its rank. It judges the PERSON and never the agent -- @requiresAgentRole is that gate -- and it replaces the person half of the deprecated @allowedRoles.
 
 ### @row
 

@@ -11327,7 +11327,7 @@ QueryClient.prototype.validationLog = function (this: QueryClient, args: Validat
   return this.executeNamed("validationLog", buildValidationLog(args), opts);
 };
 
-/** The validation queue: requests awaiting first-line developer validation. Developer/owner only (forgeDeveloper). */
+/** The validation queue: requests awaiting first-line developer validation. The forge developer tier only -- the writer rank or above -- and anyone below it is refused rather than shown an empty queue. */
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["validationQueue"] in generated_concepts.ts).
 export interface ValidationQueueArgs {
 }
