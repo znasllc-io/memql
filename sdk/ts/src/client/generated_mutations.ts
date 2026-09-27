@@ -3296,6 +3296,7 @@ export interface CreateSkillArgs {
   tags?: unknown[];
   domainIds?: unknown[];
   toolSlugs?: unknown[];
+  /** Inert since memql#5432 retired the live-knowledge mechanism; stored and never resolved. */
   liveSourceIds?: unknown[];
   tier: string;
   predefined?: boolean;
@@ -4444,6 +4445,7 @@ export interface MintSkillArgs {
   tags?: unknown[];
   domainIds?: unknown[];
   toolSlugs?: unknown[];
+  /** Inert since memql#5432 retired the live-knowledge mechanism; stored and never resolved. */
   liveSourceIds?: unknown[];
   tier: string;
   instructions?: Record<string, unknown>;
