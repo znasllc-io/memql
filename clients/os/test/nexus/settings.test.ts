@@ -68,12 +68,16 @@ describe("the section list", () => {
     expect(NEXUS_SECTION_IDS).toContain(DEFAULT_NEXUS_SETTINGS.defaultSection);
   });
 
-  it("opens on Goals, and names that default rather than reading it off the array", () => {
-    expect(NEXUS_SECTIONS[0]?.id).toBe("goals");
+  it("opens on the Overview, and names that default rather than reading it off the array", () => {
+    // OVERVIEW IS FIRST (epic memql#5414), as in Fleet and Campaigns: the
+    // summary destination DESIGN.md names. It asks nothing of a model -- every
+    // figure is a read the other sections already make.
+    expect(NEXUS_SECTIONS[0]).toEqual({ id: "overview", name: "Overview" });
     // RUNS STAYS, and it is a decision (design record D3): `v1:work:run.goalId`
     // is EMPTY for an automation run no goal asked for, and in a goal-only app
     // those runs would have no home at all.
     expect(NEXUS_SECTIONS.map((section) => section.id)).toEqual([
+      "overview",
       "goals",
       "runs",
       "automations",
@@ -81,7 +85,7 @@ describe("the section list", () => {
       "logs",
       "settings",
     ]);
-    expect(DEFAULT_NEXUS_SETTINGS.defaultSection).toBe("goals");
+    expect(DEFAULT_NEXUS_SETTINGS.defaultSection).toBe("overview");
   });
 
   it("names the Logs section as its own resource, seeded at the engine's admin floor and not this app's choice", () => {

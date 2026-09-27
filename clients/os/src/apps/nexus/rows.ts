@@ -70,6 +70,185 @@ function objectField(row: Row, key: string): Record<string, unknown> | null {
   return null;
 }
 
+function stringIn(from: Record<string, unknown> | null, key: string): string {
+  const v = from?.[key];
+  return typeof v === "string" ? v : "";
+}
+
+// ---------------------------------------------------------------------------
+// The head: which version of every step is current (epic memql#5414, D18)
+// ---------------------------------------------------------------------------
+
+/** One entry of `run.head`. `runId` is set only when the version lives in ANOTHER run -- a branch's reused prefix. */
+export interface HeadEntry {
+  version: number;
+  runId: string;
+}
+
+export type Head = Readonly<Record<string, HeadEntry>>;
+
+/**
+ * `run.head` (or a version's `basis`), read tolerantly.
+ *
+ * AN ABSENT HEAD IS AN EMPTY MAP, NOT AN ERROR. Runs written before the field
+ * existed carry none, and the rule the concept states for them is that each
+ * step's newest row is current -- which is what every caller falls back to
+ * when a key is missing here. An entry without a usable version is dropped
+ * rather than read as version 0: there is no version 0, and a guessed one
+ * would mark the wrong tick current.
+ */
+export function parseHead(value: unknown): Head {
+  const out: Record<string, HeadEntry> = {};
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "" || raw === null || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const entry = raw as Record<string, unknown>;
+    const version = entry["version"];
+    if (typeof version !== "number" || !Number.isFinite(version) || version < 1) continue;
+    out[key] = {
+      version: Math.round(version),
+      runId: typeof entry["runId"] === "string" ? entry["runId"] : "",
+    };
+  }
+  return out;
+}
+
+/**
+ * A re-run the run is carrying out -- `run.rerun`, written by the person's act
+ * and cleared to `{}` when the run closes.
+ *
+ * `{}` AND ABSENT ARE BOTH "NONE", which is why this answers null rather than
+ * an object with blank fields: every reader asks one question of it -- is a
+ * re-run in flight? -- and a truthy empty object would answer yes.
+ */
+export interface RerunRequest {
+  requestId: string;
+  /** `rerun`, `headMove` or `branch`. */
+  reason: string;
+  stepKey: string;
+  requestedAt: string;
+}
+
+export function rerunFrom(value: unknown): RerunRequest | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+  if (Object.keys(obj).length === 0) return null;
+  const request = {
+    requestId: stringIn(obj, "requestId"),
+    reason: stringIn(obj, "reason"),
+    stepKey: stringIn(obj, "stepKey"),
+    requestedAt: stringIn(obj, "requestedAt"),
+  };
+  // A map whose every field this build reads is blank is a request nobody can
+  // name a step for, and treating it as in flight would hide every step act
+  // with nothing on the page able to say why.
+  return request.stepKey === "" && request.reason === "" && request.requestId === "" ? null : request;
+}
+
+/**
+ * The answer validator's summary -- `run.validation` (D22). A PRE-FILTER, never
+ * a certification: it is drawn beside the person's own verdict and never in
+ * place of one. The per-axis detail and the reason are the `decision`
+ * observation it names, which is read on demand.
+ */
+export interface ValidationSummary {
+  verdict: string;
+  stepKey: string;
+  version: number | null;
+  observationId: string;
+  level: string;
+  at: string;
+}
+
+export function validationFrom(value: unknown): ValidationSummary | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const obj = value as Record<string, unknown>;
+  const verdict = stringIn(obj, "verdict");
+  if (verdict === "") return null;
+  return {
+    verdict,
+    stepKey: stringIn(obj, "stepKey"),
+    version: figure(obj, "version"),
+    observationId: stringIn(obj, "observationId"),
+    level: stringIn(obj, "level"),
+    at: stringIn(obj, "at"),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// What a person changed for one version (D20)
+// ---------------------------------------------------------------------------
+
+export interface StepOverrideRow {
+  level: string;
+  model: string;
+  effort: string;
+  prompt: string;
+  inputs: Readonly<Record<string, unknown>>;
+  /** The dislike that rode along as guidance, when one did. */
+  guidance: { product: boolean; process: boolean; performance: boolean; reason: string } | null;
+  requestedBy: string;
+}
+
+export const NO_OVERRIDE: StepOverrideRow = {
+  level: "",
+  model: "",
+  effort: "",
+  prompt: "",
+  inputs: {},
+  guidance: null,
+  requestedBy: "",
+};
+
+export function overrideFrom(value: unknown): StepOverrideRow {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return NO_OVERRIDE;
+  const obj = value as Record<string, unknown>;
+  const inputs = objectOf(obj["inputs"]) ?? {};
+  const rawGuidance = objectOf(obj["guidance"]);
+  const axes = objectOf(rawGuidance?.["axes"]);
+  const guidance =
+    rawGuidance === null
+      ? null
+      : {
+          product: axes?.["product"] === true,
+          process: axes?.["process"] === true,
+          performance: axes?.["performance"] === true,
+          reason: stringIn(rawGuidance, "reason"),
+        };
+  return {
+    level: stringIn(obj, "level"),
+    model: stringIn(obj, "model"),
+    effort: stringIn(obj, "effort"),
+    prompt: stringIn(obj, "prompt"),
+    inputs,
+    // A guidance block with no axis and no reason carries nothing a person
+    // could read back, so it is not reported as one.
+    guidance:
+      guidance !== null && (guidance.product || guidance.process || guidance.performance || guidance.reason !== "")
+        ? guidance
+        : null,
+    requestedBy: stringIn(obj, "requestedBy"),
+  };
+}
+
+/** Whether a version was run with anything a person changed. `requestedBy` alone changes nothing. */
+export function overridden(o: StepOverrideRow): boolean {
+  return (
+    o.level !== "" ||
+    o.model !== "" ||
+    o.effort !== "" ||
+    o.prompt !== "" ||
+    Object.keys(o.inputs).length > 0 ||
+    o.guidance !== null
+  );
+}
+
+function objectOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 // ---------------------------------------------------------------------------
 // goal
 // ---------------------------------------------------------------------------
@@ -153,6 +332,14 @@ export interface RunRow {
   startedAt: string;
   finishedAt: string;
   createdAt: string;
+  /** Which version of every top-level step is current. Empty on runs written before it existed. */
+  head: Head;
+  /** Steps whose current version was made from an upstream version that is no longer current. */
+  staleSteps: string[];
+  /** The re-run in flight, or null. */
+  rerun: RerunRequest | null;
+  /** The answer validator's pre-filter verdict, or null before it has spoken. */
+  validation: ValidationSummary | null;
 }
 
 export function runFromRow(row: Row): RunRow {
@@ -181,6 +368,10 @@ export function runFromRow(row: Row): RunRow {
     startedAt: rowString(flat, "startedAt"),
     finishedAt: rowString(flat, "finishedAt"),
     createdAt: rowString(flat, "createdAt"),
+    head: parseHead(flat["head"]),
+    staleSteps: stringsOf(flat, "staleSteps"),
+    rerun: rerunFrom(flat["rerun"]),
+    validation: validationFrom(flat["validation"]),
   };
 }
 
@@ -267,6 +458,23 @@ export interface StepRow {
   errorCode: string;
   errorMessage: string;
   createdAt: string;
+  /**
+   * Which VERSION this row is (D18). Every version of a step is a version of
+   * the SAME row id, so the live feed carries one row per step -- its newest
+   * version, which the head re-assertion keeps equal to the current one except
+   * while a re-run is writing a newer one.
+   */
+  version: number;
+  /** What a person changed for this version. `NO_OVERRIDE` on a version nobody touched. */
+  override: StepOverrideRow;
+  /** The person who wrote this version's prompt or inputs; "" when the input is the system's own. */
+  authoredBy: string;
+  /** Who answered: `{provider, model, surface, ...}` as recorded at dispatch. */
+  binding: Record<string, unknown> | null;
+  /** The bound input, when it was safe to record. */
+  input: Record<string, unknown> | null;
+  /** The trimmed result: `{status, result, error, metadata, contentId}`. */
+  result: Record<string, unknown> | null;
 }
 
 export function stepFromRow(row: Row): StepRow {
@@ -274,6 +482,11 @@ export function stepFromRow(row: Row): StepRow {
   const call = objectField(flat, "call");
   const post = objectField(flat, "postcondition");
   const passed = post?.["passed"];
+  // `attempt` is `int!` defaulting to 1; `version` equals it on every row the
+  // journal writes and is ABSENT on rows written before it existed -- where the
+  // attempt number is exactly what the version would have said.
+  const attempt = Math.max(1, rowNumber(flat, "attempt"));
+  const version = figure(flat, "version");
   return {
     id: rowString(flat, "id"),
     runId: rowString(flat, "runId"),
@@ -290,7 +503,7 @@ export function stepFromRow(row: Row): StepRow {
     // that did not touch it -- and "attempt 0" is not a thing. 1 is the honest
     // reading of an untouched field here, unlike `spent`, where the whole
     // question is whether anything was measured at all.
-    attempt: Math.max(1, rowNumber(flat, "attempt")),
+    attempt,
     idempotencyKey: rowString(flat, "idempotencyKey"),
     childRunId: rowString(flat, "childRunId"),
     approvalId: rowString(flat, "approvalId"),
@@ -308,6 +521,12 @@ export function stepFromRow(row: Row): StepRow {
     errorCode: rowString(flat, "errorCode"),
     errorMessage: rowString(flat, "errorMessage"),
     createdAt: rowString(flat, "createdAt"),
+    version: version !== null && version >= 1 ? Math.round(version) : attempt,
+    override: overrideFrom(flat["override"]),
+    authoredBy: rowString(flat, "authoredBy"),
+    binding: objectField(flat, "binding"),
+    input: objectField(flat, "input"),
+    result: objectField(flat, "result"),
   };
 }
 
@@ -330,9 +549,9 @@ export function stepsInOrder(steps: readonly StepRow[]): StepRow[] {
   return [...steps].sort((a, b) => (a.seq === b.seq ? a.key.localeCompare(b.key) : a.seq - b.seq));
 }
 
-/** Step news: the state moved, the classifier spoke, or it was retried. */
+/** Step news: the state moved, the classifier spoke, it was retried, or a new version arrived. */
 export function stepFingerprint(step: StepRow): string {
-  return [step.status, step.symptom, String(step.attempt), step.kind].join("|");
+  return [step.status, step.symptom, String(step.attempt), step.kind, String(step.version)].join("|");
 }
 
 /** What a step DID, in one line. Never blank: an unnamed call is its type. */
@@ -880,6 +1099,8 @@ export interface ObservationRow {
   stepKey: string;
   kind: string;
   content: string;
+  /** The structured half: a verdict, the validator's axes, a tool's result. */
+  data: Record<string, unknown> | null;
   createdAt: string;
 }
 
@@ -891,6 +1112,7 @@ export function observationFromRow(row: Row): ObservationRow {
     stepKey: rowString(flat, "stepKey"),
     kind: rowString(flat, "kind"),
     content: rowString(flat, "content"),
+    data: objectField(flat, "data"),
     createdAt: rowString(flat, "createdAt"),
   };
 }
@@ -905,6 +1127,8 @@ export function observationKindWord(kind: string): string {
       return "Note";
     case "decision":
       return "Decision";
+    case "feedback":
+      return "Feedback";
     default:
       return kind === "" ? "--" : kind;
   }
