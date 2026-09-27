@@ -7,7 +7,6 @@ package automations
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -103,11 +102,13 @@ func TestCompileMemQL_RefusesAnArgsPatternThatDoesNotCompile(t *testing.T) {
 	const tmpl = `@trigger(event="deploy.requested")
 automation patternProbe {
   args {
-    region string @required @pattern(%q)
+    region string @required @pattern("PATTERN")
   }
   gate := logic requireForwardDeploy(environment: args.region)
 }`
-	_, err := loader.compileMemQL(fmt.Sprintf(tmpl, "^[A-Z"), "test:badPattern")
+	// The patterns carry no quote or backslash, so they are spliced in as
+	// written; a MemQL string is never rendered with Go's %q (memql#3035).
+	_, err := loader.compileMemQL(strings.Replace(tmpl, "PATTERN", "^[A-Z", 1), "test:badPattern")
 	if err == nil {
 		t.Fatal("an args @pattern that does not compile loaded")
 	}
@@ -115,7 +116,7 @@ automation patternProbe {
 	if !strings.Contains(err.Error(), want) || baseloaderRuleCode(err) != "pattern_invalid" {
 		t.Fatalf("err = %v (code %q), want it to say %q under pattern_invalid", err, baseloaderRuleCode(err), want)
 	}
-	if _, err := loader.compileMemQL(fmt.Sprintf(tmpl, "^[A-Z]{2}$"), "test:goodPattern"); err != nil {
+	if _, err := loader.compileMemQL(strings.Replace(tmpl, "PATTERN", "^[A-Z]{2}$", 1), "test:goodPattern"); err != nil {
 		t.Fatalf("a pattern that compiles was refused: %v", err)
 	}
 }
