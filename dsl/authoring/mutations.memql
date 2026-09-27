@@ -346,9 +346,10 @@ mutation construct recordConstructReliability {
 
 /// Record a LEARNED procedure's payload on its construct (epic memql#5408): the rendered MemQL
 /// source, the procedure TEMPLATE a replay executes, the learned preconditions, and procedureHash --
-/// sha256: over the canonical JSON of the three, the version a procedurePromotion approval pins. The
-/// lift writes it on a first lift and on every re-lift whose hash changed; an unchanged hash writes
-/// nothing, so re-mining an unchanged corpus keeps every ladder counter.
+/// sha256: over the canonical JSON of the three less provenance, presentation and the dispatcher's
+/// time limits (comment lines, title, recordedFrom, hints), the version a procedurePromotion approval
+/// pins. The lift writes it on a first lift and on every re-lift whose hash changed; an unchanged hash
+/// writes nothing, so re-mining an unchanged corpus keeps every ladder counter.
 ///
 /// Server-only, and scoping to actor.userId is not the missing piece: the construct is already the
 /// caller's own row. What must not be the caller's is the ASSERTION that this template is what their
