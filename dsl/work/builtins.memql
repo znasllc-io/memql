@@ -63,6 +63,94 @@ builtin replayRun {
   policy  string   @description("strict (default) raises a divergence on a journal miss; permissive makes a fresh call and journals it.")
 }
 
+// ---- intervention: versions, the head and branches (epic memql#5414, #5415) ----
+//
+// Every one of these is caller-scoped in its handler: the caller must OWN the
+// run, the run must have stopped (a run still working is never re-run under
+// itself), and the step must be one of the run's own top-level steps. The act
+// is recorded on the RUN ROW and served on the agent that executes the run,
+// because the replica a person's click arrives at is not the one that runs it.
+
+/// Run one step of one of the caller's finished runs AGAIN, as a new VERSION of that step (design
+/// D18, D20): the step runs with whatever the person changed -- the level, the model, the effort,
+/// the prompt or the inputs -- on that version only, and every step after it runs again from the
+/// new answer, each as a new version. Nothing is deleted: every earlier version stays readable and
+/// moveRunHead goes back to it. When the person disliked the version being replaced, the axes and
+/// the reason they gave ride along as guidance (D23). Returns {runId, stepKey, version, staleSteps}.
+@sdk
+@executor("integration.work.rerunStep")
+builtin rerunStep {
+  runId    string!  @description("The caller's finished run.")
+  stepKey  string!  @description("The top-level step to run again.")
+  level    enum("fast", "strong", "reasoning")  @description("The level of intelligence to ask for instead of the step's own. Embeddings is never offered: a different embedder answers in a different vector space.")
+  model    string   @description("A policy entry to pin instead of routing by level: a provider name, fleet:<modelId>, app:<id> or app:<id>:<model>.")
+  effort   enum("low", "medium", "high", "xhigh", "max")  @description("The effort to ask an app to spend. An app that is not asked keeps the effort its level maps to.")
+  prompt   string   @description("For a step an app session answered, the whole prompt the session runs with; for any other step, instructions added to the step's prompt.")
+  inputs   object   @description("Arguments to use instead of the step's own, by name. Anything omitted keeps its value.")
+}
+
+/// Branch one of the caller's finished runs at a step: a NEW run (mode fork) whose steps before the
+/// branch point are served by REFERENCE from the source run -- they do not run again -- and whose
+/// branch step runs live with the person's changes, followed by everything after it (design D19).
+/// The source run is untouched. When the branch step was answered by an app session, the branch is
+/// a NEW session started against the workspace as it was before that step, rebuilt from the
+/// recording's content-addressed files; a branch whose snapshot is missing a file's content is
+/// refused naming the file, because a branch from a partial workspace would diverge without saying
+/// so. Returns {runId, forkedFromRunId, forkAtStepKey}.
+@sdk
+@executor("integration.work.branchRun")
+builtin branchRun {
+  runId    string!  @description("The caller's finished run to branch from.")
+  stepKey  string!  @description("The top-level step the branch diverges at.")
+  level    enum("fast", "strong", "reasoning")  @description("The level of intelligence to ask for at the branch step.")
+  model    string   @description("A policy entry to pin at the branch step: a provider name, fleet:<modelId>, app:<id> or app:<id>:<model>.")
+  effort   enum("low", "medium", "high", "xhigh", "max")  @description("The effort to ask an app to spend at the branch step.")
+  prompt   string   @description("For a session step, the whole prompt the new session runs with; for any other step, instructions added to its prompt.")
+  inputs   object   @description("Arguments to use at the branch step instead of its own, by name.")
+}
+
+/// Make an earlier version of one step of the caller's finished run current again -- going back
+/// (design D18). The head moves; every later step whose recorded version was computed from the same
+/// upstream becomes current again without running, and only the steps with no such version run
+/// again, in order. Returns {runId, stepKey, version, staleSteps}.
+@sdk
+@executor("integration.work.moveRunHead")
+builtin moveRunHead {
+  runId    string!  @description("The caller's finished run.")
+  stepKey  string!  @description("The top-level step whose version to make current.")
+  version  int!     @description("The version to make current.")
+}
+
+/// Say what one of the caller's runs, or one version of one of its steps, was like (design D21): a
+/// like, a dislike or neutral -- the AI Fluency framework's Discernment. A dislike must name at
+/// least one axis -- the product (what it produced), the process (how it went about it) or the
+/// performance (how it behaved) -- and is refused without one, because the question is the point. A
+/// later verdict is a NEW row and never rewrites an earlier one. When the answer validator judged the
+/// same version the other way, the disagreement is kept on the row. Returns {observationId, verdict,
+/// validatorDisagrees}.
+@sdk
+@executor("integration.work.recordFeedback")
+builtin recordFeedback {
+  runId        string!  @description("The caller's run.")
+  stepKey      string   @description("The top-level step judged; omit it to judge the whole run.")
+  version      int      @description("The version of that step judged; the current one when omitted.")
+  verdict      enum("like", "dislike", "neutral")!  @description("The person's verdict.")
+  product      bool     @description("What it produced was wrong or incomplete.")
+  process      bool     @description("How it went about the work was wrong.")
+  performance  bool     @description("How it behaved -- its tone, pace or instruction-following -- was wrong.")
+  reason       string   @description("Why, in the person's own words. It rides as guidance when the step is run again or branched, and it steers the next model used for this goal.")
+}
+
+/// Every VERSION of every step of one of the caller's runs -- the step timeline's read (design D18).
+/// The standard reads collapse an append-only row to its newest version; this answers each version
+/// once, folded to its newest row-version, with the run's head marked (current). Returns one entry
+/// per version, keyed <stepId>@v<version>.
+@sdk
+@executor("integration.work.stepVersions")
+builtin workStepVersions {
+  runId  string!  @description("The caller's run.")
+}
+
 /// Decide one of the caller's pending approvals and resume the run parked on it. The decision is
 /// refused if the artifact changed since it was approved -- an approval is a decision about a
 /// specific command, patch, message or draft, and it never carries to a modified one.
@@ -88,6 +176,22 @@ builtin workSweepWaiting {
 @executor("integration.work.retentionSweep")
 builtin workRetentionSweep {
   dryRun  bool  @description("Report what would be archived and deleted without doing either.")
+}
+
+/// Check one finished goal run's answer against what was asked, BEFORE a person looks (design D22):
+/// one bounded call at the run's own level applies the framework's three axes and records a decision
+/// observation plus the run's validation summary. A PRE-FILTER and nothing more: it never counts as
+/// a like, never certifies, never moves a procedure's ladder, and a person's verdict outranks it;
+/// when they disagree the disagreement is kept as the signal that the validator needs work. Skips,
+/// saying why, when the cluster's feedbackPolicy turns it off, when the run was not asked for through
+/// Nexus or the API, when it reached no model, or when this answer version was already checked.
+///
+/// NOT @sdk, and gated in its handler on internal origin under the validateGoalAnswer automation: its
+/// argument names WHOSE run to read, so a caller-supplied id would be an authorization decision.
+@executor("integration.work.validateAnswer")
+builtin workValidateAnswer {
+  runId        string!  @description("The finished goal run whose answer to check.")
+  ownerUserId  string!  @description("The run's owner as the completion event carried it. The handler borrows exactly this owner's authority and re-reads the run under it, so a hint that does not own the run reads nothing.")
 }
 
 // ---- the computer-use kill switch, in-flight half (memql#5066) ----

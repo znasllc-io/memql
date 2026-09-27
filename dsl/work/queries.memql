@@ -315,3 +315,65 @@ query run workRunsInFlight {
   filter  row => row.status in ["compiling", "running", "waiting"] && actor.isClusterOwner == true
   shape   workRunFull
 }
+
+/// The DESCRIPTION GUIDANCE a goal shape has accumulated (epic memql#5414, design D23): the
+/// caller's own dislikes whose run served this goal signature, newest first, each carrying the axes
+/// and the reason the person gave. It is read only when a MODEL is about to be used for that goal
+/// again -- an agent turn of a live run, compile's triage and design calls -- and never by a replay,
+/// a fork's shared prefix or a construct-served goal, because a replay reads rows and text is not a
+/// row it can act on. Owned: guidance mined from somebody else's dislikes would steer a person's
+/// goal by another person's taste. Bounded at 20, the most recent, because the reader keeps five.
+@actor
+query observation workDescriptionGuidance {
+  args {
+    goalSignature  string!
+  }
+  filter   row => row.ownerUserId == actor.userId
+               && row.kind == "feedback"
+               && row.?data.goalSignature == args.goalSignature
+               && row.?data.verdict == "dislike"
+  sort     "row.createdAt", "desc"
+  paginate 20
+  shape    workObservationFull
+}
+
+/// The caller's SUCCEEDED runs that carry a goal signature, newest first -- the reuse sweep's read
+/// (epic memql#5414, design D24). A construct's reuse evidence is the set of distinct goal
+/// signatures that used it, and this is where the signatures are: pushed down on the status and the
+/// signature's presence rather than paging the owner's whole history. Owned, and the sweep reads it
+/// under each owner's own actor, because evidence counted across two people's work would call a
+/// construct reusable that neither of them has reused. Bounded at 1000, the most recent.
+@actor
+query run workSignedRunsForOwner {
+  filter   row => row.ownerUserId == actor.userId
+               && row.status == "succeeded"
+               && row.goalSignature != nil
+  sort     "row.createdAt", "desc"
+  paginate 1000
+  shape    workRunFull
+}
+
+/// The caller's steps that invoked an AUTOMATION, newest first -- the other half of the reuse
+/// evidence (epic memql#5414, D24): a section a decomposed goal served from the catalog is an
+/// automation step of the goal's run, so a construct used that way counts for the goal it served.
+/// Owned, for the reason workSignedRunsForOwner gives. Bounded at 2000, the most recent.
+@actor
+query step workAutomationStepsForOwner {
+  filter   row => row.ownerUserId == actor.userId
+               && row.stepType == "automation"
+  sort     "row.createdAt", "desc"
+  paginate 2000
+  shape    workStepFull
+}
+
+/// The epic memql#5414 values: the one row `seed feedbackPolicy feedbackPolicyPrimary` writes
+/// (dsl/work/seeds.memql), pinned to its literal id so a row at any other id is never read as the
+/// policy. Readable from the `reader` rung up -- every predefined role -- and @requiresRank bounds
+/// the callers to exactly the concept's read floor, so the tier decides the whole row set for every
+/// caller this admits. The Go reader treats an absent or refused row as
+/// component/work.DefaultFeedbackPolicy(), which carries the seed's values.
+@requiresRank("reader")
+query feedbackPolicy feedbackPolicyCurrent {
+  filter  row => row.id == "v1:work:feedbackPolicy:primary"
+  shape   feedbackPolicyFull
+}

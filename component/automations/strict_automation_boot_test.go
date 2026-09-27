@@ -178,7 +178,13 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // applies the one human approval, and demoteProcedures and retireProcedures are
 // the ladder's two sweeps. Four added, none removed; learnFromSucceededRun
 // gained a filter and is the same automation.
-const shippedAutomationCount = 71
+//
+// 71 -> 73 in epic memql#5414 (intervention, feedback and reusable
+// decomposition): validateGoalAnswer checks a finished goal run's answer before
+// a person looks (design D22), and sweepConstructReuse decides every
+// construct's reuse label from the evidence (D24). Two added, none removed;
+// measured by the strict loader on this tree.
+const shippedAutomationCount = 73
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

@@ -258,6 +258,30 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"level":         "integer -- 1 actions (default), 2 automation invocations",
 			},
 		},
+		// REUSE LABELS (epic memql#5414, design D24). Both handlers live in
+		// their own files (reuse.go, reuse_sweep.go) and refuse by name until
+		// the reuse stream replaces them.
+		{
+			Name: "setReuse",
+			Description: "Label one of the caller's constructs reusable, for one goal or for one account, or hand the " +
+				"label back to the evidence. The override is a VERSION and the evidence keeps counting underneath. " +
+				"Returns {constructId, reuse, override}.",
+			Handler: i.handleSetReuse,
+			ArgsSchema: map[string]string{
+				"constructId": "string (required) -- the caller's construct",
+				"label":       "string (required) -- reusable, goalSpecific, accountSpecific, or evidence to clear the override",
+			},
+		},
+		{
+			Name: "reuseSweep",
+			Description: "Decide every construct's reuse label from the evidence: the distinct goal signatures and " +
+				"account ties of the runs that used it, per owner under that owner's actor. Maintenance principal " +
+				"only. Returns {owners, constructs, changed, dryRun}.",
+			Handler: i.handleReuseSweep,
+			ArgsSchema: map[string]string{
+				"dryRun": "boolean -- report what would change without writing it",
+			},
+		},
 		// THE FOUR BELOW ARE STUBS until the replay runner lands (plan Task
 		// 5), and they say so in their error: a capability that resolves
 		// and refuses by name is honest, where one missing from the

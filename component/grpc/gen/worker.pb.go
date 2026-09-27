@@ -2589,7 +2589,19 @@ type AppSessionStart struct {
 	// reports a model nobody asked for. "embeddings" is always refused (D10):
 	// an embedding must come from the embedder of the index it is written
 	// into, and no app exposes one.
-	Level         string `protobuf:"bytes,14,opt,name=level,proto3" json:"level,omitempty"`
+	Level string `protobuf:"bytes,14,opt,name=level,proto3" json:"level,omitempty"`
+	// model and effort are a PERSON'S explicit choice for this one session
+	// (epic memql#5414, design D20): a step re-run or branched with a
+	// different model or effort. They OVERRIDE the level's knobs for this
+	// session only and never change the table. model is the app's own model
+	// name or alias (Claude Code's --model, Codex's model); effort is one of
+	// low, medium, high, xhigh or max (Claude Code's --effort, Codex's
+	// model_reasoning_effort). EMPTY MEANS THE LEVEL DECIDES, which is every
+	// session nobody overrode. A cockpit that predates these fields ignores
+	// them, and what the app actually ran at is what it REPORTS on
+	// AppSessionEnd -- which is what the version records.
+	Model         string `protobuf:"bytes,15,opt,name=model,proto3" json:"model,omitempty"`
+	Effort        string `protobuf:"bytes,16,opt,name=effort,proto3" json:"effort,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2718,6 +2730,20 @@ func (x *AppSessionStart) GetResponseSchemaJson() string {
 func (x *AppSessionStart) GetLevel() string {
 	if x != nil {
 		return x.Level
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetEffort() string {
+	if x != nil {
+		return x.Effort
 	}
 	return ""
 }
@@ -3224,7 +3250,12 @@ type ModelCallStart struct {
 	// substitutes another model on the strength of it: a level steers an app,
 	// which has knobs, while a runtime has only the model it was asked for.
 	// Empty means the engine named none.
-	Level         string `protobuf:"bytes,16,opt,name=level,proto3" json:"level,omitempty"`
+	Level string `protobuf:"bytes,16,opt,name=level,proto3" json:"level,omitempty"`
+	// effort is a PERSON'S explicit effort for this one call (epic
+	// memql#5414, design D20): low, medium, high, xhigh or max, for a step
+	// re-run with a different effort. EMPTY MEANS THE LEVEL DECIDES. An app
+	// with no such knob, or a cockpit that predates the field, ignores it.
+	Effort        string `protobuf:"bytes,17,opt,name=effort,proto3" json:"effort,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3367,6 +3398,13 @@ func (x *ModelCallStart) GetImage() *ModelCallImageRequest {
 func (x *ModelCallStart) GetLevel() string {
 	if x != nil {
 		return x.Level
+	}
+	return ""
+}
+
+func (x *ModelCallStart) GetEffort() string {
+	if x != nil {
+		return x.Effort
 	}
 	return ""
 }
@@ -5610,7 +5648,7 @@ const file_worker_proto_rawDesc = "" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12\x1f\n" +
 	"\vdetail_json\x18\x02 \x01(\fR\n" +
 	"detailJson\x12*\n" +
-	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xca\x03\n" +
+	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xf8\x03\n" +
 	"\x0fAppSessionStart\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
@@ -5629,7 +5667,9 @@ const file_worker_proto_rawDesc = "" +
 	"\astep_id\x18\v \x01(\tR\x06stepId\x12&\n" +
 	"\x0fapp_session_ref\x18\f \x01(\tR\rappSessionRef\x120\n" +
 	"\x14response_schema_json\x18\r \x01(\tR\x12responseSchemaJson\x12\x14\n" +
-	"\x05level\x18\x0e \x01(\tR\x05level\"\xb6\x01\n" +
+	"\x05level\x18\x0e \x01(\tR\x05level\x12\x14\n" +
+	"\x05model\x18\x0f \x01(\tR\x05model\x12\x16\n" +
+	"\x06effort\x18\x10 \x01(\tR\x06effort\"\xb6\x01\n" +
 	"\x10AppSessionLimits\x12>\n" +
 	"\x1bcredential_lifetime_seconds\x18\x01 \x01(\x03R\x19credentialLifetimeSeconds\x120\n" +
 	"\x14max_duration_seconds\x18\x02 \x01(\x03R\x12maxDurationSeconds\x120\n" +
@@ -5665,7 +5705,7 @@ const file_worker_proto_rawDesc = "" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x12\x19\n" +
 	"\bcost_usd\x18\x03 \x01(\x01R\acostUsd\x12\x14\n" +
-	"\x05known\x18\x04 \x01(\bR\x05known\"\xe8\x05\n" +
+	"\x05known\x18\x04 \x01(\bR\x05known\"\x80\x06\n" +
 	"\x0eModelCallStart\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
@@ -5684,7 +5724,8 @@ const file_worker_proto_rawDesc = "" +
 	"\x05audio\x18\r \x01(\v2'.znasllc.memql.worker.v1.ModelCallAudioR\x05audio\x12@\n" +
 	"\x06speech\x18\x0e \x01(\v2(.znasllc.memql.worker.v1.ModelCallSpeechR\x06speech\x12D\n" +
 	"\x05image\x18\x0f \x01(\v2..znasllc.memql.worker.v1.ModelCallImageRequestR\x05image\x12\x14\n" +
-	"\x05level\x18\x10 \x01(\tR\x05level\"n\n" +
+	"\x05level\x18\x10 \x01(\tR\x05level\x12\x16\n" +
+	"\x06effort\x18\x11 \x01(\tR\x06effort\"n\n" +
 	"\rModelCallTool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12'\n" +

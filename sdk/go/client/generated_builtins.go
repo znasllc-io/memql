@@ -65,6 +65,81 @@ func AutomationLoopStopsBuild(args AutomationLoopStopsArgs) string {
 	return "builtin automationLoopStops()"
 }
 
+// BranchRun -- Branch one of the caller's finished runs at a step: a NEW run (mode fork) whose steps before the branch point are served by REFERENCE from the source run -- they do not run again -- and whose branch step runs live with the person's changes, followed by everything after it (design D19). The source run is untouched. When the branch step was answered by an app session, the branch is a NEW session started against the workspace as it was before that step, rebuilt from the recording's content-addressed files; a branch whose snapshot is missing a file's content is refused naming the file, because a branch from a partial workspace would diverge without saying so. Returns {runId, forkedFromRunId, forkAtStepKey}.
+type BranchRunArgs struct {
+	// The caller's finished run to branch from.
+	RunId string
+	// The top-level step the branch diverges at.
+	StepKey string
+	// The level of intelligence to ask for at the branch step.
+	// Enum: fast | strong | reasoning
+	Level string
+	// A policy entry to pin at the branch step: a provider name, fleet:<modelId>, app:<id> or app:<id>:<model>.
+	Model string
+	// The effort to ask an app to spend at the branch step.
+	// Enum: low | medium | high | xhigh | max
+	Effort string
+	// For a session step, the whole prompt the new session runs with; for any other step, instructions added to its prompt.
+	Prompt string
+	// Arguments to use at the branch step instead of its own, by name.
+	Inputs map[string]any
+}
+
+// BranchRun calls the engine builtin branchRun.
+func (qc *QueryClient) BranchRun(ctx context.Context, args BranchRunArgs) (*Result, error) {
+	call := BranchRunBuild(args)
+	return qc.executeNamed(ctx, "branchRun", call)
+}
+
+func BranchRunBuild(args BranchRunArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin branchRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 18 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	if args.Level != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("level: ")
+		b.WriteString(quoteMemQL(args.Level))
+	}
+	if args.Model != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("model: ")
+		b.WriteString(quoteMemQL(args.Model))
+	}
+	if args.Effort != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("effort: ")
+		b.WriteString(quoteMemQL(args.Effort))
+	}
+	if args.Prompt != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("prompt: ")
+		b.WriteString(quoteMemQL(args.Prompt))
+	}
+	if args.Inputs != nil {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("inputs: ")
+		b.WriteString(renderMemQLValue(args.Inputs))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignActivateEmailRule -- Generate an event-email rule's automation construct and arm it (memql#4829). The generator is a DETERMINISTIC template over the rule's form -- the LLM authoring path stays off, because a rule that mails strangers is not a place for a model to improvise and a deterministic generator is one a person can read the output of. The generated .memql goes through the ordinary authoring pipeline: bundle, validate, activate. Activation takes effect IMMEDIATELY rather than at next boot. The rule row records the bundle and construct it produced; on refusal it records the engine's own sentence on lastError and the rule goes to 'failed' rather than silently staying draft.
 type CampaignActivateEmailRuleArgs struct {
 	// The rule to generate and arm. The caller must own it: the generated construct runs under the AUTHOR's envelope, so who armed it decides what it can read.
@@ -2350,6 +2425,41 @@ func ModuleReadinessBuild(args ModuleReadinessArgs) string {
 	return "builtin moduleReadiness()"
 }
 
+// MoveRunHead -- Make an earlier version of one step of the caller's finished run current again -- going back (design D18). The head moves; every later step whose recorded version was computed from the same upstream becomes current again without running, and only the steps with no such version run again, in order. Returns {runId, stepKey, version, staleSteps}.
+type MoveRunHeadArgs struct {
+	// The caller's finished run.
+	RunId string
+	// The top-level step whose version to make current.
+	StepKey string
+	// The version to make current.
+	Version int
+}
+
+// MoveRunHead calls the engine builtin moveRunHead.
+func (qc *QueryClient) MoveRunHead(ctx context.Context, args MoveRunHeadArgs) (*Result, error) {
+	call := MoveRunHeadBuild(args)
+	return qc.executeNamed(ctx, "moveRunHead", call)
+}
+
+func MoveRunHeadBuild(args MoveRunHeadArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin moveRunHead(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("version: ")
+	b.WriteString(fmt.Sprintf("%v", args.Version))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PackageAnalyze -- Analyze a package source offline and return the report, deploying nothing (epic memql#4794, D12). Fetches the tracked source, walks the manifest, discovers the DSL domains and runs the SAME Init-grade gates strict boot runs -- so 'this DSL would refuse boot' is an answer produced here, before a pod is ever asked to run it. Returns {report, ok}: the report names every deployable with its build plan (or 'prebuilt output found -- build skipped'), every DSL domain with construct counts, any Go pack as reported-not-deployable, and every problem found. A refusal carries one of the stable codes in component/packages/refusal.go.
 type PackageAnalyzeArgs struct {
 	// The v1:platform:package row to analyze.
@@ -2837,6 +2947,92 @@ func RecallBuild(args RecallArgs) string {
 	return b.String()
 }
 
+// RecordFeedback -- Say what one of the caller's runs, or one version of one of its steps, was like (design D21): a like, a dislike or neutral -- the AI Fluency framework's Discernment. A dislike must name at least one axis -- the product (what it produced), the process (how it went about it) or the performance (how it behaved) -- and is refused without one, because the question is the point. A later verdict is a NEW row and never rewrites an earlier one. When the answer validator judged the same version the other way, the disagreement is kept on the row. Returns {observationId, verdict, validatorDisagrees}.
+type RecordFeedbackArgs struct {
+	// The caller's run.
+	RunId string
+	// The top-level step judged; omit it to judge the whole run.
+	StepKey string
+	// The version of that step judged; the current one when omitted.
+	Version int
+	// The person's verdict.
+	// Enum: like | dislike | neutral
+	Verdict string
+	// What it produced was wrong or incomplete.
+	Product    bool
+	ProductSet bool // set true to send product; required because zero-value bool is ambiguous
+	// How it went about the work was wrong.
+	Process    bool
+	ProcessSet bool // set true to send process; required because zero-value bool is ambiguous
+	// How it behaved -- its tone, pace or instruction-following -- was wrong.
+	Performance    bool
+	PerformanceSet bool // set true to send performance; required because zero-value bool is ambiguous
+	// Why, in the person's own words. It rides as guidance when the step is run again or branched, and it steers the next model used for this goal.
+	Reason string
+}
+
+// RecordFeedback calls the engine builtin recordFeedback.
+func (qc *QueryClient) RecordFeedback(ctx context.Context, args RecordFeedbackArgs) (*Result, error) {
+	call := RecordFeedbackBuild(args)
+	return qc.executeNamed(ctx, "recordFeedback", call)
+}
+
+func RecordFeedbackBuild(args RecordFeedbackArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin recordFeedback(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if args.StepKey != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("stepKey: ")
+		b.WriteString(quoteMemQL(args.StepKey))
+	}
+	if args.Version != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("version: ")
+		b.WriteString(fmt.Sprintf("%v", args.Version))
+	}
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("verdict: ")
+	b.WriteString(quoteMemQL(args.Verdict))
+	if args.ProductSet {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("product: ")
+		b.WriteString(fmt.Sprintf("%v", args.Product))
+	}
+	if args.ProcessSet {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("process: ")
+		b.WriteString(fmt.Sprintf("%v", args.Process))
+	}
+	if args.PerformanceSet {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("performance: ")
+		b.WriteString(fmt.Sprintf("%v", args.Performance))
+	}
+	if args.Reason != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(quoteMemQL(args.Reason))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseCut -- Cut a new release of MemQL: compute the next version from the repository's existing vX.Y.Z tags, create the tag at main's head, and publish a GitHub Release -- which is what fires the image-build cascade. Owner role only, enforced in Go before any network call. Returns the version, the Release URL and the base sha. Requires MEMQL_RELEASE_REPO and the MEMQL_GITHUB_RELEASE_TOKEN credential.
 type ReleaseCutArgs struct {
 	// Which part of the newest existing version to increment. major and minor zero the parts below them.
@@ -2984,6 +3180,81 @@ func RequestSpecialistTrainingBuild(args RequestSpecialistTrainingArgs) string {
 		}
 		b.WriteString("mode: ")
 		b.WriteString(quoteMemQL(args.Mode))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RerunStep -- Run one step of one of the caller's finished runs AGAIN, as a new VERSION of that step (design D18, D20): the step runs with whatever the person changed -- the level, the model, the effort, the prompt or the inputs -- on that version only, and every step after it runs again from the new answer, each as a new version. Nothing is deleted: every earlier version stays readable and moveRunHead goes back to it. When the person disliked the version being replaced, the axes and the reason they gave ride along as guidance (D23). Returns {runId, stepKey, version, staleSteps}.
+type RerunStepArgs struct {
+	// The caller's finished run.
+	RunId string
+	// The top-level step to run again.
+	StepKey string
+	// The level of intelligence to ask for instead of the step's own. Embeddings is never offered: a different embedder answers in a different vector space.
+	// Enum: fast | strong | reasoning
+	Level string
+	// A policy entry to pin instead of routing by level: a provider name, fleet:<modelId>, app:<id> or app:<id>:<model>.
+	Model string
+	// The effort to ask an app to spend. An app that is not asked keeps the effort its level maps to.
+	// Enum: low | medium | high | xhigh | max
+	Effort string
+	// For a step an app session answered, the whole prompt the session runs with; for any other step, instructions added to the step's prompt.
+	Prompt string
+	// Arguments to use instead of the step's own, by name. Anything omitted keeps its value.
+	Inputs map[string]any
+}
+
+// RerunStep calls the engine builtin rerunStep.
+func (qc *QueryClient) RerunStep(ctx context.Context, args RerunStepArgs) (*Result, error) {
+	call := RerunStepBuild(args)
+	return qc.executeNamed(ctx, "rerunStep", call)
+}
+
+func RerunStepBuild(args RerunStepArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin rerunStep(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 18 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepKey: ")
+	b.WriteString(quoteMemQL(args.StepKey))
+	if args.Level != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("level: ")
+		b.WriteString(quoteMemQL(args.Level))
+	}
+	if args.Model != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("model: ")
+		b.WriteString(quoteMemQL(args.Model))
+	}
+	if args.Effort != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("effort: ")
+		b.WriteString(quoteMemQL(args.Effort))
+	}
+	if args.Prompt != "" {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("prompt: ")
+		b.WriteString(quoteMemQL(args.Prompt))
+	}
+	if args.Inputs != nil {
+		if b.Len() > 18 {
+			b.WriteString(", ")
+		}
+		b.WriteString("inputs: ")
+		b.WriteString(renderMemQLValue(args.Inputs))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -3488,6 +3759,36 @@ func (qc *QueryClient) RoutingRules(ctx context.Context, args RoutingRulesArgs) 
 func RoutingRulesBuild(args RoutingRulesArgs) string {
 	_ = args
 	return "builtin routingRules()"
+}
+
+// SetConstructReuse -- Label one of the caller's constructs reusable, for one goal, or for one account -- or hand the label back to the evidence (design D24). The decomposer proposes and the evidence decides; this is the person's override, and it is a VERSION: each call writes the next override version and never rewrites an earlier one, while the evidence keeps counting underneath so Nexus can show both. Returns {constructId, reuse, override}.
+// Caller-scoped in its handler: the construct is read under the caller's own actor, so a caller who does not own it reads nothing and writes nothing.
+type SetConstructReuseArgs struct {
+	// The caller's construct.
+	ConstructId string
+	// The person's label; evidence clears the override and follows the sweep's label again.
+	// Enum: reusable | goalSpecific | accountSpecific | evidence
+	Label string
+}
+
+// SetConstructReuse calls the engine builtin setConstructReuse.
+func (qc *QueryClient) SetConstructReuse(ctx context.Context, args SetConstructReuseArgs) (*Result, error) {
+	call := SetConstructReuseBuild(args)
+	return qc.executeNamed(ctx, "setConstructReuse", call)
+}
+
+func SetConstructReuseBuild(args SetConstructReuseArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin setConstructReuse(")
+	b.WriteString("constructId: ")
+	b.WriteString(quoteMemQL(args.ConstructId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	b.WriteString(")")
+	return b.String()
 }
 
 // ShopifyAccountConnectBegin -- Begin a reusable personal store connection without changing any deployable. The shop is derived from a recent signed Shopify App URL launch, then authorized through the session-bound callback. No caller-supplied store address is accepted.
@@ -4505,6 +4806,27 @@ func StorefrontProbeBuild(args StorefrontProbeArgs) string {
 		b.WriteString("storeId: ")
 		b.WriteString(quoteMemQL(args.StoreId))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkStepVersions -- Every VERSION of every step of one of the caller's runs -- the step timeline's read (design D18). The standard reads collapse an append-only row to its newest version; this answers each version once, folded to its newest row-version, with the run's head marked (current). Returns one entry per version, keyed <stepId>@v<version>.
+type WorkStepVersionsArgs struct {
+	// The caller's run.
+	RunId string
+}
+
+// WorkStepVersions calls the engine builtin workStepVersions.
+func (qc *QueryClient) WorkStepVersions(ctx context.Context, args WorkStepVersionsArgs) (*Result, error) {
+	call := WorkStepVersionsBuild(args)
+	return qc.executeNamed(ctx, "workStepVersions", call)
+}
+
+func WorkStepVersionsBuild(args WorkStepVersionsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin workStepVersions(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")
 	return b.String()
 }

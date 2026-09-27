@@ -120,3 +120,13 @@ automation demoteProcedures {
 automation retireProcedures {
   sweep := builtin procedureLadderSweep(sweep: "retirement")
 }
+
+/// Every six hours, at twenty past: decide every construct's reuse label from the evidence (epic
+/// memql#5414, design D24). Runs under the maintenance principal (component/auth/maintenance_actor.go)
+/// because constructs sit on the plain owner tier with no cluster-owner arm: under the default
+/// system actor every read would answer zero rows and no error, and a sweep that labels nothing
+/// looks exactly like a catalog with nothing reused.
+@trigger(schedule="0 20 */6 * * *")
+automation sweepConstructReuse {
+  sweep := builtin procedureReuseSweep(dryRun: false)
+}

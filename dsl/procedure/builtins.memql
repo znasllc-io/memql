@@ -99,3 +99,34 @@ builtin procedureLadderSweep {
 builtin procedureDecidePromotion {
   approvalId  string!  @description("The decided v1:work:approval, of kind procedurePromotion.")
 }
+
+// ---- reuse labels (epic memql#5414, design D24) ----
+
+/// Label one of the caller's constructs reusable, for one goal, or for one account -- or hand the
+/// label back to the evidence (design D24). The decomposer proposes and the evidence decides; this
+/// is the person's override, and it is a VERSION: each call writes the next override version and
+/// never rewrites an earlier one, while the evidence keeps counting underneath so Nexus can show
+/// both. Returns {constructId, reuse, override}.
+///
+/// Caller-scoped in its handler: the construct is read under the caller's own actor, so a caller who
+/// does not own it reads nothing and writes nothing.
+@sdk
+@executor("integration.procedure.setReuse")
+builtin setConstructReuse {
+  constructId  string!  @description("The caller's construct.")
+  label        enum("reusable", "goalSpecific", "accountSpecific", "evidence")!  @description("The person's label; evidence clears the override and follows the sweep's label again.")
+}
+
+/// Decide every construct's reuse label from the evidence (design D24): for each owner, the distinct
+/// goal signatures and account ties of the runs that used each construct -- as their compiled
+/// template, as the learned procedure a replay served, or as an automation step inside another
+/// goal's run. At least the feedbackPolicy's reusableAfterSignatures signatures make it reusable;
+/// one account tie makes it account-specific; anything else keeps it goal-specific. A person's
+/// override is never touched. Writes only a construct whose label or evidence changed.
+///
+/// Gated in its handler to the maintenance principal and internal origin: it reads every owner's
+/// work, one owner at a time under that owner's actor.
+@executor("integration.procedure.reuseSweep")
+builtin procedureReuseSweep {
+  dryRun  bool  @description("Report what would change without writing it.")
+}

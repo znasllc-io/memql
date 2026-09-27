@@ -38,3 +38,24 @@ automation sweepWaitingWorkRuns {
 automation workJournalRetentionSweep {
   sweep := builtin workRetentionSweep(dryRun: false)
 }
+
+/// Check a goal run's answer the moment the run succeeds, before a person looks (epic memql#5414,
+/// design D22). Fires on the TRANSITION only -- `args.oldStatus` is what makes a heartbeat or a later
+/// summary write on an already-succeeded run not fire it again -- and only for a goal's run. Every
+/// other rule is the handler's, which reads the cluster's feedbackPolicy, skips a run that reached
+/// no model or was not asked for through Nexus or the API, and never checks the same answer version
+/// twice. One bounded model call at most, and it writes a decision observation and the run's
+/// validation summary -- never a like, never a construct. The OWNER travels with the event, exactly
+/// as learnFromSucceededRun's does: the handler borrows that one owner's authority for this trusted
+/// completion trigger and re-reads the run under it, so a hint that does not own the run reads
+/// nothing.
+@trigger(event="node.updated", concept="v1:work:run")
+@filter(row => row.status == "succeeded" && args.oldStatus != "succeeded" && row.goalId != "" && row.ownerUserId != "")
+automation validateGoalAnswer {
+  args {
+    id           any
+    oldStatus    any
+    ownerUserId  any
+  }
+  check := builtin workValidateAnswer(runId: args.id ?? "", ownerUserId: args.ownerUserId ?? "")
+}

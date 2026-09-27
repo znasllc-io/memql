@@ -87,6 +87,10 @@ concept run {
   finishedAt             datetime  @description("When status reached a terminal value.")
   summary                object  @description("Folded from the journal before its retention window closes (epic A2).")
   parentRunId            string  @description("The run whose step delegated this run (epic memql#5408): set on a delegated app session's recording run, and on a replay run to the goal run it serves or the recording it is compared against. The inverse of childRunId on the delegating step, and stored the same way -- exactly as the writer passes it, deliberately not a @relationship -- so a reader compares it byte for byte with the id it holds. Empty on every run nothing delegated.")
+  head                   object  @description("The run's HEAD (epic memql#5414, design D18): the current version of every top-level step, {\"<stepKey>\": {\"version\": int, \"runId\": string}}. runId is present only when that version lives in ANOTHER run -- a branch's shared prefix, served from the run it forked by reference. The journal writes the whole map at every step receipt, a re-run advances the entries it re-executes, and moving the head (moveRunHead) points an entry back at an earlier version. Every version stays stored; the head only says which one is current. ABSENT on runs written before the field existed, where a reader takes each step's newest row as current.")
+  staleSteps             []string  @description("Step keys whose current version was computed against an upstream version that is no longer current (epic memql#5414, D18). A head move writes them and the re-run it starts clears them as each gets a new version. Empty on a run whose every step agrees with its head.")
+  rerun                  object  @description("The pending re-run of this run (epic memql#5414, D18 and D19): {requestId, reason: rerun|headMove|branch, stepKey, override, snapshot, workspace, requestedBy, requestedAt}. Written on the node the person's act arrived at and served on the agent that executes the run -- the request rides the ROW because the executing replica holds none of the originating one's memory. Cleared to {} when the run closes.")
+  validation             object  @description("The answer validator's summary (epic memql#5414, design D22): {verdict: pass|flag, stepKey, version, observationId, level, at}. A PRE-FILTER, never a certification: it is shown beside the person's own verdict, it never counts as a like and it never moves a procedure's ladder. The detail -- a verdict per axis and the reason -- is the decision observation it names.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="goalId", target=goal, direction="outgoing")
@@ -131,6 +135,10 @@ concept step {
   cost               float  @description("Cost attributed to this step (epic A2).")
   errorCode          string  @description("A catalogued code when the step failed.")
   errorMessage       string  @description("The failure in words.")
+  version            int  @description("The VERSION this row-version belongs to (epic memql#5414, design D18): the attempt number surfaced as a first-class field, so a re-run with a different intelligence is version 2 and the first answer stays readable as version 1. Every version of a step is a version of the SAME row id (runId-stepKey); the run's head says which is current.")
+  basis              object  @description("The head of every EARLIER top-level step when this version started, in run.head's shape (epic memql#5414, D18). It is what lets moving the head back restore a downstream version computed from the same upstream instead of running it again. OMITTED in the pristine case -- every earlier step at version 1 of this same run -- so an ordinary run writes no basis at all.")
+  override           object  @description("What a person changed for THIS version (epic memql#5414, design D20): {level, model, effort, prompt, inputs, guidance: {axes: {product, process, performance}, reason, feedbackId}, requestedBy}. An override applies to one version of one step and never leaks into the next step. Empty on a version nobody overrode.")
+  authoredBy         string  @description("The v1:identity:user.id of the person who WROTE this version's prompt or inputs (D20). A version a person authored is marked as such and is never a recording of the app. Empty when the version's input is the system's own, including a re-run that changed only the level, model or effort.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
@@ -195,11 +203,41 @@ concept observation {
   ownerUserId  string  @serverSet  @description("Copied from the run's owner.")
   runId        string!  @description("v1:work:run.id the observation belongs to.")
   stepKey      string  @description("The step that produced it.")
-  kind         enum("tool_result", "error", "note", "decision")!  @description("What kind of event this records.")
-  data         object  @description("Structured per-kind data. Named data, not payload, because payload is a reserved row intrinsic. A tool_result from the agent's own loop carries {tool, seq, isError, args, argsTruncated}. A tool_result recorded from a delegated APP SESSION (epic memql#5396, design D5 and D12) carries the app's own evidence: appActionId (the id the app gave the call, which is how a recording keys back to its transcript), sessionId, seq, cwd, exitCode, isError, args (WHOLE up to the ceiling -- an action is only reproducible from its arguments, so a shortened one reproduces a DIFFERENT call), argsRef (the Library file the arguments spilled to when they exceeded it), argsTruncated, resultDigest and resultType (the result is a digest plus an inferred JSON type rather than the result itself, so the spine stays about actions), contentRefs (Library file ids of the contents the action read or wrote) and contentOmitted (a content above the per-file cap, or a Library write that failed -- recorded, never fatal to the session). An ABSENT key is a fact nobody measured, which is not the same as zero.")
+  kind         enum("tool_result", "error", "note", "decision", "feedback")!  @description("What kind of event this records. `feedback` (epic memql#5414, design D21) is a PERSON'S verdict on a step version or on the run; `decision` also carries the answer validator's pre-filter verdict (D22).")
+  data         object  @description("Structured per-kind data. Named data, not payload, because payload is a reserved row intrinsic. A tool_result from the agent's own loop carries {tool, seq, isError, args, argsTruncated}. A tool_result recorded from a delegated APP SESSION (epic memql#5396, design D5 and D12) carries the app's own evidence: appActionId (the id the app gave the call, which is how a recording keys back to its transcript), sessionId, seq, cwd, exitCode, isError, args (WHOLE up to the ceiling -- an action is only reproducible from its arguments, so a shortened one reproduces a DIFFERENT call), argsRef (the Library file the arguments spilled to when they exceeded it), argsTruncated, resultDigest and resultType (the result is a digest plus an inferred JSON type rather than the result itself, so the spine stays about actions), contentRefs (Library file ids of the contents the action read or wrote) and contentOmitted (a content above the per-file cap, or a Library write that failed -- recorded, never fatal to the session). An ABSENT key is a fact nobody measured, which is not the same as zero. A `feedback` observation (epic memql#5414, D21) carries {verdict: like|dislike|neutral, axes: {product, process, performance}, reason, target: {stepKey, version} -- no stepKey means the run --, goalSignature, validatorDisagrees, validatorObservationId}; a dislike always names at least one axis, and a later verdict is a NEW row, never a rewrite. The validator's `decision` observation (D22) carries {validator: {axes, reason, verdict: pass|flag}, target: {stepKey, version}, level, model}, where an axis set to true is a problem found on it.")
   content      string!  @description("The text rendering -- the embedding source, so observations are recall-able.")
   embedding    []float  @description("The embedding vector for content, populated lazily by the embed hook.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
+}
+
+// @no-displayCard: a singleton of one switch and one positive integer -- the
+// values epic memql#5414 decides by. There is no human-facing identity on the
+// row, only its literal id; the documented fallback renders it better than any
+// field would.
+
+/// The VALUES epic memql#5414 decides by (design record
+/// docs/superpowers/specs/2026-09-13-app-session-recording-and-learning-program-design.md, D22 and
+/// D24, and section 5 "Values, not constants"): whether the answer validator runs at all, and how many
+/// distinct goal signatures make a construct reusable. They are rows rather than constants so a person
+/// can read the numbers the system is applying, and so the Go that applies them carries the same
+/// numbers only as component/work.DefaultFeedbackPolicy() for an absent or unreadable row.
+///
+/// ONE ROW, AT A LITERAL ID: v1:work:feedbackPolicy:primary, written by `seed feedbackPolicy feedbackPolicyPrimary`
+/// (dsl/work/seeds.memql) through createFeedbackPolicy. A global seed is re-asserted on every boot on
+/// every node, fields the seed declares winning, so an edit made anywhere else does not survive a
+/// restart. Every read pins the literal id, so a stray row at any other id is never mistaken for the
+/// policy.
+///
+/// TIER: `@rowAuthz(clusterOwner, rankFloor="reader")`, exactly as v1:authoring:ladderPolicy: every
+/// signed-in person READS it, and the WRITE stays with the cluster owner or trusted server-side Go
+/// stamping internal origin (the seed materializer), with createFeedbackPolicy @serverOnly in front
+/// of that. There is no owner field because the values are the deployment's. The floor names
+/// `reader`, viewer's alias, because the load-time floor check runs before the rbac catalog is
+/// readable and `viewer` would rank 0 there.
+@rowAuthz(clusterOwner, rankFloor="reader")
+concept feedbackPolicy {
+  validateAnswers          bool!  @description("Whether the answer validator (design D22) checks a goal run's answer against its description before a person sees it. One bounded model call per finished goal run requested through Nexus or the API, at the run's own level; it is a PRE-FILTER that never certifies anything. The seeded value is true.")
+  reusableAfterSignatures  int!   @minimum(1)  @description("How many DISTINCT goal signatures, within one owner's work, must have used a construct before the evidence labels it reusable (design D24). One goal keeps it goal-specific; a single account tie makes it account-specific. The seeded value is 2.")
 }

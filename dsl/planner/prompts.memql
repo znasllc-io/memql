@@ -47,6 +47,7 @@ prompt reactiveConductor {
 @level("fast")
 @templateFile("prompts/goalComplexityTriage.tmpl")
 prompt goalComplexityTriage {
-  goal  string! @description("The user-stated goal driving the Plan, verbatim. The single most important input -- the classification is inferred from it.")
-  now   string            @description("Optional RFC3339 wall-clock; opaque, never required.")
+  goal      string! @description("The user-stated goal driving the Plan, verbatim. The single most important input -- the classification is inferred from it.")
+  now       string            @description("Optional RFC3339 wall-clock; opaque, never required.")
+  guidance  []object          @description("DESCRIPTION GUIDANCE (epic memql#5414, design D23): what the goal's owner disliked about earlier answers to this same goal shape -- [{axes, reason}], newest first, at most five. Present only when a model is genuinely being used for the goal again; empty on a goal nobody disliked.")
 }

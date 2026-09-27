@@ -42,6 +42,11 @@ with one deterministic navigation step instead of a second model turn.
 {{if .now}}
 Current time: {{.now}}
 {{end}}
+{{if .guidance}}
+## WHAT WAS WRONG BEFORE WITH THIS GOAL
+The person who owns this goal disliked earlier answers to it. Do not repeat these problems:
+{{range .guidance}}- {{if .axes}}({{.axes}}) {{end}}{{.reason}}
+{{end}}{{end}}
 
 ## CLASSIFICATION CRITERIA
 

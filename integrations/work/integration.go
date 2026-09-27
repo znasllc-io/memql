@@ -278,6 +278,64 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"policy": "string -- strict (default) raises a divergence on a journal miss; permissive makes a fresh call and journals it",
 			},
 		},
+		// INTERVENTION AND FEEDBACK (epic memql#5414). Each handler lives in
+		// its own file (rerun.go, branch.go, head.go, feedback.go,
+		// versions.go, validator.go) and refuses by name until its stream
+		// replaces it.
+		{
+			Name:        "rerunStep",
+			Description: "Run one step of one of the caller's finished runs again as a new VERSION, with the level, model, effort, prompt or inputs the person changed on that version only; every later step runs again from the new answer. Returns {runId, stepKey, version, staleSteps}.",
+			Handler:     i.handleRerunStep,
+			ArgsSchema:  interventionArgsSchema(),
+		},
+		{
+			Name:        "branchRun",
+			Description: "Branch one of the caller's finished runs at a step: a NEW fork run whose earlier steps are served by reference from the source and whose branch step runs live with the person's changes. Returns {runId, forkedFromRunId, forkAtStepKey}.",
+			Handler:     i.handleBranchRun,
+			ArgsSchema:  interventionArgsSchema(),
+		},
+		{
+			Name:        "moveRunHead",
+			Description: "Make an earlier version of one step of the caller's finished run current again; later steps with a version computed from the same upstream become current without running, and only the rest run again. Returns {runId, stepKey, version, staleSteps}.",
+			Handler:     i.handleMoveRunHead,
+			ArgsSchema: map[string]string{
+				"runId":   "string (required) -- the caller's finished run",
+				"stepKey": "string (required) -- the top-level step whose version to make current",
+				"version": "int (required) -- the version to make current",
+			},
+		},
+		{
+			Name:        "recordFeedback",
+			Description: "Record the caller's verdict on one of their runs or on one version of one of its steps: like, dislike (naming at least one of the product, process and performance axes) or neutral. A later verdict is a new row. Returns {observationId, verdict, validatorDisagrees}.",
+			Handler:     i.handleRecordFeedback,
+			ArgsSchema: map[string]string{
+				"runId":       "string (required) -- the caller's run",
+				"stepKey":     "string -- the top-level step judged; omit to judge the run",
+				"version":     "int -- the version judged; the current one when omitted",
+				"verdict":     "string (required) -- like, dislike or neutral",
+				"product":     "bool -- what it produced was wrong or incomplete",
+				"process":     "bool -- how it went about the work was wrong",
+				"performance": "bool -- how it behaved was wrong",
+				"reason":      "string -- why, in the person's own words",
+			},
+		},
+		{
+			Name:        "stepVersions",
+			Description: "Every version of every step of one of the caller's runs, each folded to its newest row-version and marked current when the run's head names it. Returns one entry per version.",
+			Handler:     i.handleStepVersions,
+			ArgsSchema: map[string]string{
+				"runId": "string (required) -- the caller's run",
+			},
+		},
+		{
+			Name:        "validateAnswer",
+			Description: "Check one finished goal run's answer against what was asked, at the run's own level, and record a decision observation and the run's validation summary. A pre-filter that never certifies. Internal origin under the validateGoalAnswer automation only. Returns {observationId, verdict} or {skipped}.",
+			Handler:     i.handleValidateAnswer,
+			ArgsSchema: map[string]string{
+				"runId":       "string (required) -- the finished goal run",
+				"ownerUserId": "string (required) -- the run's owner as the completion event carried it",
+			},
+		},
 		{
 			Name:        "decideApproval",
 			Description: "Decide one of the caller's pending approvals and resume the run parked on it. Refused when the artifact changed since it was approved. Returns {approvalId, runId, decision, runResumed}.",
@@ -715,4 +773,20 @@ func (i *Integration) OpenResponsibilityGoal(ctx context.Context, g Responsibili
 		Input:       g.Input,
 	})
 	return goalId, runId, nil
+}
+
+// interventionArgsSchema is the argument set rerunStep and branchRun share
+// (epic memql#5414): the step, and what a person may change about the version
+// it runs as. Declared once because the two acts differ in what they OPEN, not
+// in what a person may ask for.
+func interventionArgsSchema() map[string]string {
+	return map[string]string{
+		"runId":   "string (required) -- the caller's finished run",
+		"stepKey": "string (required) -- the top-level step",
+		"level":   "string -- fast, strong or reasoning; embeddings is never offered",
+		"model":   "string -- a policy entry to pin: a provider name, fleet:<modelId>, app:<id> or app:<id>:<model>",
+		"effort":  "string -- low, medium, high, xhigh or max, for an app",
+		"prompt":  "string -- a session step's whole prompt, or instructions added to any other step's",
+		"inputs":  "object -- arguments to use instead of the step's own, by name",
+	}
 }
