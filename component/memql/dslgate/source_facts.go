@@ -111,16 +111,13 @@ type sourceFacts struct {
 	automationCalls lazy[[]automationCallSite]
 	builtinCalls    lazy[[]builtinCallFact]
 	statementDecls  lazy[[]statementDecl]
-	topLevel        lazy[languageParser.TopLevel]
-	statements      lazy[[]languageParser.TopLevelStatement]
+	top             lazy[topLevelFacts]
 	constructs      lazy[[]constructFacts]
 
 	// Per-file findings, File unset (stampFile sets it).
 	retiredOperators lazy[[]Violation]
 	rowIntrinsics    lazy[[]Violation]
 	duplicateImports lazy[[]Violation]
-	unknownKeywords  lazy[[]Violation]
-	misplacedUses    lazy[[]Violation]
 }
 
 // stampFile is a copy of findings with File set to path, so the caller owns
@@ -302,50 +299,65 @@ func (f *sourceFacts) statementDeclarations() []statementDecl {
 	})
 }
 
-// readTopLevel is the file's one top-level scan (parser.ReadTopLevel), which
-// the construct-keyword, construct-placement and late-`use` gates all answer
-// from.
-func (f *sourceFacts) readTopLevel() languageParser.TopLevel {
-	return f.topLevel.get(func() languageParser.TopLevel { return languageParser.ReadTopLevel(f.src) })
+// topLevelFacts is what the construct-keyword, construct-placement and
+// late-`use` gates read off the file's one top-level scan
+// (parser.ReadTopLevel).
+//
+// The scan itself is not kept. Its statements point into a comment- and
+// string-blanked copy of the whole file, and holding them would hold that copy
+// for the life of the process -- a second copy of every file the process ever
+// scanned. So the three answers are derived together, and the few strings they
+// keep are cloned out of it.
+type topLevelFacts struct {
+	statements []languageParser.TopLevelStatement
+	unknown    []Violation // File unset
+	misplaced  []Violation // File unset
+}
+
+func (f *sourceFacts) topLevel() topLevelFacts {
+	return f.top.get(func() topLevelFacts {
+		read := languageParser.ReadTopLevel(f.src)
+		var t topLevelFacts
+		for _, s := range read.Statements() {
+			t.statements = append(t.statements, languageParser.TopLevelStatement{
+				Line: s.Line, Keyword: strings.Clone(s.Keyword), Name: strings.Clone(s.Name),
+			})
+		}
+		for _, u := range read.UnknownConstructKeywords() {
+			t.unknown = append(t.unknown, Violation{
+				Gate:      GateUnknownConstructKeyword,
+				Line:      u.Line,
+				Kind:      "construct",
+				Construct: strings.Clone(u.Keyword),
+				Detail:    u.Message,
+			})
+		}
+		for _, m := range read.MisplacedUseLines() {
+			t.misplaced = append(t.misplaced, Violation{
+				Gate:      GateMisplacedUse,
+				Line:      m.Line,
+				Kind:      "use",
+				Construct: strings.Clone(m.Path),
+				Detail:    m.Message,
+			})
+		}
+		return t
+	})
 }
 
 // topLevelStatements is parser.TopLevelStatements over the file's one scan.
 func (f *sourceFacts) topLevelStatements() []languageParser.TopLevelStatement {
-	return f.statements.get(func() []languageParser.TopLevelStatement { return f.readTopLevel().Statements() })
+	return f.topLevel().statements
 }
 
 // unknownKeywordFindings is scanUnknownConstructKeywords' findings, File unset.
 func (f *sourceFacts) unknownKeywordFindings() []Violation {
-	return f.unknownKeywords.get(func() []Violation {
-		var out []Violation
-		for _, u := range f.readTopLevel().UnknownConstructKeywords() {
-			out = append(out, Violation{
-				Gate:      GateUnknownConstructKeyword,
-				Line:      u.Line,
-				Kind:      "construct",
-				Construct: u.Keyword,
-				Detail:    u.Message,
-			})
-		}
-		return out
-	})
+	return f.topLevel().unknown
 }
 
 // misplacedUseFindings is scanMisplacedUseLines' findings, File unset.
 func (f *sourceFacts) misplacedUseFindings() []Violation {
-	return f.misplacedUses.get(func() []Violation {
-		var out []Violation
-		for _, m := range f.readTopLevel().MisplacedUseLines() {
-			out = append(out, Violation{
-				Gate:      GateMisplacedUse,
-				Line:      m.Line,
-				Kind:      "use",
-				Construct: m.Path,
-				Detail:    m.Message,
-			})
-		}
-		return out
-	})
+	return f.topLevel().misplaced
 }
 
 // retiredOperatorFindings is scanRetiredOperators' findings, File unset.

@@ -196,7 +196,10 @@ func constructFactsOf(c construct) constructFacts {
 	isQuery := c.Kind == "query"
 	f := constructFacts{construct: c}
 	if isQuery {
-		f.clause = FilterClauseOf(c.Body)
+		// Cloned: the clause is cut from a comment-blanked copy of the body,
+		// which the memo would otherwise hold whole for as long as it holds
+		// this construct (source_facts.go).
+		f.clause = strings.Clone(FilterClauseOf(c.Body))
 	}
 
 	f.public = strings.Contains(c.Preamble, "@public")
