@@ -35,6 +35,26 @@
       "code": "body_config_unknown",
       "message": "`config.definitelyNotExposed` names no key of the config allow-list",
       "note": "a key outside the allow-list reads absent at run time, so the corpus-level gate refuses it at load"
+    },
+    {
+      "file": "lambda-parameter-named-args.memql",
+      "verdict": "evaluate",
+      "call": "lambdaParameterNamedArgs",
+      "args": {
+        "items": [
+          {
+            "active": true
+          },
+          {
+            "active": false
+          },
+          {
+            "active": true
+          }
+        ]
+      },
+      "expect": 2,
+      "note": "A lambda parameter in scope resolves before a reserved root, so inside `args => ...` the read is the element's. The load used to refuse the logic, reading args.active as an argument the construct never declared, while an automation's compiler read it as the element (memql#5426)."
     }
   ]
 }
