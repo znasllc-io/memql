@@ -179,7 +179,7 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 		anyCall = true
 		calledModel[rowString(c, "stepKey")] = true
 	}
-	answer, session, err := i.answerStep(ctx, owner, run, steps, calledModel)
+	answer, session, err := i.answerStep(scoped, owner, run, steps, calledModel)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 		"answer":  text,
 		"now":     rfc(i.clock()),
 	}
-	if description := i.answerDescription(ctx, owner, answer, session); len(description) > 0 {
+	if description := i.answerDescription(scoped, owner, answer, session); len(description) > 0 {
 		data["description"] = description
 	}
 	rendered, err := judge.RenderPrompt(validatorPrompt, data)

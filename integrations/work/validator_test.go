@@ -226,6 +226,11 @@ func TestTheValidatorNeverWritesFeedbackOrTouchesAConstruct(t *testing.T) {
 		if strings.Contains(name, "construct") || strings.Contains(name, "authoring") || strings.Contains(name, "procedure") {
 			t.Errorf("the validator reached %s; it never reads or writes a construct", c.Construct())
 		}
+		// The automation's internal origin gets it through the gate and no
+		// further: every read runs as the owner, unstamped.
+		if strings.HasPrefix(c.Query, "query ") && c.Origin.IsInternal() {
+			t.Errorf("%s ran with the automation's internal origin; a read must be the owner's own", c.Construct())
+		}
 	}
 
 	// And the ladder is not reachable from here at all: validator.go imports

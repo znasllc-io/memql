@@ -78,8 +78,10 @@ func (i *Integration) handleMoveRunHead(ctx context.Context, args map[string]any
 		rerunVersions = plan.Versions
 	}
 
-	scoped := ownerActor(ctx, run.owner)
-	st := i.store()
+	// Every step whose current version changes, upstream included, found
+	// BEFORE anything is written: a version the new head names and no row
+	// holds refuses the move whole rather than half-way through it.
+	var reasserts []map[string]any
 	for _, key := range run.order {
 		e, ok := next[key]
 		if !ok || e == old[key] {
@@ -94,8 +96,14 @@ func (i *Integration) handleMoveRunHead(ctx context.Context, args map[string]any
 		if row == nil {
 			return nil, refuse(codeVersionNotFound, "run %s records no version %d of %s to make current", run.id, e.Version, key)
 		}
-		if err := st.writeInternal(scoped, "mutation "+call("reassertWorkStepVersion", reassertion(row, e.Version))); err != nil {
-			return nil, fmt.Errorf("work: re-assert version %d of %s: %w", e.Version, key, err)
+		reasserts = append(reasserts, reassertion(row, e.Version))
+	}
+
+	scoped := ownerActor(ctx, run.owner)
+	st := i.store()
+	for _, args := range reasserts {
+		if err := st.writeInternal(scoped, "mutation "+call("reassertWorkStepVersion", args)); err != nil {
+			return nil, fmt.Errorf("work: re-assert version %v of %v: %w", args["version"], args["stepId"], err)
 		}
 	}
 
