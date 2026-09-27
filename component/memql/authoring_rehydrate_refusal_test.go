@@ -68,3 +68,72 @@ func TestRehydrationNamesAStoredRowARuleRefuses(t *testing.T) {
 		t.Error("a quarantined stored row must not become a strict-boot problem")
 	}
 }
+
+// TestRehydrationKeepsTheStampDiagnosisForARuleThatDidNotNarrow (memql#5426
+// review): a coded refusal is not, by carrying a code, a line the language
+// stopped accepting. A stored query whose bound concept no longer resolves
+// (signature_concept_unresolved) is a missing dependency: the report keeps the
+// stamp guard's diagnosis rather than telling the operator to delete a line
+// from a construct that was never wrong -- and the quarantine entry still
+// carries the rule.
+func TestRehydrationKeepsTheStampDiagnosisForARuleThatDidNotNarrow(t *testing.T) {
+	eng := stampTestEngine(t)
+	row := AuthoringConstructRow{
+		Id:             "v1:authoring:construct:ghost1",
+		Kind:           "query",
+		Name:           "storedGhostConcept",
+		BundleId:       "authoring:bundle:ghost1",
+		OwnerUserId:    "u-owner",
+		Source:         "query ghostConceptNobodyDeclares storedGhostConcept {\n  filter row => row.status == \"active\"\n  paginate 10\n}\n",
+		Origin:         "trainingns/queries.memql",
+		Status:         "active",
+		GrammarVersion: "2026.07-some-earlier-epoch",
+	}
+	err := eng.recompileAndPromoteRow(context.Background(), row)
+	if err == nil {
+		t.Fatal("a stored query bound to a concept nobody declares re-hydrated")
+	}
+	var refusal *RehydrationRefusal
+	if errors.As(err, &refusal) {
+		t.Fatalf("a missing dependency was explained as a rule of the language (%s):\n%v", refusal.Code, err)
+	}
+	if !strings.Contains(err.Error(), "for the intervening grammar epics") {
+		t.Errorf("the stamp guard's diagnosis is gone:\n%v", err)
+	}
+	if n := len(eng.loadReport.Quarantined); n != 1 {
+		t.Fatalf("want one quarantine entry, got %d", n)
+	}
+	if q := eng.loadReport.Quarantined[0]; q.Id != row.Id || q.Code != SignatureConceptCode {
+		t.Errorf("the quarantine entry = %+v, want the row id and %s", q, SignatureConceptCode)
+	}
+}
+
+// TestNarrowingRulesAreTheLanguagesNarrowings pins which families explain a
+// stored row as refused by the language: the annotation refusals, retired and
+// deprecated forms (read from their registries), and the follow-ups' spelling
+// refusals -- and not a missing dependency, a declaration that does not
+// parse, a lowering rule or a statement syntax error.
+func TestNarrowingRulesAreTheLanguagesNarrowings(t *testing.T) {
+	for code, want := range map[string]bool{
+		"annotation_unknown":           true,
+		"annotation_key":               true,
+		"retired_comma_connective":     true,
+		"body_step_retired":            true,
+		"trigger_partition_retired":    true,
+		"deprecated_allowed_roles":     true,
+		"query_clause_duplicate":       true,
+		"prompt_level_missing":         true,
+		"pattern_invalid":              true,
+		"args_undeclared":              true,
+		"body_call_unknown":            true,
+		"signature_concept_unresolved": false,
+		CodeConceptUnparsed:            false,
+		"lower_unknown_field":          false,
+		"body_one_statement_per_line":  false,
+		"":                             false,
+	} {
+		if got := narrowsTheLanguage(code); got != want {
+			t.Errorf("narrowsTheLanguage(%q) = %v, want %v", code, got, want)
+		}
+	}
+}
