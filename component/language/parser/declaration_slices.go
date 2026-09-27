@@ -67,33 +67,69 @@ type DeclarationSlice struct {
 // on the declaration's opening `{` -- both hold for the `^[ \t]*<keyword>[ \t]+
 // (NAME)[ \t]*\{` family every call site uses.
 //
-// A header whose braces never close, or which sits inside another construct's
-// braces, is skipped rather than guessed at.
+// A header which sits inside another construct's braces is skipped rather than
+// guessed at, and so is one whose braces never close: a caller that must report
+// that declaration asks ExtractDeclarationSlicesReporting.
 func ExtractDeclarationSlices(source string, headerRe *regexp.Regexp) []DeclarationSlice {
+	slices, _ := ExtractDeclarationSlicesReporting(source, headerRe)
+	return slices
+}
+
+// UnterminatedDeclaration is a top-level declaration whose opening brace never
+// closes.
+type UnterminatedDeclaration struct {
+	Name string
+	// Start is the byte offset where its preamble begins, and HeaderLine the
+	// 1-based line of its header.
+	Start      int
+	HeaderLine int
+}
+
+// ExtractDeclarationSlicesReporting is ExtractDeclarationSlices, and every
+// top-level header of the kind whose opening brace never closes (memql#5426
+// review).
+//
+// Such a declaration used to vanish, and it took every later declaration of the
+// file with it: its unclosed `{` left the rest of the file one level deep, so
+// the top-level guard refused every header after it. Its brace is set aside
+// once it is found to be unterminated, so each later declaration is judged by
+// its own braces, and a caller can refuse the one that is broken rather than
+// lose it and the ones that are not.
+func ExtractDeclarationSlicesReporting(source string, headerRe *regexp.Regexp) ([]DeclarationSlice, []UnterminatedDeclaration) {
 	scan := BlankComments(source)
 	matches := headerRe.FindAllStringSubmatchIndex(scan, -1)
 	if len(matches) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	var out []DeclarationSlice
+	var unterminated []UnterminatedDeclaration
 	walker := NewPreambleWalker(source)
+	// depthView is the blanked view with the opening brace of every
+	// unterminated declaration found so far set aside, which is what the
+	// top-level guard reads.
+	depthView := scan
 	for _, m := range matches {
 		headerStart, headerEnd := m[0], m[1]
 
 		// Only top-level declarations. Depth is counted on the blanked view so
 		// braces inside comments do not perturb it.
-		if BraceDepthBefore(scan, headerStart) != 0 {
+		if BraceDepthBefore(depthView, headerStart) != 0 {
 			continue
 		}
 
 		// The opening `{` is the last byte of the header match.
 		closeIdx := MatchingCloseBrace(scan, headerEnd-1)
+		preambleStart := walker.StartOf(headerStart)
 		if closeIdx < 0 {
+			unterminated = append(unterminated, UnterminatedDeclaration{
+				Name:       source[m[2]:m[3]],
+				Start:      preambleStart,
+				HeaderLine: 1 + strings.Count(source[:headerStart], "\n"),
+			})
+			depthView = depthView[:headerEnd-1] + " " + depthView[headerEnd:]
 			continue
 		}
-
-		preambleStart := walker.StartOf(headerStart)
 
 		out = append(out, DeclarationSlice{
 			Source: source[preambleStart : closeIdx+1],
@@ -102,7 +138,7 @@ func ExtractDeclarationSlices(source string, headerRe *regexp.Regexp) []Declarat
 			End:    closeIdx + 1,
 		})
 	}
-	return out
+	return out, unterminated
 }
 
 // predicateDeclHeaderRe matches the header of an edition-2026 BRACE-LESS

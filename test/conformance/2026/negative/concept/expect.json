@@ -12,6 +12,12 @@
       "verdict": "refuse_parse",
       "message": "expected attribute name after @",
       "note": "A concept that does not parse is refused. At boot the concept loader parses each concept on its own and used to drop one that failed with nothing reported, so a node booted without it; it is a skip strict boot refuses now, concept_unparsed (memql#5426). The corpus reads the file with the parser every loader uses, which refuses it here."
+    },
+    {
+      "file": "an-unterminated-body.memql",
+      "verdict": "refuse_parse",
+      "message": "expected property name, got \"{\"",
+      "note": "A concept whose `{` never closes is refused. The corpus reads the whole file with the parser, which reads the next concept as a field of this one; the concept loader slices each concept on its own, and used to lose this one AND every concept below it without a word, because the unclosed brace left the rest of the file inside it. It refuses this one by name now, concept_unparsed, and builds the note below it (memql#5426)."
     }
   ]
 }
