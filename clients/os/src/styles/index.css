@@ -9946,19 +9946,21 @@ a.os-button {
 /* The step, opened: a disclosure UNDER the row rather than a second panel.
  * It carries no Head and no acts, so it is the row saying more about itself
  * -- which is what keeps rule 11 satisfied. The inset aligns it under the
- * body rather than under the spine, so the thread stays unbroken. */
+ * body rather than under the spine.
+ *
+ * ATTACHED TO THE SPINE BY A HAIRLINE, holding ONE panel -- the version --
+ * rather than a box around a box (epic memql#5414): the raised plate it used
+ * to carry would put the version's Panel inside a second frame. At
+ * `--os-rail` the stub was invisible on dark and the disclosure floated free
+ * of the step it belongs to, hence the hover tint. */
 .os-nexus-step-detail {
-  margin: 2px 0 10px 30px;
-  padding: 10px 12px;
-  /* The disclosure has to read as ATTACHED to the spine. At `--os-rail` the
-   * stub was invisible on dark and the panel floated free of the step it
-   * belongs to. */
+  position: relative;
+  margin: 2px 0 12px 30px;
+  padding: 2px 0 2px 14px;
   border-left: 2px solid var(--os-rail-hover);
-  border-radius: 0 var(--os-radius-xs) var(--os-radius-xs) 0;
-  background: var(--os-raised);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .os-nexus-step-meaning {
   margin: 0;
@@ -10118,17 +10120,6 @@ a.os-button {
   order: -1;
 }
 
-/* THE DISCLOSURE, ATTACHED TO THE SPINE BY A HAIRLINE, holding ONE panel --
- * the version -- rather than a box around a box. */
-.os-nexus-step-detail {
-  position: relative;
-  margin: 2px 0 12px 30px;
-  padding: 2px 0 2px 14px;
-  border-left: 2px solid var(--os-rail-hover);
-  border-radius: 0;
-  background: none;
-  gap: 10px;
-}
 /* THE THREAD RUNS ON THROUGH AN OPEN STEP. The spine is drawn by each row,
  * so a disclosure between two rows used to cut it -- one thread became two.
  * The detail carries the hairline on at the spine's own x (the gutter is
