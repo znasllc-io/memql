@@ -763,8 +763,15 @@ negative/ai/query-filter.memql
 negative/concept/nesting-too-deep.memql
 negative/logic/chain-too-long.memql
 negative/logic/nesting-too-deep.memql
+negative/mutate/imported-concept-declared-nowhere.memql
 negative/mutate/two-write-blocks.memql
+negative/query/imported-concept-declared-nowhere-filtered.memql
+negative/query/imported-concept-declared-nowhere.memql
+negative/query/signature-concept-not-imported.memql
 negative/query/unknown-clause.memql
+negative/seed/concept-declared-nowhere.memql
+negative/shape/concept-declared-nowhere.memql
+negative/spec/binding-declared-nowhere.memql
 negative/use/import-block.memql
 statements/automation/assign/assign.memql
 statements/automation/assign/call-inside-an-expression.memql
