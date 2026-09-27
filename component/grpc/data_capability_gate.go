@@ -81,7 +81,8 @@ var dataPlaneGateExemptions = []dataPlaneGateExemption{
 			"machine credentials that carry no role claim and resolve to the reader " +
 			"fallback, and proxied agent-node calls arrive as forwarded auth, so gating " +
 			"it on the caller's data-plane capability would refuse the live agent path. " +
-			"It is a curated, @allowedRoles-gated allowlist " +
+			"It is a curated allowlist, gated per tool on the acting agent (@requiresAgentRole) and on the " +
+			"person's rank (@requiresRank), " +
 			"rather than the whole authored mutation surface, which is why the uncovered " +
 			"slice is the smaller one -- but it IS uncovered.",
 	},

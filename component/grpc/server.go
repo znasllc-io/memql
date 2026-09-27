@@ -2414,11 +2414,20 @@ func (s *streamSession) handleCallTool(envelope *memqlv1.MemqlClientMessage, msg
 
 // toolCallerContext is ctx carrying the tool caller a ListToolsMsg or a
 // CallToolMsg speaks for (memql#5438): the acting agent the envelope's
-// metadata names, when it names one, and the person this stream is for, as
-// the AccessContext @requiresRank reads -- the same actor handleExecuteQuery
-// binds, so a tool's floor and a query's are judged against one person.
+// metadata names, when it names one, and the person the call is for, as the
+// AccessContext @requiresRank reads.
+//
+// WHICH person. A request forwarded across the mesh arrives on the agent node
+// with its VERIFIED authority already bound (bindForwardedContext): the
+// principal as the originating node proved it, role ceiling included. A
+// re-resolution from its claims could only disagree with that, so an actor
+// already on the context is kept. A direct stream carries only claims, and
+// gets the actor this stream resolves -- the one handleExecuteQuery binds, so
+// a tool's floor and a query's are judged against one person.
 func (s *streamSession) toolCallerContext(ctx context.Context, envelope *memqlv1.MemqlClientMessage) context.Context {
-	ctx = auth.ContextWithAccess(ctx, s.ensureAccess(ctx))
+	if ac, ok := auth.AccessFromContext(ctx); !ok || ac == nil || (strings.TrimSpace(ac.UserId) == "" && !ac.IsAnonymousActor()) {
+		ctx = auth.ContextWithAccess(ctx, s.ensureAccess(ctx))
+	}
 	if role := callerRoleFromMetadata(envelope); role != "" {
 		ctx = memqlengine.WithActingAgentRole(ctx, role)
 	}

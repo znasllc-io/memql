@@ -94,11 +94,19 @@ One decision (`component/memql/tool_gate.go`), asked on every path:
 
 **Cross-node.** `CallToolMsg` runs on the agent node: the agent kind arrives
 threaded in the envelope's `agent_role` metadata, and the person as the
-forwarded authority the mesh binds onto the stream's context
-(`bindForwardedContext`), which `toolCallerContext` hands to the rank floor as
-an `AccessContext` -- the same actor `handleExecuteQuery` binds. An agent turn
-forwarded to the agent node carries the person the same way. No state lives on
-one node that another needs.
+VERIFIED forwarded authority the mesh binds onto the stream's context
+(`bindForwardedContext`). `toolCallerContext` keeps that actor as it was
+proved -- role ceiling included -- rather than re-resolving the claims beside
+it, which could disagree; only a direct stream, which carries claims alone,
+resolves its actor the way `handleExecuteQuery` does. An agent turn forwarded
+to the agent node carries the person the same way. No state lives on one node
+that another needs.
+
+A tool's floor is judged exactly as a query's is, through
+`refuseBelowRequiredRank`: an internal-origin call passes it, and a work run's
+borrowed actor (`auth.ContextWithUserActor`, whose role is the synthetic
+`writer`) is judged at that rank, as a query floor under borrowed authority
+already is.
 
 ### Load-time checks
 
