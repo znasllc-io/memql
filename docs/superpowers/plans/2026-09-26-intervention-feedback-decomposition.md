@@ -98,7 +98,7 @@
 | `step.authoredBy` | `string` | The person's user id when they wrote this version's prompt or inputs (D20); empty otherwise. |
 | `observation.kind` | enum += `"feedback"` | |
 
-New concept `v1:work:feedbackPolicy` (singleton, literal id `v1:work:feedbackPolicy:primary`), `@rowAuthz(clusterOwner, rankFloor="reader")`: `validateAnswers bool!`, `reusableAfterSignatures int! @minimum(1)`. Seeded in `dsl/work/seeds.memql` with `true` / `2`. Read by `feedbackPolicyCurrent` (`@requiresRank("reader")`, no `@actor`).
+New concept `v1:work:feedbackPolicy` (singleton, literal id `v1:work:feedbackPolicy:primary`), `@rowAuthz(clusterOwner, rankFloor="reader")`: `validateAnswers bool!`, `reusableAfterSignatures int! @minimum(1)`. Seeded in `dsl/work/seeds.memql` by `seed feedbackPolicy feedbackPolicyPrimary` (seed names are global and `primary` is ladderPolicy's) with an explicit `id: "primary"` and `true` / `2`. Read by `feedbackPolicyCurrent` (`@requiresRank("reader")`, no `@actor`).
 
 `dsl/authoring/concepts.memql`, `construct` additive:
 
@@ -115,7 +115,7 @@ Mutations (all `@serverOnly` unless marked; each pinned in `server_only_parsed_t
 - `createWorkStep` gains `version int`, `basis object`, `override object`, `authoredBy string`, plus the reset fields it did not accept before: `result object`, `resultFingerprint string`, `binding object`, `errorCode string`, `errorMessage string`, `childRunId string` (bound with NO default, so the journal sends them only on a version > 1).
 - `updateWorkStep` gains `version int`, `basis object`, `override object`, `authoredBy string`.
 - NEW `reassertWorkStepVersion` (update): every per-version field (`status, result, resultFingerprint, binding, postcondition, symptom, attempt, version, basis, override, authoredBy, childRunId, idempotencyKey, startedAt, finishedAt, durationMs, tokens, cost, errorCode, errorMessage`) -- the head move's pointer write (section 1.4).
-- NEW `createWorkFeedback` (insert on observation): `observationId!, runId!, stepKey, content!, data object!` with `kind: "feedback"` stamped.
+- (No new feedback mutation: `recordFeedback` writes through the existing `createWorkObservation` with `kind: "feedback"`, now a legal enum value.)
 - NEW `recordConstructReuse` (update on construct): `constructId!, reuse!, reuseEvidence object!`.
 - NEW `recordConstructReuseOverride` (update on construct): `constructId!, reuseOverride object!`.
 - NEW `createFeedbackPolicy` (seed materializer only).
@@ -325,19 +325,22 @@ func (p FeedbackPolicy) Normalize() FeedbackPolicy
 
 ### 1.4 Re-run, head move and branch -- the execution contract (Tasks 2-4)
 
-- `core/common.RunContext` gains `Override *work-free struct` -- declared in `core/common` (no import of component/work):
+- `core/common.RunContext` gains (LANDED at `d1845f2ed`, `core/common/modelcall.go`):
   ```go
-  type StepOverride struct {
-  	Level, Model, Effort, Prompt string
-  	Inputs      map[string]any
-  	GuidanceAxes []string
-  	GuidanceReason, FeedbackId, RequestedBy string
-  }
-  type WorkspaceSnapshot struct { Files []SnapshotFile } // SnapshotFile{Path, FileId}
-  // RunContext additions:
   Override  *StepOverride      // ONLY on the context of the one step the re-run or branch targets
   Workspace string             // a fresh workspace for this execution's app sessions; "" = the default
   Snapshot  *WorkspaceSnapshot // ONLY on the targeted step, when it is a session step
+
+  type StepOverride struct {
+  	Level, Model, Effort, Prompt string
+  	Inputs                       map[string]any
+  	GuidanceAxes                 []string // "product", "process", "performance"
+  	GuidanceReason, FeedbackId   string
+  	RequestedBy                  string
+  }
+  func (o *StepOverride) Empty() bool
+  type WorkspaceSnapshot struct{ Files []SnapshotFile }
+  type SnapshotFile struct{ Path, FileId string }
   ```
 - A **re-run** (`rerunStep`): the bff handler validates, then writes the run `{status: "running", rerun: {requestId, reason: "rerun", stepKey, override, snapshot?, workspace?, requestedBy, requestedAt}, staleSteps: plan.Stale}` through the internal stamp under the owner. The agent's `Dispatch` sees `journal.Rerun` and calls `ResumeFrom(journal, auto, &ResumeOptions{FromStep: rerun.stepKey, AllowSideEffects: true, Rerun: &RerunSpec{...}})`. With `Rerun` set: `ValidateRunJournal`'s failed-step requirement is waived; every step from `FromStep` on executes as `maxRecordedAttempt(step) + 1`; the targeted step alone runs with `RunContext.Override` (and `Snapshot`); every step of the execution carries `RunContext.Workspace` when set. The run closes with `rerun: {}` and `staleSteps: []`.
 - A **head move** (`moveRunHead`): the bff handler reads every version (`StepVersions`), calls `work.MoveHead`, re-asserts each step whose current version CHANGED with `reassertWorkStepVersion` (so every collapsed read -- the timeline, the corpus, `LoadRunJournal` -- keeps returning the head), writes `head` and `staleSteps`, and when stale is non-empty also writes `status: running` with `rerun: {reason: "headMove", stepKey: stale[0], override: {}}`.
@@ -493,4 +496,10 @@ Each stream works only in its files, commits `Issue #<N>: ...`, and reports what
 
 ## 3. Stream notes
 
-(filled in as streams merge)
+### Task 0 (coordinator), landed at `626351aee` + `d1845f2ed`
+- Every capability is a STUB in the file its stream owns: `integrations/work/{rerun,branch,head,feedback,versions,validator}.go` and `integrations/procedure/{reuse,reuse_sweep}.go`. Replace the stub function IN PLACE; never edit `integrations/work/integration.go`'s or `integrations/procedure/integration.go`'s capability list (the coordinator owns both).
+- Executor names: `integration.work.{rerunStep, branchRun, moveRunHead, recordFeedback, stepVersions, validateAnswer}`, `integration.procedure.{setReuse, reuseSweep}`.
+- `workValidateAnswer` takes `runId` AND `ownerUserId` (the owner hint the completion event carries, re-verified by an owner-filtered read -- `learnFromSucceededRun`'s pattern).
+- `forkRun` is still present; it is retired when the Nexus stream moves to `branchRun` (coordinator, at that merge).
+- A fresh worktree needs `bash scripts/identity/build-css.sh` before the root package builds.
+- Gates already satisfied by Task 0: maintenance pin, automation count 73, goldens, server-only pins, prompt level pin, row-authz adjudication of `feedbackPolicyCurrent`, embed inventory 433, SDK, snapshot, arch model, proto.
