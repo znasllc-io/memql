@@ -9405,6 +9405,14 @@ a.os-button {
   flex-direction: column;
   gap: 8px;
 }
+/* A ROW'S FOCUS RING IS DRAWN INSIDE IT HERE. The column scrolls, so it clips
+ * whatever paints outside it, and a record row runs edge to edge: the kit's
+ * ring, 2px outside the row, lost both its sides and read as two rules, the
+ * upper one on top of the divider -- a keyboard user could not tell focus from
+ * a line. Inset, it is a whole ring again. */
+.os-nexus-column .os-row.os-record-row:focus-visible {
+  outline-offset: -2px;
+}
 .os-nexus-aside {
   flex: 1 1 320px;
   max-width: 460px;
