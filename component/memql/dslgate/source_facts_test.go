@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/ast"
@@ -251,5 +252,38 @@ func TestSourceFactsMemoIsBounded(t *testing.T) {
 	small := fmt.Sprintf("// %s\nquery thing q {\n}\n", t.Name())
 	if factsOf(small) != factsOf(small) {
 		t.Error("a small text was not held")
+	}
+}
+
+// TestSourceFactsAreSafeUnderConcurrentScans: scans running at once over the
+// same texts -- the language server re-runs the load pass while a boot is in
+// flight, and tests boot engines in parallel -- share one derivation per text
+// and all report the same thing. Run under -race it is also the check that
+// the lazy facts are published safely.
+func TestSourceFactsAreSafeUnderConcurrentScans(t *testing.T) {
+	corpus := factsCorpus(t.Name())
+	opts := Options{BuiltinStepRefusal: func(string, string) (string, bool) { return "", true }}
+	const scans = 8
+	results := make([][]string, scans)
+	before := sourceFactsDerived.Load()
+	var wg sync.WaitGroup
+	for i := 0; i < scans; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i] = scanFacts(corpus, opts)
+		}(i)
+	}
+	wg.Wait()
+	if derived := sourceFactsDerived.Load() - before; derived != int64(len(corpus)) {
+		t.Errorf("%d concurrent scans derived facts for %d texts, want %d -- one per distinct text", scans, derived, len(corpus))
+	}
+	for i := 1; i < scans; i++ {
+		if !reflect.DeepEqual(results[i], results[0]) {
+			t.Fatalf("scan %d disagrees with scan 0:\n%s\n---\n%s", i, strings.Join(results[i], "\n"), strings.Join(results[0], "\n"))
+		}
+	}
+	if len(results[0]) == 0 {
+		t.Fatal("the scans reported nothing; the comparison would pass over a corpus that reached no gate")
 	}
 }
