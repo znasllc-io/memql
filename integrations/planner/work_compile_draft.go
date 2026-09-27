@@ -138,16 +138,14 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 		}
 		return fmt.Sprintf("builtin runAgentTurn(agentId: %s, prompt: %s)", langparser.QuoteString(agentId), instruction)
 	}
+	// The body is written first and the imports after it: runAgentTurn is
+	// imported only when a statement OF THE TEMPLATE calls it -- a single
+	// answer turn, a section left inline, or the assembly turn of a text
+	// goal. A section written as an automation of its own imports it there,
+	// and a decomposition the catalog serves whole calls none.
 	var b strings.Builder
-	if nativeFile {
-		b.WriteString("use compose.builtins.{ composeMaterialize }\n")
-	}
-	// runAgentTurn is imported only when a statement calls it: a single
-	// answer turn, or a section planned live (whose presence also keeps the
-	// assembly turn). A decomposition the catalog serves whole calls none.
-	if (!fanout && !nativeFile) || (fanout && dec.anyIntelligence(headline)) {
-		b.WriteString("use agents.builtins.{ runAgentTurn }\n")
-	}
+	templateTurns := !fanout && !nativeFile
+	var sectionAutos []memql.SandboxConstruct
 	fmt.Fprintf(&b, "\n@template\nautomation %s {\n", headline)
 	if len(inputNames) > 0 {
 		b.WriteString("  args {\n")
@@ -167,12 +165,22 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 		// values by name, and a parallel branch's names end with the branch.
 		producers := map[string]string{}
 		dependent := false
+		live := dec.liveSections(req, headline)
 		for _, section := range sections {
 			if cat := dec.catalogFor(section.Index); cat != nil {
 				// A CATALOGUED SECTION CALLS ITS AUTOMATION and spends no
 				// model (D24). Its source travels in this bundle, below.
 				fmt.Fprintf(&b, "  %s := %s\n", section.Name, cat.callText())
+			} else if ls := live[section.Index]; ls != nil && ls.Automation != "" {
+				// A SECTION PLANNED LIVE IS AN AUTOMATION OF ITS OWN, called
+				// the way a catalogued one is, so that a run that succeeds can
+				// catalogue it for the next goal that asks for the same
+				// section (work_compile_section_automations.go).
+				fmt.Fprintf(&b, "  %s := %s\n", section.Name, ls.callText())
+				sectionAutos = append(sectionAutos, memql.SandboxConstruct{Kind: "automation", Name: ls.Automation, Source: sectionAutomationSource(ls, agentId, section.Spec)})
+				dependent = dependent || ls.readsEarlierSection()
 			} else {
+				templateTurns = true
 				consumed := consumedOutputs(section.Spec.Inputs, producers)
 				text := x.join(langparser.QuoteString(sectionPrompt(goal, section.Spec, len(consumed) > 0)+inputHeading), x.goalInput)
 				if len(consumed) > 0 {
@@ -199,6 +207,7 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 			}
 			assembly := goal + "\n\nAssemble the completed " + kind + " into the requested deliverable. Verify completeness. " + dec.Assembly
 			fmt.Fprintf(&b, "  assemble := %s\n", delivery(assembly, x.sections))
+			templateTurns = templateTurns || !nativeFile
 		} else {
 			// EVERY SECTION WAS SERVED FROM THE CATALOG, so a text answer is
 			// the sections' own results. An assembly turn here would spend
@@ -208,7 +217,15 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 		}
 	}
 	b.WriteString("}\n")
-	bundle := authoringBundle{AutomationName: headline, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: headline, Source: b.String()}}}
+	var imports strings.Builder
+	if nativeFile {
+		imports.WriteString("use compose.builtins.{ composeMaterialize }\n")
+	}
+	if templateTurns {
+		imports.WriteString("use agents.builtins.{ runAgentTurn }\n")
+	}
+	bundle := authoringBundle{AutomationName: headline, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: headline, Source: imports.String() + b.String()}}}
+	bundle.Constructs = append(bundle.Constructs, sectionAutos...)
 	if fanout {
 		carryCatalogSections(&bundle, dec, sections)
 	}

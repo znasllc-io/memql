@@ -115,6 +115,12 @@ type sectionableDecision struct {
 	// index. Compile decides them after triage (work_compile_sections.go);
 	// they are never read from the model's answer.
 	catalog map[int]*catalogSection
+	// inlineAll, when set, keeps every section planned live an inline
+	// statement of the template, and is why: the draft that wrote them as
+	// automations of their own did not persist
+	// (work_compile_section_automations.go). Never read from the model's
+	// answer.
+	inlineAll string
 }
 
 // sectionSpec is one section of a sectionable deliverable, in the order triage

@@ -419,9 +419,18 @@ func (l *PlannerAgentLoop) catalogCall(ctx context.Context, req CompileRequest, 
 	for _, in := range inputs {
 		names[strings.TrimSpace(in)] = true
 	}
+	sectionInput := map[string]bool{}
+	for name := range names {
+		sectionInput[name] = true
+	}
 	if auto.Args != nil {
 		for _, f := range auto.Args.Fields {
-			if !f.Optional {
+			// THE GOAL IT SERVES rides to an automation declaring the
+			// context argument -- a section automation, written for another
+			// goal as often as for this one, see
+			// work_compile_section_automations.go -- so the model is told
+			// about THIS goal.
+			if !f.Optional || f.Name == sectionGoalArg {
 				names[f.Name] = true
 			}
 		}
@@ -435,6 +444,8 @@ func (l *PlannerAgentLoop) catalogCall(ctx context.Context, req CompileRequest, 
 			cat.Args = append(cat.Args, boundArg{Name: name, Expr: producers[name]})
 		case goalInputs[name]:
 			cat.Args = append(cat.Args, boundArg{Name: name, Expr: "args." + name})
+		case name == sectionGoalArg && !sectionInput[name]:
+			cat.Args = append(cat.Args, boundArg{Name: name, Expr: langparser.QuoteString(req.Statement)})
 		default:
 			return nil, fmt.Sprintf("nothing binds its input %q: it is neither a goal input nor an earlier section's output", name)
 		}
