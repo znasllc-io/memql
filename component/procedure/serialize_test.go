@@ -192,6 +192,16 @@ func TestTheWireShapeIsPinned(t *testing.T) {
 		t.Fatalf("symbol wire shape changed:\n got %s\nwant %s", sb, want)
 	}
 
+	// A hole's shape rides beside its class, a feature at a time.
+	hb, err := MarshalTemplate(Template{Holes: []Hole{{Id: "s0.command.1", StepIndex: 0, Path: []string{"command", "1"},
+		Type: "string", Class: HoleFree, Shape: &HoleShape{Dash: true}}}})
+	if err != nil {
+		t.Fatalf("MarshalTemplate: %v", err)
+	}
+	if want := `{"steps":null,"holes":[{"id":"s0.command.1","stepIndex":0,"path":["command","1"],"type":"string","class":"free","shape":{"dash":true}}]}`; string(hb) != want {
+		t.Fatalf("hole wire shape changed:\n got %s\nwant %s", hb, want)
+	}
+
 	// A command line canonicalized from a recording carries its spelling:
 	// each token's `raw` beside its `lit`, and the argv's `seps` beside its
 	// `kids`. Both are omitted when absent, so every payload written before
