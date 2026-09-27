@@ -2757,6 +2757,42 @@ seeded `v1:authoring:ladderPolicy:primary` row. Three rules reach outside it:
   word; a version whose parameter would be code stays a candidate
   (`ReplayRisks`). [learned-procedures.md](docs/public/operate/learned-procedures.md).
 
+### Intervention, feedback and reuse (epic memql#5414)
+
+A person steps into a finished run: runs a step again as a new VERSION with a
+different level, model, effort, prompt or inputs (`rerunStep`), makes an earlier
+version current (`moveRunHead`), or branches into a fork run (`branchRun`); says
+what was wrong on the AI Fluency framework's Discernment axes
+(`recordFeedback`); and long work is cut into sections that ask the catalog
+before intelligence, every construct labelled reusable, goal-specific or
+account-specific by evidence.
+[intervention-and-feedback.md](docs/public/operate/intervention-and-feedback.md).
+
+Five rules reach outside it:
+
+- **An override is ONE version of ONE step.** It rides
+  `common.RunContext.Override` for that step's execution only, and nothing
+  reads one off a row or a neighbour's context, so it cannot leak. Its prompt
+  is the WHOLE session prompt only when an app session answered the version it
+  replaces (`wholePrompt`, decided by the act); otherwise it is instructions
+  added to the step's own prompt.
+- **The head is re-asserted, not only recorded.** Moving the head writes the
+  chosen version again as the step's newest row-version
+  (`reassertWorkStepVersion`), so every collapsed read -- the timeline, the
+  corpus, resume's journal loader -- answers with the head. A version made
+  current brings the upstream it was computed from (`step.basis`).
+- **A branch serves its prefix BY REFERENCE.** The fork's journal is built
+  from the source run's done results; the prefix never executes.
+- **A replay cannot honour an override.** Re-running a step a learned
+  procedure served with anything changed hands the goal to the app instead
+  (`integrations/procedure/rerun.go`); an unchanged re-run replays.
+- **Feedback is a `feedback` observation in epic D's shape, and the validator
+  never certifies.** `data.verdict`, `data.target.{stepKey, version}`,
+  `data.axes`, `data.reason`: a dislike with no axis is refused, and a later
+  verdict is a new row. The answer validator writes a `decision` observation
+  and `run.validation`, never a like; a disagreement with the person is kept
+  (D22).
+
 ### Planner / Knowledge / Validation
 
 The schema is stable, so new features add fields/automations without migrations.
