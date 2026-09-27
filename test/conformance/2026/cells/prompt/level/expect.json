@@ -14,6 +14,13 @@
       "file": "an-unknown-level.memql",
       "verdict": "refuse_parse",
       "message": "unknown level \"medium\": a level is one of fast, strong, reasoning, embeddings"
+    },
+    {
+      "file": "with-no-level.memql",
+      "verdict": "refuse_load",
+      "code": "prompt_level_missing",
+      "message": "prompt \"summariseTicketNoLevel\" (level): line 3: no @level declared",
+      "note": "Every prompt declares its level: the router's rules branch on it, and a prompt never names a model (epic memql#5127). The parser leaves an absent @level empty and the loader refuses it, so strict boot does and a bundle mounted at MEMQL_DSL_PATH is held to it too (memql#5426)."
     }
   ]
 }

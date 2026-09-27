@@ -335,7 +335,7 @@ var placementTable = concat(
 	lifecycle(Prompt, "Distil a cluster of episodes into one memory."),
 	[]Placement{
 		{Receiver: Prompt, Name: "defaultProvider", Forms: FormString, Example: `@defaultProvider("fleet")`},
-		{Receiver: Prompt, Name: "level", Forms: FormString, Example: `@level("fast")`, Doc: "How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Every prompt should declare one; a prompt without one is not yet refused at load (memql#5426)."},
+		{Receiver: Prompt, Name: "level", Forms: FormString, Example: `@level("fast")`, Doc: "How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Required on every prompt: one without it is refused at load (`prompt_level_missing`), a @disabled prompt included."},
 		{Receiver: Prompt, Name: "templateFile", Forms: FormString, Example: `@templateFile("prompts/consolidateMemory.tmpl")`, Doc: "The prompt's template: a .tmpl file beside the prompt, rendered with the input fields."},
 	},
 

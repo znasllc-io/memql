@@ -108,12 +108,14 @@ func TestLoadUnifiedPrompts_DisabledSkipped(t *testing.T) {
 		"prompts.memql": {Data: []byte(`@disabled
 @templateFile("retired.tmpl")
 @description("retired probe prompt")
+@level("fast")
 prompt retiredProbePrompt {
   subject string @required @description("subject")
 }
 
 @templateFile("live.tmpl")
 @description("live probe prompt")
+@level("fast")
 prompt liveProbePrompt {
   subject string @required @description("subject")
 }

@@ -1894,9 +1894,8 @@ func (p *Parser) parsePromptDecl(attrs []*Attribute) (*PromptDecl, error) {
 	// it is why a prompt names no model: a model name at a call site is a
 	// release every time the fleet changes.
 	//
-	// NOT REQUIRED HERE, deliberately. The corpus does not carry one yet, and
-	// requiring it in the parser would refuse every prompt in the tree the
-	// moment this lands. The requirement belongs to the loader, which can put a
+	// NOT REQUIRED HERE, deliberately. The requirement belongs to the loader
+	// (component/memql/prompt_level_required.go, memql#5426), which puts a
 	// prompt with no level on the LoadReport as a skip that strict boot refuses
 	// -- one place, with MEMQL_DSL_ALLOW_SKIPS as the operator break-glass, and
 	// the same rule applied to a bundle mounted at MEMQL_DSL_PATH. An absent
