@@ -77,7 +77,13 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 		// "would have mounted but for the collision". A core-named directory
 		// holding no .memql file is not a product domain at all and would be
 		// skipped either way -- reporting it as a collision would be noise.
-		if !directoryHoldsMemqlFile(root, domain) {
+		//
+		// A domain is a directory holding a .memql file the tree walker reads,
+		// at any depth (dslfs.HoldsMemqlFile) -- the answer boot's loaders
+		// and the editor's workspace graph share. A domain that holds nothing
+		// but sub-namespace directories used to be skipped here while boot
+		// mounted it (memql#5426).
+		if !dslfs.HoldsMemqlFile(root, domain) {
 			continue
 		}
 		if _, isCore := core[domain]; isCore {
@@ -129,26 +135,6 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 	return mounted, skippedCore, unmount
 }
 
-// directoryHoldsMemqlFile reports whether dir (a top-level entry of root)
-// holds at least one .memql file the tree walker reads, at any depth -- the
-// marker that distinguishes a product domain from an incidental sidecar
-// directory. It asks the walker boot's loaders use, so a soft-disabled
-// (`_`-prefixed) file or sub-directory counts here exactly as it counts
-// there: not at all.
-//
-// It used to look at dir's own entries only, so a domain that holds nothing
-// but sub-namespace directories was skipped -- by memqllint's engine-parity
-// pass and by the package analysis, whose mounted set is what a package
-// deploy stages -- while boot mounted it (memql#5426).
-func directoryHoldsMemqlFile(root fs.FS, dir string) bool {
-	sub, err := fs.Sub(root, dir)
-	if err != nil {
-		return false
-	}
-	files, err := dslfs.WalkMemqlFiles(sub)
-	return err == nil && len(files) > 0
-}
-
 // UnreadRootManifestCode ends the diagnostic UnreadRootManifest answers.
 const UnreadRootManifestCode = "language_line_unread"
 
@@ -176,7 +162,7 @@ func UnreadRootManifest(root fs.FS) (string, bool) {
 		if !e.IsDir() || strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
 			continue
 		}
-		if directoryHoldsMemqlFile(root, name) && !IsCoreDomain(name) {
+		if dslfs.HoldsMemqlFile(root, name) && !IsCoreDomain(name) {
 			return dslfs.ManifestFile + " at the root of this tree is never read: a mount reads domain directories only, " +
 				"so declare the language line in each domain directory as <domain>/" + dslfs.ManifestFile +
 				" and remove this one [" + UnreadRootManifestCode + "]", true

@@ -7,6 +7,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql/dslimports"
 	"github.com/znasllc-io/memql/component/memql/sense"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // workspace_graph.go adapts a dslimports.Index (the file/tree resolution
@@ -96,7 +97,8 @@ func (g senseWorkspaceGraph) DeclarationSites(name string) []sense.DeclSite {
 // dslRootCandidates are the conventional places a DSL tree sits relative to an
 // opened workspace. The engine keeps its domains under dsl/, and so does every
 // product repository; a product bundle may keep them at the top level, which
-// resolveDSLRoot handles by testing the root itself first.
+// resolveDSLRoot handles by testing the root itself when no candidate holds a
+// domain.
 var dslRootCandidates = []string{"dsl"}
 
 // resolveDSLRoot returns the sub-tree the workspace graph should resolve
@@ -112,18 +114,25 @@ var dslRootCandidates = []string{"dsl"}
 // index where the domain directories actually live is what makes
 // `use calendar.concepts.{ ... }` resolvable.
 //
-// The root and a conventional candidate are held to different bars. The root
-// must hold two domains (isDSLRoot says why); dsl/ needs only one, because a
-// product repository keeps exactly one domain there (dsl/<product>/). Held to
-// two, dsl/ never qualified in a product repository: the build mounted
-// nothing, and the editor lost the product's vocabulary and every word about
-// its language line while boot refused the tree (memql#5362).
+// A domain is what boot and memqllint call one: a directory holding a .memql
+// file the tree walker reads, at any depth (dslfs.HoldsMemqlFile). The editor
+// used to require one DIRECTLY in the directory, so a product domain holding
+// only sub-namespace directories was no domain here, dsl/ did not qualify, and
+// every `use` line resolved against the repository root (memql#5426).
+//
+// The conventional candidates are asked FIRST, and the root is the answer
+// when none holds a domain. The root used to be asked first -- did two of its
+// children directly hold a .memql file? -- which could only ever answer "the
+// root" early; with domains counted at any depth it would answer it wrongly,
+// since a repository whose dsl/, packs/ and examples/ all hold .memql files
+// somewhere below looks like a directory of domains. A candidate needs only one
+// domain, because a product repository keeps exactly one there
+// (dsl/<product>/); held to two, dsl/ never qualified in a product repository,
+// and the editor lost the product's vocabulary and every word about its
+// language line while boot refused the tree (memql#5362).
 func resolveDSLRoot(root fs.FS) (fs.FS, string) {
 	if root == nil {
 		return nil, ""
-	}
-	if isDSLRoot(root) {
-		return root, ""
 	}
 	for _, candidate := range dslRootCandidates {
 		sub, err := fs.Sub(root, candidate)
@@ -137,22 +146,10 @@ func resolveDSLRoot(root fs.FS) (fs.FS, string) {
 	return root, ""
 }
 
-// isDSLRoot reports whether d, a workspace ROOT, looks like the directory DSL
-// domains sit in: at least two of its immediate children directly contain a
-// .memql file.
-//
-// Two rather than one deliberately. A repository root whose dsl/ directory
-// happens to hold a stray .memql would otherwise look like a domain holder and
-// win over the real tree below it; requiring a second sibling domain makes the
-// answer stable against scratch files. A conventional candidate is not held to
-// it (resolveDSLRoot): what sits under dsl/ is the tree, not a stand-in for it.
-func isDSLRoot(d fs.FS) bool {
-	return holdsDomains(d, 2)
-}
-
-// holdsDomains reports whether at least atLeast of d's immediate children look
-// like DSL domain directories: not "_"- or "."-prefixed, and directly
-// containing a .memql file.
+// holdsDomains reports whether at least atLeast of d's immediate children are
+// DSL domain directories: not "_"- or "."-prefixed, and holding a .memql file
+// the tree walker reads (dslfs.HoldsMemqlFile, the predicate the offline
+// mounts share).
 func holdsDomains(d fs.FS, atLeast int) bool {
 	entries, err := fs.ReadDir(d, ".")
 	if err != nil {
@@ -167,27 +164,11 @@ func holdsDomains(d fs.FS, atLeast int) bool {
 		if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
 			continue
 		}
-		if !directoryHasDirectMemqlFile(d, name) {
+		if !dslfs.HoldsMemqlFile(d, name) {
 			continue
 		}
 		domains++
 		if domains >= atLeast {
-			return true
-		}
-	}
-	return false
-}
-
-// directoryHasDirectMemqlFile reports whether dir holds a .memql file
-// DIRECTLY (not in a nested sub-directory), which is what makes it look like a
-// DSL domain rather than a container of them.
-func directoryHasDirectMemqlFile(root fs.FS, dir string) bool {
-	entries, err := fs.ReadDir(root, dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".memql") {
 			return true
 		}
 	}

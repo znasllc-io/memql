@@ -37,19 +37,14 @@ func WalkMemqlFiles(root fs.FS) ([]string, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), "_") {
+			if softDisabled(d.Name()) {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		name := d.Name()
-		if !strings.HasSuffix(name, ".memql") {
-			return nil
+		if walkedMemqlFile(d.Name()) {
+			out = append(out, p)
 		}
-		if strings.HasPrefix(name, "_") {
-			return nil
-		}
-		out = append(out, p)
 		return nil
 	})
 	if err != nil {
@@ -58,6 +53,55 @@ func WalkMemqlFiles(root fs.FS) ([]string, error) {
 
 	sort.Strings(out)
 	return out, nil
+}
+
+// HoldsMemqlFile reports whether dir, a directory of root, holds a .memql file
+// WalkMemqlFiles would return, at any depth. It is the ONE answer to "is this
+// directory a DSL domain" (memql#5426 review): the offline mounts ask it of a
+// root's top-level entries, and the editor's workspace graph asks it when it
+// looks for the directory the domains sit in. The editor used to require a
+// .memql DIRECTLY in the directory, so a product domain holding nothing but
+// sub-namespace directories was a domain to boot and to memqllint and not one
+// to the editor, which then resolved every `use` line against the wrong root.
+//
+// It stops at the first file it finds.
+func HoldsMemqlFile(root fs.FS, dir string) bool {
+	sub, err := fs.Sub(root, dir)
+	if err != nil {
+		return false
+	}
+	found := false
+	_ = fs.WalkDir(sub, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if p == "." {
+			return nil
+		}
+		if d.IsDir() {
+			if softDisabled(d.Name()) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if walkedMemqlFile(d.Name()) {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+// softDisabled reports whether a directory or file name is soft-disabled: a
+// leading `_` takes it, and everything below it, out of the tree.
+func softDisabled(name string) bool {
+	return strings.HasPrefix(name, "_")
+}
+
+// walkedMemqlFile reports whether a file name is one WalkMemqlFiles returns.
+func walkedMemqlFile(name string) bool {
+	return strings.HasSuffix(name, ".memql") && !softDisabled(name)
 }
 
 // FileBasename returns the file's basename without the `.memql`
