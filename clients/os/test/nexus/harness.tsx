@@ -235,9 +235,10 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // through a `vi.fn(async () => ...)` whose parameter list is empty.
       createGoal: write(seed.createReply),
       cancelGoal: write(),
-      // `forkRun` is RETIRED (epic memql#5414) and deliberately still answered
-      // here, so a test can assert NOTHING calls it -- a method the fake did
-      // not have would fail the call loudly and prove less.
+      // Nexus no longer calls `forkRun` (epic memql#5414), and it is
+      // deliberately still answered here, so a test can assert NOTHING in the
+      // app calls it -- a method the fake did not have would fail the call
+      // loudly and prove less.
       forkRun: write(seed.deriveReply),
       replayRun: write(seed.deriveReply),
       decideApproval: write(),

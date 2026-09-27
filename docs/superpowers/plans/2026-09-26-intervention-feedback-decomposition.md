@@ -500,7 +500,7 @@ Each stream works only in its files, commits `Issue #<N>: ...`, and reports what
 - Every capability is a STUB in the file its stream owns: `integrations/work/{rerun,branch,head,feedback,versions,validator}.go` and `integrations/procedure/{reuse,reuse_sweep}.go`. Replace the stub function IN PLACE; never edit `integrations/work/integration.go`'s or `integrations/procedure/integration.go`'s capability list (the coordinator owns both).
 - Executor names: `integration.work.{rerunStep, branchRun, moveRunHead, recordFeedback, stepVersions, validateAnswer}`, `integration.procedure.{setReuse, reuseSweep}`.
 - `workValidateAnswer` takes `runId` AND `ownerUserId` (the owner hint the completion event carries, re-verified by an owner-filtered read -- `learnFromSucceededRun`'s pattern).
-- `forkRun` is still present; it is retired when the Nexus stream moves to `branchRun` (coordinator, at that merge).
+- `forkRun` is still present; it is retired when the Nexus stream moves to `branchRun` (coordinator, at that merge). SUPERSEDED at Task 7: `forkRun` STAYS. It re-executes a run from its first step with different run variables, which `branchRun` does not offer (a planner db test drives compiled drafts through it); only Nexus stopped calling it.
 - A fresh worktree needs `bash scripts/identity/build-css.sh` before the root package builds.
 - Gates already satisfied by Task 0: maintenance pin, automation count 73, goldens, server-only pins, prompt level pin, row-authz adjudication of `feedbackPolicyCurrent`, embed inventory 433, SDK, snapshot, arch model, proto.
 

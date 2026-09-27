@@ -2117,7 +2117,9 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   changes are sent, a deterministic step is asked only for its inputs, a session
   step's recorded prompt is prefilled, the floor says the consequence ("Runs as
   version 4. The step after it runs again."), and a refusal shows verbatim with
-  the draft kept. `forkRun` is gone; `branchRun` serves the prefix by reference.
+  the draft kept. Nexus no longer calls `forkRun`, which re-executes a run from
+  its first step with different variables; `branchRun` serves the prefix by
+  reference.
 
 - **A VERDICT IS PRESSED ONLY AFTER THE SERVER HAS IT.** Like and Neutral save
   on click; Dislike first asks what was wrong on the AI Fluency framework's

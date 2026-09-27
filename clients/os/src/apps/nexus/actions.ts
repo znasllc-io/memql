@@ -205,10 +205,13 @@ export interface DeriveRunState extends WriteState {
 /**
  * Replay a run: a NEW run served from the journal, the source untouched.
  *
- * `forkRun` USED TO LIVE HERE AND IS RETIRED (epic memql#5414). Its fork
- * re-executed every step from step 1 and only served the model calls before
- * the fork point; `branchRun` below serves the prefix BY REFERENCE and takes
- * the same overrides a re-run does, so a branch is a re-run into a new run.
+ * `forkRun` USED TO BE CALLED HERE, AND NEXUS NO LONGER CALLS IT (epic
+ * memql#5414). Its fork re-executes every step from step 1 and only serves the
+ * model calls before the fork point -- which is what an API caller re-running
+ * a goal with different variables wants, and why the builtin stays; a person
+ * stepping into a run wants `branchRun` below, which serves the prefix BY
+ * REFERENCE and takes the same overrides a re-run does, so a branch is a
+ * re-run into a new run.
  *
  * `policy` is left UNSENT rather than sent as `"strict"`: strict is the
  * declared default and the builtin applies it, so naming it here would put a

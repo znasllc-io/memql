@@ -591,7 +591,7 @@ describe("every act survives", () => {
     expect(acts()).not.toContain("Fork from draft");
   });
 
-  it("calls forkRun from nowhere in the app -- it is retired", () => {
+  it("calls forkRun from nowhere in the app -- a person branches instead", () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const dir = join(here, "../../src/apps/nexus");
     const offenders = readdirSync(dir)
