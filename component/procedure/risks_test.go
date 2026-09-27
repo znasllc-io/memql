@@ -222,6 +222,8 @@ func TestATemplateWhoseParametersAreDataHasNoReplayRisk(t *testing.T) {
 		{"bash script.sh alpha", "bash script.sh beta"},
 		{"cat <<'EOF' > notes.txt\nhello\nEOF\ncp notes.txt a.txt", "cat <<'EOF' > notes.txt\nhello\nEOF\ncp notes.txt b.txt"},
 		{[]any{"git", "commit", "-m", "first"}, []any{"git", "commit", "-m", "second"}},
+		{[]any{"bash", "-lc", "echo a > x"}, []any{"bash", "-lc", "echo b > x"}},
+		{[]any{"sudo", "bash", "-c", "cp report.txt out/a.txt"}, []any{"sudo", "bash", "-c", "cp report.txt out/b.txt"}},
 	} {
 		if risks := risksOf(t, pair[0], pair[1]); len(risks) != 0 {
 			t.Errorf("%q / %q: risks = %q, want none", pair[0], pair[1], risks)
@@ -257,7 +259,6 @@ func TestAParameterThatIsCodeIsARisk(t *testing.T) {
 		{`bash -c "echo a > x"`, `bash -c "echo b > x"`, []string{"script", "bash"}},
 		{`sh -ec 'make a'`, `sh -ec 'make b'`, []string{"script", "sh"}},
 		{`/bin/zsh -lc "go test ./a"`, `/bin/zsh -lc "go test ./b"`, []string{"script", "zsh"}},
-		{[]any{"bash", "-lc", "echo a > x"}, []any{"bash", "-lc", "echo b > x"}, []string{"script", "bash"}},
 		{`sudo sh -c "echo a"`, `sudo sh -c "echo b"`, []string{"script", "sh"}},
 		{`python3 -c "print(1)"`, `python3 -c "print(2)"`, []string{"code", "python3"}},
 		{`node --eval "f(1)"`, `node --eval "f(2)"`, []string{"code", "node"}},
@@ -307,4 +308,104 @@ func TestReplayRisksAreInStepOrder(t *testing.T) {
 	if len(risks) != 2 || !strings.Contains(risks[0], "step 0") || !strings.Contains(risks[1], "step 1") {
 		t.Fatalf("risks = %q, want step 0's then step 1's", risks)
 	}
+}
+
+// codexStep is one Codex exec step: its command the vector
+// ["bash", "-lc", script].
+func codexStep(script string) []Action {
+	return Canonicalize([]Step{{StepType: "exec", Consumed: true, Input: map[string]any{"command": []any{"bash", "-lc", script}}}})
+}
+
+// TestACodexProcedureIsAParameterInsideItsScript: two Codex recordings that
+// wrote out/a.txt and out/b.txt generalize to ONE template whose one hole is
+// the file inside the script -- not the script. It has no replay risk, a new
+// value goes back into the script as one word, a hostile one as one QUOTED
+// word, and the vector still materializes as [shell, flags, "<script>"], so no
+// dispatcher changes.
+func TestACodexProcedureIsAParameterInsideItsScript(t *testing.T) {
+	instances := [][]Action{codexStep("cp report.txt out/a.txt"), codexStep("cp report.txt out/b.txt")}
+	tmpl := Generalize(instances)
+	tmpl.Holes = Classify(tmpl, instances)
+	if len(tmpl.Holes) != 1 || tmpl.Holes[0].Id != "s0.command.2.2" || tmpl.Holes[0].Class != HoleFree {
+		t.Fatalf("holes = %+v, want the one free hole s0.command.2.2 -- the file inside the script", tmpl.Holes)
+	}
+	if risks := ReplayRisks(tmpl, instances); len(risks) != 0 {
+		t.Fatalf("risks = %q, want none: the parameter is a word of the script, not the script", risks)
+	}
+	materialized := func(value string) []any {
+		t.Helper()
+		v, err := Materialize(tmpl.Steps[0].Args, map[string]string{"s0.command.2.2": value})
+		if err != nil {
+			t.Fatalf("Materialize(%q): %v", value, err)
+		}
+		vec, ok := v.(map[string]any)["command"].([]any)
+		if !ok {
+			t.Fatalf("command materialized as %T, want the vector", v.(map[string]any)["command"])
+		}
+		return vec
+	}
+	if got, want := materialized("out/c.txt"), []any{"bash", "-lc", "cp report.txt out/c.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+	hostile := "x;rm${IFS}-rf${IFS}$HOME"
+	got := materialized(hostile)
+	if want := []any{"bash", "-lc", `cp report.txt 'x;rm${IFS}-rf${IFS}$HOME'`}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+	if words := lits(splitArgv(got[2].(string))); !reflect.DeepEqual(words, []string{"cp", "report.txt", hostile}) {
+		t.Fatalf("the script reads back as %q, want the hostile value as ONE argument", words)
+	}
+	if b, ok := BindInstance(tmpl, codexStep("cp report.txt out/d.txt")); !ok || b["s0.command.2.2"] != "out/d.txt" {
+		t.Fatalf("a third recording does not bind: %v, %v", b, ok)
+	}
+}
+
+// TestACodexScriptWithNoParameterRoundTripsByteForByte: the script is read as
+// a command line WITH its spelling, so a vector the template holds whole goes
+// back exactly as recorded -- heredoc, expansions and all.
+func TestACodexScriptWithNoParameterRoundTripsByteForByte(t *testing.T) {
+	script := "git commit -m \"$(cat <<'EOF'\nAdd the replay runner\n\nIt serves a goal with no model.\nEOF\n)\" && echo \"done $HOME\""
+	a := codexStep(script)[0]
+	v, err := Materialize(a.Args, nil)
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	if got, want := v.(map[string]any)["command"], []any{"bash", "-lc", script}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %q\n     want %q", got, want)
+	}
+}
+
+// TestACodexScriptJudgesItsParametersLikeAnyCommandLine: inside the script a
+// parameter is judged exactly as in a command line -- a program, inline code,
+// an expansion are still risks -- and scripts that differ in SHAPE, not in a
+// word, still leave a template no replay can be trusted with.
+func TestACodexScriptJudgesItsParametersLikeAnyCommandLine(t *testing.T) {
+	for _, c := range []struct {
+		first, second string
+		says          []string
+	}{
+		{"touch out/x", "rm out/x", []string{"s0.command.2.0", "program"}},
+		{`python3 -c 'print(1)'`, `python3 -c 'print(2)'`, []string{"s0.command.2.2", "code python3 runs"}},
+		{`cat "$HOME/a"`, `cat "$HOME/b"`, []string{"s0.command.2.1", "expansion"}},
+		{"echo a > x", "make build", []string{"does not bind"}},
+	} {
+		instances := [][]Action{codexStep(c.first), codexStep(c.second)}
+		tmpl := Generalize(instances)
+		tmpl.Holes = Classify(tmpl, instances)
+		risks := ReplayRisks(tmpl, instances)
+		if len(risks) == 0 || !containsEvery(strings.Join(risks, " | "), c.says...) {
+			t.Errorf("%q / %q: risks = %q, want one saying %q", c.first, c.second, risks, c.says)
+		}
+	}
+}
+
+// TestAStoredVectorWhoseWholeScriptIsAParameterIsStillAScriptRisk: a payload
+// written before scripts were read -- or a template whose scripts were of
+// different kinds -- holds the whole script as one hole, and that is still
+// code a goal would choose.
+func TestAStoredVectorWhoseWholeScriptIsAParameterIsStillAScriptRisk(t *testing.T) {
+	tmpl := Template{Steps: []TemplateStep{{Tool: "exec", Args: Obj(map[string]*Node{
+		"command": Arr(Lit("bash"), Lit("-lc"), HoleNode("s0.command.2", "string")),
+	})}}}
+	oneRiskSaying(t, ReplayRisks(tmpl, nil), "s0.command.2", "script bash runs")
 }

@@ -134,7 +134,8 @@ func bindNode(tmpl, inst *Node, out map[string]string) bool {
 //
 // What round-trips, and how exactly:
 //
-//   - a scalar, a path and an argument vector: byte for byte;
+//   - a scalar, a path and an argument vector: byte for byte -- a shell's
+//     script inside a vector is a command line, written back as below;
 //   - a command line: byte for byte, as long as the template holds it whole
 //     -- every argument its recorded spelling (Node.Raw), the text between
 //     them the recorded separators (Node.Seps). A parameter is written as one

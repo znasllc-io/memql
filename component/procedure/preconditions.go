@@ -450,15 +450,33 @@ func commandWordsOf(n *Node) []string {
 }
 
 // argumentVectorWords reads a vector executed with no shell: its first
-// element is the one command word, unless it is a shell whose -c argument is a
-// command line.
+// element is the one command word, and a shell's script is a command line of
+// its own. Canonicalization reads that script as one (a FormArgv element), so
+// the shell running it -- first in the vector, or behind a wrapper -- and the
+// script's own command words are read from it. A vector stored before scripts
+// were read, its script one literal after the shell's -c, is read as it
+// always was.
 func argumentVectorWords(kids []*Node) []string {
 	if len(kids) == 0 || kids[0] == nil || kids[0].Kind != KindLit {
 		return nil
 	}
 	word := basename(kids[0].Lit)
 	out := []string{word}
-	if shells[word] {
+	read := false
+	for i, k := range kids {
+		if k == nil || k.Kind != KindArray || k.Form != FormArgv {
+			continue
+		}
+		for j := i - 1; j >= 0; j-- {
+			if kids[j] != nil && kids[j].Kind == KindLit && shells[basename(kids[j].Lit)] {
+				out = append(out, basename(kids[j].Lit))
+				break
+			}
+		}
+		out = append(out, commandWordsOf(k)...)
+		read = true
+	}
+	if !read && shells[word] {
 		args := make([]shellItem, 0, len(kids)-1)
 		for _, k := range kids[1:] {
 			if k == nil || k.Kind != KindLit {

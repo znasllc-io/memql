@@ -537,3 +537,36 @@ func TestAVersionWithAParameterNoGoalInputSuppliesStaysACandidate(t *testing.T) 
 		t.Fatalf("the control lifted to %s, so the hold above proves nothing", ok.Rung)
 	}
 }
+
+// TestACodexCorpusLiftsIntoShadowWithItsParameterInsideTheScript: the same
+// goal recorded by Codex, every command the vector ["bash", "-lc",
+// "<script>"]. The script is read as the command line it is, so the file
+// name is a parameter INSIDE it -- tied to the goal's `file` input like any
+// other -- rather than the whole script as a parameter no replay could be
+// trusted with. The version enters shadow, and its template writes a new
+// goal's value back into the script.
+func TestACodexCorpusLiftsIntoShadowWithItsParameterInsideTheScript(t *testing.T) {
+	recs := twoRecordings()
+	for n := range recs {
+		recs[n].execVector = []any{"bash", "-lc", "mkdir -p out && echo hello > " + recs[n].file}
+	}
+	eng, res := liftFixture(t, recs...)
+	if res.Rung != work.RungShadow {
+		reason := argsOf(t, eng.callTo(t, "recordConstructLadder"))["ladderReason"]
+		t.Fatalf("rung = %s (%v), want shadow: the parameter is a word of the script, not the script", res.Rung, reason)
+	}
+	p, err := DecodeProcedure(argsOf(t, eng.callTo(t, "recordProcedure"))["procedure"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(p.FreeParameters, []string{"s0.command.2.7"}) || p.InputMap["s0.command.2.7"] != "file" {
+		t.Fatalf("free parameters %v / inputMap %v, want the file inside the script, supplied by the goal's `file`", p.FreeParameters, p.InputMap)
+	}
+	v, err := proc.Materialize(p.Steps[0].Args, map[string]string{"s0.command.2.7": "e.txt"})
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	if got, want := v.(map[string]any)["command"], []any{"bash", "-lc", "mkdir -p out && echo hello > e.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+}

@@ -89,16 +89,36 @@ func canonicalizeValue(key string, v any) *Node {
 		return canonicalizeString(key, t)
 	case []any:
 		kids := make([]*Node, len(t))
+		script := -1
+		if commandKeys[key] {
+			script = shellScriptIndex(t)
+		}
 		for i, e := range t {
 			if s, ok := e.(string); ok && commandKeys[key] {
-				// An ARGUMENT VECTOR -- Codex's exec events record argv this
-				// way -- is already split, and each element is one argument
-				// taken verbatim. Reading one again as a command line would
-				// treat the apostrophe in `don't` as an opening quote and
-				// lose it, and a replay would send a message nobody wrote.
-				// Kept whole, the vector is also Equal to the same command
-				// recorded as a string, so the two recordings generalize
-				// together.
+				if i == script {
+					// THE ONE ELEMENT THAT IS A COMMAND LINE: the script a
+					// shell in the vector runs. Codex records every command
+					// as ["bash", "-lc", "<script>"], and kept as one literal
+					// any value that varied between two recordings made the
+					// WHOLE script a parameter -- code a goal would choose --
+					// so no parameterised Codex procedure could climb. Read
+					// as a command line, with its spelling, exactly as a
+					// `command` string is, the value is one word inside it,
+					// and Materialize writes the script back byte for byte.
+					toks, seps := scanArgv(s)
+					n := Arr(toks...)
+					n.Form = FormArgv
+					n.Seps = seps
+					kids[i] = n
+					continue
+				}
+				// Every other element of an ARGUMENT VECTOR is already one
+				// argument, taken verbatim. Reading one again as a command
+				// line would treat the apostrophe in `don't` as an opening
+				// quote and lose it, and a replay would send a message
+				// nobody wrote. Kept whole, a vector that runs no shell
+				// script is also Equal to the same command recorded as a
+				// string, so the two recordings generalize together.
 				kids[i] = Lit(s)
 				continue
 			}
@@ -145,6 +165,90 @@ var commandKeys = map[string]bool{
 	"command": true,
 	"cmd":     true,
 	"argv":    true,
+}
+
+// posixShells are the shells whose -c script canonicalization reads as a
+// command line. fish is absent on purpose: its quoting is not POSIX -- a
+// backslash escapes inside its single quotes -- so a parameter written into a
+// fish script by POSIX rules could be read back as another value.
+var posixShells = map[string]bool{"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true}
+
+// scriptWrappers run the command that follows their own options and
+// arguments, so a shell behind one -- `sudo -u bob bash -c ...`,
+// `env X=1 bash -lc ...` -- is still the shell that runs the script. The list
+// is short on purpose: a shell word that some OTHER program is merely handed
+// (`echo bash -c x`) must not have its "script" re-read, because a parameter
+// written into it would be quoted for a shell that never reads it. Missing a
+// wrapper only leaves its script one literal, which ReplayRisks refuses.
+var scriptWrappers = map[string]bool{
+	"sudo": true, "doas": true, "env": true, "nice": true, "nohup": true,
+	"timeout": true, "time": true, "stdbuf": true, "setsid": true, "ionice": true,
+}
+
+// shellOptionsWithArgument are the shell options that take the next word as
+// their argument, so the search for the script steps over it
+// (`bash -o pipefail -c ...`).
+var shellOptionsWithArgument = map[string]bool{"-o": true, "+o": true, "-O": true, "+O": true, "--rcfile": true, "--init-file": true}
+
+// shellScriptIndex is the index of the script a POSIX shell in an argument
+// vector runs, or -1 when it runs none. The shell is the vector's first
+// element, or the first shell word behind a scriptWrapper that is; the script
+// is what the shell itself takes it to be -- its first operand after its
+// options, when one of them is a short-flag cluster holding c (-c, -lc, -ec).
+// `bash script.sh -c x` runs a script FILE, and its -c is the file's.
+func shellScriptIndex(vec []any) int {
+	word := func(i int) (string, bool) {
+		if i < 0 || i >= len(vec) {
+			return "", false
+		}
+		s, ok := vec[i].(string)
+		return s, ok
+	}
+	first, ok := word(0)
+	if !ok {
+		return -1
+	}
+	shell := -1
+	switch {
+	case posixShells[basename(first)]:
+		shell = 0
+	case scriptWrappers[basename(first)]:
+		for i := 1; i < len(vec); i++ {
+			if w, ok := word(i); ok && posixShells[basename(w)] {
+				shell = i
+				break
+			}
+		}
+	}
+	if shell < 0 {
+		return -1
+	}
+	sawC := false
+	for k := shell + 1; k < len(vec); k++ {
+		w, ok := word(k)
+		if !ok {
+			return -1
+		}
+		switch {
+		case w == "--":
+			// The end of the options: the next word is the operand.
+			if _, ok := word(k + 1); ok && sawC {
+				return k + 1
+			}
+			return -1
+		case len(w) > 1 && (w[0] == '-' || w[0] == '+'):
+			sawC = sawC || isShortFlagWithC(w)
+			if shellOptionsWithArgument[w] {
+				k++
+			}
+		default:
+			if sawC {
+				return k
+			}
+			return -1
+		}
+	}
+	return -1
 }
 
 // pathKeys are the argument names whose value is a filesystem path.

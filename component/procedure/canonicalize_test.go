@@ -362,3 +362,71 @@ func TestFormatNumberNeverNarrowsAFloatOutsideInt64(t *testing.T) {
 		}
 	}
 }
+
+// vectorCommand canonicalizes one exec step whose command is an argument
+// vector and answers its command node.
+func vectorCommand(t *testing.T, vec ...any) *Node {
+	t.Helper()
+	a := Canonicalize([]Step{{StepType: "exec", Consumed: true, Input: map[string]any{"command": vec}}})[0]
+	n, ok := a.Args.At([]string{"command"})
+	if !ok || n.Kind != KindArray {
+		t.Fatalf("%q canonicalized to %+v, want a vector", vec, n)
+	}
+	return n
+}
+
+// TestAShellsScriptInAVectorIsReadAsACommandLine: Codex records every command
+// as ["bash", "-lc", "<script>"], and the script is a command line in its own
+// right. Kept as one literal, any value that varied between two recordings
+// made the WHOLE script a parameter -- code a goal would choose -- so no
+// parameterised Codex procedure could ever be promoted. Read as a command line
+// (with its spelling, exactly as a `command` string is), the value is one
+// word inside it. The shell is found where it runs the script: first in the
+// vector, or behind a wrapper that runs what follows it; the script is its
+// first operand after a -c among its options, an option's own argument
+// stepped over.
+func TestAShellsScriptInAVectorIsReadAsACommandLine(t *testing.T) {
+	for _, c := range []struct {
+		vec    []any
+		script int
+	}{
+		{[]any{"bash", "-lc", "cp report.txt out/a.txt"}, 2},
+		{[]any{"/bin/sh", "-c", "make build"}, 2},
+		{[]any{"zsh", "-ec", "make build"}, 2},
+		{[]any{"bash", "-c", "-e", "make build"}, 3},
+		{[]any{"bash", "-o", "pipefail", "-c", "make build"}, 4},
+		{[]any{"bash", "-c", "make build", "arg0", "arg1"}, 2},
+		{[]any{"sudo", "-u", "bob", "bash", "-c", "make build"}, 5},
+		{[]any{"env", "X=1", "bash", "-lc", "make build"}, 4},
+	} {
+		n := vectorCommand(t, c.vec...)
+		for i, k := range n.Kids {
+			if i == c.script {
+				if k.Kind != KindArray || k.Form != FormArgv || len(k.Seps) != len(k.Kids)+1 {
+					t.Errorf("%q: element %d = %+v, want the script read as a command line", c.vec, i, *k)
+				}
+				continue
+			}
+			if k.Kind != KindLit || k.Lit != c.vec[i] {
+				t.Errorf("%q: element %d = %+v, want the argument kept whole", c.vec, i, *k)
+			}
+		}
+	}
+	// Not a script a POSIX shell runs: a script FILE, an interpreter, fish
+	// (whose quoting is not POSIX), a shell word some other program is merely
+	// handed, and no -c at all. Every element stays whole.
+	for _, vec := range [][]any{
+		{"bash", "script.sh", "-c", "make build"},
+		{"python3", "-c", "print(1)"},
+		{"fish", "-c", "echo hi"},
+		{"echo", "bash", "-c", "make build"},
+		{"bash", "-l", "make build"},
+		{"git", "commit", "-m", "don't break it"},
+	} {
+		for i, k := range vectorCommand(t, vec...).Kids {
+			if k.Kind != KindLit || k.Lit != vec[i] {
+				t.Errorf("%q: element %d = %+v, want every element kept whole", vec, i, *k)
+			}
+		}
+	}
+}
