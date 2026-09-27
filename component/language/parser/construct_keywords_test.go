@@ -171,6 +171,13 @@ func TestTopLevelStatementsNameWhatEachDeclares(t *testing.T) {
 		`seed brief first {`,                              // 21
 		`  note: "automation notADecl {"`,
 		`}`,
+		// A declaration name may carry hyphens -- the seeded role and skill
+		// catalogs are kebab-case -- and the name is all of it, not the
+		// segment after the last hyphen.
+		`seed agentRole row-crop-farmer {`, // 24
+		`}`,
+		`spec brief has-note = row => row.note != nil`,                       // 26
+		`automation night-shift @trigger(schedule="0 0 * * * *") => logic x`, // 27
 	}, "\n")
 	type stmt struct {
 		line          int
@@ -190,6 +197,9 @@ func TestTopLevelStatementsNameWhatEachDeclares(t *testing.T) {
 		{17, "automation", "loose"},
 		{20, "automation", "terse"},
 		{21, "seed", "first"},
+		{24, "seed", "row-crop-farmer"},
+		{26, "spec", "has-note"},
+		{27, "automation", "night-shift"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("TopLevelStatements =\n  %+v\nwant\n  %+v", got, want)
