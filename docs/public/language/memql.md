@@ -1521,6 +1521,15 @@ Logic prompts (routing / suggest / classification) use the structured-output pat
 
 **The body must cover the template, and `@defaultProvider` must name a real provider** (memql#3616). The input schema compiles with `additionalProperties: false` and is validated **before** the template renders, so a variable the `.tmpl` reads but the body omits is a field no caller can ever supply — the load refuses rather than registering a schema that cannot serve its own template. Likewise `@defaultProvider` must name a declared `provider`, never a `policy` slug: a dangling name does not error at call time, it silently falls through to the default provider. A `@disabled` provider still counts as declared. See [authoring rule 28](authoring-rules.md).
 
+**A field's `@default` is a literal of the field's type** (memql#5430), held
+to the rule a [tool field's](#tools) is: `@default("en")` on a `string`
+field, `@default("3")` or an unquoted `@default(3)` on an `int` field, `"true"`
+or `"false"` on a `boolean`, one of an `enum(...)` field's values. An unquoted
+number is a literal of a numeric field only; on a `string` field it is written
+quoted. Anything else is refused at load as `prompt_default_type`, naming the
+prompt, the field, its type and the value, and the input schema publishes the
+default with the field's type.
+
 Two legacy forms are retired (both rejected at parse time):
 - `func (Prompt) name(ctx any) { ... }` — receiver-function wrapping.
 - `@input { ... }` — body-level wrapper around the field list.

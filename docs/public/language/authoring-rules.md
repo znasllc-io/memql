@@ -3210,9 +3210,10 @@ JSON-Schema `default` keyword, which no validator applies. `??` is the
 only mechanism that fills a value. (`@default` DOES stay on a `tool` /
 `prompt` field, where the body IS the schema handed to the model and
 `default` is a value the model reads; a `builtin` field refuses it as
-misplaced. On a tool field the quoted text must be a literal of the field's
-type -- `@default("10")` on an `integer` field, never `@default("ten")` --
-or the load refuses it as `tool_default_type`, memql#5430.) Changing the operator under the corpus to settle a
+misplaced. On a tool or prompt field the default must be a literal of the
+field's type -- `@default("10")` on an `integer` field, never
+`@default("ten")` -- or the load refuses it as `tool_default_type` /
+`prompt_default_type`, memql#5430.) Changing the operator under the corpus to settle a
 naming complaint would be the larger defect.
 
 **What to do about it.** When a stored value must survive a caller

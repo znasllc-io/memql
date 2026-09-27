@@ -1,0 +1,7 @@
+/// A digest of a ticket, as long as the reader asked for.
+@level("fast")
+@templateFile("ticketDigest.tmpl")
+prompt ticketDigestDefault {
+  title      string!  @description("The ticket's title.")
+  sentences  int  @default("three")  @description("How many sentences to write.")
+}

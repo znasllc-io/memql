@@ -9,6 +9,20 @@
       "verdict": "refuse_parse",
       "code": "annotation_form",
       "message": "@default on a prompt field takes one string or one number"
+    },
+    {
+      "file": "with-a-word-on-an-int-field.memql",
+      "verdict": "refuse_load",
+      "code": "prompt_default_type",
+      "message": "prompt \"ticketDigestDefault\" field \"sentences\" (int): @default(\"three\") is not an integer -- write one, as in @default(\"20\")",
+      "note": "What the annotation MEANS: a prompt field's default is a literal of the field's type, as a tool field's is (memql#5430)."
+    },
+    {
+      "file": "with-a-number-on-a-string-field.memql",
+      "verdict": "refuse_load",
+      "code": "prompt_default_type",
+      "message": "@default(5) is a number, and the field is a string -- write it quoted, as in @default(\"5\")",
+      "note": "A prompt field's placement admits an unquoted number, which is a literal of a numeric field only."
     }
   ]
 }
