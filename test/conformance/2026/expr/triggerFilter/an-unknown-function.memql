@@ -1,0 +1,10 @@
+/// A trigger filter that calls a name nothing declares -- refused at load,
+/// not on every fire.
+@trigger(event="node.updated", concept="v1:work:goal")
+@filter(row => isStale(row))
+automation tfUnknownFunctionFilter {
+  args {
+    id  string
+  }
+  note := mutation tfNoteGoal(goalId: args.id, note: "stale")
+}

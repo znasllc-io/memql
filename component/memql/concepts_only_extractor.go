@@ -20,27 +20,73 @@ package memql
 // natively and doesn't run any rewriters).
 
 import (
+	"fmt"
+	"regexp"
 	"strings"
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
+
+// CodeConceptUnparsed is the stable rule id of a concept declaration that
+// does not parse, when the parse error carries no rule id of its own.
+const CodeConceptUnparsed = "concept_unparsed"
+
+// ConceptParseError is one concept declaration that did not parse: the name
+// its header declares, the line of its `concept` keyword, and the parser's
+// refusal, positioned in the file rather than in the slice.
+//
+// It used to be dropped here with no error at all (memql#5426). The unified
+// loader built what parsed and reported nothing about what did not, so strict
+// boot -- whose contract is that a malformed construct refuses boot -- booted
+// without the concept, and every query, mutation and shape bound to it failed
+// at run time naming an import rather than the concept.
+type ConceptParseError struct {
+	Name string
+	Line int
+	Err  error
+}
+
+// Error names the position and the concept, then the parser's refusal, with a
+// rule id last in brackets: the parser's own when it carries one (a retired
+// spelling's rule), else concept_unparsed.
+func (e *ConceptParseError) Error() string {
+	msg := fmt.Sprintf("line %d: concept %q does not parse, so it is not registered: %v", e.Line, e.Name, e.Err)
+	if baseloader.RuleCode(e.Err) == "" {
+		msg += " [" + CodeConceptUnparsed + "]"
+	}
+	return msg
+}
+
+// Unwrap exposes the parser's refusal.
+func (e *ConceptParseError) Unwrap() error { return e.Err }
+
+// RuleCode is the refusal's stable rule id (baseloader.CodedRefusal).
+func (e *ConceptParseError) RuleCode() string {
+	if code := baseloader.RuleCode(e.Err); code != "" {
+		return code
+	}
+	return CodeConceptUnparsed
+}
 
 // ExtractConceptDecls scans `source` for `concept <name> { ... }`
 // blocks (with their preceding @-attribute preamble) and returns
-// each parsed ConceptDecl. Everything else in the file (queries,
-// mutations, shapes, specs, etc.) is ignored.
+// each parsed ConceptDecl, and every block that did not parse.
+// Everything else in the file (queries, mutations, shapes, specs,
+// etc.) is ignored.
 //
-// The function is tolerant: parse failures on individual slices
-// are skipped with no error returned, so callers get whatever
-// loaded cleanly. Use this for transitional-state registration
-// only; full multi-construct loading must wait for the struct-form
-// rewriters to gain multi-concept awareness.
-func ExtractConceptDecls(source string) []*languageAst.ConceptDecl {
+// A block that does not parse is not in the declarations, and IS in the
+// errors: a caller that registers concepts must refuse on one (strict boot),
+// and a caller that only wants what parsed must say so by ignoring them in
+// its own code, where a reviewer can see it.
+func ExtractConceptDecls(source string) ([]*languageAst.ConceptDecl, []*ConceptParseError) {
 	var out []*languageAst.ConceptDecl
+	var failed []*ConceptParseError
 	for _, slice := range conceptSlices(source) {
-		file, err := languageParser.ParseFile(slice)
+		file, err := languageParser.ParseFile(slice.Source)
 		if err != nil {
+			failed = append(failed, conceptParseError(source, slice, err))
 			continue
 		}
 		for _, def := range file.Definitions {
@@ -49,138 +95,46 @@ func ExtractConceptDecls(source string) []*languageAst.ConceptDecl {
 			}
 		}
 	}
-	return out
+	return out, failed
 }
 
-// conceptSlices walks `source` line-by-line and returns each
-// concept declaration's preamble + body as a self-contained text
-// slice ready for parser.ParseFile.
+// conceptParseError places a slice's parse failure in its file: the line of
+// the slice's `concept` keyword, and the parser's refusal re-read with the
+// slice anchored at its first line, so the error's own line and column are
+// the file's rather than the slice's.
+func conceptParseError(source string, slice languageParser.DeclarationSlice, err error) *ConceptParseError {
+	first := 1 + strings.Count(source[:slice.Start], "\n")
+	line := first
+	if loc := conceptHeaderRe.FindStringIndex(languageParser.BlankComments(slice.Source)); loc != nil {
+		line = first + strings.Count(slice.Source[:loc[0]], "\n")
+	}
+	if _, anchored := languageParser.ParseFile(languageParser.AnchorSource(slice.Source, first)); anchored != nil {
+		err = anchored
+	}
+	return &ConceptParseError{Name: slice.Name, Line: line, Err: err}
+}
+
+// conceptHeaderRe is a top-level concept declaration's header: `concept`
+// at column 0, its name (group 1), and the opening brace on the same line --
+// the shape conceptSlices has always required.
+var conceptHeaderRe = regexp.MustCompile(`(?m)^concept[ \t]+([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\{`)
+
+// conceptSlices returns each top-level concept declaration's preamble + body
+// as a self-contained slice ready for parser.ParseFile, with its offset and
+// the name its header declares.
 //
-// A "concept block" starts at the first `@`-attribute line in a
-// run that culminates in a `concept <name> {` line, and ends at
-// the matching closing brace at indent 0. Brace counting handles
-// nested object bodies inside the concept's property declarations.
-func conceptSlices(source string) []string {
-	lines := strings.Split(source, "\n")
-
-	// Declaration detection and brace balancing run on a comment-BLANKED view;
-	// the preamble walk and the emitted slice are cut from the ORIGINAL
-	// (memql#2868).
-	//
-	// Concepts do NOT go through ExtractKeywordSlices -- they have this
-	// dedicated line-oriented slicer, which #2868's diagnosis missed. Fixing
-	// the keyword slicer alone left a block-commented concept REGISTERING; the
-	// end-to-end test in keyword_slices_e2e_test.go is what caught it. A
-	// commented-out schema is live: it validates writes and appears in the
-	// concepts API.
-	//
-	// BlankComments preserves byte offsets -- it overwrites comment bytes with
-	// spaces IN PLACE, never inserting or deleting, and never writing a newline
-	// -- so splitting the blanked source yields the same number of lines at the
-	// same indices as `lines`. scanLines[j] and lines[j] are the same line, one
-	// blanked and one not.
-	//
-	// That invariant is asserted by TestBlankCommentsIsLengthPreserving rather
-	// than re-checked here. An earlier version DID check it and bailed to nil,
-	// under a comment claiming the caller "reports zero concepts and the
-	// strict-boot gate surfaces it loudly". Measured false: LoadUnifiedConcepts
-	// does `if len(decls) == 0 { continue }` with no warning and no report
-	// entry, so the bail-out would have SILENTLY DROPPED a whole namespace's
-	// schema -- the opposite of loud, and a worse failure than the one it
-	// guarded. A promise the code does not keep is worse than no guard.
-	//
-	// KNOWN LIMIT, pre-existing and unchanged by this fix: the brace count
-	// below is string-BLIND, so `concept x { a string @description("a }
-	// brace") }` closes the slice early and the concept is silently dropped.
-	// The sibling ExtractKeywordSlices does not have this, because it balances
-	// through the string-aware findMatchingCloseBraceRune. Converting this
-	// line-oriented slicer onto that offset-based walker is a real refactor
-	// rather than a comment fix, and it is latent today -- the tree has 42
-	// brace-bearing string literals and zero unbalanced ones.
-	// TestConceptSlicesIsStringBlind pins the current behaviour so that
-	// refactor has a before/after to work against.
-	scanLines := strings.Split(languageParser.BlankComments(source), "\n")
-
-	var slices []string
-
-	i := 0
-	for i < len(lines) {
-		// Find the next `concept <name> {` declaration at column 0.
-		conceptLine := -1
-		for j := i; j < len(lines); j++ {
-			line := scanLines[j]
-			if isConceptDeclStart(line) {
-				conceptLine = j
-				break
-			}
-		}
-		if conceptLine == -1 {
-			break
-		}
-
-		// Walk backwards from the concept line, gathering the
-		// preamble: any contiguous run of @-attribute lines (and
-		// adjacent comment lines) immediately above the concept.
-		preambleStart := conceptLine
-		for k := conceptLine - 1; k >= i; k-- {
-			line := strings.TrimSpace(lines[k])
-			if strings.HasPrefix(line, "@") {
-				preambleStart = k
-				continue
-			}
-			if strings.HasPrefix(line, "//") {
-				// Comment lines stay attached to the preamble only
-				// if they're immediately adjacent. Stop when we
-				// hit a non-comment, non-@ line.
-				preambleStart = k
-				continue
-			}
-			if line == "" {
-				// Blank line ends the preamble run -- comments and
-				// attributes BELOW the blank stay attached; above
-				// don't.
-				break
-			}
-			break
-		}
-
-		// Walk forward from the concept line, balancing braces to
-		// find the closing `}` at indent 0.
-		depth := 0
-		endLine := -1
-		for k := conceptLine; k < len(scanLines); k++ {
-			// Blanked view: a `{` or `}` inside a comment must not move the
-			// depth, or the slice closes early and emits a truncated concept.
-			depth += strings.Count(scanLines[k], "{")
-			depth -= strings.Count(scanLines[k], "}")
-			if depth == 0 {
-				endLine = k
-				break
-			}
-		}
-		if endLine == -1 {
-			// Unterminated -- skip this slice.
-			i = conceptLine + 1
-			continue
-		}
-
-		slice := strings.Join(lines[preambleStart:endLine+1], "\n")
-		slices = append(slices, slice)
-		i = endLine + 1
-	}
-
-	return slices
-}
-
-// isConceptDeclStart returns true if `line` starts with the
-// `concept <name>` declaration at column 0 (i.e. the top-level
-// concept block opener, not a property reference inside a body).
-func isConceptDeclStart(line string) bool {
-	if !strings.HasPrefix(line, "concept ") && !strings.HasPrefix(line, "concept\t") {
-		return false
-	}
-	// Must contain a `{` somewhere on the same line or be a
-	// multi-line form. For simplicity require `{` on the same line
-	// (the parser handles same-line opener; cross-line is rare).
-	return strings.Contains(line, "{")
+// It is the shared comment- and string-safe declaration slicer
+// (languageParser.ExtractDeclarationSlices, memql#2896) over the concept
+// header. This used to be a line-oriented slicer of its own, which balanced
+// braces on a comment-blanked view but not a string-blanked one, so a `}`
+// inside a string literal -- `@description("a } brace")` -- closed the slice
+// early and the concept was silently dropped (the KNOWN LIMIT the memql#2868
+// review recorded). Once a slice that fails to parse became a load error
+// (memql#5426), that limit would have refused a valid concept instead, so the
+// slicer is the shared one now: the preamble walk (@-attribute and `//`
+// lines, a blank line ending the run) is the one it always had, header
+// detection and brace balance run on the comment-blanked view, and a brace
+// inside a string of either quote form does not move the depth.
+func conceptSlices(source string) []languageParser.DeclarationSlice {
+	return languageParser.ExtractDeclarationSlices(source, conceptHeaderRe)
 }

@@ -9,6 +9,13 @@
       "verdict": "refuse_parse",
       "code": "annotation_form",
       "message": "@addToSet on a mutation takes one or more strings"
+    },
+    {
+      "file": "a-string-field.memql",
+      "verdict": "refuse_load",
+      "code": "write_annotation_field_type",
+      "message": "@addToSet(\"title\") names a field declared string: @addToSet changes the members of a stored list, so it takes a []T field",
+      "note": "Set membership is a change to a list, so the field is a list (memql#5426)."
     }
   ]
 }

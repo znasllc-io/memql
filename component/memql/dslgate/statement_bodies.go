@@ -67,44 +67,82 @@ func scanStatementBodies(files []SourceFile) []Violation {
 		}
 	}
 	var out []Violation
-	eachStatementBody(files, func(f SourceFile, kind, name string, startLine int, body *ast.Body) {
+	eachStatementBody(files, func(f SourceFile, kind, name string, startLine int, def *ast.AutomationDef) {
 		report := func(gate Gate, sp ast.Span, detail string) {
 			out = append(out, Violation{Gate: gate, File: f.Path, Line: startLine + sp.Line - 1,
 				Kind: kind, Construct: name, Detail: detail})
 		}
-		ast.WalkBody(body.Statements, func(s ast.BodyStatement) bool {
-			for _, e := range ast.StatementExpressions(s) {
-				ast.WalkV1(e, func(n ast.ExpressionNode) bool {
-					switch x := n.(type) {
-					case *ast.MemberExpr:
-						if root, ok := x.Object.(*ast.IdentExpr); ok && root.Name == "config" {
-							if msg, unknown := config.UnknownKey(x.Field); unknown {
-								report(GateStatementConfigKey, x.Span, msg+" ["+compiler.CodeBodyConfigUnknown+"]")
-							}
+		check := func(e ast.ExpressionNode) {
+			ast.WalkV1(e, func(n ast.ExpressionNode) bool {
+				switch x := n.(type) {
+				case *ast.MemberExpr:
+					if root, ok := x.Object.(*ast.IdentExpr); ok && root.Name == "config" {
+						if msg, unknown := config.UnknownKey(x.Field); unknown {
+							report(GateStatementConfigKey, x.Span, msg+" ["+compiler.CodeBodyConfigUnknown+"]")
 						}
-					case *ast.CallExpr:
-						if x.Kind != "" || x.Receiver != nil {
-							break
-						}
-						if _, fn := functions.Lookup(x.Name); fn || predicates[x.Name] {
-							break
-						}
-						remedy := "call a catalog function or a spec or trait the corpus declares"
-						if k, isConstruct := constructs[x.Name]; isConstruct {
-							remedy = fmt.Sprintf("%s is a %s, which is called with its kind as a statement of its own: `x := %s %s(...)`, then read x",
-								x.Name, k, k, x.Name)
-						}
-						report(GateStatementUnknownCall, x.Span, fmt.Sprintf(
-							"`%s(...)` is not a function or a predicate known here, so the expression fails when it runs: %s [%s]",
-							x.Name, remedy, compiler.CodeBodyCallUnknown))
 					}
-					return true
-				})
+				case *ast.CallExpr:
+					if x.Kind != "" {
+						break
+					}
+					if x.Receiver != nil {
+						if detail := unknownMethod(x.Name); detail != "" {
+							report(GateStatementUnknownCall, x.Span, detail)
+						}
+						break
+					}
+					if _, fn := functions.Lookup(x.Name); fn || predicates[x.Name] {
+						break
+					}
+					remedy := "call a catalog function or a spec or trait the corpus declares"
+					if k, isConstruct := constructs[x.Name]; isConstruct {
+						remedy = fmt.Sprintf("%s is a %s, which is called with its kind as a statement of its own: `x := %s %s(...)`, then read x",
+							x.Name, k, k, x.Name)
+					}
+					report(GateStatementUnknownCall, x.Span, fmt.Sprintf(
+						"`%s(...)` is not a function or a predicate known here, so the expression fails when it runs: %s [%s]",
+						x.Name, remedy, compiler.CodeBodyCallUnknown))
+				}
+				return true
+			})
+		}
+		// An automation's header lambdas are expressions of the automation
+		// too, evaluated in process by the same evaluator its conditions are
+		// (memql#5426): a trigger filter calling a name nothing declares
+		// loaded, and refused every fire.
+		if def.Trigger != nil && def.Trigger.FilterLambda != nil {
+			check(def.Trigger.FilterLambda)
+		}
+		if def.Loop != nil && def.Loop.Until != nil {
+			check(def.Loop.Until)
+		}
+		ast.WalkBody(def.Body.Statements, func(s ast.BodyStatement) bool {
+			for _, e := range ast.StatementExpressions(s) {
+				check(e)
 			}
 			return true
 		})
 	})
 	return out
+}
+
+// unknownMethod is the report for a method name no receiver has, or "" when a
+// list or a string has it -- exactly the question the in-process evaluator
+// asks before it evaluates the receiver (expr_eval.go's method), so a name it
+// would refuse on every run is refused at load instead (memql#5426).
+func unknownMethod(name string) string {
+	if _, onList := functions.Method(functions.TypeList, name); onList {
+		return ""
+	}
+	if _, onString := functions.Method(functions.TypeString, name); onString {
+		return ""
+	}
+	if replacement, retired := functions.RetiredMethods()[functions.TypeList+"."+name]; retired {
+		return fmt.Sprintf("`.%s()` is retired in edition 2026, so the expression fails when it runs: write %s [%s]",
+			name, replacement, compiler.CodeBodyCallUnknown)
+	}
+	return fmt.Sprintf("`.%s()` is not a method of a list or a string, so the expression fails when it runs: call a method the function catalog lists [%s]",
+		name, compiler.CodeBodyCallUnknown)
 }
 
 // StatementBodiesRead is the statement-body gates' coverage: "<file> <name>"
@@ -114,16 +152,18 @@ func scanStatementBodies(files []SourceFile) []Violation {
 // gates could not read then cannot pass for one they found clean.
 func StatementBodiesRead(files []SourceFile) []string {
 	var out []string
-	eachStatementBody(files, func(f SourceFile, _, name string, _ int, _ *ast.Body) {
+	eachStatementBody(files, func(f SourceFile, _, name string, _ int, _ *ast.AutomationDef) {
 		out = append(out, f.Path+" "+name)
 	})
 	return out
 }
 
 // eachStatementBody calls visit with every logic and automation in files
-// whose body is written in statements, and the line its declaration starts
-// on. Each declaration is parsed alone, from its keyword to its closing brace.
-func eachStatementBody(files []SourceFile, visit func(f SourceFile, kind, name string, startLine int, body *ast.Body)) {
+// whose body is written in statements, and the line its declaration's text
+// starts on. Each declaration is parsed alone, from the first line of its
+// annotation preamble to its closing brace, so an automation's header
+// lambdas -- @filter and @loop's until -- are read with its statements.
+func eachStatementBody(files []SourceFile, visit func(f SourceFile, kind, name string, startLine int, def *ast.AutomationDef)) {
 	for _, f := range files {
 		if !strings.Contains(f.Content, "logic") && !strings.Contains(f.Content, "automation") {
 			continue
@@ -134,9 +174,10 @@ func eachStatementBody(files []SourceFile, visit func(f SourceFile, kind, name s
 			if closeAt < 0 {
 				continue // the loader reports the unbalanced construct
 			}
-			startLine := 1 + strings.Count(f.Content[:loc[0]], "\n")
+			start := languageParser.PreambleStartOf(f.Content, loc[0])
+			startLine := 1 + strings.Count(f.Content[:start], "\n")
 			kind, name := f.Content[loc[2]:loc[3]], f.Content[loc[4]:loc[5]]
-			pf, err := languageParser.ParseFile(f.Content[loc[0] : closeAt+1])
+			pf, err := languageParser.ParseFile(f.Content[start : closeAt+1])
 			if err != nil {
 				continue // a refusal the loader reports
 			}
@@ -146,7 +187,7 @@ func eachStatementBody(files []SourceFile, visit func(f SourceFile, kind, name s
 					continue
 				}
 				if auto, ok := fn.Body.(*ast.AutomationDef); ok && auto.Body != nil {
-					visit(f, kind, name, startLine, auto.Body)
+					visit(f, kind, name, startLine, auto)
 				}
 			}
 		}

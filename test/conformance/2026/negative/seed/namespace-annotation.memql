@@ -1,0 +1,6 @@
+/// A queue seeded once per user, with a namespace annotation the seed cannot have.
+@scope("perUser")
+@namespace("elsewhere")
+seed personalQueue myTicketsElsewhere {
+  name: "My tickets"
+}

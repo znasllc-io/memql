@@ -99,6 +99,21 @@ type CompletionItem struct {
 	// consumer without snippet support must render a plain-text
 	// degradation rather than inserting the tabstops literally.
 	IsSnippet bool
+	// AdditionalEdits are edits the completion makes ELSEWHERE in the
+	// document, never overlapping where InsertText goes: the file-top
+	// `use` line a concept import adds for a concept the file does not
+	// import yet (memql#5426). A consumer that cannot apply them must not
+	// offer the item -- its InsertText alone is not what its Label
+	// promises.
+	AdditionalEdits []TextEdit
+}
+
+// TextEdit is one edit a completion makes besides its insert text.
+// Positions are 1-based; a Range whose Start and End meet is an
+// insertion.
+type TextEdit struct {
+	Range   Range
+	NewText string
 }
 
 // Hover is the structured response from a Hover request. Contents
@@ -228,9 +243,15 @@ func (c *Client) Complete(ctx context.Context, source string, cursor Position) (
 	if result == nil {
 		return nil, nil
 	}
-	out := make([]CompletionItem, 0, len(result.GetItems()))
-	for _, item := range result.GetItems() {
-		out = append(out, CompletionItem{
+	return protoCompletionItems(result.GetItems()), nil
+}
+
+// protoCompletionItems decodes the wire's completion items, each with the
+// edits it makes elsewhere in the document.
+func protoCompletionItems(items []*memqlv1.SenseCompletionItem) []CompletionItem {
+	out := make([]CompletionItem, 0, len(items))
+	for _, item := range items {
+		ci := CompletionItem{
 			Label:         item.GetLabel(),
 			Kind:          item.GetKind(),
 			Detail:        item.GetDetail(),
@@ -238,9 +259,13 @@ func (c *Client) Complete(ctx context.Context, source string, cursor Position) (
 			InsertText:    item.GetInsertText(),
 			SortPriority:  int(item.GetSortPriority()),
 			IsSnippet:     item.GetIsSnippet(),
-		})
+		}
+		for _, e := range item.GetAdditionalEdits() {
+			ci.AdditionalEdits = append(ci.AdditionalEdits, TextEdit{Range: protoRange(e.GetRange()), NewText: e.GetNewText()})
+		}
+		out = append(out, ci)
 	}
-	return out, nil
+	return out
 }
 
 // Hover asks Sense for the symbol-info markdown at the supplied

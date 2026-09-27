@@ -260,6 +260,13 @@ automation c {
 // fires on a write stamping "done", and that edge must stay; and a
 // first-version filter on an automation that does not declare firstVersion
 // never fires, so no write reaches it.
+//
+// A filter reading an undeclared argument is refused at compile now
+// (memql#5426, args_undeclared), so from source the case cannot load; the
+// automations below are compiled DECLARING the field and then have the
+// declaration taken away in Go -- the shape an automation built in Go, which
+// never passes the compile check, can still take, and the one the graph must
+// still judge correctly.
 func TestLoopGraph_UndeclaredArgsReadAbsent(t *testing.T) {
 	finisher := `@trigger(event="tick.a")
 automation a {
@@ -272,11 +279,30 @@ automation b {
 ` + args + `  record := mutation recordOther()
 }`
 	}
+	if _, err := NewLoader(LoaderOptions{}).CompileSource(reader("  args {\n    id any\n  }\n"), "test"); err == nil ||
+		!strings.Contains(err.Error(), "[args_undeclared]") {
+		t.Fatalf("a filter reading an undeclared args.status compiled; want the args_undeclared refusal, got %v", err)
+	}
+	undeclare := func(a *Automation, field string) *Automation {
+		t.Helper()
+		kept := a.Args.Fields[:0]
+		for _, f := range a.Args.Fields {
+			if f.Name != field {
+				kept = append(kept, f)
+			}
+		}
+		a.Args.Fields = kept
+		if len(kept) == 0 {
+			a.Args = nil
+		}
+		return a
+	}
 	for name, args := range map[string]string{
-		"no args block":                "",
-		"an args block without status": "  args {\n    id any\n  }\n",
+		"no args block":                "  args {\n    status any\n  }\n",
+		"an args block without status": "  args {\n    id any\n    status any\n  }\n",
 	} {
-		g := BuildLoopGraph(graphAutomations(t, finisher, reader(args)), fakeSource{thingReg()}, 0)
+		b := undeclare(graphAutomation(t, reader(args)), "status")
+		g := BuildLoopGraph([]*Automation{graphAutomation(t, finisher), b}, fakeSource{thingReg()}, 0)
 		if e := graphEdge(g, "a", "b"); e == nil || !e.Decided {
 			t.Errorf("%s: args.status is absent at run time, so != \"done\" holds and b fires: edge = %+v", name, e)
 		}
@@ -291,15 +317,16 @@ automation b {
 automation c {
   create := mutation createThing()
 }`
-	firstOnly := `@trigger(event="node.created", concept="v1:t:thing")
+	firstOnly := undeclare(graphAutomation(t, `@trigger(event="node.created", concept="v1:t:thing")
 @filter(row => args.firstVersion == true)
 automation f {
   args {
     id any
+    firstVersion any
   }
   record := mutation recordOther(id: args.id)
-}`
-	g = BuildLoopGraph(graphAutomations(t, creator, firstOnly), fakeSource{thingReg()}, 0)
+}`), "firstVersion")
+	g = BuildLoopGraph([]*Automation{graphAutomation(t, creator), firstOnly}, fakeSource{thingReg()}, 0)
 	if e := graphEdge(g, "c", "f"); e != nil {
 		t.Errorf("f does not declare firstVersion, so its filter reads absent and never holds, yet c -> f: %+v", e)
 	}

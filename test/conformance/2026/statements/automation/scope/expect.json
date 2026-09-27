@@ -34,6 +34,20 @@
       "verdict": "refuse_load",
       "code": "body_unknown_name",
       "message": "a is bound in another branch of this if on line 4, which cannot have run"
+    },
+    {
+      "file": "an-undeclared-arg.memql",
+      "verdict": "refuse_load",
+      "code": "args_undeclared",
+      "message": "automation \"undeclaredArgRead\": body reads args.zone, which is not declared in its args block",
+      "note": "An automation's statements read the args block as every other body does (memql#3626, #5447): an undeclared argument reads absent when the trigger payload omits it and bypasses the block's checks when it carries it."
+    },
+    {
+      "file": "an-undefined-name.memql",
+      "verdict": "refuse_load",
+      "code": "body_unknown_name",
+      "message": "`first` is not a statement name, a loop variable or a root here",
+      "note": "A statement reads another by its name, and a name nothing in the body binds is refused at load (epic memql#5370; memql#5426 row: a step reference names a step)."
     }
   ]
 }

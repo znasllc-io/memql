@@ -88,3 +88,51 @@ func TestCreateOnly_ReStageDoesNotResetWorkerOwnedStatus(t *testing.T) {
 	require.Equal(t, "body-v2", afterRestage["body"],
 		"non-createOnly content still refreshes on re-stage (not a blind create-if-absent)")
 }
+
+// TestCreateOnly_InboundReStageKeepsTheProductsHandlingState (memql#5426):
+// stageInboundRequest's @createOnly names status alone. It used to name
+// processedAt and lastError too -- two fields its insert never writes, which
+// the read-merge keeps on a re-stage with or without the annotation, so the
+// load now refuses naming them (write_annotation_unwritten_field). This is the
+// real-Postgres proof that dropping them changed nothing: a redelivery of the
+// same event re-stages onto the same row and keeps the product's whole
+// handling state -- status, processedAt and lastError -- while its accepted
+// fields refresh.
+func TestCreateOnly_InboundReStageKeepsTheProductsHandlingState(t *testing.T) {
+	eng, db, ctx := sharedReadMergeEngine(t)
+
+	const conceptName = "v1:platform:inboundRequest"
+	reqId := "in5426-" + uniqueSuffix("restage")
+	stage := func(body string) string {
+		return runMutation(t, ctx, eng, "stageInboundRequest", map[string]any{
+			"requestId":         reqId,
+			"source":            "acme",
+			"medium":            "webhook",
+			"body":              body,
+			"contentType":       "application/json",
+			"dedupeKey":         "in5426:" + reqId,
+			"signatureVerified": true,
+			"receivedAt":        "2026-01-02T03:04:05Z",
+		})
+	}
+
+	canonicalId := stage(`{"a":1}`)
+	require.Equal(t, "received", latestPayload(t, ctx, db, conceptName, canonicalId)["status"], "a fresh stage is received")
+
+	// The product works the row and records how it went.
+	runMutation(t, ctx, eng, "updateInboundRequestStatus", map[string]any{
+		"requestId":   reqId,
+		"status":      "failed",
+		"lastError":   "downstream refused",
+		"processedAt": "2026-01-02T04:00:00Z",
+	})
+
+	// The sender redelivers the same event.
+	stage(`{"a":1,"redelivered":true}`)
+
+	row := latestPayload(t, ctx, db, conceptName, canonicalId)
+	require.Equal(t, "failed", row["status"], "@createOnly keeps the product's status")
+	require.Equal(t, "downstream refused", row["lastError"], "the read-merge keeps a field the insert never writes")
+	require.Equal(t, "2026-01-02T04:00:00Z", row["processedAt"], "the read-merge keeps a field the insert never writes")
+	require.Equal(t, `{"a":1,"redelivered":true}`, row["body"], "the accepted fields refresh")
+}

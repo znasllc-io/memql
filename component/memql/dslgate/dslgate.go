@@ -354,5 +354,8 @@ func ScanSource(path, src string, opts Options) []Violation {
 	// Per-file too: whether a declaration sits in a file its loader reads is
 	// a fact about this file's path and text (memql#5437).
 	out = append(out, scanConstructPlacement(path, src)...)
+	// And whether a `use` line sits above the file's first construct
+	// (memql#5426).
+	out = append(out, scanMisplacedUseLines(path, src)...)
 	return out
 }

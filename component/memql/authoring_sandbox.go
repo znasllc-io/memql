@@ -306,7 +306,14 @@ func sandboxCompileConcept(c SandboxConstruct, overlay *memoryNodes.MemoryRegist
 func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, error) {
 	origin := c.sandboxOrigin()
 
-	decls := ExtractConceptDecls(c.Source)
+	decls, unparsed := ExtractConceptDecls(c.Source)
+	// A declaration that does not parse is the author's error to read, not
+	// "no concept declaration found" (memql#5426).
+	for _, pe := range unparsed {
+		if pe.Name == c.Name || len(decls) == 0 {
+			return "", nil, fmt.Errorf("%s: %w", origin, pe)
+		}
+	}
 	if len(decls) == 0 {
 		return "", nil, fmt.Errorf("%s: no concept declaration found in source", origin)
 	}

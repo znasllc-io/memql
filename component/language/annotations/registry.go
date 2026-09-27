@@ -341,7 +341,7 @@ var placementTable = concat(
 	lifecycle(Prompt, "Distil a cluster of episodes into one memory."),
 	[]Placement{
 		{Receiver: Prompt, Name: "defaultProvider", Forms: FormString, Example: `@defaultProvider("fleet")`},
-		{Receiver: Prompt, Name: "level", Forms: FormString, Example: `@level("fast")`, Doc: "How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Every prompt should declare one; a prompt without one is not yet refused at load (memql#5426)."},
+		{Receiver: Prompt, Name: "level", Forms: FormString, Example: `@level("fast")`, Doc: "How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Required on every prompt: one without it is refused at load (`prompt_level_missing`), a @disabled prompt included."},
 		{Receiver: Prompt, Name: "templateFile", Forms: FormString, Example: `@templateFile("prompts/consolidateMemory.tmpl")`, Doc: "The prompt's template: a .tmpl file beside the prompt, rendered with the input fields."},
 	},
 
@@ -567,7 +567,7 @@ var Docs = map[string]string{
 	// Fields.
 	"required":     "The field is required: a concept write without it fails the schema, and a caller must pass an args / tool / prompt / builtin field that carries it. The `!` sigil after the type is the same thing.",
 	"enum":         "The closed set of string values the field accepts: @enum(\"a\", \"b\"). The `enum(\"a\", \"b\")` type is the same constraint in one statement.",
-	"pattern":      "A regular expression a string value must match.",
+	"pattern":      "A regular expression a string value must match, in Go's RE2 syntax. It is compiled at load on a concept field and an args field alike, so an expression that does not compile is refused there (`pattern_invalid`) rather than at the first write or call.",
 	"minLength":    "The fewest characters a string value may carry.",
 	"maxLength":    "The most characters a string value may carry.",
 	"minimum":      "The INCLUSIVE lower bound on a numeric value.",

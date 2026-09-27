@@ -1,0 +1,13 @@
+/// Open a ticket, keeping an attempt count this insert never writes.
+@createOnly("status", "attempts")
+mutation ticket openTicketCreateOnlyUnwritten {
+  args {
+    ticketId  string!
+    title     string!
+  }
+  insert {
+    id: args.ticketId
+    title: args.title
+    status: "open"
+  }
+}

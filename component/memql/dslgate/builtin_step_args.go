@@ -118,8 +118,8 @@ func scanBuiltinStepArgs(files []SourceFile, opts Options) []Violation {
 			check(f.Path, strings.Count(src[:m[0]], "\n")+1, "automation", enclosingAutomation(src, m[0]), name, args)
 		}
 	}
-	eachStatementBody(scanned, func(f SourceFile, kind, construct string, startLine int, body *ast.Body) {
-		ast.WalkBody(body.Statements, func(st ast.BodyStatement) bool {
+	eachStatementBody(scanned, func(f SourceFile, kind, construct string, startLine int, def *ast.AutomationDef) {
+		ast.WalkBody(def.Body.Statements, func(st ast.BodyStatement) bool {
 			call := statementConstructCall(st)
 			if call == nil || call.Kind != "builtin" {
 				return true

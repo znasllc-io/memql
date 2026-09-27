@@ -1,0 +1,6 @@
+/// A support ticket whose slug pattern is not a regular expression.
+concept ticket {
+  title   string
+  status  string
+  slug    string  @pattern("^[a-z")
+}

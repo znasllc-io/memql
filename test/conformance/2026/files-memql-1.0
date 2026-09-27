@@ -101,6 +101,7 @@ cells/concept/version/with-no-value.memql
 cells/conceptBody/relationship/a-domain-verb-in-the-type-slot.memql
 cells/conceptBody/relationship/keyword-arguments.memql
 cells/conceptBody/relationship/with-a-positional-value.memql
+cells/conceptField/description/a-brace-in-the-text.memql
 cells/conceptField/description/a-string.memql
 cells/conceptField/description/with-no-value.memql
 cells/conceptField/internal/with-true.memql
@@ -116,6 +117,7 @@ cells/conceptField/minimum/with-a-quoted-number.memql
 cells/conceptField/open/with-true.memql
 cells/conceptField/open/written-bare.memql
 cells/conceptField/pattern/a-string.memql
+cells/conceptField/pattern/an-invalid-pattern.memql
 cells/conceptField/pattern/with-no-value.memql
 cells/conceptField/pii/with-true.memql
 cells/conceptField/pii/written-bare.memql
@@ -144,11 +146,14 @@ cells/logic/requiresRank/with-an-unquoted-value.memql
 cells/mutation/actor/reads-the-actor-undeclared.memql
 cells/mutation/actor/with-true.memql
 cells/mutation/actor/written-bare.memql
+cells/mutation/addToSet/a-string-field.memql
 cells/mutation/addToSet/a-string.memql
 cells/mutation/addToSet/with-an-unquoted-value.memql
 cells/mutation/appendFields/a-string.memql
 cells/mutation/appendFields/with-an-unquoted-value.memql
+cells/mutation/createOnly/a-field-it-does-not-write.memql
 cells/mutation/createOnly/a-list-of-strings.memql
+cells/mutation/createOnly/an-undeclared-field.memql
 cells/mutation/createOnly/on-an-update.memql
 cells/mutation/createOnly/with-unquoted-values.memql
 cells/mutation/description/a-string.memql
@@ -157,13 +162,16 @@ cells/mutation/disabled/with-true.memql
 cells/mutation/disabled/written-bare.memql
 cells/mutation/mcp/with-true.memql
 cells/mutation/mcp/written-bare.memql
+cells/mutation/mergeFields/a-string-field.memql
 cells/mutation/mergeFields/a-string.memql
 cells/mutation/mergeFields/with-an-unquoted-value.memql
+cells/mutation/noUnset/a-field-it-does-not-write.memql
 cells/mutation/noUnset/a-string.memql
 cells/mutation/noUnset/with-an-unquoted-value.memql
 cells/mutation/public/with-true.memql
 cells/mutation/public/written-bare.memql
 cells/mutation/removeFromSet/a-string.memql
+cells/mutation/removeFromSet/an-undeclared-field.memql
 cells/mutation/removeFromSet/with-an-unquoted-value.memql
 cells/mutation/requiresCapability/a-list-of-strings.memql
 cells/mutation/requiresCapability/with-no-value.memql
@@ -194,6 +202,7 @@ cells/prompt/disabled/written-bare.memql
 cells/prompt/level/a-string.memql
 cells/prompt/level/an-unknown-level.memql
 cells/prompt/level/with-an-unquoted-value.memql
+cells/prompt/level/with-no-level.memql
 cells/prompt/templateFile/a-missing-file.memql
 cells/prompt/templateFile/a-string.memql
 cells/prompt/templateFile/with-no-value.memql
@@ -475,6 +484,7 @@ examples/specifications/archived-artifacts.memql
 examples/specifications/requires-cluster-owner.memql
 expr/automationCondition/a-retired-function.memql
 expr/automationCondition/absent-is-false.memql
+expr/automationCondition/an-unknown-method.memql
 expr/automationCondition/closed-at-is-nil.memql
 expr/automationCondition/coalesced-status.memql
 expr/automationCondition/code-prefix.memql
@@ -725,6 +735,7 @@ expr/specBody/not-closed.memql
 expr/specBody/open-and-tagged.memql
 expr/specBody/optional-plan.memql
 expr/specBody/reads-an-intrinsic-through-the-parameter.memql
+expr/specBody/reads-the-actor-on-the-right.memql
 expr/specBody/reads-the-actor.memql
 expr/specBody/spec-return-body.memql
 expr/specBody/ternary-over-the-row.memql
@@ -769,6 +780,9 @@ expr/toolDefault/default-method-call.memql
 expr/toolDefault/default-or.memql
 expr/toolDefault/default-starts-with.memql
 expr/toolDefault/default-ternary.memql
+expr/triggerFilter/an-undeclared-arg.memql
+expr/triggerFilter/an-unknown-function.memql
+expr/triggerFilter/an-unknown-method.memql
 expr/triggerFilter/archived.memql
 expr/triggerFilter/closed-goal.memql
 expr/triggerFilter/coalesce-call.memql
@@ -797,6 +811,7 @@ expr/triggerFilter/urgent-or-high.memql
 negative/action/missing-required-capability-arg.memql
 negative/ai/query-filter.memql
 negative/automation/declared-outside-automations-file.memql
+negative/concept/an-unparsable-field.memql
 negative/concept/nesting-too-deep.memql
 negative/logic/chain-too-long.memql
 negative/logic/nesting-too-deep.memql
@@ -807,8 +822,10 @@ negative/query/imported-concept-declared-nowhere.memql
 negative/query/signature-concept-not-imported.memql
 negative/query/unknown-clause.memql
 negative/seed/concept-declared-nowhere.memql
+negative/seed/namespace-annotation.memql
 negative/shape/concept-declared-nowhere.memql
 negative/spec/binding-declared-nowhere.memql
+negative/use/a-use-line-below-a-construct.memql
 negative/use/import-block.memql
 statements/automation/assign/assign.memql
 statements/automation/assign/call-inside-an-expression.memql
@@ -853,6 +870,8 @@ statements/automation/retry/retry-on-an-expression.memql
 statements/automation/retry/retry.memql
 statements/automation/return/retry-on-a-return.memql
 statements/automation/return/return.memql
+statements/automation/scope/an-undeclared-arg.memql
+statements/automation/scope/an-undefined-name.memql
 statements/automation/scope/branches-share-a-name.memql
 statements/automation/scope/forward-reference.memql
 statements/automation/scope/loop-variable-shadows.memql

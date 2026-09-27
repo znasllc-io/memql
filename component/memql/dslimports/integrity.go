@@ -2073,9 +2073,10 @@ func sameDomainConceptDecl(path string, f *languageAst.File, idx *declIndex, nam
 // the annotation there would resolve the binding against an id the engine
 // will never mint, so a bundle that cannot boot would lint clean; #2852's
 // review caught exactly that, on a nested declaration the engine-parity tier
-// cannot see (lint_mount.go's directoryHasMemqlFile is non-recursive, so a
-// domain dir with no direct .memql never mounts). A candidate the loader
-// would reject is not a candidate.
+// could not see then (lint_mount.go mounted only a domain dir with a direct
+// .memql file, until memql#5426; it mounts one that holds only nested
+// namespaces now, as boot does). A candidate the loader would reject is not
+// a candidate.
 func candidateConceptId(root fs.FS, entry conceptEntry) string {
 	if entry.decl == nil {
 		return ""

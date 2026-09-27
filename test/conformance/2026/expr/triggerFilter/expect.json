@@ -250,6 +250,27 @@
       "code": "lower_refused",
       "message": "`mutation tfNoteGoal(goalId: row.id, note: \"x\")` does not lower in a trigger filter: cannot be called from this position: a construct call is the work of a statement, and a trigger filter is not one -- a call there would read or write with no step of its own. Move the call into a step of the automation's body",
       "note": "memql#5582: the tier manifest already refuses a construct call at this position (manifest.go's inProcessKinds), but nothing enforced it at load -- the automation loaded clean and the refusal only arrived at fire time (construct_call_not_allowed), once per matching event. This pins the load-time refusal PrepareExpressions now produces (component/automations/expressions_v1.go's checkTriggerFilterAdmission), worded to match EvalCondition's fire-time one."
+    },
+    {
+      "file": "an-undeclared-arg.memql",
+      "verdict": "refuse_load",
+      "code": "args_undeclared",
+      "message": "automation \"tfUndeclaredArgFilter\": trigger filter reads args.wanted, which is not declared in its args block",
+      "note": "The trigger payload is bound into the args block before the filter decides, so a filter reads args exactly as a statement does, and an undeclared one read absent on every fire (memql#5426)."
+    },
+    {
+      "file": "an-unknown-function.memql",
+      "verdict": "refuse_load",
+      "code": "body_call_unknown",
+      "message": "`isStale(...)` is not a function or a predicate known here, so the expression fails when it runs",
+      "note": "A trigger filter is evaluated in process by the evaluator an automation's conditions use, so a bare call there names a catalog function or a declared spec or trait, as it does in a condition. It used to load and refuse every fire (memql#5426)."
+    },
+    {
+      "file": "an-unknown-method.memql",
+      "verdict": "refuse_load",
+      "code": "body_call_unknown",
+      "message": "`.startsWith()` is not a method of a list or a string, so the expression fails when it runs",
+      "note": "Prefix selection is the `startsWith` operator (row.status startsWith \"clos\"), not a method. The evaluator resolves a method against what a list or a string has before it reads the receiver, so the load refuses a name neither has (memql#5426)."
     }
   ]
 }

@@ -419,7 +419,10 @@ func languageLineServer(t *testing.T, root string, createsFiles bool) (*server, 
 // TestLanguageLine_OnlyARefusedMountedDomainsFilesCarryTheRefusal: of the
 // files a workspace can hold, exactly the ones in a mounted domain whose line
 // is refused get the diagnostic. A core domain speaks the engine's line, and a
-// directory the build does not mount is none of the build's business.
+// directory the build does not mount -- a soft-disabled `_` one -- is none of
+// the build's business. A domain that holds its .memql files only below its
+// top level IS mounted, by boot and by the build alike (memql#5426), so its
+// refusal is shown too.
 func TestLanguageLine_OnlyARefusedMountedDomainsFilesCarryTheRefusal(t *testing.T) {
 	root := t.TempDir()
 	writeFiles(t, root, map[string]string{
@@ -428,6 +431,7 @@ func TestLanguageLine_OnlyARefusedMountedDomainsFilesCarryTheRefusal(t *testing.
 		"widgets/" + dslfs.ManifestFile: declaration(),
 		"identity/traits.memql":         probeTrait,
 		"fixtures/deep/traits.memql":    probeTrait,
+		"_drafts/traits.memql":          probeTrait,
 		"loose.memql":                   probeTrait,
 	})
 	_, c := languageLineServer(t, root, true)
@@ -440,7 +444,8 @@ func TestLanguageLine_OnlyARefusedMountedDomainsFilesCarryTheRefusal(t *testing.
 		{"a file below the refused domain's top level", pathToURI(filepath.Join(root, "gadgets", "more", "x.memql")), true},
 		{"a file of a domain that declares its line", pathToURI(filepath.Join(root, "widgets", "traits.memql")), false},
 		{"a file of a core domain", pathToURI(filepath.Join(root, "identity", "traits.memql")), false},
-		{"a file of a directory the build does not mount", pathToURI(filepath.Join(root, "fixtures", "deep", "traits.memql")), false},
+		{"a file of a domain of only sub-namespaces", pathToURI(filepath.Join(root, "fixtures", "deep", "traits.memql")), true},
+		{"a file of a directory the build does not mount", pathToURI(filepath.Join(root, "_drafts", "traits.memql")), false},
 		{"a file at the workspace root", pathToURI(filepath.Join(root, "loose.memql")), false},
 		{"a file outside the workspace", pathToURI(filepath.Join(t.TempDir(), "gadgets", "traits.memql")), false},
 		{"a buffer that is not a file", "untitled:Untitled-1", false},

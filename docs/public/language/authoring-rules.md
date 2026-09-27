@@ -1663,8 +1663,10 @@ digested) is the durable answer, has its own false-positive design
 problem, and is not built.
 
 `@pattern` on an args field is genuinely enforced, unlike some of the
-concept-field annotations: it is compiled at load (`convertArgsField`),
-matched on every call (`validateArgsField`), and
+concept-field annotations: it is compiled at load (`convertArgsField`, and a
+concept field's pattern is compiled at load by the same check since
+memql#5426 -- `pattern_invalid` for either), matched on every call
+(`validateArgsField`), and
 `executeMutationFunctionCall` validates before rendering the template —
 `engine.go`'s call is the only non-test caller of
 `renderMutationTemplate`, so no call path reaches the hash unchecked.
@@ -2622,6 +2624,22 @@ memql#5356):
   (`v1:authoring:construct.grammarVersion`) at promote; re-hydration recompiles
   a stored row first and uses a stale stamp only to explain a failure, so a
   bump never unregisters a construct whose source still parses.
+
+**A stored row a narrowing refuses is reported by its id.** A durably promoted
+row whose source carries a line the grammar it was stored under accepted and
+never read -- an annotation no receiver takes, a clause no loader consumed,
+which the parser now refuses by name -- stops compiling at re-hydration. It is
+quarantined, not fatal, and the report names the row (`row
+v1:authoring:construct:...`, its bundle and owner), the rule id of the refusal,
+and the remedy: delete the line (it changed nothing the construct did) or write
+what the refusal says, then promote the bundle again -- or demote the
+construct so it is not re-hydrated. No `memqlmigrate` rewrite removes such a
+line, and the report says so rather than naming one. After an upgrade, every
+boot logs each such row as `durable authored construct quarantined at
+re-hydration` with its id, rule and remedy, and one WARN line listing them all
+(`durably-promoted constructs did not re-hydrate`), so
+`kubectl logs -n memql deploy/<node> | grep 'did not re-hydrate'` finds them
+(memql#5426). A failure that carries no rule id keeps the stamp's diagnosis.
 
 **The migration channel is `memqlmigrate`.** Every rewrite is registered in
 one registry, keyed by the edition it moves a tree onto and the epic that

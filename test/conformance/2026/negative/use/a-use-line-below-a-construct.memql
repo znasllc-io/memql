@@ -1,0 +1,6 @@
+/// A ticket.
+concept ticket {
+  title  string
+}
+
+use cells.concepts.{ ticket }

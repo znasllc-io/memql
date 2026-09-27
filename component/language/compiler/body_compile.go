@@ -70,7 +70,7 @@ func compileStatementSteps(def *ast.FunctionDef, automation *ast.AutomationDef) 
 		kind = "beforeWrite"
 	}
 	if def.Type == ast.FunctionTypeAutomation {
-		if err := checkAutomationBindings(def, automation.Body); err != nil {
+		if err := checkAutomationBindings(def, automation); err != nil {
 			return nil, err
 		}
 	}

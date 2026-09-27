@@ -20,9 +20,10 @@ package memql
 // Once the form's window is spent the same use is a strict-boot problem
 // instead: a coded Skip carrying the refusal the parser makes of the spelling,
 // so a load and a parse say one thing about it. The load records it here rather
-// than trusting each construct's loader to: a concept's parse failure drops the
-// concept without a skip of its own (ExtractConceptDecls), and `array(T)` is
-// written in concepts.
+// than trusting each construct's loader to: a concept's parse failure is a
+// concept skip recorded before Init (ExtractConceptDecls, memql#5426) that
+// names the parse error rather than the form, and `array(T)` is written in
+// concepts.
 //
 // WHAT IS SCANNED is what Init reads its constructs from, the merged tree
 // baseloader.ReadAll returns: the embedded core tree, every registered pack and

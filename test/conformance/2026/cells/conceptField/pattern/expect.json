@@ -9,6 +9,13 @@
       "verdict": "refuse_load",
       "code": "annotation_form",
       "message": "@pattern on a concept field takes one string"
+    },
+    {
+      "file": "an-invalid-pattern.memql",
+      "verdict": "refuse_load",
+      "code": "pattern_invalid",
+      "message": "property \"slug\": invalid @pattern \"^[a-z\": error parsing regexp: missing closing ]",
+      "note": "A concept field's pattern is compiled at load, as an args field's is (cells/argsField/pattern): it reaches the schema as the JSON-Schema pattern keyword, which is compiled on the concept's first write, so an invalid expression used to load and then refuse every write to the concept (memql#5426)."
     }
   ]
 }

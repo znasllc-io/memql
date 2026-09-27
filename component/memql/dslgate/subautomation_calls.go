@@ -177,8 +177,8 @@ func scanSubAutomationCalls(files []SourceFile) []Violation {
 			report(p, strings.Count(src[:m[0]], "\n")+1, enclosingAutomation(src, m[0]), callee)
 		}
 	}
-	eachStatementBody(scanned, func(f SourceFile, kind, name string, startLine int, body *ast.Body) {
-		ast.WalkBody(body.Statements, func(st ast.BodyStatement) bool {
+	eachStatementBody(scanned, func(f SourceFile, kind, name string, startLine int, def *ast.AutomationDef) {
+		ast.WalkBody(def.Body.Statements, func(st ast.BodyStatement) bool {
 			call := statementConstructCall(st)
 			if call == nil || call.Kind != "automation" {
 				return true

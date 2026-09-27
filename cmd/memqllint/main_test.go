@@ -252,19 +252,25 @@ query item queryByStatus {
 	}
 }
 
-// TestRun_RefusedLineOutsideTheParityMountIsStillReported: boot mounts every
-// domain directory, but the parity pass mounts only one that directly holds a
-// .memql file (MountOverlayDomains) -- so a domain holding only a
-// sub-namespace refuses boot without its line and is Load's alone to report.
-// memqllint prints a refusal both passes make once, keeping Load's copy and
-// dropping the parity pass's echo of it: here it reports demo's (mounted,
-// refused by both passes, printed once) and beta's (Load's alone). A dedupe
-// that kept both copies would print demo's twice, and one that dropped Load's
-// copies whenever the parity pass ran would lose beta's.
-func TestRun_RefusedLineOutsideTheParityMountIsStillReported(t *testing.T) {
+// TestRun_ARefusedLineIsReportedOnceForEveryDomainShape: boot mounts every
+// domain directory, and so does the parity pass -- a domain holding only a
+// sub-namespace included, since memql#5426 (MountOverlayDomains mounted only
+// one that directly held a .memql file before, which left beta's refusal to
+// Load alone). memqllint prints a refusal both passes make once, keeping
+// Load's copy and dropping the parity pass's echo of it: here it reports
+// demo's and beta's, each refused by both passes and printed once. A dedupe
+// that kept both copies would print each twice, and one that dropped Load's
+// copies whenever the parity pass ran would lose the file line Load names.
+func TestRun_ARefusedLineIsReportedOnceForEveryDomainShape(t *testing.T) {
 	files := map[string]string{
 		"demo/concepts.memql":     testConcepts,
 		"beta/sub/concepts.memql": "/// A widget.\nconcept widget {\n  label  string\n}\n",
+		// A concept's namespace is a colon-separated identifier, so a nested
+		// directory holding concepts pins the one it declares under (as
+		// dsl/shopify/generated does). Without it boot refuses the concept's
+		// id -- which the parity pass could not see until it mounted a
+		// domain of only sub-namespaces (memql#5426).
+		"beta/sub/namespace.pin": "beta\n",
 	}
 	code, out := captureRun(t, []string{"--json", writeTreeAsIs(t, files)})
 	if code != 1 {
@@ -414,6 +420,9 @@ func TestRun_ASubNamespaceOfADeclaredDomainGetsNoLanguageLineCheck(t *testing.T)
 	bundle := writeTreeAsIs(t, map[string]string{
 		"beta/memql.toml":         dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render(),
 		"beta/sub/concepts.memql": "/// A widget.\nconcept widget {\n  label  string\n}\n",
+		// The nested concept's namespace pin (see
+		// TestRun_ARefusedLineIsReportedOnceForEveryDomainShape).
+		"beta/sub/namespace.pin": "beta\n",
 	})
 	sub := filepath.Join(bundle, "beta", "sub")
 	for _, target := range []string{sub, filepath.Join(sub, "concepts.memql")} {
@@ -1249,5 +1258,61 @@ func TestRun_AllowedRolesIsAWarningNamingBothReplacements(t *testing.T) {
 	code, out = captureRun(t, []string{writeTree(t, tree)})
 	if code != 1 || !strings.Contains(out, deprecation.AllowedRoles) || !strings.Contains(out, "@requiresAgentRole") {
 		t.Fatalf("past its window @allowedRoles must refuse naming its replacements, code=%d output:\n%s", code, out)
+	}
+}
+
+// TestRun_TheParityPassChecksADomainOfOnlySubNamespaces (memql#5426): boot
+// mounts every directory of a MEMQL_DSL_PATH root, and reads a domain that
+// holds nothing but sub-namespace directories through them. The parity pass
+// mounted only a directory with a .memql file directly in it, so such a
+// domain was never checked: a refusal only the engine makes -- here a bare
+// call nothing declares, which dslimports cannot see -- linted clean and
+// refused boot.
+func TestRun_TheParityPassChecksADomainOfOnlySubNamespaces(t *testing.T) {
+	root := writeTreeAsIs(t, map[string]string{
+		"warehouse/" + dslfs.ManifestFile: dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render(),
+		"warehouse/nested/logic.memql": `logic probeNestedUnknownCall {
+  args {
+    x string
+  }
+  return definitelyNothing(args.x)
+}`,
+	})
+	code, out := captureRun(t, []string{root})
+	if code != 1 {
+		t.Fatalf("run() = %d, want 1: the nested domain's refusal is the engine's; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "`definitelyNothing(...)` is not a function or a predicate known here") {
+		t.Fatalf("the report does not carry the parity pass's refusal; output:\n%s", out)
+	}
+}
+
+// TestRun_AConceptThatDoesNotParseIsRefusedByBothPasses (memql#5426): a
+// concept that does not parse was refused by the parse pass alone -- the
+// engine-parity pass, like boot, dropped it in silence. The parity pass
+// refuses it now, naming the concept, its line and concept_unparsed, with the
+// parser's refusal placed at the author's line and column: two passes, two
+// copies, as a construct-level parse refusal is reported by both
+// (TestRun_V1RefusalNamesTheAuthorsLineAndColumn).
+func TestRun_AConceptThatDoesNotParseIsRefusedByBothPasses(t *testing.T) {
+	code, report, out := jsonReport(t, writeTree(t, map[string]string{
+		"demo/concepts.memql": "/// A demo item.\nconcept item {\n  name    string\n  status  string  @@description(\"x\")\n}\n",
+	}))
+	if code != 1 || len(report.Errors) != 2 {
+		t.Fatalf("one concept that does not parse: run() = %d, want 1 with the two passes' refusals:\n%s", code, out)
+	}
+	var all strings.Builder
+	for _, e := range report.Errors {
+		all.WriteString(e.Message + "\n")
+	}
+	for _, want := range []string{
+		"demo/concepts.memql: parse: parser error: parse error at line 4, column 20",
+		`demo/concepts.memql: concept "item" DROPPED`,
+		`line 2: concept "item" does not parse, so it is not registered: parse error at line 4, column 20`,
+		"[concept_unparsed]",
+	} {
+		if !strings.Contains(all.String(), want) {
+			t.Errorf("the report does not carry %q; errors:\n%s", want, all.String())
+		}
 	}
 }

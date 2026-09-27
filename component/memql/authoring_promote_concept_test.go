@@ -777,7 +777,10 @@ concept trainedBasket {
 // table cases above do not have to repeat it.
 func declaredConceptName(t *testing.T, source string) string {
 	t.Helper()
-	decls := ExtractConceptDecls(source)
+	decls, unparsed := ExtractConceptDecls(source)
+	if len(unparsed) > 0 {
+		t.Fatalf("fixture does not parse: %v", unparsed[0])
+	}
 	if len(decls) != 1 {
 		t.Fatalf("fixture declares %d concepts, want exactly 1", len(decls))
 	}

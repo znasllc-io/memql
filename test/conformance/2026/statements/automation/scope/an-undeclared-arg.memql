@@ -1,0 +1,7 @@
+@trigger(schedule="0 0 * * * *")
+automation undeclaredArgRead {
+  args {
+    region  string
+  }
+  label := args.region + args.zone
+}
