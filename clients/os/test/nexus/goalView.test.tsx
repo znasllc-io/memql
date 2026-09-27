@@ -358,7 +358,7 @@ describe("the acts legal from the run's state", () => {
     await openGoal();
     const bar = screen.getByRole("group", { name: "What you can do with this" });
     expect(within(bar).queryByText("Replay")).toBeNull();
-    expect(screen.getByText(/replay and fork wait until the run finishes/)).toBeTruthy();
+    expect(screen.getByText(/replay and branching wait until the run finishes/)).toBeTruthy();
   });
 
   it("offers Replay once the run is terminal", async () => {

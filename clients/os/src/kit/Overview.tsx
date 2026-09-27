@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { InlineSkeleton } from "./ContentSkeleton";
 import { Head } from "./index";
 import { Measure } from "./MeasureView";
 import type { Figure } from "./measure";
@@ -7,6 +8,18 @@ export interface OverviewMetric {
   label: string;
   figure: Figure;
   detail?: string;
+  /**
+   * How a measured value is written, when it is not a plain count -- Nexus's
+   * "4 to 2" is one figure with its counterpart beside it. An absent figure
+   * ignores it and draws the em dash every absent value draws.
+   */
+  format?: (value: number) => string;
+  /**
+   * The read behind this figure has not answered yet: its SHAPE is drawn, never
+   * a caption (DESIGN.md, "Loading is the shape of the content"). Distinct from
+   * an absent figure, which is an answer -- "nothing has reported this".
+   */
+  loading?: boolean;
 }
 
 /** App summaries share a layout; each app supplies its own measured facts. */
@@ -20,8 +33,8 @@ export function Overview({ metrics, scope, children, actions }: {
     <Head title="Overview" meta={scope}>{actions}</Head>
     <dl className="os-overview-metrics" aria-label="Overview statistics">
       {metrics.map(metric => <div key={metric.label} data-overview-metric={metric.label}>
-        <dt>{metric.label}</dt><dd><Measure figure={metric.figure} /></dd>
-        {metric.detail ? <small>{metric.detail}</small> : null}
+        <dt>{metric.label}</dt><dd>{metric.loading ? <InlineSkeleton label={`Loading ${metric.label.toLowerCase()}`} /> : <Measure figure={metric.figure} format={metric.format} />}</dd>
+        {metric.detail && !metric.loading ? <small>{metric.detail}</small> : null}
       </div>)}
     </dl>
     {children}

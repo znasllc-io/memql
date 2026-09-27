@@ -1,28 +1,41 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { useMemo, useState } from "react";
-import { ArrowLeft, GitFork, RotateCcw } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { GitBranch, Pin, Redo2, RotateCcw } from "lucide-react";
 
+import { AttentionMarker } from "../../attention/Attention";
+import { useSession } from "../../chrome/access";
 import {
+  Button,
   Caption,
   Chip,
-  Chips,
-  Fact,
-  Facts,
+  Head,
   Notice,
   Panel,
-  formatDuration,
   formatFreshness,
-  formatMoment,
   useNow,
 } from "../../kit";
 import { ActionBar, type Act, type ActionBarTone } from "../../kit/ActionBar";
 import { JournalPanel } from "./Journal";
 import { KindBand } from "./KindBand";
 import { StepSpineRow } from "./StepSpine";
-import type { DeriveRunState } from "./actions";
+import { StepDetail, STEP_VERSIONS_TARGET } from "./StepDetail";
+import { ComposerHost, type ComposerRequest } from "./ComposerHost";
+import { ValidatorLine, VerdictControl, type DislikeDraft } from "./Verdict";
+import { NEXUS_APP_ID } from "./concepts";
+import { useMoveRunHead, useRecordFeedback, type DeriveRunState, type RerunReply } from "./actions";
+import {
+  RUN_TARGET,
+  disagrees,
+  newestVerdict,
+  targetKey,
+  validatorFor,
+  type Axes,
+  type FeedbackTarget,
+} from "./feedback";
 import {
   decisionsByStep,
   formatSpend,
+  idTail,
   kindBreakdown,
   runIsTerminal,
   runSpend,
@@ -33,18 +46,26 @@ import {
   type GoalRow,
   type RunRow,
   type StepRow,
+  type ValidationSummary,
 } from "./rows";
+import { useRunVerdicts, useStepVersions } from "./useInterventions";
 import {
+  currentVersionOf,
+  versionCount,
+  versionsByKey,
+  versionsOf,
+  versionsSignature,
+  type ComposerDraft,
+  type StepVersion,
+} from "./versions";
+import {
+  rerunInFlightWords,
   runModeDetail,
   runModeWord,
   runStatusDetail,
   runStatusWord,
-  stepKindMeaning,
-  stepKindWord,
-  stepStatusWord,
-  symptomMeaning,
-  symptomWord,
   waitingWord,
+  type Verdict,
 } from "./words";
 import type { Journal } from "./useNexus";
 
@@ -58,22 +79,36 @@ import type { Journal } from "./useNexus";
 // form. Two Heads in one scroller is the tell that neither happened, and the
 // Deployables app measured what that costs: 5,069px over 5.9 viewports.
 //
+// The heading is the kit's `Head`, which PUBLISHES the trail to the window's
+// one trail row rather than drawing a back button of its own (DESIGN.md, "One
+// trail row"). The trail is where the run sits -- Runs, then this run -- and
+// Back is where the person came from, which for a branch or a replay opened
+// from here is the run it came from.
+//
 // ===========================================================================
 // THE ORDER OF THE PAGE IS THE ORDER OF THE QUESTIONS
 // ===========================================================================
 // What is this and how did it go (the head) -> how much of it had to think
-// (the band) -> what happened, in order (the spine) -> what the model was
-// actually asked (the journal, on demand). Somebody who came to check one
-// fact finds it before scrolling; somebody debugging keeps reading.
+// (the band) -> what did I think of it (the verdict) -> what happened, in
+// order (the spine) -> what the model was actually asked (the journal, on
+// demand). Somebody who came to check one fact finds it before scrolling;
+// somebody debugging keeps reading.
 //
 // ===========================================================================
-// THE ACTS ARE ON ONE BAR AND AN ILLEGAL ONE IS ABSENT (rule 12)
+// THE ACTS ARE ON ONE BAR, THEY FOLLOW THE SELECTION, AND AN ILLEGAL ONE IS
+// ABSENT (rule 12)
 // ===========================================================================
-// Replay and Fork are offered on a TERMINAL run only, and that is a real rule
-// rather than caution: a replay serves every model call from the journal, so
-// replaying a run that is still writing that journal is a run that will miss
-// and raise a divergence at whatever step it happened to reach. Offering it
-// would be offering a failure.
+// With no step selected the bar offers the RUN's acts: Answer it while it is
+// parked on you, Replay once it has finished. Select a step of a finished run
+// and it offers that step's: Make current (only for a version that is not
+// current), Branch from here, and Run again, primary last -- three, which is
+// the cap. While a re-run is in flight no step act is offered, and the bar
+// says in words what is running.
+//
+// Replay and the step acts wait for a TERMINAL run, and that is a real rule
+// rather than caution: a replay serves every model call from the journal, and
+// a re-run of a run still writing is refused (`run_not_finished`) because it
+// would race the live execution.
 //
 // THERE IS NO CANCEL ON THIS PAGE, AND THE BAR SAYS WHY. The verb is
 // `cancelGoal`, which closes the goal and asks EVERY run of it to stop -- so
@@ -83,6 +118,25 @@ import type { Journal } from "./useNexus";
 // It lives on the goal, where its blast radius is the thing you are looking
 // at.
 
+/**
+ * What a run page remembers while somebody is away from it -- to a branch it
+ * opened, and Back again. Held by the app root per run, so returning lands
+ * the person on the step and version they had open, with every draft intact.
+ */
+export interface RunPageMemory {
+  openStepKey: string;
+  selectedVersions: Readonly<Record<string, number>>;
+  composerDrafts: Readonly<Record<string, ComposerDraft>>;
+  dislikeDrafts: Readonly<Record<string, DislikeDraft>>;
+}
+
+export const EMPTY_RUN_MEMORY: RunPageMemory = {
+  openStepKey: "",
+  selectedVersions: {},
+  composerDrafts: {},
+  dislikeDrafts: {},
+};
+
 export interface RunPageProps {
   run: RunRow;
   goal: GoalRow | null;
@@ -91,10 +145,19 @@ export interface RunPageProps {
   approvals: readonly ApprovalRow[];
   journal: Journal;
   derive: DeriveRunState;
+  /** Every run this person owns: a step's child run says whether an app session answered it. */
+  runs?: readonly RunRow[];
+  /** Where Back goes, by name: the run this one was opened from, or the list. */
+  backLabel?: string;
   onBack: () => void;
+  /** The trail's own "Runs" crumb, which always goes to the list. */
+  onBackToList?: () => void;
   onOpenGoal: (goalId: string) => void;
   onOpenApprovals: (approvalId: string) => void;
+  /** Open another run FROM this one, so Back returns here. */
   onOpenRun: (runId: string) => void;
+  memory?: RunPageMemory;
+  onRemember?: (memory: RunPageMemory) => void;
 }
 
 export function RunPage({
@@ -105,13 +168,36 @@ export function RunPage({
   approvals,
   journal,
   derive,
+  runs = [],
+  backLabel = "Runs",
   onBack,
+  onBackToList,
   onOpenGoal,
   onOpenApprovals,
   onOpenRun,
+  memory = EMPTY_RUN_MEMORY,
+  onRemember,
 }: RunPageProps) {
   const now = useNow(15_000);
-  const [openStepKey, setOpenStepKey] = useState("");
+  const { access } = useSession();
+  const viewerId = access?.userId ?? "";
+
+  const [openStepKey, setOpenStepKey] = useState(memory.openStepKey);
+  const [selectedVersions, setSelectedVersions] = useState(memory.selectedVersions);
+  const [composerDrafts, setComposerDrafts] = useState(memory.composerDrafts);
+  const [dislikeDrafts, setDislikeDrafts] = useState(memory.dislikeDrafts);
+  const [composer, setComposer] = useState<ComposerRequest | null>(null);
+  const [lastRerun, setLastRerun] = useState<RerunReply | null>(null);
+
+  // Whatever the page holds is handed back to the app root as it changes, so
+  // a person who opens a branch from here and comes Back finds this page as
+  // they left it.
+  useEffect(() => {
+    onRemember?.({ openStepKey, selectedVersions, composerDrafts, dislikeDrafts });
+  }, [openStepKey, selectedVersions, composerDrafts, dislikeDrafts]);
+
+  const head = useMoveRunHead();
+  const feedback = useRecordFeedback();
 
   const breakdown = useMemo(() => kindBreakdown(steps), [steps]);
   const spend = useMemo(() => runSpend(run), [run]);
@@ -122,11 +208,174 @@ export function RunPage({
   // the honest state: before the read, this window does not know which door
   // answered, and a row cannot say what it has not been told.
   const decisions = useMemo(() => decisionsByStep(journal.modelCalls), [journal.modelCalls]);
-  const openStep = steps.find((step) => step.key === openStepKey) ?? null;
+
+  // THE VERSIONS, read on open and again when a new one appears or the head
+  // moves -- never on a status flip, which the steps feed already carries.
+  const versionsRead = useStepVersions(run.id, versionsSignature(run, steps));
+  const versionIndex = useMemo(() => versionsByKey(versionsRead.versions), [versionsRead.versions]);
+
+  // THE VERDICTS, read on open and again when the run finishes or the
+  // validator speaks: both change what the verdicts beside the steps say.
+  const verdicts = useRunVerdicts(run.id, `${run.status}|${run.validation?.observationId ?? ""}`);
+  const validatorEntry = useMemo(() => validatorFor(verdicts.validator, run.validation), [verdicts.validator, run.validation]);
+  const validation: ValidationSummary | null =
+    run.validation ??
+    (validatorEntry === null
+      ? null
+      : {
+          verdict: validatorEntry.verdict,
+          stepKey: validatorEntry.target.stepKey,
+          version: validatorEntry.target.version,
+          observationId: validatorEntry.id,
+          level: validatorEntry.level,
+          at: validatorEntry.createdAt,
+        });
 
   const terminal = runIsTerminal(run);
   const waiting = runWaitsOnYou(run);
   const pending = approvals[0] ?? null;
+  // The step acts are legal on a finished run with no re-run of its own in
+  // flight. A re-run turns the run back to `running`, so this is mostly the
+  // terminal test -- but a request left on a closed run still hides them.
+  const stepActsLegal = terminal && run.rerun === null;
+  // A run that has finished once can be judged -- including while a re-run of
+  // one of its steps is in flight, when hiding the verdicts would move the
+  // whole timeline up under the person watching it.
+  const judgeable = terminal || run.rerun !== null;
+
+  const timelineKeys = useMemo(() => steps.map((step) => step.key), [steps]);
+
+  function stepVersions(step: StepRow): {
+    versions: StepVersion[];
+    current: number | null;
+    count: number;
+  } {
+    const versions = versionsOf(versionIndex, step, step.key);
+    const current = currentVersionOf(run, versions, step.key);
+    return { versions, current, count: versionCount(versions, run.head, step, step.key) };
+  }
+
+  function isSession(step: StepRow | StepVersion | null): boolean {
+    if (step === null || step.childRunId === "") return false;
+    const child = runs.find((candidate) => idTail(candidate.id) === idTail(step.childRunId));
+    return child?.automationName === "appSession";
+  }
+
+  const openStep = steps.find((step) => step.key === openStepKey) ?? null;
+  const open = openStep === null ? null : stepVersions(openStep);
+  const selected =
+    openStep === null || open === null
+      ? null
+      : (selectedVersions[openStep.key] ?? open.current ?? openStep.version);
+  const selectedVersion =
+    open === null || selected === null
+      ? null
+      : (open.versions.find((version) => version.version === selected) ?? null);
+
+  function toggleStep(key: string): void {
+    setOpenStepKey((held) => (held === key ? "" : key));
+  }
+
+  function openComposer(mode: "rerun" | "branch", stepKey: string, seed?: string): void {
+    setComposer({ mode, stepKey, ...(seed === undefined ? {} : { seed }) });
+  }
+
+  // -------------------------------------------------------------------------
+  // Verdicts
+  // -------------------------------------------------------------------------
+
+  function recordVerdict(target: FeedbackTarget, verdict: Verdict, axes?: Axes, reason?: string): void {
+    const key = targetKey(target);
+    void feedback
+      .record(key, {
+        runId: run.id,
+        ...(target.stepKey === "" ? {} : { stepKey: target.stepKey }),
+        ...(target.version === null ? {} : { version: target.version }),
+        verdict,
+        ...(verdict === "dislike" && axes !== undefined
+          ? {
+              ...(axes.product ? { product: true } : {}),
+              ...(axes.process ? { process: true } : {}),
+              ...(axes.performance ? { performance: true } : {}),
+            }
+          : {}),
+        ...(reason !== undefined && reason !== "" ? { reason } : {}),
+      })
+      .then((reply) => {
+        if (reply === null) return;
+        verdicts.add({
+          id: reply.observationId,
+          verdict,
+          axes: verdict === "dislike" && axes !== undefined ? axes : { product: false, process: false, performance: false },
+          reason: reason ?? "",
+          target,
+          validatorDisagrees: reply.validatorDisagrees,
+          createdAt: new Date().toISOString(),
+        });
+        setDislikeDrafts((held) => {
+          if (!(key in held)) return held;
+          const next = { ...held };
+          delete next[key];
+          return next;
+        });
+      });
+  }
+
+  function verdictFor(target: FeedbackTarget, scope: "step" | "run", label: string, validatorLine: ReactNode) {
+    const key = targetKey(target);
+    const saved = newestVerdict(verdicts.feedback, target);
+    return (
+      <VerdictControl
+        label={label}
+        scope={scope}
+        saved={saved}
+        state={verdicts.state}
+        readError={scope === "run" && verdicts.state === "error" ? verdicts.error : ""}
+        draft={dislikeDrafts[key] ?? null}
+        onDraft={(next) =>
+          setDislikeDrafts((held) => {
+            const copy = { ...held };
+            if (next === null) delete copy[key];
+            else copy[key] = next;
+            return copy;
+          })
+        }
+        busy={feedback.recording === key}
+        error={feedback.errors[key] ?? ""}
+        onRecord={(verdict, axes, reason) => recordVerdict(target, verdict, axes, reason)}
+      >
+        {validatorLine}
+      </VerdictControl>
+    );
+  }
+
+  /** The validator's line for a target, when the validator judged it. */
+  function validatorLineFor(target: FeedbackTarget, nameTheStep: boolean) {
+    if (validation === null) return null;
+    const judgedHere =
+      target.stepKey === "" || (target.stepKey === validation.stepKey && target.version === validation.version);
+    if (!judgedHere) return null;
+    const saved = newestVerdict(verdicts.feedback, target);
+    const disagreesWithYou = saved !== null && (saved.validatorDisagrees || disagrees(saved.verdict, validation.verdict));
+    const flaggedStep = steps.find((step) => step.key === validation.stepKey) ?? null;
+    return (
+      <ValidatorLine
+        verdict={validation.verdict}
+        entry={validatorEntry}
+        stepKey={nameTheStep ? validation.stepKey : ""}
+        disagreesWithYou={disagreesWithYou}
+        onRunAgain={
+          stepActsLegal && flaggedStep !== null
+            ? () => openComposer("rerun", validation.stepKey, validatorEntry?.reason.trim() || undefined)
+            : undefined
+        }
+      />
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // The bar
+  // -------------------------------------------------------------------------
 
   const tone: ActionBarTone =
     run.status === "running" || run.status === "compiling"
@@ -145,20 +394,34 @@ export function RunPage({
       onAct: () => onOpenApprovals(pending.id),
     });
   }
-  if (terminal) {
-    if (openStep !== null) {
+  if (stepActsLegal && openStep !== null && open !== null && selected !== null) {
+    const key = openStep.key;
+    // MAKE CURRENT is offered for a finished version that is not the current
+    // one -- going back, or forward again after going back. A version still
+    // running or one that failed is never made current.
+    if (selected !== open.current && selectedVersion !== null && selectedVersion.status === "done") {
       acts.push({
-        label: `Fork from ${openStep.key}`,
-        icon: <GitFork size={13} aria-hidden />,
-        busy: derive.busy,
-        ariaLabel: `Fork this run at step ${openStep.key}: the steps before it come from the journal, and this step onward runs live`,
-        onAct: () => {
-          void derive.fork(run.id, openStep.key).then((id) => {
-            if (id !== "") onOpenRun(id);
-          });
-        },
+        label: "Make current",
+        icon: <Pin size={13} aria-hidden />,
+        busy: head.busy,
+        ariaLabel: `Make version ${selected} of ${key} current. The steps after it that were made from it come back without running; any others run again.`,
+        onAct: () => void head.act({ runId: run.id, stepKey: key, version: selected }),
       });
     }
+    acts.push({
+      label: "Branch from here",
+      icon: <GitBranch size={13} aria-hidden />,
+      ariaLabel: `Branch from ${key}: a new run that reuses the steps before it and runs from here, with whatever you change`,
+      onAct: () => openComposer("branch", key),
+    });
+    acts.push({
+      label: "Run again",
+      tone: "primary",
+      icon: <Redo2 size={13} aria-hidden />,
+      ariaLabel: `Run ${key} again as a new version, with whatever you change. Every earlier version is kept.`,
+      onAct: () => openComposer("rerun", key),
+    });
+  } else if (stepActsLegal) {
     acts.push({
       label: "Replay",
       tone: "primary",
@@ -173,31 +436,52 @@ export function RunPage({
     });
   }
 
-  const barDetail = waiting
-    ? waitingWord(run.waitingOnKind).toLowerCase()
-    : terminal
-      ? runStatusDetail(run.status) ||
-        (openStep === null ? "select a step to fork from there" : "")
-      : // A non-terminal run offers no Replay and no Fork, so the bar says
-        // what IS true rather than leaving two absent controls unaccounted
-        // for -- an absent control with no account of itself reads as
-        // something nobody got round to building.
-        runStatusDetail(run.status) || "replay and fork wait until it finishes";
+  const rerunVersion = (() => {
+    if (run.rerun === null) return null;
+    if (lastRerun !== null && lastRerun.stepKey === run.rerun.stepKey && lastRerun.version !== null) return lastRerun.version;
+    const target = steps.find((step) => step.key === run.rerun?.stepKey);
+    return target !== undefined && target.status === "running" ? target.version : null;
+  })();
+
+  const barDetail =
+    run.rerun !== null
+      ? rerunInFlightWords(run.rerun.reason, run.rerun.stepKey, rerunVersion)
+      : waiting
+        ? waitingWord(run.waitingOnKind).toLowerCase()
+        : terminal && openStep !== null && open !== null && selected !== null
+          ? selectionWords(openStep.key, selected, open.count, open.current)
+          : terminal
+            ? runStatusDetail(run.status) || "select a step to run it again or branch from it"
+            : // A non-terminal run offers no Replay and no step acts, so the
+              // bar says what IS true rather than leaving absent controls
+              // unaccounted for.
+              runStatusDetail(run.status) || "replay and branching wait until it finishes";
+
+  const composerStep = composer === null ? null : (steps.find((step) => step.key === composer.stepKey) ?? null);
+  const composerVersions = composerStep === null ? null : stepVersions(composerStep);
+  const composerCurrent =
+    composerVersions === null || composerVersions.current === null
+      ? null
+      : (composerVersions.versions.find((version) => version.version === composerVersions.current) ?? null);
+  const composerDislike =
+    composer === null || composerVersions === null
+      ? null
+      : newestVerdict(verdicts.feedback, { stepKey: composer.stepKey, version: composerVersions.current });
+
+  const title = runTitle(run);
 
   return (
     <div className="os-nexus-run">
-      <div className="os-head">
-        <button type="button" className="os-nexus-back" onClick={onBack}>
-          <ArrowLeft size={13} aria-hidden />
-          Runs
-        </button>
-        <h3 className="os-settings-title">{runTitle(run)}</h3>
-        <span className="os-head-meta">
+      <Head
+        title={title}
+        meta={
           <Chip tone={run.mode === "replay" ? "accent" : "muted"} title={runModeDetail(run.mode)}>
             {runModeWord(run.mode)}
           </Chip>
-        </span>
-      </div>
+        }
+        breadcrumbs={[{ label: "Runs", onSelect: onBackToList ?? onBack }, { label: title }]}
+        back={{ label: backLabel, onSelect: onBack }}
+      />
 
       <div className="os-nexus-run-body">
         {/* WHAT THIS RUN IS FOR, FIRST. A run's own name is an automation
@@ -347,16 +631,16 @@ export function RunPage({
         ) : null}
         {run.mode === "fork" && run.forkAtStepKey !== "" ? (
           <Caption>
-            Forked from{" "}
+            Branched from{" "}
             <button
               type="button"
               className="os-nexus-link"
               onClick={() => onOpenRun(run.forkedFromRunId)}
             >
-              its source run
+              the run it came from
             </button>{" "}
-            at <span className="os-mono">{run.forkAtStepKey}</span>. Everything before that step
-            came from the journal.
+            at <span className="os-mono">{run.forkAtStepKey}</span>. The steps before it were reused
+            from that run, not run again.
           </Caption>
         ) : null}
 
@@ -390,27 +674,88 @@ export function RunPage({
           ) : null}
         </Panel>
 
+        {/* THE RUN'S OWN VERDICT, where the summary is -- and the validator's
+            beside it, naming the step it checked, because this is where a
+            person looks first and a flagged answer is the one fact on the page
+            that might change what they do next. */}
+        {judgeable ? (
+          <Panel label="Your verdict on this run">
+            {verdictFor(RUN_TARGET, "run", "Your verdict on this run", validatorLineFor(RUN_TARGET, true))}
+          </Panel>
+        ) : null}
+
         <section className="os-nexus-timeline" aria-label="What this run did, in order">
           <ol className="os-nexus-steps">
-            {steps.map((step, index) => (
-              <li key={step.id || step.key} className="os-nexus-step-item">
-                <StepSpineRow
-                  step={step}
-                  position={index + 1}
-                  last={index === steps.length - 1}
-                  open={step.key === openStepKey}
-                  onOpen={() => setOpenStepKey(step.key === openStepKey ? "" : step.key)}
-                  decision={decisions.get(step.key) ?? null}
-                />
-                {step.key === openStepKey ? <StepDetail step={step} onOpenRun={onOpenRun} /> : null}
-              </li>
-            ))}
+            {steps.map((step, index) => {
+              const info = stepVersions(step);
+              const isOpen = step.key === openStepKey;
+              const picked = isOpen && selected !== null ? selected : (info.current ?? step.version);
+              const pickedRow = isOpen ? selectedVersion : null;
+              // A version can be judged once it has finished -- done or failed.
+              // One still running has nothing to judge yet.
+              const finished = pickedRow !== null && (pickedRow.status === "done" || pickedRow.status === "failed");
+              const target: FeedbackTarget = { stepKey: step.key, version: picked };
+              return (
+                <li key={step.id || step.key} className="os-nexus-step-item">
+                  <StepSpineRow
+                    step={step}
+                    position={index + 1}
+                    last={index === steps.length - 1}
+                    open={isOpen}
+                    onOpen={() => toggleStep(step.key)}
+                    decision={decisions.get(step.key) ?? null}
+                    versions={{ count: info.count, current: info.current }}
+                    stale={run.staleSteps.includes(step.key)}
+                    marker={
+                      terminal ? (
+                        <AttentionMarker appId={NEXUS_APP_ID} sectionId="runs" target={STEP_VERSIONS_TARGET} />
+                      ) : null
+                    }
+                  />
+                  {isOpen ? (
+                    <StepDetail
+                      step={step}
+                      versions={info.versions}
+                      versionsLoading={versionsRead.state === "loading" && info.count > 1}
+                      current={info.current}
+                      count={info.count}
+                      selected={picked}
+                      onSelect={(version) => setSelectedVersions((held) => ({ ...held, [step.key]: version }))}
+                      selectedVersion={pickedRow}
+                      session={isSession(pickedRow ?? step)}
+                      viewerId={viewerId}
+                      reachable={terminal}
+                      onOpenRun={onOpenRun}
+                      verdict={
+                        judgeable && finished
+                          ? verdictFor(target, "step", "Your verdict", validatorLineFor(target, false))
+                          : null
+                      }
+                    />
+                  ) : null}
+                </li>
+              );
+            })}
           </ol>
           {steps.length === 0 ? (stepsState === "seeding" ? <RecordListSkeleton label="Loading the steps from the cluster" /> : <Caption>{stepsState === "disconnected"
                   ? "Not connected to the cluster"
                   : run.status === "compiling"
                     ? "It is still working out what to do. The steps appear as it decides them."
                     : "This run recorded no steps."}</Caption>) : null}
+          {/* ONCE, UNDER THE TIMELINE, not in every step: a read that failed
+              is one fact about the page, and repeating it in each disclosure
+              would say it forty times. The timeline still draws what the live
+              feed holds -- each step's current version. */}
+          {versionsRead.state === "error" && steps.length > 0 ? (
+            <Notice
+              tone="warn"
+              sentence="Earlier versions of these steps could not be read."
+              next="Each step shows the version the run uses now."
+              detail={versionsRead.error}
+            >
+              <Button onClick={versionsRead.retry}>Try again</Button>
+            </Notice>
+          ) : null}
         </section>
 
         <JournalPanel journal={journal} />
@@ -427,101 +772,60 @@ export function RunPage({
             {derive.error}
           </span>
         )}
+        {head.error === "" ? null : (
+          <span className="os-nexus-act-error os-mono" role="alert">
+            {head.error}
+          </span>
+        )}
       </ActionBar>
+
+      <ComposerHost
+        request={composer}
+        runId={run.id}
+        stepOrder={run.stepOrder}
+        head={run.head}
+        timelineKeys={timelineKeys}
+        step={composerStep}
+        versions={composerVersions?.versions ?? []}
+        current={composerVersions?.current ?? null}
+        session={isSession(composerCurrent ?? composerStep)}
+        ownLevel={ownLevelOf(composerCurrent ?? composerStep)}
+        passedOn={composerDislike !== null && composerDislike.verdict === "dislike" ? composerDislike : null}
+        drafts={composerDrafts}
+        onDrafts={setComposerDrafts}
+        onClose={() => setComposer(null)}
+        onRerun={(reply) => {
+          setComposer(null);
+          setLastRerun(reply);
+          // THE NEW VERSION IS WHAT THEY ASKED TO SEE: select it, so the step
+          // they re-ran shows the version running rather than the one it
+          // replaces.
+          if (reply.version !== null) {
+            const version = reply.version;
+            setSelectedVersions((held) => ({ ...held, [reply.stepKey]: version }));
+          }
+          setOpenStepKey(reply.stepKey);
+        }}
+        onBranched={(reply) => {
+          setComposer(null);
+          onOpenRun(reply.runId);
+        }}
+      />
     </div>
   );
 }
 
-/**
- * One step, opened.
- *
- * A DISCLOSURE UNDER THE ROW, NOT A SECOND PANEL. Rule 11 is about a list and
- * a DETAIL PAGE sharing a scroller -- the tell is two Heads. This carries no
- * Head and no acts of its own; it is the row saying more about itself, which
- * is the same shape the Deployables rail's open stop has.
- */
-function StepDetail({
-  step,
-  onOpenRun,
-}: {
-  step: StepRow;
-  onOpenRun: (runId: string) => void;
-}) {
-  return (
-    <div className="os-nexus-step-detail">
-      <p className="os-nexus-step-meaning">
-        <strong>{stepKindWord(step.kind)}</strong> -- {stepKindMeaning(step.kind)}
-      </p>
-      <Facts>
-        <Fact label="Step key" value={step.key} mono />
-        <Fact label="Type" value={step.stepType} mono />
-        <Fact label="Calls" value={step.callName} mono />
-        <Fact label="Status" value={stepStatusWord(step.status)} />
-        <Fact label="Attempt" value={step.attempt} />
-        <Fact
-          label="Duration"
-          value={step.durationMs === null ? "" : formatDuration(step.durationMs)}
-          mono
-        />
-        <Fact
-          label="Started"
-          value={step.startedAt === "" ? "" : formatMoment(step.startedAt)}
-          title={step.startedAt}
-        />
-        <Fact
-          label="Finished"
-          value={step.finishedAt === "" ? "" : formatMoment(step.finishedAt)}
-          title={step.finishedAt}
-        />
-        {/* A POSTCONDITION HAS THREE ANSWERS AND THE THIRD IS NOT "false".
-            Absent means this step declares none, which epic A1 leaves true of
-            every step; rendering that as "did not pass" would mark every run
-            in the cluster failed on the strength of a field nobody wrote. */}
-        <Fact
-          label="Postcondition"
-          value={
-            step.postconditionPassed === null
-              ? "none declared"
-              : step.postconditionPassed
-                ? `passed (${step.postconditionKind || "check"})`
-                : `did not hold -- ${step.postconditionMessage || "no message"}`
-          }
-        />
-        {/* THE KEY A SIDE EFFECT RAN UNDER. On a resume the executor asks
-            the far side whether it already holds a receipt for this exact
-            key, which is what turns "never retry a mutation" into "retried
-            when idempotent by key, parked otherwise". */}
-        <Fact label="Idempotency key" value={step.idempotencyKey} mono />
-      </Facts>
+/** The bar's words for a selected step: "draft, version 2 of 3 -- version 3 is current". */
+function selectionWords(key: string, selected: number, count: number, current: number | null): string {
+  if (count <= 1) return key;
+  const base = `${key}, version ${selected} of ${count}`;
+  return current !== null && current !== selected ? `${base} -- version ${current} is current` : base;
+}
 
-      {step.dependsOn.length === 0 ? null : (
-        <Chips label="Steps this one waited for">
-          {step.dependsOn.map((key) => (
-            <Chip key={key} tone="muted">
-              {key}
-            </Chip>
-          ))}
-        </Chips>
-      )}
-
-      {step.symptom === "" ? null : (
-        <Notice
-          tone="warn"
-          sentence={symptomWord(step.symptom)}
-          next={symptomMeaning(step.symptom)}
-          detail={step.errorMessage || undefined}
-        />
-      )}
-
-      {step.childRunId === "" ? null : (
-        <p className="os-caption">
-          It opened{" "}
-          <button type="button" className="os-nexus-link" onClick={() => onOpenRun(step.childRunId)}>
-            a run of its own
-          </button>{" "}
-          and waited for it.
-        </p>
-      )}
-    </div>
-  );
+/** The level a version asked for, or the one recorded as serving it. "" when nothing says. */
+function ownLevelOf(step: StepRow | null): string {
+  if (step === null) return "";
+  if (step.override.level !== "") return step.override.level;
+  const level = step.binding?.["level"];
+  return typeof level === "string" ? level : "";
 }
