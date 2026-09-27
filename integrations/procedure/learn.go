@@ -544,23 +544,47 @@ func (i *Integration) ownerIds(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
+// maxSignatureRuns bounds how many of one owner's runs ownerSignatures reads.
+// The read is newest first, so an owner whose history outgrows the bound keeps
+// their recent goals -- where recurrence is, and all the corpus read itself
+// looks at -- and the stop is LOGGED, because a read that ended at a limit must
+// not look like a history that ended there.
+const maxSignatureRuns = 10000
+
 // ownerSignatures is every goal signature one owner has a SUCCEEDED recording
-// for, read under that owner's actor from their recent runs. A replay run is
-// not a recording and names no corpus of its own.
+// for, read under that owner's actor across EVERY PAGE of their runs, newest
+// first, up to maxSignatureRuns. One page was the engine's default window --
+// the newest few hundred runs -- so a goal last recorded further back than
+// that was never mined again. A replay run is not a recording and names no
+// corpus of its own.
 func (i *Integration) ownerSignatures(ctx context.Context, owner string) ([]string, error) {
-	rows, err := i.store.query(ownerActor(ctx, owner), "query "+call("workRunsForOwner", nil))
-	if err != nil {
-		return nil, err
-	}
+	actorCtx := ownerActor(ctx, owner)
 	seen := map[string]bool{}
 	var out []string
-	for _, r := range rows {
-		s := strings.TrimSpace(str(r, "goalSignature"))
-		if s == "" || seen[s] || str(r, "status") != "succeeded" || isReplayRun(r) {
-			continue
+	cursor, read := "", 0
+	for {
+		rows, next, err := i.store.queryPage(actorCtx, cursor, "query "+call("workRunsForOwner", nil))
+		if err != nil {
+			return nil, err
 		}
-		seen[s] = true
-		out = append(out, s)
+		read += len(rows)
+		for _, r := range rows {
+			s := strings.TrimSpace(str(r, "goalSignature"))
+			if s == "" || seen[s] || str(r, "status") != "succeeded" || isReplayRun(r) {
+				continue
+			}
+			seen[s] = true
+			out = append(out, s)
+		}
+		if next == "" || next == cursor || len(rows) == 0 {
+			break
+		}
+		if read >= maxSignatureRuns {
+			i.log().Warn("procedure: the corpus sweep stopped reading an owner's runs at its bound; goals recorded only before them are not mined this pass",
+				"owner", owner, "runsRead", read, "bound", maxSignatureRuns, "signatures", len(out))
+			break
+		}
+		cursor = next
 	}
 	sort.Strings(out)
 	return out, nil

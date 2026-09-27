@@ -129,10 +129,12 @@ func (w *SessionWriter) OpenRecording(ctx context.Context, r workerservice.Recor
 	// THE RUN INHERITS ITS PARENT'S GOAL (epic memql#5408, gap G2), exactly as
 	// a run the delegate opens does: procedure learning mines the recordings of
 	// ONE goal signature, so a recording that does not carry its parent's
-	// belongs to no corpus, and one without the parent's variables cannot say
-	// which goal input supplied each parameter. Read under the owner's own
-	// actor -- the parent is theirs -- and a parent that cannot be read leaves
-	// the recording unsigned rather than refused: the session runs either way.
+	// belongs to none of its goal's corpus, and one without the goal's input --
+	// the parent's variables, less the replay-only ones -- cannot say which
+	// input supplied each parameter. Read under the owner's own actor -- the
+	// parent is theirs -- and a parent that cannot be read leaves the recording
+	// with its own statement's signature rather than refused: the session runs
+	// either way.
 	inherited := w.parentRunInheritance(ctx, owner, r.ParentRunId)
 	if err := w.store.writeInternal(ownerActor(ctx, owner), "mutation "+call("createWorkGoal", map[string]any{
 		"goalId":       goalId,
@@ -415,9 +417,14 @@ type runInheritance struct {
 
 // parentRunInheritance reads the delegating run under its owner's actor. It is
 // BEST-EFFORT for the file header's reason: a parent that cannot be read costs
-// the recording its place in a corpus, and refusing the session would cost the
-// person the work. The failure is logged, because a recording that silently
-// belongs to no goal is the gap this exists to close.
+// the recording its PARENT's corpus -- it keeps the signature of its own
+// statement, which OpenRecording writes unless a parent's replaces it -- and
+// refusing the session would cost the person the work. The failure is logged,
+// because a recording that silently left its goal's corpus is the gap this
+// exists to close.
+//
+// The variables inherited are the GOAL'S INPUT: the parent's, less every one
+// only a replay reads (replayOnlyVariables).
 func (w *SessionWriter) parentRunInheritance(ctx context.Context, owner, parentRunId string) runInheritance {
 	parentRunId = strings.TrimSpace(parentRunId)
 	if parentRunId == "" {
@@ -425,14 +432,46 @@ func (w *SessionWriter) parentRunInheritance(ctx context.Context, owner, parentR
 	}
 	parent, err := w.store.runForOwner(ownerActor(ctx, owner), parentRunId)
 	if err != nil || parent == nil {
-		w.logger.Warn("app session recording: could not read the delegating run; the recording carries no goal signature",
+		w.logger.Warn("app session recording: could not read the delegating run; the recording keeps the goal signature of its own statement and inherits no variables",
 			"parent_run_id", parentRunId, "error", err)
 		return runInheritance{}
 	}
 	return runInheritance{
 		goalSignature: strings.TrimSpace(rowString(parent, "goalSignature")),
-		variables:     rowMap(parent, "variables"),
+		variables:     goalInputOf(rowMap(parent, "variables")),
 	}
+}
+
+// ProcedureConstructVariable is the variable compile adds to the run of a goal
+// a learned procedure serves (integrations/planner, work_compile.go): the one
+// argument of replayLearnedProcedure, naming the procedure serving the goal.
+// Compile lays it over the goal's input; the goal never supplied it.
+const ProcedureConstructVariable = "procedureConstructId"
+
+// replayOnlyVariables are the variables a replay reads and a goal never
+// supplied -- every key compile lays over a goal's input when a learned
+// procedure serves it (epic memql#5408). A recording opened from such a run,
+// the app taking the goal back, inherits the goal's input WITHOUT them: the
+// lift reads a recording's variables as the goal's input, maps the
+// procedure's parameters onto them and lists their keys as its inputs, so a
+// recording carrying one would teach it an input nobody gave.
+var replayOnlyVariables = []string{ProcedureConstructVariable}
+
+// goalInputOf is a run's variables less the replay-only ones. It copies, so
+// the row read is left as it was, and answers nil when nothing is left -- an
+// empty object is not an input.
+func goalInputOf(variables map[string]any) map[string]any {
+	out := make(map[string]any, len(variables))
+	for k, v := range variables {
+		out[k] = v
+	}
+	for _, k := range replayOnlyVariables {
+		delete(out, k)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // actionStepKey names the step. It is the app's OWN id where there is one, so

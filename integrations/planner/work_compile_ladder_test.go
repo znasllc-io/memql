@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/work"
 )
 
@@ -149,4 +150,40 @@ func (m *mislabelledProcedures) Execute(ctx context.Context, q string) (any, err
 		return []map[string]any{r}, nil
 	}
 	return m.countingCompileEngine.Execute(ctx, q)
+}
+
+// TestTheProcedureReadWritesItsArgumentWithTheLanguagesQuoting: a MemQL string
+// literal is spelled by the language (langparser.QuoteString), never by a
+// second definition of the escape set. json.Marshal is one: it happens to agree
+// with the language on a quote, a backslash and U+2028 -- the lexer decodes
+// each -- and spells <, > and & its own way (<...). So the argument
+// carries all of them: the first three are what a renderer must survive, and
+// the last two are what tells the two spellings apart. The real parser reading
+// the argument back as the signature is the half that says the statement
+// means what it was given.
+func TestTheProcedureReadWritesItsArgumentWithTheLanguagesQuoting(t *testing.T) {
+	sig := "sig \"quoted\" back\\slash line sep <tag> & co"
+	eng := &countingCompileEngine{}
+	l := &PlannerAgentLoop{engine: eng}
+	if _, err := l.servableProceduresForSignature(context.Background(), "u1", sig); err != nil {
+		t.Fatalf("servableProceduresForSignature: %v", err)
+	}
+	if len(eng.queries) != 1 {
+		t.Fatalf("queries = %v, want the one procedure read", eng.queries)
+	}
+	q := eng.queries[0]
+	if want := "query procedureConstructsForGoalSignature(goalSignature: " + langparser.QuoteString(sig) + ")"; q != want {
+		t.Errorf("the read was written\n\t%s\nwant the language's own quoting\n\t%s", q, want)
+	}
+	expr, err := langparser.ParseExpression(strings.TrimPrefix(q, "query "))
+	if err != nil {
+		t.Fatalf("the real parser refused the read: %v\n\t%s", err, q)
+	}
+	fn, ok := expr.(*langparser.FunctionCallExpr)
+	if !ok {
+		t.Fatalf("the read parsed as %T, not a call", expr)
+	}
+	if got := fn.Args["goalSignature"]; got != sig {
+		t.Errorf("the parser read the argument back as %q, want %q", got, sig)
+	}
 }

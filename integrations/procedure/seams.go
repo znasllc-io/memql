@@ -3,6 +3,7 @@ package procedure
 import (
 	"context"
 	"sync"
+	"time"
 
 	proc "github.com/znasllc-io/memql/component/procedure"
 	"github.com/znasllc-io/memql/component/work"
@@ -57,6 +58,12 @@ type DispatchRequest struct {
 	// AgentId is the agent the machine dispatch runs under (its standing
 	// computer-use scope is the consent). Empty on the workbench.
 	AgentId string
+	// Timeout is the longest the recordings let this step run -- the app's
+	// own per-call timeout, kept beside the template rather than in it,
+	// because the model picks a different one on every call and a value
+	// that varies is not a parameter anybody supplies. Zero is the
+	// executor's default.
+	Timeout time.Duration
 }
 
 // DispatchResult is what the step did.
@@ -68,6 +75,12 @@ type DispatchResult struct {
 	// Delivered reports that a side effect reached something outside the
 	// replay's own workspace (a machine file, a mail, an HTTP write).
 	Delivered bool
+	// Unavailable reports that the TARGET could not finish the step for a
+	// reason that says nothing about the procedure: the machine's stream
+	// dropped, a forward failed, no workbench peer answered. The step may or
+	// may not have run, so a caller treats its effects as unknown -- and the
+	// ladder does not count it against the procedure.
+	Unavailable bool
 }
 
 // Prober measures, on the target, the predicates a procedure learned.

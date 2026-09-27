@@ -171,3 +171,57 @@ func TestDispatchDB_SweepRecoversDueTimersAndInferenceWaits(t *testing.T) {
 		}
 	}
 }
+
+// TestDispatchDB_SweepLeavesAProcedureReplayRunToItsRunner is the unit test's
+// finding against the REAL recovery read: runsInFlight projects the payload
+// into the row the sweep judges, and the replay runner's trigger has to survive
+// that projection for the sweep to see it. Both runs are written through the
+// real createWorkRun, both went silent an hour ago, neither names a goal; only
+// the ordinary one -- the control -- is handed back, and the replay run is
+// closed by its heartbeat rather than run a second time.
+func TestDispatchDB_SweepLeavesAProcedureReplayRunToItsRunner(t *testing.T) {
+	db, i := sweepDB(t)
+	eng := dispatchDBEngine(t, db)
+	i.engine = eng
+	d, c := &capturingDispatcher{}, &stubClaimer{grant: true}
+	i.SetDispatcher(d)
+	i.SetRunClaimer(c)
+	silentSince := time.Now().UTC().Add(-time.Hour)
+	replay, ordinary := runConcept+":replay", runConcept+":ordinary"
+	for _, seed := range []runSeed{
+		{
+			RunId: replay, AutomationName: "learnedProcedure_abc_l1", TemplateFingerprint: "sha256:abc",
+			TemplateConstructId: "v1:authoring:construct:p1", TriggeredBy: "procedure:trusted",
+			Status: "running", Mode: "live", StartedAt: silentSince,
+		},
+		{
+			RunId: ordinary, AutomationName: "probe", TemplateFingerprint: "probe", TriggeredBy: "schedule",
+			Status: "running", Mode: "live", StartedAt: silentSince,
+		},
+	} {
+		if err := i.store().createRunRow(actorCtx("replay-sweep-owner"), seed); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := i.SweepWaiting(auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.seen(); len(got) != 1 || got[0].RunId != ordinary {
+		t.Fatalf("dispatched %+v, want only the ordinary run (sweep %+v)", got, result)
+	}
+	if len(c.keys) != 1 || c.keys[0] != ordinary {
+		t.Errorf("claimed %v, want only the ordinary run's claim", c.keys)
+	}
+	if result.Redispatched != 1 || result.Abandoned != 1 {
+		t.Errorf("sweep %+v, want the ordinary run handed back and the silent replay run closed", result)
+	}
+	j, err := automations.LoadRunJournal(context.Background(), eng, replay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.TriggeredBy != "procedure:trusted" || j.Status != runStatusAbandoned {
+		t.Fatalf("the replay run reads back triggeredBy %q status %q, want procedure:trusted and abandoned", j.TriggeredBy, j.Status)
+	}
+}

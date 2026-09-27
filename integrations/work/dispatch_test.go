@@ -136,6 +136,10 @@ func TestRunEventFiltering(t *testing.T) {
 	ordinary := runEvent("ordinary", "running", "seedSelfAccount", "")
 	delete(ordinary.Payload["payload"].(map[string]any), "goalId")
 	ordinary.Payload["payload"].(map[string]any)["triggerEvent"] = map[string]any{"topic": "system.startup"}
+	// A replay run never carries a goal; this one does, so the goal is not
+	// what stops it -- its trigger is.
+	replay := runEvent("replay", "running", "learnedProcedure_abc_l1", "u1")
+	replay.Payload["payload"].(map[string]any)["triggeredBy"] = "procedure:canary"
 	cases := []struct {
 		name       string
 		ev         events.Event
@@ -143,6 +147,7 @@ func TestRunEventFiltering(t *testing.T) {
 	}{
 		{"running with a template dispatches", runEvent("r1", "running", "demo", "u1"), 1},
 		{"ordinary scheduler journal does not dispatch again", ordinary, 0},
+		{"a procedure's replay run does not, even naming a goal", replay, 0},
 		{"compiling does not", runEvent("r2", "compiling", "", "u1"), 0},
 		{"waiting does not", runEvent("r3", "waiting", "demo", "u1"), 0},
 		{"succeeded does not", runEvent("r4", "succeeded", "demo", "u1"), 0},
@@ -255,5 +260,43 @@ func TestCanDispatchStoredRunRecovery(t *testing.T) {
 				t.Fatalf("got %v want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A procedure's replay run is its runner's (epic memql#5408), and the
+// dispatcher's admission says so on BOTH of its checks: before the claim, so no
+// lease is spent on it, and behind the privileged read, where a goal-less
+// running run is otherwise admitted on recovery. The ordinary recovery beside
+// each is the control: without it, a dispatcher that refused everything would
+// pass.
+func TestTheDispatcherNeverAdmitsAProcedureReplayRun(t *testing.T) {
+	now := time.Now()
+	for _, trigger := range []string{"procedure:shadow", "procedure:canary", "procedure:trusted"} {
+		t.Run(trigger, func(t *testing.T) {
+			replay := DispatchRequest{RunId: "replay-1", Status: runStatusRunning, Recovery: true, TriggeredBy: trigger}
+			if replay.CanDispatchStoredRun("", runStatusRunning, nil, now) {
+				t.Error("a replay run was admitted on recovery; the template executor would fail it automation_not_runnable")
+			}
+			if replay.CanDispatchStoredRun("v1:work:goal:g1", runStatusRunning, nil, now) {
+				t.Error("a replay run naming a goal was admitted")
+			}
+
+			i, d, c := newDispatchProbe(t, true)
+			if i.dispatchRun(context.Background(), replay) {
+				t.Error("dispatchRun reported a replay run taken")
+			}
+			if len(c.keys) != 0 || len(d.seen()) != 0 {
+				t.Errorf("claimed %v and dispatched %+v; a replay run's claim is never taken", c.keys, d.seen())
+			}
+		})
+	}
+
+	ordinary := DispatchRequest{RunId: "ordinary-1", Status: runStatusRunning, Recovery: true, TriggeredBy: "schedule"}
+	if !ordinary.CanDispatchStoredRun("", runStatusRunning, nil, now) {
+		t.Fatal("the control: an ordinary goal-less run is no longer admitted on recovery")
+	}
+	i, d, c := newDispatchProbe(t, true)
+	if !i.dispatchRun(context.Background(), ordinary) || len(c.keys) != 1 || len(d.seen()) != 1 {
+		t.Fatalf("the control: an ordinary recovery was not claimed and dispatched (claims %v, dispatched %+v)", c.keys, d.seen())
 	}
 }
