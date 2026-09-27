@@ -53,7 +53,12 @@ type DispatchRequest struct {
 	// Translating them to an executor's actions is the dispatcher's job.
 	Args map[string]any
 	// Sandbox marks a shadow replay: never the person's machine, never a
-	// write to a MemQL row, never a delivery outside the workbench.
+	// write to a MemQL row, never a delivery outside the workbench. The
+	// workbench itself has full egress, so a command that may send something
+	// out of it (network.go: a POST, a push, a publish, a cloud CLI) is never
+	// dispatched in shadow at all -- it is compared dry. A script such a step
+	// runs can still reach the network; nothing reading the command line can
+	// see into it.
 	Sandbox bool
 	// AgentId is the agent the machine dispatch runs under (its standing
 	// computer-use scope is the consent). Empty on the workbench.

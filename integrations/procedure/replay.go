@@ -350,6 +350,11 @@ type replay struct {
 	// resuming: a replay of this very statement had started and not
 	// finished, and this one continues it from its receipts.
 	resuming bool
+	// dryStep marks the steps a SHADOW compared dry although the rest of it
+	// ran in the sandbox: commands that may send something out of it
+	// (network.go). A later data-flow hole reading one of them takes the
+	// app's own value, as it does in a wholly dry comparison.
+	dryStep map[int]bool
 
 	free     map[string]string
 	outputs  map[int]any
@@ -1057,6 +1062,24 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		obs    work.StepObservation
 		output any
 	)
+	// A COMMAND THAT MAY SEND SOMETHING OUT OF THE SANDBOX (network.go) is
+	// never dispatched by a shadow -- the workbench has full egress, and a
+	// recorded webhook post or push would be sent again beside every
+	// recording that matches it. It is compared dry, as a machine-local
+	// procedure's whole comparison is. Served, it runs, and is a side effect
+	// the app must not repeat whatever the workbench says it delivered.
+	sends := false
+	if step.Tool == "exec" {
+		sends, _ = sendsOutside(args)
+	}
+	stepDry := r.dry
+	if r.mode == ReplayShadow && sends && !r.dry {
+		stepDry = true
+		if r.dryStep == nil {
+			r.dryStep = map[int]bool{}
+		}
+		r.dryStep[idx] = true
+	}
 	receipt, ran := r.receipts[key]
 	switch {
 	case ran:
@@ -1064,7 +1087,7 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		// It is never dispatched again; what it reported then is compared now.
 		obs, output = receipt.observation, receipt.output
 		done.SideEffect = receipt.completed.SideEffect
-	case r.dry:
+	case stepDry:
 		r.writeStepIntent(ctx, idx, key, idem)
 	default:
 		r.writeStepIntent(ctx, idx, key, idem)
@@ -1107,14 +1130,16 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		// the replay's own workspace -- a machine's file or command, an MCP
 		// call that wrote -- and the app is told never to repeat it. A step
 		// that only touched the workbench's workspace delivered nothing the
-		// app shares: it runs in a workspace of its own.
-		done.SideEffect = res.Delivered
+		// app shares: it runs in a workspace of its own -- unless the command
+		// itself sends something out of it (network.go), which reaches the
+		// world from the workbench as surely as from a machine.
+		done.SideEffect = res.Delivered || sends
 	}
 
 	match, why := r.compare(idx, step.Tool, args, obs)
 	if !ran {
 		status := "done"
-		if r.dry {
+		if stepDry {
 			status = "skipped"
 		}
 		r.writeStepReceipt(ctx, key, status, done, &obs, output, "", "", match, strings.Join(why, "; "))
@@ -1161,10 +1186,11 @@ func (r *replay) stepTimeout(idx int) time.Duration {
 }
 
 // compare holds one step to its reference: what every recording agreed on
-// (canary, trusted), the app beside it (shadow), or -- for a dry shadow -- the
-// app's own call.
+// (canary, trusted), the app beside it (shadow), or -- for a dry shadow, or a
+// shadow step compared dry because it may send something out -- the app's own
+// call.
 func (r *replay) compare(idx int, tool string, args map[string]any, obs work.StepObservation) (bool, []string) {
-	if r.dry {
+	if r.dry || r.dryStep[idx] {
 		if idx >= len(r.req.AppArgs) || r.req.AppArgs[idx] == nil {
 			return false, []string{"the app's call at this step was not recorded, so a dry comparison has nothing to hold it to"}
 		}
@@ -1283,8 +1309,8 @@ func (r *replay) finishUncounted(ctx context.Context) {
 
 // holeValues is every value one step's holes take: a free parameter's
 // binding, a constant's recorded value, and a data-flow hole's value read out
-// of the earlier step's output -- or, in a dry shadow, where nothing produced
-// one, the app's.
+// of the earlier step's output -- or, where that step was compared dry and so
+// produced nothing, the app's.
 func (r *replay) holeValues(idx int, step proc.TemplateStep) (map[string]string, error) {
 	values := map[string]string{}
 	var walkErr error
@@ -1308,7 +1334,7 @@ func (r *replay) holeValues(idx int, step proc.TemplateStep) (map[string]string,
 				walkErr = fmt.Errorf("hole %s names no earlier step", holeId)
 				return
 			}
-			if r.dry {
+			if r.dry || r.dryStep[h.Ref.StepIndex] {
 				if v, ok := r.req.Bindings[holeId]; ok {
 					values[holeId] = v
 					return
