@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -303,8 +304,11 @@ func TestCompressionAnswersEveryStateItCanFind(t *testing.T) {
 	dsn := scratchDatabase(t)
 	db := openScratch(t, dsn)
 	ctx := context.Background()
-	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ensure := func() string { return database.EnsureMemoryNodesCompression(ctx, db, quiet) }
+	logs := &levelLog{}
+	ensure := func() string {
+		logs.reset()
+		return database.EnsureMemoryNodesCompression(ctx, db, slog.New(logs))
+	}
 
 	if got := ensure(); got != database.CompressionNoTimescaleDB {
 		t.Fatalf("without the timescaledb extension: %q, want %q", got, database.CompressionNoTimescaleDB)
@@ -356,6 +360,11 @@ func TestCompressionAnswersEveryStateItCanFind(t *testing.T) {
 	if got := ensure(); got != database.CompressionBlockedPrefix+"capture_delete" {
 		t.Fatalf("with a DELETE transition trigger behind an open read: %q, want %q", got, database.CompressionBlockedPrefix+"capture_delete")
 	}
+	// Blocked is the schema's standing state on every boot of every node:
+	// said at INFO, never WARN, since nothing an operator does changes it.
+	if got := logs.levels(); len(got) != 1 || got[0] != slog.LevelInfo {
+		t.Errorf("the blocked answer logged at %v, want exactly one INFO", got)
+	}
 	if err := reader.Rollback(); err != nil {
 		t.Fatal(err)
 	}
@@ -372,6 +381,10 @@ func TestCompressionAnswersEveryStateItCanFind(t *testing.T) {
 	reader = openRead()
 	if got := ensure(); !strings.HasPrefix(got, "failed: ") || !strings.Contains(got, "lock timeout") {
 		t.Fatalf("behind an open read: %q, want a failure naming the lock timeout", got)
+	}
+	// A real failure stays a WARN.
+	if got := logs.levels(); len(got) != 1 || got[0] != slog.LevelWarn {
+		t.Errorf("the failure logged at %v, want exactly one WARN", got)
 	}
 	if err := reader.Rollback(); err != nil {
 		t.Fatal(err)
@@ -390,6 +403,33 @@ func TestCompressionAnswersEveryStateItCanFind(t *testing.T) {
 	if got := ensure(); got != database.CompressionAlreadyEnabled {
 		t.Fatalf("a second call: %q, want %q", got, database.CompressionAlreadyEnabled)
 	}
+}
+
+// levelLog is a slog handler that keeps the level of every record, so a case
+// can say how loudly something was said.
+type levelLog struct {
+	mu   sync.Mutex
+	seen []slog.Level
+}
+
+func (l *levelLog) Enabled(context.Context, slog.Level) bool { return true }
+func (l *levelLog) Handle(_ context.Context, r slog.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.seen = append(l.seen, r.Level)
+	return nil
+}
+func (l *levelLog) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *levelLog) WithGroup(string) slog.Handler      { return l }
+func (l *levelLog) reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.seen = nil
+}
+func (l *levelLog) levels() []slog.Level {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]slog.Level(nil), l.seen...)
 }
 
 // TestTheMigrationPoolLiftsTheDecompressionCap: the migration runner's
