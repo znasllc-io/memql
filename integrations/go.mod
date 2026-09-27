@@ -9,7 +9,7 @@ toolchain go1.27.1
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.1
-	github.com/livekit/protocol v1.49.0
+	github.com/livekit/protocol v1.50.4
 	github.com/livekit/server-sdk-go/v2 v2.18.1
 	github.com/pion/opus v0.1.1-0.20260923000601-86ced7318333
 	github.com/pion/webrtc/v4 v4.2.20
