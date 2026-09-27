@@ -128,3 +128,64 @@ func TestATransientSweepFailureStaysDue(t *testing.T) {
 		t.Errorf("a transient failure stamped lastReconcileAt; the next tick should retry it: %s", writes[0])
 	}
 }
+
+func TestPausingADomainWithNoHealthRowWritesOneCarryingThePause(t *testing.T) {
+	// setSyncPaused is an update; the engine refuses an update of a row
+	// that is not there. Before its first sweep or delivery a domain has
+	// no row, and the empty state SyncStateFor hands out already carries
+	// an id, so the old empty-id check never took the write path.
+	engine := newFakeEngine()
+	c := mirrorConnector()
+	r := testRunner(engine, newFakeWriter(), c)
+
+	if err := r.SetPaused(context.Background(), "shopify", testMirrorConcept, true); err != nil {
+		t.Fatal(err)
+	}
+	if n := engine.countContaining("mutation setSyncPaused"); n != 0 {
+		t.Errorf("an update was issued for a row that does not exist (%d)", n)
+	}
+	writes := engine.callsContaining("mutation upsertSyncState")
+	if len(writes) != 1 || !strings.Contains(writes[0], "paused: true") {
+		t.Fatalf("no health row carrying the pause was written: %v", writes)
+	}
+
+	// With a stored row, the pause is the update it always was.
+	engine.seed(`query syncStateFor`, []map[string]any{{
+		"id":        SyncStateID(testMirrorConcept, "shopify", "inbound"),
+		"conceptId": testMirrorConcept,
+		"connector": "shopify",
+		"direction": "inbound",
+		"createdAt": testNow.Format(time.RFC3339),
+	}})
+	if err := r.SetPaused(context.Background(), "shopify", testMirrorConcept, false); err != nil {
+		t.Fatal(err)
+	}
+	if n := engine.countContaining("mutation setSyncPaused"); n != 1 {
+		t.Errorf("a stored row was not flipped with setSyncPaused (%d)", n)
+	}
+}
+
+func TestASweepAfterARefusalStillNarrowsOnTheLastSweepThatRan(t *testing.T) {
+	// lastReconcileAt is the updated_at watermark; a refusal stamps only
+	// the attempt, so the sweep that finally runs asks for everything
+	// since the last one that ran, not since the refusal.
+	engine := newFakeEngine()
+	c := mirrorConnector()
+	r := testRunner(engine, newFakeWriter(), c)
+	ranAt := testNow.Add(-5 * time.Hour)
+	engine.seed(`query syncStateFor`, []map[string]any{{
+		"id":              SyncStateID(testMirrorConcept, "shopify", "inbound"),
+		"conceptId":       testMirrorConcept,
+		"connector":       "shopify",
+		"direction":       "inbound",
+		"lastReconcileAt": ranAt.Format(time.RFC3339),
+		"lastAttemptAt":   testNow.Add(-time.Hour).Format(time.RFC3339),
+		"lastError":       "connector: permanent failure: refused last hour",
+	}})
+	if _, err := r.Reconcile(context.Background(), "shopify", testMirrorConcept); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.reconcileSince) != 1 || !c.reconcileSince[0].Equal(ranAt) {
+		t.Fatalf("since = %v, want the last sweep that ran (%v)", c.reconcileSince, ranAt)
+	}
+}

@@ -82,13 +82,16 @@ func mapObject(spec *generated.TypeSpec, storeID string, obj map[string]any, par
 		// row unwritable on every sweep. A string field is written as ""
 		// (the engine reads "" and absent as one unset value, and "" is
 		// what clears the stored value under the engine's read-merge of a
-		// write to an existing row); every other type is omitted, which
-		// on an existing row keeps its last mirrored value -- a limit of
-		// the raw insert, which has no way to unset a typed field, noted
-		// until the engine grows one.
+		// write to an existing row) and a list as []; an object, bool,
+		// int or enum is omitted, which on an existing row keeps its last
+		// mirrored value -- a limit of the raw insert, which has no way to
+		// unset a typed field, noted until the engine grows one.
 		if raw == nil {
-			if f.DSLType == "string" {
+			switch {
+			case f.DSLType == "string":
 				payload[f.Name] = ""
+			case strings.HasPrefix(f.DSLType, "[]"):
+				payload[f.Name] = []any{}
 			}
 			continue
 		}

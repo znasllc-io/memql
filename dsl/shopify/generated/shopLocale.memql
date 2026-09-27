@@ -25,7 +25,8 @@ use common.traits.{ isNotDeleted }
 concept shopLocale {
   /// The v1:shopify:store row this mirror belongs to. Every read is store-scoped.
   storeId    string!
-  /// Shopify's own identity, gid://shopify/<Type>/<id>. Stable across renames.
+  /// Not a Shopify GID: this type declares no id, so the row is keyed by the parent's GID and the first
+  /// reference it carries ("<parent gid>#<referenced gid>"). The reference field beside it is the identity a reader wants.
   gid        string!
   /// The ORIGIN's version. A write whose updatedAt is older than the stored one is refused as stale.
   updatedAt  datetime!

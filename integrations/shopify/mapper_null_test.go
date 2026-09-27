@@ -7,8 +7,8 @@ import (
 	"github.com/znasllc-io/memql/integrations/shopify/generated"
 )
 
-// mapper_null_test.go -- a null from the origin is an ABSENT field, not a
-// null in the payload.
+// mapper_null_test.go -- a null from the origin is never a null in the
+// payload.
 //
 // Every generated concept field is optional and typed (`string`, `object`,
 // ...), and the engine's schema is `additionalProperties: false` with typed
@@ -16,9 +16,11 @@ import (
 // null for any nullable field that is simply unset -- an inventory level's
 // deactivationAlert, an inventory item's countryCodeOfOrigin -- so a mirror
 // write that carried the null was refused on every sweep
-// ("expected string, but got null"), 357 times per ten-minute tick on one
-// store. The mirror insert is wholesale, so omitting the key already means
-// "cleared"; writing null adds nothing but the refusal.
+// ("expected string, but got null"), 119 times per ten-minute tick on one
+// store. The engine read-merges a write to an existing row, so a cleared
+// string is written as "" and a cleared list as [] -- the typed empties that
+// validate and clear -- while a cleared object, bool, int or enum is omitted
+// and keeps its last value until the engine can unset a typed field.
 func TestMapObjectOmitsNullValuesSoTheConceptSchemaAccepts(t *testing.T) {
 	spec := &generated.TypeSpec{
 		Concept: "inventoryLevel",
@@ -29,6 +31,7 @@ func TestMapObjectOmitsNullValuesSoTheConceptSchemaAccepts(t *testing.T) {
 			{Name: "quantities", GraphQL: "quantities", Kind: generated.KindObjectList, DSLType: "[]object", Extract: "quantities"},
 			{Name: "canDeactivate", GraphQL: "canDeactivate", Kind: generated.KindScalar, DSLType: "bool", Extract: "canDeactivate"},
 			{Name: "position", GraphQL: "position", Kind: generated.KindScalar, DSLType: "int", Extract: "position"},
+			{Name: "tags", GraphQL: "tags", Kind: generated.KindScalarList, DSLType: "[]string", Extract: "tags"},
 		},
 	}
 	obj := map[string]any{
@@ -43,6 +46,7 @@ func TestMapObjectOmitsNullValuesSoTheConceptSchemaAccepts(t *testing.T) {
 		}},
 		"canDeactivate": false,
 		"position":      nil,
+		"tags":          nil,
 	}
 	writes := mapObject(spec, "store-1", obj, "", time.Date(2026, 9, 27, 0, 0, 0, 0, time.UTC))
 	if len(writes) != 1 {
@@ -56,6 +60,9 @@ func TestMapObjectOmitsNullValuesSoTheConceptSchemaAccepts(t *testing.T) {
 	}
 	if v, present := payload["quantities"]; !present || v == nil {
 		t.Errorf("quantities = %#v", v)
+	}
+	if v, ok := payload["tags"].([]any); !ok || len(v) != 0 {
+		t.Errorf("tags = %#v; a null list is written as the empty list, which validates and clears the stored value", payload["tags"])
 	}
 	if _, present := payload["position"]; present {
 		t.Errorf("a null int must be omitted, not written as a zero that reads as a real value: %#v", payload["position"])

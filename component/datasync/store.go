@@ -100,6 +100,10 @@ type SyncState struct {
 	DeadLetterCount int
 	Paused          bool
 	LastError       string
+	// Stored says a row came back from the database; false is the empty
+	// state SyncStateFor hands out for a domain nothing has written yet,
+	// which already carries the id it WOULD have.
+	Stored bool
 }
 
 // syncIDs derives the health row ids. Untracked: a hash-only caller keeps
@@ -194,7 +198,9 @@ func (s *Store) SyncStateFor(ctx context.Context, conceptID, connector, directio
 			Direction: direction,
 		}, nil
 	}
-	return syncStateFromRow(rows[0]), nil
+	st := syncStateFromRow(rows[0])
+	st.Stored = true
+	return st, nil
 }
 
 // WriteSyncState persists one domain's health.

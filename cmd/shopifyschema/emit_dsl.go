@@ -132,7 +132,12 @@ func mirrorColumns(p *TypePlan) string {
 	var b strings.Builder
 	b.WriteString("  /// The v1:shopify:store row this mirror belongs to. Every read is store-scoped.\n")
 	b.WriteString("  storeId    string!\n")
-	b.WriteString("  /// Shopify's own identity, gid://shopify/<Type>/<id>. Stable across renames.\n")
+	if p.HasID {
+		b.WriteString("  /// Shopify's own identity, gid://shopify/<Type>/<id>. Stable across renames.\n")
+	} else {
+		b.WriteString("  /// Not a Shopify GID: this type declares no id, so the row is keyed by the parent's GID and the first\n")
+		b.WriteString("  /// reference it carries (\"<parent gid>#<referenced gid>\"). The reference field beside it is the identity a reader wants.\n")
+	}
 	b.WriteString("  gid        string!\n")
 	b.WriteString("  /// The ORIGIN's version. A write whose updatedAt is older than the stored one is refused as stale.\n")
 	b.WriteString("  updatedAt  datetime!\n")

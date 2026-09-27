@@ -334,11 +334,13 @@ func (r *Runner) SetPaused(ctx context.Context, connectorName, conceptID string,
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(st.ID) == "" {
-		// The domain has no health row yet, so there is nothing to flip.
-		// Write one carrying the pause rather than failing: pausing a
-		// domain before its first delivery is a legitimate thing to want.
-		st.ID = SyncStateID(conceptID, connectorName, string(memqlsync.DirectionInbound))
+	if !st.Stored {
+		// The domain has no health row yet, so there is nothing to flip:
+		// setSyncPaused is an update, and the engine refuses an update of
+		// a row that does not exist. Write one carrying the pause rather
+		// than failing: pausing a domain before its first delivery is a
+		// legitimate thing to want. (The empty state already carries the
+		// id it would have, so an empty-id check here never fired.)
 		st.ConceptID, st.Connector, st.Direction = conceptID, connectorName, string(memqlsync.DirectionInbound)
 		st.Paused = paused
 		return r.store.WriteSyncState(opCtx, st)
