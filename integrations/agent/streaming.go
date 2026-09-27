@@ -1152,15 +1152,15 @@ var agentContextStamps = map[string]agentContextStamp{
 	// trusted). taskId stays optional (invocation filing only).
 	"workbenchHost":           {StampAgentId: true, StampRunId: true},
 	"requestComputerUseScope": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "partitionId"},
-	// requestUserFeedback parks the ACTIVE Plan, so it needs the
-	// turn-context planId stamped (the LLM never knows its own Plan id);
-	// agentId / ownerUserId scope the mutation's owner attribution and
-	// partitionId targets the canvas card.
+	// requestUserFeedback parks the ACTIVE run on a feedback approval, so it
+	// needs the turn-context runId stamped (the LLM never knows its own run
+	// id); ownerUserId is the run's owner the approval is raised for, and
+	// agentId / partitionId name the calling agent and its space.
 	"requestUserFeedback": {StampAgentId: true, StampOwnerUserId: true, StampRunId: true, SpaceField: "partitionId"},
-	// produceArtifact CREATES a new plan (it doesn't park the active one),
-	// so it needs the calling agent, the owning user (-> the new plan's
-	// requestedBy), and the space the plan lives in. No planId stamp -- the
-	// handler mints a fresh one.
+	// produceArtifact OPENS a new goal and run (it doesn't park the active
+	// one), so it needs the calling agent, the owning user (the new goal's
+	// owner), and the space. No runId stamp -- the new goal gets a run of its
+	// own.
 	"produceArtifact": {StampAgentId: true, StampOwnerUserId: true, SpaceField: "partitionId"},
 	// editDocument revises an existing document and records who did it:
 	// agentId becomes the new version's authorId, producedByPlanId its
