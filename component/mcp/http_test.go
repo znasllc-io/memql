@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // newTestHandler builds the full /mcp HTTP handler (auth wrapper + mux) the
@@ -330,5 +332,36 @@ func TestConfigForRequestPins(t *testing.T) {
 	cfg := h.configForRequest(req)
 	if cfg.ActingUser != "pinned-user" || cfg.ActingRole != "reader" || cfg.Tier != TierSealed {
 		t.Fatalf("pins not honored: %+v", cfg)
+	}
+}
+
+// TestAnAppSessionActsAsItsOwnerHoldingNoRole pins the actor a delegated app
+// session's calls run as on this surface: its owner, holding NO role. An
+// app-session credential carries no role claim (identity's
+// IssueAppSessionAccessToken), and the head takes a session's role from the
+// claim.
+//
+// A PROCEDURE REPLAY DEPENDS ON THIS. Only an app session records, and a
+// replayed call is decided by the same actor its recording was
+// (app/procedure_dispatch.go's runProcedureMCP), so a tool gate answers a
+// replay as it answered the recording. If an app session is ever given a role
+// here -- its owner's, resolved as the gRPC surface resolves it -- the replay
+// must be given the same one in the same change, or a rank-floored read the
+// recording was refused will replay admitted (memql#5438).
+func TestAnAppSessionActsAsItsOwnerHoldingNoRole(t *testing.T) {
+	claims := map[string]any{
+		"sub":     "v1:identity:user:owner",
+		"class":   appSessionClass,
+		"node_id": appSessionLabelPrefix + "s1",
+	}
+	ctx := auth.ContextWithClaims(context.Background(), claims)
+	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
+	h := &httpHead{base: Config{Tier: TierAuthoring}}
+	cfg := h.configForRequest(httptest.NewRequest(http.MethodPost, MCPPath, nil).WithContext(ctx))
+	if cfg.AppSessionId != "s1" {
+		t.Fatalf("the credential was not read as an app session: %+v", cfg)
+	}
+	if cfg.ActingUser != "v1:identity:user:owner" || cfg.ActingRole != "" {
+		t.Fatalf("an app session acts as %q holding %q; the procedure replay reproduces the owner holding no role, and must change with this", cfg.ActingUser, cfg.ActingRole)
 	}
 }
