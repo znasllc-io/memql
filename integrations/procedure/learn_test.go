@@ -1,8 +1,11 @@
 package procedure
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -480,5 +483,100 @@ func TestTheReplayTriggerIsTheOneTheWorkSpineLeavesAlone(t *testing.T) {
 	if replayTriggerPrefix != workspine.ProcedureReplayTriggerPrefix {
 		t.Fatalf("replay runs are opened with %q, and integrations/work leaves runs triggered by %q to their runner",
 			replayTriggerPrefix, workspine.ProcedureReplayTriggerPrefix)
+	}
+}
+
+// runsOf is n succeeded runs of one goal signature, as workRunsForOwner
+// answers them.
+func runsOf(sig string, n int) []map[string]any {
+	out := make([]map[string]any, n)
+	for k := range out {
+		out[k] = map[string]any{
+			"id": fmt.Sprintf("v1:work:run:%s-%d", sig, k), "ownerUserId": testOwner,
+			"goalSignature": sig, "status": "succeeded",
+		}
+	}
+	return out
+}
+
+// TestTheCorpusSweepMinesAGoalOlderThanTheNewestPageOfRuns: the signatures a
+// blank-signature mine walks were read from ONE page of workRunsForOwner -- an
+// owner's newest runs, as many as the engine's default window holds -- so a
+// goal last recorded further back than that was never mined again. The fake
+// pages as the engine does: a full page answers a cursor, and the next read
+// carries it. The replay run and the failed run on the last page are the
+// filters' control: reading more pages must not widen what counts as a
+// recording.
+func TestTheCorpusSweepMinesAGoalOlderThanTheNewestPageOfRuns(t *testing.T) {
+	replay := runsOf("sig-replay", 1)[0]
+	replay["triggeredBy"] = "procedure:canary"
+	failed := runsOf("sig-failed", 1)[0]
+	failed["status"] = "failed"
+	pages := map[string]struct {
+		rows []map[string]any
+		next string
+	}{
+		"":         {runsOf("sig-new", 3), "cursor-2"},
+		"cursor-2": {runsOf("sig-mid", 3), "cursor-3"},
+		"cursor-3": {append(runsOf("sig-old", 2), replay, failed), ""},
+	}
+	eng := newFakeEngine()
+	var cursors []string
+	eng.answer("workRunsForOwner", func(_ recordedCall, cursor string) ([]map[string]any, string) {
+		cursors = append(cursors, cursor)
+		return pages[cursor].rows, pages[cursor].next
+	})
+	// Read as anybody but the owner, the runs answer nothing, as the tier would.
+	eng.ownedRead("workRunsForOwner", testOwner)
+
+	if _, err := newTestIntegration(eng).handleMineCorpus(personCtx("alice"), map[string]any{"ownerUserId": testOwner}, 0); err != nil {
+		t.Fatalf("mineCorpus: %v", err)
+	}
+	if got := strings.Join(cursors, ","); got != ",cursor-2,cursor-3" {
+		t.Fatalf("workRunsForOwner was read from the cursors [%s], want every page in turn", got)
+	}
+	mined := map[string]bool{}
+	for _, c := range eng.callsTo("workRunsForOwnerGoalSignature") {
+		mined[parseCallArgs(t, c.Query)["goalSignature"].(string)] = true
+	}
+	for _, sig := range []string{"sig-new", "sig-mid", "sig-old"} {
+		if !mined[sig] {
+			t.Errorf("%s was not mined (mined %v): a goal past the newest page of runs is never learned from again", sig, mined)
+		}
+	}
+	for _, sig := range []string{"sig-replay", "sig-failed"} {
+		if mined[sig] {
+			t.Errorf("%s was mined: a replay run and a failed run are not recordings", sig)
+		}
+	}
+}
+
+// TestTheSignatureReadStopsAtItsBoundAndSaysSo: a history that never runs out
+// of pages -- larger than the bound, or a cursor that never ends -- is read up
+// to maxSignatureRuns and no further, the signatures read so far are still
+// mined, and the stop is LOGGED: a read that ended at a limit must not look
+// like a history that ended there.
+func TestTheSignatureReadStopsAtItsBoundAndSaysSo(t *testing.T) {
+	const pageSize = 500
+	eng := newFakeEngine()
+	pagesRead := 0
+	eng.answer("workRunsForOwner", func(_ recordedCall, _ string) ([]map[string]any, string) {
+		pagesRead++
+		return runsOf(fmt.Sprintf("sig-%03d", pagesRead), pageSize), fmt.Sprintf("cursor-%d", pagesRead+1)
+	})
+	var logs bytes.Buffer
+	i := New(eng, slog.New(slog.NewTextHandler(&logs, nil)))
+
+	sigs, err := i.ownerSignatures(context.Background(), testOwner)
+	if err != nil {
+		t.Fatalf("ownerSignatures: %v", err)
+	}
+	wantPages := (maxSignatureRuns + pageSize - 1) / pageSize
+	if pagesRead != wantPages || len(sigs) != wantPages {
+		t.Fatalf("read %d pages and found %d signatures, want %d of each: the read stops at the first page that reaches maxSignatureRuns (%d)",
+			pagesRead, len(sigs), wantPages, maxSignatureRuns)
+	}
+	if !strings.Contains(logs.String(), "bound") || !strings.Contains(logs.String(), testOwner) {
+		t.Errorf("the read stopped at its bound without saying so for whom: %q", logs.String())
 	}
 }
