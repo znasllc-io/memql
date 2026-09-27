@@ -39,6 +39,13 @@
       "code": "query_clause_duplicate",
       "message": "`filter` is written twice",
       "note": "The same defect on the clause where it costs most: the second filter line replaced the first, and with it the ownership test."
+    },
+    {
+      "file": "imported-from-a-namespace-that-lacks-it.memql",
+      "verdict": "refuse_load",
+      "code": "signature_concept_unresolved",
+      "message": "which the import does not name -- this file's own domain declares it, and a same-domain concept is in scope with no import: drop the import",
+      "note": "memql#5433. The import names crm, which declares no escalationNote, and the one concept of that name -- this domain's own -- used to bind anyway: the namespace an import names was consulted only to break a tie. A concepts import is held to the namespace it names."
     }
   ]
 }

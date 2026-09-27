@@ -1,0 +1,12 @@
+use crm.concepts.{ escalationNote }
+
+/// A note an agent leaves on an escalated ticket.
+concept escalationNote {
+  body  string
+}
+
+/// The escalation notes, newest first. The import names crm, which declares no escalation note.
+query escalationNote newestEscalationNotes {
+  sort "row.createdAt", "desc"
+  paginate 20
+}
