@@ -484,6 +484,12 @@ jobs:
               - 'component/automations/**'
               - 'component/work/**'
               - 'dsl/bench/**'
+              # The procedure lifecycle scenarios run the certification ladder's
+              # DSL (epic memql#5408): a change to these trees alone must still
+              # run the lane, and a DSL-only diff matches no Go bucket.
+              - 'dsl/authoring/**'
+              - 'dsl/procedure/**'
+              - 'dsl/work/**'
               - 'test/proving/**'
               - 'docs/public/overview/proving-scorecard.md'
               - 'docs/public/overview/proving/scorecard/**'
