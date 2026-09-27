@@ -12,7 +12,7 @@ import (
 )
 
 // owner_scope_test.go -- the owner an agents builtin acts for is its caller
-// (owner_scope.go).
+// (memql.CallOwner, whose own table test is component/memql's TestCallOwner).
 //
 // Every handler that takes an ownerUserId is driven three ways: naming
 // ANOTHER user (refused before anything is read or written), naming the
@@ -41,60 +41,7 @@ func asAutomation() context.Context {
 }
 
 func isOwnerRefusal(err error) bool {
-	return err != nil && strings.Contains(err.Error(), ownerNotCallerCode)
-}
-
-func TestCallOwner(t *testing.T) {
-	synthetic := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-		UserId: "system:automation:x", Role: auth.RoleReader, Synthetic: true, Unranked: true,
-	})
-	clusterOwner := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-		UserId: "v1:identity:user:operator", Role: auth.RoleOwner,
-	})
-	admin := auth.ContextWithAccess(context.Background(), &auth.AccessContext{
-		UserId: "v1:identity:user:admin", Role: auth.RoleAdmin,
-	})
-	cases := []struct {
-		name      string
-		ctx       context.Context
-		requested string
-		want      string
-		refused   bool
-	}{
-		{"the caller's own id", asPerson(userA), userA, userA, false},
-		{"absent resolves to the caller", asPerson(userA), "", userA, false},
-		{"the caller's own id, bare", asPerson(userA), "owner-a", "owner-a", false},
-		{"a bare caller naming their canonical id", asPerson("owner-a"), userA, userA, false},
-		{"another user", asPerson(userA), userB, "", true},
-		{"the caller's short id under another concept", asPerson(userA), "v1:agents:agent:owner-a", "", true},
-		{"no actor at all", context.Background(), userA, "", true},
-		{"no actor and no owner", context.Background(), "", "", false},
-		{"an anonymous actor", auth.ContextWithAnonymousActor(context.Background()), userA, "", true},
-		{"an anonymous actor names nobody when absent", auth.ContextWithAnonymousActor(context.Background()), "", "", false},
-		{"a connector", auth.ContextWithConnectorActor(context.Background(), "shopify"), userA, "", true},
-		{"an automation's actor at client origin", synthetic, userB, "", true},
-		{"an automation's actor names nobody when absent", synthetic, "", "", false},
-		{"internal origin", asAutomation(), userB, userB, false},
-		{"internal origin under a person", auth.ContextWithInternalOrigin(asPerson(userA)), userB, userB, false},
-		{"a cluster owner", clusterOwner, userB, userB, false},
-		// admin is not in the write guard's escape set (memql#3174), so it is
-		// not here either.
-		{"an admin", admin, userB, "", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := callOwner(tc.ctx, "op", tc.requested)
-			if tc.refused {
-				if !isOwnerRefusal(err) {
-					t.Fatalf("callOwner(%q) = %q, %v; want the %s refusal", tc.requested, got, err, ownerNotCallerCode)
-				}
-				return
-			}
-			if err != nil || got != tc.want {
-				t.Fatalf("callOwner(%q) = %q, %v; want %q", tc.requested, got, err, tc.want)
-			}
-		})
-	}
+	return err != nil && strings.Contains(err.Error(), memql.OwnerNotCallerCode)
 }
 
 func TestInvokeActsForItsCaller(t *testing.T) {
