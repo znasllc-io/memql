@@ -71,6 +71,13 @@ type Parser struct {
 	// that sets it (parseLegacyExpression): it has to READ a retired spelling
 	// to write its replacement, and the refusals name it as the fix. Every
 	// parse the engine makes refuses both (memql#5375, memql#5439).
+	//
+	// It reaches the connective levels (parseLogicalOr, parseLogicalAnd) and
+	// so every group, guard and traversal target above them. shape()'s query
+	// argument is the one comma it does not reach (parseShapeQueryArg refuses
+	// a folding comma either way): no clause the rewrite reads holds a
+	// shape() call, which is a directive the rewriter lowers, never filter
+	// text.
 	legacyConnectives bool
 
 	// traversal is the head of the relationship traversal whose argument list
