@@ -325,3 +325,27 @@ func TestARerunStepIsNeverServedFromTheCache(t *testing.T) {
 		t.Fatalf("calls = %d after two structured re-run calls, want both to reach the model", model.calls)
 	}
 }
+
+// A model call a step makes that is not the step's ANSWER -- the work-context
+// checkpoint, which is stored and reused by a fingerprint of what it
+// summarizes -- runs without the override, and keeps the rest of the run
+// context so it is still journaled against its run and step.
+func TestAContextCheckpointIsNotGivenTheStepsOverride(t *testing.T) {
+	ov := &common.StepOverride{Level: "reasoning", Model: "personPinned", Effort: "high", Prompt: "Put the totals in bold."}
+	ctx := withoutStepOverride(stepCtx(ov))
+	rc, ok := common.RunFromContext(ctx)
+	if !ok || rc.RunId != "v1:work:run:r1" || rc.StepKey != "draft" {
+		t.Fatalf("the checkpoint lost its run context: %+v", rc)
+	}
+	req, err := ApplyStepOverride(ctx, airoute.ResolveRequest{Level: airoute.LevelFast})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Level != airoute.LevelFast || req.ExplicitProvider != "" || req.Effort != "" || len(StepOverrideMessages(ctx)) != 0 {
+		t.Fatalf("the checkpoint call carried the step's override: %+v", req)
+	}
+	// The step's own context still carries it.
+	if len(StepOverrideMessages(stepCtx(ov))) != 1 {
+		t.Fatal("withoutStepOverride changed the step's own context")
+	}
+}

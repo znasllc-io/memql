@@ -65,6 +65,23 @@ func stepOverrideOf(ctx context.Context) (*common.StepOverride, string) {
 	return rc.Override, rc.StepKey
 }
 
+// withoutStepOverride returns ctx with the executing step's override removed,
+// for a model call the step makes that is NOT the step's answer -- context
+// machinery such as the work-context checkpoint. The rest of the run context
+// is kept, so the call is still journaled against its run and step.
+//
+// The checkpoint is the case that needs it: it is stored and reused by a
+// fingerprint of the messages it summarizes, so one version's instructions
+// written into it would steer every later version that reads it back.
+func withoutStepOverride(ctx context.Context) context.Context {
+	rc, ok := common.RunFromContext(ctx)
+	if !ok || rc.Override == nil {
+		return ctx
+	}
+	rc.Override = nil
+	return common.ContextWithRun(ctx, rc)
+}
+
 // stepIsBeingRerun reports whether a person asked for THIS step to run again.
 //
 // It is the override's PRESENCE, not its content: "run it again" with nothing
