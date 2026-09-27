@@ -10,7 +10,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.75.0
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/lib/pq v1.12.3
-	github.com/openai/openai-go/v3 v3.65.0
+	github.com/openai/openai-go/v3 v3.66.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/stretchr/testify v1.12.1
 	github.com/uptrace/bun v1.2.18
