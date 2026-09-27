@@ -43,6 +43,8 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -100,12 +102,40 @@ type RunJournal struct {
 	// memql#5370): a `failed` statement that carries `on error continue` was
 	// continued past, and stays so.
 	StepStates map[string]StepState
+	// MaxAttempt is the highest version each top-level step's newest row
+	// records, by key: its attempt or its version, whichever is higher. A
+	// step executed again runs one past it (epic memql#5414). It is read off
+	// the collapsed newest rows, so after a head move re-asserted an earlier
+	// version it is that version's number -- which is why a re-run takes the
+	// plan's numbers as a floor (RerunSpec.Versions).
+	MaxAttempt map[string]int
+	// Head is the run's stored head (epic memql#5414, design D18): the
+	// current version of every top-level step, an entry naming another run
+	// when that version lives there. Nil on a run written before it existed.
+	Head work.Head
+	// StaleSteps are the steps whose current version was computed against an
+	// upstream that is no longer current: written by a person's act, and
+	// taken off one by one as a re-run gives each a finished new version.
+	StaleSteps []string
+	// Rerun is the pending re-run request, decoded from run.rerun; nil when
+	// absent or cleared to {}.
+	Rerun *RerunSpec
+	// StepOverrides is the override each top-level step's newest row
+	// records, by key: the override its head version ran with (the newest
+	// row IS the head, a head move re-asserting the version it makes
+	// current). Only steps somebody overrode appear. A replay of this run
+	// applies them (ResumeOptions.Overrides, RunAdoption.Overrides), because
+	// the model calls its journal holds were made with them.
+	StepOverrides map[string]*common.StepOverride
 }
 
 // StepState is one step's latest journal row: its status and its attempt.
 type StepState struct {
 	Status  string
 	Attempt int
+	// Version is the version the row belongs to (epic memql#5414); 0 on a
+	// row written before the field existed, whose attempt is its version.
+	Version int
 }
 
 // ResumeOptions configures resume behavior.
@@ -117,6 +147,20 @@ type ResumeOptions struct {
 	// action. Without this flag, resuming from a non-retryable step returns
 	// an error.
 	AllowSideEffects bool
+
+	// Rerun serves a re-run request (epic memql#5414, task memql#5415): the
+	// run need not have a failed step, every step from the resume point on
+	// runs as a new version, the steps before it are served from what they
+	// recorded, and the override reaches the targeted step alone. FromStep
+	// empty resumes where the request stands (rerunResumePoint);
+	// PrepareRerun builds the journal and the options together.
+	Rerun *RerunSpec
+
+	// Overrides are the overrides a REPLAY applies, by top-level step key:
+	// the replayed run's StepOverrides. Each reaches its own step alone, as a
+	// re-run's does (withRunContext). A re-run's own request wins for the
+	// step it targets.
+	Overrides map[string]*common.StepOverride
 }
 
 // IsStepRetryable reports whether a step type can be re-run with no
@@ -195,6 +239,10 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 		InitialChainHead:      stringField(run, "initialChainHead"),
 		Steps:                 map[string]*MinimalStepResult{},
 		StepStates:            map[string]StepState{},
+		MaxAttempt:            map[string]int{},
+		Head:                  work.ParseHead(run["head"]),
+		StaleSteps:            rowStringList(run["staleSteps"]),
+		Rerun:                 rerunSpecFrom(run["rerun"]),
 	}
 	j.HeartbeatAt, _ = time.Parse(time.RFC3339Nano, stringField(run, "heartbeatAt"))
 	j.WaitingOn, _ = run["waitingOn"].(map[string]any)
@@ -202,13 +250,7 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 	if ev, ok := run["triggerEvent"].(map[string]any); ok {
 		j.TriggerEvent = ev
 	}
-	if order, ok := run["stepOrder"].([]any); ok {
-		for _, s := range order {
-			if k, ok := s.(string); ok {
-				j.StepOrder = append(j.StepOrder, k)
-			}
-		}
-	}
+	j.StepOrder = rowStringList(run["stepOrder"])
 	for _, row := range steps {
 		key := stringField(row, "key")
 		if key == "" || isNestedStepKey(key) {
@@ -217,7 +259,17 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 			// re-runs that statement, never into it.
 			continue
 		}
-		j.StepStates[key] = StepState{Status: stringField(row, "status"), Attempt: intField(row, "attempt")}
+		state := StepState{Status: stringField(row, "status"), Attempt: intField(row, "attempt"), Version: intField(row, "version")}
+		j.StepStates[key] = state
+		j.MaxAttempt[key] = max(state.Attempt, state.Version)
+		if record, ok := row["override"].(map[string]any); ok {
+			if o := stepOverrideFrom(record); o != nil {
+				if j.StepOverrides == nil {
+					j.StepOverrides = map[string]*common.StepOverride{}
+				}
+				j.StepOverrides[key] = o
+			}
+		}
 		if stringField(row, "status") == "running" {
 			j.HasRunningStep = true
 		}
@@ -244,13 +296,20 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 // ValidateRunJournal is the resume precondition: a run, a resume point,
 // and an automation that has not changed underneath it.
 func ValidateRunJournal(j *RunJournal, automation *Automation, idEngine *id.Engine) error {
+	return validateRunJournal(j, automation, idEngine, false)
+}
+
+// validateRunJournal is ValidateRunJournal, with the resume point waived for a
+// re-run: a finished run is exactly what a person runs a step of again, and its
+// resume point is the step the request names rather than one that failed.
+func validateRunJournal(j *RunJournal, automation *Automation, idEngine *id.Engine, rerun bool) error {
 	if j == nil {
 		return ErrRunJournalInvalid
 	}
 	if j.RunId == "" || j.AutomationName == "" {
 		return fmt.Errorf("%w: missing run id or automation name", ErrRunJournalInvalid)
 	}
-	if j.FailedStep == "" {
+	if j.FailedStep == "" && !rerun {
 		return fmt.Errorf("%w: run %s has no failed or unfinished step to resume from", ErrRunJournalInvalid, j.RunId)
 	}
 	if j.TemplateFingerprint != "" && automation != nil && idEngine != nil {
@@ -278,6 +337,24 @@ func stringField(m map[string]any, k string) string {
 func boolField(m map[string]any, k string) bool {
 	b, _ := m[k].(bool)
 	return b
+}
+
+// rowStringList reads a row's string list however it decoded: []any off a
+// read, []string when a caller built the row.
+func rowStringList(v any) []string {
+	switch list := v.(type) {
+	case []string:
+		return append([]string(nil), list...)
+	case []any:
+		var out []string
+		for _, s := range list {
+			if k, ok := s.(string); ok {
+				out = append(out, k)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // intField reads a step row's attempt however the row decoded it.
@@ -327,13 +404,32 @@ func (e *Executor) ResumeFrom(
 		opts = &ResumeOptions{}
 	}
 
-	// Validate the journal against the current automation
-	if err := ValidateRunJournal(journal, automation, fingerprintEngine); err != nil {
+	// A re-run (epic memql#5414) resumes a run that may have finished: the
+	// failed-step requirement is waived, and the step it targets must be one
+	// of the automation's own.
+	rerun := opts.Rerun
+	if err := validateRunJournal(journal, automation, fingerprintEngine, rerun != nil); err != nil {
 		return nil, err
+	}
+	target := -1
+	if rerun != nil {
+		var err error
+		if target, err = rerunTargetIndex(automation, rerun, journal.ForkAtStepKey); err != nil {
+			return nil, err
+		}
+		// The spec names its target as the step it resolved to, so a branch
+		// that named its fork point only as forkAtStepKey still aims its
+		// override at that step. A copy: the caller's spec is theirs.
+		spec := *rerun
+		spec.StepKey = automation.Steps[target].ID
+		rerun = &spec
 	}
 
 	// Determine the resume point
 	resumeStepId := statementResumePoint(journal, automation)
+	if rerun != nil {
+		resumeStepId = rerunResumePoint(journal, automation, rerun, target)
+	}
 	if opts.FromStep != "" {
 		resumeStepId = opts.FromStep
 	}
@@ -350,6 +446,12 @@ func (e *Executor) ResumeFrom(
 	}
 	if resumeIndex == -1 {
 		return nil, fmt.Errorf("step %q not found in automation", resumeStepId)
+	}
+	// Every step before a re-run's target is served from what it recorded, so
+	// resuming earlier would run one of them again -- in a branch, a step
+	// whose version lives in another run.
+	if rerun != nil && resumeIndex < target {
+		return nil, fmt.Errorf("%w: the resume point %q is before the targeted step %q", ErrRerunStepInvalid, resumeStepId, rerun.StepKey)
 	}
 
 	// Check if resume step is retryable
@@ -386,6 +488,17 @@ func (e *Executor) ResumeFrom(
 	// 2 is what MINTS the token in step 3.
 	exec.SourceTrusted = automation.Trusted && !journal.CallerSuppliedPayload
 	exec.CallerSuppliedPayload = journal.CallerSuppliedPayload
+	// The head the journal writes at every receipt starts where the run's rows
+	// stand, and a re-run's request rides the execution rather than the
+	// context, so it reaches this run's steps and journal writes and no other
+	// run's (a sub-automation a step starts is an execution of its own).
+	exec.rerun = rerun
+	exec.overrides = opts.Overrides
+	var stale []string
+	if rerun != nil && len(journal.StaleSteps) > 0 {
+		stale = journal.StaleSteps
+	}
+	exec.head = newRunHead(resumeHead(journal), stale)
 
 	// The resumed run keeps its place in its causal chain (epic memql#5380):
 	// the parent its first attempt recorded on triggerEvent, one deeper, under
@@ -442,6 +555,18 @@ func (e *Executor) ResumeFrom(
 		}
 	}
 
+	resumedPayload := map[string]any{
+		"automationName": automation.Name,
+		"executionId":    exec.ID,
+		"runId":          journal.RunId,
+		"resumeFromStep": resumeStepId,
+		"restoredSteps":  len(journal.Steps),
+	}
+	if rerun != nil {
+		resumedPayload["rerunReason"] = rerun.Reason
+		resumedPayload["rerunRequestId"] = rerun.RequestId
+		resumedPayload["rerunStepKey"] = rerun.StepKey
+	}
 	if e.logger != nil {
 		e.logger.Info("resuming automation execution",
 			"component", ComponentName,
@@ -451,17 +576,12 @@ func (e *Executor) ResumeFrom(
 			"resumeFromStep", resumeStepId,
 			"resumeIndex", resumeIndex,
 			"restoredSteps", len(journal.Steps),
+			"rerun", rerun != nil,
 		)
 	}
 
 	// Publish automation resumed event
-	e.publishEvent(ctx, "automation.resumed", events.KindTelemetry, map[string]any{
-		"automationName": automation.Name,
-		"executionId":    exec.ID,
-		"runId":          journal.RunId,
-		"resumeFromStep": resumeStepId,
-		"restoredSteps":  len(journal.Steps),
-	})
+	e.publishEvent(ctx, "automation.resumed", events.KindTelemetry, resumedPayload)
 
 	// Chain tracking starts from the run row's chain head. The body runs again
 	// from its first statement over names rehydrated from the journal; the
@@ -504,7 +624,7 @@ func (e *Executor) ResumeFrom(
 		ChainTrackingEnabled: e.chainTrackingEnabled,
 	}
 
-	return e.runStatementAutomation(ctx, automation, exec, nil, writer, stepCtx, chainHead, resumedStatements(journal, automation, resumeIndex))
+	return e.runStatementAutomation(ctx, automation, exec, nil, writer, stepCtx, chainHead, resumedStatements(journal, automation, resumeIndex, rerun))
 }
 
 // minimalToStepResult converts a MinimalStepResult back to a full StepResult,

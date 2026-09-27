@@ -378,6 +378,9 @@
         "promotionApprovalId",
         "reinforceCount",
         "reliability",
+        "reuse",
+        "reuseEvidence",
+        "reuseOverride",
         "shadowMatches",
         "source",
         "status",
@@ -412,6 +415,11 @@
           "retired",
           "shadow",
           "trusted"
+        ],
+        "reuse": [
+          "accountSpecific",
+          "goalSpecific",
+          "reusable"
         ],
         "status": [
           "active",
@@ -7921,6 +7929,18 @@
       }
     },
     {
+      "concept": "v1:work:feedbackPolicy",
+      "file": "work/concepts.memql",
+      "fields": [
+        "reusableAfterSignatures",
+        "validateAnswers"
+      ],
+      "required": [
+        "reusableAfterSignatures",
+        "validateAnswers"
+      ]
+    },
+    {
       "concept": "v1:work:goal",
       "file": "work/concepts.memql",
       "fields": [
@@ -8021,6 +8041,7 @@
         "kind": [
           "decision",
           "error",
+          "feedback",
           "note",
           "tool_result"
         ]
@@ -8045,6 +8066,7 @@
         "forkedFromRunId",
         "goalId",
         "goalSignature",
+        "head",
         "heartbeatAt",
         "initialChainHead",
         "input",
@@ -8055,7 +8077,9 @@
         "ownerUserId",
         "parentRunId",
         "replayPolicy",
+        "rerun",
         "spent",
+        "staleSteps",
         "startedAt",
         "status",
         "stepOrder",
@@ -8065,6 +8089,7 @@
         "templateVersion",
         "triggerEvent",
         "triggeredBy",
+        "validation",
         "variables",
         "waitingOn"
       ],
@@ -8103,6 +8128,8 @@
         "actualFootprint",
         "approvalId",
         "attempt",
+        "authoredBy",
+        "basis",
         "binding",
         "call",
         "childRunId",
@@ -8119,6 +8146,7 @@
         "input",
         "key",
         "kind",
+        "override",
         "ownerUserId",
         "postcondition",
         "result",
@@ -8130,7 +8158,8 @@
         "status",
         "stepType",
         "symptom",
-        "tokens"
+        "tokens",
+        "version"
       ],
       "required": [
         "attempt",

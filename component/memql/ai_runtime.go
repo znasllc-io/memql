@@ -119,6 +119,13 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	if err != nil {
 		return nil, fmt.Errorf("executing prompt template %q: %w", prompt.Name, err)
 	}
+	// A PERSON'S INSTRUCTIONS AND GUIDANCE for the step this call serves ride
+	// the prompt itself (epic memql#5414, design D20): an ai() expression is a
+	// one-string call, and ai_step_override.go says why they become paragraphs
+	// of it rather than a switch to a chat call. Appended before anything
+	// estimates or hashes the text, so the ceilings, the caches and the
+	// journal all see the prompt that is actually sent.
+	text = withStepOverrideText(ctx, text)
 
 	// THE RUN'S CEILINGS ARE ASKED ABOVE THE CACHES, NOT BELOW THEM
 	// (memql#5580). The model seam asks too, and this second ask is the one
@@ -170,6 +177,15 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	}
 
 	ttl := r.cacheTTL(invocation)
+	// A STEP A PERSON ASKED TO RUN AGAIN IS NEVER ANSWERED FROM A CACHE, in
+	// either direction: a warm answer is the previous version's answer, and
+	// the same provider at a different effort would be served the very text
+	// the person asked to replace. Nor is its answer cached, since it was
+	// produced for one version rather than for the prompt.
+	rerun := stepIsBeingRerun(ctx)
+	if rerun {
+		ttl = 0
+	}
 	var cacheKey string
 	if ttl > 0 && r.cache != nil {
 		cacheKey = buildAICacheKey(invocation.TemplateId, providerName, text)
@@ -214,7 +230,7 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 	// similarity threshold (the wrong-answer guard). Disabled/unset
 	// namespaces skip this entirely (no embed call, no behaviour change).
 	namespace := strings.TrimSpace(invocation.SemanticNamespace)
-	semanticEnabled := namespace != "" && r.semantic.Enabled(namespace)
+	semanticEnabled := namespace != "" && !rerun && r.semantic.Enabled(namespace)
 	if semanticEnabled {
 		if cached, ok := r.semantic.Lookup(ctx, namespace, text); ok {
 			// Recorded and counted exactly as the exact-hash hit above is,

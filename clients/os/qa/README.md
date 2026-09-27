@@ -40,7 +40,14 @@ what says the page has not become a wall of advisories), or `overview`,
 `mesh-node-identity`, `mesh-node-unreported` (Cluster > Mesh), or
 `sharing-owner`, `sharing-people`, `sharing-waiting`, `sharing-everyone`,
 `sharing-viewer`, `share-dialog`, `share-dialog-admin`, `share-dialog-empty`,
-`share-dialog-refused` (a machine's Sharing view and its dialog); `mode` is `dark`
+`share-dialog-refused` (a machine's Sharing view and its dialog), or
+`nexus-procedure-evidence`, `nexus-procedure-overridden`,
+`nexus-procedure-unlabelled`, `nexus-automations`, `nexus-automation-detail`,
+`nexus-overview` (what an automation is for, epic memql#5414: a learned
+procedure's Reuse panel with the evidence deciding, with a person's own label
+over evidence that disagrees, and before anything was counted; the list with
+every label on it; an authored automation's detail; the Overview's ratio);
+`mode` is `dark`
 or `light`. **Take at least one narrow capture** (`820,760`): two of
 the first three real defects this harness found were invisible at 1400x900.
 

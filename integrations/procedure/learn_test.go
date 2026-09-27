@@ -454,7 +454,7 @@ func TestNoCapabilitySaysItIsNotWiredYet(t *testing.T) {
 			t.Errorf("%s still answers as a stub: %v", c.Name, err)
 		}
 	}
-	for _, name := range []string{"learnFromRun", "mineCorpus", "step", "replay", "ladderSweep", "decidePromotion"} {
+	for _, name := range []string{"learnFromRun", "mineCorpus", "step", "replay", "ladderSweep", "decidePromotion", "setReuse", "reuseSweep", "catalogSections"} {
 		if !caps[name] {
 			t.Errorf("capability %s is not registered; the boot audit refuses every node", name)
 		}

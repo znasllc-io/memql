@@ -360,7 +360,9 @@ describe("the runs list", () => {
 
 describe("the section list", () => {
   it("navigates to the app's preferred section on open, and only from the shell's default", async () => {
-    const first = mount(fakeConnection(), "goals", { defaultSection: "approvals" });
+    // The shell opens an app on its manifest's FIRST section, which is the
+    // Overview (epic memql#5414) -- so that is the one a preference moves off.
+    const first = mount(fakeConnection(), "overview", { defaultSection: "approvals" });
     await waitFor(() => expect(first.navigate).toHaveBeenCalledWith("approvals"));
     first.view.unmount();
 

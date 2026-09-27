@@ -24,6 +24,16 @@ package proving
 // declared here, so the sequencing below is testable with no engine, and so a
 // change in the runner's shape is one adapter's problem rather than the
 // driver's.
+//
+// A PERSON MAY STEP IN (epic memql#5414, task memql#5420). A lifecycle's
+// entries may judge the step the app served for the goal served last, or run
+// that step again at another level. A lifecycle that does is served
+// differently in one place: each goal the app serves is EXECUTED through the
+// platform's executor, so its run holds a real step with real versions, and
+// its recording hangs off that step as its childRunId -- which is how the
+// learning corpus knows which version a recording answered, and whether a
+// person replaced or disliked it. The checks that read it are at the end of
+// this file. A lifecycle that does not step in keeps epic D's path.
 
 import (
 	"context"
@@ -34,6 +44,7 @@ import (
 	"strings"
 	"time"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/proving/figure"
 	"github.com/znasllc-io/memql/component/proving/scenario"
 	"github.com/znasllc-io/memql/component/proving/world"
@@ -94,6 +105,112 @@ type WorkSpine interface {
 	// every one still pending, and each of known -- the ones the lifecycle saw
 	// raised -- whatever its decision.
 	PromotionApprovals(ctx context.Context, ownerUserId string, known []string) ([]ApprovalState, error)
+
+	// The four below are a person stepping into a goal (epic memql#5414, task
+	// memql#5420). Only a lifecycle that intervenes calls them.
+
+	// ExecuteAppGoal executes the run of a goal the app serves through the
+	// platform's automation executor, as an agent executes a compiled run:
+	// the run is ADOPTED, its one step is handed to the app -- serve, called
+	// from inside the step with the step's own context -- the session is
+	// recorded beneath the run and stamped as the step's childRunId, and the
+	// executor journals the step's version and closes the run. That is what
+	// gives the goal a step a person can judge and run again.
+	ExecuteAppGoal(ctx context.Context, step GoalStep, serve AppStepServer) (StepRun, error)
+	// RerunStep is a person running a finished goal run's step again as a new
+	// version: the work spine's own rerunStep act as that person, then the
+	// request served as an agent serves it -- from the run's rows, the step
+	// executed with the person's override on its context alone, the run
+	// closed again.
+	RerunStep(ctx context.Context, o RerunOrder, serve AppStepServer) (StepRun, error)
+	// RecordFeedback is a person's verdict on one version of a run's step,
+	// through the work spine's own recordFeedback act as that person. It
+	// answers the feedback observation's id.
+	RecordFeedback(ctx context.Context, o FeedbackOrder) (string, error)
+	// StepVersions reads back every version of every step of one run, as the
+	// step timeline reads it: workStepVersions, as the run's owner.
+	StepVersions(ctx context.Context, ownerUserId, runId string) ([]StepVersionState, error)
+}
+
+// appStepKey is the one step of the run of a goal the app serves, in a
+// lifecycle that intervenes: the step the goal hands to the app, which a
+// person judges and runs again. The fixture app's actions are steps of the
+// RECORDING beneath it, never of the goal's run.
+const appStepKey = "answer"
+
+// GoalStep names one step of one goal's run, and whose it is.
+type GoalStep struct {
+	OwnerUserId string
+	RunId       string
+	StepKey     string
+}
+
+// RerunOrder is a step run again.
+type RerunOrder struct {
+	GoalStep
+	// Level is the level the person asks for instead of the step's own; empty
+	// keeps the step's.
+	Level string
+}
+
+// FeedbackOrder is one verdict on one version of a step.
+type FeedbackOrder struct {
+	GoalStep
+	// Version is the version judged -- the one the person is looking at.
+	Version int
+	Verdict string
+	// Axes are what a dislike found wrong, by name.
+	Axes   []string
+	Reason string
+}
+
+// AppStepServer is the app answering the step a goal's run hands it: what the
+// fixture app does, called from INSIDE the executor's step with the step's own
+// context. So a re-run's override, which the executor puts on the targeted
+// step's context alone (component/automations withRunContext), reaches the app
+// exactly as it reaches the session delegate in production.
+type AppStepServer func(ctx context.Context, step AppStep) (AppStepAnswer, error)
+
+// AppStep is the step being served.
+type AppStep struct {
+	RunId   string
+	StepKey string
+	// StepId is the step's ROW -- the id the journal writes for the key
+	// (component/automations.WorkStepId). The session is stamped on it as the
+	// step's childRunId, the back-pointer the session delegate stamps.
+	StepId string
+}
+
+// AppStepAnswer is what the app's session did for the step.
+type AppStepAnswer struct {
+	// ChildRunId is the session's recording; SessionId is the session.
+	ChildRunId string
+	SessionId  string
+	// Failed says an action failed and the session stopped there; the step
+	// then fails with Error.
+	Failed bool
+	Error  string
+}
+
+// StepRun is how one execution of a goal's step ended.
+type StepRun struct {
+	// Version is the version of the step it ran as.
+	Version int
+	// Status is the run's status as the execution left it -- succeeded,
+	// failed, or a wait the failure path parked it on.
+	Status string
+}
+
+// StepVersionState is one version of one step, as the platform reads it back.
+type StepVersionState struct {
+	StepKey    string
+	Version    int
+	Status     string
+	Current    bool
+	ChildRunId string
+	// Level is the level the version was asked for, from its override; empty
+	// when nobody asked for one.
+	Level string
 }
 
 // AppHandover is the app's side of a fallback: a goal a replay could not
@@ -241,6 +358,20 @@ type ConstructState struct {
 	GoalSignature       string
 	Rung                string
 	PromotionApprovalId string
+
+	// What the version replays, read only for the constructs read back after
+	// the last goal (Constructs), and empty where it was not.
+	//
+	// RecordedFrom are the recordings the version was generalized from, as
+	// its provenance names them (procedure.recordedFrom.runIds): written when
+	// the version is created and never while it stays unchanged.
+	RecordedFrom []string
+	// Steps are the version's steps as the commands a replay runs, a free
+	// parameter written {{input}} after the goal input that binds it, and a
+	// position no goal input binds written {{?hole}}.
+	Steps []string
+	// Unreadable says why the version could not be read, when it could not.
+	Unreadable string
 }
 
 // ApprovalState is one procedurePromotion approval.
@@ -302,6 +433,10 @@ type lifecycleRecord struct {
 	// Constructs and Approvals are read back after the last goal.
 	Constructs []ConstructState
 	Approvals  []ApprovalState
+	// Interventions are the goals a person stepped into -- judged, or ran
+	// again -- in the order served, each with its step's versions read back
+	// after the last goal.
+	Interventions []*interventionRecord
 	// Problems are the platform not doing what the lifecycle needed -- a
 	// decision with no proposal to decide, an app session that failed. They
 	// are verifier failures on the platform arm, not runner errors: the
@@ -309,11 +444,71 @@ type lifecycleRecord struct {
 	Problems []string
 }
 
+// interventionRecord is one goal a person stepped into, and its step's
+// versions as the lifecycle made them.
+type interventionRecord struct {
+	// Goal is the goal's index among the lifecycle's entries; GoalRunId is
+	// its run.
+	Goal      int
+	GoalRunId string
+	// goal is the goal as the app was given it, for a re-run's session and
+	// for the checks, which render the corrected actions from its input.
+	goal appGoal
+	// Current is the step's current version as the lifecycle left it.
+	Current int
+	// Recordings maps each version of the step to the recording its session
+	// made.
+	Recordings map[int]string
+	Verdicts   []verdictSeen
+	Reruns     []rerunSeen
+	// Versions are the step's versions as the platform reads them back after
+	// the last goal.
+	Versions []StepVersionState
+}
+
+// verdictSeen is one verdict a person gave.
+type verdictSeen struct {
+	Version       int
+	Verdict       string
+	Axes          []string
+	Reason        string
+	ObservationId string
+}
+
+// rerunSeen is one re-run, and what its session was told.
+type rerunSeen struct {
+	// From is the version replaced; Version the one the re-run made.
+	From, Version int
+	Level         string
+	Status        string
+	// Recording is the new version's session; Prompt and SessionLevel are
+	// what that session was started with.
+	Recording    string
+	Prompt       string
+	SessionLevel string
+}
+
+// newestVerdicts is each version's newest verdict: a verdict is never
+// overwritten (D21), so the newest one given is the person's judgment -- the
+// reading the corpus and the candidate gate give.
+func (iv *interventionRecord) newestVerdicts() map[int]string {
+	out := map[int]string{}
+	for _, v := range iv.Verdicts {
+		out[v.Version] = v.Verdict
+	}
+	return out
+}
+
 // goalRecord is one entry of the lifecycle.
 type goalRecord struct {
 	Index    int
 	Decide   string
 	ServedBy string
+	// GoalRunId is the served goal's run; Executed says the run was executed
+	// through the platform's executor with one step the app served -- the
+	// path a lifecycle that intervenes serves its app's goals on.
+	GoalRunId string
+	Executed  bool
 	// Rung is the rung the serve decision read, "" when there was no
 	// procedure for the goal.
 	Rung      string
@@ -405,7 +600,8 @@ func (r *Runner) runLifecyclePlatform(ctx context.Context, s scenario.Scenario, 
 		return
 	}
 	d := &lifecycleDriver{s: s, owner: owner, world: pw, app: app, spine: platform.Spine, ladder: ladder,
-		rec: &lifecycleRecord{Owner: owner, Measured: -1}}
+		rec: &lifecycleRecord{Owner: owner, Measured: -1}, executes: s.Procedure.Intervenes(),
+		interventions: map[int]*interventionRecord{}, lastGoal: -1}
 	res.lifecycle = d.rec
 	err = d.run(ctx)
 	if platform.Warnings != nil {
@@ -430,21 +626,45 @@ const baselineRestarts = 3
 // Every goal goes to the app, and a goal whose app session fails is started
 // again from its first action -- a loop with no memory of what it already did
 // has nowhere else to start.
+//
+// A person stepping in reaches a bare loop too, as far as a bare loop can
+// hear them: a re-run is the goal asked for again -- one more session, told
+// nothing about what was wrong, since nothing kept the verdict -- and a
+// verdict is kept by nothing at all.
 func runLifecycleBaseline(ctx context.Context, s scenario.Scenario, pw *ProcedureWorld, owner string, res *ArmResult) {
 	app := newFixtureApp(pw, s.Steps, nil, owner)
 	rec := &lifecycleRecord{Owner: owner, Measured: -1}
 	res.lifecycle = rec
 	completed := true
+	var last *appGoal
 	for i, g := range s.Procedure.Goals {
-		if g.Decide != "" {
+		switch {
+		case g.Decide != "":
 			// No ladder, so nothing was proposed and there is nothing to
 			// decide.
 			rec.Goals = append(rec.Goals, goalRecord{Index: i, Decide: g.Decide, Narrative: "no ladder, nothing to decide"})
 			continue
+		case g.Feedback != nil:
+			rec.Goals = append(rec.Goals, goalRecord{Index: i, Narrative: "no store, so the verdict is kept by nothing"})
+			continue
+		case g.Rerun != nil:
+			gr := goalRecord{Index: i, Narrative: "nothing was served to ask for again"}
+			if last != nil {
+				callsBefore := app.Calls()
+				if _, err := app.Serve(ctx, *last); err != nil {
+					res.Err = fmt.Errorf("baseline re-run %d: %w", i, err)
+					return
+				}
+				gr.AppCalls = app.Calls() - callsBefore
+				gr.Narrative = "the goal asked for again: one more session, told nothing"
+			}
+			rec.Goals = append(rec.Goals, gr)
+			continue
 		}
 		pw.armGoal(g.Inject)
 		callsBefore, dupBefore := app.Calls(), pw.world.Duplicates()
-		ag := appGoal{OwnerUserId: owner, GoalRunId: fmt.Sprintf("baseline-goal-%d", i), Statement: goalStatement(s, g), Variables: g.Variables}
+		ag := appGoal{OwnerUserId: owner, GoalRunId: fmt.Sprintf("baseline-goal-%d", i), Statement: goalStatement(s, g), Variables: g.Variables, Answer: g.Answer}
+		last = &ag
 		done := false
 		for attempt := 0; attempt <= baselineRestarts && !done; attempt++ {
 			sess, err := app.Serve(ctx, ag)
@@ -487,14 +707,28 @@ type lifecycleDriver struct {
 	// raised are the promotion approvals the lifecycle saw raised, read back
 	// by id after the last goal whatever became of them.
 	raised []string
+
+	// executes: the lifecycle intervenes, so every goal the app serves is
+	// executed through the platform's executor and its run holds a real step.
+	executes bool
+	// interventions are the executed goals' steps, by goal index; lastGoal is
+	// the index of the goal served last, which a verdict or a re-run applies
+	// to (-1 before the first).
+	interventions map[int]*interventionRecord
+	lastGoal      int
 }
 
 func (d *lifecycleDriver) run(ctx context.Context) error {
 	for i, g := range d.s.Procedure.Goals {
 		var err error
-		if g.Decide != "" {
+		switch {
+		case g.Decide != "":
 			err = d.decide(ctx, i, g.Decide)
-		} else {
+		case g.Feedback != nil:
+			err = d.feedback(ctx, i, *g.Feedback)
+		case g.Rerun != nil:
+			err = d.rerun(ctx, i, *g.Rerun)
+		default:
 			err = d.serve(ctx, i, g)
 		}
 		if err != nil {
@@ -507,6 +741,19 @@ func (d *lifecycleDriver) run(ctx context.Context) error {
 	}
 	if d.rec.Approvals, err = d.spine.PromotionApprovals(ctx, d.owner, d.raised); err != nil {
 		return fmt.Errorf("reading the promotion approvals back: %w", err)
+	}
+	// The steps a person stepped into, as the step timeline reads them now:
+	// every version, and which one is current.
+	for i := range d.s.Procedure.Goals {
+		iv := d.interventions[i]
+		if iv == nil || (len(iv.Verdicts) == 0 && len(iv.Reruns) == 0) {
+			continue
+		}
+		if iv.Versions, err = d.spine.StepVersions(ctx, d.owner, iv.GoalRunId); err != nil {
+			return fmt.Errorf("reading the versions of goal %d's step back: %w", i, err)
+		}
+		d.checkRecordedLevels(iv)
+		d.rec.Interventions = append(d.rec.Interventions, iv)
 	}
 	return nil
 }
@@ -545,7 +792,9 @@ func (d *lifecycleDriver) serve(ctx context.Context, i int, g scenario.Procedure
 	if err != nil {
 		return fmt.Errorf("opening the goal: %w", err)
 	}
-	ag := appGoal{OwnerUserId: d.owner, GoalRunId: goalRunId, Statement: statement, Variables: g.Variables}
+	ag := appGoal{OwnerUserId: d.owner, GoalRunId: goalRunId, Statement: statement, Variables: g.Variables, Answer: g.Answer}
+	gr.GoalRunId = goalRunId
+	d.lastGoal = i
 	d.app.expect(ag)
 	d.world.armGoal(g.Inject)
 	defer d.world.armGoal(nil)
@@ -584,12 +833,12 @@ func (d *lifecycleDriver) serve(ctx context.Context, i int, g scenario.Procedure
 			}
 		}
 	} else {
-		sess, err := d.app.Serve(ctx, ag)
+		sess, err := d.serveByApp(ctx, &gr, ag)
 		if err != nil {
 			return err
 		}
 		gr.ServedBy = servedByApp
-		gr.Narrative = fmt.Sprintf("the app served it (rung %s)", wordOr(string(rung), "none"))
+		gr.Narrative = fmt.Sprintf("the app served it (rung %s)", wordOr(string(rung), "none")) + gr.Narrative
 		served, why = !sess.Failed, "the app's session failed"
 		if sess.Failed {
 			// Not learned from: a failed recording is not a success, and the
@@ -600,8 +849,12 @@ func (d *lifecycleDriver) serve(ctx context.Context, i int, g scenario.Procedure
 			return err
 		}
 	}
-	if err := d.spine.CloseGoal(ctx, d.owner, goalRunId, served, why); err != nil {
-		return fmt.Errorf("closing the goal's run: %w", err)
+	// An executed run was closed by the executor that ran it, as a compiled
+	// run is; closing it again here would be a second writer of its end.
+	if !gr.Executed {
+		if err := d.spine.CloseGoal(ctx, d.owner, goalRunId, served, why); err != nil {
+			return fmt.Errorf("closing the goal's run: %w", err)
+		}
 	}
 
 	gr.AppCalls = d.app.Calls() - callsBefore
@@ -692,11 +945,209 @@ func (d *lifecycleDriver) decide(ctx context.Context, i int, decision string) er
 // that uses it to the same set.
 func (d *lifecycleDriver) primaryKeys() []string {
 	for _, g := range d.s.Procedure.Goals {
-		if g.Decide == "" && g.Goal == "" {
+		if g.Serves() && g.Goal == "" {
 			return inputKeys(g.Variables)
 		}
 	}
 	return nil
+}
+
+// --- A person stepping in (epic memql#5414, task memql#5420) ------------------
+
+// serveByApp is the app serving a goal. In a lifecycle that intervenes the
+// goal's run is EXECUTED: the platform's executor adopts it, hands its one
+// step to the app, journals the version and closes the run -- so the run holds
+// a step a person can judge and run again, the recording hangs off that step's
+// row as its childRunId, and the corpus can judge the recording by the version
+// that made it. Every other lifecycle keeps epic D's path, a session under a
+// run nothing executes, and its committed figures with it.
+func (d *lifecycleDriver) serveByApp(ctx context.Context, gr *goalRecord, ag appGoal) (appSession, error) {
+	if !d.executes {
+		return d.app.Serve(ctx, ag)
+	}
+	var (
+		sess appSession
+		serr error
+	)
+	run, err := d.spine.ExecuteAppGoal(ctx, GoalStep{OwnerUserId: d.owner, RunId: ag.GoalRunId, StepKey: appStepKey}, d.stepServer(ag, &sess, &serr))
+	if serr != nil {
+		// The recording failing is the harness failing, as it is on the path
+		// that executes nothing: here the recording is the thing under test.
+		return sess, serr
+	}
+	if err != nil {
+		return sess, fmt.Errorf("executing the goal's run: %w", err)
+	}
+	gr.Executed = true
+	gr.Narrative = fmt.Sprintf(", executed as version %d of its %s step, the run %s", run.Version, appStepKey, wordOr(run.Status, "unclosed"))
+	if !sess.Failed && run.Status != "succeeded" {
+		d.rec.problem("goal %d: the app's session succeeded and the executor left the goal's run %s, not succeeded", gr.Index, wordOr(run.Status, "unclosed"))
+	}
+	d.interventions[gr.Index] = &interventionRecord{
+		Goal: gr.Index, GoalRunId: ag.GoalRunId, goal: ag,
+		Current: run.Version, Recordings: map[int]string{run.Version: sess.RunId},
+	}
+	return sess, nil
+}
+
+// stepServer is the fixture app answering a step, keeping what its session
+// did for the driver: the session itself, and a recording error, which the
+// executor would otherwise turn into nothing more than a failed step.
+func (d *lifecycleDriver) stepServer(ag appGoal, sess *appSession, serr *error) AppStepServer {
+	return func(ctx context.Context, step AppStep) (AppStepAnswer, error) {
+		s, err := d.app.ServeStep(ctx, ag, step)
+		*sess = s
+		if err != nil {
+			*serr = err
+			return AppStepAnswer{}, err
+		}
+		ans := AppStepAnswer{ChildRunId: s.RunId, SessionId: s.SessionId, Failed: s.Failed}
+		if s.Failed && s.FailedAt >= 0 && s.FailedAt < len(d.s.Steps) {
+			ans.Error = "the app's session failed at its action " + d.s.Steps[s.FailedAt].Key
+		}
+		return ans, nil
+	}
+}
+
+// intervened is the step a verdict or a re-run applies to: the one the goal
+// served LAST handed to the app. why is set when there is none -- nothing was
+// served yet, or a procedure served it and handed nothing to the app -- which
+// the loader refuses wherever it can see it, so reaching it is the platform's
+// answer, recorded as a problem.
+func (d *lifecycleDriver) intervened(i int, verb string) (*interventionRecord, string) {
+	switch {
+	case d.lastGoal < 0:
+		return nil, fmt.Sprintf("goal %d %s the step of the goal served last, and no goal was served", i, verb)
+	case d.interventions[d.lastGoal] == nil:
+		return nil, fmt.Sprintf("goal %d %s the step of goal %d, and the app was handed no step for that goal -- it was served by a procedure", i, verb, d.lastGoal)
+	}
+	return d.interventions[d.lastGoal], ""
+}
+
+// feedback is a person's verdict on the current version of the step the goal
+// served last, through the work spine's own act (design D21).
+func (d *lifecycleDriver) feedback(ctx context.Context, i int, f scenario.Feedback) error {
+	gr := goalRecord{Index: i}
+	defer func() { d.rec.Goals = append(d.rec.Goals, gr) }()
+	iv, why := d.intervened(i, "judges")
+	if iv == nil {
+		d.rec.problem("%s", why)
+		gr.Narrative = "nothing to judge"
+		return nil
+	}
+	id, err := d.spine.RecordFeedback(ctx, FeedbackOrder{
+		GoalStep: GoalStep{OwnerUserId: d.owner, RunId: iv.GoalRunId, StepKey: appStepKey},
+		Version:  iv.Current, Verdict: f.Verdict, Axes: f.Axes, Reason: f.Reason,
+	})
+	if err != nil {
+		return fmt.Errorf("recording the verdict on version %d of goal %d's step: %w", iv.Current, iv.Goal, err)
+	}
+	iv.Verdicts = append(iv.Verdicts, verdictSeen{Version: iv.Current, Verdict: f.Verdict, Axes: f.Axes, Reason: f.Reason, ObservationId: id})
+	gr.Narrative = fmt.Sprintf("the person gave a %s on version %d of goal %d's step", f.Verdict, iv.Current, iv.Goal)
+	if len(f.Axes) > 0 {
+		gr.Narrative += " (" + strings.Join(f.Axes, ", ") + ")"
+	}
+	return nil
+}
+
+// rerun is a person running the step the goal served last again, as a new
+// version (D18, D20), and the platform learning from what the new version's
+// session recorded exactly as it learns after any goal the app serves.
+//
+// WHAT THE SESSION WAS TOLD IS CHECKED HERE. A dislike on the version replaced
+// rides the re-run as guidance (D23's repair half): the act attaches it, the
+// executor puts it on the targeted step's context, and the app is told it. A
+// session started without the reason is the platform losing the person's
+// words somewhere on that path, and so is one started at a level the re-run
+// did not ask for.
+func (d *lifecycleDriver) rerun(ctx context.Context, i int, r scenario.Rerun) error {
+	gr := goalRecord{Index: i}
+	defer func() { d.rec.Goals = append(d.rec.Goals, gr) }()
+	iv, why := d.intervened(i, "re-runs")
+	if iv == nil {
+		d.rec.problem("%s", why)
+		gr.Narrative = "nothing to run again"
+		return nil
+	}
+	replaced := iv.Current
+	reason := ""
+	if newest := iv.newestVerdicts()[replaced]; newest == scenario.VerdictDislike {
+		for _, v := range iv.Verdicts {
+			if v.Version == replaced {
+				reason = strings.TrimSpace(v.Reason)
+			}
+		}
+	}
+	callsBefore := d.app.Calls()
+	var (
+		sess appSession
+		serr error
+	)
+	run, err := d.spine.RerunStep(ctx, RerunOrder{
+		GoalStep: GoalStep{OwnerUserId: d.owner, RunId: iv.GoalRunId, StepKey: appStepKey},
+		Level:    r.Level,
+	}, d.stepServer(iv.goal, &sess, &serr))
+	if serr != nil {
+		return serr
+	}
+	if err != nil {
+		return fmt.Errorf("running version %d of goal %d's step again: %w", replaced, iv.Goal, err)
+	}
+	gr.AppCalls = d.app.Calls() - callsBefore
+	seen := rerunSeen{From: replaced, Version: run.Version, Level: r.Level, Status: run.Status,
+		Recording: sess.RunId, Prompt: sess.Prompt, SessionLevel: sess.Level}
+	iv.Reruns = append(iv.Reruns, seen)
+	iv.Current = run.Version
+	iv.Recordings[run.Version] = sess.RunId
+	gr.Narrative = fmt.Sprintf("goal %d's step ran again as version %d (replacing %d) at level %s, the run %s",
+		iv.Goal, run.Version, replaced, wordOr(r.Level, "unchanged"), wordOr(run.Status, "unclosed"))
+
+	switch {
+	case run.Version <= replaced:
+		d.rec.problem("goal %d: the re-run of version %d of goal %d's step ran as version %d; a re-run is a NEW version, one past every version the step has", i, replaced, iv.Goal, run.Version)
+	case sess.RunId == "":
+		d.rec.problem("goal %d: the re-run of goal %d's step reached the app, and its session was not recorded", i, iv.Goal)
+	case sess.Failed:
+		d.rec.problem("goal %d: the re-run's session failed at action %d, so nothing was recorded to learn from", i, sess.FailedAt)
+	}
+	if reason != "" && !strings.Contains(sess.Prompt, reason) {
+		d.rec.problem("goal %d: the re-run's session was not told what the person disliked about version %d (%s); it was started with: %s", i, replaced, reason, sess.Prompt)
+	}
+	if r.Level != "" && sess.Level != r.Level {
+		d.rec.problem("goal %d: the re-run asked for level %s, and the app's session was started at %s", i, r.Level, wordOr(sess.Level, "the step's own level"))
+	}
+	if !sess.Failed && run.Status != "succeeded" {
+		d.rec.problem("goal %d: the re-run's session succeeded and the executor left the goal's run %s, not succeeded", i, wordOr(run.Status, "unclosed"))
+	}
+	if sess.Failed || sess.RunId == "" {
+		return nil
+	}
+	return d.learn(ctx, sess.RunId, &gr)
+}
+
+// checkRecordedLevels holds each re-run's version to the level it asked for,
+// as the version's own row records it (D20: "the level, model, effort and
+// author of every version are on the row").
+func (d *lifecycleDriver) checkRecordedLevels(iv *interventionRecord) {
+	for _, rr := range iv.Reruns {
+		if rr.Level == "" {
+			continue
+		}
+		row, ok := versionOf(iv.Versions, appStepKey, rr.Version)
+		if ok && row.Level != rr.Level {
+			d.rec.problem("version %d of goal %d's step records the level %s, and the re-run that made it asked for %s", rr.Version, iv.Goal, wordOr(row.Level, "none"), rr.Level)
+		}
+	}
+}
+
+// versionOf finds one version of one step among those read back.
+func versionOf(versions []StepVersionState, key string, version int) (StepVersionState, bool) {
+	for _, v := range versions {
+		if v.StepKey == key && v.Version == version {
+			return v, true
+		}
+	}
+	return StepVersionState{}, false
 }
 
 // publish turns the measured goal into the arm's counters.
@@ -938,4 +1389,208 @@ func checkDivergedReplayHandedOver(rec *lifecycleRecord) string {
 		}
 	}
 	return ""
+}
+
+// --- A person's correction (epic memql#5414, task memql#5420) ------------------
+
+// correction is the goal a person corrected: a version they disliked was run
+// again, and the version the step ended on -- the current one -- is one they
+// liked. It answers the versions disliked, each by its newest verdict. The
+// loader holds a scenario naming either check below to entries that make one.
+//
+// Only the CURRENT version is the liked one a procedure must have come from. A
+// version liked and then run again anyway was replaced, and the corpus leaves
+// a replaced version out whatever its verdict (D18), so asking for it would
+// fail a platform that did exactly what it should.
+func (r *lifecycleRecord) correction() (iv *interventionRecord, disliked []int) {
+	if r == nil {
+		return nil, nil
+	}
+	for _, x := range r.Interventions {
+		verdicts := x.newestVerdicts()
+		var dl []int
+		replacedDislike := false
+		for v, verdict := range verdicts {
+			if verdict == scenario.VerdictDislike {
+				dl = append(dl, v)
+				replacedDislike = replacedDislike || v < x.Current
+			}
+		}
+		if replacedDislike && verdicts[x.Current] == scenario.VerdictLike {
+			sort.Ints(dl)
+			return x, dl
+		}
+	}
+	return nil, nil
+}
+
+// replacedDislike is a version a person disliked and then ran again: the
+// first one, of the first goal that has one.
+func (r *lifecycleRecord) replacedDislike() (*interventionRecord, int) {
+	if r == nil {
+		return nil, 0
+	}
+	for _, x := range r.Interventions {
+		verdicts := x.newestVerdicts()
+		versions := make([]int, 0, len(verdicts))
+		for v := range verdicts {
+			versions = append(versions, v)
+		}
+		sort.Ints(versions)
+		for _, v := range versions {
+			if verdicts[v] == scenario.VerdictDislike && v < x.Current {
+				return x, v
+			}
+		}
+	}
+	return nil, 0
+}
+
+// checkLiftedFromTheLikedVersion is the correction's first named check: the
+// procedure the platform learned for the corrected goal came from the version
+// the person LIKED and from none they disliked, and its steps are the actions
+// as corrected rather than the wrong answer. It is D23's learning half, and
+// D18's superseded rule, as rows: a disliked recording and a replaced one
+// leave the corpus, and a liked one stays in it.
+//
+// Every part is asked separately, because each fails for its own reason: no
+// procedure is the learner never clearing the floor; a provenance naming the
+// disliked recording is the corpus keeping a recording it must drop; a step
+// carrying the wrong answer is the procedure being MINED from that recording,
+// whatever its provenance says.
+func checkLiftedFromTheLikedVersion(rec *lifecycleRecord, s scenario.Scenario) string {
+	iv, disliked := rec.correction()
+	if iv == nil {
+		return fmt.Sprintf("no goal of the lifecycle had a version the person disliked run again and the version it ended on liked, so there is no liked version for a procedure to have come from (%s)", rec.narrative())
+	}
+	sig := work.GoalSignature(iv.goal.Statement, inputKeys(iv.goal.Variables))
+	var cs *ConstructState
+	for n := range rec.Constructs {
+		if rec.Constructs[n].GoalSignature == sig {
+			cs = &rec.Constructs[n]
+		}
+	}
+	switch {
+	case cs == nil:
+		return fmt.Sprintf("no learned procedure exists for the corrected goal's signature %s; the owner's procedures are %s (%s)", sig, describeConstructs(rec.Constructs), rec.narrative())
+	case cs.Unreadable != "":
+		return fmt.Sprintf("the procedure %s could not be read, so what it came from is unknown: %s", cs.ConstructId, cs.Unreadable)
+	}
+	if id := iv.Recordings[iv.Current]; !containsRun(cs.RecordedFrom, id) {
+		return fmt.Sprintf("the procedure %s was not learned from %s, the recording of version %d, which the person liked; it names %s", cs.ConstructId, wordOr(id, "(no recording)"), iv.Current, describeRuns(cs.RecordedFrom))
+	}
+	for _, v := range disliked {
+		if id := iv.Recordings[v]; containsRun(cs.RecordedFrom, id) {
+			return fmt.Sprintf("the procedure %s was learned from %s, the recording of version %d, which the person disliked", cs.ConstructId, id, v)
+		}
+	}
+	if len(cs.Steps) != len(s.Steps) {
+		return fmt.Sprintf("the procedure %s has %d step(s) and the fixture app performs %d action(s): %s", cs.ConstructId, len(cs.Steps), len(s.Steps), strings.Join(cs.Steps, "; "))
+	}
+	vars := iv.goal.Variables
+	for n, st := range s.Steps {
+		got := scenario.Render(cs.Steps[n], vars)
+		if wrong, ok := iv.goal.Answer[st.Key]; ok && sameCommand(got, scenario.Render(wrong, vars)) {
+			return fmt.Sprintf("step %d of the procedure %s is the wrong answer the person disliked: %s", n, cs.ConstructId, got)
+		}
+		if want := scenario.Render(st.Target, vars); !sameCommand(got, want) {
+			return fmt.Sprintf("step %d of the procedure %s is %s for goal %d's input, and the corrected action is %s", n, cs.ConstructId, got, iv.Goal, want)
+		}
+	}
+	return ""
+}
+
+// checkDislikedVersionReadable is the correction's second named check: the
+// version the person disliked is still there after the re-run replaced it --
+// finished, no longer current, naming the session that answered it -- and the
+// re-run's version is the current one. "The previous version is still there"
+// is a property of the store (D18), read through the one read of every
+// version a person uses, the step timeline's.
+func checkDislikedVersionReadable(rec *lifecycleRecord) string {
+	iv, v := rec.replacedDislike()
+	if iv == nil {
+		return fmt.Sprintf("no goal of the lifecycle had a version the person disliked run again, so no replaced version was left to read (%s)", rec.narrative())
+	}
+	old, ok := versionOf(iv.Versions, appStepKey, v)
+	switch {
+	case !ok:
+		return fmt.Sprintf("version %d of goal %d's step is not among the versions the step reads back (%s): the re-run replaced it instead of adding beside it", v, iv.Goal, describeVersions(iv.Versions))
+	case old.Status != "done":
+		return fmt.Sprintf("version %d of goal %d's step reads back %s, not done: the version the person judged had finished, and nothing may rewrite it", v, iv.Goal, wordOr(old.Status, "with no status"))
+	case old.Current:
+		return fmt.Sprintf("version %d of goal %d's step still reads as current, so the re-run did not move the step's head to its own version", v, iv.Goal)
+	case !sameRun(old.ChildRunId, iv.Recordings[v]):
+		return fmt.Sprintf("version %d of goal %d's step names %s as the session that answered it, not %s, the recording that session made", v, iv.Goal, wordOr(old.ChildRunId, "no session"), wordOr(iv.Recordings[v], "(none)"))
+	}
+	cur, ok := versionOf(iv.Versions, appStepKey, iv.Current)
+	switch {
+	case !ok:
+		return fmt.Sprintf("version %d of goal %d's step, the re-run's, is not among the versions the step reads back (%s)", iv.Current, iv.Goal, describeVersions(iv.Versions))
+	case !cur.Current:
+		return fmt.Sprintf("version %d of goal %d's step, the re-run's, is not the current one (%s)", iv.Current, iv.Goal, describeVersions(iv.Versions))
+	}
+	return ""
+}
+
+// sameCommand reports whether two commands are one argument vector, however
+// each is quoted -- the world's own reading of a command (splitCommand).
+func sameCommand(a, b string) bool {
+	x, y := splitCommand(a), splitCommand(b)
+	if len(x) != len(y) {
+		return false
+	}
+	for i := range x {
+		if x[i] != y[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// sameRun compares two run ids that may be spelled canonically or bare.
+func sameRun(a, b string) bool {
+	a, b = memqlengine.BareShortId(strings.TrimSpace(a)), memqlengine.BareShortId(strings.TrimSpace(b))
+	return a != "" && a == b
+}
+
+func containsRun(ids []string, id string) bool {
+	for _, x := range ids {
+		if sameRun(x, id) {
+			return true
+		}
+	}
+	return false
+}
+
+func describeRuns(ids []string) string {
+	if len(ids) == 0 {
+		return "no recording"
+	}
+	return strings.Join(ids, ", ")
+}
+
+func describeConstructs(cs []ConstructState) string {
+	if len(cs) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(cs))
+	for _, c := range cs {
+		parts = append(parts, fmt.Sprintf("%s on %s for %s", c.ConstructId, wordOr(c.Rung, "no rung"), wordOr(c.GoalSignature, "no signature")))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func describeVersions(vs []StepVersionState) string {
+	if len(vs) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(vs))
+	for _, v := range vs {
+		current := ""
+		if v.Current {
+			current = ", current"
+		}
+		parts = append(parts, fmt.Sprintf("%s v%d %s%s", v.StepKey, v.Version, wordOr(v.Status, "no status"), current))
+	}
+	return strings.Join(parts, "; ")
 }

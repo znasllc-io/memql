@@ -68,6 +68,14 @@ shape run workRunFull {
   // these two a delegated recording could not name the goal it served or the
   // run that delegated it, however faithfully the row stored them.
   parentRunId
+  // epic memql#5414: the head, the stale steps, the pending re-run and the
+  // validator's summary. Listed for the reason above -- Nexus, the dispatcher
+  // and the acts all read runs through this shape, and a field missing here is
+  // a field none of them can see.
+  head
+  staleSteps
+  rerun
+  validation
 }
 
 /// What a run the loop protection stopped says about the stop, and nothing else: the fields the
@@ -122,6 +130,12 @@ shape step workStepFull {
   cost
   errorCode
   errorMessage
+  // epic memql#5414: which version this row is, the head it ran against, what
+  // a person changed for it and who wrote its input.
+  version
+  basis
+  override
+  authoredBy
 }
 
 /// Every modelCall field.
@@ -180,4 +194,13 @@ shape observation workObservationFull {
   kind
   data
   content
+}
+
+/// The epic memql#5414 values, both of them, and when the seed last wrote the row.
+@row
+shape feedbackPolicy feedbackPolicyFull {
+  row.id
+  validateAnswers
+  reusableAfterSignatures
+  row.createdAt
 }

@@ -63,6 +63,11 @@ var promptLevels = map[string]string{
 	"authoringRepair":      "reasoning",
 	"replanGap":            "reasoning",
 	"compileGoal":          "reasoning",
+	// validateStepAnswer (epic memql#5414, design D22): the answer validator.
+	// Its caller runs it at the RUN's level; strong is the level for a run
+	// that recorded none, because judging an answer on three axes is the
+	// judgement band, not the classification band.
+	"validateStepAnswer": "strong",
 
 	// NOT named in D3, assigned here with the reason.
 	//

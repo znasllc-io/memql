@@ -99,18 +99,32 @@ type sectionableDecision struct {
 	FileName   string `json:"fileName"`
 	FileFormat string `json:"fileFormat"`
 	// Sectionable is the model's verdict that the deliverable decomposes into
-	// independent, concurrently-producible sections.
+	// sections -- independent units, or ordered ones where a later section
+	// reads an earlier one's outputs (epic memql#5414, D24).
 	Sectionable bool `json:"sectionable"`
-	// Sections is one entry per independent unit of work. Each carries a short
-	// id-able label + a per-section instruction the production turn runs.
+	// Sections is one entry per section, in the order they run. Each carries a
+	// short id-able label, a per-section instruction, and the decomposition's
+	// own fields (sectionSpec).
 	Sections []sectionSpec `json:"sections"`
 	// Assembly is the one-line intent for the final concatenate+verify step
 	// (e.g. "concatenate the ten stories into one markdown file"). Optional; a
 	// blank assembly gets a deterministic default.
 	Assembly string `json:"assembly"`
+
+	// catalog are the sections a catalogued automation serves, by section
+	// index. Compile decides them after triage (work_compile_sections.go);
+	// they are never read from the model's answer.
+	catalog map[int]*catalogSection
+	// inlineAll, when set, keeps every section planned live an inline
+	// statement of the template, and is why: the draft that wrote them as
+	// automations of their own did not persist
+	// (work_compile_section_automations.go). Never read from the model's
+	// answer.
+	inlineAll string
 }
 
-// sectionSpec is one independent section of a sectionable deliverable.
+// sectionSpec is one section of a sectionable deliverable, in the order triage
+// listed it: a later section may read an earlier one's outputs.
 type sectionSpec struct {
 	// Label is a short human-meaningful name for the section ("redRidingHood",
 	// "vendorAcme"). Normalized to a DSL-safe identifier for the branch/step id.
@@ -118,6 +132,113 @@ type sectionSpec struct {
 	// Instruction is the per-section production instruction the agent turn runs
 	// for this section. May be empty -- the section then inherits the goal.
 	Instruction string `json:"instruction"`
+
+	// The decomposition's own fields (epic memql#5414, design D24), every one
+	// optional: a section that omits one simply has none, and component/work
+	// decides what that means -- a section with neither an output nor a
+	// postcondition has no end and refuses the decomposition.
+
+	// Purpose is the section as a one-line goal of its own; with Inputs it is
+	// the section's catalog key (work.SectionSignature).
+	Purpose string `json:"purpose,omitempty"`
+	// Inputs name what the section reads: the goal's inputs, or an earlier
+	// section's outputs.
+	Inputs []string `json:"inputs,omitempty"`
+	// Outputs name what the section produces.
+	Outputs []string `json:"outputs,omitempty"`
+	// ReuseIntent is the decomposer's PROPOSAL -- reusable, goalSpecific or
+	// accountSpecific; empty when it named none this build recognises.
+	ReuseIntent string `json:"reuseIntent,omitempty"`
+	// Effects are what the section changes: files, machine, external, spend,
+	// or concept:<v1 concept id>.
+	Effects []string `json:"effects,omitempty"`
+	// Postcondition says how the section's end is checked.
+	Postcondition string `json:"postcondition,omitempty"`
+}
+
+// UnmarshalJSON reads one section TOLERANTLY. The model answering triage is
+// the cheapest one there is, and the decision's parse is all-or-nothing: one
+// field in an unexpected shape -- `"inputs": "month"` where a list was asked
+// for -- would otherwise zero the whole decision and send a sectionable goal
+// down the author route with no word said. So every field is read for what
+// it can mean and a field that means nothing is absent, never an error. A
+// section written as a bare string is its label.
+func (s *sectionSpec) UnmarshalJSON(b []byte) error {
+	var label string
+	if err := json.Unmarshal(b, &label); err == nil {
+		*s = sectionSpec{Label: label}
+		return nil
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		*s = sectionSpec{}
+		return nil
+	}
+	*s = sectionSpec{
+		Label:         textField(raw["label"]),
+		Instruction:   textField(raw["instruction"]),
+		Purpose:       strings.TrimSpace(textField(raw["purpose"])),
+		Inputs:        nameList(raw["inputs"]),
+		Outputs:       nameList(raw["outputs"]),
+		ReuseIntent:   reuseIntentOf(raw["reuseIntent"]),
+		Effects:       nameList(raw["effects"]),
+		Postcondition: postconditionOf(raw["postcondition"]),
+	}
+	return nil
+}
+
+// textField is a string field's value; anything that is not a string is no
+// text.
+func textField(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+// nameList reads a list of names. A list keeps its non-empty strings; a single
+// string is split on commas, which is how a model that was asked for a list
+// most often answers with one.
+func nameList(v any) []string {
+	var parts []string
+	switch t := v.(type) {
+	case string:
+		parts = strings.Split(t, ",")
+	case []any:
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+	}
+	var out []string
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// reuseIntentOf reads the decomposer's reuse proposal; a value this build does
+// not recognise is no proposal rather than a guess.
+func reuseIntentOf(v any) string {
+	switch strings.ToLower(strings.TrimSpace(textField(v))) {
+	case "reusable":
+		return "reusable"
+	case "goalspecific":
+		return "goalSpecific"
+	case "accountspecific":
+		return "accountSpecific"
+	}
+	return ""
+}
+
+// postconditionOf reads how a section's end is checked: a string, or a list of
+// checks joined into one.
+func postconditionOf(v any) string {
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return strings.Join(nameList(v), "; ")
 }
 
 // usableSections returns the section specs that survive normalization +
@@ -378,12 +499,24 @@ func withSectionableLogic(bundle authoringBundle) authoringBundle {
 // BOTH the complexity verdict and the optional sectionable shape parsed off the
 // SAME response (one call, two reads). A nil/blank goal or an AI error yields a
 // non-sectionable zero decision + unknown complexity so the caller routes
-// normally.
-func (l *PlannerAgentLoop) classifySectionable(ctx context.Context, goal, nowRFC3339 string) (goalComplexity, string, sectionableDecision, error) {
-	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "goalComplexityTriage", map[string]any{
+// normally. guidance is the goal's description guidance (D23), passed only
+// when there is some.
+func (l *PlannerAgentLoop) classifySectionable(ctx context.Context, goal, nowRFC3339 string, guidance []map[string]any, goalInputs []string) (goalComplexity, string, sectionableDecision, error) {
+	data := map[string]any{
 		"goal": truncate(goal, maxGoalChars),
 		"now":  nowRFC3339,
-	})
+	}
+	if len(guidance) > 0 {
+		data["guidance"] = guidance
+	}
+	// The goal's own input names (epic memql#5414): a section's catalog
+	// signature is its purpose plus its input names, so a section that
+	// respelled "month" as "period" would miss the automation already doing
+	// that work, and would bind nothing from the goal's input.
+	if len(goalInputs) > 0 {
+		data["inputKeys"] = goalInputs
+	}
+	resp, err := l.engine.InvokeAI(systemActorContext(ctx), "goalComplexityTriage", data)
 	if err != nil {
 		return complexityUnknown, "", sectionableDecision{}, err
 	}

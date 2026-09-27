@@ -309,6 +309,44 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"level":         "integer -- 1 actions (default), 2 automation invocations",
 			},
 		},
+		// REUSE LABELS (epic memql#5414, design D24). Both handlers live in
+		// their own files (reuse.go, reuse_sweep.go) and refuse by name until
+		// the reuse stream replaces them.
+		{
+			Name: "setReuse",
+			Description: "Label one of the caller's constructs reusable, for one goal or for one account, or hand the " +
+				"label back to the evidence. The override is a VERSION and the evidence keeps counting underneath. " +
+				"Returns {constructId, reuse, override}.",
+			Handler: i.handleSetReuse,
+			ArgsSchema: map[string]string{
+				"constructId": "string (required) -- the caller's construct",
+				"label":       "string (required) -- reusable, goalSpecific, accountSpecific, or evidence to clear the override",
+			},
+		},
+		{
+			Name: "reuseSweep",
+			Description: "Decide every construct's reuse label from the evidence: the distinct goal signatures and " +
+				"account ties of the runs that used it, per owner under that owner's actor. Maintenance principal " +
+				"only. Returns {owners, constructs, changed, dryRun}.",
+			Handler: i.handleReuseSweep,
+			ArgsSchema: map[string]string{
+				"dryRun": "boolean -- report what would change without writing it",
+			},
+		},
+		{
+			Name: "catalogSections",
+			Description: "Catalogue a succeeded goal run's sections that were worked out live (design D24): every section " +
+				"automation of the run's draft whose current version stands -- not overridden, not disliked, in a run " +
+				"neither stale nor disliked -- is written into its owner's catalog as a construct of its own, keyed by the " +
+				"section's signature, so the next goal whose section asks for the same thing is served it instead of " +
+				"planning it live. An already-catalogued section writes nothing. Runs only as the catalogSucceededSections " +
+				"automation, borrowing the owner its event names. Returns {runId, catalogued, skipped, notCatalogued}.",
+			Handler: i.handleCatalogSections,
+			ArgsSchema: map[string]string{
+				"runId":       "string (required) -- the v1:work:run that just succeeded",
+				"ownerUserId": "string (required) -- the owner the completion event carries, re-verified by an owner-filtered read",
+			},
+		},
 		{
 			Name: "step",
 			Description: "The statement every step of a learned procedure's rendered SOURCE is. It always refuses (" +

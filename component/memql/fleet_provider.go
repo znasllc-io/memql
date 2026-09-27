@@ -283,6 +283,11 @@ type FleetCallRequest struct {
 	Purpose string
 	RunId   string
 	StepId  string
+	// Effort is a PERSON'S explicit effort for this one call (epic
+	// memql#5414, design D20). It rides ModelCallStart.effort for a runtime
+	// that has such a knob; one that has none ignores it. Empty means the
+	// level decides.
+	Effort string
 	// OnDelta, when set, receives streamed content as it arrives.
 	OnDelta func(string)
 }
@@ -863,6 +868,9 @@ type fleetProvider struct {
 	selector         string
 	attributes       FleetModel
 	minContextTokens int
+	// effort is a person's explicit effort for this one call (epic
+	// memql#5414), bound per resolution for the reason the floor is.
+	effort string
 	// lastMu guards the surface bookkeeping the ledger reads back after a
 	// call. It is per-entry rather than per-call because the provider
 	// interfaces return a string and have nowhere to carry it.
@@ -942,6 +950,10 @@ func (p *fleetProvider) call(ctx context.Context, req FleetCallRequest) (FleetCa
 	req.ActingUserId = p.actingUserId
 	if strings.TrimSpace(req.ActingUserId) == "" {
 		req.ActingUserId = actingUserFromContext(ctx)
+	}
+
+	if strings.TrimSpace(req.Effort) == "" {
+		req.Effort = p.effort
 	}
 
 	req.ContextTokens = max(req.ContextTokens, p.minContextTokens)

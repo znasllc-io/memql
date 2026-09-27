@@ -2,6 +2,7 @@ import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/clien
 
 import { flatten } from "../../kit/rows";
 import type { ApprovalRow } from "./rows";
+import { reuseFactsFromRow, type ReuseFacts } from "./reuse";
 
 // A LEARNED PROCEDURE, AND THE LADDER IT CLIMBS (epic memql#5408, #5412).
 //
@@ -225,6 +226,8 @@ export interface ProcedureRow {
   target: string;
   recordedFrom: RecordedFrom;
   preconditions: Preconditions;
+  /** What the evidence and the person say it is for (epic memql#5414). */
+  reuse: ReuseFacts;
 }
 
 function objectOf(v: unknown): Record<string, unknown> | null {
@@ -380,6 +383,7 @@ export function procedureFromRow(row: Row): ProcedureRow {
     target: str(procedure, "target"),
     recordedFrom: recordedFromOf(procedure?.["recordedFrom"]),
     preconditions: preconditionsOf(flat["preconditions"]),
+    reuse: reuseFactsFromRow(flat),
   };
 }
 

@@ -58,9 +58,11 @@ mutation run createWorkRun {
     initialChainHead       string
     startedAt              string!
     parentRunId            string
+    head                   object
+    rerun                  object
   }
   insert {
-    accept { executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt, parentRunId }
+    accept { executionAuthority, goalId, goalSignature, automationName, templateFingerprint, templateConstructId, templateVersion, input, inputFingerprint, triggeredBy, triggerEvent, variables, forkedFromRunId, forkAtStepKey, status, nodeId, initialChainHead, startedAt, parentRunId, head, rerun }
     stamp {
       id: args.runId
       ownerUserId: actor.userId
@@ -78,6 +80,12 @@ mutation run createWorkRun {
 /// their own. goalSignature and parentRunId (epic memql#5408) are accepted for the run compile opens
 /// before it knows the goal's signature, and for a child run opened by a writer that learns its
 /// parent afterwards; like every argument here they are written only when named.
+///
+/// head, staleSteps, rerun and validation (epic memql#5414) carry NO default for the same reason:
+/// the journal names head at every receipt and nothing else, a person's act names rerun and
+/// staleSteps, and the validator names validation -- four writers of one row, and a `??` default on
+/// any of them would erase the others' value at the moment it was written. The merge is SHALLOW, so
+/// the journal always sends the WHOLE head map; `{}` and `[]` are how a writer clears one.
 @serverOnly
 mutation run updateWorkRun {
   args {
@@ -105,9 +113,13 @@ mutation run updateWorkRun {
     actualFootprint  object
     summary          object
     parentRunId      string
+    head             object
+    staleSteps       []string
+    rerun            object
+    validation       object
   }
   update {
-    accept { status, goalSignature, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary, parentRunId }
+    accept { status, goalSignature, automationName, templateConstructId, templateVersion, templateFingerprint, variables, nodeId, callerSuppliedPayload, heartbeatAt, chainHead, stepOrder, waitingOn, spent, outcome, errorCode, errorMessage, finishedAt, cancelRequested, cancelledBy, actualFootprint, summary, parentRunId, head, staleSteps, rerun, validation }
     stamp {
       id: args.runId
     }
@@ -118,25 +130,42 @@ mutation run updateWorkRun {
 /// again for the same stepId with attempt incremented. @serverOnly for createWorkRun's reason: a
 /// step row is a claim about what the engine ran, which no caller may make about itself, so
 /// actor.userId scoping narrows the wrong axis.
+///
+/// version, basis, override and authoredBy (epic memql#5414) describe the version this intent
+/// opens. result, resultFingerprint, binding, errorCode, errorMessage and childRunId are the
+/// RESET fields: an insert on an existing id is a shallow read-merge, so a version 2 intent that
+/// did not name them would carry version 1's answer until its own receipt landed -- and forever, if
+/// it never did. The journal names them (with empty values) on every version after the first; on a
+/// first version it names none, so an ordinary run writes nothing more than before.
 @serverOnly
 @actor
 mutation step createWorkStep {
   args {
-    stepId          string!
-    runId           string!
-    key             string!
-    seq             int!
-    stepType        string!
-    kind            string
-    call            object
-    dependsOn       []string
-    status          string!
-    attempt         int!
-    idempotencyKey  string
-    startedAt       string
+    stepId             string!
+    runId              string!
+    key                string!
+    seq                int!
+    stepType           string!
+    kind               string
+    call               object
+    dependsOn          []string
+    status             string!
+    attempt            int!
+    idempotencyKey     string
+    startedAt          string
+    version            int
+    basis              object
+    override           object
+    authoredBy         string
+    result             object
+    resultFingerprint  string
+    binding            object
+    errorCode          string
+    errorMessage       string
+    childRunId         string
   }
   insert {
-    accept { runId, key, seq, stepType, call, dependsOn, status, attempt, idempotencyKey, startedAt }
+    accept { runId, key, seq, stepType, call, dependsOn, status, attempt, idempotencyKey, startedAt, version, basis, override, authoredBy, result, resultFingerprint, binding, errorCode, errorMessage, childRunId }
     stamp {
       id: args.stepId
       ownerUserId: actor.userId
@@ -176,9 +205,65 @@ mutation step updateWorkStep {
     resumeAt           string
     externalKey        string
     fingerprint        object
+    version            int
+    basis              object
+    override           object
+    authoredBy         string
   }
   update {
-    accept { status, result, resultFingerprint, binding, actualFootprint, postcondition, symptom, attempt, errorCode, errorMessage, finishedAt, durationMs, tokens, cost, childRunId, approvalId, resumeAt, externalKey, fingerprint }
+    accept { status, result, resultFingerprint, binding, actualFootprint, postcondition, symptom, attempt, errorCode, errorMessage, finishedAt, durationMs, tokens, cost, childRunId, approvalId, resumeAt, externalKey, fingerprint, version, basis, override, authoredBy }
+    stamp {
+      id: args.stepId
+    }
+  }
+}
+
+/// Make an EARLIER version of a step current again (epic memql#5414, design D18): a new
+/// row-version of the step carrying that version's content verbatim, written when a person moves the
+/// run's head back. The store is append-only, so nothing is lost and nothing is rewritten -- the
+/// later versions stay readable through the version-history read -- and every collapsed read (the
+/// timeline, the procedure corpus, resume's journal loader) keeps answering with the step's newest
+/// row, which is now the head again. Every per-version field is an argument, and the writer names
+/// ALL of them: an update is a read-merge, and one left out would keep the LATER version's value
+/// under the earlier version's number.
+///
+/// @serverOnly: the row is the engine's testimony about what ran, and which version is current is
+/// the run's head, decided by integrations/work after it has checked that the caller owns the run.
+/// Scoping to actor.userId would let an owner re-assert a version with any content they typed, which
+/// is a forged execution record however correctly attributed.
+@serverOnly
+mutation step reassertWorkStepVersion {
+  args {
+    stepId             string!
+    status             string!
+    result             object
+    resultFingerprint  string
+    binding            object
+    postcondition      object
+    symptom            string
+    attempt            int!
+    version            int!
+    basis              object
+    override           object
+    authoredBy         string
+    childRunId         string
+    idempotencyKey     string
+    startedAt          string
+    finishedAt         string
+    durationMs         int
+    tokens             int
+    cost               float
+    errorCode          string
+    errorMessage       string
+    actualFootprint    object
+    approvalId         string
+    resumeAt           string
+    externalKey        string
+    input              object
+    fingerprint        object
+  }
+  update {
+    accept { status, result, resultFingerprint, binding, postcondition, symptom, attempt, version, basis, override, authoredBy, childRunId, idempotencyKey, startedAt, finishedAt, durationMs, tokens, cost, errorCode, errorMessage, actualFootprint, approvalId, resumeAt, externalKey, input, fingerprint }
     stamp {
       id: args.stepId
     }
@@ -353,6 +438,31 @@ mutation approval decideWorkApproval {
     accept { decision, decidedBy, decidedAt, answer }
     stamp {
       id: args.approvalId
+    }
+  }
+}
+
+/// Create the epic memql#5414 values -- the seed materializer's write for `seed feedbackPolicy
+/// feedbackPolicyPrimary` (dsl/work/seeds.memql), which calls create<Concept> with <concept>Id by convention and
+/// re-asserts the row on every boot.
+///
+/// Server-only, and scoping to actor.userId is not available even in principle: the row has no
+/// owner -- the values are the deployment's -- so there is no field for actor.userId to compare
+/// against, and inventing one would give each person a private validator switch and a private
+/// reuse threshold. What must hold is that no caller can rewrite the values every person's work is
+/// judged by. The one writer is the seed materializer, which stamps internal origin, and the
+/// concept's cluster-owner write rule stands behind this annotation.
+@serverOnly
+mutation feedbackPolicy createFeedbackPolicy {
+  args {
+    feedbackPolicyId         string!
+    validateAnswers          bool!
+    reusableAfterSignatures  int!
+  }
+  insert {
+    accept { validateAnswers, reusableAfterSignatures }
+    stamp {
+      id: args.feedbackPolicyId
     }
   }
 }

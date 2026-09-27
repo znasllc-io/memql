@@ -251,6 +251,7 @@ func (j *workJournal) failTerminally(ctx context.Context, exec *AutomationExecut
 	if exec.Error != "" {
 		args["errorMessage"] = exec.Error
 	}
+	closeHeadArgs(exec, args)
 	j.call(ctx, "updateWorkRun", args)
 	if j.logger != nil {
 		j.logger.Info("work journal: a failure that cannot end differently was recorded as terminal rather than parked",

@@ -65,6 +65,48 @@ QueryClient.prototype.automationLoopStops = function (this: QueryClient, args: A
   return this.executeNamed("automationLoopStops", buildAutomationLoopStops(args), opts);
 };
 
+/** Branch one of the caller's finished runs at a step: a NEW run (mode fork) whose steps before the branch point are served by REFERENCE from the source run -- they do not run again -- and whose branch step runs live with the person's changes, followed by everything after it (design D19). The source run is untouched. When the branch step was answered by an app session, the branch is a NEW session started against the workspace as it was before that step, rebuilt from the recording's content-addressed files; a branch whose snapshot is missing a file's content is refused naming the file, because a branch from a partial workspace would diverge without saying so. Returns {runId, forkedFromRunId, forkAtStepKey}. */
+export interface BranchRunArgs {
+  /** The caller's finished run to branch from. */
+  runId: string;
+  /** The top-level step the branch diverges at. */
+  stepKey: string;
+  /** The level of intelligence to ask for at the branch step. */
+  // Enum: fast | strong | reasoning
+  level?: string;
+  /** A policy entry to pin at the branch step: a provider name, fleet:<modelId>, app:<id> or app:<id>:<model>. */
+  model?: string;
+  /** The effort to ask an app to spend at the branch step. */
+  // Enum: low | medium | high | xhigh | max
+  effort?: string;
+  /** For a session step, the whole prompt the new session runs with; for any other step, instructions added to its prompt. */
+  prompt?: string;
+  /** Arguments to use at the branch step instead of its own, by name. */
+  inputs?: Record<string, unknown>;
+}
+
+export function buildBranchRun(args: BranchRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  if (args.level !== undefined) parts.push("level: " + renderMemQLValue(args.level));
+  if (args.model !== undefined) parts.push("model: " + renderMemQLValue(args.model));
+  if (args.effort !== undefined) parts.push("effort: " + renderMemQLValue(args.effort));
+  if (args.prompt !== undefined) parts.push("prompt: " + renderMemQLValue(args.prompt));
+  if (args.inputs !== undefined) parts.push("inputs: " + renderMemQLValue(args.inputs));
+  return "builtin branchRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    branchRun(args: BranchRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.branchRun = function (this: QueryClient, args: BranchRunArgs = {} as BranchRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("branchRun", buildBranchRun(args), opts);
+};
+
 /** Generate an event-email rule's automation construct and arm it (memql#4829). The generator is a DETERMINISTIC template over the rule's form -- the LLM authoring path stays off, because a rule that mails strangers is not a place for a model to improvise and a deterministic generator is one a person can read the output of. The generated .memql goes through the ordinary authoring pipeline: bundle, validate, activate. Activation takes effect IMMEDIATELY rather than at next boot. The rule row records the bundle and construct it produced; on refusal it records the engine's own sentence on lastError and the rule goes to 'failed' rather than silently staying draft. */
 export interface CampaignActivateEmailRuleArgs {
   /** The rule to generate and arm. The caller must own it: the generated construct runs under the AUTHOR's envelope, so who armed it decides what it can read. */
@@ -1857,6 +1899,34 @@ QueryClient.prototype.moduleReadiness = function (this: QueryClient, args: Modul
   return this.executeNamed("moduleReadiness", buildModuleReadiness(args), opts);
 };
 
+/** Make an earlier version of one step of the caller's finished run current again -- going back (design D18). The head moves; every later step whose recorded version was computed from the same upstream becomes current again without running, and only the steps with no such version run again, in order. Returns {runId, stepKey, version, staleSteps}. */
+export interface MoveRunHeadArgs {
+  /** The caller's finished run. */
+  runId: string;
+  /** The top-level step whose version to make current. */
+  stepKey: string;
+  /** The version to make current. */
+  version: number;
+}
+
+export function buildMoveRunHead(args: MoveRunHeadArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  parts.push("version: " + renderMemQLValue(args.version));
+  return "builtin moveRunHead(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    moveRunHead(args: MoveRunHeadArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.moveRunHead = function (this: QueryClient, args: MoveRunHeadArgs = {} as MoveRunHeadArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("moveRunHead", buildMoveRunHead(args), opts);
+};
+
 /** Analyze a package source offline and return the report, deploying nothing (epic memql#4794, D12). Fetches the tracked source, walks the manifest, discovers the DSL domains and runs the SAME Init-grade gates strict boot runs -- so 'this DSL would refuse boot' is an answer produced here, before a pod is ever asked to run it. Returns {report, ok}: the report names every deployable with its build plan (or 'prebuilt output found -- build skipped'), every DSL domain with construct counts, any Go pack as reported-not-deployable, and every problem found. A refusal carries one of the stable codes in component/packages/refusal.go. */
 export interface PackageAnalyzeArgs {
   /** The v1:platform:package row to analyze. */
@@ -2226,6 +2296,50 @@ QueryClient.prototype.recall = function (this: QueryClient, args: RecallArgs = {
   return this.executeNamed("recall", buildRecall(args), opts);
 };
 
+/** Say what one of the caller's runs, or one version of one of its steps, was like (design D21): a like, a dislike or neutral -- the AI Fluency framework's Discernment. A dislike must name at least one axis -- the product (what it produced), the process (how it went about it) or the performance (how it behaved) -- and is refused without one, because the question is the point. A later verdict is a NEW row and never rewrites an earlier one. When the answer validator judged the same version the other way, the disagreement is kept on the row. Returns {observationId, verdict, validatorDisagrees}. */
+export interface RecordFeedbackArgs {
+  /** The caller's run. */
+  runId: string;
+  /** The top-level step judged; omit it to judge the whole run. */
+  stepKey?: string;
+  /** The version of that step judged; the current one when omitted. */
+  version?: number;
+  /** The person's verdict. */
+  // Enum: like | dislike | neutral
+  verdict: string;
+  /** What it produced was wrong or incomplete. */
+  product?: boolean;
+  /** How it went about the work was wrong. */
+  process?: boolean;
+  /** How it behaved -- its tone, pace or instruction-following -- was wrong. */
+  performance?: boolean;
+  /** Why, in the person's own words. It rides as guidance when the step is run again or branched, and it steers the next model used for this goal. */
+  reason?: string;
+}
+
+export function buildRecordFeedback(args: RecordFeedbackArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  if (args.stepKey !== undefined) parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
+  parts.push("verdict: " + renderMemQLValue(args.verdict));
+  if (args.product !== undefined) parts.push("product: " + renderMemQLValue(args.product));
+  if (args.process !== undefined) parts.push("process: " + renderMemQLValue(args.process));
+  if (args.performance !== undefined) parts.push("performance: " + renderMemQLValue(args.performance));
+  if (args.reason !== undefined) parts.push("reason: " + renderMemQLValue(args.reason));
+  return "builtin recordFeedback(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recordFeedback(args: RecordFeedbackArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recordFeedback = function (this: QueryClient, args: RecordFeedbackArgs = {} as RecordFeedbackArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recordFeedback", buildRecordFeedback(args), opts);
+};
+
 /** Cut a new release of MemQL: compute the next version from the repository's existing vX.Y.Z tags, create the tag at main's head, and publish a GitHub Release -- which is what fires the image-build cascade. Owner role only, enforced in Go before any network call. Returns the version, the Release URL and the base sha. Requires MEMQL_RELEASE_REPO and the MEMQL_GITHUB_RELEASE_TOKEN credential. */
 export interface ReleaseCutArgs {
   /** Which part of the newest existing version to increment. major and minor zero the parts below them. */
@@ -2338,6 +2452,48 @@ declare module "./query.js" {
 
 QueryClient.prototype.requestSpecialistTraining = function (this: QueryClient, args: RequestSpecialistTrainingArgs = {} as RequestSpecialistTrainingArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("requestSpecialistTraining", buildRequestSpecialistTraining(args), opts);
+};
+
+/** Run one step of one of the caller's finished runs AGAIN, as a new VERSION of that step (design D18, D20): the step runs with whatever the person changed -- the level, the model, the effort, the prompt or the inputs -- on that version only, and every step after it runs again from the new answer, each as a new version. Nothing is deleted: every earlier version stays readable and moveRunHead goes back to it. When the person disliked the version being replaced, the axes and the reason they gave ride along as guidance (D23). Returns {runId, stepKey, version, staleSteps}. */
+export interface RerunStepArgs {
+  /** The caller's finished run. */
+  runId: string;
+  /** The top-level step to run again. */
+  stepKey: string;
+  /** The level of intelligence to ask for instead of the step's own. Embeddings is never offered: a different embedder answers in a different vector space. */
+  // Enum: fast | strong | reasoning
+  level?: string;
+  /** A policy entry to pin instead of routing by level: a provider name, fleet:<modelId>, app:<id> or app:<id>:<model>. */
+  model?: string;
+  /** The effort to ask an app to spend. An app that is not asked keeps the effort its level maps to. */
+  // Enum: low | medium | high | xhigh | max
+  effort?: string;
+  /** For a step an app session answered, the whole prompt the session runs with; for any other step, instructions added to the step's prompt. */
+  prompt?: string;
+  /** Arguments to use instead of the step's own, by name. Anything omitted keeps its value. */
+  inputs?: Record<string, unknown>;
+}
+
+export function buildRerunStep(args: RerunStepArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("stepKey: " + renderMemQLValue(args.stepKey));
+  if (args.level !== undefined) parts.push("level: " + renderMemQLValue(args.level));
+  if (args.model !== undefined) parts.push("model: " + renderMemQLValue(args.model));
+  if (args.effort !== undefined) parts.push("effort: " + renderMemQLValue(args.effort));
+  if (args.prompt !== undefined) parts.push("prompt: " + renderMemQLValue(args.prompt));
+  if (args.inputs !== undefined) parts.push("inputs: " + renderMemQLValue(args.inputs));
+  return "builtin rerunStep(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    rerunStep(args: RerunStepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.rerunStep = function (this: QueryClient, args: RerunStepArgs = {} as RerunStepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("rerunStep", buildRerunStep(args), opts);
 };
 
 /** Restore a Library document to an earlier version by APPENDING a new latest version equal to the chosen one (memql#1230). Forward-only and non-destructive: history is never deleted; the restore lands as a new version (authorKind=system) with note 'restored from vN'. ownerUserId is threaded from the document row. */
@@ -2686,6 +2842,33 @@ declare module "./query.js" {
 
 QueryClient.prototype.routingRules = function (this: QueryClient, args: RoutingRulesArgs = {} as RoutingRulesArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("routingRules", buildRoutingRules(args), opts);
+};
+
+/** Label one of the caller's constructs reusable, for one goal, or for one account -- or hand the label back to the evidence (design D24). The decomposer proposes and the evidence decides; this is the person's override, and it is a VERSION: each call writes the next override version and never rewrites an earlier one, while the evidence keeps counting underneath so Nexus can show both. Returns {constructId, reuse, override}.
+Caller-scoped in its handler: the construct is read under the caller's own actor, so a caller who does not own it reads nothing and writes nothing. */
+export interface SetConstructReuseArgs {
+  /** The caller's construct. */
+  constructId: string;
+  /** The person's label; evidence clears the override and follows the sweep's label again. */
+  // Enum: reusable | goalSpecific | accountSpecific | evidence
+  label: string;
+}
+
+export function buildSetConstructReuse(args: SetConstructReuseArgs): string {
+  const parts: string[] = [];
+  parts.push("constructId: " + renderMemQLValue(args.constructId));
+  parts.push("label: " + renderMemQLValue(args.label));
+  return "builtin setConstructReuse(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setConstructReuse(args: SetConstructReuseArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setConstructReuse = function (this: QueryClient, args: SetConstructReuseArgs = {} as SetConstructReuseArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setConstructReuse", buildSetConstructReuse(args), opts);
 };
 
 /** Begin a reusable personal store connection without changing any deployable. The shop is derived from a recent signed Shopify App URL launch, then authorized through the session-bound callback. No caller-supplied store address is accepted. */
@@ -3562,6 +3745,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.storefrontProbe = function (this: QueryClient, args: StorefrontProbeArgs = {} as StorefrontProbeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("storefrontProbe", buildStorefrontProbe(args), opts);
+};
+
+/** Every VERSION of every step of one of the caller's runs -- the step timeline's read (design D18). The standard reads collapse an append-only row to its newest version; this answers each version once, folded to its newest row-version, with the run's head marked (current). Returns one entry per version, keyed <stepId>@v<version>. */
+export interface WorkStepVersionsArgs {
+  /** The caller's run. */
+  runId: string;
+}
+
+export function buildWorkStepVersions(args: WorkStepVersionsArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "builtin workStepVersions(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workStepVersions(args: WorkStepVersionsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workStepVersions = function (this: QueryClient, args: WorkStepVersionsArgs = {} as WorkStepVersionsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workStepVersions", buildWorkStepVersions(args), opts);
 };
 
 /** Fetch one run's full execution timeline: every run and step version and every observation, ordered by createdAt. The OS Nexus (sub-project B) reads the rows live; this is the one-call form the VS Code panel and the cockpit use. Replaces harnessTrace, which read the retired v1:harness:plan / step / observation stream -- same envelope, same @sdk surface, and `planId` becomes `runId`. */

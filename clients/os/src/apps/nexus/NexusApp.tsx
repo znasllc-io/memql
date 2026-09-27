@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { Caption, Check, Head, Panel, SetupGroup } from "../../kit";
+import { Caption, Check, ContentSkeleton, Head, Panel, SetupGroup } from "../../kit";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { ApprovalsSection } from "./ApprovalsSection";
 import { AutomationsSection } from "./AutomationsSection";
 import { GoalsSection } from "./GoalsSection";
 import { GoalView } from "./GoalView";
-import { RunPage } from "./RunPage";
+import { OverviewSection } from "./OverviewSection";
+import { EMPTY_RUN_MEMORY, RunPage, type RunPageMemory } from "./RunPage";
 import { RunsSection } from "./RunsSection";
 import { defaultRunId } from "./world";
 import { NEXUS_APP_ID, NEXUS_LOG_CONCEPTS } from "./concepts";
@@ -26,6 +27,7 @@ import {
   idTail,
   pendingApprovalsOfRun,
   runFromRow,
+  runTitle,
   stepFromRow,
   stepsInOrder,
   type ApprovalRow,
@@ -108,6 +110,15 @@ export function NexusApp({
   const [selectedGoalId, setSelectedGoalId] = useState("");
   const [openGoalId, setOpenGoalId] = useState("");
   const [openRunId, setOpenRunId] = useState("");
+  // THE RUNS THE PERSON CAME THROUGH to reach the open one, from a run page:
+  // a branch or a replay opened from a run, a child run, the run a branch
+  // came from. Back pops it, so it returns to the run it was opened from
+  // rather than to the list; a run opened from anywhere else starts it empty.
+  const [runTrail, setRunTrail] = useState<string[]>([]);
+  // What each run page was showing -- the open step, the version picked, the
+  // drafts -- kept across a visit elsewhere, so Back lands where the person
+  // left off. A ref: remembering must not re-render the app.
+  const runMemory = useRef(new Map<string, RunPageMemory>());
   const [selectedApprovalId, setSelectedApprovalId] = useState("");
   const [selectedAutomationId, setSelectedAutomationId] = useState("");
   // Which run of the open goal the map draws, and the moment it is rewound to.
@@ -138,11 +149,13 @@ export function NexusApp({
   }, [goalRows]);
 
   // THE CATALOG, FOLLOWED WHILE A VISIBLE SURFACE NEEDS IT (see
-  // useAutomations). Automations always does; Approvals does only while a
+  // useAutomations). Automations always does, and so does the Overview, whose
+  // reuse figures count the same two lists; Approvals does only while a
   // promotion waits in it, because only that card names a procedure it has to
   // find.
   const feeds = useAutomationFeeds(
     sectionId === "automations" ||
+      sectionId === "overview" ||
       (sectionId === "approvals" && approvalRows.some((a) => a.kind === PROCEDURE_PROMOTION)),
   );
   // Which procedure's page is open. A link naming one the feed does not hold
@@ -152,9 +165,29 @@ export function NexusApp({
 
   function openRun(runId: string) {
     if (runId.trim() === "") return;
+    setRunTrail([]);
     setOpenRunId(runId);
     askContext(`nexus run:${idTail(runId)}`);
     navigate("runs");
+  }
+
+  /** Open a run FROM the run page showing `from`, so Back returns there. */
+  function openRunFrom(from: string, runId: string) {
+    if (runId.trim() === "") return;
+    setRunTrail((held) => [...held, from]);
+    setOpenRunId(runId);
+    askContext(`nexus run:${idTail(runId)}`);
+  }
+
+  function backFromRun() {
+    const previous = runTrail[runTrail.length - 1];
+    if (previous === undefined) {
+      setOpenRunId("");
+      return;
+    }
+    setRunTrail((held) => held.slice(0, -1));
+    setOpenRunId(previous);
+    askContext(`nexus run:${idTail(previous)}`);
   }
 
   function openGoal(goalId: string) {
@@ -235,6 +268,18 @@ export function NexusApp({
   if (sectionId === "settings") {
     return <NexusSettingsSection settings={settings} update={update} />;
   }
+  if (sectionId === "overview") {
+    return (
+      <OverviewSection
+        goals={goals.snapshot}
+        runs={runs.snapshot}
+        approvals={approvals.snapshot}
+        catalog={feeds.catalog.snapshot}
+        procedures={feeds.procedures.snapshot}
+        navigate={navigate}
+      />
+    );
+  }
   if (sectionId === "logs") {
     return (
       <AppLogsSection
@@ -279,16 +324,47 @@ export function NexusApp({
   if (sectionId === "runs") {
     const open = runRows.find((run) => idTail(run.id) === idTail(openRunId)) ?? null;
     if (openRunId !== "" && open !== null) {
+      const previousId = runTrail[runTrail.length - 1];
+      const previous =
+        previousId === undefined ? null : (runRows.find((run) => idTail(run.id) === idTail(previousId)) ?? null);
       return (
+        // KEYED ON THE RUN: another run is another page, with its own open
+        // step and its own drafts -- which the memory below hands back when
+        // the person returns.
         <RunView
+          key={idTail(open.id)}
           run={open}
+          runs={runRows}
           goal={goalsById.get(idTail(open.goalId)) ?? null}
           approvals={pendingApprovalsOfRun(approvalRows, open.id)}
           derive={derive}
-          onBack={() => setOpenRunId("")}
+          backLabel={previousId === undefined ? "Runs" : previous === null ? "the run it came from" : runTitle(previous)}
+          onBack={backFromRun}
+          onBackToList={() => {
+            setRunTrail([]);
+            setOpenRunId("");
+          }}
           onOpenGoal={openGoal}
           onOpenApprovals={openApproval}
-          onOpenRun={openRun}
+          onOpenRun={(runId) => openRunFrom(open.id, runId)}
+          memory={runMemory.current.get(idTail(open.id)) ?? EMPTY_RUN_MEMORY}
+          onRemember={(memory) => runMemory.current.set(idTail(open.id), memory)}
+        />
+      );
+    }
+    // A RUN OPENED FROM A RUN PAGE, NOT ARRIVED YET. A branch or a replay
+    // answers with the new run's id a moment before its row reaches the feed,
+    // and falling back to the list in that moment would be the page moving
+    // somewhere nobody asked to go. So the page it will be stands in its
+    // shape, with Back to where the person was.
+    if (openRunId !== "" && runTrail.length > 0) {
+      return (
+        <ArrivingRun
+          onBack={backFromRun}
+          onBackToList={() => {
+            setRunTrail([]);
+            setOpenRunId("");
+          }}
         />
       );
     }
@@ -390,22 +466,32 @@ function GoalViewHost(
  */
 function RunView({
   run,
+  runs,
   goal,
   approvals,
   derive,
+  backLabel,
   onBack,
+  onBackToList,
   onOpenGoal,
   onOpenApprovals,
   onOpenRun,
+  memory,
+  onRemember,
 }: {
   run: RunRow;
+  runs: readonly RunRow[];
   goal: GoalRow | null;
   approvals: ApprovalRow[];
   derive: ReturnType<typeof useDeriveRun>;
+  backLabel: string;
   onBack: () => void;
+  onBackToList: () => void;
   onOpenGoal: (goalId: string) => void;
   onOpenApprovals: (approvalId: string) => void;
   onOpenRun: (runId: string) => void;
+  memory: RunPageMemory;
+  onRemember: (memory: RunPageMemory) => void;
 }) {
   const steps = useRunSteps(run.id);
   const journal = useJournal(run.id);
@@ -423,17 +509,38 @@ function RunView({
   return (
     <RunPage
       run={run}
+      runs={runs}
       goal={goal}
       steps={ordered}
       stepsState={steps.snapshot.state}
       approvals={approvals}
       journal={journal}
       derive={derive}
+      backLabel={backLabel}
       onBack={onBack}
+      onBackToList={onBackToList}
       onOpenGoal={onOpenGoal}
       onOpenApprovals={onOpenApprovals}
       onOpenRun={onOpenRun}
+      memory={memory}
+      onRemember={onRemember}
     />
+  );
+}
+
+/** The run page's shape, while the run it will show has not reached the feed. */
+function ArrivingRun({ onBack, onBackToList }: { onBack: () => void; onBackToList: () => void }) {
+  return (
+    <div className="os-nexus-run">
+      <Head
+        title="New run"
+        breadcrumbs={[{ label: "Runs", onSelect: onBackToList }, { label: "New run" }]}
+        back={{ label: "the run it came from", onSelect: onBack }}
+      />
+      <div className="os-nexus-run-body">
+        <ContentSkeleton kind="detail" label="Opening the new run" />
+      </div>
+    </div>
   );
 }
 

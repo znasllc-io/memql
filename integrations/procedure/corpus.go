@@ -95,6 +95,20 @@ type recording struct {
 	Workspace   string
 	// Verdicts are a person's step-level feedback, by step key.
 	Verdicts map[string][]stepVerdict
+	// Weight is what the recording weighs when patterns are ranked: two for
+	// a recording a person liked -- the parent step version it recorded, or
+	// the run itself -- and one otherwise (D23, parent_version.go). It ranks
+	// and never counts: the two-use floor counts recordings.
+	Weight int
+}
+
+// weight is the recording's ranking weight; a recording built without one
+// weighs one.
+func (r recording) weight() int {
+	if r.Weight < 1 {
+		return 1
+	}
+	return r.Weight
 }
 
 // stepEvidence is what one recorded action reported.
@@ -147,7 +161,9 @@ func (r recording) variables() map[string]any { return obj(r.Run, "variables") }
 //
 // A REPLAY RUN IS NOT A RECORDING (triggeredBy `procedure:`), and a disliked
 // recording contributes nothing (D23): exclusion happens here, in the loader,
-// so that nothing downstream can forget it.
+// so that nothing downstream can forget it. So does a recording whose parent
+// step version was superseded or disliked (parent_version.go), and the
+// recording's weight is decided in the same place.
 //
 // A RECORDING THAT CANNOT BE READ BACK IS SKIPPED WHOLE: an action with no
 // tool_result observation, or whose arguments were truncated, is a step whose
@@ -170,6 +186,7 @@ func (i *Integration) loadCorpus(ctx context.Context, k corpusKey) ([]recording,
 	}
 	sortOldestFirst(runs)
 
+	parents := map[string]*parentFacts{}
 	var out []recording
 	for _, run := range runs {
 		runId := str(run, "id")
@@ -182,7 +199,7 @@ func (i *Integration) loadCorpus(ctx context.Context, k corpusKey) ([]recording,
 		if str(run, "goalSignature") != sig || str(run, "status") != "succeeded" || isReplayRun(run) {
 			continue
 		}
-		rec, ok, err := i.loadRecording(actorCtx, run, k.Level)
+		rec, ok, err := i.loadRecordingWith(actorCtx, run, k.Level, parents)
 		if err != nil {
 			return nil, err
 		}
@@ -196,8 +213,14 @@ func (i *Integration) loadCorpus(ctx context.Context, k corpusKey) ([]recording,
 // loadRecording reads one run's steps and evidence. ok is false for a run
 // that is not usable as a recording at this level.
 func (i *Integration) loadRecording(ctx context.Context, run map[string]any, level Level) (recording, bool, error) {
+	return i.loadRecordingWith(ctx, run, level, nil)
+}
+
+// loadRecordingWith is loadRecording sharing parent runs' rows across the
+// recordings of one corpus load; a nil cache reads them for this run alone.
+func (i *Integration) loadRecordingWith(ctx context.Context, run map[string]any, level Level, parents map[string]*parentFacts) (recording, bool, error) {
 	runId := str(run, "id")
-	rec := recording{RunId: runId, Run: run, Evidence: map[string]stepEvidence{}}
+	rec := recording{RunId: runId, Run: run, Evidence: map[string]stepEvidence{}, Weight: 1}
 
 	observations, err := i.store.query(ctx, "query "+call("workObservationsForOwnerRun", map[string]any{"runId": runId}))
 	if err != nil {
@@ -206,6 +229,17 @@ func (i *Integration) loadRecording(ctx context.Context, run map[string]any, lev
 	feedback := readFeedback(observations)
 	if feedback.runDisliked {
 		return rec, false, nil
+	}
+	// THE PARENT STEP VERSION, before any step is read: a recording it
+	// excludes costs nothing more.
+	judged := i.judgeByParent(ctx, run, parents)
+	if judged.Excluded != "" {
+		i.log().Debug("procedure: a recording left the corpus", "runId", runId, "reason", judged.Excluded,
+			"parentStep", judged.StepKey, "version", judged.Version)
+		return rec, false, nil
+	}
+	if judged.Liked || feedback.runLiked {
+		rec.Weight = likedWeight
 	}
 	rec.Verdicts = feedback.steps
 
@@ -315,29 +349,10 @@ func toolResultsByStep(observations []map[string]any) map[string]map[string]any 
 // is kept as {"_raw": value} -- what the app sent, in the one shape a template
 // can hold -- rather than dropped.
 func observationArgs(o map[string]any) (map[string]any, bool) {
-	data := obj(o, "data")
-	if truncated, _ := data["argsTruncated"].(bool); truncated {
-		return nil, false
-	}
-	switch raw := data["args"].(type) {
-	case nil:
-		return map[string]any{}, true
-	case map[string]any:
-		return raw, true
-	case string:
-		if strings.TrimSpace(raw) == "" {
-			return map[string]any{}, true
-		}
-		var decoded any
-		if err := json.Unmarshal([]byte(raw), &decoded); err == nil {
-			if m, ok := decoded.(map[string]any); ok {
-				return m, true
-			}
-		}
-		return map[string]any{"_raw": raw}, true
-	default:
-		return map[string]any{"_raw": raw}, true
-	}
+	// One reading of the recording format, in component/work (epic
+	// memql#5414): the branch snapshot and the learner read an action's
+	// arguments the same way, or one of them is wrong about a recording.
+	return work.RecordedArgs(obj(o, "data"))
 }
 
 // stepEvidenceOf builds what one action reported, in the executor-independent
@@ -455,70 +470,22 @@ func preferArgPath(base string, argPaths []string) string {
 // parseOmitted reads one `contentOmitted` entry: "<path>: <why>", with
 // " (sha256 <hex>)" at the end when the digest was measured.
 func parseOmitted(entry string) (string, string) {
-	p, rest, found := strings.Cut(entry, ": ")
-	if !found {
-		return "", ""
-	}
-	digest := ""
-	const marker = "(sha256 "
-	if i := strings.LastIndex(rest, marker); i >= 0 && strings.HasSuffix(rest, ")") {
-		digest = strings.ToLower(strings.TrimSpace(rest[i+len(marker) : len(rest)-1]))
-	}
-	return strings.TrimSpace(p), digest
-}
-
-// pathKeys are the argument names whose string value is a file path, for the
-// footprint. Named rather than sniffed: an argument that merely LOOKS like a
-// path -- the old_string of an edit that begins with "//" -- is content, and
-// reading it as a path would send a portable procedure to somebody's machine.
-var pathKeys = map[string]bool{
-	"path": true, "file": true, "file_path": true, "filePath": true, "filepath": true,
-	"filename": true, "targetPath": true, "target_path": true, "directory": true,
-	"dir": true, "cwd": true, "notebook_path": true,
+	p, _, digest := work.ParseOmitted(entry)
+	return p, digest
 }
 
 // pathsInArgs collects every path-keyed string in an action's arguments,
 // nested ones included, sorted.
 func pathsInArgs(args map[string]any) []string {
-	var out []string
-	var walk func(map[string]any)
-	walk = func(m map[string]any) {
-		for k, v := range m {
-			switch t := v.(type) {
-			case string:
-				if pathKeys[k] && strings.TrimSpace(t) != "" {
-					out = append(out, strings.TrimSpace(t))
-				}
-			case map[string]any:
-				walk(t)
-			case []any:
-				for _, e := range t {
-					if sub, ok := e.(map[string]any); ok {
-						walk(sub)
-					}
-				}
-			}
-		}
-	}
-	walk(args)
-	sort.Strings(out)
-	return out
+	// component/work.RecordedPaths is the one list of path-keyed arguments:
+	// the branch snapshot restores exactly the files this footprint names.
+	return work.RecordedPaths(args)
 }
 
 // workspaceRelative writes an absolute path inside the workspace relative to
 // it; anything else is returned cleaned and as it was.
 func workspaceRelative(workspace, p string) string {
-	p = strings.TrimSpace(p)
-	ws := strings.TrimSpace(workspace)
-	if p == "" || !path.IsAbs(p) || !path.IsAbs(ws) {
-		return cleanPath(p)
-	}
-	ws = path.Clean(ws)
-	abs := path.Clean(p)
-	if ws != "/" && strings.HasPrefix(abs, ws+"/") {
-		return strings.TrimPrefix(abs, ws+"/")
-	}
-	return abs
+	return work.WorkspaceRelative(workspace, p)
 }
 
 func cleanPath(p string) string {
@@ -532,6 +499,10 @@ func cleanPath(p string) string {
 type feedback struct {
 	// runDisliked: a dislike naming the RUN. The recording leaves the corpus.
 	runDisliked bool
+	// runLiked: the newest readable verdict naming the RUN is a like -- the
+	// recording weighs more in the corpus (D23). A later neutral takes it
+	// back; a dislike at any time excludes the recording outright.
+	runLiked bool
 	// steps: verdicts naming a STEP, by step key -- the candidate gate's
 	// evidence, which holds a procedure at candidate until a disliked step
 	// has a liked or neutral version.
@@ -544,6 +515,7 @@ type feedback struct {
 // which is also every feedback row epic C wrote.
 func readFeedback(observations []map[string]any) feedback {
 	fb := feedback{steps: map[string][]stepVerdict{}}
+	var runNewest *stepVerdict
 	for idx, o := range observations {
 		if str(o, "kind") != "feedback" {
 			continue
@@ -552,13 +524,17 @@ func readFeedback(observations []map[string]any) feedback {
 		verdict := work.ParseVerdict(str(data, "verdict"))
 		target := obj(data, "target")
 		key := str(target, "stepKey")
+		created, _ := time.Parse(time.RFC3339Nano, str(o, "createdAt"))
 		if key == "" {
 			if verdict == work.VerdictDislike {
 				fb.runDisliked = true
 			}
+			row := stepVerdict{Verdict: verdict, CreatedAt: created, Order: idx}
+			if verdict != work.VerdictUnseen && (runNewest == nil || newerVerdict(row, *runNewest)) {
+				runNewest = &row
+			}
 			continue
 		}
-		created, _ := time.Parse(time.RFC3339Nano, str(o, "createdAt"))
 		fb.steps[key] = append(fb.steps[key], stepVerdict{
 			Version:   intOf(target, "version"),
 			Verdict:   verdict,
@@ -566,6 +542,7 @@ func readFeedback(observations []map[string]any) feedback {
 			Order:     idx,
 		})
 	}
+	fb.runLiked = runNewest != nil && runNewest.Verdict == work.VerdictLike
 	return fb
 }
 

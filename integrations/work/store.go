@@ -284,7 +284,7 @@ func (s *store) createGoalRow(ctx context.Context, g goalSeed) error {
 // owner arrives through the actor, which is why every caller of this passes a
 // context already stamped with ownerActor.
 func (s *store) createRunRow(ctx context.Context, r runSeed) error {
-	return s.writeInternal(ctx, "mutation "+call("createWorkRun", map[string]any{
+	args := map[string]any{
 		"runId":               r.RunId,
 		"executionAuthority":  optMap(r.ExecutionAuthority),
 		"goalId":              r.GoalId,
@@ -303,7 +303,15 @@ func (s *store) createRunRow(ctx context.Context, r runSeed) error {
 		"status":              r.Status,
 		"nodeId":              r.NodeId,
 		"startedAt":           rfc(r.StartedAt),
-	}))
+		"head":                optMap(r.Head),
+		"rerun":               optMap(r.Rerun),
+	}
+	// Named only when there is one, so every run opened without a signature
+	// renders exactly the call it always did.
+	if sig := trim(r.GoalSignature); sig != "" {
+		args["goalSignature"] = sig
+	}
+	return s.writeInternal(ctx, "mutation "+call("createWorkRun", args))
 }
 
 // updateRun is the read-merge advance. Every field NOT named keeps its prior
@@ -399,6 +407,12 @@ type runSeed struct {
 	// from actor.userId. It is carried here so the caller can build the
 	// borrowed-authority context from the same value it read off the goal.
 	OwnerUserId string
+	// GoalSignature, Head and Rerun open a branch already carrying the goal it
+	// serves, the source versions its prefix points at and the request the
+	// agent serves (epic memql#5414). Each is written only when set.
+	GoalSignature string
+	Head          map[string]any
+	Rerun         map[string]any
 }
 
 type approvalSeed struct {

@@ -654,8 +654,29 @@ const nexus: OsAppManifest = {
   // from), and the shell acknowledges it when Automations is visible -- never
   // when the app opens on Goals. Advance the revision only when the surface
   // itself changes meaningfully, never because a procedure climbed.
+  //
+  // Stepping into a run (epic memql#5414) is a new capability nothing else in
+  // the shell says exists: run a step again with a different intelligence,
+  // branch from it, go back to an earlier version, and say what was wrong.
+  // The destination is the version area of a step on a FINISHED run -- where
+  // all of that is reachable -- so the marker sits on the rows that open it
+  // and is acknowledged only when that area is on screen, never when Runs or
+  // a run page opens. Advance the revision only when the surface itself
+  // changes meaningfully, never because a run gained a version.
   attentionChanges: [
     { id: "nexus:procedures", revision: "procedures-1", sectionId: "automations", label: "Learned procedures" },
+    {
+      id: "nexus:interventions",
+      revision: "interventions-1",
+      sectionId: "runs",
+      target: "step-versions",
+      label: "Re-run, branch and feedback",
+    },
+    // Every automation now says what it is for, and a person can say so
+    // themselves (epic memql#5414, D24). The list carries the label on its
+    // rows and asks about it in Refine, so the section itself is where it is
+    // seen.
+    { id: "nexus:reuse", revision: "reuse-1", sectionId: "automations", label: "Reuse labels" },
   ],
   component: NexusApp,
 };

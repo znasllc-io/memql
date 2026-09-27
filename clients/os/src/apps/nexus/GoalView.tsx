@@ -1,6 +1,6 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, GitFork, History, RotateCcw } from "lucide-react";
+import { GitBranch, History, RotateCcw } from "lucide-react";
 import type { LiveState, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
@@ -9,6 +9,7 @@ import {
   Chips,
   Fact,
   Facts,
+  Head,
   Input,
   Notice,
   Panel,
@@ -23,6 +24,7 @@ import { formatElapsed, receipt } from "../../nexus/scene/receipt";
 import { BeaconMap } from "./BeaconMap";
 import { KindBand } from "./KindBand";
 import { StepSpineRow } from "./StepSpine";
+import { ComposerHost, type ComposerRequest } from "./ComposerHost";
 import type { CancelGoalState, DeriveRunState } from "./actions";
 import {
   formatMoney,
@@ -30,11 +32,13 @@ import {
   RUN_TERMINAL,
   idTail,
   kindBreakdown,
+  runFromRow,
   stepFromRow,
   stepsInOrder,
   type GoalRow,
   type StepRow,
 } from "./rows";
+import type { ComposerDraft } from "./versions";
 import { buildWorld } from "./world";
 import { goalStatusWord, originWord, runModeWord, runStatusWord } from "./words";
 
@@ -112,6 +116,10 @@ export function GoalView({
   const [expandedFolds, setExpandedFolds] = useState<ReadonlySet<number>>(new Set());
   const [at, setAt] = useState(openAt);
   const [confirm, setConfirm] = useState("");
+  // "Branch from here" opens the same composer the run page does, and its
+  // drafts are kept the same way: Escape keeps what was typed.
+  const [composer, setComposer] = useState<ComposerRequest | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
 
   const live = useMemo(
     () => buildWorld({ goalRow, runRows, stepRows, approvalRows, artifactRows, openRunId }),
@@ -193,17 +201,17 @@ export function GoalView({
     });
   }
   if (run !== null && terminal) {
+    // BRANCH, NOT FORK (epic memql#5414). `forkRun` re-executed every step
+    // from the first; `branchRun` reuses everything before the step by
+    // reference and takes what the person changes, through the one composer
+    // the run page opens for the same act.
     if (openStep !== null) {
+      const key = openStep.key;
       acts.push({
-        label: `Fork from ${openStep.key}`,
-        icon: <GitFork size={13} aria-hidden />,
-        busy: derive.busy,
-        ariaLabel: `Fork this run at step ${openStep.key}: the steps before it come from the journal, and this step onward runs live`,
-        onAct: () => {
-          void derive.fork(run.id, openStep.key).then((id) => {
-            if (id !== "") onOpenRun(id);
-          });
-        },
+        label: "Branch from here",
+        icon: <GitBranch size={13} aria-hidden />,
+        ariaLabel: `Branch from ${key}: a new run that reuses the steps before it and runs from here, with whatever you change`,
+        onAct: () => setComposer({ mode: "branch", stepKey: key }),
       });
     }
     acts.push({
@@ -241,6 +249,16 @@ export function GoalView({
     });
   }
 
+  // The APP's projection of the drawn run, for what the scene library does not
+  // carry: its head, and whether a step's child run is an app session.
+  const appRuns = useMemo(() => runRows.map(runFromRow), [runRows]);
+  const appRun = run === null ? null : (appRuns.find((candidate) => idTail(candidate.id) === idTail(run.id)) ?? null);
+  const composerStep = composer === null ? null : (railSteps.find((step) => step.key === composer.stepKey) ?? null);
+  const composerSession =
+    composerStep !== null &&
+    composerStep.childRunId !== "" &&
+    appRuns.find((candidate) => idTail(candidate.id) === idTail(composerStep.childRunId))?.automationName === "appSession";
+
   const tone: ActionBarTone =
     run === null
       ? "none"
@@ -254,18 +272,14 @@ export function GoalView({
 
   return (
     <div className="os-nexus-goalview">
-      <div className="os-head">
-        <button type="button" className="os-nexus-back" onClick={onBack}>
-          <ArrowLeft size={13} aria-hidden />
-          Goals
-        </button>
-        <h3 className="os-settings-title">{goal.statement}</h3>
-        <span className="os-head-meta">
-          <Chip tone={goal.status === "closed" ? "muted" : "accent"}>
-            {goalStatusWord(goal.status)}
-          </Chip>
-        </span>
-      </div>
+      {/* THE KIT'S HEAD, which publishes the trail to the window's one trail
+          row rather than drawing a back button of its own (DESIGN.md, "One
+          trail row"). */}
+      <Head
+        title={goal.statement}
+        meta={<Chip tone={goal.status === "closed" ? "muted" : "accent"}>{goalStatusWord(goal.status)}</Chip>}
+        back={{ label: "Goals", onSelect: onBack }}
+      />
 
       <div className="os-nexus-goalview-body">
         <Facts>
@@ -344,6 +358,13 @@ export function GoalView({
                       onOpen={() =>
                         setSelectedStepKey(step.key === selectedStepKey ? "" : step.key)
                       }
+                      // WHAT THE LIVE ROW AND THE HEAD KNOW, without the run
+                      // page's versions read: a retried or re-run step still
+                      // shows it was, as the "attempt N" chip used to say.
+                      versions={{
+                        count: Math.max(step.version, step.attempt, appRun?.head[step.key]?.version ?? 0),
+                        current: appRun?.head[step.key]?.runId === "" ? (appRun.head[step.key]?.version ?? step.version) : step.version,
+                      }}
                     />
                   </li>
                 ))}
@@ -382,9 +403,9 @@ export function GoalView({
                     : "parked on you -- it does not move until you answer"
                 : terminal
                   ? openStep === null
-                    ? "select a step to fork from there"
+                    ? "select a step to branch from there"
                     : ""
-                  : "replay and fork wait until the run finishes"
+                  : "replay and branching wait until the run finishes"
         }
         tone={tone}
         acts={acts}
@@ -410,6 +431,28 @@ export function GoalView({
           </span>
         )}
       </ActionBar>
+
+      <ComposerHost
+        request={composer}
+        runId={run?.id ?? ""}
+        stepOrder={run?.stepOrder ?? []}
+        head={appRun?.head ?? {}}
+        timelineKeys={railSteps.map((step) => step.key)}
+        step={composerStep}
+        versions={[]}
+        current={composerStep?.version ?? null}
+        session={composerSession}
+        ownLevel={composerStep?.override.level ?? ""}
+        passedOn={null}
+        drafts={drafts}
+        onDrafts={setDrafts}
+        onClose={() => setComposer(null)}
+        onRerun={() => setComposer(null)}
+        onBranched={(reply) => {
+          setComposer(null);
+          onOpenRun(reply.runId);
+        }}
+      />
     </div>
   );
 }

@@ -3,6 +3,7 @@ package memql
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/znasllc-io/memql/core/airoute"
 )
@@ -15,6 +16,19 @@ func (p *fleetProvider) WithMinContextTokens(tokens int) any {
 		registry: p.registry, modelId: p.modelId, actingUserId: p.actingUserId,
 		selector: p.selector, attributes: p.attributes,
 		minContextTokens: max(p.minContextTokens, tokens),
+		effort:           p.effort,
+	}
+}
+
+// WithEffort binds a person's explicit effort for one call (epic memql#5414,
+// design D20) the same way, carrying the floor forward so the order the router
+// applies the two bindings in cannot drop one.
+func (p *fleetProvider) WithEffort(effort string) any {
+	return &fleetProvider{
+		registry: p.registry, modelId: p.modelId, actingUserId: p.actingUserId,
+		selector: p.selector, attributes: p.attributes,
+		minContextTokens: p.minContextTokens,
+		effort:           strings.TrimSpace(effort),
 	}
 }
 

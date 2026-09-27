@@ -18,12 +18,18 @@ import type { OsAppSection } from "../../system/registry";
 /**
  * The sections this app declares, in manifest order.
  *
- * GOALS IS FIRST and is therefore the section a window opens on: a goal is
- * what this app is for, and runs, automations and approvals are all things a
- * goal produced. The app's own settings can point a window elsewhere -- and
- * the one preference somebody actually wants here is Approvals, because a
- * parked run is stuck until a person acts and an operator who lives in this
- * app all day wants to land on the queue.
+ * OVERVIEW IS FIRST (epic memql#5414) and is therefore the section a window
+ * opens on, as it is in Fleet and Campaigns: the summary destination DESIGN.md
+ * names, answering what is open, what is moving, what is waiting on you, and
+ * how much of what the system learned is reusable. It needs no module: every
+ * figure on it is a read the other sections already make, and an overview
+ * that refused to draw without a model would hide the one screen that says
+ * whether anything is waiting. GOALS follows -- a goal is what this app is
+ * for, and runs, automations and approvals are all things a goal produced.
+ * The app's own settings can point a window elsewhere -- and the one
+ * preference somebody actually wants here is Approvals, because a parked run
+ * is stuck until a person acts and an operator who lives in this app all day
+ * wants to land on the queue.
  *
  * RUNS STAYS, and it is a decision rather than a leftover (design record D3,
  * owner-answered). `v1:work:run.goalId` is EMPTY for an automation run that no
@@ -37,10 +43,12 @@ import type { OsAppSection } from "../../system/registry";
  * with the nav highlighting nothing.
  */
 export const NEXUS_SECTIONS: OsAppSection[] = [
-  // Three of the four need a model: a goal is compiled, a run executes what
-  // the compile produced, and an approval is a gate on one. Automations is the
-  // exception and is deliberately NOT gated -- an authored automation is rows,
-  // and reading and arming one asks nothing of a provider.
+  // The Overview is only reads, so it asks nothing of a provider (see above).
+  { id: "overview", name: "Overview" },
+  // Three of the next four need a model: a goal is compiled, a run executes
+  // what the compile produced, and an approval is a gate on one. Automations
+  // is the exception and is deliberately NOT gated -- an authored automation
+  // is rows, and reading and arming one asks nothing of a provider.
   { id: "goals", name: "Goals", needs: ["ai"] },
   { id: "runs", name: "Runs", needs: ["ai"] },
   { id: "automations", name: "Automations" },
@@ -86,7 +94,7 @@ export const DEFAULT_NEXUS_SETTINGS: NexusSettings = {
   // Named rather than read off NEXUS_SECTIONS[0]: this value is what a corrupt
   // or absent document falls back to, and falling back to "whatever is first
   // in an array" would move with an unrelated edit to that array.
-  defaultSection: "goals",
+  defaultSection: "overview",
   showFinishedRuns: true,
 };
 

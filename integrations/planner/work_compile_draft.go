@@ -85,7 +85,7 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 	}
 	if dec.Navigation != nil && !*dec.RequiresFile && !dec.Sectionable && strings.TrimSpace(dec.Navigation.App) != "" {
 		target := dec.Navigation
-		headline := "workRun_" + sanitizeIdent(req.RunId)
+		headline := workDraftHeadline(req)
 		arguments := []string{"app: " + langparser.QuoteString(strings.TrimSpace(target.App))}
 		if section := strings.TrimSpace(target.Section); section != "" {
 			arguments = append(arguments, "section: "+langparser.QuoteString(section))
@@ -109,7 +109,7 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 			return authoringBundle{}, fmt.Errorf("work compile: triage fileFormat: %w", err)
 		}
 	}
-	headline := "workRun_" + sanitizeIdent(req.RunId)
+	headline := workDraftHeadline(req)
 	goal := req.Statement
 	sections := dec.usableSections(headline)
 	fanout := dec.Sectionable && len(sections) >= minSectionsForFanout
@@ -138,13 +138,14 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 		}
 		return fmt.Sprintf("builtin runAgentTurn(agentId: %s, prompt: %s)", langparser.QuoteString(agentId), instruction)
 	}
+	// The body is written first and the imports after it: runAgentTurn is
+	// imported only when a statement OF THE TEMPLATE calls it -- a single
+	// answer turn, a section left inline, or the assembly turn of a text
+	// goal. A section written as an automation of its own imports it there,
+	// and a decomposition the catalog serves whole calls none.
 	var b strings.Builder
-	if nativeFile {
-		b.WriteString("use compose.builtins.{ composeMaterialize }\n")
-	}
-	if !nativeFile || fanout {
-		b.WriteString("use agents.builtins.{ runAgentTurn }\n")
-	}
+	templateTurns := !fanout && !nativeFile
+	var sectionAutos []memql.SandboxConstruct
 	fmt.Fprintf(&b, "\n@template\nautomation %s {\n", headline)
 	if len(inputNames) > 0 {
 		b.WriteString("  args {\n")
@@ -159,19 +160,164 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 	if !fanout {
 		fmt.Fprintf(&b, "  reason := %s\n", delivery(goal, ""))
 	} else {
-		// The sections run one after another, each bound to its own name:
-		// the assembly reads every section's value, and a parallel branch's
-		// names end with the branch.
+		// The sections run one after another, in triage's order, each bound
+		// to its own name: a later section and the assembly read earlier
+		// values by name, and a parallel branch's names end with the branch.
+		producers := map[string]string{}
+		dependent := false
+		live := dec.liveSections(req, headline)
 		for _, section := range sections {
-			prompt := "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): " + goal + "\n\nSection: " + section.Spec.Label + "\n" + section.Spec.Instruction
-			fmt.Fprintf(&b, "  %s := builtin runAgentTurn(agentId: %s, prompt: %s)\n", section.Name, langparser.QuoteString(agentId), x.join(langparser.QuoteString(prompt+inputHeading), x.goalInput))
+			if cat := dec.catalogFor(section.Index); cat != nil {
+				// A CATALOGUED SECTION CALLS ITS AUTOMATION and spends no
+				// model (D24). Its source travels in this bundle, below.
+				fmt.Fprintf(&b, "  %s := %s\n", section.Name, cat.callText())
+			} else if ls := live[section.Index]; ls != nil && ls.Automation != "" {
+				// A SECTION PLANNED LIVE IS AN AUTOMATION OF ITS OWN, called
+				// the way a catalogued one is, so that a run that succeeds can
+				// catalogue it for the next goal that asks for the same
+				// section (work_compile_section_automations.go).
+				fmt.Fprintf(&b, "  %s := %s\n", section.Name, ls.callText())
+				sectionAutos = append(sectionAutos, memql.SandboxConstruct{Kind: "automation", Name: ls.Automation, Source: sectionAutomationSource(ls, agentId, section.Spec)})
+				dependent = dependent || ls.readsEarlierSection()
+			} else {
+				templateTurns = true
+				consumed := consumedOutputs(section.Spec.Inputs, producers)
+				text := x.join(langparser.QuoteString(sectionPrompt(goal, section.Spec, len(consumed) > 0)+inputHeading), x.goalInput)
+				if len(consumed) > 0 {
+					// What an earlier section produced reaches this one by
+					// name, bound as a map of its own for the reason
+					// goalInput is: a call's argument may not be a map
+					// literal.
+					dependent = true
+					mapName := "inputsFor_" + section.Name
+					fmt.Fprintf(&b, "  %s := {%s}\n", mapName, strings.Join(consumed, ", "))
+					text = x.join(text, langparser.QuoteString(earlierResultsHeading), "toString("+mapName+")")
+				}
+				fmt.Fprintf(&b, "  %s := builtin runAgentTurn(agentId: %s, prompt: %s)\n", section.Name, langparser.QuoteString(agentId), text)
+			}
+			for _, o := range section.Spec.Outputs {
+				producers[o] = section.Name
+			}
 		}
-		assembly := goal + "\n\nAssemble the completed independent sections into the requested deliverable. Verify completeness. " + dec.Assembly
 		fmt.Fprintf(&b, "  %s\n", x.sectionsStatement)
-		fmt.Fprintf(&b, "  assemble := %s\n", delivery(assembly, x.sections))
+		if nativeFile || dec.anyIntelligence(headline) {
+			kind := "independent sections"
+			if dependent {
+				kind = "sections"
+			}
+			assembly := goal + "\n\nAssemble the completed " + kind + " into the requested deliverable. Verify completeness. " + dec.Assembly
+			fmt.Fprintf(&b, "  assemble := %s\n", delivery(assembly, x.sections))
+			templateTurns = templateTurns || !nativeFile
+		} else {
+			// EVERY SECTION WAS SERVED FROM THE CATALOG, so a text answer is
+			// the sections' own results. An assembly turn here would spend
+			// the one model call the catalog exists to save (D24): the run
+			// returns them as they are.
+			b.WriteString("  return sections\n")
+		}
 	}
 	b.WriteString("}\n")
-	return authoringBundle{AutomationName: headline, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: headline, Source: b.String()}}}, nil
+	var imports strings.Builder
+	if nativeFile {
+		imports.WriteString("use compose.builtins.{ composeMaterialize }\n")
+	}
+	if templateTurns {
+		imports.WriteString("use agents.builtins.{ runAgentTurn }\n")
+	}
+	bundle := authoringBundle{AutomationName: headline, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: headline, Source: imports.String() + b.String()}}}
+	bundle.Constructs = append(bundle.Constructs, sectionAutos...)
+	if fanout {
+		carryCatalogSections(&bundle, dec, sections)
+	}
+	return bundle, nil
+}
+
+// earlierResultsHeading introduces, in a live section's prompt, what the
+// earlier sections it reads produced.
+const earlierResultsHeading = "\n\nResults of earlier sections (JSON):\n"
+
+// sectionPrompt is the instruction a live section's agent turn runs. A
+// section that only produces text drafts its part for the assembly -- and is
+// told not to write files, which the assembly or the Materializer does. A
+// section that declared EFFECTS makes exactly those changes, which the
+// drafting instruction would forbid: its end is the postcondition it named.
+func sectionPrompt(goal string, s sectionSpec, dependent bool) string {
+	var b strings.Builder
+	switch {
+	case footprintOf(s.Effects).IsSideEffect():
+		b.WriteString("Carry out only the section below, one part of a larger goal, and report what you did as text. Make only the changes this section describes.")
+		if dependent {
+			b.WriteString(" It builds on the results of earlier sections, given after the goal input.")
+		}
+	case dependent:
+		b.WriteString("Produce only the section below and return its complete content as text; it builds on the results of earlier sections, given after the goal input. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.")
+	default:
+		b.WriteString("Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.")
+	}
+	b.WriteString("\n\nOverall goal (context only): " + goal + "\n\nSection: " + s.Label + "\n" + s.Instruction)
+	if purpose := strings.TrimSpace(s.Purpose); purpose != "" {
+		b.WriteString("\nPurpose: " + purpose)
+	}
+	if post := strings.TrimSpace(s.Postcondition); post != "" {
+		b.WriteString("\nIt is finished when: " + post)
+	}
+	return b.String()
+}
+
+// consumedOutputs are the map entries, `<input>: <statement>`, by which a
+// section reads earlier sections' outputs, sorted by input name. An input no
+// earlier section produced is the goal's, already in the goal input; one that
+// is not a name a map may key on is left to that context too.
+func consumedOutputs(inputs []string, producers map[string]string) []string {
+	seen := map[string]bool{}
+	var names []string
+	for _, in := range inputs {
+		in = strings.TrimSpace(in)
+		if seen[in] || producers[in] == "" || !workDraftArgName.MatchString(in) || workDraftReservedNames[in] {
+			continue
+		}
+		seen[in] = true
+		names = append(names, in)
+	}
+	sort.Strings(names)
+	out := make([]string, 0, len(names))
+	for _, in := range names {
+		out = append(out, in+": "+producers[in])
+	}
+	return out
+}
+
+// carryCatalogSections puts every catalogued section's automation, and the
+// rest of its bundle, into the draft -- where the run's template is reloaded
+// from on the node that executes it -- with what those bundles reused, for
+// sealWorkDraft to capture.
+func carryCatalogSections(bundle *authoringBundle, dec sectionableDecision, sections []sectionPlan) {
+	seen := map[string]bool{}
+	for _, c := range bundle.Constructs {
+		seen[c.Kind+"/"+c.Name+"\x00"+c.Source] = true
+	}
+	edges := map[reuseEdge]bool{}
+	for _, e := range bundle.ReuseEdges {
+		edges[e] = true
+	}
+	for _, section := range sections {
+		cat := dec.catalogFor(section.Index)
+		if cat == nil {
+			continue
+		}
+		for _, c := range cat.Closure {
+			if key := c.Kind + "/" + c.Name + "\x00" + c.Source; !seen[key] {
+				seen[key] = true
+				bundle.Constructs = append(bundle.Constructs, c)
+			}
+		}
+		for _, e := range cat.ReuseEdges {
+			if !edges[e] {
+				edges[e] = true
+				bundle.ReuseEdges = append(bundle.ReuseEdges, e)
+			}
+		}
+	}
 }
 
 // workDraftText is the text a work draft's call arguments are written in: the

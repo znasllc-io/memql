@@ -94,6 +94,12 @@ shape construct constructFull {
   lastReplayAt
   ladderReason
   ladderChangedAt
+  // Reuse (epic memql#5414, D24), listed for the reason every note above
+  // gives: the sweep, compile's section tiers and Nexus read constructs
+  // through this shape.
+  reuse
+  reuseEvidence
+  reuseOverride
   row.createdAt
   row.createdBy
 }
@@ -143,6 +149,10 @@ shape construct procedureCard {
   preconditions
   procedureHash
   bundleId
+  // Reuse (epic memql#5414, D24): Nexus shows the label on every row.
+  reuse
+  reuseEvidence
+  reuseOverride
   row.createdAt
 }
 

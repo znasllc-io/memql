@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 
 import { Chip, formatDuration } from "../../kit";
@@ -61,6 +62,21 @@ import {
 // pack -- a pack carries colour, and this contrast does not use colour to mean
 // anything.
 
+/**
+ * A step's versions, as the spine draws them (epic memql#5414, D18).
+ *
+ * `count` is how many versions the page knows of and `current` which of them
+ * the run's head points at. A step with one version draws nothing: the whole
+ * device is a way to find the few steps somebody stepped into.
+ */
+export interface SpineVersions {
+  count: number;
+  current: number | null;
+}
+
+/** More ticks than this read as a bar, not as versions; the count is in the name either way. */
+const MAX_TICKS = 5;
+
 export interface StepSpineRowProps {
   step: StepRow;
   /** Sequence position as drawn, 1-based. `seq` is 0-based on the row. */
@@ -69,6 +85,16 @@ export interface StepSpineRowProps {
   last: boolean;
   open: boolean;
   onOpen: () => void;
+  /** Omitted, or one version: no ticks. */
+  versions?: SpineVersions;
+  /**
+   * Its current version was made from an upstream version that is no longer
+   * current, so it runs again (`run.staleSteps`). Said in words on the row --
+   * a state that is only a tint is a state half the readers never get.
+   */
+  stale?: boolean;
+  /** The unseen-change marker for what opening this row reveals. */
+  marker?: ReactNode;
   /**
    * Which door answered for this step, when the journal has been read.
    *
@@ -90,6 +116,9 @@ export function StepSpineRow({
   open,
   onOpen,
   decision = null,
+  versions,
+  stale = false,
+  marker = null,
 }: StepSpineRowProps) {
   const thought = stepThought(step);
   const kind = step.kind === "" ? "unclassified" : step.kind;
@@ -101,11 +130,22 @@ export function StepSpineRow({
   // which the filter below drops.
   const decided = decision === null ? "" : decisionLine(decision);
 
+  const count = versions?.count ?? 1;
+  const current = versions?.current ?? null;
+  // THE ONE STATE THE TICKS ALONE CANNOT CARRY: somebody went back to an
+  // earlier version, so the newest one on the row is not what the run uses.
+  // Said in words beside the key. The ordinary case -- the newest is current --
+  // needs no words; the ticks and the name carry it.
+  const behind = count > 1 && current !== null && current < count;
+  const versionWords =
+    count <= 1 ? "" : current === null ? `${count} versions` : `${count} versions, version ${current} is current`;
+
   // The accessible name says everything the drawing says, in words. A reader
   // who cannot see the spine gets "step 3, reasoning, called a model, done".
   // That contract is why the decision is appended here and not only drawn: a
   // line about who was billed, visible to sighted readers only, is the whole
-  // point of this epic withheld from half of them.
+  // point of this epic withheld from half of them. The versions and the stale
+  // mark ride on the same contract.
   const spoken = [
     `Step ${position}`,
     step.key,
@@ -113,9 +153,16 @@ export function StepSpineRow({
     stepKindMeaning(step.kind),
     stepStatusWord(step.status),
     decided,
+    versionWords,
+    stale ? "runs again" : "",
   ]
     .filter((part) => part !== "")
     .join(", ");
+
+  // Oldest first, newest last: the tally reads left to right, and past the
+  // cap it shows the newest ones.
+  const shown = Math.min(count, MAX_TICKS);
+  const firstShown = count - shown + 1;
 
   return (
     <button
@@ -131,7 +178,28 @@ export function StepSpineRow({
     >
       <span className="os-nexus-step-spine" aria-hidden>
         <span className="os-nexus-step-line" data-head />
-        <span className="os-nexus-step-node" />
+        <span className="os-nexus-step-knot">
+          <span className="os-nexus-step-node" />
+          {/* THE VERSIONS, ON THE SPINE ITSELF. A quiet stack of ticks beside
+              the node, one per version, the current one inked -- the thread's
+              own vocabulary of weight rather than hue, so it survives
+              greyscale and every theme pack, and a run of forty steps shows
+              the three somebody stepped into before a word is read. */}
+          {count > 1 ? (
+            <span className="os-nexus-step-ticks">
+              {Array.from({ length: shown }, (_, index) => {
+                const version = firstShown + index;
+                return (
+                  <span
+                    key={version}
+                    className="os-nexus-step-tick"
+                    data-current={version === current || undefined}
+                  />
+                );
+              })}
+            </span>
+          ) : null}
+        </span>
         {last ? null : <span className="os-nexus-step-line" data-tail />}
       </span>
 
@@ -142,9 +210,9 @@ export function StepSpineRow({
       <span className="os-nexus-step-body">
         <span className="os-nexus-step-name">
           <span className="os-nexus-step-key os-mono">{step.key}</span>
-          {step.attempt > 1 ? (
-            <Chip tone="muted" title={`This is attempt ${step.attempt} of this step`}>
-              attempt {step.attempt}
+          {behind ? (
+            <Chip tone="muted" title={`Version ${current} of ${count} is current; the newer ones are kept`}>
+              version {current} of {count}
             </Chip>
           ) : null}
         </span>
@@ -215,7 +283,15 @@ export function StepSpineRow({
           </Chip>
         ) : null}
         {waiting ? <Chip tone="accent">waiting</Chip> : null}
-        <ChevronRight size={13} className="os-nexus-step-chevron" aria-hidden />
+        {stale ? (
+          <Chip tone="muted" title="What it was made from is no longer current, so it runs again">
+            runs again
+          </Chip>
+        ) : null}
+        <span className="os-nexus-step-open os-attention-anchor">
+          <ChevronRight size={13} className="os-nexus-step-chevron" aria-hidden />
+          {marker}
+        </span>
       </span>
     </button>
   );

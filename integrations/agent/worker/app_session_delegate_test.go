@@ -8,8 +8,10 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	"github.com/znasllc-io/memql/component/workjournal"
@@ -411,6 +413,312 @@ func TestADelegatedSessionRunCarriesItsParentsGoalSignature(t *testing.T) {
 		if strings.Contains(opened[0], absent+":") {
 			t.Errorf("a child with no parent wrote %s anyway:\n%s", absent, opened[0])
 		}
+	}
+}
+
+// discardingJournal is a journal whose writes go nowhere, for a test that
+// needs a child run opened and does not read what the journal wrote.
+func discardingJournal() *workjournal.Journal {
+	return workjournal.New(workjournal.ExecutorFunc(func(context.Context, string) (any, error) {
+		return nil, nil
+	}), nil, "node-a")
+}
+
+// A handover names the run and the step KEY, and the step ROW is the
+// journal's composition of the two. The subrun must be stamped on that row:
+// updateWorkStep on the key names no row, which is how every delegated step
+// used to keep no childRunId (epic memql#5414).
+func TestTheDelegateStampsTheRealStepRow(t *testing.T) {
+	stamper := &recordingStamper{}
+	d := newAppSessionDelegateFor(&recordingExecutor{out: planner.ExecutorResult{
+		Output: map[string]any{"sessionId": "s"},
+	}}, discardingJournal(), stamper, nil)
+
+	out, err := d.RunStep(context.Background(), memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code",
+		RunId: "v1:work:run:run-1", StepId: "layer0.sales", Prompt: "go",
+	})
+	if err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if out.ChildRunId == "" {
+		t.Fatal("no child run was opened, so there was nothing to stamp and this test measures nothing")
+	}
+	row := automations.WorkStepId("v1:work:run:run-1", "layer0.sales")
+	if row != "run-1-layer0-sales" {
+		t.Fatalf("the journal's step id is %q; the fixture assumes run-1-layer0-sales", row)
+	}
+	want := `mutation updateWorkStep(stepId: "run-1-layer0-sales", childRunId: "` + out.ChildRunId + `")`
+	var stamped bool
+	for _, q := range stamper.queries {
+		if q == want {
+			stamped = true
+		}
+		if strings.Contains(q, `stepId: "layer0.sales"`) {
+			t.Fatalf("the stamp targeted the step KEY, which names no row: %s", q)
+		}
+	}
+	if !stamped {
+		t.Fatalf("the step row was never stamped; want %s among %v", want, stamper.queries)
+	}
+}
+
+// createdGoals records the goal id of every createWorkGoal a journal is asked
+// to write.
+func createdGoals(goals *[]string) *workjournal.Journal {
+	return workjournal.New(workjournal.ExecutorFunc(func(_ context.Context, q string) (any, error) {
+		if strings.HasPrefix(q, "mutation createWorkGoal(") {
+			_, rest, _ := strings.Cut(q, `goalId: "`)
+			id, _, _ := strings.Cut(rest, `"`)
+			*goals = append(*goals, id)
+		}
+		return nil, nil
+	}), nil, "node-a")
+}
+
+// The child goal is keyed on the step ROW. Keyed on the key alone, two runs
+// that each have a step called `draft` put their sessions into one goal; a
+// retried step of ONE run is still one goal with two runs.
+func TestTwoRunsWithTheSameStepKeyGetDifferentChildGoals(t *testing.T) {
+	var goals []string
+	d := newAppSessionDelegateFor(&recordingExecutor{out: planner.ExecutorResult{
+		Output: map[string]any{"sessionId": "s"},
+	}}, createdGoals(&goals), nil, nil)
+
+	for _, runId := range []string{"v1:work:run:r1", "v1:work:run:r2", "v1:work:run:r1"} {
+		if _, err := d.RunStep(context.Background(), memqlengine.AppSessionHandover{
+			ActingUserId: "u1", AppId: "claude-code", RunId: runId, StepId: "draft", Prompt: "go",
+		}); err != nil {
+			t.Fatalf("RunStep(%s): %v", runId, err)
+		}
+	}
+	if len(goals) != 3 || goals[0] == "" {
+		t.Fatalf("goals = %v, want one goal written per handover", goals)
+	}
+	if goals[0] == goals[1] {
+		t.Fatalf("two runs' `draft` steps share child goal %s", goals[0])
+	}
+	if goals[0] != goals[2] {
+		t.Fatalf("the same step of the same run opened a second goal (%s, then %s); a retried step is one goal", goals[0], goals[2])
+	}
+}
+
+// overriddenSessionStep is the run context the executor gives the ONE step a
+// re-run targets.
+func overriddenSessionStep(ov *common.StepOverride, snapshot *common.WorkspaceSnapshot) context.Context {
+	return common.ContextWithRun(context.Background(), common.RunContext{
+		RunId: "v1:work:run:r1", GoalId: "v1:work:goal:g1", StepKey: "revise", OwnerUserId: "u1",
+		Mode: common.RunModeLive, Override: ov, Snapshot: snapshot, Workspace: "r1-v2",
+	})
+}
+
+// A session step's prompt is the text recorded on v1:worker:appSession.prompt,
+// which is what the person saw and edited, so their prompt REPLACES the whole
+// session prompt -- the flattened conversation the door handed over goes -- and
+// the guidance follows it once. The level, model and effort reach the spec the
+// cockpit is sent, the model as the part after `app:<id>:`.
+func TestASessionOverrideReplacesThePromptAndSetsTheKnobs(t *testing.T) {
+	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{"sessionId": "s"}}}
+	d := newAppSessionDelegateFor(ex, nil, nil, nil)
+	handover := memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code", RunId: "v1:work:run:r1", StepId: "revise", Level: "strong",
+		Prompt: "[system]\nYou are the reviser.\n\nRevise the report.",
+	}
+	ov := &common.StepOverride{
+		Prompt: "Revise report.md and put the totals in bold.", WholePrompt: true,
+		Level: "reasoning", Model: "app:claude-code:opus", Effort: "xhigh",
+		GuidanceAxes: []string{"product"}, GuidanceReason: "the totals are missing",
+	}
+	if _, err := d.RunStep(overriddenSessionStep(ov, nil), handover); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	wantPrompt := "Revise report.md and put the totals in bold.\n\n" +
+		"What was wrong with the previous version (product): the totals are missing"
+	for key, want := range map[string]string{
+		"prompt": wantPrompt, "level": "reasoning", "model": "opus", "effort": "xhigh", "freshWorkspace": "r1-v2",
+	} {
+		if got := ex.got.Input[key]; got != want {
+			t.Errorf("Input[%s] = %v, want %q", key, got, want)
+		}
+	}
+	spec := sessionRunSpec(ex.got, "claude-code", "u1", sessionWorkspace(ex.got, "/home/u1/work/"), 0)
+	if spec.Prompt != wantPrompt || spec.Level != "reasoning" || spec.Model != "opus" || spec.Effort != "xhigh" {
+		t.Fatalf("the cockpit would be sent prompt=%q level=%q model=%q effort=%q", spec.Prompt, spec.Level, spec.Model, spec.Effort)
+	}
+	if spec.Workspace != "/home/u1/work/r1-v2" {
+		t.Fatalf("workspace = %q, want the re-run's fresh directory under the owner's root", spec.Workspace)
+	}
+
+	// Guidance with no new prompt is appended to the door's prompt -- once:
+	// when the conversation the door flattened already carries it, it is not
+	// said a second time.
+	guidanceOnly := &common.StepOverride{GuidanceAxes: []string{"process"}, GuidanceReason: "it guessed the week"}
+	line := "What was wrong with the previous version (process): it guessed the week"
+	for _, prompt := range []string{"Revise the report.", "Revise the report.\n\n" + line} {
+		handover.Prompt = prompt
+		if _, err := d.RunStep(overriddenSessionStep(guidanceOnly, nil), handover); err != nil {
+			t.Fatalf("RunStep: %v", err)
+		}
+		if got := ex.got.Input["prompt"]; got != "Revise the report.\n\n"+line {
+			t.Fatalf("from %q the session got %q, want the guidance exactly once", prompt, got)
+		}
+	}
+
+	// A level no step is re-run at refuses before anything runs on a machine.
+	runs := ex.runs
+	if _, err := d.RunStep(overriddenSessionStep(&common.StepOverride{Level: "embeddings"}, nil), handover); err == nil {
+		t.Fatal("an embeddings override started a session")
+	}
+	if ex.runs != runs {
+		t.Fatal("a refused override still ran the session")
+	}
+
+	// The control: a step nobody re-ran is started with the door's own values.
+	handover.Prompt = "Revise the report."
+	if _, err := d.RunStep(context.Background(), handover); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+	if ex.got.Input["prompt"] != "Revise the report." || ex.got.Input["level"] != "strong" ||
+		ex.got.Input["effort"] != "" || ex.got.Input["freshWorkspace"] != "" {
+		t.Fatalf("a step nobody re-ran was changed: %+v", ex.got.Input)
+	}
+}
+
+// INSTRUCTIONS ARE NOT A PROMPT. When the version being replaced was not a
+// session -- a model answered it, or a learned procedure did -- the person
+// wrote instructions to add to the step's own prompt, and a session handed
+// only those would lose its goal. The handed-over prompt is kept, and the
+// instructions are added exactly once: a tool loop has already put them in the
+// conversation it flattened, a procedure's hand-back has not.
+func TestInstructionsAreAddedToTheSessionPromptNeverSwappedForIt(t *testing.T) {
+	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{"sessionId": "s"}}}
+	d := newAppSessionDelegateFor(ex, nil, nil, nil)
+	ov := &common.StepOverride{Prompt: "Put the totals in bold."}
+	instructions := memqlengine.StepOverrideInstructions(ov)
+	for _, prompt := range []string{"Revise the report.", "Revise the report.\n\n" + instructions} {
+		handover := memqlengine.AppSessionHandover{
+			ActingUserId: "u1", AppId: "claude-code", RunId: "v1:work:run:r1", StepId: "revise", Prompt: prompt,
+		}
+		if _, err := d.RunStep(overriddenSessionStep(ov, nil), handover); err != nil {
+			t.Fatalf("RunStep: %v", err)
+		}
+		if got := ex.got.Input["prompt"]; got != "Revise the report.\n\n"+instructions {
+			t.Fatalf("from %q the session got %q, want the goal's prompt with the instructions once", prompt, got)
+		}
+	}
+}
+
+// libraryEngine answers the owner-scoped Library reads a snapshot needs and
+// records every query with the actor it ran under.
+type libraryEngine struct {
+	files     map[string]string // bare file id -> the file row's name
+	artifacts map[string]string // bare file id -> its artifact's bare id
+	queries   []string
+	actors    []string
+}
+
+func (e *libraryEngine) Execute(ctx context.Context, q string) (*memqlengine.ExecuteResult, error) {
+	e.queries = append(e.queries, q)
+	actor := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+		actor = ac.UserId
+	}
+	e.actors = append(e.actors, actor)
+	for id, name := range e.files {
+		if q == `query libraryFileById(fileId: "`+id+`")` {
+			return memqlengine.NewResultWithOutput([]any{map[string]any{"id": "v1:library:file:" + id, "name": name}}), nil
+		}
+	}
+	for id, artifact := range e.artifacts {
+		if q == `query libraryArtifactBySourceConceptRef(sourceConceptRef: "v1:library:file:`+id+`")` {
+			return memqlengine.NewResultWithOutput([]any{map[string]any{"id": "v1:library:artifact:" + artifact}}), nil
+		}
+	}
+	return nil, nil
+}
+
+// A snapshot's files become the session's INPUTS as Library artifacts, the
+// cockpit lands each flat under its file row's name, and the prompt opens by
+// telling the app where each one belongs -- in a fresh workspace, so the new
+// session does not run inside the tree later steps changed (design D19).
+func TestASnapshotLandsAsInputsWithARestorePreamble(t *testing.T) {
+	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{"sessionId": "s"}}}
+	eng := &libraryEngine{
+		files: map[string]string{
+			"f1": "report.md.5e551011aaaa.ac7101111111",
+			"f2": "sales.csv.5e551011aaaa.ac7102222222",
+		},
+		artifacts: map[string]string{"f1": "art-report", "f2": "art-sales"},
+	}
+	d := newAppSessionDelegateFor(ex, nil, eng, nil)
+	snapshot := &common.WorkspaceSnapshot{Files: []common.SnapshotFile{
+		{Path: "data/sales.csv", FileId: "v1:library:file:f2"},
+		{Path: "report.md", FileId: "f1"},
+	}}
+	if _, err := d.RunStep(overriddenSessionStep(nil, snapshot), memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code", RunId: "v1:work:run:r1", StepId: "revise",
+		Prompt: "Revise the report.", Inputs: []string{"art-brief"},
+	}); err != nil {
+		t.Fatalf("RunStep: %v", err)
+	}
+
+	wantInputs := []string{"art-brief", "art-sales", "art-report"}
+	if strings.Join(ex.got.Inputs, ",") != strings.Join(wantInputs, ",") {
+		t.Fatalf("inputs = %v, want the handover's own then the snapshot's artifacts %v", ex.got.Inputs, wantInputs)
+	}
+	wantPrompt := "Before you start, restore the workspace: each file below was delivered into the working directory " +
+		"under the name on the left; move it to the path on the right (create directories as needed).\n" +
+		"sales.csv.5e551011aaaa.ac7102222222 -> data/sales.csv\n" +
+		"report.md.5e551011aaaa.ac7101111111 -> report.md\n\n" +
+		"Revise the report."
+	if got := ex.got.Input["prompt"]; got != wantPrompt {
+		t.Fatalf("prompt = %q\nwant %q", got, wantPrompt)
+	}
+	spec := sessionRunSpec(ex.got, "claude-code", "u1", sessionWorkspace(ex.got, "/home/u1/work"), 0)
+	if spec.Workspace != "/home/u1/work/r1-v2" || strings.Join(spec.Inputs, ",") != strings.Join(wantInputs, ",") || spec.Prompt != wantPrompt {
+		t.Fatalf("the cockpit would be sent workspace=%q inputs=%v prompt=%q", spec.Workspace, spec.Inputs, spec.Prompt)
+	}
+	// Every Library read is the owner's: the Library is owner-tiered, and a
+	// read as anybody else would answer zero rows.
+	for i, q := range eng.queries {
+		if strings.Contains(q, "library") && eng.actors[i] != "u1" {
+			t.Fatalf("%s ran as %q, want the owner", q, eng.actors[i])
+		}
+	}
+}
+
+// A snapshot file with no artifact to hand the session REFUSES the step, naming
+// the file -- a session restored from a partial snapshot diverges silently --
+// and it refuses before anything is opened: no child run, no session.
+func TestASnapshotFileWithNoArtifactRefusesTheStepNamingIt(t *testing.T) {
+	ex := &recordingExecutor{}
+	var goals []string
+	eng := &libraryEngine{files: map[string]string{"f1": "report.md.5e551011aaaa.ac7101111111"}}
+	d := newAppSessionDelegateFor(ex, createdGoals(&goals), eng, nil)
+	d.snapshotWait, d.snapshotPoll = 30*time.Millisecond, 5*time.Millisecond
+	snapshot := &common.WorkspaceSnapshot{Files: []common.SnapshotFile{{Path: "report.md", FileId: "f1"}}}
+	handover := memqlengine.AppSessionHandover{
+		ActingUserId: "u1", AppId: "claude-code", RunId: "v1:work:run:r1", StepId: "revise", Prompt: "Revise the report.",
+	}
+
+	_, err := d.RunStep(overriddenSessionStep(nil, snapshot), handover)
+	if err == nil || !strings.Contains(err.Error(), "report.md") || !strings.Contains(err.Error(), "f1") {
+		t.Fatalf("err = %v, want a refusal naming the file and its id", err)
+	}
+	if ex.runs != 0 || len(goals) != 0 {
+		t.Fatalf("a refused snapshot still opened %d goal(s) and ran %d session(s)", len(goals), ex.runs)
+	}
+
+	// A snapshot with no fresh workspace to land in is refused as well.
+	noWorkspace := common.ContextWithRun(context.Background(), common.RunContext{
+		RunId: "v1:work:run:r1", GoalId: "v1:work:goal:g1", StepKey: "revise", OwnerUserId: "u1",
+		Mode: common.RunModeLive, Snapshot: snapshot,
+	})
+	if _, err := d.RunStep(noWorkspace, handover); err == nil || !strings.Contains(err.Error(), "fresh workspace") {
+		t.Fatalf("err = %v, want a refusal for a snapshot with no fresh workspace", err)
+	}
+	if ex.runs != 0 {
+		t.Fatal("a snapshot with no fresh workspace still ran a session")
 	}
 }
 

@@ -216,10 +216,14 @@ func (e *MemQLEngine) InvokeAIStructured(
 	// -- harmless because subsequent calls with the same template +
 	// schema land on the same fallback again, so the cache reflects
 	// reality.
+	//
+	// A step a person asked to run again skips the cache both ways, for the
+	// reason aiRuntime.Invoke gives: the key cannot see the person's
+	// override, so a hit would be the previous version's answer.
 	providerName := e.promptDefaultProvider(templateId)
 	var cacheKey string
 	var cacheTTL time.Duration
-	if e.aiRuntime.cache != nil {
+	if e.aiRuntime.cache != nil && !stepIsBeingRerun(ctx) {
 		cacheTTL = e.aiRuntime.cacheTTL(nil)
 		if cacheTTL > 0 {
 			cacheInput := strings.TrimSpace(schemaName) + "|" + string(schema) + "|" + rendered
@@ -257,6 +261,11 @@ func (e *MemQLEngine) InvokeAIStructured(
 	// refuseUnavailableLocalProvider is gone with them: it existed because
 	// tier 2 would otherwise have fallen through a shut local door, and there
 	// is no tier 2 left to fall through.
+	//
+	// A person's override for the step this call serves (epic memql#5414) is
+	// honoured here as on every other prompt path: requestForPrompt applies
+	// its level, model and effort from the context, and CallAIStructured
+	// appends its instructions and guidance.
 	prompt, ok := e.prompts.Get(templateId)
 	if !ok || prompt == nil {
 		return "", fmt.Errorf("unknown prompt template %q", templateId)

@@ -114,7 +114,7 @@ func (f *procedureAppFallback) Handover(ctx context.Context, req procedure.Fallb
 		door = memql.AppReferencePrefix + app
 	}
 	callCtx := auth.ContextWithUserActor(ctx, owner)
-	client, resolution, err := f.resolve(callCtx, airoute.ResolveRequest{
+	request := airoute.ResolveRequest{
 		Level:    level,
 		Modality: airoute.ModalityTools,
 		Needs: airoute.Needs{
@@ -127,7 +127,16 @@ func (f *procedureAppFallback) Handover(ctx context.Context, req procedure.Fallb
 		AgentId:          agentId,
 		RunId:            runId,
 		StepId:           stepId,
-	})
+	}
+	// A PERSON'S KNOBS BIND HERE (epic memql#5414, D20). When the step being
+	// handed over is one a person re-ran or branched, its level, the app they
+	// named and its effort are theirs -- applied by the one function every
+	// model seam uses. A step nobody re-ran comes back unchanged.
+	request, err := memql.ApplyStepOverride(callCtx, request)
+	if err != nil {
+		return procedure.FallbackOutcome{}, fmt.Errorf("procedure fallback: %w", err)
+	}
+	client, resolution, err := f.resolve(callCtx, request)
 	if err != nil {
 		return procedure.FallbackOutcome{}, fmt.Errorf("procedure fallback: the router would not hand the goal to %s: %w", door, err)
 	}
