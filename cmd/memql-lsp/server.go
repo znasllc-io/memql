@@ -11,6 +11,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
+	"github.com/znasllc-io/memql/packs/anchor"
 )
 
 const lsName = "memql-lsp"
@@ -140,6 +141,13 @@ func (s *server) buildSense(notify glsp.NotifyFunc) {
 	// workspace in the process-global tree the load reads (loadpass.go).
 	s.buildMu.Lock()
 	defer s.buildMu.Unlock()
+	// The build models the engine a node boots, and every published image
+	// links the storefront packs with no build tag -- as memqllint and the
+	// package analyzer model it. Without them a product domain that imports a
+	// pack's concept (`use wholesale.concepts.{ application }`) refuses the
+	// whole build, and the editor loses its registry and its load pass for
+	// every file of the workspace. Linking is not enabling; idempotent.
+	anchor.Storefront()
 	// The lines are the build's own, as its Init resolved them, so they and
 	// the build's error are one answer even when a memql.toml changes while
 	// the build runs.

@@ -374,3 +374,43 @@ func TestLoadPass_OffTheRequestPath(t *testing.T) {
 		t.Errorf("the last publish is the load's answer for the final buffer, one refusal on line 3; got %+v", last)
 	}
 }
+
+// A product domain may relate its concepts to a storefront pack's (epic
+// memql#5532), and every published image links those packs. The build models
+// that image, so the workspace builds -- with its registry, and with its load
+// pass -- instead of refusing every file over an import a node accepts.
+func TestBuild_ADomainRelatingToAStorefrontPackConceptBuilds(t *testing.T) {
+	root := writeWorkspace(t, map[string]string{
+		"dsl/shop/memql.toml": lspLanguageLine,
+		"dsl/shop/concepts.memql": `use wholesale.concepts.{ application }
+
+/// The shop's own detail on a wholesale application.
+concept applicationNote {
+  /// The application this note is about.
+  applicationId  string  @required
+  /// The note.
+  body           string
+
+  @relationship(type="references", field="applicationId", target=application, direction="outgoing")
+}
+`,
+	})
+	s := initializedServer(t, root)
+	svc, _ := s.getBuild()
+	if !svc.CanLoad() {
+		t.Fatal("a workspace relating to a storefront pack's concept must build with its engine, as it boots on a node")
+	}
+	s.loads.start = func(fn func()) { fn() }
+	uri := docURI(root, "dsl/shop/queries.memql")
+	s.docs.open(uri, `/// Notes with a body the concept does not have.
+@unbounded("fixture")
+query applicationNote notesByTitle {
+  filter row => row.title != ""
+}
+`)
+	notify, got := capturingNotify()
+	s.publishDiagnostics(notify, uri)
+	if refusals := loadCoded((*got)[len(*got)-1].Diagnostics); len(refusals) != 1 || diagnosticCode(refusals[0]) != "lower_unknown_field" {
+		t.Errorf("the load pass runs in the workspace and refuses `row.title`, got %+v", (*got)[len(*got)-1].Diagnostics)
+	}
+}
