@@ -4,9 +4,10 @@ package proving
 // half of the platform, so the lifecycle driver, its figures and its verifier
 // can be exercised with no engine and no database.
 //
-// It behaves as the plan says the runner does
-// (docs/superpowers/plans/2026-09-23-procedure-certification-replay.md,
-// section 1.4 and Task 5): a construct per goal signature, lifted on its
+// It behaves as the runner does (integrations/procedure: replay.go's stages
+// and seams.go's contract; design record
+// docs/superpowers/specs/2026-09-13-app-session-recording-and-learning-program-design.md,
+// section 4 epic D): a construct per goal signature, lifted on its
 // second succeeded recording, moved ONLY by component/work.Advance -- the real
 // ladder, not a copy of it -- a shadow comparison replaying in a sandbox, a
 // promotion raised once and decided through a separate spine, a replay that
