@@ -62,7 +62,6 @@ package memql
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -508,20 +507,19 @@ func (f conceptFieldShape) declaredType() string {
 // change. What is caught is the property gaining or losing its variant-ness,
 // because that lands in the type string below.
 func flattenConceptFields(c *memorynodes.Concept) (map[string]conceptFieldShape, error) {
-	out := map[string]conceptFieldShape{}
 	if c == nil {
-		return out, nil
+		return map[string]conceptFieldShape{}, nil
 	}
-	raw, err := c.DefinitionSchema()
+	// Decoded once per distinct schema document (concept_schema_memo.go); the
+	// caller gets its own copy.
+	d, err := decodedSchemaOf(c)
 	if err != nil {
 		return nil, err
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, err
+	if d.err != nil {
+		return nil, d.err
 	}
-	collectConceptSchemaFields("", doc, out)
-	return out, nil
+	return copyFieldShapes(d.fields), nil
 }
 
 func collectConceptSchemaFields(prefix string, doc map[string]any, out map[string]conceptFieldShape) {

@@ -158,6 +158,25 @@ func conceptSlices(source string) []languageParser.DeclarationSlice {
 // conceptSlicesReporting is conceptSlices, and every concept whose opening
 // brace never closes -- which conceptSlices leaves out, and which a caller that
 // registers concepts must refuse rather than lose.
+//
+// Memoized per source (sourceMemo, memql#5427): every concept load slices every
+// concepts file, and a process loads the same files many times over -- the
+// string-aware slicer that replaced the line slicer here (memql#5426) made that
+// a measurable part of every boot (PR #5693). Each caller gets its own copies.
 func conceptSlicesReporting(source string) ([]languageParser.DeclarationSlice, []languageParser.UnterminatedDeclaration) {
-	return languageParser.ExtractDeclarationSlicesReporting(source, conceptHeaderRe)
+	r := conceptSliceReports.get(source, "concept", func() []conceptSliceReport {
+		slices, unterminated := languageParser.ExtractDeclarationSlicesReporting(source, conceptHeaderRe)
+		return []conceptSliceReport{{slices: slices, unterminated: unterminated}}
+	})
+	return copyOrNil(r[0].slices), copyOrNil(r[0].unterminated)
 }
+
+// conceptSliceReport is one source's conceptSlicesReporting answer, held whole.
+type conceptSliceReport struct {
+	slices       []languageParser.DeclarationSlice
+	unterminated []languageParser.UnterminatedDeclaration
+}
+
+// conceptSliceReports memoizes conceptSlicesReporting, a pure function of its
+// source.
+var conceptSliceReports = &sourceMemo[conceptSliceReport]{maxBytes: 64 << 20}
