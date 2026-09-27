@@ -1427,6 +1427,24 @@ func TestRun_AMisplacedConstructIsRefusedInEveryMode(t *testing.T) {
 		t.Errorf("concepts.memql alone: run() = %d, want 0 with no error:\n%s", code, out)
 	}
 
+	// A soft-disabled directory is read by nothing at boot, so the same file
+	// parked in one has no placement to judge, in any mode.
+	parked := filepath.Join(bundle, "_parked")
+	if err := os.MkdirAll(parked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parked, "billing.memql"), []byte(misplacedAutomation), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{parked, filepath.Join(parked, "billing.memql")} {
+		if _, _, out := jsonReport(t, target); strings.Contains(out, "construct_misplaced") {
+			t.Errorf("%s is soft-disabled, which boot never reads, yet the lint judged its placement:\n%s", target, out)
+		}
+	}
+	if err := os.RemoveAll(parked); err != nil {
+		t.Fatal(err)
+	}
+
 	// Positive control: the same automation in automations.memql lints clean in
 	// every mode, so the refusals above are the file it was in.
 	if err := os.Rename(filepath.Join(domainDir, "billing.memql"), filepath.Join(domainDir, "automations.memql")); err != nil {

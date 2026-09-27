@@ -430,13 +430,15 @@ func deprecatedFormWarnings(tree *dslimports.Tree, target string) []Diagnostic {
 // Directory mode therefore scans the root's own files and leaves the rest to
 // the parity pass, which reads them, so nothing is reported twice. Single-file
 // mode scans its target and nothing else, as every other lane here does. A
-// file whose domain's language line was refused is read by no loader at boot,
-// so it has no placement to judge.
+// file whose domain's language line was refused, or a root whose name marks it
+// soft-disabled, is read by no loader at boot, so it has no placement to judge.
 func misplacedConstructs(tree *dslimports.Tree, rootDir, target string) []error {
-	if tree == nil {
+	domain := filepath.Base(rootDir)
+	if tree == nil || strings.HasPrefix(domain, "_") {
+		// A directory whose name begins with `_` is soft-disabled: boot reads
+		// nothing in it, so nothing in it has a placement to judge.
 		return nil
 	}
-	domain := filepath.Base(rootDir)
 	paths := make([]string, 0, len(tree.Files))
 	for p := range tree.Files {
 		switch {
