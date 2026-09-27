@@ -117,6 +117,26 @@ func TestALeadingCdBecomesTheWorkingDirectory(t *testing.T) {
 	}
 }
 
+// A HOST'S ERROR CODE IS ONE THING. Refused before running (a Go error: the
+// step did not run, and the ladder hears of it) and unavailable (the target
+// could not finish, and the ladder does not) are exclusive answers, and a
+// timeout is neither -- it is the procedure's own failure.
+func TestAHostErrorCodeIsRefusedOrUnavailableNeverBoth(t *testing.T) {
+	for code := range procedureTargetUnavailable {
+		if procedureRefusedBeforeRunning[code] {
+			t.Errorf("%s is both refused-before-running and unavailable", code)
+		}
+	}
+	for _, code := range []string{"worker_disconnected", "worker_unreachable", "no_workbench_peer", "forward_failed"} {
+		if !procedureTargetUnavailable[code] {
+			t.Errorf("%s says the target could not finish, and is not unavailable", code)
+		}
+	}
+	if procedureTargetUnavailable["timeout"] || procedureRefusedBeforeRunning["timeout"] {
+		t.Error("a timeout is the procedure's own failure, neither a refusal nor an unavailable target")
+	}
+}
+
 func TestClaudesTimeoutIsMillisecondsRoundedUpToSeconds(t *testing.T) {
 	for in, want := range map[any]int{float64(120000): 120, float64(1500): 2, float64(1): 1, float64(-5): 0, "600": 0, nil: 0} {
 		if got := procedureTimeoutSec(0, map[string]any{"timeout": in}); got != want {

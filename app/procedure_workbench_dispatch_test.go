@@ -265,13 +265,71 @@ func TestANonZeroExitIsAnErrorCarryingItsCode(t *testing.T) {
 // NOTHING RAN, so it is not an observation: the runner must not list a
 // refused step among the ones the app is told not to repeat.
 func TestAStepTheWorkbenchRefusesBeforeRunningIsAnError(t *testing.T) {
-	for _, code := range []string{"command_not_allowed", "no_workbench_peer", "no_forwarded_authority", "workspace_owner_unresolved"} {
+	for _, code := range []string{"command_not_allowed", "no_forwarded_authority", "workspace_owner_unresolved"} {
 		wb := newFakeWorkbench()
 		wb.refuse["exec"] = code
 		_, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), workbenchStep("exec", map[string]any{"command": "make"}))
 		if err == nil || !strings.Contains(err.Error(), code) || !strings.Contains(err.Error(), "step0") {
 			t.Errorf("%s -> %v, want an error naming the code and the step", code, err)
 		}
+	}
+}
+
+// AN UNREACHABLE WORKBENCH SAYS NOTHING ABOUT THE PROCEDURE. No peer answered,
+// or the forward to one failed: the step is a failed observation -- as it
+// always was to a reader that knows nothing else -- marked Unavailable, which
+// is what keeps the ladder from counting it against the procedure. Every
+// action a step can reach answers the same way, the read an Edit needs first
+// included.
+func TestAnUnreachableWorkbenchIsUnavailableNotAFailedProcedure(t *testing.T) {
+	steps := map[string]procedure.DispatchRequest{
+		"exec":     workbenchStep("exec", map[string]any{"command": "npm test"}),
+		"fs_write": workbenchStep("fs_write", map[string]any{"file_path": "out/a.txt", "content": "a\n"}),
+		"sandbox": func() procedure.DispatchRequest {
+			r := workbenchStep("fs_write", map[string]any{"file_path": "out/a.txt", "content": "a\n"})
+			r.Sandbox = true
+			return r
+		}(),
+		"edit":    workbenchStep("fs_write", map[string]any{"file_path": "a.txt", "old_string": "a", "new_string": "b"}),
+		"fs_read": workbenchStep("fs_read", map[string]any{"file_path": "a.txt"}),
+		"fetch":   workbenchStep("fetch", map[string]any{"url": "https://example.com/"}),
+	}
+	for _, code := range []string{"no_workbench_peer", "forward_failed"} {
+		for name, req := range steps {
+			wb := newFakeWorkbench()
+			for _, action := range []string{"exec", "fs_write", "fs_read", "fs_stat", "http_fetch"} {
+				wb.refuse[action] = code
+			}
+			res, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), req)
+			if err != nil {
+				t.Errorf("%s %s: %v -- an unreachable target is a result the runner reads, not a step it refused", code, name, err)
+				continue
+			}
+			if !res.Unavailable {
+				t.Errorf("%s %s: not Unavailable, so the ladder would count a missing peer against the procedure", code, name)
+			}
+			if o := res.Observation; o.IsError == nil || !*o.IsError || len(o.Contents) != 0 || o.ExitCode != nil {
+				t.Errorf("%s %s: observation = %+v, want an error measuring nothing", code, name, o)
+			}
+			if res.Delivered {
+				t.Errorf("%s %s: delivered", code, name)
+			}
+			if out, _ := res.Output.(map[string]any); out["errorCode"] != code {
+				t.Errorf("%s %s: the receipt does not say why: %+v", code, name, res.Output)
+			}
+		}
+	}
+}
+
+// A TIMEOUT IS THE PROCEDURE'S. The command ran as long as the recordings let
+// it and did not finish: that is evidence about the procedure, and it is
+// counted like any other failure.
+func TestATimedOutCommandIsNotUnavailable(t *testing.T) {
+	wb := newFakeWorkbench()
+	wb.refuse["exec"] = "timeout"
+	res, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), workbenchStep("exec", map[string]any{"command": "npm test"}))
+	if err != nil || res.Unavailable || res.Observation.IsError == nil || !*res.Observation.IsError {
+		t.Fatalf("a timeout = %+v unavailable %v, %v; want a failed step the ladder counts", res.Observation, res.Unavailable, err)
 	}
 }
 

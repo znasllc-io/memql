@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -151,9 +152,33 @@ func runProcedureStep(
 		err = fmt.Errorf("%q is not a tool a replay can run (exec, fs_write, fs_read, fetch, mcp)", req.Tool)
 	}
 	if err != nil {
+		var unavailable *procedureUnavailable
+		if errors.As(err, &unavailable) {
+			return procedureUnavailableResult(unavailable), nil
+		}
 		return procedure.DispatchResult{}, fmt.Errorf("procedure dispatch: step %s (%s): %w", req.StepKey, req.Tool, err)
 	}
 	return res, nil
+}
+
+// procedureUnavailableResult is a step whose TARGET could not finish it: a
+// failed observation that measured nothing -- what a reader that knows nothing
+// of Unavailable has always been handed for a lost answer -- marked
+// Unavailable, so the ladder does not count it against the procedure, and
+// delivering nothing this dispatcher knows of. The receipt says which host
+// action went unanswered and why.
+func procedureUnavailableResult(u *procedureUnavailable) procedure.DispatchResult {
+	isError := true
+	return procedure.DispatchResult{
+		Observation: work.StepObservation{IsError: &isError},
+		Output: map[string]any{
+			"action":       u.action,
+			"errorCode":    u.reply.ErrorCode,
+			"errorMessage": u.reply.ErrorMessage,
+			"unavailable":  true,
+		},
+		Unavailable: true,
+	}
 }
 
 // runProcedureExec runs a recorded command, bounded by the step's timeout.
@@ -176,8 +201,8 @@ func runProcedureExec(ctx context.Context, host procedureHost, timeout time.Dura
 	if err != nil {
 		return procedure.DispatchResult{}, err
 	}
-	if procedureRefusedBeforeRunning[reply.ErrorCode] {
-		return procedure.DispatchResult{}, procedureRefusal(host.label(), "the command", reply)
+	if err := procedureHostAnswer(host.label(), "the command", "exec", reply); err != nil {
+		return procedure.DispatchResult{}, err
 	}
 	obs, out := procedureExecObservation(reply)
 	return procedure.DispatchResult{Observation: obs, Output: out, Delivered: host.delivers()}, nil
@@ -226,8 +251,8 @@ func runProcedureWrite(ctx context.Context, host procedureHost, sandbox bool, ar
 		if err != nil {
 			return procedure.DispatchResult{}, err
 		}
-		if procedureRefusedBeforeRunning[reply.ErrorCode] {
-			return procedure.DispatchResult{}, procedureRefusal(host.label(), "the write", reply)
+		if err := procedureHostAnswer(host.label(), "the write", "exec", reply); err != nil {
+			return procedure.DispatchResult{}, err
 		}
 		code, hasCode := procedurePayloadInt(reply.Payload["exitCode"])
 		ok = hasCode && code == 0 && reply.ErrorCode == ""
@@ -239,8 +264,8 @@ func runProcedureWrite(ctx context.Context, host procedureHost, sandbox bool, ar
 		if err != nil {
 			return procedure.DispatchResult{}, err
 		}
-		if procedureRefusedBeforeRunning[reply.ErrorCode] {
-			return procedure.DispatchResult{}, procedureRefusal(host.label(), "the write", reply)
+		if err := procedureHostAnswer(host.label(), "the write", "fs_write", reply); err != nil {
+			return procedure.DispatchResult{}, err
 		}
 		ok = reply.OK
 		if !ok {
@@ -276,11 +301,14 @@ func readProcedureFile(ctx context.Context, host procedureHost, hostPath string)
 		content, _ := reply.Payload["content"].(string)
 		return content, true, nil
 	}
-	if procedureRefusedBeforeRunning[reply.ErrorCode] {
-		return "", false, procedureRefusal(host.label(), "the read an edit needs", reply)
+	if err := procedureHostAnswer(host.label(), "the read an edit needs", "fs_read", reply); err != nil {
+		return "", false, err
 	}
 	stat, err := host.call(ctx, "fs_stat", map[string]any{"path": hostPath})
 	if err != nil {
+		return "", false, err
+	}
+	if err := procedureHostAnswer(host.label(), "the look an edit needs at a file it cannot read", "fs_stat", stat); err != nil {
 		return "", false, err
 	}
 	if exists, known := stat.Payload["exists"].(bool); stat.OK && known && !exists {
@@ -305,8 +333,8 @@ func runProcedureRead(ctx context.Context, host procedureHost, args map[string]a
 	if err != nil {
 		return procedure.DispatchResult{}, err
 	}
-	if procedureRefusedBeforeRunning[reply.ErrorCode] {
-		return procedure.DispatchResult{}, procedureRefusal(host.label(), "the read", reply)
+	if err := procedureHostAnswer(host.label(), "the read", "fs_read", reply); err != nil {
+		return procedure.DispatchResult{}, err
 	}
 	out := map[string]any{"action": "fs_read", "path": reported}
 	if !reply.OK {
@@ -339,8 +367,8 @@ func runProcedureFetch(ctx context.Context, host procedureHost, args map[string]
 	if err != nil {
 		return procedure.DispatchResult{}, err
 	}
-	if procedureRefusedBeforeRunning[reply.ErrorCode] {
-		return procedure.DispatchResult{}, procedureRefusal(host.label(), "the fetch", reply)
+	if err := procedureHostAnswer(host.label(), "the fetch", "http_fetch", reply); err != nil {
+		return procedure.DispatchResult{}, err
 	}
 	obs, out := procedureFetchObservation(reply)
 	return procedure.DispatchResult{Observation: obs, Output: out}, nil

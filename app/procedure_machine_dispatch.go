@@ -226,6 +226,11 @@ func (h *machineProcedureHost) ensure(ctx context.Context, dir string) error {
 	if err != nil {
 		return err
 	}
+	// An unreachable machine is the target's failure, not the procedure's,
+	// and it is the step's answer whatever the step was about to run.
+	if procedureTargetUnavailable[reply.ErrorCode] {
+		return &procedureUnavailable{surface: h.label(), action: "exec", reply: reply}
+	}
 	if code, ok := procedurePayloadInt(reply.Payload["exitCode"]); reply.ErrorCode != "" || !ok || code != 0 {
 		return fmt.Errorf("the replay's workspace %s could not be made on the machine (%s): %s", dir, reply.ErrorCode, reply.ErrorMessage)
 	}

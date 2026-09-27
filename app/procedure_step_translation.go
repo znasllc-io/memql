@@ -62,20 +62,21 @@ type procedureHostReply struct {
 }
 
 // procedureRefusedBeforeRunning are the error codes with which a surface
-// says NOTHING RAN -- a gate, a missing peer, an argument it would not take.
+// says NOTHING RAN -- a gate, a missing surface, an argument it would not take.
 //
 // The distinction is the one the replay's side-effect accounting rests on. A
 // step that did not run is returned as a Go error, and the runner does not
 // list it among the steps the app must not redo; a step that ran and failed
 // -- or may have run, like a timeout or a lost answer -- is an observation
 // with isError set, and the comparison is what stops the replay. Guessing
-// "did not run" for a call that ran would hand the app a step to repeat.
+// "did not run" for a call that ran would hand the app a step to repeat. A
+// TARGET that could not finish -- no peer, a dropped stream -- is neither: see
+// procedureTargetUnavailable.
 var procedureRefusedBeforeRunning = map[string]bool{
 	// The workbench (integrations/workbench).
 	"unknown_action":             true,
 	"invalid_environment_hint":   true,
 	"environment_mismatch":       true,
-	"no_workbench_peer":          true,
 	"no_forwarded_authority":     true,
 	"encode_args":                true,
 	"workspace_owner_unresolved": true,
@@ -95,7 +96,31 @@ var procedureRefusedBeforeRunning = map[string]bool{
 	"denied_by_policy":            true,
 	"no_worker_available":         true,
 	"worker_busy":                 true,
-	"worker_unreachable":          true,
+}
+
+// procedureTargetUnavailable are the error codes with which a surface says
+// the TARGET could not finish the step, for a reason that says nothing about
+// the procedure (integrations/procedure seams.go, DispatchResult.Unavailable).
+//
+// The step is reported as it always was to a reader that knows nothing else --
+// a failed observation that measured nothing -- and marked Unavailable, which
+// is what keeps the ladder from counting a machine that went to sleep or a
+// workbench with no peer against the procedure. Whether it ran is unknown for
+// some of them (a stream that dropped with the call in flight) and known-not
+// for others (no peer at all); the runner treats its effects as unknown either
+// way, which is the reading that never hands the app a step to repeat.
+//
+// A TIMEOUT IS NOT ONE OF THEM: the command ran as long as the recordings let
+// it and did not finish, which is evidence about the procedure.
+var procedureTargetUnavailable = map[string]bool{
+	// The worker (integrations/agent/worker): the machine's stream dropped
+	// with the call in flight, or the replica holding it could not be reached.
+	"worker_disconnected": true,
+	"worker_unreachable":  true,
+	// The workbench (integrations/workbench): no workbench peer answered, or
+	// the forward to one failed in transit.
+	"no_workbench_peer": true,
+	"forward_failed":    true,
 }
 
 // procedureRefusal is the Go error for a host that refused a step before
@@ -106,6 +131,38 @@ func procedureRefusal(surface, action string, reply procedureHostReply) error {
 		msg = "no reason given"
 	}
 	return fmt.Errorf("%s refused %s before running it (%s): %s", surface, action, reply.ErrorCode, msg)
+}
+
+// procedureUnavailable is a host's answer that the TARGET could not finish a
+// step. It travels as an error INSIDE a dispatcher, because it can arrive from
+// deep in a step -- the read an Edit needs first, the workspace a machine makes
+// before a command -- and runProcedureStep turns it into the Unavailable result
+// the runner reads. It never leaves Dispatch as an error.
+type procedureUnavailable struct {
+	surface string
+	action  string
+	reply   procedureHostReply
+}
+
+func (u *procedureUnavailable) Error() string {
+	msg := strings.TrimSpace(u.reply.ErrorMessage)
+	if msg == "" {
+		msg = "no reason given"
+	}
+	return fmt.Sprintf("%s could not finish %s (%s): %s", u.surface, u.action, u.reply.ErrorCode, msg)
+}
+
+// procedureHostAnswer sorts a reply by its error code: a target that could not
+// finish (*procedureUnavailable), a refusal before anything ran (a Go error
+// naming what was refused), or nil -- an answer the step reads as its own.
+func procedureHostAnswer(surface, what, action string, reply procedureHostReply) error {
+	switch {
+	case procedureTargetUnavailable[reply.ErrorCode]:
+		return &procedureUnavailable{surface: surface, action: action, reply: reply}
+	case procedureRefusedBeforeRunning[reply.ErrorCode]:
+		return procedureRefusal(surface, what, reply)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

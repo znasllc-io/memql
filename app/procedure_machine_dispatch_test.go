@@ -253,6 +253,46 @@ func TestAMachineGateDenialIsAnError(t *testing.T) {
 	}
 }
 
+// A DROPPED STREAM OR AN UNREACHABLE REPLICA SAYS NOTHING ABOUT THE PROCEDURE.
+// The step is a failed observation, as before, and Unavailable -- which is what
+// keeps the ladder from counting a machine that went to sleep against the
+// procedure. The workspace a command needs made first answers the same way.
+func TestAnUnreachableMachineIsUnavailableNotAFailedProcedure(t *testing.T) {
+	for _, code := range []string{"worker_disconnected", "worker_unreachable"} {
+		for name, req := range map[string]procedure.DispatchRequest{
+			"fs_write": machineStep("fs_write", map[string]any{"file_path": "/tmp/x", "content": "x"}),
+			"fs_read":  machineStep("fs_read", map[string]any{"file_path": "/etc/hosts"}),
+			"exec":     machineStep("exec", map[string]any{"command": "make"}),
+		} {
+			m := newFakeMachine()
+			for _, action := range []string{"exec", "fs_write", "fs_read", "fs_stat"} {
+				m.refuse[action] = code
+			}
+			res, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(), req)
+			if err != nil {
+				t.Errorf("%s %s: %v -- an unreachable machine is a result the runner reads", code, name, err)
+				continue
+			}
+			if !res.Unavailable || res.Observation.IsError == nil || !*res.Observation.IsError || res.Delivered {
+				t.Errorf("%s %s = %+v unavailable %v delivered %v; want a failed, undelivered, Unavailable step",
+					code, name, res.Observation, res.Unavailable, res.Delivered)
+			}
+		}
+	}
+	// A timeout is the procedure's: counted, not excused.
+	m := newFakeMachine()
+	m.exec = func(map[string]any) map[string]any { return map[string]any{"exitCode": 0} }
+	d := newTestMachineDispatcher(m, testMachineRoot)
+	if _, err := d.Dispatch(context.Background(), machineStep("exec", map[string]any{"command": "true"})); err != nil {
+		t.Fatal(err)
+	}
+	m.refuse["exec"] = "timeout"
+	res, err := d.Dispatch(context.Background(), machineStep("exec", map[string]any{"command": "make"}))
+	if err != nil || res.Unavailable || res.Observation.IsError == nil || !*res.Observation.IsError {
+		t.Fatalf("a timeout = %+v unavailable %v, %v", res.Observation, res.Unavailable, err)
+	}
+}
+
 // A GOAL SUPPLIES A PARAMETER, AND A PARAMETER CAN SIT IN A PATH. Whatever the
 // value, a relative path that climbs out of the replay's workspace is refused
 // before anything is sent -- the one directory a replay owns on the person's
