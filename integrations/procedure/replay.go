@@ -1267,6 +1267,20 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 	if err != nil {
 		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s) could not be bound: %v.", idx+1, oneLine(step.Tool), err), false)
 	}
+	// A VALUE AN EARLIER STEP ANSWERED IS A PARAMETER NOBODY CHOSE, and it is
+	// held to the rule a goal's input is (bindParameters): only the kinds of
+	// value the recordings showed at that hole. Strict quoting keeps it one
+	// word either way; this keeps a word that is an option, an absolute path
+	// or a climb out of the workspace from reaching a step whose recordings
+	// never saw one. The free parameters pass again, having passed at start.
+	if err := proc.CheckBindings(r.c.template, values); err != nil {
+		var refused *proc.BindingRefusal
+		if errors.As(err, &refused) {
+			return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s) could not be bound: the value %s took, %q, %s.",
+				idx+1, oneLine(step.Tool), refused.Hole, refused.Value, refused.Why), false)
+		}
+		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s) could not be bound: %v.", idx+1, oneLine(step.Tool), err), false)
+	}
 	raw, err := proc.Materialize(step.Args, values)
 	if err != nil {
 		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s) could not be written out: %v.", idx+1, oneLine(step.Tool), err), false)

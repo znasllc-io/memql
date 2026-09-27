@@ -116,3 +116,46 @@ func TestAServedCommandThatSendsSomethingOutIsASideEffect(t *testing.T) {
 		t.Fatalf("the app was not told the push already happened:\n%s", prompt)
 	}
 }
+
+// TestADataFlowValueIsHeldToTheKindTheRecordingsSaw: a value a step takes
+// from an earlier step's output is a parameter nobody chose, held to the rule
+// a goal's input is. The earlier step answers "-rf", which no recording's
+// output at that hole began with, so the write is never dispatched and the
+// replay stops there. The control: an answer shaped like the recordings'
+// writes as before.
+func TestADataFlowValueIsHeldToTheKindTheRecordingsSaw(t *testing.T) {
+	setup := func(t *testing.T, stdout string) *replayWorld {
+		t.Helper()
+		w := newReplayWorld(t, "trusted")
+		w.withDecoded(t, func(p *Procedure) {
+			fp, ok := p.Steps[1].Args.At([]string{"file_path"})
+			if !ok || len(fp.Kids) != 3 {
+				t.Fatalf("the fixture's write path is %+v, want ./out/<name>", fp)
+			}
+			fp.Kids[2] = proc.HoleNode("s1.file_path.2", "string")
+			p.Holes = append(p.Holes, proc.Hole{Id: "s1.file_path.2", StepIndex: 1, Path: []string{"file_path", "2"}, Type: "string",
+				Class: proc.HoleDataFlow, Ref: &proc.DataFlowRef{StepIndex: 0, Path: []string{"stdout"}}, Shape: &proc.HoleShape{}})
+		})
+		w.d.alter["step0"] = func(r *DispatchResult) { r.Output = map[string]any{"stdout": stdout} }
+		return w
+	}
+
+	w := setup(t, "-rf")
+	out := w.serve(t, ReplayTrusted, map[string]any{"file": goalFile})
+	if out.Served || !out.Diverged || out.DivergedStep != 1 {
+		t.Fatalf("outcome = %+v, want the replay stopped at the write", out)
+	}
+	if !strings.Contains(out.Diagnosis, "never recorded as an option") {
+		t.Fatalf("diagnosis = %q, want it to say why the value was refused", out.Diagnosis)
+	}
+	for _, c := range w.d.recorded() {
+		if c.StepKey == "step1" {
+			t.Fatalf("the write was dispatched with a value no recording saw: %+v", c.Args)
+		}
+	}
+
+	control := setup(t, "report.txt")
+	if out := control.serve(t, ReplayTrusted, map[string]any{"file": goalFile}); !out.Served {
+		t.Fatalf("control: an answer shaped like the recordings' = %+v, want served", out)
+	}
+}
