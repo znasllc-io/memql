@@ -791,6 +791,7 @@ negative/mutate/two-write-blocks.memql
 negative/query/filter-written-twice.memql
 negative/query/imported-concept-declared-nowhere-filtered.memql
 negative/query/imported-concept-declared-nowhere.memql
+negative/query/imported-from-a-namespace-that-lacks-it.memql
 negative/query/signature-concept-not-imported.memql
 negative/query/sort-written-twice.memql
 negative/query/unknown-clause.memql
