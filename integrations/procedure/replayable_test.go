@@ -31,7 +31,6 @@ func TestEveryFormTheDispatchersRunIsReplayable(t *testing.T) {
 		"a Claude Code Write":           stepOf(t, "fs_write", map[string]any{"file_path": "./out/a.txt", "content": "hi\n"}),
 		"a Claude Code Edit":            stepOf(t, "fs_write", map[string]any{"file_path": "./a.go", "old_string": "x", "new_string": "y"}),
 		"a Claude Code MultiEdit":       stepOf(t, "fs_write", map[string]any{"file_path": "./a.go", "edits": []any{map[string]any{"old_string": "x", "new_string": "y"}}}),
-		"a Codex file that is added":    stepOf(t, "fs_write", map[string]any{"changes": []any{map[string]any{"path": "./out.txt", "kind": map[string]any{"type": "add"}, "diff": "hello\n"}}}),
 		"a Claude Code Read":            stepOf(t, "fs_read", map[string]any{"file_path": "./a.txt"}),
 		"a Codex image view":            stepOf(t, "fs_read", map[string]any{"path": "./a.png"}),
 		"a fetch of a URL":              stepOf(t, "fetch", map[string]any{"url": "https://example.test/x", "prompt": "summarise"}),
@@ -59,11 +58,15 @@ func TestAStepNoDispatcherRunsIsNotReplayable(t *testing.T) {
 		"a background command":      {stepOf(t, "exec", map[string]any{"command": "npm run dev", "run_in_background": true}), "background"},
 		"a program that is a hole":  {programHole, "program"},
 		"a notebook edit":           {stepOf(t, "fs_write", map[string]any{"notebook_path": "./n.ipynb", "new_source": "x"}), "notebook"},
-		"a Codex update":            {stepOf(t, "fs_write", map[string]any{"changes": []any{map[string]any{"path": "./a", "kind": map[string]any{"type": "update"}, "diff": "@@"}}}), "not an `add`"},
-		"a write with no content":   {stepOf(t, "fs_write", map[string]any{"file_path": "./a", "mode": "0644"}), "form no dispatcher applies"},
-		"a Glob listing":            {stepOf(t, "fs_read", map[string]any{"pattern": "**/*.go", "path": "."}), "listing"},
-		"a web search":              {stepOf(t, "fetch", map[string]any{"query": "weather"}), "no URL"},
-		"an mcp call with no tool":  {stepOf(t, "mcp", map[string]any{"q": "x"}), "does not name the MemQL tool"},
+		"a Codex update":            {stepOf(t, "fs_write", map[string]any{"changes": []any{map[string]any{"path": "./a", "kind": map[string]any{"type": "update"}, "diff": "@@"}}}), "changes"},
+		// No dispatcher reads `changes` at all -- not even an add, whose
+		// diff is the whole file: such a procedure would climb on dry shadow
+		// comparisons, ask a person to approve it, and fail every canary.
+		"a Codex file that is added": {stepOf(t, "fs_write", map[string]any{"changes": []any{map[string]any{"path": "./out.txt", "kind": map[string]any{"type": "add"}, "diff": "hello\n"}}}), "changes"},
+		"a write with no content":    {stepOf(t, "fs_write", map[string]any{"file_path": "./a", "mode": "0644"}), "form no dispatcher applies"},
+		"a Glob listing":             {stepOf(t, "fs_read", map[string]any{"pattern": "**/*.go", "path": "."}), "listing"},
+		"a web search":               {stepOf(t, "fetch", map[string]any{"query": "weather"}), "no URL"},
+		"an mcp call with no tool":   {stepOf(t, "mcp", map[string]any{"q": "x"}), "does not name the MemQL tool"},
 	} {
 		ok, why := replayable(tc.step)
 		if ok {

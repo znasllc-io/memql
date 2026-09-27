@@ -2246,15 +2246,7 @@ func stepSummary(tool string, args map[string]any) string {
 			s = "ran `" + strings.Join(words, " ") + "`"
 		}
 	case "fs_write":
-		paths := pathsInArgs(args)
-		if changes, ok := args["changes"].([]any); ok {
-			for _, ch := range changes {
-				if m, ok := ch.(map[string]any); ok {
-					paths = append(paths, str(m, "path"))
-				}
-			}
-		}
-		s = "wrote " + strings.Join(paths, ", ")
+		s = "wrote " + strings.Join(pathsInArgs(args), ", ")
 	case "fs_read":
 		s = "read " + strings.Join(pathsInArgs(args), ", ")
 	case "fetch":

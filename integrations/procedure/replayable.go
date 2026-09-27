@@ -31,10 +31,11 @@ import (
 //	          command the app left running reported no result to compare.
 //	fs_write  Claude Code's Write {file_path, content}, Edit {file_path,
 //	          old_string, new_string[, replace_all]}, MultiEdit {file_path,
-//	          edits: [{old_string, new_string[, replace_all]}]}; Codex's
-//	          fileChange {changes: [...]} when EVERY change is an `add`, whose
-//	          `diff` is the new file's whole content. An update's diff is a
-//	          patch, and applying a patch is not a write any dispatcher makes.
+//	          edits: [{old_string, new_string[, replace_all]}]}. Codex's
+//	          fileChange {changes: [...]} is REFUSED, an `add` included: no
+//	          dispatcher reads `changes`, so a procedure made of one climbed
+//	          on dry shadow comparisons, asked a person to approve it, and
+//	          failed every canary.
 //	fs_read   {file_path} or {path} -- one file. A listing (a Glob or Grep
 //	          `pattern`) reads no one file's content.
 //	fetch     {url}. A web search names no URL to fetch again.
@@ -115,8 +116,8 @@ func replayableExec(args *proc.Node) (bool, string) {
 
 // replayableWrite is the fs_write half of the contract.
 func replayableWrite(args *proc.Node) (bool, string) {
-	if changes, ok := at(args, "changes"); ok {
-		return replayableChanges(changes)
+	if has(args, "changes") {
+		return false, "it writes through Codex's file changes (changes), which no dispatcher applies"
 	}
 	if !has(args, "file_path") {
 		if has(args, "notebook_path") {
@@ -142,24 +143,6 @@ func replayableWrite(args *proc.Node) (bool, string) {
 		return true, ""
 	}
 	return false, fmt.Sprintf("it writes in a form no dispatcher applies (%s)", strings.Join(keysOf(args), ", "))
-}
-
-// replayableChanges is Codex's fileChange: a write only when every change
-// adds a file whose whole content is the change's diff.
-func replayableChanges(changes *proc.Node) (bool, string) {
-	if changes.Kind != proc.KindArray || len(changes.Kids) == 0 {
-		return false, "its file changes are not a list"
-	}
-	for _, ch := range changes.Kids {
-		if ch == nil || ch.Kind != proc.KindObject || !has(ch, "path") || !has(ch, "diff") {
-			return false, "one of its file changes names no path or content"
-		}
-		kind, ok := literalAt(ch, "kind", "type")
-		if !ok || kind != "add" {
-			return false, "one of its file changes is not an `add` -- an update or a delete is a patch, which no dispatcher applies"
-		}
-	}
-	return true, ""
 }
 
 // firstUnreplayable is the first step of a template no dispatcher runs, as
