@@ -71,8 +71,9 @@ func AntiUnify(a, b *Node, next holeNamer) (*Node, int) {
 		if a.Lit == b.Lit {
 			// The LEFT operand's hints survive: a number both sides agree on
 			// is still a number, or the template renders and materializes it
-			// as a string.
-			return &Node{Kind: KindLit, Lit: a.Lit, LitType: a.LitType, Form: a.Form}, 0
+			// as a string -- and an argument both sides agree on is still
+			// spelled the way the first instance spelled it.
+			return &Node{Kind: KindLit, Lit: a.Lit, LitType: a.LitType, Raw: a.Raw, Form: a.Form}, 0
 		}
 		return HoleNode(next(), widenType(typeOf(a), typeOf(b))), 1
 	case KindHole:
@@ -121,6 +122,9 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 		dist int
 		ai   int
 		bi   int
+		// inserted: some element came from the right alone, so the
+		// generalization's elements are no longer the left's one for one.
+		inserted bool
 	)
 	// emitGap generalizes the unmatched runs before the next matched pair.
 	emitGap := func(untilA, untilB int) {
@@ -140,6 +144,7 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 				kids = append(kids, HoleNode(next(), typeOf(b.Kids[bi])))
 				dist += b.Kids[bi].Size()
 				bi++
+				inserted = true
 			}
 		}
 	}
@@ -154,6 +159,14 @@ func antiUnifyArray(a, b *Node, next holeNamer) (*Node, int) {
 	// A generalized command line is still a command line: without the Form a
 	// template's argv would materialize as a list, and a shell cannot run one.
 	g.Form = a.Form
+	// The left's SEPARATORS survive only while every element is the left's,
+	// one for one and in order: they are the text between THOSE elements. An
+	// element the right inserted has no gap in the left, and the command line
+	// falls back to single spaces rather than borrowing one that was never
+	// recorded.
+	if !inserted && a.Seps != nil && len(a.Seps) == len(a.Kids)+1 {
+		g.Seps = append(make([]string, 0, len(a.Seps)), a.Seps...)
+	}
 	return g, dist
 }
 

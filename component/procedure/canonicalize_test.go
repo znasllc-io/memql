@@ -1,6 +1,10 @@
 package procedure
 
-import "testing"
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
 
 func TestCanonicalize_AnAutomationSubrunIsASymbolLikeAnyAction(t *testing.T) {
 	// D24's second corpus level: an automation invocation is a symbol in the
@@ -216,5 +220,116 @@ func TestCanonicalizeRecordsANullAsNull(t *testing.T) {
 	}
 	if !n.Equal(Lit("")) {
 		t.Fatal("a null literal must still Equal the empty string: canonicalization folds scalars to one spelling")
+	}
+}
+
+// lits is a token list's values, for comparing what splitArgv read.
+func lits(nodes []*Node) []string {
+	out := make([]string, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.Lit
+	}
+	return out
+}
+
+// TestSplitArgvRemovesQuotesTheWayAPOSIXShellDoes (A1): every expectation
+// below is what dash and bash hand the program. Inside double quotes a
+// backslash escapes only $, `, ", \ and a newline -- before anything else it
+// is a literal backslash, so `grep -E "\d+"` searches for \d+ and not for d+.
+// A backslash-newline outside single quotes is a line continuation and
+// vanishes; inside single quotes nothing is special.
+func TestSplitArgvRemovesQuotesTheWayAPOSIXShellDoes(t *testing.T) {
+	for _, c := range []struct {
+		line string
+		want []string
+	}{
+		{`grep -E "\d+"`, []string{"grep", "-E", `\d+`}},
+		{`printf "a\tb"`, []string{"printf", `a\tb`}},
+		{`echo "a\"b" "a\\b" "\$HOME" "\` + "`" + `"`, []string{"echo", `a"b`, `a\b`, `$HOME`, "`"}},
+		{`grep -n "foo\|bar" f`, []string{"grep", "-n", `foo\|bar`, "f"}},
+		{"echo \"a\\\nb\"", []string{"echo", "ab"}},
+		{"echo a\\\nb", []string{"echo", "ab"}},
+		{"echo a \\\n b", []string{"echo", "a", "b"}},
+		{`echo 'a\b' 'x"y'`, []string{"echo", `a\b`, `x"y`}},
+		{"echo 'a\\\nb'", []string{"echo", "a\\\nb"}},
+		{`echo a\ b \'x\' \\`, []string{"echo", "a b", "'x'", `\`}},
+		{`echo "" ''`, []string{"echo", "", ""}},
+		{`echo a\`, []string{"echo", `a\`}},
+		{`echo "$(date +%F)"`, []string{"echo", "$(date +%F)"}},
+	} {
+		if got := lits(splitArgv(c.line)); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("splitArgv(%q) = %q, want %q", c.line, got, c.want)
+		}
+	}
+}
+
+// recordedCommands are command lines an app writes and a replay has to send
+// back EXACTLY: Claude Code's heredoc commit message, expansions inside double
+// quotes, backslashes a shell keeps, a heredoc, and the whitespace between the
+// words. Each was measured wrong before Raw and Seps: re-quoted from the tree,
+// every expansion became a literal, every kept backslash vanished and every
+// newline became a space.
+var recordedCommands = []string{
+	"git commit -m \"$(cat <<'EOF'\nAdd the replay runner\n\nIt serves a goal with no model.\nEOF\n)\"",
+	`mkdir -p "$HOME/My Docs"`,
+	`echo "Build $(date +%F)" > build.txt`,
+	`grep -E "\d+" log.txt`,
+	`printf "a\tb"`,
+	`grep -n "foo\|bar" f`,
+	"cat <<'EOF' > notes.txt\nline one\n  indented line\nEOF",
+	"ls   -la\t/tmp",
+	"docker run \\\n  --rm alpine echo hi",
+	"  echo hi  ",
+	`echo 'it'\''s' "" ''`,
+	`cd app&&npm test`,
+	"",
+}
+
+// TestSplitArgvRecordsEachTokensSpellingAndTheTextBetweenThem (A2): a token
+// keeps its exact source spelling (Raw) and the argv keeps the exact text
+// around its tokens (Seps, one more than the tokens), so the pieces put back
+// together ARE the recorded command, byte for byte.
+func TestSplitArgvRecordsEachTokensSpellingAndTheTextBetweenThem(t *testing.T) {
+	for _, line := range recordedCommands {
+		toks, seps := scanArgv(line)
+		if len(seps) != len(toks)+1 {
+			t.Fatalf("%q: %d tokens and %d separators, want one more separator than tokens", line, len(toks), len(seps))
+		}
+		var b strings.Builder
+		b.WriteString(seps[0])
+		for i, tok := range toks {
+			if tok.Raw == "" {
+				t.Fatalf("%q: token %d (%q) has no spelling", line, i, tok.Lit)
+			}
+			b.WriteString(tok.Raw)
+			b.WriteString(seps[i+1])
+		}
+		if b.String() != line {
+			t.Errorf("the pieces of %q put back together are %q", line, b.String())
+		}
+	}
+	toks, seps := scanArgv(`mkdir  -p "$HOME/My Docs"` + "\n")
+	if got := []string{toks[0].Raw, toks[1].Raw, toks[2].Raw}; !reflect.DeepEqual(got, []string{"mkdir", "-p", `"$HOME/My Docs"`}) {
+		t.Errorf("spellings = %q", got)
+	}
+	if want := []string{"", "  ", " ", "\n"}; !reflect.DeepEqual(seps, want) {
+		t.Errorf("separators = %q, want %q", seps, want)
+	}
+	if toks[2].Lit != "$HOME/My Docs" {
+		t.Errorf("the value is still what the quotes enclose; got %q", toks[2].Lit)
+	}
+}
+
+// TestCanonicalizeKeepsTheSpellingOnTheArgv: the reading canonicalization
+// records is the one Materialize writes back from, so the argv node carries
+// the separators and every token its spelling.
+func TestCanonicalizeKeepsTheSpellingOnTheArgv(t *testing.T) {
+	a := Canonicalize([]Step{{StepType: "exec", Consumed: true, Input: map[string]any{"command": `echo  "a b"`}}})[0]
+	argv, _ := a.Args.At([]string{"command"})
+	if want := []string{"", "  ", ""}; !reflect.DeepEqual(argv.Seps, want) {
+		t.Fatalf("Seps = %q, want %q", argv.Seps, want)
+	}
+	if argv.Kids[1].Raw != `"a b"` || argv.Kids[1].Lit != "a b" {
+		t.Fatalf("token 1 = %+v, want the value a b spelled \"a b\"", *argv.Kids[1])
 	}
 }

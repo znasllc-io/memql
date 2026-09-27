@@ -2,6 +2,7 @@ package procedure
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -161,8 +162,10 @@ var pathKeys = map[string]bool{
 // nobody can tell apart.
 func canonicalizeString(key, s string) *Node {
 	if commandKeys[key] {
-		n := Arr(splitArgv(s)...)
+		toks, seps := scanArgv(s)
+		n := Arr(toks...)
 		n.Form = FormArgv
+		n.Seps = seps
 		return n
 	}
 	if n, ok := parseJSONTree(s); ok {
@@ -230,53 +233,163 @@ func splitPath(s string) []*Node {
 	return out
 }
 
-// splitArgv splits a command line on whitespace, honouring single and double
-// quotes and backslash escapes. It is not a shell: it does not expand,
-// substitute or interpret operators, because the recording is evidence of what
-// ran and re-interpreting it would be a second opinion about it.
+// splitArgv is a command line's arguments, each carrying its spelling
+// (scanArgv without the separators).
 func splitArgv(s string) []*Node {
+	toks, _ := scanArgv(s)
+	return toks
+}
+
+// scanArgv splits a command line on whitespace the way a POSIX shell removes
+// quotes, and keeps how it was WRITTEN: every argument's exact source text
+// (Node.Raw) and the exact text around the arguments -- the separators, one
+// more than the arguments. Put back together the pieces are the line, byte
+// for byte, which is what lets Materialize send a recorded command as it ran.
+//
+// The values follow POSIX quote removal exactly, because a value is what the
+// PROGRAM received and two recordings are compared by it:
+//
+//   - inside single quotes nothing is special;
+//   - inside double quotes a backslash escapes only $, `, ", \ and a newline,
+//     and before any other character it is a literal backslash -- so
+//     `grep -E "\d+"` searched for \d+, and `printf "a\tb"` printed a\tb;
+//   - outside quotes a backslash escapes the next character, and one that
+//     ends the line is kept, as sh keeps it;
+//   - a backslash-newline outside single quotes is a line continuation and
+//     vanishes. It belongs to an argument only when the argument goes on
+//     after it; otherwise it is separator text.
+//
+// It is still not a shell: it does not expand, substitute or interpret
+// operators, because the recording is evidence of what ran and
+// re-interpreting it would be a second opinion about it. A value holding
+// `$(date +%F)` is the text the shell was handed, not what it expanded to --
+// which is exactly why the spelling is kept beside it.
+//
+// It reads bytes rather than runes: every character it treats specially is
+// ASCII, and no byte of a multi-byte UTF-8 sequence is, so a spelling sliced
+// at these boundaries is always whole runes.
+func scanArgv(s string) ([]*Node, []string) {
 	var (
-		out   []*Node
-		cur   strings.Builder
-		open  bool
-		quote rune
-		esc   bool
+		toks    []*Node
+		seps    []string
+		val     strings.Builder
+		open    bool // an argument is being read
+		start   int  // where the open argument's spelling begins
+		end     int  // just past the last byte that belongs to it
+		sepFrom int  // where the separator before the next argument begins
+		quote   byte // 0, '\'' or '"'
 	)
-	flush := func() {
-		if open {
-			out = append(out, Lit(cur.String()))
-			cur.Reset()
-			open = false
+	begin := func(at int) {
+		if !open {
+			open, start = true, at
 		}
 	}
-	for _, r := range s {
+	flush := func() {
+		seps = append(seps, s[sepFrom:start])
+		toks = append(toks, &Node{Kind: KindLit, Lit: val.String(), Raw: s[start:end]})
+		val.Reset()
+		open, sepFrom = false, end
+	}
+	for i := 0; i < len(s); {
+		c := s[i]
 		switch {
-		case esc:
-			cur.WriteRune(r)
-			open = true
-			esc = false
-		case r == '\\' && quote != '\'':
-			esc = true
-			open = true
-		case quote != 0:
-			if r == quote {
+		case quote == '\'':
+			if c == '\'' {
 				quote = 0
 			} else {
-				cur.WriteRune(r)
+				val.WriteByte(c)
 			}
-			open = true
-		case r == '\'' || r == '"':
-			quote = r
-			open = true
-		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
-			flush()
+			i++
+			end = i
+		case quote == '"':
+			switch {
+			case c == '"':
+				quote = 0
+				i++
+			case c == '\\' && i+1 < len(s) && s[i+1] == '\n':
+				i += 2
+			case c == '\\' && i+1 < len(s) && strings.IndexByte("$`\"\\", s[i+1]) >= 0:
+				val.WriteByte(s[i+1])
+				i += 2
+			default:
+				val.WriteByte(c)
+				i++
+			}
+			end = i
+		case c == '\\' && i+1 < len(s) && s[i+1] == '\n':
+			i += 2
+		case c == '\\':
+			begin(i)
+			if i+1 < len(s) {
+				val.WriteByte(s[i+1])
+				i += 2
+			} else {
+				val.WriteByte(c)
+				i++
+			}
+			end = i
+		case c == '\'' || c == '"':
+			begin(i)
+			quote = c
+			i++
+			end = i
+		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
+			if open {
+				flush()
+			}
+			i++
 		default:
-			cur.WriteRune(r)
-			open = true
+			begin(i)
+			val.WriteByte(c)
+			i++
+			end = i
 		}
 	}
-	flush()
-	return out
+	if open {
+		flush()
+	}
+	seps = append(seps, s[sepFrom:])
+	return toks, seps
+}
+
+// spelledAs reports whether raw is ONE argument whose value is lit, with
+// nothing around it -- what an argument's recorded spelling must be, so the
+// command a replay sends says what the tree it was approved as says.
+func spelledAs(raw, lit string) bool {
+	toks, seps := scanArgv(raw)
+	return len(toks) == 1 && toks[0].Lit == lit && seps[0] == "" && seps[1] == ""
+}
+
+// checkSeps is what a command line's separators must be: one more than its
+// arguments, each nothing but the text scanArgv puts between arguments --
+// blanks and line continuations -- and every one BETWEEN two arguments holding
+// a blank, or the two would be sent as one argument. Separators that carried
+// anything else would send text the tree does not describe.
+func checkSeps(seps []string, args int) error {
+	if len(seps) != args+1 {
+		return fmt.Errorf("procedure: a command line of %d argument(s) carries %d separator(s), not %d", args, len(seps), args+1)
+	}
+	for i, s := range seps {
+		blank := false
+		for j := 0; j < len(s); j++ {
+			switch s[j] {
+			case ' ', '\t', '\r', '\n':
+				blank = true
+			case '\\':
+				if j+1 < len(s) && s[j+1] == '\n' {
+					j++
+					continue
+				}
+				return fmt.Errorf("procedure: separator %d of a command line is %q, which is not whitespace", i, s)
+			default:
+				return fmt.Errorf("procedure: separator %d of a command line is %q, which is not whitespace", i, s)
+			}
+		}
+		if !blank && i > 0 && i < args {
+			return fmt.Errorf("procedure: separator %d of a command line is %q, which does not separate two arguments", i, s)
+		}
+	}
+	return nil
 }
 
 // formatNumber writes a float back in the shortest spelling that round-trips,

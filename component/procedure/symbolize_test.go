@@ -1,6 +1,9 @@
 package procedure
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func argsOf(cmd string) *Node { return Obj(map[string]*Node{"command": Arr(litsOf(cmd)...)}) }
 
@@ -233,5 +236,54 @@ func TestAHoleIsTypedByWhatBothSidesObserved(t *testing.T) {
 	tmpl := Generalize(three)
 	if len(tmpl.Holes) != 1 || tmpl.Holes[0].Type != "number" {
 		t.Fatalf("three numbers must open one number hole; got %+v", tmpl.Holes)
+	}
+}
+
+// argvOf is a command line canonicalized the way a recording's is.
+func argvOf(t *testing.T, line string) *Node {
+	t.Helper()
+	n, ok := execStep(line).Args.At([]string{"command"})
+	if !ok {
+		t.Fatalf("%q canonicalized to no command", line)
+	}
+	return n
+}
+
+// TestAntiUnifyKeepsTheLeftSpellingWhereLiteralsAgree (A3): two recordings
+// agreeing on an argument's VALUE may have spelled it differently, and the
+// template reads the way its first instance was read -- as it already does for
+// LitType and Form.
+func TestAntiUnifyKeepsTheLeftSpellingWhereLiteralsAgree(t *testing.T) {
+	g, dist := AntiUnify(argvOf(t, `echo "a b"`), argvOf(t, `echo 'a b'`), newHoleNamer())
+	if dist != 0 {
+		t.Fatalf("distance = %d, want 0: the two spellings are one argument", dist)
+	}
+	if g.Kids[1].Raw != `"a b"` {
+		t.Fatalf("spelling = %q, want the left operand's", g.Kids[1].Raw)
+	}
+}
+
+// TestAntiUnifyKeepsTheLeftSeparatorsOnlyWhenEveryElementIsTheLefts (A3): the
+// separators say what sits BETWEEN the left operand's tokens, so they survive
+// only while the generalization's elements are the left's, one for one, in
+// order. An element inserted from the right has no separator in the left, and
+// the argv falls back to single spaces rather than borrowing a gap that was
+// never there.
+func TestAntiUnifyKeepsTheLeftSeparatorsOnlyWhenEveryElementIsTheLefts(t *testing.T) {
+	left := argvOf(t, "cp  report.txt\tdest1.txt")
+	g, _ := AntiUnify(left, argvOf(t, "cp report.txt dest2.txt"), newHoleNamer())
+	if !reflect.DeepEqual(g.Seps, left.Seps) {
+		t.Fatalf("a one-for-one generalization must keep the left separators %q; got %q", left.Seps, g.Seps)
+	}
+	deleted, _ := AntiUnify(argvOf(t, "cp -r a  b"), argvOf(t, "cp a b"), newHoleNamer())
+	if len(deleted.Seps) != len(deleted.Kids)+1 {
+		t.Fatalf("an element only the LEFT has is still the left's; got separators %q for %d elements", deleted.Seps, len(deleted.Kids))
+	}
+	inserted, _ := AntiUnify(argvOf(t, "cp a  b"), argvOf(t, "cp -r a b"), newHoleNamer())
+	if inserted.Seps != nil {
+		t.Fatalf("an element inserted from the right has no separator in the left; got %q", inserted.Seps)
+	}
+	if inserted.Form != FormArgv {
+		t.Fatalf("the generalization is still a command line; Form = %q", inserted.Form)
 	}
 }

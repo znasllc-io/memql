@@ -131,27 +131,54 @@ func materializedCommand(t *testing.T, args *Node, values map[string]string) str
 	return cmd
 }
 
-// TestMaterializeRoundTripsARecordedCommand: the replay sends the string, and
-// the only claim a canonical tree can support about a string is that it READS
-// BACK as the same tree. The exact text is pinned too, because it is what a
-// shell will run.
-func TestMaterializeRoundTripsARecordedCommand(t *testing.T) {
-	a := execStep(`git commit -m "a b"`)
-	cmd := materializedCommand(t, a.Args, nil)
-	if want := `git commit -m 'a b'`; cmd != want {
-		t.Fatalf("command = %q, want %q", cmd, want)
+// TestMaterializeRebuildsARecordedCommandByteForByte (A4): the replay sends
+// the string, and a shell runs it -- so the claim is about BYTES, not about a
+// tree. A template with no hole in its command materializes as exactly the
+// command its first recording ran: every quote, every expansion, every
+// backslash and every newline where the app wrote it. Reading the output back
+// is not the test, because a tree that lost the quoting reads back as itself
+// and runs something else.
+func TestMaterializeRebuildsARecordedCommandByteForByte(t *testing.T) {
+	for _, line := range recordedCommands {
+		a := execStep(line)
+		if cmd := materializedCommand(t, a.Args, nil); cmd != line {
+			t.Errorf("recorded %q\n     replayed %q", line, cmd)
+		}
 	}
+	// And the tree is still the arguments the program received.
+	a := execStep(`git commit -m "a b"`)
 	orig, _ := a.Args.At([]string{"command"})
-	if back := Arr(splitArgv(cmd)...); !back.Equal(orig) {
-		t.Fatalf("the materialized command does not read back as the recorded tree:\n %q", cmd)
+	if got := lits(orig.Kids); !reflect.DeepEqual(got, []string{"git", "commit", "-m", "a b"}) {
+		t.Fatalf("arguments = %q", got)
+	}
+	if cmd := materializedCommand(t, a.Args, nil); cmd != `git commit -m "a b"` {
+		t.Fatalf("command = %q, want the recorded spelling", cmd)
 	}
 }
 
-// TestMaterializeQuotesExactlyTheArgumentsThatNeedIt pins the quoting rule. An
-// argument with whitespace, a quote or a backslash, or an empty one, is single
-// quoted (an embedded single quote closes, escapes and reopens); everything
-// else is bare -- which keeps a recorded redirect an operator rather than an
-// argument.
+// TestAGeneralizedCommandKeepsEveryOtherByteOfItsFirstRecording (A3, A4): two
+// recordings differing in one word generalize to a hole at that word, and a
+// replay changes that word ONLY -- the first recording's quoting, spacing and
+// line breaks survive around it.
+func TestAGeneralizedCommandKeepsEveryOtherByteOfItsFirstRecording(t *testing.T) {
+	first := "grep -rn  \"TODO:\"  src/ --include='*.go' \\\n  | head -5"
+	second := "grep -rn \"TODO:\" lib/ --include='*.go' | head -5"
+	tmpl := Generalize([][]Action{{execStep(first)}, {execStep(second)}})
+	if len(tmpl.Holes) != 1 {
+		t.Fatalf("holes = %+v, want the one directory", tmpl.Holes)
+	}
+	got := materializedCommand(t, tmpl.Steps[0].Args, map[string]string{tmpl.Holes[0].Id: "pkg/"})
+	if want := strings.Replace(first, "src/", "pkg/", 1); got != want {
+		t.Fatalf("replayed %q\n     want %q", got, want)
+	}
+}
+
+// TestMaterializeQuotesExactlyTheArgumentsThatNeedIt pins the LENIENT quoting
+// rule a recorded argument with no spelling -- a payload from before Node.Raw
+// -- is still written with. An argument with whitespace, a quote or a
+// backslash, or an empty one, is single quoted (an embedded single quote
+// closes, escapes and reopens); everything else is bare -- which keeps a
+// recorded redirect an operator rather than an argument.
 func TestMaterializeQuotesExactlyTheArgumentsThatNeedIt(t *testing.T) {
 	argv := Arr(Lit("printf"), Lit(""), Lit("it's"), Lit(`a"b`), Lit(`c\d`), Lit("tab\there"), Lit(">"), Lit("out.txt"))
 	argv.Form = FormArgv

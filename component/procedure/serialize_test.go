@@ -19,8 +19,8 @@ func sameNode(t *testing.T, path string, a, b *Node) {
 	if a == nil {
 		return
 	}
-	if a.Kind != b.Kind || a.Lit != b.Lit || a.LitType != b.LitType || a.Form != b.Form ||
-		a.HoleId != b.HoleId || a.HoleType != b.HoleType {
+	if a.Kind != b.Kind || a.Lit != b.Lit || a.LitType != b.LitType || a.Raw != b.Raw || a.Form != b.Form ||
+		a.HoleId != b.HoleId || a.HoleType != b.HoleType || !reflect.DeepEqual(a.Seps, b.Seps) {
 		t.Fatalf("%s: %+v\n     vs %+v", path, *a, *b)
 	}
 	if len(a.Keys) != len(b.Keys) || len(a.Kids) != len(b.Kids) {
@@ -38,8 +38,9 @@ func sameNode(t *testing.T, path string, a, b *Node) {
 
 // everyFieldTemplate exercises every Node field and every Hole field.
 func everyFieldTemplate() Template {
-	argv := Arr(Lit("echo"), HoleNode("s0.command.1", "string"), Lit(">"), Lit("out.txt"))
+	argv := Arr(Lit("echo"), HoleNode("s0.command.1", "string"), Lit(">"), &Node{Kind: KindLit, Lit: "out file.txt", Raw: `"out file.txt"`})
 	argv.Form = FormArgv
+	argv.Seps = []string{"", "  ", " ", " ", "\n"}
 	rooted := Arr(Lit(""), Lit("cdn.example.com"), Lit("x"))
 	rooted.Form = FormRootedPath
 	rel := Arr(Lit("."), Lit("a"))
@@ -189,6 +190,20 @@ func TestTheWireShapeIsPinned(t *testing.T) {
 	if want := `{"id":"s0","tool":"exec","template":{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"echo"},{"kind":"hole","holeId":"s0.command.1","holeType":"string"}]}}`; string(sb) != want {
 		t.Fatalf("symbol wire shape changed:\n got %s\nwant %s", sb, want)
 	}
+
+	// A command line canonicalized from a recording carries its spelling:
+	// each token's `raw` beside its `lit`, and the argv's `seps` beside its
+	// `kids`. Both are omitted when absent, so every payload written before
+	// them encodes, and decodes, exactly as it did.
+	spelled := execStep(`echo  "a b"`).Args
+	pb, err := json.Marshal(spelled)
+	if err != nil {
+		t.Fatalf("marshal a spelled command: %v", err)
+	}
+	if want := `{"kind":"object","keys":["command"],"kids":[{"kind":"array","form":"argv",` +
+		`"kids":[{"kind":"lit","lit":"echo","raw":"echo"},{"kind":"lit","lit":"a b","raw":"\"a b\""}],"seps":["","  ",""]}]}`; string(pb) != want {
+		t.Fatalf("spelled wire shape changed:\n got %s\nwant %s", pb, want)
+	}
 }
 
 // TestUnmarshalRefusesWhatItCannotReplay: a stored procedure is executed, and
@@ -222,6 +237,62 @@ func TestUnmarshalRefusesWhatItCannotReplay(t *testing.T) {
 		if _, err := UnmarshalTree([]byte(bad)); err == nil {
 			t.Errorf("UnmarshalTree accepted %s", bad)
 		}
+	}
+}
+
+// TestAPayloadWrittenBeforeTheSpellingDecodesAsBefore: a stored argv with no
+// `raw` and no `seps` is a payload from before them. It decodes with neither,
+// and replays as it always did -- its tokens re-quoted by the lenient rule and
+// joined by single spaces.
+func TestAPayloadWrittenBeforeTheSpellingDecodesAsBefore(t *testing.T) {
+	old := `{"steps":[{"tool":"exec","args":{"kind":"object","keys":["command"],"kids":[` +
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"echo"},{"kind":"lit","lit":"a b"}]}]}}],"holes":[]}`
+	tmpl, err := UnmarshalTemplate([]byte(old))
+	if err != nil {
+		t.Fatalf("UnmarshalTemplate: %v", err)
+	}
+	argv, _ := tmpl.Steps[0].Args.At([]string{"command"})
+	if argv.Seps != nil || argv.Kids[1].Raw != "" {
+		t.Fatalf("an old payload decoded with a spelling it never carried: %q / %q", argv.Seps, argv.Kids[1].Raw)
+	}
+	if cmd := materializedCommand(t, tmpl.Steps[0].Args, nil); cmd != "echo 'a b'" {
+		t.Fatalf("command = %q, want the tokens re-quoted and joined as before", cmd)
+	}
+}
+
+// TestUnmarshalRefusesASpellingThatDisagreesWithItsTree: the spelling is what
+// a replay SENDS, and the tree is what a person approved and what Bind reads.
+// A `raw` that does not read back as its own `lit` -- one word with that value
+// -- or `seps` that are not pure separator text, or not one more than the
+// tokens, would send a command the tree does not describe; it is refused on
+// the way in and on the way out.
+func TestUnmarshalRefusesASpellingThatDisagreesWithItsTree(t *testing.T) {
+	for _, bad := range []string{
+		// A spelling that is two words, or another value.
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"x","raw":"x; rm -rf ~"}]}`,
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"x","raw":"'y'"}]}`,
+		// A spelling on something that is not an argv token.
+		`{"kind":"array","form":"path","kids":[{"kind":"lit","lit":"x","raw":"x"}]}`,
+		`{"kind":"hole","holeId":"h","raw":"x"}`,
+		// Separators of the wrong count, carrying text, or empty between tokens.
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"a"}],"seps":[""]}`,
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"a"},{"kind":"lit","lit":"b"}],"seps":["","; rm -rf ~ ",""]}`,
+		`{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"a"},{"kind":"lit","lit":"b"}],"seps":["","",""]}`,
+		`{"kind":"array","form":"path","kids":[{"kind":"lit","lit":"a"}],"seps":["",""]}`,
+	} {
+		var n Node
+		if err := json.Unmarshal([]byte(bad), &n); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	good := `{"kind":"array","form":"argv","kids":[{"kind":"lit","lit":"a b","raw":"a\\ b"},{"kind":"lit","lit":"c"}],"seps":[" ","\\\n\t",""]}`
+	var n Node
+	if err := json.Unmarshal([]byte(good), &n); err != nil {
+		t.Fatalf("a consistent spelling was refused: %v", err)
+	}
+	bad := &Node{Kind: KindArray, Form: FormArgv, Kids: []*Node{{Kind: KindLit, Lit: "x", Raw: "$(id)"}}}
+	if _, err := json.Marshal(bad); err == nil {
+		t.Fatal("MarshalJSON must refuse a spelling that disagrees with its value")
 	}
 }
 
