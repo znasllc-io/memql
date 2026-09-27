@@ -30,6 +30,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
+	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
 // CompileRequest is one goal to compile.
@@ -80,7 +81,10 @@ type CompileOutcome struct {
 	// goal's own input. Today that is only a learned procedure's construct
 	// id: replayLearnedProcedure is ONE embedded automation that serves every
 	// procedure on the ladder, so it has to be told which (epic memql#5408).
-	// WorkCompiler.Compile merges them over the goal's input.
+	// WorkCompiler.Compile merges them over the goal's input. A key added here
+	// is one no goal supplied, so it belongs in integrations/work's
+	// replayOnlyVariables too: a recording opened from the goal's run inherits
+	// the variables as the goal's input.
 	Variables map[string]any
 }
 
@@ -205,7 +209,7 @@ func (l *PlannerAgentLoop) finishCompile(ctx context.Context, req CompileRequest
 			// and the construct id rides the run's variables instead.
 			out.AutomationName = replayProcedureAutomation
 			out.ConstructId = ""
-			out.Variables = map[string]any{"procedureConstructId": d.Candidate.ConstructId}
+			out.Variables = map[string]any{workintegration.ProcedureConstructVariable: d.Candidate.ConstructId}
 			return out, nil
 		}
 		// The template is the catalogue's. Nothing more to author; the
