@@ -23,8 +23,8 @@ query ShopifyFetchMarket($id: ID!) {
       webPresences(first: 25) {
         nodes {
           id
-          alternateLocales { id }
-          defaultLocale { id }
+          alternateLocales { locale marketWebPresences { id } name primary published }
+          defaultLocale { locale marketWebPresences { id } name primary published }
           domain { host id localization { alternateLocales country defaultLocale } marketWebPresence { id } sslEnabled url }
           rootUrls { locale url }
           subfolderSuffix
@@ -53,8 +53,8 @@ query ShopifyListMarket($first: Int!, $after: String, $query: String) {
       webPresences(first: 25) {
         nodes {
           id
-          alternateLocales { id }
-          defaultLocale { id }
+          alternateLocales { locale marketWebPresences { id } name primary published }
+          defaultLocale { locale marketWebPresences { id } name primary published }
           domain { host id localization { alternateLocales country defaultLocale } marketWebPresence { id } sslEnabled url }
           rootUrls { locale url }
           subfolderSuffix

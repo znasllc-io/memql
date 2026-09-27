@@ -20,8 +20,8 @@ query ShopifyFetchOnlineStoreTheme($id: ID!) {
   }
 }
 
-query ShopifyListOnlineStoreTheme($first: Int!, $after: String, $query: String) {
-  themes(first: $first, after: $after, query: $query) {
+query ShopifyListOnlineStoreTheme($first: Int!, $after: String) {
+  themes(first: $first, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id

@@ -80,7 +80,12 @@ func (ps *PlanSet) ParentsFirst() []*TypePlan {
 // recurse further, which is what keeps a fetch to two levels.
 func (ps *PlanSet) selectionLines(p *TypePlan, indent string, nested bool, bulk bool) []string {
 	var lines []string
-	lines = append(lines, indent+"id")
+	// The row's identity -- when the type has one. A type without an id
+	// field (a price list's prices) is selected without it; asking for it
+	// is what makes the Admin API refuse the parent's whole document.
+	if p.HasID {
+		lines = append(lines, indent+"id")
+	}
 	for _, f := range p.Fields {
 		sel := f.Selection
 		if sel == "" {
@@ -88,7 +93,7 @@ func (ps *PlanSet) selectionLines(p *TypePlan, indent string, nested bool, bulk 
 		}
 		if bulk {
 			switch {
-			case f.Kind == KindRefs:
+			case f.Kind == KindRefs || f.OmitFromBulk:
 				// Omitted from bulk: see the note on the ref mapping.
 				continue
 			case f.SelectionBulk != "":
@@ -179,8 +184,16 @@ func (ps *PlanSet) EmitSelectionDocument(version string, p *TypePlan) string {
 
 	if p.Entry.Query != "" {
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "query ShopifyList%s($first: Int!, $after: String, $query: String) {\n", title(p.Concept))
-		fmt.Fprintf(&b, "  %s(first: $first, after: $after, query: $query) {\n", p.Entry.Query)
+		// $query only where the connection takes it. Declaring it against
+		// a connection that does not is refused outright (argumentNotAccepted
+		// plus variableNotUsed), with or without a value bound to it.
+		if p.ListFilterable {
+			fmt.Fprintf(&b, "query ShopifyList%s($first: Int!, $after: String, $query: String) {\n", title(p.Concept))
+			fmt.Fprintf(&b, "  %s(first: $first, after: $after, query: $query) {\n", p.Entry.Query)
+		} else {
+			fmt.Fprintf(&b, "query ShopifyList%s($first: Int!, $after: String) {\n", title(p.Concept))
+			fmt.Fprintf(&b, "  %s(first: $first, after: $after) {\n", p.Entry.Query)
+		}
 		b.WriteString("    pageInfo { hasNextPage endCursor }\n")
 		b.WriteString("    nodes {\n")
 		for _, l := range body {
@@ -234,8 +247,14 @@ func (ps *PlanSet) EmitBulkDocuments(version string, p *TypePlan) (string, []str
 		sub := *p
 		sub.Children = batch
 		body := ps.selectionLines(&sub, "        ", true, true)
-		fmt.Fprintf(&file, "query %s($query: String) {\n", name)
-		fmt.Fprintf(&file, "  %s(query: $query) {\n", p.Entry.Query)
+		// The same rule as the list document: $query only where accepted.
+		if p.ListFilterable {
+			fmt.Fprintf(&file, "query %s($query: String) {\n", name)
+			fmt.Fprintf(&file, "  %s(query: $query) {\n", p.Entry.Query)
+		} else {
+			fmt.Fprintf(&file, "query %s {\n", name)
+			fmt.Fprintf(&file, "  %s {\n", p.Entry.Query)
+		}
 		file.WriteString("    edges {\n      node {\n")
 		for _, l := range body {
 			file.WriteString(l + "\n")

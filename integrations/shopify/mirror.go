@@ -52,10 +52,13 @@ func (c *Connector) writeMirror(ctx context.Context, w memqlsync.MirrorWrite) er
 // mirrorInsert renders the raw concept insert.
 //
 // Deliberately the same form datasync's EngineMirrorWriter renders:
-// insert(<concept>, id=<row>, payload=<json>). A raw insert rather than
-// a named mutation because the payload is written WHOLESALE -- which is
-// what makes a field the origin cleared actually clear, instead of being
-// merged forward from the previous fetch.
+// insert(<concept>, id=<row>, payload=<json>). A raw insert rather than a
+// named mutation, so the payload is stated in full on every write. Note
+// what the engine does with it on an EXISTING row: it read-merges, and an
+// omitted top-level field keeps its stored value (memql#1709). The mapper
+// therefore states every field it fetched, writing "" for a string the
+// origin cleared; a cleared field of another type keeps its last value
+// until the engine has a way to unset one.
 func mirrorInsert(w memqlsync.MirrorWrite) (string, error) {
 	concept := strings.TrimSpace(w.Concept)
 	rowID := strings.TrimSpace(w.RowId)

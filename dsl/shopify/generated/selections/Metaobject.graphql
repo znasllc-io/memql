@@ -14,33 +14,12 @@ query ShopifyFetchMetaobject($id: ID!) {
       createdByStaff { id }
       definition { id }
       displayName
-      fields { definition { description key name required } jsonValue key reference { __typename ... on Article { id } ... on Collection { id } ... on Company { id } ... on Customer { id } ... on Metaobject { id } ... on Order { id } ... on Page { id } ... on Product { id } ... on ProductVariant { id } } thumbnail { hex } type value }
+      fields { definition { description key name required } jsonValue key reference { __typename ... on Article { id } ... on Collection { id } ... on Company { id } ... on Customer { id } ... on GenericFile { alt createdAt fileStatus id mimeType originalFileSize updatedAt url } ... on MediaImage { alt createdAt fileStatus id mediaContentType mimeType status updatedAt } ... on Metaobject { id } ... on Model3d { alt createdAt fileStatus filename id mediaContentType status updatedAt } ... on Order { id } ... on Page { id } ... on Product { id } ... on ProductVariant { id } ... on TaxonomyValue { id name } ... on Video { alt createdAt duration fileStatus filename id mediaContentType status updatedAt } } thumbnail { hex } type value }
       handle
       createdAt
       createdBy { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
       type
-      thumbnailField { definition { description key name required } jsonValue key reference { __typename ... on Article { id } ... on Collection { id } ... on Company { id } ... on Customer { id } ... on Metaobject { id } ... on Order { id } ... on Page { id } ... on Product { id } ... on ProductVariant { id } } thumbnail { hex } type value }
-      values
-    }
-  }
-}
-
-query ShopifyListMetaobject($first: Int!, $after: String, $query: String) {
-  metaobjects(first: $first, after: $after, query: $query) {
-    pageInfo { hasNextPage endCursor }
-    nodes {
-      id
-      capabilities { onlineStore { templateSuffix } publishable { status } }
-      createdByApp { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
-      createdByStaff { id }
-      definition { id }
-      displayName
-      fields { definition { description key name required } jsonValue key reference { __typename ... on Article { id } ... on Collection { id } ... on Company { id } ... on Customer { id } ... on Metaobject { id } ... on Order { id } ... on Page { id } ... on Product { id } ... on ProductVariant { id } } thumbnail { hex } type value }
-      handle
-      createdAt
-      createdBy { apiKey appStoreAppUrl appStoreDeveloperUrl availableAccessScopes { description handle } banner { altText height id thumbhash url width } description developerName developerType embedded failedRequirements { message } features feedback { channel { id } feedbackGeneratedAt state } handle icon { altText height id thumbhash url width } id installUrl installation { id launchUrl uninstallUrl } isPostPurchaseAppInUse optionalAccessScopes { description handle } previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published requestedAccessScopes { description handle } screenshots { altText height id thumbhash url width } shopifyDeveloped title uninstallMessage webhookApiVersion }
-      type
-      thumbnailField { definition { description key name required } jsonValue key reference { __typename ... on Article { id } ... on Collection { id } ... on Company { id } ... on Customer { id } ... on Metaobject { id } ... on Order { id } ... on Page { id } ... on Product { id } ... on ProductVariant { id } } thumbnail { hex } type value }
+      thumbnailField { definition { description key name required } jsonValue key reference { __typename ... on Article { id } ... on Collection { id } ... on Company { id } ... on Customer { id } ... on GenericFile { alt createdAt fileStatus id mimeType originalFileSize updatedAt url } ... on MediaImage { alt createdAt fileStatus id mediaContentType mimeType status updatedAt } ... on Metaobject { id } ... on Model3d { alt createdAt fileStatus filename id mediaContentType status updatedAt } ... on Order { id } ... on Page { id } ... on Product { id } ... on ProductVariant { id } ... on TaxonomyValue { id name } ... on Video { alt createdAt duration fileStatus filename id mediaContentType status updatedAt } } thumbnail { hex } type value }
       values
     }
   }

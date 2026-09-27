@@ -17,8 +17,8 @@ query ShopifyFetchProductFeed($id: ID!) {
   }
 }
 
-query ShopifyListProductFeed($first: Int!, $after: String, $query: String) {
-  productFeeds(first: $first, after: $after, query: $query) {
+query ShopifyListProductFeed($first: Int!, $after: String) {
+  productFeeds(first: $first, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id

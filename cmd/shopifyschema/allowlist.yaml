@@ -608,12 +608,16 @@ types:
     cadence: 6h
     bulk: true
 
+  # No generic `query` for Metaobject or MetafieldDefinition: QueryRoot's
+  # metaobjects(type:) and metafieldDefinitions(ownerType:) each REQUIRE an
+  # argument a generic listing cannot supply, so the generator refuses a
+  # query on them and the domains are webhook-fed only. Listing them per
+  # metaobject type / per owner type is future work.
   - type: Metaobject
     concept: metaobject
-    query: metaobjects
     scopes: [read_metaobjects]
-    reconcile: updated_at
-    bulk: true
+    reconcile: none
+    bulk: false
     topics:
       METAOBJECTS_CREATE: upsert
       METAOBJECTS_UPDATE: upsert
@@ -629,10 +633,8 @@ types:
 
   - type: MetafieldDefinition
     concept: metafieldDefinition
-    query: metafieldDefinitions
     scopes: [read_products]
-    reconcile: full_relist
-    cadence: 24h
+    reconcile: none
     bulk: false
     topics:
       METAFIELD_DEFINITIONS_CREATE: upsert

@@ -8,7 +8,6 @@ query ShopifyFetchShopLocale($id: ID!) {
   node(id: $id) {
     __typename
     ... on ShopLocale {
-      id
       locale
       marketWebPresences { id }
       name

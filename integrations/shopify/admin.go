@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	stdsync "sync"
@@ -115,6 +117,12 @@ type AdminError struct {
 	Errors     []GraphQLError
 	RetryAfter time.Duration
 	Body       string
+	// Data is what a 200 with `errors` STILL returned. GraphQL answers a
+	// field the caller may not read with an error AND the rest of the
+	// document; a store that lacks read_publications gets every product
+	// variant it asked for, minus the publication counts. The caller
+	// decides whether the partial answer is usable.
+	Data json.RawMessage
 }
 
 func (e *AdminError) Error() string {
@@ -139,6 +147,144 @@ func (e *AdminError) Retryable() bool {
 	}
 	return adminErrors(e.Errors).Throttled()
 }
+
+// standingCodes are the GraphQL error codes that name the DOCUMENT or the
+// GRANT rather than the moment: the same request will be refused the same
+// way tomorrow. Everything else Shopify puts in a 200 -- its own
+// INTERNAL_SERVER_ERROR, a timeout code, anything unnamed -- is treated as
+// transient and left to the next tick.
+var standingCodes = map[string]bool{
+	"ACCESS_DENIED":     true,
+	"MAX_COST_EXCEEDED": true,
+	// The validation family: the document does not fit the schema.
+	"undefinedField":           true,
+	"variableNotUsed":          true,
+	"argumentNotAccepted":      true,
+	"missingRequiredArguments": true,
+	"fieldNotDefined":          true,
+	"unknownArgument":          true,
+	"variableNotDefined":       true,
+	"variableTypeMismatch":     true,
+	"selectionMismatch":        true,
+	"fragmentMismatch":         true,
+}
+
+// Standing reports whether the refusal is one that retrying cannot change:
+// a client error status, or a 200 whose every error (a truncation notice
+// aside) carries a standing code.
+func (e *AdminError) Standing() bool {
+	if e == nil {
+		return false
+	}
+	switch e.StatusCode {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound,
+		http.StatusNotAcceptable, http.StatusGone, http.StatusUnprocessableEntity:
+		return true
+	}
+	if e.StatusCode != http.StatusOK {
+		return false
+	}
+	named := 0
+	for _, err := range e.Errors {
+		if err.truncationNotice() {
+			continue
+		}
+		if !standingCodes[err.Code()] {
+			return false
+		}
+		named++
+	}
+	return named > 0
+}
+
+// CostExceeded reports a MAX_COST_EXCEEDED refusal and reads the two numbers
+// Shopify puts in its message ("Query cost is 1649, which exceeds the single
+// query max cost limit (1000)"), which are what a caller needs to pick a page
+// size that fits.
+func (e *AdminError) CostExceeded() (cost, limit int, ok bool) {
+	if e == nil {
+		return 0, 0, false
+	}
+	for _, err := range e.Errors {
+		if err.Code() != "MAX_COST_EXCEEDED" {
+			continue
+		}
+		m := costExceededRe.FindStringSubmatch(err.Message)
+		if m == nil {
+			return 0, 0, true
+		}
+		cost, _ = strconv.Atoi(m[1])
+		limit, _ = strconv.Atoi(m[2])
+		return cost, limit, true
+	}
+	return 0, 0, false
+}
+
+var costExceededRe = regexp.MustCompile(`Query cost is (\d+), which exceeds the single query max cost limit \((\d+)\)`)
+
+// DeniedOnly reports whether every error is ACCESS_DENIED: the store's grant
+// does not cover part of the selection, and nothing else went wrong.
+func (e *AdminError) DeniedOnly() bool {
+	if e == nil {
+		return false
+	}
+	denied := 0
+	for _, err := range e.Errors {
+		if err.truncationNotice() {
+			continue
+		}
+		if err.Code() != "ACCESS_DENIED" {
+			return false
+		}
+		denied++
+	}
+	return denied > 0
+}
+
+// truncationNotice is Shopify's "Too many execution errors, max error limit
+// reached. Results truncated" entry: a statement about the error LIST, not a
+// further failure of the query, appended when a denied field recurs in
+// every node of a page.
+func (e GraphQLError) truncationNotice() bool {
+	return strings.HasPrefix(strings.TrimSpace(e.Message), "Too many execution errors")
+}
+
+// DeniedFields names the fields the ACCESS_DENIED errors point at: the last
+// named segment of each error's path, or the field the message names when
+// the origin sent no path. Deduplicated, sorted.
+func (e *AdminError) DeniedFields() []string {
+	if e == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	for _, err := range e.Errors {
+		if err.Code() != "ACCESS_DENIED" || err.truncationNotice() {
+			continue
+		}
+		name := ""
+		for _, seg := range err.Path {
+			if s, ok := seg.(string); ok && s != "nodes" && s != "edges" && s != "node" {
+				name = s
+			}
+		}
+		if name == "" {
+			if m := deniedFieldRe.FindStringSubmatch(err.Message); m != nil {
+				name = m[1]
+			}
+		}
+		if name != "" {
+			seen[name] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+var deniedFieldRe = regexp.MustCompile(`Access denied for ([A-Za-z0-9_]+) field`)
 
 // AdminClient calls one deployment's stores. It is safe for concurrent use;
 // the pacing state is per store.
@@ -294,7 +440,7 @@ func (c *AdminClient) once(ctx context.Context, store Store, token, document, op
 		}
 	}
 	if len(envelope.Errors) > 0 {
-		return nil, &AdminError{StatusCode: resp.StatusCode, Errors: envelope.Errors}
+		return nil, &AdminError{StatusCode: resp.StatusCode, Errors: envelope.Errors, Data: envelope.Data}
 	}
 	return &AdminResponse{
 		Data:       envelope.Data,

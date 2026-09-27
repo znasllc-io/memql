@@ -47,7 +47,7 @@ query ShopifyFetchOrder($id: ID!) {
       customer { id }
       customerJourneySummary { customerOrderIndex daysToConversion firstVisit { id landingPage landingPageHtml marketingEvent { id } occurredAt referralCode referralInfoHtml referrerUrl source sourceDescription sourceType } lastVisit { id landingPage landingPageHtml marketingEvent { id } occurredAt referralCode referralInfoHtml referrerUrl source sourceDescription sourceType } momentsCount { count precision } ready }
       customerLocale
-      discountApplications(first: 25) { nodes { id } }
+      discountApplications(first: 25) { nodes { __typename allocationMethod index targetSelection targetType value { __typename ... on MoneyV2 { amount currencyCode } ... on PricingPercentageValue { percentage } } } }
       discountCode
       discountCodes
       displayAddress { address1 address2 city company coordinatesValidated country countryCodeV2 firstName formatted formattedArea id lastName latitude longitude name phone province provinceCode timeZone validationResultSummary zip }
@@ -296,7 +296,7 @@ query ShopifyListOrder($first: Int!, $after: String, $query: String) {
       customer { id }
       customerJourneySummary { customerOrderIndex daysToConversion firstVisit { id landingPage landingPageHtml marketingEvent { id } occurredAt referralCode referralInfoHtml referrerUrl source sourceDescription sourceType } lastVisit { id landingPage landingPageHtml marketingEvent { id } occurredAt referralCode referralInfoHtml referrerUrl source sourceDescription sourceType } momentsCount { count precision } ready }
       customerLocale
-      discountApplications(first: 25) { nodes { id } }
+      discountApplications(first: 25) { nodes { __typename allocationMethod index targetSelection targetType value { __typename ... on MoneyV2 { amount currencyCode } ... on PricingPercentageValue { percentage } } } }
       discountCode
       discountCodes
       displayAddress { address1 address2 city company coordinatesValidated country countryCodeV2 firstName formatted formattedArea id lastName latitude longitude name phone province provinceCode timeZone validationResultSummary zip }

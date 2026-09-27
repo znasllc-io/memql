@@ -20,8 +20,8 @@ query ShopifyFetchCollection($id: ID!) {
       metafields(first: 50) { nodes { namespace key type value jsonValue } }
       productsCount { count precision }
       products(first: 25) { nodes { id } }
+      resourcePublications(first: 25) { nodes { isPublished publication { id } publishDate publishable { __typename } } }
       resourcePublicationsCount { count precision }
-      resourcePublications(first: 25) { nodes { id } }
       seo { description title }
       sortOrder
       sources { __typename app { apiKey appStoreAppUrl appStoreDeveloperUrl description developerName developerType embedded features handle id installUrl isPostPurchaseAppInUse previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published shopifyDeveloped title uninstallMessage webhookApiVersion } description id title }
@@ -48,8 +48,8 @@ query ShopifyListCollection($first: Int!, $after: String, $query: String) {
       metafields(first: 50) { nodes { namespace key type value jsonValue } }
       productsCount { count precision }
       products(first: 25) { nodes { id } }
+      resourcePublications(first: 25) { nodes { isPublished publication { id } publishDate publishable { __typename } } }
       resourcePublicationsCount { count precision }
-      resourcePublications(first: 25) { nodes { id } }
       seo { description title }
       sortOrder
       sources { __typename app { apiKey appStoreAppUrl appStoreDeveloperUrl description developerName developerType embedded features handle id installUrl isPostPurchaseAppInUse previouslyInstalled pricingDetails pricingDetailsSummary privacyPolicyUrl publicCategory published shopifyDeveloped title uninstallMessage webhookApiVersion } description id title }

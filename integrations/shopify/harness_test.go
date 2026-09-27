@@ -132,6 +132,8 @@ type fakeAdmin struct {
 	requests  []adminRequest
 	replies   map[string]any
 	errors    map[string][]GraphQLError
+	errorOnce map[string][][]GraphQLError
+	denials   map[string][]fieldDenial
 	status    map[string]int
 	throttle  ThrottleStatus
 	downloads map[string]string
@@ -149,6 +151,8 @@ func newFakeAdmin(t *testing.T) *fakeAdmin {
 	f := &fakeAdmin{
 		replies:   map[string]any{},
 		errors:    map[string][]GraphQLError{},
+		errorOnce: map[string][][]GraphQLError{},
+		denials:   map[string][]fieldDenial{},
 		status:    map[string]int{},
 		downloads: map[string]string{},
 		throttle:  ThrottleStatus{MaximumAvailable: 2000, CurrentlyAvailable: 1800, RestoreRate: 100},
@@ -181,6 +185,24 @@ func (f *fakeAdmin) serveGraphQL(w http.ResponseWriter, r *http.Request) {
 	})
 	reply, hasReply := f.replies[op]
 	errs := f.errors[op]
+	if queue := f.errorOnce[op]; len(queue) > 0 {
+		// One refused answer per queued entry, then the scripted reply:
+		// the shape of a cost ceiling the caller is expected to back
+		// away from.
+		errs, hasReply = queue[0], false
+		f.errorOnce[op] = queue[1:]
+	}
+	for _, d := range f.denials[op] {
+		// A field the grant does not cover is refused for as long as the
+		// document still asks for it, and answered with whatever data a
+		// real origin would still return (null-propagated, or partial).
+		if strings.Contains(body.Query, d.field) {
+			errs = append(errs, denied(d.field, op, "nodes", 0, d.field))
+			if d.data != nil {
+				reply, hasReply = d.data, true
+			}
+		}
+	}
 	status := f.status[op]
 	throttle := f.throttle
 	f.mu.Unlock()
@@ -218,6 +240,37 @@ func (f *fakeAdmin) serveDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = w.Write([]byte(body))
+}
+
+// failOnce answers the NEXT request for op with errs and no data, and the
+// scripted reply afterwards.
+func (f *fakeAdmin) failOnce(op string, errs ...GraphQLError) {
+	f.mu.Lock()
+	f.errorOnce[op] = append(f.errorOnce[op], errs)
+	f.mu.Unlock()
+}
+
+// fieldDenial scripts a field the grant does not cover: refused while the
+// document selects it, with `data` standing in for what the origin still
+// returns alongside the refusal (nil keeps the scripted reply).
+type fieldDenial struct {
+	field string
+	data  any
+}
+
+// denyField refuses op's `field` for as long as the document selects it.
+func (f *fakeAdmin) denyField(op, field string, data any) {
+	f.mu.Lock()
+	f.denials[op] = append(f.denials[op], fieldDenial{field: field, data: data})
+	f.mu.Unlock()
+}
+
+// fail answers EVERY request for op with errs, alongside whatever reply is
+// scripted (GraphQL returns data and errors together).
+func (f *fakeAdmin) fail(op string, errs ...GraphQLError) {
+	f.mu.Lock()
+	f.errors[op] = errs
+	f.mu.Unlock()
 }
 
 func (f *fakeAdmin) reply(op string, data any) {

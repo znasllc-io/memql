@@ -24,8 +24,8 @@ query ShopifyFetchDeliveryProfile($id: ID!) {
   }
 }
 
-query ShopifyListDeliveryProfile($first: Int!, $after: String, $query: String) {
-  deliveryProfiles(first: $first, after: $after, query: $query) {
+query ShopifyListDeliveryProfile($first: Int!, $after: String) {
+  deliveryProfiles(first: $first, after: $after) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id

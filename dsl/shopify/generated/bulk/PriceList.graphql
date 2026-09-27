@@ -4,8 +4,8 @@
 # edit here and the concept in dsl/shopify/generated/priceList.memql would disagree,
 # and the disagreement is a field the mirror fetches and never stores.
 
-query ShopifyBulkPriceList($query: String) {
-  priceLists(query: $query) {
+query ShopifyBulkPriceList {
+  priceLists {
     edges {
       node {
         id
@@ -17,7 +17,6 @@ query ShopifyBulkPriceList($query: String) {
         prices {
           edges {
             node {
-            id
             compareAtPrice { amount currencyCode }
             originType
             price { amount currencyCode }
@@ -28,7 +27,6 @@ query ShopifyBulkPriceList($query: String) {
         quantityRules {
           edges {
             node {
-            id
             increment
             isDefault
             maximum
