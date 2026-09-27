@@ -55,6 +55,7 @@ the source `big-corp` reads `MEMQL_INBOUND_SOURCE_BIG_CORP_*`:
 | `..._SIGNATURE_PREFIX` | no | stripped before decoding, e.g. `sha256=` |
 | `..._TIMESTAMP_HEADER` | no | turns on the replay window |
 | `..._DEDUPE_HEADER` | no | the sender's own idempotency key |
+| `..._FORWARD_HEADERS` | no | comma-separated allowlist of non-secret delivery headers to stage on the row as `headersJson` (lowercase keys). `Authorization`, `Cookie` and the signature header are never staged, whatever the list says. The body HMAC does not sign these values: they are routing metadata, not proof of who sent the request |
 | `..._ELEMENT_SEPARATOR` | no | the header is a `k=v` list; this is what separates the entries |
 | `..._SIGNATURE_ELEMENT` | with a separator | which element carries the digest |
 | `..._TIMESTAMP_ELEMENT` | no | which element carries the timestamp |
@@ -117,6 +118,7 @@ A Shopify-shaped one:
 MEMQL_INBOUND_SOURCE_SHOPIFY_SIGNATURE_SCHEME=hmac-sha256-base64
 MEMQL_INBOUND_SOURCE_SHOPIFY_SIGNATURE_HEADER=X-Shopify-Hmac-Sha256
 MEMQL_INBOUND_SOURCE_SHOPIFY_DEDUPE_HEADER=X-Shopify-Webhook-Id
+MEMQL_INBOUND_SOURCE_SHOPIFY_FORWARD_HEADERS=X-Shopify-Topic,X-Shopify-Shop-Domain,X-Shopify-Webhook-Id
 MEMQL_INBOUND_SOURCE_SHOPIFY_SECRET=<shared secret>
 ```
 
