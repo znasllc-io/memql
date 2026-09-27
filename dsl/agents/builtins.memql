@@ -199,12 +199,12 @@ builtin requestUserFeedback {
 
 @executor("integration.agents.ensureForGoal")
 @args(profile="object")
-@description("Match-extend-or-create an agent that can handle the given goal. Reads the role + domain + tool catalogs, runs agentFactoryAnalyze, issues the appropriate write, and returns {agentId, action, reasoning}. Planner-driven callers (integrations/planner/agent_loop.go) pass `planId` so the factory can stamp `lineage.originatingPlanId` on the created specialist (memql#399); the GA-driven `ensureAgent` tool omits it -- the resulting specialist still lands with `kind=\"specialist\"` (the factory only ever creates specialists, never assistants or system agents) but without a Plan back-pointer.")
+@description("Match-extend-or-create an agent that can handle the given goal. Reads the role + domain + tool catalogs, runs agentFactoryAnalyze, issues the appropriate write, and returns {agentId, action, reasoning}. The created specialist records the v1:work:run it was created under in `lineage.originatingRunId` (memql#5436) -- a planner-driven caller names that run in `runId`, which also marks the creation planner-driven; the `ensureAgent` tool omits it and the run the call belongs to is recorded instead. Outside any run there is no originating run. The factory only ever creates specialists (`kind=\"specialist\"`), never assistants or system agents.")
 builtin ensureAgentForGoal {
   goal         string!
   ownerUserId  string!
   partitionId      string
-  planId       string
+  runId        string
 }
 
 // ---- builtin produceArtifact -----------------------------------------

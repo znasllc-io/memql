@@ -363,7 +363,7 @@ func TestANonPrincipalActorDoesNotOwnTheRowItCreates(t *testing.T) {
 	ctx := auth.ContextWithAccess(context.Background(), seed)
 
 	payload := map[string]any{"ownerUserId": seed.UserId, "name": "My company"}
-	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload)
+	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload, rowOwnerBefore{})
 	if got := payload["ownerUserId"]; got != "" {
 		t.Fatalf("ownerUserId = %q after a maintenance-actor create, want the empty string. "+
 			"A synthetic id resolves to no principal and therefore to no rank, which makes the "+
@@ -406,7 +406,7 @@ func TestBorrowedAuthorityStillOwnsTheRowsItCreates(t *testing.T) {
 			"leaves the row owned by nobody")
 	}
 	payload := map[string]any{"ownerUserId": "a-real-person"}
-	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload)
+	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload, rowOwnerBefore{})
 	if payload["ownerUserId"] != "a-real-person" {
 		t.Fatalf("ownerUserId = %v after a borrowed-authority create, want the person's own id",
 			payload["ownerUserId"])
@@ -445,7 +445,7 @@ func TestTheOwnerUndoNeverTouchesAThirdPartysRow(t *testing.T) {
 	rankFixture(t, false, "admin")
 	ctx := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("seedSelfAccount"))
 	payload := map[string]any{"ownerUserId": "a-real-user"}
-	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload)
+	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload, rowOwnerBefore{})
 	if payload["ownerUserId"] != "a-real-user" {
 		t.Fatalf("ownerUserId = %v; a system actor provisioning a row FOR a user must leave it theirs",
 			payload["ownerUserId"])
@@ -458,7 +458,7 @@ func TestAPrincipalsOwnStampSurvives(t *testing.T) {
 	rankFixture(t, false, "admin")
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u1", Role: auth.RoleWriter})
 	payload := map[string]any{"ownerUserId": "u1"}
-	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload)
+	undoNonPrincipalOwnerStamp(ctx, declaredRankConcept, payload, rowOwnerBefore{})
 	if payload["ownerUserId"] != "u1" {
 		t.Fatalf("ownerUserId = %v; an ordinary caller's own stamp must survive", payload["ownerUserId"])
 	}

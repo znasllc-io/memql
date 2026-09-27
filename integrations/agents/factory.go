@@ -11,6 +11,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -20,6 +21,37 @@ import (
 // package so the registration in Capabilities() and the handler share
 // the constant.
 const ensureForGoalCapName = "ensureForGoal"
+
+// factoryRun is the run an agent is created or extended under (memql#5436).
+//
+// Two facts, kept apart on purpose. Id is the v1:work:run the call belongs
+// to -- what lineage.originatingRunId and skillChangeEvent.runId record --
+// taken from an explicit runId argument or, failing one, from the work run
+// the call itself carries on its context. RunDriven is whether a caller
+// NAMED the run: the planner-driven signal the lineage.createdBy bucket and
+// the skill-change attribution key on, exactly as they keyed on a named plan
+// before. Keying those on Id instead would relabel every agent the
+// assistant's ensureAgent tool creates while a run is being worked as
+// planner-made -- a different statement about who made it.
+type factoryRun struct {
+	Id        string
+	RunDriven bool
+}
+
+// runForFactory resolves the run a factory call happens under. The run rides
+// the context rather than the tool schema for the reason the work spine puts
+// it there (core/common.RunContext): the model never knows its own run, and
+// the tool call path has no business carrying one. "" when the call belongs
+// to no run -- a creation outside any run records no originating run.
+func runForFactory(ctx context.Context, args map[string]any) factoryRun {
+	if runId := strings.TrimSpace(asString(args["runId"])); runId != "" {
+		return factoryRun{Id: runId, RunDriven: true}
+	}
+	if run, ok := common.RunFromContext(ctx); ok {
+		return factoryRun{Id: run.RunId}
+	}
+	return factoryRun{}
+}
 
 // factoryResultConcept is the MemoryNode concept the handler returns.
 // Same pattern as envelopeConcept -- an in-flight integration result,
@@ -35,12 +67,13 @@ const factoryResultConcept = "integration:agents:factory-result"
 //	goal         string  required -- the user-stated goal
 //	ownerUserId  string  required -- target agent owner
 //	partitionId      string  optional -- forwarded to the analysis prompt
-//	planId       string  optional -- planner-driven callers pass the
-//	                                  originating v1:planner:plan.id so
-//	                                  createAgent can stamp
-//	                                  lineage.originatingPlanId on the new
-//	                                  specialist (memql#399). GA-driven
-//	                                  ensureAgent tool calls omit it.
+//	runId        string  optional -- a planner-driven caller names the
+//	                                  v1:work:run it is working, which marks
+//	                                  the call planner-driven (memql#399,
+//	                                  memql#5436). The ensureAgent tool
+//	                                  omits it; the run the call carries on
+//	                                  its context is recorded instead (see
+//	                                  runForFactory).
 //
 // Behavior:
 //
@@ -85,7 +118,7 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 	if strings.TrimSpace(ownerUserId) == "" {
 		return nil, fmt.Errorf("ensureForGoal: 'ownerUserId' argument is required")
 	}
-	planId, _ := args["planId"].(string)
+	run := runForFactory(ctx, args)
 
 	// Step 1-2: load the user's agents + the role catalog + the skill
 	// catalog. All three are best-effort -- the analysis prompt tolerates
@@ -116,7 +149,7 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 		roleSlug = match.RoleSlug
 		action = "match"
 	case "extend":
-		updated, err := i.extendAgent(ctx, ownerUserId, existing, decision, planId)
+		updated, err := i.extendAgent(ctx, ownerUserId, existing, decision, run)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +158,7 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 		roleSlug = updated.RoleSlug
 		action = "extend"
 	case "create":
-		created, err := i.createAgent(ctx, ownerUserId, decision, roleCatalog, planId)
+		created, err := i.createAgent(ctx, ownerUserId, decision, roleCatalog, run)
 		if err != nil {
 			return nil, err
 		}
@@ -371,23 +404,23 @@ func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []a
 // After the agent-row update lands, one v1:agents:skillChangeEvent row
 // is appended per skill that is net-new on the agent post-extend (in
 // the merged set but not the pre-extend set). This is the audit trail
-// the Tasks UI reads to render "extended for Plan X" (memql#405).
-// Attribution branches on planId presence -- the same discriminator
-// createAgent uses for lineage (memql#399):
-//   - planId != "": planner-driven extend. actorAgentId is the
-//     per-user Planner Agent (`plannerAgent-<userId>`); planId carries
-//     the originating Plan id. (The planner invokes the factory under a
-//     system-actor context, so the context actor is NOT the right
-//     attribution -- the per-user planner agent id is.)
-//   - planId == "": GA-driven extend (the ensureAgent tool, invoked
-//     from a user turn). actorUserId is the agent owner; planId empty.
+// the trace viewer reads to render "extended during run X" (memql#405).
+// Each row records the run the extend happened under (run.Id), and its
+// attribution branches on run.RunDriven -- the same discriminator
+// createAgent uses for the lineage bucket (memql#399):
+//   - planner-driven (a caller named its run): actorAgentId is the
+//     per-user Planner Agent (`plannerAgent-<userId>`). (The planner
+//     invokes the factory under a system-actor context, so the context
+//     actor is NOT the right attribution -- the per-user planner agent
+//     id is.)
+//   - otherwise (the ensureAgent tool): actorUserId is the agent owner.
 //
 // Kind audit (memql#398/#405): a target row carrying the retired
 // kind enum value ("user" or "") can only survive on a stale dev DB.
 // We warn-log and skip the kind-related work -- the row is already
 // orphaned by the schema enforcement and the dev should reset their
 // DB; the factory does NOT try to repair it via update.
-func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, existing []agentSnapshot, decision factoryDecision, planId string) (agentSnapshot, error) {
+func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, existing []agentSnapshot, decision factoryDecision, run factoryRun) (agentSnapshot, error) {
 	if decision.TargetAgentId == "" {
 		return agentSnapshot{}, fmt.Errorf("ensureForGoal: action=extend but targetAgentId is empty")
 	}
@@ -452,7 +485,7 @@ func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, exist
 	// warning rather than aborting the extend.
 	netNew := diffStrings(mergedSkills, preExtendSkills)
 	for _, skillId := range netNew {
-		evArgs := buildSkillChangeEventArgs(id.NewShortId(), target.Id, skillId, ownerUserId, planId, before, after)
+		evArgs := buildSkillChangeEventArgs(id.NewShortId(), target.Id, skillId, ownerUserId, run, before, after)
 		evQuery, merr := langparser.RenderCall("createSkillChangeEvent", evArgs)
 		if merr != nil {
 			slog.Default().Warn("agents factory: rendering the skillChangeEvent call failed; skipping audit row",
@@ -473,15 +506,20 @@ func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, exist
 // memql#399) so a unit test can pin the attribution contract without an
 // engine handle (memql#405).
 //
-// Attribution branches on planId presence:
-//   - planId != "": planner-driven. actorAgentId = `plannerAgent-<userId>`
-//     (the per-user Planner Agent), actorUserId empty, planId stamped.
-//   - planId == "": GA-driven. actorUserId = ownerUserId, actorAgentId
-//     empty, planId empty.
+// Attribution branches on run.RunDriven:
+//   - planner-driven: actorAgentId = `plannerAgent-<userId>` (the
+//     per-user Planner Agent), actorUserId empty.
+//   - otherwise: actorUserId = ownerUserId, actorAgentId empty.
+//
+// runId is stamped whenever the extend happened under a run, whichever
+// way the run was learned, and omitted when it did not -- the concept's
+// field is "the run the change happened under, if any". It used to be
+// written as `planId`, a name createSkillChangeEvent no longer declares
+// (memql#5436).
 //
 // The skillChangeEvent concept declares the two actor fields as mutually
 // exclusive (exactly one set per event); this builder honors that.
-func buildSkillChangeEventArgs(eventId, targetAgentId, skillId, ownerUserId, planId string, before, after map[string]any) map[string]any {
+func buildSkillChangeEventArgs(eventId, targetAgentId, skillId, ownerUserId string, run factoryRun, before, after map[string]any) map[string]any {
 	args := map[string]any{
 		"skillChangeEventId": eventId,
 		"targetAgentId":      targetAgentId,
@@ -490,12 +528,13 @@ func buildSkillChangeEventArgs(eventId, targetAgentId, skillId, ownerUserId, pla
 		"before":             before,
 		"after":              after,
 	}
-	if planId != "" {
+	if run.RunDriven {
 		args["actorAgentId"] = plannerAgentId(ownerUserId)
-		args["planId"] = planId
 	} else {
 		args["actorUserId"] = ownerUserId
-		args["planId"] = ""
+	}
+	if run.Id != "" {
+		args["runId"] = run.Id
 	}
 	return args
 }
@@ -559,23 +598,22 @@ func diffStrings(a, b []string) []string {
 // createAgent composes the new agent's capabilities from the role
 // catalog row + the analysis-proposed additions and writes via
 // createAgent. roleCatalog is the snapshot loaded above so
-// we don't re-query. planId is the originating v1:planner:plan.id for
-// planner-driven calls; the empty string means GA-driven (no plan
-// back-pointer to stamp).
+// we don't re-query. run is the run the creation happens under
+// (runForFactory); its zero value means no run.
 //
 // Stamping: kind="specialist" is hard-coded -- the factory only ever
 // creates specialists (GA-driven ensureAgent has the same semantics,
 // and the assistant + system agents come from their own seed
-// materializers). lineage.originatingPlanId is stamped when planId is
-// non-empty; the lineage.createdBy bucket is "planner" for plan-driven
-// calls and "user" otherwise (the GA's ensureAgent tool is invoked
-// from a user turn).
+// materializers). lineage.originatingRunId is stamped when the
+// creation happens under a run; the lineage.createdBy bucket is
+// "planner" for a planner-driven call (a caller named its run) and
+// "user" otherwise (the GA's ensureAgent tool).
 // buildCreateAgentArgs composes the args map for createAgent
-// from a factory decision + role snapshot + optional planId. Extracted
+// from a factory decision + role snapshot + the run. Extracted
 // from createAgent so tests can pin the contract (kind="specialist",
-// lineage stamping per planId presence) without needing an engine
-// handle (memql#399).
-func buildCreateAgentArgs(agentId, ownerUserId string, decision factoryDecision, role roleSnapshot, planId string) map[string]any {
+// lineage stamping per run) without needing an engine handle
+// (memql#399, memql#5436).
+func buildCreateAgentArgs(agentId, ownerUserId string, decision factoryDecision, role roleSnapshot, run factoryRun) map[string]any {
 	skillIds := unionStrings(role.LockedSkillIds, role.DefaultSkillIds)
 	skillIds = unionStrings(skillIds, decision.SkillIds)
 
@@ -606,18 +644,22 @@ func buildCreateAgentArgs(agentId, ownerUserId string, decision factoryDecision,
 	// Lineage attribution. The createdBy bucket is the agent.lineage
 	// field (NOT the row intrinsic createdBy that the engine stamps from
 	// the actor) -- it records the bootstrap source ("user" vs "planner"
-	// vs "system"). The factory is invoked from both the planner loop
-	// (planId set) and the GA ensureAgent tool (planId empty), so we
-	// derive the bucket from planId presence.
+	// vs "system"). A planner-driven caller names its run; the GA's
+	// ensureAgent tool does not, so the bucket is derived from whether a
+	// caller NAMED a run, exactly as it was from a named plan.
 	lineageBucket := "user"
-	if planId != "" {
+	if run.RunDriven {
 		lineageBucket = "planner"
 	}
 	lineage := map[string]any{
 		"createdBy": lineageBucket,
 	}
-	if planId != "" {
-		lineage["originatingPlanId"] = planId
+	// lineage.originatingRunId, the field v1:agents:agent declares, and
+	// the one agentsForRun reads (memql#5436). It was written as
+	// originatingPlanId -- a field the concept stopped declaring when the
+	// work spine renamed it -- so no agent ever carried a run pointer.
+	if run.Id != "" {
+		lineage["originatingRunId"] = run.Id
 	}
 	return map[string]any{
 		"agentId":        agentId,
@@ -634,13 +676,13 @@ func buildCreateAgentArgs(agentId, ownerUserId string, decision factoryDecision,
 	}
 }
 
-func (i *Integration) createAgent(ctx context.Context, ownerUserId string, decision factoryDecision, roleCatalog []roleSnapshot, planId string) (agentSnapshot, error) {
+func (i *Integration) createAgent(ctx context.Context, ownerUserId string, decision factoryDecision, roleCatalog []roleSnapshot, run factoryRun) (agentSnapshot, error) {
 	role, ok := findRoleBySlug(roleCatalog, decision.RoleSlug)
 	if !ok {
 		return agentSnapshot{}, fmt.Errorf("ensureForGoal: action=create but roleSlug %q not in catalog", decision.RoleSlug)
 	}
 	agentId := id.NewShortId()
-	insertArgs := buildCreateAgentArgs(agentId, ownerUserId, decision, role, planId)
+	insertArgs := buildCreateAgentArgs(agentId, ownerUserId, decision, role, run)
 	skillIds, _ := insertArgs["capabilities"].(map[string]any)["skillIds"].([]string)
 	query, err := langparser.RenderCall("createAgent", insertArgs)
 	if err != nil {
