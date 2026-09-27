@@ -39,9 +39,11 @@ import (
 // executor, and the same per-run and standing-scope gates, as a delegated
 // task -- under the owner's reasoning agent, which is why the request carries
 // it. A session runs only on the replica holding the machine's stream; a
-// replay on the other replica is refused by the router, and the runner fails
-// the goal with procedure_fallback_unavailable rather than serving it
-// somewhere else.
+// replay on the other replica is refused by the router, Handover returns that
+// refusal as its error, and the runner fails the goal with
+// procedure_fallback_failed rather than serving it somewhere else.
+// (procedure_fallback_unavailable is the other answer: no fallback installed
+// on the node at all.)
 
 // procedureSessionResolver resolves a tools-modality request through the
 // router this node already uses.

@@ -22,11 +22,15 @@ import (
 // `dispatchHost` capability. Agent-only, because the worker streams terminate
 // on the agent node.
 //
-// THE CONSENT IS THE OWNER'S REASONING AGENT'S. Every call goes through the
-// worker dispatcher's own gates -- per-task approval (a run id), the kill
-// switch, the agent's standing computer-use scope, the safety classifier --
-// under the agent compile resolves for the owner (their assistant, else their
-// seeded planner; integrations/planner.ResolveReasoningAgent). A replay
+// THE CONSENT IS THE PROMOTION APPROVAL AND THE AGENT'S STANDING SCOPE. Every
+// call goes through the worker dispatcher's own gates -- the kill switch, the
+// agent's standing computer-use scope, the safety classifier, and the
+// "per-task approval" gate, which checks only that a run id is PRESENT: the
+// replay run's id satisfies it, and no person clicked anything for this
+// replay. The human consent is the procedurePromotion approval the owner
+// decided before the procedure left shadow, plus the standing computer-use
+// scope of the agent compile resolves for them (their assistant, else their
+// seeded planner; integrations/planner.ResolveReasoningAgent) -- so a replay
 // asks for nothing an agent of theirs was not already allowed to do, and an
 // owner with neither agent is refused by name before anything is sent.
 //
