@@ -299,13 +299,20 @@ func (i *Integration) handleDispatch(ctx context.Context, tool string, args map[
 	if action == "" {
 		return nil, fmt.Errorf("worker integration: action required")
 	}
+	// The command runs on the OWNER's machine, so the owner is the caller
+	// unless the context may act for another user (memql.CallOwner) --
+	// decided before anything is routed or dispatched.
+	owner, err := memql.CallOwner(ctx, tool, asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
 	innerArgs, _ := args["args"].(map[string]any)
 	req := Request{
 		Tool:          tool,
 		Action:        action,
 		Args:          innerArgs,
 		AgentId:       strings.TrimSpace(asString(args["agentId"])),
-		OwnerUserId:   strings.TrimSpace(asString(args["ownerUserId"])),
+		OwnerUserId:   owner,
 		RunId:         strings.TrimSpace(asString(args["runId"])),
 		StepId:        strings.TrimSpace(asString(args["stepId"])),
 		CorrelationId: strings.TrimSpace(asString(args["correlationId"])),
@@ -518,7 +525,12 @@ func (i *Integration) handleListWorkers(ctx context.Context, args map[string]any
 	if i.registry == nil {
 		return nil, fmt.Errorf("worker integration: registry not configured")
 	}
-	owner := strings.TrimSpace(asString(args["ownerUserId"]))
+	// Whose machines are listed is the caller's own unless the context may
+	// act for another user (memql.CallOwner).
+	owner, err := memql.CallOwner(ctx, "listWorkers", asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
 	if owner == "" {
 		return nil, fmt.Errorf("worker integration: ownerUserId required")
 	}
@@ -566,7 +578,12 @@ func (i *Integration) handleStatus(ctx context.Context, args map[string]any, _ i
 	if i.registry == nil {
 		return nil, fmt.Errorf("worker integration: registry not configured")
 	}
-	owner := strings.TrimSpace(asString(args["ownerUserId"]))
+	// Whose machines are probed is the caller's own unless the context may
+	// act for another user (memql.CallOwner).
+	owner, err := memql.CallOwner(ctx, "workerStatus", asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
 	if owner == "" {
 		return nil, fmt.Errorf("worker integration: ownerUserId required")
 	}
@@ -651,6 +668,13 @@ func (i *Integration) handleStatus(ctx context.Context, args map[string]any, _ i
 // small ack payload with the runId so it can reference it in its
 // final respondToUser; user input on the card is the actual gate.
 func (i *Integration) handleRequestScope(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	// The consent card asks the OWNER, and the plan is written as them, so the
+	// owner is the caller unless the context may act for another user
+	// (memql.CallOwner) -- decided first, before anything else is consulted.
+	ownerUserId, err := memql.CallOwner(ctx, "requestComputerUseScope", asString(args["ownerUserId"]))
+	if err != nil {
+		return nil, err
+	}
 	if i.engine == nil {
 		return nil, fmt.Errorf("worker integration: engine not configured")
 	}
@@ -658,7 +682,6 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	scope := strings.TrimSpace(asString(args["requestedScope"]))
 	summary := strings.TrimSpace(asString(args["summary"]))
 	agentId := strings.TrimSpace(asString(args["agentId"]))
-	ownerUserId := strings.TrimSpace(asString(args["ownerUserId"]))
 	partitionId := strings.TrimSpace(asString(args["partitionId"]))
 	if intent == "" || scope == "" || summary == "" {
 		return nil, fmt.Errorf("worker integration: intent, requestedScope, and summary are all required")
