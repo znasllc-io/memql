@@ -15,8 +15,15 @@ import (
 // only engine calls. No database, embeddings or model inference is performed.
 func researchRegion(t *testing.T, name string) string {
 	t.Helper()
-	data, err := os.ReadFile("../../../examples/research-desk/research/brief.memql")
-	require.NoError(t, err)
+	// The example is two files: the automation is in automations.memql, the one
+	// file of a domain the automation loader reads, and what it calls is in
+	// brief.memql (memql#5437). A region is in one or the other.
+	var data []byte
+	for _, file := range []string{"brief.memql", "automations.memql"} {
+		b, err := os.ReadFile("../../../examples/research-desk/research/" + file)
+		require.NoError(t, err)
+		data = append(append(data, b...), '\n')
+	}
 	_, rest, ok := strings.Cut(string(data), "// showcase:"+name+":start\n")
 	require.True(t, ok)
 	src, _, ok := strings.Cut(rest, "// showcase:"+name+":end")

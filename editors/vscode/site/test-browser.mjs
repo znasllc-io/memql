@@ -193,6 +193,12 @@ try {
       await page.locator("[data-example][aria-selected=true]").count(),
       1,
     );
+    // The automation is in its own file: the automation loader reads a
+    // domain's automations from automations.memql and no other file.
+    assert.equal(
+      await page.locator("#example-file").innerText(),
+      ["brief.memql", "brief.memql", "brief.memql", "automations.memql"][i],
+    );
     assert.ok(
       (await page.locator("#example-code").innerText()).includes(
         [
@@ -240,7 +246,7 @@ try {
       document.querySelector("#copy-code").textContent ===
       "Select text to copy",
   );
-  for (const name of ["brief.memql", "memql.toml"]) {
+  for (const name of ["brief.memql", "automations.memql", "memql.toml"]) {
     const response = await context.request.get(url + name);
     assert.equal(response.status(), 200);
     assert.equal(
@@ -374,7 +380,7 @@ try {
       "logic relevantResearchFiles",
     ),
   );
-  assert.equal(await plainPage.locator("a[download]").count(), 2);
+  assert.equal(await plainPage.locator("a[download]").count(), 3);
   assert.ok(
     (await plainPage.locator("#core-code").innerText()).includes(
       "trait hasDraftStatus",

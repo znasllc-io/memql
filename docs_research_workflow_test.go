@@ -8,9 +8,16 @@ import (
 )
 
 func TestResearchWorkflowExcerptsMatchSource(t *testing.T) {
-	source, err := os.ReadFile("examples/research-desk/research/brief.memql")
-	if err != nil {
-		t.Fatal(err)
+	// The example is two files: its automation is in automations.memql, the one
+	// file of a domain the automation loader reads, and everything it calls is
+	// in brief.memql (memql#5437). The excerpts come from either.
+	var source []byte
+	for _, file := range []string{"brief.memql", "automations.memql"} {
+		b, err := os.ReadFile("examples/research-desk/research/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source = append(append(source, b...), '\n')
 	}
 	guide, err := os.ReadFile("docs/public/language/research-workflow.md")
 	if err != nil {

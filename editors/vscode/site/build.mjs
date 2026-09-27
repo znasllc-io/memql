@@ -14,6 +14,19 @@ const source = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(source, "../../..");
 const output = path.join(source, "dist");
 const assets = ["index.html", "style.css", "site.js", "appearance.js"];
+// The research-desk example's two .memql files, in the order a reader meets
+// them. Its automation is in automations.memql -- the one file of a domain the
+// automation loader reads (memql#5437) -- and everything it calls is in
+// brief.memql. Both are downloads, and the showcase regions come from either.
+const exampleFiles = ["brief.memql", "automations.memql"];
+
+async function readExample() {
+  return Promise.all(
+    exampleFiles.map((name) =>
+      readFile(path.join(root, "examples/research-desk/research", name), "utf8"),
+    ),
+  );
+}
 
 async function check() {
   const html = await readFile(path.join(output, "index.html"), "utf8");
@@ -31,14 +44,13 @@ async function check() {
       throw new Error(`Asset escapes bundle: ${url}`);
     await stat(file);
   }
-  const example = await readFile(
-    path.join(root, "examples/research-desk/research/brief.memql"),
-    "utf8",
-  );
-  if ((await readFile(path.join(output, "brief.memql"), "utf8")) !== example) {
-    throw new Error("Download differs from canonical example; rebuild");
+  const sources = await readExample();
+  for (const [i, name] of exampleFiles.entries()) {
+    if ((await readFile(path.join(output, name), "utf8")) !== sources[i]) {
+      throw new Error(`Download ${name} differs from canonical example; rebuild`);
+    }
   }
-  const expectedData = showcaseModule(example);
+  const expectedData = showcaseModule(sources);
   if (
     (await readFile(path.join(output, "example-data.js"), "utf8")) !==
     expectedData
@@ -153,9 +165,25 @@ function showcasePieces(
   });
 }
 
-function showcaseModule(example) {
+// The file each advanced tab's region comes from, for the code panel's title.
+function showcaseFiles(
+  sources,
+  names = ["search", "ai", "cache", "automation"],
+) {
+  return names.map((name) => {
+    const at = sources.findIndex((text) =>
+      text.includes(`// showcase:${name}:start\n`),
+    );
+    if (at < 0) throw new Error(`Missing showcase region: ${name}`);
+    return exampleFiles[at];
+  });
+}
+
+function showcaseModule(sources) {
+  const example = sources.join("\n");
   return (
     `export const examples = ${JSON.stringify(showcasePieces(example), null, 2)};\n` +
+    `export const exampleFiles = ${JSON.stringify(showcaseFiles(sources), null, 2)};\n` +
     `export const coreExamples = ${JSON.stringify(showcasePieces(example, ["model", "predicates", "write"]), null, 2)};\n`
   );
 }
@@ -167,6 +195,7 @@ async function researchGuide() {
   );
   return text
     .replaceAll("(research/brief.memql)", "(brief.memql)")
+    .replaceAll("(research/automations.memql)", "(automations.memql)")
     .replaceAll("(research/memql.toml)", "(memql.toml)")
     .replaceAll("](../../", "](https://github.com/znasllc-io/memql/blob/main/");
 }
@@ -199,18 +228,16 @@ async function build() {
   // standalone image; preserve the canonical geometry and source file.
   const mark = await readFile(path.join(root, "brand/mark.svg"), "utf8");
   await writeFile(path.join(output, "brand/mark.svg"), withoutComments(mark));
-  const example = await readFile(
-    path.join(root, "examples/research-desk/research/brief.memql"),
-    "utf8",
-  );
-  await writeFile(path.join(output, "brief.memql"), example);
+  const sources = await readExample();
+  for (const [i, name] of exampleFiles.entries())
+    await writeFile(path.join(output, name), sources[i]);
   await writeFile(
     path.join(output, "research-guide.md"),
     await researchGuide(),
   );
   await writeFile(
     path.join(output, "example-data.js"),
-    showcaseModule(example),
+    showcaseModule(sources),
   );
   await cp(
     path.join(root, "examples/research-desk/research/memql.toml"),
