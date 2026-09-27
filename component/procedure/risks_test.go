@@ -179,3 +179,132 @@ func TestAHoleShapeIsStoredAndReadBackStrictly(t *testing.T) {
 		t.Fatal("a shape feature this replica does not know was dropped rather than refused")
 	}
 }
+
+// risksOf generalizes recordings -- each one step, an exec of the command --
+// classifies the template, and answers ReplayRisks over the instances it was
+// generalized from.
+func risksOf(t *testing.T, commands ...any) []string {
+	t.Helper()
+	var instances [][]Action
+	for _, c := range commands {
+		instances = append(instances, Canonicalize([]Step{{StepType: "exec", Consumed: true, Input: map[string]any{"command": c}}}))
+	}
+	tmpl := Generalize(instances)
+	tmpl.Holes = Classify(tmpl, instances)
+	return ReplayRisks(tmpl, instances)
+}
+
+// oneRiskSaying asserts exactly one risk, carrying every fragment.
+func oneRiskSaying(t *testing.T, risks []string, fragments ...string) {
+	t.Helper()
+	if len(risks) != 1 || !containsEvery(risks[0], fragments...) {
+		t.Fatalf("risks = %q, want one saying %q", risks, fragments)
+	}
+}
+
+func containsEvery(s string, fragments ...string) bool {
+	for _, f := range fragments {
+		if !strings.Contains(s, f) {
+			return false
+		}
+	}
+	return true
+}
+
+// TestATemplateWhoseParametersAreDataHasNoReplayRisk is the control every
+// risk below is measured against: a parameter that is an ordinary argument --
+// strictly quoted, one word, judged by its shape -- is what a procedure is
+// FOR.
+func TestATemplateWhoseParametersAreDataHasNoReplayRisk(t *testing.T) {
+	for _, pair := range [][2]any{
+		{"cp report.txt dest1.txt", "cp report.txt dest2.txt"},
+		{"mkdir -p out && echo hello > a.txt", "mkdir -p out && echo hello > b.txt"},
+		{"bash script.sh alpha", "bash script.sh beta"},
+		{"cat <<'EOF' > notes.txt\nhello\nEOF\ncp notes.txt a.txt", "cat <<'EOF' > notes.txt\nhello\nEOF\ncp notes.txt b.txt"},
+		{[]any{"git", "commit", "-m", "first"}, []any{"git", "commit", "-m", "second"}},
+	} {
+		if risks := risksOf(t, pair[0], pair[1]); len(risks) != 0 {
+			t.Errorf("%q / %q: risks = %q, want none", pair[0], pair[1], risks)
+		}
+	}
+}
+
+// TestATemplateThatCannotBindItsOwnRecordingIsARisk (B4 a): the template is
+// the generalization of its instances, so it must bind every one of them. One
+// it cannot -- recordings whose argument lists differ in length leave a gap
+// hole that only some of them fill -- cannot reproduce what that recording
+// did, and a replay compared against the others would be compared against a
+// procedure the recordings never showed.
+func TestATemplateThatCannotBindItsOwnRecordingIsARisk(t *testing.T) {
+	oneRiskSaying(t, risksOf(t, "cp a.txt b.txt", "cp -r a.txt b.txt"), "instance 0", "step 0")
+}
+
+// TestAParameterRecordedThroughAnExpansionIsARisk (B4 b).
+func TestAParameterRecordedThroughAnExpansionIsARisk(t *testing.T) {
+	oneRiskSaying(t, risksOf(t, `cat "$HOME/a.txt"`, `cat "$HOME/b.txt"`), "s0.command.1", "expansion")
+}
+
+// TestAParameterThatIsCodeIsARisk (B4 c): strict quoting makes a value one
+// argument, and there are arguments a program RUNS -- a shell's -c script, an
+// interpreter's inline code, eval's arguments. A goal's input there chooses
+// the code, quoted or not. The same holds for a command vector, which is how
+// Codex records every command, and through a wrapper like sudo.
+func TestAParameterThatIsCodeIsARisk(t *testing.T) {
+	for _, c := range []struct {
+		first, second any
+		says          []string
+	}{
+		{`bash -c "echo a > x"`, `bash -c "echo b > x"`, []string{"script", "bash"}},
+		{`sh -ec 'make a'`, `sh -ec 'make b'`, []string{"script", "sh"}},
+		{`/bin/zsh -lc "go test ./a"`, `/bin/zsh -lc "go test ./b"`, []string{"script", "zsh"}},
+		{[]any{"bash", "-lc", "echo a > x"}, []any{"bash", "-lc", "echo b > x"}, []string{"script", "bash"}},
+		{`sudo sh -c "echo a"`, `sudo sh -c "echo b"`, []string{"script", "sh"}},
+		{`python3 -c "print(1)"`, `python3 -c "print(2)"`, []string{"code", "python3"}},
+		{`node --eval "f(1)"`, `node --eval "f(2)"`, []string{"code", "node"}},
+		{`node -p "a"`, `node -p "b"`, []string{"code", "node"}},
+		{`perl -e 'print 1'`, `perl -e 'print 2'`, []string{"code", "perl"}},
+		{`ruby -e 'puts 1'`, `ruby -e 'puts 2'`, []string{"code", "ruby"}},
+		{`eval "echo a"`, `eval "echo b"`, []string{"eval"}},
+	} {
+		risks := risksOf(t, c.first, c.second)
+		if len(risks) == 0 || !containsEvery(risks[0], append([]string{"code that runs"}, c.says...)...) {
+			t.Errorf("%q / %q: risks = %q, want one naming %q", c.first, c.second, risks, c.says)
+		}
+	}
+}
+
+// TestAParameterThatIsTheCommandWordIsARisk: a parameter where a shell expects
+// a command word chooses the PROGRAM, however it is quoted -- the principle
+// replayable.go holds argv[0] to, applied to every simple command of a line.
+func TestAParameterThatIsTheCommandWordIsARisk(t *testing.T) {
+	oneRiskSaying(t, risksOf(t, "mkdir -p out && touch out/x", "mkdir -p out && rm out/x"), "s0.command.4", "program")
+}
+
+// TestAParameterInsideAHereDocumentIsARisk (B4 d): a here-document's body is
+// text the shell hands the command -- expanding $ and backticks in it when the
+// delimiter is unquoted -- and a value's quotes are just more text there, so a
+// parameter in one is not one argument. A parameter after a here-document
+// operator on its line is flagged too; one on a line after the document
+// ended is an ordinary argument (the control above).
+func TestAParameterInsideAHereDocumentIsARisk(t *testing.T) {
+	oneRiskSaying(t, risksOf(t, "cat <<EOF > f\nhello alpha\nEOF", "cat <<EOF > f\nhello beta\nEOF"), "s0.command.5", "here-document")
+	oneRiskSaying(t, risksOf(t, "cat <<< alpha", "cat <<< beta"), "s0.command.2", "here-document")
+}
+
+// TestReplayRisksAreInStepOrder: the first sentence is the ladder's reason, so
+// the order is the procedure's own.
+func TestReplayRisksAreInStepOrder(t *testing.T) {
+	mk := func(a, b string) []Action {
+		return Canonicalize([]Step{
+			{StepType: "exec", Consumed: true, Input: map[string]any{"command": `bash -c "echo ` + a + `"`}},
+			{StepType: "exec", Consumed: true, Input: map[string]any{"command": `cat "$HOME/` + b + `"`}},
+		})
+	}
+	instances := [][]Action{mk("a", "x"), mk("b", "y")}
+	tmpl := Generalize(instances)
+	tmpl.Holes = Classify(tmpl, instances)
+	risks := ReplayRisks(tmpl, instances)
+	if len(risks) != 2 || !strings.Contains(risks[0], "step 0") || !strings.Contains(risks[1], "step 1") {
+		t.Fatalf("risks = %q, want step 0's then step 1's", risks)
+	}
+}

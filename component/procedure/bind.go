@@ -46,23 +46,35 @@ func Bind(t Template, stepIndex int, a Action) (map[string]string, bool) {
 // take EVERY step: a recording that took only some of them did something else,
 // and comparing the procedure against it would measure the wrong run.
 func BindInstance(t Template, instance []Action) (map[string]string, bool) {
-	if len(instance) != len(t.Steps) {
-		return nil, false
-	}
+	out, _, ok := bindInstanceAt(t, instance)
+	return out, ok
+}
+
+// bindInstanceAt is BindInstance, answering -- when the instance does not
+// bind -- the first step it did not fit: where its steps and the template's
+// stop agreeing in number, or the step whose arguments did not bind, or the
+// step that bound a hole to a second value.
+func bindInstanceAt(t Template, instance []Action) (map[string]string, int, bool) {
 	out := map[string]string{}
 	for i := range t.Steps {
+		if i >= len(instance) {
+			return nil, i, false
+		}
 		b, ok := Bind(t, i, instance[i])
 		if !ok {
-			return nil, false
+			return nil, i, false
 		}
 		for id, v := range b {
 			if prev, seen := out[id]; seen && prev != v {
-				return nil, false
+				return nil, i, false
 			}
 			out[id] = v
 		}
 	}
-	return out, true
+	if len(instance) != len(t.Steps) {
+		return nil, len(t.Steps), false
+	}
+	return out, 0, true
 }
 
 // bindNode walks the template and the instance together. Structure must agree
