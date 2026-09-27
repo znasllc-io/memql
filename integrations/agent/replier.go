@@ -36,6 +36,18 @@ func looksLikeCanonicalUserId(s string) bool {
 	return strings.HasPrefix(strings.TrimSpace(s), "v1:identity:user:")
 }
 
+// turnOwnerFromActor is the turn owner's first and most authoritative source:
+// the actor on the context, when it names a user. A work run's turn carries
+// the run's owner there -- the run restores its persisted owner on the agent
+// node -- so the owner the tool loop stamps onto a tool's ownerUserId is the
+// very actor every tool call of the turn runs under.
+func turnOwnerFromActor(ctx context.Context) string {
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil && looksLikeCanonicalUserId(ac.UserId) {
+		return ac.UserId
+	}
+	return ""
+}
+
 // Replier handles AgentGenerateTurnMsg on the agent node. It builds prompt
 // data from the message's routing context, renders the agentReply prompt,
 // and either runs a streaming tool-calling loop (standard text path) or a
@@ -723,10 +735,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// (queryPrivateCanvasStatesForViewer's filter
 	// `payload.forUserId==args.viewerUserId` doesn't match
 	// email-vs-id mismatches).
-	resolvedOwner := ""
-	if ac, ok := auth.AccessFromContext(ctx); ok && looksLikeCanonicalUserId(ac.UserId) {
-		resolvedOwner = ac.UserId
-	}
+	resolvedOwner := turnOwnerFromActor(ctx)
 	// Planner-driven post-approval turn: ctx carries system-actor
 	// claims, not the end user, so AccessContext.UserId won't match
 	// the canonical user id pattern. The planner forwards the Plan's

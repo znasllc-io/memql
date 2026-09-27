@@ -237,8 +237,8 @@ func (i *Integration) handleInvoke(ctx context.Context, args map[string]any, _ i
 	// another user's bucket.
 	//
 	// The owner is the caller unless the context may act for another user
-	// (owner_scope.go), decided before the registry is consulted.
-	ownerUserId, err := callOwner(ctx, fmt.Sprintf("agent(%q)", name), asString(args["ownerUserId"]))
+	// (memql.CallOwner), decided before the registry is consulted.
+	ownerUserId, err := memql.CallOwner(ctx, fmt.Sprintf("agent(%q)", name), asString(args["ownerUserId"]))
 	if err != nil {
 		return nil, err
 	}
@@ -353,9 +353,9 @@ func (i *Integration) handleAskSpecialist(ctx context.Context, args map[string]a
 	// invisible cross-tenant one.
 	//
 	// The owner is also the caller's own unless the context may act for
-	// another user (owner_scope.go): the persona handed back is the named
+	// another user (memql.CallOwner): the persona handed back is the named
 	// user's.
-	ownerUserId, err := callOwner(ctx, fmt.Sprintf("askSpecialist(%q)", role), asString(args["ownerUserId"]))
+	ownerUserId, err := memql.CallOwner(ctx, fmt.Sprintf("askSpecialist(%q)", role), asString(args["ownerUserId"]))
 	if err != nil {
 		return nil, err
 	}
@@ -471,8 +471,8 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 		return nil, fmt.Errorf("requestUserFeedback: 'runId' required (auto-injection failed -- no active run in the turn context)")
 	}
 	// The run is parked AS its owner, so the owner is the caller unless the
-	// context may act for another user (owner_scope.go).
-	ownerUserId, err := callOwner(ctx, "requestUserFeedback", asString(args["ownerUserId"]))
+	// context may act for another user (memql.CallOwner).
+	ownerUserId, err := memql.CallOwner(ctx, "requestUserFeedback", asString(args["ownerUserId"]))
 	if err != nil {
 		return nil, err
 	}
@@ -549,8 +549,8 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 		return nil, fmt.Errorf("produceArtifact: 'goal' is required -- describe the deliverable to produce")
 	}
 	// The goal is opened FOR its owner, so the owner is the caller unless the
-	// context may act for another user (owner_scope.go).
-	ownerUserId, err := callOwner(ctx, "produceArtifact", asString(args["ownerUserId"]))
+	// context may act for another user (memql.CallOwner).
+	ownerUserId, err := memql.CallOwner(ctx, "produceArtifact", asString(args["ownerUserId"]))
 	if err != nil {
 		return nil, err
 	}

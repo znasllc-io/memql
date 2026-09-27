@@ -93,7 +93,10 @@ func (i *Integration) handleRunScript(ctx context.Context, args map[string]any, 
 	if i == nil || i.runner == nil {
 		return nil, fmt.Errorf("skills.runScript: no script runner is wired on this node")
 	}
-	req := requestFromArgs(args)
+	req, err := requestFromArgs(ctx, "skills.runScript", args)
+	if err != nil {
+		return nil, err
+	}
 	receipt, err := i.runner.Run(ctx, req)
 	if err != nil {
 		var refusal Refusal
@@ -114,8 +117,12 @@ func (i *Integration) handleCaptureScript(ctx context.Context, args map[string]a
 	if i == nil || i.runner == nil {
 		return nil, fmt.Errorf("skills.captureScript: no script runner is wired on this node")
 	}
+	base, err := requestFromArgs(ctx, "skills.captureScript", args)
+	if err != nil {
+		return nil, err
+	}
 	req := CaptureRequest{
-		Request:  requestFromArgs(args),
+		Request:  base,
 		Path:     asString(args["path"]),
 		Platform: asString(args["platform"]),
 		Entry:    asString(args["entry"]),
@@ -132,19 +139,27 @@ func (i *Integration) handleCaptureScript(ctx context.Context, args map[string]a
 	return okNode("captureScript", captured), nil
 }
 
-func requestFromArgs(args map[string]any) Request {
+// requestFromArgs reads one call's arguments. The owner routes a fleet call to
+// that person's machines and names whose step a receipt is written onto, so it
+// is the caller's own unless the context may act for another user
+// (memql.CallOwner) -- decided before anything is read, shipped or run.
+func requestFromArgs(ctx context.Context, op string, args map[string]any) (Request, error) {
+	owner, err := memql.CallOwner(ctx, op, asString(args["ownerUserId"]))
+	if err != nil {
+		return Request{}, err
+	}
 	return Request{
 		SkillID:          asString(args["skillId"]),
 		ScriptArtifactID: asString(args["scriptArtifactId"]),
 		Args:             asStringList(args["args"]),
 		AgentID:          asString(args["agentId"]),
-		OwnerID:          asString(args["ownerUserId"]),
+		OwnerID:          owner,
 		StepID:           asString(args["stepId"]),
 		RunID:            asString(args["runId"]),
 		Environment:      asObject(args["environment"]),
 		RequireLabels:    asLabels(args["requireLabels"]),
 		TimeoutSec:       asInt(args["timeoutSec"]),
-	}
+	}, nil
 }
 
 // ---------------------------------------------------------------------------

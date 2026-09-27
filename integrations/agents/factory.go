@@ -115,8 +115,8 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 		return nil, fmt.Errorf("ensureForGoal: 'goal' argument is required")
 	}
 	// The catalog read and written is the owner's, so the owner is the caller
-	// unless the context may act for another user (owner_scope.go).
-	ownerUserId, err := callOwner(ctx, "ensureForGoal", asString(args["ownerUserId"]))
+	// unless the context may act for another user (memql.CallOwner).
+	ownerUserId, err := memql.CallOwner(ctx, "ensureForGoal", asString(args["ownerUserId"]))
 	if err != nil {
 		return nil, err
 	}
