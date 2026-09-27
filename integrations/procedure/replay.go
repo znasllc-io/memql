@@ -1772,7 +1772,9 @@ func (r *replay) finishShadow(ctx context.Context) {
 //   - WHETHER THIS FINISH IS THE FIRST. A derived run can be finished by two
 //     executions of the same statement (a resumed goal run whose first
 //     executor was still alive, a comparison asked for twice at once). The
-//     second finds the run terminal and counts nothing.
+//     second finds the run closed with an outcome and counts nothing. (A run
+//     the abandoned sweep closed has no outcome, and is closed again with
+//     what happened.)
 //   - WHETHER THE VERSION IS STILL THE ONE THAT RAN. A re-lift while the
 //     replay was in flight put a NEW version on the entry rung; evidence
 //     about the old one is no evidence about it, and writing the loaded state
@@ -1800,7 +1802,12 @@ func (r *replay) settle(ctx context.Context, status, code, message string, ev *w
 	}
 	defer release()
 	if r.derived && r.runId != "" {
-		if run, rerr := r.i.runForOwner(ownerActor(ctx, r.req.OwnerUserId), r.runId); rerr == nil && run != nil && terminalRunStatus(str(run, "status")) {
+		// Finished by ANOTHER EXECUTION means closed WITH AN OUTCOME. The
+		// abandoned-run sweep closes a run with none, and a run it closed
+		// under a replay that was still working is closed again here with
+		// what actually happened.
+		if run, rerr := r.i.runForOwner(ownerActor(ctx, r.req.OwnerUserId), r.runId); rerr == nil && run != nil &&
+			terminalRunStatus(str(run, "status")) && obj(run, "outcome") != nil {
 			r.i.log().Info("procedure: a replay run was finished by another execution first; this one counts nothing",
 				"construct", r.c.id, "run", r.runId)
 			r.adoptFinished(run)

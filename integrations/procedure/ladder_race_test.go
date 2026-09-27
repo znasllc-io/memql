@@ -200,3 +200,67 @@ func TestThePromotionApprovalIdIsDerivedFromWhatProposedIt(t *testing.T) {
 		}
 	}
 }
+
+// TestAReplayTheSweepClosedUnderItStillRecordsWhatHappened: the abandoned-run
+// sweep closed the replay's run while it was still working (its node was
+// paused past the window). That is not another execution finishing it -- the
+// sweep writes no outcome -- so the replay closes its run with what actually
+// happened, and the ladder counts it. Only a run another execution closed
+// WITH an outcome makes this one a duplicate.
+func TestAReplayTheSweepClosedUnderItStillRecordsWhatHappened(t *testing.T) {
+	w := newReplayWorld(t, "trusted")
+	req := ReplayRequest{OwnerUserId: replayOwner, ConstructId: w.constructId, Mode: ReplayTrusted,
+		GoalRunId: goalRunId, StepKey: "replayed", Input: map[string]any{"file": goalFile}}
+	runId, _ := (&replay{mode: ReplayTrusted, req: req, c: &loaded{id: w.constructId, hash: w.hash}}).replayRunId()
+	w.d.alter["step1"] = func(*DispatchResult) {
+		row := copyRow(t, w.work.run(runId))
+		row["status"], row["errorCode"], row["finishedAt"] = "abandoned", "heartbeat_expired", testNow.Format(timeLayout)
+		w.work.putRun(row)
+	}
+	out, err := w.i.Replay(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if !out.Served || out.AlreadyDone {
+		t.Fatalf("outcome = %+v, want the goal served and recorded by this replay", out)
+	}
+	if run := w.work.run(runId); run["status"] != "succeeded" {
+		t.Fatalf("the run = %v, want it closed with what happened", run)
+	}
+	if w.lc.get("lastReplayAt") != testNow.Format(timeLayout) {
+		t.Fatal("the replay that served the goal was not counted")
+	}
+}
+
+// TestAReplayAnotherExecutionFinishedCountsAndHandsOverNothing: two
+// executions of one goal statement ran the same replay run (the goal's run
+// was reclaimed while its first executor was still alive). The other one
+// finished first -- it closed the run with an outcome and handed the goal to
+// the app. This one adopts that answer: it neither counts the replay again nor
+// hands the goal over a second time.
+func TestAReplayAnotherExecutionFinishedCountsAndHandsOverNothing(t *testing.T) {
+	w := newReplayWorld(t, "trusted")
+	req := ReplayRequest{OwnerUserId: replayOwner, ConstructId: w.constructId, Mode: ReplayTrusted,
+		GoalRunId: goalRunId, StepKey: "replayed", Input: map[string]any{"file": goalFile}}
+	runId, _ := (&replay{mode: ReplayTrusted, req: req, c: &loaded{id: w.constructId, hash: w.hash}}).replayRunId()
+	w.d.alter["step1"] = func(r *DispatchResult) {
+		r.Observation.Contents[0].Digest = "sha256:" + strings.Repeat("0", 64)
+		row := copyRow(t, w.work.run(runId))
+		row["status"], row["errorCode"] = "failed", codeDiverged
+		row["outcome"] = map[string]any{"diverged": true, "divergedStep": float64(1), "repairRunId": "v1:work:run:repair-other"}
+		w.work.putRun(row)
+	}
+	out, err := w.i.Replay(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if !out.AlreadyDone || !out.FellBack || out.Fallback.ChildRunId != "v1:work:run:repair-other" {
+		t.Fatalf("outcome = %+v, want the other execution's answer adopted", out)
+	}
+	if n := len(w.f.recorded()); n != 0 {
+		t.Fatalf("the goal was handed to the app %d more time(s)", n)
+	}
+	if n := len(w.eng.callsTo("recordConstructLadder")); n != 0 || w.lc.get("failures") != float64(0) {
+		t.Fatalf("the replay was counted a second time: %d ladder writes, failures %v", n, w.lc.get("failures"))
+	}
+}
