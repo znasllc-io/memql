@@ -42,7 +42,7 @@
 /// just a diff). For making a brand-new deliverable from scratch, use produceArtifact instead; for
 /// a plain question, answer inline via respondToUser.
 @handler(type="function", name="assistantEditDocument")
-@allowedRoles("assistant", "specialist")
+@requiresAgentRole("assistant", "specialist")
 @executionTime("fast")
 tool editDocument {
   documentId   string! @description("Id of the existing logical document to revise -- the v1:library:generatedOutput id resolved from the artifact the user is referring to. The version history + backing content are keyed on this; every revision of the same document shares it.")

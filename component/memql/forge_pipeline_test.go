@@ -2,6 +2,7 @@ package memql
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -84,7 +85,7 @@ func TestForgeRoutingContractMatchesGuard(t *testing.T) {
 		if !forgeRequestTransitionAllowed(forgeStatusSubmitted, target, role) {
 			t.Errorf("routing %s -> %q: not a valid submitted-> transition for role %s", role, target, role)
 		}
-		if !forgeRequestRoleAllowed(target, role) {
+		if !forgeRequestRoleAllowed(target, role, roleLadder{}) {
 			t.Errorf("routing %s -> %q: role %s is not authorized to set that status (guard would reject the DSL write)", role, target, role)
 		}
 	}
@@ -172,22 +173,22 @@ func TestForgePipelineWalkReaderPath(t *testing.T) {
 	if !forgeRequestTransitionAllowed(forgeStatusValidated, forgeStatusNeedsApproval, writer) {
 		t.Error("validated -> needs_approval should be allowed")
 	}
-	if !forgeRequestRoleAllowed(forgeStatusNeedsApproval, writer) {
+	if !forgeRequestRoleAllowed(forgeStatusNeedsApproval, writer, roleLadder{}) {
 		t.Error("writer (developer) should be authorized to move a request to needs_approval")
 	}
 	// 4. owner approves: needs_approval -> approved.
 	if !forgeRequestTransitionAllowed(forgeStatusNeedsApproval, forgeStatusApproved, owner) {
 		t.Error("owner should be able to approve (needs_approval -> approved)")
 	}
-	if !forgeRequestRoleAllowed(forgeStatusApproved, owner) {
+	if !forgeRequestRoleAllowed(forgeStatusApproved, owner, roleLadder{}) {
 		t.Error("owner must be authorized to set approved")
 	}
 
 	// A reader must NOT be able to approve or to move a request to approval.
-	if forgeRequestRoleAllowed(forgeStatusApproved, reader) {
+	if forgeRequestRoleAllowed(forgeStatusApproved, reader, roleLadder{}) {
 		t.Error("reader must NOT be authorized to approve")
 	}
-	if forgeRequestRoleAllowed(forgeStatusNeedsApproval, reader) {
+	if forgeRequestRoleAllowed(forgeStatusNeedsApproval, reader, roleLadder{}) {
 		t.Error("reader must NOT be authorized to push a request to needs_approval (validation is a developer act)")
 	}
 }
@@ -198,28 +199,30 @@ func TestForgeOwnerFastTrack(t *testing.T) {
 	if !forgeRequestTransitionAllowed(forgeStatusSubmitted, forgeStatusQueued, "owner") {
 		t.Error("owner fast-track submitted -> queued should be allowed")
 	}
-	if !forgeRequestRoleAllowed(forgeStatusQueued, "owner") {
+	if !forgeRequestRoleAllowed(forgeStatusQueued, "owner", roleLadder{}) {
 		t.Error("owner must be authorized to set queued")
 	}
 	for _, role := range []string{"admin", "writer", "reader"} {
-		if forgeRequestRoleAllowed(forgeStatusQueued, role) {
+		if forgeRequestRoleAllowed(forgeStatusQueued, role, roleLadder{}) {
 			t.Errorf("%s must NOT be authorized to fast-track to queued (owner-only)", role)
 		}
 	}
 }
 
-// TestForgeQueueGatingTiers locks the two query-layer gating tiers from
-// traits.memql against the engine role-authority, so the surface a reader can
-// reach stays empty of other people's work:
+// TestForgeQueueGatingTiers locks the two gating tiers against the engine
+// role-authority, so the surface a reader can reach stays empty of other
+// people's work:
 //
 //   - approver tier (forgeApprover) == owner only: only the owner may
 //     reach the terminal approve/queue statuses.
-//   - developer tier (forgeDeveloper) == owner/admin/developer/writer:
-//     developers may reach needs_approval (the validation act); a reader may
-//     not. `developer` is a literal cluster role (dsl/identity/concepts.memql)
-//     and was missing from BOTH this authority and the spec until memql#4112 --
-//     a gap that presented as an empty queue, not as a refusal, because the MCP
-//     tool gate admitted the call and the row filter then matched nothing.
+//   - developer tier == forgeDeveloperFloor and above: developers may reach
+//     needs_approval (the validation act); a reader may not. `developer` is a
+//     literal cluster role and was missing from BOTH this authority and the
+//     old forgeDeveloper spec until memql#4112 -- a gap that presented as an
+//     empty queue, not as a refusal, because the MCP tool gate admitted the
+//     call and the row filter then matched nothing. The tier is a rank floor
+//     now (memql#5438), and TestForgeDeveloperTierIsOneFloor holds the tools,
+//     the queue and this rule to the same one.
 func TestForgeQueueGatingTiers(t *testing.T) {
 	developerTier := map[string]bool{
 		string(auth.RoleOwner):     true,
@@ -230,7 +233,7 @@ func TestForgeQueueGatingTiers(t *testing.T) {
 	}
 	for role, isDev := range developerTier {
 		// needs_approval is the developer-gated validation act.
-		if got := forgeRequestRoleAllowed(forgeStatusNeedsApproval, role); got != isDev {
+		if got := forgeRequestRoleAllowed(forgeStatusNeedsApproval, role, roleLadder{}); got != isDev {
 			t.Errorf("developer tier mismatch for %s: needs_approval allowed=%v want %v", role, got, isDev)
 		}
 	}
@@ -245,29 +248,89 @@ func TestForgeQueueGatingTiers(t *testing.T) {
 		string(auth.RoleReader):    false,
 	}
 	for role, isApprover := range approverTier {
-		if got := forgeRequestRoleAllowed(forgeStatusApproved, role); got != isApprover {
+		if got := forgeRequestRoleAllowed(forgeStatusApproved, role, roleLadder{}); got != isApprover {
 			t.Errorf("approver tier mismatch for %s: approved allowed=%v want %v", role, got, isApprover)
 		}
-		if got := forgeRequestRoleAllowed(forgeStatusQueued, role); got != isApprover {
+		if got := forgeRequestRoleAllowed(forgeStatusQueued, role, roleLadder{}); got != isApprover {
 			t.Errorf("approver tier mismatch for %s: queued allowed=%v want %v", role, got, isApprover)
 		}
 	}
 
-	// And the specs the queues actually reference exist with the right
-	// role sets in the bundle. Under the spec/shape binding redesign (epic
-	// #2281) the caller/role predicates are @actor-bound specs that read
-	// the projected envelope key by BARE name (no `actor.` prefix).
+	// And the approval queue's spec exists with the owner-only role set.
 	specs, err := os.ReadFile("../../dsl/forge/specs.memql")
 	if err != nil {
 		t.Fatalf("read dsl/forge/specs.memql: %v", err)
 	}
 	ss := string(specs)
-	for _, must := range []string{
-		"forgeDeveloper", "forgeApprover",
-		`role == "owner"`, `role == "admin"`, `role == "developer"`, `role == "writer"`,
-	} {
+	for _, must := range []string{"forgeApprover", `actor.role == "owner"`} {
 		if !strings.Contains(ss, must) {
 			t.Errorf("specs.memql missing expected fragment %q", must)
+		}
+	}
+}
+
+// TestForgeDeveloperTierIsOneFloor is memql#4112's invariant made structural
+// (memql#5438): the forge developer tier is named by the developer tools'
+// @requiresRank, the validation queue's @requiresRank and the transition
+// rule's forgeDeveloperFloor, and all three must be the SAME floor. When they
+// disagreed the caller got an empty queue rather than an error. A spec
+// comparing role slugs cannot see a custom role the floor admits, which is why
+// forgeDeveloper is gone rather than kept beside the floor.
+func TestForgeDeveloperTierIsOneFloor(t *testing.T) {
+	floor := `@requiresRank("` + forgeDeveloperFloor + `")`
+
+	queries, err := os.ReadFile("../../dsl/forge/queries.memql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(regexp.QuoteMeta(floor) + `\s*\nquery request validationQueue\b`).Match(queries) {
+		t.Errorf("validationQueue does not declare %s, the floor the transition rule reads", floor)
+	}
+
+	tools, err := os.ReadFile("../../dsl/forge/tools.memql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{
+		"forgeRegisterProject", "forgeRequestHistory", "forgeValidationQueue",
+		"forgeValidateRequest", "forgeApprovalQueue", "forgeApproveRequest", "forgeRequestChanges",
+	} {
+		// The tool's own annotation run: the lines between its /// block and
+		// its header.
+		m := regexp.MustCompile(`(?s)((?:@[^\n]*\n)+)tool ` + tool + `\b`).FindSubmatch(tools)
+		if m == nil {
+			t.Errorf("tool %s is not declared in dsl/forge/tools.memql", tool)
+			continue
+		}
+		if !strings.Contains(string(m[1]), floor) {
+			t.Errorf("developer tool %s does not declare %s:\n%s", tool, floor, m[1])
+		}
+	}
+	if regexp.MustCompile(`(?m)^\s*@allowedRoles\(`).Match(tools) {
+		t.Error("dsl/forge/tools.memql still gates on @allowedRoles, whose slug lists this floor replaced")
+	}
+
+	specs, err := os.ReadFile("../../dsl/forge/specs.memql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regexp.MustCompile(`spec\s+\w+\s+forgeDeveloper\b`).Match(specs) {
+		t.Error("dsl/forge/specs.memql declares forgeDeveloper again: a slug list cannot agree with a rank floor")
+	}
+
+	// The transition rule reads the ladder the floors are judged on, so a role
+	// the CATALOG ranks into the tier -- the member slug `user`, a custom role
+	// -- is admitted exactly where the tool and the queue admit it.
+	ladder := roleLadder{ranks: map[string]int{
+		"owner": 400, "developer": 300, "admin": 200, "user": 100, "writer": 100,
+		"viewer": 50, "reader": 50, "lead": 150, "intern": 75,
+	}}
+	for role, want := range map[string]bool{
+		"owner": true, "developer": true, "admin": true, "writer": true, "user": true, "lead": true,
+		"intern": false, "viewer": false, "reader": false, "": false, "nobody": false,
+	} {
+		if got := forgeRequestRoleAllowed(forgeStatusNeedsApproval, role, ladder); got != want {
+			t.Errorf("needs_approval for %q = %v, want %v on the catalog ladder", role, got, want)
 		}
 	}
 }

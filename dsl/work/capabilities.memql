@@ -16,12 +16,12 @@ builtin workExecute {
 /// Find an operation and its exact argument contract before using it. Search
 /// the relevant app or concept; narrow the search using the returned names.
 @handler(type="query", query="query workCapabilities(search: args.search)")
-@allowedRoles("assistant", "system-planner")
+@requiresAgentRole("assistant", "specialist")
 tool discoverCapabilities { search string! @description("Short words describing the app, data or operation, or an exact capability name.") }
 
 /// Perform a discovered operation, rechecking caller and row permissions.
 @handler(type="query", query="query workExecute(name: args.name, arguments: args.arguments)")
-@allowedRoles("assistant", "system-planner")
+@requiresAgentRole("assistant", "specialist")
 tool executeCapability {
   name string! @description("Exact qualified name from discoverCapabilities.")
   arguments object! @description("Arguments matching its contract; resolve identifiers through reads first.")
@@ -41,7 +41,7 @@ builtin workNavigate {
 /// Navigate directly to a real OS destination. Use this for opening apps,
 /// sections and records; do not discover arbitrary data operations first.
 @handler(type="query", query="query workNavigate(app: args.app, section: args.section, record: args.record)")
-@allowedRoles("assistant", "system-planner")
+@requiresAgentRole("assistant", "specialist")
 tool navigateOS {
  app string @description("App id/name; omit to list destinations.")
  section string @description("Section id/name when requested.")
@@ -57,7 +57,7 @@ builtin workRecallHistory { search string! }
 
 /// Recover exact evidence from the original messages of the current work run.
 @handler(type="query", query="query workRecallHistory(search: args.search)")
-@allowedRoles("assistant", "system-planner")
+@requiresAgentRole("assistant", "specialist")
 tool recallWorkHistory { search string! @description("An exact name, word, identifier or phrase from earlier conversation or tool output.") }
 
 /// Reuse a checkpoint only for these exact source bytes and this owner.

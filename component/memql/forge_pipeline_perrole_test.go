@@ -71,7 +71,7 @@ func TestForgeFullPipelinePerRole(t *testing.T) {
 				t.Errorf("%s path hop %d: %s->%s by %s is not a valid graph edge",
 					submitter, i, h.from, h.to, h.actorRole)
 			}
-			if !forgeRequestRoleAllowed(h.to, h.actorRole) {
+			if !forgeRequestRoleAllowed(h.to, h.actorRole, roleLadder{}) {
 				t.Errorf("%s path hop %d: role %s not authorized to set %q",
 					submitter, i, h.actorRole, h.to)
 			}

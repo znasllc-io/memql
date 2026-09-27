@@ -2,7 +2,7 @@
 /// waits for the file and returns outputFileId. Supply the complete content request and optionally
 /// a starting draft or source references. Use for documents, reports, lists and data exports.
 @handler(type="function", name="composeMaterialize")
-@allowedRoles("assistant", "specialist")
+@requiresAgentRole("assistant", "specialist")
 @executionTime("slow")
 tool composeFile {
   name       string!   @description("Descriptive filename stem, without a path.")

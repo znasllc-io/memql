@@ -135,10 +135,15 @@ The trigger is `node.created`; `advanceRequest` is an `update`
 
 ## Role mapping
 
-Cluster roles are `owner` / `admin` / `developer` / `writer` / `reader`
-(`dsl/identity/concepts.memql`). Forge maps these to pipeline personas. The
-forge MCP tool surface's `@allowedRoles` annotations already grant
-`developer` the same tool access as `admin` throughout `dsl/forge/tools.memql`:
+Forge maps the cluster's role ladder (`dsl/rbac/seeds.memql`: owner 400,
+developer 300, admin 200, user/`writer` 100, viewer/`reader` 50) to pipeline
+personas. Every forge MCP tool gates the PERSON the call is for with a rank
+floor (memql#5438): the submit-and-browse tools are open to the whole team,
+`@requiresRank("reader")`, and the developer tools -- registration, history,
+both queues and the three transitions -- start at `@requiresRank("writer")`. A
+floor admits every role ranked at or above it, so a custom role a cluster
+authors between two of these is admitted by its rank, and so is the member
+slug `user`, which is the rung `writer` names:
 
 | Cluster role | Forge persona | Permissions |
 |---|---|---|
@@ -148,24 +153,23 @@ forge MCP tool surface's `@allowedRoles` annotations already grant
 | `writer` | Junior developer | May validate requests (first-line review). Cannot approve; moves requests to `needs_approval` for the owner. |
 | `reader` | Non-developer employee | Submit-only. Requests enter the pipeline at `needs_validation`. Receives the mentoring layer while filing (see below). |
 
-The validation and approval queues are gated at the query layer via the forge
-role specs (`forgeDeveloper` for `owner` / `admin` / `developer` / `writer`;
-`forgeApprover` for `owner` only). Submission (`forgeSubmitRequest`) and
-reading own requests (`forgeMyRequests`) are open to every authenticated team
-member.
+The validation queue query carries the same `@requiresRank("writer")` floor,
+so a caller below the developer tier is refused rather than shown an empty
+queue; the approval queue returns rows to the owner alone (the `forgeApprover`
+spec). Submission (`forgeSubmitRequest`) and reading own requests
+(`forgeMyRequests`) are open to every authenticated team member.
 
-**Three gates must agree on the developer tier, and a disagreement is
-silent.** The `@allowedRoles` annotation on a forge tool decides whether the
-CALL is admitted; `forgeRequestRoleAllowed`
+**Three gates name the developer tier, and they are one floor.** The tool's
+`@requiresRank` decides whether the CALL is admitted; `forgeRequestRoleAllowed`
 (`component/memql/forge_request_validation.go`) decides whether the status
-TRANSITION is; and the `forgeDeveloper` spec decides whether the queue's rows
-are VISIBLE. When the tool gate admits a role the spec excludes, the caller
-gets an empty list rather than a permission error -- which reads as "there is
-nothing to validate", not as "you lack access". That is exactly what happened
-to the `developer` role until memql#4112: `@allowedRoles` admitted it,
-`forgeDeveloper` and `forgeRequestRoleAllowed` both omitted it, so a
-legitimately-permissioned engineer saw the same empty queue a `reader` sees.
-Both now include it; `TestForgeQueueGatingTiers` pins the tier.
+TRANSITION is; and the validation queue's floor decides whether its rows are
+READ. When they were three hand-kept role lists they disagreed silently: until
+memql#4112 the tools admitted `developer` while the queue's `forgeDeveloper`
+spec and the transition rule both omitted it, and a legitimately-permissioned
+engineer saw the same empty queue a `reader` sees. They are now the one floor
+`forgeDeveloperFloor` names, read through one ladder, and a spec -- which
+cannot read a rank -- is no longer among them. `TestForgeDeveloperTierIsOneFloor`
+holds the three together.
 
 ### Mentoring layer
 
@@ -328,4 +332,4 @@ All forge constructs live under `dsl/forge/`:
 | `logic.memql` | `requestRouteStatus` — role-based pipeline router; `transitionEventKind` — status → `requestEvent` kind |
 | `automations.memql` | `routeRequest` — fires on `node.created` for `v1:forge:request`; `recordTransition` — fires on `node.updated` |
 | `tools.memql` | All `@mcp`-annotated tools (the team's Claude-facing surface) |
-| `specs.memql` | `forgeDeveloper`, `forgeApprover` — actor-bound role gates |
+| `specs.memql` | `forgeApprover` — the actor-bound owner gate on the approval queue |

@@ -27,7 +27,8 @@ import (
 //  2. Role-authority check (forgeRequestRoleAllowed): the incoming status
 //     requires a minimum cluster role:
 //     - "approved" / "queued"      -> owner only
-//     - "needs_approval"           -> owner, admin, or writer
+//     - "needs_approval"           -> the forge developer tier: the
+//       forgeDeveloperFloor rank or above (memql#5438)
 //     - everything else            -> any authenticated actor (reader can
 //       submit; rejections/revisions are validator/approver actions, but
 //       the DSL already gates those via traits)
@@ -182,31 +183,37 @@ func forgeRequestTransitionAllowed(from, to, role string) bool {
 	return forgeRequestTransitions[from][to]
 }
 
+// forgeDeveloperFloor is the rank the forge developer tier starts at: the
+// @requiresRank floor dsl/forge/tools.memql's developer tools and the
+// validationQueue query declare. Three gates name this tier -- the tool gate
+// decides whether the CALL is admitted, this rule whether the TRANSITION is,
+// and the query's floor whether the queue is READ -- and a disagreement
+// between them presents as an empty queue rather than an error (memql#4112).
+// They used to be three lists of role slugs kept in step by hand; they are now
+// one floor on one ladder (memql#5438), which is also what admits a custom
+// role ranked into the tier.
+const forgeDeveloperFloor = "writer"
+
 // forgeRequestRoleAllowed reports whether an actor with the given role may
-// set a forge request to `status`. Pure logic, unit-testable:
+// set a forge request to `status`, reading ranks from ladder -- the engine's
+// role ladder, the one the tool's and the query's @requiresRank floors are
+// judged on (an empty ladder is the compiled base ladder). Pure logic,
+// unit-testable:
 //
-//   - approved / queued  -> owner only
-//   - needs_approval     -> owner, admin, developer, or writer (the developer
-//     tier), matching the forgeDeveloper spec in dsl/forge/specs.memql and the
-//     @allowedRoles on dsl/forge/tools.memql's validation tools. All three must
-//     agree: the tool gate decides whether the CALL is admitted, this decides
-//     whether the TRANSITION is, and the spec decides whether the queue rows
-//     are VISIBLE -- and a disagreement between the last two presents as an
-//     empty queue rather than an error (memql#4112).
+//   - approved / queued  -> owner only (the top rung: nothing aliases it and
+//     no role can be created at or above it, so the slug comparison is exact)
+//   - needs_approval     -> the forge developer tier: forgeDeveloperFloor or
+//     ranked above it. A floor that does not resolve admits nobody.
 //   - all other statuses -> any role (fresh submit is reader-accessible;
 //     the DSL traits gate query-layer visibility separately)
-func forgeRequestRoleAllowed(status, role string) bool {
+func forgeRequestRoleAllowed(status, role string, ladder roleLadder) bool {
 	r := strings.ToLower(strings.TrimSpace(role))
 	switch strings.TrimSpace(status) {
 	case forgeStatusApproved, forgeStatusQueued:
 		return r == string(auth.RoleOwner)
 	case forgeStatusNeedsApproval:
-		switch r {
-		case string(auth.RoleOwner), string(auth.RoleAdmin), string(auth.RoleDeveloper), string(auth.RoleWriter):
-			return true
-		default:
-			return false
-		}
+		floor := ladder.rankOf(forgeDeveloperFloor)
+		return floor > 0 && ladder.rankOf(r) >= floor
 	default:
 		return true
 	}
@@ -282,27 +289,28 @@ func (e *MemQLEngine) validateForgeRequestTransition(ctx context.Context, payloa
 		priorStatus = forgeStatusSubmitted
 	}
 
-	return forgeRequestTransitionDecision(priorStatus, newStatus, role)
+	return forgeRequestTransitionDecision(priorStatus, newStatus, role, e.rankLadder(ctx))
 }
 
 // forgeRequestTransitionDecision is the pure (priorStatus -> newStatus, role)
-// decision applied to a re-version once the prior row has been loaded. Split
-// out of validateForgeRequestTransition so the transition-graph + role-
-// authority combination is unit-testable without a database (the
-// system-actor bypass and the prior-row load are the only impure parts).
-// Returns nil when the transition is permitted, or a descriptive error.
-func forgeRequestTransitionDecision(priorStatus, newStatus, role string) error {
+// decision applied to a re-version once the prior row has been loaded, with
+// ranks read from ladder. Split out of validateForgeRequestTransition so the
+// transition-graph + role-authority combination is unit-testable without a
+// database (the system-actor bypass and the prior-row load are the only
+// impure parts). Returns nil when the transition is permitted, or a
+// descriptive error.
+func forgeRequestTransitionDecision(priorStatus, newStatus, role string, ladder roleLadder) error {
 	if !forgeRequestTransitionAllowed(priorStatus, newStatus, role) {
 		return fmt.Errorf(
 			"v1:forge:request: invalid transition %q -> %q",
 			priorStatus, newStatus)
 	}
 
-	if !forgeRequestRoleAllowed(newStatus, role) {
+	if !forgeRequestRoleAllowed(newStatus, role, ladder) {
 		return fmt.Errorf(
 			"v1:forge:request: role %q is not permitted to set status %q "+
-				"(requires: approved/queued -> owner; needs_approval -> owner/admin/writer)",
-			role, newStatus)
+				"(requires: approved/queued -> owner; needs_approval -> the %q rank or above)",
+			role, newStatus, forgeDeveloperFloor)
 	}
 
 	return nil
