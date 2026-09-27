@@ -332,6 +332,12 @@ func (l *PlannerAgentLoop) reasoningDraft(ctx context.Context, req CompileReques
 		return out, err
 	}
 	out.LiveSections = dec.liveSectionOutcome(req)
+	for _, ls := range out.LiveSections {
+		// The fallback that inlined every section said so once already.
+		if ls.Inline != "" && dec.inlineAll == "" {
+			l.infoCompile("work compile: a live section stays inline in the template", req, "section", ls.Section, "reason", ls.Inline)
+		}
+	}
 	return l.persistWorkDraft(ctx, req, out, bundle, sandbox)
 }
 
