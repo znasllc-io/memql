@@ -1,4 +1,4 @@
-import { Fact, Facts, Head, Notice, Panel, Subhead } from "../../kit";
+import { ContentSkeleton, Fact, Facts, Head, Notice, Panel, Subhead } from "../../kit";
 import { InfoDetail } from "../../kit/InfoDetail";
 import { useSession } from "../../chrome/access";
 import type { LadderPolicy } from "../nexus/ladder";
@@ -89,11 +89,10 @@ export function ProceduresSection() {
           </InfoDetail>
         </div>
         {read.state === "loading" ? (
-          // THE SHAPE OF THE WAIT IS SILENT (DESIGN.md, "Loading is the shape
-          // of the content, never a message"): announced, never painted.
-          <p className="os-sr-only" role="status" aria-busy="true">
-            Loading the ladder&apos;s values
-          </p>
+          // LOADING IS THE SHAPE OF THE CONTENT, NEVER A MESSAGE (DESIGN.md):
+          // quiet shapes where the values will stand, so the panel is not an
+          // empty box under its heading, and the words announced, not painted.
+          <ContentSkeleton kind="detail" label="Loading the ladder's values" />
         ) : read.state === "error" ? null : read.policy === null ? (
           // STATED WITHOUT THE NUMBERS. The engine does fall back to values of
           // its own; printing them would present its fallback as this

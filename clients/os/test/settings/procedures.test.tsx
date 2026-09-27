@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReactNode } from "react";
@@ -149,15 +149,20 @@ describe("Settings -> Procedures: the ladder's values", () => {
     expect(await screen.findByText("PERMISSION_DENIED: below the reader rung")).toBeTruthy();
   });
 
-  it("paints no loading words while the values arrive", async () => {
+  it("draws the values' shape while they arrive, and paints no loading words", async () => {
     h.connection.query.ladderPolicyCurrent.mockImplementationOnce(() => new Promise<never>(() => {}));
     await renderProcedures();
-    expect(screen.queryByText(/Asking the cluster|Loading/)).not.toBeNull();
-    // ...and that one is announced, not painted.
-    const status = screen.getByRole("status");
+    // LOADING IS THE SHAPE OF THE CONTENT (DESIGN.md): the panel holds quiet
+    // shapes where the values will stand, not an empty box under its heading.
+    const panel = screen.getByRole("region", { name: "Certification ladder" });
+    const status = within(panel).getByRole("status");
     expect(status.getAttribute("aria-busy")).toBe("true");
-    expect(status.className).toContain("os-sr-only");
+    expect(status.querySelector(".os-content-skeleton-shape")).not.toBeNull();
+    // ...and its words are announced, not painted.
+    expect(within(status).getByText(/Loading/).className).toContain("os-sr-only");
     expect(screen.queryByText(/Asking the cluster/)).toBeNull();
+    // No value is claimed while nothing has been read.
+    expect(panel.textContent ?? "").not.toMatch(/\d/);
   });
 
   it("explains the ladder behind the one information control", async () => {
