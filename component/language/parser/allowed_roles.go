@@ -33,9 +33,21 @@ package parser
 //     "writer" but not admin or developer) is not a floor, and @requiresRank
 //     cannot say it.
 //
-// The one deliberate difference in meaning is the one the owner-approved
-// design records: a rank floor admits a CUSTOM role ranked at or above it,
-// which a list of slugs could not name.
+// A PERSON-LIST REWRITE ADMITS MORE THAN THE LIST DID, in two ways, and both
+// are deliberate -- the owner-approved design records them -- and both are
+// said wherever the rewrite is made (AllowedRolesRewrite.Note):
+//
+//   - AGENTS. @allowedRoles compared the CALLER's role string, and in an
+//     agent's tool loop that is the agent's own role (assistant /
+//     specialist), which no person-role list names -- so a person list
+//     refused every agent, and only a person over MCP could ever pass it.
+//     @requiresRank judges the PERSON a call is for, so an agent acting for
+//     somebody at or above the floor can now call the tool.
+//   - CUSTOM ROLES. A rank floor admits a custom role ranked at or above it,
+//     which a list of slugs could not name.
+//
+// An agent-list rewrite admits nothing new: @requiresAgentRole compares the
+// same agent role @allowedRoles did.
 
 import (
 	"fmt"
@@ -190,6 +202,9 @@ func (v *RoleVocabulary) ladderSlugs() []string {
 type AllowedRolesRewrite struct {
 	Annotation string
 	Reason     string
+	// Note says what the Annotation admits that the list did not -- set for
+	// every person-list rewrite (see the file comment) and for nothing else.
+	Note string
 }
 
 // RewriteAllowedRoles decides what the @allowedRoles list values becomes. See
@@ -251,7 +266,14 @@ func (v *RoleVocabulary) RewriteAllowedRoles(values []string) AllowedRolesRewrit
 			"the list admits %q but not %s, ranked above it, so it is not a floor and @requiresRank(%q) would admit what it excluded",
 			lowest, quoteJoin(skipped), lowest)}
 	}
-	return AllowedRolesRewrite{Annotation: "@requiresRank(" + QuoteString(lowest) + ")"}
+	return AllowedRolesRewrite{
+		Annotation: "@requiresRank(" + QuoteString(lowest) + ")",
+		Note: fmt.Sprintf(
+			"this admits more than the list did: an AGENT acting for a person ranked %q or above can now call the tool "+
+				"(the list was compared with the calling agent's own role, which no person role matches, so it refused every agent), "+
+				"and so can a person holding a custom role ranked at or above %q",
+			lowest, lowest),
+	}
 }
 
 // quoteJoin renders values as an annotation's argument list: "a", "b".
@@ -263,26 +285,31 @@ func quoteJoin(values []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-// AllowedRolesFinding is one @allowedRoles use a rewrite left as written, and
-// why: what `memqlmigrate --rewrite=allowed-roles` reports for its author.
+// AllowedRolesFinding is one @allowedRoles use a rewrite reports for its
+// author -- `memqlmigrate --rewrite=allowed-roles` prints each one. A use left
+// as written carries no Replacement and the Reason it was left; a use
+// rewritten into an annotation that admits more than it did carries its
+// Replacement and, as the Reason, the rewrite's Note.
 type AllowedRolesFinding struct {
 	Line, Column int
 	Text         string
+	Replacement  string
 	Reason       string
 }
 
 // RewriteAllowedRoles rewrites every @allowedRoles use in src that vocabulary
 // can carry across exactly (DeprecatedUse.AllowedRolesReplacement), in place
-// and touching nothing else, and returns the uses it left, in source order. It
-// is the migration channel of the deprecated_allowed_roles window: lexical,
-// so it runs over a file whatever else is wrong with it, and idempotent,
-// because what it writes is not the form it rewrites.
-func RewriteAllowedRoles(src string, vocabulary *RoleVocabulary) (string, []AllowedRolesFinding) {
+// and touching nothing else. It returns the uses it LEFT, and the uses it
+// rewrote into an annotation that admits more than the list did (WIDENED:
+// every person list, see the file comment), each in source order. It is the
+// migration channel of the deprecated_allowed_roles window: lexical, so it
+// runs over a file whatever else is wrong with it, and idempotent, because
+// what it writes is not the form it rewrites.
+func RewriteAllowedRoles(src string, vocabulary *RoleVocabulary) (out string, left, widened []AllowedRolesFinding) {
 	var (
-		out      []rune
-		findings []AllowedRolesFinding
-		runes    = []rune(src)
-		next     int
+		written []rune
+		runes   = []rune(src)
+		next    int
 	)
 	for _, s := range scanDeprecatedUses(src) {
 		if s.use.Rule != ruleDeprecatedAllowedRoles {
@@ -290,16 +317,19 @@ func RewriteAllowedRoles(src string, vocabulary *RoleVocabulary) (string, []Allo
 		}
 		decision := s.use.AllowedRolesReplacement(vocabulary)
 		if decision.Annotation == "" {
-			findings = append(findings, AllowedRolesFinding{Line: s.use.Line, Column: s.use.Column, Text: s.use.Text, Reason: decision.Reason})
+			left = append(left, AllowedRolesFinding{Line: s.use.Line, Column: s.use.Column, Text: s.use.Text, Reason: decision.Reason})
 			continue
 		}
-		out = append(out, runes[next:s.start]...)
-		out = append(out, []rune(decision.Annotation)...)
+		if decision.Note != "" {
+			widened = append(widened, AllowedRolesFinding{Line: s.use.Line, Column: s.use.Column, Text: s.use.Text, Replacement: decision.Annotation, Reason: decision.Note})
+		}
+		written = append(written, runes[next:s.start]...)
+		written = append(written, []rune(decision.Annotation)...)
 		next = s.end
 	}
-	if out == nil {
-		return src, findings
+	if written == nil {
+		return src, left, widened
 	}
-	out = append(out, runes[next:]...)
-	return string(out), findings
+	written = append(written, runes[next:]...)
+	return string(written), left, widened
 }

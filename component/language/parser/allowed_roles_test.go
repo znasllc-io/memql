@@ -117,6 +117,19 @@ func TestAnAllowedRolesListBecomesWhatItMeant(t *testing.T) {
 		if tc.want == "" && !strings.Contains(got.Reason, tc.reason) {
 			t.Errorf("%s: the reason %q does not say %q", tc.name, got.Reason, tc.reason)
 		}
+		// A PERSON-list rewrite admits more than the list did -- an agent
+		// acting for such a person, whom the list refused, and a custom role
+		// ranked at the floor -- and says so. An agent-list rewrite compares
+		// the same agent role the list did, and has nothing to say.
+		widens := strings.HasPrefix(got.Annotation, "@requiresRank(")
+		switch {
+		case widens && !strings.Contains(got.Note, "an AGENT acting for a person ranked"):
+			t.Errorf("%s: the person-list rewrite does not disclose that it admits agents: %q", tc.name, got.Note)
+		case widens && !strings.Contains(got.Note, "custom role"):
+			t.Errorf("%s: the person-list rewrite does not disclose that it admits a custom role: %q", tc.name, got.Note)
+		case !widens && got.Note != "":
+			t.Errorf("%s: a rewrite that admits nothing new carries a note: %q", tc.name, got.Note)
+		}
 	}
 }
 

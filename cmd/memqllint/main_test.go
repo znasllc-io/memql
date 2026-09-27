@@ -1363,7 +1363,7 @@ tool writerTool {
 tool assistantTool {
   name  string  @required @description("Item name.")
 }`
-	rewritten, left := langparser.RewriteAllowedRoles(tools, vocabulary)
+	rewritten, left, _ := langparser.RewriteAllowedRoles(tools, vocabulary)
 	if len(left) != 0 {
 		t.Fatalf("the rewrite left %d use(s) as written: %+v", len(left), left)
 	}

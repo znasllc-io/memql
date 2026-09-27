@@ -128,10 +128,19 @@ tool mixedTool {
 	for _, want := range []string{
 		`dsl/acme/tools.memql:16:1: left @allowedRoles("assistant", "system-planner") as written: "system-planner" is neither an agent role`,
 		`dsl/acme/tools.memql:22:1: left @allowedRoles("assistant", "owner") as written: the list mixes agent roles`,
+		// The person list's rewrite WIDENS the gate, and says so: the list
+		// refused every agent, and the floor admits an agent acting for a
+		// person at or above it, and a custom role ranked there.
+		`dsl/acme/tools.memql:9:1: rewrote @allowedRoles("owner", "admin", "developer", "writer") as @requiresRank("writer"); this admits more than the list did: an AGENT acting for a person ranked "writer" or above can now call the tool`,
+		`so it refused every agent), and so can a person holding a custom role ranked at or above "writer"`,
 	} {
 		if !strings.Contains(report.String(), want) {
 			t.Errorf("the report does not say %q:\n%s", want, report.String())
 		}
+	}
+	// The agent list's rewrite admits nothing new, so it is not reported.
+	if strings.Contains(report.String(), "ensureAgent") || strings.Contains(report.String(), `rewrote @allowedRoles("assistant")`) {
+		t.Errorf("the agent-list rewrite was reported as a widening:\n%s", report.String())
 	}
 
 	// Idempotent: a second run changes nothing and reports the same two.

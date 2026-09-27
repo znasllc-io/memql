@@ -179,10 +179,23 @@ agent's role in an agent's tool loop and the person's cluster role over MCP,
 so a list was one of two things, and each now has its own annotation: a list
 of agent roles becomes `@requiresAgentRole(...)` with the same values, and a
 list of person roles that forms a floor becomes `@requiresRank("<its lowest
-role>")`, which also admits a custom role ranked at or above it. The rewrite
-leaves a list it cannot carry across exactly -- one mixing the two, one naming
-a value neither vocabulary knows, one that skips a rung -- and says why on
-stderr.
+role>")`. The rewrite leaves a list it cannot carry across exactly -- one
+mixing the two, one naming a value neither vocabulary knows, one that skips a
+rung -- and says why on stderr.
+
+**A person-list rewrite admits more than the list did, and the rewrite says so
+on stderr for every one it makes.** In an agent's tool loop `@allowedRoles`
+compared the AGENT's own role (`assistant`, `specialist`), which no person
+role matches, so a list of person roles refused every agent and only a person
+over MCP could pass it. `@requiresRank` judges the person a call is for, so
+after the rewrite **an agent acting for somebody at or above the floor can
+call the tool** -- and so can a person holding a custom role ranked at or above
+it, which a list of slugs could not name. Both are deliberate (the design
+record for memql#5438), and each is reported so it can be reviewed: no
+annotation keeps a tool from every agent, so a tool that must not be reachable
+by one needs that decided before its rewrite lands. An agent-list rewrite
+admits nothing new: `@requiresAgentRole` compares the same agent role the list
+did.
 
 <!-- deprecation-window:begin -- generated from component/language/deprecation; see deprecation_window_docs_test.go -->
 
@@ -2435,9 +2448,13 @@ tool notifyOnCall {
 A tool is called by an **agent**, in its tool loop, or by an authenticated **person** over the MCP connector, and it can gate each on its own axis (memql#5438):
 
 - `@requiresAgentRole("assistant", ...)` gates WHICH AGENT is calling: the acting agent's role, one of the `v1:agents:agent` concept's own `role` values (`assistant`, `specialist`), checked against that declaration when the tree loads. A person over MCP is not an agent, so a tool carrying it is neither listed nor callable for them.
-- `@requiresRank("<role>")` gates the PERSON the call is for -- the authenticated user over MCP, or the user an agent acts for -- exactly as it does on a query, a mutation or a logic: that role or one ranked above it, a custom role included, validated against the ladder at load.
+- `@requiresRank("<role>")` gates the PERSON the call is for -- the authenticated user over MCP, or the user an agent acts for -- on the same ladder a query, a mutation or a logic floor uses: that role or one ranked above it, a custom role included, validated against the ladder at load.
 
-A tool with neither is callable by every agent and by an authenticated person over MCP; one with both requires both. A tool is listed to a caller exactly when a call from them would be admitted. `@allowedRoles(...)`, which compared one role string meaning either of the two, is in a [deprecation window](#forms-in-a-deprecation-window).
+A tool with neither is callable by every agent and by an authenticated person over MCP; one with both requires both. A tool is listed to a caller exactly when a call from them would be admitted -- an MCP session with no authenticated identity (stdio without `MEMQL_MCP_USER`) is offered none, because it may call none.
+
+**The person is judged at the rank they hold.** An agent often acts under a stand-in role -- borrowed authority, or background work that carries no captured interactive grant, both of which assert `writer` whatever the person holds -- and a floor is never judged against that: the person's role is read from the principal table for the call, so an agent acting for a `reader` does not clear a `writer` floor and one acting for an `admin` clears an `admin` floor. A person the table does not resolve holds no role and clears no floor.
+
+`@allowedRoles(...)`, which compared one role string meaning either of the two, is in a [deprecation window](#forms-in-a-deprecation-window). Rewriting a list of PERSON roles to `@requiresRank` widens the gate: the list refused every agent, and the floor admits an agent acting for a person at or above it.
 
 <!-- corpus: 2026/examples/memql/builtins/tool-gates.memql -->
 ```memql
