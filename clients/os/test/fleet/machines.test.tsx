@@ -268,19 +268,25 @@ describe("the machines directory", () => {
     expect(screen.getByText(/Settings > Credentials/)).toBeTruthy();
   });
 
-  it.each([false, true])("offers the correct uninstall location when revoked=%s", async (revoked) => {
+  it.each([false, true])("offers one uninstall line that names this cluster and asks nothing, when revoked=%s", async (revoked) => {
+    // Design D12 as amended 2026-09-27. The page used to ask where Cockpit was
+    // installed (system or account-only) and compose --user-local from the
+    // answer; a person removing a machine cannot be expected to know that,
+    // and the uninstaller detects it. What the line MUST carry is the
+    // cluster: the uninstaller of the day refused a line without one, and
+    // that refusal was copied straight from this field.
     const row = revoked ? REVOKED : LIVE;
     const connection = fakeConnection({ myWorkersWithStatus: [row] });
     mount(connection, revoked);
     await click(await screen.findByText(revoked ? "Old laptop" : "Studio mini"));
     if (!revoked) await click(screen.getByRole("button", { name: "Remove this machine" }));
 
-    const command = () => (screen.getByLabelText("the uninstall command") as HTMLInputElement).value;
-    expect(command()).not.toContain("--user-local");
-    await click(screen.getByRole("radio", { name: /My account only/ }));
-    expect(command()).toContain("--user-local");
-    await click(screen.getByRole("radio", { name: /System installation/ }));
-    expect(command()).not.toContain("--user-local");
+    const command = (screen.getByLabelText("the uninstall command") as HTMLInputElement).value;
+    expect(command).toContain(" --cluster=https://api.memql.example.com");
+    expect(command).not.toContain("--user-local");
+    expect(command).not.toContain("<your cluster URL>");
+    expect(screen.queryByRole("radio", { name: /My account only/ })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /System installation/ })).toBeNull();
     expect(connection.query.fleetRevokeMachine).not.toHaveBeenCalled();
   });
 

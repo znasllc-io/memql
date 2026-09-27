@@ -129,29 +129,52 @@ export function installCommand(input: InstallCommandInput): string {
 }
 
 // uninstallCommand composes the uninstaller's one-liner (design record
-// 2026-09-08-cockpit-install-wizard, D12).
+// 2026-09-08-cockpit-install-wizard, D12, amended 2026-09-27).
 //
 // The same shape as the install line, for the same reasons: one physical line
 // with no newline and no backslash, the script fetched from the cockpit
-// repository's main branch. It takes no token and no cluster -- removing a
-// worker is a fact about the machine, not about the cluster it served. The
-// registration on the cluster is revoked from Fleet, which is where this line
-// is shown.
+// repository's main branch. It takes no token -- the registration on the
+// cluster is revoked from Fleet, which is where this line is shown -- but it
+// DOES name the cluster, and that is the amendment.
+//
+// ===========================================================================
+// WHY THE CLUSTER IS ON THE LINE
+// ===========================================================================
+// A machine can be enrolled with more than one cluster (the cockpit's
+// multi-home workers.yaml), so "uninstall" from THIS cluster's Fleet page
+// means: remove this cluster's enrollment, and when it was the machine's last
+// one, take the app and its service with it. The uninstaller does exactly that
+// given --cluster=<url>. Given nothing, it has to work out which enrollment the
+// person meant -- and the first shape of this line passed nothing, so the
+// script of the day refused to guess: "choose --cluster=URL or --all-homes",
+// exit 2, observed live on the owner's Mac from the machine page's copy field
+// (2026-09-27). A copied line that errors is the failure this module exists to
+// prevent. So the cluster is stated, in the exact spelling the install line
+// wrote into the enrollment, and the uninstaller matches on it. The script now
+// also copes with a bare line (one enrollment: that one; none: full removal;
+// several: it lists them and stops), but the OS knows the cluster and says it
+// rather than leaving the script to infer it.
 //
 // WITHOUT --purge the state directory, policy.yaml and the logs stay, so a
 // person can read what the worker was doing before it went; the caption beside
 // the line says so and names the flag. `userLocal` mirrors the install's own
-// --user-local: a worker installed under ~/.memql/bin is removed from there.
+// --user-local when the caller KNOWS the install was account-only (the wizard
+// printed that install line moments ago). Left out, the uninstaller detects
+// the installation shape itself -- account-only under ~/.memql, system-wide
+// under /usr/local, or both -- which is why the machine page no longer asks.
 export function uninstallCommand(
   platform: InstallPlatform,
   opts: { purge?: boolean; userLocal?: boolean; clusterUrl?: string; localTest?: LocalCockpitInstall | null } = {},
 ): string {
-  if (opts.localTest && platform === "mac") return `curl -fsSL ${opts.localTest.base}/scripts/install/uninstall-mac.sh | ${localInstallerEnvironment(opts.localTest)}bash -s -- --user-local --cluster=${opts.clusterUrl || CLUSTER_URL_PLACEHOLDER}${opts.purge ? " --purge" : ""}`;
+  const cluster = opts.clusterUrl ? opts.clusterUrl : CLUSTER_URL_PLACEHOLDER;
+  if (opts.localTest && platform === "mac") return `curl -fsSL ${opts.localTest.base}/scripts/install/uninstall-mac.sh | ${localInstallerEnvironment(opts.localTest)}bash -s -- --user-local --cluster=${cluster}${opts.purge ? " --purge" : ""}`;
   const script = `https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-${platform}.sh`;
+  // ORDER IS FIXED and asserted word for word by the tests, as for the
+  // install line: --cluster first, then --purge, then --user-local. Both
+  // uninstallers parse the flags in any order; the fixed order is for the
+  // person comparing what the OS printed with what the runbook prints.
   const flags = [opts.purge ? " --purge" : "", opts.userLocal ? " --user-local" : ""].join("");
-  // `bash -s --` even with no flags, so a person appending one edits the same
-  // line the install had rather than learning a second shape.
-  return `curl -fsSL ${script} | bash -s --${flags}`;
+  return `curl -fsSL ${script} | bash -s -- --cluster=${cluster}${flags}`;
 }
 
 /** The second command a local-models machine needs on a fresh install: the

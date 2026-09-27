@@ -5,7 +5,7 @@ import { InfoDetail } from "../../../kit/InfoDetail";
 import { useEffect, useState } from "react";
 
 import { CallHistory } from "../routing/CallHistory";
-import { Button, EmptyState, Caption, Chip, Chips, ChoiceStack, CopyField, Fact, Facts, Notice, Panel, Subhead, Switch, RecordList, RecordRow } from "../../../kit";
+import { Button, EmptyState, Caption, Chip, Chips, CopyField, Fact, Facts, Notice, Panel, Subhead, Switch, RecordList, RecordRow } from "../../../kit";
 import { formatFreshness, formatMoment } from "../../../kit/format";
 import { uninstallCommand, workerClusterUrl, type InstallPlatform } from "../addMachine/install";
 import { roundTripFigure } from "../addMachine/flow";
@@ -345,7 +345,6 @@ function RemoveControl({
   const localTest = platformOf(machine) === "mac" ? localCockpitInstall(config.domain) : null;
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
-  const [userLocal, setUserLocal] = useState(false);
   const [purge, setPurge] = useState(false);
   // The receipt from the last removal on THIS machine (epic memql#5327,
   // design D2). It is held rather than discarded because a removal is two
@@ -353,33 +352,29 @@ function RemoveControl({
   // be revoked" is a different outcome from "removed", and the person who
   // just removed a stolen laptop is the one who needs to know which they got.
   const [receipt, setReceipt] = useState<RemovalReceipt | null>(null);
-  useEffect(() => { setUserLocal(false); setPurge(false); setReceipt(null); }, [machine.id]);
+  useEffect(() => { setPurge(false); setReceipt(null); }, [machine.id]);
   const label = machineName(machine);
-  const uninstall = uninstallCommand(platformOf(machine), { userLocal, localTest, purge: localTest !== null && purge, clusterUrl: workerClusterUrl(config.domain) });
-  // The registration does not report its installation path. Ask rather than
-  // inferring it from the version or the machine's operating system.
+  // The line names THIS cluster (design D12 as amended 2026-09-27): the
+  // uninstaller removes this cluster's enrollment and, when it was the
+  // machine's last one, Cockpit and its service as well. It carries no
+  // --user-local, because the registration does not report its installation
+  // path and the person removing a machine cannot be expected to know it:
+  // until the amendment this page asked them to choose between a system and
+  // an account-only installation, and a wrong answer was a line that found
+  // nothing to remove. The uninstaller now detects which shape is installed
+  // and removes what is there, so there is nothing left to ask.
+  const uninstall = uninstallCommand(platformOf(machine), { localTest, purge: localTest !== null && purge, clusterUrl: workerClusterUrl(config.domain) });
   const uninstallControls = (
     <>
-      <Caption>{localTest ? "Run this command on the machine to uninstall its connection to this cluster:" : "Choose where Cockpit was installed on this machine, then run the matching command on it:"}</Caption>
-      {localTest ? <Caption>Uses the matching local test uninstaller for your account.</Caption> : <ChoiceStack
-        name={`fleet-uninstall-location-${machine.id}`}
-        label="Cockpit installation location"
-        voice="prose"
-        value={userLocal ? "user" : "system"}
-        onChange={(next) => setUserLocal(next === "user")}
-        options={[
-          { value: "system", label: "System installation", description: "Installed in /usr/local/bin using an account password." },
-          { value: "user", label: "My account only", description: "Installed without a password in ~/.memql/bin." },
-        ]}
-      />
-      }
+      <Caption>{localTest ? "Run this command on the machine to uninstall its connection to this cluster:" : "Run this command on the machine to remove its connection to this cluster:"}</Caption>
+      {localTest ? <Caption>Uses the matching local test uninstaller for your account.</Caption> : null}
       {localTest ? <>
         <Switch checked={purge} onChange={setPurge}>Remove saved worker data</Switch>
         <Caption>Also removes worker policy, state and MemQL-managed model data. Refused if another cluster connection still uses them.</Caption>
       </> : null}
       <CopyField value={uninstall} label="the uninstall command" />
       <Caption>
-        {localTest ? "Other cluster connections keep running. After the last connection is removed, the app and services are removed and MemQL’s Accessibility and Screen Recording authorizations are reset. macOS may retain a row in Settings." : "Stops the service and removes Cockpit and its connection token. Logs and settings remain; add --purge to remove retained data too."}
+        {localTest ? "Other cluster connections keep running. After the last connection is removed, the app and services are removed and MemQL’s Accessibility and Screen Recording authorizations are reset. macOS may retain a row in Settings." : "Removes this cluster's connection; other cluster connections keep running. After the last one is removed, Cockpit and its service are removed too, whether it was installed system-wide or for one account. A system-wide installation asks for the account password. Logs and settings remain; add --purge to remove retained data too."}
       </Caption>
       {localTest ? <Caption>CLI credentials, cluster settings, certificates and rollback backups are retained in either mode.</Caption> : null}
     </>

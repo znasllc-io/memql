@@ -164,45 +164,54 @@ Re-running the same one-liner is safe:
 
 ### Uninstall
 
-Uninstall is one physical line too — the install run backwards. It stops
-and removes the service (LaunchAgent / user-systemd), the binary and its
-symlink, and the token registry `~/.memql/workers.yaml` plus the legacy
-`~/.memql/worker.yaml` mirror. It does **not** revoke the machine on the
-cluster; do that from Fleet -> Machines (or the machine page's **Remove
-this machine**). Cluster credentials under `clusters.yaml` are left alone.
+Uninstall is one physical line too — the install run backwards, and like
+the install it names the cluster. A machine can be enrolled with more than
+one cluster (`~/.memql/workers.yaml` holds one home per cluster), so the
+line says which enrollment goes: `--cluster=<url>`, the same
+`https://api.<domain>` the install line wrote. The uninstaller removes that
+enrollment (`memql worker unpair`) and, when it was the machine's **last**
+one, stops and removes the service (LaunchAgent / user-systemd), the binary
+and its symlink, and the token registry plus the legacy `~/.memql/worker.yaml`
+mirror. It does **not** revoke the machine on the cluster; do that from
+Fleet -> Machines (or the machine page's **Remove this machine**, which
+prints this exact line). Cluster credentials under `clusters.yaml` are left
+alone.
 
-`--user-local` removes a `--user-local` install from `~/.memql/bin`
-instead of `/usr/local/bin`. `--purge` also removes `~/.memql/policy.yaml`,
-the state dir (logs, ledgers), and on Linux the native model runtime under
+The line needs no other flag. The uninstaller finds the installation itself
+— account-only under `~/.memql/bin`, system-wide under `/usr/local/bin`
+(that one asks for the account password), or both — and removes what is
+there; `--user-local` restricts it to the account-only shape when you know
+that is the one. `--purge` also removes `~/.memql/policy.yaml`, the state
+dir (logs, ledgers), and on Linux the native model runtime under
 `~/.memql/ollama` when present; without `--purge` those are kept and the
-script says so.
-
-To drop **one** cluster home while keeping the supervisor for others,
-prefer `memql worker unpair --cluster <home-id>` and reload the service
-instead of a full uninstall.
+script says so. Run with **no** `--cluster` at all, the uninstaller acts on
+the machine's single enrollment when there is exactly one, removes the
+runtime when there is none, and when there are several lists them with the
+line to run for each rather than guessing. `--all-homes` removes every
+enrollment and the runtime in one go.
 
 **macOS** (one physical line):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-mac.sh | bash -s -- --cluster=https://api.<domain>
 ```
 
 With flags (still one physical line):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-mac.sh | bash -s -- --user-local --purge
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-mac.sh | bash -s -- --cluster=https://api.<domain> --purge --user-local
 ```
 
 **Linux** (one physical line):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-linux.sh | bash
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-linux.sh | bash -s -- --cluster=https://api.<domain>
 ```
 
 With flags:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-linux.sh | bash -s -- --user-local --purge
+curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-linux.sh | bash -s -- --cluster=https://api.<domain> --purge --user-local
 ```
 
 From a cockpit clone: `./scripts/install/uninstall-mac.sh` or
@@ -646,14 +655,15 @@ connects with, as ONE act (`fleetRevokeMachine`, epic memql#5327 design D2),
 ends its live connection within seconds from whichever replica is holding it,
 and shows the uninstall one-liner for its platform — the same
 paste-safe `curl | bash` lines in [Uninstall](#uninstall) above
-(`uninstall-mac.sh` / `uninstall-linux.sh` from cockpit `main`). That
-script stops and removes the service, the binary, and the token registry
-`~/.memql/workers.yaml` plus legacy `worker.yaml`, and keeps logs /
-`policy.yaml` unless `--purge` is passed. Select the installation location
-on this page so the uninstaller gets `--user-local` when the install was
-account-only. To drop **one** cluster home while keeping the supervisor for
-others, prefer `memql worker unpair --cluster <home-id>` and reload the
-service instead of a full uninstall.
+(`uninstall-mac.sh` / `uninstall-linux.sh` from cockpit `main`), with
+`--cluster=https://api.<domain>` naming this cluster's enrollment. That
+script removes the enrollment and, when it was the machine's last one,
+stops and removes the service, the binary, and the token registry
+`~/.memql/workers.yaml` plus legacy `worker.yaml`; it keeps logs /
+`policy.yaml` unless `--purge` is passed. The page asks nothing else: the
+uninstaller detects whether Cockpit was installed system-wide or for one
+account and removes what it finds (the earlier location question is gone,
+2026-09-27). Other clusters' enrollments on the machine keep running.
 
 ### 5.6 The cross-node forward (memql#4352)
 
