@@ -194,8 +194,8 @@ import {
   importPaths,
   parseImports,
 } from './constructs/imports.js';
-import type { MappedDiagnostic } from './run/diagnostics.js';
-import { groupByFile } from './run/diagnostics.js';
+import type { MappedDiagnostic, ShownDiagnostic } from './run/diagnostics.js';
+import { dropAlreadyShown, groupByFile, LANGUAGE_SERVER_SOURCE } from './run/diagnostics.js';
 import { RunOrchestrator, type RunCluster, type RunEngine } from './run/orchestrator.js';
 import {
   runConfigPath,
@@ -3927,6 +3927,10 @@ function resolveImportPath(
 // The collection is CLEARED first, on every publish including the empty one.
 // Without that a failure fixed on the next run would stay on screen until some
 // later run happened to fail in the same file.
+//
+// A failure the language server already draws -- its load pass shows the same
+// lowering refusal as the author types -- is left to the server's squiggle
+// (dropAlreadyShown), so one fault is drawn once.
 function publishRunDiagnostics(
   collection: ReturnType<typeof languages.createDiagnosticCollection>,
   mapped: MappedDiagnostic[]
@@ -3934,9 +3938,10 @@ function publishRunDiagnostics(
   collection.clear();
   for (const [file, diagnostics] of groupByFile(mapped)) {
     if (file === '') continue;
+    const uri = Uri.file(file);
     collection.set(
-      Uri.file(file),
-      diagnostics.map((d) => {
+      uri,
+      dropAlreadyShown(diagnostics, languageServerDiagnostics(uri)).map((d) => {
         const diagnostic = new Diagnostic(
           new Range(
             new Position(d.start.line, d.start.character),
@@ -3953,6 +3958,28 @@ function publishRunDiagnostics(
       })
     );
   }
+}
+
+// languageServerDiagnostics is what the language server draws in a file, in
+// the shape a run's failures are compared against.
+function languageServerDiagnostics(uri: Uri): ShownDiagnostic[] {
+  return languages
+    .getDiagnostics(uri)
+    .filter((d) => d.source === LANGUAGE_SERVER_SOURCE)
+    .map((d) => ({
+      code: diagnosticCodeText(d.code),
+      start: { line: d.range.start.line, character: d.range.start.character },
+      end: { line: d.range.end.line, character: d.range.end.character },
+    }));
+}
+
+// diagnosticCodeText is a diagnostic's code as text, whichever of its three
+// shapes VS Code holds it in.
+function diagnosticCodeText(code: Diagnostic['code']): string {
+  if (typeof code === 'string') return code;
+  if (typeof code === 'number') return String(code);
+  if (code !== undefined && code !== null) return String(code.value);
+  return '';
 }
 
 function workspaceRelative(workspaceRoot: string, uri: string): string | undefined {
