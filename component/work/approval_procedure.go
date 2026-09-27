@@ -21,7 +21,6 @@ package work
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -104,9 +103,15 @@ func ProcedurePromotionApproval(p PromotionProposal, requestedAt time.Time) Appr
 // (learnedProcedure_<digest>_l1) and reads as noise in an inbox. The
 // construct name is the fallback, and a generic phrase the last resort --
 // never an empty quote.
+//
+// The goal is quoted the way a person writes a quotation, in plain double
+// quotes: Go's quoting would show a statement that carries quotation marks of
+// its own with backslashes in it, and one that ran over several lines with a
+// literal \n. Its whitespace is collapsed instead, so it is one line in the
+// question.
 func promotionSubjectName(p PromotionProposal) string {
-	if t := strings.TrimSpace(p.Title); t != "" {
-		return strconv.Quote(t)
+	if t := strings.Join(strings.Fields(p.Title), " "); t != "" {
+		return `"` + t + `"`
 	}
 	if n := strings.TrimSpace(p.ConstructName); n != "" {
 		return n

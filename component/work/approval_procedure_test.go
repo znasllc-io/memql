@@ -154,6 +154,28 @@ func TestValidateApprovalKindAcceptsAProcedurePromotionWithARun(t *testing.T) {
 	}
 }
 
+// The question is read by a person, not parsed by Go. A goal statement that
+// carries its own quotation marks reads as it was written -- never with the
+// backslashes Go's quoting adds -- and one that ran over several lines is one
+// line in a question.
+func TestThePromotionQuestionQuotesTheGoalAsAPersonWritesIt(t *testing.T) {
+	for _, tc := range []struct{ title, want string }{
+		{`Export the "Q3" invoices`, `Promote "Export the "Q3" invoices" to canary?`},
+		{"Reconcile the ledger\nfor last month", `Promote "Reconcile the ledger for last month" to canary?`},
+	} {
+		a := ProcedurePromotionApproval(PromotionProposal{
+			ConstructId: "c1", ConstructName: "learnedProcedure_abc_l1", ProcedureHash: "sha256:x",
+			ShadowRunId: "r1", ShadowMatches: 5, Title: tc.title,
+		}, time.Unix(0, 0))
+		if !strings.HasPrefix(a.Question, tc.want) {
+			t.Errorf("title %q: question %q, want it to open %q", tc.title, a.Question, tc.want)
+		}
+		if strings.ContainsAny(a.Question, "\\\n") {
+			t.Errorf("title %q: question %q carries an escape or a line break", tc.title, a.Question)
+		}
+	}
+}
+
 // TestThePromotionQuestionNamesTheGoalNotTheConstruct: the question is what
 // a person reads in their inbox, and a learned procedure's construct name is
 // derived from a digest (learnedProcedure_<sig>_l1). The goal it serves is
