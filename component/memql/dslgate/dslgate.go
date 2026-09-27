@@ -351,5 +351,8 @@ func ScanSource(path, src string, opts Options) []Violation {
 	// Per-file for the same reason: whether a statement opens with a
 	// construct keyword is a fact about this file's text (memql#5358).
 	out = append(out, scanUnknownConstructKeywords(path, src)...)
+	// And whether a `use` line sits above the file's first construct
+	// (memql#5426).
+	out = append(out, scanMisplacedUseLines(path, src)...)
 	return out
 }

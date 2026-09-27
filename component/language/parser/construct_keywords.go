@@ -37,6 +37,79 @@ type UnknownConstructKeyword struct {
 // carries it as the cause of the parse error it raises for the statement.
 func (u *UnknownConstructKeyword) Error() string { return u.Message }
 
+// CodeUseNotFileTop ends every MisplacedUse message.
+const CodeUseNotFileTop = "use_not_file_top"
+
+// misplacedUseMessage is the one refusal of a `use` line below a construct,
+// raised by the parser for the statement it cannot open and by the load gate
+// for the line it finds (FindMisplacedUseLines), so the two say one thing.
+const misplacedUseMessage = "a use line must come before the file's first construct -- move it to the top of the file [" + CodeUseNotFileTop + "]"
+
+// MisplacedUse is one `use` line written below a file's first construct.
+// Every loader collects a file's `use` lines wherever they sit, so the
+// parser's refusal of one (it reads use lines only at the top) was the only
+// place the rule was kept: the engine's loaders never run that whole-file
+// parse, and boot accepted the line the offline lint refused (memql#5426).
+type MisplacedUse struct {
+	// Line is the 1-based line of the `use` keyword.
+	Line int
+	// Path is the module the line imports from, as written
+	// (`shop.concepts`), or "" when the line names none.
+	Path string
+	// Message is misplacedUseMessage.
+	Message string
+}
+
+// Error is the message, so the refusal can travel as the cause of the parse
+// error the parser raises for the line.
+func (m *MisplacedUse) Error() string { return m.Message }
+
+// RuleCode is the refusal's stable rule id.
+func (m *MisplacedUse) RuleCode() string { return CodeUseNotFileTop }
+
+// FindMisplacedUseLines reports every top-level `use` line of source written
+// after the file's first construct -- the statements the parser refuses with
+// the same message, found over the same top-level statement scan
+// FindUnknownConstructKeywords makes.
+func FindMisplacedUseLines(source string) []MisplacedUse {
+	var out []MisplacedUse
+	constructSeen := false
+	depth := 0
+	for i, line := range strings.Split(BlankCommentsAndStrings(source), "\n") {
+		if depth == 0 {
+			if m := statementHead.FindStringSubmatch(line); m != nil && isConstructKeyword(m[1]) {
+				if m[1] != "use" {
+					constructSeen = true
+				} else if constructSeen {
+					out = append(out, MisplacedUse{Line: i + 1, Path: usePath(line), Message: misplacedUseMessage})
+				}
+			}
+		}
+		for _, c := range line {
+			switch c {
+			case '{', '(', '[':
+				depth++
+			case '}', ')', ']':
+				if depth > 0 {
+					depth--
+				}
+			}
+		}
+	}
+	return out
+}
+
+// usePath is the module a `use` line imports from: the dotted path between
+// the keyword and the brace list (`use shop.concepts.{ order }` ->
+// `shop.concepts`).
+func usePath(line string) string {
+	rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "use"))
+	if i := strings.IndexAny(rest, "{ \t"); i >= 0 {
+		rest = rest[:i]
+	}
+	return strings.TrimSuffix(rest, ".")
+}
+
 // retiredStatements maps a word that once opened a top-level statement to
 // what replaced it, so its refusal names the replacement rather than listing
 // every construct keyword.

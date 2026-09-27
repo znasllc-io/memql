@@ -735,7 +735,13 @@ func (p *Parser) parseDefinition() (Node, error) {
 func (p *Parser) refuseTopLevelToken() error {
 	tok := p.current
 	if tok.Type == TokenKeywordUse {
-		return newParseErrorf(&tok, "a use line must come before the file's first construct -- move it to the top of the file")
+		// The load gate refuses the same line with the same message and code
+		// (FindMisplacedUseLines, memql#5426). Positioned at the token but
+		// not carrying it, so the rule id stays last rather than ahead of a
+		// `(got "use")` that says nothing the message does not.
+		err := &ParseError{Message: misplacedUseMessage, Cause: &MisplacedUse{Line: tok.Line, Message: misplacedUseMessage}}
+		err.setToken(tok)
+		return err
 	}
 	if tok.Type == TokenIdentifier || isKeywordToken(tok.Type) {
 		if m := statementHead.FindStringSubmatch(tok.Literal); m != nil && !isConstructKeyword(m[1]) {
