@@ -186,7 +186,11 @@ func (p *Parser) parseToolFieldDecl(toolName string) (*ast.ToolFieldDecl, error)
 		case "description":
 			field.Description = attrStringValue(attr)
 		case "default":
+			// The registry admits one string here, so what a default MEANS --
+			// a literal of the field's type -- is the loader's to check
+			// (memql#5430): the type vocabulary is its.
 			field.Default = attrStringValue(attr)
+			field.HasDefault = true
 		case "enum":
 			field.EnumValues = attrEnumValues(attr)
 		}

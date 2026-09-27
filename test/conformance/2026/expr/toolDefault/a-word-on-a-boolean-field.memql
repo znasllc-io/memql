@@ -1,0 +1,5 @@
+/// List the tickets, the closed ones left out unless asked, the default written as a word.
+@handler(type="query", query="paginate(query ticketsForToolDefaults(includeClosed: args.includeClosed), 20)")
+tool tdListTicketsYesNo {
+  includeClosed  boolean  @default("yes")  @description("Whether to list closed tickets too.")
+}

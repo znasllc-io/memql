@@ -431,7 +431,7 @@ var placementTable = concat(
 	// ---- ToolField ------------------------------------------------------
 	[]Placement{
 		{Receiver: ToolField, Name: "autoInjected", Forms: FormFlag, Example: "@autoInjected"},
-		{Receiver: ToolField, Name: "default", Forms: FormString, Example: `@default("5")`, Doc: "The default the tool's input schema advertises to the model."},
+		{Receiver: ToolField, Name: "default", Forms: FormString, Example: `@default("5")`, Doc: "The default the tool's input schema advertises to the model, written quoted: its text is a literal of the field's type -- `@default(\"5\")` on an integer field, `@default(\"true\")` on a boolean, one of the values of an enum field -- or the load refuses it (tool_default_type, memql#5430)."},
 		{Receiver: ToolField, Name: "description", Forms: FormString, Example: `@description("Max results to return.")`, Doc: "The field's description, shown to the model in the tool's input schema."},
 		{Receiver: ToolField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("exec", "fs_read")`},
 		{Receiver: ToolField, Name: "required", Forms: FormFlag, Example: "@required"},

@@ -122,8 +122,8 @@ func toolSchemaDefaults(tool *Tool) map[string]any {
 	}
 	var schema struct {
 		Properties map[string]struct {
-			Type    string `json:"type"`
-			Default any    `json:"default"`
+			Type    string          `json:"type"`
+			Default json.RawMessage `json:"default"`
 		} `json:"properties"`
 	}
 	if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
@@ -131,10 +131,9 @@ func toolSchemaDefaults(tool *Tool) map[string]any {
 	}
 	out := map[string]any{}
 	for name, prop := range schema.Properties {
-		if prop.Default == nil {
-			continue
+		if v := schemaDefaultValue(prop.Type, prop.Default); v != nil {
+			out[name] = v
 		}
-		out[name] = coerceSchemaDefault(prop.Type, prop.Default)
 	}
 	if len(out) == 0 {
 		return nil
@@ -142,12 +141,37 @@ func toolSchemaDefaults(tool *Tool) map[string]any {
 	return out
 }
 
-// coerceSchemaDefault converts a JSON-Schema default value (the MemQL
-// tool loader stores these as strings, e.g. "10" / "false") into the
-// Go value matching the field's declared type, so downstream MemQL-arg
-// substitution renders it as the right literal kind. Non-string
-// defaults pass through unchanged; an uncoercible string falls back to
-// the raw string.
+// schemaDefaultValue reads one property's JSON-Schema default as the Go value
+// a handler receives, nil when the property has none.
+//
+// An authored tool publishes its default WITH the field's type since
+// memql#5430 (`"default": 10`, where it used to publish `"10"`). An integer
+// is read from its token, exactly, as the int64 the string form was always
+// coerced to -- decoding it as JSON first would round it through a float64 --
+// so a handler sees one value whichever way the schema spells the default.
+// A string default, a hand-built schema's `"10"` / `"false"`, is still coerced
+// by coerceSchemaDefault.
+func schemaDefaultValue(typ string, raw json.RawMessage) any {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	if typ == "integer" {
+		if n, err := strconv.ParseInt(string(raw), 10, 64); err == nil {
+			return n
+		}
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil
+	}
+	return coerceSchemaDefault(typ, v)
+}
+
+// coerceSchemaDefault converts a JSON-Schema default value (a hand-built
+// schema may store these as strings, e.g. "10" / "false") into the Go value
+// matching the field's declared type, so downstream MemQL-arg substitution
+// renders it as the right literal kind. Non-string defaults pass through
+// unchanged; an uncoercible string falls back to the raw string.
 func coerceSchemaDefault(typ string, raw any) any {
 	s, ok := raw.(string)
 	if !ok {

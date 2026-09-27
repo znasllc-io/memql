@@ -68,7 +68,59 @@
       "verdict": "refuse_parse",
       "code": "annotation_form",
       "message": "@default on a tool field takes one string",
-      "note": "A tool field's default is the string the input schema advertises to the model. What is inside the quotes is not checked today: @default(\"twenty\") on an integer field, and a default outside the field's @enum, both load."
+      "note": "A tool field's default is the string the input schema advertises to the model: one quoted string, whose text is a literal of the field's type (memql#5430). The quotes are the form; what is inside them is held to the type at load -- see the refusals below."
+    },
+    {
+      "file": "a-boolean.memql",
+      "verdict": "load_ok",
+      "note": "The text of a boolean field's default is true or false, and the schema publishes it as a boolean."
+    },
+    {
+      "file": "a-decimal-on-a-number-field.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "a-value-of-the-enum.memql",
+      "verdict": "load_ok",
+      "note": "A field that declares its values takes one of them as its default."
+    },
+    {
+      "file": "a-word-on-an-integer-field.memql",
+      "verdict": "refuse_load",
+      "code": "tool_default_type",
+      "message": "tool \"tdListTicketsInWords\" field \"limit\" (integer): @default(\"twenty\") is not an integer -- write one, as in @default(\"20\")",
+      "note": "memql#5430: the text inside the quotes was never checked, so the model was told the integer field defaults to \"twenty\" and a call that left it out handed the handler the string."
+    },
+    {
+      "file": "a-decimal-on-an-integer-field.memql",
+      "verdict": "refuse_load",
+      "code": "tool_default_type",
+      "message": "@default(\"2.5\") is not an integer"
+    },
+    {
+      "file": "an-empty-default-on-an-integer-field.memql",
+      "verdict": "refuse_load",
+      "code": "tool_default_type",
+      "message": "@default(\"\") is not an integer",
+      "note": "An empty default is a value only of a string field."
+    },
+    {
+      "file": "a-word-on-a-boolean-field.memql",
+      "verdict": "refuse_load",
+      "code": "tool_default_type",
+      "message": "@default(\"yes\") is not true or false -- write @default(\"true\") or @default(\"false\")"
+    },
+    {
+      "file": "a-word-on-a-number-field.memql",
+      "verdict": "refuse_load",
+      "code": "tool_default_type",
+      "message": "@default(\"high\") is not a number"
+    },
+    {
+      "file": "a-value-outside-the-enum.memql",
+      "verdict": "refuse_load",
+      "code": "tool_default_type",
+      "message": "tool \"tdListTicketsPending\" field \"status\" (enum(\"open\", \"closed\")): @default(\"pending\") is not one of the field's values -- write one of them, as in @default(\"open\")"
     }
   ]
 }

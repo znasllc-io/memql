@@ -1966,7 +1966,12 @@ type ToolFieldDecl struct {
 	AutoInjected bool     // @autoInjected -- value is stamped server-side; LLM-supplied values are dropped at dispatch
 	Description  string   // @description("...") value
 	EnumValues   []string // @enum("a", "b", "c") values; empty = no enum constraint
-	Default      string   // @default("x") value, stored as a string regardless of the field's declared type
+	Default      string   // @default("x") value: the text between the quotes, whatever the field's declared type
+	// HasDefault reports that @default was written, which Default alone
+	// cannot: `@default("")` is written and empty. The loader holds the text
+	// to a literal of the field's type (memql#5430), and an empty text is one
+	// only for a string field.
+	HasDefault bool
 }
 
 // PolicyDecl is the shared-frontend AST node for an AI Router

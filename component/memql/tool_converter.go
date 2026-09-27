@@ -88,8 +88,15 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 			}
 			prop["enum"] = enumAny
 		}
-		if f.Default != "" {
-			prop["default"] = f.Default
+		// A default is a literal of the field's type, published with that
+		// type (memql#5430): `"default": 10` on an integer field, never the
+		// string "10", and never "twenty".
+		if f.HasDefault || f.Default != "" {
+			value, err := toolDefaultValue(decl.Name, f, prop["type"].(string))
+			if err != nil {
+				return nil, err
+			}
+			prop["default"] = value
 		}
 
 		properties[f.Name] = prop

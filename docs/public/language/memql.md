@@ -2343,6 +2343,17 @@ tool findUsers {
 }
 ```
 
+A field's `@default` is one quoted string, and the text between the quotes is a
+literal of the field's type (memql#5430): an integer on an `integer` field
+(`"10"`), a number on a `number` field (`"2.5"`), `"true"` or `"false"` on a
+`boolean` field, one of the declared values on an `enum(...)` field, JSON on an
+`array` or `object` field (`"[]"`), and any text on a `string` field. The input
+schema publishes it with that type -- `"default": 10`, not `"default": "10"` --
+and a call that leaves the field out receives that value. A default that is not
+a literal of its field's type, `@default("twenty")` on an `integer` field, is
+refused at load with the rule id `tool_default_type`, naming the tool, the
+field, its type and the value.
+
 The tool loop binds tool-call args to handler args and forwards. A query handler is one construct call -- a query, mutation, logic, builtin or automation -- or that call inside `paginate(...)`, as above, and it is parsed when the tool loads: a handler that is not a call, such as a raw filter, refuses the load. It reads each tool argument as `args.<name>`, as in `@handler(type="query", query="query findEvents(title: args.title)")`, and the call is rendered from the arguments' values, so a caller's text is data whatever it contains; an argument the caller did not supply is left out of the call. The `$args.<name>` text substitution is retired: `$args.x`, bare or quoted as `"$args.x"`, refuses the load -- write `args.x` (`memqlmigrate --rewrite=expressions` rewrites both spellings). The legacy `func (Tool)` form is retired; the parser rejects it with a migration hint.
 
 A webhook handler, `@handler(type="webhook", url=..., method=...)`, is written the same way. Its url is one expression over the tool's arguments: a fixed address is a quoted string, and a caller's value is joined with `+`, as in `url="\"https://api.example.com/items/\" + args.id"`. A bare address refuses the load, and the refusal shows it quoted. With no body template the request body is the tool's arguments as JSON; a body template (a tool registered from Go can carry one) is a map whose string leaves are expressions over `args`, fixed text quoted, and an argument the caller did not supply omits its key. `$args.` is refused in a url or a body leaf exactly as in a query handler, with the same replacement.

@@ -1,0 +1,5 @@
+/// List the tickets, the closed ones left out unless the caller asks for them.
+@handler(type="query", query="paginate(query ticketsForToolDefaults(includeClosed: args.includeClosed), 20)")
+tool listTicketsMaybeClosed {
+  includeClosed  boolean  @default("false")  @description("Whether to list closed tickets too.")
+}
