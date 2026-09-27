@@ -89,6 +89,10 @@ type Integration struct {
 	// a test over a fake engine, or a node with no database, which could not
 	// write the ladder anyway.
 	lockDB func() *bun.DB
+	// heartbeatEvery is how often a replay renews its run's heartbeat while
+	// a step is in flight (replay.go); zero is the automation runtime's own
+	// interval.
+	heartbeatEvery time.Duration
 }
 
 // New builds the integration.
@@ -237,6 +241,18 @@ func (i *Integration) SetNow(f func() time.Time) {
 	if f != nil {
 		i.now = f
 	}
+}
+
+// replayHeartbeatEvery is the automation runtime's heartbeat interval
+// (component/automations/heartbeat.go), which the abandoned-run sweep's
+// window is set against.
+const replayHeartbeatEvery = 15 * time.Second
+
+func (i *Integration) heartbeatInterval() time.Duration {
+	if i == nil || i.heartbeatEvery <= 0 {
+		return replayHeartbeatEvery
+	}
+	return i.heartbeatEvery
 }
 
 func (i *Integration) clock() time.Time {

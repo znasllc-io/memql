@@ -916,7 +916,9 @@ func (r *replay) checkPreconditions(ctx context.Context) bool {
 	)
 	if needsProbe := !proc.CheckPreconditions(r.c.learned, proc.Preconditions{}, target).Held; needsProbe {
 		if p := r.i.prober(); p != nil {
+			stopPulse := r.pulseWhile(ctx)
 			observed, probeErr = p.Probe(r.seamContext(ctx), r.target, r.req.OwnerUserId, r.runId, r.c.learned)
+			stopPulse()
 		} else {
 			probeErr, code = errors.New("no prober is installed on this node"), codeNoProber
 		}
@@ -1066,11 +1068,13 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		r.writeStepIntent(ctx, idx, key, idem)
 	default:
 		r.writeStepIntent(ctx, idx, key, idem)
+		stopPulse := r.pulseWhile(ctx)
 		res, derr := r.d.Dispatch(r.seamContext(ctx), DispatchRequest{
 			Target: r.target, OwnerUserId: r.req.OwnerUserId, RunId: r.runId,
 			StepKey: key, IdempotencyKey: idem, Tool: step.Tool, Args: args,
 			Sandbox: r.mode == ReplayShadow, Timeout: r.stepTimeout(idx),
 		})
+		stopPulse()
 		if derr != nil {
 			// A GO ERROR MEANS THE STEP DID NOT RUN -- a gate or scope
 			// refusal, a missing surface, a spelling the executor does not
@@ -1718,7 +1722,8 @@ func (r *replay) recordHandover(ctx context.Context) {
 }
 
 // writeStepIntent writes a step's `running` version before it is dispatched,
-// and a heartbeat on the run -- the abandoned sweep judges a run by it.
+// and a heartbeat on the run -- the abandoned sweep judges a run by it, and
+// pulseWhile keeps it fresh for as long as the step is in flight.
 func (r *replay) writeStepIntent(ctx context.Context, idx int, key, idem string) {
 	actorCtx := ownerActor(ctx, r.req.OwnerUserId)
 	now := r.now()
@@ -1737,10 +1742,53 @@ func (r *replay) writeStepIntent(ctx context.Context, idx int, key, idem string)
 	})); err != nil {
 		r.i.log().Warn("procedure: could not write a replay step's intent", "run", r.runId, "step", key, "error", err)
 	}
-	if err := r.i.store.writeInternal(actorCtx, "mutation "+call("updateWorkRun", map[string]any{
-		"runId": r.runId, "heartbeatAt": now,
+	r.heartbeat(ctx)
+}
+
+// heartbeat writes one heartbeat on the replay run -- the abandoned sweep
+// judges a run by it.
+func (r *replay) heartbeat(ctx context.Context) {
+	if err := r.i.store.writeInternal(ownerActor(ctx, r.req.OwnerUserId), "mutation "+call("updateWorkRun", map[string]any{
+		"runId": r.runId, "heartbeatAt": r.now(),
 	})); err != nil {
 		r.i.log().Debug("procedure: could not write a replay heartbeat", "run", r.runId, "error", err)
+	}
+}
+
+// pulseWhile renews the replay run's heartbeat until the returned stop is
+// called (review finding I3). One beat per step, before its dispatch, left a
+// replay whose step ran longer than the abandoned sweep's window -- a build, a
+// test suite, a download on somebody's machine -- looking abandoned while it
+// worked; the probe, which runs commands on the target too, is covered the
+// same way. The interval is the automation runtime's
+// (component/automations/heartbeat.go), and stop JOINS the ticker, as that
+// file's does: a heartbeat is a read-merge, and one still in flight when the
+// receipt or the run's close is written could put a stale status back.
+func (r *replay) pulseWhile(ctx context.Context) func() {
+	if r.runId == "" {
+		return func() {}
+	}
+	every := r.i.heartbeatInterval()
+	pulseCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(every)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pulseCtx.Done():
+				return
+			case <-ticker.C:
+				beatCtx, stop := context.WithTimeout(pulseCtx, 5*time.Second)
+				r.heartbeat(beatCtx)
+				stop()
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
 	}
 }
 
