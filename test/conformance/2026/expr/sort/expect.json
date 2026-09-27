@@ -132,16 +132,14 @@
     {
       "file": "unknown-direction.memql",
       "verdict": "refuse_load",
-      "code": "sort_key_unknown",
-      "message": "sort key \"sideways\": it is not a direction, which is \"asc\" or \"desc\"",
-      "note": "A string after a key that is not a direction starts the next key, so the grammar reads \"sideways\" as a key -- one the concept does not declare. The refusal says both."
+      "code": "sort_direction_unknown",
+      "message": "sort direction \"sideways\": a direction is \"asc\" or \"desc\", and as the next key it names no field of",
+      "note": "memql#5429. A string after a key that is not a direction starts the next key, so \"sideways\" loaded as a second key and sorted on nothing. Written where a direction goes, and naming no field, it is refused as an unknown direction."
     },
     {
       "file": "direction-in-capitals.memql",
-      "verdict": "refuse_load",
-      "code": "sort_direction_unknown",
-      "message": "sort direction \"DESC\": a direction is \"asc\" or \"desc\", written in lower case -- write \"desc\"",
-      "note": "The grammar reads a direction in any case, which a runtime query string keeps; an authored clause has one spelling."
+      "verdict": "load_ok",
+      "note": "Lower case is the spelling to write, but a direction is read in any case, and \"DESC\" always ordered descending, so it loads."
     },
     {
       "file": "path-through-a-string.memql",

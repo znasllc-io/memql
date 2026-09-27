@@ -547,7 +547,7 @@ On an insert (create-or-upsert) mutation: write the named payload fields ONLY wh
 
 - On a provider: Mark this provider as the default for its modality.
 - On a tool field: The default the tool's input schema advertises to the model, written quoted: its text is a literal of the field's type -- `@default("5")` on an integer field, `@default("true")` on a boolean, one of the values of an enum field -- or the load refuses it (tool_default_type, memql#5430).
-- On a prompt field: The default the prompt's input schema declares for the field.
+- On a prompt field: The default the prompt's input schema declares for the field: a literal of the field's type -- quoted text that parses as it, or an unquoted number on a numeric field -- or the load refuses it (prompt_default_type, memql#5430).
 
 ### @defaultProvider
 

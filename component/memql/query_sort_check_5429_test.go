@@ -15,6 +15,10 @@ import (
 // JSONB path no stored row carries -- a silent no-op ordering -- and
 // `sort "priority", "sideways"` loaded as two keys, since a string after a key
 // that is not a direction starts the next key.
+//
+// A direction in another case ("ASC", "Desc") is NOT a defect: the grammar
+// reads one in any case and it always ordered as written, so it loads, as it
+// does at run time.
 
 const sortCheckConcepts = `/// A support ticket.
 concept sortTicket5429 {
@@ -52,6 +56,7 @@ func TestSortClauseIsHeldToTheBoundConcept(t *testing.T) {
 		{"sortOkOpenObject5429", `"details.severity.level", "desc"`, "", nil},
 		{"sortOkNoDirection5429", `"title"`, "", nil},
 		{"sortOkListField5429", `"tags", "asc"`, "", nil},
+		{"sortOkDirectionCase5429", `"priority", "ASC", "row.createdAt", "Desc"`, "", nil},
 
 		// Refused.
 		{"sortBadUndeclared5429", `"priorty", "desc"`, SortCodeUnknownKey,
@@ -60,12 +65,14 @@ func TestSortClauseIsHeldToTheBoundConcept(t *testing.T) {
 			[]string{`declares no field "zzz"`, `sort by a field the concept declares, or by a row intrinsic as "row.createdAt"`}},
 		{"sortBadSecondKey5429", `"priority", "desc", "nope"`, SortCodeUnknownKey,
 			[]string{`sort key "nope": v1:sortcheck5429:sortTicket5429 declares no field "nope"`}},
-		{"sortBadDirectionWord5429", `"priority", "sideways"`, SortCodeUnknownKey,
-			[]string{`sort key "sideways": it is not a direction, which is "asc" or "desc"`, `write "asc" or "desc" after the key it orders`}},
-		{"sortBadDirectionCase5429", `"priority", "ASC"`, SortCodeUnknownDirection,
-			[]string{`sort direction "ASC": a direction is "asc" or "desc", written in lower case -- write "asc"`}},
-		{"sortBadDirectionMixed5429", `"priority", "Desc"`, SortCodeUnknownDirection,
-			[]string{`write "desc"`}},
+		{"sortBadDirectionWord5429", `"priority", "sideways"`, SortCodeUnknownDirection,
+			[]string{`sort direction "sideways": a direction is "asc" or "desc", and as the next key it names no field of v1:sortcheck5429:sortTicket5429`, `write "asc" or "desc" after the key it orders`}},
+		{"sortBadDirectionSpelled5429", `"priority", "ascending"`, SortCodeUnknownDirection,
+			[]string{`sort direction "ascending"`, `-- write "asc" [`}},
+		{"sortBadDirectionNearField5429", `"priority", "titel"`, SortCodeUnknownDirection,
+			[]string{`or, for a second key, "title"`}},
+		{"sortBadDirectionThenDirection5429", `"priority", "sideways", "desc"`, SortCodeUnknownDirection,
+			[]string{`sort direction "sideways"`}},
 		{"sortBadRowUnknown5429", `"row.updatedAt", "desc"`, SortCodeUnknownKey,
 			[]string{`sort key "row.updatedAt": row.updatedAt is not a sortable row intrinsic`}},
 		{"sortBadRowTypo5429", `"row.createAt", "desc"`, SortCodeUnknownKey,

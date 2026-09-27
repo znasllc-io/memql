@@ -43,6 +43,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/language/dslclause"
 )
@@ -979,6 +980,11 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 	// `//` inside a string literal survives untouched, while a trailing comment
 	// on a real field (`filter id==args.id // note`) becomes trailing
 	// whitespace that TrimSpace removes -- which is what the author meant.
+	// Each clause as first written, so a second one is refused naming both
+	// (memql#5429): the switch below ASSIGNS, so a second `filter` line used
+	// to replace the first -- dropping its conditions, an ownership test
+	// included -- and a second `sort` line the first keys, with no word.
+	written := map[string]string{}
 	for _, clause := range joinStructQueryContinuations(restScan) {
 		line := clause.text
 		kw := ""
@@ -1010,9 +1016,65 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 			at, width := firstWordAt(restScan, clause.at)
 			return nil, refuseAtBody(at, width, fmt.Errorf("unknown struct-query field on line %q", line))
 		}
+		if first, twice := written[kw]; twice {
+			return nil, refuseAtBody(clause.at, len(kw), &QueryClauseDuplicateError{Clause: kw, First: first, Second: line})
+		}
+		written[kw] = line
 		out.at[kw] = clause.at
 	}
 	return out, nil
+}
+
+// RuleQueryClauseDuplicate is the rule id of a struct query that writes one
+// clause twice (memql#5429). Stable: a load report, memqllint and the
+// conformance corpus key on it.
+const RuleQueryClauseDuplicate = "query_clause_duplicate"
+
+// QueryClauseDuplicateError refuses a struct query's second copy of a clause.
+// Every clause of a query body is written once: the body is read line by line
+// into one slot per clause, so the second line used to overwrite the first
+// without a word -- a second `filter` dropped the first one's conditions and a
+// second `sort` its keys. The refusal quotes both lines and says how to write
+// the one clause that means both.
+type QueryClauseDuplicateError struct {
+	// Clause is the keyword written twice: filter, sort, paginate, ...
+	Clause string
+	// First and Second are the two lines as written.
+	First, Second string
+}
+
+// Error prints the refusal with its code last, in brackets.
+func (e *QueryClauseDuplicateError) Error() string {
+	return fmt.Sprintf("`%s` is written twice -- `%s`, then `%s` -- and a query takes one %s clause: the second used to replace the first. %s [%s]",
+		e.Clause, clipClause(e.First), clipClause(e.Second), e.Clause, queryClauseDuplicateFix(e.Clause), RuleQueryClauseDuplicate)
+}
+
+// RuleCode is the refusal's stable rule id: a load report reads it through
+// this method (baseloader.CodedRefusal).
+func (e *QueryClauseDuplicateError) RuleCode() string { return RuleQueryClauseDuplicate }
+
+// queryClauseDuplicateFix says how one clause carries what the two meant.
+func queryClauseDuplicateFix(clause string) string {
+	switch clause {
+	case "filter":
+		return "Join the conditions with `&&` in one filter, as in `filter row => row.ownerUserId == actor.userId && row.status == \"open\"`."
+	case "sort":
+		return "List every key in one sort clause, in order, as in `sort \"priority\", \"desc\", \"row.createdAt\", \"desc\"`."
+	}
+	return "Keep the one you mean."
+}
+
+// clipClause shortens a quoted clause to a readable length.
+func clipClause(line string) string {
+	const limit = 60
+	if len(line) <= limit {
+		return line
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(line[cut]) {
+		cut--
+	}
+	return line[:cut] + "..."
 }
 
 // buildStructQueryExpr stitches the concept / filter / shape +

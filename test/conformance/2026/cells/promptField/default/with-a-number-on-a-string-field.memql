@@ -1,0 +1,7 @@
+/// A one-sentence digest of a ticket, the language default written as a number.
+@level("fast")
+@templateFile("ticketDigest.tmpl")
+prompt ticketDigestDefault {
+  title     string!  @description("The ticket's title.")
+  language  string  @default(5)  @description("The language to answer in.")
+}

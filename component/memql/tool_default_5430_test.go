@@ -84,7 +84,7 @@ func TestToolDefaultIsALiteralOfTheFieldType(t *testing.T) {
 		tools, err := toolDeclToTool(decl, "unified:probe/tools.memql:probeDefaults")
 		label := c.typ + " @default(" + `"` + c.text + `"` + ")"
 		if c.fault != "" {
-			var tde *ToolDefaultError
+			var tde *FieldDefaultError
 			if !errors.As(err, &tde) {
 				t.Errorf("%s: loaded (err %v), want it refused: %s", label, err, c.fault)
 				continue

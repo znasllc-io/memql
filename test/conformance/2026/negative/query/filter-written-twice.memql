@@ -1,0 +1,7 @@
+/// The caller's open tickets, with the filter clause written twice.
+@actor
+query ticket myOpenTicketsFilteredTwice {
+  filter row => row.ownerUserId == actor.userId
+  filter row => row.status == "open"
+  paginate 20
+}

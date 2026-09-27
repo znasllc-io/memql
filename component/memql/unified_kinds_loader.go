@@ -547,7 +547,7 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 					logger.Warn("memql.unifiedPromptLoader: convert failed",
 						"file", raw.Path, "prompt", slice.Name, "error", err)
 				}
-				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPromptLoader", Keyword: "prompt", Name: slice.Name, File: raw.Path, Phase: "convert", Err: err.Error()})
+				rep.AddSkip(baseloader.SkipFor("memql.unifiedPromptLoader", "prompt", slice.Name, raw.Path, "convert", err))
 				continue
 			}
 			// Every prompt declares its level, a @disabled one included

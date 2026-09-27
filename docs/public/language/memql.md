@@ -1182,7 +1182,7 @@ Use `sort(<expr>, "<field>", "<direction>?", ...)` to order results. The functio
 - Must wrap the entire query expression (i.e., `sort(...)` should be the outermost call).
 - Supported fields: the row intrinsics `id`, `concept`, `createdAt`, `createdBy`, `type` -- each also addressable through the `row.` namespace (`"row.createdAt"`) -- and bare payload properties (`status`, `metadata.tags`).
 - In an authored `.memql` sort clause the namespaced spelling is required for intrinsics and enforced by CI (memql#2786), because a bare key cannot be told apart from a payload property of the same name. This runtime form still accepts either spelling, so existing SDK and API callers are unaffected.
-- An authored sort clause is also held to the query's concept at load: every key names a declared field or a sortable row intrinsic, and a direction is `"asc"` or `"desc"` in lower case ([Sort keys](#sort-keys), memql#5429). This runtime form reads a direction in any case.
+- An authored sort clause is also held to the query's concept at load: every key names a declared field or a sortable row intrinsic, and a word written where a direction goes is `"asc"` or `"desc"` ([Sort keys](#sort-keys), memql#5429). A direction is read in any case, here and in an authored clause.
 - Limits and offsets always apply **after** sorting. Sorting on payload properties may cause the engine to fetch up to `MEMQL_MEMORY_ENGINE_MAX_WINDOW` rows to guarantee correctness.
 
 Example:
@@ -1562,6 +1562,15 @@ Logic prompts (routing / suggest / classification) use the structured-output pat
 
 **The body must cover the template, and `@defaultProvider` must name a real provider** (memql#3616). The input schema compiles with `additionalProperties: false` and is validated **before** the template renders, so a variable the `.tmpl` reads but the body omits is a field no caller can ever supply — the load refuses rather than registering a schema that cannot serve its own template. Likewise `@defaultProvider` must name a declared `provider`, never a `policy` slug: a dangling name does not error at call time, it silently falls through to the default provider. A `@disabled` provider still counts as declared. See [authoring rule 28](authoring-rules.md).
 
+**A field's `@default` is a literal of the field's type** (memql#5430), held
+to the rule a [tool field's](#tools) is: `@default("en")` on a `string`
+field, `@default("3")` or an unquoted `@default(3)` on an `int` field, `"true"`
+or `"false"` on a `boolean`, one of an `enum(...)` field's values. An unquoted
+number is a literal of a numeric field only; on a `string` field it is written
+quoted. Anything else is refused at load as `prompt_default_type`, naming the
+prompt, the field, its type and the value, and the input schema publishes the
+default with the field's type.
+
 Two legacy forms are retired (both rejected at parse time):
 - `func (Prompt) name(ctx any) { ... }` — receiver-function wrapping.
 - `@input { ... }` — body-level wrapper around the field list.
@@ -1864,6 +1873,12 @@ query artifact artifactsInFolder {
 A long filter continues on the lines below it: a line that opens with `&&`,
 `||` or `??` joins the one above it, as the example shows.
 
+Each clause is written once. A second `filter` or `sort` line used to replace
+the first without a word -- dropping its conditions or its keys -- and a clause
+written twice is refused at parse as `query_clause_duplicate`, quoting both
+lines (memql#5429): join the conditions with `&&` in one filter, and list every
+key in one sort clause.
+
 Body directives: `filter` (the predicate), `shape` (named projection), and optional `sort "field", "dir"` / `paginate N` / `refine row => ...` lines ([the refine clause](#the-refine-clause)):
 
 <!-- corpus: 2026/examples/memql/queries/sort-paginate.memql -->
@@ -1898,21 +1913,23 @@ that (memql#5429):
   `"row.type"`, `"row.createdAt"` or `"row.createdBy"`. `row.provenance` is an
   object and has no order. A bare intrinsic (`"createdAt"`) is refused by its
   own gate, naming `"row.createdAt"` ([authoring rules](authoring-rules.md)).
-- **A direction, `"asc"` or `"desc"`**, in lower case, after the key it
-  orders. A key written with none sorts descending.
+- **A direction, `"asc"` or `"desc"`**, after the key it orders. Lower case
+  is the spelling to write; a direction is read in any case, so `"DESC"`
+  loads and orders descending. A key written with none sorts descending.
 
 Anything else is refused at load, naming the key and the fix, with the rule id
-`sort_key_unknown` for a key and `sort_direction_unknown` for a direction
-written in another case (`"DESC"`). A string after a key that is not a
-direction is the next key, so `sort "priority", "sideways"` is refused as a key
-the concept does not declare, and the refusal says it is not a direction
-either. The runtime `sort(...)` form of the internal query language is not an
-authored clause and keeps its looser reading ([Sorting](#sorting)).
+`sort_key_unknown` for a key and `sort_direction_unknown` for a word written
+where a direction goes that is no direction. A string after a key that is not
+a direction is read as the next key, so `sort "priority", "sideways"` used to
+load as two keys; it is refused as an unknown direction when the concept
+declares no field `sideways`, and the refusal names the field it may have
+meant instead. The runtime `sort(...)` form of the internal query language is
+not an authored clause and keeps its looser reading ([Sorting](#sorting)).
 
 Every authored query binds its concept in its signature, and one whose concept
 does not resolve is refused before its sort clause is read. A load that holds
 no concept registry at all -- an offline tool's -- checks only what needs no
-concept: the `row.` namespace, the reserved names and the direction.
+concept: the `row.` namespace and the reserved names.
 
 ### Temporal queries (`asOf`)
 

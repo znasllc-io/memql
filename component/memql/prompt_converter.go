@@ -102,6 +102,13 @@ func promptDeclToPromptDecl(decl *languageParser.PromptDecl, origin string) (*pr
 		if err != nil {
 			return nil, err
 		}
+		if tf.defaultSet {
+			value, err := promptDefaultValue(decl.Name, tf)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", origin, err)
+			}
+			tf.defaultValue = value
+		}
 		out.fields = append(out.fields, tf)
 	}
 
@@ -156,11 +163,15 @@ func promptFieldToToolField(field *languageParser.PromptField, origin string) (t
 			}
 			tf.description = val
 		case "default":
-			// parsePromptMemQL stores @default as a string (the
-			// JSON-schema layer round-trips it as `default: <value>`).
-			// Accept any scalar and stringify -- the hand-rolled
-			// parser was likewise lenient.
+			// The text (or the number) as written; promptDefaultValue holds
+			// it to a literal of the field's type and supplies the value the
+			// schema publishes (memql#5430).
 			tf.defaultVal = stringifyAttrValue(attr.Value)
+			tf.defaultSet = true
+			switch attr.Value.(type) {
+			case float64, int, int64:
+				tf.defaultNumber = true
+			}
 		case "enum":
 			// Multi-value or single string. parseAttribute may surface
 			// the args as either a single string or a list under

@@ -2137,9 +2137,10 @@ the change. The gates, with their test names:
   namespace, an authored sort clause is held to the query's concept at
   load: a bare key is a declared payload field (a dotted one is walked hop
   by hop, as a filter walks `row.a.b`), a `row.` key is one of the sortable
-  intrinsics, and a direction is `"asc"` or `"desc"` in lower case. A key
-  that names nothing is refused as `sort_key_unknown`, a direction in
-  another case as `sort_direction_unknown`; both name the key and the fix.
+  intrinsics, and a word where a direction goes is `"asc"` or `"desc"` (in
+  any case; lower case is the spelling to write). A key that names nothing
+  is refused as `sort_key_unknown`, a word in a direction's place that is no
+  direction as `sort_direction_unknown`; both name the key and the fix.
   Before this a misspelled key loaded and ordered on a JSONB path no row
   carries, and `sort "priority", "sideways"` loaded as two keys. The rules
   are in [Sort keys](memql.md#sort-keys).
@@ -3239,9 +3240,10 @@ JSON-Schema `default` keyword, which no validator applies. `??` is the
 only mechanism that fills a value. (`@default` DOES stay on a `tool` /
 `prompt` field, where the body IS the schema handed to the model and
 `default` is a value the model reads; a `builtin` field refuses it as
-misplaced. On a tool field the quoted text must be a literal of the field's
-type -- `@default("10")` on an `integer` field, never `@default("ten")` --
-or the load refuses it as `tool_default_type`, memql#5430.) Changing the operator under the corpus to settle a
+misplaced. On a tool or prompt field the default must be a literal of the
+field's type -- `@default("10")` on an `integer` field, never
+`@default("ten")` -- or the load refuses it as `tool_default_type` /
+`prompt_default_type`, memql#5430.) Changing the operator under the corpus to settle a
 naming complaint would be the larger defect.
 
 **What to do about it.** When a stored value must survive a caller

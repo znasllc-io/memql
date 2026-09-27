@@ -445,7 +445,7 @@ var placementTable = concat(
 
 	// ---- PromptField ----------------------------------------------------
 	[]Placement{
-		{Receiver: PromptField, Name: "default", Forms: FormString | FormNumber, Example: `@default("en")`, Doc: "The default the prompt's input schema declares for the field."},
+		{Receiver: PromptField, Name: "default", Forms: FormString | FormNumber, Example: `@default("en")`, Doc: "The default the prompt's input schema declares for the field: a literal of the field's type -- quoted text that parses as it, or an unquoted number on a numeric field -- or the load refuses it (prompt_default_type, memql#5430)."},
 		{Receiver: PromptField, Name: "description", Forms: FormString, Example: `@description("The episodes to distil.")`, Doc: "The field's description, carried into the prompt's input schema."},
 		{Receiver: PromptField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("short", "long")`},
 		{Receiver: PromptField, Name: "required", Forms: FormFlag, Example: "@required"},
