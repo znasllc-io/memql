@@ -1,12 +1,15 @@
 package procedure
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/work"
 )
+
+var errBoom = errors.New("the app could not take the goal over")
 
 // unavailable_test.go -- a target that could not run the procedure is not the
 // procedure failing (review finding I1, epic memql#5408).
@@ -143,5 +146,32 @@ func TestAShadowWhoseTargetCouldNotFinishAStepIsNotCompared(t *testing.T) {
 	}
 	if w.lc.get("shadowMatches") != float64(2) || len(w.eng.callsTo("recordConstructLadder")) != 0 {
 		t.Fatalf("shadowMatches %v: a dropped stream reset the streak", w.lc.get("shadowMatches"))
+	}
+}
+
+// TestAStoppedReplayThatIsExecutedAgainSaysWhereItStopped: the goal's run is
+// resumed after the replay stopped on an unavailable target and the app's
+// hand-back failed, so the statement runs again and hands the goal over from
+// the run's row. It must name the step the replay stopped at -- the stored
+// stoppedAt -- not a position counted from a list that includes the step that
+// MAY HAVE RUN.
+func TestAStoppedReplayThatIsExecutedAgainSaysWhereItStopped(t *testing.T) {
+	w := newReplayWorld(t, "trusted")
+	w.f.err = errBoom
+	w.d.alter["step1"] = func(r *DispatchResult) {
+		yes := true
+		*r = DispatchResult{Observation: work.StepObservation{IsError: &yes}, Unavailable: true}
+	}
+	req := servedReq(w)
+	if first, err := w.i.Replay(context.Background(), req); err != nil || first.FellBack {
+		t.Fatalf("first = %+v, %v; want the hand-back to fail", first, err)
+	}
+	w.f.err = nil
+	again, err := w.i.Replay(context.Background(), req)
+	if err != nil || !again.AlreadyDone || !again.FellBack || again.DivergedStep != 1 {
+		t.Fatalf("again = %+v, %v; want the goal handed over once, stopped at step index 1", again, err)
+	}
+	if prompt := w.f.recorded()[1].Guidance.Prompt; !strings.Contains(prompt, "It stopped at step 2 because") {
+		t.Fatalf("the hand-back names the wrong step:\n%s", prompt)
 	}
 }

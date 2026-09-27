@@ -160,7 +160,10 @@ type ReplayOutcome struct {
 	// Insufficient: diverged although every precondition held (D16).
 	Insufficient bool
 	// Completed are the steps that ran and matched, with their idempotency
-	// keys -- what the app is told never to repeat.
+	// keys -- what the app is told never to repeat -- and, flagged
+	// MayHaveRun, a step that was sent and whose running is unknown (its
+	// target stopped answering, or its node died with it in flight), which
+	// the app is told to check before repeating.
 	Completed []CompletedStep
 	Fitness   proc.FitnessResult
 	Alignment proc.Alignment
@@ -941,7 +944,12 @@ func (r *replay) reenterFinished(ctx context.Context, run map[string]any) {
 	r.outcome = o
 	started := r.out.Diverged || len(r.out.Completed) > 0
 	if started && !r.out.Diverged {
+		// Where it stopped, as the run recorded it; counting the list would
+		// count a step that MAY HAVE RUN as one that finished.
 		r.out.DivergedStep = len(r.out.Completed)
+		if _, stored := o["stoppedAt"]; stored {
+			r.out.DivergedStep = intOf(o, "stoppedAt")
+		}
 	}
 	r.fallBack(ctx, Guidance{Diagnosis: r.out.Diagnosis, Completed: r.out.Completed}, started)
 	r.recordHandover(ctx)
