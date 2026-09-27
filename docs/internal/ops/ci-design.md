@@ -588,6 +588,99 @@ ESTIMATE, requiring measurement after implementation:
 
 ---
 
+## D6. The CI bridge (epic memql#5476, landed 2026-09-27)
+
+The first epic of the pipelines program
+(`docs/superpowers/specs/2026-09-16-pipelines-program-design.md`, section 4,
+epic 1): the selection and sharding the MemQL-run pipeline will declare,
+built first inside `ci.yml`, plus the ruleset and caching fixes that do not
+wait for it. Five issues, one pull request.
+
+### What changed
+
+| Issue | Change |
+|---|---|
+| memql#5481 | the ruleset's `strict_required_status_checks_policy` off; the queue tests the tree that lands ([ruleset-baseline.md](ruleset-baseline.md)) |
+| memql#5482 | CodeQL off the pull-request and merge-queue paths (push to `main` + weekly); one shared Go cache with one writer; npm caches on the five Node lanes; the retry around a test removed; `deploy-gate-image` concurrency |
+| memql#5484 | `scripts/ci/selection` + `scripts/ci/affected`: the union import graph, the affected set, the planner CLI |
+| memql#5485 | `go-tests` and `db-tests` as shard matrices from the class table and `scripts/ci/shard-timings.tsv`; each db shard its own Postgres |
+| memql#5483 | the seven node-tag passes as the `go-tests-tags` matrix, gated on the planner |
+
+### The planner
+
+A `plan` job runs `go run ./scripts/ci/affected plan`. Every decision is a
+pure function in `scripts/ci/selection`, tested on a recorded graph fixture;
+the job summary prints each plan.
+
+| Event | Plan |
+|---|---|
+| `push`, `merge_group` | everything, sharded -- the queue still runs the full suite once on the exact tree that lands (design D1) |
+| `pull_request`, any `go.mod`/`go.sum`/`go.work`, anything under `.github/`, the `Makefile`, the selector or `db-gated-packages.sh` changed | everything |
+| `pull_request`, diff unreadable or empty | everything -- an unreadable diff is never read as an empty one |
+| `pull_request`, otherwise | the affected set, sharded |
+
+The graph is the union of `go list -e -json` over the default build and every
+node tag (`app/build_<type>.go`), because a tag-only import still has to run
+its importer's tests. A changed file reaches packages by SCOPE: a build file
+(a non-test source, a build embed) reaches its package and every package
+whose test binary depends on it; a test file (a `_test.go`, a test embed,
+testdata, a document) reaches only its own package. Any non-Go change adds
+the gate-input packages -- the same list as `go-checks`' gate-inputs step,
+held to it by a test -- because they read repository files by path, which no
+graph can see. The planner refuses outright (and `ci-required` goes red)
+only when no plan can be trusted: a graph under 200 packages, a full lane
+under its floor, a disagreement with `db-gated-packages.sh`, or a package
+directory that is not a plain path.
+
+A shard never mixes budget classes, because `go test -timeout` covers every
+package of one invocation. The classes are the budgets the unsharded lanes
+carried, unchanged, in the `plan` step's `CLASSES` table: `component/memql`
+600s serialised, `component/packages` 300s, every other db-gated package
+180s, the root package 300s uncached, the rest 600s. Within a class,
+packages are placed longest-first on the timing table's seconds; a package
+the table has not measured lands in the lightest shard. Refresh the table
+with `scripts/ci/refresh-shard-timings.sh` and land the diff.
+
+### Measured before (2026-09-27, the last seven green push runs on `main`)
+
+| Lane | Wall clock | Dominated by |
+|---|---|---|
+| `db-tests` | 21.7 - 24.2 min | `component/memql` step 696s (the package alone 496s), fast step 516s |
+| `go-tests` | 18.0 - 19.9 min | complement 707s (`cmd/memqllint` 446s, `cmd/memql-lsp` 346s, `test/conformance` 283s), root 215s, seven tag passes ~250s serial |
+| `go-checks` | 9.8 - 10.3 min | bounded fuzz 365s, `go build` 137s |
+
+`go-tests` was running against its 20-minute cap (19m18s - 19m54s on main,
+two runs cancelled at 20m03s during the cache save with every test green).
+
+**The Go cache never hit.** Every `setup-go` cache in the repository was
+22 MB: `setup-go` saves from whichever job finishes first, which was
+`path-routing` (two small packages), so every other lane restored almost
+nothing and compiled the module cold. A cold build here fills 1.45 GB of build
+cache and downloads 941 MB of modules; warm, it rebuilds in 13s. The store
+itself sat at 10.09 GB against its 10 GB limit, mostly CodeQL's
+per-pull-request ~1 GB dependency caches, so what caches there were kept
+being evicted.
+
+### What the bridge does NOT buy, measured before it landed
+
+**Narrowing is small on this import graph.** Prototyped over the 25 pull
+requests merged before this landed: 11 were full runs anyway (a go.mod/go.sum
+or workflow change), and in every one of the other 14 the five heavy packages
+(`component/memql`, `cmd/memqllint`, `cmd/memql-lsp`, `test/conformance`, the
+root) were affected, because they sit downstream of nearly everything. The
+time comes back from SHARDING, and from narrowing only the long tail.
+
+**The heavy packages are single binaries, and they set the floor.** No shard
+is shorter than its heaviest package plus compile: `component/memql` (496s,
+serialised) bounds `db-tests` near 10 minutes and `cmd/memqllint` (446s)
+bounds `go-tests` near 9 whenever a change reaches them -- down from 22 and 19,
+but not the design record's 5 - 7. Reaching M0 (a Go-touching pull request
+under 7 minutes for a week) needs those packages made cheaper, by the rule
+this file and `ci.yml` already state: split by CONCERN, never by `-run`. The
+week of measurement against section 1's numbers is tracked as its own issue.
+
+---
+
 ## Sequencing
 
 Per decision F, each phase is independently landable and independently
@@ -643,6 +736,11 @@ I will design around it instead.
 worse than re-runs — and reduce the constant first via Phases 1–3. If
 re-run storms become the bottleneck, the next step is the merge queue, not
 dropping `strict`.
+*Resolved (memql#5481, D6):* the queue came first, as recommended, and with
+it on `strict` only re-proved from the pull request's side what the queue
+already tests, charging a full run per open pull request on every merge. It
+is off; the owner bypass, the one path that skips the queue, still refuses a
+behind branch by measuring the drift itself.
 
 **O3. Directory reorganization.**
 You left this undecided. The D3 buckets are written against current paths.
