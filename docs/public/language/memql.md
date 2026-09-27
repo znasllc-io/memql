@@ -356,17 +356,27 @@ OWN domain are ambient -- in scope with no import (#2617); the tree
 gate keeps redundant same-domain imports out of the corpus.
 
 The concept a query's or a mutation's signature binds --
-`query <Concept> <name>` -- must resolve to a concept an import supplies, or to
-one of the file's own domain; a spec's binding, to an imported shape or
-concept. One that does not is refused at load with the rule id
-`signature_concept_unresolved`, naming the concept, the import that failed to
-supply it, and the import to add when another domain declares it
-(memql#5433). That includes an import whose namespace declares no such
-concept: it used to bind the construct to no concept at all, so a query with
-no filter loaded and matched nothing. A shape and a seed resolve their concept
-by name across every mounted domain -- a shape preferring its own domain when
-two declare the name, a seed as the seed materializer resolves it, which never
-reads an import -- and carry the same rule id when no domain supplies it.
+`query <Concept> <name>` -- resolves through the file's imports, then through
+its own domain; a spec's binding resolves to an imported shape or concept.
+Refused at load with the rule id `signature_concept_unresolved`
+(memql#5433):
+
+- a name no import brings in that is not a concept of the file's own domain
+  -- the refusal names the import to add when another domain declares it;
+- a name an import brings in when no mounted domain declares a concept of
+  that name, or when several do and the import's namespace selects none of
+  them. Such an import used to bind the construct to no concept at all, so a
+  query with no filter loaded and matched nothing.
+
+Not refused: an import's namespace is read only to choose between concepts
+that share the name. When exactly one mounted domain declares the concept,
+the import binds it whatever namespace the import names --
+`use crm.concepts.{ lead }` binds `v1:sales:lead` when `sales` alone declares
+a `lead` -- and an import of a shape or a function that shares the name is
+read the same way. A shape and a seed resolve their concept by name across every
+mounted domain -- a shape preferring its own domain when two declare the name,
+a seed as the seed materializer resolves it, which never reads an import --
+and carry the same rule id when no domain supplies it.
 
 <!-- corpus: 2026/examples/memql/concepts/retention-override.memql -->
 ```memql
