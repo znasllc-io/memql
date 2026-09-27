@@ -23,32 +23,36 @@ day 14   suspend                 →  scale to zero, data intact
 day 28   teardown                →  final backup, then destroy
 ```
 
-Five scheduled sweeps do all of it, in the trial-clock section of
-`deploy/fleet/dsl/fleet/automations.memql`, beside a sixth that hibernates idle
-instances (below). Convert at any point before day 28 and the instance resumes
-with nothing lost — a resume is a scale-up, not a restore.
+That is the DESIGNED lifecycle. Five scheduled sweeps would run it, in the
+trial-clock section of `deploy/fleet/dsl/fleet/automations.memql`, beside a
+sixth that hibernates idle instances (below).
 
-**Until memql#5437 none of the six ran.** They lived in `trial.memql`, and the
-automation loader reads a domain's automations from its `automations.memql` and
-from no other file -- so no trial was nudged, paused or torn down, and no idle
-instance hibernated, while this page described them running. They load now,
-and the engine refuses an automation declared in any other file at load
-(`construct_misplaced`).
+**None of the six runs today: all six are `@disabled`, pending the trial
+lifecycle redesign (memql#5677).** They load and are checked like every other
+construct -- a disabled construct is maintained -- but the scheduler does not
+run them. Two findings decided it:
 
-### Before the first deploy that loads them
+- **They read nothing.** Their candidate queries (`instancesByStatus`,
+  `subscriptionsByStatus`) are owner-tier reads, and an automation runs as its
+  own synthetic actor, which owns no row.
+- **Fixing the read would expose real damage.** `teardownAfterGrace` would
+  destroy any instance suspended for 14 days -- a customer's own pause, a
+  hibernation, a dunning suspension -- while its subscription is still billed,
+  and the trial expiry and nudges key off `instance.trialEndsAt`, which nothing
+  updates after a conversion or an extension.
 
-**The first run acts on every row already past its date,** not only on rows
-that cross it afterwards: at 02:00 UTC every running trial instance past day 14
-is suspended and every trialing subscription past its end is paused, at 03:00
-every instance idle for 14 days is hibernated, and at 04:00 every instance
-suspended for more than 14 days is torn down -- with a final backup first, and
-irreversibly. An instance an operator suspended by hand weeks ago is exactly
-what `teardownAfterGrace` destroys. Read the fleet's instance and subscription
-rows before that deploy, and resolve anything you intend to keep.
+Until memql#5437 the sweeps did not even load: they lived in `trial.memql`, and
+the automation loader reads a domain's automations from its `automations.memql`
+and from no other file. The engine now refuses an automation declared in any
+other file at load (`construct_misplaced`).
+
+Until the redesign lands, a trial is moved through its life by an operator:
+suspending, resuming and tearing down an instance are the controller's
+transient statuses (`suspending`, `resuming`, `tearing_down`), written by hand.
 
 ### What bounds a trial's cost is not the clock
 
-The sweeps bound a trial in **time**. What bounds it in **spend** is the
+The sweeps would bound a trial in **time**. What bounds it in **spend** is the
 [ceiling inside the tenant](memql-cloud-billing.md#two-layers-of-allowance-and-why-one-is-not-enough)
 — 500 message credits, `overagePolicy: throttle`, enforced in-process with no
 network.
@@ -65,12 +69,18 @@ nothing writes a row when a date passes — so the sweeps are scheduled, and the
 **read**, which the rest of the domain never does.
 
 An automation's actor is not the row's owner, so a caller-scoped read from
-inside one returns nothing *while looking entirely correct*. What makes these
-legal is `@serverOnly` (refuses a client-originated call) plus `@unbounded`
+inside one returns nothing *while looking entirely correct*. The candidate
+queries carry `@serverOnly` (refuses a client-originated call) plus `@unbounded`
 (declares that reading every row is the intent, with the reason recorded, so the
 pagination gate does not truncate a sweep to its first page and leave the tail
-of the fleet unswept). `deploy/fleet/authz_test.go` requires **both** — either
-alone is a defect wearing the other's clothes.
+of the fleet unswept), and `deploy/fleet/authz_test.go` requires **both** —
+either alone is a defect wearing the other's clothes.
+
+**That pair makes the call reachable; it does not make the read see anything.**
+It does not widen the concepts' owner tier, so the row-authz layer still admits
+only the caller's own rows, and an automation's synthetic actor owns none.
+Measured once the sweeps loaded, they read zero rows -- the first reason they
+are disabled (memql#5677).
 
 **A sweep cannot join**, which is why the clocks are denormalised onto the rows
 they sweep: `instance.trialEndsAt` is copied from the subscription, and
@@ -95,7 +105,10 @@ fourteen days without removing anything that looks like a safeguard.
 
 ## Hibernation applies to every tier
 
-Any instance that has served nothing for 14 days scales to zero.
+As designed, any instance that has served nothing for 14 days scales to zero.
+Like the trial sweeps it is `@disabled` pending memql#5677: a hibernated
+instance is `suspended`, and `teardownAfterGrace` does not tell it from a trial
+whose grace ran out.
 
 Not just trials, deliberately: a paying customer's idle instance costs us
 exactly as much as an idle trial's, and resuming is a scale-up — the data never

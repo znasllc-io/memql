@@ -106,7 +106,7 @@ concept partitionVariable {
 // ---- concepts/v1/platform/missingCapability/concept.memql ----
 
 /// A capability the platform itself cannot yet provide -- a missing tool, missing integration,
-/// missing liveSource connector kind, missing knowledge domain category, etc. Distinct from
+/// missing connector, missing knowledge domain category, etc. Distinct from
 /// the capability-gap signal raised when no agent in the catalog can serve an
 /// utterance: missingCapability fires when even creating the right specialist wouldn't solve the
 /// problem because the underlying platform surface doesn't exist. Logged by the Planner Agent
@@ -115,7 +115,7 @@ concept partitionVariable {
 /// visible across tenants for prioritization.
 @displayCard(primary="capability", secondary="kind", tertiary="description", status="status")
 concept missingCapability {
-  kind            enum("tool", "integration", "liveSource", "connectorKind", "knowledgeDomain", "modelCapability", "other")! @description("What category of platform extension would close this gap. 'tool' = an agent-callable action that doesn't exist yet (e.g. 'sendSlackMessage'). 'integration' = a backing service we don't speak to yet (e.g. Jira). 'liveSource' = a volatile data source we'd want bound to agents but don't have a query for. 'connectorKind' = a brand-new liveConnector implementation kind (e.g. 'snowflake'). 'knowledgeDomain' = a category-level gap, e.g. agents trying to act in a domain we never seeded. 'modelCapability' = a model-level feature we don't support yet (e.g. structured-output with strict schemas on a new provider).")
+  kind            enum("tool", "integration", "liveSource", "connectorKind", "knowledgeDomain", "modelCapability", "other")! @description("What category of platform extension would close this gap. 'tool' = an agent-callable action that doesn't exist yet (e.g. 'sendSlackMessage'). 'integration' = a backing service we don't speak to yet (e.g. Jira). 'liveSource' = a volatile data source we'd want bound to agents but don't have a query for. 'connectorKind' = an external system MemQL has no connector for, to mirror its data or sync to it (e.g. 'snowflake'). 'knowledgeDomain' = a category-level gap, e.g. agents trying to act in a domain we never seeded. 'modelCapability' = a model-level feature we don't support yet (e.g. structured-output with strict schemas on a new provider).")
   capability      string! @description("Short identifier for the missing thing, e.g. 'sendSlackMessage', 'jira.createIssue', 'erp.inventory.live'. Stable across multiple sightings so duplicate signals collapse onto one row.")
   description     string! @description("Human-readable description: what the platform was being asked to do that it couldn't. Surfaced in the product backlog view.")
   requestedFromRunId   string @description("v1:work:run.id where the gap was detected. Lets the platform team trace back to 'what was the user trying to accomplish when we hit this wall'.")

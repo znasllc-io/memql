@@ -216,10 +216,14 @@ func TestEveryFleetQueryIsCallerScoped(t *testing.T) {
 	// runs as its own synthetic actor (`system:automation:<name>`), which owns
 	// no row, and "find every trial that expired today" is not a question a
 	// caller-scoped read can answer: constraining it to actor.userId would
-	// return NOTHING while looking perfectly scoped. Its reads reach these
+	// return NOTHING while looking perfectly scoped. Its CALLS reach these
 	// queries at internal origin because the automation came from the loaded
-	// tree -- which the trial sweeps did not until memql#5437, when they moved
-	// into automations.memql.
+	// tree. Its READS do not see anything yet: @serverOnly does not widen a
+	// concept's owner tier, and the row-authz layer admits a synthetic actor to
+	// none of the owned rows these queries read -- so from an automation they
+	// return nothing today, which is why the sweeps that call them are
+	// @disabled until a reach is designed (memql#5677). This bucket is about the
+	// annotations; it does not claim the reads work.
 	//
 	// This is the one bucket that could hide a genuine hole, so it is the one
 	// with two independent checks below rather than a list:
@@ -419,23 +423,41 @@ func splitQueryBlocks(src string) map[string]string {
 // it on an UPDATE leaves the field to the read-merge, and a row whose ownership
 // depends on a merge is a row whose ownership can drift.
 //
-// So every insert and update in this domain must contain the literal
-// `ownerUserId: actor.userId`, and none may declare `ownerUserId` in its args.
+// So every insert and update of an OWNED concept in this domain must contain
+// the literal `ownerUserId: actor.userId`, and none may declare `ownerUserId` in
+// its args.
+//
+// A mutation over an OWNERLESS concept -- the price list, tierSpec -- has no
+// owner to stamp, and is the one kind that must be @serverOnly instead: a
+// caller who could write a tier row could mint themselves an allowance
+// (mutations.memql, "tierSpec"). The ownerless set is derived from
+// concepts.memql, as TestEveryFleetQueryIsCallerScoped derives it, so making a
+// customer concept public cannot quietly exempt its mutations.
 func TestEveryOwnedMutationStampsTheOwnerFromTheActor(t *testing.T) {
 	src := fleetFile(t, "mutations.memql")
+	ownerless := ownerlessConcepts(t)
 
 	blocks := regexp.MustCompile(`(?m)^mutation\s+(\w+)\s+(\w+)\s*\{`).FindAllStringSubmatchIndex(src, -1)
 	if len(blocks) == 0 {
 		t.Fatal("parsed no mutations -- this gate is watching nothing")
 	}
 
+	var ownerlessChecked int
 	for i, m := range blocks {
-		name := src[m[4]:m[5]]
+		concept, name := src[m[2]:m[3]], src[m[4]:m[5]]
 		end := len(src)
 		if i+1 < len(blocks) {
 			end = blocks[i+1][0]
 		}
 		body := src[m[0]:end]
+
+		if ownerless[concept] {
+			ownerlessChecked++
+			if !mutationPreambleHas(src, m[0], "@serverOnly") {
+				t.Errorf("mutation %s writes %s, which declares no owner, and is not @serverOnly. A mutation over the price list that a caller can reach lets that caller mint themselves an allowance; the seed path reaches a @serverOnly mutation at internal origin, and nothing else should reach it at all.", name, concept)
+			}
+			continue
+		}
 
 		if !strings.Contains(body, "ownerUserId: actor.userId") {
 			t.Errorf("mutation %s does not stamp `ownerUserId: actor.userId`. On an insert that lets a caller create rows owned by somebody else; on an update it leaves ownership to the read-merge, where it can drift.", name)
@@ -449,4 +471,30 @@ func TestEveryOwnedMutationStampsTheOwnerFromTheActor(t *testing.T) {
 			}
 		}
 	}
+	// The reachable positive for the ownerless branch: the price list's one
+	// mutation, createTierSpec, is what the seeds materialize through.
+	if ownerlessChecked == 0 {
+		t.Fatal("no mutation over an ownerless concept was checked -- createTierSpec is gone, or the concept read stopped matching, and either way the price list's seed path is unwatched")
+	}
+}
+
+// mutationPreambleHas reports whether the annotation lines directly above the
+// declaration at offset declStart -- up to the first blank line -- include one
+// that is exactly annotation. Reading forward from the declaration would reach
+// the NEXT construct's annotations, which is why this walks back.
+func mutationPreambleHas(src string, declStart int, annotation string) bool {
+	lines := strings.Split(src[:declStart], "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			if i == len(lines)-1 {
+				continue // the declaration's own line prefix
+			}
+			return false
+		}
+		if line == annotation {
+			return true
+		}
+	}
+	return false
 }

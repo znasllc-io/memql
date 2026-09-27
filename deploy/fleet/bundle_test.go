@@ -213,6 +213,28 @@ func TestEveryFleetAutomationLoads(t *testing.T) {
 			"An automation anywhere else never registers and its trigger never fires -- with a clean lint and a clean boot.",
 			len(missing), strings.Join(missing, "\n  "))
 	}
+
+	// THE OWNER RULING (memql#5677): the six sweeps load, and stay held to
+	// every gate above, but are @disabled until the trial lifecycle is
+	// redesigned -- they read no rows as an automation, and teardownAfterGrace
+	// would destroy any instance suspended for 14 days. Everything else the
+	// bundle declares runs. A sweep switched back on, or a billing automation
+	// switched off, is a decision this makes somebody state.
+	sweep := map[string]bool{}
+	for _, name := range fleetSweeps {
+		sweep[name] = true
+	}
+	for _, a := range loaded {
+		if !strings.Contains(a.Origin, "fleet/") {
+			continue
+		}
+		switch {
+		case sweep[a.Name] && a.IsEnabled():
+			t.Errorf("sweep %s is enabled; the six sweeps stay @disabled pending the trial lifecycle redesign (memql#5677)", a.Name)
+		case !sweep[a.Name] && !a.IsEnabled():
+			t.Errorf("automation %s is @disabled; only the six sweeps are held off (memql#5677)", a.Name)
+		}
+	}
 }
 
 // TestEveryQueryShapeIsDefined closes the gap the package comment measures.

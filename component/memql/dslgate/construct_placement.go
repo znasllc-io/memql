@@ -39,6 +39,15 @@ const GateConstructMisplaced Gate = "construct-misplaced"
 // as the language's rule ids do.
 const CodeConstructMisplaced = "construct_misplaced"
 
+// ScanConstructPlacement is this gate alone over one file, for a caller that
+// holds a file under a different path than the one boot reads it by: memqllint
+// pointed at one domain directory, or at one file in it, whose own root hides
+// the domain directory the verdict turns on. p is the file's path within a DSL
+// tree, its domain directory included ("acmez/billing.memql").
+func ScanConstructPlacement(p, src string) []Violation {
+	return scanConstructPlacement(p, src)
+}
+
 // scanConstructPlacement runs the gate over one file.
 func scanConstructPlacement(p, src string) []Violation {
 	var out []Violation

@@ -241,8 +241,12 @@ func topLevelHeads(source string) []topLevelHead {
 	return out
 }
 
-// statementIdent is one identifier of a statement's head.
-var statementIdent = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
+// statementIdent is one identifier of a statement's head. A hyphen continues
+// one, as it does in a declaration name everywhere else the parser reads one
+// (strip_non_procedural.go, declaration_slices.go): the seeded role and skill
+// catalogs name their rows in kebab-case, and `seed agentRole row-crop-farmer`
+// declares row-crop-farmer, not farmer.
+var statementIdent = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_-]*`)
 
 // statementName is the name a top-level statement opened by word declares:
 // the last identifier after the word and before the head ends.

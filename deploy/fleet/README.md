@@ -33,6 +33,13 @@ and never loaded, while the operator docs described them running. The engine
 now refuses an automation declared in any other file at load
 (`construct_misplaced`), in this bundle and every other tree.
 
+**The six scheduled sweeps -- the trial clock and idle hibernation -- are
+`@disabled`, pending the trial lifecycle redesign (memql#5677).** They load and
+are checked, but the scheduler does not run them: their owner-tier reads return
+nothing to an automation's synthetic actor, and `teardownAfterGrace` would
+destroy any instance suspended for 14 days while its subscription is still
+billed. The controller and the four billing automations run.
+
 ## Two halves, on opposite sides of a line
 
 |  | Lives in | Why |
@@ -88,8 +95,10 @@ number the business runs on. Three surfaces read those rows rather than
 restating them: the public pricing page, Orbit's upgrade picker, and the
 allowance enforcement that decides whether a turn is billable.
 
-There is deliberately **no mutation that writes a tier**. A price change is a
-bundle change: edit the seed, review it, deploy it.
+There is deliberately **no mutation a caller can reach that writes a tier**. The
+one tier mutation, `createTierSpec`, is `@serverOnly`: it is how the seed
+materializer writes the seeded rows, and a client-originated call is refused. A
+price change is a bundle change: edit the seed, review it, deploy it.
 [`dsl/fleet/mutations.memql`](dsl/fleet/mutations.memql) records the reasoning,
 which is shorter than it looks — a bundle has no Go, so an "owner/admin only"
 tier mutation would in fact be reachable by any authenticated caller, on a

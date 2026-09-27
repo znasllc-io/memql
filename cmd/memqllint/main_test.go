@@ -1386,3 +1386,73 @@ tool assistantTool {
 		t.Fatalf("the rewritten tree does not lint clean (exit %d); a first boot would refuse it:\n%s", code, out)
 	}
 }
+
+// misplacedAutomation is an automation that would load cleanly from its
+// domain's automations.memql.
+const misplacedAutomation = `@trigger(event="demo.ping")
+automation pingProbe {
+  publish "demo.pong" { value: 1 }
+}`
+
+// TestRun_AMisplacedConstructIsRefusedInEveryMode (memql#5437): an automation
+// declared outside its domain's automations.memql loads as nothing at boot,
+// and boot refuses it (construct_misplaced). The bundle root reached that
+// verdict through the engine-parity pass; the domain directory and a file in
+// it did not, because the parity pass mounts the directories INSIDE the root
+// and the root there IS the domain. Every mode now refuses it, once, naming
+// the file it is in and the file it belongs in.
+func TestRun_AMisplacedConstructIsRefusedInEveryMode(t *testing.T) {
+	bundle := writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/billing.memql":  misplacedAutomation,
+	})
+	domainDir := filepath.Join(bundle, "demo")
+	for _, target := range []string{bundle, domainDir, filepath.Join(domainDir, "billing.memql")} {
+		code, report, out := jsonReport(t, target)
+		if code != 1 || len(report.Errors) != 1 {
+			t.Errorf("%s: run() = %d with %d errors, want 1 with the one misplaced automation:\n%s", target, code, len(report.Errors), out)
+			continue
+		}
+		msg := report.Errors[0].Message
+		for _, want := range []string{"billing.memql", `automation "pingProbe"`, "demo/automations.memql", "[construct_misplaced]"} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("%s: the refusal must carry %q, got %q", target, want, msg)
+			}
+		}
+	}
+
+	// A file of the same domain that declares nothing misplaced is not
+	// reported for its neighbour, as every single-file lane is scoped.
+	if code, report, out := jsonReport(t, filepath.Join(domainDir, "concepts.memql")); code != 0 || len(report.Errors) != 0 {
+		t.Errorf("concepts.memql alone: run() = %d, want 0 with no error:\n%s", code, out)
+	}
+
+	// A soft-disabled directory is read by nothing at boot, so the same file
+	// parked in one has no placement to judge, in any mode.
+	parked := filepath.Join(bundle, "_parked")
+	if err := os.MkdirAll(parked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parked, "billing.memql"), []byte(misplacedAutomation), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{parked, filepath.Join(parked, "billing.memql")} {
+		if _, _, out := jsonReport(t, target); strings.Contains(out, "construct_misplaced") {
+			t.Errorf("%s is soft-disabled, which boot never reads, yet the lint judged its placement:\n%s", target, out)
+		}
+	}
+	if err := os.RemoveAll(parked); err != nil {
+		t.Fatal(err)
+	}
+
+	// Positive control: the same automation in automations.memql lints clean in
+	// every mode, so the refusals above are the file it was in.
+	if err := os.Rename(filepath.Join(domainDir, "billing.memql"), filepath.Join(domainDir, "automations.memql")); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{bundle, domainDir, filepath.Join(domainDir, "automations.memql")} {
+		if code, report, out := jsonReport(t, target); code != 0 || len(report.Errors) != 0 {
+			t.Errorf("%s with the automation in automations.memql: run() = %d, want 0 with no error:\n%s", target, code, out)
+		}
+	}
+}
