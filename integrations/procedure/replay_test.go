@@ -523,6 +523,14 @@ func TestAShadowMatchingMTimesAcrossKBindingsRaisesExactlyOnePromotion(t *testin
 	if subject["constructId"] != w.constructId || subject["procedureHash"] != w.hash || subject["shadowMatches"] != float64(2) {
 		t.Fatalf("subject = %v", subject)
 	}
+	// It says where the procedure would run, and that its evidence RAN: the
+	// comparisons replayed it in the workbench sandbox rather than dry.
+	if subject["target"] != "workbench" || subject["dryEvidence"] != false {
+		t.Fatalf("subject target / dryEvidence = %v / %v, want workbench / false", subject["target"], subject["dryEvidence"])
+	}
+	if q, _ := a["question"].(string); !strings.Contains(q, "in the workbench") || strings.Contains(q, "has not run by itself") {
+		t.Fatalf("question = %q, want it to name the workbench and claim no dry evidence", q)
+	}
 	if !approvals[0].Internal || approvals[0].Actor != replayOwner {
 		t.Fatalf("the approval was raised internal=%v as %q, want the stamp and the owner", approvals[0].Internal, approvals[0].Actor)
 	}

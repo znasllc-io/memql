@@ -73,11 +73,11 @@ func (i *Integration) raisePromotion(ctx context.Context, owner string, c *loade
 		DistinctBindings: distinct,
 		RecordedFrom:     recordedFrom,
 		Title:            c.p.Title,
-		// TODO(coordinator): component/work.PromotionProposal gains Target
-		// and DryEvidence on the epic branch (F2). Once this branch sits on
-		// it, name where the procedure runs and whether its evidence was dry:
-		//	Target:      string(procedureTarget(c.p)),
-		//	DryEvidence: dryEvidence,
+		// Where it would run and whether its evidence was dry: a person
+		// promoting a procedure onto their own machine on the strength of
+		// argument comparisons should be told both, in the question itself.
+		Target:      string(procedureTarget(c.p)),
+		DryEvidence: dryEvidence,
 	}, i.clock().UTC())
 	if err := work.ValidateApprovalKind(req); err != nil {
 		return "", err
