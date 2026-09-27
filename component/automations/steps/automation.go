@@ -156,6 +156,17 @@ func (e *AutomationExecutor) Execute(ctx context.Context, step *automations.Step
 		"duration":    execResult.Duration.Milliseconds(),
 		"stepCount":   len(execResult.Steps),
 	}
+	// A SUB-AUTOMATION THAT RETURNED A VALUE BINDS THAT VALUE (epic
+	// memql#5414, D24). A decomposed goal calls each of its sections as an
+	// automation, and a later section and the assembly read the section by
+	// the name its statement binds: bound to the run summary above, they
+	// would be handed an execution id where the section's answer belongs.
+	// A body that returned nothing binds the summary, as it always did --
+	// nil carries nothing a caller could read, and the summary at least
+	// says the call completed.
+	if execResult.Returned && execResult.Output != nil {
+		result.Result = execResult.Output
+	}
 	result.CompletedAt = time.Now()
 	result.Duration = result.CompletedAt.Sub(result.StartedAt)
 	result.Metadata = map[string]any{
