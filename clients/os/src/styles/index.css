@@ -15774,13 +15774,10 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-nexus-automations .os-nexus-column {
   max-height: 100%;
 }
-/* An authored automation's detail stands BESIDE the list, so the row it
- * belongs to says so in the shell's one selection language. The flat record
- * row has no border to colour, so the accent is an inset edge. */
-.os-nexus-automations .os-row.os-record-row[data-open] {
-  background: var(--os-accent-soft);
-  box-shadow: inset 2px 0 0 var(--os-accent);
-}
+/* An authored automation's detail stands BESIDE the list, and the row it
+ * belongs to says so in the shell's one selection language: the record row's
+ * own `[data-open]` plate and inset accent edge, exactly as Approvals and
+ * every other record list draw it. No selection of its own here. */
 
 /* ---- Settings -> Procedures ------------------------------------------------ */
 .os-settings-procedures {
