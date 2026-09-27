@@ -78,16 +78,22 @@ type ProcedureLadder interface {
 
 // WorkSpine is what the driver needs from the work spine.
 type WorkSpine interface {
-	// OpenGoal opens the goal a person asked for and the run that serves it.
-	// The run carries the goal signature and the goal's input as its
-	// variables -- what compile writes on a run it decided, and what an app
+	// OpenGoal opens the goal a person asked for and the run that serves it,
+	// AFTER the serve decision -- as compile does -- so the run names what
+	// serves it. It carries the goal signature and the goal's input as its
+	// variables: what compile writes on a run it decided, and what an app
 	// session's recording inherits from the run it was delegated from.
 	OpenGoal(ctx context.Context, g GoalOrder) (goalId, runId string, err error)
+	// CloseGoal ends the goal's run the way its template's completion would:
+	// succeeded when the goal was served, failed with why when it was not.
+	CloseGoal(ctx context.Context, ownerUserId, runId string, served bool, why string) error
 	// DecideApproval is the person's decision, through the work spine's OWN
 	// decide handler: the owner check and the artifact-hash gate included.
 	DecideApproval(ctx context.Context, ownerUserId, approvalId, decision string) error
-	// PromotionApprovals reads back the owner's procedurePromotion approvals.
-	PromotionApprovals(ctx context.Context, ownerUserId string) ([]ApprovalState, error)
+	// PromotionApprovals reads back the owner's procedurePromotion approvals:
+	// every one still pending, and each of known -- the ones the lifecycle saw
+	// raised -- whatever its decision.
+	PromotionApprovals(ctx context.Context, ownerUserId string, known []string) ([]ApprovalState, error)
 }
 
 // AppHandover is the app's side of a fallback: a goal a replay could not
@@ -105,9 +111,12 @@ type AppHandover interface {
 type LifecycleHarness interface {
 	// Open writes the ladder's values for the run -- overlay's non-zero
 	// fields over the deployment's current row, a zero field keeping the
-	// deployment's value -- and returns what the run records through and
-	// decides with.
-	Open(ctx context.Context, overlay work.LadderPolicy) (*LifecyclePlatform, error)
+	// deployment's value -- PROVES the owner reads them back, and returns what
+	// the run records through and decides with. A ladder that silently read
+	// the defaults would run a lifecycle that never proposes, and pass or fail
+	// for a reason nobody wrote down, so a read-back that disagrees is an
+	// error rather than a figure.
+	Open(ctx context.Context, ownerUserId string, overlay work.LadderPolicy) (*LifecyclePlatform, error)
 }
 
 // LifecyclePlatform is what Open returns.
@@ -123,6 +132,13 @@ type LifecyclePlatform struct {
 	// Close puts back what Open changed -- the ladder's values. Nil when
 	// nothing needs putting back.
 	Close func(ctx context.Context) error
+	// Warnings are what the platform logged at WARN or above while the
+	// lifecycle ran. The runner LOGS a write the engine refused and carries
+	// on -- a replay must not fail a goal over its own bookkeeping -- so a
+	// lifecycle that discarded the log would pass with every step row and
+	// receipt refused. Each one is a verifier failure. Nil when there is no
+	// log to read.
+	Warnings func() []string
 }
 
 // LearnReport is what one learning pass did.
@@ -149,11 +165,23 @@ type ReplayOrder struct {
 	ConstructId string
 	// Mode is "canary" or "trusted" -- the rung the serve decision read.
 	Mode string
-	// GoalRunId is the run of the goal the replay serves.
+	// GoalRunId is the run of the goal the replay serves; GoalId and
+	// Statement are its goal.
 	GoalRunId string
+	GoalId    string
+	Statement string
+	// StepKey is the goal run's statement that asked for the replay. It keys
+	// the replay run, so a statement executed again finds the replay it
+	// already made.
+	StepKey string
 	// Input is the goal's input, which binds the procedure's free parameters.
 	Input map[string]any
 }
+
+// replayStatementKey is the key of replayLearnedProcedure's one statement
+// (dsl/procedure/automations.memql) -- the step a served goal's run replays
+// from, as the automation journal names it.
+const replayStatementKey = "replayed"
 
 // ReplayReport is what one replay -- canary, trusted or shadow -- did.
 type ReplayReport struct {
@@ -180,9 +208,17 @@ type ReplayReport struct {
 	// PromotionApprovalId is the approval raised for it.
 	Proposed            bool
 	PromotionApprovalId string
-	// From and To are the ladder's move.
+	// From and To are the ladder's move; Rung is the rung the replay found
+	// the procedure on -- the runner's own reading, which decides what ran.
 	From, To    string
+	Rung        string
 	ReplayRunId string
+	// Code is the replay run's error code when it did not serve or match.
+	Code string
+	// NotCompared (shadow): the comparison was not made where it ran --
+	// no workbench, or a sandbox that refused its first step -- so the
+	// ladder did not hear of it.
+	NotCompared bool
 }
 
 // CompletedReport is one step a replay ran before it stopped.
@@ -221,6 +257,10 @@ type GoalOrder struct {
 	Statement     string
 	Input         map[string]any
 	GoalSignature string
+	// ProcedureConstructId is the learned procedure the serve decision chose,
+	// "" when the app serves. It decides what the run names as its template,
+	// exactly as compile's choice does.
+	ProcedureConstructId string
 }
 
 // HandoverOrder is a goal handed back to the app.
@@ -340,7 +380,7 @@ func (r *Runner) runLifecyclePlatform(ctx context.Context, s scenario.Scenario, 
 		res.Err = errNoLifecycleHarness
 		return
 	}
-	platform, err := r.Lifecycle.Open(ctx, ladderPolicyOf(s.Procedure.Policy))
+	platform, err := r.Lifecycle.Open(ctx, owner, ladderPolicyOf(s.Procedure.Policy))
 	if err != nil {
 		res.Err = fmt.Errorf("opening the learned-procedure platform: %w", err)
 		return
@@ -367,7 +407,13 @@ func (r *Runner) runLifecyclePlatform(ctx context.Context, s scenario.Scenario, 
 	d := &lifecycleDriver{s: s, owner: owner, world: pw, app: app, spine: platform.Spine, ladder: ladder,
 		rec: &lifecycleRecord{Owner: owner, Measured: -1}}
 	res.lifecycle = d.rec
-	if err := d.run(ctx); err != nil {
+	err = d.run(ctx)
+	if platform.Warnings != nil {
+		for _, w := range platform.Warnings() {
+			d.rec.problem("the platform warned while the lifecycle ran -- a row it wrote may have been refused: %s", w)
+		}
+	}
+	if err != nil {
 		res.Err = fmt.Errorf("the lifecycle of %s could not be run: %w (so far: %s)", s.Id, err, d.rec.narrative())
 		return
 	}
@@ -438,6 +484,9 @@ type lifecycleDriver struct {
 	spine  WorkSpine
 	ladder ProcedureLadder
 	rec    *lifecycleRecord
+	// raised are the promotion approvals the lifecycle saw raised, read back
+	// by id after the last goal whatever became of them.
+	raised []string
 }
 
 func (d *lifecycleDriver) run(ctx context.Context) error {
@@ -456,13 +505,17 @@ func (d *lifecycleDriver) run(ctx context.Context) error {
 	if d.rec.Constructs, err = d.ladder.Constructs(ctx, d.owner); err != nil {
 		return fmt.Errorf("reading the learned constructs back: %w", err)
 	}
-	if d.rec.Approvals, err = d.spine.PromotionApprovals(ctx, d.owner); err != nil {
+	if d.rec.Approvals, err = d.spine.PromotionApprovals(ctx, d.owner, d.raised); err != nil {
 		return fmt.Errorf("reading the promotion approvals back: %w", err)
 	}
 	return nil
 }
 
 // serve serves one goal however the platform's serve decision says.
+//
+// The decision comes FIRST and the goal's run after it, which is compile's
+// order: the run names what serves it -- replayLearnedProcedure and the
+// construct, when the ladder serves -- because a run is opened for a template.
 func (d *lifecycleDriver) serve(ctx context.Context, i int, g scenario.ProcedureGoal) error {
 	statement := goalStatement(d.s, g)
 	sig := work.GoalSignature(statement, inputKeys(g.Variables))
@@ -470,16 +523,6 @@ func (d *lifecycleDriver) serve(ctx context.Context, i int, g scenario.Procedure
 	for k, v := range g.Variables {
 		input[k] = v
 	}
-	_, goalRunId, err := d.spine.OpenGoal(ctx, GoalOrder{OwnerUserId: d.owner, Statement: statement, Input: input, GoalSignature: sig})
-	if err != nil {
-		return fmt.Errorf("opening the goal: %w", err)
-	}
-	ag := appGoal{OwnerUserId: d.owner, GoalRunId: goalRunId, Statement: statement, Variables: g.Variables}
-	d.app.expect(ag)
-	d.world.armGoal(g.Inject)
-	defer d.world.armGoal(nil)
-
-	callsBefore, dupBefore, handoversBefore := d.app.Calls(), d.world.world.Duplicates(), d.app.handoverCount()
 	gr := goalRecord{Index: i}
 
 	cs, found, err := d.ladder.ProcedureFor(ctx, d.owner, sig)
@@ -494,23 +537,52 @@ func (d *lifecycleDriver) serve(ctx context.Context, i int, g scenario.Procedure
 	}
 	gr.Rung = string(rung)
 	verdict := work.DecideServe(work.ReplayContext{Mode: "live", ConstructRung: rung})
+	order := GoalOrder{OwnerUserId: d.owner, Statement: statement, Input: input, GoalSignature: sig}
+	if verdict.Source == work.ServeConstruct {
+		order.ProcedureConstructId = cs.ConstructId
+	}
+	goalId, goalRunId, err := d.spine.OpenGoal(ctx, order)
+	if err != nil {
+		return fmt.Errorf("opening the goal: %w", err)
+	}
+	ag := appGoal{OwnerUserId: d.owner, GoalRunId: goalRunId, Statement: statement, Variables: g.Variables}
+	d.app.expect(ag)
+	d.world.armGoal(g.Inject)
+	defer d.world.armGoal(nil)
+	callsBefore, dupBefore, handoversBefore := d.app.Calls(), d.world.world.Duplicates(), d.app.handoverCount()
 
+	served, why := false, ""
 	if verdict.Source == work.ServeConstruct {
 		mode := string(work.RungTrusted)
 		if verdict.Standby {
 			mode = string(work.RungCanary)
 		}
-		rep, err := d.ladder.Replay(ctx, ReplayOrder{OwnerUserId: d.owner, ConstructId: cs.ConstructId, Mode: mode, GoalRunId: goalRunId, Input: input})
+		rep, err := d.ladder.Replay(ctx, ReplayOrder{
+			OwnerUserId: d.owner, ConstructId: cs.ConstructId, Mode: mode,
+			GoalRunId: goalRunId, GoalId: goalId, Statement: statement, StepKey: replayStatementKey, Input: input,
+		})
 		if err != nil {
 			return fmt.Errorf("replaying %s on %s: %w", cs.ConstructId, mode, err)
 		}
 		gr.Replay = &rep
+		if rep.Rung != "" {
+			// The rung the replay FOUND is the one that decided what ran; the
+			// read above chose the replay, and the runner re-decides it.
+			gr.Rung = rep.Rung
+		}
 		gr.ServedBy = servedByApp
 		if rep.Served && !rep.FellBack {
 			gr.ServedBy = servedByProcedure
 		}
-		gr.Narrative = fmt.Sprintf("%s replay of %s: served=%v diverged=%v fellBack=%v modelCalls=%d, ladder %s -> %s",
-			mode, cs.ConstructId, rep.Served, rep.Diverged, rep.FellBack, rep.ModelCalls, rep.From, rep.To)
+		d.noteApproval(rep)
+		gr.Narrative = fmt.Sprintf("%s replay of %s: served=%v diverged=%v fellBack=%v modelCalls=%d code=%s, ladder %s -> %s",
+			mode, cs.ConstructId, rep.Served, rep.Diverged, rep.FellBack, rep.ModelCalls, wordOr(rep.Code, "none"), wordOr(rep.From, "none"), wordOr(rep.To, "none"))
+		served, why = gr.ServedBy == servedByProcedure, rep.Diagnosis
+		if rep.FellBack {
+			if hs := d.app.handoversSince(handoversBefore); len(hs) > 0 && !hs[len(hs)-1].Session.Failed {
+				served, why = true, ""
+			}
+		}
 	} else {
 		sess, err := d.app.Serve(ctx, ag)
 		if err != nil {
@@ -518,32 +590,18 @@ func (d *lifecycleDriver) serve(ctx context.Context, i int, g scenario.Procedure
 		}
 		gr.ServedBy = servedByApp
 		gr.Narrative = fmt.Sprintf("the app served it (rung %s)", wordOr(string(rung), "none"))
+		served, why = !sess.Failed, "the app's session failed"
 		if sess.Failed {
 			// Not learned from: a failed recording is not a success, and the
 			// learner fires only on one.
 			d.rec.problem("goal %d: the app's session failed at action %d, so nothing was recorded to learn from", i, sess.FailedAt)
 			gr.Narrative += "; its session failed"
-		} else {
-			learn, err := d.ladder.LearnFromRun(ctx, d.owner, sess.RunId)
-			if err != nil {
-				return fmt.Errorf("learning from the recording %s: %w", sess.RunId, err)
-			}
-			gr.Learn = &learn
-			gr.Narrative += fmt.Sprintf(", learned: lift %s, rung %s", wordOr(learn.Lift, "none"), wordOr(learn.Rung, "none"))
-			// A comparison beside the app is meaningful only against a
-			// version this recording did NOT change: one it changed was
-			// partly derived from it and has just re-entered the ladder.
-			if verdict.Shadow && learn.Lift == LiftUnchanged {
-				reps, err := d.ladder.ShadowCompare(ctx, d.owner, sess.RunId)
-				if err != nil {
-					return fmt.Errorf("comparing beside the recording %s: %w", sess.RunId, err)
-				}
-				gr.Shadow = reps
-				for _, rep := range reps {
-					gr.Narrative += fmt.Sprintf(", shadow match=%v proposed=%v ladder %s -> %s", rep.Match, rep.Proposed, rep.From, rep.To)
-				}
-			}
+		} else if err := d.learn(ctx, sess.RunId, &gr); err != nil {
+			return err
 		}
+	}
+	if err := d.spine.CloseGoal(ctx, d.owner, goalRunId, served, why); err != nil {
+		return fmt.Errorf("closing the goal's run: %w", err)
 	}
 
 	gr.AppCalls = d.app.Calls() - callsBefore
@@ -554,6 +612,51 @@ func (d *lifecycleDriver) serve(ctx context.Context, i int, g scenario.Procedure
 		d.rec.Measured = len(d.rec.Goals) - 1
 	}
 	return nil
+}
+
+// learn is what the learnFromSucceededRun automation does when a recording
+// run succeeds, in its handler's order (integrations/procedure learn.go): the
+// lift, and then -- only when the lift left the version UNCHANGED -- the
+// shadow comparison. A recording that changed the procedure is part of the
+// new version's corpus, not evidence about it. The comparison is the
+// runner's to scope: it compares with whatever is in shadow for the goal.
+//
+// A handover's repaired session is a recording too, and in production the
+// learner reads it; the lifecycle does not, because its measured goal is the
+// last and what the learner makes of a repair is no figure's business here.
+func (d *lifecycleDriver) learn(ctx context.Context, recordingRunId string, gr *goalRecord) error {
+	learn, err := d.ladder.LearnFromRun(ctx, d.owner, recordingRunId)
+	if err != nil {
+		return fmt.Errorf("learning from the recording %s: %w", recordingRunId, err)
+	}
+	gr.Learn = &learn
+	gr.Narrative += fmt.Sprintf(", learned: lift %s, rung %s", wordOr(learn.Lift, "none"), wordOr(learn.Rung, "none"))
+	if learn.Lift != LiftUnchanged {
+		return nil
+	}
+	reps, err := d.ladder.ShadowCompare(ctx, d.owner, recordingRunId)
+	if err != nil {
+		return fmt.Errorf("comparing beside the recording %s: %w", recordingRunId, err)
+	}
+	gr.Shadow = reps
+	for _, rep := range reps {
+		d.noteApproval(rep)
+		if rep.NotCompared {
+			// Not made where it ran -- the node had no workbench, or the
+			// sandbox refused -- so the ladder heard nothing. In the
+			// lifecycle that is the harness failing to be the platform.
+			d.rec.problem("goal %d: the shadow comparison beside %s was not made (%s: %s)", gr.Index, recordingRunId, wordOr(rep.Code, "no code"), rep.Diagnosis)
+		}
+		gr.Narrative += fmt.Sprintf(", shadow match=%v proposed=%v ladder %s -> %s", rep.Match, rep.Proposed, wordOr(rep.From, "none"), wordOr(rep.To, "none"))
+	}
+	return nil
+}
+
+// noteApproval remembers a promotion a replay raised, for the read-back.
+func (d *lifecycleDriver) noteApproval(rep ReplayReport) {
+	if id := strings.TrimSpace(rep.PromotionApprovalId); id != "" {
+		d.raised = append(d.raised, id)
+	}
 }
 
 // decide is a person answering the promotion the ladder proposed: through the

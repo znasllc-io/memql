@@ -114,7 +114,12 @@ func (p *ProcedureWorld) firedInjections() []string {
 // differently from the app, and a duplicate the world missed because two
 // spellings of one command differed would be a zero measured by accident.
 func (p *ProcedureWorld) exec(command, idempotencyKey string, sandbox bool) execAnswer {
-	argv := splitCommand(command)
+	return p.execArgv(splitCommand(command), idempotencyKey, sandbox)
+}
+
+// execArgv runs one command given as its argument vector -- the form a
+// recording that captured argv replays as.
+func (p *ProcedureWorld) execArgv(argv []string, idempotencyKey string, sandbox bool) execAnswer {
 	if len(argv) == 0 {
 		return execAnswer{ExitCode: commandNotFound, IsError: true, Error: "empty command"}
 	}
