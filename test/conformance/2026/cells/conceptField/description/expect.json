@@ -9,6 +9,11 @@
       "verdict": "refuse_load",
       "code": "annotation_form",
       "message": "@description on a concept field takes one string"
+    },
+    {
+      "file": "a-brace-in-the-text.memql",
+      "verdict": "load_ok",
+      "note": "A brace inside a string does not end the concept. The concept slicer balanced braces per line without reading strings, so this closed the declaration at the `}` and the concept was dropped from the registry with no diagnostic; the runner's registration check is what fails if that returns (memql#5426)."
     }
   ]
 }

@@ -6,6 +6,12 @@
       "code": "nesting_too_deep",
       "message": "the declaration nests too deeply (more than 256 levels): flatten the nesting into separate fields or concepts",
       "note": "The parser is recursive descent, and a goroutine stack overflow is a fatal error no recover() sees, so how deep it reads is bounded in every grammar it holds. The remedy is the DECLARATION one: \"name its parts as separate statements\" is the wrong instruction for a property or a container type. The depth at which an unbounded parse fails is a property of the stack ceiling rather than of the source's size, which is why no byte cap stands in for this."
+    },
+    {
+      "file": "an-unparsable-field.memql",
+      "verdict": "refuse_parse",
+      "message": "expected attribute name after @",
+      "note": "A concept that does not parse is refused. At boot the concept loader parses each concept on its own and used to drop one that failed with nothing reported, so a node booted without it; it is a skip strict boot refuses now, concept_unparsed (memql#5426). The corpus reads the file with the parser every loader uses, which refuses it here."
     }
   ]
 }

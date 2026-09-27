@@ -39,7 +39,7 @@ func buildCompositeField(t *testing.T, decl string) (map[string]any, error) {
 	t.Helper()
 	src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 		"concept probe {\n  label string @required @description(\"l\")\n  f " + decl + "\n}\n"
-	decls := ExtractConceptDecls(src)
+	decls, _ := ExtractConceptDecls(src)
 	if len(decls) == 0 {
 		t.Fatalf("fixture for %q did not parse into a concept decl, so it measures nothing", decl)
 	}

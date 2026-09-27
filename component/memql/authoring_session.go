@@ -93,12 +93,12 @@ func SplitBundleSource(source string) []SandboxConstruct {
 		})
 	}
 
-	// Concepts: each concept block (preamble + body) is its own slice; its name
-	// comes from parsing the slice.
+	// Concepts: each concept block (preamble + body) is its own slice, named by
+	// its header. A block that does not parse is split out all the same, so
+	// the sandbox reports its parse error rather than the bundle losing it
+	// without a word (memql#5426).
 	for _, slice := range conceptSlices(source) {
-		if decls := ExtractConceptDecls(slice); len(decls) > 0 {
-			add("concept", decls[0].Name, slice)
-		}
+		add("concept", slice.Name, slice.Source)
 	}
 	// Function family: query / mutation / logic. The slice carries its own kind
 	// (derived from the source keyword). ExtractFunctionSlices deliberately

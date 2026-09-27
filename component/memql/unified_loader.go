@@ -125,9 +125,9 @@ func LoadUnifiedConcepts(logger *slog.Logger) (int, error) {
 // us to full concept coverage from the new tree.
 //
 // LoadUnifiedConceptsWithSkips is LoadUnifiedConcepts plus the list of
-// concepts that failed to build. Boot ignores the list (a skip must not
-// stop a node starting); memqllint turns each entry into a diagnostic,
-// which is the only pre-boot gate a product bundle has.
+// concepts that failed to parse or to build. Boot refuses on any of them
+// unless the operator sets MEMQL_DSL_ALLOW_SKIPS (app/database.go), and
+// memqllint and the package analysis turn each entry into a diagnostic.
 func LoadUnifiedConceptsWithSkips(logger *slog.Logger) (int, []ConceptSkip, error) {
 	concepts, skips, err := BuildUnifiedConcepts(logger, memqldsl.Tree())
 	if err != nil {
@@ -236,7 +236,21 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 			continue
 		}
 
-		decls := ExtractConceptDecls(string(raw))
+		decls, unparsed := ExtractConceptDecls(string(raw))
+		// A concept that does not parse is a skip, which strict boot refuses
+		// (memql#5426): it was dropped here with nothing reported, so a node
+		// booted without it and every construct bound to it failed at run
+		// time naming an import rather than the concept.
+		for _, pe := range unparsed {
+			skips = append(skips, ConceptSkip{File: p, Concept: pe.Name, Err: pe})
+			if logger != nil {
+				logger.Warn("unified loader: skipping a concept that does not parse",
+					"component", "memql.unifiedLoader",
+					"file", p,
+					"concept", pe.Name,
+					"error", pe)
+			}
+		}
 		if len(decls) == 0 {
 			continue
 		}

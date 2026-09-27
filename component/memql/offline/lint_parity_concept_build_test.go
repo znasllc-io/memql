@@ -140,7 +140,7 @@ func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
 		t.Helper()
 		src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  f " + ty + " @description(\"x\")\n}\n"
-		decls := memql.ExtractConceptDecls(src)
+		decls, _ := memql.ExtractConceptDecls(src)
 		if len(decls) == 0 {
 			t.Fatalf("fixture for %q did not parse into a concept decl, so it measures nothing", ty)
 		}
@@ -206,7 +206,7 @@ func TestConceptPropertyTypes_NestedBlockPropertiesAreValidated(t *testing.T) {
 	src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 		"concept probe {\n  label string @required @description(\"l\")\n" +
 		"  cfg {\n    inner boolean @description(\"x\")\n  }\n}\n"
-	decls := memql.ExtractConceptDecls(src)
+	decls, _ := memql.ExtractConceptDecls(src)
 	if len(decls) == 0 {
 		t.Fatal("fixture did not parse into a concept decl, so it measures nothing")
 	}
@@ -247,7 +247,7 @@ func TestConceptPropertyTypes_ElementTypesAreValidated(t *testing.T) {
 		t.Helper()
 		src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  f " + ty + " @description(\"x\")\n}\n"
-		decls := memql.ExtractConceptDecls(src)
+		decls, _ := memql.ExtractConceptDecls(src)
 		if len(decls) == 0 {
 			t.Fatalf("fixture for %q did not parse, so it measures nothing", ty)
 		}
@@ -378,7 +378,7 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 		t.Helper()
 		src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  f " + decl + " @description(\"x\")\n}\n"
-		decls := memql.ExtractConceptDecls(src)
+		decls, _ := memql.ExtractConceptDecls(src)
 		if len(decls) == 0 {
 			t.Fatalf("fixture for %q did not parse, so it measures nothing", decl)
 		}
@@ -501,7 +501,7 @@ func mustReject(t *testing.T, decl string, bad, good any) {
 	id := "v1:aud:probeReject"
 	src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 		"concept probeReject {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
-	decls := memql.ExtractConceptDecls(src)
+	decls, _ := memql.ExtractConceptDecls(src)
 	if len(decls) == 0 {
 		t.Fatalf("fixture %q did not parse, so it measures nothing", decl)
 	}
@@ -573,7 +573,7 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 		t.Helper()
 		src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
-		decls := memql.ExtractConceptDecls(src)
+		decls, _ := memql.ExtractConceptDecls(src)
 		if len(decls) == 0 {
 			t.Fatalf("fixture %q did not parse, so it measures nothing", decl)
 		}
@@ -686,7 +686,7 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 		requiredOf := func(decl string) []any {
 			src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 				"concept probe {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
-			decls := memql.ExtractConceptDecls(src)
+			decls, _ := memql.ExtractConceptDecls(src)
 			if len(decls) == 0 {
 				t.Fatalf("fixture %q did not parse", decl)
 			}
@@ -740,7 +740,7 @@ func TestConceptPropertyTypes_ValueAnnotationsAreCarriedIntoElementPosition(t *t
 		t.Helper()
 		src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
-		decls := memql.ExtractConceptDecls(src)
+		decls, _ := memql.ExtractConceptDecls(src)
 		if len(decls) == 0 {
 			t.Fatalf("fixture %q did not parse, so it measures nothing", decl)
 		}
@@ -879,7 +879,7 @@ func mustAccept(t *testing.T, decl string, payload any) {
 	id := "v1:aud:probeAccept"
 	src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 		"concept probeAccept {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
-	decls := memql.ExtractConceptDecls(src)
+	decls, _ := memql.ExtractConceptDecls(src)
 	if len(decls) == 0 {
 		t.Fatalf("fixture %q did not parse, so it measures nothing", decl)
 	}
