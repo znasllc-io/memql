@@ -58,31 +58,52 @@ type parentJudgment struct {
 type parentFacts struct {
 	versions []map[string]any
 	feedback *feedback
+	// unreadable: the versions could not be read, so nothing about this
+	// parent is known -- and it is said once, not once per recording.
+	unreadable bool
 }
 
 // judgeByParent reads the recording's parent step version and judges the
 // recording by it. A run no step delegated -- no parentRunId, or a parent none
 // of whose versions names it -- is judged by nothing and stays.
-func (i *Integration) judgeByParent(ctx context.Context, run map[string]any, cache map[string]*parentFacts) (parentJudgment, error) {
+//
+// A PARENT THAT CANNOT BE READ JUDGES NOTHING either, and never fails the
+// load. An unreadable version is no evidence that the recording was replaced
+// or disliked -- the same reading an unmarked `current` gets below -- and
+// failing the whole corpus for it would let one recording whose parent the
+// read cannot reach (a transient error, a parent that is not the owner's, a
+// node that registers no work integration) stop every procedure of the goal
+// from being learned. The recording is judged by its own run's verdicts, and
+// the failure is logged.
+func (i *Integration) judgeByParent(ctx context.Context, run map[string]any, cache map[string]*parentFacts) parentJudgment {
 	parent := strings.TrimSpace(str(run, "parentRunId"))
 	runId := strings.TrimSpace(str(run, "id"))
 	if parent == "" || runId == "" {
-		return parentJudgment{}, nil
+		return parentJudgment{}
 	}
 	facts := cache[parent]
 	if facts == nil {
+		facts = &parentFacts{}
 		versions, err := i.store.runStepVersions(ctx, parent)
 		if err != nil {
-			return parentJudgment{}, fmt.Errorf("reading the versions of parent run %s: %w", parent, err)
+			facts.unreadable = true
+			// Info, not Warn: in this package a WARN says a write was refused,
+			// and nothing here was written -- the lift goes on with what it
+			// can see.
+			i.log().Info("procedure: a recording's parent run could not be read; its recordings are judged by their own verdicts alone",
+				"parentRunId", parent, "error", err)
 		}
-		facts = &parentFacts{versions: versions}
+		facts.versions = versions
 		if cache != nil {
 			cache[parent] = facts
 		}
 	}
+	if facts.unreadable {
+		return parentJudgment{}
+	}
 	delegating := delegatingVersion(facts.versions, runId)
 	if delegating == nil {
-		return parentJudgment{}, nil
+		return parentJudgment{}
 	}
 	j := parentJudgment{StepKey: str(delegating, "key"), Version: intOf(delegating, "version")}
 	// Only an explicit false excludes. A version the read did not mark either
@@ -90,14 +111,17 @@ func (i *Integration) judgeByParent(ctx context.Context, run map[string]any, cac
 	// longer current" would empty the corpus of every recording at once.
 	if current, marked := delegating["current"].(bool); marked && !current {
 		j.Excluded = exclusionSuperseded
-		return j, nil
+		return j
 	}
 	if facts.feedback == nil {
+		fb := feedback{}
 		observations, err := i.store.query(ctx, "query "+call("workObservationsForOwnerRun", map[string]any{"runId": parent}))
 		if err != nil {
-			return j, fmt.Errorf("reading the feedback on parent run %s: %w", parent, err)
+			i.log().Info("procedure: the feedback on a recording's parent run could not be read; its version's verdict is unseen",
+				"parentRunId", parent, "error", err)
+		} else {
+			fb = readFeedback(observations)
 		}
-		fb := readFeedback(observations)
 		facts.feedback = &fb
 	}
 	switch newestVerdictOn(facts.feedback.steps[j.StepKey], j.Version) {
@@ -106,7 +130,7 @@ func (i *Integration) judgeByParent(ctx context.Context, run map[string]any, cac
 	case work.VerdictLike:
 		j.Liked = true
 	}
-	return j, nil
+	return j
 }
 
 // delegatingVersion is the version whose childRunId is the recording. Each

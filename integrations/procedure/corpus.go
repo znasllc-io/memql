@@ -229,10 +229,7 @@ func (i *Integration) loadRecordingWith(ctx context.Context, run map[string]any,
 	}
 	// THE PARENT STEP VERSION, before any step is read: a recording it
 	// excludes costs nothing more.
-	judged, err := i.judgeByParent(ctx, run, parents)
-	if err != nil {
-		return rec, false, err
-	}
+	judged := i.judgeByParent(ctx, run, parents)
 	if judged.Excluded != "" {
 		i.log().Debug("procedure: a recording left the corpus", "runId", runId, "reason", judged.Excluded,
 			"parentStep", judged.StepKey, "version", judged.Version)

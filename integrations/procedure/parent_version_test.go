@@ -234,17 +234,31 @@ func weightsOf(recs []recording) []int {
 	return out
 }
 
-// TestAParentWhoseVersionsCannotBeReadFailsTheLoad: a recording whose parent
-// cannot be read is one the loader cannot judge, and it says so rather than
-// mining it as if nothing were known -- the same answer every other corpus
-// read gives.
-func TestAParentWhoseVersionsCannotBeReadFailsTheLoad(t *testing.T) {
+// TestAParentThatCannotBeReadJudgesNothing: a recording whose parent's
+// versions cannot be read -- a transient error, a parent the owner does not
+// own, a node with no work integration -- is judged by its own verdicts
+// alone, and the load goes on: one unreachable parent must not stop every
+// procedure of the goal from being learned. The failure is read once per
+// parent, not once per recording.
+func TestAParentThatCannotBeReadJudgesNothing(t *testing.T) {
+	recs := twoRecordings()
 	eng := newVersionsEngine()
-	seedCorpus(t, eng.fakeEngine, twoRecordings()...)
+	seedCorpus(t, eng.fakeEngine, recs...)
+	// Both recordings delegated by one parent, newest first as the query
+	// answers.
+	newer, older := recs[1].runRow(), recs[0].runRow()
+	newer["parentRunId"] = parentOf(recs[0])
+	eng.reply("workRunsForOwnerGoalSignature", newer, older)
 	eng.fail["workStepVersions"] = errWorkStepVersionsDown
-	if _, err := newTestIntegration(eng).loadCorpus(context.Background(), corpusKeyFor()); err == nil ||
-		!strings.Contains(err.Error(), "workStepVersions") {
-		t.Fatalf("err = %v, want the unreadable versions named", err)
+	got, err := newTestIntegration(eng).loadCorpus(context.Background(), corpusKeyFor())
+	if err != nil {
+		t.Fatalf("an unreadable parent failed the corpus: %v", err)
+	}
+	if len(got) != 2 || got[0].weight() != 1 || got[1].weight() != 1 {
+		t.Fatalf("corpus = %v weights %v, want both recordings judged by nothing", runIdsOf(got), weightsOf(got))
+	}
+	if n := len(eng.callsTo("workStepVersions")); n != 1 {
+		t.Fatalf("the unreadable parent was read %d times, want once for both of its recordings", n)
 	}
 }
 
