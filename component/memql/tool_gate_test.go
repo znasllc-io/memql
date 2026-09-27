@@ -169,6 +169,11 @@ func TestAToolIsListedExactlyWhenItIsCallable(t *testing.T) {
 		"writer over MCP":       personOverMCP("writer"),
 		"reader over MCP":       personOverMCP("reader"),
 		"assistant over MCP (a person whose role string is an agent kind)": personOverMCP("assistant"),
+		// A person over MCP with NO identity is refused every call, so they
+		// are offered no tool either -- the ungated one included (memql#5438).
+		"a person over MCP with no identity":  WithMCPHumanCaller(context.Background(), "owner"),
+		"an anonymous person over MCP":        WithMCPHumanCaller(auth.ContextWithAccess(context.Background(), auth.AnonymousActor()), "reader"),
+		"a person over MCP with a blank user": WithMCPHumanCaller(auth.ContextWithAccess(context.Background(), &auth.AccessContext{Role: auth.RoleOwner}), "owner"),
 	}
 	for name, ctx := range callers {
 		for _, tool := range tools {
@@ -229,5 +234,43 @@ func TestToolGateRefusalsAreNotSentinelErrors(t *testing.T) {
 	err := eng.ToolCallRefusal(personOverMCP("reader"), &Tool{Name: "x", RequiresRank: "admin"})
 	if err == nil || errors.Unwrap(err) == nil {
 		t.Fatalf("the rank refusal should wrap the floor's own refusal, got %v", err)
+	}
+}
+
+// TestAStandInRoleIsNeverWhatAToolFloorJudges: borrowed authority and work
+// restored without a captured grant both assert writer whatever the person
+// holds, and a tool's @requiresRank must judge the PERSON (memql#5438). This
+// engine has no principal table, so the person resolves no role -- and the
+// stand-in must not answer in their place. Before the fix both callers
+// cleared a writer floor as "writer".
+//
+// The directions a real principal table decides (a reader refused a writer
+// floor, an admin admitted to an admin floor) are
+// tool_gate_rank_db_test.go's.
+func TestAStandInRoleIsNeverWhatAToolFloorJudges(t *testing.T) {
+	eng := newQuietEngine(t)
+	writerFloor := &Tool{Name: "fileRequest", RequiresRank: "writer"}
+	const ghost = "v1:identity:user:nobody-resolves-me"
+
+	ungranted, err := auth.ContextWithPersistedOwner(context.Background(), ghost, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, ctx := range map[string]context.Context{
+		"borrowed authority":          WithActingAgentRole(auth.ContextWithUserActor(context.Background(), ghost), "assistant"),
+		"work with no captured grant": WithActingAgentRole(ungranted, "assistant"),
+	} {
+		err := eng.ToolCallRefusal(ctx, writerFloor)
+		if err == nil || !strings.Contains(err.Error(), "this caller holds no role") {
+			t.Errorf("%s: an agent acting for a person who resolves no role = %v; want the floor refusing a caller who holds no role", name, err)
+		}
+		if eng.ToolListed(ctx, writerFloor) {
+			t.Errorf("%s: the floored tool was listed for a person who resolves no role", name)
+		}
+		// The replacement is for the judgment only: the actor the call runs
+		// under -- and writes as -- is still the stand-in.
+		if ac, _ := auth.AccessFromContext(ctx); ac == nil || ac.Role != auth.RoleWriter || !ac.RoleStandIn {
+			t.Errorf("%s: the caller's own actor changed: %+v", name, ac)
+		}
 	}
 }

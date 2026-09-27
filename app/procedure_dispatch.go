@@ -389,9 +389,9 @@ func runProcedureFetch(ctx context.Context, host procedureHost, args map[string]
 // A REPLAYED MCP STEP RUNS ONLY A TOOL THAT READS, IN EVERY MODE. Its handler
 // must call a query; a mutation, a logic, a builtin, an automation or a webhook
 // could write. The recorded call ran under the app session's credential, which
-// is pinned to the read/query surface, while a replay acts as the owner with a
-// borrowed actor that is not -- so a replay that ran a writing tool would do
-// something the recording could not have, with more authority than it had. A
+// is pinned to the read/query surface, while a replay acts for the owner with
+// no such pin -- so a replay that ran a writing tool would do something the
+// recording could not have, with more authority than it had. A
 // shadow writes nothing anyway; a canary or trusted replay is held to the
 // recording.
 func runProcedureMCP(
@@ -420,11 +420,11 @@ func runProcedureMCP(
 		return procedure.DispatchResult{}, fmt.Errorf("%q calls a %s, and a replayed MCP step runs only a tool that reads: the recorded call ran under the app session's credential, pinned to the read/query surface, and a replay asks for no more than the recording had", name, kind)
 	}
 	if agents == nil {
-		return procedure.DispatchResult{}, fmt.Errorf("this node cannot resolve the agent a tool call acts as")
+		return procedure.DispatchResult{}, fmt.Errorf("this node cannot resolve the owner's reasoning agent, whose id a replayed call carries in place of a recorded one")
 	}
 	agent, err := agents(ctx, req.OwnerUserId)
 	if err != nil {
-		return procedure.DispatchResult{}, fmt.Errorf("the owner's reasoning agent, which a tool call acts as: %w", err)
+		return procedure.DispatchResult{}, fmt.Errorf("the owner's reasoning agent, whose id a replayed call carries in place of a recorded one: %w", err)
 	}
 
 	var callArgs map[string]any
@@ -439,13 +439,36 @@ func runProcedureMCP(
 		}
 	}
 
-	// AS THE APP'S CALL RAN: the owner's actor, an acting agent (a tool is
-	// agent-only), the MCP marker that lets a recorded @autoInjected value
-	// stand where the server has none, and the server's own owner and agent,
-	// which always win over a recorded one.
+	// AS THE APP'S CALL RAN (memql#5438). Only an app session records
+	// (component/mcp/recording.go), and the MCP surface calls a tool as a
+	// PERSON: the session's owner, holding the role the session's credential
+	// names, marked WithMCPHumanCaller. The replay used to run as the owner's
+	// reasoning AGENT instead, stamped with the agent row's roleSlug
+	// ("assistant", or "system-planner", which is no agent role at all), so
+	// every tool gate was decided on the wrong axis: @requiresAgentRole
+	// admitted a replay its recording was refused, and a rank floor judged the
+	// borrowed actor's writer stand-in.
+	//
+	// So the replay is decided by the actor the surface built for the
+	// recording: the owner, holding NO role -- an app session's credential
+	// carries no role claim and the HTTP head takes a session's role from the
+	// claim (component/mcp's TestAnAppSessionActsAsItsOwnerHoldingNoRole pins
+	// that; if it ever holds a role there, it must hold the same one here).
+	// NOT the owner's own rank, which the principal table would answer for a
+	// stand-in (component/memql tool_gate.go): that would admit a rank-floored
+	// read the recording was refused, and a replay asks for no more than the
+	// recording had. A tool gated on an agent kind is refused, as it was; a
+	// rank floor refuses a caller holding no role, as it did; an ungated read
+	// runs.
+	//
+	// ContextWithUserActor supplies the claims and TokenInfo an owner's call
+	// carries; the actor that decides is replaced with the recording's. The
+	// MCP marker lets a recorded @autoInjected value stand where the server has
+	// none, and the server's own owner and agent still win over recorded ones
+	// as ARGUMENTS -- which values a replay may be handed, not who is calling.
 	callCtx := auth.ContextWithUserActor(ctx, req.OwnerUserId)
-	callCtx = memql.WithActingAgentRole(callCtx, agent.RoleSlug)
-	callCtx = memql.WithActingAgentId(callCtx, agent.Id)
+	callCtx = auth.ContextWithAccess(callCtx, &auth.AccessContext{UserId: req.OwnerUserId})
+	callCtx = memql.WithMCPHumanCaller(callCtx, "")
 	callCtx = memql.WithMCPToolExecution(callCtx)
 	callCtx = common.ContextWithToolDefaults(callCtx, map[string]any{"ownerUserId": req.OwnerUserId, "agentId": agent.Id})
 

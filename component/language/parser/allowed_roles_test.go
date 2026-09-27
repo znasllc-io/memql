@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/deprecation"
 )
 
@@ -117,6 +118,19 @@ func TestAnAllowedRolesListBecomesWhatItMeant(t *testing.T) {
 		if tc.want == "" && !strings.Contains(got.Reason, tc.reason) {
 			t.Errorf("%s: the reason %q does not say %q", tc.name, got.Reason, tc.reason)
 		}
+		// A PERSON-list rewrite admits more than the list did -- an agent
+		// acting for such a person, whom the list refused, and a custom role
+		// ranked at the floor -- and says so. An agent-list rewrite compares
+		// the same agent role the list did, and has nothing to say.
+		widens := strings.HasPrefix(got.Annotation, "@requiresRank(")
+		switch {
+		case widens && !strings.Contains(got.Note, "an AGENT acting for a person ranked"):
+			t.Errorf("%s: the person-list rewrite does not disclose that it admits agents: %q", tc.name, got.Note)
+		case widens && !strings.Contains(got.Note, "custom role"):
+			t.Errorf("%s: the person-list rewrite does not disclose that it admits a custom role: %q", tc.name, got.Note)
+		case !widens && got.Note != "":
+			t.Errorf("%s: a rewrite that admits nothing new carries a note: %q", tc.name, got.Note)
+		}
 	}
 }
 
@@ -206,5 +220,52 @@ func TestAnUnstampedBuildKeepsParsingAllowedRoles(t *testing.T) {
 	defer restore()
 	if _, err := ParseToolDecl(allowedRolesTool); err != nil {
 		t.Fatalf("a build that names no release must not refuse a deprecated form: %v", err)
+	}
+}
+
+// A rewrite keeps the comments written inside a list laid out over several
+// lines (memql#5438). It replaces the whole spelling and the lexer hands back
+// no comments, so a note beside a role used to vanish. An agent list keeps its
+// argument list exactly as written, under the new name; a person list becomes
+// one rung carrying each note as a block comment; a note that cannot be a
+// block comment leaves the use for its author.
+func TestARewriteKeepsTheCommentsWrittenInsideTheList(t *testing.T) {
+	v := testVocabulary(t)
+	agentList := "@allowedRoles(\n  \"assistant\",  // the assistant drives discovery\n  \"specialist\" /* specialists read it too */\n)"
+	src := "/// Discover capabilities.\n@handler(type=\"function\", name=\"discover\")\n" + agentList + "\ntool discover {\n}\n\n" +
+		"/// Validate a request.\n@handler(type=\"function\", name=\"validate\")\n@allowedRoles(\n  \"owner\",\n  \"admin\",      // user management\n  // developers validate their own work\n  \"developer\",\n  \"writer\"\n)\ntool validate {\n}\n\n" +
+		"/// Unrewritable note.\n@handler(type=\"function\", name=\"odd\")\n@allowedRoles(\n  \"owner\", \"admin\", \"developer\", // closes */ early\n  \"writer\"\n)\ntool odd {\n}\n"
+
+	out, left, _ := RewriteAllowedRoles(src, v)
+	for _, want := range []string{
+		"@requiresAgentRole" + strings.TrimPrefix(agentList, "@allowedRoles"),
+		`@requiresRank("writer" /* user management */ /* developers validate their own work */)`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the rewrite does not carry the comments as %q:\n%s", want, out)
+		}
+	}
+	if len(left) != 1 || !strings.Contains(left[0].Reason, "cannot be carried") || !strings.Contains(left[0].Text, "closes */ early") {
+		t.Fatalf("want the one list whose note cannot be a block comment left for its author, got %+v", left)
+	}
+
+	// What it wrote is ordinary source: it parses, and each tool carries the
+	// gate it meant.
+	norm, err := NormaliseAll(out)
+	if err != nil {
+		t.Fatalf("the rewritten source does not normalise: %v\n%s", err, out)
+	}
+	file, err := ParseFile(norm)
+	if err != nil {
+		t.Fatalf("the rewritten source does not parse: %v\n%s", err, out)
+	}
+	gates := map[string]string{}
+	for _, d := range file.Definitions {
+		if tool, ok := d.(*ast.ToolDecl); ok {
+			gates[tool.Name] = strings.Join(tool.RequiresAgentRole, ",") + "|" + tool.RequiresRank
+		}
+	}
+	if gates["discover"] != "assistant,specialist|" || gates["validate"] != "|writer" {
+		t.Errorf("the rewritten tools carry %v, want discover on the two agent kinds and validate at writer", gates)
 	}
 }

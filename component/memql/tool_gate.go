@@ -23,14 +23,23 @@ package memql
 // deprecation, rule deprecated_allowed_roles) and keeps exactly that behaviour
 // while its window runs: callerRefusal applies it to ToolCaller.LegacyRole.
 //
+// # Which person a rank floor judges
+//
+// @requiresRank asks how senior the PERSON is, and the actor on the context
+// usually says: a person's own credential, the forwarded authority an agent
+// turn runs under, a grant-backed work run's ceiling-bounded role. Two actors
+// carry a STAND-IN role instead (auth.AccessContext.RoleStandIn) -- borrowed
+// authority, and work restored without a captured grant -- and for those the
+// person's role is read from the principal table (toolFloorContext).
+//
 // # Listed and callable are one decision, asked twice
 //
 // ToolListed and ToolCallRefusal share every gate, so a caller is never shown
-// a tool it cannot call nor refused one it was shown. The one difference is
-// the caller-kind rule: only a CALL must come from an agent or an
-// authenticated person over MCP -- a listing is a description, and the gRPC
-// ListTools surface has always described the tool set to callers that stamp
-// neither.
+// a tool it cannot call nor refused one it was shown -- a person over MCP with
+// no authenticated identity included, who is offered no tool because they may
+// call none. The one difference is a caller that is NEITHER kind: a call from
+// one is refused, while a listing is a description, and the gRPC ListTools
+// surface has always described the tool set to callers that stamp neither.
 //
 // # Enforced on every path
 //
@@ -44,6 +53,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/znasllc-io/memql/component/auth"
 )
@@ -93,18 +103,34 @@ func notAnAgentPhrase(c ToolCaller) string {
 	return "this call carries no acting agent"
 }
 
-// ToolListed reports whether the caller on ctx may be offered t: its
-// agent-kind gate, the deprecated @allowedRoles, and its rank floor against
-// the person the call would be for. It is ToolCallRefusal without the
-// caller-kind rule (see the file comment).
+// ToolListed reports whether the caller on ctx may be offered t: a person
+// over MCP must be authenticated, then its agent-kind gate, the deprecated
+// @allowedRoles, and its rank floor against the person the call would be for.
+// It is ToolCallRefusal less one rule: a caller that is neither an agent nor a
+// person over MCP is described the tool set (see the file comment).
 func (e *MemQLEngine) ToolListed(ctx context.Context, t *Tool) bool {
 	if t == nil {
 		return false
 	}
-	if t.callerRefusal(ToolCallerFromContext(ctx)) != nil {
+	caller := ToolCallerFromContext(ctx)
+	if caller.Kind == ToolCallerMCPHuman && mcpCallerUnidentified(ctx) {
+		return false
+	}
+	if t.callerRefusal(caller) != nil {
 		return false
 	}
 	return e.toolRankRefusal(ctx, t) == nil
+}
+
+// mcpCallerUnidentified reports whether a person over MCP has no authenticated
+// identity on ctx. The HTTP head verifies a bearer before a session exists; a
+// stdio session is a person only once MEMQL_MCP_USER names one. A session with
+// no identity has nobody for @requiresRank to judge and nobody for the
+// handler's writes to belong to, so it may call no tool -- and, listing and
+// calling being one decision, is offered none.
+func mcpCallerUnidentified(ctx context.Context) bool {
+	ac, ok := auth.AccessFromContext(ctx)
+	return !ok || ac == nil || strings.TrimSpace(ac.UserId) == "" || ac.IsAnonymousActor()
 }
 
 // ToolCallRefusal is the whole call-time decision for t, or nil when the
@@ -118,12 +144,8 @@ func (e *MemQLEngine) ToolCallRefusal(ctx context.Context, t *Tool) error {
 	switch caller.Kind {
 	case ToolCallerAgent:
 	case ToolCallerMCPHuman:
-		// "An AUTHENTICATED person over MCP": the HTTP head verifies a bearer
-		// before a session exists, and a stdio session is a person only once
-		// MEMQL_MCP_USER names one. A session with no identity has nobody for
-		// @requiresRank to judge and nobody for the handler's writes to
-		// belong to.
-		if ac, ok := auth.AccessFromContext(ctx); !ok || ac == nil || strings.TrimSpace(ac.UserId) == "" || ac.IsAnonymousActor() {
+		// "An AUTHENTICATED person over MCP" (mcpCallerUnidentified).
+		if mcpCallerUnidentified(ctx) {
 			return fmt.Errorf("tool %q: tools are agent-only outside an authenticated MCP session, and this MCP session has no authenticated identity (a stdio session names one with MEMQL_MCP_USER)", t.Name)
 		}
 	default:
@@ -139,21 +161,98 @@ func (e *MemQLEngine) ToolCallRefusal(ctx context.Context, t *Tool) error {
 }
 
 // toolRankRefusal enforces t's @requiresRank against the person the call is
-// for, through refuseBelowRequiredRank -- the enforcement every query,
-// mutation and logic floor has, so a tool's floor fails closed in the same
-// two directions (an unresolvable caller rank, an unresolvable floor) and an
-// internal-origin call passes it for the same reason.
+// for, at the rank they hold (toolFloorContext), through
+// refuseBelowRequiredRank -- the enforcement every query, mutation and logic
+// floor has, so a tool's floor fails closed in the same two directions (an
+// unresolvable caller rank, an unresolvable floor) and an internal-origin call
+// passes it for the same reason.
 func (e *MemQLEngine) toolRankRefusal(ctx context.Context, t *Tool) error {
 	floor := strings.TrimSpace(t.RequiresRank)
 	if floor == "" {
 		return nil
 	}
-	if err := e.refuseBelowRequiredRank(ctx, &Function{RequiresRank: floor}, t.Name); err != nil {
+	if err := e.refuseBelowRequiredRank(e.toolFloorContext(ctx), &Function{RequiresRank: floor}, t.Name); err != nil {
 		// "is not allowed for" is what ClassifyToolError reads as a
 		// permission refusal, which is what the model must be told.
 		return fmt.Errorf("tool %q is not allowed for this caller: %w", t.Name, err)
 	}
 	return nil
+}
+
+// toolFloorContext is ctx carrying the actor a tool's @requiresRank judges:
+// the PERSON the call is for, at the rank they hold.
+//
+// For almost every caller that is the actor as it stands. Two carry a
+// STAND-IN role instead (auth.AccessContext.RoleStandIn): borrowed authority
+// (auth.ContextWithUserActor) and work restored without a captured grant
+// (auth.ContextWithPersistedOwner), both asserting writer whatever the person
+// holds. Judged as they stood, an agent acting for a READER passed a writer
+// floor and one acting for an ADMIN failed an admin floor. For those the
+// person's role is read from the principal table -- organizationUserRole, the
+// read the account scope already makes for the same borrowed actor -- once
+// per tool caller (personRole).
+//
+// A person the table does not resolve -- no row, deactivated, deleted, a role
+// the cluster does not know -- holds no role and clears no floor. The stand-in
+// is never the fallback: it is exactly the answer this replaces.
+//
+// The actor is replaced for this judgment ONLY. The call runs under the
+// stand-in, which is what bounds what the work may write.
+func (e *MemQLEngine) toolFloorContext(ctx context.Context) context.Context {
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac == nil || !ac.RoleStandIn || ac.Synthetic {
+		return ctx
+	}
+	person := *ac
+	person.Role = e.personRole(ctx, ac.UserId)
+	person.RoleStandIn = false
+	return auth.ContextWithAccess(ctx, &person)
+}
+
+// personRoleMemo holds one tool caller's person-role reads, so a listing that
+// asks about every floored tool, or a turn that calls several, reads the
+// principal table once per person rather than once per tool -- the per-request
+// resolution the row-authz rank memo makes (rowauthz_rank.go). The two caller
+// stamps install it (tool_context.go). Absent, personRole still answers; it
+// just reads again, and the answer is the same.
+//
+// Only a RESOLVED role is kept. A miss is re-read, so a read that failed for
+// a moment does not refuse every floored tool for the rest of the turn.
+type personRoleMemo struct {
+	mu    sync.Mutex
+	roles map[string]auth.Role
+}
+
+type personRoleMemoKey struct{}
+
+// contextWithPersonRoleMemo installs a memo unless ctx already carries one.
+func contextWithPersonRoleMemo(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(personRoleMemoKey{}).(*personRoleMemo); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, personRoleMemoKey{}, &personRoleMemo{roles: map[string]auth.Role{}})
+}
+
+// personRole is the role the principal table holds for userId now, or "" when
+// it resolves none.
+func (e *MemQLEngine) personRole(ctx context.Context, userId string) auth.Role {
+	key := BareShortId(strings.TrimSpace(userId))
+	memo, _ := ctx.Value(personRoleMemoKey{}).(*personRoleMemo)
+	if memo != nil {
+		memo.mu.Lock()
+		defer memo.mu.Unlock()
+		if role, ok := memo.roles[key]; ok {
+			return role
+		}
+	}
+	role, found := e.organizationUserRole(ctx, userId)
+	if !found {
+		return ""
+	}
+	if memo != nil {
+		memo.roles[key] = role
+	}
+	return role
 }
 
 // joinOr renders a value list for a refusal: "assistant" or

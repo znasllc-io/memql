@@ -627,10 +627,12 @@ func TestEveryToolReportsTheErrorFlag(t *testing.T) {
 	}
 }
 
-// An `mcp` step is a call back into MemQL, run as the app's call ran: the
-// owner's actor, under the owner's reasoning agent, with the server's owner
-// winning over any recorded one -- and typed by the MCP recorder's own rule.
-func TestAnMCPQueryRunsAsTheOwnersAgentAndIsTypedAsItWasRecorded(t *testing.T) {
+// An `mcp` step is a call back into MemQL, run as the app's call ran: a
+// PERSON over MCP -- the owner, holding the role the app session's credential
+// held, which is none -- never an agent (memql#5438), with the server's owner
+// and agent winning over any recorded ones as arguments -- and typed by the
+// MCP recorder's own rule.
+func TestAnMCPQueryRunsAsTheOwnerOverMCPAndIsTypedAsItWasRecorded(t *testing.T) {
 	tools := &fakeProcedureTools{kinds: map[string]string{"librarySearch": "query"},
 		result: `{"content":[{"type":"text","text":"42"}],"isError":false}`}
 	req := workbenchStep("mcp", map[string]any{"tool": "librarySearch", "arguments": map[string]any{"q": "budget", "ownerUserId": "v1:identity:user:somebody-else"}})
@@ -643,14 +645,17 @@ func TestAnMCPQueryRunsAsTheOwnersAgentAndIsTypedAsItWasRecorded(t *testing.T) {
 		t.Fatalf("called %q with %+v", tools.gotName, tools.gotArgs)
 	}
 	ctx := tools.gotCtx
-	if access, ok := auth.AccessFromContext(ctx); !ok || access.UserId != "v1:identity:user:owner" {
-		t.Fatalf("the call did not run as the owner: %+v", access)
+	if access, ok := auth.AccessFromContext(ctx); !ok || access.UserId != "v1:identity:user:owner" || access.Role != "" || access.RoleStandIn {
+		t.Fatalf("the call did not run as the recording's actor -- the owner, holding no role: %+v", access)
 	}
-	if memql.ActingAgentRoleFromContext(ctx) != "assistant" || memql.ActingAgentIdFromContext(ctx) != testReasoningAgent.Id {
-		t.Fatalf("acting agent = %q / %q", memql.ActingAgentRoleFromContext(ctx), memql.ActingAgentIdFromContext(ctx))
+	if caller := memql.ToolCallerFromContext(ctx); caller.Kind != memql.ToolCallerMCPHuman || caller.LegacyRole != "" {
+		t.Fatalf("the call ran as %+v, want a person over MCP holding no role", caller)
 	}
-	if defaults := common.ToolDefaultsFromContext(ctx); defaults["ownerUserId"] != "v1:identity:user:owner" {
-		t.Fatalf("tool defaults = %+v, want the owner to win over a recorded one", defaults)
+	if memql.ActingAgentRoleFromContext(ctx) != "" || memql.ActingAgentIdFromContext(ctx) != "" {
+		t.Fatalf("the call carries an acting agent %q / %q; the recording was a person's", memql.ActingAgentRoleFromContext(ctx), memql.ActingAgentIdFromContext(ctx))
+	}
+	if defaults := common.ToolDefaultsFromContext(ctx); defaults["ownerUserId"] != "v1:identity:user:owner" || defaults["agentId"] != testReasoningAgent.Id {
+		t.Fatalf("tool defaults = %+v, want the server's owner and agent to win over recorded ones", defaults)
 	}
 	// "42" is text to the MCP recorder -- it is not component/work's number.
 	if o := res.Observation; o.IsError == nil || *o.IsError || o.ResultType != "string" {

@@ -554,9 +554,11 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// context.Background(): Init carries none, and this read belongs to
 	// the boot rather than to any request. On a FIRST boot the catalog is
 	// being seeded by this very startup, so the ladder reads empty and
-	// rankOf falls back to the engine's compiled base slugs -- which is
-	// why the five base roles validate on a fresh cluster and a
-	// custom-role floor is the case that needs a seeded catalog.
+	// rankOf falls back to the engine's compiled base ladder -- which is
+	// why every base rung validates on a fresh cluster, by the seed's slug
+	// ("user", "viewer") or the user row's alias ("writer", "reader")
+	// alike, and a custom-role floor is the case that needs a seeded
+	// catalog.
 	for _, problem := range e.validateRequiresRankSlugs(context.Background(), functionRegistry) {
 		report.AddSkip(baseloader.Skip{
 			Component: "memql.engine",

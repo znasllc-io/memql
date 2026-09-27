@@ -16,6 +16,14 @@ package main
 // are read from their declarations in the embedded tree -- dsl/agents' agent
 // concept and dsl/rbac's role seeds -- rather than restated here.
 //
+// EVERY PERSON-LIST REWRITE IS REPORTED TOO, because it admits more than the
+// list did: @allowedRoles compared the calling agent's own role with a list of
+// person roles and so refused every agent, while @requiresRank judges the
+// person an agent acts for -- an agent acting for somebody at or above the
+// floor can now call the tool, as can a custom role ranked there. Deliberate,
+// and the owner-approved design records it; a rewrite that widens a gate
+// without saying so is one nobody reviews.
+//
 // A path rewrite rather than a plain one only so a report can name the file.
 
 import (
@@ -43,9 +51,12 @@ func rewriteAllowedRoles(path string, src []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("allowed-roles: reading the agent roles and the role ladder from the embedded tree: %w", err)
 	}
-	out, left := langparser.RewriteAllowedRoles(string(src), vocabulary)
+	out, left, widened := langparser.RewriteAllowedRoles(string(src), vocabulary)
 	for _, f := range left {
 		fmt.Fprintf(allowedRolesReport, "memqlmigrate: %s:%d:%d: left %s as written: %s\n", path, f.Line, f.Column, f.Text, f.Reason)
+	}
+	for _, f := range widened {
+		fmt.Fprintf(allowedRolesReport, "memqlmigrate: %s:%d:%d: rewrote %s as %s; %s\n", path, f.Line, f.Column, f.Text, f.Replacement, f.Reason)
 	}
 	return []byte(out), nil
 }

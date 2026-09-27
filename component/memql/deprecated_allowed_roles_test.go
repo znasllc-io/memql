@@ -92,13 +92,21 @@ func TestAllowedRolesWarnsCountsKeepsGatingAndRefusesOnlyAfterItsWindow(t *testi
 	restore = deprecation.SetCurrent(f.RefusedFrom() + ".0")
 	defer restore()
 	diags, _, _ := LintUnifiedTree(nil, tree)
-	refused := false
+	var refusals []LintDiagnostic
 	for _, d := range diags {
-		if d.Code == deprecation.AllowedRoles && d.Severity == LintSeverityError && strings.Contains(d.Message, "@requiresAgentRole") {
-			refused = true
+		if d.Code == deprecation.AllowedRoles {
+			refusals = append(refusals, d)
 		}
 	}
-	if !refused {
-		t.Fatalf("after the window @allowedRoles must be refused naming its replacements; diags = %+v", diags)
+	// ONE use is ONE problem, at the author's position. The tool's loader
+	// reported the same refusal too, positioned in the declaration it parsed
+	// ("line 3") rather than in the file, so one use read as two problems
+	// that disagreed about where it was (memql#5438).
+	if len(refusals) != 1 {
+		t.Fatalf("after the window one @allowedRoles use must be ONE refusal, got %d: %+v", len(refusals), refusals)
+	}
+	if d := refusals[0]; d.Severity != LintSeverityError || !strings.Contains(d.Message, "@requiresAgentRole") ||
+		!strings.Contains(d.Message, "line 19, column 1") {
+		t.Fatalf("the refusal must be an error naming the replacements at the use's own line (19); got %+v", d)
 	}
 }

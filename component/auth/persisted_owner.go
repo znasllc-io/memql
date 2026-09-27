@@ -100,6 +100,13 @@ func ContextWithPersistedOwner(ctx context.Context, ownerUserId string, grant ma
 	if err != nil {
 		return nil, err
 	}
+	// Without a grant the writer role above is a STAND-IN, never the owner's
+	// resolved rung, and the actor says so (AccessContext.RoleStandIn): a
+	// tool's @requiresRank asks how senior the person is, and "writer" would
+	// answer that wrongly in both directions (memql#5438). With a grant the
+	// role IS a resolution -- the owner's current role under the recorded
+	// ceiling -- and stands as it is.
+	verified.RoleStandIn = len(grant) == 0
 	return BindForwardedContext(ctx, authority.Principal().Claims, verified, authority), nil
 }
 

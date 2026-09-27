@@ -17,6 +17,7 @@ package parser
 //     reads a retired form's code reads this one's.
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -103,7 +104,100 @@ func (u DeprecatedUse) AllowedRolesReplacement(vocabulary *RoleVocabulary) Allow
 				decision.Annotation + " beside it would be written twice; merge the two by hand"}
 		}
 	}
+	return u.carryComments(decision)
+}
+
+// carryComments keeps the comments written inside the use's argument list in
+// the annotation that replaces it. A rewrite replaces the whole spelling, and
+// the lexer hands back no comments, so a list laid out over several lines with
+// a note beside a role lost the note (memql#5438).
+//
+//   - An agent list keeps its values, so its argument list is kept exactly as
+//     written -- layout, comments and all -- under the new name.
+//   - A person list becomes one rung, and a note about a role it no longer
+//     names still belongs with the gate: each comment is carried inside the
+//     new argument list as a block comment, in order. A line comment whose
+//     text would end that block early is not carried across: the use is left
+//     for its author, with the reason, like every list the rewrite cannot
+//     carry exactly.
+func (u DeprecatedUse) carryComments(decision AllowedRolesRewrite) AllowedRolesRewrite {
+	comments := commentsIn(u.Text)
+	if len(comments) == 0 {
+		return decision
+	}
+	if strings.HasPrefix(decision.Annotation, "@requiresAgentRole(") && strings.HasPrefix(u.Text, "@"+allowedRolesName+"(") {
+		decision.Annotation = "@requiresAgentRole" + strings.TrimPrefix(u.Text, "@"+allowedRolesName)
+		return decision
+	}
+	carried := make([]string, 0, len(comments))
+	for _, c := range comments {
+		if !strings.HasPrefix(c, "//") {
+			carried = append(carried, c) // a block comment, whole
+			continue
+		}
+		body := strings.TrimSpace(strings.TrimLeft(c, "/"))
+		if strings.Contains(body, "*/") {
+			return AllowedRolesRewrite{Reason: fmt.Sprintf(
+				"the comment %q inside the list cannot be carried into %s as a block comment; rewrite it by hand",
+				c, decision.Annotation)}
+		}
+		carried = append(carried, "/* "+body+" */")
+	}
+	closeAt := strings.LastIndex(decision.Annotation, ")")
+	decision.Annotation = decision.Annotation[:closeAt] + " " + strings.Join(carried, " ") + ")"
 	return decision
+}
+
+// commentsIn returns the comments written between the tokens of text, in
+// order: a line comment to the end of its line, a block comment whole. The
+// lexer drops both, so the gaps between consecutive tokens hold nothing but
+// whitespace and comments -- which is also why a string's contents can never
+// be mistaken for one.
+func commentsIn(text string) []string {
+	tokens, err := NewLexer(text).Tokenize()
+	if err != nil {
+		return nil
+	}
+	runes := []rune(text)
+	var out []string
+	gap := func(from, to int) {
+		if from < 0 {
+			from = 0
+		}
+		if to > len(runes) {
+			to = len(runes)
+		}
+		for i := from; i < to; {
+			if runes[i] != '/' || i+1 >= to || (runes[i+1] != '/' && runes[i+1] != '*') {
+				i++
+				continue
+			}
+			j := i + 2
+			if runes[i+1] == '/' {
+				for j < to && runes[j] != '\n' {
+					j++
+				}
+				out = append(out, strings.TrimRight(string(runes[i:j]), " \t\r"))
+			} else {
+				for j+1 < to && !(runes[j] == '*' && runes[j+1] == '/') {
+					j++
+				}
+				j = min(j+2, to)
+				out = append(out, string(runes[i:j]))
+			}
+			i = j
+		}
+	}
+	prev := 0
+	for _, tok := range tokens {
+		if tok.Type == TokenEOF {
+			break
+		}
+		gap(prev, tok.Pos)
+		prev = tok.EndPos
+	}
+	gap(prev, len(runes))
+	return out
 }
 
 // allowedRolesValues reads the values of an `@allowedRoles(...)` spelling: the

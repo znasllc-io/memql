@@ -64,11 +64,19 @@ The `mcp` node enforces two orthogonal, server-side authz gates:
 - `MEMQL_MCP_MODE` -- the capability tier (Gate A): `sealed` (execute named
   constructs only), `authoring` (**default** -- adds `define`), or `inline`
   (adds ad-hoc `query`).
-- `MEMQL_MCP_ROLE` -- the role the session acts as for the per-construct gate
-  (Gate B). Empty -> the engine's `specialist` default. Authoring (`define`)
-  and inline (`query`) require the `owner` or `developer` role. The
+- `MEMQL_MCP_ROLE` -- the cluster role of the PERSON the session acts as, for
+  the per-construct gate (Gate B): what a reflected tool's `@requiresRank`
+  floor (and the deprecated `@allowedRoles`) judges a call against. On HTTP an
+  empty value takes the role from the caller's verified token; on stdio it
+  means the session holds no role, which clears no rank floor. Authoring
+  (`define`) and inline (`query`) require the `owner` or `developer` role. The
   `developer` role is engineering power (author / inline / write) but not
   user-management power.
+- `MEMQL_MCP_USER` -- the PERSON the session acts as. On HTTP an empty value
+  takes the user from the caller's verified token. **A stdio session needs it
+  to run a reflected DSL tool** (memql#5438): a tool is called by an agent or
+  by an authenticated person, so a session with no identity is offered no
+  reflected tool by `tools/list` and refused every one by `tools/call`.
 
 ## Docker
 
