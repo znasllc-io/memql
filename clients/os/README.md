@@ -1908,8 +1908,9 @@ label -- an approvals inbox that two windows disagree about is a run somebody
 thinks they unparked. Nothing the Work app earned was thrown away; what changed
 is that the GOAL, rather than the run, is what the app is about.
 
-Nine things about it are new rules rather than repetitions of the nine apps
-before it. The first five came with sub-project A and hold unchanged.
+Twelve things about it are new rules rather than repetitions of the nine apps
+before it. The first five came with sub-project A and hold unchanged; the last
+three came with epic memql#5414 (versions, verdicts and the reuse ratio).
 
 - **THE SPINE'S WEIGHT IS THE PRODUCT'S CLAIM, AND IT IS DRAWN IN INK RATHER
   THAN IN HUE.** The system works a goal out once and replays it afterwards
@@ -2091,6 +2092,43 @@ before it. The first five came with sub-project A and hold unchanged.
   is on its Logs section, and that one IS a mirror: every read on the log store
   is admin-and-above in the Go handler. An absent control with nothing said
   about it reads as something nobody got round to.
+
+- **A STEP HAS VERSIONS, AND THEY ARE DRAWN ON THE SPINE THAT ALREADY EXISTS**
+  (epic memql#5414). Running a step again, making an earlier version current
+  and branching from a step keep every version; the run's `head` says which is
+  current. A step with more than one version carries a quiet stack of ticks
+  beside its node -- the same ink-not-hue vocabulary as the thread -- and the
+  step detail's version picker (`v1 v2 v3`, the current one marked) selects
+  which version the facts, the verdict and the acts are about. The timeline is
+  grouped by step KEY: an attempt is a version of a step, not a step of its own.
+  The version history is `workStepVersions`, a builtin, because the standard
+  reads collapse an append-only row to its newest version.
+
+  **The acts follow the selection** (rule 12): nothing selected -> the run's own
+  acts; a step selected on a finished run -> `Make current` (absent on the
+  current version), `Branch from here`, `Run again`. While a re-run is in flight
+  the step acts are absent and the bar says what is running. `Run again` and
+  `Branch from here` open ONE composer (`kit/Dialog`): only the fields a person
+  changes are sent, a deterministic step is asked only for its inputs, a session
+  step's recorded prompt is prefilled, the floor says the consequence ("Runs as
+  version 4. The step after it runs again."), and a refusal shows verbatim with
+  the draft kept. `forkRun` is gone; `branchRun` serves the prefix by reference.
+
+- **A VERDICT IS PRESSED ONLY AFTER THE SERVER HAS IT.** Like and Neutral save
+  on click; Dislike first asks what was wrong on the AI Fluency framework's
+  three axes ("The result", "The approach", "The behaviour"), and `Save` is
+  ABSENT until one is chosen -- the engine refuses a dislike without an axis,
+  and a control that could only be refused is not offered. A later verdict is a
+  new row; the newest is the one shown. The answer validator's pre-filter
+  verdict sits beside the person's, never above it, with "It disagrees with you"
+  when the two differ; it is a line of evidence, not a second verdict control.
+
+- **THE OVERVIEW'S REUSE RATIO IS A MEASUREMENT OR IT IS ABSENT.** "Reusable to
+  goal-specific" counts constructs by their EFFECTIVE label (a person's override
+  wins over the evidence); constructs the sweep has not labelled are their own
+  "Not yet labelled" segment, and with nothing labelled the figure is absent
+  (`Figure` semantics), never "0 to 0". The threshold in its explanation is read
+  from `feedbackPolicyCurrent`, not written into the copy.
 
 ### What the browser found that the suite could not
 
