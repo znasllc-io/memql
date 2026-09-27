@@ -75,6 +75,14 @@ func TestABranchCreatesAForkRunPointingThePrefixAtTheSource(t *testing.T) {
 	if override["model"] != "app:claude-code:opus" || override["effort"] != "high" || override["requestedBy"] != actOwner {
 		t.Errorf("fork override = %v", override)
 	}
+	// The fork's step rows are new rows of a new run: each step it executes
+	// runs as that row's first version.
+	if !reflect.DeepEqual(rerun["versions"], map[string]any{"draft": float64(1), "publish": float64(1)}) {
+		t.Errorf("fork versions = %v", rerun["versions"])
+	}
+	if id, _ := rerun["requestId"].(string); id == "" {
+		t.Error("the fork's request carries no id")
+	}
 
 	reply := decodeReply(t, nodes)
 	if reply["runId"] != forkId || reply["forkedFromRunId"] != actRunId || reply["forkAtStepKey"] != "draft" {

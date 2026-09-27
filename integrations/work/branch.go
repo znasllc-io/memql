@@ -69,6 +69,13 @@ func (i *Integration) handleBranchRun(ctx context.Context, args map[string]any, 
 	if err != nil {
 		return nil, headRefusal(err)
 	}
+	// The fork's own step rows are new rows of a new run, so every step it
+	// executes -- the branch step and each after it -- runs as that row's
+	// first version: the plan over a run that has recorded nothing.
+	plan, err := work.PlanRerun(source.order, nil, stepKey)
+	if err != nil {
+		return nil, headRefusal(err)
+	}
 
 	if e := sourceHead[stepKey]; e.RunId == "" {
 		guidance, err := i.dislikeGuidance(ctx, source.owner, source.id, stepKey, e.Version)
@@ -110,7 +117,7 @@ func (i *Integration) handleBranchRun(ctx context.Context, args map[string]any, 
 		Head:                forkHead.Object(),
 		// The fork's sessions run in a directory named for the fork, never in
 		// the source's: the source is untouched, its workspace included.
-		Rerun: rerunRequest(rerunReasonBranch, stepKey, override, snapshot, bareRunId(runId), requestedBy, now),
+		Rerun: rerunRequest(rerunReasonBranch, stepKey, override, plan.Versions, snapshot, bareRunId(runId), requestedBy, now),
 	}
 	if err := i.store().createRunRow(ownerActor(ctx, source.owner), seed); err != nil {
 		return nil, err

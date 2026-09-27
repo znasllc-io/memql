@@ -120,6 +120,11 @@ func TestARerunWritesTheRequestOnTheRunForTheAgent(t *testing.T) {
 	if rerun["requestedAt"] != rfc(testNow) {
 		t.Errorf("requestedAt = %v", rerun["requestedAt"])
 	}
+	// The plan's versions ride the request: the executor runs each stale step
+	// as the version named here, never one it reads off the newest row.
+	if got := rerun["versions"]; !reflect.DeepEqual(got, map[string]any{"draft": float64(2), "publish": float64(2)}) {
+		t.Errorf("versions = %v, want draft and publish at version 2", got)
+	}
 	override, _ := rerun["override"].(map[string]any)
 	want := map[string]any{
 		"level":       "reasoning",
@@ -166,6 +171,37 @@ func TestARerunNeverReusesAVersionNumber(t *testing.T) {
 	}
 	if got := decodeReply(t, nodes)["version"]; got != float64(4) {
 		t.Errorf("version = %v, want 4 (one past the highest recorded, which is the failed 3)", got)
+	}
+	rerun, _ := argsOf(t, eng, "updateWorkRun")["rerun"].(map[string]any)
+	if versions, _ := rerun["versions"].(map[string]any); versions["draft"] != float64(4) || versions["publish"] != float64(2) {
+		t.Errorf("versions = %v, want draft 4 and publish 2", rerun["versions"])
+	}
+}
+
+// Every request carries a FRESH id, head moves included: the agent claims each
+// request once under its id, so a reused id is a request never served.
+func TestEveryRequestCarriesAFreshId(t *testing.T) {
+	i, eng := headMoveFixture(t)
+	if _, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0); err != nil {
+		t.Fatalf("first re-run: %v", err)
+	}
+	if _, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0); err != nil {
+		t.Fatalf("second re-run: %v", err)
+	}
+	if _, err := i.handleMoveRunHead(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft", "version": float64(2)}, 0); err != nil {
+		t.Fatalf("head move: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, c := range eng.callsTo("updateWorkRun") {
+		rerun, _ := c.Args(t)["rerun"].(map[string]any)
+		id, _ := rerun["requestId"].(string)
+		if strings.TrimSpace(id) == "" || seen[id] {
+			t.Fatalf("request id %q is missing or reused among %v", id, seen)
+		}
+		seen[id] = true
+	}
+	if len(seen) != 3 {
+		t.Errorf("got %d requests, want 3", len(seen))
 	}
 }
 

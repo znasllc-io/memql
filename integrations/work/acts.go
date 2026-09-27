@@ -373,14 +373,25 @@ func newestFeedbackOn(observations []map[string]any, key string, version int) ma
 // ---------------------------------------------------------------------------
 
 // rerunRequest is run.rerun: what the agent that claims the run executes, and
-// on whose behalf. The request id is fresh per act, so a request served once
-// is distinguishable from the next one written over it.
-func rerunRequest(reason, stepKey string, o work.Override, snapshot *work.Snapshot, workspace, requestedBy string, at time.Time) map[string]any {
+// on whose behalf.
+//
+// THE REQUEST ID IS FRESH ON EVERY ACT, head moves included: the agent claims
+// each request once, under the run and this id, so a reused id is a request
+// never served (its claim is already spent) and a missing one is a request no
+// claim can name.
+//
+// THE VERSIONS ARE THE PLAN'S (component/work.PlanRerun): the version each
+// re-executed step runs as, one past the highest recorded. The executor takes
+// them from here rather than from the step rows, because after a head move
+// re-asserted an earlier version the newest row no longer carries the highest
+// number, and a version reused is an idempotency key reused.
+func rerunRequest(reason, stepKey string, o work.Override, versions map[string]int, snapshot *work.Snapshot, workspace, requestedBy string, at time.Time) map[string]any {
 	out := map[string]any{
 		"requestId":   id.NewShortId(),
 		"reason":      reason,
 		"stepKey":     stepKey,
 		"override":    o.Object(),
+		"versions":    versions,
 		"requestedBy": requestedBy,
 		"requestedAt": rfc(at),
 	}

@@ -65,12 +65,15 @@ func (a actsDB) query(t *testing.T, userId, q string) []map[string]any {
 	return memqlengine.MaterializeRows(res)
 }
 
-// openRun writes a run as its owner and returns its id.
+// openRun writes a goal and its run as their owner and returns the run's id.
+// The goal matters: only a goal's run is executed again on a person's word.
 func (a actsDB) openRun(t *testing.T, extra map[string]any) string {
 	t.Helper()
+	goalId := newRowId(goalConcept)
+	a.write(t, "createWorkGoal", map[string]any{"goalId": goalId, "statement": "Draft the weekly report", "origin": "user", "requestedVia": "nexus"})
 	runId := newRowId(runConcept)
 	args := map[string]any{
-		"runId": runId, "automationName": "weeklyReport", "templateFingerprint": "fp-weekly",
+		"runId": runId, "goalId": goalId, "automationName": "weeklyReport", "templateFingerprint": "fp-weekly",
 		"mode": modeLive, "status": runStatusRunning, "startedAt": rfc(time.Now()),
 	}
 	for k, v := range extra {
@@ -304,6 +307,9 @@ func TestARerunAndAVerdictLandOnTheirRows(t *testing.T) {
 	}
 	if g := rowMap(override, "guidance"); rowString(g, "reason") != "the totals are missing" {
 		t.Errorf("the stored override carries guidance %v", g)
+	}
+	if versions := rowMap(rerun, "versions"); rowInt(versions, "draft") != 2 || rowString(rerun, "requestId") == "" {
+		t.Errorf("run.rerun versions %v, request id %q", versions, rowString(rerun, "requestId"))
 	}
 	if stale := rowStringSlice(run, "staleSteps"); len(stale) != 1 || stale[0] != "draft" {
 		t.Errorf("run.staleSteps = %v", stale)

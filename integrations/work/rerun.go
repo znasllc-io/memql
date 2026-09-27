@@ -87,7 +87,7 @@ func (i *Integration) handleRerunStep(ctx context.Context, args map[string]any, 
 
 	now := i.clock().UTC()
 	fields := reopenFields(now)
-	fields["rerun"] = rerunRequest(rerunReasonRerun, stepKey, override, snapshot, workspace, requestedBy, now)
+	fields["rerun"] = rerunRequest(rerunReasonRerun, stepKey, override, plan.Versions, snapshot, workspace, requestedBy, now)
 	fields["staleSteps"] = plan.Stale
 	if err := i.store().updateRun(ownerActor(ctx, run.owner), run.id, fields); err != nil {
 		return nil, err

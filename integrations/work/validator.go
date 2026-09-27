@@ -179,7 +179,10 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 		anyCall = true
 		calledModel[rowString(c, "stepKey")] = true
 	}
-	answer, session := i.answerStep(ctx, owner, run, steps, calledModel)
+	answer, session, err := i.answerStep(ctx, owner, run, steps, calledModel)
+	if err != nil {
+		return nil, err
+	}
 	reached := anyCall || rowInt(rowMap(run, "spent"), "modelCalls") > 0 ||
 		(answer != nil && (session || rowString(answer, "stepType") == work.StepTypeAppAnswer))
 	if !reached {
@@ -326,7 +329,7 @@ func (i *Integration) feedbackPolicy(ctx context.Context) work.FeedbackPolicy {
 // top-level step, in the run's own order, that spent intelligence -- a
 // reasoning step, an app's answer, a step that made a model call, or a step
 // an app session answered. session reports the last of those.
-func (i *Integration) answerStep(ctx context.Context, owner string, run map[string]any, steps []map[string]any, calledModel map[string]bool) (map[string]any, bool) {
+func (i *Integration) answerStep(ctx context.Context, owner string, run map[string]any, steps []map[string]any, calledModel map[string]bool) (map[string]any, bool, error) {
 	order := topLevelOrder(rowStringSlice(run, "stepOrder"))
 	position := make(map[string]int, len(order))
 	for n, k := range order {
@@ -350,12 +353,15 @@ func (i *Integration) answerStep(ctx context.Context, owner string, run map[stri
 		}
 		intelligent := rowString(row, "kind") == "reasoning" ||
 			rowString(row, "stepType") == work.StepTypeAppAnswer || calledModel[key]
-		session := i.isSessionVersion(ctx, owner, row)
-		if intelligent || session {
+		recording, err := i.recordingOf(ctx, owner, row)
+		if err != nil {
+			return nil, false, err
+		}
+		if session := recording != ""; intelligent || session {
 			best, bestSession = row, session
 		}
 	}
-	return best, bestSession
+	return best, bestSession, nil
 }
 
 // answerDescription is what the step was asked for, as far as the run

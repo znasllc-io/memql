@@ -66,6 +66,17 @@ func (i *Integration) handleMoveRunHead(ctx context.Context, args map[string]any
 	if err != nil {
 		return nil, headRefusal(err)
 	}
+	// The re-run a stale step starts executes each stale step one past the
+	// highest version it has recorded -- decided from the versions just read,
+	// before any re-assertion writes a newest row carrying a LOWER number.
+	var rerunVersions map[string]int
+	if len(stale) > 0 {
+		plan, err := work.PlanRerun(run.order, versions.byKey, stale[0])
+		if err != nil {
+			return nil, headRefusal(err)
+		}
+		rerunVersions = plan.Versions
+	}
 
 	scoped := ownerActor(ctx, run.owner)
 	st := i.store()
@@ -100,7 +111,7 @@ func (i *Integration) handleMoveRunHead(ctx context.Context, args map[string]any
 		for k, v := range reopenFields(now) {
 			fields[k] = v
 		}
-		fields["rerun"] = rerunRequest(rerunReasonHeadMove, stale[0], work.Override{}, nil, "", trim(ac.UserId), now)
+		fields["rerun"] = rerunRequest(rerunReasonHeadMove, stale[0], work.Override{}, rerunVersions, nil, "", trim(ac.UserId), now)
 	}
 	if err := st.updateRun(scoped, run.id, fields); err != nil {
 		return nil, err

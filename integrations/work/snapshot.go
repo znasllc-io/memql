@@ -15,6 +15,11 @@ package work
 // decides what the rebuilt workspace holds and refuses a partial one, naming
 // the file.
 //
+// A READ THAT FAILS REFUSES THE ACT, it never shrinks the snapshot. A
+// recording that could not be read is a set of files the snapshot silently
+// lacks, which is exactly the divergence the refusal above exists to prevent;
+// the person can try again, and a snapshot that says it is whole must be.
+//
 // A version with no childRunId is not treated as a session step, even when it
 // was one: runs recorded before the delegate stamped the real step row carry
 // no back-pointer, and there is nothing to rebuild from. Such a step re-runs
@@ -40,9 +45,13 @@ import (
 // contributes the files its recording holds.
 func (i *Integration) sessionSnapshot(ctx context.Context, run actRun, versions runVersions, head work.Head, key string) (*work.Snapshot, error) {
 	resolve := i.versionResolver(ctx, run, versions)
-	target := resolve(key, head[key])
-	if target == nil || !i.isSessionVersion(ctx, run.owner, target) {
-		return nil, nil
+	target, err := resolve(key, head[key])
+	if err != nil {
+		return nil, err
+	}
+	session, err := i.recordingOf(ctx, run.owner, target)
+	if err != nil || session == "" {
+		return nil, err
 	}
 
 	var (
@@ -54,11 +63,18 @@ func (i *Integration) sessionSnapshot(ctx context.Context, run actRun, versions 
 		if k == key {
 			break
 		}
-		row := resolve(k, head[k])
-		if row == nil || !i.isSessionVersion(ctx, run.owner, row) {
+		row, err := resolve(k, head[k])
+		if err != nil {
+			return nil, err
+		}
+		recording, err := i.recordingOf(ctx, run.owner, row)
+		if err != nil {
+			return nil, err
+		}
+		if recording == "" {
 			continue
 		}
-		got, commands, err := i.recordedEffects(ctx, run.owner, rowString(row, "childRunId"), &order)
+		got, commands, err := i.recordedEffects(ctx, run.owner, recording, &order)
 		if err != nil {
 			return nil, err
 		}
@@ -76,42 +92,46 @@ func (i *Integration) sessionSnapshot(ctx context.Context, run actRun, versions 
 
 // versionResolver finds the row of the version a head entry names: in this
 // run's own versions, or -- for an entry naming another run -- in that run's,
-// read once and kept for the rest of the act.
-func (i *Integration) versionResolver(ctx context.Context, run actRun, own runVersions) func(key string, e work.HeadEntry) map[string]any {
+// read once and kept for the rest of the act. A version the head names and no
+// row holds answers nil.
+func (i *Integration) versionResolver(ctx context.Context, run actRun, own runVersions) func(key string, e work.HeadEntry) (map[string]any, error) {
 	others := map[string]runVersions{}
-	return func(key string, e work.HeadEntry) map[string]any {
+	return func(key string, e work.HeadEntry) (map[string]any, error) {
 		if e.Version <= 0 {
-			return nil
+			return nil, nil
 		}
 		if e.RunId == "" || bareRunId(e.RunId) == bareRunId(run.id) {
-			return own.row(key, e.Version)
+			return own.row(key, e.Version), nil
 		}
 		v, ok := others[e.RunId]
 		if !ok {
 			read, err := i.readVersions(ctx, e.RunId, nil)
 			if err != nil {
-				i.log().Warn("work: could not read the run a head entry points into; its version contributes nothing to the snapshot",
-					"component", "work.snapshot", "run", run.id, "points_into", e.RunId, "err", err)
+				return nil, fmt.Errorf("work: read run %s, which step %s of run %s is served from: %w", e.RunId, key, run.id, err)
 			}
 			v = read
 			others[e.RunId] = v
 		}
-		return v.row(key, e.Version)
+		return v.row(key, e.Version), nil
 	}
 }
 
-// isSessionVersion reports whether a step version handed its work to an app:
-// its childRunId names a recording run.
-func (i *Integration) isSessionVersion(ctx context.Context, owner string, row map[string]any) bool {
+// recordingOf is the recording run a step version handed its work to, or ""
+// when it handed nothing to an app: no childRunId, or a child that is some
+// other kind of subrun.
+func (i *Integration) recordingOf(ctx context.Context, owner string, row map[string]any) (string, error) {
 	child := rowString(row, "childRunId")
 	if child == "" {
-		return false
+		return "", nil
 	}
 	childRun, err := i.store().runForOwner(ownerActor(ctx, owner), child)
-	if err != nil || childRun == nil {
-		return false
+	if err != nil {
+		return "", fmt.Errorf("work: read the subrun %s a step handed its work to: %w", child, err)
 	}
-	return rowString(childRun, "automationName") == appSessionTemplate
+	if childRun == nil || rowString(childRun, "automationName") != appSessionTemplate {
+		return "", nil
+	}
+	return child, nil
 }
 
 // recordedEffects reads one recording's file effects, in action order, and
@@ -126,10 +146,8 @@ func (i *Integration) recordedEffects(ctx context.Context, owner, recordingRunId
 	scoped := ownerActor(ctx, owner)
 	observations, err := st.query(scoped, "query "+call("workObservationsForOwnerRun", map[string]any{"runId": recordingRunId}))
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("work: read the recording %s: %w", recordingRunId, err)
 	}
-	workspace := i.recordingWorkspace(ctx, owner, recordingRunId)
-
 	actions := make([]map[string]any, 0, len(observations))
 	for _, o := range observations {
 		if rowString(o, "kind") == observationKindToolResult {
@@ -145,6 +163,10 @@ func (i *Integration) recordedEffects(ctx context.Context, owner, recordingRunId
 		tb, _ := rowTime(actions[b], "createdAt")
 		return ta.Before(tb)
 	})
+	workspace, err := i.recordingWorkspace(ctx, owner, recordingRunId, actions)
+	if err != nil {
+		return nil, 0, err
+	}
 
 	var (
 		effects  []work.FileEffect
@@ -163,17 +185,17 @@ func (i *Integration) recordedEffects(ctx context.Context, owner, recordingRunId
 			if fileId == "" {
 				continue
 			}
-			p, label := i.contentPath(ctx, owner, fileId, len(refs), argPaths, data)
-			effect := work.FileEffect{Order: *order, FileId: fileId}
+			p, label, err := i.contentPath(ctx, owner, fileId, len(refs), argPaths, data)
+			if err != nil {
+				return nil, 0, err
+			}
+			effect := work.FileEffect{Order: *order, FileId: fileId, Path: work.WorkspaceRelative(workspace, p)}
 			if p == "" {
 				// A content the recording kept but cannot place: restoring it
 				// anywhere would be a guess, so it refuses like an omitted one,
 				// naming what the recording does know about it.
-				effect.Path = label
-				effect.FileId = ""
-				effect.Omitted = "the recording kept this content but not the path it belongs at"
-			} else {
-				effect.Path = work.WorkspaceRelative(workspace, p)
+				effect = work.FileEffect{Order: *order, Path: label,
+					Omitted: "the recording kept this content but not the path it belongs at"}
 			}
 			effects = append(effects, effect)
 			*order++
@@ -199,51 +221,51 @@ func (i *Integration) recordedEffects(ctx context.Context, owner, recordingRunId
 // one path and stored exactly one content the two are the same file, and
 // otherwise the row's base name picks among the action's paths. label is what
 // a refusal names when no path can be recovered.
-func (i *Integration) contentPath(ctx context.Context, owner, fileId string, contents int, argPaths []string, data map[string]any) (p, label string) {
+func (i *Integration) contentPath(ctx context.Context, owner, fileId string, contents int, argPaths []string, data map[string]any) (p, label string, err error) {
 	if contents == 1 && len(argPaths) == 1 {
-		return argPaths[0], argPaths[0]
+		return argPaths[0], argPaths[0], nil
 	}
-	name := i.libraryFileName(ctx, owner, fileId)
-	base, ok := workerservice.ContentBaseName(name, rowString(data, "sessionId"), rowString(data, "appActionId"))
+	row, err := one(i.store().query(ownerActor(ctx, owner), "query "+call("libraryFileById", map[string]any{"fileId": fileId})))
+	if err != nil {
+		return "", "", fmt.Errorf("work: read the recorded content %s: %w", fileId, err)
+	}
+	base, ok := workerservice.ContentBaseName(rowString(row, "name"), rowString(data, "sessionId"), rowString(data, "appActionId"))
 	if ok {
 		for _, candidate := range argPaths {
 			if path.Base(candidate) == base {
-				return candidate, candidate
+				return candidate, candidate, nil
 			}
 		}
 	}
 	if len(argPaths) == 1 {
-		return argPaths[0], argPaths[0]
+		return argPaths[0], argPaths[0], nil
 	}
 	if ok {
-		return "", base
+		return "", base, nil
 	}
-	return "", fileId
-}
-
-// libraryFileName is a stored content's Library row name under the owner's
-// actor; "" when the row is not readable.
-func (i *Integration) libraryFileName(ctx context.Context, owner, fileId string) string {
-	row, err := one(i.store().query(ownerActor(ctx, owner), "query "+call("libraryFileById", map[string]any{"fileId": fileId})))
-	if err != nil || row == nil {
-		return ""
-	}
-	return rowString(row, "name")
+	return "", fileId, nil
 }
 
 // recordingWorkspace is the directory a recorded session ran in: the
-// environment fingerprint its first action carried. Empty when nobody
-// measured it, and paths are then kept as the recording wrote them.
-func (i *Integration) recordingWorkspace(ctx context.Context, owner, recordingRunId string) string {
+// environment fingerprint its first action carried, or -- for a recording
+// made before fingerprints -- the working directory its first action
+// reported. Empty when neither was measured, and paths are then kept as the
+// recording wrote them.
+func (i *Integration) recordingWorkspace(ctx context.Context, owner, recordingRunId string, actions []map[string]any) (string, error) {
 	steps, err := i.store().query(ownerActor(ctx, owner), "query "+call("workStepsForOwnerRun", map[string]any{"runId": recordingRunId}))
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("work: read the recording %s's steps: %w", recordingRunId, err)
 	}
 	sort.SliceStable(steps, func(a, b int) bool { return rowInt(steps[a], "seq") < rowInt(steps[b], "seq") })
 	for _, s := range steps {
 		if cwd := rowString(rowMap(s, "fingerprint"), "cwd"); cwd != "" {
-			return cwd
+			return cwd, nil
 		}
 	}
-	return ""
+	for _, o := range actions {
+		if cwd := rowString(rowMap(o, "data"), "cwd"); cwd != "" {
+			return cwd, nil
+		}
+	}
+	return "", nil
 }

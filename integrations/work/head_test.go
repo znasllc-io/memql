@@ -108,6 +108,18 @@ func TestAHeadMoveReassertsTheChosenVersionAndMarksOnlyTheUnmatchedStale(t *test
 	if o, _ := rerun["override"].(map[string]any); len(o) != 0 {
 		t.Errorf("override = %v; after a head move the upstream is what changed, nobody's instructions", o)
 	}
+	// publish recorded v1 and a failed v2, so it runs again as v3 -- a number
+	// taken from every version read, not from the newest row, which the
+	// re-assertions have just made an EARLIER version.
+	if !reflect.DeepEqual(rerun["versions"], map[string]any{"publish": float64(3)}) {
+		t.Errorf("versions = %v, want publish at version 3", rerun["versions"])
+	}
+	if id, _ := rerun["requestId"].(string); id == "" {
+		t.Error("the head move's request carries no id")
+	}
+	if update["heartbeatAt"] != rfc(testNow) {
+		t.Errorf("heartbeatAt = %v; the write that flips the run to running stamps it", update["heartbeatAt"])
+	}
 
 	// The rows go first and the run last: the run's write is what can start
 	// the re-run, and the executor it starts reads the collapsed rows.
