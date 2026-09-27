@@ -17,6 +17,7 @@ import (
 	"github.com/znasllc-io/memql/component/language/deprecation"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // captureRun runs the CLI with args while capturing everything it writes to
@@ -1314,5 +1315,74 @@ func TestRun_AConceptThatDoesNotParseIsRefusedByBothPasses(t *testing.T) {
 		if !strings.Contains(all.String(), want) {
 			t.Errorf("the report does not carry %q; errors:\n%s", want, all.String())
 		}
+	}
+}
+
+// TestRun_AnAllowedRolesRewriteLintsCleanAtFirstBoot (memql#5438): what
+// `memqlmigrate --rewrite=allowed-roles` writes must load on a cluster whose
+// role catalog has not been seeded yet -- the ladder a first boot, and this
+// lint, validate a floor against.
+//
+// The rewrite writes @requiresRank at the list's lowest rung AS THE LIST SPELLS
+// IT, and a list may spell a rung by the catalog's own slug ("user", "viewer")
+// rather than by the alias the user row carries ("writer", "reader"). The
+// compiled ladder knew only the aliases, so a rewritten tree refused to load
+// with requires_rank_unknown: the deprecation window's migration channel wrote
+// a file the engine would not boot.
+func TestRun_AnAllowedRolesRewriteLintsCleanAtFirstBoot(t *testing.T) {
+	vocabulary, err := langparser.RoleVocabularyFromTree(memqldsl.Tree())
+	if err != nil {
+		t.Fatalf("reading the role vocabulary from the embedded tree: %v", err)
+	}
+	const tools = `use demo.queries.{ queryItems }
+
+@description("Members and up, spelled by the catalog's slug.")
+@allowedRoles("owner", "developer", "admin", "user")
+@handler(type="query", query="query queryItems(name: args.name)")
+tool memberTool {
+  name  string  @required @description("Item name.")
+}
+
+@description("Everyone on the ladder, spelled by the catalog's slugs.")
+@allowedRoles("owner", "developer", "admin", "user", "viewer")
+@handler(type="query", query="query queryItems(name: args.name)")
+tool viewerTool {
+  name  string  @required @description("Item name.")
+}
+
+@description("Members and up, spelled by the user row's alias.")
+@allowedRoles("owner", "developer", "admin", "writer")
+@handler(type="query", query="query queryItems(name: args.name)")
+tool writerTool {
+  name  string  @required @description("Item name.")
+}
+
+@description("An assistant agent's tool.")
+@allowedRoles("assistant")
+@handler(type="query", query="query queryItems(name: args.name)")
+tool assistantTool {
+  name  string  @required @description("Item name.")
+}`
+	rewritten, left := langparser.RewriteAllowedRoles(tools, vocabulary)
+	if len(left) != 0 {
+		t.Fatalf("the rewrite left %d use(s) as written: %+v", len(left), left)
+	}
+	for _, want := range []string{`@requiresRank("user")`, `@requiresRank("viewer")`, `@requiresRank("writer")`, `@requiresAgentRole("assistant")`} {
+		if !strings.Contains(rewritten, want) {
+			t.Fatalf("the rewrite did not write %s; it wrote:\n%s", want, rewritten)
+		}
+	}
+	if strings.Contains(rewritten, "@allowedRoles") {
+		t.Fatalf("the rewrite left an @allowedRoles behind:\n%s", rewritten)
+	}
+
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  testQueries,
+		"demo/tools.memql":    rewritten,
+	})
+	code, out := captureRun(t, []string{root})
+	if code != 0 || strings.Contains(out, "requires_rank_unknown") {
+		t.Fatalf("the rewritten tree does not lint clean (exit %d); a first boot would refuse it:\n%s", code, out)
 	}
 }

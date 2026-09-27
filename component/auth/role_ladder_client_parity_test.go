@@ -143,6 +143,20 @@ func TestEngineRankModelMatchesTheSeeds(t *testing.T) {
 		}
 	}
 
+	// EVERY NAME THE SEED GIVES A RUNG, slug and alias alike, ranks there
+	// through the MIRROR -- the answer a floor is validated against before the
+	// catalog is readable (a first boot, memqllint). The table above names the
+	// five legacy slugs; the mirror knowing only those ranked the seed's own
+	// "user" and "viewer" at 0, and @requiresRank("user") refused to load
+	// until the catalog it names had been seeded (memql#5438).
+	withoutCatalog(t)
+	for name, want := range seededNames(t) {
+		if got := RoleRank(Role(name)); got != want {
+			t.Errorf("with no catalog installed, auth.RoleRank(%q) = %d, but %s gives it rank %d -- "+
+				"a floor naming it would refuse to load on a first boot", name, got, rbacSeedPath, want)
+		}
+	}
+
 	// THE DECISION ITSELF, pinned as a statement rather than left implicit in
 	// the numbers: developer OUTRANKS admin. The table above would pass with
 	// both at any pair of values, including the shell's old ordering.
@@ -193,6 +207,50 @@ func seededRungs(t *testing.T) map[string]int {
 		out[slug[1]] = n
 	}
 	return out
+}
+
+var seedAliasesPattern = regexp.MustCompile(`aliases:\s*\[([^\]]*)\]`)
+var quotedPattern = regexp.MustCompile(`"([^"]+)"`)
+
+// seededNames is every name dsl/rbac/seeds.memql gives a rung -- each seeded
+// slug and each of its aliases -- mapped to that rung's rank.
+func seededNames(t *testing.T) map[string]int {
+	t.Helper()
+	src := readClientFile(t, rbacSeedPath)
+	out := map[string]int{}
+	for _, block := range seedRolePattern.FindAllStringSubmatch(src, -1) {
+		slug := seedSlugPattern.FindStringSubmatch(block[1])
+		rank := seedRankPattern.FindStringSubmatch(block[1])
+		if slug == nil || rank == nil {
+			continue
+		}
+		n, err := strconv.Atoi(rank[1])
+		if err != nil {
+			continue
+		}
+		out[slug[1]] = n
+		if aliases := seedAliasesPattern.FindStringSubmatch(block[1]); aliases != nil {
+			for _, alias := range quotedPattern.FindAllStringSubmatch(aliases[1], -1) {
+				out[alias[1]] = n
+			}
+		}
+	}
+	// A floor on the parse: the seed aliases writer and reader today, and a
+	// parse that found no alias would pass the loop above having checked none.
+	if _, ok := out["writer"]; !ok {
+		t.Fatalf("parsed no alias out of %s -- the seed's shape changed and this gate is "+
+			"comparing against nothing", rbacSeedPath)
+	}
+	return out
+}
+
+// withoutCatalog clears any installed capability catalog for the test, so a
+// rank is answered by the compiled mirror rather than by rows.
+func withoutCatalog(t *testing.T) {
+	t.Helper()
+	prior := InstalledCapabilityCatalog()
+	SetCapabilityCatalog(nil)
+	t.Cleanup(func() { SetCapabilityCatalog(prior) })
 }
 
 var fixtureRungPattern = regexp.MustCompile(`slug:\s*"([^"]+)"\s*,\s*name:\s*"[^"]*"\s*,\s*rank:\s*(\d+)`)
