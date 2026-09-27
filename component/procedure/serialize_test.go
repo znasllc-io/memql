@@ -328,3 +328,54 @@ func TestDigestIsTheSha256PrefixedHexOfItsBytes(t *testing.T) {
 		t.Fatalf("Digest(nil) = %q, want sha256: and 64 hex digits", got)
 	}
 }
+
+// TestDecodingIsStrictAboutWhatAnOlderReplicaCannotRead (E5): a stored
+// procedure is replayed by whichever replica serves the goal, and a replica
+// older than the writer must REFUSE what it cannot check rather than read it
+// as something close:
+//
+//   - a hole class it does not know -- read as nothing in particular, the
+//     hole would reach the replay as an unexplained guess;
+//   - an object whose keys are not sorted, or repeat -- Bind pairs keys
+//     positionally against Obj's sorted order, so either would bind one
+//     argument's value into another's position;
+//   - a precondition it does not know -- skipped, it would be a predicate the
+//     recordings needed and the replay never checked.
+func TestDecodingIsStrictAboutWhatAnOlderReplicaCannotRead(t *testing.T) {
+	for _, bad := range []string{
+		`{"steps":[],"holes":[{"id":"h","stepIndex":0,"path":[],"class":"guessed"}]}`,
+		`{"steps":[{"tool":"exec","args":{"kind":"object","keys":["b","a"],"kids":[{"kind":"lit"},{"kind":"lit"}]}}],"holes":[]}`,
+		`{"steps":[{"tool":"exec","args":{"kind":"object","keys":["a","a"],"kids":[{"kind":"lit"},{"kind":"lit"}]}}],"holes":[]}`,
+	} {
+		if _, err := UnmarshalTemplate([]byte(bad)); err == nil {
+			t.Errorf("UnmarshalTemplate accepted %s", bad)
+		}
+	}
+	for _, class := range []HoleClass{"", HoleDataFlow, HoleConstant, HoleFree, HoleUnexplained} {
+		b, err := MarshalTemplate(Template{Holes: []Hole{{Id: "h", Class: class}}})
+		if err != nil {
+			t.Fatalf("class %q: %v", class, err)
+		}
+		if _, err := UnmarshalTemplate(b); err != nil {
+			t.Errorf("class %q does not round-trip: %v", class, err)
+		}
+	}
+	if _, err := MarshalTemplate(Template{Holes: []Hole{{Id: "h", Class: "guessed"}}}); err == nil {
+		t.Error("MarshalTemplate accepted an unknown hole class")
+	}
+	unsorted := &Node{Kind: KindObject, Keys: []string{"b", "a"}, Kids: []*Node{Lit("1"), Lit("2")}}
+	if _, err := json.Marshal(unsorted); err == nil {
+		t.Error("MarshalJSON accepted an object whose keys are not sorted")
+	}
+
+	var p Preconditions
+	if err := json.Unmarshal([]byte(`{"tools":{"node":"22.1.0"},"kernel":{"min":"6.1"}}`), &p); err == nil {
+		t.Error("a precondition this replica cannot check was skipped rather than refused")
+	}
+	if err := json.Unmarshal([]byte(`{"platform":{"os":"darwin"},"tools":{"node":"22.1.0"},"variables":{"PATH":"unset"},"emptyWorkspace":true}`), &p); err != nil {
+		t.Fatalf("every known predicate must still decode: %v", err)
+	}
+	if p.Tools["node"] != "22.1.0" || p.EmptyWorkspace == nil || !*p.EmptyWorkspace {
+		t.Fatalf("decoded %+v", p)
+	}
+}

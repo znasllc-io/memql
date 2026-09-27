@@ -1,7 +1,9 @@
 package procedure
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"regexp"
 	"sort"
@@ -29,6 +31,27 @@ type Preconditions struct {
 	Tools          map[string]string `json:"tools,omitempty"`          // name -> version (only tools the procedure's exec steps invoke)
 	Variables      map[string]string `json:"variables,omitempty"`      // name -> VariableUnset | digest
 	EmptyWorkspace *bool             `json:"emptyWorkspace,omitempty"` // every recorded start had cwdEntries == 0
+}
+
+// preconditionFields is Preconditions without its methods, so decoding it does
+// not recurse.
+type preconditionFields Preconditions
+
+// UnmarshalJSON decodes a stored initiation set and REFUSES a field it does
+// not know. A predicate is something every recorded start agreed on, and a
+// replica older than the writer that SKIPPED one -- a kernel version, say, a
+// later cockpit learned to fingerprint -- would start a replay the recordings
+// never showed could succeed. Refused, the replay does not start; the goal
+// goes to the app, which is the direction a missing check must fail in.
+func (p *Preconditions) UnmarshalJSON(b []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var f preconditionFields
+	if err := dec.Decode(&f); err != nil {
+		return fmt.Errorf("procedure: decoding preconditions: %w", err)
+	}
+	*p = Preconditions(f)
+	return nil
 }
 
 // VariableUnset is a variable's value in Preconditions when it was not set.

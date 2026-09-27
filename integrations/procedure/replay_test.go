@@ -602,3 +602,30 @@ func TestACallThatDoesNotReadBackAsItsStepIsRefusedBeforeDispatch(t *testing.T) 
 		t.Fatalf("the control did not serve, so the refusal above proves nothing: %+v", ok)
 	}
 }
+
+// TestAStoredPreconditionThisReplicaCannotCheckRefusesTheReplay (E5): the
+// stored initiation set is read through DecodePreconditions, and a predicate
+// a newer writer learned -- one this replica has no check for -- refuses the
+// replay rather than being skipped. Skipped, the replay would start on
+// evidence the recordings never gave; refused, nothing is dispatched.
+func TestAStoredPreconditionThisReplicaCannotCheckRefusesTheReplay(t *testing.T) {
+	w := newReplayWorld(t, "trusted")
+	prec, _ := w.lc.get("preconditions").(map[string]any)
+	prec = copyRow(t, prec)
+	prec["kernel"] = map[string]any{"min": "6.1"}
+	w.lc.set("preconditions", prec)
+
+	_, err := w.i.Replay(context.Background(), ReplayRequest{
+		OwnerUserId: replayOwner, ConstructId: w.constructId, Mode: ReplayTrusted, GoalRunId: goalRunId,
+		Input: map[string]any{"file": goalFile},
+	})
+	if err == nil || !strings.Contains(err.Error(), "kernel") {
+		t.Fatalf("Replay = %v, want a refusal naming the predicate it cannot check", err)
+	}
+	if len(w.d.recorded()) != 0 {
+		t.Fatalf("a replay with an uncheckable precondition dispatched %v", dispatchedKeys(w.d.recorded()))
+	}
+	if _, err := DecodePreconditions(map[string]any{"tools": map[string]any{"mkdir": "9.4"}}); err != nil {
+		t.Fatalf("the control: a known predicate must still decode: %v", err)
+	}
+}

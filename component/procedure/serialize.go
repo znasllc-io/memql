@@ -198,6 +198,11 @@ func (n Node) check() error {
 		return fmt.Errorf("procedure: an array node carries keys")
 	case n.Kind == KindObject && len(n.Keys) != len(n.Kids):
 		return fmt.Errorf("procedure: an object node has %d keys and %d values", len(n.Keys), len(n.Kids))
+	case n.Kind == KindObject && !strictlySorted(n.Keys):
+		// Bind pairs an object's keys positionally against Obj's sorted
+		// order, so keys out of order or repeated would bind one argument's
+		// value into another's place.
+		return fmt.Errorf("procedure: an object node's keys %q are not sorted and distinct", n.Keys)
 	case n.Kind != KindLit && n.Raw != "":
 		return fmt.Errorf("procedure: a %s node carries a spelling", kindNames[n.Kind])
 	case n.Seps != nil && !(n.Kind == KindArray && n.Form == FormArgv):
@@ -219,6 +224,49 @@ func (n Node) check() error {
 			return fmt.Errorf("procedure: argument %d is spelled %q, which does not read back as its value %q", i, k.Raw, k.Lit)
 		}
 	}
+	return nil
+}
+
+// strictlySorted reports that keys are in increasing order with no repeat.
+func strictlySorted(keys []string) bool {
+	for i := 1; i < len(keys); i++ {
+		if keys[i-1] >= keys[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// --- Hole -------------------------------------------------------------------
+
+// knownHoleClasses are D13's answers, and "" -- a position Generalize opened
+// that Classify has not answered yet.
+var knownHoleClasses = map[HoleClass]bool{"": true, HoleDataFlow: true, HoleConstant: true, HoleFree: true, HoleUnexplained: true}
+
+// holeFields is Hole without its methods, so encoding it does not recurse.
+type holeFields Hole
+
+// MarshalJSON encodes one hole after checking its class.
+func (h Hole) MarshalJSON() ([]byte, error) {
+	if !knownHoleClasses[h.Class] {
+		return nil, fmt.Errorf("procedure: hole %s has an unknown class %q", h.Id, h.Class)
+	}
+	return json.Marshal(holeFields(h))
+}
+
+// UnmarshalJSON decodes one hole and REFUSES a class this code does not know.
+// Read as nothing in particular, it would reach a replay as a parameter bound
+// from wherever the default branch looks, and a class a newer writer added is
+// one whose meaning this replica cannot honour.
+func (h *Hole) UnmarshalJSON(b []byte) error {
+	var f holeFields
+	if err := json.Unmarshal(b, &f); err != nil {
+		return err
+	}
+	if !knownHoleClasses[f.Class] {
+		return fmt.Errorf("procedure: hole %s has an unknown class %q", f.Id, f.Class)
+	}
+	*h = Hole(f)
 	return nil
 }
 
