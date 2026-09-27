@@ -240,7 +240,9 @@ func TestADecomposedGoalWhoseSectionsAreAllCataloguedSpendsOnlyTheTriageCall(t *
 // control of the headline above: the same goal with nothing catalogued plans
 // both sections live, keeps the assembly turn, and still spends only the
 // triage call at COMPILE -- the live sections are spent when the run
-// executes, not counted here as if they had been.
+// executes, not counted here as if they had been. Each live section is an
+// automation of its own holding its one agent turn; the template's own turn
+// is the assembly.
 func TestADecomposedGoalWithALiveSectionSpendsItAtRunTime(t *testing.T) {
 	req, triage, _ := invoiceGoal()
 	eng := newSectionCatalogEngine(triage)
@@ -252,8 +254,22 @@ func TestADecomposedGoalWithALiveSectionSpendsItAtRunTime(t *testing.T) {
 		t.Fatalf("outcome = %+v", out)
 	}
 	src := persistedSource(t, eng.countingCompileEngine, workDraftHeadline(req))
-	if strings.Count(src, "builtin runAgentTurn(") != 3 || !strings.Contains(src, "assemble := ") {
-		t.Fatalf("two live sections and the assembly must each be an agent turn:\n%s", src)
+	if strings.Count(src, "builtin runAgentTurn(") != 1 || !strings.Contains(src, "assemble := ") {
+		t.Fatalf("the assembly must be the template's one agent turn:\n%s", src)
+	}
+	if len(out.LiveSections) != 2 {
+		t.Fatalf("LiveSections = %+v, want both sections", out.LiveSections)
+	}
+	for _, ls := range out.LiveSections {
+		if ls.Automation == "" {
+			t.Fatalf("section %s stayed inline: %s", ls.Section, ls.Inline)
+		}
+		if !strings.Contains(src, "automation "+ls.Automation+"(") {
+			t.Errorf("the template does not call %s:\n%s", ls.Automation, src)
+		}
+		if n := strings.Count(persistedSource(t, eng.countingCompileEngine, ls.Automation), "builtin runAgentTurn("); n != 1 {
+			t.Errorf("%s holds %d agent turns, want its one", ls.Automation, n)
+		}
 	}
 }
 
@@ -363,10 +379,12 @@ func (a *automationCalls) TriggerAutomationWithArgs(_ context.Context, name stri
 // TestSectionsBindTheirInputsFromTheGoal: a catalogued section's call binds
 // each input by name -- from the goal's input, or from the earlier section
 // that produced it -- and the bound value, not its expression, reaches the
-// automation when the draft RUNS. A live section that reads an earlier
-// section's output is handed it in its prompt. And a catalogued section one
-// of whose inputs nothing binds is planned live: a call without its input
-// would answer a different question.
+// automation when the draft RUNS. A live section written as an automation of
+// its own is called the same way, and told the goal it serves. And a
+// catalogued section one of whose inputs nothing binds is planned live, and
+// -- since no automation could be called with that input either -- stays an
+// inline turn that is handed the earlier section's output in its prompt: a
+// call without its input would answer a different question.
 func TestSectionsBindTheirInputsFromTheGoal(t *testing.T) {
 	req, triage, sections := invoiceGoal()
 	// A third section reads the summary, and has a catalogued automation
@@ -395,6 +413,14 @@ func TestSectionsBindTheirInputsFromTheGoal(t *testing.T) {
 	if strings.Contains(src, "automation archiveSummary(") {
 		t.Fatalf("a section whose input nothing binds was served from the catalog:\n%s", src)
 	}
+	if len(out.LiveSections) != 2 || out.LiveSections[0].Automation == "" || out.LiveSections[1].Automation != "" ||
+		!strings.Contains(out.LiveSections[1].Inline, `"region"`) {
+		t.Fatalf("LiveSections = %+v, want notify as an automation and archive inline, naming the input nothing binds", out.LiveSections)
+	}
+	notifyAuto := out.LiveSections[0].Automation
+	if !strings.Contains(persistedSource(t, eng.countingCompileEngine, notifyAuto), "It is finished when: the email to finance was sent") {
+		t.Fatalf("the live section with an effect is not told how its end is checked:\n%s", persistedSource(t, eng.countingCompileEngine, notifyAuto))
+	}
 
 	// Run the draft as the executing node would: the goal's input as the
 	// trigger payload, the automation calls through the real step executor.
@@ -411,16 +437,21 @@ func TestSectionsBindTheirInputsFromTheGoal(t *testing.T) {
 	if err != nil || exec.Status != "completed" {
 		t.Fatalf("run the draft: %v (%+v)\n%s", err, exec, src)
 	}
-	if len(subs.names) != 1 || subs.names[0] != "summariseInvoices" || subs.calls[0]["month"] != "2026-08" {
-		t.Fatalf("automation calls = %v %v, want summariseInvoices with the goal's month", subs.names, subs.calls)
+	if len(subs.names) != 2 || subs.names[0] != "summariseInvoices" || subs.calls[0]["month"] != "2026-08" || subs.names[1] != notifyAuto {
+		t.Fatalf("automation calls = %v %v, want summariseInvoices with the goal's month, then %s", subs.names, subs.calls, notifyAuto)
 	}
-	notify, _ := turns.args[headline+"_notify"]["prompt"].(string)
-	if !strings.Contains(notify, "Results of earlier sections (JSON):") || !strings.Contains(notify, `"invoiceSummary"`) ||
-		!strings.Contains(notify, "exec-summariseInvoices") {
-		t.Fatalf("the live section that reads the summary was not handed it:\n%s", notify)
+	// automationCalls answers with no returned value, so the summary section
+	// binds its run summary -- which is what the notify automation is handed.
+	if summary, _ := subs.calls[1]["invoiceSummary"].(map[string]any); summary == nil || summary["executionId"] != "exec-summariseInvoices" {
+		t.Fatalf("the notify automation was not handed the summary section's value: %v", subs.calls[1])
 	}
-	if !strings.Contains(notify, "It is finished when: the email to finance was sent") {
-		t.Fatalf("the live section with an effect was not told how its end is checked:\n%s", notify)
+	if subs.calls[1][sectionGoalArg] != req.Statement {
+		t.Fatalf("the notify automation was told the goal %v, want %q", subs.calls[1][sectionGoalArg], req.Statement)
+	}
+	archive, _ := turns.args[headline+"_archive"]["prompt"].(string)
+	if !strings.Contains(archive, "Results of earlier sections (JSON):") || !strings.Contains(archive, `"invoiceSummary"`) ||
+		!strings.Contains(archive, "exec-summariseInvoices") {
+		t.Fatalf("the inline section that reads the summary was not handed it:\n%s", archive)
 	}
 }
 
@@ -609,8 +640,13 @@ func TestACataloguedSectionThatCannotTravelIsPlannedLive(t *testing.T) {
 		}
 	}
 	src := persistedSource(t, eng.countingCompileEngine, workDraftHeadline(req))
-	if strings.Contains(src, "automation summariseInvoices(") || strings.Count(src, "builtin runAgentTurn(") != 3 {
-		t.Fatalf("the redrafted goal must plan both sections live:\n%s", src)
+	if strings.Contains(src, "automation summariseInvoices(") || len(out.LiveSections) != 2 {
+		t.Fatalf("the redrafted goal must plan both sections live (%+v):\n%s", out.LiveSections, src)
+	}
+	for _, ls := range out.LiveSections {
+		if ls.Automation == "" || !strings.Contains(src, "automation "+ls.Automation+"(") {
+			t.Fatalf("live section %+v is not called as an automation of its own:\n%s", ls, src)
+		}
 	}
 	bundles := 0
 	for _, q := range eng.queries {

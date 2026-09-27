@@ -117,6 +117,24 @@ builtin setConstructReuse {
   label        enum("reusable", "goalSpecific", "accountSpecific", "evidence")!  @description("The person's label; evidence clears the override and follows the sweep's label again.")
 }
 
+/// Catalogue a succeeded goal run's sections that were worked out live (design D24: decomposition
+/// spends intelligence once). Compile writes every section it plans live as an automation of its own
+/// in the run's draft, named by the section's signature; this writes each one whose current version
+/// stands -- not re-run with a person's override, not disliked, in a run neither stale nor disliked --
+/// into its owner's catalog as a construct of its own, keyed by that signature, so the next goal
+/// whose section asks for the same thing is served it instead of planning it live. An
+/// already-catalogued section writes nothing. Returns {runId, catalogued, skipped, notCatalogued}.
+///
+/// Gated in its handler: only the catalogSucceededSections automation, under internal origin, may
+/// call it, and every read and write runs as the owner its completion event names -- re-verified by
+/// an owner-filtered read of the run. A catalogued signature is served to a later goal without
+/// planning, which is an equivalence no caller may assert.
+@executor("integration.procedure.catalogSections")
+builtin procedureCatalogSections {
+  runId        string!  @description("The v1:work:run that just succeeded.")
+  ownerUserId  string   @description("The owner the completion event carries. Only the trusted completion trigger may supply it, and an owner who does not own the run reads nothing.")
+}
+
 /// Decide every construct's reuse label from the evidence (design D24): for each owner, the distinct
 /// goal signatures and account ties of the runs that used each construct -- as their compiled
 /// template, as the learned procedure a replay served, or as an automation step inside another

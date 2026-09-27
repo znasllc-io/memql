@@ -95,6 +95,12 @@ type CompileOutcome struct {
 	// catalogued automation, or planned live -- as the draft has them. Empty
 	// for a goal that was not decomposed.
 	Sections []work.SectionDecision
+	// LiveSections is how the draft wrote each section planned live, in its
+	// order: as an automation of its own, which a succeeded run catalogues
+	// for the next goal (D24), or inline in the template, with why
+	// (work_compile_section_automations.go). Empty for a goal that was not
+	// decomposed.
+	LiveSections []LiveSection
 }
 
 // replayProcedureAutomation is the embedded template a learned procedure is
@@ -265,6 +271,16 @@ func (l *PlannerAgentLoop) finishCompile(ctx context.Context, req CompileRequest
 			}
 			persisted, err = l.reasoningDraft(ctx, req, out, sandbox, sectionable)
 		}
+		if err != nil && sectionable.cutsSectionAutomations(req) {
+			// A SECTION AUTOMATION THAT DOES NOT PERSIST IS WRITTEN INLINE,
+			// never a failed goal -- the same answer the catalog fallback
+			// gives, one level down. The draft is written again with every
+			// live section an agent turn of the template, as it was before
+			// sections became automations, and the outcome says why for each.
+			l.warnCompile("work compile: the draft with its live sections as automations did not persist; every live section is written inline", req, err)
+			sectionable.inlineAll = "the draft that wrote it as an automation of its own did not persist: " + err.Error()
+			persisted, err = l.reasoningDraft(ctx, req, out, sandbox, sectionable)
+		}
 		return persisted, err
 	case work.RouteAuthor:
 		if sandbox == nil {
@@ -317,6 +333,13 @@ func (l *PlannerAgentLoop) reasoningDraft(ctx context.Context, req CompileReques
 	bundle, err := synthesizeWorkReasoningBundle(req, agentId, dec)
 	if err != nil {
 		return out, err
+	}
+	out.LiveSections = dec.liveSectionOutcome(req)
+	for _, ls := range out.LiveSections {
+		// The fallback that inlined every section said so once already.
+		if ls.Inline != "" && dec.inlineAll == "" {
+			l.infoCompile("work compile: a live section stays inline in the template", req, "section", ls.Section, "reason", ls.Inline)
+		}
 	}
 	return l.persistWorkDraft(ctx, req, out, bundle, sandbox)
 }
@@ -410,6 +433,15 @@ func (l *PlannerAgentLoop) cataloguedForSignature(ctx context.Context, ownerUser
 			l.warnCompile("work compile: dropping a catalogued row whose goalSignature does not match the query's argument",
 				CompileRequest{OwnerUserId: ownerUserId},
 				fmt.Errorf("row %s carries %q, asked for %q", getString(r, "id"), got, signature))
+			continue
+		}
+		// A CATALOGUED SECTION ANSWERS A SECTION, NOT A GOAL (D24). A goal
+		// whose statement and inputs normalize to a section's purpose and
+		// inputs shares its signature, and served whole it would run as its
+		// template an automation whose bundle holds nothing but it and was
+		// never any run's draft -- which the executing node refuses, failing
+		// the goal. The section tier serves it; this tier passes it over.
+		if strings.HasPrefix(getString(r, "catalogKey"), SectionCatalogKeyPrefix) {
 			continue
 		}
 		out = append(out, work.CatalogCandidate{

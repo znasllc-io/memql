@@ -199,9 +199,11 @@ func TestCompileSectionsDB_ACataloguedSectionRunsFromTheDraft(t *testing.T) {
 	if got := trigger.args["summariseInvoices"]["month"]; got != "2026-08" {
 		t.Fatalf("summariseInvoices got month %v, want the goal's", got)
 	}
-	summary, _ := trigger.args["countInvoiceLines"]["invoiceSummary"].(map[string]any)
-	if summary == nil || summary["automation"] != "summariseInvoices" {
-		t.Fatalf("countInvoiceLines was not handed the summary section's value: %v", trigger.args["countInvoiceLines"])
+	// What the summary section RETURNED -- catalogSource returns its
+	// arguments -- not a note that it ran.
+	summary, _ := trigger.args["countInvoiceLines"]["invoiceSummary"].([]any)
+	if len(summary) != 1 || summary[0] != "2026-08" {
+		t.Fatalf("countInvoiceLines was not handed what the summary section returned: %v", trigger.args["countInvoiceLines"])
 	}
 
 	// And those calls are the reuse sweep's evidence: automation steps of

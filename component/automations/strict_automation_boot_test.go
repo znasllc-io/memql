@@ -184,7 +184,12 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // a person looks (design D22), and sweepConstructReuse decides every
 // construct's reuse label from the evidence (D24). Two added, none removed;
 // measured by the strict loader on this tree.
-const shippedAutomationCount = 73
+//
+// 73 -> 74 in the same epic (#5418): catalogSucceededSections catalogues the
+// sections a succeeded goal run worked out live, so the next goal asking for
+// the same section is served it instead of planning it again (D24). One
+// added, none removed; measured by the strict loader on this tree.
+const shippedAutomationCount = 74
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
