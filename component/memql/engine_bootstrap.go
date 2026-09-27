@@ -556,11 +556,25 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 			Name:      "requiresRank",
 			Phase:     "contract-gate:requiresRank",
 			Err:       problem.Error(),
+			Code:      baseloader.RuleCode(problem),
 		})
 		if e.Component != nil && e.Logger != nil {
 			e.Logger.Error("@requiresRank names an unknown role",
 				"component", "memql.engine",
 				"detail", problem.Error())
+		}
+	}
+
+	// A tool's two gates (memql#5438), checked here beside the function floors
+	// because the rank half IS the check above, applied to a tool:
+	// @requiresAgentRole against the v1:agents:agent role enum this load built,
+	// @requiresRank against the same ladder. See tool_gate_load.go.
+	for _, problem := range e.recordToolGateProblems(context.Background(), report, e.tools, concepts, rawTree) {
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("a tool gate names a value nothing can hold",
+				"component", "memql.engine",
+				"tool", problem.tool,
+				"detail", problem.err.Error())
 		}
 	}
 

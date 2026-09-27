@@ -1,0 +1,6 @@
+/// Open a support ticket; meant for owners, written on the agent axis.
+@handler(type="function", name="openTicketRequiresAgentRole")
+@requiresAgentRole("owner")
+tool openSupportTicketPersonRole {
+  title  string!  @description("The ticket's one-line title.")
+}

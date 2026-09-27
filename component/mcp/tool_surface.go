@@ -38,6 +38,10 @@ type ToolLister interface {
 // a validated session construct into the engine's durable/shared registries.
 type Engine interface {
 	Tools() ToolLister
+	// ToolListed answers whether the caller on ctx may be offered a tool: the
+	// same gates a call is judged by (component/memql/tool_gate.go), so
+	// tools/list never offers a tool tools/call would refuse (memql#5438).
+	ToolListed(ctx context.Context, t *memql.Tool) bool
 	ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error)
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 	ExecuteAuthored(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
@@ -156,12 +160,18 @@ func mcpSessionFromContext(ctx context.Context) mcpSession {
 func (s mcpSession) available() bool { return s.registry != nil && s.owner != "" }
 
 // listMCPTools reflects the engine's DSL tools 1:1 into MCP tool descriptors,
-// filtered by the acting role's per-tool gate, then appends the meta-tools.
-// Client-execution tools (browser-driven, e.g. the ui* operator primitives)
-// are skipped: they cannot run server-side over MCP. The tier-gated `define`
-// (Tier 2) and `query` (Tier 3) tools are listed only when BOTH the deployment
-// tier (Gate A) and the acting role (Gate B) permit them.
-func listMCPTools(eng Engine, role string, tier Tier, appSessionId string) []map[string]any {
+// filtered by each tool's gates for the person this session is (Gate B), then
+// appends the meta-tools. The tier-gated `define` (Tier 2) and `query` (Tier 3)
+// tools are listed only when BOTH the deployment tier (Gate A) and the acting
+// role (Gate B) permit them.
+//
+// ctx carries the session's actor (Server.withActorEnvelope); role is the
+// person's cluster role. The caller is a PERSON over MCP, never an agent
+// (memql#5438): a tool carrying @requiresAgentRole is not listed, one carrying
+// @requiresRank is listed only at the person's rank, and the deprecated
+// @allowedRoles is compared with role exactly as it always was.
+func listMCPTools(ctx context.Context, eng Engine, role string, tier Tier, appSessionId string) []map[string]any {
+	ctx = memql.WithMCPHumanCaller(ctx, role)
 	out := make([]map[string]any, 0)
 	if eng != nil {
 		if reg := eng.Tools(); reg != nil {
@@ -189,7 +199,7 @@ func listMCPTools(eng Engine, role string, tier Tier, appSessionId string) []map
 				if curated && !t.MCPExposed {
 					continue
 				}
-				if !t.IsAllowedForRole(role) {
+				if !eng.ToolListed(ctx, t) {
 					continue
 				}
 				if m := memql.ToolDefinitionToMCP(t); m != nil {
@@ -315,10 +325,12 @@ func metaToolDefs() []map[string]any {
 }
 
 // callMCPTool dispatches a tools/call. name is either a reflected DSL tool
-// (executed by name -- ExecuteTool enforces the per-tool role gate internally)
-// or a meta-tool. It returns an MCP tools/call result object (content + isError)
+// (executed by name -- ExecuteTool enforces the tool's gates internally) or a
+// meta-tool. It returns an MCP tools/call result object (content + isError)
 // -- tool failures are reported as isError results, not protocol errors, per the
-// MCP convention. The acting role is threaded onto the context for the gate.
+// MCP convention. The caller is threaded onto the context for the gates as a
+// PERSON over MCP (memql#5438): role is their cluster role, never stamped as an
+// acting agent's.
 func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, appSessionId, name string, args map[string]any) map[string]any {
 	if eng == nil {
 		return errorResult("mcp tool surface unavailable: engine not connected")
@@ -349,14 +361,19 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, appSes
 	// THE RECORDING CONTEXT IS BOUND HERE, before the derivations below. A
 	// deferred closure captures the VARIABLE, so writing `ctx` would hand the
 	// recorder whatever `ctx` had become by the time the tool returned --
-	// carrying the acting-agent role, the strict-unknown-args mark and the
+	// carrying the MCP caller mark, the strict-unknown-args mark and the
 	// MCP-tool-execution mark, none of which belong on a write this package
 	// is not making on the caller's behalf. Harmless today and the kind of
 	// coupling that is only ever noticed once it breaks something.
 	recordCtx := ctx
 	result := errorResult("mcp tool surface: the tool returned nothing")
 	defer func() { recordAppSessionToolCall(recordCtx, appSessionId, name, args, result) }()
-	ctx = memql.WithActingAgentRole(ctx, role)
+	// A PERSON over MCP (memql#5438). This used to be WithActingAgentRole(ctx,
+	// role): the person's cluster role stamped as if it were an agent's, which
+	// is how dsl/forge came to gate on human roles through the same
+	// @allowedRoles the agents' tools gate agent kinds with. ExecuteTool admits
+	// a person over MCP only with an authenticated identity on ctx.
+	ctx = memql.WithMCPHumanCaller(ctx, role)
 	// Reject unknown mutation args at the MCP boundary instead of silently
 	// dropping them (memql#1633). Scoped to MCP calls so internal engine
 	// callers stay lenient; mirrors the unknown-tool rejection (memql#1602).
@@ -795,6 +812,7 @@ type engineAdapter struct{ c concreteEngine }
 // concreteEngine is the method set of *memql.MemQLEngine the surface uses.
 type concreteEngine interface {
 	Tools() *memql.ToolRegistry
+	ToolListed(ctx context.Context, t *memql.Tool) bool
 	ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error)
 	Execute(ctx context.Context, query string) (*memql.ExecuteResult, error)
 	ExecuteAuthored(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
@@ -807,7 +825,16 @@ type concreteEngine interface {
 	MCPPromotedFunctionKind(name string) (string, bool)
 }
 
+// The deployed MCP node hands asEngine a *memql.MemQLEngine, and asEngine
+// answers nil for a handle missing any method of concreteEngine -- which
+// would serve an EMPTY tool surface with no error anywhere. A method added to
+// the interface and not to the engine must fail the build instead.
+var _ concreteEngine = (*memql.MemQLEngine)(nil)
+
 func (a engineAdapter) Tools() ToolLister { return a.c.Tools() }
+func (a engineAdapter) ToolListed(ctx context.Context, t *memql.Tool) bool {
+	return a.c.ToolListed(ctx, t)
+}
 func (a engineAdapter) ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error) {
 	return a.c.ExecuteToolByName(ctx, name, args)
 }

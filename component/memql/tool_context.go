@@ -14,11 +14,14 @@ import (
 
 type actingAgentRoleKey struct{}
 type actingAgentIdKey struct{}
+type mcpHumanCallerKey struct{}
 
 // WithActingAgentRole returns a child context that carries the acting
-// agent's guardrail role (e.g. "assistant" or "specialist"). ExecuteTool
-// reads it to enforce Tool.AllowedRoles on the in-engine
-// ExecuteToolByName path as well as on a CallToolMsg with wire metadata.
+// agent's guardrail role (its v1:agents:agent.role: "assistant" or
+// "specialist"). It is what makes a call an AGENT's (ToolCaller): ExecuteTool
+// reads it to enforce @requiresAgentRole and the deprecated @allowedRoles on
+// the in-engine ExecuteToolByName path as well as on a CallToolMsg with wire
+// metadata.
 func WithActingAgentRole(ctx context.Context, role string) context.Context {
 	role = strings.TrimSpace(role)
 	if role == "" {
@@ -29,7 +32,8 @@ func WithActingAgentRole(ctx context.Context, role string) context.Context {
 
 // ActingAgentRoleFromContext returns the role previously attached via
 // WithActingAgentRole, or "" if none was set. Absence means there is no
-// acting agent, which ExecuteTool treats as "not a tool caller".
+// acting agent: the call is a person's over MCP (WithMCPHumanCaller) or no
+// tool caller at all.
 func ActingAgentRoleFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -38,6 +42,74 @@ func ActingAgentRoleFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// ToolCallerKind is WHO is calling a tool, which decides which of its gates
+// can admit the call (memql#5438). There are exactly two kinds of tool
+// caller, and the context says which -- a tool call is never inferred from a
+// role string's spelling:
+//
+//   - ToolCallerAgent: an agent's tool loop, stamped with the acting agent's
+//     role by WithActingAgentRole. @requiresAgentRole is judged against that
+//     role; @requiresRank against the person the agent acts for.
+//   - ToolCallerMCPHuman: a person calling over MCP, stamped by
+//     WithMCPHumanCaller. A person is not an agent kind, so @requiresAgentRole
+//     refuses them; @requiresRank is judged against their own rank.
+//
+// Before the two kinds existed the MCP surface stamped the person's cluster
+// role as if it were an agent role, which is how one @allowedRoles list came
+// to gate agent kinds on some tools and human roles on others.
+type ToolCallerKind string
+
+const (
+	// ToolCallerNone is a context carrying neither stamp: not a tool caller.
+	ToolCallerNone ToolCallerKind = ""
+	// ToolCallerAgent is an agent's tool loop.
+	ToolCallerAgent ToolCallerKind = "agent"
+	// ToolCallerMCPHuman is an authenticated person calling over MCP.
+	ToolCallerMCPHuman ToolCallerKind = "mcp_human"
+)
+
+// ToolCaller is the caller a tool gate judges.
+type ToolCaller struct {
+	// Kind is who is calling.
+	Kind ToolCallerKind
+	// AgentRole is the acting agent's role; set only when Kind is
+	// ToolCallerAgent.
+	AgentRole string
+	// LegacyRole is the ONE string the deprecated @allowedRoles compares, kept
+	// exactly as it was while the form's window runs: the acting agent's role
+	// for an agent, the person's cluster role for a person over MCP, and ""
+	// (which @allowedRoles reads as "specialist") for anything else.
+	LegacyRole string
+}
+
+// WithMCPHumanCaller returns a child context marking the call as an
+// authenticated person's over MCP (memql#5438). role is the person's cluster
+// role -- recorded ONLY for the deprecated @allowedRoles, which compared it;
+// @requiresRank reads the person's rank from the auth context, never from
+// this string.
+//
+// It does not stamp an acting agent, and that is the point: a person over MCP
+// used to be stamped as an agent whose role was their cluster role.
+func WithMCPHumanCaller(ctx context.Context, role string) context.Context {
+	return context.WithValue(ctx, mcpHumanCallerKey{}, strings.TrimSpace(role))
+}
+
+// ToolCallerFromContext reports who ctx says is calling a tool. An acting
+// agent wins over an MCP mark: an agent loop started inside an MCP call stamps
+// its own agent, and it is that agent calling.
+func ToolCallerFromContext(ctx context.Context) ToolCaller {
+	if ctx == nil {
+		return ToolCaller{}
+	}
+	if role := ActingAgentRoleFromContext(ctx); role != "" {
+		return ToolCaller{Kind: ToolCallerAgent, AgentRole: role, LegacyRole: role}
+	}
+	if role, ok := ctx.Value(mcpHumanCallerKey{}).(string); ok {
+		return ToolCaller{Kind: ToolCallerMCPHuman, LegacyRole: role}
+	}
+	return ToolCaller{}
 }
 
 // WithActingAgentId returns a child context carrying the acting agent's id

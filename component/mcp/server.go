@@ -73,9 +73,13 @@ type Server struct {
 	// interface via asEngine().
 	engine any
 
-	// cfg carries the two MCP authz gates: the acting role (Gate B; #1531,
-	// from MEMQL_MCP_ROLE -- empty -> IsAllowedForRole's "specialist" default)
-	// and the capability tier (Gate A; #1532, from MEMQL_MCP_MODE).
+	// cfg carries the two MCP authz gates: the acting person's role (Gate B;
+	// #1531, from MEMQL_MCP_ROLE or the verified token) and the capability tier
+	// (Gate A; #1532, from MEMQL_MCP_MODE). The role is a PERSON's cluster
+	// role: a tool is gated for them by @requiresRank against their rank, is
+	// never offered when it carries @requiresAgentRole (a person is not an
+	// agent), and the deprecated @allowedRoles compares this string as it
+	// always did (memql#5438).
 	cfg Config
 
 	// session is the per-connection, owner-scoped, NON-DURABLE authored-construct
@@ -301,7 +305,7 @@ func (s *Server) route(ctx context.Context, req *rpcRequest) *rpcResponse {
 		// Reflect the engine's DSL tools (role-gated) + the generic dispatchers
 		// + @mcp-promoted query/mutation (Phase 4 #1534). @mcp-promoted
 		// automations come from the runner (the engine does not own automations).
-		tools := listMCPTools(asEngine(s.engine), s.cfg.ActingRole, s.cfg.Tier, s.cfg.AppSessionId)
+		tools := listMCPTools(ctx, asEngine(s.engine), s.cfg.ActingRole, s.cfg.Tier, s.cfg.AppSessionId)
 		if s.autoRunner != nil {
 			tools = append(tools, s.autoRunner.PromotedAutomationTools()...)
 		}

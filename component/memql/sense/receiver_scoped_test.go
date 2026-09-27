@@ -36,8 +36,10 @@ func TestReceiverFilteredAnnotations(t *testing.T) {
 			want: []string{"version", "rowAuthz", "displayCard"}, absent: []string{"mergeFields", "trigger", "handler", "cache", "relationship"},
 		},
 		{
+			// The two tool gates of memql#5438 are offered beside the handler;
+			// @allowedRoles is still legal while its deprecation window runs.
 			name: "tool preamble", src: "@\ntool probeTool {\n}\n", line: 1, col: 2,
-			want: []string{"handler", "allowedRoles"}, absent: []string{"mergeFields", "cache"},
+			want: []string{"handler", "requiresAgentRole", "requiresRank", "allowedRoles"}, absent: []string{"mergeFields", "cache"},
 		},
 	}
 	for _, tc := range cases {

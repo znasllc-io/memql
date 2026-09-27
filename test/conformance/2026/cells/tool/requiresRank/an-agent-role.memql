@@ -1,0 +1,6 @@
+/// Open a support ticket; meant for the assistant, written on the person axis.
+@handler(type="function", name="openTicketToolRequiresRank")
+@requiresRank("assistant")
+tool openSupportTicketAgentRank {
+  title  string!  @description("The ticket's one-line title.")
+}

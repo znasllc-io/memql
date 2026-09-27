@@ -1937,7 +1937,9 @@ type ToolDecl struct {
 	ExecutionTime        string   // "fast" / "medium" / "slow"
 	RateLimitMaxCalls    int      // 0 = no rate limit; @rateLimit(maxCalls=...)
 	RateLimitPeriod      int      // seconds; paired with RateLimitMaxCalls
-	AllowedRoles         []string // @allowedRoles("assistant", ...) -- empty = no restriction
+	AllowedRoles         []string // @allowedRoles("assistant", ...) -- empty = no restriction; DEPRECATED (memql#5438)
+	RequiresAgentRole    []string // @requiresAgentRole("assistant", ...) -- the acting agent's role must be one of these; empty = any caller
+	RequiresRank         string   // @requiresRank("<role>") -- the person the call is for must hold this role or one ranked above it
 	Scopes               []string // @scopes("operator", ...) -- caller must hold a superset
 	MCPExposed           bool     // @mcp flag -- opt this tool into the curated MCP connector surface (memql#1596)
 	Disabled             bool     // @disabled flag -- the loader skips registration (#2606)
