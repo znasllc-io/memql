@@ -244,3 +244,44 @@ func ownerAdmits(owner string) func(context.Context, memorynodes.MemoryNode) boo
 }
 
 func timeMinutes(n int) time.Duration { return time.Duration(n) * time.Minute }
+
+// TestTheActsRefuseAnUnauthenticatedCaller pins the handler-side floor for
+// the epic memql#5414 acts, as TestCapabilitiesRefuseAnUnauthenticatedCaller
+// does for the rest: a builtin's annotation set carries no @requiresRank, so
+// the floor is the handler's, and it refuses BEFORE anything reaches the
+// engine or the database.
+func TestTheActsRefuseAnUnauthenticatedCaller(t *testing.T) {
+	args := map[string]any{"runId": actRunId, "stepKey": "draft", "version": float64(1), "verdict": "like"}
+	handlers := map[string]func(*Integration, context.Context) error{
+		"rerunStep": func(i *Integration, ctx context.Context) error { _, err := i.handleRerunStep(ctx, args, 0); return err },
+		"branchRun": func(i *Integration, ctx context.Context) error { _, err := i.handleBranchRun(ctx, args, 0); return err },
+		"moveRunHead": func(i *Integration, ctx context.Context) error {
+			_, err := i.handleMoveRunHead(ctx, args, 0)
+			return err
+		},
+		"recordFeedback": func(i *Integration, ctx context.Context) error {
+			_, err := i.handleRecordFeedback(ctx, args, 0)
+			return err
+		},
+		"workStepVersions": func(i *Integration, ctx context.Context) error {
+			_, err := i.handleStepVersions(ctx, args, 0)
+			return err
+		},
+	}
+	for name, call := range handlers {
+		t.Run(name, func(t *testing.T) {
+			i, eng, store := newActsIntegration(t)
+			addPristineRun(store, actRunId, "fetch", "draft")
+			eng.reply("workRunForOwner", actRunRow(runStatusSucceeded, "fetch", "draft"))
+			if err := call(i, context.Background()); err == nil {
+				t.Fatalf("%s admitted a caller with no access context", name)
+			}
+			if got := eng.summary(); got != "(none)" {
+				t.Errorf("%s reached the engine before refusing: %s", name, got)
+			}
+			if n := len(store.queried()); n != 0 {
+				t.Errorf("%s read the version history before refusing", name)
+			}
+		})
+	}
+}
