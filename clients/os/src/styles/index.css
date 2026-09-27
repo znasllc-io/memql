@@ -9405,6 +9405,14 @@ a.os-button {
   flex-direction: column;
   gap: 8px;
 }
+/* A ROW'S FOCUS RING IS DRAWN INSIDE IT HERE. The column scrolls, so it clips
+ * whatever paints outside it, and a record row runs edge to edge: the kit's
+ * ring, 2px outside the row, lost both its sides and read as two rules, the
+ * upper one on top of the divider -- a keyboard user could not tell focus from
+ * a line. Inset, it is a whole ring again. */
+.os-nexus-column .os-row.os-record-row:focus-visible {
+  outline-offset: -2px;
+}
 .os-nexus-aside {
   flex: 1 1 320px;
   max-width: 460px;
@@ -10074,14 +10082,24 @@ a.os-button {
 }
 
 /* ---- approvals --------------------------------------------------------*/
-.os-nexus-approval-run {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--os-text-sm);
-  color: var(--os-muted);
+/* AN APPROVAL ROW CARRIES NO SUMMARY FACTS, so the record row's quiet middle
+ * column stood empty: a third of the row reserved for nothing while the
+ * question beside it -- the one thing the row is for -- was clamped
+ * mid-sentence. Narrow, the empty cell took a line of its own under the
+ * question and left a blank band. The question takes the track instead; the
+ * state column keeps its floor, so the kind still starts at one x down the
+ * list. Keyed on the cell being EMPTY, so a row that ever carries a fact gets
+ * the kit's column back. */
+.os-nexus-approvals .os-record-summary:empty {
+  display: none;
+}
+.os-nexus-approvals .os-row.os-record-row[data-no-icon]:has(> .os-record-summary:empty) {
+  grid-template-columns: minmax(0, 1fr) minmax(8.5rem, auto) 14px;
+}
+@container os-record-list (max-width: 600px) {
+  .os-nexus-approvals .os-row.os-record-row[data-no-icon]:has(> .os-record-summary:empty) {
+    grid-template-columns: minmax(0, 1fr) auto 12px;
+  }
 }
 /* THE QUESTION IS THE LOUDEST THING IN THE PANEL. A person opens an approval
  * to answer it, not to read metadata about it, so it is set at content size
@@ -15764,13 +15782,10 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-nexus-automations .os-nexus-column {
   max-height: 100%;
 }
-/* An authored automation's detail stands BESIDE the list, so the row it
- * belongs to says so in the shell's one selection language. The flat record
- * row has no border to colour, so the accent is an inset edge. */
-.os-nexus-automations .os-row.os-record-row[data-open] {
-  background: var(--os-accent-soft);
-  box-shadow: inset 2px 0 0 var(--os-accent);
-}
+/* An authored automation's detail stands BESIDE the list, and the row it
+ * belongs to says so in the shell's one selection language: the record row's
+ * own `[data-open]` plate and inset accent edge, exactly as Approvals and
+ * every other record list draw it. No selection of its own here. */
 
 /* ---- Settings -> Procedures ------------------------------------------------ */
 .os-settings-procedures {
