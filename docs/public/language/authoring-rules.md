@@ -1657,8 +1657,10 @@ digested) is the durable answer, has its own false-positive design
 problem, and is not built.
 
 `@pattern` on an args field is genuinely enforced, unlike some of the
-concept-field annotations: it is compiled at load (`convertArgsField`),
-matched on every call (`validateArgsField`), and
+concept-field annotations: it is compiled at load (`convertArgsField`, and a
+concept field's pattern is compiled at load by the same check since
+memql#5426 -- `pattern_invalid` for either), matched on every call
+(`validateArgsField`), and
 `executeMutationFunctionCall` validates before rendering the template —
 `engine.go`'s call is the only non-test caller of
 `renderMutationTemplate`, so no call path reaches the hash unchecked.

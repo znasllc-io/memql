@@ -77,7 +77,7 @@ A newer line reads, for example:
 domain "storefront" declares memql = "1.1", newer than the 1.0 this engine speaks: run an engine that speaks 1.1, or declare memql = "1.0" in storefront/memql.toml [language_version_newer]
 ```
 
-A refused domain is read by no loader at all, so its author sees exactly one refusal per domain rather than everything that reading it under a line it did not declare would produce; fix the line, and the next boot reports what the domain itself holds. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once. Pointed at one domain directory instead of at the bundle (`memqllint bundle/storefront`, or a file inside it), it checks that directory's own `memql.toml` when a mount would read the directory as a domain -- not a sub-namespace, not a `_` or `.` name, not a core domain: a malformed or newer file is refused with its code, and a missing one is a warning, because only the tree the directory is mounted in decides whether it is a domain. Linting the bundle checks every domain exactly as boot does.
+A refused domain is read by no loader at all, so its author sees exactly one refusal per domain rather than everything that reading it under a line it did not declare would produce; fix the line, and the next boot reports what the domain itself holds. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once. Pointed at one domain directory instead of at the bundle (`memqllint bundle/storefront`, or a file inside it), it checks that directory's own `memql.toml` when a mount would read the directory as a domain -- not a sub-namespace, not a `_` or `.` name, not a core domain: a malformed or newer file is refused with its code, and a missing one is a warning, because only the tree the directory is mounted in decides whether it is a domain. Linting the bundle checks every domain exactly as boot does -- a domain that holds nothing but sub-namespace directories included, which boot mounts and a package deploy stages (memql#5426).
 
 ### Adding the line
 
@@ -326,6 +326,14 @@ Concepts are schemas for nodes (like tables in SQL). Each concept is declared in
 > could only restate the domain directory or silently disagree with it, so it is
 > refused at load and `memqlmigrate --rewrite=attributes` deletes it. Pin a
 > deliberate divergence with `namespace.pin`.
+
+A concept that does not parse refuses boot like any other malformed construct
+(`concept_unparsed`, or the parser's own rule id when its refusal carries one),
+naming the file and the line of its `concept` keyword; it used to be dropped
+with nothing reported, so a node booted without it (memql#5426). A field's
+`@pattern` is a regular expression in Go's RE2 syntax, compiled at load, and one
+that does not compile is refused there (`pattern_invalid`) rather than on the
+concept's first write.
 
 Cross-domain references are imported with a file-top
 `use <domain>.<construct>.{ names }` line. Constructs of the file's
@@ -1402,7 +1410,7 @@ prompt emitConstruct {
 }
 ```
 
-`@level` is **required on every prompt**, in the embedded tree and in a bundle mounted at `MEMQL_DSL_PATH` alike; a prompt without one refuses to load and the message names all four values. **Modality is never declared** — whether a call is chat, streaming chat, tools, structured output, vision or an embedding is derived from the call itself and interface-checked by the router.
+`@level` is **required on every prompt**, in the embedded tree and in a bundle mounted at `MEMQL_DSL_PATH` alike; a prompt without one refuses to load (`prompt_level_missing`, a `@disabled` prompt included) and the message names all four values. **Modality is never declared** — whether a call is chat, streaming chat, tools, structured output, vision or an embedding is derived from the call itself and interface-checked by the router.
 
 ### Policies
 
@@ -1716,6 +1724,7 @@ mutation folder archiveFolder {
 - Longhand: a bare `args.X` entry spreads the field under its own name; `name: <expr>` assigns explicitly.
 - Engine-provided names are available in the body: `now` (RFC3339 timestamp captured at eval start), `actor.userId` / `actor.role` / `actor.identityId` / `actor.isClusterOwner`, `partition`, and allow-listed `config.X`.
 - A value is any in-process expression: `"si-" + hash(args.agentId)`, `canonicalId(args.folderId, "folder")`, `args.title ?? "Untitled"`, `args.pinned ? "top" : "normal"`. The current time is the bare reserved `now` (no call parens).
+- The write-shaping annotations -- `@createOnly`, `@noUnset`, `@mergeFields`, `@appendFields`, `@addToSet`, `@removeFromSet` -- change how a WRITTEN top-level field meets the stored row, so each field they name is one the write can shape, or the mutation is refused at load (memql#5426): a top-level field the bound concept declares (`write_annotation_undeclared_field`), of a type the annotation shapes -- a list for the three list verbs, an object or map for `@mergeFields` (`write_annotation_field_type`) -- that the block writes (`write_annotation_unwritten_field`). A field the write omits is already kept by the read-merge, so naming one protects nothing. A block whose payload is one caller-supplied object (`payload: args.payload`) is exempt from the last rule.
 
 ## Specs
 
@@ -1874,6 +1883,8 @@ use common.traits.{ isActiveRecord, isNotDeleted }
 
 The dotted path maps to a file on disk (`library.concepts` → `dsl/library/concepts.memql`); the brace list names the constructs imported into local scope.
 
+A `use` line is **file-top**: one written below the file's first construct is refused, by the parser and at load alike (`use_not_file_top`), naming the line. Boot never parses a file whole -- each loader slices out the constructs it owns -- so the load has a gate of its own for it (memql#5426).
+
 #### Aliasing an import (`as`)
 
 An imported name can be bound to a different local name (memql#3802):
@@ -2006,6 +2017,8 @@ How names resolve inside a body:
 
 A bare name is never a payload property: see [the lambda parameter and bare names](#the-lambda-parameter-and-bare-names). A shape body is the exception, because it is a list of paths rather than an expression: there a bare `name` is the payload property.
 
+**Every `args.X` a body reads is declared** (memql#3626): a read the `args` block does not declare is refused at load (`args_undeclared`), in a query, mutation or logic body, in an automation's statements, and in an automation's `@filter` and `@loop` `until` -- the trigger payload is bound into the declared arguments before the filter decides, so an undeclared one read absent on every fire (memql#5426).
+
 **Reserved engine names.** `now`, `actor`, `partition`, `config`, `trace` are reserved as top-level identifiers. An `args` field that collides with one of these names is rejected at load time.
 
 > **Retired.** The `ctx` envelope is gone from the author surface — no `ctx.input.X`, no `ctx.X` shorthand, no `ctx.output =` assignment. Authors read caller args as `args.X` and return values directly.
@@ -2117,7 +2130,7 @@ A `for` over a query's rows, with a filter clause and a nested bind:
   }
 ```
 
-**A construct call is a statement of its own**: the whole right-hand side of `:=`, the whole value of `return`, or a line by itself. A call nested inside an expression is refused, because a side effect that is not a statement is not journaled, previewed or retried. Arguments are always named (`logic triple(n: 14)`). A bare call inside an expression is a catalog function (`lower(x)`, `addDuration(now, "PT1H")`) or a spec or trait predicate; anything else is refused at load (`body_call_unknown`), since it could only fail when it runs.
+**A construct call is a statement of its own**: the whole right-hand side of `:=`, the whole value of `return`, or a line by itself. A call nested inside an expression is refused, because a side effect that is not a statement is not journaled, previewed or retried. Arguments are always named (`logic triple(n: 14)`). A bare call inside an expression is a catalog function (`lower(x)`, `addDuration(now, "PT1H")`) or a spec or trait predicate; anything else is refused at load (`body_call_unknown`), since it could only fail when it runs. So is a method no value has -- a method is resolved against the ones a list or a string has (`.count()`, `.includes(s)`), and `row.status.startsWith("x")` names neither (prefix selection is the `startsWith` operator). Both rules hold in an automation's `@filter` and `@loop` `until` as they do in its statements, since one evaluator runs them all (memql#5426).
 
 ### Trailing clauses
 
