@@ -283,6 +283,20 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name: "catalogSections",
+			Description: "Catalogue a succeeded goal run's sections that were worked out live (design D24): every section " +
+				"automation of the run's draft whose current version stands -- not overridden, not disliked, in a run " +
+				"neither stale nor disliked -- is written into its owner's catalog as a construct of its own, keyed by the " +
+				"section's signature, so the next goal whose section asks for the same thing is served it instead of " +
+				"planning it live. An already-catalogued section writes nothing. Runs only as the catalogSucceededSections " +
+				"automation, borrowing the owner its event names. Returns {runId, catalogued, skipped, notCatalogued}.",
+			Handler: i.handleCatalogSections,
+			ArgsSchema: map[string]string{
+				"runId":       "string (required) -- the v1:work:run that just succeeded",
+				"ownerUserId": "string (required) -- the owner the completion event carries, re-verified by an owner-filtered read",
+			},
+		},
+		{
 			Name: "step",
 			Description: "The statement every step of a learned procedure's rendered SOURCE is. It always refuses (" +
 				"\"" + stepRefusal + "\"): a learned procedure is served through the certification ladder by its " +
