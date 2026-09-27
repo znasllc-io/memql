@@ -48,6 +48,14 @@ var constructLearnedFields = []string{
 	"lastReinforced",
 }
 
+// constructLearnedSource is the MemQL source a person reads on a learned
+// procedure's page and approves: recordProcedure writes it beside the
+// procedure a replay executes, and procedureHash digests both. On an authored
+// construct it is the construct itself, which its owner edits; on a learned
+// one an owner edit would show a person one thing, approved under a hash that
+// never changed, while the ladder served another.
+const constructLearnedSource = "source"
+
 // validateConstructLadderServerOnly refuses a write to a v1:authoring:construct
 // that CHANGES a field the certification ladder owns without internal origin
 // (epic memql#5408, issue #5409).
@@ -92,6 +100,10 @@ func validateConstructLadderServerOnly(ctx context.Context, prior, final map[str
 			return errConstructLadderWrite(field,
 				"on a learned procedure, the signature compile serves a goal from it by and the reliability that ranks it")
 		}
+	}
+	if constructFieldChanged(prior, final, constructLearnedSource) {
+		return errConstructLadderWrite(constructLearnedSource,
+			"on a learned procedure, the source a person reads and approves beside the procedure a replay runs")
 	}
 	return nil
 }

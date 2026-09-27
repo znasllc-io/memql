@@ -21,12 +21,10 @@ import (
 // Both directions are held, so a field the DSL stops writing does not linger
 // here either.
 //
-// ONE EXEMPTION, AND WHY: recordProcedure also writes `source`. On a learned
-// procedure the source is the auditable rendering beside the procedure a
-// replay EXECUTES, and it is an ordinary field of every authored construct,
-// which its owner edits; the guard judges what the ladder serves and what a
-// person approved -- `procedure`, `preconditions` and `procedureHash` -- and
-// leaves `source` to the row tier.
+// ONE EXEMPTION, AND WHY: recordProcedure also writes `source`, an ordinary
+// field of every authored construct, which its owner edits. It is guarded on
+// a LEARNED procedure only (constructLearnedSource, pinned below), so it is not
+// in the unconditional list.
 func TestConstructLadderWriteGuard_FieldListsAreWhatTheServerOnlyMutationsWrite(t *testing.T) {
 	templates := loadAllMutationTemplates(t)
 	written := func(names ...string) []string {
@@ -121,4 +119,25 @@ func TestConstructLadderWriteGuard_InternalOriginIsTheOnlyWayIn(t *testing.T) {
 		"an authored construct -- no ladder -- is not a learned procedure")
 	require.NoError(t, validateConstructLadderServerOnly(auth.ContextWithInternalOrigin(owner), learned, map[string]any{"ladder": "trusted", "goalSignature": "sig-2"}),
 		"internal origin is integrations/procedure's own write")
+}
+
+// A LEARNED PROCEDURE'S SOURCE IS WHAT A PERSON APPROVES. An owner editing it
+// would show one thing under a hash that never changed while the ladder served
+// another, so on a learned row it is the ladder's; on an authored construct it
+// stays the owner's to edit. Internal origin still writes it (recordProcedure).
+func TestConstructLadderWriteGuard_ALearnedProceduresSourceIsTheLadders(t *testing.T) {
+	ctx := context.Background()
+	learned := map[string]any{"ladder": "trusted", "source": "automation a { }"}
+	edited := map[string]any{"ladder": "trusted", "source": "automation a { mutation x() }"}
+	err := validateConstructLadderServerOnly(ctx, learned, edited)
+	require.Error(t, err)
+	require.True(t, strings.Contains(err.Error(), "`source`"), "the refusal names the field: %v", err)
+
+	authored := map[string]any{"source": "automation a { }"}
+	authoredEdit := map[string]any{"source": "automation a { mutation x() }"}
+	require.NoError(t, validateConstructLadderServerOnly(ctx, authored, authoredEdit),
+		"an authored construct's source is its owner's to edit")
+
+	require.NoError(t, validateConstructLadderServerOnly(auth.ContextWithInternalOrigin(ctx), learned, edited),
+		"recordProcedure writes a learned procedure's source under internal origin")
 }
