@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/compiler"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -182,9 +183,11 @@ func validateArgsReferencesAreDeclared(body string, funcDef *languageParser.Func
 			continue
 		}
 		if len(declared) == 0 {
-			return fmt.Errorf("function %q: body reads args.%s but the construct declares no args block -- an undeclared arg is silently absent when the caller omits it, and bypasses @required / type / @enum / @pattern when the caller supplies it; add `args { %s <type> }`", funcDef.Name, name, name)
+			return fmt.Errorf("function %q: body reads args.%s but the construct declares no args block -- an undeclared arg is silently absent when the caller omits it, and bypasses @required / type / @enum / @pattern when the caller supplies it; add `args { %s <type> }` [%s]", funcDef.Name, name, name, compiler.CodeArgsUndeclared)
 		}
-		return fmt.Errorf("function %q: body reads args.%s, which is not declared in the args block (declared: %s) -- an undeclared arg is silently absent when the caller omits it, and bypasses @required / type / @enum / @pattern when the caller supplies it", funcDef.Name, name, strings.Join(sortedDeclaredArgsNames(declared), ", "))
+		// The rule id is the automation compiler's for the same read (memql#5426):
+		// one rule, one code, whichever construct makes the read.
+		return fmt.Errorf("function %q: body reads args.%s, which is not declared in the args block (declared: %s) -- an undeclared arg is silently absent when the caller omits it, and bypasses @required / type / @enum / @pattern when the caller supplies it [%s]", funcDef.Name, name, strings.Join(sortedDeclaredArgsNames(declared), ", "), compiler.CodeArgsUndeclared)
 	}
 	return nil
 }
