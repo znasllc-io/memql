@@ -237,3 +237,32 @@ func TestAWorkspaceThatDoesNotExistYetIsEmpty(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// A TARGET THAT IS NOT THERE IS NOT A PRECONDITION THAT FAILED. A probe the
+// target could not answer -- no workbench peer, a dropped stream -- says
+// nothing about the environment, so the prober answers an ERROR, which the
+// runner does not count against the procedure, rather than an empty
+// measurement, which the check would read as every learned tool missing and
+// the ladder would count as a refused start. The control: a tool the host
+// answered it cannot run is still left unmeasured, with no error.
+func TestAnUnavailableTargetIsAnErrorNotAnEmptyMeasurement(t *testing.T) {
+	learned := proc.Preconditions{Tools: map[string]string{"go": "1.22.1"}}
+	for _, code := range []string{"no_workbench_peer", "worker_disconnected", "worker_unreachable", "forward_failed"} {
+		wb := newFakeWorkbench()
+		wb.refuse["exec"] = code
+		_, err := workbenchProber(wb).Probe(context.Background(), work.TargetWorkbench, "v1:identity:user:owner", "v1:work:run:replay1", learned)
+		if err == nil || !strings.Contains(err.Error(), code) {
+			t.Fatalf("%s: a probe the target could not answer = %v, want an error naming it", code, err)
+		}
+	}
+
+	wb := newFakeWorkbench()
+	wb.refuse["exec"] = "command_not_allowed"
+	observed, err := workbenchProber(wb).Probe(context.Background(), work.TargetWorkbench, "v1:identity:user:owner", "v1:work:run:replay1", learned)
+	if err != nil {
+		t.Fatalf("a tool the host refused to run is unmeasured, not an unavailable target: %v", err)
+	}
+	if _, measured := observed.Tools["go"]; measured {
+		t.Fatalf("a refused probe measured something: %+v", observed.Tools)
+	}
+}
