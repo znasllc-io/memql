@@ -24,7 +24,8 @@ import (
 // A SHADOW WRITES NOTHING A PERSON SEES. The workbench promotes every
 // successful fs_write into the run owner's Library; a shadow's writes go
 // through exec instead (procedureSandboxWriteCommand), which lands the same
-// bytes and writes no row. A shadow's MCP call may only read. Its commands
+// bytes and writes no row. A canary's or trusted replay's write DOES go
+// through fs_write, and is reported Delivered for exactly that reason. A shadow's MCP call may only read. Its commands
 // still run -- the directory is the isolation, and a command that reaches the
 // network reaches it from the workbench, never from the person's machine.
 //
@@ -102,8 +103,14 @@ func (h *workbenchProcedureHost) prepareCommand(_ context.Context, cmd procedure
 	return args, nil
 }
 
-// delivers is false: an effect on the workbench stays in the run's directory.
-func (h *workbenchProcedureHost) delivers() bool { return false }
+// delivers is true for an fs_write alone. The workbench promotes every
+// successful fs_write into the run owner's Library as a generated output -- a
+// row the person sees, outside the run's directory -- so a canary or trusted
+// write is a delivery the app must never repeat. A command, a read and a fetch
+// stay in the directory (a command that reaches the network is the runner's to
+// classify, not this host's), and a shadow's writes go through exec, which
+// promotes nothing.
+func (h *workbenchProcedureHost) delivers(action string) bool { return action == "fs_write" }
 
 // procedureWorkbenchDispatcher is the procedure.Dispatcher for
 // work.TargetWorkbench.

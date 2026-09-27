@@ -242,7 +242,7 @@ func (h *machineProcedureHost) ensure(ctx context.Context, dir string) error {
 
 // delivers is true: an effect on the person's machine is outside any
 // workspace a replay owns.
-func (h *machineProcedureHost) delivers() bool { return true }
+func (h *machineProcedureHost) delivers(string) bool { return true }
 
 // procedureMachineDispatcher is the procedure.Dispatcher for
 // work.TargetMachine.

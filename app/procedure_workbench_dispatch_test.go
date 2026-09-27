@@ -381,6 +381,49 @@ func TestAShadowWriteGoesThroughExecSoNoLibraryRowIsWritten(t *testing.T) {
 	}
 }
 
+// A CANARY OR TRUSTED WRITE ON THE WORKBENCH IS DELIVERED. The workbench
+// promotes every successful fs_write into the run owner's Library -- a row the
+// person sees, outside the run's directory -- so the app taking a diverged goal
+// over must be told never to write it again. A shadow's write goes through
+// exec, promotes nothing and delivers nothing; a write that failed delivered
+// nothing either.
+func TestAWorkbenchWriteOutsideAShadowIsDelivered(t *testing.T) {
+	for name, args := range map[string]map[string]any{
+		"write": {"file_path": "./out/report.md", "content": "# Report\n"},
+		"edit":  {"file_path": "./src/app.go", "old_string": "v = 1", "new_string": "v = 2"},
+	} {
+		wb := newFakeWorkbench()
+		wb.files["src/app.go"] = "const v = 1\n"
+		res, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), workbenchStep("fs_write", args))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !res.Delivered {
+			t.Errorf("%s: a canary/trusted write on the workbench lands in the person's Library, and was not reported delivered", name)
+		}
+
+		wb = newFakeWorkbench()
+		wb.files["src/app.go"] = "const v = 1\n"
+		shadow := workbenchStep("fs_write", args)
+		shadow.Sandbox = true
+		res, err = newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), shadow)
+		if err != nil {
+			t.Fatalf("%s in a shadow: %v", name, err)
+		}
+		if res.Delivered {
+			t.Errorf("%s: a shadow's write promotes nothing, and was reported delivered", name)
+		}
+	}
+
+	wb := newFakeWorkbench()
+	wb.refuse["fs_write"] = "fs_write_failed"
+	res, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(),
+		workbenchStep("fs_write", map[string]any{"file_path": "out/a.txt", "content": "a"}))
+	if err != nil || res.Delivered || res.Observation.IsError == nil || !*res.Observation.IsError {
+		t.Fatalf("a failed write = %+v delivered %v, %v", res.Observation, res.Delivered, err)
+	}
+}
+
 func TestAnEditReplacesTheExactStringAndReportsTheEditedFile(t *testing.T) {
 	wb := newFakeWorkbench()
 	wb.files["src/app.go"] = "package app\n\nconst v = 1\n"

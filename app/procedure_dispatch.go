@@ -91,10 +91,11 @@ type procedureHost interface {
 	resolvePath(ctx context.Context, p string) (hostPath, reported string, err error)
 	// prepareCommand is the exec arguments a step's command runs with here.
 	prepareCommand(ctx context.Context, cmd procedureCommandLine) (map[string]any, error)
-	// delivers reports whether an effect on this surface reaches outside the
-	// replay's own workspace -- the person's machine does, the workbench's
-	// per-run directory does not.
-	delivers() bool
+	// delivers reports whether a successful action on this surface reaches
+	// outside the replay's own workspace -- every one on the person's machine
+	// does; on the workbench only an fs_write does, which it promotes into the
+	// run owner's Library.
+	delivers(action string) bool
 }
 
 // procedureAgentResolver answers the owner's reasoning agent.
@@ -205,7 +206,7 @@ func runProcedureExec(ctx context.Context, host procedureHost, timeout time.Dura
 		return procedure.DispatchResult{}, err
 	}
 	obs, out := procedureExecObservation(reply)
-	return procedure.DispatchResult{Observation: obs, Output: out, Delivered: host.delivers()}, nil
+	return procedure.DispatchResult{Observation: obs, Output: out, Delivered: host.delivers("exec")}, nil
 }
 
 // runProcedureWrite writes a file: a Write's whole content, or an Edit's or a
@@ -242,8 +243,14 @@ func runProcedureWrite(ctx context.Context, host procedureHost, sandbox bool, ar
 		content = edited
 	}
 
-	var ok bool
+	// writeAction is the host action the bytes went through, which is what
+	// decides whether they reached anything a person sees.
+	var (
+		ok          bool
+		writeAction string
+	)
 	if sandbox {
+		writeAction = "exec"
 		reply, err := host.call(ctx, "exec", map[string]any{
 			"cmd":   procedureSandboxWriteCommand(hostPath),
 			"stdin": content,
@@ -260,6 +267,7 @@ func runProcedureWrite(ctx context.Context, host procedureHost, sandbox bool, ar
 			out["errorCode"], out["errorMessage"] = reply.ErrorCode, reply.ErrorMessage
 		}
 	} else {
+		writeAction = "fs_write"
 		reply, err := host.call(ctx, "fs_write", map[string]any{"path": hostPath, "content": content})
 		if err != nil {
 			return procedure.DispatchResult{}, err
@@ -281,7 +289,7 @@ func runProcedureWrite(ctx context.Context, host procedureHost, sandbox bool, ar
 	return procedure.DispatchResult{
 		Observation: procedureFileObservation("write", ok, reported, digest),
 		Output:      out,
-		Delivered:   ok && host.delivers(),
+		Delivered:   ok && host.delivers(writeAction),
 	}, nil
 }
 
