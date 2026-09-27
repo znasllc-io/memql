@@ -141,6 +141,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"goal":        "string",
 				"ownerUserId": "string",
 				"partitionId": "string",
+				"runId":       "string (optional) -- the v1:work:run a planner-driven caller is working; omitted, the run the call belongs to is recorded",
 			},
 		},
 		{

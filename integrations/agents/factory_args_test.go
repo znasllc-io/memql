@@ -1,8 +1,11 @@
 package agents
 
 import (
+	"context"
 	"reflect"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // TestBuildCreateAgentArgs_StampsKindSpecialist pins the contract for
@@ -20,7 +23,7 @@ func TestBuildCreateAgentArgs_StampsKindSpecialist(t *testing.T) {
 	}
 	decision := factoryDecision{Action: "create", RoleSlug: "it-support", Reasoning: "fits"}
 
-	args := buildCreateAgentArgs("agent-abc", "user-xyz", decision, role, "")
+	args := buildCreateAgentArgs("agent-abc", "user-xyz", decision, role, factoryRun{})
 
 	kind, ok := args["kind"].(string)
 	if !ok || kind != "specialist" {
@@ -41,42 +44,66 @@ func TestBuildCreateAgentArgs_StampsKindSpecialist(t *testing.T) {
 	}
 }
 
-// TestBuildCreateAgentArgs_GADrivenLineage pins the lineage shape for
-// the GA-driven path (planId empty): createdBy bucket is "user",
-// originatingPlanId is NOT stamped. The GA's ensureAgent tool calls
-// the factory from a user turn; the resulting specialist has no Plan
-// back-pointer.
-func TestBuildCreateAgentArgs_GADrivenLineage(t *testing.T) {
+// TestBuildCreateAgentArgs_NoRunNoOriginatingRun pins the lineage shape for
+// a creation outside any run: createdBy bucket is "user" and no
+// lineage.originatingRunId is stamped -- there is no run to point at.
+func TestBuildCreateAgentArgs_NoRunNoOriginatingRun(t *testing.T) {
 	role := roleSnapshot{Slug: "it-support", Name: "IT Support", Tier: "A"}
 	decision := factoryDecision{Action: "create", RoleSlug: "it-support"}
 
-	args := buildCreateAgentArgs("a1", "u1", decision, role, "")
+	args := buildCreateAgentArgs("a1", "u1", decision, role, factoryRun{})
 
 	lineage, ok := args["lineage"].(map[string]any)
 	if !ok {
 		t.Fatalf("lineage missing or wrong type: %v", args["lineage"])
 	}
 	if got := lineage["createdBy"]; got != "user" {
-		t.Errorf("lineage.createdBy: got %v want \"user\" (GA-driven path)", got)
+		t.Errorf("lineage.createdBy: got %v want \"user\" (no run)", got)
+	}
+	if _, has := lineage["originatingRunId"]; has {
+		t.Errorf("lineage.originatingRunId stamped on a creation outside any run: %v", lineage["originatingRunId"])
 	}
 	if _, has := lineage["originatingPlanId"]; has {
-		t.Errorf("lineage.originatingPlanId unexpectedly stamped on GA-driven create: %v", lineage["originatingPlanId"])
+		t.Errorf("lineage.originatingPlanId is a field v1:agents:agent no longer declares: %v", lineage["originatingPlanId"])
+	}
+}
+
+// TestBuildCreateAgentArgs_RunOnTheCallIsRecorded pins memql#5436: an agent
+// the ensureAgent tool creates while a run is being worked records that run
+// in lineage.originatingRunId -- the field agentsForRun reads, which nothing
+// wrote before -- and keeps the "user" bucket, because no caller NAMED the
+// run.
+func TestBuildCreateAgentArgs_RunOnTheCallIsRecorded(t *testing.T) {
+	role := roleSnapshot{Slug: "it-support", Name: "IT Support", Tier: "A"}
+	decision := factoryDecision{Action: "create", RoleSlug: "it-support"}
+
+	args := buildCreateAgentArgs("a1", "u1", decision, role, factoryRun{Id: "v1:work:run:r7"})
+
+	lineage, ok := args["lineage"].(map[string]any)
+	if !ok {
+		t.Fatalf("lineage missing or wrong type: %v", args["lineage"])
+	}
+	if got := lineage["originatingRunId"]; got != "v1:work:run:r7" {
+		t.Errorf("lineage.originatingRunId: got %v want \"v1:work:run:r7\"", got)
+	}
+	if got := lineage["createdBy"]; got != "user" {
+		t.Errorf("lineage.createdBy: got %v want \"user\" (the tool path keeps its bucket)", got)
+	}
+	if _, has := lineage["originatingPlanId"]; has {
+		t.Errorf("lineage.originatingPlanId is a field v1:agents:agent no longer declares: %v", lineage["originatingPlanId"])
 	}
 }
 
 // TestBuildCreateAgentArgs_PlannerDrivenLineage pins the planner
-// auto-provision contract (memql#399). When ensureSpecialistForPlan
-// passes a non-empty planId, the factory stamps:
+// auto-provision contract (memql#399, in run vocabulary since memql#5436).
+// When a caller names its run, the factory stamps:
 //   - lineage.createdBy = "planner"
-//   - lineage.originatingPlanId = the plan id
-//
-// The Tasks-page Plan/agent attribution UI reads these to render
-// "created for Plan X" on planner-spawned specialists.
+//   - lineage.originatingRunId = the run id
 func TestBuildCreateAgentArgs_PlannerDrivenLineage(t *testing.T) {
 	role := roleSnapshot{Slug: "data-analysis", Name: "Data Analysis", Tier: "A"}
 	decision := factoryDecision{Action: "create", RoleSlug: "data-analysis"}
 
-	args := buildCreateAgentArgs("a1", "u1", decision, role, "plan-42")
+	args := buildCreateAgentArgs("a1", "u1", decision, role, factoryRun{Id: "run-42", RunDriven: true})
 
 	lineage, ok := args["lineage"].(map[string]any)
 	if !ok {
@@ -85,8 +112,8 @@ func TestBuildCreateAgentArgs_PlannerDrivenLineage(t *testing.T) {
 	if got := lineage["createdBy"]; got != "planner" {
 		t.Errorf("lineage.createdBy: got %v want \"planner\" (planner-driven path)", got)
 	}
-	if got := lineage["originatingPlanId"]; got != "plan-42" {
-		t.Errorf("lineage.originatingPlanId: got %v want \"plan-42\"", got)
+	if got := lineage["originatingRunId"]; got != "run-42" {
+		t.Errorf("lineage.originatingRunId: got %v want \"run-42\"", got)
 	}
 	// Kind invariant holds across both code paths.
 	if got := args["kind"]; got != "specialist" {
@@ -113,7 +140,7 @@ func TestBuildCreateAgentArgs_SkillUnion(t *testing.T) {
 		SkillIds: []string{"exampleapp-ui", "go-backend-engineering"}, // overlap with locked
 	}
 
-	args := buildCreateAgentArgs("a1", "u1", decision, role, "")
+	args := buildCreateAgentArgs("a1", "u1", decision, role, factoryRun{})
 
 	caps, ok := args["capabilities"].(map[string]any)
 	if !ok {
@@ -140,16 +167,14 @@ func TestBuildCreateAgentArgs_SkillUnion(t *testing.T) {
 }
 
 // TestBuildSkillChangeEventArgs_PlannerDriven pins the planner-driven
-// extend audit contract (memql#405): a planner-driven extend (planId
-// set) stamps the per-user Planner Agent id as actorAgentId, carries
-// the originating planId, and leaves actorUserId unset. The skillId +
-// targetAgentId + changeKind=attached are load-bearing for the Tasks
-// "extended for Plan X" attribution UI.
+// extend audit contract (memql#405, run vocabulary since memql#5436): a
+// planner-driven extend stamps the per-user Planner Agent id as
+// actorAgentId, carries the run as runId, and leaves actorUserId unset.
 func TestBuildSkillChangeEventArgs_PlannerDriven(t *testing.T) {
 	before := map[string]any{"domainIds": []string{"d1"}}
 	after := map[string]any{"domainIds": []string{"d1", "d2"}}
 
-	args := buildSkillChangeEventArgs("ev-1", "agent-7", "skill-new", "v1:identity:user:jose", "plan-42", before, after)
+	args := buildSkillChangeEventArgs("ev-1", "agent-7", "skill-new", "v1:identity:user:jose", factoryRun{Id: "run-42", RunDriven: true}, before, after)
 
 	if got := args["targetAgentId"]; got != "agent-7" {
 		t.Errorf("targetAgentId: got %v want \"agent-7\"", got)
@@ -168,8 +193,11 @@ func TestBuildSkillChangeEventArgs_PlannerDriven(t *testing.T) {
 	if got := args["actorAgentId"]; got != "plannerAgent-jose" {
 		t.Errorf("actorAgentId: got %v want \"plannerAgent-jose\" (planner-driven)", got)
 	}
-	if got := args["planId"]; got != "plan-42" {
-		t.Errorf("planId: got %v want \"plan-42\"", got)
+	if got := args["runId"]; got != "run-42" {
+		t.Errorf("runId: got %v want \"run-42\"", got)
+	}
+	if _, has := args["planId"]; has {
+		t.Errorf("planId is an argument createSkillChangeEvent no longer declares: %v", args["planId"])
 	}
 	if _, has := args["actorUserId"]; has {
 		t.Errorf("actorUserId unexpectedly set on planner-driven extend: %v", args["actorUserId"])
@@ -182,12 +210,12 @@ func TestBuildSkillChangeEventArgs_PlannerDriven(t *testing.T) {
 	}
 }
 
-// TestBuildSkillChangeEventArgs_GADriven pins the GA-driven extend
-// audit contract (memql#405): the ensureAgent tool path (planId empty)
-// stamps actorUserId from the caller, leaves actorAgentId unset, and
-// carries an empty planId (no Plan back-pointer).
+// TestBuildSkillChangeEventArgs_GADriven pins the GA-driven extend audit
+// contract (memql#405): the ensureAgent tool path stamps actorUserId from
+// the caller and leaves actorAgentId unset. Outside any run no runId is
+// written; inside one, the run is recorded without changing attribution.
 func TestBuildSkillChangeEventArgs_GADriven(t *testing.T) {
-	args := buildSkillChangeEventArgs("ev-2", "agent-9", "skill-x", "v1:identity:user:dana", "", map[string]any{}, map[string]any{})
+	args := buildSkillChangeEventArgs("ev-2", "agent-9", "skill-x", "v1:identity:user:dana", factoryRun{}, map[string]any{}, map[string]any{})
 
 	if got := args["actorUserId"]; got != "v1:identity:user:dana" {
 		t.Errorf("actorUserId: got %v want \"v1:identity:user:dana\" (GA-driven)", got)
@@ -195,8 +223,41 @@ func TestBuildSkillChangeEventArgs_GADriven(t *testing.T) {
 	if _, has := args["actorAgentId"]; has {
 		t.Errorf("actorAgentId unexpectedly set on GA-driven extend: %v", args["actorAgentId"])
 	}
-	if got, ok := args["planId"].(string); !ok || got != "" {
-		t.Errorf("planId: got %v want \"\" (GA-driven has no Plan back-pointer)", args["planId"])
+	for _, key := range []string{"runId", "planId"} {
+		if _, has := args[key]; has {
+			t.Errorf("%s written for an extend outside any run: %v", key, args[key])
+		}
+	}
+
+	inRun := buildSkillChangeEventArgs("ev-3", "agent-9", "skill-x", "v1:identity:user:dana", factoryRun{Id: "v1:work:run:r7"}, map[string]any{}, map[string]any{})
+	if got := inRun["runId"]; got != "v1:work:run:r7" {
+		t.Errorf("runId: got %v want \"v1:work:run:r7\" (the run the extend happened under)", got)
+	}
+	if got := inRun["actorUserId"]; got != "v1:identity:user:dana" {
+		t.Errorf("actorUserId: got %v; a run on the call must not move the attribution to the planner", got)
+	}
+}
+
+// TestRunForFactory pins where the factory learns its run (memql#5436): an
+// explicit runId argument, which is the planner-driven signal; else the work
+// run the call carries on its context, which is not; else none.
+func TestRunForFactory(t *testing.T) {
+	inRun := common.ContextWithRun(context.Background(), common.RunContext{RunId: "v1:work:run:ctx", OwnerUserId: "u1"})
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		args map[string]any
+		want factoryRun
+	}{
+		{"no run anywhere", context.Background(), map[string]any{}, factoryRun{}},
+		{"the run on the context", inRun, map[string]any{}, factoryRun{Id: "v1:work:run:ctx"}},
+		{"a named run", context.Background(), map[string]any{"runId": "run-42"}, factoryRun{Id: "run-42", RunDriven: true}},
+		{"a named run wins over the context", inRun, map[string]any{"runId": "run-42"}, factoryRun{Id: "run-42", RunDriven: true}},
+		{"a blank name is no name", inRun, map[string]any{"runId": "  "}, factoryRun{Id: "v1:work:run:ctx"}},
+	} {
+		if got := runForFactory(tc.ctx, tc.args); got != tc.want {
+			t.Errorf("%s: runForFactory = %+v, want %+v", tc.name, got, tc.want)
+		}
 	}
 }
 
