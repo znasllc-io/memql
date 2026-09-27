@@ -75,7 +75,16 @@ each one's replacement, are the table in `parser/v1_refusals.go`
 (`V1RetiredForms`). What each position admits is the tier manifest in
 `tiers/`, and what each function means is the catalog in `functions/`. The
 string the rewriter emits is the engine's internal query form -- also what an
-SDK sends to `Execute` -- and its grammar (`ParseExpression`) does not change.
+SDK sends to `Execute` -- and it keeps its own grammar (`ParseExpression`),
+with one thing in common with the authored one: neither has a comma or a
+semicolon connective. `;` as AND (memql#5375) and `,` as OR (memql#5439) are
+refused there too, the comma as `retired_comma_connective`, the v1 code. The
+only reader that still understands them is the expressions rewrite, through
+`parseLegacyExpression` (the `legacyConnectives` parser flag), because it has
+to read the retired spelling to write `&&` / `||` in its place -- never set
+that flag anywhere the engine parses, and never emit a comma between two
+conditions from a lowering (`TestNoLoweringCarriesTheCommaConnective` in
+`test/dslconformance` lowers every tracked file to hold it).
 
 **Before-write automation bodies** use `@trigger(before="create"|"update"|"write", concept="...")` and field writes `row.<field> = <expression>`. `ast.FieldWriteStatement` is a statement kind and `tiers.PositionBeforeWriteValue` its expression position. The compiler captures branch conditions so earlier field writes cannot change the chosen arm. The engine runs the body after read-merge and before schema validation; only read-only query/logic calls are admitted transitively.
 

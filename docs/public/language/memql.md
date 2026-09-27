@@ -1030,10 +1030,17 @@ authored language: it keeps bare payload fields, has no lambdas, and refuses
 | Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && active==true`.       |
 | Limit                | Use `paginate(<expr>, limit)` to request an explicit page size; omitting both `paginate` and `sort` caps the read at `MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop). Continuation is via keyset cursors, not an offset skip. |
 
-The legacy parser of this form still reads `;` as AND and `,` as OR
-(memql#3630), which is why a `,` inside parentheses was once an authorization
-bypass (memql#3612). No authored expression can write either: the parser refuses
-both in a `.memql` file, with every other [retired spelling](#retired-spellings).
+`&&` and `||` are the only connectives. The internal form once also read `;`
+as AND and `,` as OR, which is how
+`(ownerUserId==actor.userId, visibility=="public")` became a disjunction and
+an authorization bypass (memql#3612). Both are refused now, in this form as in
+a `.memql` file: `;` since memql#5375 and `,` since memql#5439, the comma with
+the same rule code, `retired_comma_connective`, that the authored language
+refuses it with. A comma still separates arguments, list elements, a
+directive's parameters and a traversal's label from its filter; it never joins
+two conditions. A traversal takes one filter, so two are joined inside it:
+`parentOf(concept==v1:examples:hub || concept==v1:examples:space)`, never
+`parentOf(concept==v1:examples:hub, concept==v1:examples:space)`.
 
 IDs are persisted as `<concept>:<raw-id>`. MemQL supports both full IDs and short IDs (when concept context is provided):
 
@@ -1232,6 +1239,14 @@ filter row => childOf(w => w.id == args.worldId) && row.tier == "silver"
 That selects the silver-tier children of the world `args.worldId`. The internal
 form writes the same traversal with a filter as its argument:
 `childOf(concept==v1:examples:world && id=="v1:examples:world:world-aurora") && tier=="silver"`.
+
+A traversal takes ONE lambda (or, in the internal form, one filter), after its
+optional label. Rows that meet either of two conditions are one lambda joined by
+`||` -- `childOf(w => w.id == args.a || w.id == args.b)` -- and never two
+arguments: the internal form's `childOf(a, b)` once read its comma as OR, and is
+refused naming `childOf(a || b)` (memql#5439).
+`memqlmigrate --rewrite=expressions` writes a legacy traversal, comma and all,
+as its lambda.
 
 | Function        | Purpose                                                                                                  |
 |-----------------|----------------------------------------------------------------------------------------------------------|
@@ -3090,7 +3105,8 @@ prompt summariseDoc { title string  content string! }
 ### The internal query form
 
 A client sends these strings to `Execute`. They keep the older grammar: bare
-payload fields, no `!`, no `in`.
+payload fields, no `!`, no `in`. Their connectives are `&&` and `||` only:
+`;` and `,` are refused, as in a `.memql` file.
 
 ```text
 concept==v1:user && active==true                   # a filter
@@ -3118,6 +3134,8 @@ A small set of legacy runtime shapes is rejected upfront with a typed `ErrUnsupp
 - Trailing `@timestamp` / `@latest` suffix — pin the timestamp via `asOf(...)` or at the DSL definition site.
 - Inline spec definition (`name := expr`) — declare the spec in the DSL and apply it in a declared query.
 - Trailing comma in the query string.
+
+The two retired connectives are refused by the parser itself: `;` as AND since memql#5375, and `,` as OR since memql#5439 -- the comma with the rule code the authored language refuses it with, `retired_comma_connective`, carried by the `*langparser.RetiredFormError` the engine returns (`RuleCode()`). A comma directly inside a traversal is refused naming the call to write, `parentOf(a || b)`.
 
 Cross-parser equivalence for the supported shapes is guarded by `TestParseViaLangparser_Equivalence` in `component/memql/parser_langpath_test.go`. Add a row there if a new caller adopts a shape the corpus doesn't cover.
 
