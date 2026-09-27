@@ -139,7 +139,8 @@ type Node struct {
 
 // The readings canonicalization records on a parsed string (Node.Form).
 const (
-	// FormArgv is a command line split into arguments. It materializes as
+	// FormArgv is a command line split into arguments -- a `command` string,
+	// or the script a shell in an argument vector runs. It materializes as
 	// ONE string: the recorded spelling of every argument (Raw) and the text
 	// between them (Seps) where the recording kept them, so a command the
 	// template holds whole is sent exactly as it was recorded.

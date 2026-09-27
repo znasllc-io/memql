@@ -350,3 +350,24 @@ func TestUsedToolsReadsOperatorsAttachedToWords(t *testing.T) {
 		}
 	}
 }
+
+// TestUsedToolsReadsAVectorsScript: a shell's script inside an argument
+// vector is a command line of its own, read as one -- behind a wrapper as
+// well -- and a vector stored before scripts were read (its script one
+// literal) is read as it always was.
+func TestUsedToolsReadsAVectorsScript(t *testing.T) {
+	vector := func(vec ...any) Template {
+		return Template{Steps: []TemplateStep{{Tool: "exec", Args: Canonicalize([]Step{{
+			StepType: "exec", Consumed: true, Input: map[string]any{"command": vec},
+		}})[0].Args}}}
+	}
+	if got, want := UsedTools(vector("sudo", "-u", "bob", "bash", "-c", "cd app&&npm test")), []string{"bash", "cd", "npm", "sudo"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("behind sudo: UsedTools = %v, want %v", got, want)
+	}
+	stored := Template{Steps: []TemplateStep{{Tool: "exec", Args: Obj(map[string]*Node{
+		"command": Arr(Lit("bash"), Lit("-lc"), Lit("make build && git status")),
+	})}}}
+	if got, want := UsedTools(stored), []string{"bash", "git", "make"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("a stored literal script: UsedTools = %v, want %v", got, want)
+	}
+}

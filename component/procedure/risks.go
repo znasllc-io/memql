@@ -123,7 +123,10 @@ func shownValue(v string) string {
 //
 // Each applies to a command line (a FormArgv argv, read as the line
 // Materialize sends) and to a command vector (an array under command, cmd or
-// argv, as canonicalization builds one). The program list is short and NOT
+// argv, as canonicalization builds one) -- including the script a shell in a
+// vector runs, which canonicalization reads as a command line of its own, so
+// a parameter inside it is judged as a word of that line and a script that is
+// a parameter as a whole is still a script. The program list is short and NOT
 // exhaustive -- ssh, xargs, find -exec, a make target all run code -- and it
 // does not need to be: strict quoting makes every other position a single
 // literal argument, and the steps are what a person approves.
@@ -219,18 +222,25 @@ func commandRisks(n *Node) []string {
 		return out
 	case n.Kind == KindArray:
 		var (
-			items []shellItem
-			elems []*Node
+			items  []shellItem
+			elems  []*Node
+			nested []string
 		)
 		for _, k := range n.Kids {
 			if k != nil && k.Kind == KindLit {
 				items = append(items, shellItem{word: k.Lit, here: strings.HasPrefix(k.Lit, "<<")})
 				continue
 			}
+			if k != nil && k.Kind == KindArray && k.Form == FormArgv {
+				// A shell's script, which canonicalization read as the
+				// command line it is: its parameters are judged inside it,
+				// like any command line's, rather than as one script.
+				nested = append(nested, commandRisks(k)...)
+			}
 			items = append(items, shellItem{slots: []int{len(elems)}})
 			elems = append(elems, k)
 		}
-		return wordRisks(items, elems, false)
+		return append(wordRisks(items, elems, false), nested...)
 	}
 	return nil
 }

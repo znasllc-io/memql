@@ -295,6 +295,9 @@ type recFixture struct {
 	// execCommand overrides the exec step's command: the app doing the goal
 	// some other way.
 	execCommand string
+	// execVector records the exec step's command as an argument VECTOR, the
+	// way Codex records every command.
+	execVector []any
 }
 
 type stepFeedback struct {
@@ -424,6 +427,9 @@ func (r recFixture) observationRows(t *testing.T) []map[string]any {
 			"sessionId": r.sessionId, "seq": float64(1), "isError": r.execExit != 0,
 			"exitCode": float64(r.execExit), "resultType": "string", "cwd": testWorkspace,
 			"args": argsJSON(t, map[string]any{"command": r.command()}),
+		}
+		if r.execVector != nil {
+			data["args"] = argsJSON(t, map[string]any{"command": r.execVector})
 		}
 		if r.argsTruncated {
 			data["argsTruncated"] = true
