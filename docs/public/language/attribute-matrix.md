@@ -725,7 +725,7 @@ On a concept field: server-only (memql#2035) -- never projected by a shape's def
 | [prompt](#prompt) | one string | `@level("fast")` |
 | [rule](#rule) | one string | `@level("strong")` |
 
-- On a prompt: How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Every prompt should declare one; a prompt without one is not yet refused at load (memql#5426).
+- On a prompt: How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Required on every prompt: one without it is refused at load (`prompt_level_missing`), a @disabled prompt included.
 - On a rule: The level to resolve the call at: fast, strong, reasoning or embeddings, OVERRIDING what the call declared.
 
 ### @locked
@@ -887,7 +887,7 @@ Declares WHERE CHANGES TO THIS CONCEPT ARE MADE -- the system that owns the data
 | [concept field](#concept-field) | one string | `@pattern("^[a-z][a-z0-9-]*$")` |
 | [args field](#args-field) | one string | `@pattern("^[A-Za-z]{2,3}$")` |
 
-- On a concept field: A regular expression a string value must match.
+- On a concept field: A regular expression a string value must match, in Go's RE2 syntax. It is compiled at load on a concept field and an args field alike, so an expression that does not compile is refused there (`pattern_invalid`) rather than at the first write or call.
 - On an args field: A regular expression a string argument must match, compiled once at load.
 
 ### @pii
