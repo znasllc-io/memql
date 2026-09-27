@@ -267,6 +267,13 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 		automation.Name = automationOutput.Name
 	}
 
+	// An args field's @pattern is a regular expression, and the load says so
+	// (memql#5426 review): compiled here, once, by the check every other
+	// @pattern is held to, rather than at the first fire as no constraint.
+	if err := compileArgsPatterns(&automation); err != nil {
+		return nil, fmt.Errorf("automation %q: %w", automation.Name, err)
+	}
+
 	// Re-attach the first-class preconditions extracted before the rewrite
 	// (Epic 4 / memql#2139). The executor evaluates them deterministically
 	// at the start of the run; a miss emits the healing.precondition.missed

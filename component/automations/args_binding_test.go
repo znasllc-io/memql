@@ -6,6 +6,8 @@ package automations
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -88,6 +90,44 @@ automation badDefault {
 	} else if !strings.Contains(err.Error(), "default") {
 		t.Errorf("error should mention @default, got: %v", err)
 	}
+}
+
+// TestCompileMemQL_RefusesAnArgsPatternThatDoesNotCompile (memql#5426
+// review): an args field's @pattern is compiled at load, by the check every
+// other @pattern is held to, and refused under pattern_invalid naming the
+// field. The binder compiled it at the first fire and took one that does not
+// compile as no constraint, so the automation loaded and bound every value. A
+// pattern that compiles is the control.
+func TestCompileMemQL_RefusesAnArgsPatternThatDoesNotCompile(t *testing.T) {
+	loader := NewLoader(LoaderOptions{})
+	const tmpl = `@trigger(event="deploy.requested")
+automation patternProbe {
+  args {
+    region string @required @pattern(%q)
+  }
+  gate := logic requireForwardDeploy(environment: args.region)
+}`
+	_, err := loader.compileMemQL(fmt.Sprintf(tmpl, "^[A-Z"), "test:badPattern")
+	if err == nil {
+		t.Fatal("an args @pattern that does not compile loaded")
+	}
+	const want = `automation "patternProbe": args field "region": invalid @pattern "^[A-Z"`
+	if !strings.Contains(err.Error(), want) || baseloaderRuleCode(err) != "pattern_invalid" {
+		t.Fatalf("err = %v (code %q), want it to say %q under pattern_invalid", err, baseloaderRuleCode(err), want)
+	}
+	if _, err := loader.compileMemQL(fmt.Sprintf(tmpl, "^[A-Z]{2}$"), "test:goodPattern"); err != nil {
+		t.Fatalf("a pattern that compiles was refused: %v", err)
+	}
+}
+
+// baseloaderRuleCode is baseloader.RuleCode without the import: the rule id
+// a refusal carries, read off its chain.
+func baseloaderRuleCode(err error) string {
+	var coded interface{ RuleCode() string }
+	if errors.As(err, &coded) {
+		return coded.RuleCode()
+	}
+	return ""
 }
 
 // An automation with NO args block compiles and carries a nil Args: it binds
