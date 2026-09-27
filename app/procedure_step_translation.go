@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/num"
@@ -291,11 +292,23 @@ func procedureSplitLeadingCd(line string) (rest, dir string, ok bool) {
 	}
 }
 
-// procedureTimeoutSec reads a recorded command's own time limit. Claude
-// Code's Bash `timeout` is MILLISECONDS; the hosts take seconds, rounded up so
-// a limit never shrinks. Zero means none was recorded, and the host's default
-// applies.
-func procedureTimeoutSec(args map[string]any) int {
+// procedureTimeoutSec is the time limit a recorded command runs under, in the
+// seconds the hosts take, rounded up so a limit never shrinks.
+//
+// THE REQUEST'S TIMEOUT WINS. The app's per-call timeout is not in the
+// template -- the model picks a different one on every call, and a value that
+// varies is not a parameter anybody supplies -- so the runner hands it over
+// beside the step (DispatchRequest.Timeout). A timeout still spelled in the
+// arguments is the fallback: Claude Code's Bash `timeout`, in MILLISECONDS.
+// Zero means neither said, and the host's default applies.
+func procedureTimeoutSec(timeout time.Duration, args map[string]any) int {
+	if timeout > 0 {
+		secs := int64(timeout / time.Second)
+		if timeout%time.Second != 0 {
+			secs++
+		}
+		return num.ClampInt64(secs)
+	}
 	ms, ok := procedurePayloadInt(args["timeout"])
 	if !ok || ms <= 0 {
 		return 0

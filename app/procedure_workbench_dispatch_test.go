@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -195,6 +196,33 @@ func TestAWorkbenchExecTranslatesClaudesBashCommand(t *testing.T) {
 	}
 	if res.Delivered {
 		t.Fatal("a command in the run's own workspace delivered nothing outside it")
+	}
+}
+
+// THE STEP'S TIMEOUT RIDES THE REQUEST. The template no longer carries the
+// app's per-call timeout -- the model picks a different one every call, and a
+// value that varies is not a parameter -- so the runner hands it over beside
+// the step, and it is what bounds the command here. It wins over a timeout
+// still spelled in the arguments.
+func TestTheRequestsTimeoutReachesTheWorkbenchExec(t *testing.T) {
+	wb := newFakeWorkbench()
+	req := workbenchStep("exec", map[string]any{"command": "npm test"})
+	req.Timeout = 180 * time.Second
+	if _, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if args := wb.lastArgs(); args["timeoutSec"] != 180 {
+		t.Fatalf("exec args = %+v, want timeoutSec 180", args)
+	}
+
+	wb = newFakeWorkbench()
+	req = workbenchStep("exec", map[string]any{"command": "npm test", "timeout": float64(600000)})
+	req.Timeout = 180 * time.Second
+	if _, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if args := wb.lastArgs(); args["timeoutSec"] != 180 {
+		t.Fatalf("exec args = %+v, want the request's 180 over the argument's 600", args)
 	}
 }
 

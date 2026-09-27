@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/integrations/planner"
@@ -163,6 +164,20 @@ func TestAMachineCommandRunsInTheReplaysOwnWorkspace(t *testing.T) {
 	}
 	if args := m.lastArgs(); args["cwd"] != testMachineRoot+"/replay1" {
 		t.Fatalf("exec args = %+v", args)
+	}
+}
+
+// The step's timeout reaches the machine's command the way it reaches the
+// workbench's: from the request, beside the template.
+func TestTheRequestsTimeoutReachesTheMachineExec(t *testing.T) {
+	m := newFakeMachine()
+	req := machineStep("exec", map[string]any{"command": "make build"})
+	req.Timeout = 180 * time.Second
+	if _, err := newTestMachineDispatcher(m, testMachineRoot).Dispatch(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if args := m.lastArgs(); args["cmd"] != "make build" || args["timeoutSec"] != 180 {
+		t.Fatalf("exec args = %+v, want the command with timeoutSec 180", args)
 	}
 }
 

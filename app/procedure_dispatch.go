@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -137,7 +138,7 @@ func runProcedureStep(
 	)
 	switch req.Tool {
 	case work.StepTypeExec:
-		res, err = runProcedureExec(ctx, host, args)
+		res, err = runProcedureExec(ctx, host, req.Timeout, args)
 	case work.StepTypeFSWrite:
 		res, err = runProcedureWrite(ctx, host, req.Sandbox, args)
 	case work.StepTypeFSRead:
@@ -155,8 +156,8 @@ func runProcedureStep(
 	return res, nil
 }
 
-// runProcedureExec runs a recorded command.
-func runProcedureExec(ctx context.Context, host procedureHost, args map[string]any) (procedure.DispatchResult, error) {
+// runProcedureExec runs a recorded command, bounded by the step's timeout.
+func runProcedureExec(ctx context.Context, host procedureHost, timeout time.Duration, args map[string]any) (procedure.DispatchResult, error) {
 	if background, _ := args["run_in_background"].(bool); background {
 		return procedure.DispatchResult{}, fmt.Errorf("it ran in the background, so what the app recorded is a job handle rather than the command's result, and no replay of it could compare")
 	}
@@ -168,7 +169,7 @@ func runProcedureExec(ctx context.Context, host procedureHost, args map[string]a
 	if err != nil {
 		return procedure.DispatchResult{}, err
 	}
-	if t := procedureTimeoutSec(args); t > 0 {
+	if t := procedureTimeoutSec(timeout, args); t > 0 {
 		execArgs["timeoutSec"] = t
 	}
 	reply, err := host.call(ctx, "exec", execArgs)

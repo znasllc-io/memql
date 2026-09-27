@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/integrations/workbench"
@@ -118,9 +119,22 @@ func TestALeadingCdBecomesTheWorkingDirectory(t *testing.T) {
 
 func TestClaudesTimeoutIsMillisecondsRoundedUpToSeconds(t *testing.T) {
 	for in, want := range map[any]int{float64(120000): 120, float64(1500): 2, float64(1): 1, float64(-5): 0, "600": 0, nil: 0} {
-		if got := procedureTimeoutSec(map[string]any{"timeout": in}); got != want {
+		if got := procedureTimeoutSec(0, map[string]any{"timeout": in}); got != want {
 			t.Errorf("timeout %v -> %d, want %d", in, got, want)
 		}
+	}
+}
+
+// The request's timeout is the step's, handed over beside the template; it
+// wins over one still spelled in the arguments, and rounds up the same way.
+func TestTheRequestsTimeoutWinsAndRoundsUp(t *testing.T) {
+	for timeout, want := range map[time.Duration]int{180 * time.Second: 180, 1500 * time.Millisecond: 2, time.Nanosecond: 1} {
+		if got := procedureTimeoutSec(timeout, map[string]any{"timeout": float64(600000)}); got != want {
+			t.Errorf("timeout %s over 600000ms -> %d, want %d", timeout, got, want)
+		}
+	}
+	if got := procedureTimeoutSec(-time.Second, map[string]any{"timeout": float64(5000)}); got != 5 {
+		t.Errorf("a negative request timeout -> %d, want the argument's 5", got)
 	}
 }
 
