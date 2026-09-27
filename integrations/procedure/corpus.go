@@ -248,7 +248,7 @@ func (i *Integration) loadRecording(ctx context.Context, run map[string]any, lev
 			// canonicalized (relativize.go): the fingerprint's cwd, or --
 			// for a recording that carried none -- the action's own.
 			ws := actionWorkspace(rec.Workspace, o)
-			input = relativizeArgs(args, ws)
+			input = relativizeArgs(semanticArgs(stepType, args), ws)
 			rec.Evidence[key] = i.stepEvidenceOf(ctx, stepType, o, input, ws)
 		}
 		result := obj(r, "result")
