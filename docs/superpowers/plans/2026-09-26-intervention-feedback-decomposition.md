@@ -509,3 +509,12 @@ Each stream works only in its files, commits `Issue #<N>: ...`, and reports what
 - `MoveHead` makes a version current WITH THE UPSTREAM IT WAS COMPUTED FROM: every earlier key its basis names takes that entry. The caller re-asserts EVERY key whose entry changed (diff the old head against the new), upstream included.
 - `ParseHead` answers nil for an absent or unreadable head; `Head.Object()` is never nil (`{}` clears).
 - Top-level keys only: a key containing `/` is `ErrNestedStep`.
+
+### Task 4 (seam), merged at `7a16c685d` (+ coordinator `a66769de0`)
+- `component/memql/ai_step_override.go`: `ApplyStepOverride(ctx, airoute.ResolveRequest) (airoute.ResolveRequest, error)`, `StepOverrideMessages(ctx) []common.ChatMessage`, `StepOverrideInstructions(*common.StepOverride) string`, `StepOverrideGuidance(*common.StepOverride) string`. Applied in requestForPrompt, CallAIStructured, the `ai()` path (one-string call: the two messages ride as paragraphs of the prompt), and both tool loops. A level override refuses anything but fast/strong/reasoning; it keeps `@defaultProvider` and a caller's pin (clearing them could send a step pinned to someone's app to a paid vendor); `Model` outranks both.
+- `Effort` on `airoute.ResolveRequest`, `memql.AppCallRequest`, `memql.FleetCallRequest`, `memql.AppSessionHandover`, `memql.SessionRequest`, `worker.ModelCallRequest`. Effort reaches the APP door via AppSessionStart.effort and the FLEET door via ModelCallStart.effort; a vendor door serves without it (debug log).
+- A re-run step (any non-nil Override) skips the exact-hash and semantic caches both ways; the work-context checkpoint runs without the override.
+- `automations.WorkStepId(runId, stepKey)` (component/automations/step_id.go). The delegate stamps childRunId on the REAL row, keys the child goal by the row id; the child run's input carries `parentStepId` (row id) and `parentStepKey`. `app:<id>:<model>` pins now reach RunSpec.Model (they were dropped).
+- The fresh workspace travels as the executor input `freshWorkspace`; an unresolvable snapshot file refuses the step naming it before any child run opens.
+- Coordinator: a work turn whose override pins a Model now names its run and step on the resolve request, so the session door can take it (default routing of other turns unchanged).
+- Open: a strict REPLAY must carry each step's recorded override or it diverges (the hash covers the appended messages) -- asked of the executor stream.
