@@ -11,6 +11,7 @@ cells/argsField/maximum/with-a-quoted-number.memql
 cells/argsField/minimum/a-number.memql
 cells/argsField/minimum/with-a-quoted-number.memql
 cells/argsField/pattern/a-string.memql
+cells/argsField/pattern/an-invalid-pattern-on-an-automation.memql
 cells/argsField/pattern/an-invalid-pattern.memql
 cells/argsField/pattern/with-no-value.memql
 cells/argsField/required/with-true.memql
@@ -200,6 +201,7 @@ cells/prompt/description/with-no-value.memql
 cells/prompt/disabled/with-true.memql
 cells/prompt/disabled/written-bare.memql
 cells/prompt/level/a-string.memql
+cells/prompt/level/above-a-multi-line-annotation.memql
 cells/prompt/level/an-unknown-level.memql
 cells/prompt/level/with-an-unquoted-value.memql
 cells/prompt/level/with-no-level.memql
@@ -484,6 +486,8 @@ examples/reserved/intrinsic-filter.memql
 examples/reserved/use-imports.memql
 examples/specifications/archived-artifacts.memql
 examples/specifications/requires-cluster-owner.memql
+expr/automationCondition/a-list-method-on-a-string-literal.memql
+expr/automationCondition/a-method-call-of-the-wrong-shape.memql
 expr/automationCondition/a-retired-function.memql
 expr/automationCondition/absent-is-false.memql
 expr/automationCondition/an-unknown-method.memql
@@ -814,6 +818,7 @@ negative/action/missing-required-capability-arg.memql
 negative/ai/query-filter.memql
 negative/automation/declared-outside-automations-file.memql
 negative/concept/an-unparsable-field.memql
+negative/concept/an-unterminated-body.memql
 negative/concept/nesting-too-deep.memql
 negative/logic/chain-too-long.memql
 negative/logic/nesting-too-deep.memql
@@ -835,6 +840,7 @@ statements/automation/assign/assign.memql
 statements/automation/assign/call-inside-an-expression.memql
 statements/automation/body/no-statement.memql
 statements/automation/body/precondition-entries.memql
+statements/automation/body/precondition-reads-an-undeclared-arg.memql
 statements/automation/body/precondition-without-check.memql
 statements/automation/body/two-statements-on-one-line.memql
 statements/automation/call/argument-pun.memql
@@ -925,6 +931,7 @@ statements/logic/scope/absent-when-not-run.memql
 statements/logic/scope/config-key-not-allowed.memql
 statements/logic/scope/event-in-a-logic.memql
 statements/logic/scope/forward-reference.memql
+statements/logic/scope/lambda-parameter-named-args.memql
 statements/logic/scope/trace-is-not-a-root.memql
 statements/logic/switch/label-twice.memql
 statements/logic/switch/switch.memql
