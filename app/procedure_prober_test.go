@@ -190,7 +190,7 @@ func (h *fakeProbeHost) resolvePath(_ context.Context, p string) (string, string
 func (h *fakeProbeHost) prepareCommand(context.Context, procedureCommandLine) (map[string]any, error) {
 	return nil, nil
 }
-func (h *fakeProbeHost) delivers() bool { return true }
+func (h *fakeProbeHost) delivers(string) bool { return true }
 
 // The MACHINE compares the platform, so it is asked -- in Go's names, which
 // is how the cockpit's fingerprint records it.

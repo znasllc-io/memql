@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -198,6 +199,33 @@ func TestAWorkbenchExecTranslatesClaudesBashCommand(t *testing.T) {
 	}
 }
 
+// THE STEP'S TIMEOUT RIDES THE REQUEST. The template no longer carries the
+// app's per-call timeout -- the model picks a different one every call, and a
+// value that varies is not a parameter -- so the runner hands it over beside
+// the step, and it is what bounds the command here. It wins over a timeout
+// still spelled in the arguments.
+func TestTheRequestsTimeoutReachesTheWorkbenchExec(t *testing.T) {
+	wb := newFakeWorkbench()
+	req := workbenchStep("exec", map[string]any{"command": "npm test"})
+	req.Timeout = 180 * time.Second
+	if _, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if args := wb.lastArgs(); args["timeoutSec"] != 180 {
+		t.Fatalf("exec args = %+v, want timeoutSec 180", args)
+	}
+
+	wb = newFakeWorkbench()
+	req = workbenchStep("exec", map[string]any{"command": "npm test", "timeout": float64(600000)})
+	req.Timeout = 180 * time.Second
+	if _, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if args := wb.lastArgs(); args["timeoutSec"] != 180 {
+		t.Fatalf("exec args = %+v, want the request's 180 over the argument's 600", args)
+	}
+}
+
 func TestAWorkbenchExecUnwrapsCodexsShellVector(t *testing.T) {
 	wb := newFakeWorkbench()
 	if _, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(),
@@ -237,13 +265,71 @@ func TestANonZeroExitIsAnErrorCarryingItsCode(t *testing.T) {
 // NOTHING RAN, so it is not an observation: the runner must not list a
 // refused step among the ones the app is told not to repeat.
 func TestAStepTheWorkbenchRefusesBeforeRunningIsAnError(t *testing.T) {
-	for _, code := range []string{"command_not_allowed", "no_workbench_peer", "no_forwarded_authority", "workspace_owner_unresolved"} {
+	for _, code := range []string{"command_not_allowed", "no_forwarded_authority", "workspace_owner_unresolved"} {
 		wb := newFakeWorkbench()
 		wb.refuse["exec"] = code
 		_, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), workbenchStep("exec", map[string]any{"command": "make"}))
 		if err == nil || !strings.Contains(err.Error(), code) || !strings.Contains(err.Error(), "step0") {
 			t.Errorf("%s -> %v, want an error naming the code and the step", code, err)
 		}
+	}
+}
+
+// AN UNREACHABLE WORKBENCH SAYS NOTHING ABOUT THE PROCEDURE. No peer answered,
+// or the forward to one failed: the step is a failed observation -- as it
+// always was to a reader that knows nothing else -- marked Unavailable, which
+// is what keeps the ladder from counting it against the procedure. Every
+// action a step can reach answers the same way, the read an Edit needs first
+// included.
+func TestAnUnreachableWorkbenchIsUnavailableNotAFailedProcedure(t *testing.T) {
+	steps := map[string]procedure.DispatchRequest{
+		"exec":     workbenchStep("exec", map[string]any{"command": "npm test"}),
+		"fs_write": workbenchStep("fs_write", map[string]any{"file_path": "out/a.txt", "content": "a\n"}),
+		"sandbox": func() procedure.DispatchRequest {
+			r := workbenchStep("fs_write", map[string]any{"file_path": "out/a.txt", "content": "a\n"})
+			r.Sandbox = true
+			return r
+		}(),
+		"edit":    workbenchStep("fs_write", map[string]any{"file_path": "a.txt", "old_string": "a", "new_string": "b"}),
+		"fs_read": workbenchStep("fs_read", map[string]any{"file_path": "a.txt"}),
+		"fetch":   workbenchStep("fetch", map[string]any{"url": "https://example.com/"}),
+	}
+	for _, code := range []string{"no_workbench_peer", "forward_failed"} {
+		for name, req := range steps {
+			wb := newFakeWorkbench()
+			for _, action := range []string{"exec", "fs_write", "fs_read", "fs_stat", "http_fetch"} {
+				wb.refuse[action] = code
+			}
+			res, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), req)
+			if err != nil {
+				t.Errorf("%s %s: %v -- an unreachable target is a result the runner reads, not a step it refused", code, name, err)
+				continue
+			}
+			if !res.Unavailable {
+				t.Errorf("%s %s: not Unavailable, so the ladder would count a missing peer against the procedure", code, name)
+			}
+			if o := res.Observation; o.IsError == nil || !*o.IsError || len(o.Contents) != 0 || o.ExitCode != nil {
+				t.Errorf("%s %s: observation = %+v, want an error measuring nothing", code, name, o)
+			}
+			if res.Delivered {
+				t.Errorf("%s %s: delivered", code, name)
+			}
+			if out, _ := res.Output.(map[string]any); out["errorCode"] != code {
+				t.Errorf("%s %s: the receipt does not say why: %+v", code, name, res.Output)
+			}
+		}
+	}
+}
+
+// A TIMEOUT IS THE PROCEDURE'S. The command ran as long as the recordings let
+// it and did not finish: that is evidence about the procedure, and it is
+// counted like any other failure.
+func TestATimedOutCommandIsNotUnavailable(t *testing.T) {
+	wb := newFakeWorkbench()
+	wb.refuse["exec"] = "timeout"
+	res, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), workbenchStep("exec", map[string]any{"command": "npm test"}))
+	if err != nil || res.Unavailable || res.Observation.IsError == nil || !*res.Observation.IsError {
+		t.Fatalf("a timeout = %+v unavailable %v, %v; want a failed step the ladder counts", res.Observation, res.Unavailable, err)
 	}
 }
 
@@ -292,6 +378,49 @@ func TestAShadowWriteGoesThroughExecSoNoLibraryRowIsWritten(t *testing.T) {
 	}
 	if o := res.Observation; len(o.Contents) != 1 || o.Contents[0].Digest != procedureDigest("hello\n") {
 		t.Fatalf("observation = %+v", o)
+	}
+}
+
+// A CANARY OR TRUSTED WRITE ON THE WORKBENCH IS DELIVERED. The workbench
+// promotes every successful fs_write into the run owner's Library -- a row the
+// person sees, outside the run's directory -- so the app taking a diverged goal
+// over must be told never to write it again. A shadow's write goes through
+// exec, promotes nothing and delivers nothing; a write that failed delivered
+// nothing either.
+func TestAWorkbenchWriteOutsideAShadowIsDelivered(t *testing.T) {
+	for name, args := range map[string]map[string]any{
+		"write": {"file_path": "./out/report.md", "content": "# Report\n"},
+		"edit":  {"file_path": "./src/app.go", "old_string": "v = 1", "new_string": "v = 2"},
+	} {
+		wb := newFakeWorkbench()
+		wb.files["src/app.go"] = "const v = 1\n"
+		res, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), workbenchStep("fs_write", args))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !res.Delivered {
+			t.Errorf("%s: a canary/trusted write on the workbench lands in the person's Library, and was not reported delivered", name)
+		}
+
+		wb = newFakeWorkbench()
+		wb.files["src/app.go"] = "const v = 1\n"
+		shadow := workbenchStep("fs_write", args)
+		shadow.Sandbox = true
+		res, err = newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(), shadow)
+		if err != nil {
+			t.Fatalf("%s in a shadow: %v", name, err)
+		}
+		if res.Delivered {
+			t.Errorf("%s: a shadow's write promotes nothing, and was reported delivered", name)
+		}
+	}
+
+	wb := newFakeWorkbench()
+	wb.refuse["fs_write"] = "fs_write_failed"
+	res, err := newTestWorkbenchDispatcher(wb, nil).Dispatch(context.Background(),
+		workbenchStep("fs_write", map[string]any{"file_path": "out/a.txt", "content": "a"}))
+	if err != nil || res.Delivered || res.Observation.IsError == nil || !*res.Observation.IsError {
+		t.Fatalf("a failed write = %+v delivered %v, %v", res.Observation, res.Delivered, err)
 	}
 }
 
@@ -532,36 +661,43 @@ func TestAnMCPQueryRunsAsTheOwnersAgentAndIsTypedAsItWasRecorded(t *testing.T) {
 	}
 }
 
-func TestAShadowRefusesAnMCPToolThatCouldWrite(t *testing.T) {
-	for _, kind := range []string{"mutation", "logic", "builtin", "automation", "webhook", "unknown"} {
-		tools := &fakeProcedureTools{kinds: map[string]string{"saveNote": kind}}
-		req := workbenchStep("mcp", map[string]any{"tool": "saveNote"})
-		req.Sandbox = true
-		if _, err := newTestWorkbenchDispatcher(newFakeWorkbench(), tools).Dispatch(context.Background(), req); err == nil {
-			t.Errorf("a shadow ran a %s tool", kind)
-		}
-		if tools.calls != 0 {
-			t.Errorf("a %s tool was executed in a shadow", kind)
+// A REPLAYED MCP STEP ONLY READS, IN EVERY MODE. The recorded call ran under
+// the app session's credential, which is pinned to the read/query surface; the
+// replay acts as the owner, with a borrowed actor that is not. So a tool whose
+// handler could write -- a mutation, a logic, a builtin, an automation, a
+// webhook, or one whose handler cannot be read -- is refused before it runs,
+// naming it, on a trusted replay exactly as in a shadow. The step did not run,
+// so the refusal is a Go error.
+func TestAReplayedMCPToolThatCouldWriteIsRefusedInEveryMode(t *testing.T) {
+	for _, mode := range []string{"shadow", "trusted"} {
+		for _, kind := range []string{"mutation", "logic", "builtin", "automation", "webhook", "unknown"} {
+			tools := &fakeProcedureTools{kinds: map[string]string{"saveNote": kind},
+				result: `{"content":[{"type":"text","text":"{\"id\":\"n1\"}"}],"isError":false}`}
+			req := workbenchStep("mcp", map[string]any{"tool": "saveNote", "arguments": map[string]any{"text": "x"}})
+			req.Sandbox = mode == "shadow"
+			_, err := newTestWorkbenchDispatcher(newFakeWorkbench(), tools).Dispatch(context.Background(), req)
+			if err == nil || !strings.Contains(err.Error(), `"saveNote"`) || !strings.Contains(err.Error(), kind) {
+				t.Errorf("%s replay of a %s tool = %v, want a refusal naming the tool and what it calls", mode, kind, err)
+			}
+			if tools.calls != 0 {
+				t.Errorf("a %s tool was executed on a %s replay", kind, mode)
+			}
 		}
 	}
 }
 
-func TestOutsideAShadowAnMCPToolThatWritesRunsAndDelivers(t *testing.T) {
-	tools := &fakeProcedureTools{kinds: map[string]string{"saveNote": "mutation"},
-		result: `{"content":[{"type":"text","text":"{\"id\":\"n1\"}"}],"isError":false}`}
+// And a tool that reads runs outside a shadow too -- delivering nothing, which
+// is what a read is.
+func TestATrustedReplayRunsAnMCPToolThatReads(t *testing.T) {
+	tools := &fakeProcedureTools{kinds: map[string]string{"librarySearch": "query"},
+		result: `{"content":[{"type":"text","text":"[]"}],"isError":false}`}
 	res, err := newTestWorkbenchDispatcher(newFakeWorkbench(), tools).Dispatch(context.Background(),
-		workbenchStep("mcp", map[string]any{"tool": "saveNote", "arguments": map[string]any{"text": "x"}}))
+		workbenchStep("mcp", map[string]any{"tool": "librarySearch", "arguments": map[string]any{"q": "x"}}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.Delivered || res.Observation.ResultType != "object" {
-		t.Fatalf("a mutation = %+v, delivered %v", res.Observation, res.Delivered)
-	}
-	tools.result = `{"content":[{"type":"text","text":"denied"}],"isError":true}`
-	res, err = newTestWorkbenchDispatcher(newFakeWorkbench(), tools).Dispatch(context.Background(),
-		workbenchStep("mcp", map[string]any{"tool": "saveNote"}))
-	if err != nil || res.Delivered || res.Observation.IsError == nil || !*res.Observation.IsError {
-		t.Fatalf("a failed mutation = %+v, delivered %v, %v", res.Observation, res.Delivered, err)
+	if tools.calls != 1 || res.Delivered || res.Observation.IsError == nil || *res.Observation.IsError || res.Observation.ResultType != "array" {
+		t.Fatalf("a trusted read = %+v delivered %v after %d calls", res.Observation, res.Delivered, tools.calls)
 	}
 }
 

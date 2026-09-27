@@ -1012,6 +1012,19 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	if err := e.validateOrganizationSensitiveChanges(ctx, conceptMeta.Name, organizationPrior, payload); err != nil {
 		return nil, meta, err
 	}
+	// THE CERTIFICATION LADDER is server-written only (epic memql#5408,
+	// issue #5409). Here, beside the organization boundary and for its
+	// reasons: it judges a CHANGE, so it needs the stored row (organizationPrior
+	// is that row as read before the merge; nil on a create) and the row about
+	// to be written -- after the read-merge, which carries every ladder field
+	// through an owner's rename unchanged, and after the before-write hooks,
+	// which an owner can author and which could otherwise set a rung on their
+	// own write. See construct_ladder_write_guard.go.
+	if conceptMeta.Name == memorynodes.ConceptAuthoringConstruct {
+		if err := validateConstructLadderServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 
 	// ROW-AUTHZ OWNER STAMP for writes that bypassed the mutation
 	// template (memql#3175, carrying memql#3059). The other half of

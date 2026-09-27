@@ -3,6 +3,7 @@ package app
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/integrations/workbench"
@@ -116,11 +117,44 @@ func TestALeadingCdBecomesTheWorkingDirectory(t *testing.T) {
 	}
 }
 
+// A HOST'S ERROR CODE IS ONE THING. Refused before running (a Go error: the
+// step did not run, and the ladder hears of it) and unavailable (the target
+// could not finish, and the ladder does not) are exclusive answers, and a
+// timeout is neither -- it is the procedure's own failure.
+func TestAHostErrorCodeIsRefusedOrUnavailableNeverBoth(t *testing.T) {
+	for code := range procedureTargetUnavailable {
+		if procedureRefusedBeforeRunning[code] {
+			t.Errorf("%s is both refused-before-running and unavailable", code)
+		}
+	}
+	for _, code := range []string{"worker_disconnected", "worker_unreachable", "no_workbench_peer", "forward_failed"} {
+		if !procedureTargetUnavailable[code] {
+			t.Errorf("%s says the target could not finish, and is not unavailable", code)
+		}
+	}
+	if procedureTargetUnavailable["timeout"] || procedureRefusedBeforeRunning["timeout"] {
+		t.Error("a timeout is the procedure's own failure, neither a refusal nor an unavailable target")
+	}
+}
+
 func TestClaudesTimeoutIsMillisecondsRoundedUpToSeconds(t *testing.T) {
 	for in, want := range map[any]int{float64(120000): 120, float64(1500): 2, float64(1): 1, float64(-5): 0, "600": 0, nil: 0} {
-		if got := procedureTimeoutSec(map[string]any{"timeout": in}); got != want {
+		if got := procedureTimeoutSec(0, map[string]any{"timeout": in}); got != want {
 			t.Errorf("timeout %v -> %d, want %d", in, got, want)
 		}
+	}
+}
+
+// The request's timeout is the step's, handed over beside the template; it
+// wins over one still spelled in the arguments, and rounds up the same way.
+func TestTheRequestsTimeoutWinsAndRoundsUp(t *testing.T) {
+	for timeout, want := range map[time.Duration]int{180 * time.Second: 180, 1500 * time.Millisecond: 2, time.Nanosecond: 1} {
+		if got := procedureTimeoutSec(timeout, map[string]any{"timeout": float64(600000)}); got != want {
+			t.Errorf("timeout %s over 600000ms -> %d, want %d", timeout, got, want)
+		}
+	}
+	if got := procedureTimeoutSec(-time.Second, map[string]any{"timeout": float64(5000)}); got != 5 {
+		t.Errorf("a negative request timeout -> %d, want the argument's 5", got)
 	}
 }
 
@@ -144,6 +178,22 @@ func TestAWorkspacePathIsReportedRelativeAndMayNotLeave(t *testing.T) {
 	for _, in := range []string{"", "/Users/x/notes.md", "~/notes.md", "../x", "a/../../b", ".."} {
 		if got, err := procedureWorkspaceRelative(in); err == nil {
 			t.Errorf("%q was accepted as %q", in, got)
+		}
+	}
+}
+
+func TestAPathClimbsOnlyThroughADotDotSegment(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/Users/x/notes/../../.ssh/authorized_keys": true,
+		"/Users/x/..":                  true,
+		"../x":                         true,
+		"/Users/x/notes/today.md":      false,
+		"/Users/x/./notes/today.md":    false,
+		"/Users/x/notes/..hidden/a.md": false,
+		"/Users/x/notes/a..b.md":       false,
+	} {
+		if got := procedurePathClimbs(p); got != want {
+			t.Errorf("%q climbs = %v, want %v", p, got, want)
 		}
 	}
 }

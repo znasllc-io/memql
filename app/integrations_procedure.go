@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/work"
@@ -71,7 +73,7 @@ func (a *App) wireProcedureReplaySeams(integ *procedure.Integration) {
 	prober := &procedureProber{}
 
 	nodeType := node.CompiledNodeType()
-	if sandboxed, why := procedureWorkbenchIsSandboxed(nodeType, workbenchRemoteEnabled()); sandboxed {
+	if sandboxed, why := procedureWorkbenchIsSandboxed(nodeType, workbenchRemoteEnabled(), workbenchLocalFallbackEnabled()); sandboxed {
 		integ.SetDispatcher(work.TargetWorkbench, newProcedureWorkbenchDispatcher(a.engine))
 		prober.setHost(work.TargetWorkbench, a.procedureWorkbenchHostBuilder())
 		log.Info("procedure replay: the workbench dispatcher and prober are installed",
@@ -99,30 +101,50 @@ func (a *App) wireProcedureReplaySeams(integ *procedure.Integration) {
 //   - with MEMQL_WORKBENCH_REMOTE it forwards to a workbench node -- or, with
 //     no reachable peer, refuses (memql#3506). The base sets it on the agent
 //     and the bff.
+//   - with MEMQL_WORKBENCH_LOCAL_FALLBACK as well, no reachable peer means it
+//     runs the step LOCALLY instead of refusing: the remote flag stops being
+//     an assertion that the step lands on a workbench.
 //   - on the WORKBENCH node it runs the step locally, which is what that node
 //     is for.
-//   - on the AGENT without the flag it runs locally on the agent's disk: the
-//     workbench's own single-node mode, the one topology that runs it that way
-//     on purpose.
+//   - on the AGENT without the flag -- or with both, and no peer -- it runs
+//     locally on the agent's disk: the workbench's own single-node mode, the
+//     one topology that runs it that way on purpose.
 //   - anywhere else it would run the step on THAT node's own disk -- the
-//     planner, the mcp, the edge or an un-flagged bff -- inside a pod that
-//     holds that node's credentials, which is not a sandbox.
+//     planner, the mcp, the edge, the identity node or a bff, un-flagged or
+//     flagged with the fallback -- inside a pod that holds that node's
+//     credentials, which is not a sandbox.
 //
 // The node type is the COMPILED one. Every shipped image is built with its
 // node type's tag (BUILD_TAGS=<type>); an untagged binary is a bff, and a dev
 // build that names another type in MEMQL_NODE_TYPE is treated as the bff it
 // was compiled as -- the conservative direction, since it then gets the
 // dispatcher only with the remote flag set.
-func procedureWorkbenchIsSandboxed(nodeType node.NodeType, remote bool) (bool, string) {
+func procedureWorkbenchIsSandboxed(nodeType node.NodeType, remote, localFallback bool) (bool, string) {
 	switch {
-	case remote:
-		return true, "dispatchHost forwards to a workbench node (MEMQL_WORKBENCH_REMOTE)"
 	case nodeType == node.NodeTypeWorkbench:
 		return true, "this node is the workbench"
+	case nodeType == node.NodeTypeAgent && remote:
+		return true, "dispatchHost forwards to a workbench node (MEMQL_WORKBENCH_REMOTE); with no peer it refuses or, under MEMQL_WORKBENCH_LOCAL_FALLBACK, runs the workbench's single-node mode on the agent's own disk"
 	case nodeType == node.NodeTypeAgent:
 		return true, "the agent runs the workbench's single-node mode on its own disk"
+	case remote && localFallback:
+		return false, "MEMQL_WORKBENCH_LOCAL_FALLBACK lets dispatchHost run a replay's step on this node's own disk when no workbench peer answers, which is not a workbench"
+	case remote:
+		return true, "dispatchHost forwards to a workbench node (MEMQL_WORKBENCH_REMOTE), or refuses with no_workbench_peer"
 	}
 	return false, "dispatchHost here would run a replay's steps on this node's own disk, which is not a workbench"
+}
+
+// workbenchLocalFallbackEnabled reads MEMQL_WORKBENCH_LOCAL_FALLBACK exactly
+// as integrations/workbench reads it (trimmed, case-insensitive 1, true, yes
+// or on), so the replay and the plug-in agree about which nodes would run a
+// step on their own disk. Only consulted with the remote flag, as there.
+func workbenchLocalFallbackEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("MEMQL_WORKBENCH_LOCAL_FALLBACK"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // procedureWorkbenchHostBuilder builds the workbench host a probe runs on.

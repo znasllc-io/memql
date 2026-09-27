@@ -22,11 +22,15 @@ import (
 // `dispatchHost` capability. Agent-only, because the worker streams terminate
 // on the agent node.
 //
-// THE CONSENT IS THE OWNER'S REASONING AGENT'S. Every call goes through the
-// worker dispatcher's own gates -- per-task approval (a run id), the kill
-// switch, the agent's standing computer-use scope, the safety classifier --
-// under the agent compile resolves for the owner (their assistant, else their
-// seeded planner; integrations/planner.ResolveReasoningAgent). A replay
+// THE CONSENT IS THE PROMOTION APPROVAL AND THE AGENT'S STANDING SCOPE. Every
+// call goes through the worker dispatcher's own gates -- the kill switch, the
+// agent's standing computer-use scope, the safety classifier, and the
+// "per-task approval" gate, which checks only that a run id is PRESENT: the
+// replay run's id satisfies it, and no person clicked anything for this
+// replay. The human consent is the procedurePromotion approval the owner
+// decided before the procedure left shadow, plus the standing computer-use
+// scope of the agent compile resolves for them (their assistant, else their
+// seeded planner; integrations/planner.ResolveReasoningAgent) -- so a replay
 // asks for nothing an agent of theirs was not already allowed to do, and an
 // owner with neither agent is refused by name before anything is sent.
 //
@@ -167,6 +171,14 @@ func (h *machineProcedureHost) workspace(ctx context.Context) (string, error) {
 
 // resolvePath uses an absolute path as recorded and puts a relative one in
 // the replay's workspace.
+//
+// A GOAL SUPPLIES PARAMETERS, AND A PARAMETER CAN SIT IN A PATH. The values are
+// checked where they are bound; this is the second lock, on the path the
+// machine is actually asked for. A relative path must stay inside the replay's
+// workspace (procedureWorkspaceRelative), and an absolute one -- literal as the
+// recording wrote it -- may not climb out of the directory it names: a `..`
+// segment is the one way a bound value could move it somewhere else, and it is
+// refused rather than cleaned away.
 func (h *machineProcedureHost) resolvePath(ctx context.Context, p string) (string, string, error) {
 	p = strings.TrimSpace(p)
 	switch {
@@ -175,6 +187,9 @@ func (h *machineProcedureHost) resolvePath(ctx context.Context, p string) (strin
 	case strings.HasPrefix(p, "~"):
 		return "", "", fmt.Errorf("%q names a home directory, which a replay cannot resolve for the machine", p)
 	case path.IsAbs(p):
+		if procedurePathClimbs(p) {
+			return "", "", fmt.Errorf("%q climbs out of the directory it names with `..`; an absolute path is run as the recording wrote it, never resolved somewhere else", p)
+		}
 		clean := path.Clean(p)
 		return clean, clean, nil
 	}
@@ -215,6 +230,11 @@ func (h *machineProcedureHost) ensure(ctx context.Context, dir string) error {
 	if err != nil {
 		return err
 	}
+	// An unreachable machine is the target's failure, not the procedure's,
+	// and it is the step's answer whatever the step was about to run.
+	if procedureTargetUnavailable[reply.ErrorCode] {
+		return &procedureUnavailable{surface: h.label(), action: "exec", reply: reply}
+	}
 	if code, ok := procedurePayloadInt(reply.Payload["exitCode"]); reply.ErrorCode != "" || !ok || code != 0 {
 		return fmt.Errorf("the replay's workspace %s could not be made on the machine (%s): %s", dir, reply.ErrorCode, reply.ErrorMessage)
 	}
@@ -226,7 +246,7 @@ func (h *machineProcedureHost) ensure(ctx context.Context, dir string) error {
 
 // delivers is true: an effect on the person's machine is outside any
 // workspace a replay owns.
-func (h *machineProcedureHost) delivers() bool { return true }
+func (h *machineProcedureHost) delivers(string) bool { return true }
 
 // procedureMachineDispatcher is the procedure.Dispatcher for
 // work.TargetMachine.
