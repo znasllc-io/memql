@@ -19,6 +19,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -179,13 +182,54 @@ func (s *Store) RecordGeneration(ctx context.Context, ruleID, status, bundleID, 
 	))
 }
 
+// FiringState is what a firing's record is derived from: the count it advances
+// and the version that count was read from.
+type FiringState struct {
+	FiredCount int
+	// VersionAt is the createdAt of the version read -- the version the
+	// record must land after (firedAtAfter). Zero when the read did not carry
+	// one, which degrades to stamping at the local clock.
+	VersionAt time.Time
+}
+
+// FiringStateByID reads the rule's count FRESH: from the database, never from
+// this node's result cache. It is read inside the rule's firing gate, and the
+// previous holder's write reaches this node's cache only by an asynchronous
+// broadcast -- a cached answer is the count the previous holder already
+// advanced (firing_gate.go, memql#5431).
+//
+// The same named read as RuleStateByID, deliberately: freshness belongs to this
+// one call site, and emailRuleById stays cached everywhere else it is read.
+func (s *Store) FiringStateByID(ctx context.Context, ruleID string) (FiringState, bool, error) {
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "emailRuleById", arg{"emailRuleId", memql.BareShortId(ruleID)}))
+	if err != nil {
+		return FiringState{}, false, err
+	}
+	if len(rows) == 0 {
+		return FiringState{}, false, nil
+	}
+	return FiringState{
+		FiredCount: integer(rows[0], "firedCount"),
+		VersionAt:  rowTime(rows[0], "createdAt"),
+	}, true, nil
+}
+
+// firedAtLayout renders a firing's time at exactly the column's precision, so
+// the time written is the time compared (firedAtAfter).
+const firedAtLayout = "2006-01-02T15:04:05.000000Z07:00"
+
 // RecordFiring stamps that a rule ran. Its two fields are LIVENESS -- they move
 // on their own -- which is why the surfaces that render them are told not to
 // fingerprint them for arrival cues.
-func (s *Store) RecordFiring(ctx context.Context, ruleID string, firedCount int, lastError string) error {
+//
+// firedAt is both lastFiredAt and the new version's createdAt: the mutation
+// stamps the version at it, which is what lets the fire path place its
+// increment after the version it read (firedAtAfter).
+func (s *Store) RecordFiring(ctx context.Context, ruleID string, firedCount int, firedAt time.Time, lastError string) error {
 	return s.exec(ctx, call("mutation", "recordEmailRuleFiring",
 		arg{"emailRuleId", memql.BareShortId(ruleID)},
 		arg{"firedCount", firedCount},
+		arg{"lastFiredAt", firedAt.UTC().Format(firedAtLayout)},
 		arg{"lastError", lastError},
 	))
 }
@@ -399,8 +443,9 @@ func str(r map[string]any, key string) string {
 // one past it: a negative would send the version backwards, and
 // PlanBundleActivation refuses a bundle whose version does not exceed the one
 // it supersedes -- so a rule would silently stop being armable. `firedCount`
-// is a monotonic counter written back as +1; a negative would make a rule's
-// own history run backwards in the surface that renders it.
+// is a monotonic counter advanced by one per firing (FiringStateByID); a
+// negative would make a rule's own history run backwards in the surface that
+// renders it.
 //
 // Zero would be wrong for the same reason it is right elsewhere: nothing here
 // reads 0 as "unset". A bundle at version 0 is a bundle that has never been
@@ -417,6 +462,25 @@ func integer(r map[string]any, key string) int {
 		return num.ClampFloat64(v)
 	}
 	return 0
+}
+
+// rowTime reads a row's timestamp -- a shaped read carries a row intrinsic as a
+// protobuf Timestamp in process, and a payload datetime as its RFC 3339 text.
+// Zero when absent or unreadable.
+func rowTime(r map[string]any, key string) time.Time {
+	switch v := r[key].(type) {
+	case *timestamppb.Timestamp:
+		if v != nil && v.IsValid() {
+			return v.AsTime()
+		}
+	case time.Time:
+		return v
+	case string:
+		if t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(v)); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 func strList(r map[string]any, key string) []string {

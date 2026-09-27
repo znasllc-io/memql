@@ -957,6 +957,14 @@ mutation emailRule recordEmailRuleGeneration {
 /// generated, that activation succeeded, that the rule has fired N times. An owner who could set
 /// status:"active" would be asserting a live automation that does not exist, and one who could set
 /// firedCount would be editing the evidence. The rule's FORM stays client-writable next door.
+///
+/// THE VERSION IS STAMPED AT lastFiredAt (memql#5431). The fire path advances firedCount from a
+/// count it reads under a per-rule lock, and every read is served the rule's newest version -- so
+/// the version this writes has to sort after the one that count came from. A version's createdAt is
+/// otherwise the writing replica's own clock, and a replica whose clock lags would file its
+/// increment behind the one it read, where every later read skips it. component/emailrules computes
+/// lastFiredAt strictly after the version it read (firedAtAfter); with no lastFiredAt the version
+/// takes the engine's clock, as every other write does.
 @actor
 @serverOnly
 mutation emailRule recordEmailRuleFiring {
@@ -970,6 +978,7 @@ mutation emailRule recordEmailRuleFiring {
     accept { firedCount, lastError }
     stamp {
       id: args.emailRuleId
+      createdAt: args.lastFiredAt
       ownerUserId: actor.userId
       lastFiredAt: args.lastFiredAt ?? now
     }
