@@ -1,0 +1,114 @@
+{
+  "id": "amortizedCost.control-a-fresh-goal-reaches-a-model",
+  "family": "amortizedCost",
+  "title": "The control: a fresh goal on the same fixture reaches a model, trusted procedure or not",
+  "description": "The app is the proving suite's FIXTURE APP: a fake harness that performs the goal's actions on the fake machine and reports each one as the cockpit does, through the same session writer a delegated app session is recorded through. It is not a provider and plays no cassette; every session it runs counts as one model reach, because an app session is the intelligence a learned procedure exists to stop paying for. The trusted scenario's lifecycle, to a trusted procedure, and then a goal with a DIFFERENT statement on the same fixture: a different goal signature, which no procedure serves. It must reach the app on both arms, which proves the counter behind the trusted scenario's zero rises on this path -- the one a served replay removes.",
+  "goal": "Reconcile the weekly ledger for {{account}} and notify the operators",
+  "variables": [],
+  "steps": [
+    {
+      "key": "reconcile",
+      "type": "exec",
+      "target": "reconcile.sh --account {{account}} --period weekly",
+      "effect": "machine"
+    },
+    {
+      "key": "notify",
+      "type": "exec",
+      "target": "notify.sh --to ops --account {{account}}",
+      "effect": "machine"
+    },
+    {
+      "key": "archive",
+      "type": "exec",
+      "target": "archive.sh --account {{account}}",
+      "effect": "machine"
+    }
+  ],
+  "procedure": {
+    "policy": {
+      "shadowMatches": 2,
+      "distinctBindings": 2,
+      "canaryMatches": 1
+    },
+    "goals": [
+      {
+        "variables": {
+          "account": "acme"
+        }
+      },
+      {
+        "variables": {
+          "account": "globex"
+        }
+      },
+      {
+        "variables": {
+          "account": "initech"
+        }
+      },
+      {
+        "variables": {
+          "account": "umbrella"
+        }
+      },
+      {
+        "decide": "approved"
+      },
+      {
+        "variables": {
+          "account": "hooli"
+        }
+      },
+      {
+        "variables": {
+          "account": "stark"
+        },
+        "goal": "Draft the quarterly board narrative for {{account}}",
+        "measure": true
+      }
+    ]
+  },
+  "world": {
+    "machine": {
+      "labels": {
+        "os": "linux"
+      },
+      "scripts": {
+        "reconcile.sh": "{\"lines\": 42, \"balanced\": true}\n",
+        "notify.sh": "notice queued\n",
+        "archive.sh": "archived\n"
+      }
+    }
+  },
+  "inject": [],
+  "verify": [
+    {
+      "rows": "v1:authoring:construct",
+      "where": {
+        "ladder": "trusted"
+      },
+      "count": 1
+    },
+    {
+      "rows": "v1:work:approval",
+      "where": {
+        "kind": "procedurePromotion",
+        "decision": "approved"
+      },
+      "count": 1
+    },
+    {
+      "effects": "machine.run",
+      "count": 18
+    },
+    {
+      "effects": "machine.duplicates",
+      "count": 0
+    }
+  ],
+  "claims": [
+    "amortizedCost.providerCalls"
+  ],
+  "negativeControlFor": "amortizedCost.providerCalls"
+}
