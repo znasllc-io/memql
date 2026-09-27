@@ -22,12 +22,16 @@ type mcpHumanCallerKey struct{}
 // reads it to enforce @requiresAgentRole and the deprecated @allowedRoles on
 // the in-engine ExecuteToolByName path as well as on a CallToolMsg with wire
 // metadata.
+//
+// It also opens the caller's person-role memo (tool_gate.go), so the rank
+// floors of every tool the turn lists or calls read the person it acts for
+// once.
 func WithActingAgentRole(ctx context.Context, role string) context.Context {
 	role = strings.TrimSpace(role)
 	if role == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, actingAgentRoleKey{}, role)
+	return contextWithPersonRoleMemo(context.WithValue(ctx, actingAgentRoleKey{}, role))
 }
 
 // ActingAgentRoleFromContext returns the role previously attached via
@@ -91,9 +95,10 @@ type ToolCaller struct {
 // this string.
 //
 // It does not stamp an acting agent, and that is the point: a person over MCP
-// used to be stamped as an agent whose role was their cluster role.
+// used to be stamped as an agent whose role was their cluster role. Like
+// WithActingAgentRole it opens the caller's person-role memo.
 func WithMCPHumanCaller(ctx context.Context, role string) context.Context {
-	return context.WithValue(ctx, mcpHumanCallerKey{}, strings.TrimSpace(role))
+	return contextWithPersonRoleMemo(context.WithValue(ctx, mcpHumanCallerKey{}, strings.TrimSpace(role)))
 }
 
 // ToolCallerFromContext reports who ctx says is calling a tool. An acting

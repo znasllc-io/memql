@@ -101,6 +101,14 @@ func (e *MemQLEngine) refuseBelowRequiredRank(ctx context.Context, fn *Function,
 	// is empty -- and "insufficient permissions" sends them to the wrong
 	// place. It does NOT name who could do it: that is a directory
 	// disclosure on a refusal path.
+	if strings.TrimSpace(string(ac.Role)) == "" {
+		// A credential that asserts no role, or a person the principal table
+		// resolves none for (tool_gate.go's toolFloorContext): `holds ""`
+		// would read like a rendering fault rather than an answer.
+		return fmt.Errorf(
+			"%q requires the %q role or above; this caller holds no role",
+			name, required)
+	}
 	return fmt.Errorf(
 		"%q requires the %q role or above; this caller holds %q",
 		name, required, string(ac.Role))
