@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"strconv"
@@ -74,9 +75,13 @@ var loadPassKinds = map[string]bool{
 // -- a parse error, a concept that does not resolve -- is Sense's own to report
 // or the load's, and a parse error in one construct does not hide a refusal in
 // another.
-func (e *MemQLEngine) LowerRefusals(source, origin string) []SandboxDiagnostic {
+//
+// ctx cancels the pass: it is checked before each construct compiles and before
+// each lowering, and a cancelled pass returns nil -- its caller has gone (a
+// closed stream) or moved on, and a partial answer would read as a complete one.
+func (e *MemQLEngine) LowerRefusals(ctx context.Context, source, origin string) []SandboxDiagnostic {
 	origin = strings.TrimSpace(origin)
-	if e == nil || strings.TrimSpace(source) == "" || !e.placesDocument(origin) {
+	if e == nil || strings.TrimSpace(source) == "" || !e.placesDocument(origin) || ctx.Err() != nil {
 		return nil
 	}
 	var constructs []SandboxConstruct
@@ -109,6 +114,9 @@ func (e *MemQLEngine) LowerRefusals(source, origin string) []SandboxDiagnostic {
 	var queries []*Function
 	var out []SandboxDiagnostic
 	for _, c := range constructs {
+		if ctx.Err() != nil {
+			return nil
+		}
 		switch c.Kind {
 		case "query":
 			fn, err := compileDocumentQuery(c, concepts)
@@ -159,6 +167,9 @@ func (e *MemQLEngine) LowerRefusals(source, origin string) []SandboxDiagnostic {
 		},
 		bindingsResolved: true,
 	}
+	if ctx.Err() != nil {
+		return nil
+	}
 	for _, f := range lowerPushdownSet(specs, queries, scope) {
 		out = append(out, failureDiagnostics(owner, f, "")...)
 	}
@@ -167,10 +178,16 @@ func (e *MemQLEngine) LowerRefusals(source, origin string) []SandboxDiagnostic {
 	// same (lowerDisabledSpecBodies): re-enabling a body that does not lower
 	// would refuse boot, and the editor says so now.
 	if len(disabled) > 0 {
+		if ctx.Err() != nil {
+			return nil
+		}
 		scope.bindingsResolved = false
 		for _, f := range lowerPushdownSet(disabled, nil, scope) {
 			out = append(out, failureDiagnostics(owner, f, disabledSpecPrefix)...)
 		}
+	}
+	if ctx.Err() != nil {
+		return nil
 	}
 	return orderLowerRefusals(out)
 }
@@ -361,11 +378,11 @@ func lowerErrorsIn(err error) []*LowerError {
 // gRPC Diagnose reach. Every refusal is an Error carrying its rule code, and
 // its message is the refusal's own sentence: the node, the position, the
 // reason and the fix.
-func (a *SenseAdapter) LoadDiagnostics(source, filePath string) []sense.Diagnostic {
+func (a *SenseAdapter) LoadDiagnostics(ctx context.Context, source, filePath string) []sense.Diagnostic {
 	if a == nil || a.engine == nil {
 		return nil
 	}
-	refusals := a.engine.LowerRefusals(source, filePath)
+	refusals := a.engine.LowerRefusals(ctx, source, filePath)
 	if len(refusals) == 0 {
 		return nil
 	}

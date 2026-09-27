@@ -1,6 +1,8 @@
 package memql
 
 import (
+	"context"
+
 	"google.golang.org/grpc/codes"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -116,10 +118,19 @@ func (s *streamSession) handleSenseDiagnose(envelope *memqlv1.MemqlClientMessage
 		// tree -- the engine's load of it, for Lower's refusals with their
 		// rule codes (memql#5434). One squiggle per fault: the merge drops a
 		// load refusal Diagnose already reports.
-		diags := sense.MergeLoadDiagnostics(
-			svc.Diagnose(msg.GetSource(), msg.GetFilePath()),
-			svc.DiagnoseLoad(msg.GetSource(), msg.GetFilePath()),
-		)
+		//
+		// The load is the expensive half, so it runs through the stream's gate
+		// (sense_load_gate.go): one pass in flight per stream, one request
+		// waiting, cancelled with the stream. A request the gate turns away is
+		// still answered, with Diagnose's diagnostics -- the fast answer is
+		// never held back or withheld.
+		source, filePath := msg.GetSource(), msg.GetFilePath()
+		diags := svc.Diagnose(source, filePath)
+		if filePath != "" && svc.CanLoad() {
+			s.senseLoad.run(s.stream.Context(), func(ctx context.Context) {
+				diags = sense.MergeLoadDiagnostics(diags, svc.DiagnoseLoad(ctx, source, filePath))
+			})
+		}
 		protoDiags := make([]*memqlv1.SenseDiagnostic, len(diags))
 		for i, d := range diags {
 			protoDiags[i] = &memqlv1.SenseDiagnostic{

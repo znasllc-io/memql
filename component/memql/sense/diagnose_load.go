@@ -1,6 +1,9 @@
 package sense
 
-import "sort"
+import (
+	"context"
+	"sort"
+)
 
 // diagnose_load.go -- the load's refusals as editor diagnostics (memql#5434).
 //
@@ -21,8 +24,8 @@ type LoadPass interface {
 	// at filePath -- a path RELATIVE TO THE DSL ROOT ("planner/queries.memql"),
 	// which is what the load derives namespaces from. Each is an Error carrying
 	// its rule code. A path that places the document in no loaded domain
-	// yields nothing.
-	LoadDiagnostics(source, filePath string) []Diagnostic
+	// yields nothing, and so does a pass ctx cancels.
+	LoadDiagnostics(ctx context.Context, source, filePath string) []Diagnostic
 }
 
 // CanLoad reports whether the service has an engine behind it that can run the
@@ -40,16 +43,17 @@ func (s *Service) CanLoad() bool {
 // positions of the nodes they refuse. filePath is the document's path relative
 // to the DSL root: without it a name two domains declare cannot be resolved as
 // the load resolves it, so an empty path yields nothing rather than a guess.
-// Nil too when the service has no engine behind it.
-func (s *Service) DiagnoseLoad(source, filePath string) []Diagnostic {
-	if s == nil || filePath == "" {
+// Nil too when the service has no engine behind it, and when ctx is cancelled
+// before the pass finishes -- the caller has gone or moved on.
+func (s *Service) DiagnoseLoad(ctx context.Context, source, filePath string) []Diagnostic {
+	if s == nil || filePath == "" || ctx.Err() != nil {
 		return nil
 	}
 	lp, ok := s.registries.(LoadPass)
 	if !ok || lp == nil {
 		return nil
 	}
-	return lp.LoadDiagnostics(source, filePath)
+	return lp.LoadDiagnostics(ctx, source, filePath)
 }
 
 // MergeLoadDiagnostics adds the load's diagnostics to Diagnose's, one squiggle

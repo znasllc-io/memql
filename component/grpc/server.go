@@ -965,6 +965,11 @@ type streamSession struct {
 	// created on first session-define via authoredSessionRegistry().
 	authoredSessionMu sync.Mutex
 	authoredSession   *memqlengine.AuthoredRuntimeRegistry
+
+	// senseLoad keeps this stream to one Sense load pass in flight
+	// (sense_load_gate.go, memql#5434): a Diagnose with a file_path runs the
+	// engine's load, and a keystroke-rate client must not run one per request.
+	senseLoad senseLoadGate
 }
 
 // authoredSessionRegistry returns this stream's owner-scoped authored registry,

@@ -28,6 +28,7 @@ package main
 // pass (treePath). Unsaved text is what is loaded -- the buffer, not the file.
 
 import (
+	"context"
 	"strings"
 	"sync"
 
@@ -219,7 +220,7 @@ func (s *server) loadOnce(notify glsp.NotifyFunc, uri protocol.DocumentUri) {
 	// A rebuild swaps process-global DSL state the load reads (the mounted
 	// tree); the build holds this lock for writing while it does.
 	s.buildMu.RLock()
-	diags := svc.DiagnoseLoad(text, path)
+	diags := svc.DiagnoseLoad(context.Background(), text, path)
 	s.buildMu.RUnlock()
 
 	s.publishMu.Lock()

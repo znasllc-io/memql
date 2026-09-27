@@ -5,6 +5,7 @@ package memql
 // refusals beside Diagnose's own, each with its rule code (memql#5434).
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -40,7 +41,7 @@ func (r *loadingRegistry) ShapeNames() []string                           { retu
 func (r *loadingRegistry) ShapeGet(string) (*sense.ShapeInfo, bool)       { return nil, false }
 func (r *loadingRegistry) IntegrationCapabilities() []string              { return nil }
 
-func (r *loadingRegistry) LoadDiagnostics(_ string, filePath string) []sense.Diagnostic {
+func (r *loadingRegistry) LoadDiagnostics(_ context.Context, _ string, filePath string) []sense.Diagnostic {
 	r.mu.Lock()
 	r.asked = append(r.asked, filePath)
 	r.mu.Unlock()

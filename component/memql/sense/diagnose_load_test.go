@@ -1,6 +1,7 @@
 package sense
 
 import (
+	"context"
 	"reflect"
 	"testing"
 )
@@ -88,7 +89,7 @@ type fakeLoadProvider struct {
 	out   []Diagnostic
 }
 
-func (f *fakeLoadProvider) LoadDiagnostics(source, filePath string) []Diagnostic {
+func (f *fakeLoadProvider) LoadDiagnostics(_ context.Context, source, filePath string) []Diagnostic {
 	f.calls = append(f.calls, filePath)
 	return f.out
 }
@@ -97,13 +98,13 @@ func TestDiagnoseLoad(t *testing.T) {
 	want := []Diagnostic{{Range: rng(1, 1, 1, 2), Severity: SeverityError, Code: "lower_refused"}}
 	p := &fakeLoadProvider{out: want}
 	svc := New(p)
-	if got := svc.DiagnoseLoad("query q { }", ""); got != nil {
+	if got := svc.DiagnoseLoad(context.Background(), "query q { }", ""); got != nil {
 		t.Errorf("an untitled document cannot be placed in the tree, so there is no pass: %+v", got)
 	}
 	if len(p.calls) != 0 {
 		t.Errorf("the engine must not be asked without a path: %v", p.calls)
 	}
-	if got := svc.DiagnoseLoad("query q { }", "planner/queries.memql"); !reflect.DeepEqual(got, want) {
+	if got := svc.DiagnoseLoad(context.Background(), "query q { }", "planner/queries.memql"); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want the engine's %+v", got, want)
 	}
 	if !reflect.DeepEqual(p.calls, []string{"planner/queries.memql"}) {
@@ -111,11 +112,11 @@ func TestDiagnoseLoad(t *testing.T) {
 	}
 
 	// A provider with no engine behind it, and no provider at all.
-	if got := New(nil).DiagnoseLoad("query q { }", "planner/queries.memql"); got != nil {
+	if got := New(nil).DiagnoseLoad(context.Background(), "query q { }", "planner/queries.memql"); got != nil {
 		t.Errorf("a registry-less service runs no load: %+v", got)
 	}
 	var plain RegistryProvider = struct{ RegistryProvider }{}
-	if got := New(plain).DiagnoseLoad("query q { }", "planner/queries.memql"); got != nil {
+	if got := New(plain).DiagnoseLoad(context.Background(), "query q { }", "planner/queries.memql"); got != nil {
 		t.Errorf("a provider that cannot load runs no load: %+v", got)
 	}
 }

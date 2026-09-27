@@ -15,6 +15,7 @@ package conformance
 // pass does not compile automations (component/memql/sense_load_pass.go).
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -71,7 +72,7 @@ func TestCorpusLowerRefusalsReachTheEditor(t *testing.T) {
 	for _, r := range cases {
 		r := r
 		t.Run(r.name(), func(t *testing.T) {
-			got := svc.DiagnoseLoad(r.src, domainOf[r.dir]+"/case.memql")
+			got := svc.DiagnoseLoad(context.Background(), r.src, domainOf[r.dir]+"/case.memql")
 			for _, d := range got {
 				if d.Code == r.c.Code && strings.Contains(d.Message, r.c.Message) {
 					if d.Range.Start.Line < 1 || d.Range.Start.Column < 1 {
@@ -123,7 +124,7 @@ func TestCorpusLoadsDrawNoEditorRefusal(t *testing.T) {
 	}
 	refused := 0
 	for _, r := range cases {
-		if got := svc.DiagnoseLoad(r.src, domainOf[r.dir]+"/case.memql"); len(got) != 0 {
+		if got := svc.DiagnoseLoad(context.Background(), r.src, domainOf[r.dir]+"/case.memql"); len(got) != 0 {
 			refused++
 			t.Errorf("%s loads clean, yet the editor pass refused it: %+v", r.rel, got)
 		}
