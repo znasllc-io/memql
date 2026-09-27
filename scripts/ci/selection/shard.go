@@ -37,6 +37,13 @@ const maxShardsPerClass = 8
 var (
 	classNameRe = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 	timeoutRe   = regexp.MustCompile(`^[1-9][0-9]*s$`)
+	// safeDirRe is a package directory that is safe to place on a shell
+	// command line unquoted: the workflow interpolates a shard's packages
+	// straight into `go test ... ${{ matrix.packages }}`. Go's own import
+	// path rules already exclude every shell metacharacter, so this refuses
+	// nothing real; it exists so that a future loader bug cannot turn a
+	// directory name into a command.
+	safeDirRe = regexp.MustCompile(`^(\.|[A-Za-z0-9][A-Za-z0-9._+~-]*(/[A-Za-z0-9][A-Za-z0-9._+~-]*)*)$`)
 )
 
 // ParseClasses reads the class table ci.yml's plan step carries: one class
@@ -181,6 +188,9 @@ func Partition(lane string, dirs []string, classes []Class, seconds map[string]f
 	byClass := map[int][]string{}
 	seen := map[string]bool{}
 	for _, d := range dirs {
+		if !safeDirRe.MatchString(d) {
+			return nil, fmt.Errorf("package directory %q is not a plain path and will not be placed on a command line", d)
+		}
 		if seen[d] {
 			return nil, fmt.Errorf("package %s is listed twice for lane %q", d, lane)
 		}

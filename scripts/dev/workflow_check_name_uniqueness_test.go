@@ -86,6 +86,20 @@ type checkRun struct {
 	name     string
 	workflow string // file base name, e.g. "gitleaks.yml"
 	jobKey   string
+	// family marks a name PATTERN: a job whose matrix is computed at run
+	// time (`${{ fromJSON(...) }}`, memql#5485) publishes one check-run per
+	// entry, and only the pattern -- `*` where the matrix value goes -- is
+	// knowable here.
+	family bool
+}
+
+// computedMatrix matches a strategy.matrix built at run time from another
+// job's output -- the planner's shard matrices.
+var computedMatrix = regexp.MustCompile(`^\$\{\{\s*fromJSON\(\s*needs\.[A-Za-z0-9_-]+\.outputs\.[A-Za-z0-9_-]+\s*\)\s*\}\}$`)
+
+// familyRe compiles a name pattern into the set of names it can publish.
+func familyRe(pattern string) *regexp.Regexp {
+	return regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(pattern), `\*`, ".+") + "$")
 }
 
 func (c checkRun) origin() string {
@@ -263,6 +277,21 @@ func effectiveCheckRunNames(t *testing.T, workflow, jobKey string, job checkName
 		base = jobKey
 	}
 
+	// A COMPUTED matrix publishes names drawn from run-time values, so the
+	// only thing knowable is the pattern -- and only when the name places the
+	// value itself. Without an interpolation GitHub appends every value of the
+	// entry in an order no static reading can reproduce, so refuse that shape
+	// rather than compare a name that is never published (memql#5485).
+	if m := job.Strategy.Matrix; m.Kind == yaml.ScalarNode && computedMatrix.MatchString(strings.TrimSpace(m.Value)) {
+		if !matrixInterpolation.MatchString(base) {
+			t.Fatalf("%s: its strategy.matrix is computed at run time (%s), and its `name:` "+
+				"interpolates no matrix key, so the check-run names it publishes cannot be known "+
+				"statically. Put the entry's name in the job name -- `name: <lane> (${{ matrix.name }})` "+
+				"-- so this guard can compare the pattern (memql#5485).", origin, m.Value)
+		}
+		return []checkRun{{name: matrixInterpolation.ReplaceAllString(base, "*"), workflow: workflow, jobKey: jobKey, family: true}}
+	}
+
 	combos := matrixCombinations(t, origin, job.Strategy.Matrix)
 	if len(combos) == 0 {
 		return []checkRun{{name: base, workflow: workflow, jobKey: jobKey}}
@@ -389,6 +418,50 @@ func TestWorkflowCheckRunNamesAreUnique(t *testing.T) {
 			"whichever run reports last wins the rollup. Give each job a distinct `name:` "+
 			"(memql#3210).",
 			name, len(byName[name]), strings.Join(origins, "\n"))
+	}
+
+	// A name family collides with any OTHER name it could publish: a literal
+	// name its pattern matches, or another family whose pattern it matches
+	// (compared on a sample with `x` for the value). Two identical patterns
+	// are already the exact duplicate reported above.
+	for _, f := range all {
+		if !f.family {
+			continue
+		}
+		re := familyRe(f.name)
+		for _, other := range all {
+			if other.origin() == f.origin() || other.name == f.name {
+				continue
+			}
+			sample := other.name
+			if other.family {
+				sample = strings.ReplaceAll(other.name, "*", "x")
+			}
+			if re.MatchString(sample) {
+				t.Errorf("check-run name %q (%s) matches the pattern %q that %s publishes one "+
+					"check-run per matrix entry under -- the two can collide at run time. Give "+
+					"one of them a distinct `name:` (memql#3210, memql#5485).",
+					other.name, other.origin(), f.name, f.origin())
+			}
+		}
+	}
+}
+
+// TestComputedMatrixNamesAreComparedAsPatterns pins the family rule on a
+// synthetic job, so a regression that stopped reading computed matrices would
+// fail here rather than quietly exempt the shard jobs.
+func TestComputedMatrixNamesAreComparedAsPatterns(t *testing.T) {
+	var job checkNameJob
+	if err := yaml.Unmarshal([]byte("name: go-tests (${{ matrix.name }})\nstrategy:\n  matrix: ${{ fromJSON(needs.plan.outputs.go_matrix) }}\n"), &job); err != nil {
+		t.Fatal(err)
+	}
+	runs := effectiveCheckRunNames(t, "ci.yml", "go-tests", job)
+	if len(runs) != 1 || !runs[0].family || runs[0].name != "go-tests (*)" {
+		t.Fatalf("a computed matrix must yield the one pattern `go-tests (*)`, got %+v", runs)
+	}
+	re := familyRe(runs[0].name)
+	if !re.MatchString("go-tests (root)") || re.MatchString("go-tests -tags agent") || re.MatchString("go-tests") {
+		t.Errorf("pattern %q matched the wrong names", runs[0].name)
 	}
 }
 

@@ -210,6 +210,11 @@ func TestPartitionRefusesWhatItCannotPlace(t *testing.T) {
 	if _, err := Partition("db", []string{"a"}, classes, nil, 0); err == nil {
 		t.Error("zero cpus must be refused")
 	}
+	for _, unsafe := range []string{"a;b", "a b", "$(id)", "a|b", "-run=x", "a/../b", "`x`", "a\nb"} {
+		if _, err := Partition("db", []string{unsafe}, classes, nil, 4); err == nil {
+			t.Errorf("directory %q reaches a shell command line unquoted and must be refused", unsafe)
+		}
+	}
 	noDefault := []Class{{Lane: "go", Name: "only", Trees: []string{"x"}, Timeout: "60s", Shards: 1}}
 	if _, err := Partition("go", []string{"y"}, noDefault, nil, 4); err == nil {
 		t.Error("a package no class holds must be refused")
