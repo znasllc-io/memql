@@ -133,6 +133,8 @@ export interface FakeSeed {
   feedbackReply?: Row;
   /** The app sessions a step opened (`appSessionsForStep`). */
   sessions?: Row[] | Error;
+  /** The override version `setConstructReuse` answers with. 1 by default. */
+  reuseVersion?: number;
 }
 
 export function fakeConnection(seed: FakeSeed = {}) {
@@ -210,10 +212,18 @@ export function fakeConnection(seed: FakeSeed = {}) {
       recordFeedback: builtinWrite("recordFeedback", (args) =>
         seed.feedbackReply ?? { id: "obs-new", observationId: "obs-new", verdict: args["verdict"], validatorDisagrees: false },
       ),
+      // THE HANDLER'S OWN REPLY: the effective label, and the override it
+      // wrote -- "" for a hand-back to the evidence -- at the next version.
       setConstructReuse: builtinWrite("setConstructReuse", (args) => ({
         id: String(args["constructId"]),
         constructId: args["constructId"],
-        reuse: args["label"],
+        reuse: args["label"] === "evidence" ? "goalSpecific" : args["label"],
+        override: {
+          label: args["label"] === "evidence" ? "" : args["label"],
+          by: "v1:identity:user:me",
+          at: "2026-09-26T10:00:00Z",
+          version: seed.reuseVersion ?? 1,
+        },
       })),
       feedbackPolicyCurrent: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult([{ id: "v1:work:feedbackPolicy:primary", validateAnswers: true, reusableAfterSignatures: 2 }]),

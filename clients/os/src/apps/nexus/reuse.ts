@@ -17,21 +17,81 @@ import type { ReuseLabel } from "./words";
 // neither, and that is its own answer: NOT YET LABELLED, never folded into
 // "for one goal", which is a claim the evidence has to make.
 
-const LABELS: readonly ReuseLabel[] = ["reusable", "goalSpecific", "accountSpecific"];
+export const REUSE_LABELS: readonly ReuseLabel[] = ["reusable", "goalSpecific", "accountSpecific"];
 
 function labelOf(value: unknown): ReuseLabel | "" {
-  return typeof value === "string" && (LABELS as readonly string[]).includes(value) ? (value as ReuseLabel) : "";
+  return typeof value === "string" && (REUSE_LABELS as readonly string[]).includes(value) ? (value as ReuseLabel) : "";
+}
+
+function objectOf(v: unknown): Record<string, unknown> | null {
+  if (typeof v === "string") {
+    // An object field reaches a browser as an object; a writer that quoted it
+    // spelled the same document once more.
+    try {
+      return objectOf(JSON.parse(v));
+    } catch {
+      return null;
+    }
+  }
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function countOf(from: Record<string, unknown> | null, key: string): number | null {
+  const v = from?.[key];
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.round(v) : null;
+}
+
+function textOf(from: Record<string, unknown> | null, key: string): string {
+  const v = from?.[key];
+  return typeof v === "string" ? v : "";
+}
+
+/** What one construct's row says about its reuse: the evidence, and the person's label over it. */
+export interface ReuseFacts {
+  /** What the sweep's evidence says, or "" before it has looked. */
+  evidence: ReuseLabel | "";
+  /** The person's own label, or "" when they follow the evidence. */
+  override: ReuseLabel | "";
+  /** Every override written counts, a hand-back included; 0 when there never was one. */
+  overrideVersion: number;
+  overrideAt: string;
+  /** Distinct goal shapes that used it -- null until the sweep has counted. */
+  signatureCount: number | null;
+  uses: number | null;
+  /** Accounts its uses were tied to. */
+  accountCount: number;
+}
+
+/** A construct row's reuse facts. Absent reads as absent, never as a zero. */
+export function reuseFactsFromRow(row: Row): ReuseFacts {
+  const flat = flatten(row);
+  const evidence = objectOf(flat["reuseEvidence"]);
+  const override = objectOf(flat["reuseOverride"]);
+  const accounts = evidence?.["accountIds"];
+  const signatures = evidence?.["goalSignatures"];
+  return {
+    evidence: labelOf(flat["reuse"]),
+    override: labelOf(override?.["label"]),
+    overrideVersion: countOf(override, "version") ?? 0,
+    overrideAt: textOf(override, "at"),
+    // The count the sweep wrote, else the signatures it kept -- at most twenty
+    // are kept, so the count is the one to believe when both are there.
+    signatureCount:
+      countOf(evidence, "signatureCount") ??
+      (Array.isArray(signatures) ? signatures.filter((s) => typeof s === "string" && s !== "").length : null),
+    uses: countOf(evidence, "uses"),
+    accountCount: Array.isArray(accounts) ? new Set(accounts.filter((a) => typeof a === "string" && a !== "")).size : 0,
+  };
+}
+
+/** The label a person sees in its facts: their own when they gave one, else the evidence's. */
+export function effectiveLabel(facts: ReuseFacts): ReuseLabel | "" {
+  return facts.override !== "" ? facts.override : facts.evidence;
 }
 
 /** The label a person sees: their own when they gave one, else the evidence's, else "". */
 export function effectiveReuse(row: Row): ReuseLabel | "" {
-  const flat = flatten(row);
-  const override = flat["reuseOverride"];
-  if (override !== null && typeof override === "object" && !Array.isArray(override)) {
-    const label = labelOf((override as Record<string, unknown>)["label"]);
-    if (label !== "") return label;
-  }
-  return labelOf(flat["reuse"]);
+  return effectiveLabel(reuseFactsFromRow(row));
 }
 
 export interface ReuseTally {

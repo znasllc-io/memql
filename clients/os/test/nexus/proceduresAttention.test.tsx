@@ -73,11 +73,15 @@ describe("the marker on Automations", () => {
 
     fireEvent.click(button);
     await screen.findByRole("heading", { name: "Automations" });
-    await waitFor(() =>
-      expect(stub.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(1),
-    );
-    const [, call] = stub.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")!;
-    expect(call).toContain('changeId: "nexus:procedures"');
+    // ITS OWN ACKNOWLEDGEMENT, ONCE. Automations is also where the reuse
+    // labels' change is read (nexus:reuse), so the section acknowledges that
+    // one too; this test is about the learned procedures'.
+    const ownAcknowledgements = () =>
+      stub.executeNamed.mock.calls.filter(
+        ([name, call]) => name === "acknowledgeAttention" && String(call).includes('changeId: "nexus:procedures"'),
+      );
+    await waitFor(() => expect(ownAcknowledgements()).toHaveLength(1));
+    const [, call] = ownAcknowledgements()[0]!;
     expect(call).toContain('revision: "procedures-1"');
     await waitFor(() =>
       expect(within(automationsNavButton()).queryByRole("img", { name: "Unseen change" })).toBeNull(),

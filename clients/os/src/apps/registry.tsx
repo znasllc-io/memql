@@ -672,6 +672,11 @@ const nexus: OsAppManifest = {
       target: "step-versions",
       label: "Re-run, branch and feedback",
     },
+    // Every automation now says what it is for, and a person can say so
+    // themselves (epic memql#5414, D24). The list carries the label on its
+    // rows and asks about it in Refine, so the section itself is where it is
+    // seen.
+    { id: "nexus:reuse", revision: "reuse-1", sectionId: "automations", label: "Reuse labels" },
   ],
   component: NexusApp,
 };

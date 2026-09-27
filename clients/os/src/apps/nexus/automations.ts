@@ -1,6 +1,7 @@
 import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { flatten } from "../../kit/rows";
+import { reuseFactsFromRow, type ReuseFacts } from "./reuse";
 
 // The automations catalog, as rows.
 //
@@ -33,6 +34,8 @@ export interface AutomationRow {
   catalogedFromBundleId: string;
   source: string;
   createdAt: string;
+  /** What the evidence and the person say it is for (epic memql#5414). */
+  reuse: ReuseFacts;
 }
 
 export function automationFromRow(wire: Row): AutomationRow {
@@ -53,6 +56,7 @@ export function automationFromRow(wire: Row): AutomationRow {
     catalogedFromBundleId: rowString(row, "catalogedFromBundleId"),
     source: rowString(row, "source"),
     createdAt: rowString(row, "createdAt"),
+    reuse: reuseFactsFromRow(row),
   };
 }
 

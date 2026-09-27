@@ -79,7 +79,7 @@ describe("the Overview's figures", () => {
       }),
     );
     await waitFor(() => expect(value("Reusable to goal-specific")).toBe("2 to 2"));
-    expect(within(metric("Reusable to goal-specific")).getByText("1 for one account · 1 not yet labelled")).toBeTruthy();
+    expect(within(metric("Reusable to goal-specific")).getByText("1 for one account, 1 not yet labelled")).toBeTruthy();
     const breakdown = screen.getByRole("region", { name: "Your automations, by reuse" });
     expect(within(breakdown).getByText("Reusable")).toBeTruthy();
     expect(within(breakdown).getByText("Not yet labelled")).toBeTruthy();
@@ -129,7 +129,7 @@ describe("the Overview's figures", () => {
       rowsResult([{ id: "v1:work:feedbackPolicy:primary", validateAnswers: true, reusableAfterSignatures: 3 }]),
     );
     mount(conn);
-    expect(await screen.findByText(/An automation is reusable once 3 different goals have used it/)).toBeTruthy();
+    expect(await screen.findByText(/An automation is reusable once 3 different kinds of goal have used it/)).toBeTruthy();
     expect(conn.query.feedbackPolicyCurrent).toHaveBeenCalled();
   });
 
@@ -139,6 +139,6 @@ describe("the Overview's figures", () => {
       throw new Error("rank floor: reader");
     });
     mount(conn);
-    expect(await screen.findByText(/An automation is reusable once enough different goals have used it/)).toBeTruthy();
+    expect(await screen.findByText(/An automation is reusable once enough different kinds of goal have used it/)).toBeTruthy();
   });
 });

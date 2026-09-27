@@ -10488,6 +10488,24 @@ a.os-button {
   overflow-wrap: anywhere;
 }
 
+/* --- Reuse (epic memql#5414, design D24) -----------------------------------
+ * The person's label as the shell's selection pills, the evidence's under it
+ * as Facts. The pills wrap: the panel is a quarter of a wide page, or the
+ * narrow aside beside the Automations list. */
+.os-nexus-reuse-choices {
+  flex-wrap: wrap;
+  margin: 2px 0 10px;
+}
+.os-nexus-reuse-error {
+  margin: 0 0 8px;
+  color: var(--os-error);
+  font-size: var(--os-text-xs);
+  overflow-wrap: anywhere;
+}
+.os-nexus-reuse-fact {
+  white-space: nowrap;
+}
+
 /* ---- Nexus: the goal view, the beacon map and the automations catalog ------
  *
  * Epic memql#4785, sub-project B of the work spine. The app's own surfaces
@@ -15648,24 +15666,22 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
   gap: 14px;
   padding-bottom: 16px;
 }
-/* THE RECORD SITS SIDE BY SIDE WHEN THERE IS ROOM (rule 9): three short Facts
+/* THE RECORD SITS SIDE BY SIDE WHEN THERE IS ROOM (rule 9): four short Facts
  * panels stacked at full width paint most of a wide window as label gutter.
- * Two across when three do not fit, with the third taking the whole row --
- * `auto-fit` left it alone in half a row, beside half a window of nothing. */
+ * Four across when a quarter still holds a panel's facts, two by two when it
+ * does not -- never three, which would leave the fourth alone in a row beside
+ * two thirds of a window of nothing. */
 .os-nexus-procedure-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
 .os-nexus-procedure-grid > .os-panel {
   min-width: 0;
 }
-@container os-nexus-procedure (max-width: 1000px) {
+@container os-nexus-procedure (max-width: 1300px) {
   .os-nexus-procedure-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .os-nexus-procedure-grid > .os-panel:last-child {
-    grid-column: 1 / -1;
   }
 }
 @container os-nexus-procedure (max-width: 620px) {

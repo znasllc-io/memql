@@ -8,7 +8,7 @@ import { absent, figureOf, type Figure } from "../../kit/measure";
 import { Overview, OverviewBreakdown, type OverviewMetric } from "../../kit/Overview";
 import { anyLabelled, reuseTally } from "./reuse";
 import { approvalFromRow, goalFromRow, runFromRow, runIsTerminal } from "./rows";
-import { useReusableAfter, useReuseLibrary } from "./useInterventions";
+import { useReusableAfter } from "./useInterventions";
 import { reuseWord } from "./words";
 
 // Nexus's Overview (epic memql#5414): what is open, what is moving, what is
@@ -19,9 +19,10 @@ import { reuseWord } from "./words";
 // ===========================================================================
 // Goals, runs and approvals are the app root's three live feeds, passed in;
 // the automation library is the authored catalog and the learned procedures,
-// the same two reads the Automations section makes, held here only while the
-// Overview is on screen. Nothing is fetched to be summarised that is not also
-// what the lists behind it show (DESIGN.md, "App overviews").
+// the very feeds the Automations section lists (useAutomations.ts), which the
+// root retains while the Overview is on screen. Nothing is fetched to be
+// summarised that is not also what the lists behind it show (DESIGN.md, "App
+// overviews").
 //
 // ===========================================================================
 // ABSENT IS NOT ZERO -- AND "NOT YET LABELLED" IS NOT "FOR ONE GOAL"
@@ -37,14 +38,19 @@ export function OverviewSection({
   goals,
   runs,
   approvals,
+  catalog,
+  procedures,
   navigate,
 }: {
   goals: LiveSnapshot<Row>;
   runs: LiveSnapshot<Row>;
   approvals: LiveSnapshot<Row>;
+  /** The authored catalog feed, every kind; the tally narrows to automations. */
+  catalog: LiveSnapshot<Row>;
+  /** The learned procedures feed. */
+  procedures: LiveSnapshot<Row>;
   navigate: (sectionId: string) => void;
 }) {
-  const library = useReuseLibrary();
   const reusableAfter = useReusableAfter();
 
   const openGoals = useMemo(
@@ -60,12 +66,10 @@ export function OverviewSection({
     [approvals.rows],
   );
   const tally = useMemo(
-    () => reuseTally([...library.catalog.snapshot.rows, ...library.procedures.snapshot.rows]),
-    [library.catalog.snapshot.rows, library.procedures.snapshot.rows],
+    () => reuseTally([...catalog.rows, ...procedures.rows]),
+    [catalog.rows, procedures.rows],
   );
 
-  const catalog = library.catalog.snapshot;
-  const procedures = library.procedures.snapshot;
   const libraryLoading = catalog.state === "seeding" || procedures.state === "seeding";
   // The library is known when BOTH reads have answered. One refused read is
   // that read's own sentence; the figures it feeds are absent, not smaller.
@@ -113,10 +117,10 @@ export function OverviewSection({
             <strong>Reusable to goal-specific</strong> counts your automations, the ones you authored and the ones
             the system learned.{" "}
             {reusableAfter === null
-              ? "An automation is reusable once enough different goals have used it."
-              : `An automation is reusable once ${reusableAfter} different goals have used it.`}{" "}
-            One used by a single goal is for that goal; one tied to a single account is for that account. A label you
-            gave an automation yourself counts instead of the evidence.
+              ? "An automation is reusable once enough different kinds of goal have used it."
+              : `An automation is reusable once ${reusableAfter} different kinds of goal have used it.`}{" "}
+            One used for a single kind of goal is for that goal; one tied to a single account is for that account. A
+            label you gave an automation yourself counts instead of the evidence.
           </p>
           <p>Not yet labelled means nothing has looked at its evidence yet. It is not counted as either.</p>
         </InfoDetail>
@@ -181,5 +185,5 @@ function reuseDetail(tally: ReturnType<typeof reuseTally>): string | undefined {
   const parts: string[] = [];
   if (tally.accountSpecific > 0) parts.push(`${tally.accountSpecific} for one account`);
   if (tally.unlabelled > 0) parts.push(`${tally.unlabelled} not yet labelled`);
-  return parts.length === 0 ? undefined : parts.join(" · ");
+  return parts.length === 0 ? undefined : parts.join(", ");
 }

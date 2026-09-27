@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getRowByConceptAndId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
-import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
-import { CONSTRUCT_CONCEPT } from "./concepts";
 import {
   feedbackFromObservation,
   validatorFromObservation,
@@ -223,69 +221,6 @@ export function useSessionPrompt(opts: {
   }, [connection, enabled, runId, stepId, stepKey, childRunId]);
 
   return read;
-}
-
-// ---------------------------------------------------------------------------
-// The automation library, for the Overview's reuse figures
-// ---------------------------------------------------------------------------
-
-/** The authored catalog read's own narrowing: `row.catalogued == true`. */
-function isCatalogued(row: Row): boolean {
-  return flatten(row)["catalogued"] === true;
-}
-
-/** The learned-procedure read's own narrowing: `row.targetNamespace == "procedure"`. */
-function isLearnedProcedure(row: Row): boolean {
-  return rowString(flatten(row), "targetNamespace") === "procedure";
-}
-
-export interface ReuseLibrary {
-  catalog: LiveCollectionHandle<Row>;
-  procedures: LiveCollectionHandle<Row>;
-}
-
-/**
- * The person's automations -- the authored catalog and the learned procedures
- * -- as two LIVE collections over `v1:authoring:construct`.
- *
- * LIVE BECAUSE THE CONCEPT BROADCASTS: `component/node/routing.go` forwards
- * `graph.node.*.v1:authoring:*` to every node, so a label the reuse sweep
- * writes on an agent arrives here without a refresh control (DESIGN.md rule 1
- * forbids one). Each collection re-applies its read's own narrowing to what
- * it folds (`inScope`), because a subscription is scoped by concept alone and
- * would otherwise fold every construct this person owns into both.
- *
- * HELD BY THE OVERVIEW, which exists only while it is on screen, so a window
- * on any other section subscribes to none of it.
- */
-export function useReuseLibrary(): ReuseLibrary {
-  const catalog = useLiveCollection<Row>("work:reuse:catalog", (connection) => ({
-    concept: CONSTRUCT_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.cataloguedConstructsForOwner({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
-    },
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, CONSTRUCT_CONCEPT, rowId, { signal });
-      return (row as Row) ?? null;
-    },
-    inScope: isCatalogued,
-    paged: false,
-  }));
-  const procedures = useLiveCollection<Row>("work:reuse:procedures", (connection) => ({
-    concept: CONSTRUCT_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.learnedProceduresForOwner({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
-    },
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, CONSTRUCT_CONCEPT, rowId, { signal });
-      return (row as Row) ?? null;
-    },
-    inScope: isLearnedProcedure,
-    paged: false,
-  }));
-  return { catalog, procedures };
 }
 
 /**

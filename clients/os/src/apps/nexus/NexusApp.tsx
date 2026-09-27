@@ -149,11 +149,13 @@ export function NexusApp({
   }, [goalRows]);
 
   // THE CATALOG, FOLLOWED WHILE A VISIBLE SURFACE NEEDS IT (see
-  // useAutomations). Automations always does; Approvals does only while a
+  // useAutomations). Automations always does, and so does the Overview, whose
+  // reuse figures count the same two lists; Approvals does only while a
   // promotion waits in it, because only that card names a procedure it has to
   // find.
   const feeds = useAutomationFeeds(
     sectionId === "automations" ||
+      sectionId === "overview" ||
       (sectionId === "approvals" && approvalRows.some((a) => a.kind === PROCEDURE_PROMOTION)),
   );
   // Which procedure's page is open. A link naming one the feed does not hold
@@ -272,6 +274,8 @@ export function NexusApp({
         goals={goals.snapshot}
         runs={runs.snapshot}
         approvals={approvals.snapshot}
+        catalog={feeds.catalog.snapshot}
+        procedures={feeds.procedures.snapshot}
         navigate={navigate}
       />
     );

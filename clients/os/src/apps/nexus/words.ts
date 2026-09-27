@@ -311,6 +311,43 @@ export function reuseWord(label: string): string {
   }
 }
 
+/**
+ * What a label means, for the information control beside the choice. "" is
+ * the automatic label. The threshold is the cluster's own value, never a
+ * number this window assumes -- unread, the sentence says "enough".
+ */
+export function reuseMeaning(label: ReuseLabel | "", reusableAfter: number | null): string {
+  switch (label) {
+    case "reusable":
+      return `Used for ${reusableAfter === null ? "enough different" : `at least ${reusableAfter}`} kinds of goal. When a goal is split into sections, each section looks for a reusable automation before a model is used.`;
+    case "goalSpecific":
+      return "Used for one kind of goal so far.";
+    case "accountSpecific":
+      return "Every use so far was for the same account.";
+    default:
+      return "The label follows how the automation has been used, and is checked again every six hours.";
+  }
+}
+
+/**
+ * How much use the evidence counted: "1 kind of goal in 4 runs; reusable at 2
+ * kinds". The threshold is said only while the evidence has not reached it,
+ * and only when the cluster's value has been read.
+ */
+export function usedForSentence(
+  kinds: number,
+  runs: number | null,
+  reusableAfter: number | null,
+  evidence: ReuseLabel | "",
+): string {
+  let s = `${kinds} ${kinds === 1 ? "kind" : "kinds"} of goal`;
+  if (runs !== null && runs > 0) s += ` in ${runs} ${runs === 1 ? "run" : "runs"}`;
+  if (evidence !== "reusable" && reusableAfter !== null && kinds < reusableAfter) {
+    s += `; reusable at ${reusableAfter} kinds`;
+  }
+  return s;
+}
+
 // ===========================================================================
 // KIND -- the distinction this whole app exists to draw
 // ===========================================================================
