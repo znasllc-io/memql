@@ -31,6 +31,8 @@ package procedure
 //
 //   - a run with steps computed against an upstream version no longer current,
 //     or one its owner disliked: its sections are not the answer that stands;
+//   - a replay, whose answers were served from its source's journal: the
+//     source worked the sections out, and catalogued them when it succeeded;
 //   - a section whose current version ran with a person's override: the answer
 //     that stands came from the override, which the automation does not carry,
 //     so cataloguing the automation would serve the behaviour the person
@@ -159,6 +161,8 @@ func (i *Integration) catalogSections(ctx context.Context, owner, runId string) 
 		res.Skipped = "the run has not succeeded"
 	case strings.TrimSpace(str(run, "templateConstructId")) == "":
 		res.Skipped = "the run was not compiled into a draft of its own, so it worked no section out"
+	case str(run, "mode") == "replay":
+		res.Skipped = "a replay serves its answers from its source's journal and works no section out live; its source catalogues them"
 	case len(stringList(run["staleSteps"])) > 0:
 		res.Skipped = "its head holds steps computed against an upstream version that is no longer current"
 	}

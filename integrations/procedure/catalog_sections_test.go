@@ -258,6 +258,10 @@ func TestADislikedOrStaleRunCataloguesNothing(t *testing.T) {
 			prepare: func(w *catalogWorld) { delete(w.run, "templateConstructId") },
 			skipped: "draft of its own",
 		},
+		"a replay": {
+			prepare: func(w *catalogWorld) { w.run["mode"] = "replay" },
+			skipped: "replay",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newCatalogWorld(t)
