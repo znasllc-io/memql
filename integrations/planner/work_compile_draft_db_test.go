@@ -225,7 +225,7 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 		t.Run(fmt.Sprintf("sectionable=%t", sectionable), func(t *testing.T) {
 			triage := map[string]any{"complexity": "trivial", "requiresFile": false}
 			if sectionable {
-				triage = map[string]any{"complexity": "moderate", "requiresFile": false, "sectionable": true, "sections": []map[string]any{{"label": "one", "instruction": "first section"}, {"label": "two", "instruction": "second section"}}}
+				triage = map[string]any{"complexity": "moderate", "requiresFile": false, "sectionable": true, "sections": []map[string]any{{"label": "one", "instruction": "first section", "outputs": []string{"first"}}, {"label": "two", "instruction": "second section", "outputs": []string{"second"}}}}
 			}
 			bridge := &draftDBCompiler{engine: plannerEngine, triage: triage}
 			req := CompileRequest{GoalId: "v1:work:goal:draft-goal", RunId: "v1:work:run:" + id.NewShortId(), OwnerUserId: "v1:identity:user:draft-owner", Statement: "Create and save the requested deliverable", Input: map[string]any{"filename": "draft.md", "region": "EMEA"}}
