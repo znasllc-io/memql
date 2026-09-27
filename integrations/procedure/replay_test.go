@@ -349,9 +349,14 @@ func TestADivergenceHandsTheAppThePartialTraceAndNeverRedoesACompletedStep(t *te
 	if !reflect.DeepEqual(g.Completed, out.Completed) || g.Procedure != w.name {
 		t.Fatalf("guidance = %+v", g)
 	}
+	// Steps are numbered from 1 in everything a person or the app reads, as
+	// MemQL OS lists them; the stored indices stay 0-based.
 	if !containsAll(g.Prompt, testStatement, "A learned procedure already ran these steps -- do not repeat them:",
-		key0, "It stopped at step 1 because:", "out/report.txt") {
+		"- step 1 (exec)", key0, "It stopped at step 2 because:", "Step 2 (fs_write", "out/report.txt") {
 		t.Fatalf("the prompt does not hand over the partial trace:\n%s", g.Prompt)
+	}
+	if out.DivergedStep != 1 || out.Completed[0].Index != 0 {
+		t.Fatalf("stored indices %d / %d, want the 0-based positions", out.DivergedStep, out.Completed[0].Index)
 	}
 	if fb[0].StepId != journalStepId(goalRunId, "replayed") || fb[0].RunId != goalRunId || fb[0].GoalId != goalId || fb[0].App != "claude-code" {
 		t.Fatalf("hand-back = %+v", fb[0])

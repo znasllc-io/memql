@@ -163,11 +163,12 @@ func replayableChanges(changes *proc.Node) (bool, string) {
 }
 
 // firstUnreplayable is the first step of a template no dispatcher runs, as
-// the sentence the ladder and the runner both say.
+// the sentence the ladder and the runner both say -- numbered from 1, as MemQL
+// OS lists a procedure's steps.
 func firstUnreplayable(t proc.Template) (string, bool) {
 	for idx, s := range t.Steps {
 		if ok, why := replayable(s); !ok {
-			return fmt.Sprintf("step %d (%s) cannot be replayed: %s", idx, oneLine(s.Tool), why), true
+			return fmt.Sprintf("step %d (%s) cannot be replayed: %s", idx+1, oneLine(s.Tool), why), true
 		}
 	}
 	return "", false

@@ -86,7 +86,7 @@ func TestAStepWhoseArgumentsHaveNoSpellingIsACommentLine(t *testing.T) {
 	if written {
 		t.Fatalf("a key that is not a name cannot be written:\n%s", src)
 	}
-	if !strings.Contains(src, "  // call0: step 0, tool exec -- an argument has no MemQL spelling") {
+	if !strings.Contains(src, "  // call0: step 1, tool exec -- an argument has no MemQL spelling") {
 		t.Fatalf("the unwritten step must be a comment naming it:\n%s", src)
 	}
 	if strings.Contains(src, "procedureStep(") {

@@ -91,8 +91,9 @@ func TestAVersionWithAStepNoDispatcherRunsStaysACandidateNamingTheStep(t *testin
 		t.Fatalf("rung = %s, want candidate: a version no dispatcher runs never climbs", res.Rung)
 	}
 	reason := argsOf(t, eng.callTo(t, "recordConstructLadder"))["ladderReason"].(string)
-	if !strings.Contains(reason, "step 1 (fs_write)") || !strings.Contains(reason, "notebook") {
-		t.Fatalf("reason %q must name the step, the tool and why", reason)
+	// The second step, numbered from 1 as MemQL OS lists a procedure's steps.
+	if !strings.Contains(reason, "step 2 (fs_write)") || !strings.Contains(reason, "notebook") {
+		t.Fatalf("reason %q must name the step (from 1), the tool and why", reason)
 	}
 
 	// The control: the same corpus written with a Write enters shadow.

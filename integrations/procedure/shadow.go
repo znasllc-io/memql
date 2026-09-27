@@ -204,6 +204,8 @@ func (i *Integration) instanceOf(p Procedure, actions []proc.Action) ([]proc.Act
 	if best >= len(want) {
 		best = len(want) - 1
 	}
+	// The sentence numbers the step from 1, as MemQL OS lists them; the index
+	// returned beside it is the stored 0-based one.
 	return nil, nil, fmt.Sprintf("The recording has no action matching step %d (%s) of the procedure where the procedure needs it, so the app did this goal some other way.",
-		best, oneLine(t.Steps[best].Tool)), best
+		best+1, oneLine(t.Steps[best].Tool)), best
 }

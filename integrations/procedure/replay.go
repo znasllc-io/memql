@@ -948,6 +948,13 @@ func (r *replay) runSteps(ctx context.Context) {
 }
 
 // runStep replays one step and reports whether the replay goes on.
+//
+// STEPS ARE NUMBERED FROM 1 IN EVERY SENTENCE A PERSON READS -- a diagnosis,
+// a refusal, the guidance handed to the app -- because MemQL OS lists a
+// procedure's steps from 1, and "step 0 did not match" beside that list sends
+// a person to the wrong step. Every STORED index (divergedStep, a receipt's
+// seq, CompletedStep.Index) and every key (stepN, the idempotency key) stays
+// the 0-based position it always was.
 func (r *replay) runStep(ctx context.Context, idx int) bool {
 	step := r.c.template.Steps[idx]
 	key := replayStepKey(idx)
@@ -956,11 +963,11 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 
 	values, err := r.holeValues(idx, step)
 	if err != nil {
-		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s) could not be bound: %v.", idx, oneLine(step.Tool), err), false)
+		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s) could not be bound: %v.", idx+1, oneLine(step.Tool), err), false)
 	}
 	raw, err := proc.Materialize(step.Args, values)
 	if err != nil {
-		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s) could not be written out: %v.", idx, oneLine(step.Tool), err), false)
+		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s) could not be written out: %v.", idx+1, oneLine(step.Tool), err), false)
 	}
 	args, _ := raw.(map[string]any)
 	if args == nil {
@@ -968,7 +975,7 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 	}
 	summary := stepSummary(step.Tool, args)
 	if ok, why := inputHolds(r.c.template, idx, step.Tool, args, values); !ok {
-		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) would not have made the call the procedure names: %s.", idx, step.Tool, summary, why), false)
+		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) would not have made the call the procedure names: %s.", idx+1, step.Tool, summary, why), false)
 	}
 
 	done := CompletedStep{Index: idx, Tool: step.Tool, IdempotencyKey: idem, Summary: summary}
@@ -1012,7 +1019,7 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 				r.startRefusedMidway = true
 				return false
 			}
-			return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) was refused before it ran: %v.", idx, step.Tool, summary, derr), false)
+			return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) was refused before it ran: %v.", idx+1, step.Tool, summary, derr), false)
 		}
 		obs, output = res.Observation, res.Output
 		// A SIDE EFFECT is what the DISPATCHER says reached the world beyond
@@ -1045,7 +1052,7 @@ func (r *replay) runStep(ctx context.Context, idx int) bool {
 		if r.mode == ReplayShadow {
 			what = "what the app did"
 		}
-		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) did not match %s: %s.", idx, step.Tool, summary, what, reason), true)
+		return r.diverge(idx, idem, fmt.Sprintf("Step %d (%s: %s) did not match %s: %s.", idx+1, step.Tool, summary, what, reason), true)
 	}
 	r.outputs[idx] = output
 	r.out.Completed = append(r.out.Completed, done)
@@ -1116,7 +1123,7 @@ func (r *replay) holeValues(idx int, step proc.TemplateStep) (map[string]string,
 			v, ok := outputValueAt(r.outputs[h.Ref.StepIndex], h.Ref.Path)
 			if !ok {
 				walkErr = fmt.Errorf("step %d's output carries no value at %s for hole %s",
-					h.Ref.StepIndex, strings.Join(h.Ref.Path, "."), holeId)
+					h.Ref.StepIndex+1, strings.Join(h.Ref.Path, "."), holeId)
 				return
 			}
 			values[holeId] = v
@@ -1237,9 +1244,9 @@ func (r *replay) diverge(idx int, idem, diagnosis string, ranAndDiffered bool) b
 func alignmentSentence(m proc.Move) string {
 	switch m.Kind {
 	case proc.MoveLog:
-		return fmt.Sprintf("Against the procedure's own model the first deviation is a log move -- the run did something the procedure does not (%s) -- at position %d.", m.Label, m.TraceIndex)
+		return fmt.Sprintf("Against the procedure's own model the first deviation is a log move -- the run did something the procedure does not (%s) -- at position %d.", m.Label, m.TraceIndex+1)
 	case proc.MoveModel:
-		return fmt.Sprintf("Against the procedure's own model the first deviation is a model move -- the procedure has a step the run did not take (%s) -- at position %d.", m.Label, m.TraceIndex)
+		return fmt.Sprintf("Against the procedure's own model the first deviation is a model move -- the procedure has a step the run did not take (%s) -- at position %d.", m.Label, m.TraceIndex+1)
 	}
 	return ""
 }
@@ -1700,7 +1707,7 @@ func renderGuidance(statement string, g Guidance, started bool, stoppedAt int) s
 	if len(delivered) > 0 {
 		b.WriteString("A learned procedure already ran these steps -- do not repeat them:\n")
 		for _, s := range delivered {
-			fmt.Fprintf(&b, "- step %d (%s): %s [idempotency key %s]\n", s.Index, s.Tool, s.Summary, s.IdempotencyKey)
+			fmt.Fprintf(&b, "- step %d (%s): %s [idempotency key %s]\n", s.Index+1, s.Tool, s.Summary, s.IdempotencyKey)
 		}
 	}
 	if len(local) > 0 {
@@ -1709,10 +1716,10 @@ func renderGuidance(statement string, g Guidance, started bool, stoppedAt int) s
 		// reached it; the app redoes whatever of them the goal still needs.
 		b.WriteString("It also ran these steps in its own workspace, which you do not share, so their effects did not reach you:\n")
 		for _, s := range local {
-			fmt.Fprintf(&b, "- step %d (%s): %s [idempotency key %s]\n", s.Index, s.Tool, s.Summary, s.IdempotencyKey)
+			fmt.Fprintf(&b, "- step %d (%s): %s [idempotency key %s]\n", s.Index+1, s.Tool, s.Summary, s.IdempotencyKey)
 		}
 	}
-	fmt.Fprintf(&b, "It stopped at step %d because: %s", stoppedAt, g.Diagnosis)
+	fmt.Fprintf(&b, "It stopped at step %d because: %s", stoppedAt+1, g.Diagnosis)
 	return b.String()
 }
 
