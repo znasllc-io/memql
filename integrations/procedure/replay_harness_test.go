@@ -45,6 +45,8 @@ type fakeDispatcher struct {
 	// authorities are the forwarded authority each dispatch saw, and
 	// whether there was one.
 	authorities []forwardedSeen
+	// internal records whether each dispatch ran under internal origin.
+	internal []bool
 }
 
 type forwardedSeen struct {
@@ -63,6 +65,7 @@ func (d *fakeDispatcher) Dispatch(ctx context.Context, req DispatchRequest) (Dis
 	d.calls = append(d.calls, req)
 	fa, present := auth.ForwardedAuthorityFromContext(ctx)
 	d.authorities = append(d.authorities, forwardedSeen{present: present, subject: fa.Subject, credentialClass: fa.CredentialClass})
+	d.internal = append(d.internal, auth.OriginFromContext(ctx).IsInternal())
 	if err := d.fail[req.StepKey]; err != nil {
 		return DispatchResult{}, err
 	}
@@ -112,6 +115,7 @@ type fakeProber struct {
 	err         error
 	calls       int
 	authorities []forwardedSeen
+	internal    []bool
 }
 
 func (p *fakeProber) Probe(ctx context.Context, _ work.ReplayTarget, _, _ string, _ proc.Preconditions) (proc.Preconditions, error) {
@@ -120,6 +124,7 @@ func (p *fakeProber) Probe(ctx context.Context, _ work.ReplayTarget, _, _ string
 	p.calls++
 	fa, present := auth.ForwardedAuthorityFromContext(ctx)
 	p.authorities = append(p.authorities, forwardedSeen{present: present, subject: fa.Subject, credentialClass: fa.CredentialClass})
+	p.internal = append(p.internal, auth.OriginFromContext(ctx).IsInternal())
 	return p.observed, p.err
 }
 

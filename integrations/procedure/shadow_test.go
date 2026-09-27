@@ -336,3 +336,44 @@ func TestARecordingTheVersionWasLearnedFromIsNotEvidenceAboutIt(t *testing.T) {
 		t.Fatalf("the control compared %+v, %v -- so the refusal above proves nothing", outs, err)
 	}
 }
+
+// TestTheSeamsRunWithTheOriginOfTheCallTheyReplay (review finding M9): a
+// replay runs inside an automation, whose context carries INTERNAL origin --
+// and a replayed MCP tool call made under it could reach a @serverOnly
+// construct the recorded call, made by the app over MCP with client origin,
+// never could. The dispatcher and the prober are handed client origin, on the
+// served path and the shadow path alike; every row this package writes still
+// stamps internal origin itself.
+func TestTheSeamsRunWithTheOriginOfTheCallTheyReplay(t *testing.T) {
+	served := newReplayWorld(t, "trusted")
+	automation := auth.ContextWithInternalOrigin(auth.ContextWithForwardedAuthority(personCtx(replayOwner), auth.ForwardedAuthority{
+		Subject: replayOwner, CredentialClass: auth.ForwardedClassUser,
+	}))
+	if _, err := served.i.Replay(automation, ReplayRequest{OwnerUserId: replayOwner, ConstructId: served.constructId,
+		Mode: ReplayTrusted, GoalRunId: goalRunId, Input: map[string]any{"file": goalFile}}); err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+
+	rec := recording1("c.txt", testNow.Add(-10*time.Minute))
+	shadow := shadowWorld(t, rec)
+	if _, err := shadow.i.shadowCompareRun(auth.ContextWithInternalOrigin(personCtx(testOwner)), rec.runRow()); err != nil {
+		t.Fatalf("shadowCompareRun: %v", err)
+	}
+
+	for name, w := range map[string]*replayWorld{"served": served, "shadow": shadow} {
+		seen := append(append([]bool(nil), w.p.internal...), w.d.internal...)
+		if len(w.p.internal) != 1 || len(w.d.internal) != 2 {
+			t.Fatalf("%s: probes %d, dispatches %d", name, len(w.p.internal), len(w.d.internal))
+		}
+		for n, internal := range seen {
+			if internal {
+				t.Fatalf("%s: seam call %d ran under internal origin, which the call it replays never had", name, n)
+			}
+		}
+		for _, c := range w.eng.writes() {
+			if !c.Internal {
+				t.Fatalf("%s: %s was written without the internal-origin stamp", name, c.Name())
+			}
+		}
+	}
+}

@@ -359,7 +359,8 @@ type replay struct {
 	target  work.ReplayTarget
 	d       Dispatcher
 	// seam is the context the prober and the dispatcher run under: the
-	// owner's actor and a forwarded authority for the owner (bindAuthority).
+	// owner's actor, a forwarded authority for the owner (bindAuthority),
+	// and client origin (seamContext says why).
 	seam context.Context
 
 	// resuming: a replay of this very statement had started and not
@@ -391,11 +392,19 @@ type replay struct {
 
 // seamContext is the context a seam runs under: the one bindAuthority bound,
 // or -- for a replay that binds none (a dry comparison) -- the owner's actor.
+//
+// ALWAYS WITH CLIENT ORIGIN (review finding M9). A replay runs inside an
+// automation, whose context carries INTERNAL origin, and a replayed MCP tool
+// call made under it could reach a @serverOnly construct that the recorded
+// call -- made by the app over MCP, as a client -- never could. The prober and
+// the dispatcher are handed the origin of the calls they replay. Every row
+// this package writes stamps internal origin itself, inline (store.go), so
+// nothing here needs the automation's.
 func (r *replay) seamContext(ctx context.Context) context.Context {
 	if r.seam != nil {
 		return r.seam
 	}
-	return ownerActor(ctx, r.req.OwnerUserId)
+	return auth.ContextWithClientOrigin(ownerActor(ctx, r.req.OwnerUserId))
 }
 
 // run is stages 2 to 8, after the one question that comes before all of them:
@@ -1015,14 +1024,14 @@ func (r *replay) bindAuthority(ctx context.Context) bool {
 	}
 	owner := r.req.OwnerUserId
 	if fa, ok := auth.ForwardedAuthorityFromContext(ctx); ok && sameUser(fa.Subject, owner) {
-		r.seam = ownerActor(ctx, owner)
+		r.seam = auth.ContextWithClientOrigin(ownerActor(ctx, owner))
 		return true
 	}
 	bound, err := auth.ContextWithPersistedOwner(ctx, owner, nil, nil)
 	if err != nil {
 		return r.refuseStart(ctx, codeStartRefused, "The owner's authority could not be bound for the replay's steps: "+err.Error()+".", false)
 	}
-	r.seam = bound
+	r.seam = auth.ContextWithClientOrigin(bound)
 	return true
 }
 
