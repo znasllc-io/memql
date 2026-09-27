@@ -468,3 +468,49 @@ automation live {
 		t.Errorf("the LIVE check was lost: %q -- blanking must not blank live source", pc.Check)
 	}
 }
+
+// TestSlicePreambleKeepsAnnotationsAboveAMultiLineAnnotation (memql#5426
+// review): a line inside a multi-line annotation's argument list starts with
+// neither `@` nor a comment, so the walk stopped there and cut every
+// annotation above it out of the slice -- the @trigger above a multi-line
+// @filter, and the @disabled above a multi-line @trigger. The automation then
+// compiled with a nil trigger, never subscribed, silently.
+func TestSlicePreambleKeepsAnnotationsAboveAMultiLineAnnotation(t *testing.T) {
+	l := &Loader{}
+	for _, tc := range []struct{ name, src, want string }{
+		{
+			name: "trigger above a multi-line filter",
+			src: `@trigger(event="node.updated", concept="v1:cluster:node")
+@filter(row =>
+  row.status != "done"
+)
+automation filtered ` + bodyStub,
+			want: "@trigger(",
+		},
+		{
+			name: "disabled above a multi-line trigger",
+			src: `@disabled
+@trigger(
+  event="node.created",
+  concept="v1:cluster:node"
+)
+automation parked ` + bodyStub,
+			want: "@disabled",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := strings.Fields(tc.src[strings.LastIndex(tc.src, "automation ")+len("automation "):])[0]
+			got := sliceFor(t, tc.src, name)
+			if !strings.HasPrefix(got, tc.want) {
+				t.Fatalf("the emitted slice does not start at %s:\n%s", tc.want, got)
+			}
+			a, err := l.compileMemQL(got, "test:"+tc.name)
+			if err != nil {
+				t.Fatalf("the slice did not compile: %v", err)
+			}
+			if !a.IsEventTriggered() {
+				t.Errorf("compiled with no trigger:\n%s", got)
+			}
+		})
+	}
+}

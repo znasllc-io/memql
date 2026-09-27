@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // unparsedConceptTree is a domain with one concept that parses and one that
@@ -84,5 +86,47 @@ func TestLintReportsAConceptThatDoesNotParse(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the lint did not report the concept that does not parse: %v", diags)
+	}
+}
+
+// TestRowAuthzAboveAMultiLineAnnotationIsDeclared (memql#5426 review) is a
+// security regression test. The concept slicer's preamble walk stopped at the
+// first line of a multi-line annotation's argument list, so every annotation
+// above it was cut out of the slice -- and a @rowAuthz there left the concept
+// on the UNDECLARED tier, which admits every reader, with nothing refused and
+// nothing logged but the undeclared-tier warning every legacy concept draws.
+// The tier must be DECLARED, owned by the field it names.
+func TestRowAuthzAboveAMultiLineAnnotationIsDeclared(t *testing.T) {
+	tree := fstest.MapFS{
+		"support/memql.toml": languageLineFile(),
+		"support/concepts.memql": {Data: []byte(`@rowAuthz(owner="ownerUserId")
+@description(
+  "A ticket a person owns."
+)
+concept ticket {
+  ownerUserId  string  @required
+  title        string
+}
+`)},
+	}
+	concepts, skips, err := BuildUnifiedConcepts(nil, tree)
+	if err != nil {
+		t.Fatalf("BuildUnifiedConcepts: %v", err)
+	}
+	if len(skips) != 0 {
+		t.Fatalf("unexpected skips: %v", skips)
+	}
+	c, ok := concepts["v1:support:ticket"]
+	if !ok {
+		t.Fatalf("the concept did not build: %d built", len(concepts))
+	}
+	if c.RowAuthz == nil {
+		t.Fatal("the concept loaded on the UNDECLARED row-authz tier: the @rowAuthz above its multi-line @description was cut out of the slice")
+	}
+	if c.RowAuthz.Tier != languageParser.RowAuthzOwned || c.RowAuthz.Owner != "ownerUserId" {
+		t.Errorf("row authz = %+v, want the owned tier on ownerUserId", *c.RowAuthz)
+	}
+	if c.Description != "A ticket a person owns." {
+		t.Errorf("description = %q, want the multi-line one", c.Description)
 	}
 }

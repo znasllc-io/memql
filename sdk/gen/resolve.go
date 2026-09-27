@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // This file resolves a construct's signature-bound concept SHORT NAME
@@ -85,9 +87,10 @@ func buildConceptIndex(roots []string) conceptIndex {
 			if ns == "" {
 				ns = dir
 			}
+			preambles := langparser.NewPreambleWalker(src)
 			for _, m := range conceptHeaderRe.FindAllStringSubmatchIndex(src, -1) {
 				name := src[m[2]:m[3]]
-				id := assembleConceptIdFromPreamble(src, m[0], name, ns)
+				id := assembleConceptIdFromPreamble(preambles, src, m[0], name, ns)
 				if id == "" {
 					continue // malformed @version, or no derivable namespace -- not addressable
 				}
@@ -108,8 +111,8 @@ func buildConceptIndex(roots []string) conceptIndex {
 // major 1 (#2613) and absent @namespace derives the containing domain
 // directory (#2614) -- both mirroring AssembleConceptIdFromDeclInDir in
 // LOCKSTEP (the PR #2657 law: the two assemblers change together).
-func assembleConceptIdFromPreamble(src string, headerStart int, name, dir string) string {
-	preamble := attrPreamble(src, headerStart)
+func assembleConceptIdFromPreamble(preambles *langparser.PreambleWalker, src string, headerStart int, name, dir string) string {
+	preamble := attrPreamble(preambles, src, headerStart)
 	vm := versionAttrRe.FindStringSubmatch(preamble)
 	major := 1
 	if vm != nil {

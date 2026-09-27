@@ -87,3 +87,43 @@ prompt levelProbeDisabledWithoutLevel {
 		t.Errorf("no skip for %s: a prompt with no @level loaded", name)
 	}
 }
+
+// TestPromptLevelAboveAMultiLineAnnotationIsRead (memql#5426 review): an
+// annotation whose argument list spans lines does not end the preamble. The
+// slicer's walk used to stop at its `)`, cutting @level out of the slice, so a
+// prompt that declares its level was refused as declaring none.
+func TestPromptLevelAboveAMultiLineAnnotationIsRead(t *testing.T) {
+	overlay := fstest.MapFS{
+		"prompts.memql": {Data: []byte(`@level("fast")
+@description(
+  "Summarise a ticket."
+)
+@templateFile("summ.tmpl")
+prompt acmeSumm {
+  title  string!  @description("The title.")
+}
+`)},
+		"summ.tmpl": {Data: []byte("Summarise {{.title}}")},
+	}
+	const domain = "promptlevelmultiline"
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
+	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
+
+	registry := newPromptRegistry()
+	rep := newLoadReport()
+	if _, err := LoadUnifiedPrompts(discardLogger(), registry, template.New("partials"), rep); err != nil {
+		t.Fatalf("LoadUnifiedPrompts: %v", err)
+	}
+	for _, s := range rep.Skipped {
+		if strings.HasPrefix(s.File, domain+"/") {
+			t.Errorf("the prompt was refused: %s", s.Err)
+		}
+	}
+	p, ok := registry.Get("acmeSumm")
+	if !ok {
+		t.Fatal("the prompt did not register")
+	}
+	if p.Level != "fast" || p.Description != "Summarise a ticket." {
+		t.Errorf("level %q description %q, want fast and the multi-line description", p.Level, p.Description)
+	}
+}

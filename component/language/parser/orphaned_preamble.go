@@ -148,12 +148,17 @@ func OrphanedPreambles(source string) []OrphanedPreamble {
 	}
 
 	var out []OrphanedPreamble
+	var continuation map[int]int // built on the first block comment that opens a line
 	for i := range lines {
 		if !opens[i] {
 			continue
 		}
+		if continuation == nil {
+			continuation = ContinuationLines(source)
+		}
 		// Walk back over the contiguous preamble run, exactly as
-		// PreambleStartOf does: `@` and `//` lines, nothing else.
+		// PreambleStartOf does: `@` and `//` lines, and a multi-line
+		// annotation whole (preamble_walk.go), nothing else.
 		start := -1
 		sawAttribute := false
 		for k := i - 1; k >= 0; k-- {
@@ -168,6 +173,12 @@ func OrphanedPreambles(source string) []OrphanedPreamble {
 			}
 			if strings.HasPrefix(trimmed, "//") {
 				start = k
+				continue
+			}
+			if opener, ok := continuation[k]; ok {
+				sawAttribute = true
+				start = opener
+				k = opener // the loop's k-- resumes above the annotation's `@`
 				continue
 			}
 			break

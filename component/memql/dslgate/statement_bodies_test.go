@@ -237,3 +237,24 @@ logic probeLogicMethod {
 		}
 	}
 }
+
+// TestStatementGatesReadAMultiLineHeaderLambda (memql#5426 review): the
+// declaration is parsed from the first line of its preamble, and a filter
+// whose lambda spans lines is part of that preamble. The walk used to stop at
+// the filter's closing line, so the declaration was parsed without it and the
+// method it calls was never checked.
+func TestStatementGatesReadAMultiLineHeaderLambda(t *testing.T) {
+	src := `@trigger(event="node.updated", concept="v1:probe:thing")
+@filter(row =>
+  row.status.frob()
+)
+automation probeMultiLineFilter {
+  builtin note(v: 1)
+}
+`
+	got := statementGates(SourceFile{"probe/automations.memql", src})
+	want := "statement-unknown-call@probe/automations.memql:3 probeMultiLineFilter: `.frob()` is not a method of a list or a string"
+	if len(got) != 1 || !strings.HasPrefix(got[0], want) {
+		t.Fatalf("want one report opening %q, got:\n%s", want, strings.Join(got, "\n"))
+	}
+}

@@ -169,12 +169,13 @@ func eachStatementBody(files []SourceFile, visit func(f SourceFile, kind, name s
 			continue
 		}
 		view := languageParser.BlankCommentsAndStrings(f.Content)
+		preambles := languageParser.NewPreambleWalker(f.Content)
 		for _, loc := range statementHeader.FindAllStringSubmatchIndex(view, -1) {
 			closeAt := closingBraceAt(view, loc[1]-1)
 			if closeAt < 0 {
 				continue // the loader reports the unbalanced construct
 			}
-			start := languageParser.PreambleStartOf(f.Content, loc[0])
+			start := preambles.StartOf(loc[0])
 			startLine := 1 + strings.Count(f.Content[:start], "\n")
 			kind, name := f.Content[loc[2]:loc[3]], f.Content[loc[4]:loc[5]]
 			pf, err := languageParser.ParseFile(f.Content[start : closeAt+1])

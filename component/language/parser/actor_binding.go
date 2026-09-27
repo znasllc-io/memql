@@ -128,13 +128,15 @@ func RewriteActorBinding(src []byte) ([]byte, error) {
 	var b strings.Builder
 	prev := 0
 	changed := false
+	preambles := NewPreambleWalker(text)
 	for _, h := range headers {
 		start := h[0]
 		end := constructEnd(text, start)
 		construct := text[start:end]
 		// The preamble (annotations above the header) belongs to this
-		// construct; scan back over contiguous annotation/comment lines.
-		pStart := preambleStart(text, start)
+		// construct: the shared walk over contiguous annotation and comment
+		// lines, a multi-line annotation whole (preamble_walk.go).
+		pStart := preambles.StartOf(start)
 		region := text[pStart:end]
 
 		if !ActorRefInSource(construct) || ActorDeclaredInSource(region) {
@@ -152,22 +154,6 @@ func RewriteActorBinding(src []byte) ([]byte, error) {
 	}
 	b.WriteString(text[prev:])
 	return []byte(b.String()), nil
-}
-
-// preambleStart walks back from a construct header over the
-// contiguous run of annotation and comment lines that belong to it.
-func preambleStart(text string, headerStart int) int {
-	lineStart := headerStart
-	for lineStart > 0 {
-		prevEnd := lineStart - 1 // the \n before this line
-		ps := strings.LastIndexByte(text[:prevEnd], '\n') + 1
-		trimmed := strings.TrimSpace(text[ps:prevEnd])
-		if trimmed == "" || (!strings.HasPrefix(trimmed, "@") && !strings.HasPrefix(trimmed, "//")) {
-			break
-		}
-		lineStart = ps
-	}
-	return lineStart
 }
 
 // constructEnd returns the exclusive end offset of the construct whose
@@ -223,11 +209,12 @@ func constructEnd(text string, headerStart int) int {
 func ActorUndeclaredRefOffsets(src string) []int {
 	headers := actorConstructHeaderRe.FindAllStringSubmatchIndex(src, -1)
 	var out []int
+	preambles := NewPreambleWalker(src)
 	for _, h := range headers {
 		start := h[0]
 		end := constructEnd(src, start)
 		construct := src[start:end]
-		region := src[preambleStart(src, start):end]
+		region := src[preambles.StartOf(start):end]
 		if ActorDeclaredInSource(region) {
 			continue
 		}

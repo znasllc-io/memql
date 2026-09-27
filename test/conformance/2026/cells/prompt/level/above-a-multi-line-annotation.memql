@@ -1,0 +1,10 @@
+/// Summarise a ticket in one sentence: the level sits above an annotation
+/// whose argument list spans lines.
+@level("fast")
+@description(
+  "Summarise a ticket."
+)
+@templateFile("summariseTicket.tmpl")
+prompt summariseTicketMultiLine {
+  title  string!  @description("The ticket's title.")
+}

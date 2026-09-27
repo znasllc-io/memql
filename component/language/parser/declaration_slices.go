@@ -77,6 +77,7 @@ func ExtractDeclarationSlices(source string, headerRe *regexp.Regexp) []Declarat
 	}
 
 	var out []DeclarationSlice
+	walker := NewPreambleWalker(source)
 	for _, m := range matches {
 		headerStart, headerEnd := m[0], m[1]
 
@@ -92,7 +93,7 @@ func ExtractDeclarationSlices(source string, headerRe *regexp.Regexp) []Declarat
 			continue
 		}
 
-		preambleStart := PreambleStartOf(source, headerStart)
+		preambleStart := walker.StartOf(headerStart)
 
 		out = append(out, DeclarationSlice{
 			Source: source[preambleStart : closeIdx+1],
@@ -144,6 +145,7 @@ func ExtractPredicateDeclarationSlices(source, keyword string) []DeclarationSlic
 	}
 
 	var out []DeclarationSlice
+	walker := NewPreambleWalker(source)
 	for _, m := range matches {
 		headerStart, headerEnd := m[0], m[1]
 		if scan[m[2]:m[3]] != keyword {
@@ -158,7 +160,7 @@ func ExtractPredicateDeclarationSlices(source, keyword string) []DeclarationSlic
 		first := sort.SearchInts(lineStarts, headerStart+1) - 1
 		last := dslclause.ClauseExtent(lines, first)
 		end := lineStarts[last] + len(strings.TrimRight(lines[last], " \t\r"))
-		preambleStart := PreambleStartOf(source, headerStart)
+		preambleStart := walker.StartOf(headerStart)
 		out = append(out, DeclarationSlice{
 			Source: source[preambleStart:end],
 			Name:   source[m[4]:m[5]],
@@ -170,9 +172,11 @@ func ExtractPredicateDeclarationSlices(source, keyword string) []DeclarationSlic
 }
 
 // PreambleStartOf walks backwards from a header over contiguous leading
-// @-attribute and `//` comment lines and returns the offset the slice should
-// start at. headerStart is a BYTE offset into source, and the return value is
-// one too.
+// @-attribute and `//` comment lines -- a multi-line annotation whole, its
+// continuation lines included (preamble_walk.go) -- and returns the offset the
+// slice should start at. headerStart is a BYTE offset into source, and the
+// return value is one too. A caller with many headers in one source uses a
+// PreambleWalker, which answers them all from one pass.
 //
 // Deliberately takes the ORIGINAL source, never the blanked view -- see rule 3
 // in the file comment.
@@ -201,19 +205,7 @@ func ExtractPredicateDeclarationSlices(source, keyword string) []DeclarationSlic
 // A caller in a different offset space (Sense counts RUNES, because the lexer
 // scans a []rune) converts at the boundary rather than reimplementing the walk.
 func PreambleStartOf(source string, headerStart int) int {
-	preambleStart := headerStart
-	for k := headerStart - 1; k >= 0; k-- {
-		lineStart := strings.LastIndexByte(source[:k], '\n') + 1
-		line := strings.TrimRight(source[lineStart:k+1], "\r\n")
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "@") || strings.HasPrefix(trimmed, "//") {
-			preambleStart = lineStart
-			k = lineStart - 1
-			continue
-		}
-		break
-	}
-	return preambleStart
+	return NewPreambleWalker(source).StartOf(headerStart)
 }
 
 // MatchingCloseBrace returns the index of the `}` matching the `{` at openIdx,

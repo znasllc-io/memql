@@ -20,6 +20,8 @@ package dslgate
 import (
 	"fmt"
 	"strings"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // construct is one row-accessing declaration located in a file's source.
@@ -34,31 +36,21 @@ type construct struct {
 // forEachConstruct walks every `query` / `mutation` / `seed` declaration in src
 // and calls fn with its header line, annotation preamble and body.
 //
-// The preamble walk goes UPWARD from the header over contiguous `@`- and
-// `//`-prefixed lines, stopping at the first blank or other line, which is
-// where a construct's own annotations live and where a preceding construct's
-// do not.
+// The preamble is the shared walk UPWARD from the header over contiguous `@`-
+// and `//`-prefixed lines, a multi-line annotation whole (languageParser.
+// PreambleWalker), stopping at the first blank or other line, which is where a
+// construct's own annotations live and where a preceding construct's do not.
+// Before memql#5426 a multi-line annotation ended the walk, so a @public or a
+// @requiresRank above one was not read.
 func forEachConstruct(src string, fn func(construct)) {
+	preambles := languageParser.NewPreambleWalker(src)
 	for _, m := range ConstructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
 		openIdx := m[1] - 1
 		closeIdx := MatchingClose(src, openIdx)
 		if closeIdx < 0 {
 			continue
 		}
-		preambleStart := m[0]
-		for k := m[0] - 1; k >= 0; k-- {
-			lineStart := strings.LastIndexByte(src[:k], '\n') + 1
-			line := strings.TrimSpace(strings.TrimRight(src[lineStart:k+1], "\r\n"))
-			if strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
-				preambleStart = lineStart
-				k = lineStart - 1
-				continue
-			}
-			if line == "" {
-				break
-			}
-			break
-		}
+		preambleStart := preambles.StartOf(m[0])
 		fn(construct{
 			Kind:     src[m[2]:m[3]],
 			Name:     src[m[4]:m[5]],
