@@ -82,6 +82,72 @@ type RunContext struct {
 	// OwnerUserId owns the run, and therefore owns every journal row written
 	// for it.
 	OwnerUserId string
+	// Override is what a person changed for the ONE step a re-run or a
+	// branch targets (epic memql#5414, design D20). The executor sets it on
+	// that step's context only, so it can never leak into the next step;
+	// every other step's context carries nil.
+	Override *StepOverride
+	// Workspace is a fresh workspace for this execution's app sessions, set
+	// by a re-run or a branch of a session step so the new session does not
+	// run inside the directory the previous version's later steps changed.
+	// Empty means the default workspace.
+	Workspace string
+	// Snapshot is the workspace a session step's new session is started
+	// against -- the content-addressed files the recording held before that
+	// step (design D19). Set only on the targeted step, and only when it is
+	// a session step.
+	Snapshot *WorkspaceSnapshot
+}
+
+// StepOverride is a person's change to one version of one step (epic
+// memql#5414, design D20). Declared here rather than in component/work so the
+// model seam, which cannot import the work module, can read it off the
+// context; component/work.Override is the validated form it is built from.
+type StepOverride struct {
+	// Level is the level to request instead of the step's own: fast, strong
+	// or reasoning. Empty keeps the step's.
+	Level string
+	// Model is a policy entry to pin instead of routing by level -- a
+	// provider name, fleet:<modelId>, app:<id> or app:<id>:<model> -- walked
+	// as a one-entry chain. Empty routes by level.
+	Model string
+	// Effort is the effort to ask an app to spend: low, medium, high, xhigh
+	// or max. Empty lets the level decide.
+	Effort string
+	// Prompt is, for a session step, the WHOLE prompt the new session runs
+	// with; for any other step, instructions added to its prompt.
+	Prompt string
+	// Inputs replace the step's own arguments by name.
+	Inputs map[string]any
+	// GuidanceAxes and GuidanceReason are what the person disliked about the
+	// version this one replaces (design D23, repair): the axes by name
+	// (product, process, performance) and their reason.
+	GuidanceAxes   []string
+	GuidanceReason string
+	// FeedbackId is the feedback observation the guidance came from.
+	FeedbackId string
+	// RequestedBy is the person who asked for this version.
+	RequestedBy string
+}
+
+// Empty reports whether the override changes nothing about the call.
+func (o *StepOverride) Empty() bool {
+	return o == nil || (o.Level == "" && o.Model == "" && o.Effort == "" && o.Prompt == "" &&
+		len(o.Inputs) == 0 && o.GuidanceReason == "" && len(o.GuidanceAxes) == 0)
+}
+
+// WorkspaceSnapshot is the set of content-addressed files a session step's
+// workspace held before that step, rebuilt from its run's recordings (epic
+// memql#5414, design D19).
+type WorkspaceSnapshot struct {
+	Files []SnapshotFile
+}
+
+// SnapshotFile is one file of a WorkspaceSnapshot: its workspace-relative
+// path and the v1:library:file holding its bytes.
+type SnapshotFile struct {
+	Path   string
+	FileId string
 }
 
 // IsRun reports whether this context names a run at all.
