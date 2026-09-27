@@ -1,6 +1,7 @@
 package procedure
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -267,6 +268,25 @@ func (h *Hole) UnmarshalJSON(b []byte) error {
 		return fmt.Errorf("procedure: hole %s has an unknown class %q", f.Id, f.Class)
 	}
 	*h = Hole(f)
+	return nil
+}
+
+// shapeFields is HoleShape without its methods, so decoding it does not
+// recurse.
+type shapeFields HoleShape
+
+// UnmarshalJSON decodes a hole's shape and REFUSES a feature this code does
+// not know. A writer records a feature because it checks values against it,
+// and a replica that dropped the feature would bind a value the writer's check
+// refuses.
+func (s *HoleShape) UnmarshalJSON(b []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var f shapeFields
+	if err := dec.Decode(&f); err != nil {
+		return fmt.Errorf("procedure: decoding a hole's shape: %w", err)
+	}
+	*s = HoleShape(f)
 	return nil
 }
 

@@ -59,7 +59,8 @@ func everyFieldTemplate() Template {
 			{Tool: "mcp", Args: Obj(map[string]*Node{"payload": doc, "target": rel, "empty": Obj(nil), "none": Arr()})},
 		},
 		Holes: []Hole{
-			{Id: "s0.command.1", StepIndex: 0, Path: []string{"command", "1"}, Type: "string", Class: HoleFree, Evidence: 2},
+			{Id: "s0.command.1", StepIndex: 0, Path: []string{"command", "1"}, Type: "string", Class: HoleFree, Evidence: 2,
+				Shape: &HoleShape{Dash: true, DotDot: true}},
 			{Id: "s1.payload.list.1", StepIndex: 1, Path: []string{"payload", "list", "1"}, Type: "number",
 				Class: HoleDataFlow, Ref: &DataFlowRef{StepIndex: 0, Path: []string{"id"}}, Evidence: 3,
 				Derivation: `basename(ref(0, "path"))`},
