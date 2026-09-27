@@ -821,9 +821,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// stamped", and an update whose delta never mentioned the owner stamped
 	// nothing. See the pipeline case in site_owner_stamp_pipeline_update_test.go.
 	_, deltaNamedOwner := payload["ownerUserId"]
-	var organizationOwnerField string
-	var organizationOwner any
-	var organizationOwnerPresent bool
+	// THE STORED OWNER of the row this write lands on, captured before the
+	// read-merge for the same reason as deltaNamedOwner: afterwards the
+	// stored owner and a freshly stamped `ownerUserId: actor.userId` are one
+	// map entry. Two restores below read it -- the organization boundary's
+	// and the non-principal undo's (memql#5437) -- so it is captured once.
+	// The zero value is a create.
+	var ownerBefore rowOwnerBefore
+	var organizationRestore bool
 	// The stored row, for the organization boundary (memql#5636), which judges
 	// the row the before-write hooks PRODUCED rather than the caller's delta: a
 	// hook may set a guarded field the delta never named. Copied because the
@@ -881,16 +886,13 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 
 		if existed {
+			ownerBefore = captureRowOwnerBefore(conceptMeta.Name, priorPayload)
 			// Organization collaboration changes the editor, not the original
-			// owning principal. Capture before merge and restore after every
-			// actor stamp below; accounts themselves use their governed claim
-			// writer and legacy untied rows keep their existing contract.
-			if organizationOwnedConcept(conceptMeta.Name) && strings.TrimSpace(stringFromAny(priorPayload["accountId"])) != "" {
-				if decl := rowAuthzDeclFor(conceptMeta.Name); decl != nil && decl.Owner != "" {
-					organizationOwnerField = decl.Owner
-					organizationOwner, organizationOwnerPresent = priorPayload[decl.Owner]
-				}
-			}
+			// owning principal. Restore after every actor stamp below;
+			// accounts themselves use their governed claim writer and legacy
+			// untied rows keep their existing contract.
+			organizationRestore = ownerBefore.field != "" && organizationOwnedConcept(conceptMeta.Name) &&
+				strings.TrimSpace(stringFromAny(priorPayload["accountId"])) != ""
 			// Capture the PRIOR status before the delta overwrites it
 			// (#1158) so executeUpdate can surface it as oldStatus.
 			meta.priorStatus, _ = priorPayload["status"].(string)
@@ -1069,19 +1071,19 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 
 	// A NON-PRINCIPAL CANNOT OWN A ROW (memql#4817). The site stamp above
 	// is this rule for one concept; this is the same rule for every
-	// concept that declares an owner field, keyed on D4's explicit
-	// Unranked flag rather than on the shape of an id string.
+	// concept that declares an owner field, keyed on the actor's Synthetic
+	// flag rather than on the shape of an id string. On a write to an
+	// existing row it restores the stored owner rather than blanking it
+	// (memql#5437): a system actor's write never changes who owns a row that
+	// already exists.
 	//
 	// Placed HERE for the reason the site stamp states: before
 	// canonicalizeRelationshipFields, while the stamped value is still the
-	// bare actor id the comparison expects.
-	undoNonPrincipalOwnerStamp(ctx, conceptMeta.Name, payload)
-	if organizationOwnerField != "" {
-		if organizationOwnerPresent {
-			payload[organizationOwnerField] = organizationOwner
-		} else {
-			delete(payload, organizationOwnerField)
-		}
+	// bare actor id the comparison expects -- and after the read-merge, which
+	// is what put the stamp over the stored owner.
+	undoNonPrincipalOwnerStamp(ctx, conceptMeta.Name, payload, ownerBefore)
+	if organizationRestore {
+		ownerBefore.restore(payload)
 	}
 
 	// Annotation-driven PII scrub (memql#1711). A mutation tagged
