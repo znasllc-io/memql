@@ -1015,7 +1015,7 @@ a browser, which is recorded here rather than left to be discovered:
 |---|---|---|
 | ~~`v1:planner:plan`~~ | **RETIRED, epic memql#5000** | Nexus reads `v1:work:run`, which declares the composite owner tier |
 | ~~`v1:planner:task`~~ | **RETIRED, epic memql#5000** | Nexus reads `v1:work:step`, same tier |
-| `v1:agents:agent` | undeclared, long tail | `agentsForPlan` is `@public` and narrows by `lineage.originatingRunId`; filtered again client-side |
+| `v1:agents:agent` | undeclared, long tail | `agentsForRun` is `@public` and narrows by `lineage.originatingRunId`; filtered again client-side |
 | `v1:authoring:bundle` | undeclared, long tail | narrowed by `sourceRunId` on an owner-gated read; filtered again client-side |
 
 Two things follow, and neither is a criticism of the surface:
