@@ -2,6 +2,7 @@ package memql
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -143,5 +144,40 @@ func TestSliceTextSignatureConceptsAreTheCallersCopy(t *testing.T) {
 	first.signatureConcepts[0] = "edited"
 	if again := sliceTextFactsOf(src); again.signatureConcepts[0] != "sigCopyThing" {
 		t.Errorf("an edit by one caller reached the next: %v", again.signatureConcepts)
+	}
+}
+
+// TestPairMemoBoundCountsEverythingItHolds: one authored text can meet any
+// number of lowered texts (a registry that resolves a slice differently each
+// time), so the bound must count both keys and the value of every entry. A
+// bound that counted the authored text once, as sourceMemo counts its source,
+// would hold them all.
+func TestPairMemoBoundCountsEverythingItHolds(t *testing.T) {
+	m := &pairMemo{maxBytes: 400}
+	authored := strings.Repeat("a", 20)
+	for i := 0; i < 200; i++ {
+		lowered := fmt.Sprintf("lowered-%04d-%s", i, strings.Repeat("b", 20))
+		want := "lexed:" + lowered
+		if got := m.get(authored, lowered, func() string { return want }); got != want {
+			t.Fatalf("entry %d: got %q, want %q", i, got, want)
+		}
+		// What is actually held, counted from the entries rather than read
+		// off the memo's own counter -- the counter is what a wrong bound
+		// gets wrong.
+		m.mu.Lock()
+		held, entries := 0, len(m.byPair)
+		for k, v := range m.byPair {
+			held += len(k[0]) + len(k[1]) + len(v)
+		}
+		m.mu.Unlock()
+		if held > m.maxBytes {
+			t.Fatalf("after %d entries the memo holds %d bytes in %d entries, over its %d bound", i+1, held, entries, m.maxBytes)
+		}
+	}
+	computed := 0
+	m.get("big", strings.Repeat("x", 500), func() string { computed++; return "v" })
+	m.get("big", strings.Repeat("x", 500), func() string { computed++; return "v" })
+	if computed != 2 {
+		t.Errorf("an entry larger than the bound was held (computed %d times, want 2)", computed)
 	}
 }

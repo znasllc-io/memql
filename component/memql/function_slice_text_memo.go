@@ -21,9 +21,14 @@ package memql
 // slice differently is simply a different key. A refusal is held unpositioned
 // and placed against the caller's authored text on every call.
 //
-// The bound and the clear-on-overflow policy are sourceMemo's.
+// The clear-on-overflow policy is sourceMemo's. The position lowering is held
+// in a memo of its own (pairMemo) because its key is a PAIR of texts: one
+// authored text can meet any number of lowered ones, and a bound that counted
+// only the authored text -- sourceMemo's, which counts its source once however
+// many keys hang off it -- would never see those grow.
 
 import (
+	"sync"
 	"sync/atomic"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
@@ -46,7 +51,7 @@ type sliceTextFacts struct {
 
 var (
 	sliceTexts          = &sourceMemo[sliceTextFacts]{maxBytes: 64 << 20}
-	positionedLowerings = &sourceMemo[string]{maxBytes: 64 << 20}
+	positionedLowerings = &pairMemo{maxBytes: 64 << 20}
 
 	// sliceTextReads and positionLowerings count the real computations, so
 	// the sharing is asserted as a count (TestSliceTextIsReadOncePerText).
@@ -74,8 +79,47 @@ func sliceTextFactsOf(content string) sliceTextFacts {
 // positionLoweringOf is languageParser.PositionLowering(authored, lowered),
 // keyed by both texts.
 func positionLoweringOf(authored, lowered string) string {
-	return positionedLowerings.get(authored, lowered, func() []string {
+	return positionedLowerings.get(authored, lowered, func() string {
 		positionLowerings.Add(1)
-		return []string{languageParser.PositionLowering(authored, lowered)}
-	})[0]
+		return languageParser.PositionLowering(authored, lowered)
+	})
+}
+
+// pairMemo caches a pure function of two texts. Its bound counts everything it
+// holds -- both keys and the value of every entry -- and it is CLEARED rather
+// than evicted when a new entry would take it past the bound, sourceMemo's
+// policy: a clear costs one recomputation, never a wrong answer. An entry
+// larger than the bound alone is computed and not held.
+type pairMemo struct {
+	mu       sync.Mutex
+	byPair   map[[2]string]string
+	bytes    int
+	maxBytes int
+}
+
+func (m *pairMemo) get(a, b string, compute func() string) string {
+	key := [2]string{a, b}
+	m.mu.Lock()
+	v, hit := m.byPair[key]
+	m.mu.Unlock()
+	if hit {
+		return v
+	}
+	v = compute()
+	size := len(a) + len(b) + len(v)
+	if size > m.maxBytes {
+		return v
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, raced := m.byPair[key]; raced {
+		return v
+	}
+	if m.byPair == nil || m.bytes+size > m.maxBytes {
+		m.byPair = map[[2]string]string{}
+		m.bytes = 0
+	}
+	m.byPair[key] = v
+	m.bytes += size
+	return v
 }
