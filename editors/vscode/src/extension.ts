@@ -2175,12 +2175,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         accessToken: credentials.accessToken,
         refreshToken: credentials.refreshToken,
         expiresAtEpochSeconds: credentials.expiresAtEpochSeconds,
-        // No client_id travels with a sign-in: it is the operator's own
-        // `clientId` override, or the well-known first-party id compiled into
-        // both halves (auth/wellKnownClient.ts). "" leaves any stored value
-        // alone, which is what keeps an entry from the old registration path
-        // working untouched.
-        clientId: '',
+        // The client the tokens were issued to -- the editor's own -- kept
+        // beside the refresh token so a refresh presents it. Never written to
+        // clusters.yaml, whose `client_id` belongs to the tool that wrote it
+        // (auth/wellKnownClient.ts).
+        clientId: credentials.clientId,
       }),
     // NO REVOCATION ON THIS PATH, deliberately (memql#4625). This is the
     // SIGN-IN flow's cleanup seam -- what it forgets is a credential a

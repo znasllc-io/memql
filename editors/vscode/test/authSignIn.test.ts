@@ -101,6 +101,9 @@ test("signInCanRecover covers exactly the credential failures", () => {
   assert.equal(signInCanRecover("missingCredential"), true);
   assert.equal(signInCanRecover("credentialExpired"), true);
   assert.equal(signInCanRecover("wrongTokenClass"), true);
+  // The "came back after a while" case: the stored session was refused and
+  // cleared. Its toast used to say to sign in and offer no button.
+  assert.equal(signInCanRecover("reauthenticationRequired"), true);
   // A fresh token does not make an endpoint appear, nor a cluster reachable.
   assert.equal(signInCanRecover("notConfigured"), false);
   assert.equal(signInCanRecover("unreachable"), false);
@@ -123,6 +126,9 @@ test("performSignIn persists the tokens", async () => {
         refreshToken: "refresh-1",
         expiresInSeconds: 900,
         expiresAtEpochSeconds: 1_800_000_900,
+        // The client the tokens were issued to travels with them to the store,
+        // which keeps it beside the refresh token.
+        clientId: "memql-vscode",
       },
     },
   ]);
@@ -142,14 +148,13 @@ test("performSignIn does NOT write clusters.yaml (memql#4517)", async () => {
   assert.deepEqual(rec.order, ["flow", "tokens"]);
 });
 
-test("performSignIn reports an operator's clientId override unchanged", async () => {
-  // An entry carrying an id from the deleted registration path must keep
-  // working: it is read as an override and neither migrated nor rewritten.
-  const rec = recorder(async () => tokens({ clientId: "existing" }));
-  const outcome = await performSignIn(cluster({ clientId: "existing" }), rec.deps);
+test("performSignIn hands the store the client the FLOW used, not the registry's", async () => {
+  // The registry's `client_id` belongs to whichever tool wrote the entry; the
+  // store must record the client the tokens were actually issued to.
+  const rec = recorder();
+  await performSignIn(cluster({ clientId: "cockpit" }), rec.deps);
 
-  assert.equal(outcome.clientId, "existing");
-  assert.equal(rec.persisted.length, 1, "the tokens are still stored");
+  assert.equal(rec.persisted[0]?.credentials.clientId, "memql-vscode");
 });
 
 test("performSignIn stores nothing when the flow fails", async () => {

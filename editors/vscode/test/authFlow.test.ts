@@ -265,21 +265,20 @@ test("the code_verifier redeemed matches the code_challenge that was authorized"
   assert.equal(codeChallengeS256(verifier as string), authorize.searchParams.get("code_challenge"));
 });
 
-test("a cluster clientId OVERRIDES the well-known id", async () => {
-  // The override is what keeps two cases working: an operator's own static
-  // client, and an entry still carrying an id the deleted registration path
-  // minted. Neither is migrated or rewritten -- the value is simply read.
+test("a registry clientId is another tool's and is NOT used", async () => {
+  // The Cockpit writes `client_id: cockpit` into the shared clusters.yaml, and
+  // identity registers that client for `/cockpit/callback` only. Honouring it
+  // is what sent the editor's loopback sign-in to a refused /authorize and a
+  // ten-minute wait (wellKnownClient.ts).
   const net = identity();
   const ui = browser();
 
-  const tokens = await runAuthorizationFlow(
-    cluster({ clientId: "mcp_stored" }),
-    deps(net, ui),
-  );
+  const tokens = await runAuthorizationFlow(cluster({ clientId: "cockpit" }), deps(net, ui));
 
-  assert.equal(tokens.clientId, "mcp_stored");
-  assert.deepEqual(net.oauthUrls(), [`${ISSUER}/oauth/token`]);
-  assert.equal(new URL(ui.resolved[0] ?? "").searchParams.get("client_id"), "mcp_stored");
+  assert.equal(tokens.clientId, WELL_KNOWN_CLIENT_ID);
+  assert.equal(new URL(ui.resolved[0] ?? "").searchParams.get("client_id"), WELL_KNOWN_CLIENT_ID);
+  const exchange = net.calls.find((c) => c.url.endsWith("/oauth/token"));
+  assert.equal(exchange?.body.client_id, WELL_KNOWN_CLIENT_ID);
 });
 
 test("a state mismatch is refused and the code is NEVER exchanged", async () => {

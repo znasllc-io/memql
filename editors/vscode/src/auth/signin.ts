@@ -36,10 +36,11 @@ import type { AuthFlowTokens } from "./flow.js";
 /**
  * What a completed sign-in hands to the store.
  *
- * A subset of AuthFlowTokens on purpose: `clientId` is registry data that
- * belongs in clusters.yaml next to the endpoint, not credential data. Nothing
- * writes it any more -- it is the operator's own override or a compiled-in
- * constant (wellKnownClient.ts) -- so it simply does not travel here.
+ * `clientId` travels WITH the tokens because it is a fact about them: the
+ * client the refresh token was issued to, which a refresh must present. The
+ * store keeps it beside the refresh token in SecretStorage and never writes it
+ * to clusters.yaml, whose `client_id` belongs to whichever tool wrote it
+ * (wellKnownClient.ts).
  */
 export interface SignInCredentials {
   /** The identity-issued JWT access token to dial the bff with. */
@@ -50,6 +51,8 @@ export interface SignInCredentials {
   expiresInSeconds: number;
   /** Absolute expiry in epoch seconds. 0 when unknown. */
   expiresAtEpochSeconds: number;
+  /** The client the tokens were issued to: the editor's own. */
+  clientId: string;
 }
 
 /**
@@ -144,34 +147,33 @@ export function canSignIn(cluster: ClusterConfig): boolean {
 /**
  * signInCanRecover reports whether a failed connection is one a sign-in fixes.
  *
- * `missingCredential`, `credentialExpired` and `wrongTokenClass` are all "the
- * bearer is the problem", and a fresh authorization mints a correct one. The
- * other two are not: `notConfigured` means there is no endpoint to dial (a
- * credential changes nothing), and `unreachable` / `lost` are the cluster
- * itself. Offering "Sign in" for those would send an operator through a browser
- * round trip to arrive at exactly the same failure.
+ * `missingCredential`, `credentialExpired`, `wrongTokenClass` and
+ * `reauthenticationRequired` are all "the bearer is the problem", and a fresh
+ * authorization mints a correct one. The last is the common "came back after
+ * a while" case -- the stored session was refused and cleared -- and it used
+ * to be missing here, so its toast said to sign in and offered no button.
+ *
+ * The other reasons are not: `notConfigured` means there is no endpoint to
+ * dial (a credential changes nothing), and `unreachable` / `lost` are the
+ * cluster itself. Offering "Sign in" for those would send an operator through
+ * a browser round trip to arrive at exactly the same failure.
  */
 export function signInCanRecover(reason: ConnectionErrorReason): boolean {
   return (
     reason === "missingCredential" ||
     reason === "credentialExpired" ||
-    reason === "wrongTokenClass"
+    reason === "wrongTokenClass" ||
+    reason === "reauthenticationRequired"
   );
 }
 
 /**
  * performSignIn runs the flow and persists what came back.
  *
- * IT NO LONGER WRITES clusters.yaml, and the deletion is the point. The
- * client_id used to be minted by RFC 7591 registration, which made it
- * unrecoverable state that had to be committed before the tokens -- lose it and
- * the next sign-in registered a second client nothing would ever revoke. There
- * is nothing minted any more: the id is either the operator's own `clientId`
- * override or a compiled-in constant (wellKnownClient.ts), and writing a
- * constant into the file would only turn today's default into tomorrow's pin.
- *
- * So this persists exactly the credentials, and an existing entry carrying an
- * id from the old path keeps working untouched -- it is read as an override.
+ * IT DOES NOT WRITE clusters.yaml's `client_id`. The id the flow authorized
+ * with is the editor's own, and it is persisted with the refresh token it
+ * belongs to rather than in a file the Cockpit also writes -- where it would
+ * either overwrite the Cockpit's own client or be overwritten by it.
  */
 export async function performSignIn(
   cluster: ClusterConfig,
@@ -184,6 +186,7 @@ export async function performSignIn(
     refreshToken: tokens.refreshToken,
     expiresInSeconds: tokens.expiresInSeconds,
     expiresAtEpochSeconds: tokens.expiresAtEpochSeconds,
+    clientId: tokens.clientId,
   });
 
   return {

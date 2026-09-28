@@ -29,7 +29,12 @@ import {
 import { AuthFlowError, isAuthFlowError } from "../src/auth/errors.js";
 import type { AuthFlowDeps } from "../src/auth/flow.js";
 import type { LoopbackListener } from "../src/auth/loopback.js";
-import { persistSignIn, refreshTokenSecretKey, type SecretStore } from "../src/auth/store.js";
+import {
+  issuedClientSecretKey,
+  persistSignIn,
+  refreshTokenSecretKey,
+  type SecretStore,
+} from "../src/auth/store.js";
 import { WELL_KNOWN_CLIENT_ID } from "../src/auth/wellKnownClient.js";
 
 const ISSUER = "https://identity.memql.localhost";
@@ -40,7 +45,9 @@ function cluster(overrides: Partial<ClusterConfig> = {}): ClusterConfig {
     name: "local",
     endpoint: "api.memql.localhost:443",
     domain: "memql.localhost",
-    clientId: "mcp_existing",
+    // Another tool's client, as the Cockpit writes it into the shared file.
+    // Neither grant may present it: the editor signs in as itself.
+    clientId: "cockpit",
     ...overrides,
   };
 }
@@ -265,7 +272,7 @@ test("a loopback listener that cannot bind falls back to the device code", async
     // credential and drives no grant; the claim here is about the grants.
     fake.urls().filter((u) => !u.endsWith("/.well-known/oauth-authorization-server")),
     [`${ISSUER}/device/code`, `${ISSUER}/oauth/token`],
-    "the fallback resolves one client_id and hands it to both grants",
+    "the fallback runs the browser attempt and then the device grant, nothing else",
   );
   assert.equal(codes[0]?.userCode, "BCDF-GHJK");
   assert.equal(codes[0]?.verificationUri, `${ISSUER}/device`);
@@ -527,7 +534,7 @@ test("the poll presents the RFC 8628 grant with the device code and the PKCE ver
   });
 
   const request = fake.deviceRequests()[0] ?? {};
-  assert.equal(request.client_id, "mcp_existing");
+  assert.equal(request.client_id, WELL_KNOWN_CLIENT_ID, "the registry's `cockpit` is not the editor's client");
   assert.equal(request.code_challenge_method, "S256");
   assert.ok(typeof request.code_challenge === "string" && request.code_challenge !== "");
 
@@ -535,11 +542,11 @@ test("the poll presents the RFC 8628 grant with the device code and the PKCE ver
   assert.equal(poll.grant_type, DEVICE_GRANT_TYPE);
   assert.equal(poll.grant_type, "urn:ietf:params:oauth:grant-type:device_code");
   assert.equal(poll.device_code, "mql_dvc_abc");
-  assert.equal(poll.client_id, "mcp_existing");
+  assert.equal(poll.client_id, WELL_KNOWN_CLIENT_ID);
   assert.ok(typeof poll.code_verifier === "string" && poll.code_verifier !== "");
 });
 
-test("a cluster with no client_id resolves the well-known id once across the fallback", async () => {
+test("a cluster with no client_id signs in as the editor across the fallback", async () => {
   const fake = identity();
 
   const tokens = await signInWithDeviceCodeFallback(cluster({ clientId: undefined }), {
@@ -585,7 +592,8 @@ test("device tokens go into the same store the loopback path uses", async () => 
   assert.equal(secrets.get(refreshTokenSecretKey("local")), "REFRESH");
   assert.equal(writes[0]?.token, "ACCESS");
   assert.equal(writes[0]?.refreshToken, "", "the plaintext copy is cleared once custody is taken");
-  assert.equal(writes[0]?.clientId, "mcp_existing");
+  assert.equal("clientId" in (writes[0] ?? {}), false, "the shared file's client_id belongs to another tool");
+  assert.equal(secrets.get(issuedClientSecretKey("local")), WELL_KNOWN_CLIENT_ID);
   assert.equal(tokens.expiresAtEpochSeconds, Math.floor(NOW_MS / 1000) + 900);
 });
 

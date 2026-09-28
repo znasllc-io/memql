@@ -23,6 +23,7 @@ import assert from "node:assert/strict";
 import {
   ClusterCredentialStore,
   accessTokenExpirySecretKey,
+  issuedClientSecretKey,
   isUnauthorizedError,
   persistSignIn,
   reconcileClusterCredentials,
@@ -98,9 +99,27 @@ test("a sign-in puts the refresh token in SecretStorage and the access token in 
   await persistSignIn({ secrets, writeCluster: writer(written) }, "local", tokens());
 
   assert.equal(secrets.values.get(refreshTokenSecretKey("local")), "REFRESH");
-  assert.deepEqual(written, [
-    { name: "local", token: "ACCESS", refreshToken: "", clientId: "client-abc" },
-  ]);
+  assert.deepEqual(written, [{ name: "local", token: "ACCESS", refreshToken: "" }]);
+});
+
+test("the issuing client is kept beside the refresh token and never written to the shared file", async () => {
+  // clusters.yaml's `client_id` belongs to the tool that wrote the entry -- the
+  // Cockpit writes its own. The editor's goes where its refresh token goes, so
+  // a refresh presents the client the token was actually issued to.
+  const secrets = new FakeSecrets();
+  const written: ClusterUpdate[] = [];
+
+  await persistSignIn({ secrets, writeCluster: writer(written) }, "local", tokens());
+
+  assert.equal(secrets.values.get(issuedClientSecretKey("local")), "client-abc");
+  assert.equal(await new ClusterCredentialStore(secrets).readClientId("local"), "client-abc");
+  assert.equal("clientId" in (written[0] ?? {}), false);
+});
+
+test("no refresh token held means no issuing client is recorded", async () => {
+  const secrets = new FakeSecrets();
+  await persistSignIn({ secrets, writeCluster: writer([]) }, "local", tokens({ refreshToken: "" }));
+  assert.equal(secrets.values.get(issuedClientSecretKey("local")), undefined);
 });
 
 test("the expiry is stored, so a credential carrying none of its own can still be renewed early", async () => {
@@ -158,6 +177,7 @@ test("signing out removes both halves -- the secret and the file's token keys", 
 
   assert.equal(secrets.values.get(refreshTokenSecretKey("local")), undefined);
   assert.equal(secrets.values.get(accessTokenExpirySecretKey("local")), undefined);
+  assert.equal(secrets.values.get(issuedClientSecretKey("local")), undefined);
   assert.deepEqual(written, [{ name: "local", token: "", refreshToken: "" }]);
 });
 
@@ -183,8 +203,10 @@ test("renaming a cluster MOVES its secrets rather than stranding them", async ()
 
   assert.equal(secrets.values.get(refreshTokenSecretKey("new")), "REFRESH");
   assert.equal(secrets.values.get(accessTokenExpirySecretKey("new")), String(NOW_SECONDS + 900));
+  assert.equal(secrets.values.get(issuedClientSecretKey("new")), "client-abc");
   assert.equal(secrets.values.get(refreshTokenSecretKey("old")), undefined);
   assert.equal(secrets.values.get(accessTokenExpirySecretKey("old")), undefined);
+  assert.equal(secrets.values.get(issuedClientSecretKey("old")), undefined);
   assert.deepEqual(await new ClusterCredentialStore(secrets).indexedClusters(), ["new"]);
 });
 
@@ -214,6 +236,7 @@ test("a deleted cluster's secrets are swept, and the surviving ones are left alo
   assert.deepEqual(swept, ["gone"]);
   assert.equal(secrets.values.get(refreshTokenSecretKey("gone")), undefined);
   assert.equal(secrets.values.get(accessTokenExpirySecretKey("gone")), undefined);
+  assert.equal(secrets.values.get(issuedClientSecretKey("gone")), undefined);
   assert.equal(secrets.values.get(refreshTokenSecretKey("staying")), "KEEP");
   assert.deepEqual(await new ClusterCredentialStore(secrets).indexedClusters(), ["staying"]);
 });

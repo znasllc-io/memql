@@ -73,7 +73,7 @@ import {
   type LoopbackOptions,
 } from "./loopback.js";
 import { generatePkcePair, generateState } from "./pkce.js";
-import { resolveClientId } from "./wellKnownClient.js";
+import { EDITOR_CLIENT_ID } from "./wellKnownClient.js";
 
 /** Binds to `vscode.env.asExternalUri`. Takes and returns an absolute URL string. */
 export type ExternalUriResolver = (url: string) => string | Promise<string>;
@@ -135,9 +135,9 @@ export interface AuthFlowTokens {
   /** The scope string the server returned, when it returned one. */
   scope?: string;
   /**
-   * The client_id this flow authorized with: the cluster's override, or the
-   * well-known first-party id. Reported so a caller can log or display it;
-   * nothing persists it, because there is nothing minted to keep.
+   * The client_id this flow authorized with -- always the editor's own. The
+   * store keeps it beside the refresh token, so a refresh presents the client
+   * the token was issued to (auth/store.ts).
    */
   clientId: string;
 }
@@ -189,10 +189,13 @@ export async function runAuthorizationFlow(
   const now = deps.now ?? (() => Date.now());
   const startListener = deps.startListener ?? startLoopbackListener;
 
-  // A local constant lookup, not a network call: identity carries this client
-  // compiled in (wellKnownClient.ts). The step that used to be the first thing
-  // to fail -- POST /register against a cluster with DCR off -- is gone.
-  const clientId = resolveClientId(cluster.clientId);
+  // ALWAYS THE EDITOR'S OWN CLIENT, whatever the registry says. The
+  // `client_id` in clusters.yaml belongs to whichever tool wrote it -- the
+  // Cockpit writes `cockpit`, which identity registers for a different
+  // callback path -- so honouring it sent this flow to a refusal
+  // (wellKnownClient.ts). A constant, not a network call: identity carries
+  // this client compiled in.
+  const clientId = EDITOR_CLIENT_ID;
 
   // THE PRE-FLIGHT (memql#4624). One round trip, before a browser is opened
   // and before anything parks on a 600-second deadline.

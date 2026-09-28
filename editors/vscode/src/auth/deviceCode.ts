@@ -127,7 +127,7 @@ import { identityBaseUrlFor } from "../connection/endpoint.js";
 import { AuthFlowError, errorText, isAuthFlowError, type AuthFlowErrorKind } from "./errors.js";
 import { runAuthorizationFlow, type AuthFlowDeps, type AuthFlowTokens } from "./flow.js";
 import { generatePkcePair } from "./pkce.js";
-import { resolveClientId } from "./wellKnownClient.js";
+import { EDITOR_CLIENT_ID } from "./wellKnownClient.js";
 
 /** The RFC 8628 grant_type URN. Must equal http.DeviceGrantType. */
 export const DEVICE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
@@ -277,30 +277,23 @@ export interface DeviceCodeFallbackDeps extends AuthFlowDeps, DeviceCodeDeps {
  * signInWithDeviceCodeFallback runs the loopback flow and, when this host
  * cannot do loopback, the device flow instead.
  *
- * The client_id is resolved HERE and handed to whichever grant runs, so both
- * see the same value. It used to matter far more than it does: resolution was
- * an RFC 7591 registration, and letting each flow do its own minted a second
- * OAuth client every time the fallback fired -- the loopback attempt
- * registered, threw, and lost the id it had just created, leaving an orphan
- * nothing revoked. Resolution is now a constant lookup (wellKnownClient.ts),
- * so the shape survives only because one resolution for two grants is still
- * the clearer arrangement.
+ * Both grants authorize as the editor's own client (wellKnownClient.ts), so
+ * there is nothing to resolve and hand across: the registry's `client_id`
+ * belongs to whichever tool wrote it and is never read here.
  */
 export async function signInWithDeviceCodeFallback(
   cluster: ClusterConfig,
   deps: DeviceCodeFallbackDeps,
 ): Promise<AuthFlowTokens> {
   requireIssuer(cluster);
-  const clientId = resolveClientId(cluster.clientId);
-  const authorized: ClusterConfig = { ...cluster, clientId };
 
   let tokens: AuthFlowTokens;
   try {
-    tokens = await runAuthorizationFlow(authorized, deps);
+    tokens = await runAuthorizationFlow(cluster, deps);
   } catch (err) {
     if (!shouldFallBackToDeviceCode(err)) throw err;
     deps.onFallback?.(err as AuthFlowError);
-    tokens = await runDeviceCodeFlow(authorized, deps);
+    tokens = await runDeviceCodeFlow(cluster, deps);
   }
   return tokens;
 }
@@ -325,7 +318,8 @@ export async function runDeviceCodeFlow(
 
   throwIfAborted(signal);
 
-  const clientId = resolveClientId(cluster.clientId);
+  // The editor's own client, never the registry's (wellKnownClient.ts).
+  const clientId = EDITOR_CLIENT_ID;
 
   // PKCE, even though there is no redirect to intercept. identity binds the
   // challenge to the row at request time and REQUIRES the verifier at

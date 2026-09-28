@@ -23,8 +23,10 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import {
+  EDITOR_CLIENT_ID,
   WELL_KNOWN_CLIENT_ID,
   WELL_KNOWN_REDIRECT_URI,
+  refreshClientId,
 } from "../src/auth/wellKnownClient.js";
 
 interface Contract {
@@ -60,6 +62,16 @@ const contract = JSON.parse(
 
 test("the extension's client id equals the one identity carries", () => {
   assert.equal(WELL_KNOWN_CLIENT_ID, contract.clientId);
+});
+
+test("every sign-in and every unrecorded refresh presents the contract's client", () => {
+  // The contract is the EDITOR's client, and it is the only one this extension
+  // signs in as: a `client_id` in the shared clusters.yaml belongs to the tool
+  // that wrote it (the Cockpit writes its own), so there is no override that
+  // could make a released editor present something identity does not carry
+  // for it.
+  assert.equal(EDITOR_CLIENT_ID, contract.clientId);
+  assert.equal(refreshClientId(undefined), contract.clientId);
 });
 
 test("the extension's redirect URI equals the one identity registers", () => {

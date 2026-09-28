@@ -101,6 +101,7 @@ import {
   ClusterCredentialStore,
   type SecretStore,
 } from "../auth/store.js";
+import { refreshClientId } from "../auth/wellKnownClient.js";
 import type { ClusterConfig } from "../clusters/model.js";
 import { identityBaseUrlFor } from "./endpoint.js";
 
@@ -439,12 +440,17 @@ export class CredentialResolver implements CredentialSource {
       };
     }
 
+    // THE CLIENT THE TOKEN WAS ISSUED TO, as recorded beside it -- never the
+    // registry's `client_id`. That field belongs to whichever tool wrote the
+    // entry (the Cockpit writes `cockpit`), and presenting it refreshed an
+    // editor token as another tool's client; identity accepts that today only
+    // because it checks registration and not issuance (wellKnownClient.ts).
+    const clientId = refreshClientId(await this.store.readClientId(cluster.name));
     const body: Record<string, string> = {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
+      client_id: clientId,
     };
-    const clientId = (cluster.clientId ?? "").trim();
-    if (clientId !== "") body.client_id = clientId;
 
     let response: HttpResponseLike;
     try {
@@ -493,6 +499,10 @@ export class CredentialResolver implements CredentialSource {
     // A SecretStorage that refuses a write must not cost us the connection; it
     // only means the plaintext copy stays where it is (custodyTaken === false).
     const custodyTaken = await this.store.writeRefreshToken(cluster.name, rotated);
+    // The rotated token belongs to the client that just presented it, so the
+    // record travels with it -- including for a token taken in from the file,
+    // which had none until now.
+    if (custodyTaken) await this.store.writeClientId(cluster.name, clientId);
 
     // The lifetime the server just reported, kept beside the refresh token so
     // an access token that is not a readable JWT can still be renewed before it
