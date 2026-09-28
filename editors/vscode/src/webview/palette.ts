@@ -26,9 +26,15 @@ export type PaletteKey =
   | "subtle"
   | "accent"
   | "accent-deep"
+  | "accent-subtle"
   | "on-accent"
   | "on-accent-hover"
+  | "focus"
+  | "ok"
+  | "warn"
+  | "warn-subtle"
   | "danger"
+  | "danger-subtle"
   | "data-number"
   | "data-string";
 
@@ -53,9 +59,15 @@ export const PALETTE_KEYS: readonly PaletteKey[] = [
   "subtle",
   "accent",
   "accent-deep",
+  "accent-subtle",
   "on-accent",
   "on-accent-hover",
+  "focus",
+  "ok",
+  "warn",
+  "warn-subtle",
   "danger",
+  "danger-subtle",
   "data-number",
   "data-string",
 ];
@@ -72,9 +84,15 @@ export const LIGHT: Palette = {
   subtle: "#7e837b",
   accent: "#047d5a",
   "accent-deep": "#026842",
+  "accent-subtle": "#dcefe6",
   "on-accent": "#ffffff",
   "on-accent-hover": "#ffffff",
+  focus: "#047d5a",
+  ok: "#047d5a",
+  warn: "#8a6210",
+  "warn-subtle": "#f5ead2",
   danger: "#b3362a",
+  "danger-subtle": "#f8e3df",
   "data-number": "#0f766e",
   "data-string": "#b45309",
 };
@@ -102,9 +120,18 @@ export const DARK: Palette = {
   subtle: "#6c726a",
   accent: "#5ccda7",
   "accent-deep": "#026842",
+  // The status washes ride the same lift as the surfaces they sit on: the
+  // canonical dark values are darker than the lifted page, and a notice that
+  // reads as a hole in the page is the wrong picture of "look here".
+  "accent-subtle": lift("#0f2a20", 0.10),
   "on-accent": "#07090a",
   "on-accent-hover": "#ffffff",
+  focus: "#5ccda7",
+  ok: "#5ccda7",
+  warn: "#d2a75a",
+  "warn-subtle": lift("#2a2113", 0.10),
   danger: "#e0705f",
+  "danger-subtle": lift("#2b1512", 0.10),
   "data-number": "#98ffe0",
   "data-string": "#cbb083",
 };
