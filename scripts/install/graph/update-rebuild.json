@@ -6,6 +6,7 @@
     {
       "id": "updateCheckout",
       "script": "install.updateStack",
+      "label": "Downloading updates",
       "description": "Bringing your source checkout up to date with the latest code. If your own changes cannot be combined with it, this stops and tells you which files are involved, leaving everything as it was.",
       "dependsOn": [],
       "elevation": "none",
@@ -18,6 +19,7 @@
     {
       "id": "rebuildFromCheckout",
       "script": "k3d.dev",
+      "label": "Rebuilding MemQL",
       "description": "Building MemQL from your source checkout, loading it into the cluster, and restarting the cluster on it.",
       "params": {
         "image-source": "checkout"

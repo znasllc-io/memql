@@ -174,6 +174,8 @@ function parseItem(value: unknown): RunItem | null {
   if (detail !== "") item.detail = detail;
   const at = str(o.at);
   if (at !== "") item.at = at;
+  const startedAt = str(o.startedAt);
+  if (startedAt !== "") item.startedAt = startedAt;
   return item;
 }
 
@@ -196,6 +198,7 @@ const RUN_KINDS = new Set<string>([
   "repair",
   "uninstall",
   "rebuild",
+  "update",
   "rollout",
 ]);
 const RUN_STATUSES = new Set<string>([

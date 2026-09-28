@@ -57,10 +57,23 @@ export interface Verify {
   value?: string;
 }
 
+/**
+ * The longest a step label may be, in words. Mirrors `MaxLabelWords` in
+ * graph.go: a label is a status line ("Creating the cluster"), and one that
+ * needs a fifth word is a sentence, which is what `description` is for.
+ */
+export const MAX_LABEL_WORDS = 4;
+
 /** One capability-script invocation, plus everything an executor needs. */
 export interface Step {
   id: string;
   script: string;
+  /**
+   * The step's short name, sentence case, at most MAX_LABEL_WORDS words. What a
+   * progress display says while the step runs and what the CLI prints as it
+   * starts. Required: every surface names every step from the same words.
+   */
+  label: string;
   description: string;
   /** Graph-PINNED flags. Run-specific values are supplied by the executor. */
   params?: Record<string, string>;
@@ -140,6 +153,7 @@ const STEP_KEYS = new Set([
   "id",
   "timeoutSeconds",
   "script",
+  "label",
   "description",
   "params",
   "dependsOn",
@@ -319,6 +333,7 @@ function parseStep(value: unknown, i: number, source: string): Step {
   const step: Step = {
     id,
     script: typeof obj.script === "string" ? obj.script : "",
+    label: typeof obj.label === "string" ? obj.label : "",
     description: typeof obj.description === "string" ? obj.description : "",
     elevation: obj.elevation as Elevation,
     retained: obj.retained === true,
@@ -409,6 +424,16 @@ function validateStep(graph: Graph, index: Map<string, Step>, s: Step, source: s
   }
   if (s.description.trim() === "") {
     throw new GraphError(`${where} has no description -- an operator has to be told what is about to happen`);
+  }
+  if (s.label.trim() === "") {
+    throw new GraphError(`${where} has no label -- a progress display needs a short name for the step while it runs`);
+  }
+  const labelWords = s.label.trim().split(/\s+/).length;
+  if (labelWords > MAX_LABEL_WORDS) {
+    throw new GraphError(
+      `${where} has a ${labelWords}-word label ${JSON.stringify(s.label)} -- a label is at most ` +
+        `${MAX_LABEL_WORDS} words; the sentence belongs in description`,
+    );
   }
   if (!(ELEVATIONS as readonly string[]).includes(s.elevation)) {
     const what = s.elevation === undefined ? "declares no elevation" : `declares an unknown elevation ${JSON.stringify(s.elevation)}`;

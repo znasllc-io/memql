@@ -45,9 +45,10 @@ const DETECT_MESSAGE_RE = /unsupported platform/i;
  * The detect step, as the install document names it -- used when we refuse
  * outside a run.
  *
- * A SECOND COPY OF ONE SENTENCE, and the reason it is safe is that a test pins
- * it: `screenOrdering.test.ts` reads `scripts/install/graph/install.json` and
- * fails when this description and that one differ. Without that, the content
+ * A SECOND COPY OF ONE SENTENCE (and its label), and the reason it is safe is
+ * that a test pins it: `screenOrdering.test.ts` reads
+ * `scripts/install/graph/install.json` and fails when this description and
+ * that one differ. Without that, the content
  * sweep in memql#4456 would have rewritten the document and left this one
  * reading in the old voice, on the one path an operator reaches when the
  * install refuses before it starts.
@@ -55,6 +56,7 @@ const DETECT_MESSAGE_RE = /unsupported platform/i;
 export const PLATFORM_DETECT_STEP: Step = {
   id: "detect",
   script: "install.detect",
+  label: "Checking this computer",
   description:
     "Taking stock of this machine before anything is installed: what system it is, which supporting tools are already here, whether Docker is answering, whether the ports a cluster needs are free, and how much disk is left. Only a system MemQL cannot support stops the install here; the rest is reported for you to read.",
   readOnly: true,
@@ -139,7 +141,16 @@ export function platformRefuseEvents(report: ExecutionReport): ExecEvent[] {
   const outcome = report.outcomes[0];
   if (outcome === undefined) return [];
   return [
-    { type: "runStarted", steps: [{ id: PLATFORM_DETECT_STEP.id, description: PLATFORM_DETECT_STEP.description }] },
+    {
+      type: "runStarted",
+      steps: [
+        {
+          id: PLATFORM_DETECT_STEP.id,
+          label: PLATFORM_DETECT_STEP.label,
+          description: PLATFORM_DETECT_STEP.description,
+        },
+      ],
+    },
     { type: "stepStarted", step: PLATFORM_DETECT_STEP, params: {} },
     { type: "stepFinished", step: PLATFORM_DETECT_STEP, outcome },
   ];

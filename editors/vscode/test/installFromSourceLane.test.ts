@@ -51,6 +51,7 @@ function options(over: Partial<SessionOptions> = {}): SessionOptions {
 const STEP = (id: string, script: string): Step => ({
   id,
   script,
+  label: "Working",
   description: "",
   elevation: "none",
   retained: false,

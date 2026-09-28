@@ -203,8 +203,8 @@ test("deploying to the version already installed is allowed, and said", () => {
 // the record
 // -----------------------------------------------------------------------------
 
-function step(id: string): { id: string; description: string } {
-  return { id, description: `${id} description` };
+function step(id: string): { id: string; label: string; description: string } {
+  return { id, label: `${id} label`, description: `${id} description` };
 }
 
 function finished(id: string, status: "ok" | "failed" | "skipped" | "preserved", reason = ""): ExecEvent {

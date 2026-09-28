@@ -57,6 +57,7 @@ const UNINSTALL_GRAPH: Graph = graph({
   steps: [
     {
       id: "removeCluster",
+      label: "Working",
       description: "Delete the local k3d cluster.",
       script: "install.removeArtifact",
       reverses: "clusterUp",
@@ -69,6 +70,7 @@ const UNINSTALL_GRAPH: Graph = graph({
     },
     {
       id: "removeHostsBlock",
+      label: "Working",
       description: "Delete the installer's marked block from the system hosts file.",
       script: "install.removeArtifact",
       reverses: "hostsBlock",
@@ -82,6 +84,7 @@ const UNINSTALL_GRAPH: Graph = graph({
     },
     {
       id: "removeLocalCA",
+      label: "Working",
       description: "Uninstall the local mkcert CA from the system trust stores.",
       script: "install.removeArtifact",
       reverses: "localCA",
@@ -95,6 +98,7 @@ const UNINSTALL_GRAPH: Graph = graph({
     },
     {
       id: "removeToolK3d",
+      label: "Working",
       description: "Remove the installed k3d binary.",
       script: "install.removeArtifact",
       reverses: "toolK3d",
@@ -501,6 +505,7 @@ function stepOf(id: string, description: string): Graph["steps"][number] {
   return {
     id,
     script: "install.removeArtifact",
+    label: "Working",
     description,
     elevation: "none",
     retained: false,

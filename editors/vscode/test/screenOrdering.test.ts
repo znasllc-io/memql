@@ -57,6 +57,7 @@ const REPO = path.resolve(PKG, "..", "..");
 function step(over: Partial<StepProgress> = {}): StepProgress {
   return {
     id: "toolK3d",
+    label: "",
     description: "Installing k3d",
     state: "pending",
     reason: "",
@@ -293,13 +294,19 @@ test("the detect step's second copy still says what the install document says", 
   // voice, on precisely the path an operator hits when something is wrong.
   const doc = JSON.parse(
     fs.readFileSync(path.join(REPO, "scripts", "install", "graph", "install.json"), "utf8"),
-  ) as { steps: { id: string; description: string }[] };
+  ) as { steps: { id: string; label: string; description: string }[] };
   const detect = doc.steps.find((s) => s.id === "detect");
   assert.notEqual(detect, undefined, "install.json still has a detect step");
   assert.equal(
     PLATFORM_DETECT_STEP.description,
     detect?.description,
     "src/install/platform.ts holds a second copy of the detect step's sentence; " +
+      "it must say what scripts/install/graph/install.json says",
+  );
+  assert.equal(
+    PLATFORM_DETECT_STEP.label,
+    detect?.label,
+    "src/install/platform.ts holds a second copy of the detect step's label; " +
       "it must say what scripts/install/graph/install.json says",
   );
 });

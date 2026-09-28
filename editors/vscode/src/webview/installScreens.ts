@@ -52,10 +52,10 @@ import { requiredFields } from "../state/addCluster.js";
 import {
   failureGuidance,
   runIsSettled,
-  runNarration,
-  runProgress,
+  runProgressOf,
   toStepViews,
 } from "../state/installProgress.js";
+import type { RunProgress } from "../state/runProgress.js";
 import { brandMarkSvg } from "./brandTokens.js";
 import { renderRunLogPane } from "./runLogPane.js";
 import { renderScreen } from "./screenLayout.js";
@@ -461,6 +461,17 @@ export interface RunningScreenInput {
   logsOpen: boolean;
   /** Whether the pane is still pinned to the tail. See `LogPaneInput.follow`. */
   logsFollow: boolean;
+  /**
+   * The run's progress, from the state machine's own `progress(now)`, which
+   * remembers its high-water mark so the bar never runs backwards.
+   *
+   * Optional so a caller holding only a step list (a gallery page, a test)
+   * still renders: the block then computes it from the steps at `now`, without
+   * that memory.
+   */
+  progress?: RunProgress;
+  /** The moment to compute progress at when `progress` is absent. Defaults to the clock. */
+  now?: number;
 }
 
 const RUN_HEADING: Readonly<Record<RunMode, string>> = {
@@ -589,11 +600,16 @@ function phrase(description: string): string {
  * fold, where a record belongs.
  *
  * THE BAR IS DETERMINATE BECAUSE THE NUMBER IS REAL. `runStarted` seeds the
- * steps AHEAD (state/addCluster.ts says why), so `settled / total` is a fact
- * about the graph rather than an animation. Before that event lands there is no
- * total, and the bar renders INDETERMINATE rather than at 0% -- "we do not know
- * yet" and "nothing has happened yet" are different claims and only one of them
- * is true then.
+ * steps AHEAD (state/addCluster.ts says why), and each step carries the time
+ * it is expected to take, so the percent is the share of the run's expected
+ * time already behind it (state/runProgress.ts) rather than an animation.
+ * Before that event lands there is no plan, and the bar renders INDETERMINATE
+ * rather than at 0% -- "we do not know yet" and "nothing has happened yet" are
+ * different claims and only one of them is true then.
+ *
+ * THE LINE UNDER IT IS THE STEP'S SHORT LABEL, or the phase it last reported
+ * ("Starting services 5 of 9"), never its long description: the description
+ * is the checklist's, below.
  *
  * NO INLINE `style` ATTRIBUTE, and this is not a stylistic choice. Every panel
  * here runs under `style-src 'nonce-...'` with no `'unsafe-inline'`, and a
@@ -603,14 +619,13 @@ function phrase(description: string): string {
  * brandTokens.ts generates for 0..100.
  */
 export function renderRunBlock(input: RunningScreenInput): string {
-  const progress = runProgress(input.steps);
-  const narration = runNarration(progress);
-  const determinate = progress.total > 0;
+  const progress = input.progress ?? runProgressOf(input.steps, input.now ?? Date.now());
+  const determinate = input.steps.length > 0;
   const settled = runIsSettled(input.steps);
-  // THE FAILED STEP, NOT WHATEVER IS STILL RUNNING. This read
-  // `narration.message` first, which is the description of the steps currently
-  // IN FLIGHT -- so a failure in one branch of a wave was announced under the
-  // name of a healthy step in another ("Issuing the certificate ... failed").
+  // THE FAILED STEP, NOT WHATEVER IS STILL RUNNING. This once read the
+  // narration of the steps currently IN FLIGHT first -- so a failure in one
+  // branch of a wave was announced under the name of a healthy step in another
+  // ("Issuing the certificate ... failed").
   // A wave runs under Promise.all and independent branches are allowed to
   // finish, so the two are routinely different steps. The FIRST failure is the
   // one named, the same rule `AddClusterState.failedId` follows and for the
@@ -634,25 +649,25 @@ export function renderRunBlock(input: RunningScreenInput): string {
           : "Nothing has been run."
         : !input.running
           ? "Stopped. Nothing further will run; what had already finished is still done."
-          : narration.message;
+          : progress.status;
 
   // `aria-valuetext` carries the human position so a screen reader hears
-  // "step 4 of 14" rather than "42 percent", which is the number the sighted
+  // "Step 4 of 14" rather than "42 percent", which is the number the sighted
   // reader is getting from the sentence rather than from the bar.
   const bar = determinate
     ? `<div class="run-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${
         progress.percent
       }"${
-        narration.position === ""
+        progress.stepText === ""
           ? ""
-          : ` aria-valuetext="${escapeHtml(narration.position)}"`
+          : ` aria-valuetext="${escapeHtml(progress.stepText)}"`
       }><div class="run-bar-fill" data-percent="${progress.percent}"></div></div>`
     : `<div class="run-bar indeterminate" role="progressbar" aria-valuetext="Starting"><div class="run-bar-fill indeterminate"></div></div>`;
 
   const position =
-    narration.position === "" || settled || failed !== undefined
+    progress.stepText === "" || settled || failed !== undefined
       ? ""
-      : ` <span class="run-position">${escapeHtml(narration.position)}</span>`;
+      : ` <span class="run-position">${escapeHtml(progress.stepText)}</span>`;
 
   return `<div class="run-block">
   <div class="run-mark">${brandMarkSvg(48)}</div>

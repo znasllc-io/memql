@@ -25,7 +25,14 @@
 
 import type { InstallStepView } from "@znasllc-io/memql-view-kit";
 
-import type { StepProgress } from "./addCluster.js";
+import type { StepProgress, StepState } from "./addCluster.js";
+import {
+  computeRunProgress,
+  stepWeight,
+  type ProgressStatus,
+  type ProgressStep,
+  type RunProgress,
+} from "./runProgress.js";
 
 /**
  * What a failure asks of the operator.
@@ -334,119 +341,60 @@ export function runIsSettled(steps: readonly StepProgress[]): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// the run's progress, as a number (memql#4454)
+// the run's progress, as a number
 // ---------------------------------------------------------------------------
 
-/**
- * How far along a run is.
- *
- * PURE, AND HERE RATHER THAN IN THE RENDERER, for the reason the rest of this
- * module exists: the panel that draws the bar imports `vscode`, so a
- * percentage computed inside a template literal is one no test can reach. The
- * bar is the most visible claim this wizard makes -- "you are two-thirds of the
- * way through a ten-minute operation" -- and it is worth being able to assert.
- */
-export interface RunProgress {
-  /** Steps that will not change state again. */
-  settled: number;
-  /** Every step the executor seeded, including the ones not started. */
-  total: number;
-  /** `settled / total` as a whole number; 0 when nothing has been seeded. */
-  percent: number;
-  /**
-   * The description of every step currently RUNNING, in graph order.
-   *
-   * A LIST BECAUSE A WAVE IS A LIST. The executor runs independent branches
-   * under `Promise.all`, so "the current step" is regularly three steps, and a
-   * narration that named one of them would be naming whichever the projection
-   * happened to reach first -- the same scheduling accident `failures` exists
-   * to avoid on the other side of the run.
-   *
-   * EMPTY IS ORDINARY: between waves, before the first step starts, and once
-   * the run is over. The caller decides what to say then; this reports.
-   */
-  currentDescriptions: readonly string[];
-}
+/** The executor's words for a step's state, from the wizard's. */
+const STATE_TO_STATUS: Readonly<Record<StepState, ProgressStatus>> = {
+  pending: "pending",
+  running: "running",
+  done: "ok",
+  skipped: "skipped",
+  preserved: "preserved",
+  failed: "failed",
+};
 
 /**
- * A step is SETTLED when it will not change state again.
+ * The wizard's step records as the progress model reads them.
  *
- * The same predicate `runIsSettled` applies to the whole list, deliberately:
- * two meanings of "settled" on one run is how a bar comes to disagree with the
- * Cancel button beside it. `skipped` and `preserved` count -- a step the run
- * verified it did not need is a step that is done with -- and so does `failed`,
- * which has finished in every sense except the one the operator cares about.
+ * THE LABEL FALLS BACK TO THE DESCRIPTION, then the id, only so a row whose
+ * first event has not landed is never blank; every graph step carries a label
+ * and it arrives with `runStarted`.
  */
-function isSettled(state: StepProgress["state"]): boolean {
-  return state !== "pending" && state !== "running";
+export function progressStepsOf(
+  steps: readonly StepProgress[],
+  weights?: Readonly<Record<string, number>>,
+): ProgressStep[] {
+  return steps.map((step) => {
+    const view: ProgressStep = {
+      id: step.id,
+      label: step.label !== "" ? step.label : step.description !== "" ? step.description : step.id,
+      weight: stepWeight(step.id, weights),
+      status: STATE_TO_STATUS[step.state] ?? "pending",
+    };
+    if (step.startedAt !== undefined) view.startedAt = step.startedAt;
+    if (step.finishedAt !== undefined) view.finishedAt = step.finishedAt;
+    if (step.phase !== undefined) view.phase = { ...step.phase };
+    return view;
+  });
 }
 
 /**
  * The run's progress, from the step list the executor seeded.
  *
- * THE BAR MAY MOVE BACKWARDS, and that is correct rather than a glitch to
- * smooth over. `AddClusterState.retry()` puts failed steps back to `pending`,
- * so a retry genuinely has more left to do than the moment before it -- and a
- * bar that only ever advanced would have to either freeze or lie about which
- * of the two it was.
+ * PURE, AND HERE RATHER THAN IN THE RENDERER, for the reason the rest of this
+ * module exists: the panels that draw the bar import `vscode`, so a percentage
+ * computed inside a template literal is one no test can reach.
  *
- * TOTAL IS THE SEEDED LIST, not a guess. `runStarted` upserts the steps ahead
- * precisely so "how much is left" is knowable; before that event the list is
- * empty, `total` is 0, and the caller renders an INDETERMINATE bar rather than
- * a 0% one -- "we do not know yet" and "nothing has happened yet" are different
- * claims and only one of them is true then.
+ * A state machine calls this through its own `progress(now)`, which carries the
+ * high-water mark from one render to the next; a caller with only a step list
+ * (a gallery page, a test) gets the same answer without one.
  */
-export function runProgress(steps: readonly StepProgress[]): RunProgress {
-  const total = steps.length;
-  const settled = steps.filter((step) => isSettled(step.state)).length;
-  return {
-    settled,
-    total,
-    percent: total === 0 ? 0 : Math.round((settled / total) * 100),
-    currentDescriptions: steps
-      .filter((step) => step.state === "running")
-      .map((step) => (step.description === "" ? step.id : step.description)),
-  };
-}
-
-/** The one line under the bar: what is happening, and where in the run it is. */
-export interface RunNarration {
-  /** The human sentence, or "" when there is nothing running to narrate. */
-  message: string;
-  /** "step 4 of 14", or "" while the total is still unknown. */
-  position: string;
-}
-
-/**
- * What to say beneath the progress bar.
- *
- * THE STEP'S OWN DESCRIPTION, NEVER ITS OUTPUT AND NEVER ITS SCRIPT. The graph
- * carries a written sentence per step for exactly this, and it is the single
- * source the CLI narrates from too -- which is what stops the wizard and the
- * terminal describing the same install differently. Raw output has one home on
- * this surface and it is behind the disclosure (memql#4455).
- *
- * A WAVE NAMES ITS FIRST STEP AND COUNTS THE REST. Listing three sentences on
- * one line is unreadable at the width a panel has, and picking one silently
- * would hide that anything else was in flight.
- *
- * POSITION IS `settled + 1`, CLAMPED. It is the step the operator is waiting
- * on, which is the one after everything that has finished; clamping stops the
- * last wave reporting "step 15 of 14" as it settles.
- */
-export function runNarration(progress: RunProgress): RunNarration {
-  const { currentDescriptions: current, settled, total } = progress;
-  const first = current[0];
-  const message =
-    first === undefined
-      ? ""
-      : current.length === 1
-        ? first
-        : // The stop is taken off the embedded sentence: "...over https. -- and 1
-          // more in progress" is what the naive join produces.
-          `${first.replace(/\.$/, "")} -- and ${current.length - 1} more in progress`;
-  return {
-    message,
-    position: total === 0 ? "" : `step ${Math.min(settled + 1, total)} of ${total}`,
-  };
+export function runProgressOf(
+  steps: readonly StepProgress[],
+  now: number,
+  prior?: { highWater: number },
+  weights?: Readonly<Record<string, number>>,
+): RunProgress {
+  return computeRunProgress(progressStepsOf(steps, weights), now, prior);
 }

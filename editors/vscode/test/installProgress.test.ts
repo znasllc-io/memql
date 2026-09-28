@@ -57,6 +57,7 @@ function contractExitCodes(): number[] {
 function step(over: Partial<StepProgress> = {}): StepProgress {
   return {
     id: "toolK3d",
+    label: "",
     description: "Place the pinned k3d binary",
     state: "pending",
     reason: "",

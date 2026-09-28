@@ -32,8 +32,8 @@ function tmpdir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "memql-steplog-"));
 }
 
-function step(id: string): { id: string; description: string } {
-  return { id, description: `${id} description` };
+function step(id: string): { id: string; label: string; description: string } {
+  return { id, label: `${id} label`, description: `${id} description` };
 }
 
 function finished(

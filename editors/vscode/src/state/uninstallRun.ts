@@ -23,6 +23,17 @@
 
 import type { ExecEvent } from "../install/executor.js";
 import type { StepProgress } from "./addCluster.js";
+import { runProgressOf } from "./installProgress.js";
+import type { RunProgress } from "./runProgress.js";
+import {
+  appendLog,
+  copyStep,
+  markFinished,
+  markPhase,
+  markStarted,
+  recordsForAttempt,
+  upsertStep,
+} from "./stepRecords.js";
 
 /**
  * Where the removal has got to.
@@ -60,13 +71,38 @@ export class UninstallRunState {
   // a fact about the run they were reading, not a preference.
   private logsShown = false;
   private logsFollowTail = true;
+  // The bar's high-water mark and the measured step weights, for the reasons
+  // AddClusterState keeps its own (see `progress`).
+  private highWater = 0;
+  private weights: Readonly<Record<string, number>> = {};
+  private readonly clock: () => number;
+
+  /** `now` is the clock step timings are read from, in epoch milliseconds. */
+  constructor(options: { now?: () => number } = {}) {
+    this.clock = options.now ?? ((): number => Date.now());
+  }
 
   get phase(): UninstallPhase {
     return this.currentPhase;
   }
 
   get steps(): StepProgress[] {
-    return this.rows.map((row) => ({ ...row }));
+    return this.rows.map(copyStep);
+  }
+
+  /**
+   * How far the removal has got at `now`. Remembers what it returned, so the
+   * bar never runs backwards within the run -- see `AddClusterState.progress`.
+   */
+  progress(now: number = this.clock()): RunProgress {
+    const result = runProgressOf(this.rows, now, { highWater: this.highWater }, this.weights);
+    this.highWater = result.highWater;
+    return result;
+  }
+
+  /** Expected seconds per step id, measured on this machine. */
+  setStepWeights(weights: Readonly<Record<string, number>>): void {
+    this.weights = { ...weights };
   }
 
   /**
@@ -79,7 +115,7 @@ export class UninstallRunState {
    */
   get failure(): StepProgress | undefined {
     const found = this.rows.find((row) => row.id === this.failedStepId);
-    return found === undefined ? undefined : { ...found };
+    return found === undefined ? undefined : copyStep(found);
   }
 
   /** Whether the removal's output is disclosed. */
@@ -131,6 +167,7 @@ export class UninstallRunState {
     // states: an open pane would be showing the previous run's output.
     this.logsShown = false;
     this.logsFollowTail = true;
+    this.highWater = 0;
   }
 
   /**
@@ -154,24 +191,31 @@ export class UninstallRunState {
         // operator has just consented to an itemized list, and a progress
         // display that showed only what had already gone would not let them
         // check the run against what they agreed to.
-        for (const step of event.steps) this.upsert(step.id, step.description);
+        //
+        // Exactly the plan, every step pending, and a fresh high-water mark:
+        // see stepRecords.recordsForAttempt.
+        this.rows = recordsForAttempt(this.rows, event.steps);
+        this.highWater = 0;
         return;
       }
       case "stepStarted": {
-        const row = this.upsert(event.step.id, event.step.description);
-        row.state = "running";
+        const row = this.upsert(event.step.id, event.step.label, event.step.description);
+        markStarted(row, this.clock());
+        return;
+      }
+      case "stepPhase": {
+        const row = this.upsert(event.step.id, event.step.label, event.step.description);
+        markPhase(row, event.label, event.done, event.total, this.clock());
         return;
       }
       case "stepLog": {
-        const row = this.upsert(event.step.id, event.step.description);
-        row.log = row.log === "" ? event.line : `${row.log}\n${event.line}`;
+        const row = this.upsert(event.step.id, event.step.label, event.step.description);
+        appendLog(row, event.line);
         return;
       }
       case "stepFinished": {
-        const row = this.upsert(event.step.id, event.step.description);
-        row.state = STATUS_TO_STATE[event.outcome.status] ?? "done";
-        row.reason = event.outcome.reason ?? "";
-        row.exitCode = event.outcome.exitCode;
+        const row = this.upsert(event.step.id, event.step.label, event.step.description);
+        markFinished(row, event.outcome, this.clock());
         // The FIRST failure is kept. A later one does not replace it: the
         // operator is being told which step to act on, and the earliest failure
         // is the one the rest may be consequences of.
@@ -223,39 +267,15 @@ export class UninstallRunState {
     this.failedStepId = undefined;
     this.problemMessage = "";
     this.followUpMessage = "";
+    this.highWater = 0;
   }
 
-  private upsert(id: string, description: string): StepProgress {
-    const existing = this.rows.find((row) => row.id === id);
-    if (existing !== undefined) {
-      if (description !== "" && existing.description === "") existing.description = description;
-      return existing;
-    }
-    const fresh: StepProgress = {
-      id,
-      description,
-      state: "pending",
-      reason: "",
-      exitCode: null,
-      log: "",
-      // Never true here. Guided is an INSTALL affordance -- the operator runs
-      // one command by hand and the same verify decides when it is done -- and
-      // an uninstall offers no such per-step hand-over. The field is carried
-      // because the row type is shared with the install run, not because this
-      // path can set it.
-      guided: false,
-      // A removal step has no remedy to offer: what it needs is not something
-      // an operator supplies, it is an artifact the receipt already names.
-      remedy: "",
-    };
-    this.rows.push(fresh);
-    return fresh;
+  // Guided and remedy stay at their fresh values here: guided is an INSTALL
+  // affordance -- the operator runs one command by hand and the same verify
+  // decides when it is done -- and a removal step has no remedy to offer, since
+  // what it needs is an artifact the receipt already names. The fields exist
+  // because the row type is shared with the install run.
+  private upsert(id: string, label: string, description: string): StepProgress {
+    return upsertStep(this.rows, id, label, description);
   }
 }
-
-const STATUS_TO_STATE: Record<string, StepProgress["state"]> = {
-  ok: "done",
-  failed: "failed",
-  skipped: "skipped",
-  preserved: "preserved",
-};

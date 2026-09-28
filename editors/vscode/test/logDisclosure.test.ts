@@ -33,6 +33,7 @@ const HOME = "/home/operator";
 function step(over: Partial<StepProgress> = {}): StepProgress {
   return {
     id: "clusterUp",
+    label: "",
     description: "Creating the cluster",
     state: "running",
     reason: "",
@@ -318,12 +319,14 @@ test("THE RUN BLOCK NAMES THE FAILED STEP, not whatever is still running", () =>
   // the failed step and the running one are routinely different steps.
   const failed = step({
     id: "clusterUp",
+    label: "",
     description: "Creating the cluster and starting MemQL's services in it.",
     state: "failed",
     exitCode: 5,
   });
   const stillRunning = step({
     id: "browserTrust",
+    label: "",
     description: "Setting up the tools your browsers need to trust local certificates.",
     state: "running",
   });

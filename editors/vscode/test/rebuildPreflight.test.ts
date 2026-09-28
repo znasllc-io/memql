@@ -115,6 +115,7 @@ test("a failed rebuild offers Retry and Back -- guided has nothing to offer it",
   // something else.
   const failure: StepProgress = {
     id: "rebuildFromCheckout",
+    label: "",
     description: "Build the node images",
     state: "failed",
     exitCode: 5,
