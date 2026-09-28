@@ -3,14 +3,22 @@ package app
 // integrations_work_validator.go -- the cross-replica claim on the answer
 // validator's one model call (integrations/work validator.go).
 //
-// EVERY NODE TYPE, because the validateGoalAnswer automation fires on every
-// node that loads the work automations and the cluster guard decides which one
-// runs it. That guard keys on the triggering event's fingerprint, and one run
-// transition can reach a replica twice with two fingerprints -- live on
-// 2026-09-28 the planner took each run update from the bridge and again from
-// the durable run-delivery path -- so without this the agent and the planner
-// each checked one answer, and on a route that puts an app first each check
-// could open its own session.
+// WHY A CLAIM. The validateGoalAnswer automation's own cluster guard keys on
+// the triggering event's fingerprint, and one run transition can reach a
+// replica twice with two fingerprints: live on 2026-09-28 the agent and the
+// planner each took run updates from the bridge AND again from the durable
+// run-delivery path. On an agent, whose route puts Claude Code first, two
+// copies of one check are two app sessions for one answer.
+//
+// WHY ON AGENT NODES ONLY. The agent is the node that can serve the check --
+// it holds the machines' streams, so it reaches the owner's app doors and
+// fleet directly. On the same cluster the planner's copy failed
+// (no_forwarded_authority: an automation context carries no forwarded
+// authority for a fleet hop) and the bff's found every door shut (no fleet on
+// a bff). A cluster-wide claim would let such a replica win the claim, fail,
+// and leave the agent's copy skipped: the check lost where today it succeeds.
+// Claiming among agents removes the duplicate sessions and costs no coverage;
+// a non-agent copy runs unclaimed exactly as before, and reaches no app door.
 //
 // The guard's own ClaimWithTTL, not StrictClaimer: a database the claim
 // cannot reach degrades to a bounded number of unclaimed checks -- a duplicate

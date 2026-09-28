@@ -99,9 +99,10 @@ type Integration struct {
 	runClaimer RunClaimer
 
 	// validatorClaimer is the cross-replica gate on the answer validator's
-	// one model call (validator.go). Unlike runClaimer, a nil one DEGRADES:
-	// the check then runs unclaimed, which is a duplicate model call at worst,
-	// never a duplicate side effect.
+	// one model call (validator.go), installed on the replicas that can serve
+	// the check. Unlike runClaimer, a nil one DEGRADES: the check then runs
+	// unclaimed, which is a duplicate model call at worst, never a duplicate
+	// side effect.
 	validatorClaimer RunClaimer
 
 	// rowsInFlight is the source of the abandoned sweep's rows. It is a

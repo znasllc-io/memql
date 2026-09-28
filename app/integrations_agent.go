@@ -31,6 +31,11 @@ func (a *App) integrationsAgent() {
 	// guard this needs -- and integrationsCore() above is what materializes
 	// the work plug-in it installs itself on.
 	a.wireWorkRunDispatcher()
+	// The answer validator's one model call is claimed across AGENT replicas:
+	// one run transition can reach an agent twice, and on a route that puts
+	// an app first each copy would open its own session
+	// (app/integrations_work_validator.go).
+	a.wireWorkValidatorClaim()
 
 	a.Logger.Info("agent integration providers registered")
 }

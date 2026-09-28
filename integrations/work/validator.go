@@ -226,15 +226,16 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 	if text == "" {
 		return skipped(fmt.Sprintf("version %d of %s recorded no answer to check", version, stepKey)), nil
 	}
-	// ONE CHECK PER ANSWER VERSION ACROSS THE CLUSTER, claimed after every
-	// skip that spends nothing and right before the one that spends a model
-	// call. The automation's own cluster guard keys on the triggering event's
-	// fingerprint, and one run transition can reach a replica twice with two
-	// fingerprints (live on 2026-09-28 the planner took each run update from
-	// the bridge and again from the durable run-delivery path), so the agent
-	// and the planner each ran this check for one answer. The "already
-	// checked" test above cannot close that race: both read before either
-	// writes.
+	// ONE CHECK PER ANSWER VERSION among the replicas that hold a claimer,
+	// claimed after every skip that spends nothing and right before the one
+	// that spends a model call. The automation's own cluster guard keys on
+	// the triggering event's fingerprint, and one run transition can reach a
+	// replica twice with two fingerprints (live on 2026-09-28 run updates
+	// arrived from the bridge and again from the durable run-delivery path),
+	// so one answer was checked twice -- and on a route that puts an app
+	// first, twice is two sessions. The "already checked" test above cannot
+	// close that race: both read before either writes. Which replicas claim
+	// is app/'s decision (app/integrations_work_validator.go).
 	if claimer := i.validatorClaimerRef(); claimer != nil {
 		key := fmt.Sprintf("%s#%s@%d", runId, stepKey, version)
 		if !claimer.ClaimWithTTL(ctx, validatorClaimName, key, validatorClaimTTL) {
