@@ -12,6 +12,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // store.go -- the engine seam, and the TWO actor rules the work spine turns
@@ -268,7 +269,7 @@ func (s *store) currentProcedureHash(ctx context.Context, subject map[string]any
 // so the owner reaches the row through the caller's own actor and through
 // nothing else.
 func (s *store) createGoalRow(ctx context.Context, g goalSeed) error {
-	return s.writeInternal(ctx, "mutation "+call("createWorkGoal", map[string]any{
+	return s.writeInternal(ctx, "mutation "+call("createWorkGoal", withArgs(map[string]any{
 		"goalId":           g.GoalId,
 		"statement":        g.Statement,
 		"origin":           g.Origin,
@@ -277,7 +278,7 @@ func (s *store) createGoalRow(ctx context.Context, g goalSeed) error {
 		"input":            optMap(g.Input),
 		"ceilings":         optMap(g.Ceilings),
 		"requestedVia":     g.RequestedVia,
-	}))
+	}, routingArg(g.Routing))))
 }
 
 // createRunRow inserts v1:work:run. Same @serverSet rule as the goal: the
@@ -311,7 +312,23 @@ func (s *store) createRunRow(ctx context.Context, r runSeed) error {
 	if sig := trim(r.GoalSignature); sig != "" {
 		args["goalSignature"] = sig
 	}
-	return s.writeInternal(ctx, "mutation "+call("createWorkRun", args))
+	return s.writeInternal(ctx, "mutation "+call("createWorkRun", withArgs(args, routingArg(r.Routing))))
+}
+
+// routingArg is the owner's routing choice as a write argument, named only
+// when there is one: Auto renders exactly the call it always did, so a goal
+// nobody chose for is indistinguishable from one written before the field.
+func routingArg(c common.RouteChoice) map[string]any {
+	if m := c.Map(); m != nil {
+		return map[string]any{"routing": m}
+	}
+	return nil
+}
+
+// withArgs adds extra to args and returns args.
+func withArgs(args, extra map[string]any) map[string]any {
+	maps.Copy(args, extra)
+	return args
 }
 
 // updateRun is the read-merge advance. Every field NOT named keeps its prior
@@ -377,6 +394,9 @@ type goalSeed struct {
 	Input            map[string]any
 	Ceilings         map[string]any
 	RequestedVia     string
+	// Routing is the owner's routing choice for every run of the goal (the
+	// Ask route picker's); the zero value writes nothing.
+	Routing common.RouteChoice
 }
 
 type runSeed struct {
@@ -413,6 +433,9 @@ type runSeed struct {
 	GoalSignature string
 	Head          map[string]any
 	Rerun         map[string]any
+	// Routing is the owner's routing choice every node executing the run
+	// reads off its row (common.RouteChoice); the zero value writes nothing.
+	Routing common.RouteChoice
 }
 
 type approvalSeed struct {

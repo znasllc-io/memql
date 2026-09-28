@@ -22,6 +22,12 @@ Fleet and Cockpit, or configure a federated provider in Settings. Ask follows
 MemQL routing policies; adding OpenAI does not silently override a person's
 policy choices. Fleet's Model Library and routing views show the available doors.
 
+A conversation can choose its own source (Auto, an app such as Claude Code, a
+local model, a vendor, or a route) and level (Auto, Fast, Strong, Reasoning).
+The choice is stored on the turn's goal and run, so the planner and the agent
+both honour it; a chosen single source is never replaced by another. See
+[AI routing: a person's choice for one conversation](ai-routing.md#a-persons-choice-for-one-conversation-ask).
+
 MemQL discovers named DSL capabilities and executes them with the person's
 original authority. Role, app capability, account scope and row authorization
 remain in force. Assistant identity never grants owner permissions. Internal

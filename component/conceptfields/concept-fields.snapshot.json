@@ -7956,6 +7956,7 @@
         "ownerUserId",
         "requestedVia",
         "responsibilityId",
+        "routing",
         "statement",
         "status"
       ],
@@ -8081,6 +8082,7 @@
         "parentRunId",
         "replayPolicy",
         "rerun",
+        "routing",
         "spent",
         "staleSteps",
         "startedAt",

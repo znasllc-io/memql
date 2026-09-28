@@ -137,6 +137,18 @@ type ResolveRequest struct {
 	// the pin is that user's own.
 	PinnedBy string
 
+	// Route is a PERSON'S ROUTE for this call: the name of the policy whose
+	// chain is walked INSTEAD of the chain the matching rule would name --
+	// the Ask route picker's `policy:<name>`, applied to every model call of
+	// the run it chose for. EMPTY MEANS THE RULES DECIDE.
+	//
+	// It sits between the two other ways a chain is chosen, and the order is
+	// the point: an ExplicitProvider still wins over it (a person's override
+	// of ONE step is more specific than their choice for the whole run), and
+	// it wins over every rule. Unlike a pin it FAILS OVER: the route's chain
+	// is walked entry by entry, exactly as a rule's would be.
+	Route string
+
 	// Effort is a PERSON'S explicit reasoning effort for this one call (epic
 	// memql#5414, design D20): low, medium, high, xhigh or max, from a step
 	// re-run or branched with a different effort. EMPTY MEANS THE LEVEL

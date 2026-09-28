@@ -58,7 +58,9 @@ func TestAskForwardUsesUniqueMeshIDsAndPreservesClientCorrelation(t *testing.T) 
 	ids := map[string]bool{}
 	for _, client := range clients {
 		session := &streamSession{service: &service{logger: testLogger(), aiForwarder: router}, stream: client, logger: testLogger(), access: &auth.AccessContext{UserId: "v1:identity:user:alice", Role: auth.RoleWriter}, credentialClass: auth.ForwardedClassUser, accessLoaded: true, badgeStamped: true}
-		envelope := &memqlv1.MemqlClientMessage{MessageId: "browser-message", Payload: &memqlv1.MemqlClientMessage_AiChat{AiChat: &memqlv1.AiChatMsg{RequestId: "client-turn", ConversationId: "private-conversation", Stream: true}}}
+		// The turn's route choice rides the envelope: the bff decides nothing
+		// about it, and the agent that runs the turn must receive it whole.
+		envelope := &memqlv1.MemqlClientMessage{MessageId: "browser-message", Payload: &memqlv1.MemqlClientMessage_AiChat{AiChat: &memqlv1.AiChatMsg{RequestId: "client-turn", ConversationId: "private-conversation", Stream: true, Provider: "policy:localFirst", Level: "reasoning"}}}
 		if err := session.proxyAI(envelope, "client-turn", node.NodeTypeAgent); err != nil {
 			t.Fatal(err)
 		}
@@ -74,6 +76,9 @@ func TestAskForwardUsesUniqueMeshIDsAndPreservesClientCorrelation(t *testing.T) 
 			}
 			if received.GetAiChat().GetRequestId() != "client-turn" {
 				t.Fatal("durable turn identity changed")
+			}
+			if received.GetAiChat().GetProvider() != "policy:localFirst" || received.GetAiChat().GetLevel() != "reasoning" {
+				t.Fatalf("the turn's route choice did not cross the hop: source %q level %q", received.GetAiChat().GetProvider(), received.GetAiChat().GetLevel())
 			}
 		case <-time.After(time.Second):
 			t.Fatal("request did not cross hop")

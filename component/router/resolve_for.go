@@ -62,10 +62,20 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 			req.StepId = run.StepKey
 		}
 	}
+	// AND WHAT THE RUN'S OWNER CHOSE (the Ask route picker). Applied HERE,
+	// the one function every model call reaches -- the engine's prompt seam
+	// and the agent replier's own request alike -- so no call site can forget
+	// it, and it is read off the run context the executing node built from
+	// the run ROW: the planner compiling and the agent running a step each see
+	// it without sharing memory with the node that took the turn. It never
+	// overrides what the executing step's own override names.
+	req, err := memql.ApplyRunRouting(ctx, req)
+	if err != nil {
+		return memql.ResolvedProvider{}, err
+	}
 
 	var client any
 	var resolved Resolved
-	var err error
 
 	switch req.Modality {
 	case airoute.ModalityStreamingTools:

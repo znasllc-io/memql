@@ -127,6 +127,11 @@ type RunJournal struct {
 	// applies them (ResumeOptions.Overrides, RunAdoption.Overrides), because
 	// the model calls its journal holds were made with them.
 	StepOverrides map[string]*common.StepOverride
+	// Routing is the owner's routing choice for every model call of the run
+	// (run.routing, the Ask route picker's), read off the row so the agent
+	// that executes the run needs nothing from the node that took the turn.
+	// The zero value routes by the rules.
+	Routing common.RouteChoice
 }
 
 // StepState is one step's latest journal row: its status and its attempt.
@@ -243,6 +248,7 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 		Head:                  work.ParseHead(run["head"]),
 		StaleSteps:            rowStringList(run["staleSteps"]),
 		Rerun:                 rerunSpecFrom(run["rerun"]),
+		Routing:               common.RouteChoiceFrom(run["routing"]),
 	}
 	j.HeartbeatAt, _ = time.Parse(time.RFC3339Nano, stringField(run, "heartbeatAt"))
 	j.WaitingOn, _ = run["waitingOn"].(map[string]any)
