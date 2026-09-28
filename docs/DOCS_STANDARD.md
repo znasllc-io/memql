@@ -101,10 +101,14 @@ it's `internal`.
 
 1. **Authoring:** prose is written/edited in `docs/public/**` via normal
    repo PRs. This is the only place public prose lives.
-2. **Generated reference:** `cmd/docs-gen` produces the DSL construct
-   reference, concept catalog, and architecture diagrams into
-   `docs/public/reference/_generated/` from the engine itself (concept
-   registry + `component/architecture`), so reference can never drift.
+2. **Generated reference:** `cmd/docs-gen` produces the concept catalog
+   into `docs/public/reference/_generated/` from the concept registry, so it
+   can never drift from the engine. That directory is gitignored; the bundle
+   carries it. The architecture facts diagrams are drawn from are generated
+   too, but committed: `make arch-model` writes the code's architecture model
+   and `make platform-graph` the platform graph (roles, deployment, gRPC
+   services, front door, routing, concepts, automations, OS navigation) into
+   `component/architecture/embedded/`, each held to the tree by a drift gate.
 3. **Bundle:** `scripts/docs/build-docs-bundle.sh` selects the public set,
    runs the generator, and emits `docs-bundle/` = the markdown tree + a
    `manifest.json` (`version`, `pageCount`, the `areas` section map, and the

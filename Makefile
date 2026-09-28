@@ -475,35 +475,57 @@ sdk-gen-check:
 	$(GO) run ./scripts/sdk-gen --check --dsl=dsl --out=sdk/go/client --ts-out=sdk/ts/src/client
 
 # ARCH_MODEL_OUT lets the drift gate regenerate to a temp file through THIS
-# target, so the flag set exists exactly once in the repo. Declared above the
-# doc block so it does not separate the '## ' summary from its target, which
-# would drop arch-model out of `make help` (TestMakeHelpCompleteness).
+# target, so the flag set exists exactly once in the repo. ARCH_MODEL_CALLS=1
+# on the command line adds --calls: the gate's on-demand call graph
+# (memql#5727), never the committed artifact. `:=`, not `?=`, so an
+# ARCH_MODEL_CALLS exported in someone's shell cannot put the call graph back
+# into the file they commit. Declared above the doc block so they do not
+# separate the '## ' summary from its target, which would drop arch-model out of
+# `make help` (TestMakeHelpCompleteness).
 ARCH_MODEL_OUT ?= component/architecture/embedded/topology.model.json
+ARCH_MODEL_CALLS :=
 
 ## Regenerate the checked-in architecture model
-## (component/architecture/embedded/topology.model.json), which the cockpit's
-## Topology tab consumes.
+## (component/architecture/embedded/topology.model.json): services, packages,
+## types and the DSL automation trigger graph.
 ##
-## THE FLAGS ARE LOAD-BEARING (memql#2844). --calls is not a default, and the
-## artifact contains the call graph: 121k edges with it, 21k without. Before
-## this target nothing recorded that, so `go run ./cmd/memql-arch` -- the
-## documented command -- produced a file 100k edges smaller than the one in
-## git, and the resulting 900k-line diff made refreshing the model impossible
-## in practice. --reproducible blanks generated_at and the absolute workspace
-## path so the output depends only on the code.
+## STRUCTURAL ONLY (memql#5727, owner decision 7). The CHA call graph was
+## 63.9 of the file's 81.3 MB and nothing read it, so --calls is off for the
+## committed artifact; TestArchitectureModelIsNotStale builds it on demand
+## (ARCH_MODEL_CALLS=1) to check it. --reproducible blanks generated_at and the
+## absolute workspace path so the output depends only on the code (memql#2844).
 arch-model:
-	$(GO) run ./cmd/memql-arch --root . --types --calls --automations --cluster memql \
-		--reproducible --out $(ARCH_MODEL_OUT)
+	$(GO) run ./cmd/memql-arch --root . --types --automations --cluster memql \
+		--reproducible $(if $(ARCH_MODEL_CALLS),--calls) --out $(ARCH_MODEL_OUT)
 
-## CI gate: regenerate the architecture model and diff against the checked-in
-## copy. Fails if the code changed without the model being refreshed -- the
-## drift that left ToggleComputerUseEnabledArgs.UserId in the model in 13
+## CI gate: regenerate the architecture model and check the checked-in copy
+## against it. Fails if the code changed without the model being refreshed --
+## the drift that left ToggleComputerUseEnabledArgs.UserId in the model in 13
 ## places after #2840 removed it. Pair with `make arch-model` locally to fix.
 ##
 ## Also enforced by TestArchitectureModelIsNotStale so it runs in the ordinary
 ## `go test ./...` lane, which needs no workflow change.
 arch-model-check:
 	$(GO) test -count=1 -run TestArchitectureModelIsNotStale ./component/architecture/
+
+# PLATFORM_GRAPH_OUT lets TestPlatformGraphIsNotStale regenerate to a temp file
+# through THIS target, as ARCH_MODEL_OUT does for the model.
+PLATFORM_GRAPH_OUT ?= component/architecture/embedded/platform.graph.json
+
+## Regenerate the checked-in platform graph
+## (component/architecture/embedded/platform.graph.json): the node roles and
+## their packages, the deploy base's Deployments and Services, the gRPC
+## services, the front door, the mesh routing table, the concepts, the
+## automations and the OS navigation (memql#5727). The docs diagrams and the
+## OS's Cluster map read it. Regenerate after changing any of those.
+platform-graph:
+	$(GO) run ./cmd/platformgraph --root . --out $(PLATFORM_GRAPH_OUT)
+
+## CI gate: fail when the committed platform graph asserts something the tree
+## no longer has, or has fallen too far behind it. Pair with
+## `make platform-graph` locally to fix.
+platform-graph-check:
+	$(GO) test -count=1 -run 'TestPlatformGraph' ./
 
 ## Regenerate the whole front door: the HOSTS first, then the PATHS inside
 ## them. Order matters -- the hosts generator writes the api Ingress that the
@@ -764,7 +786,7 @@ test-cover:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check docs-grammar docs-grammar-check memqlbreaking memqlbreaking-capture
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check platform-graph platform-graph-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check docs-grammar docs-grammar-check memqlbreaking memqlbreaking-capture
 
 ## Run go vet on all packages
 vet:
