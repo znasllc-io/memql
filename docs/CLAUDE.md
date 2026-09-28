@@ -11,7 +11,7 @@ owner: znas
 
 **Purpose:** MemQL documentation, split public (drives memql.io) vs internal.
 **Rules:** [DOCS_STANDARD.md](DOCS_STANDARD.md) — front-matter, layout, the
-repo→site release-versioned pipeline. **User entry:** [Documentation home](public/overview/index.md).
+repo→site pipeline (one set per release; the site serves the newest). **User entry:** [Documentation home](public/overview/index.md).
 **Index:** [../GLOSSARY.md](../GLOSSARY.md).
 
 ---
@@ -27,9 +27,11 @@ docs/
 │   ├── concepts/      data model, events, identifiers, mental models
 │   ├── language/      the MemQL DSL (reference, authoring, naming, specs)
 │   ├── ai/            LLM cost control, operator capabilities
-│   ├── build/         gRPC/audio, build tags; reference/_generated/ at release
+│   ├── build/         gRPC/audio, build tags
 │   ├── operate/       deploy, auth/, env, runbooks (public)
-│   └── cockpit/       engine-backed Cockpit surfaces (Editor); the rest live in the memql-cockpit repo
+│   ├── cockpit/       engine-backed Cockpit surfaces (Editor); the rest live in the memql-cockpit repo
+│   └── reference/     generated reference; the bundle renders the concept catalog as reference/concepts.md
+├── public_boundary_allowlist.toml   links the boundary gate lets through for now; only shrinks
 ├── internal/          Never published
 │   ├── design/        ADRs / historical design rationale (status: historical)
 │   ├── planning/      active multi-phase plans (deleted when shipped)
@@ -48,7 +50,10 @@ accumulated in it by then.
 ## Conventions
 
 - Every file carries front-matter (`audience`/`status`/`area`/`sinceVersion`/`owner`);
-  the site selects `public/**` where `audience: public`. See DOCS_STANDARD.
+  the bundle publishes the `public/**` pages that are `audience: public`,
+  `status: stable` and `exposure: engine` (missing reads as engine), and a
+  relative link from one of them to anything else fails
+  `docs_public_boundary_test.go`. See DOCS_STANDARD section 5.
 - `public/language/memql.md` is also **embedded into the binary** via
   `docs/embed.go` (the `memqlGuide` builtin) — if you move it, update the
   `//go:embed` directive.

@@ -461,19 +461,33 @@ is documented in [COMPATIBILITY.md](COMPATIBILITY.md).
 ## Documentation versioning
 
 **Docs version == engine release.** There is no separate docs version
-line. Public documentation lives in `docs/public/` (the source of truth;
-see [docs/DOCS_STANDARD.md](docs/DOCS_STANDARD.md)) and is published to
-memql.io per release:
+line, and memql.io serves **one documentation set: the newest
+release's**. There is no version dropdown, no version segment in a docs
+URL and no archive of older sets; a page lives at `/docs/<slug>/` for as
+long as the page exists. The full pipeline is
+[docs/DOCS_STANDARD.md](docs/DOCS_STANDARD.md), section 5.
 
-- On each `releases/<X.Y.Z>.yaml` lockfile, the release pipeline builds a
-  `docs-<X.Y.Z>.tgz` bundle (the `docs/public` markdown tree + generated
-  reference + a `manifest.json`) and attaches it to the GitHub Release.
-- memql.io consumes each bundle into a per-version snapshot and exposes a
-  version dropdown. `latest` tracks `main`'s `docs/public`.
-- Machine reference (DSL constructs, concept catalog, architecture
-  diagrams) is generated at release time, so it can never drift from the
-  engine the version was cut from.
+- **The source** is `docs/public/`: the pages git tracks there whose
+  front matter says `audience: public`, `status: stable` and
+  `exposure: engine` (a page with no `exposure` reads as engine).
+- **One set per release, as a Release asset.** When a GitHub Release is
+  published, `.github/workflows/publish-docs-bundle.yml` checks out the
+  release tag with full history and builds the set there with
+  `scripts/docs/build-docs-bundle.sh` (over `cmd/docs-gen bundle`), then
+  attaches it as `docs-<X.Y.Z>.tgz`. The build refuses a `--version`
+  that differs from `VERSION`, which equals the tag (above), so the set
+  carries the version of the release it was built from, and nothing
+  else.
+- **The site replaces its set.** That is the instance repository's side
+  of the contract: the instance that hosts memql.io replaces its docs
+  with the newest release's asset and keeps no older set (its docs sync,
+  memql#5716), and its site marks every docs page with
+  `<meta name="memql-docs-version" content="X.Y.Z">` (memql#5715).
+  `scripts/docs/current-check.sh` fails weekly when the newest release
+  tag has no asset or the site serves a different version.
+- **Generated reference** (today, the concept catalog) is rendered from
+  the engine at the tag, so it cannot drift from the release it
+  documents.
 
-This rides the same lockfile-as-source-of-truth model as the image
-release flow above — a new engine version automatically yields a new docs
-version.
+A new engine release therefore yields a new docs set with no hand step;
+a docs fix reaches the site with the next release.
