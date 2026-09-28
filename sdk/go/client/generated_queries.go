@@ -7076,8 +7076,8 @@ type RouterDecisionsRecentArgs struct {
 	// Only decisions resolved at this level.
 	// Enum: fast | strong | reasoning | embeddings
 	Level string
-	// Only decisions served through this door.
-	// Enum: local | app | federation
+	// Only decisions served through this door. `session` is an app handed a whole step.
+	// Enum: local | app | federation | session
 	Door string
 	// Only decisions the named rule made.
 	Rule string
