@@ -184,8 +184,13 @@ binaries), and an `EventForward` the worker PUSHES down the stream goes to the
 PeerManager's event sink like every other arrival (memql#5340).
 
 ### ParentConnector (`parent_connector.go`)
-Installed only when `MEMQL_PARENT_ADDRESS` is set. Dials the configured parent
-peer and keeps a single outbound NodeService stream open. Complementary to
+Installed when the node has a parent address: `MEMQL_PARENT_ADDRESS`, or one
+`DiscoverPeerAddress` read from the topology at boot. Dials that parent and
+keeps a single outbound NodeService stream open. A DISCOVERED parent is a pod
+address, so after `parentUnreachableAttempts` unanswered dials the connector
+re-resolves one from the topology (skipping the address that stopped
+answering) instead of redialling a pod its rollout replaced. A configured
+address is a Service and is redialled forever. Complementary to
 WorkerDialer: WorkerDialer runs on the BFF for outbound fan-out to workers,
 ParentConnector runs on any node with a configured upstream.
 
@@ -321,6 +326,21 @@ AND a forwarded worker session) on the producer side and `streamingOverSubstrate
 ### NodeServer (`server.go`)
 gRPC server implementing `NodeService.Stream`. Handles handshake (NodeHello/NodeWelcome),
 heartbeats, peer introductions, spawn requests, event forwarding, capability queries.
+
+### Node tokens: one mint per process (`identity.go`, `connection.go`)
+A node mints its `class="node"` JWT once at boot (`EnsureBearerToken`). After
+that it mints only in two cases, both under one process-wide lock: a peer
+refused the token as a bad credential (`RefreshRejectedBearerToken`, the
+memql#1521 key-rotation recovery), or the token has used 90% of its lifetime
+(`BearerTokenForDial`). Two rules keep a refusal from turning into a mint
+storm. A connection holding a token another connection already replaced is
+handed the current one. And no process mints twice within
+`nodeRemintMinInterval`, because a token that new was not refused for its key
+or its age. The server half matters as much: a NodeServer that cannot finish
+its revocation lookup (a draining pod after it released its database pool)
+answers `Unavailable`, not `Unauthenticated`, so callers back off instead of
+re-minting. A local rollout on 2026-09-28 minted ~2,900 tokens in 27 seconds
+before both halves existed (`node_token_churn_test.go`).
 
 ### Connection lifecycle (CLI side)
 The CLI's pool entry runs a per-connection heartbeat ticker plus a bounded

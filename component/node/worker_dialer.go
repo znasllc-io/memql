@@ -696,8 +696,8 @@ func (wd *WorkerDialer) dialTarget(parent context.Context, target WorkerTarget) 
 	// rotation (memql#1521), so the BFF recovers on its own instead of looping
 	// forever on a dead token. Only wired when self-bootstrap is configured.
 	if wd.identity.CanRemintBearerToken() {
-		conn.SetReauthFn(func(ctx context.Context) (string, error) {
-			return wd.identity.RemintBearerToken(ctx, wd.logger)
+		conn.SetReauthFn(func(ctx context.Context, rejected string) (string, error) {
+			return wd.identity.RefreshRejectedBearerToken(ctx, wd.logger, rejected)
 		})
 	}
 

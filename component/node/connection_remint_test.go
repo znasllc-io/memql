@@ -182,10 +182,12 @@ func TestPeerConnection_RemintsNodeTokenOnAuthRejection(t *testing.T) {
 
 	// The re-mint hook models identity now serving the rotated key: it returns
 	// the NEW-key token and stores it on the shared Identity, exactly as the
-	// production RemintBearerToken does after hitting /node/bootstrap.
+	// production RefreshRejectedBearerToken does after hitting /node/bootstrap.
 	var remintCount int64
-	pc.SetReauthFn(func(ctx context.Context) (string, error) {
+	var rejectedSeen atomic.Value
+	pc.SetReauthFn(func(ctx context.Context, rejected string) (string, error) {
 		atomic.AddInt64(&remintCount, 1)
+		rejectedSeen.Store(rejected)
 		identity.setBearerToken(newKeyToken)
 		return newKeyToken, nil
 	})
@@ -228,6 +230,9 @@ func TestPeerConnection_RemintsNodeTokenOnAuthRejection(t *testing.T) {
 
 	if got := atomic.LoadInt64(&remintCount); got < 1 {
 		t.Fatalf("expected at least one token re-mint after the auth rejection, got %d", got)
+	}
+	if got, _ := rejectedSeen.Load().(string); got != oldKeyToken {
+		t.Fatalf("the hook must be told which token the peer refused: got %q, want %q", got, oldKeyToken)
 	}
 	if got := atomic.LoadInt64(&svc.rejectedHandshakes); got < 1 {
 		t.Fatalf("expected at least one rejected dial after the rotation (the stuck-loop trigger), got %d", got)

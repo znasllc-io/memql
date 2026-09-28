@@ -4,10 +4,15 @@ package node
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -79,8 +84,16 @@ type Identity struct {
 	Address string
 
 	// ParentAddress is the NodeService address of the peer that bootstrapped
-	// this node. Empty for root nodes and standalone nodes.
+	// this node. Empty for root nodes and standalone nodes. It is the address
+	// the ParentConnector dials FIRST; the connector tracks the one it dials
+	// now, which differs once a discovered parent has been re-resolved.
 	ParentAddress string
+
+	// parentResolver re-runs peer discovery, skipping the given address, and
+	// is set only when DiscoverPeerAddress supplied ParentAddress (a pod
+	// address a rollout replaces). nil for an address from
+	// MEMQL_PARENT_ADDRESS, a Service that always routes to a live pod.
+	parentResolver func(ctx context.Context, exclude string) (string, bool)
 
 	// Flavor is the domain flavor within the node type. Empty for single-flavor types like cognition.
 	// Read from MEMQL_NODE_FLAVOR env var.
@@ -109,7 +122,48 @@ type Identity struct {
 	// the re-mint path. Connections shared across goroutines read it on
 	// every dial.
 	tokenMu sync.RWMutex
+
+	// tokenMintedAt and tokenExpiresAt describe BearerToken when THIS
+	// process minted it: mintedAt on the local clock, expiresAt read from
+	// the token's own `exp` claim (zero when it carries none). Both stay
+	// zero for an out-of-band MEMQL_NODE_TOKEN, which is never refreshed.
+	// Guarded by tokenMu.
+	tokenMintedAt  time.Time
+	tokenExpiresAt time.Time
+
+	// mintMu serialises every mint this process makes, so N connections
+	// rejected at the same moment produce one mint rather than N; the
+	// others find the token already replaced and present that one.
+	mintMu sync.Mutex
+
+	// lastMintAttempt is when this process last asked identity for a token,
+	// whether or not the answer was one. It is the floor under the re-mint
+	// rate (nodeRemintMinInterval). Guarded by mintMu.
+	lastMintAttempt time.Time
 }
+
+// nodeRemintMinInterval is the least time between two node-token mints by one
+// process. A token re-mint recovers from a verdict about the TOKEN -- identity
+// rotated the key that signed it, or it expired -- and a token this new was
+// not refused for either reason: the refusal is about the peer, and a fresh
+// token cannot fix it. The floor is what makes that true under any peer
+// behaviour: one local rollout on 2026-09-28 had every node re-mint on each
+// of ~30 rejections a second from terminating pods, ~2,900 mints in 27
+// seconds, because nothing bounded the rate across attempts or connections.
+// A real key rotation is still recovered on the first rejection, since the
+// token it strands was minted long before.
+const nodeRemintMinInterval = time.Minute
+
+// nodeTokenRefreshFraction is how much of its lifetime a token this process
+// minted may use before a dial refreshes it first (BearerTokenForDial). At
+// the 30-day node-token TTL that is a refresh three days before expiry: one
+// mint a month instead of a failed dial at the deadline.
+const nodeTokenRefreshFraction = 0.9
+
+// errRemintSuppressed is returned when a re-mint is refused because this
+// process minted, or tried to, within nodeRemintMinInterval. The caller backs
+// off instead of re-dialling at once.
+var errRemintSuppressed = errors.New("node token re-mint suppressed")
 
 // CompiledNodeType returns the node type this binary was built for: the one
 // named by its `-tags <type>` build tag, or NodeTypeBFF for an untagged build.
@@ -270,6 +324,14 @@ func (id *Identity) EnsureBearerToken(ctx context.Context, logger *slog.Logger) 
 	if id.Type == NodeTypeIdentity {
 		return nil
 	}
+	id.mintMu.Lock()
+	defer id.mintMu.Unlock()
+	if bootstrapMintConfigured() && strings.TrimSpace(os.Getenv("MEMQL_NODE_TOKEN")) == "" {
+		// The boot mint is this process's first attempt: the re-mint floor
+		// counts from here, so a peer that refuses the brand-new token does
+		// not earn a second one straight away.
+		id.lastMintAttempt = time.Now()
+	}
 	token, ok, err := maybeBootstrapNodeToken(ctx, logger, id.ID, string(id.Type))
 	if err != nil {
 		return err
@@ -277,7 +339,7 @@ func (id *Identity) EnsureBearerToken(ctx context.Context, logger *slog.Logger) 
 	if !ok {
 		return nil
 	}
-	id.setBearerToken(token)
+	id.storeMintedToken(token, time.Now())
 	return nil
 }
 
@@ -303,6 +365,60 @@ func (id *Identity) setBearerToken(tok string) {
 	id.BearerToken = tok
 }
 
+// storeMintedToken stores a token this process just minted, with the moment
+// it was minted and the expiry its own `exp` claim declares.
+func (id *Identity) storeMintedToken(tok string, mintedAt time.Time) {
+	if id == nil {
+		return
+	}
+	id.tokenMu.Lock()
+	defer id.tokenMu.Unlock()
+	id.BearerToken = tok
+	id.tokenMintedAt = mintedAt
+	id.tokenExpiresAt = jwtExpiry(tok)
+}
+
+// jwtExpiry reads the `exp` claim out of a JWT's payload WITHOUT verifying
+// the signature: the node only uses it to schedule its own refresh, and every
+// peer verifies the token properly. Zero when the token is not a JWT or
+// declares no expiry, which turns the proactive refresh off for it.
+func jwtExpiry(tok string) time.Time {
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		return time.Time{}
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}
+	}
+	var claims struct {
+		Exp float64 `json:"exp"`
+	}
+	if err := json.Unmarshal(raw, &claims); err != nil || claims.Exp <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(int64(claims.Exp), 0)
+}
+
+// tokenRefreshDue reports whether the token this process minted has used
+// nodeTokenRefreshFraction of its lifetime. False for a token whose mint time
+// or expiry is unknown, and for a lifetime that does not make sense (an `exp`
+// at or before the local mint time): the node does not act on a claim it
+// cannot interpret, and the peer's rejection path still covers expiry.
+func (id *Identity) tokenRefreshDue(now time.Time) bool {
+	id.tokenMu.RLock()
+	defer id.tokenMu.RUnlock()
+	if id.tokenMintedAt.IsZero() || id.tokenExpiresAt.IsZero() {
+		return false
+	}
+	lifetime := id.tokenExpiresAt.Sub(id.tokenMintedAt)
+	if lifetime <= 0 {
+		return false
+	}
+	refreshAt := id.tokenMintedAt.Add(time.Duration(float64(lifetime) * nodeTokenRefreshFraction))
+	return !now.Before(refreshAt)
+}
+
 // CanRemintBearerToken reports whether this node can re-fetch its node token
 // on an auth failure (memql#1521): the self-bootstrap mint path must be
 // configured (MEMQL_NODE_BOOTSTRAP_TOKEN + MEMQL_IDENTITY_VERIFIER_BASE_URL). When
@@ -317,21 +433,80 @@ func (id *Identity) CanRemintBearerToken() bool {
 	return bootstrapMintConfigured()
 }
 
-// RemintBearerToken re-acquires a fresh class="node" JWT from identity and
-// stores it on the Identity (memql#1521). Called by a connection's reauth
-// hook after an Unauthenticated / unknown-kid rejection -- identity now
-// serves the rotated signing key, so the new token verifies where the old one
-// looped forever. Returns the new token (also stored) or an error if the
-// re-mint failed (identity unreachable, wrong secret, etc.).
-func (id *Identity) RemintBearerToken(ctx context.Context, logger *slog.Logger) (string, error) {
+// RefreshRejectedBearerToken answers a peer that refused the token `rejected`
+// as a bad credential (memql#1521): it returns the token the next dial should
+// present, minting one only when a mint can help.
+//
+//   - Another connection already replaced `rejected`: present the current
+//     token. No mint -- N connections refused at once cost one mint.
+//   - This process minted, or tried to, within nodeRemintMinInterval: refuse
+//     with errRemintSuppressed. A token that new was not refused for its key
+//     or its age, so a second one would be refused the same way; the caller
+//     backs off instead.
+//   - Otherwise mint, store and return the new token. This is the key-rotation
+//     recovery: the stranded token was minted long before the rotation.
+//
+// Every mint this process makes after boot goes through here or through
+// BearerTokenForDial, both under mintMu.
+func (id *Identity) RefreshRejectedBearerToken(ctx context.Context, logger *slog.Logger, rejected string) (string, error) {
 	if id == nil {
 		return "", nil
 	}
+	id.mintMu.Lock()
+	defer id.mintMu.Unlock()
+	if cur := id.BearerTokenValue(); cur != "" && cur != rejected {
+		return cur, nil
+	}
+	if since := time.Since(id.lastMintAttempt); !id.lastMintAttempt.IsZero() && since < nodeRemintMinInterval {
+		return "", fmt.Errorf("%w: this process asked identity for a token %s ago (at most one per %s)",
+			errRemintSuppressed, since.Round(time.Millisecond), nodeRemintMinInterval)
+	}
+	return id.mintLocked(ctx, logger)
+}
+
+// BearerTokenForDial returns the token an outbound dial presents. When this
+// process minted it and it has used nodeTokenRefreshFraction of its lifetime,
+// it is refreshed first -- the one mint that is not an answer to a rejection
+// -- so a dial never presents a token about to lapse. A failed refresh keeps
+// the current token, still valid until its expiry, and is not retried inside
+// nodeRemintMinInterval. An out-of-band token, or one with no known expiry,
+// is returned as it is.
+func (id *Identity) BearerTokenForDial(ctx context.Context, logger *slog.Logger) string {
+	if id == nil {
+		return ""
+	}
+	if !id.tokenRefreshDue(time.Now()) || !id.CanRemintBearerToken() {
+		return id.BearerTokenValue()
+	}
+	id.mintMu.Lock()
+	defer id.mintMu.Unlock()
+	if !id.tokenRefreshDue(time.Now()) {
+		return id.BearerTokenValue() // another dial refreshed it while we waited
+	}
+	if !id.lastMintAttempt.IsZero() && time.Since(id.lastMintAttempt) < nodeRemintMinInterval {
+		return id.BearerTokenValue()
+	}
+	tok, err := id.mintLocked(ctx, logger)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("node token refresh before expiry failed; presenting the current token",
+				"node_type", id.Type, "node_id", id.ID, "error", err)
+		}
+		return id.BearerTokenValue()
+	}
+	return tok
+}
+
+// mintLocked asks identity for a fresh token and stores it. Caller holds
+// mintMu. The attempt is recorded before the call, so a failing identity is
+// asked at most once per nodeRemintMinInterval too.
+func (id *Identity) mintLocked(ctx context.Context, logger *slog.Logger) (string, error) {
+	id.lastMintAttempt = time.Now()
 	tok, err := remintNodeToken(ctx, logger, id.ID, string(id.Type))
 	if err != nil {
 		return "", err
 	}
-	id.setBearerToken(tok)
+	id.storeMintedToken(tok, time.Now())
 	return tok, nil
 }
 

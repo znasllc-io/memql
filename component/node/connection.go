@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -34,14 +35,6 @@ const (
 	// uiClick* + utterance + presence + text:chunk + canvas events,
 	// easily >100 across a few seconds).
 	sendChCapacity = 1024
-
-	// remintInitialBackoff / remintMaxBackoff bound the auth-failure re-mint
-	// cadence (memql#1521). The FIRST auth rejection re-mints immediately (a
-	// key rotation is the expected trigger and we want to recover fast);
-	// consecutive rejections back off so a persistently-misconfigured /
-	// down identity isn't hammered with mint POSTs.
-	remintInitialBackoff = 2 * time.Second
-	remintMaxBackoff     = 30 * time.Second
 
 	// defaultReadLivenessFactor is the multiple of the heartbeat interval
 	// after which an inbound-silent stream is declared half-dead and torn
@@ -100,23 +93,40 @@ type peerConnection struct {
 	// behaviour and the gossip contract stays backward-compatible.
 	healthFn func() nodev1.NodeHealthStatus
 
-	// reauthFn re-acquires a fresh node token after an auth rejection
-	// (memql#1521). When identity's signing key rotates, the token this
-	// connection presents is rejected with Unauthenticated / "unknown kid"
-	// on every dial; without a re-mint the reconnect loop reuses the dead
-	// token forever (the stuck loop). When set, the Connect loop calls this
-	// on an auth-rejection error to fetch a token signed by the CURRENT key,
-	// then retries. nil leaves the legacy reconnect-with-the-same-token
-	// behaviour (single-node dev, or an out-of-band MEMQL_NODE_TOKEN that
-	// cannot be re-minted). It returns the new token (already stored on the
-	// shared Identity) or an error if the re-mint failed.
-	reauthFn func(ctx context.Context) (string, error)
+	// reauthFn answers an auth rejection (memql#1521). When identity's
+	// signing key rotates, the token this connection presents is rejected
+	// with Unauthenticated / "unknown kid" on every dial; without a new token
+	// the reconnect loop reuses the dead one forever (the stuck loop). When
+	// set, the Connect loop calls it with the token the rejected dial
+	// presented and retries at once with the token it returns. nil leaves the
+	// legacy reconnect-with-the-same-token behaviour (single-node dev, or an
+	// out-of-band MEMQL_NODE_TOKEN that cannot be re-minted). Production wires
+	// Identity.RefreshRejectedBearerToken, which mints only when a mint can
+	// help and otherwise returns an error the loop backs off from.
+	reauthFn func(ctx context.Context, rejected string) (string, error)
 
-	// remintBackoff bounds how often the auth-failure re-mint fires across
-	// reconnect attempts so a persistently-rejecting identity isn't hammered.
-	// Grows on consecutive auth rejections, resets on a clean connect.
-	remintBackoff time.Duration
+	// presented is the bearer token the latest attempt put on the wire, so a
+	// rejection is answered for THAT token and not for whatever the shared
+	// Identity holds by then.
+	presented string
+
+	// giveUpAfter, when positive, makes Connect return ErrPeerUnreachable
+	// after that many consecutive attempts that never received a message
+	// from the peer, so the caller can look for a different peer instead of
+	// redialling a pod that is gone. Zero redials the same address forever
+	// (the default, right for a Service address that always has a live
+	// endpoint behind it).
+	giveUpAfter int
+
+	// lastAttemptEstablished records whether the latest attempt received at
+	// least one message, which is what resets the giveUpAfter count.
+	lastAttemptEstablished bool
 }
+
+// ErrPeerUnreachable is returned by Connect when a connection configured with
+// SetGiveUpAfter has failed that many attempts in a row without the peer
+// answering. The address it was dialling is presumed gone.
+var ErrPeerUnreachable = errors.New("peer unreachable")
 
 // newPeerConnection creates a new outbound connection to a peer.
 func newPeerConnection(identity *Identity, nodeId, address string, logger *slog.Logger) *peerConnection {
@@ -151,14 +161,23 @@ func (pc *peerConnection) SetHealthFn(fn func() nodev1.NodeHealthStatus) {
 	pc.mu.Unlock()
 }
 
-// SetReauthFn installs the auth-failure re-mint hook (memql#1521). When set,
-// an Unauthenticated / unknown-kid rejection on a dial triggers a fresh token
-// fetch via fn before the next reconnect attempt, instead of looping forever
-// on the dead token. Must be called before Connect. A nil fn leaves the legacy
-// behaviour (no re-mint). Thread-safe.
-func (pc *peerConnection) SetReauthFn(fn func(ctx context.Context) (string, error)) {
+// SetReauthFn installs the auth-rejection hook (memql#1521). When set, an
+// Unauthenticated / unknown-kid rejection on a dial calls fn with the token
+// that dial presented; a token back means retry at once with it, an error
+// means back off as for any other failure. Must be called before Connect. A
+// nil fn leaves the legacy behaviour (no new token). Thread-safe.
+func (pc *peerConnection) SetReauthFn(fn func(ctx context.Context, rejected string) (string, error)) {
 	pc.mu.Lock()
 	pc.reauthFn = fn
+	pc.mu.Unlock()
+}
+
+// SetGiveUpAfter makes Connect return ErrPeerUnreachable after n consecutive
+// attempts in which the peer never sent a message. Must be called before
+// Connect. A non-positive n redials forever. Thread-safe.
+func (pc *peerConnection) SetGiveUpAfter(n int) {
+	pc.mu.Lock()
+	pc.giveUpAfter = n
 	pc.mu.Unlock()
 }
 
@@ -213,6 +232,9 @@ func (pc *peerConnection) Connect(ctx context.Context, onMessage func(*nodev1.No
 	defer cancel()
 
 	backoff := initialBackoff
+	// unanswered counts consecutive attempts in which the peer never sent a
+	// message: a refused dial, a rejected handshake, a pod that is gone.
+	unanswered := 0
 
 	for {
 		select {
@@ -225,32 +247,38 @@ func (pc *peerConnection) Connect(ctx context.Context, onMessage func(*nodev1.No
 		if err == nil || ctx.Err() != nil {
 			return err
 		}
+		pc.mu.Lock()
+		established := pc.lastAttemptEstablished
+		giveUpAfter := pc.giveUpAfter
+		pc.mu.Unlock()
+		if established {
+			unanswered = 0
+		} else {
+			unanswered++
+		}
 
 		// Auth rejection (memql#1521): identity's signing key rotated and the
 		// token this connection presents was minted under the OLD key, so the
 		// remote NodeServer rejects it with Unauthenticated / "unknown kid"
 		// every time. Reconnecting with the SAME token loops forever (the
 		// outage). When a re-mint hook is wired, fetch a token signed by the
-		// CURRENT key before retrying so the next dial verifies. The re-mint
-		// itself backs off across consecutive rejections so a down /
-		// misconfigured identity isn't hammered.
-		if isAuthRejection(err) {
-			if pc.tryReauth(ctx, err) {
-				// Fresh token obtained -- retry IMMEDIATELY (no reconnect
-				// backoff): the previous failure was purely an expired
-				// credential, not an unreachable peer, and we want to recover
-				// from the key rotation fast.
-				backoff = initialBackoff
-				continue
-			}
-			// No re-mint hook, or the re-mint failed (already backed off
-			// inside tryReauth). Fall through to the normal reconnect backoff
-			// and try again -- a transient identity blip will clear.
-		} else {
-			// A non-auth failure means the credential is (probably) fine; reset
-			// the re-mint backoff so the next genuine key rotation re-mints
-			// promptly again.
-			pc.resetRemintBackoff()
+		// CURRENT key before retrying so the next dial verifies. The Identity
+		// mints at most once per nodeRemintMinInterval for the whole process,
+		// however many connections are refused, so neither a down identity
+		// nor a peer that refuses every token is hammered.
+		if isAuthRejection(err) && pc.tryReauth(ctx, err) {
+			// A different token to present -- retry IMMEDIATELY: the failure
+			// was the credential, not the peer, and a key rotation should
+			// heal fast. The re-mint floor on the Identity bounds this path:
+			// a token that new is never replaced again, so a peer that keeps
+			// refusing it lands on the backoff below.
+			backoff = initialBackoff
+			continue
+		}
+
+		if giveUpAfter > 0 && unanswered >= giveUpAfter {
+			return fmt.Errorf("%w: %s did not answer %d consecutive attempts: %w",
+				ErrPeerUnreachable, pc.address, unanswered, err)
 		}
 
 		pc.logger.Warn("peer connection lost, reconnecting",
@@ -297,78 +325,56 @@ func isAuthRejection(err error) bool {
 	return false
 }
 
-// tryReauth runs the re-mint hook (if wired) after an auth rejection, applying
-// a per-connection backoff so consecutive rejections don't hammer identity.
-// Returns true when a fresh token was obtained (caller retries immediately),
-// false when there is no hook or the re-mint failed (caller falls back to the
-// normal reconnect backoff). memql#1521.
+// tryReauth asks the reauth hook (if wired) for a token to present after an
+// auth rejection. Returns true when there is a DIFFERENT token to present
+// (caller retries immediately), false when there is no hook, or the hook
+// declined or failed (caller falls back to the normal reconnect backoff).
+// memql#1521.
 func (pc *peerConnection) tryReauth(ctx context.Context, cause error) bool {
 	pc.mu.Lock()
 	fn := pc.reauthFn
-	wait := pc.remintBackoff
+	rejected := pc.presented
 	pc.mu.Unlock()
 
 	if fn == nil {
 		return false
 	}
 
-	// Backoff BEFORE re-minting on a repeat rejection (wait==0 the first time,
-	// so the initial re-mint after a key rotation fires immediately).
-	if wait > 0 {
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(wait):
-		}
-	}
-
-	pc.logger.Warn("node auth rejected; re-minting node token before reconnect",
-		"peer_id", pc.nodeId,
-		"address", pc.address,
-		"error", cause,
-	)
-
-	_, err := fn(ctx)
+	tok, err := fn(ctx, rejected)
 	if err != nil {
-		// Grow the backoff so a persistently-failing identity isn't hammered.
-		pc.bumpRemintBackoff()
+		if errors.Is(err, errRemintSuppressed) {
+			pc.logger.Warn("node auth rejected a freshly minted token; backing off instead of re-minting",
+				"peer_id", pc.nodeId,
+				"address", pc.address,
+				"error", cause,
+			)
+			return false
+		}
 		pc.logger.Warn("node token re-mint failed; will retry on the next reconnect",
 			"peer_id", pc.nodeId,
 			"address", pc.address,
 			"error", err,
+			"rejection", cause,
 		)
 		return false
 	}
+	if tok == "" || tok == rejected {
+		return false
+	}
 
-	pc.resetRemintBackoff()
-	pc.logger.Info("node token re-minted after auth rejection; retrying connection",
+	pc.logger.Info("node auth rejected; retrying with a new node token",
 		"peer_id", pc.nodeId,
 		"address", pc.address,
+		"error", cause,
 	)
 	return true
 }
 
-func (pc *peerConnection) bumpRemintBackoff() {
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	if pc.remintBackoff <= 0 {
-		pc.remintBackoff = remintInitialBackoff
-		return
-	}
-	pc.remintBackoff = time.Duration(float64(pc.remintBackoff) * backoffFactor)
-	if pc.remintBackoff > remintMaxBackoff {
-		pc.remintBackoff = remintMaxBackoff
-	}
-}
-
-func (pc *peerConnection) resetRemintBackoff() {
-	pc.mu.Lock()
-	pc.remintBackoff = 0
-	pc.mu.Unlock()
-}
-
 // connectOnce establishes a single connection attempt.
 func (pc *peerConnection) connectOnce(parentCtx context.Context, onMessage func(*nodev1.NodeServerMessage)) error {
+	pc.mu.Lock()
+	pc.lastAttemptEstablished = false
+	pc.mu.Unlock()
 	// Per-attempt context so the read-liveness watchdog (memql#1388) can tear
 	// down a half-dead stream by cancelling it, which unblocks stream.Recv()
 	// and returns control to the outer reconnect loop. Cancelling this does
@@ -433,7 +439,13 @@ func (pc *peerConnection) connectOnce(parentCtx context.Context, onMessage func(
 	if pc.identity != nil {
 		// Read under the token lock: the re-mint path (memql#1521) writes
 		// BearerToken at runtime, so a bare field read here would race it.
-		if tok := pc.identity.BearerTokenValue(); tok != "" {
+		// Remember what went on the wire, so a rejection is answered for
+		// this token rather than for whatever the Identity holds by then.
+		tok := pc.identity.BearerTokenForDial(ctx, pc.logger)
+		pc.mu.Lock()
+		pc.presented = tok
+		pc.mu.Unlock()
+		if tok != "" {
 			streamCtx = metadata.AppendToOutgoingContext(streamCtx,
 				"authorization", "Bearer "+tok)
 		}
@@ -511,10 +523,19 @@ func (pc *peerConnection) connectOnce(parentCtx context.Context, onMessage func(
 	}
 
 	// Receive loop (blocks until stream ends or context cancelled)
+	answered := false
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
 			return err
+		}
+		if !answered {
+			// The peer is alive and took us: this attempt does not count
+			// toward giveUpAfter, and the count starts over.
+			answered = true
+			pc.mu.Lock()
+			pc.lastAttemptEstablished = true
+			pc.mu.Unlock()
 		}
 		// Reset the inbound-silence deadline. Non-blocking: a full channel
 		// already signals "saw activity since the last watchdog tick".

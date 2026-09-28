@@ -64,8 +64,8 @@ import (
 // "operator-CLI mint that pre-dates persistence" case is treated as
 // not-revoked; verifier proceeds).
 // Returns (false, error) when the lookup itself failed; the
-// interceptor logs and short-circuits to codes.Unauthenticated to
-// avoid admitting traffic on a partially-failed revocation check.
+// interceptor logs and refuses the open with codes.Unavailable rather
+// than admitting traffic on a partially-failed revocation check.
 type NodeTokenRevocationResolver interface {
 	IsNodeTokenRevoked(ctx context.Context, nodeType, nodeId string) (bool, error)
 }
@@ -148,7 +148,16 @@ func NodeClassStreamInterceptorWithRevocation(v *verifier.Verifier, check *NodeR
 						"method", info.FullMethod,
 						"error", err)
 				}
-				return status.Error(codes.Unauthenticated, "node token revocation check failed")
+				// Fail closed, but say WHOSE fault it is. The token verified; it
+				// is this node that could not finish checking it. A draining pod
+				// answers here for the whole Stop sweep after it has released its
+				// database pool (app/run.go). Unauthenticated would tell the
+				// caller its credential is bad, and the caller's answer to that is
+				// to mint another one (isAuthRejection in connection.go): one local
+				// rollout on 2026-09-28 minted ~2,900 node tokens in 27 seconds
+				// against terminating pods that way. Unavailable is what the
+				// caller backs off from.
+				return status.Error(codes.Unavailable, "node token revocation check unavailable")
 			}
 			if revoked {
 				if logger != nil {
