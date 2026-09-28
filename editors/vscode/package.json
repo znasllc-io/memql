@@ -206,6 +206,21 @@
         "when": "memql.clusterSelected && memql.connectionState == connected"
       },
       {
+        "view": "memqlDeployments",
+        "contents": "Connecting.",
+        "when": "memql.clusterSelected && memql.connectionState == connecting"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "Can't reach this cluster.\n[Open Cluster Page](command:memql.deployments.openCluster)",
+        "when": "memql.clusterSelected && memql.connectionState == unreachable"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "This cluster has no address.\n[Edit Cluster](command:memql.clusters.edit)",
+        "when": "memql.clusterSelected && memql.connectionState == notConfigured"
+      },
+      {
         "view": "memqlConstructs",
         "contents": "Not connected. Select a cluster to browse its constructs.\n[Select Cluster](command:memql.clusters.select)",
         "when": "!memql.clusterSelected"

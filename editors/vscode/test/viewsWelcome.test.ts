@@ -143,6 +143,20 @@ test("a selected cluster whose history cannot be read says what it needs, never 
   assert.equal(empty?.contents, "No history yet.");
 });
 
+test("every connection state that can leave a selected cluster's history empty has a welcome line", () => {
+  // A blank view under a heading is the one thing a disconnected read must
+  // never look like. The history of a cluster this editor cannot read is
+  // empty for a reason, and the welcome says which.
+  const states = ["connected", "signIn", "connecting", "unreachable", "notConfigured"];
+  for (const state of states) {
+    const entry = welcomeFor("memqlDeployments").find(
+      (e) => e.when === `${CLUSTER_SELECTED_KEY} && memql.connectionState == ${state}`,
+    );
+    assert.ok(entry, `no welcome for ${state}`);
+    assert.equal(entry.contents.split("\n")[0]!.length <= 40, true, `${state}: more than one short line`);
+  }
+});
+
 test("only the Deployments welcome carries the install entry point", () => {
   // WHERE THE `local` ROW'S JOB WENT (design D4): the Deployments welcome, the
   // Clusters welcome and the view title menu. Constructs and Data do NOT get
