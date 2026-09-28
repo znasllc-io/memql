@@ -430,3 +430,149 @@ func TestBaseComparisonIsBuiltFromTheHeadOidNotTheBranchName(t *testing.T) {
 			"got exit %d\n%s", code, out)
 	}
 }
+
+// THE ABSENT REQUIRED CHECK, and the fail-open every guard above shared.
+//
+// The guard counted required checks that had FAILED and required checks that
+// were PENDING, and refused on either. A required check that does not EXIST
+// is neither, so both counts were zero and the guard passed. `ci-required` is
+// an `if: always()` aggregate with `needs:` on every other lane, and GitHub
+// does not create a job's check run until its `needs:` have finished -- so for
+// most of a CI run the one check the ruleset requires is ABSENT from the
+// rollup, and a merge attempted then went straight through the bypass.
+//
+// Observed 2026-09-28: `merge-as-owner.sh --pr=5709` printed `checks: 3
+// passed, 0 failed, 13 pending`, warned that it was proceeding with 13
+// non-required checks still running, and merged memql#5709 while all five
+// db-tests shards were pending and no `ci-required` check run existed on the
+// head commit.
+//
+// The fix is to ask the positive question: is every required context PRESENT
+// with a SUCCESS conclusion? Not "is none of them red or running".
+func TestGuardRefusesARequiredCheckThatHasNotReported(t *testing.T) {
+	// The #5709 shape: a few lanes green, many running, no ci-required at all.
+	running := `{"name":"changes","conclusion":"SUCCESS"},` +
+		`{"name":"plan","conclusion":"SUCCESS"},` +
+		`{"name":"db-tests (1)","status":"IN_PROGRESS"},` +
+		`{"name":"db-tests (2)","status":"QUEUED"}`
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired, prRollup(running))
+	out, code := runMergeAsOwner(t, stub)
+
+	if code != 3 {
+		t.Fatalf("a required check that has not reported must refuse with exit 3: it is neither "+
+			"failed nor pending, so counting those alone passes it. That is how memql#5709 merged "+
+			"with db-tests still running. exit=%d\n%s", code, out)
+	}
+	if strings.Contains(out, "STUB-MERGE-INVOKED") {
+		t.Fatalf("the script merged with the required check absent:\n%s", out)
+	}
+	if !strings.Contains(out, "ci-required has not reported yet") {
+		t.Errorf("the refusal must NAME the required context that is missing; output:\n%s", out)
+	}
+}
+
+// The same hole at its widest: a pull request whose checks have not even been
+// queued. Every count is zero, which is what "all clear" looked like too.
+func TestGuardRefusesAnEmptyRollupWhenACheckIsRequired(t *testing.T) {
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired, prRollup(``))
+	out, code := runMergeAsOwner(t, stub)
+	if code != 3 {
+		t.Fatalf("an empty rollup must refuse when the ruleset requires a check, got exit %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "ci-required has not reported yet") {
+		t.Errorf("the refusal must name the missing context; output:\n%s", out)
+	}
+}
+
+// Present is not the same as passed. The old guard recognised exactly two red
+// conclusions (FAILURE, TIMED_OUT) and two running statuses (QUEUED,
+// IN_PROGRESS); a required check in any other state -- cancelled, skipped, a
+// commit status still PENDING or in ERROR -- was neither, and passed. GitHub
+// itself accepts SKIPPED and NEUTRAL for a required check; this script does
+// not, because it runs AROUND the ruleset, and an aggregate that did not run
+// has said nothing about the lanes beneath it.
+func TestGuardRefusesARequiredCheckThatIsPresentButNotSuccessful(t *testing.T) {
+	for _, tc := range []struct{ name, entry, wants string }{
+		{"cancelled check run", `{"name":"ci-required","status":"COMPLETED","conclusion":"CANCELLED"}`, "CANCELLED"},
+		{"skipped check run", `{"name":"ci-required","status":"COMPLETED","conclusion":"SKIPPED"}`, "SKIPPED"},
+		{"pending commit status", `{"context":"ci-required","state":"PENDING"}`, "PENDING"},
+		{"errored commit status", `{"context":"ci-required","state":"ERROR"}`, "ERROR"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired, prRollup(tc.entry))
+			out, code := runMergeAsOwner(t, stub)
+			if code != 3 {
+				t.Fatalf("a required check in state %s must refuse with exit 3, got %d\n%s", tc.wants, code, out)
+			}
+			if strings.Contains(out, "STUB-MERGE-INVOKED") {
+				t.Fatalf("the script merged over a required check in state %s:\n%s", tc.wants, out)
+			}
+			if !strings.Contains(out, "ci-required") || !strings.Contains(out, tc.wants) {
+				t.Errorf("the refusal must name the context and the state it is in (%s); output:\n%s", tc.wants, out)
+			}
+		})
+	}
+}
+
+// The control for the pair above: a required context reported as a commit
+// STATUS (`.context` + `.state`) rather than a check run (`.name` +
+// `.conclusion`) satisfies the guard when its state is SUCCESS. Without this,
+// "only a check run can pass" would satisfy every refusal test here.
+func TestGuardAcceptsASuccessfulRequiredCommitStatus(t *testing.T) {
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired,
+		prRollup(`{"context":"ci-required","state":"SUCCESS"}`))
+	out, code := runMergeAsOwner(t, stub)
+	if code != 0 {
+		t.Fatalf("a required commit status in state SUCCESS must satisfy the guard, got exit %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "STUB-MERGE-INVOKED") {
+		t.Errorf("the script did not reach the merge; output:\n%s", out)
+	}
+}
+
+// With more than one required context, EACH is judged, and the refusal names
+// every one that is missing and none that is not. A guard that asked "is some
+// required check green" would pass this pull request.
+func TestGuardNamesEachMissingRequiredContext(t *testing.T) {
+	requiresThree := `{
+  "rules": [
+    {"type":"pull_request","parameters":{"require_code_owner_review":true,"required_approving_review_count":0}},
+    {"type":"required_status_checks","parameters":{"required_status_checks":[
+      {"context":"ci-required"},{"context":"lint"},{"context":"license/cla"}
+    ]}}
+  ],
+  "bypass_actors": [{"actor_type":"RepositoryRole","actor_id":5,"bypass_mode":"pull_request"}]
+}`
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresThree, prRollup(ciRequiredGreen))
+	out, code := runMergeAsOwner(t, stub)
+	if code != 3 {
+		t.Fatalf("two of three required contexts are absent; the guard must refuse, got exit %d\n%s", code, out)
+	}
+	for _, missing := range []string{"lint has not reported yet", "license/cla has not reported yet"} {
+		if !strings.Contains(out, missing) {
+			t.Errorf("the refusal must name every missing required context (%q); output:\n%s", missing, out)
+		}
+	}
+	if strings.Contains(out, "ci-required has not reported yet") {
+		t.Errorf("ci-required reported SUCCESS and must not be named as missing; output:\n%s", out)
+	}
+}
+
+// --check returns before the guard, so the report is the only place a reader
+// running it learns that the required check is absent. It has to say so, or
+// `--check` on the #5709 shape reads as "0 failed" and nothing else.
+func TestReportMarksARequiredCheckThatHasNotReported(t *testing.T) {
+	stub := mergeGuardGhStub(t, rulesetsActive, requiresCIRequired,
+		prRollup(`{"name":"db-tests (1)","status":"IN_PROGRESS"}`))
+	script := filepath.Join(repoRoot(t), "scripts", "dev", "merge-as-owner.sh")
+	cmd := exec.Command("bash", script, "--pr=1", "--check")
+	cmd.Env = append(os.Environ(), "PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+	outB, err := cmd.CombinedOutput()
+	out := string(outB)
+	if err != nil {
+		t.Fatalf("--check merges nothing and must exit 0: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "NOT REPORTED (REQUIRED): ci-required") {
+		t.Errorf("the report must mark a required context that has not reported; output:\n%s", out)
+	}
+}
