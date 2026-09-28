@@ -674,7 +674,10 @@
     "build:install-cli": "esbuild src/install/cli.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist-install/cli.js",
     "install-cli": "npm run build:install-cli && node dist-install/cli.js",
     "test": "tsc -p tsconfig.test.json && node esbuild.test.js && node --test dist-test/test/*.js",
-    "test:host": "npm run compile && tsc -p tsconfig.host.json && node esbuild.host.js && node test-host/runner.js"
+    "test:host": "npm run compile && tsc -p tsconfig.host.json && node esbuild.host.js && node test-host/runner.js",
+    "gallery": "node gallery/build.mjs",
+    "gallery:shoot": "node gallery/shoot.mjs",
+    "gallery:check": "node gallery/check.mjs"
   },
   "dependencies": {
     "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
