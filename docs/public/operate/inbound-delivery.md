@@ -55,6 +55,7 @@ the source `big-corp` reads `MEMQL_INBOUND_SOURCE_BIG_CORP_*`:
 | `..._SIGNATURE_PREFIX` | no | stripped before decoding, e.g. `sha256=` |
 | `..._TIMESTAMP_HEADER` | no | turns on the replay window |
 | `..._DEDUPE_HEADER` | no | the sender's own idempotency key |
+| `..._FORWARD_HEADERS` | no | comma-separated allowlist of non-secret delivery headers to stage on the row as `headersJson` (lowercase keys). `Authorization`, `Cookie` and the signature header are never staged, whatever the list says. The body HMAC does not sign these values: they are routing metadata, not proof of who sent the request |
 | `..._ELEMENT_SEPARATOR` | no | the header is a `k=v` list; this is what separates the entries |
 | `..._SIGNATURE_ELEMENT` | with a separator | which element carries the digest |
 | `..._TIMESTAMP_ELEMENT` | no | which element carries the timestamp |
@@ -111,13 +112,20 @@ Note there is no `..._SIGNATURE_PREFIX` here and it would not help: `v1=` is not
 a *leading* prefix, because `t=<unix>,` comes first. That is precisely the shape
 the element vars exist for.
 
-A Shopify-shaped one:
+A Shopify-shaped one, for a custom app's webhook secret. The source is named
+`shopify-custom`, not `shopify`: a connector's own name is its app-level
+source (for Shopify, the three compliance topics, verified with the managed
+app's secret), and the receiver refuses an env pin on a bound connector's own
+name outright -- the connector would otherwise read a body verified by the env
+secret as app-signed, and the connector for its part refuses an app-level row
+it cannot have signed for.
 
 ```bash
-MEMQL_INBOUND_SOURCE_SHOPIFY_SIGNATURE_SCHEME=hmac-sha256-base64
-MEMQL_INBOUND_SOURCE_SHOPIFY_SIGNATURE_HEADER=X-Shopify-Hmac-Sha256
-MEMQL_INBOUND_SOURCE_SHOPIFY_DEDUPE_HEADER=X-Shopify-Webhook-Id
-MEMQL_INBOUND_SOURCE_SHOPIFY_SECRET=<shared secret>
+MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_SCHEME=hmac-sha256-base64
+MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_HEADER=X-Shopify-Hmac-Sha256
+MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_DEDUPE_HEADER=X-Shopify-Webhook-Id
+MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_FORWARD_HEADERS=X-Shopify-Topic,X-Shopify-Shop-Domain,X-Shopify-Webhook-Id
+MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SECRET=<shared secret>
 ```
 
 `..._SECRET` is secret material. It belongs in the deployment's secret store,

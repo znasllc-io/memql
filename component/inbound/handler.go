@@ -175,13 +175,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	headers, err := deliveryHeaders(src, r.Header)
+	if err != nil {
+		http.Error(w, "invalid delivery metadata", http.StatusBadRequest)
+		return
+	}
 	received := h.now().UTC()
 	requestID := requestIDFor(name, identityKeyFor(src, r.Header, body))
 	mutation := fmt.Sprintf(
 		`mutation stageInboundRequest(requestId: %s, source: %s, medium: "webhook", body: %s, `+
-			`contentType: %s, dedupeKey: %s, signatureVerified: %t, receivedAt: %s)`,
+			`contentType: %s, headersJson: %s, dedupeKey: %s, signatureVerified: %t, receivedAt: %s)`,
 		memqlString(requestID), memqlString(name), memqlString(string(body)),
-		memqlString(r.Header.Get("Content-Type")), memqlString(dedupeKey), verified,
+		memqlString(r.Header.Get("Content-Type")), memqlString(headers), memqlString(dedupeKey), verified,
 		memqlString(received.Format(time.RFC3339)))
 
 	if _, err := h.engine.Execute(systemActorContext(r.Context()), mutation); err != nil {
@@ -237,6 +242,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // changed to say so.
 func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig, bool) {
 	if src, ok := h.cfg.Sources[name]; ok {
+		// A BOUND connector's OWN name is never an env source. The connector
+		// reads a row under that name as "verified by my app secret" and
+		// binds the tenant off the signed body on that premise, so a body the
+		// env secret verified must never be staged under it -- and whether
+		// the connector currently CLAIMS the name is no help: an app with a
+		// client id but no sealed secret claims nothing, and that is exactly
+		// the state in which a stray row would be bound by client id. The
+		// name is reserved outright (memql#5707 review); a per-tenant name
+		// such as shopify-<storeId> stays ENV WINS, and the connector side
+		// refuses an app-level row it cannot have signed for as well.
+		if _, bound := memqlsync.Lookup(name); bound {
+			h.logger.Error("inbound receiver: env source names a bound connector, refusing with 404",
+				"source", name, "env", "MEMQL_INBOUND_SOURCE_"+envSuffix(name)+"_*")
+			return SourceConfig{}, false
+		}
 		return src, true
 	}
 	// THE REGISTERED TIER, after the environment and before the connectors.
@@ -279,6 +299,7 @@ func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig,
 		SignatureHeader: src.SignatureHeader,
 		SignaturePrefix: src.SignaturePrefix,
 		DedupeHeader:    src.DedupeHeader,
+		ForwardHeaders:  src.ForwardHeaders,
 	}, true
 }
 
@@ -434,12 +455,18 @@ func memqlString(s string) string { return langparser.QuoteString(s) }
 // precedent).
 const systemInboundActor = "system:inbound"
 
+// The write also carries INTERNAL ORIGIN, which stageInboundRequest requires
+// (@serverOnly): the row's `source` and `headersJson` drive a connector all
+// the way to a privacy purge, so the row's provenance must be the receiver's
+// and never a client's. The stamp is earned in ServeHTTP before the one
+// Execute: the source allowlist and the signature check precede it
+// (memql#5707 review).
 func systemActorContext(ctx context.Context) context.Context {
-	return auth.ContextWithToken(ctx, &auth.TokenInfo{
+	return auth.ContextWithInternalOrigin(auth.ContextWithToken(ctx, &auth.TokenInfo{
 		Subject: systemInboundActor,
 		Claims: map[string]any{
 			"sub":  systemInboundActor,
 			"role": "system",
 		},
-	})
+	}))
 }

@@ -43,6 +43,9 @@ type InboundSource struct {
 	SignatureHeader string
 	SignaturePrefix string
 	DedupeHeader    string
+	// ForwardHeaders names the non-secret delivery metadata the receiver stages.
+	// Values are not authenticated merely because the body signature matched.
+	ForwardHeaders []string
 	// Secret is the RESOLVED shared key. It lives here for exactly as
 	// long as the verification takes: never staged on a row, never
 	// logged, never returned to a caller.
@@ -69,6 +72,21 @@ func SourceName(connector, tenant string) string { return connector + "-" + tena
 // silently taking over a pinned name would move which secret verifies a
 // live sender, with nothing in the environment changed to say so.
 func SourceFor(ctx context.Context, name string) (InboundSource, bool) {
+	src, _, ok := sourceOwner(ctx, name)
+	return src, ok
+}
+
+// ConnectorForSource resolves an exact connector name or a source explicitly
+// claimed by a bound connector. It never guesses ownership from a prefix.
+func ConnectorForSource(ctx context.Context, name string) (Connector, bool) {
+	if c, ok := Lookup(name); ok {
+		return c, true
+	}
+	_, c, ok := sourceOwner(ctx, name)
+	return c, ok
+}
+
+func sourceOwner(ctx context.Context, name string) (InboundSource, Connector, bool) {
 	for _, connectorName := range BoundNames() {
 		c, ok := Lookup(connectorName)
 		if !ok {
@@ -79,8 +97,8 @@ func SourceFor(ctx context.Context, name string) (InboundSource, bool) {
 			continue
 		}
 		if src, ok := provider.InboundSource(ctx, name); ok {
-			return src, true
+			return src, c, true
 		}
 	}
-	return InboundSource{}, false
+	return InboundSource{}, nil, false
 }

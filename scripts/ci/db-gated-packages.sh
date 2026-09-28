@@ -204,6 +204,18 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 # go-checks to db-tests whole. Nothing is lost -- the lane runs whole packages
 # -- and the package's other suites are ordinary unit tests over an in-memory
 # store that now happen to run beside a database they ignore.
+# PR memql#5707 added `test/inboundhop`. The Shopify webhook hop -- receipt on
+# one engine through the inbound receiver, then the shipped
+# dispatchInboundToConnector automation and an independent connector instance
+# on a second engine, sharing only Postgres -- is the one proof that a staged
+# row's headersJson and receivedAt survive the row -> event -> automation ->
+# builtin hop, and a fake engine answers it either way. It crosses three
+# modules (component/inbound, component/datasync in the root module, and
+# integrations/shopify), so it cannot live in integrations/shopify without the
+# integrations module requiring the other two, which module-boundaries
+# refuses; the root module may depend on all three, so it sits under test/
+# beside clustere2e, and a db-gated test outside this lane only ever runs on
+# the machine of whoever happened to have Postgres up.
 readonly DB_GATED_TREES=(
 	"app"
 	"component/memql"
@@ -231,6 +243,7 @@ readonly DB_GATED_TREES=(
 	"integrations/work"
 	"examples/referencepack"
 	"packs"
+	"test/inboundhop"
 )
 
 # KNOWN_GO_MOD_DIRS is every directory this script knows carries a `go.mod`,

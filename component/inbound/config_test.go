@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"log/slog"
+	"reflect"
 	"testing"
 )
 
@@ -89,6 +90,9 @@ func TestLoadConfigAdmitsAConfiguredSource(t *testing.T) {
 	t.Setenv("MEMQL_INBOUND_SOURCE_ACME_SIGNATURE_SCHEME", SchemeHMACSHA256Base64)
 	t.Setenv("MEMQL_INBOUND_SOURCE_ACME_SECRET", "shh")
 	t.Setenv("MEMQL_INBOUND_SOURCE_ACME_SIGNATURE_HEADER", "X-Acme-Hmac")
+	// Lower-cased, trimmed, blanks dropped: the allowlist is compared against
+	// canonical header names, and a trailing comma is not a header.
+	t.Setenv("MEMQL_INBOUND_SOURCE_ACME_FORWARD_HEADERS", "X-Acme-Topic, X-Acme-Id,")
 	// The '-' in the name maps to '_' in the env spelling.
 	t.Setenv("MEMQL_INBOUND_SOURCE_BIG_CORP_SIGNATURE_SCHEME", SchemeNone)
 
@@ -99,6 +103,9 @@ func TestLoadConfigAdmitsAConfiguredSource(t *testing.T) {
 	}
 	if acme.Scheme != SchemeHMACSHA256Base64 || acme.Secret != "shh" || acme.SignatureHeader != "X-Acme-Hmac" {
 		t.Errorf("source policy did not resolve from env: %+v", acme)
+	}
+	if want := []string{"x-acme-topic", "x-acme-id"}; !reflect.DeepEqual(acme.ForwardHeaders, want) {
+		t.Errorf("FORWARD_HEADERS did not resolve from env: got %q, want %q", acme.ForwardHeaders, want)
 	}
 	if _, ok := cfg.Sources["big-corp"]; !ok {
 		t.Errorf("a source with an explicit scheme=none must be admitted -- it is a deliberate "+

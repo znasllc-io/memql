@@ -77,15 +77,15 @@ func TestTheSourceNameWinsOverTheShopDomainHeader(t *testing.T) {
 	}
 }
 
-func TestTheShopDomainHeaderResolvesWhenTheSourceCannot(t *testing.T) {
+func TestAnUnknownSourceCannotSelectAStoreByHeader(t *testing.T) {
 	h := newHarness(t)
 	req := memqlsync.InboundRequest{
 		Source:  "shopify-gone",
 		Headers: map[string]string{"x-shopify-shop-domain": "acme-widgets.myshopify.com"},
 	}
 	store, ok := h.conn.StoreFor(context.Background(), req)
-	if !ok || store.ID != testStoreID {
-		t.Fatalf("resolved %q/%v", store.ID, ok)
+	if ok {
+		t.Fatalf("unknown source selected store %q through an unsigned header", store.ID)
 	}
 }
 

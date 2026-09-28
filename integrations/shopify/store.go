@@ -240,6 +240,7 @@ func (r *StoreRegistry) InboundSourceFor(ctx context.Context, s Store) (memqlsyn
 		Scheme:          "hmac-sha256-base64",
 		SignatureHeader: HeaderHMAC,
 		DedupeHeader:    HeaderWebhookID,
+		ForwardHeaders:  shopifyDeliveryHeaders(),
 		Secret:          secret,
 		SecretRef:       s.WebhookSecretRef,
 	}, true

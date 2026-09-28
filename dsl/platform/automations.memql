@@ -22,11 +22,15 @@ automation dispatchInboundToConnector {
     id     any
     source any
     body   any
+    headersJson any
+    receivedAt any
   }
   dispatch := builtin datasyncDispatchInbound(
     inboundRequestId: args.id,
     source: args.source,
-    body: args.body
+    body: args.body,
+    headersJson: args.headersJson,
+    receivedAt: args.receivedAt
   )
 }
 

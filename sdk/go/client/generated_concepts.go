@@ -960,7 +960,6 @@ var BoundConcepts = map[string]string{
 	"sourceCredentialById":                             "v1:platform:sourceCredential",
 	"sourceCredentialsMine":                            "v1:platform:sourceCredential",
 	"stageConstructConceptData":                        "v1:authoring:construct",
-	"stageInboundRequest":                              "v1:platform:inboundRequest",
 	"stageOutboundRequest":                             "v1:platform:outboundRequest",
 	"staleClusterNodes":                                "v1:cluster:node",
 	"stampNodeTokenBootstrap":                          "v1:identity:identity",

@@ -318,8 +318,26 @@ customers/redact
 shop/redact
 ```
 
-Point all three at `https://api.<your-domain>/inbound/shopify-<storeId>`.
-A bad HMAC on any of them answers **401**, which is Shopify's requirement.
+Point all three at the **app-level** endpoint
+`https://api.<your-domain>/inbound/shopify` -- the connector's own name,
+with no store id -- and not at a store's `/inbound/shopify-<storeId>`. The
+reason is when Shopify sends them: for a shop that never finished
+installing, for a shop that uninstalled 48 hours ago, and before the first
+store has connected at all. A per-store URL exists only while that store
+row does; the app-level one exists as soon as the Connect flow has sealed
+the app's client id and secret (`SHOPIFY_CONNECT_CLIENT_ID` /
+`SHOPIFY_CONNECT_CLIENT_SECRET`), and every delivery to it is verified
+against that secret. A bad HMAC on any of them answers **401**, which is
+Shopify's requirement.
+
+Because one secret covers every store, neither the URL nor a header can say
+which store a privacy request is about. The connector reads the **signed**
+`shop_domain` in the body, refuses a delivery whose `X-Shopify-Shop-Domain`
+header disagrees with it, and queues a job only for a store this app
+installed (`appClientId`); any other shop is dropped without a job. A
+privacy delivery on a per-store URL is held to the same body check, and a
+**paused** store still queues its privacy jobs -- a pause stops the mirror,
+not the merchant's obligations.
 
 What each one does:
 

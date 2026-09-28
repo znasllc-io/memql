@@ -81,6 +81,15 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 	if c == nil || c.stores == nil {
 		return nil, nil
 	}
+	if req.Source == ConnectorName {
+		if _, _, ok := c.managedAppSigning(ctx); !ok {
+			// A row under the app-level source name while the managed app has
+			// no client id or no sealed secret: nothing this connector trusts
+			// verified it, so it is refused with a reason rather than bound
+			// to a store by client id (memql#5707 review).
+			return nil, fmt.Errorf("shopify: delivery on the app-level source while the managed app's client id or sealed secret is missing; nothing verified it as app-signed")
+		}
+	}
 	store, ok := c.StoreFor(ctx, req)
 	if !ok {
 		// A delivery for a store nobody configured. Not an error: an
@@ -90,6 +99,22 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		c.logger.Warn("shopify: delivery for an unknown store", "source", req.Source, "topic", req.Topic)
 		return nil, nil
 	}
+
+	topic := req.Topic
+	if topic == "" {
+		topic = header(req, HeaderTopic)
+	}
+	if isComplianceTopic(topic) {
+		if req.Source != ConnectorName && c.storeSignsWithManagedSecret(ctx, store) {
+			// A store installed through the managed app signs its per-store
+			// deliveries with the app secret, so a captured privacy delivery
+			// replays onto the per-store URL as well. Privacy topics for such
+			// a store are accepted only on the app-level source, where the
+			// webhook id collapses a replay (memql#5707 review).
+			return nil, fmt.Errorf("shopify: %s for a managed-app store must arrive on the app-level source, not %s", topic, req.Source)
+		}
+		return nil, c.enqueueComplianceJob(ctx, store, topic, req)
+	}
 	if !store.Ingests() {
 		// A paused store still STAGES -- the receiver recorded the
 		// delivery -- so a pause loses telemetry rather than events, and
@@ -97,13 +122,6 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		return nil, nil
 	}
 
-	topic := req.Topic
-	if topic == "" {
-		topic = header(req, HeaderTopic)
-	}
-	if isComplianceTopic(topic) {
-		return nil, c.enqueueComplianceJob(ctx, store, topic, req)
-	}
 	enum := generated.TopicHeaderToEnum(topic)
 	if enum == generated.TopicBulkOperationsFinish {
 		return nil, c.onBulkOperationFinish(ctx, store, req)
