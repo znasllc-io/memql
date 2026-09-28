@@ -1,208 +1,232 @@
-// What a Clusters-tree row says about a cluster.
+// What a cluster's row, page and menus say about its state.
 //
-// Split out of views/clustersTree.ts so the WORDING and the CHOICE OF ICON are
-// unit-testable, the way deploy/clusterView.ts holds the Cluster tab's. The
-// tree is left as a mapping from the names below onto ThemeIcons.
+// ONE STATE MACHINE FOR EVERY SURFACE. The Clusters row, the cluster page, the
+// row's menus and the `memql.connectionState` context key all read the state
+// computed here, so they cannot disagree about one cluster -- which is what the
+// old page did, saying "no credential", "did not answer" and "connected, but
+// the access read produced no identity" at once.
 //
-// The distinction this module exists to draw is memql#3385's second acceptance
-// item. A red error dot used to mean everything: an expired access token and a
-// cluster that had gone away rendered identically, and the two have completely
-// different next actions. `credential` is therefore its own state, at rest as
-// well as on failure -- a cluster carrying a PAT (memql#3383) can be flagged
-// before anyone tries to connect with it, because nothing about that credential
-// needs a round trip to diagnose.
+//   connected      this editor holds a live session to it
+//   connecting     a dial is in flight (or a dropped connection is retrying)
+//   signIn         the credential is the problem: none, expired, refused, or
+//                  of a class the mesh cannot verify
+//   unreachable    the cluster is the problem: the dial failed, or a live
+//                  connection dropped and stopped retrying
+//   notConfigured  there is no address to dial
+//   idle           configured, with a session this editor could use, and not
+//                  the one it is connected to
+//
+// AT REST, "signIn" IS CLAIMED ONLY WHEN NOTHING COULD RENEW SILENTLY. It used
+// to follow clusters.yaml alone, and the thirty-day refresh token lives in
+// SecretStorage -- so a row said "needs sign-in" for a cluster a click would
+// simply connect. The at-rest half reads `ClusterFacts` (facts.ts), which
+// looks in both places.
+//
+// THE WORDS are the person's: "Connected", "Sign in", "Connecting", "Not
+// running" (a local cluster), "Can't reach" (a remote one), "Not set up". The
+// full reason a dial failed goes to the MemQL Connection output, never here.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
-import {
-  classifyToken,
-  missingCredentialMessage,
-  notConfiguredMessage,
-  wrongTokenClassMessage,
-} from "../connection/credentials.js";
-import type { ConnectionState } from "../connection/manager.js";
+import { isUntrustedCertificate } from "../auth/errors.js";
+import { classifyToken } from "../connection/credentials.js";
+import { hostOf } from "../connection/endpoint.js";
+import type { ConnectionErrorReason, ConnectionState } from "../connection/manager.js";
 import { DEFAULT_STACK_TAG } from "../install/stackPin.js";
-import { briefMessage } from "../state/diagnostics.js";
 import { compareVersions } from "../version/compare.js";
 import { describeVersion } from "../version/describe.js";
 import type { ReleaseListing } from "../version/releaseCache.js";
-import { needsAuth, type ClusterConfig } from "./model.js";
+import type { ClusterFacts } from "./facts.js";
+import { displayLabel, type ClusterConfig } from "./model.js";
 
-export type ClusterRowIcon =
-  /** The working cluster, live. */
-  | "connected"
-  /** Handshake in flight. */
-  | "connecting"
-  /** The cluster itself is the problem: unreachable, or a connection that died. */
-  | "failed"
-  /** The CREDENTIAL is the problem: expired, missing, or of a class the mesh rejects. */
-  | "credential"
-  /** Nothing to dial. */
-  | "unconfigured"
-  /** Configured, not the working cluster. */
-  | "idle";
+export type ClusterState = "connected" | "connecting" | "signIn" | "unreachable" | "notConfigured" | "idle";
 
-export interface ClusterRowStatus {
-  icon: ClusterRowIcon;
-  tooltip: string;
+/** Why a cluster is in the `signIn` state, which decides the one sentence said about it. */
+export type SignInReason = "missing" | "expired" | "refused" | "wrongToken";
+
+export interface ClusterStatus {
+  state: ClusterState;
+  /** Set in the `signIn` state. */
+  signInReason?: SignInReason;
+  /** Set in the `unreachable` state: a connection that dropped, rather than a dial that failed. */
+  lost?: boolean;
+  /**
+   * Set in the `unreachable` state when the dial failed on a certificate this
+   * computer does not trust -- the cluster answered, and Repair (for a local
+   * cluster) is the fix, not a retry.
+   */
+  untrusted?: boolean;
 }
 
-// The reasons that mean "look at your token", not "look at your cluster".
-// `reauthenticationRequired` is one of them: the stored credentials were
-// refused and cleared (memql#3404), which is a credential problem even though
-// nothing about the cluster changed.
-const CREDENTIAL_REASONS = new Set([
-  "credentialExpired",
-  "wrongTokenClass",
-  "missingCredential",
-  "reauthenticationRequired",
-]);
+export interface StatusInput {
+  cluster: ClusterConfig;
+  connection: ConnectionState;
+  facts: ClusterFacts;
+}
 
-export function clusterRowStatus(
-  cluster: ClusterConfig,
-  state: ConnectionState,
-): ClusterRowStatus {
-  const isActive = state.status !== "disconnected" && state.clusterName === cluster.name;
+// The reasons that mean "look at your credential", not "look at your cluster".
+const SIGN_IN_REASONS: Readonly<Partial<Record<ConnectionErrorReason, SignInReason>>> = {
+  missingCredential: "missing",
+  credentialExpired: "expired",
+  reauthenticationRequired: "refused",
+  wrongTokenClass: "wrongToken",
+};
 
-  if (isActive && state.status === "connected") {
-    return { icon: "connected", tooltip: `Connected (node ${state.nodeId})` };
-  }
-  if (isActive && state.status === "connecting") {
-    return { icon: "connecting", tooltip: "Connecting..." };
-  }
-  if (isActive && state.status === "error") {
-    if (state.reason === "credentialExpired") {
-      return { icon: "credential", tooltip: `CREDENTIAL EXPIRED: ${state.message}` };
+/** The state of one cluster, from the live connection when it names this cluster, else from what is stored. */
+export function clusterStatus(input: StatusInput): ClusterStatus {
+  const { cluster, connection } = input;
+  const active = connection.status !== "disconnected" && connection.clusterName === cluster.name;
+  if (active) {
+    switch (connection.status) {
+      case "connected":
+        return { state: "connected" };
+      case "connecting":
+        return { state: "connecting" };
+      case "error": {
+        const reason = SIGN_IN_REASONS[connection.reason];
+        if (reason !== undefined) return { state: "signIn", signInReason: reason };
+        if (connection.reason === "notConfigured") return { state: "notConfigured" };
+        // A dropped connection being retried reads as connecting, not as an
+        // outage: another try is scheduled (ConnectionManager's ReconnectPolicy).
+        if (connection.retrying === true) return { state: "connecting" };
+        return {
+          state: "unreachable",
+          lost: connection.reason === "lost",
+          ...(isUntrustedCertificate(connection.message) ? { untrusted: true } : {}),
+        };
+      }
     }
-    if (CREDENTIAL_REASONS.has(state.reason)) {
-      return { icon: "credential", tooltip: `CREDENTIAL: ${state.message}` };
-    }
-    return { icon: "failed", tooltip: `ERROR: ${state.message}` };
   }
-
-  // At rest. The same three sentences the connection attempt would produce, so
-  // an operator reads one explanation of a condition rather than two.
-  if (cluster.endpoint.trim() === "") {
-    return { icon: "unconfigured", tooltip: notConfiguredMessage(cluster.name) };
-  }
+  if (cluster.endpoint.trim() === "") return { state: "notConfigured" };
   const tokenClass = classifyToken(cluster.token);
-  if (tokenClass === "pat" || tokenClass === "workerToken") {
-    return { icon: "credential", tooltip: wrongTokenClassMessage(cluster.name, tokenClass) };
-  }
-  if (needsAuth(cluster)) {
-    return { icon: "credential", tooltip: missingCredentialMessage(cluster.name) };
-  }
-  return { icon: "idle", tooltip: cluster.endpoint };
+  if (tokenClass === "pat" || tokenClass === "workerToken") return { state: "signIn", signInReason: "wrongToken" };
+  if (!input.facts.session) return { state: "signIn", signInReason: input.facts.signedIn ? "expired" : "missing" };
+  return { state: "idle" };
 }
 
-/** The two pieces of text a Clusters-tree row renders beside its icon. */
-export interface ClusterRowText {
-  /** The dimmed text after the cluster's name. */
-  description: string;
-  tooltip: string;
-}
-
-/**
- * The one-or-two-word verdict a row's dimmed description leads with.
- *
- * The clusters-first IA (memql#4195) reads the list as "which of my clusters
- * needs me", so the subtitle answers STATE, not address. `idle` answers
- * nothing: a configured cluster that simply is not the working one has no
- * state worth a word, and the version alone is the useful fact.
- */
-export function rowVerdict(icon: ClusterRowIcon): string {
-  switch (icon) {
+/** The state in the row's words. Empty for an idle cluster that is not the one in use. */
+export function stateWord(status: ClusterStatus, cluster: ClusterConfig, inUse: boolean): string {
+  switch (status.state) {
     case "connected":
-      return "connected";
+      return "Connected";
     case "connecting":
-      return "connecting...";
-    case "failed":
-      return "unreachable";
-    case "credential":
-      return "needs sign-in";
-    case "unconfigured":
-      return "no endpoint";
+      return "Connecting";
+    case "signIn":
+      return "Sign in";
+    case "unreachable":
+      // A certificate this computer does not trust is not a stopped cluster.
+      return cluster.local === true && status.untrusted !== true ? "Not running" : "Can't reach";
+    case "notConfigured":
+      return "Not set up";
     case "idle":
-      return "";
+      return inUse ? "Not connected" : "";
+  }
+}
+
+/** One short sentence about the state, for a tooltip or the page's action bar detail. */
+export function stateSentence(status: ClusterStatus, cluster: ClusterConfig): string {
+  switch (status.state) {
+    case "connected":
+      return "Connected.";
+    case "connecting":
+      return "Connecting.";
+    case "signIn":
+      switch (status.signInReason) {
+        case "expired":
+        case "refused":
+          return "Your session ended.";
+        case "wrongToken":
+          return "The saved token can't be used here.";
+        default:
+          return "Not signed in.";
+      }
+    case "unreachable":
+      if (status.untrusted === true) return "This computer doesn't trust the cluster's certificate.";
+      if (status.lost === true) return "The connection was lost.";
+      return cluster.local === true ? "The local cluster isn't answering." : "This cluster isn't answering.";
+    case "notConfigured":
+      return "No address set.";
+    case "idle":
+      return "Not connected.";
   }
 }
 
 /**
- * The one-sentence skew fact for a cluster whose recorded release is behind
- * the release this extension build is pinned to (src/install/stackPin.ts).
- * Empty when the versions are not comparable or the cluster is not behind --
- * an incomparable pair proves nothing, and saying "maybe" on every row is
- * noise. The transport-failure variant of the same fact lives in
- * version/skewHint.ts; this is the AT-REST rendering the tree can show
- * without any call having failed.
+ * The version, only when it tells the person something: a newer release
+ * exists, or the cluster is older than this extension expects. A version that
+ * is simply current (or `main`) is on the page and in the tooltip, not on
+ * every row.
  */
-export function recordedSkewSentence(recorded: string | undefined): string {
-  const version = (recorded ?? "").trim();
-  if (version === "") return "";
-  if (compareVersions(version, DEFAULT_STACK_TAG) !== "behind") return "";
-  return `This cluster records ${version}, older than the ${DEFAULT_STACK_TAG} this extension ships for -- it may not answer this editor's newer calls.`;
+export function versionNote(cluster: ClusterConfig, listing: ReleaseListing | undefined): string {
+  const described = describeVersion({ recorded: cluster.version, listing });
+  if (described.state === "behind" && described.latest !== undefined) return `${described.latest} available`;
+  if (isOlderThanExtension(cluster.version)) return "Needs an update";
+  return "";
 }
 
-/**
- * The row's words: this cluster's STATE and release (memql#3995, memql#4195).
- *
- * THIS IS THE SURFACE THAT MAKES A DISCONNECTED OR NEVER-DIALLED CLUSTER'S
- * VERSION VISIBLE AT ALL. Every other place a version could appear needs a live
- * session; this one is read off clusters.yaml, so it answers with the cluster
- * switched off -- which is the situation the motivating incident happened in,
- * and the reason memql#3990 records the version rather than observing it.
- *
- * THE ENDPOINT IS NOT THE SUBTITLE ANY MORE (memql#4194, audit rows 10/42).
- * A `host:port` on every row put internal addresses on permanent display in
- * the sidebar -- in every screenshot and screen share -- to answer a question
- * nobody asks at a glance. It lives in the tooltip here and on the Connection
- * page, which is the surface FOR addresses.
- *
- * THE TOOLTIP IS BRIEF ON FAILURE. Raw transport errors go to the MemQL
- * Connection output channel (extension.ts records them as the state changes);
- * the hover carries the classified first line and names the channel, because a
- * hover can be neither scrolled nor copied and must never be the only home of
- * a diagnostic.
- *
- * An unknown version adds NOTHING. A row that appended "unknown" to every
- * cluster on a fresh install would be noise, and the connection page says the
- * word where there is room to explain it.
- */
+/** Whether the recorded version is behind the release this extension build is pinned to. */
+export function isOlderThanExtension(recorded: string | undefined): boolean {
+  const version = (recorded ?? "").trim();
+  return version !== "" && compareVersions(version, DEFAULT_STACK_TAG) === "behind";
+}
+
+/** The two pieces of text a Clusters row renders beside its icon, and what assistive tech reads. */
+export interface ClusterRowText {
+  /** The dimmed words after the name: state and a version note, joined by " · ". */
+  description: string;
+  /** Three short lines at most: the state, the address, the version. */
+  tooltip: string;
+  /** "memql.localhost, Connected, in use". */
+  accessibilityLabel: string;
+}
+
 export function clusterRowText(
   cluster: ClusterConfig,
-  state: ConnectionState,
+  status: ClusterStatus,
+  inUse: boolean,
   listing: ReleaseListing | undefined,
 ): ClusterRowText {
-  // The synthetic error row (empty name -- a name the registry refuses to
-  // store) says nothing here; the tree renders its own words for it.
-  if (cluster.name === "") {
-    return { description: "", tooltip: "" };
-  }
-  const status = clusterRowStatus(cluster, state);
-  const version = describeVersion({ recorded: cluster.version, listing });
-  const verdict = rowVerdict(status.icon);
-  const description = [verdict, version.short].filter((part) => part !== "").join(" - ");
+  const word = stateWord(status, cluster, inUse);
+  const description = [word, versionNote(cluster, listing)].filter((part) => part !== "").join(" · ");
 
-  const endpoint = cluster.endpoint.trim();
-  // An idle row's status "verdict" is the bare endpoint (pinned by the status
-  // tests); rendered here under its label so the hover has exactly one
-  // address line whatever the state.
-  const lines =
-    status.icon === "idle" && endpoint !== ""
-      ? [`Endpoint: ${endpoint}`]
-      : [briefMessage(status.tooltip)];
-  if (status.icon === "failed") {
-    lines.push("Full error: the MemQL Connection output channel.");
+  const lines = [stateSentence(status, cluster)];
+  const host = hostOf(cluster.endpoint) ?? cluster.endpoint.trim();
+  if (host !== "") lines.push(host);
+  const recorded = (cluster.version ?? "").trim();
+  if (recorded !== "") {
+    const described = describeVersion({ recorded, listing });
+    lines.push(
+      described.state === "behind" && described.latest !== undefined
+        ? `Version ${recorded} · ${described.latest} available`
+        : `Version ${recorded}`,
+    );
   }
-  if (status.icon !== "idle" && endpoint !== "") {
-    lines.push(`Endpoint: ${endpoint}`);
-  }
-  if (version.state !== "unknown") {
-    lines.push(version.sentence);
-  }
-  const skew = recordedSkewSentence(cluster.version);
-  if (skew !== "") {
-    lines.push(skew);
-  }
-  return { description, tooltip: lines.join("\n") };
+
+  const spoken = [displayLabel(cluster), word === "" ? "not connected" : word];
+  if (inUse) spoken.push("in use");
+  return { description, tooltip: lines.join("\n"), accessibilityLabel: spoken.join(", ") };
+}
+
+/**
+ * The row's contextValue: the kind and the flags the menus are gated on,
+ * joined by ";" so a `when` clause matches one with `viewItem =~ /;flag(;|$)/`.
+ *
+ *   memqlCluster;<state>[;local][;signedIn][;ownerSetup][;os][;inUse]
+ *
+ * Every row starts with `memqlCluster`, so a clause keyed on the prefix
+ * reaches every row, and the state token is always the second.
+ */
+export function clusterContextValue(
+  cluster: ClusterConfig,
+  status: ClusterStatus,
+  facts: ClusterFacts,
+  inUse: boolean,
+): string {
+  const parts = ["memqlCluster", status.state];
+  if (cluster.local === true) parts.push("local");
+  if (facts.signedIn) parts.push("signedIn");
+  if (facts.ownerSetup && status.state !== "connected") parts.push("ownerSetup");
+  if (facts.consoleUrl !== "") parts.push("os");
+  if (inUse) parts.push("inUse");
+  return parts.join(";");
 }

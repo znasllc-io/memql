@@ -26,6 +26,7 @@ import * as path from "node:path";
 
 import {
   CLUSTER_SELECTED_KEY,
+  LOCAL_CLUSTER_PRESENT_KEY,
   NOT_CONNECTED_REFUSAL,
 } from "../src/state/connectionContext.js";
 
@@ -132,18 +133,35 @@ test("only the Deployments welcome carries the install entry point", () => {
   }
 });
 
-test("the Clusters welcome is unchanged and stays unconditional", () => {
-  // It is the SELECTOR: the one view that must say something useful when there
-  // is no cluster to select, so it is keyed on nothing and renders whenever its
-  // tree is empty. Gating it on `!memql.clusterSelected` would be circular --
+test("the Clusters welcome says whether a local cluster is already here", () => {
+  // It is the SELECTOR: the one view that must say something useful when
+  // there is no cluster to select, so it is never keyed on the connection --
   // a user with no clusters at all could never reach the offer to add one.
+  // It IS keyed on what is on this machine: a local cluster that is running
+  // but not in the list (removed from it, or built with `make up`) is one
+  // click from connected, and leading with "Install" there would offer to
+  // build a second one over it.
   const entries = welcomeFor("memqlClusters");
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].when, undefined, "the Clusters welcome grew a when clause");
-  assert.deepEqual(linkedCommands(entries[0].contents).sort(), [
-    "memql.clusters.add",
-    "memql.deployments.createDeployment",
-  ]);
+  assert.equal(entries.length, 2);
+  const none = entries.find((e) => e.when === `!${LOCAL_CLUSTER_PRESENT_KEY}`);
+  const present = entries.find((e) => e.when === LOCAL_CLUSTER_PRESENT_KEY);
+  assert.ok(none !== undefined && present !== undefined, "one welcome for each answer of the presence key");
+  for (const entry of entries) {
+    assert.ok(!(entry.when ?? "").includes(CLUSTER_SELECTED_KEY), "the Clusters welcome is keyed on the connection");
+  }
+
+  assert.ok(none.contents.startsWith("No clusters yet.\n"));
+  assert.deepEqual(linkedCommands(none.contents), ["memql.deployments.createDeployment", "memql.clusters.add"]);
+
+  assert.ok(present.contents.startsWith("A local cluster is running on this computer.\n"));
+  assert.deepEqual(linkedCommands(present.contents), ["memql.clusters.connectLocal", "memql.clusters.add"]);
+
+  // One line and its buttons: no doctrine, no retired names.
+  for (const entry of entries) {
+    const [line] = entry.contents.split("\n");
+    assert.ok(line.length < 60, `the welcome is a paragraph: ${line}`);
+    assert.doesNotMatch(entry.contents, /portal/i);
+  }
 });
 
 test("Runs has no connection-gated welcome", () => {

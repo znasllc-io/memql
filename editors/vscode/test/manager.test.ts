@@ -229,7 +229,9 @@ test("a credential-less OIDC cluster reports a MISSING CREDENTIAL, without diali
   const state = manager.state as { message: string; reason: string };
   assert.equal(state.reason, "missingCredential");
   assert.doesNotMatch(state.message, /Cockpit/);
-  assert.match(state.message, /JWT access token/);
+  // The record ends with the fix, and never with hand-editing the file.
+  assert.match(state.message, /Sign in/);
+  assert.doesNotMatch(state.message, /clusters\.yaml|refresh_token/);
 });
 
 test("a PAT is refused by name, without dialing", async () => {
@@ -376,7 +378,7 @@ test("an unconfigured cluster (no endpoint) produces the generic not-configured 
   const state = manager.state as { status: string; message: string; reason: string };
   assert.equal(state.status, "error");
   assert.equal(state.reason, "notConfigured");
-  assert.match(state.message, /not configured/);
+  assert.match(state.message, /no address/);
 });
 
 test("disconnect() closes the live connection and publishes disconnected", async () => {
@@ -615,7 +617,7 @@ test("a credential-less cluster with no endpoint reports 'not configured', not a
   assert.equal(dialed, false);
   const state = manager.state as { message: string; reason: string };
   assert.equal(state.reason, "notConfigured");
-  assert.match(state.message, /not configured/);
+  assert.match(state.message, /no address/);
 });
 
 // --- The reactive 401: the cluster refused a bearer we believed was good -----

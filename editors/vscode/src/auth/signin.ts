@@ -30,7 +30,7 @@
 import type { ClusterConfig } from "../clusters/model.js";
 import type { ConnectionErrorReason } from "../connection/manager.js";
 import { identityBaseUrlFor } from "../connection/endpoint.js";
-import { isAuthFlowError, type AuthFlowErrorKind } from "./errors.js";
+import { isAuthFlowError, isUntrustedCertificate, type AuthFlowErrorKind } from "./errors.js";
 import type { AuthFlowTokens } from "./flow.js";
 
 /**
@@ -216,6 +216,12 @@ export interface SignInFailureReport {
    * offer a retry affordance on true; it must not on false.
    */
   retryable: boolean;
+  /**
+   * The failure is this computer not trusting the cluster's certificate
+   * (errors.ts isUntrustedCertificate). For a local cluster the fix is
+   * Repair, which the caller offers.
+   */
+  untrustedCertificate: boolean;
 }
 
 /**
@@ -232,21 +238,24 @@ export interface SignInFailureReport {
  * part that said what to do.
  */
 export function describeSignInFailure(clusterLabel: string, err: unknown): SignInFailureReport {
+  const untrusted = isUntrustedCertificate(err);
   if (!isAuthFlowError(err)) {
     return {
       level: "error",
-      message: `Couldn't sign in to ${clusterLabel}.`,
+      message: untrusted ? untrustedSentence(clusterLabel) : `Couldn't sign in to ${clusterLabel}.`,
       detail: err instanceof Error ? err.message : String(err),
       retryable: false,
+      untrustedCertificate: untrusted,
     };
   }
   const level = levelFor(err.kind);
-  if (level === "silent") return { level, message: "", detail: "", retryable: false };
+  if (level === "silent") return { level, message: "", detail: "", retryable: false, untrustedCertificate: false };
   return {
     level,
-    message: sentenceFor(err.kind, clusterLabel, err.serverMessage),
+    message: untrusted ? untrustedSentence(clusterLabel) : sentenceFor(err.kind, clusterLabel, err.serverMessage),
     detail: err.message,
     retryable: retryableFor(err.kind),
+    untrustedCertificate: untrusted,
   };
 }
 
@@ -281,6 +290,11 @@ function retryableFor(kind: AuthFlowErrorKind): boolean {
     default:
       return true;
   }
+}
+
+/** The one sentence for a certificate this computer does not trust. */
+export function untrustedSentence(_label: string): string {
+  return "This computer doesn't trust the cluster's certificate.";
 }
 
 function sentenceFor(kind: AuthFlowErrorKind, label: string, server: string | undefined): string {

@@ -232,6 +232,35 @@ const TLS_ADVICE: Record<string, string> = {
 };
 
 /**
+ * Whether a failure (a thrown value, or the text it was rendered to) is this
+ * computer not trusting the server's certificate -- as distinct from an
+ * expired or misnamed certificate, and from a server that is not there.
+ *
+ * WHY IT IS ITS OWN QUESTION. A local cluster is fronted by a mkcert CA, and
+ * whether the extension host trusts it depends on how the editor was launched
+ * and on the editor's own certificate patching -- so the same healthy cluster
+ * can fail a sign-in or a dial for one person and not another. That failure
+ * used to read as "not answering" or as a sign-in fault. It is neither: the
+ * sentence is "This computer doesn't trust the cluster's certificate", and for
+ * a local cluster the fix is Repair, which sets the trust up again.
+ *
+ * Text as well as the cause chain, because a failure often arrives already
+ * rendered (errorText writes the code into the message, and a dial error from
+ * `ws` is a plain message).
+ */
+export function isUntrustedCertificate(err: unknown): boolean {
+  for (const link of typeof err === "string" ? [] : causeChain(err)) {
+    const code = errorCode(link);
+    if (TLS_ADVICE[code] === TRUST_STORE_ADVICE) return true;
+  }
+  const text = typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
+  return UNTRUSTED_TEXT.test(text);
+}
+
+const UNTRUSTED_TEXT =
+  /UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT|SELF_SIGNED_CERT_IN_CHAIN|DEPTH_ZERO_SELF_SIGNED_CERT|unable to verify the first certificate|unable to get local issuer certificate|self[- ]signed certificate/i;
+
+/**
  * errorText renders an unknown thrown value as a sentence fragment, including
  * the transport reason undici hides in `.cause` (memql#4619).
  */

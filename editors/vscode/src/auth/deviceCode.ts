@@ -241,14 +241,11 @@ export function deviceCodeActionMessage(
   authorization: DeviceAuthorization,
   via: DeviceCodeVia,
 ): string {
-  const finish = `enter code ${authorization.userCode} at ${authorization.verificationUri} to finish signing in`;
+  const enter = `Enter code ${authorization.userCode} at ${authorization.verificationUri}`;
   if (via === "fallback") {
-    return (
-      `MemQL: a browser sign-in is not possible on this host (details in the MemQL Connection output). ` +
-      `Finish with a device code instead: ${finish} -- on another device if this one cannot open the page.`
-    );
+    return `MemQL: This window can't finish a browser sign-in. ${enter}.`;
   }
-  return `MemQL: ${finish}. The approval page should have opened with the code pre-filled -- use the buttons if it did not.`;
+  return `MemQL: ${enter} to sign in.`;
 }
 
 /**

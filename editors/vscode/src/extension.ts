@@ -46,9 +46,10 @@ import {
   deviceCodeProgressLine,
   showDeviceCodeActions,
 } from './auth/deviceCodeUi.js';
-import { isAuthFlowError } from './auth/errors.js';
+import { isAuthFlowError, isUntrustedCertificate } from './auth/errors.js';
+import { BrowserOrCodeSignIn, CODE_OFFER_AFTER_MS } from './auth/codeOffer.js';
+import type { SignInPhase } from './auth/flow.js';
 import {
-  canSignIn,
   describeSignInFailure,
   performSignIn,
   selectSignInRunner,
@@ -72,8 +73,11 @@ import {
 import { revokeRefreshToken, signOutMessage, type RevocationOutcome } from './auth/revoke.js';
 import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { refreshTokenFieldPlan, resolveCredentialInput, tokenFieldPlan } from './clusters/form.js';
-import { displayLabel, needsAuth, type ClusterConfig } from './clusters/model.js';
-import { clusterRowText } from './clusters/status.js';
+import { displayLabel, type ClusterConfig } from './clusters/model.js';
+import { clusterRowText, clusterStatus } from './clusters/status.js';
+import { fileOnlyFacts, gatherClusterFacts, signedInKey, type ClusterFacts } from './clusters/facts.js';
+import { planLocalReconnect } from './clusters/reconnect.js';
+import { completeInstallHandoff } from './install/handoff.js';
 import { listK3dClusters } from "./clusters/k3dListing.js";
 import { ClusterPresence } from './clusters/presence.js';
 import {
@@ -81,12 +85,7 @@ import {
   probeClaimStateForCluster,
   setupUrlForCluster,
 } from './clusters/claimState.js';
-import {
-  isFirstCredentialPending,
-  receiptNamesAnotherCluster,
-  resolveOwnershipRoute,
-  type OwnershipRoute,
-} from './clusters/ownershipRoute.js';
+import { resolveOwnershipRoute, type OwnershipRoute } from './clusters/ownershipRoute.js';
 import {
   SIGN_IN_DEVICE_CODE,
   SIGN_IN_EDIT_CLUSTER,
@@ -106,7 +105,11 @@ import {
 } from './theme/themeOffer.js';
 import { CredentialResolver } from './connection/credentials.js';
 import { apiBaseUrlFor, composeEndpointFromDomain, identityBaseUrlFor } from './connection/endpoint.js';
-import { ConnectionManager, type ConnectionState } from './connection/manager.js';
+import {
+  ConnectionManager,
+  DEFAULT_RECONNECT_DELAYS_MS,
+  type ConnectionState,
+} from './connection/manager.js';
 import {
   COMMAND_RUN,
   COMMAND_RUN_AUTOMATION,
@@ -212,6 +215,8 @@ import {
   connectionContextKeys,
   CLUSTER_SELECTED_KEY,
   CONNECTED_KEY,
+  CONNECTION_STATE_KEY,
+  LOCAL_CLUSTER_PRESENT_KEY,
   NOT_CONNECTED_REFUSAL,
 } from './state/connectionContext.js';
 import { DEPLOYMENTS_INSTANCE_KEY } from './state/deploymentsCatalog.js';
@@ -437,6 +442,24 @@ async function copyEnrolmentLink(url: string): Promise<void> {
 // extension host does: both markers are session answers, not preferences
 // written to disk. See OfferMemory.
 const passkeyOfferMemory = new OfferMemory();
+
+// Which clusters (name and domain) have completed a sign-in on this machine,
+// in globalState. The one piece of evidence the owner-passkey offer needs
+// beyond the install receipt: an owner who has signed in here already holds a
+// credential, so "Create the owner passkey" is no longer a first-run step for
+// them (clusters/ownershipRoute.ts). A sign-out does not undo it.
+const SIGNED_IN_CLUSTERS_KEY = 'memql.signedInClusters';
+
+function signedInClusters(context: ExtensionContext): string[] {
+  const known = context.globalState.get<unknown>(SIGNED_IN_CLUSTERS_KEY);
+  return Array.isArray(known) ? known.filter((k): k is string => typeof k === 'string') : [];
+}
+
+// Assigned in registerRuntimeSurface, where SecretStorage and globalState are
+// in hand; the module-level helpers below (select, sign-in) read through them.
+let factsForCluster: (cluster: ClusterConfig) => Promise<ClusterFacts> = (cluster) =>
+  Promise.resolve(fileOnlyFacts(cluster));
+let rememberSignIn: (cluster: ClusterConfig) => Promise<void> = async () => {};
 
 // activate wires the extension's TWO INDEPENDENT SURFACES: the language client
 // and the runtime surface (Clusters / Concepts / Runs).
@@ -1431,6 +1454,18 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     (keys) => {
       void commands.executeCommand('setContext', CLUSTER_SELECTED_KEY, keys.clusterSelected);
       void commands.executeCommand('setContext', CONNECTED_KEY, keys.connected);
+      void commands.executeCommand('setContext', CONNECTION_STATE_KEY, keys.connectionState);
+    },
+    // A DROPPED CONNECTION IS RETRIED, a handful of times over about two
+    // minutes, and never against a credential refusal (ConnectionManager's
+    // ReconnectPolicy). Each try re-reads the entry, so a cluster removed from
+    // the list meanwhile stops the retries rather than being redialled.
+    {
+      delaysMs: DEFAULT_RECONNECT_DELAYS_MS,
+      reload: async (name) => {
+        const registry = await readClustersFileSafe(clustersPath);
+        return registry.ok ? registry.file.clusters.find((c) => c.name === name) : undefined;
+      },
     }
   );
 
@@ -1438,6 +1473,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // surface that mentions the failure afterwards -- tree tooltip, toast,
   // Connection page -- shows the brief form and points here, so shortening
   // them loses nothing.
+  //
+  // AND THE ONE PLACE a connection that dropped and could not be retried is
+  // announced: the retries run silently (the row reads "Connecting"), and only
+  // when they stop is there something to say -- with Reconnect as the button.
+  let lastState: ConnectionState = connections.state;
   connections.onDidChangeState((state) => {
     if (state.status === 'error') {
       noteDiagnostic(
@@ -1445,6 +1485,17 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         `dial to "${state.clusterName}" failed (${state.reason})`,
         state.message
       );
+    }
+    const wasRetrying = lastState.status === 'error' && lastState.retrying === true;
+    lastState = state;
+    if (wasRetrying && state.status === 'error' && state.retrying !== true) {
+      if (state.reason === 'lost' || state.reason === 'unreachable') {
+        void announceLostConnection(state.clusterName, clustersPath, 'reconnect');
+      } else if (signInCanRecover(state.reason)) {
+        // The retry reached the cluster and was refused on the credential:
+        // the session ended while the connection was down.
+        void announceLostConnection(state.clusterName, clustersPath, 'signIn');
+      }
     }
   });
 
@@ -1512,11 +1563,35 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     write: (name, version) => upsertCluster(clustersPath, { name, version }),
   });
 
+  // What this machine knows about each cluster's sign-in (clusters/facts.ts):
+  // SecretStorage as well as the file, so a row never claims "Sign in" for a
+  // cluster a stored session would connect -- plus the owner-passkey offer's
+  // evidence. The tree, the cluster page and the select command read it.
+  factsForCluster = (cluster) =>
+    gatherClusterFacts(cluster, {
+      readRefreshToken: (name) => new ClusterCredentialStore(context.secrets).readRefreshToken(name),
+      readReceipt: () => readReceipt(defaultReceiptPath()),
+      signedInBefore: (c) => signedInClusters(context).includes(signedInKey(c)),
+      now: () => Date.now(),
+    });
+  rememberSignIn = async (cluster) => {
+    const known = signedInClusters(context);
+    const key = signedInKey(cluster);
+    if (!known.includes(key)) await context.globalState.update(SIGNED_IN_CLUSTERS_KEY, [...known, key]);
+  };
+
+  // Set once `presence` exists (below): the tree calls it after every read, and
+  // it publishes whether a local cluster is on this machine for the welcome.
+  let onClustersRead: (clusters: readonly ClusterConfig[]) => void = () => {};
   const clustersTree = new ClustersTreeProvider(
     clustersPath,
     connections,
     releaseCache,
-    clusterVersions
+    clusterVersions,
+    {
+      factsFor: (cluster) => factsForCluster(cluster),
+      onRead: (clusters) => onClustersRead(clusters),
+    }
   );
   context.subscriptions.push(
     window.registerTreeDataProvider('memqlClusters', clustersTree)
@@ -1557,6 +1632,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   watcher.onDidChange(() => clustersRegistryChanged(clustersTree));
   watcher.onDidCreate(() => clustersRegistryChanged(clustersTree));
   watcher.onDidDelete(() => clustersRegistryChanged(clustersTree));
+  // The cluster page reads the same file; an edit there (or by the Cockpit)
+  // is a change to what it says.
+  watcher.onDidChange(() => ConnectionPanel.refresh());
+  watcher.onDidCreate(() => ConnectionPanel.refresh());
+  watcher.onDidDelete(() => ConnectionPanel.refresh());
   context.subscriptions.push(watcher);
 
 
@@ -2232,7 +2312,30 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   const presence = new ClusterPresence({
     clustersPath,
     listClusters: () => listK3dClusters({ root: installRootFor(context) }),
+    // Why a probe said "not answering", for the person who wonders: the
+    // Deployments view and the "+" page only show the verdict.
+    onProbeFailure: (endpoint, reason) =>
+      noteDiagnostic(connectionOutput, `the local cluster at ${endpoint} did not answer`, reason),
   });
+
+  // memql.localClusterPresent: whether a MemQL local cluster is on this
+  // machine, listed or not -- installed by this extension, or by `make up`.
+  // The Clusters welcome reads it to offer "Connect to it" instead of Install.
+  // Asked when the tree reads the file, through the presence memo, so a
+  // repaint does not re-dial; install, uninstall and remove invalidate the
+  // memo and refresh the tree, which asks again.
+  let presencePublished: boolean | undefined;
+  onClustersRead = () => {
+    void presence
+      .get()
+      .then((result) => {
+        const present = result.verdict !== 'absent';
+        if (present === presencePublished) return;
+        presencePublished = present;
+        void commands.executeCommand('setContext', LOCAL_CLUSTER_PRESENT_KEY, present);
+      })
+      .catch(() => undefined);
+  };
 
   // "Forget this cluster", as one call: the entry, the stored credential and
   // the live connection. Lifted out of the memql.clusters.remove handler
@@ -2285,30 +2388,46 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     commands.registerCommand('memql.clusters.refreshReleases', () =>
       clustersTree.refreshReleases()
     ),
-    commands.registerCommand('memql.clusters.disconnect', async () => {
+    // Disconnect acts on the cluster it was asked about. The page and the row
+    // menu pass their node, and a page for cluster B used to drop the
+    // connection to A; with a node, nothing happens unless the live (or
+    // in-flight, or retrying) connection names that cluster. The palette,
+    // which passes none, disconnects whatever is connected.
+    commands.registerCommand('memql.clusters.disconnect', async (node?: ClusterNode) => {
+      const state = connections?.state;
+      if (node !== undefined && (state === undefined || state.status === 'disconnected' || state.clusterName !== node.cluster.name)) {
+        return;
+      }
       await connections?.disconnect();
       clustersTree.refresh();
     }),
+    // A ROW CLICK, and the palette's Select Cluster (memql#4195's "use this
+    // cluster").
+    //
+    //   connected (or connecting) to it   -> open its page; never tear down a
+    //                                        live session to dial it again
+    //   nothing stored could sign in      -> open its page, where Sign in is
+    //                                        the primary act; the connection in
+    //                                        use is left alone
+    //   otherwise                         -> select it and connect; a
+    //                                        credential refusal opens the page
+    //
+    // NO MODAL, ever. A row click used to end in "is installed and running /
+    // One step left: create this cluster's owner passkey" for any local
+    // cluster with nothing stored -- including the owner's own, whose passkey
+    // already existed -- and its button dead-ended in "Re-run the installer".
+    // The owner-passkey step belongs to the install hand-off; everywhere else
+    // it is an offer on the page (clusters/ownershipRoute.ts).
     commands.registerCommand('memql.clusters.select', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
-      if (target === undefined) {
+      if (target === undefined || target.cluster.name === '') {
         return;
       }
-      await setSelectedCluster(clustersPath, target.cluster.name);
-      clustersTree.refresh();
       // THE REGISTRY WINS OVER A CALLER WITH NO ENDPOINT (#3905). This command
       // dials what it is handed, and the install hand-off used to hand it a
-      // placeholder built from the cluster's name alone -- so a successful
-      // install ended by reporting "not configured. Set an endpoint" about a
-      // cluster whose endpoint it had just written, and withheld the "Sign in"
-      // button because `notConfigured` is not credential-recoverable.
-      //
-      // The caller is fixed. This is the wall behind it, in the shape
-      // `install/secrets.ts` already argues for: the fix goes where the value is
-      // produced, and the wall goes where it is consumed, because the next
-      // caller to pass a half-built config has not been written yet. Only an
-      // EMPTY endpoint is overridden -- a caller naming a different one is
-      // making a deliberate statement and is left alone.
+      // placeholder built from the cluster's name alone. Only an EMPTY
+      // endpoint is overridden -- a caller naming a different one is making a
+      // deliberate statement and is left alone.
       let dialing = target.cluster;
       if (dialing.endpoint.trim() === '') {
         const registry = await readClustersFileSafe(clustersPath);
@@ -2317,88 +2436,87 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           : undefined;
         if (known !== undefined && known.endpoint.trim() !== '') dialing = known;
       }
-      await connections?.connect(dialing);
-      const state = connections?.state;
-      // THE END OF A SUCCESSFUL INSTALL COMES THROUGH HERE (memql#3909).
-      //
-      // The install hand-off selects the cluster it just registered, and this
-      // command dials -- so a cluster built thirty seconds ago, whose owner
-      // account by design holds no human credential, arrived at the error
-      // branch below every single time. It told the operator to hand-edit
-      // clusters.yaml with a JWT and offered them Sign in, which cannot work.
-      //
-      // That is not a failure to report; it is the one step left. Offered as
-      // information rather than an error, and wired to the action that
-      // actually completes it -- which then chains on to sign-in and the
-      // console by itself.
-      //
-      // MODAL, uniquely among this file's information messages (memql#4078).
-      // As a toast this was the first of three stacked notifications after the
-      // first fully-green install, and it evaporated before the operator could
-      // read it -- decapitating the walk it introduces. VS Code gives no
-      // duration control on a toast, but a modal stays until answered, and
-      // this is the one popup that can justify one: the single required next
-      // step, fired once, at the end of an install the operator just watched.
-      // The modal's built-in Cancel is the "later"; nothing else in the walk
-      // may be modal, or the walk becomes a wizard that traps.
-      //
-      // AND DETACHED, never awaited (memql#4079). The dial's caller is
-      // sometimes the install panel's hand-off, whose next paint is the done
-      // screen carrying the ONE-TIME recovery key reveal. Awaiting the modal
-      // here -- and, behind "Set up now", the whole ownership walk -- would
-      // hold that paint hostage until the walk ended, burying the only chance
-      // there will ever be to show the key behind the popup that introduces
-      // the walk. The dial is complete at this point, and both calls below
-      // surface their own failures, so answering the caller first loses
-      // nothing.
-      if (state?.status === 'error' && isFirstCredentialPending(state.reason, await ownershipRouteFor(dialing))) {
-        void (async () => {
-          const choice = await window.showInformationMessage(
-            `MemQL: "${displayLabel(dialing)}" is installed and running.`,
-            {
-              modal: true,
-              detail:
-                "One step left: create this cluster's owner passkey. Your browser " +
-                'will open -- approve the passkey prompt there, then come back to sign in.',
-            },
-            'Set up now'
-          );
-          if (choice === 'Set up now') {
-            await commands.executeCommand('memql.clusters.takeOwnership', {
-              cluster: dialing,
-              selected: true,
-            });
-          }
-        })();
+      const openPage = (): Thenable<unknown> =>
+        commands.executeCommand(
+          'memql.clusters.connection',
+          { cluster: dialing, selected: false },
+          { preserveFocus: true }
+        );
+
+      const current = connections?.state;
+      if (
+        current !== undefined &&
+        (current.status === 'connected' || current.status === 'connecting') &&
+        current.clusterName === dialing.name
+      ) {
+        await openPage();
         return;
       }
-      if (state?.status === 'error') {
-        // A failure the CREDENTIAL causes now has a first-class recovery in the
-        // editor, so it is offered as the primary action rather than described
-        // in prose the operator has to act on somewhere else (memql#3403). The
-        // decision of which reasons qualify is signInCanRecover's -- a dial
-        // that failed because the cluster is unreachable is not made reachable
-        // by a fresh token, and `notConfigured` means there is no endpoint at
-        // all. canSignIn is the second half: a cluster naming no identity
-        // service has nowhere to sign in to, and a button whose only outcome is
-        // an error toast is worse than no button.
-        // `dialing`, not `target.cluster`: the resolved config is the one that
-        // was actually connected to, and it is the one carrying the domain
-        // `canSignIn` and `signInToCluster` read to find the identity service.
-        const offer = signInCanRecover(state.reason) && canSignIn(dialing);
-        // Brief; the raw text is already in the Connection channel via the
-        // state listener above (memql#4194, audit 45).
-        const headline = `MemQL: ${briefMessage(state.message)}`;
-        const choice = offer
-          ? await offerDetails('error', connectionOutput, headline, 'Sign in')
-          : await offerDetails('error', connectionOutput, headline);
-        if (choice === 'Sign in') {
-          await signInToCluster(dialing, {
-            clustersPath,
-            store: signInStore,
-            clustersTree,
-          });
+
+      const facts = await factsForCluster(dialing);
+      const at = clusterStatus({ cluster: dialing, connection: { status: 'disconnected' }, facts });
+      if (at.state === 'signIn') {
+        // Known before any dial: nothing stored can authenticate. Tearing
+        // down a live connection to another cluster to learn that would leave
+        // the person connected to nothing, so that one is kept; with nothing
+        // live, this cluster becomes the one in use (an install's hand-off
+        // selects the cluster it just built).
+        if (current?.status !== 'connected' || current.clusterName === dialing.name) {
+          await setSelectedCluster(clustersPath, dialing.name);
+          clustersTree.refresh();
         }
+        await openPage();
+        return;
+      }
+
+      await setSelectedCluster(clustersPath, dialing.name);
+      clustersTree.refresh();
+      await connections?.connect(dialing);
+      const state = connections?.state;
+      if (state?.status !== 'error' || state.clusterName !== dialing.name) return;
+      if (signInCanRecover(state.reason) || state.reason === 'notConfigured') {
+        // The page says it, with Sign in (or Edit) as its primary act.
+        await openPage();
+        return;
+      }
+      // The cluster did not answer -- or answered with a certificate this
+      // computer does not trust, which is its own sentence and, for a local
+      // cluster, Repair's to fix. One short line and the fix; the full reason
+      // is already in the Connection output (the state listener above).
+      const retry = 'Retry';
+      const repair = 'Repair';
+      const untrusted = isUntrustedCertificate(state.message);
+      const actions = dialing.local === true ? (untrusted ? [repair, retry] : [retry, repair]) : [retry];
+      const headline = untrusted
+        ? "MemQL: This computer doesn't trust the cluster's certificate."
+        : `MemQL: ${displayLabel(dialing)} ${dialing.local === true ? "isn't running" : "isn't answering"}.`;
+      void (async () => {
+        const choice = await offerDetails('error', connectionOutput, headline, ...actions);
+        if (choice === retry) await commands.executeCommand('memql.clusters.select', { cluster: dialing, selected: true });
+        else if (choice === repair) await commands.executeCommand('memql.clusters.repair');
+      })();
+    }),
+    // Connect to the local cluster that is already on this machine, with
+    // nothing typed: the Clusters welcome's "Connect to it". The entry is
+    // composed exactly as a finished install composes it (clusters/
+    // reconnect.ts), then selected and connected like any row click.
+    commands.registerCommand('memql.clusters.connectLocal', async () => {
+      const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+      const plan = planLocalReconnect(receipt);
+      const result = await completeInstallHandoff(
+        { domain: plan.domain },
+        {
+          write: (update) => upsertCluster(clustersPath, update),
+          invalidatePresence: () => presence.invalidate(),
+          refreshTree: () => clustersTree.refresh(),
+          select: async (cluster) => {
+            await commands.executeCommand('memql.clusters.select', { cluster, selected: true });
+          },
+        }
+      );
+      if (!result.ok) {
+        noteDiagnostic(connectionOutput, 'adding the local cluster to the list failed', result.message);
+        void offerDetails('error', connectionOutput, "MemQL: Couldn't add the local cluster to your list.");
       }
     }),
     // memql#3403. Reached from the Clusters view's context menu (which supplies
@@ -2408,107 +2526,14 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (target === undefined || target.cluster.name === '') {
         return;
       }
-      // WHICH OF THREE STATES IS THIS CLUSTER IN (memql#3885, memql#3906).
-      //
-      //   nobody owns it            -> /setup, which mints the first owner
-      //   owner exists, nothing
-      //     stored here             -> an enrolment link, the first passkey
-      //   credential in hand        -> sign in
-      //
-      // THE ORDER THESE ARE ASKED IN IS THE FIX. #3885 probed `/setup` first
-      // and mapped everything else to sign-in, which is right for a cluster
-      // this machine knows nothing about and wrong for every cluster this
-      // machine INSTALLED: `seedBootstrap` has already created the owner, so
-      // `/setup` is sealed (verified: 404), and sign-in cannot work either
-      // because that owner holds no human credential. Worse, the probe cannot
-      // even reach a local cluster -- Node's `fetch` does not trust the mkcert
-      // CA, so it throws `UNABLE_TO_VERIFY_LEAF_SIGNATURE` and every local
-      // cluster answers `unknown`.
-      //
-      // So local evidence -- the receipt's recorded owner, and whether a
-      // credential is stored -- is consulted first, and the network only for
-      // what it cannot settle. `claim` is then reachable only on a real 200.
-      //
-      // AND IT RUNS INSIDE A PROGRESS NOTIFICATION (memql#4620). This used to be
-      // awaited bare, before anything was drawn. The probe is a network GET, and
-      // Node's fetch binds undici's 300-second headers timeout -- so a cluster
-      // whose host does not route left `MemQL: Sign In` looking like a command
-      // that did nothing at all, with no spinner to say otherwise and no way to
-      // give up. There is now both, on top of the five-second deadline
-      // `claimProbeSignal` imposes.
-      const route = await window.withProgress(
-        {
-          location: ProgressLocation.Notification,
-          title: `MemQL: checking what "${displayLabel(target.cluster)}" needs...`,
-          cancellable: true,
-        },
-        async (_progress, token) => {
-          const aborter = new AbortController();
-          const subscription = token.onCancellationRequested(() => aborter.abort());
-          try {
-            const resolved = await ownershipRouteFor(target.cluster, aborter.signal);
-            // Cancelling ends the COMMAND, not merely the probe. A cancelled
-            // probe answers `unknown`, `unknown` routes to sign-in, and opening
-            // a sign-in is not an honest answer to a person who just pressed
-            // Cancel on the step before it.
-            return token.isCancellationRequested ? undefined : resolved;
-          } finally {
-            subscription.dispose();
-          }
-        }
-      );
-      if (route === undefined) return;
-
-      if (route === 'claim') {
-        const wizard = setupUrlForCluster(target.cluster);
-        // THE SENTENCE, CORRECTED NOW THAT IT IS REACHABLE (memql#4622). It said
-        // "a cluster is claimed by its first sign-in", which is the bootstrap
-        // model this product no longer has: an install writes the owner ROW at
-        // identity boot, and what mints the first owner on a cluster that has
-        // none is the WIZARD. That copy cost nothing while memql#4620 kept this
-        // branch unreachable, and the moment the branch works it is the first
-        // thing an operator reads. clusters/ownershipRoute.ts carries the model.
-        const choice = await window.showInformationMessage(
-          `MemQL: "${displayLabel(target.cluster)}" has no owner account, so there is nothing to sign in to. Its ownership wizard is open and mints the first owner -- claim it first.`,
-          'Claim this cluster',
-          'Sign in anyway'
-        );
-        if (choice === 'Claim this cluster') {
-          // asExternalUri first, for the same reason the enrolment opener
-          // does it: under Remote-SSH or Codespaces the wizard runs on the
-          // REMOTE host, and the operator's browser is local.
-          const external = (await env.asExternalUri(Uri.parse(wizard))).toString(true);
-          await env.openExternal(Uri.parse(external));
-          return;
-        }
-        if (choice !== 'Sign in anyway') {
-          return;
-        }
-      }
-
-      // THE STATE A LOCAL INSTALL ACTUALLY LEAVES BEHIND (znasllc-io#3905).
-      //
-      // The owner account exists and has no passkey and no magic-link identity,
-      // so there is nothing to authenticate WITH. An operator reads that as
-      // "the extension will not let me in". Both routes are offered rather than
-      // one chosen, because this side cannot know whether the operator already
-      // registered a passkey on another machine -- they may have -- so it asks.
-      // The buttons speak the walk's vocabulary (memql#4078): the action is
-      // creating the cluster's owner passkey, not "taking ownership" -- that
-      // phrase survives only as the id of the command this button invokes.
-      if (route === 'enrol') {
-        const choice = await window.showInformationMessage(
-          `MemQL: "${displayLabel(target.cluster)}" has an owner but no credential is stored here. ` +
-            'Create the owner passkey if this is your first time on this machine; sign in if you already have one.',
-          'Create the owner passkey',
-          'Sign in'
-        );
-        if (choice === undefined) return;
-        if (choice === 'Create the owner passkey') {
-          await commands.executeCommand('memql.clusters.takeOwnership', target);
-          return;
-        }
-      }
+      // ONE CLICK, ONE PROGRESS. The ownership question -- is there an owner
+      // to sign in to at all? -- is asked silently inside the sign-in's own
+      // progress notification (signInToCluster), and only an unclaimed
+      // cluster stops to say so. The dialogs that used to stand in front of
+      // the browser ("checking what X needs", "Create the owner passkey or
+      // sign in?") are gone: a claimed cluster is signed in to
+      // (clusters/ownershipRoute.ts), and the owner passkey is an offer on
+      // the cluster page when it is really a first run.
       await signInToCluster(target.cluster, {
         clustersPath,
         store: signInStore,
@@ -2547,7 +2572,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       let url: string;
       try {
         url = await window.withProgress(
-          { location: ProgressLocation.Notification, title: 'MemQL: minting an enrolment link...' },
+          { location: ProgressLocation.Notification, title: 'MemQL: Preparing passkey setup' },
           () =>
             mintOwnershipLink(
               {
@@ -2562,7 +2587,21 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       } catch (err) {
         const detail = err instanceof OwnershipError ? err.message : String(err);
         noteDiagnostic(connectionOutput, 'minting an enrolment link failed', detail);
-        void offerDetails('error', connectionOutput, `MemQL: ${briefMessage(detail)}`);
+        // The fix as a button when the extension has one: no recorded owner
+        // means this is not a first run here -- sign in; a receipt for another
+        // cluster is what Repair re-records.
+        const reason = err instanceof OwnershipError ? err.reason : undefined;
+        const fix = reason === 'noOwner' ? 'Sign in' : reason === 'otherCluster' ? 'Repair' : undefined;
+        void (async () => {
+          const choice = await offerDetails(
+            'error',
+            connectionOutput,
+            `MemQL: ${briefMessage(detail)}`,
+            ...(fix === undefined ? [] : [fix])
+          );
+          if (choice === 'Sign in') await signInToCluster(target.cluster, { clustersPath, store: signInStore, clustersTree });
+          else if (choice === 'Repair') await commands.executeCommand('memql.clusters.repair');
+        })();
         return;
       }
       try {
@@ -2625,7 +2664,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // owns; "take ownership" survives only as this command's id and palette
       // title, which are contributions, not copy.
       const enrolled = await window.showInformationMessage(
-        `MemQL: approved the passkey prompt in your browser? Sign in to "${displayLabel(target.cluster)}" to finish.`,
+        `MemQL: Approve the passkey in your browser, then sign in to ${displayLabel(target.cluster)}.`,
         'Sign in'
       );
       if (enrolled !== 'Sign in') return;
@@ -2636,10 +2675,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       });
       if (!signedIn) return;
       const next = await window.showInformationMessage(
-        `MemQL: setup is complete -- you own "${displayLabel(target.cluster)}". MemQL OS is its operations console.`,
-        'Open console'
+        `MemQL: You're the owner of ${displayLabel(target.cluster)}.`,
+        'Open MemQL OS'
       );
-      if (next === 'Open console') {
+      if (next === 'Open MemQL OS') {
         await commands.executeCommand('memql.clusters.openConsole', target);
       }
     }),
@@ -2671,7 +2710,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         void offerDetails(
           'error',
           connectionOutput,
-          `MemQL: signing out of "${target.cluster.name}" failed.`
+          `MemQL: Couldn't sign out of ${displayLabel(target.cluster)}.`
         );
         return;
       }
@@ -2682,22 +2721,24 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         await connections?.disconnect();
       }
       clustersTree.refresh();
+      ConnectionPanel.refresh();
       // The wording follows what actually happened. A session this could not
-      // end is named as such, with identity's own Devices page as the way to
-      // end it -- "signed out" over a live refresh token is the defect.
+      // end is named as such, with MemQL OS's Devices page as the way to end
+      // it -- "signed out" over a live refresh token is the defect.
+      const label = displayLabel(target.cluster);
       if (revocation.attempted && !revocation.revoked) {
         noteDiagnostic(
           connectionOutput,
           `the session for "${target.cluster.name}" was not revoked on the cluster`,
           revocation.reason
         );
-        void offerDetails(
-          'warning',
-          connectionOutput,
-          signOutMessage(target.cluster.name, revocation)
-        );
+        void (async () => {
+          const open = 'Open MemQL OS';
+          const choice = await offerDetails('warning', connectionOutput, signOutMessage(label, revocation), open);
+          if (choice === open) await commands.executeCommand('memql.clusters.openConsole', target);
+        })();
       } else {
-        window.showInformationMessage(signOutMessage(target.cluster.name, revocation));
+        void window.showInformationMessage(signOutMessage(label, revocation));
       }
     }),
     // The "+" (memql#3412). It used to mean exactly one thing -- register a
@@ -2760,17 +2801,15 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // in the dialog rather than in documentation, because the dialog is
       // where the question is being asked.
       const confirmed = await window.showWarningMessage(
-        `Remove "${name}" from the cluster list?`,
+        `Remove ${displayLabel(target.cluster)} from your list?`,
         {
           modal: true,
+          // One sentence of what does NOT happen: the whole risk here is
+          // reading "remove" as "uninstall".
           detail:
             target.cluster.local === true
-              ? 'This removes the connection only. The cluster keeps running -- uninstall it ' +
-                'from Deployments. This editor forgets it and deletes the credential it stored, ' +
-                'and you can connect to it again from the "+" menu without re-typing anything.'
-              : 'This editor forgets the cluster and deletes the credential it stored for it. ' +
-                'Nothing is uninstalled, and no data on the cluster is touched. ' +
-                'You can add it back at any time.',
+              ? 'The cluster keeps running on this computer. You can add it back from +.'
+              : 'Nothing on the cluster changes. Your saved sign-in is deleted.',
         },
         'Remove'
       );
@@ -2794,7 +2833,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         noteDiagnostic(connectionOutput, `removing "${name}" failed`, detail);
-        void offerDetails('error', connectionOutput, `MemQL: removing "${name}" failed.`);
+        void offerDetails('error', connectionOutput, `MemQL: Couldn't remove ${displayLabel(target.cluster)}.`);
         return;
       }
 
@@ -2802,7 +2841,9 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // must not wait out the memo window (see presence.ts invalidate).
       presence.invalidate();
       clustersTree.refresh();
-      window.showInformationMessage(`MemQL: removed "${name}" from the cluster list.`);
+      // No toast: the row leaving the list is the confirmation, and the page
+      // (if open) says the cluster is no longer in the list.
+      ConnectionPanel.refresh();
     }),
     commands.registerCommand('memql.clusters.edit', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
@@ -2836,7 +2877,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // -- and from the palette, which cannot, so it falls back to the selected
     // cluster rather than doing nothing. That fallback is why this command
     // carries the trust clause instead of "when": "false".
-    commands.registerCommand('memql.clusters.connection', async (node?: ClusterNode) => {
+    commands.registerCommand('memql.clusters.connection', async (node?: ClusterNode, options?: { preserveFocus?: boolean }) => {
       if (connections === undefined) {
         return;
       }
@@ -2849,13 +2890,21 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         {
           clustersPath,
           connections,
-          // Straight off SecretStorage through the same store every other
-          // credential path uses -- one place decides how a credential is
-          // kept, so there is one place this can read it from.
-          readExpiry: (name) =>
-            new ClusterCredentialStore(context.secrets).readExpiry(name),
+          factsFor: (cluster) => factsForCluster(cluster),
+          releases: () => releaseCache.peek(),
+          // A sign-in in flight shows on the page as its own state, with Cancel
+          // and, after a while, "Use a code instead" -- the same controls the
+          // progress notification and its offer carry.
+          signInFlight: (name) => {
+            const flight = activeSignIns.get(name);
+            return flight === undefined ? undefined : { phase: flight.phase, codeOffered: flight.codeOffered };
+          },
+          cancelSignIn: (name) => activeSignIns.get(name)?.cancel(),
+          useCode: (name) => activeSignIns.get(name)?.useCode(),
+          showDetails: () => connectionOutput?.show(true),
         },
         target.cluster.name,
+        options?.preserveFocus === true,
       );
     }),
     // Open Console, as an inline action on the tree as well as a button on the
@@ -2871,9 +2920,14 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       }
       const url = await consoleUrlForCluster(target.cluster);
       if (url === '') {
-        void window.showErrorMessage(
-          'MemQL: no console address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
+        // Rare: the row and the page offer this only when an address can be
+        // composed. From the palette, the fix is the entry's domain.
+        const edit = 'Edit';
+        const choice = await window.showErrorMessage(
+          `MemQL: No MemQL OS address for ${displayLabel(target.cluster)}. Add its domain.`,
+          edit
         );
+        if (choice === edit) await commands.executeCommand('memql.clusters.edit', target);
         return;
       }
       await env.openExternal(Uri.parse(url));
@@ -2905,6 +2959,24 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   );
 
   registerRunSurface(context, clustersPath, connections);
+
+  // RECONNECT WITHOUT A CLICK. The cluster in use when the window last closed
+  // is connected again when it opens -- but only when something stored can
+  // authenticate it (clusters/facts.ts): a cluster that needs a sign-in is
+  // left for its row and page to say so, rather than dialled into a refusal.
+  // A failure here is shown only as the row's state; the reason is in the
+  // Connection output. Nothing is awaited: activation does not wait on the
+  // network, and a click in the meantime simply wins.
+  void (async () => {
+    const registry = await readClustersFileSafe(clustersPath);
+    if (!registry.ok || registry.file.selectedCluster === '') return;
+    const cluster = registry.file.clusters.find((c) => c.name === registry.file.selectedCluster);
+    if (cluster === undefined) return;
+    const facts = await factsForCluster(cluster);
+    const at = clusterStatus({ cluster, connection: { status: 'disconnected' }, facts });
+    if (at.state !== 'idle' || connections?.state.status !== 'disconnected') return;
+    await connections.connect(cluster);
+  })().catch(() => undefined);
 
   // A handoff that survived a window reload (memql#4251). Opening the local
   // checkout can restart the extension host, so the request was parked in
@@ -4222,28 +4294,35 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
   // raw command-error toast for a file the tree was calmly explaining.
   const result = await readClustersFileSafe(clustersPath);
   if (!result.ok) {
-    window.showErrorMessage(`MemQL: ${result.error}`);
+    const open = 'Open file';
+    const choice = await window.showErrorMessage("MemQL: Can't read your cluster list.", open);
+    if (choice === open) await commands.executeCommand('vscode.open', Uri.file(clustersPath));
     return undefined;
   }
   const file = result.file;
-  const picked = await window.showQuickPick(
-    file.clusters.map((cluster) => ({
-      label: cluster.name,
-      // The row policy (memql#4194, audit 42): state + version, never the
-      // address. Same composer as the tree, so the two lists cannot disagree.
-      description: clusterRowText(
+  const state = connections?.state ?? { status: 'disconnected' as const };
+  // The same words as the tree (clusters/status.ts), with the stored-session
+  // facts read the same way, so the two lists cannot disagree. The cluster in
+  // use goes first.
+  const items = await Promise.all(
+    file.clusters.map(async (cluster) => {
+      const facts = await factsForCluster(cluster).catch(() => fileOnlyFacts(cluster));
+      const inUse = cluster.name === file.selectedCluster;
+      const status = clusterStatus({ cluster, connection: state, facts });
+      return {
+        label: displayLabel(cluster),
+        description: clusterRowText(cluster, status, inUse, releaseCache.peek()).description,
         cluster,
-        connections?.state ?? { status: 'disconnected' },
-        releaseCache.peek()
-      ).description,
-      cluster,
-    })),
-    { placeHolder: 'Select a MemQL cluster' }
+        inUse,
+      };
+    })
   );
+  items.sort((a, b) => Number(b.inUse) - Number(a.inUse));
+  const picked = await window.showQuickPick(items, { placeHolder: 'Choose a cluster' });
   if (picked === undefined) {
     return undefined;
   }
-  return { cluster: picked.cluster, selected: picked.cluster.name === file.selectedCluster };
+  return { cluster: picked.cluster, selected: picked.inUse };
 }
 
 interface SignInDeps {
@@ -4253,184 +4332,143 @@ interface SignInDeps {
 }
 
 /**
- * What this cluster needs next: enrol a first credential, claim it, or sign in.
+ * Whether the cluster has an owner to sign in to at all.
  *
- * ONE COMPUTATION, TWO CALLERS (memql#3909). `memql.clusters.signIn` asks it to
- * decide what to offer, and `memql.clusters.select` asks it to decide whether a
- * failed dial is a fault or an unfinished install. Two copies would answer the
- * same question differently on the day one of them was edited, and the
- * disagreement would be an operator told to set up a passkey by one surface and
- * to edit clusters.yaml by the other.
+ * `claim` only on a real 200 from `/setup` -- the one state with no account to
+ * sign in to. Everything else, `claimed` and `unknown` alike, is a sign-in
+ * (clusters/ownershipRoute.ts): the old third route, "create the owner
+ * passkey", fired for any local cluster with nothing stored and sent the
+ * owner's own machine to a dead end.
  *
- * The receipt is read at the moment of use, not cached: an install or repair
- * can rewrite it between two clicks, and the owner it names is the value the
- * mint will carry.
- *
- * `cancel` is the progress notification's cancellation token, bridged. It bounds
- * only the PROBE -- the receipt read is local and cannot hang -- and a cancelled
- * probe answers `unknown` like any other unreachable one, so cancelling costs
- * the claim branch and nothing else.
+ * The probe runs under a deadline and the sign-in's own cancellation, so an
+ * unroutable host cannot hold the command (memql#4620), and it is asked of the
+ * CLUSTER (probeClaimStateForCluster), which is where the identity host is
+ * decided.
  */
 async function ownershipRouteFor(
   cluster: ClusterConfig,
   cancel?: AbortSignal
 ): Promise<OwnershipRoute> {
-  const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
-  return resolveOwnershipRoute(
-    {
-      local: cluster.local === true,
-      // The receipt is one file and the cluster list is many, so its owner is
-      // evidence only about the cluster whose domain it names.
-      ownerRecorded:
-        recordedOwner(receipt).email !== '' &&
-        !receiptNamesAnotherCluster(cluster.domain ?? '', recordedDomain(receipt)),
-      credentialMissing: needsAuth(cluster),
-    },
-    // RE-DERIVED at the moment of use rather than read from a stored flag: the
-    // operator may have claimed the cluster in a browser this extension never
-    // saw, and acting on a stale "unclaimed" would send them to a wizard that
-    // has since sealed.
-    //
-    // THE CLUSTER, NOT `cluster.issuer` (memql#4620). This passed the raw field,
-    // and NOTHING in this extension ever writes it -- the connect form's
-    // registration shape has no such key and the install path omits it on
-    // purpose. So the probe was handed `undefined` on every cluster the editor
-    // can produce, short-circuited to `unknown`, and `unknown` maps to sign-in:
-    // the `claim` branch below was unreachable in the shipped product, and an
-    // operator connecting to a genuinely unclaimed remote cluster was sent to
-    // authenticate against an account that does not exist. Which field names the
-    // identity service is `identityBaseUrlFor`'s decision, and
-    // probeClaimStateForCluster is where it is now made -- somewhere a test can
-    // reach, which this file is not.
-    //
-    // AND UNDER A DEADLINE. Node's fetch binds undici's 300-second headers
-    // timeout, so an unroutable host used to hang this command for five minutes.
-    () =>
-      probeClaimStateForCluster(cluster, {
-        fetch: globalThis.fetch,
-        signal: claimProbeSignal(cancel),
-      })
+  return resolveOwnershipRoute(() =>
+    probeClaimStateForCluster(cluster, {
+      fetch: globalThis.fetch,
+      signal: claimProbeSignal(cancel),
+    })
   );
 }
 
-// signInToCluster is the editor half of memql#3403's sign-in: progress,
-// cancellation, and the two vscode.env capabilities the flow needs injected.
-//
-// THIS IS THE ONLY SIGN-IN SHELL (memql#3515). There used to be two functions
-// with this name -- this one, and an exported one in auth/deviceCodeUi.ts that
-// ran the loopback-to-device-code fallback. The exported one had ZERO importers:
-// `MemQL: Sign In` reached this one, which ran loopback alone, so a host that
-// genuinely could not do loopback (Remote-SSH onto a box whose browser is
-// elsewhere, a hardened network) waited out the callback deadline and was then
-// told it had failed, with the code to hand it a device code sitting unreachable
-// two files away.
-//
-// The fallback is adopted here rather than deleted, because the capability is
-// real and tested (auth/deviceCode.ts, signInWithDeviceCodeFallback). Merging in
-// this direction rather than the other keeps the three things a sign-in owes the
-// editor and the other shell never did: the tree refresh, the reconnect of the
-// SELECTED cluster only, and the kind-based failure levels from auth/signin.ts.
-// deviceCodeUi.ts keeps the part that is genuinely about a device code -- putting
-// it on screen and keeping it there.
-//
-// WHY THE PROGRESS IS CANCELLABLE AND WHAT CANCELLING ACTUALLY DOES.
-// A browser sign-in parks on a loopback listener for minutes at a time waiting
-// for a person to finish a page they may already have closed. A notification
-// with no way out would leave the operator watching a spinner with no
-// affordance except reloading the window. The token is bridged to the
-// AbortSignal src/auth/flow.ts accepts, so cancelling closes the listener and
-// rejects with kind `cancelled` -- it is a real abort, not a hidden spinner.
-//
-// WHY THE FAILURE TOAST IS NOT AWAITED. Every rejection is reported through a
-// fire-and-forget message box: awaiting one would keep this command pending
-// until a human dismissed a notification, which makes the command unusable from
-// any automated caller (the host smoke lane included) and buys nothing -- the
-// message offers no choice to read back.
-// One sign-in flow per cluster at a time (memql#4596). Four surfaces reach
-// this -- the dial-failure toast's "Sign in" action, the palette command, the
-// ownership walk, "Sign In With a Device Code" -- and nothing used to stop two of them
-// running at once: two listeners, two browser tabs or code notifications, two
-// progress notifications. A second request now JOINS the in-flight attempt
-// and observes its outcome (joining, not cancel-and-restart: the person
-// asking again is usually the person mid-way through the first flow's browser
-// page, and a `flow` argument on a joined call is deliberately not honoured
-// -- one flow at a time is the point). Keyed by cluster name; different
-// clusters stay independent.
+/**
+ * A sign-in in flight, as the cluster page shows it: which phase, whether "Use
+ * a code instead" is on offer, and the two controls the page binds to.
+ */
+interface ActiveSignIn {
+  phase: 'opening' | 'waiting' | 'finishing' | 'code';
+  codeOffered: boolean;
+  cancel(): void;
+  useCode(): void;
+}
+const activeSignIns = new Map<string, ActiveSignIn>();
+
+// One sign-in flow per cluster at a time (memql#4596). Every surface reaches
+// this -- the row's inline Sign in, the page, a toast, the palette, the
+// ownership walk, "Sign In With a Device Code" -- and a second request JOINS
+// the in-flight attempt and observes its outcome rather than opening a second
+// browser tab. Keyed by cluster name; different clusters stay independent.
 const signInFlights = new SingleFlight<boolean>();
 
+// signInToCluster is the editor half of the sign-in: ONE cancellable progress
+// notification whose line moves through "Opening your browser" -> "Waiting for
+// you in the browser" -> "Finishing sign-in" -> "Connecting".
+//
+// WHAT HAPPENS IN IT, in order:
+//   - the ownership question, silently: only a cluster with no owner stops,
+//     to offer its wizard (ownershipRouteFor);
+//   - the browser sign-in, which is checked before the browser opens -- a
+//     cluster that refuses this editor fails in seconds (auth/flow.ts) -- and
+//     which falls back to a device code by itself on a host that cannot do
+//     loopback (auth/deviceCode.ts);
+//   - after CODE_OFFER_AFTER_MS without a callback, "Use a code instead",
+//     which runs the device grant BESIDE the browser (auth/codeOffer.ts): the
+//     loopback listener stays up, so a late callback still wins;
+//   - on success: this cluster is selected and connected (signing in to a
+//     cluster is asking to use it), and remembered as signed in here, which is
+//     what retires the owner-passkey offer.
+//
+// WHY THE FAILURE TOAST IS NOT AWAITED. Awaiting it would keep this command
+// pending until a human dismissed a notification, which makes the command
+// unusable from any automated caller (the host smoke lane included).
 async function signInToCluster(
   cluster: ClusterConfig,
   deps: SignInDeps,
   flow: SignInFlow = 'auto'
 ): Promise<boolean> {
-  // Said out loud, not silently absorbed. The joiner most worth telling is
-  // the one who ran "MemQL: Sign In With a Device Code" while a browser flow
-  // waits on its (now ten-minute) callback: their request is deliberately
-  // not honoured as a second flow, so without this line the documented
-  // recovery gesture would read as a command that does nothing.
   if (signInFlights.has(cluster.name)) {
-    void window.showInformationMessage(
-      `MemQL: a sign-in to "${cluster.name}" is already in progress -- finish it, or cancel it from its progress notification first.`
-    );
+    // Said out loud rather than silently absorbed, with the way out: a flight
+    // whose browser tab was closed would otherwise swallow every new click
+    // until its deadline.
+    void (async () => {
+      const again = 'Start over';
+      const choice = await window.showInformationMessage(
+        `MemQL: Already signing in to ${displayLabel(cluster)}.`,
+        again
+      );
+      if (choice !== again) return;
+      activeSignIns.get(cluster.name)?.cancel();
+      await signInFlights.run(cluster.name, async () => false).catch(() => false);
+      await signInToCluster(cluster, deps, flow);
+    })();
   }
   return signInFlights.run(cluster.name, () => runSignInToCluster(cluster, deps, flow));
 }
+
+/** The progress line for each phase of a browser sign-in. */
+const SIGN_IN_PHASE_LINES: Readonly<Record<SignInPhase, string>> = {
+  opening: 'Opening your browser',
+  waiting: 'Waiting for you in the browser',
+  finishing: 'Finishing sign-in',
+};
 
 async function runSignInToCluster(
   cluster: ClusterConfig,
   deps: SignInDeps,
   flow: SignInFlow = 'auto'
 ): Promise<boolean> {
-  return window.withProgress(
+  const label = displayLabel(cluster);
+  let offerClaim = false;
+  const signedIn = await window.withProgress(
     {
       location: ProgressLocation.Notification,
-      title:
-        flow === 'deviceCode'
-          ? `MemQL: signing in to ${displayLabel(cluster)} with a device code`
-          : `MemQL: signing in to ${displayLabel(cluster)}`,
+      title: `MemQL: Signing in to ${label}`,
       cancellable: true,
     },
     async (progress, token) => {
       const aborter = new AbortController();
       const cancelSubscription = token.onCancellationRequested(() => aborter.abort());
-      // Read by the code notification at every step, so a flow that finished or
-      // was cancelled while the notification sat open does not re-summon it.
       let settled = false;
-      // True once a device code owns the progress line; the quiet-wait hint
-      // below must never overwrite it.
-      let deviceCodeShown = false;
-      // True from the moment the auto-fallback fires. Declared here, above
-      // the hint timer that reads it: after a bindFailed fallback the line
-      // says "switching to a device code..." while POST /device/code runs,
-      // and the hint overwriting THAT with browser-flow advice would claim a
-      // flow is running that is not. Also read by onUserCode (the action
-      // message explains the switch) and the failure path (so an error in the
-      // fallback flow still says why a device code was being tried at all).
       let fallbackFired = false;
-      // The browser wait can legitimately run for minutes -- the magic-link
-      // round trip is enter-email, wait for the mail, click, approve -- and a
-      // spinner that says nothing for that long reads as hung (memql#4594,
-      // which replaced the old answer: silently switching to a device code
-      // under the person's live tab). One update, after a quiet minute,
-      // naming both exits.
-      const quietHint =
-        flow === 'deviceCode'
-          ? undefined
-          : setTimeout(() => {
-              if (settled || deviceCodeShown || fallbackFired) return;
-              progress.report({
-                message:
-                  'still waiting for the browser sign-in -- magic-link emails can take a minute. Cancel and run "MemQL: Sign In With a Device Code" if the page cannot reach this machine.',
-              });
-            }, 60_000);
-      // Both grants report the user code the same way, and the device code is
-      // the one thing a person has to READ off the screen and carry to another
-      // one -- so it goes on the progress line (undismissable, lives exactly as
-      // long as the polling) and into a message with the two actions a
-      // progress line cannot render.
+      let offerTimer: ReturnType<typeof setTimeout> | undefined;
+      const flight: ActiveSignIn = {
+        phase: flow === 'deviceCode' ? 'code' : 'opening',
+        codeOffered: false,
+        cancel: () => aborter.abort(),
+        useCode: () => {},
+      };
+      activeSignIns.set(cluster.name, flight);
+      const say = (message: string): void => progress.report({ message });
+      const phase = (next: ActiveSignIn['phase']): void => {
+        flight.phase = next;
+        if (next !== 'waiting') flight.codeOffered = false;
+        ConnectionPanel.repaint();
+      };
+      ConnectionPanel.repaint();
+
+      // Both grants report the code the same way, and it is the one thing a
+      // person has to READ off the screen and carry to another -- so it goes on
+      // the progress line (lives exactly as long as the polling) and into one
+      // message with the two actions a progress line cannot render.
       const onUserCode = (authorization: DeviceAuthorization): void => {
-        deviceCodeShown = true;
-        progress.report({ message: deviceCodeProgressLine(authorization) });
+        phase('code');
+        say(deviceCodeProgressLine(authorization));
         showDeviceCodeActions(
           authorization,
           () => settled,
@@ -4440,144 +4478,242 @@ async function runSignInToCluster(
       };
       // asExternalUri is not decoration: under Remote-SSH, Codespaces or a dev
       // container the browser runs on a different machine from this extension
-      // host, and the loopback URL has to be rewritten into one that machine
-      // can reach. toString(true) skips re-encoding -- the authorization URL's
-      // query is already percent-encoded and encoding it twice corrupts the
-      // PKCE challenge and the state.
+      // host. toString(true) skips re-encoding -- the authorization URL's query
+      // is already percent-encoded and encoding it twice corrupts the PKCE
+      // challenge and the state.
       const resolveExternalUri = async (url: string): Promise<string> =>
         (await env.asExternalUri(Uri.parse(url))).toString(true);
+      const runDevice = (signal: AbortSignal | undefined): ReturnType<typeof runDeviceCodeFlow> =>
+        runDeviceCodeFlow(cluster, { signal, onUserCode });
+      const runBrowser = (signal: AbortSignal | undefined): ReturnType<typeof signInWithDeviceCodeFallback> =>
+        signInWithDeviceCodeFallback(cluster, {
+          signal,
+          onUserCode,
+          resolveExternalUri,
+          openExternal: (url) => env.openExternal(Uri.parse(url)),
+          // WHAT MAKES REMOTE-SSH WORK (memql#4623). Undefined locally. A
+          // remote extension host cannot receive a loopback callback, so the
+          // flow refuses before binding and takes the device path.
+          remoteName: env.remoteName,
+          onPhase: (p) => {
+            phase(p);
+            say(SIGN_IN_PHASE_LINES[p]);
+          },
+          onFallback: (reason) => {
+            fallbackFired = true;
+            announceDeviceCodeFallback(progress, reason, sinkFor(connectionOutput));
+          },
+        });
+
       try {
-        progress.report({
-          message: flow === 'deviceCode' ? 'requesting a device code...' : 'opening your browser...',
-        });
-        await performSignIn(cluster, {
-          signal: aborter.signal,
-          store: deps.store,
-          // The choice of grant is selectSignInRunner's, in auth/signin.ts,
-          // where a test can reach it (memql#3515). This file binds the two
-          // runners to vscode; it does not decide between them.
-          runFlow: selectSignInRunner(flow, {
-            loopbackWithDeviceFallback: (target, signal) =>
-              signInWithDeviceCodeFallback(target, {
-                signal,
-                onUserCode,
-                resolveExternalUri,
-                openExternal: (url) => env.openExternal(Uri.parse(url)),
-                // WHAT MAKES REMOTE-SSH WORK (memql#4623). Undefined locally.
-                // A remote extension host cannot receive a loopback callback --
-                // the port would be on the wrong machine -- so the flow refuses
-                // before binding and this fallback takes the device path, which
-                // needs no callback at all. Read here rather than in `flow.ts`,
-                // which must stay free of `vscode` imports.
-                remoteName: env.remoteName,
-                onFallback: (reason) => {
-                  fallbackFired = true;
-                  announceDeviceCodeFallback(progress, reason, sinkFor(connectionOutput));
-                },
-              }),
-            deviceCode: (target, signal) => runDeviceCodeFlow(target, { signal, onUserCode }),
-          }),
-        });
-      } catch (err) {
-        const report = describeSignInFailure(cluster.name, err);
-        if (report.level !== 'silent') {
-          noteDiagnostic(connectionOutput, `sign-in to "${cluster.name}" failed`, report.message);
+        say(flow === 'deviceCode' ? 'Requesting a code' : SIGN_IN_PHASE_LINES.opening);
+        // Is there an owner to sign in to? Only a real "unclaimed" stops.
+        const route = skipClaimProbe.has(cluster.name) ? 'signIn' : await ownershipRouteFor(cluster, aborter.signal);
+        if (route === 'claim' && !aborter.signal.aborted) {
+          offerClaim = true;
+          return false;
         }
-        // A failure INSIDE the fallback flow says why a device code was
-        // being tried at all. The switch's own toast is gone (memql#4595 --
-        // the explanation rides the code message), and the code message only
-        // exists once /device/code succeeds; without this suffix, a person
-        // who asked for a browser sign-in reads an error about a device flow
-        // they never requested.
-        const shown =
-          fallbackFired && report.level !== 'silent'
-            ? `${briefMessage(report.message)} (A browser sign-in was not possible on this host, so a device code was tried; the reason is in the MemQL Connection output.)`
-            : briefMessage(report.message);
-        // WHAT `retryable` WAS COMPUTED FOR (memql#4621). describeSignInFailure
-        // returns it and documents it -- "A UI may offer a retry affordance on
-        // true; it must not on false" -- and this call site read `level` and
-        // `message` and discarded it, raising every failure toast with NO
-        // actions. So after the browser flow ran out its ten-minute deadline the
-        // operator read a sentence naming `MemQL: Sign In With a Device Code`
-        // and had to open the palette and type it: a command name in prose,
-        // where a button was already justified by a field two files away.
-        //
-        // WHICH buttons is signInRecoveryActions' decision, in a module a test
-        // can reach. This binds each returned label to a command and branches on
-        // nothing else -- the kinds are the contract, and a second opinion about
-        // them here is how the two come to disagree.
-        const actions = signInRecoveryActions({
-          retryable: report.retryable,
-          kind: isAuthFlowError(err) ? err.kind : undefined,
-          flow,
+        if (aborter.signal.aborted) return false;
+
+        // The grant. The choice of runner stays selectSignInRunner's
+        // (memql#3515); the browser side is wrapped so a code can be taken
+        // beside it without closing the loopback listener.
+        const runFlow = selectSignInRunner(flow, {
+          loopbackWithDeviceFallback: (_target, signal) => {
+            const race = new BrowserOrCodeSignIn({
+              runBrowser: (s) => runBrowser(s),
+              runDeviceCode: (s) => runDevice(s),
+              ...(signal !== undefined ? { signal } : {}),
+            });
+            flight.useCode = () => {
+              if (race.useCode()) {
+                phase('code');
+                say('Requesting a code');
+              }
+            };
+            offerTimer = setTimeout(() => {
+              if (settled || fallbackFired || flight.phase !== 'waiting') return;
+              flight.codeOffered = true;
+              ConnectionPanel.repaint();
+              void offerCodeInstead(label, () => settled || flight.phase !== 'waiting', () => flight.useCode());
+            }, CODE_OFFER_AFTER_MS);
+            return race.result;
+          },
+          deviceCode: (_target, signal) => runDevice(signal),
         });
+        await performSignIn(cluster, { signal: aborter.signal, store: deps.store, runFlow });
+      } catch (err) {
+        const report = describeSignInFailure(label, err);
         if (report.level !== 'silent') {
+          noteDiagnostic(connectionOutput, `sign-in to "${cluster.name}" failed`, report.detail);
+          // WHICH buttons is signInRecoveryActions' decision (memql#4621), in a
+          // module a test can reach; this binds each label to a command.
+          const actions = report.untrustedCertificate
+            ? // Not a sign-in problem: the certificate. Repair sets the trust
+              // up again for a local cluster; elsewhere the details say more.
+              cluster.local === true
+              ? ['Repair']
+              : []
+            : signInRecoveryActions({
+                retryable: report.retryable,
+                kind: isAuthFlowError(err) ? err.kind : undefined,
+                flow,
+              });
           const severity = report.level;
-          // STILL NOT AWAITED, for the reason this function's header gives: the
-          // command settles now, and the handler runs afterwards. That ordering
-          // is also what makes `Try again` work -- by the time a person clicks,
-          // this flow has settled and the single-flight entry has cleared, so
-          // the retry is a fresh flow rather than a joiner told one is already
-          // in progress.
+          // NOT AWAITED: the command settles now, so a Try again is a fresh
+          // flow rather than a joiner.
           void (async () => {
-            const choice = await offerDetails(severity, connectionOutput, shown, ...actions);
+            const choice = await offerDetails(severity, connectionOutput, `MemQL: ${report.message}`, ...actions);
             if (choice === SIGN_IN_RETRY) {
               await signInToCluster(cluster, deps, flow);
             } else if (choice === SIGN_IN_DEVICE_CODE) {
               await signInToCluster(cluster, deps, 'deviceCode');
             } else if (choice === SIGN_IN_EDIT_CLUSTER) {
-              // The edit command reads only `cluster` off the node; `selected`
-              // is the tree's own marker and nothing on this path knows it.
               await commands.executeCommand('memql.clusters.edit', { cluster, selected: false });
+            } else if (choice === 'Repair') {
+              await commands.executeCommand('memql.clusters.repair');
             }
           })();
         }
         return false;
       } finally {
         // Before the dispose, so a code notification still open when the flow
-        // resolves stops re-summoning itself rather than outliving the sign-in.
+        // resolves stops acting rather than outliving the sign-in.
         settled = true;
-        if (quietHint !== undefined) clearTimeout(quietHint);
+        if (offerTimer !== undefined) clearTimeout(offerTimer);
         cancelSubscription.dispose();
+        if (activeSignIns.get(cluster.name) === flight) activeSignIns.delete(cluster.name);
+        ConnectionPanel.repaint();
       }
 
+      await rememberSignIn(cluster);
       deps.clustersTree.refresh();
 
-      // Reconnect ONLY the working cluster. Exactly one connection exists at a
-      // time (see ConnectionManager), so dialing a cluster the operator merely
-      // signed into would silently switch which cluster every other view is
-      // showing. When the sign-in came from a failed connect, this IS the
-      // selected cluster and the reconnect is the point.
-      //
-      // Re-read from disk rather than reusing the in-memory config: the token
-      // just persisted is the whole reason to reconnect, and the object this
-      // function was called with predates it.
+      // SIGNING IN TO A CLUSTER IS ASKING TO USE IT. It used to reconnect only
+      // when the cluster was already the selected one, so signing in from a
+      // row or a page left it disconnected and read as a failed login. Re-read
+      // from disk: the token just persisted is the whole reason to connect.
+      say('Connecting');
       const result = await readClustersFileSafe(deps.clustersPath);
-      if (result.ok && result.file.selectedCluster === cluster.name) {
-        const fresh = result.file.clusters.find((c) => c.name === cluster.name);
-        if (fresh !== undefined) {
-          await connections?.connect(fresh);
-          const state = connections?.state;
-          if (state?.status === 'error') {
-            void offerDetails('error', connectionOutput, `MemQL: ${briefMessage(state.message)}`);
-            return true;
-          }
+      const fresh = result.ok ? result.file.clusters.find((c) => c.name === cluster.name) : undefined;
+      if (fresh !== undefined) {
+        await setSelectedCluster(deps.clustersPath, fresh.name);
+        deps.clustersTree.refresh();
+        await connections?.connect(fresh);
+        const state = connections?.state;
+        if (state?.status === 'error' && state.clusterName === fresh.name) {
+          const retry = 'Retry';
+          void (async () => {
+            const choice = await offerDetails(
+              'error',
+              connectionOutput,
+              `MemQL: Signed in, but ${label} isn't answering.`,
+              retry
+            );
+            if (choice === retry) await commands.executeCommand('memql.clusters.select', { cluster: fresh, selected: true });
+          })();
+          return true;
         }
       }
-      void window.showInformationMessage(`MemQL: signed in to "${cluster.name}".`);
-      // The second half of memql#3885's three-state table (memql#3902). Runs
-      // here and nowhere earlier because passkey state is only knowable to an
-      // AUTHENTICATED caller -- there is deliberately no unauthenticated way to
-      // ask whether an account has one, since that is an enumeration oracle.
-      //
-      // NOT AWAITED. The sign-in is finished and reported; whether the operator
-      // also wants a passkey is a separate conversation, and holding the
-      // progress notification open across it would make an optional offer look
-      // like a step of the sign-in.
+      ConnectionPanel.refresh();
+      // The cluster page, when it is showing this cluster, already says it.
+      if (ConnectionPanel.showing() !== cluster.name) {
+        void window.showInformationMessage(`MemQL: Signed in to ${label}.`);
+      }
+      // The second half of memql#3885's three-state table (memql#3902): passkey
+      // state is only knowable to an AUTHENTICATED caller. Not awaited -- an
+      // optional offer must not look like a step of the sign-in.
       void offerPasskeyEnrolment(cluster);
       return true;
     }
   );
+  if (offerClaim) void offerClaimWizard(cluster, deps, flow);
+  return signedIn;
+}
+
+/**
+ * The browser has been waited on for a while: offer a code beside it.
+ * Taking it runs the device grant WITHOUT closing the loopback listener
+ * (auth/codeOffer.ts), so a tab that does come back still completes the
+ * sign-in. A click after the sign-in settled does nothing.
+ */
+async function offerCodeInstead(
+  label: string,
+  isStale: () => boolean,
+  useCode: () => void
+): Promise<void> {
+  const take = 'Use a code instead';
+  const choice = await window.showInformationMessage(
+    `MemQL: Still waiting for your browser to sign in to ${label}.`,
+    take
+  );
+  if (choice === take && !isStale()) useCode();
+}
+
+/**
+ * The one case sign-in cannot help: the cluster has no owner yet, so there is
+ * no account to sign in to. Its ownership wizard mints the first one.
+ */
+async function offerClaimWizard(cluster: ClusterConfig, deps: SignInDeps, flow: SignInFlow): Promise<void> {
+  const claim = 'Claim it';
+  const anyway = 'Sign in anyway';
+  const choice = await window.showInformationMessage(
+    `MemQL: ${displayLabel(cluster)} has no owner yet.`,
+    claim,
+    anyway
+  );
+  if (choice === claim) {
+    // asExternalUri first: under Remote-SSH or Codespaces the wizard runs on
+    // the REMOTE host, and the person's browser is local.
+    const wizard = setupUrlForCluster(cluster);
+    if (wizard === '') return;
+    const external = (await env.asExternalUri(Uri.parse(wizard))).toString(true);
+    await env.openExternal(Uri.parse(external));
+    return;
+  }
+  if (choice === anyway) {
+    // Straight to the grant: the ownership question has just been answered.
+    await signInFlights.run(cluster.name, () => runSignInSkippingClaim(cluster, deps, flow));
+  }
+}
+
+// A sign-in that does not ask the ownership question again, for "Sign in
+// anyway". Implemented as the normal flow against a probe that answers
+// "claimed", so there is still one sign-in shell.
+async function runSignInSkippingClaim(cluster: ClusterConfig, deps: SignInDeps, flow: SignInFlow): Promise<boolean> {
+  skipClaimProbe.add(cluster.name);
+  try {
+    return await runSignInToCluster(cluster, deps, flow);
+  } finally {
+    skipClaimProbe.delete(cluster.name);
+  }
+}
+const skipClaimProbe = new Set<string>();
+
+/**
+ * A dropped connection the retries could not restore: one line and Reconnect.
+ * The retries themselves ran silently -- the row read "Connecting" -- so this
+ * is the first thing the person is told.
+ */
+async function announceLostConnection(
+  clusterName: string,
+  clustersPath: string,
+  fix: 'reconnect' | 'signIn'
+): Promise<void> {
+  const registry = await readClustersFileSafe(clustersPath);
+  const cluster = registry.ok ? registry.file.clusters.find((c) => c.name === clusterName) : undefined;
+  if (cluster === undefined) return;
+  const label = displayLabel(cluster);
+  if (fix === 'signIn') {
+    // A credential problem: the toast carries Sign in.
+    const signIn = 'Sign in';
+    const choice = await offerDetails('warning', connectionOutput, `MemQL: Your session for ${label} ended.`, signIn);
+    if (choice === signIn) await commands.executeCommand('memql.clusters.signIn', { cluster, selected: true });
+    return;
+  }
+  const reconnect = 'Reconnect';
+  const choice = await offerDetails('warning', connectionOutput, `MemQL: Lost connection to ${label}.`, reconnect);
+  if (choice === reconnect) await commands.executeCommand('memql.clusters.select', { cluster, selected: true });
 }
 
 /**
@@ -4693,8 +4829,10 @@ async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
 // it is four fields, and a QuickInput sequence is both less code and more
 // idiomatic than a custom form.
 async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig | undefined> {
+  const title = existing === undefined ? 'Add Cluster' : `Edit ${displayLabel(existing)}`;
   const name = await window.showInputBox({
-    prompt: 'Cluster name (the key used in clusters.yaml)',
+    title,
+    prompt: 'Name',
     value: existing?.name ?? '',
     ignoreFocusOut: true,
     validateInput: (v) => (v.trim() === '' ? 'A name is required' : undefined),
@@ -4704,7 +4842,9 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   }
 
   const domain = await window.showInputBox({
-    prompt: 'Domain (e.g. memql.localhost). The endpoint is composed as api.<domain>:443.',
+    title,
+    prompt: 'Domain',
+    placeHolder: 'memql.localhost',
     value: existing?.domain ?? '',
     ignoreFocusOut: true,
   });
@@ -4712,14 +4852,18 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
     return undefined;
   }
 
+  // composeEndpointFromDomain, not a fourth copy of `api.<domain>:443`
+  // (memql#3475). An address that was the old domain's default follows a new
+  // domain; one the person typed by hand is kept.
+  const composedBefore = composeEndpointFromDomain(existing?.domain ?? '');
+  const keepEndpoint =
+    existing !== undefined && existing.endpoint.trim() !== '' && existing.endpoint.trim() !== composedBefore;
   const endpoint = await window.showInputBox({
-    prompt: 'gRPC endpoint (host:port)',
-    // composeEndpointFromDomain, not a fourth copy of `api.<domain>:443`
-    // (memql#3475). It answers "" for a blank domain, which is the same empty
-    // box the ternary here used to construct by hand.
-    value: existing?.endpoint ?? composeEndpointFromDomain(domain),
+    title,
+    prompt: 'Address (host:port)',
+    value: keepEndpoint ? existing.endpoint : composeEndpointFromDomain(domain),
     ignoreFocusOut: true,
-    validateInput: (v) => (v.trim() === '' ? 'An endpoint is required' : undefined),
+    validateInput: (v) => (v.trim() === '' ? 'An address is required' : undefined),
   });
   if (endpoint === undefined) {
     return undefined;
@@ -4740,6 +4884,7 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   // credential is sign-out's job, where the SecretStorage half goes too.
   const tokenPlan = tokenFieldPlan(existing?.token);
   const tokenEntered = await window.showInputBox({
+    title,
     prompt: tokenPlan.prompt,
     value: tokenPlan.value,
     ignoreFocusOut: true,
@@ -4756,6 +4901,7 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   // plaintext file. Same no-prefill plan as the access token.
   const refreshPlan = refreshTokenFieldPlan(existing?.refreshToken);
   const refreshEntered = await window.showInputBox({
+    title,
     prompt: refreshPlan.prompt,
     value: refreshPlan.value,
     ignoreFocusOut: true,
@@ -4779,20 +4925,20 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
     [
       {
         label: 'Not local',
-        description: 'Running a mutation against this cluster asks for confirmation first',
+        description: 'Changes ask before they run',
         value: false,
+        picked: existing?.local !== true,
       },
       {
         label: 'Local',
-        description: 'Disposable data -- mutations run without a confirmation prompt',
+        description: 'On this computer: changes run without asking, and it can be repaired or uninstalled',
         value: true,
+        picked: existing?.local === true,
       },
     ],
     {
-      placeHolder:
-        existing?.local === true
-          ? 'Currently marked local. Is this cluster disposable?'
-          : 'Is this cluster disposable? (currently: not local)',
+      title,
+      placeHolder: existing?.local === true ? 'Local cluster (now: local)' : 'Local cluster (now: not local)',
       ignoreFocusOut: true,
     }
   );

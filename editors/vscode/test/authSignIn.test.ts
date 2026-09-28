@@ -371,3 +371,16 @@ test("the two flows select DIFFERENT runners", async () => {
   };
   assert.notEqual(selectSignInRunner("auto", runners), selectSignInRunner("deviceCode", runners));
 });
+
+test("a certificate this computer does not trust is said as such, not as a sign-in fault", () => {
+  const cause = Object.assign(new Error("unable to verify the first certificate"), {
+    code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  });
+  const report = describeSignInFailure(
+    "memql.localhost",
+    new AuthFlowError("registrationFailed", "Cannot sign in: fetch failed", { cause }),
+  );
+  assert.equal(report.message, "This computer doesn't trust the cluster's certificate.");
+  assert.equal(report.untrustedCertificate, true);
+  assert.equal(describeSignInFailure("x", new AuthFlowError("timeout", "no callback")).untrustedCertificate, false);
+});

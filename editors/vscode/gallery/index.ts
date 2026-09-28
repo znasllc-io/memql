@@ -6,9 +6,10 @@
 
 import { GALLERY_THEMES, wrapDocument, type GalleryTheme, type Scenario } from "./harness.js";
 import { scenarios as kit } from "./scenarios/kit.js";
+import { scenarios as access } from "./scenarios/access.js";
 
 /** Every scenario, in index order. */
-export const SCENARIOS: readonly Scenario[] = [...kit];
+export const SCENARIOS: readonly Scenario[] = [...kit, ...access];
 
 /** One rendered gallery page. */
 export interface GalleryPage {

@@ -75,7 +75,7 @@ export function announceDeviceCodeFallback(
   diagnostics?: DiagnosticSink,
 ): void {
   progress.report({
-    message: 'This host cannot complete a browser sign-in; switching to a device code...',
+    message: 'Switching to a code',
   });
   if (diagnostics !== undefined) {
     recordDiagnostic(
@@ -99,8 +99,8 @@ export function showDeviceCodeActions(
   via: DeviceCodeVia,
   diagnostics?: DiagnosticSink,
 ): void {
-  const COPY = 'Copy Code';
-  const OPEN = 'Open Approval Page';
+  const COPY = 'Copy code';
+  const OPEN = 'Open page';
   const target = deviceCodeOpenTarget(authorization);
 
   const recordOpenFailure = (detail: string): void => {

@@ -697,11 +697,7 @@ test("the open target prefers the pre-filled verification URI", () => {
 // both the switch and where the full reason lives.
 test("the deliberate action message carries the code and page, and no fallback talk", () => {
   const message = deviceCodeActionMessage(authorizationFixture(), "deliberate");
-  assert.equal(
-    message,
-    "MemQL: enter code BCDF-GHJK at https://identity.example.com/device to finish signing in. " +
-      "The approval page should have opened with the code pre-filled -- use the buttons if it did not.",
-  );
+  assert.equal(message, "MemQL: Enter code BCDF-GHJK at https://identity.example.com/device to sign in.");
   assert.ok(
     !message.toLowerCase().includes("browser sign-in"),
     `a deliberate device flow must not explain a switch nobody made: ${message}`,
@@ -710,23 +706,17 @@ test("the deliberate action message carries the code and page, and no fallback t
 
 test("the fallback action message explains the switch in the same notification", () => {
   // ONE notification for the whole fallback (memql#4595): the explanation
-  // that used to be its own toast rides the action message instead, and the
-  // full reason stays in the MemQL Connection output.
+  // that used to be its own toast rides the action message instead. The full
+  // reason is in the MemQL Connection output, which the message's buttons
+  // do not need to name.
   const message = deviceCodeActionMessage(authorizationFixture(), "fallback");
   assert.equal(
     message,
-    "MemQL: a browser sign-in is not possible on this host (details in the MemQL Connection output). " +
-      "Finish with a device code instead: enter code BCDF-GHJK at " +
-      "https://identity.example.com/device to finish signing in -- on another device if this one " +
-      "cannot open the page.",
+    "MemQL: This window can't finish a browser sign-in. Enter code BCDF-GHJK at https://identity.example.com/device.",
   );
   assert.ok(
     message.toLowerCase().includes("browser sign-in"),
     `the switch must be explained where the code is shown: ${message}`,
-  );
-  assert.ok(
-    message.includes("MemQL Connection"),
-    `the message must say where the full reason lives: ${message}`,
   );
 });
 

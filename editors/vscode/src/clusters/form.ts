@@ -26,28 +26,20 @@ export interface CredentialFieldPlan {
 
 /** The access-token field: what to show given whether a token is stored. */
 export function tokenFieldPlan(existingToken: string | undefined): CredentialFieldPlan {
-  const stored =
-    existingToken !== undefined && existingToken.trim() !== ""
-      ? "A token is stored for this cluster; leave empty to keep it, or paste a new one to replace it. Sign out to remove it. "
-      : "";
+  const stored = existingToken !== undefined && existingToken.trim() !== "";
   return {
-    prompt:
-      `Access token (optional): the identity-issued JWT from POST <identity>/oauth/token. ${stored}` +
-      'Leave empty and run "MemQL: Sign In" to authenticate through your browser. A PAT (mql_pat_...) will not work -- the mesh verifies bearers via JWKS.',
+    prompt: stored
+      ? "Access token (optional). Leave empty to keep the saved one."
+      : "Access token (optional). Most people use Sign in instead.",
     value: "",
   };
 }
 
 /** The refresh-token field's plan, same shape and same invariant. */
 export function refreshTokenFieldPlan(existingRefreshToken: string | undefined): CredentialFieldPlan {
-  const stored =
-    existingRefreshToken !== undefined && existingRefreshToken.trim() !== ""
-      ? "One is pending in clusters.yaml; leave empty to keep it. "
-      : "";
+  const stored = existingRefreshToken !== undefined && existingRefreshToken.trim() !== "";
   return {
-    prompt:
-      `Refresh token (optional): the refresh_token from the same response. ${stored}` +
-      "Stored in the editor's secret storage and used to renew the access token as it expires.",
+    prompt: stored ? "Refresh token (optional). Leave empty to keep the saved one." : "Refresh token (optional).",
     value: "",
   };
 }

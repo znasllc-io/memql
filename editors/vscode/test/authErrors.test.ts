@@ -15,7 +15,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { errorText } from "../src/auth/errors.js";
+import { errorText, isUntrustedCertificate } from "../src/auth/errors.js";
 
 /** The undici wrapper: its message is always this, and the truth is in `.cause`. */
 function fetchFailed(cause: unknown): TypeError {
@@ -146,4 +146,32 @@ test("a cause that points back at itself terminates instead of spinning", () => 
   (looping as { cause?: unknown }).cause = looping;
 
   assert.equal(errorText(looping), "outer");
+});
+
+// -----------------------------------------------------------------------------
+// An untrusted certificate is its own answer
+// -----------------------------------------------------------------------------
+//
+// A local cluster's mkcert CA may or may not be trusted by the extension host,
+// depending on how the editor was launched. That failure read as "not
+// answering" or as a sign-in fault; the surfaces now say "This computer
+// doesn't trust the cluster's certificate." and offer Repair.
+
+test("isUntrustedCertificate finds the trust codes down the cause chain", () => {
+  const wrapper = new TypeError("fetch failed");
+  (wrapper as { cause?: unknown }).cause = Object.assign(new Error("unable to verify the first certificate"), {
+    code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  });
+  assert.equal(isUntrustedCertificate(wrapper), true);
+});
+
+test("isUntrustedCertificate reads a failure that arrived as text", () => {
+  assert.equal(isUntrustedCertificate("Error: self-signed certificate in certificate chain"), true);
+  assert.equal(isUntrustedCertificate(new Error("fetch failed: UNABLE_TO_GET_ISSUER_CERT_LOCALLY -- x")), true);
+});
+
+test("an expired or misnamed certificate, or no server at all, is not an untrusted one", () => {
+  assert.equal(isUntrustedCertificate(Object.assign(new Error("certificate has expired"), { code: "CERT_HAS_EXPIRED" })), false);
+  assert.equal(isUntrustedCertificate(Object.assign(new Error("x"), { code: "ERR_TLS_CERT_ALTNAME_INVALID" })), false);
+  assert.equal(isUntrustedCertificate(new Error("connect ECONNREFUSED 127.0.0.1:443")), false);
 });
