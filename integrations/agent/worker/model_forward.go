@@ -164,7 +164,7 @@ func (r *ForwardRouter) ForwardModelCall(
 		return out, nil
 	case <-ctx.Done():
 		// Best-effort cancel so the machine stops generating.
-		r.sender.Send(nodeId, &nodev1.NodeClientMessage{
+		r.sendCancel(nodeId, &nodev1.NodeClientMessage{
 			MessageId: id.NewShortId(),
 			Payload: &nodev1.NodeClientMessage_ModelForwardCancel{
 				ModelForwardCancel: &nodev1.ModelForwardCancel{RequestId: requestId, Reason: "caller_cancelled"},
@@ -324,6 +324,14 @@ func (h *ForwardHandler) HandleForwardedModelCall(
 		return
 	}
 	defer w.Release(workerservice.ModelCapability)
+
+	// THE CALLER MAY ALREADY HAVE GONE (see HandleForwardedRequest): nothing
+	// has reached the machine, so it is a refusal before start.
+	if err := callCtx.Err(); err != nil {
+		h.sendModelRefusal(send, requestId, ForwardCallerCancelled,
+			"the caller gave up before the call reached the machine: "+err.Error())
+		return
+	}
 
 	// The local call gets its OWN id. The two id spaces never have to agree:
 	// the answer is mapped back by this envelope's request id, and conflating

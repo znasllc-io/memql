@@ -49,7 +49,7 @@ func (a *audioChain) call(ctx context.Context, inputChars int, invoke func(conte
 		attemptCtx := startObservation(ctx, a.req, resolved, start)
 		result, outputChars, err := invoke(attemptCtx, client)
 		record := buildRecord(a.req, resolved, client, EstimateTokensFromChars(inputChars), EstimateTokensFromChars(outputChars), 0, start, time.Time{}, time.Now(), false, err, ctx.Err())
-		a.router.recordObserved(attemptCtx, record)
+		a.router.recordAttempt(attemptCtx, record)
 		if err == nil {
 			return result, nil
 		}

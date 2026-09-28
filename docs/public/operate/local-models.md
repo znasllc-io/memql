@@ -300,8 +300,12 @@ that drives itself: it reaches MemQL's tools through MCP, in the other
 direction. A tool turn therefore walks past every app door and lands on the
 next entry in the chain.
 
-A machine whose stream a **sibling replica** holds leaves the door shut on
-this one — the app-session envelope has no cross-node forward yet.
+A machine whose stream a **sibling replica** holds — or any machine at all,
+seen from the planner, which holds no streams — is reached by forwarding the
+call to the agent holding it (`AppCallForward`), so planner prompts use app
+Sources too. A tool-needing step is the exception: it is handed over only on
+the replica holding the stream. See
+[local-apps.md](local-apps.md#which-machine-and-on-which-replica).
 
 ### Door 3 — Anthropic workload identity federation
 

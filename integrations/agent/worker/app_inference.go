@@ -55,14 +55,6 @@ import (
 // inference".
 const AppSurfacePrefix = "app:"
 
-// appSessionMaxDuration bounds an INFERENCE call through an app.
-//
-// Deliberately far shorter than defaultAppSessionMaxDuration (4h, for a
-// delegated coding task): this is one prompt and one answer, and a turn that
-// has not finished in ten minutes is a wedged harness rather than deep work.
-// A caller waiting on an inference call has something waiting on it.
-const appSessionMaxDuration = 10 * time.Minute
-
 // AppInference implements memqlengine.AppInference over the fleet router, the
 // local registry and the session runner.
 type AppInference struct {
@@ -82,6 +74,13 @@ type AppInference struct {
 	// app_vision.go for why a prompt naming a file that is not there is the
 	// worst of the available failures.
 	vision *visionStager
+	// forward reaches a machine whose stream a SIBLING agent replica holds
+	// (AppCallForward, the planner/app-source design section 3a), and
+	// selfNodeId keeps this replica out of its own target set. Nil on a
+	// replica that cannot forward, which then sees only its own machines --
+	// what every replica saw before the forward existed.
+	forward    *ForwardRouter
+	selfNodeId string
 }
 
 // NewAppInference builds the seam implementation from the dispatcher's
@@ -128,6 +127,18 @@ func (a *AppInference) SetVisionStager(engine visionEngine, uploader visionBlobU
 	a.vision = newVisionStager(engine, uploader, container, a.logger, a.clock)
 }
 
+// SetForward wires the cross-replica app-call hop: calls for a machine held by
+// another agent are forwarded there, and the doors report such machines as
+// Forwardable. A SETTER for SetVisionStager's reason -- the forward is built in
+// the cluster phase (app/cluster_worker.go), after this seam.
+func (a *AppInference) SetForward(forward *ForwardRouter, selfNodeId string) {
+	if a == nil {
+		return
+	}
+	a.forward = forward
+	a.selfNodeId = strings.TrimSpace(selfNodeId)
+}
+
 // Doors reports which apps this user could reach right now.
 //
 // AN EMPTY ACTING USER REACHES NOTHING, and that is the one place this differs
@@ -150,71 +161,26 @@ func (a *AppInference) Doors(ctx context.Context, actingUserId string) ([]memqle
 	return a.projectDoors(machines), nil
 }
 
-// projectDoors turns registrations into one entry per KNOWN app id.
-//
-// Every id in the engine's closed set gets a door, even one no machine
-// reports: a door with no machines behind it is what lets a refusal say "you
-// have not signed into Codex anywhere" rather than saying nothing at all. Its
-// Runnable() is false, so it is never selected.
+// projectDoors turns registrations into one entry per KNOWN app id, placing
+// each machine LOCAL when this replica holds its stream and FORWARDABLE when a
+// sibling agent does and this replica can forward there.
 func (a *AppInference) projectDoors(machines []Candidate) []memqlengine.AppDoor {
-	now := a.clock()
-	byApp := map[string]*memqlengine.AppDoor{}
-	for _, id := range workerservice.KnownAppIds() {
-		byApp[id] = &memqlengine.AppDoor{AppId: id}
-	}
-
-	for _, m := range machines {
-		online := workerservice.IsOnline(m.LastSeenAt, m.RevokedAt, now)
-		local := a.holdsStream(m)
-		for _, app := range m.Apps {
-			door, known := byApp[app.Id]
-			if !known {
-				// An app id outside the engine's closed set. Stored on the
-				// registration, never driven -- so a newer cockpit reporting
-				// one never makes the engine attempt a protocol it lacks.
-				continue
-			}
-			if !app.Runnable() {
-				continue
-			}
-			// A descriptor the machine did not send leaves both harness
-			// capabilities TRUE. Absent is "this cockpit predates the field",
-			// not a declared no, and reading silence as a refusal would take
-			// structured answers away from every machine that has not
-			// upgraded.
-			structured, followUps := true, true
-			harness := ""
-			if d, ok := descriptorFor(m.AppDescriptors, app.Id); ok {
-				structured, followUps, harness = d.StructuredResult, d.FollowUps, d.Harness
-			}
-			door.Machines = append(door.Machines, memqlengine.AppMachine{
-				RegistrationId:   m.RegistrationId,
-				Name:             m.Name,
-				DisplayName:      m.DisplayName,
-				Online:           online,
-				Harness:          harness,
-				StructuredResult: structured,
-				FollowUps:        followUps,
-				Subscription:     app.Subscription,
-				LocalStream:      local,
-			})
+	return projectAppDoors(machines, a.clock(), func(c Candidate) (bool, bool) {
+		if a.holdsStream(c) {
+			return true, false
 		}
-	}
-
-	out := make([]memqlengine.AppDoor, 0, len(byApp))
-	for _, id := range workerservice.KnownAppIds() {
-		out = append(out, *byApp[id])
-	}
-	return out
+		return false, canForwardTo(c, a.forward, a.selfNodeId)
+	})
 }
 
 // holdsStream reports whether THIS replica holds the machine's stream.
 //
-// The app-session envelope has no cross-node forward yet (design section 8),
-// so a machine on a sibling replica is skipped during selection rather than
-// failing the run. Reading the registry rather than `connectedNodeId` answers
-// the question that actually matters -- can this process open a session on it
-// right now -- rather than the question the row can answer.
+// Reading the registry rather than `connectedNodeId` answers the question that
+// actually matters -- can this process open a session on it right now --
+// rather than the question the row can answer. A machine held elsewhere is
+// reached by forwarding one call (SetForward); a step handover is never
+// forwarded, which is why a door built from such a machine is Reachable and
+// not Runnable.
 func (a *AppInference) holdsStream(c Candidate) bool {
 	if a.registry == nil {
 		return false
@@ -222,24 +188,12 @@ func (a *AppInference) holdsStream(c Candidate) bool {
 	return a.registry.WorkerById(c.RegistrationId) != nil
 }
 
-// descriptorFor is DescriptorFor over the candidate's persisted descriptors.
-func descriptorFor(descriptors []workerservice.AppDescriptor, appId string) (workerservice.AppDescriptor, bool) {
-	return workerservice.DescriptorFor(descriptors, appId)
-}
-
 // AppOrder reads the owner's preferred app order off their delegation policy.
 func (a *AppInference) AppOrder(ctx context.Context, actingUserId string) ([]string, error) {
-	if a == nil || a.policies == nil || strings.TrimSpace(actingUserId) == "" {
+	if a == nil {
 		return nil, nil
 	}
-	policy, err := a.policies.DelegationPolicy(ctx, actingUserId)
-	if err != nil {
-		return nil, err
-	}
-	if !policy.Found {
-		return nil, nil
-	}
-	return policy.AppOrder, nil
+	return appOrderFor(ctx, a.policies, actingUserId)
 }
 
 // Call runs one inference turn through an app session.
@@ -249,6 +203,12 @@ func (a *AppInference) AppOrder(ctx context.Context, actingUserId string) ([]str
 // message array. Flattening here rather than pretending otherwise keeps the
 // lie out of the wire -- and the roles are labelled in the flattened text so
 // the app can still see who said what.
+//
+// A MACHINE THIS REPLICA HOLDS IS PREFERRED, and one held by a sibling agent
+// is reached by forwarding THIS call there (the planner/app-source design,
+// section 3a): with two agent replicas, which one serves the turn and which
+// one holds the laptop is a coin flip, and losing it used to read as "no
+// machine can run this" for a laptop the user could see was on.
 func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest) (memqlengine.AppCallResult, error) {
 	if a == nil || a.runner == nil {
 		return memqlengine.AppCallResult{},
@@ -275,31 +235,109 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 	// door asks, with the pin the router bound on this resolution. A refusal
 	// reads as a shut door (ErrAppUnavailable), so a chat chain moves on to
 	// its next source exactly as it does for a laptop that is asleep, and the
-	// refusal's own code says which it was.
+	// refusal's own code says which it was. A forwarded call meets the gate
+	// again on the holder, which reads the switch at the moment it opens.
 	if refusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin); refusal != nil {
 		return memqlengine.AppCallResult{}, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable, refusal)
 	}
 
-	// CAN THIS REPLICA STAGE AT ALL (issue memql#5523) -- asked before a
-	// machine is chosen, because it is a CONFIGURATION fact and needs no
-	// machine to answer. A node with no blob storage refuses the call here
-	// rather than selecting a machine, opening a session and only then
-	// discovering the images have nowhere to land.
-	//
-	// The STAGE itself stays after selection, below: that one costs a Library
-	// write and a promotion wait, and paying it for a call about to be refused
-	// for having no machine is the waste this split avoids.
-	if len(req.Images) > 0 {
-		if ok, why := a.vision.ready(); !ok {
-			return memqlengine.AppCallResult{}, &memqlengine.AppVisionStagingFailed{
-				AppId: req.AppId, Images: len(req.Images), Staged: 0, Reason: why,
+	w, remote, refusal := a.selectMachine(ctx, owner, req)
+	if w != nil {
+		res, _, err := a.callOnWorker(ctx, w, owner, req)
+		return res, err
+	}
+	if len(remote) > 0 && a.forward != nil {
+		return forwardAppCall(ctx, a.forward, a.logger, owner, req, remote, refusal.Considered, refusal.Total)
+	}
+	return memqlengine.AppCallResult{}, refusal
+}
+
+// ServeForwardedAppCall implements AppCallServer: the RECEIVING end of the
+// app-call hop, on the replica holding the machine's stream.
+//
+// It asks everything a local call asks, here, where the answers are live: the
+// app gate (the pin and the owner's kill switch, read now), that this replica
+// still holds the stream, and that the app is still allowed and signed in
+// there. Every refusal before the session starts says so, so the sender may
+// try the owner's next machine. It NEVER forwards again: a call crosses the
+// mesh at most once, so two replicas can never pass one call back and forth.
+func (a *AppInference) ServeForwardedAppCall(ctx context.Context, registrationId string, req memqlengine.AppCallRequest) (memqlengine.AppCallResult, bool, error) {
+	if a == nil || a.runner == nil {
+		return memqlengine.AppCallResult{}, true,
+			fmt.Errorf("%w: no app sessions on this node", memqlengine.ErrAppUnavailable)
+	}
+	owner := strings.TrimSpace(req.ActingUserId)
+	if owner == "" || !workerservice.IsKnownAppId(req.AppId) {
+		return memqlengine.AppCallResult{}, true, &memqlengine.AppUnavailable{
+			AppId:     req.AppId,
+			LastError: "a forwarded app call needs an acting user and an app this engine drives",
+		}
+	}
+	if refusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin); refusal != nil {
+		return memqlengine.AppCallResult{}, true, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable, refusal)
+	}
+	var w *workerservice.Worker
+	if a.registry != nil {
+		w = a.registry.WorkerById(registrationId)
+	}
+	if w == nil {
+		// The row the sender read said this replica holds the stream; it
+		// does not any more. Ordinary -- the laptop reconnected elsewhere --
+		// and re-pickable.
+		return memqlengine.AppCallResult{}, true, &memqlengine.AppUnavailable{
+			AppId:      req.AppId,
+			Considered: map[string]string{registrationId: "this replica no longer holds its stream"},
+			Total:      1,
+		}
+	}
+	if why := appMachineRefusal(w, owner, req.AppId); why != "" {
+		return memqlengine.AppCallResult{}, true, &memqlengine.AppUnavailable{
+			AppId: req.AppId, Considered: map[string]string{registrationId: why}, Total: 1,
+		}
+	}
+	if req.Schema != nil {
+		if d, ok := w.AppDescriptor(req.AppId); ok && !d.StructuredResult {
+			return memqlengine.AppCallResult{}, true, &memqlengine.AppUnavailable{
+				AppId:      req.AppId,
+				Considered: map[string]string{registrationId: "its harness (" + d.Harness + ") cannot return a structured answer"},
+				Total:      1,
 			}
 		}
 	}
+	res, started, err := a.callOnWorker(ctx, w, owner, req)
+	return res, !started, err
+}
 
-	w, refusal := a.selectMachine(ctx, owner, req)
-	if refusal != nil {
-		return memqlengine.AppCallResult{}, refusal
+// callOnWorker runs one call on a machine this replica holds. started reports
+// whether a session was opened on it -- the line after which nothing is
+// re-pickable.
+func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker, owner string, req memqlengine.AppCallRequest) (res memqlengine.AppCallResult, started bool, err error) {
+	// A CALLER THAT HAS GIVEN UP OPENS NOTHING. Asked first, before anything
+	// is staged, and again at the point of no return below: a session opened
+	// with a done context runs until the machine notices, on the owner's
+	// subscription, for nobody.
+	if err := ctx.Err(); err != nil {
+		return memqlengine.AppCallResult{}, false, &callerGone{appId: req.AppId, err: err}
+	}
+
+	// CAN THIS REPLICA STAGE AT ALL (issue memql#5523) -- asked before
+	// anything is written, because it is a CONFIGURATION fact and costs
+	// nothing to answer. A node with no blob storage refuses the call here
+	// rather than opening a session and only then discovering the images have
+	// nowhere to land. It is asked HERE, on the replica that runs the
+	// session, rather than before selection: a call forwarded to a sibling
+	// lands its images in the SIBLING's session, so it is the sibling's
+	// storage that matters.
+	//
+	// The STAGE itself follows: that one costs a Library write and a
+	// promotion wait, and paying it for a call about to be refused is the
+	// waste this split avoids.
+	if len(req.Images) > 0 {
+		if ok, why := a.vision.ready(); !ok {
+			return memqlengine.AppCallResult{}, false, &memqlengine.AppVisionStagingFailed{
+				AppId: req.AppId, Images: len(req.Images), Staged: 0, Reason: why,
+			}
+		}
 	}
 
 	schema := ""
@@ -330,7 +368,7 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 			// files it wrote are inputs to nothing and must not be left in
 			// the owner's Files app.
 			a.vision.Release(ctx, owner, landed)
-			return memqlengine.AppCallResult{}, &memqlengine.AppVisionStagingFailed{
+			return memqlengine.AppCallResult{}, false, &memqlengine.AppVisionStagingFailed{
 				AppId: req.AppId, Images: len(req.Images), Staged: len(landed), Reason: err.Error(),
 			}
 		}
@@ -388,16 +426,25 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		ModelCall: true,
 	}
 
+	// Asked again here, at the point of no return: staging images can take a
+	// while, and a caller that gave up meanwhile still opens nothing (its
+	// staged inputs are released by the deferred Release above).
+	if err := ctx.Err(); err != nil {
+		return memqlengine.AppCallResult{}, false, &callerGone{appId: req.AppId, err: err}
+	}
+
+	// FROM HERE ON, NOTHING IS RE-PICKABLE: the session row is written and
+	// the start goes on the wire, so the call may have run on the machine.
 	result, err := a.runner.Run(ctx, w, spec, nil)
 	surface := AppSurfacePrefix + req.AppId + "@" + result.WorkerId
 	if err != nil {
-		return memqlengine.AppCallResult{ExecutionSurface: surface},
+		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true,
 			fmt.Errorf("%w: %s on %s: %v", memqlengine.ErrAppUnavailable, req.AppId, w.Name, err)
 	}
 
 	content, err := answerFrom(result, req.Schema != nil)
 	if err != nil {
-		return memqlengine.AppCallResult{ExecutionSurface: surface}, err
+		return memqlengine.AppCallResult{ExecutionSurface: surface, MachineLabel: w.Name}, true, err
 	}
 	return memqlengine.AppCallResult{
 		Content: content,
@@ -416,27 +463,63 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		// its own subscription; it is never re-derived here, because two
 		// derivations of "who paid" would eventually disagree.
 		Billing: appBilling(result.Billing),
-	}, nil
+	}, true, nil
 }
 
-// selectMachine picks a machine that can run the app, through the fleet
-// router, and returns the typed refusal naming what was considered when none
-// can.
-func (a *AppInference) selectMachine(ctx context.Context, owner string, req memqlengine.AppCallRequest) (*workerservice.Worker, *memqlengine.AppUnavailable) {
+// callerGone is an app-door call refused before its session opened because
+// its caller had already given up. It reads as a shut door
+// (ErrAppUnavailable) AND as the caller's own cancellation, and crosses the
+// hop under ForwardCallerCancelled.
+type callerGone struct {
+	appId string
+	err   error
+}
+
+func (e *callerGone) Error() string {
+	return fmt.Sprintf("%v: %s: the caller gave up before the session opened: %v",
+		memqlengine.ErrAppUnavailable, e.appId, e.err)
+}
+
+// Code is the stable tag the hop carries it under.
+func (e *callerGone) Code() string { return ForwardCallerCancelled }
+
+func (e *callerGone) Unwrap() []error { return []error{memqlengine.ErrAppUnavailable, e.err} }
+
+// selectMachine picks a machine this replica holds that can run the app,
+// through the fleet router. When none can, it returns the machines a SIBLING
+// agent holds that could -- in the router's order, for the forward -- and the
+// typed refusal naming what was considered.
+func (a *AppInference) selectMachine(ctx context.Context, owner string, req memqlengine.AppCallRequest) (*workerservice.Worker, []Candidate, *memqlengine.AppUnavailable) {
 	if a.router == nil || a.registry == nil {
-		return nil, &memqlengine.AppUnavailable{
+		return nil, nil, &memqlengine.AppUnavailable{
 			AppId:     req.AppId,
 			LastError: "no fleet router on this node",
 		}
 	}
 	plan, err := a.router.Plan(ctx, owner, workerservice.CapabilityHeadless, nil, nil)
 	if err != nil {
-		return nil, &memqlengine.AppUnavailable{AppId: req.AppId, LastError: err.Error()}
+		return nil, nil, &memqlengine.AppUnavailable{AppId: req.AppId, LastError: err.Error()}
 	}
 
+	now := a.clock()
 	considered := map[string]string{}
+	var remote []Candidate
 	for _, cand := range plan.Candidates {
 		w := a.registry.WorkerById(cand.RegistrationId)
+		if w == nil {
+			// Held by another replica: a candidate for the FORWARD, judged
+			// on its row. The holder asks the live registration again.
+			switch why := appCandidateRefusal(cand, owner, req, now); {
+			case why != "":
+				considered[cand.RegistrationId] = why
+			case !canForwardTo(cand, a.forward, a.selfNodeId):
+				considered[cand.RegistrationId] = "its stream is held by another replica"
+			default:
+				considered[cand.RegistrationId] = "its stream is held by " + cand.ConnectedNodeId
+				remote = append(remote, cand)
+			}
+			continue
+		}
 		if why := appMachineRefusal(w, owner, req.AppId); why != "" {
 			considered[cand.RegistrationId] = why
 			continue
@@ -447,12 +530,12 @@ func (a *AppInference) selectMachine(ctx context.Context, owner string, req memq
 				continue
 			}
 		}
-		return w, nil
+		return w, nil, nil
 	}
 	for id, why := range plan.Rejected {
 		considered[id] = why
 	}
-	return nil, &memqlengine.AppUnavailable{
+	return nil, remote, &memqlengine.AppUnavailable{
 		AppId:      req.AppId,
 		Considered: considered,
 		Total:      plan.Total,

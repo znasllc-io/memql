@@ -48,6 +48,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -74,6 +75,16 @@ type JournaledCall struct {
 	// is what both covered seams return.
 	Response map[string]any
 	Error    string
+
+	// RouterCallId is the v1:router:call row that records the attempt this
+	// call ended on, and Decision the routing decision behind it: the level,
+	// rule and route, the door that served, and every source passed over on
+	// the way with its reason. Both describe the SOURCE THAT SERVED, which
+	// after a fallback is not the resolution's pick -- Provider and Model name
+	// it too. Both are empty on a row served from the journal (no source was
+	// asked) and on a call no router wrapped.
+	RouterCallId string
+	Decision     *airoute.Decision
 }
 
 // Answer is the recorded response as the seam returns it.
@@ -215,6 +226,12 @@ type modelCallOutcome struct {
 	// `served: "local"` rather than `served: "live"` -- MemQL was not billed
 	// for it and the scorecard counts it separately.
 	Local bool
+	// Served is what the routed client reported about the source the call
+	// ended on (airoute.Served), nil when the client reports nothing. It
+	// OVERRIDES the request's provider on the journal row: the request names
+	// the resolution's pick, and after a fallback that is a source that did
+	// not answer.
+	Served *airoute.Served
 }
 
 // serveModelCall is the seam.
@@ -335,6 +352,19 @@ func (s *modelSeam) serve(
 		Cost:         out.Cost,
 		LatencyMs:    int(time.Since(started).Milliseconds()),
 		Served:       served,
+	}
+	if served := out.Served; served != nil {
+		// THE SOURCE THAT SERVED, not the one the resolution picked. The
+		// request hash above stays the request's own -- it is the replay key,
+		// and a replay asks the same question of the same pick -- but the row
+		// records who answered it, and which decision record says why.
+		if name := strings.TrimSpace(served.ProviderName); name != "" {
+			call.Provider = name
+			call.Model = served.Model
+		}
+		call.RouterCallId = served.RouterCallId
+		decision := served.Decision
+		call.Decision = &decision
 	}
 	if out.Usage.Model != "" {
 		call.Model = out.Usage.Model

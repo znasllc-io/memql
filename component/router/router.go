@@ -163,18 +163,27 @@ func (r *Router) resolveChat(ctx context.Context, req ResolveRequest) (common.Ch
 }
 
 // ResolveStructured picks a provider for a structured-output call -- the
-// classifiers, the routing prompts, every CallChatStructured site.
-//
-// There is no fallback wrapper and no observer on this surface yet: the
-// observed* wrappers cover the three chat surfaces, and wrapping a fourth
-// without a ledger row to write would be an empty layer. The RESOLUTION is
-// still recorded in full on Resolved.Decision.
+// classifiers, the routing prompts, every CallChatStructured site -- and
+// returns it wrapped, like the chat surfaces: a source that fails at call time
+// hands the call to the next one on the route, and every attempt writes its
+// v1:router:call row (fallback_structured.go).
 func (r *Router) ResolveStructured(req ResolveRequest) (common.ChatStructuredProvider, Resolved, error) {
-	client, resolved, err := r.resolveDirect(context.Background(), req, modalityStructured)
+	return r.resolveStructured(context.Background(), req)
+}
+
+func (r *Router) resolveStructured(ctx context.Context, req ResolveRequest) (common.ChatStructuredProvider, Resolved, error) {
+	chain, resolved, err := r.resolveChain(ctx, req, modalityStructured)
 	if err != nil {
 		return nil, Resolved{}, err
 	}
-	return client.(common.ChatStructuredProvider), resolved, nil
+	req = r.stampRequestId(req)
+	resolved.Chain = chain
+	return &fallbackStructured{
+		router:   r,
+		chain:    chain,
+		req:      req,
+		resolved: resolved,
+	}, resolved, nil
 }
 
 // ResolveVision picks a provider for a vision call -- an image or a document
@@ -323,6 +332,11 @@ type chainWinner struct {
 	// that carries it is not the registry entry's appProvider.
 	client    any
 	remaining []string
+	// localSeen is true when a local or app source came before this winner in
+	// the walked route, or is this winner. It is the walk's own sawLocalDoor,
+	// carried out so a fallback wrapper hopping to a vendor later asks the
+	// cost ceiling on exactly the condition the walk asks it on.
+	localSeen bool
 }
 
 // resolveChain decides which provider serves this call, and records the whole
@@ -666,9 +680,16 @@ func (r *Router) walkChain(
 			// to reach the same answer when the fallback wrapper re-resolves
 			// this winner by name.
 			if serves, why := servesModality(entry.Client, mod); !serves {
-				sessionClient, isSession, sessionErr := r.sessionDoorFor(req, cand.Name, mod)
+				sessionClient, isSession, skip, sessionErr := r.sessionDoorFor(ctx, req, cand.Name, mod)
 				if sessionErr != nil {
 					return nil, sessionErr
+				}
+				if skip != "" {
+					// Held by another agent: the chat door is open from
+					// here and the session door is not, so the entry is
+					// passed over as a shut door would be.
+					report.note(cand.Name, skip)
+					continue
 				}
 				if isSession {
 					// NO REMAINING CHAIN, and that is the park rule (design D7,
@@ -688,6 +709,7 @@ func (r *Router) walkChain(
 				entry:     entry,
 				door:      cand.Door,
 				remaining: r.remainingNames(ctx, req, candidates[ci:], chain[idx+1:], banned),
+				localSeen: sawLocalDoor,
 			}, nil
 		}
 	}
@@ -771,6 +793,7 @@ func (r *Router) resolvedFrom(
 		Decision:     decision,
 		Entry:        winner.entry,
 		Client:       winner.client,
+		localSeen:    winner.localSeen,
 	}
 }
 
@@ -870,7 +893,7 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 		// walk already resolved, which means the request carried a step. If it
 		// ever did arrive, a session winner's chain is itself alone, so the
 		// skip exhausts the chain and refuses rather than reaching a vendor.
-		sessionClient, isSession, err := r.sessionDoorFor(req, name, mod)
+		sessionClient, isSession, _, err := r.sessionDoorFor(ctx, req, name, mod)
 		if err != nil || !isSession {
 			return nil, Resolved{}, false
 		}
@@ -1134,7 +1157,11 @@ func (r *Router) writeRecord(rec CallRecord) {
 		Claims:  map[string]any{"sub": "system:router"},
 	})
 
-	args := buildRouterCallArgs(rec, id.NewShortId())
+	callId := strings.TrimSpace(rec.CallId)
+	if callId == "" {
+		callId = id.NewShortId()
+	}
+	args := buildRouterCallArgs(rec, callId)
 	query, err := langparser.RenderCall("recordRouterCall", args)
 	if err != nil {
 		r.recordsDropped.Add(1)

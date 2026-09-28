@@ -20,6 +20,7 @@ package router
 // surfaces are there to prevent.
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -29,28 +30,43 @@ import (
 // sessionDoorFor reports whether this chain entry resolves to an APP SESSION
 // for this modality, and hands back the client that carries the step.
 //
+// SKIP is set when the entry is an app door that cannot take a step ON THIS
+// NODE: its machine is held by another agent. The entry the walk read is the
+// chat door's, which is open wherever one call can be forwarded to the holding
+// agent (AppCallForward); a step handover does not cross -- it runs as a
+// session subrun on the replica whose delegate opens it -- so here the door is
+// passed over with this reason, exactly as it was before forwarding existed,
+// rather than won as a session that cannot run and has no chain behind it
+// (the planner/app-source design, section 3a, precondition 3). It is asked
+// BEFORE the step check: a door no step could open is not a call-site fault.
+//
 // It returns an ERROR for a tool-needing call that carries no step. That is a
 // refusal AT RESOLUTION, before anything is spent, and it names both the entry
 // and the modality: a bare Go model call with tools has no step to hand over,
 // and reporting that as an unavailable door would send somebody to look at
 // their laptop for a fact about the call site.
-func (r *Router) sessionDoorFor(req ResolveRequest, name string, mod providerModality) (client any, ok bool, err error) {
+func (r *Router) sessionDoorFor(ctx context.Context, req ResolveRequest, name string, mod providerModality) (client any, ok bool, skip string, err error) {
 	if !toolNeeding(mod) {
-		return nil, false, nil
+		return nil, false, "", nil
 	}
 	appId, model, isApp := memql.SplitAppReference(name)
 	if !isApp {
-		return nil, false, nil
+		return nil, false, "", nil
+	}
+	if r != nil && r.providers != nil {
+		if why := r.providers.AppSessionRefusalHere(ctx, req.UserId, appId); why != "" {
+			return nil, false, why, nil
+		}
 	}
 	if strings.TrimSpace(req.StepId) == "" {
-		return nil, false, fmt.Errorf(
+		return nil, false, "", fmt.Errorf(
 			"router: %q resolved for %s and this call carries no work step to hand over: "+
 				"an app door serves a tool-needing call by taking the whole step as a session, and a "+
 				"session is opened from a step. A bare model call with tools cannot be delegated",
 			name, modalityName(mod))
 	}
 	if r == nil || r.providers == nil {
-		return nil, false, fmt.Errorf(
+		return nil, false, "", fmt.Errorf(
 			"router: %q resolved for %s with no provider registry to open a session through",
 			name, modalityName(mod))
 	}
@@ -62,7 +78,7 @@ func (r *Router) sessionDoorFor(req ResolveRequest, name string, mod providerMod
 		RunId:        req.RunId,
 		StepId:       req.StepId,
 		Pin:          appDoorPin(req, name),
-	}), true, nil
+	}), true, "", nil
 }
 
 // appDoorPin says how the app door `name` was reached on this request, for the

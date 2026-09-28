@@ -144,7 +144,7 @@ func (r *ForwardRouter) ForwardModelPull(
 		// has already fetched stays on disk and is resumed by the next pull
 		// of the same model -- a cancel stops the spend of bandwidth, not the
 		// existence of bytes.
-		r.sender.Send(nodeId, &nodev1.NodeClientMessage{
+		r.sendCancel(nodeId, &nodev1.NodeClientMessage{
 			MessageId: id.NewShortId(),
 			Payload: &nodev1.NodeClientMessage_ModelPullForwardCancel{
 				ModelPullForwardCancel: &nodev1.ModelPullForwardCancel{RequestId: requestId, Reason: "caller_cancelled"},

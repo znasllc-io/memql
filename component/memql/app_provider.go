@@ -35,6 +35,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -137,10 +138,15 @@ type AppMachine struct {
 	// Subscription is what the app REPORTED about itself: unknown, none or
 	// present. Never inferred.
 	Subscription string
-	// LocalStream is true when THIS replica holds the machine's stream. A
-	// machine on a sibling replica is skipped rather than failed: the
-	// app-session envelope has no cross-node forward yet (design section 8).
+	// LocalStream is true when THIS replica holds the machine's stream, which
+	// is the only place a STEP HANDOVER can open (the session door runs its
+	// subrun on the replica whose delegate opens it).
 	LocalStream bool
+	// Forwardable is true when another agent replica holds the stream and
+	// this node can forward ONE app-door call there (AppCallForward, the
+	// planner/app-source design section 3a). It opens the chat door -- chat,
+	// structured and vision turns -- and never the session door.
+	Forwardable bool
 }
 
 // AppDoor is one app id and the machines behind it.
@@ -149,7 +155,12 @@ type AppDoor struct {
 	Machines []AppMachine
 }
 
-// Runnable reports whether at least one machine can carry a session right now.
+// Runnable reports whether at least one machine can carry a session opened
+// ON THIS REPLICA right now: the SESSION door's predicate, and deliberately
+// local-only. A step handover runs as a session subrun on the replica whose
+// delegate opens it, and that subrun does not cross the mesh -- so a tool turn
+// resolved on a replica without the stream would become a session winner that
+// cannot run and, by the park rule, has no remaining chain.
 func (d AppDoor) Runnable() bool {
 	for _, m := range d.Machines {
 		if m.Online && m.LocalStream {
@@ -159,11 +170,29 @@ func (d AppDoor) Runnable() bool {
 	return false
 }
 
-// SupportsStructured reports whether any runnable machine's harness can
-// return a structured final answer.
+// Reachable reports whether at least one machine can answer ONE app-door call
+// from this node right now: on a stream this replica holds, or through the
+// agent that holds it (AppCallForward). The CHAT door's predicate -- chat,
+// structured and vision turns -- and what makes a planner's app source open.
+func (d AppDoor) Reachable() bool {
+	for _, m := range d.Machines {
+		if m.reachable() {
+			return true
+		}
+	}
+	return false
+}
+
+func (m AppMachine) reachable() bool {
+	return m.Online && (m.LocalStream || m.Forwardable)
+}
+
+// SupportsStructured reports whether any reachable machine's harness can
+// return a structured final answer. It is a chat-door question: a structured
+// turn is one call, and it crosses to the holding agent like any other.
 func (d AppDoor) SupportsStructured() bool {
 	for _, m := range d.Machines {
-		if m.Online && m.LocalStream && m.StructuredResult {
+		if m.reachable() && m.StructuredResult {
 			return true
 		}
 	}
@@ -307,6 +336,24 @@ func (r *ProviderRegistry) SetAppInference(a AppInference) {
 	r.apps = a
 }
 
+// appSourcesNotOnThisNode is why an app source is passed over on a node with no
+// app door wired at all -- neither sessions of its own (the agent) nor a
+// forward to the agent holding the machine (the planner, AppCallForward).
+//
+// IT SAYS WHERE APP SOURCES DO RUN, because that is what a reader of the
+// decision record can act on (the planner/app-source design, section 3a). An
+// app session travels over the machine's WorkerService stream, which
+// terminates on the agent replica holding it. "This node has no app sessions
+// installed" read like a fault to repair on the node that said it, which is
+// not where the fix is.
+//
+// The node type is MEMQL_NODE_TYPE, the identity every other per-node reading
+// uses (envregistry.ResolveNodeType).
+func appSourcesNotOnThisNode() string {
+	return "app sources run on the agent holding the machine; this " +
+		envregistry.ResolveNodeType() + " node cannot open one"
+}
+
 // AppInferenceInstalled reports whether this node can open app sessions at
 // all, which distinguishes "you have not signed in anywhere" from "the node
 // answering this request has no worker service".
@@ -404,7 +451,7 @@ func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId, mo
 	client := &appProvider{registry: r, appId: appId, model: model, actingUserId: actingUserId, wildcard: wildcard}
 	entry := &ProviderConfigEntry{Config: cfg, Client: client}
 	if a == nil {
-		entry.err = fmt.Errorf("this node has no app sessions installed")
+		entry.err = errors.New(appSourcesNotOnThisNode())
 		return entry, true
 	}
 
@@ -413,21 +460,63 @@ func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId, mo
 		entry.err = err
 		return entry, true
 	}
+	// REACHABLE, not Runnable: the entry is the chat door's, and a chat turn
+	// crosses to the agent holding the machine. The session door asks its
+	// own, local-only question (AppSessionRefusalHere) before it takes a step.
 	for _, d := range doors {
 		if !wildcard && d.AppId != appId {
 			continue
 		}
-		if d.Runnable() {
+		if d.Reachable() {
 			entry.Available = true
 			return entry, true
 		}
 	}
 	if wildcard {
-		entry.err = fmt.Errorf("no app is allowed, signed in and online on a machine this replica holds")
+		entry.err = fmt.Errorf("no app is allowed, signed in and online on a machine this node can reach")
 		return entry, true
 	}
-	entry.err = fmt.Errorf("no machine has %s allowed, signed in and online on a stream this replica holds", appId)
+	entry.err = fmt.Errorf("no machine has %s allowed, signed in and online on a stream this node can reach", appId)
 	return entry, true
+}
+
+// AppSessionRefusalHere says why a STEP HANDOVER to appId cannot open on this
+// node, or "" when it can. The session door asks it before it takes a step.
+//
+// LOCAL-ONLY, and that is the point (the planner/app-source design, section
+// 3a, precondition 3). The entry the router reads is the chat door's, which
+// is open wherever a call can be forwarded to the agent holding the machine.
+// A handover does not cross: it runs as a session subrun on the replica whose
+// delegate opens it. Without this question, a tool turn on a replica that
+// holds no stream would take the app as a session winner that cannot run --
+// and a session winner has no remaining chain by the park rule, so the
+// fallback behind it would never be tried.
+//
+// The wildcard answers for ANY app.
+func (r *ProviderRegistry) AppSessionRefusalHere(ctx context.Context, actingUserId, appId string) string {
+	if r == nil {
+		return appSourcesNotOnThisNode()
+	}
+	r.mu.RLock()
+	a := r.apps
+	r.mu.RUnlock()
+	if a == nil {
+		return appSourcesNotOnThisNode()
+	}
+	doors, err := a.Doors(ctx, actingUserId)
+	if err != nil {
+		return err.Error()
+	}
+	for _, d := range doors {
+		if appId != AppWildcardId && d.AppId != appId {
+			continue
+		}
+		if d.Runnable() {
+			return ""
+		}
+	}
+	return "a step handover opens its session on the agent holding the machine's stream, and this " +
+		envregistry.ResolveNodeType() + " node holds none with it allowed, signed in and online"
 }
 
 // appProvider is the client behind an `app:<appId>` entry.
@@ -498,7 +587,7 @@ func (p *appProvider) inference() AppInference {
 func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResult, error) {
 	a := p.inference()
 	if a == nil {
-		return AppCallResult{}, fmt.Errorf("%w: this node has no app sessions installed", ErrAppUnavailable)
+		return AppCallResult{}, fmt.Errorf("%w: %s", ErrAppUnavailable, appSourcesNotOnThisNode())
 	}
 	req.AppId = p.appId
 	if strings.TrimSpace(req.Model) == "" {
@@ -670,8 +759,8 @@ func (p *appProvider) resolveWildcard(ctx context.Context, a AppInference, req A
 	considered := map[string]string{}
 	for _, d := range orderDoors(doors, order) {
 		switch {
-		case !d.Runnable():
-			considered[d.AppId] = "not allowed, signed in and online on a machine this replica holds"
+		case !d.Reachable():
+			considered[d.AppId] = "not allowed, signed in and online on a machine this node can reach"
 		case req.Schema != nil && !d.SupportsStructured():
 			considered[d.AppId] = "its harness on this machine cannot return a structured answer"
 		default:
@@ -914,7 +1003,11 @@ func (r *ProviderRegistry) AppRefusal(ctx context.Context, actingUserId, appId s
 	a := r.apps
 	r.mu.RUnlock()
 	if a == nil {
-		out.Considered["(this node)"] = "this node has no app sessions installed"
+		// ONE SENTENCE, NOT A PER-APP LIST. Nothing about any app or machine
+		// was looked at, so a line per app would be a list of the same fact;
+		// the router inlines Considered beside the entry's own reason, which
+		// already says it.
+		out.LastError = appSourcesNotOnThisNode()
 		return out
 	}
 	doors, err := a.Doors(ctx, actingUserId)
@@ -930,8 +1023,8 @@ func (r *ProviderRegistry) AppRefusal(ctx context.Context, actingUserId, appId s
 		switch {
 		case len(d.Machines) == 0:
 			out.Considered[d.AppId] = "no machine reports it"
-		case !d.Runnable():
-			out.Considered[d.AppId] = "not allowed, signed in and online on a machine this replica holds"
+		case !d.Reachable():
+			out.Considered[d.AppId] = "not allowed, signed in and online on a machine this node can reach"
 		default:
 			out.Considered[d.AppId] = "runnable, but not eligible for what this call needs"
 		}

@@ -46,7 +46,7 @@ const (
 	// a policy named.
 	RefusalNoLocalModel = "no_local_model_available"
 	// RefusalNoApp is the app door's: no machine has the app allowed,
-	// signed in and online on a stream this replica holds.
+	// signed in and online on a stream this node holds or can forward to.
 	RefusalNoApp = "no_app_available"
 	// RefusalEveryDoorShut is the chain's: every entry was tried and none
 	// could serve the call. This is the one that parks in the ordinary case.

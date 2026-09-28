@@ -159,6 +159,8 @@ shape modelCall workModelCallFull {
   served
   response
   error
+  routerCallId
+  decision
 }
 
 /// Every approval field.

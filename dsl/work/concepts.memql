@@ -22,6 +22,7 @@
 use authoring.concepts.{ construct }
 use identity.concepts.{ user }
 use planner.concepts.{ responsibility }
+use router.concepts.{ call }
 
 /// The intent, owned by a person. Execution state does not live here: it lives on the run, so a
 /// goal that has been re-run, forked or repaired still reads as one thing.
@@ -153,8 +154,8 @@ concept modelCall {
   runId         string!  @description("v1:work:run.id the call was made for.")
   stepKey       string  @description("The step that made the call.")
   requestHash   string!  @description("Hash over provider, model, settings, messages, tools and output schema -- the replay key.")
-  provider      string!  @description("Provider name as the router resolved it.")
-  model         string!  @description("Model id as the router resolved it.")
+  provider      string!  @description("The source that ANSWERED: the route's pick, or the source the router fell back to when the pick failed at call time. The request hash is over the pick, since a replay asks the same question of it.")
+  model         string!  @description("Model id of the source that answered, as that source reported it when it did.")
   settings      object  @description("Temperature, max tokens and the rest of the request settings.")
   promptRef     string  @description("The prompt construct name.")
   promptVersion string  @description("The prompt construct version at call time.")
@@ -165,9 +166,12 @@ concept modelCall {
   served        enum("live", "journal", "local")!  @description("live = a provider answered; journal = served from a recorded response; local = a fleet model answered.")
   response      object  @description("The response, structured output or text.")
   error         string  @description("The provider's error, when there was one.")
+  routerCallId  string  @description("The v1:router:call row that records the attempt this call ended on -- the decision record behind it. Empty on a row served from the journal, where no source was asked, and on a call no router wrapped.")
+  decision      object  @description("The routing decision behind the source that answered: {level, requestedLevel, servedLevel, degraded, rule, policy, door, outcome, minContextTokens, considered: [{entry, door, reason}]}. `considered` is every source the route passed over, in order and with why -- an app source this node cannot open, a machine that was asleep -- and ends with the one that served. Empty wherever routerCallId is.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="runId", target=run, direction="outgoing")
+  @relationship(type="references", as="decidedBy", field="routerCallId", target=call, direction="outgoing")
 }
 
 /// One human gate. Every kind of gate is this concept; an approval never carries to a modified

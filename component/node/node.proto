@@ -54,6 +54,8 @@ message NodeClientMessage {
     ModelPullForwardCancel model_pull_forward_cancel = 105;
     ModelProbeForwardRequest model_probe_forward_request = 106;
     ModelProbeForwardCancel model_probe_forward_cancel = 107;
+    AppCallForwardRequest app_call_forward_request = 108;
+    AppCallForwardCancel app_call_forward_cancel = 109;
   }
 }
 
@@ -90,6 +92,7 @@ message NodeServerMessage {
     ModelPullForwardProgress model_pull_forward_progress = 105;
     ModelProbeForwardResponse model_probe_forward_response = 106;
     ModelProbeForwardProgress model_probe_forward_progress = 107;
+    AppCallForwardResponse app_call_forward_response = 108;
   }
 }
 
@@ -833,6 +836,146 @@ message ModelProbeForwardProgress {
 
 // ModelProbeForwardCancel stops a forwarded probe.
 message ModelProbeForwardCancel {
+  string request_id = 1;
+  string reason = 2;
+}
+
+// ---------------------------------------------------------------------------
+// App-door call forwarding
+// ---------------------------------------------------------------------------
+//
+// AppCallForwardRequest carries ONE app-door call -- a chat, structured or
+// vision turn answered by a signed-in Claude Code or Codex -- to the agent
+// replica holding the machine's WorkerService stream (the planner/app-source
+// design, section 3a).
+//
+// WHY IT EXISTS. An app session travels over the machine's stream, which
+// terminates on exactly ONE agent replica. The planner holds no streams at
+// all, and a sibling agent replica holds none for this machine, so a route
+// that put `app:claude-code` first passed over it on every planner call --
+// triage, compile, compose -- and on half the agent's. This is the
+// ModelForward shape for an app call: stamp a request id, park, send to the
+// replica named by the registration's connectedNodeId, route the answer back
+// by id.
+//
+// WHAT CROSSES IS THE RESOLVED CALL, NOT THE PROMPT. The sender's router has
+// already decided this call goes to this app (one router, one decision
+// record); the receiver runs it on the machine it names and does not
+// re-resolve. Forwarding the prompt for a second resolution would run two
+// routers and write two decision records for one call.
+//
+// WHAT THE RECEIVER RE-CHECKS is everything it can know better than the
+// sender, and it decides from the VERIFIED `authority`, never from
+// `owner_user_id`, which is a hint:
+//   - the registration is the verified subject's OWN and not revoked. App
+//     sessions are never lent: sharing a machine lends its models, not its
+//     signed-in apps, its subscription or its shell;
+//   - the APP GATE: the pin (only the owner's own pin opens their machine)
+//     and the kill switch, read at the moment the session would open;
+//   - that it still holds the stream and the app is still allowed and
+//     signed in there.
+// Absence of an authority is refusal, not a default.
+message AppCallForwardRequest {
+  string request_id = 1;
+  // The machine to run on. Chosen by the sender from the persisted
+  // registration; the receiver verifies rather than re-choosing.
+  string registration_id = 2;
+  // A HINT for the fleet read only. The owner that DECIDES is the subject of
+  // `authority`.
+  string owner_user_id = 3;
+  // The app id, one of the engine's closed set. Never the wildcard: `app:*`
+  // was resolved to one app by the sender.
+  string app_id = 4;
+  repeated AppCallMessage messages = 5;
+  // Present for a structured call. Its presence is what makes the call
+  // require a harness that can return a structured final answer.
+  AppCallSchema schema = 6;
+  string purpose = 7;
+  // The calling run and its step KEY, so the session the receiver opens is
+  // recorded as one model call made inside that step.
+  string run_id = 8;
+  string step_id = 9;
+  // The model a policy pinned with `app:<id>:<model>`; empty is no pin.
+  string model = 10;
+  // The call's level, one of the closed four; the cockpit translates it.
+  string level = 11;
+  // A person's explicit effort for this call; empty lets the level decide.
+  string effort = 12;
+  // Library artifact ids the cockpit pulls into the session workspace.
+  repeated string inputs = 13;
+  // How the sender's router reached the door, for the receiver's app gate.
+  AppCallPin pin = 14;
+  // The images of a vision call. The RECEIVER stages them into the session
+  // workspace, because that is the replica whose session they land in.
+  repeated AppCallImage images = 15;
+  // Optional timeout hint; the receiver clamps to its own ceiling.
+  int32 timeout_sec = 16;
+  ForwardedAuthority authority = 17;
+}
+
+// AppCallMessage is one turn of the conversation. Only the role and the text
+// cross: an app takes ONE prompt, and the receiver flattens these into it.
+message AppCallMessage {
+  string role = 1;
+  string content = 2;
+}
+
+// AppCallSchema is the output contract of a structured call.
+message AppCallSchema {
+  string name = 1;
+  string description = 2;
+  bytes schema_json = 3;
+  bool strict = 4;
+}
+
+// AppCallPin says how the sender's router reached the app door.
+message AppCallPin {
+  // True when the call pinned this door rather than a rule's chain naming it.
+  bool pinned = 1;
+  // The person who made the pin; empty when no person did.
+  string by = 2;
+}
+
+// AppCallImage is one image of a vision call, as bytes.
+message AppCallImage {
+  string mime_type = 1;
+  bytes data = 2;
+}
+
+// AppCallForwardResponse is the terminal answer for one request_id.
+message AppCallForwardResponse {
+  string request_id = 1;
+  bool ok = 2;
+  string content = 3;
+  // What the APP reported serving the turn with; empty is unknown.
+  string model = 4;
+  string effort = 5;
+  int64 input_tokens = 6;
+  int64 output_tokens = 7;
+  // False means the app reported nothing, which the ledger records as
+  // unknown rather than as a free call.
+  bool usage_known = 8;
+  // `app:<appId>@<registrationId>`, the surface the ledger stores.
+  string execution_surface = 9;
+  string machine_label = 10;
+  string billing = 11;
+  // The refusal's stable code when there is one (the app gate's, the
+  // registration check's, no_app_available, app_vision_staging_failed ...).
+  string error_code = 12;
+  string error_message = 13;
+  // refused_before_start IS THE RE-PICK PREDICATE, with the meaning it
+  // carries on WorkerForwardResponse and the same prohibition on guessing it:
+  // true only when the receiver is CERTAIN no session reached the machine,
+  // so the sender may try another machine. After a session starts it is
+  // false even for a failure -- a session that ran spent somebody's
+  // subscription and may have acted in its workspace.
+  bool refused_before_start = 14;
+}
+
+// AppCallForwardCancel stops a forwarded app call: the receiver cancels the
+// session on the machine, which a caller that gave up must never leave
+// running on somebody's laptop.
+message AppCallForwardCancel {
   string request_id = 1;
   string reason = 2;
 }
