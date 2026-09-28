@@ -94,8 +94,8 @@ export function checkoutSkew(i: CheckoutSkewInputs): CheckoutSkew {
       // The honest reading, and the common one: an extension running out of a
       // checkout in the Extension Development Host was never packaged.
       sentence:
-        `This extension records no build commit -- it was run from source rather than packaged -- ` +
-        `so it cannot be compared with the checkout at ${shortCommit(checkout)}.`,
+        `This extension records no build commit (it was run from source rather than packaged), ` +
+        `so it can't be compared with the checkout at ${shortCommit(checkout)}.`,
       terse: `not recorded, so it cannot be compared with ${shortCommit(checkout)} in the checkout`,
     };
   }
@@ -114,17 +114,17 @@ export function checkoutSkew(i: CheckoutSkewInputs): CheckoutSkew {
     return {
       state: "diverged",
       sentence:
-        `Built from uncommitted edits on ${shortCommit(extension)}, which is also the checkout's ` +
-        `commit -- so this extension is not the code that commit describes.`,
+        `Built from uncommitted edits on ${shortCommit(extension)}, the checkout's commit, ` +
+        `so this extension isn't exactly that commit.`,
       terse: `${shortCommit(extension)} plus uncommitted edits, which the checkout does not have`,
     };
   }
   return {
     state: "diverged",
     sentence:
-      `Built at ${shortCommit(extension)} and the checkout is at ${shortCommit(checkout)}. ` +
-      `A build from the checkout runs the CHECKOUT's scripts; the install graph, this checklist ` +
-      `and the rest of the panel are this extension's own.`,
+      `Built at ${shortCommit(extension)}; the checkout is at ${shortCommit(checkout)}. ` +
+      `A build from the checkout runs the checkout's scripts, while its steps and this page ` +
+      `come from this extension.`,
     terse: `${shortCommit(extension)}, and the checkout is at ${shortCommit(checkout)}`,
   };
 }

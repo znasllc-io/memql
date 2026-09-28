@@ -256,6 +256,8 @@ test("a run refused for want of a connection offers the fix, and a failed one it
     }),
   );
   assert.match(failed, /data-act="copyErrorId"/);
+  // The id rides inside the message it was lifted from: said once, not twice.
+  assert.equal(words(failed).split("ERR-1a2b3c").length - 1, 1, "the error ID is on the page twice");
   assert.doesNotMatch(words(failed), /ERROR \(invoke\)/, "the internal phase is on the page");
 });
 
@@ -267,6 +269,15 @@ test("a result says what ran in its meta line, and a tool says its edits don't a
     outcome: { status: "ok", target: TARGET, rows: [{ id: "a" }], raw: [], ranDeployedDefinition: true, injected: false },
   });
   assert.match(ok.head, /1 row · Deployed version/);
+  // No rows: the body says so, and the meta does not say "0 rows" over it.
+  const none = resultParts({
+    state: "settled",
+    concepts: new Map(),
+    jsonOpen: false,
+    outcome: { status: "ok", target: TARGET, rows: [], raw: [], ranDeployedDefinition: true, injected: false },
+  });
+  assert.doesNotMatch(none.head, /0 rows/);
+  assert.match(words(none.body), /No rows\./);
   const tool = resultParts({
     state: "settled",
     concepts: new Map(),

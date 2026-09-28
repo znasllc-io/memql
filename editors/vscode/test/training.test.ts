@@ -168,6 +168,18 @@ test("unknown produces NO plan at all -- not an empty one", () => {
   assert.deepEqual(trainingLensPlans([construct("unknown")]), []);
 });
 
+test("a construct defined for this session keeps its marker even when its state cannot be read", () => {
+  // The session lens used to be drawn whatever the state; folded into the one
+  // training lens, an `unknown` state would have taken the marker with it.
+  const plans = trainingLensPlans([construct("unknown")], { offerActions: true, sessionDefined: () => true });
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0]?.label, "This session");
+  assert.deepEqual(plans[0]?.actions, []);
+  assert.match(plans[0]?.detail ?? "", /until you disconnect/);
+  // And nothing at all when it is not session-defined.
+  assert.deepEqual(trainingLensPlans([construct("unknown")], { sessionDefined: () => false }), []);
+});
+
 test("a mixed file shows all three simultaneously, in document order", () => {
   // The acceptance criterion verbatim.
   const plans = trainingLensPlans([

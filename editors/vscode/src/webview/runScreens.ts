@@ -293,7 +293,9 @@ export function resultParts(input: ResultInput): RegionParts {
         };
       }
       return {
-        head: head({ title, meta: `${countText(o.rows.length)} · ${provenance}` }),
+        // The count only when there are rows: "0 rows" over "No rows." is
+        // the same fact twice.
+        head: head({ title, meta: o.rows.length === 0 ? provenance : `${countText(o.rows.length)} · ${provenance}` }),
         body: rowsBody(o.rows, input.concepts) + (o.rows.length === 0 ? "" : jsonDisclosure(o.raw, input.jsonOpen)),
         actions: "",
       };
@@ -330,12 +332,15 @@ export function resultParts(input: ResultInput): RegionParts {
       // The ERR- id is the only handle on the server-side log entry: shown
       // apart from the prose, and one click from the clipboard.
       if (o.errorId !== "") acts.push({ act: RESULT_ACTS.copyErrorId, label: "Copy error ID" });
+      // The id is lifted OUT of the message (run/call.ts), so the message
+      // already carries it; it is added only when the brief cut it off.
+      const brief = briefMessage(o.message, 400);
       return {
         head: head({ title, meta: "Failed" }),
         body: notice({
           tone: "error",
           line: disconnected ? o.message : "The run failed.",
-          next: disconnected ? undefined : `${briefMessage(o.message, 400)}${o.errorId === "" ? "" : ` · ${o.errorId}`}`,
+          next: disconnected ? undefined : o.errorId === "" || brief.includes(o.errorId) ? brief : `${brief} · ${o.errorId}`,
           acts,
         }),
         actions: "",

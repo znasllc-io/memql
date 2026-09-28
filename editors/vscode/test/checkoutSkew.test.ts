@@ -44,7 +44,7 @@ test("two different commits are reported as diverged, naming both", () => {
   assert.match(skew.sentence, new RegExp(shortCommit(CHECKOUT)));
   // The sentence that would have ended both investigations: WHICH half comes
   // from where.
-  assert.match(skew.sentence, /CHECKOUT's scripts/);
+  assert.match(skew.sentence, /runs the checkout's scripts, while its steps and this page come from this extension/);
 });
 
 test("the same commit is reported as the same, and claims no direction either way", () => {

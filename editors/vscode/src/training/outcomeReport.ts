@@ -79,8 +79,10 @@ export function outcomeReport(outcome: TrainingOutcome): TrainingReport | undefi
     case "error":
       return {
         severity: "error",
+        // The id is lifted out of the message (training/actions.ts), so the
+        // message already carries it; naming it again would say it twice.
         headline:
-          outcome.errorId === ""
+          outcome.errorId === "" || outcome.message.includes(outcome.errorId)
             ? `MemQL: ${VERB[outcome.action]} failed: ${outcome.message}`
             : `MemQL: ${VERB[outcome.action]} failed (${outcome.errorId}): ${outcome.message}`,
         body: [

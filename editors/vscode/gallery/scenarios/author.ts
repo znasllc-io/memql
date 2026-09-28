@@ -355,7 +355,7 @@ const resultScenarios: Scenario[] = [
         status: "error",
         target: TARGET,
         phase: "invoke",
-        message: "query spaceParticipants: argument spaceId: no space 01J8Z2QK6X is visible to you",
+        message: "query spaceParticipants: argument spaceId: no space 01J8Z2QK6X is visible to you (ERR-7c41a2)",
         errorId: "ERR-7c41a2",
       },
     }),

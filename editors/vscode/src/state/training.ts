@@ -332,7 +332,9 @@ export const SESSION_DETAIL = "Callable in this session only, until you disconne
  * The lens plan for each construct, in document order.
  *
  * An `unknown` construct produces NO PLAN -- not an empty one. The caller
- * renders what it gets, so absence here is absence on screen.
+ * renders what it gets, so absence here is absence on screen. The one
+ * exception is a construct defined for this session, whose "This session"
+ * must not vanish because its state could not be read.
  */
 export function trainingLensPlans(
   constructs: readonly TrainingConstruct[],
@@ -340,13 +342,19 @@ export function trainingLensPlans(
 ): TrainingLensPlan[] {
   const out: TrainingLensPlan[] = [];
   for (const construct of constructs) {
-    if (construct.state === "unknown") continue;
+    const session = options.sessionDefined?.(construct.name) === true;
+    if (construct.state === "unknown") {
+      // No state to name, but a copy defined for this session is still
+      // answering calls, and that is the one thing that must stay on screen
+      // (it used to be a lens of its own, drawn whatever the state).
+      if (session) out.push({ construct, label: "This session", detail: SESSION_DETAIL, actions: [] });
+      continue;
+    }
     // `edited` is the one state answered from the CLUSTER as well as from the
     // state, so it is routed past the two per-state tables rather than folded
     // into them -- `detailFor` is also what the status bar's list renders, and
     // that surface has no cluster to be told about.
     const edited = construct.state === "edited";
-    const session = options.sessionDefined?.(construct.name) === true;
     const detail = edited ? editedDetail(options.cluster) : detailFor(construct.state);
     out.push({
       construct,

@@ -1084,3 +1084,19 @@ test("a construct the buffer no longer declares reports the rename rather than c
   assert.equal(outcome.status, "error");
   assert.ok(outcome.status === "error" && outcome.message.includes("isn't in this file any more"));
 });
+
+test("a failed act's toast names its error ID once", () => {
+  // The id is extracted FROM the message, so "failed (ERR-x): ... ERR-x" said
+  // it twice on one line.
+  const report = outcomeReport({
+    status: "error",
+    action: "promote",
+    request: REQUEST,
+    message: "promote: engine unavailable (ERR-a1b2c3)",
+    errorId: "ERR-a1b2c3",
+  });
+  assert.ok(report !== undefined);
+  assert.equal(report.headline.split("ERR-a1b2c3").length - 1, 1, report.headline);
+  // The full record still carries it, for the log search.
+  assert.ok(report.body.includes("Error ID: ERR-a1b2c3"));
+});
