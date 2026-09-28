@@ -1,10 +1,10 @@
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, type KeyboardEvent, type Ref } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { ChoiceStack, Subhead } from "../kit";
 import { InlineSkeleton } from "../kit/ContentSkeleton";
-import { ASK_LEVELS, routingFor, whereOf, type AskLevel, type AskRouting, type RouteWhere } from "./askRoute";
-import { routeOptions, useRouteFacts } from "./routeSources";
+import { ASK_LEVELS, routeLabel, routingFor, whereOf, type AskLevel, type AskRouting, type RouteWhere } from "./askRoute";
+import { NOT_CONNECTED, routeOptions, useRouteFacts } from "./routeSources";
 
 // The Ask route picker (design brief "routing in MemQL OS", section 6).
 //
@@ -13,10 +13,11 @@ import { routeOptions, useRouteFacts } from "./routeSources";
 // person choosing where their next question goes is not reading the last
 // answer. Back (or Escape) returns to the conversation with nothing changed.
 //
-// CHOOSING IS THE ACTION. There is no Apply: a Where row applies to this
-// conversation and returns -- the wizard's "a step that is one choice is
-// answered by choosing". Effort applies in place and stays, because it
-// modifies the Where choice; a person setting both does it in one visit.
+// CHOOSING IS THE ACTION. There is no Apply: a Where row or an Effort applies
+// to this conversation and returns -- the wizard's "a step that is one choice
+// is answered by choosing" (brief section 6). The Effort a conversation
+// already has is kept when its Where changes, and the other way round, so
+// setting both is two visits and never a lost choice.
 //
 // Nothing here edits a route or a rule; it only chooses for this
 // conversation. That is said ONCE, to assistive technology, in the region's
@@ -49,17 +50,18 @@ export function AskRoutePicker({
     root.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus();
   }, []);
 
-  // Escape unwinds ONE layer: back to the conversation. Capture phase, so it
-  // runs before the sheet's own listener would close Ask altogether.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.stopPropagation();
-      onBack();
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [onBack]);
+  // Escape unwinds ONE layer: back to the conversation -- and only when it is
+  // pressed IN the picker. The desk widget's picker is on screen for as long
+  // as nobody closes it, so a window listener here would take Escape from
+  // every launcher, menu and dropdown in the OS. Stopping it here also keeps
+  // it from the sheet's own window listener, which would close Ask
+  // altogether. The region takes focus (tabIndex -1) so a click on its
+  // background does not drop focus to the page and send Escape past it.
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    onBack();
+  }
 
   function chooseWhere(value: string) {
     const option = options.find((o) => o.where === value);
@@ -73,10 +75,19 @@ export function AskRoutePicker({
     // elsewhere) keeps its selector; only the level moves.
     const where: RouteWhere | null = current;
     onChoose(where === null ? { source: routing.source, level } : routingFor(where, level));
+    onBack();
   }
 
   return (
-    <div ref={root} className="os-ask-route" role="region" aria-label="Route" aria-describedby={describedBy}>
+    <div
+      ref={root}
+      className="os-ask-route"
+      role="region"
+      aria-label="Route"
+      aria-describedby={describedBy}
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
+    >
       <p id={describedBy} className="os-sr-only">
         Applies to this conversation only. Routes and rules stay as they are.
       </p>
@@ -118,5 +129,51 @@ export function AskRoutePicker({
         </button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The composer's pill: the conversation's route in words ("Auto", "Claude
+ * Code · Strong"); activating it opens the picker.
+ *
+ * A route pinned to a source that cannot serve right now says why BEFORE a
+ * send fails at the gate -- quietly: the words stay the choice, the reason is
+ * the pill's accessible description and tooltip, and the words take the
+ * warning tone. Auto has nothing to check and reads nothing; Local and Vendor
+ * ask `inferenceStatus` only while the conversation is pinned to one of them.
+ * "Not connected" is not the route's problem -- Ask already says that about
+ * itself -- so it is not repeated here.
+ */
+export function AskRoutePill({
+  routing,
+  onOpen,
+  ref,
+}: {
+  routing: AskRouting;
+  onOpen: () => void;
+  ref?: Ref<HTMLButtonElement>;
+}) {
+  const name = routeLabel(routing);
+  const where = whereOf(routing.source);
+  const facts = useRouteFacts({ doors: where === "local" || where === "vendor" });
+  const reasonId = useId();
+  const option = where === null || where === "auto" ? undefined : routeOptions(facts, routing.level).find((o) => o.where === where);
+  const reason = option && option.state === "unready" && option.note !== NOT_CONNECTED ? option.note : "";
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        className="os-ask-route-pill"
+        aria-label={`Route: ${name}`}
+        aria-describedby={reason ? reasonId : undefined}
+        data-ready={reason ? "false" : undefined}
+        title={reason ? `Route: ${name}. ${reason}` : `Route: ${name}`}
+        onClick={onOpen}
+      >
+        {name}
+      </button>
+      {reason ? <span id={reasonId} className="os-sr-only">{reason}</span> : null}
+    </>
   );
 }

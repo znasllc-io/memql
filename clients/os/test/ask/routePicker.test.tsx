@@ -19,7 +19,8 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { AskSurface } = await import("../../src/ask/AskSurface");
+const { AskSurface, FLEET_ROUTING_SECTION } = await import("../../src/ask/AskSurface");
+const { FLEET_SECTIONS } = await import("../../src/apps/fleet/settings");
 const { ConversationSession } = await import("../../src/ask/conversationSession");
 const { AUTO_ROUTING } = await import("../../src/ask/askRoute");
 const { MachinesProvider } = await import("../../src/live/machines");
@@ -60,10 +61,10 @@ const STUDIO = machineRow({
 
 const ready = { state: "ready" as const, message: "", refresh: vi.fn() };
 
-function mount({ machines = [STUDIO], doors = [DOORS], doorsPending = false, onManageRoutes = vi.fn() }: { machines?: Row[]; doors?: Row[]; doorsPending?: boolean; onManageRoutes?: () => void } = {}) {
+function mount({ machines = [STUDIO], doors = [DOORS], doorsPending = false, connected = true, routing, variant = "sheet", onManageRoutes = vi.fn() }: { machines?: Row[]; doors?: Row[]; doorsPending?: boolean; connected?: boolean; routing?: AskRouting; variant?: "sheet" | "widget"; onManageRoutes?: () => void } = {}) {
   const connection = fakeConnection({ myWorkersWithStatus: machines, inferenceStatus: doors });
   if (doorsPending) connection.query.inferenceStatus = vi.fn(() => new Promise(() => {}));
-  h.connection = connection;
+  h.connection = connected ? connection : null;
   const calls: { prompt: string; options?: AskOptions }[] = [];
   let callbacks!: AskCallbacks;
   const transport: AskTransport = {
@@ -76,9 +77,10 @@ function mount({ machines = [STUDIO], doors = [DOORS], doorsPending = false, onM
   };
   const routes = new MemoryRoutes();
   const conversation = new ConversationSession(transport, routes);
+  if (routing) conversation.setRouting(routing);
   const view = render(withSession(
     <MachinesProvider>
-      <AskSurface transport={transport} conversation={conversation} availability={ready} variant="sheet" onManageRoutes={onManageRoutes} />
+      <AskSurface transport={transport} conversation={conversation} availability={ready} variant={variant} onManageRoutes={onManageRoutes} />
     </MachinesProvider>,
   ));
   return { view, calls, routes, conversation, onManageRoutes, finish: () => act(() => { callbacks.delta("ok"); callbacks.done(); }) };
@@ -100,6 +102,42 @@ describe("the pill", () => {
     mount();
     expect(pill().textContent).toBe("Auto");
     expect(pill().getAttribute("aria-label")).toBe("Route: Auto");
+  });
+
+  it("on Auto it reads nothing: the composer adds no read of its own", async () => {
+    mount();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect((h.connection as ReturnType<typeof fakeConnection>).query.inferenceStatus).not.toHaveBeenCalled();
+    expect(pill().getAttribute("aria-describedby")).toBeNull();
+  });
+
+  it("a pinned app that cannot serve now says why, quietly, before a send fails", async () => {
+    const laptop = machineRow({
+      id: "v1:worker:registration:laptop",
+      displayName: "Laptop",
+      connectedNodeId: "",
+      apps: [{ id: "claude-code", allowed: true, signedIn: true }],
+    });
+    mount({ machines: [laptop], routing: { source: "app:claude-code", level: "" } });
+    await waitFor(() => expect(pill().getAttribute("aria-describedby")).toBeTruthy());
+    // The words stay the choice; the reason is the pill's description.
+    expect(pill().textContent).toBe("Claude Code");
+    expect(document.getElementById(pill().getAttribute("aria-describedby")!)?.textContent).toBe("Laptop is offline");
+    expect(pill().getAttribute("data-ready")).toBe("false");
+  });
+
+  it("a pinned local model that cannot serve now says why", async () => {
+    mount({ doors: [{ ...DOORS, localEligible: false }], routing: { source: "fleet:strongest", level: "" } });
+    await waitFor(() => expect(pill().getAttribute("aria-describedby")).toBeTruthy());
+    expect(document.getElementById(pill().getAttribute("aria-describedby")!)?.textContent).toBe("No local model online");
+  });
+
+  it("a pinned source that can serve carries no cue", async () => {
+    mount({ routing: { source: "app:claude-code", level: "" } });
+    await open();
+    await act(async () => { screen.getByRole("button", { name: "Back to the conversation" }).click(); });
+    expect(pill().getAttribute("aria-describedby")).toBeNull();
+    expect(pill().getAttribute("data-ready")).toBeNull();
   });
 });
 
@@ -156,14 +194,19 @@ describe("the picker", () => {
     expect(calls[0]!.options?.routing).toEqual({ source: "app:claude-code", level: "" });
   });
 
-  it("Effort applies in place; the pill carries the level when it is not Auto", async () => {
+  it("choosing an Effort applies and returns, like Where; the pill carries the level when it is not Auto", async () => {
     const { calls } = mount();
     await open();
-    const effort = screen.getByRole("radiogroup", { name: "Effort" });
-    await act(async () => { within(effort).getByRole("radio", { name: "Strong" }).click(); });
-    // Still picking: Effort is a modifier of Where, so the Where choice can
-    // follow it in the same visit.
-    expect(within(effort).getByRole("radio", { name: "Strong" }).getAttribute("aria-checked")).toBe("true");
+    await act(async () => { within(screen.getByRole("radiogroup", { name: "Effort" })).getByRole("radio", { name: "Strong" }).click(); });
+    // Choosing IS the action (brief section 6): back to the conversation,
+    // focus on the pill, the level in its words.
+    expect(screen.queryByRole("region", { name: "Route" })).toBeNull();
+    expect(document.activeElement).toBe(pill());
+    expect(pill().textContent).toBe("Auto · Strong");
+
+    // The level is kept when the Where is chosen next.
+    await open();
+    expect(within(screen.getByRole("radiogroup", { name: "Effort" })).getByRole("radio", { name: "Strong" }).getAttribute("aria-checked")).toBe("true");
     await act(async () => { row(/^Local/).click(); });
     expect(pill().textContent).toBe("Local · Strong");
     expect(pill().getAttribute("aria-label")).toBe("Route: Local · Strong");
@@ -176,7 +219,7 @@ describe("the picker", () => {
     // Fast on Local asks for the fastest local model.
     await open();
     await act(async () => { within(screen.getByRole("radiogroup", { name: "Effort" })).getByRole("radio", { name: "Fast" }).click(); });
-    await act(async () => { screen.getByRole("button", { name: "Back to the conversation" }).click(); });
+    expect(screen.queryByRole("region", { name: "Route" })).toBeNull();
     expect(pill().textContent).toBe("Local · Fast");
   });
 
@@ -237,13 +280,89 @@ describe("the picker", () => {
     await open();
     // Focus lands on the current choice.
     expect(document.activeElement).toBe(row(/^Auto/));
-    await act(async () => { fireEvent.keyDown(window, { key: "Escape" }); });
+    await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "Escape" }); });
     expect(screen.queryByRole("region", { name: "Route" })).toBeNull();
     expect(document.activeElement).toBe(pill());
     await open();
     await act(async () => { screen.getByRole("button", { name: "Back to the conversation" }).click(); });
     expect(screen.queryByRole("region", { name: "Route" })).toBeNull();
     expect(conversation.getSnapshot().routing).toEqual(AUTO_ROUTING);
+  });
+
+  it("Escape unwinds the picker from inside it, and never reaches the sheet's own Escape (which closes Ask)", async () => {
+    mount();
+    await open();
+    const sheetEscape = vi.fn();
+    window.addEventListener("keydown", sheetEscape);
+    try {
+      await act(async () => { fireEvent.keyDown(document.activeElement!, { key: "Escape" }); });
+      expect(screen.queryByRole("region", { name: "Route" })).toBeNull();
+      expect(sheetEscape).not.toHaveBeenCalled();
+
+      // A click on the picker's own background keeps focus in the picker, so
+      // Escape still unwinds it rather than closing Ask behind it.
+      await open();
+      const region = screen.getByRole("region", { name: "Route" });
+      act(() => { region.focus(); });
+      expect(document.activeElement).toBe(region);
+      await act(async () => { fireEvent.keyDown(region, { key: "Escape" }); });
+      expect(screen.queryByRole("region", { name: "Route" })).toBeNull();
+      expect(sheetEscape).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", sheetEscape);
+    }
+  });
+
+  it("the desk widget's open picker leaves Escape elsewhere in the OS alone", async () => {
+    mount({ variant: "widget" });
+    await open();
+    // Somewhere else on the desk: a launcher field, a dropdown, a menu.
+    const elsewhere = document.createElement("button");
+    document.body.appendChild(elsewhere);
+    const own = vi.fn();
+    const onDocument = vi.fn();
+    elsewhere.addEventListener("keydown", own);
+    document.addEventListener("keydown", onDocument);
+    try {
+      elsewhere.focus();
+      await act(async () => { fireEvent.keyDown(elsewhere, { key: "Escape" }); });
+      expect(own).toHaveBeenCalledOnce();
+      expect(onDocument).toHaveBeenCalledOnce();
+      // The widget's picker did not take it.
+      expect(screen.getByRole("region", { name: "Route" })).toBeTruthy();
+    } finally {
+      document.removeEventListener("keydown", onDocument);
+      elsewhere.remove();
+    }
+  });
+
+  it("with no connection, the rows say so instead of a skeleton that never resolves", async () => {
+    mount({ connected: false });
+    await act(async () => { pill().click(); });
+    expect(within(where()).queryAllByRole("status")).toHaveLength(0);
+    for (const name of [/^Local/, /^Claude Code/, /^Codex/, /^Vendor/]) {
+      expect(row(name).textContent).toContain("Not connected");
+      expect(row(name).getAttribute("aria-disabled")).toBe("true");
+    }
+    expect(row(/^Auto/).getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it("the current choice stays marked in the picker when it can no longer serve", async () => {
+    const laptop = machineRow({
+      id: "v1:worker:registration:laptop",
+      displayName: "Laptop",
+      connectedNodeId: "",
+      apps: [{ id: "claude-code", allowed: true, signedIn: true }],
+    });
+    mount({ machines: [laptop], routing: { source: "app:claude-code", level: "" } });
+    await open();
+    expect(row(/^Claude Code/).getAttribute("aria-checked")).toBe("true");
+    expect(row(/^Claude Code/).getAttribute("aria-disabled")).toBe("true");
+    expect(row(/^Claude Code/).textContent).toContain("Laptop is offline");
+  });
+
+  it("Manage routes names a section Fleet has", () => {
+    expect(FLEET_SECTIONS.map((section) => section.id)).toContain(FLEET_ROUTING_SECTION);
   });
 
   it("Manage routes opens Fleet's routing", async () => {

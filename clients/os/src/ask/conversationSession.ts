@@ -72,6 +72,10 @@ export class ConversationSession {
   private voiceRevision = 0;
   private voiceTurnId: string | null = null;
   private pendingVoiceActivity = new Map<string, AskActivity[]>();
+  /** The conversation being opened, and the route of the one still showing
+   *  (given back if the open fails). A route chosen meanwhile is the opening
+   *  conversation's: the pill already names it. */
+  private opening: { id: string; before: AskRouting } | null = null;
   constructor(private transport: AskTransport, private routes: AskRouteStore = new LocalAskRouteStore()) {}
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
@@ -83,7 +87,8 @@ export class ConversationSession {
    *  first message creates it) adopts the choice when it is. */
   setRouting = (routing: AskRouting) => {
     this.patch({ routing: { source: routing.source, level: routing.level } });
-    if (this.state.selectedId) this.routes.save(this.state.selectedId, this.state.routing);
+    const id = this.opening?.id ?? this.state.selectedId;
+    if (id) this.routes.save(id, this.state.routing);
   };
   /** A conversation this session just created takes the choice made before it existed. */
   private adopt(id: string) { if (!isAuto(this.state.routing)) this.routes.save(id, this.state.routing); }
@@ -105,16 +110,27 @@ export class ConversationSession {
   newConversation = () => {
     if (this.state.busy || this.state.voiceActive) return;
     this.selection++;
+    this.opening = null;
     this.patch({ selectedId: null, turns: [], dictationActivity: [], draft: "", error: "", loading: false, routing: AUTO_ROUTING });
   };
   select = async (id: string) => {
     if (this.state.busy || this.state.voiceActive || !this.transport.conversations) return;
     const selection = ++this.selection;
-    this.patch({ loading: true, error: "" });
+    // The route belongs to the conversation being opened from the moment it
+    // is asked for, so a choice made while it loads lands on it -- not on the
+    // one being left, and not overwritten when the transcript arrives.
+    this.opening = { id, before: this.opening?.before ?? this.state.routing };
+    this.patch({ loading: true, error: "", routing: this.routes.load(id) });
     try {
       const turns = await this.transport.conversations.read(id);
-      if (selection === this.selection) this.patch({ selectedId: id, turns, dictationActivity: [], draft: "", loading: false, routing: this.routes.load(id) });
-    } catch (error) { if (selection === this.selection) this.patch({ loading: false, error: message(error) }); }
+      if (selection === this.selection) { this.opening = null; this.patch({ selectedId: id, turns, dictationActivity: [], draft: "", loading: false }); }
+    } catch (error) {
+      if (selection === this.selection) {
+        const before = this.opening?.before ?? this.state.routing;
+        this.opening = null;
+        this.patch({ loading: false, error: message(error), routing: before });
+      }
+    }
   };
   detach = (reason = "Connection ended. The work continues in Nexus.") => {
     this.epoch++;
@@ -141,7 +157,7 @@ export class ConversationSession {
     } catch (error) { if (epoch === this.epoch) { this.stopRequested = false; this.patch({ error: `Could not stop work: ${message(error)}` }); } }
     finally { this.cancelling = false; }
   }
-  dispose = () => { this.detach(); this.selection++; this.historyEpoch++; this.voiceEpoch++; this.listeners.clear(); };
+  dispose = () => { this.detach(); this.selection++; this.opening = null; this.historyEpoch++; this.voiceEpoch++; this.listeners.clear(); };
   beginVoice = async (): Promise<string> => {
     if (this.state.busy || this.state.loading || this.state.voiceActive) throw new Error("Finish the current turn first.");
     const epoch = ++this.voiceEpoch;

@@ -9,8 +9,7 @@ import { ConversationSession } from "./conversationSession";
 import { AskWait } from "./AskWait";
 import { AskActivityLog } from "./AskActivityLog";
 import { AskMessage } from "./AskMessage";
-import { AskRoutePicker } from "./AskRoutePicker";
-import { routeLabel } from "./askRoute";
+import { AskRoutePicker, AskRoutePill } from "./AskRoutePicker";
 import type { AskTransport } from "./askController";
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
 import { useReducedMotion, useVoice } from "./useVoice";
@@ -135,7 +134,6 @@ export function AskSurface({
     pillRef.current?.focus();
   }, [picking]);
   const closePicker = useCallback(() => { returnToPill.current = true; setPicking(false); }, []);
-  const routeName = routeLabel(state.routing);
   const draft = providedDraft ?? state.draft;
   const setDraft = onDraftChange ?? conversation.setDraft;
   const exchanges = state.turns;
@@ -378,7 +376,7 @@ export function AskSurface({
         />
         {/* The conversation's route (design brief section 6). The visible
             words are the choice; the accessible name says what they are. */}
-        <button ref={pillRef} type="button" className="os-ask-route-pill" aria-label={`Route: ${routeName}`} title={`Route: ${routeName}`} onClick={() => { controls?.cancel(); setShowHistory(false); setShowActivity(false); setPicking(true); }}>{routeName}</button>
+        <AskRoutePill ref={pillRef} routing={state.routing} onOpen={() => { controls?.cancel(); setShowHistory(false); setShowActivity(false); setPicking(true); }} />
         {busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" title="Stop this work" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
           type="submit"
           className="os-ask-send"

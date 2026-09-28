@@ -134,29 +134,43 @@ interface RoutesDocument {
 }
 
 export class LocalAskRouteStore implements AskRouteStore {
+  /**
+   * What THIS page chose, Auto included, most recent last. Storage can refuse
+   * a write (a private window, blocked site data, a full quota) and a reload
+   * of the conversation must not then drop the choice back to Auto, so a
+   * choice made here answers before whatever storage holds -- for as long as
+   * the page lives.
+   */
+  private readonly session = new Map<string, AskRouting>();
+
   constructor(
     private readonly storage: Storage | null = safeStorage(),
     private readonly kept = ASK_ROUTES_KEPT,
   ) {}
 
   load(conversationId: string): AskRouting {
+    const chosen = this.session.get(conversationId);
+    if (chosen) return { ...chosen };
     const stored = this.read().routes[conversationId];
     return stored ? sanitizeRouting(stored) : { ...AUTO_ROUTING };
   }
 
   save(conversationId: string, routing: AskRouting): void {
     if (!conversationId) return;
+    const choice = { source: routing.source, level: routing.level };
+    this.session.delete(conversationId);
+    this.session.set(conversationId, choice);
+    for (const id of [...this.session.keys()].slice(0, Math.max(0, this.session.size - this.kept))) this.session.delete(id);
     const doc = this.read();
     delete doc.routes[conversationId];
     // Auto is the absence of a choice, so it is stored as nothing.
-    if (!isAuto(routing)) doc.routes[conversationId] = { source: routing.source, level: routing.level };
+    if (!isAuto(choice)) doc.routes[conversationId] = choice;
     const ids = Object.keys(doc.routes);
     for (const id of ids.slice(0, Math.max(0, ids.length - this.kept))) delete doc.routes[id];
     try {
       this.storage?.setItem(ASK_ROUTES_KEY, JSON.stringify(doc));
     } catch {
-      // A private window with storage disabled keeps the choice for this
-      // session only, in the conversation's own state.
+      // Refused: the session map above still holds it for this page.
     }
   }
 

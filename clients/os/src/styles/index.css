@@ -1010,8 +1010,15 @@ button:not(:disabled):active {
  * to the panel (rule 9). No accent beyond the kit's own checked state. */
 .os-ask-route-pill { flex: none; max-width: 13rem; height: var(--os-control-h); margin-bottom: 1px; padding: 0 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; font-size: var(--os-text-xs); color: var(--os-muted); background: none; border: 1px solid var(--os-line); border-radius: 999px; cursor: pointer; transition: color var(--os-duration-fast) var(--os-ease), border-color var(--os-duration-fast) var(--os-ease); }
 .os-ask-route-pill:hover { color: var(--os-ink); border-color: var(--os-muted); }
+/* A pinned source that cannot serve now: the words take the warning tone and
+ * the reason is the pill's description. The edge stays neutral -- a cue, not
+ * an alarm. */
+.os-ask-route-pill[data-ready="false"], .os-ask-route-pill[data-ready="false"]:hover { color: var(--os-warn); }
 .os-ask-route-pill:focus-visible, .os-ask-route-back:focus-visible, .os-ask-route-manage:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 1px; }
 .os-ask-route { flex: 1; min-width: 0; overflow-y: auto; padding: 16px 22px 22px; display: flex; flex-direction: column; gap: 4px; overscroll-behavior: contain; }
+/* The region takes focus only so a click on its background keeps Escape in
+ * the picker; it is never a Tab stop, so it draws no ring of its own. */
+.os-ask-route:focus { outline: none; }
 .os-ask-route > .os-choice-stack, .os-ask-route > .os-choice-row { max-width: 34rem; }
 .os-ask-route .os-choice-stack { gap: 6px; }
 .os-ask-route .os-choice-card { padding: 11px 13px; }
@@ -2499,6 +2506,12 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
 }
 .os-choice-card[aria-disabled="true"] .os-choice-card-name {
   font-weight: 400;
+}
+/* ...except that the CURRENT choice keeps its edge when it stops being
+ * available (a pinned source whose machine went offline): it is still what
+ * this conversation asks for, and the note says why it will not answer. */
+.os-choice-card[aria-checked="true"][aria-disabled="true"] {
+  border-color: var(--os-accent);
 }
 
 /* ---- chips ---- */

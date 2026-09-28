@@ -118,7 +118,30 @@ describe("the per-viewer store", () => {
     } as unknown as Storage;
     const store = new LocalAskRouteStore(throwing);
     expect(() => store.save("c1", { source: "app:codex", level: "" })).not.toThrow();
-    expect(store.load("c1")).toEqual(AUTO_ROUTING);
+    expect(new LocalAskRouteStore(throwing).load("c1")).toEqual(AUTO_ROUTING);
     expect(new LocalAskRouteStore(null).load("c1")).toEqual(AUTO_ROUTING);
+  });
+
+  it("keeps a choice for the session when the browser refuses to store it", () => {
+    // A private window, blocked site data, a full quota: the write fails, and
+    // the choice still holds for as long as this page does.
+    const throwing = {
+      getItem: () => { throw new Error("SecurityError"); },
+      setItem: () => { throw new Error("QuotaExceededError"); },
+    } as unknown as Storage;
+    const store = new LocalAskRouteStore(throwing);
+    store.save("c1", { source: "app:codex", level: "" });
+    expect(store.load("c1")).toEqual({ source: "app:codex", level: "" });
+    expect(new LocalAskRouteStore(null).load("c1")).toEqual(AUTO_ROUTING);
+
+    // Readable but full: what this page chose wins over what is stored.
+    const full = new MemoryStorage();
+    full.setItem(ASK_ROUTES_KEY, JSON.stringify({ version: 1, routes: { c2: { source: "app:codex", level: "" } } }));
+    full.setItem = () => { throw new Error("QuotaExceededError"); };
+    const fullStore = new LocalAskRouteStore(full);
+    fullStore.save("c2", AUTO_ROUTING);
+    expect(fullStore.load("c2")).toEqual(AUTO_ROUTING);
+    fullStore.save("c3", { source: "fleet:fastest", level: "fast" });
+    expect(fullStore.load("c3")).toEqual({ source: "fleet:fastest", level: "fast" });
   });
 });

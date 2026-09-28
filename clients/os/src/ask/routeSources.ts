@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from "react";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useReading, type ReadingState } from "../cluster/reading";
 import { isWorkerOnline } from "../apps/fleet/online";
@@ -23,7 +24,11 @@ import { WHERE_LABEL, ROUTE_WHERE, type AskLevel, type RouteWhere } from "./askR
 //
 // A reading that has not answered is PENDING, not "no": its rows keep their
 // shape with a skeleton where the line goes, and cannot be chosen until the
-// answer lands. A reading that failed says so in the line.
+// answer lands. A reading that failed says so in the line. A reading that
+// cannot be taken -- no connection, or the feed dropped -- is OFFLINE, and
+// says "Not connected" rather than keeping a skeleton for an answer that is
+// not coming (DESIGN.md: a skeleton never implies a disconnected read is
+// progressing).
 
 export type SourceState = "ready" | "unready" | "pending";
 
@@ -36,7 +41,7 @@ export interface RouteOption {
 }
 
 export interface Settled<T> {
-  state: "pending" | "failed" | "read";
+  state: "pending" | "failed" | "offline" | "read";
   value: T;
 }
 
@@ -46,10 +51,12 @@ export interface RouteFacts {
 }
 
 const COULD_NOT_CHECK = "Could not check";
+export const NOT_CONNECTED = "Not connected";
 
 function appOption(where: "claude-code" | "codex", machines: Settled<MachineRow[]>, now: Date): RouteOption {
   const label = WHERE_LABEL[where];
   if (machines.state === "pending") return { where, label, state: "pending", note: "" };
+  if (machines.state === "offline") return { where, label, state: "unready", note: NOT_CONNECTED };
   if (machines.state === "failed") return { where, label, state: "unready", note: COULD_NOT_CHECK };
   const holding = machines.value
     .filter((machine) => !isRevoked(machine))
@@ -81,12 +88,14 @@ export function routeOptions(facts: RouteFacts, level: AskLevel, now: Date = new
         return appOption(where, facts.machines, now);
       case "local":
         if (doors.state === "pending") return { where, label, state: "pending", note: "" };
+        if (doors.state === "offline") return { where, label, state: "unready", note: NOT_CONNECTED };
         if (doors.state === "failed" || doors.value === null) return { where, label, state: "unready", note: COULD_NOT_CHECK };
         return doors.value.localEligible
           ? { where, label, state: "ready", note: "Your machines" }
           : { where, label, state: "unready", note: "No local model online" };
       case "vendor":
         if (doors.state === "pending") return { where, label, state: "pending", note: "" };
+        if (doors.state === "offline") return { where, label, state: "unready", note: NOT_CONNECTED };
         if (doors.state === "failed" || doors.value === null) return { where, label, state: "unready", note: COULD_NOT_CHECK };
         if (!doors.value.federationConfigured) return { where, label, state: "unready", note: "No vendor key" };
         return { where, label, state: "ready", note: level === "strong" || level === "reasoning" ? "Strongest vendor" : "Cheapest vendor" };
@@ -94,14 +103,36 @@ export function routeOptions(facts: RouteFacts, level: AskLevel, now: Date = new
   });
 }
 
-function settledReading<T>(state: ReadingState, value: T | null, empty: T): Settled<T> {
+/** The machines feed as the picker reads it. `absent` is no connection (no
+ *  collection was ever built) and `disconnected` a feed that dropped; neither
+ *  is an answer on its way. */
+export function settleMachines(
+  feedState: ReturnType<typeof useMachines>["feedState"],
+  settled: boolean,
+  rows: readonly Row[],
+): Settled<MachineRow[]> {
+  if (feedState === "absent" || feedState === "disconnected") return { state: "offline", value: [] };
+  if (!settled) return { state: "pending", value: [] };
+  return { state: "read", value: rows.map(machineFromRow).filter((machine) => machine.id !== "") };
+}
+
+function settledReading<T>(connected: boolean, state: ReadingState, value: T | null, empty: T): Settled<T> {
+  if (!connected) return { state: "offline", value: empty };
   if (state === "read") return { state: "read", value: value ?? empty };
   if (state === "failed") return { state: "failed", value: empty };
   return { state: "pending", value: empty };
 }
 
-/** The picker's two readings, live while it is open. */
-export function useRouteFacts(): RouteFacts {
+/**
+ * The picker's two readings, live while they are mounted.
+ *
+ * `doors` is a query, not a feed -- `inferenceStatus` has no event behind it
+ * -- so a caller that does not need Local or Vendor passes false and nothing
+ * is read: the composer's pill asks only while its conversation is pinned to
+ * one of them. The machines feed costs nothing to read here; the shell's
+ * MachinesProvider already retains it.
+ */
+export function useRouteFacts({ doors: wantDoors = true }: { doors?: boolean } = {}): RouteFacts {
   const connection = useOsConnection();
   const feed = useMachines();
 
@@ -113,16 +144,14 @@ export function useRouteFacts(): RouteFacts {
     },
     [connection],
   );
-  const doors = useReading<DoorsReading | null>("ask:route:doors", connection === null ? null : readDoors);
+  const doors = useReading<DoorsReading | null>("ask:route:doors", connection === null || !wantDoors ? null : readDoors);
 
   // `presence` changes identity on every fold of the feed, so it is what
   // re-derives the rows when a machine comes online while the picker is open.
-  const machines = useMemo((): Settled<MachineRow[]> => {
-    const rows = feed.collection?.snapshot?.rows ?? [];
-    if (feed.feedState === "disconnected") return { state: "failed", value: [] };
-    if (!feed.settled) return { state: "pending", value: [] };
-    return { state: "read", value: rows.map(machineFromRow).filter((machine) => machine.id !== "") };
-  }, [feed.collection, feed.feedState, feed.settled, feed.presence]);
+  const machines = useMemo(
+    () => settleMachines(feed.feedState, feed.settled, feed.collection?.snapshot?.rows ?? []),
+    [feed.collection, feed.feedState, feed.settled, feed.presence],
+  );
 
-  return { machines, doors: settledReading(doors.state, doors.value, null) };
+  return { machines, doors: settledReading(connection !== null, doors.state, doors.value, null) };
 }

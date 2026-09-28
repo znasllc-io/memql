@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -35,4 +38,16 @@ it("keeps an unavailable option visible and focusable, says why, and refuses the
   expect(auto.getAttribute("aria-disabled")).toBeNull();
   fireEvent.click(auto);
   expect(onChange).toHaveBeenCalledWith("auto");
+});
+
+// The current choice keeps its mark when it becomes unavailable (a pinned
+// source whose machine went offline): the unavailable rule strips the card's
+// edge, so the checked-and-unavailable rule must come AFTER it and put the
+// accent edge back. Otherwise only the name's colour says which row is chosen.
+it("keeps the checked edge on an unavailable option", () => {
+  const css = readFileSync(join(__dirname, "..", "..", "src", "styles", "index.css"), "utf8");
+  const quiet = css.indexOf('.os-choice-card[aria-disabled="true"],\n.os-choice-card[aria-disabled="true"]:hover {');
+  const marked = css.indexOf('.os-choice-card[aria-checked="true"][aria-disabled="true"] {\n  border-color: var(--os-accent);');
+  expect(quiet).toBeGreaterThan(-1);
+  expect(marked).toBeGreaterThan(quiet);
 });
