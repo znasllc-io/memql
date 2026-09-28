@@ -291,9 +291,9 @@ times while every automated test was green.
 ## 2. Cluster registry editing (B1)
 
 - [ ] The **"+"** opens the **Add a cluster** page (its own subsection below),
-      and registering a cluster that already exists is its *Connect to an
-      existing cluster* branch -- the fields are collected in that page's own
-      form, not by a chain of editor prompts
+      and registering a cluster that already exists is its *Connect to a
+      cluster* choice -- the fields are collected in that page's own form, not
+      by a chain of editor prompts
 - [ ] Registering a cluster whose name collides with an existing one is
       refused, not silently turned into an edit
 - [ ] **Edit Cluster** collects name, domain, endpoint, access token, refresh
@@ -398,71 +398,77 @@ WARNING: one thing this section deliberately does not ask you to verify:
 
 ### The Add a cluster page and the cluster lifecycle (memql#3463)
 
-The **"+"** opens a webview page, not a quick pick. The palette entry the
-`+` used to show, and the installer stub behind it that named a CLI command
-for you to copy, were both deleted (memql#3478): no path in this surface
-hands you a command to run in a terminal.
+The **"+"** opens one page -- its tab reads **Add a cluster**, and **Install
+MemQL**, **Repair MemQL** or **Uninstall MemQL** while it is doing that. Every
+screen is the page kit: a head, the body, and a bar at the bottom with the
+state in words and at most three acts, one of them a button.
 
-The three evidence branches want three machine states, so run them in the
-order below and you get all three from one cluster.
+The landing wants four machine states; run them in the order below and you get
+them from one cluster.
 
-- [ ] With no install receipt and no `local: true` cluster, the page's landing
-      cards lead with **Install a local cluster** and offer **Connect to an
-      existing cluster...** beside it, and no uninstall card
-- [ ] Pressing **"+"** a second time reveals the page that is already open
-      rather than opening a second one -- one machine, one wizard
-- [ ] **Connect to an existing cluster...** asks exactly TWO things -- a name
-      and a domain -- and the hint under the domain box updates AS YOU TYPE to
-      read `Will connect to api.<what-you-typed>:443` (memql#4431)
-- [ ] **Advanced** is collapsed, and opening it shows the endpoint already
-      prefilled with that derivation plus an empty token field. Editing the
-      endpoint wins: the registered entry carries what you typed, not the
-      derivation
+- [ ] While the page is looking at the machine the landing is the grey shape of
+      a list, with no sentence and no choice -- never "installed but not
+      answering" before it has looked
+- [ ] With nothing local: **Install MemQL on this computer** and **Connect to a
+      cluster**, and nothing else. On an unsupported computer: one sentence
+      and **Connect to a cluster**
+- [ ] Pressing **"+"** a second time reveals the page already open rather than
+      opening a second one
+- [ ] **Connect to a cluster** asks for a name and a domain; the line under the
+      domain reads `Connects to api.<what-you-typed>:443` as you type.
+      **More options** holds the endpoint (prefilled) and the access token
 - [ ] Typing `memql.localhost` (or `localhost`, or `127.0.0.1`) as the domain is
-      REFUSED, with a message naming **Install a local cluster** as the thing to
-      use instead. The install form's own `memql.localhost` default still works
-- [ ] Saving a valid form with an unreachable domain WARNS with the endpoint and
-      the reason, writes nothing, and relabels the button **Save anyway**;
-      pressing it again registers the cluster (memql#4432)
-- [ ] Saving a valid form for a cluster that IS up registers it with no warning,
-      and the new cluster appears in the tree
-- [ ] With a local cluster installed and answering, the cards include
-      **Uninstall the local cluster...** and no longer lead with Install
-- [ ] With one installed but NOT answering (stop it: `k3d cluster stop memql`),
-      the cards lead with **Repair the local cluster**
-- [ ] Repair re-runs the install graph: steps already satisfied report as
-      skipped rather than being done twice
-- [ ] The cluster panel's primary control offers **Repair** for a local
-      cluster that is not answering, and opens the same page
-- [ ] The collect form's **Version** field lists releases NEWEST FIRST, with the
-      first entry reading `Latest -- vX.Y.Z (recommended)` and SELECTED. No
-      older tag sits above a newer one (memql#4429 -- the previous form hoisted
-      the pinned tag to the top, which is the mis-sort this replaces)
-- [ ] The tag named in that Latest entry is the one the receipt records at the
-      end of the run, and `kubectl get pods -n memql -o jsonpath` shows node
-      images at that same version
-- [ ] The last entry reads `main -- build from source (for MemQL developers)`
-      and names NO release tag. Selecting it and starting the run: the plan has
-      one more step than a release install (`buildImages`), and after the run
-      `kubectl get pods -n memql -o jsonpath='{.items[*].spec.containers[*].image}'`
-      shows `memql-<node>:local` -- not a ghcr.io image -- with the Deployments
-      row reporting checkout mode at main's commit (memql#4430)
-- [ ] With no network (or no `git`), the Version field degrades to a TEXT BOX
-      prefilled with the extension's pinned release, and the install still runs
-- [ ] The collect form offers the AI provider as a **choice** (anthropic /
-      openai), pre-answered, and the provider chosen is the one the run
-      verifies the key against -- pick `openai` with an OpenAI key and the run
-      passes wave 2
-- [ ] A repair asks for nothing that is already recorded: it needs no key file
-      and no provider, both of which come back off the receipt
-- [ ] Every step of the graph is on screen from the start, the ones ahead
-      marked pending -- not a list that grows as each step begins
-- [ ] A failed step shows its exit status and the script's own stderr verbatim
-      in a disclosure, and offers a retry in place rather than a restart
-- [ ] Retry actually re-runs: fix the cause, press it, and the step executes
-      again rather than the screen merely repainting
-- [ ] Cancelling a part-finished install still leaves a receipt, and the
-      uninstall preview can read it
+      refused, and the message sends you back to the local cluster
+- [ ] Escape leaves an EMPTY connect form; in a half-filled one it does nothing
+      and what you typed is still there. **Cancel** discards
+- [ ] **Connect** on an unreachable domain warns with the address and the
+      reason, writes nothing, and the button becomes **Add anyway**
+- [ ] A cluster that is added stays on the page with its address and **Sign
+      in** as the one button -- no toast
+- [ ] **Install MemQL** shows First name, Last name and Email; Domain and
+      Version sit behind **More options**, whose summary reads
+      `memql.localhost · Latest (vX.Y.Z)`. Checks below list Installer (and
+      Your password, when one will be asked) with one word each
+- [ ] Version, under More options, lists releases newest first with the first
+      reading `Latest (vX.Y.Z)` and selected; the last reads **Build from
+      source (main, slower)**. With no network it is a text box prefilled with
+      the pinned release
+- [ ] Install asks for your computer password ONCE, titled **MemQL needs your
+      password**. Pressing Escape on that prompt returns to the form with
+      everything you typed and runs nothing
+- [ ] The run screen is the mark, **Installing MemQL**, a bar that keeps moving
+      through the cluster step, one short status line ("Creating the
+      cluster", "Starting services 5 of 9") and `Step n of m · m:ss`. No step
+      checklist. The bar at the bottom reads **Installing** with **Cancel**
+- [ ] **Show logs** opens a live log in the order lines arrived, each step's
+      label once where its lines begin; scrolling up stops the follow and
+      reaching the bottom resumes it. **Copy** and **Open in Output** sit on
+      its header. Typing and selecting text are not interrupted while it runs
+- [ ] **Cancel** changes the bar to **Stopping after the current step** with
+      nothing to press, and only once the step finishes to **Not finished**
+      with **Back** and **Resume**
+- [ ] Break a step (stop Docker): the status reads **Couldn't check Docker**,
+      one notice says what the script said and what to do, the log opens AT
+      that step, and -- only once every other step has finished -- the bar
+      offers **Cancel** and **Retry**. A step that needs the password it was
+      refused shows the command with **Run in terminal**, which types it into
+      a terminal without pressing Enter
+- [ ] The done screen: **MemQL is installed**, Address and MemQL OS, the
+      recovery key masked with **Show** and **Copy** (Copy works without
+      Show, and the button then reads **Copied**), and **Sign in** as the one
+      button, with **Set up a passkey** beside it when the owner has no
+      passkey yet. No modal appears over it
+- [ ] Closing the tab with the key not copied warns that it can't be shown
+      again and names MemQL OS as where to rotate it
+- [ ] With a local cluster installed and in the list, the landing offers **Sign
+      in** (or **Open MemQL OS** when signed in), **Repair** and **Uninstall**,
+      and never Install. Stop it (`k3d cluster stop memql`): Repair moves first
+- [ ] Remove it from the list: the landing offers **Connect to it**, which adds
+      it with nothing typed and opens the sign-in
+- [ ] A `make up` cluster with no install record offers **Connect to it** and
+      **Uninstall**, and -- listed or not -- no Repair
+- [ ] **Repair Local Cluster** from the Clusters or Deployments menu on a
+      machine with nothing installed opens the landing, not a repair form
 
 Remove and Uninstall are the pair to check most carefully, because the risk in
 this surface is reading one as the other:
@@ -479,25 +485,32 @@ this surface is reading one as the other:
       NOT appear with a remote cluster selected -- nor on any Clusters row
       (memql#3742 moved it off Clusters; memql#4426 moved it off the Deployments
       instance row, which is gone)
-- [ ] Uninstall opens an itemised dry run first: every artifact the receipt
-      names, what happens to it, and which steps will ask for elevation
-- [ ] Anything the install FOUND rather than created -- an mkcert CA that was
-      already on the machine -- is listed as **preserved** and is still there
-      afterwards
+- [ ] Uninstall opens **Uninstall MemQL**: what will be removed, by name
+      (The cluster, Downloaded MemQL files, Local addresses -- "Asks for your
+      password"), what is kept and why, and no path with your home directory
+      in it
+- [ ] k3d, kubectl, the local certificate authority and mkcert are SWITCHES,
+      all off. mkcert is unavailable, with a line saying so, until the
+      certificate authority is on; turning the authority off turns mkcert off
+- [ ] On a cluster MemQL did not create (a `make up` one, with or without a
+      list entry), the cluster is listed as kept and **Delete the cluster's
+      data** is a red switch. Turning it on shows the `delete memql data`
+      field, which says **Doesn't match yet** as you type; the bar offers
+      **Uninstall and delete data** only once it matches, and the cluster moves
+      to **Will be removed**
+- [ ] **Cancel** and reopening Uninstall brings every switch back OFF and the
+      phrase empty
+- [ ] Escape on the password prompt removes nothing and returns to the list
+- [ ] Anything the install FOUND rather than created is listed as kept and is
+      still there afterwards
 - [ ] After the uninstall the cluster is gone from the tree as well as from
       the machine
 
-Both of the caveats that used to sit here are closed, and what replaced them
-is worth checking rather than assuming:
+One property is worth checking rather than assuming:
 
-- The provider key IS verified with one live call, and nothing has touched the
-  machine when it happens (memql#3473). It is not a preflight ahead of the run
-  -- it is `providerKey`, alone in wave 2, with every mutating step declaring
-  `dependsOn: [..., providerKey]`. `hostsBlock` needs sudo and used to sit in
-  the same wave, so a bad key could cost a password prompt and an `/etc/hosts`
-  edit before anything mentioned it.
-- A wave with several failures explains EACH of them (memql#3474). The headline
-  counts them and leads with the earliest, on the ground that the others may be
+- A wave with several failures explains EACH of them (memql#3474): one notice
+  per failed step, each opening with its own "Couldn't ..." -- and the status
+  line leads with the earliest, on the ground that the others may be
   consequences of it.
 
 ## 3. Running a construct (B2, memql#3309)
@@ -685,7 +698,8 @@ are now in the view's **title menu** (the `...` in the view's header).
 - [ ] The run reports every step; the ones already satisfied report as skipped
 - [ ] Docker not running fails at `detect`, **in the page with its guidance** --
       not as a notification toast
-- [ ] A failed step still offers Retry and Switch-to-guided
+- [ ] A failed step offers Retry (when retrying could help) and no *Switch to
+      guided* control
 
 ### 5c. Repair and uninstall, from Deployments
 
