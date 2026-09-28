@@ -1,4 +1,5 @@
 import type { AskActivity, AskConversationStore } from "./conversationSession";
+import type { AskRouting } from "./askRoute";
 // Shared contract for the cluster transport and injected test transports.
 
 import type { PolicyDraft } from "../apps/fleet/PolicyEditor";
@@ -15,6 +16,14 @@ export interface AskHandle {
   cancel: () => void;
 }
 
+export interface AskOptions {
+  conversationId: string;
+  turnId: string;
+  /** The conversation's route: `source` rides AiChatMsg.provider and `level`
+   *  AiChatMsg.level. Empty values are Auto -- the cluster's rules decide. */
+  routing?: AskRouting;
+}
+
 export interface AskTransport {
  cancelGoal?: (goalId: string) => Promise<void>;
   conversations?: AskConversationStore;
@@ -23,5 +32,5 @@ export interface AskTransport {
    * Stream an answer. `context` is the surface's context tag
    * ("app:artifacts section:browse") or null from the desk/orb.
    */
-  ask(prompt: string, context: string | null, on: AskCallbacks, options?: { conversationId: string; turnId: string }): AskHandle;
+  ask(prompt: string, context: string | null, on: AskCallbacks, options?: AskOptions): AskHandle;
 }

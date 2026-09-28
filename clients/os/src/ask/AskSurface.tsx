@@ -2,13 +2,15 @@ import { ContentSkeleton } from "../kit/ContentSkeleton";
 import { Mark } from "../chrome/Mark";
 import { AskLiveVoice } from "./AskLiveVoice";
 import type { LiveVoiceSession } from "./liveVoiceSession";
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import { ArrowUp, Mic, History, Plus, X, Activity, Square, AudioLines } from "lucide-react";
 
 import { ConversationSession } from "./conversationSession";
 import { AskWait } from "./AskWait";
 import { AskActivityLog } from "./AskActivityLog";
 import { AskMessage } from "./AskMessage";
+import { AskRoutePicker } from "./AskRoutePicker";
+import { routeLabel } from "./askRoute";
 import type { AskTransport } from "./askController";
 import { CHECKING_ASK, type AskAvailability } from "./useAskReadiness";
 import { useReducedMotion, useVoice } from "./useVoice";
@@ -32,6 +34,10 @@ import { DEFAULT_ASK_SETTINGS, type AskSettings } from "../apps/settings/askSett
 // it in state would re-render the streaming answer log sixty times a second
 // to animate one ring; it is written to a CSS custom property on the button
 // instead, from a rAF loop that only runs while the mic is live.
+
+/** Where "Manage routes" goes: Fleet's routing section, one id for every
+ *  entry point that opens it. */
+export const FLEET_ROUTING_SECTION = "routing";
 
 /** What the caption says, per phase. Exported so the tests read the copy. */
 export const ASK_VOICE_HOLD = "Listening -- let go to send.";
@@ -82,6 +88,7 @@ export function AskSurface({
   liveVoice,
   onOpenFile,
   onOpenFleet,
+  onManageRoutes,
   onClose,
   voicePorts = null,
   settings = DEFAULT_ASK_SETTINGS,
@@ -99,6 +106,8 @@ export function AskSurface({
   onClose?: () => void;
   availability?: AskAvailability;
   onOpenFleet?: () => void;
+  /** Open Fleet's routing from the route picker. */
+  onManageRoutes?: () => void;
   draft?: string;
   onDraftChange?: (draft: string) => void;
   /** Absent = this window has no voice wiring; the control says so. */
@@ -116,6 +125,17 @@ export function AskSurface({
   const state = useSyncExternalStore(conversation.subscribe, conversation.getSnapshot);
   const [showHistory, setShowHistory] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
+  // The route picker REPLACES the content while it is open (AskRoutePicker).
+  const [picking, setPicking] = useState(false);
+  const pillRef = useRef<HTMLButtonElement | null>(null);
+  const returnToPill = useRef(false);
+  useEffect(() => {
+    if (picking || !returnToPill.current) return;
+    returnToPill.current = false;
+    pillRef.current?.focus();
+  }, [picking]);
+  const closePicker = useCallback(() => { returnToPill.current = true; setPicking(false); }, []);
+  const routeName = routeLabel(state.routing);
   const draft = providedDraft ?? state.draft;
   const setDraft = onDraftChange ?? conversation.setDraft;
   const exchanges = state.turns;
@@ -252,13 +272,13 @@ export function AskSurface({
       <header className="os-ask-header">
         <div className="os-ask-heading"><strong>MemQL</strong><span>{contextLabel || "Ask"}</span></div>
         <div className="os-ask-actions">
-          <button type="button" title="Conversations" aria-label="Conversations" aria-pressed={showHistory} onClick={() => { setShowHistory(!showHistory); void conversation.refresh(); }}><History size={17} /></button>
-          <button type="button" title="New conversation" aria-label="New conversation" disabled={busy || state.voiceActive} onClick={() => { conversation.newConversation(); setShowHistory(false); inputRef.current?.focus(); }}><Plus size={18} /></button>
-          <button type="button" title="Activity" aria-label="Activity" aria-pressed={showActivity} onClick={() => setShowActivity(!showActivity)}><Activity size={17} /></button>
+          <button type="button" title="Conversations" aria-label="Conversations" aria-pressed={showHistory} onClick={() => { setPicking(false); setShowHistory(!showHistory); void conversation.refresh(); }}><History size={17} /></button>
+          <button type="button" title="New conversation" aria-label="New conversation" disabled={busy || state.voiceActive} onClick={() => { conversation.newConversation(); setShowHistory(false); setPicking(false); inputRef.current?.focus(); }}><Plus size={18} /></button>
+          <button type="button" title="Activity" aria-label="Activity" aria-pressed={showActivity} onClick={() => { setPicking(false); setShowActivity(!showActivity); }}><Activity size={17} /></button>
           {onClose ? <button type="button" title="Close Ask" aria-label="Close Ask" onClick={onClose}><X size={17} /></button> : null}
         </div>
       </header>
-      {state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} />{showActivity ? <AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={() => setShowActivity(false)} /> : null}</div> : <div className="os-ask-content">
+      {picking && !state.voiceActive ? <div className="os-ask-content"><AskRoutePicker routing={state.routing} onChoose={conversation.setRouting} onBack={closePicker} onManageRoutes={onManageRoutes ? () => { setPicking(false); onManageRoutes(); } : undefined} /></div> : state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} />{showActivity ? <AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={() => setShowActivity(false)} /> : null}</div> : <div className="os-ask-content">
         {showHistory ? <nav className="os-ask-history" aria-label="Conversations">
           <span className="os-caption">Conversations</span>
           {state.historyLoading && state.conversations.length === 0 ? <ContentSkeleton label="Opening conversations" /> : null}
@@ -284,7 +304,7 @@ export function AskSurface({
       }
       {state.error ? <p className="os-ask-error" role="alert">{askErrorSummary(state.error)}</p> : null}
       {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
-      {!state.voiceActive ? <form className="os-ask-input" onSubmit={onSubmit}>
+      {!state.voiceActive && !picking ? <form className="os-ask-input" onSubmit={onSubmit}>
         <button
           ref={micRef}
           type="button"
@@ -356,6 +376,9 @@ export function AskSurface({
           readOnly={live}
           onChange={(event) => setDraft(event.target.value)}
         />
+        {/* The conversation's route (design brief section 6). The visible
+            words are the choice; the accessible name says what they are. */}
+        <button ref={pillRef} type="button" className="os-ask-route-pill" aria-label={`Route: ${routeName}`} title={`Route: ${routeName}`} onClick={() => { controls?.cancel(); setShowHistory(false); setShowActivity(false); setPicking(true); }}>{routeName}</button>
         {busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" title="Stop this work" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
           type="submit"
           className="os-ask-send"
@@ -366,7 +389,7 @@ export function AskSurface({
         </button>}
       </form> : null}
       {phase === "transcribing" && !state.voiceActive ? <AskWait activity={state.dictationActivity} startedAt={state.dictationActivity.at(-1)?.at ?? new Date().toISOString()} hasText={false} label="Transcribing" /> : null}
-      {note && phase !== "transcribing" && !state.voiceActive ? (
+      {note && phase !== "transcribing" && !state.voiceActive && !picking ? (
         <p
           className="os-caption os-ask-micnote"
           data-note={!wired || voice?.state.problem ? "problem" : "state"}

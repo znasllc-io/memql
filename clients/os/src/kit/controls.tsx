@@ -903,8 +903,18 @@ export interface ChoiceOption {
   label: string;
   indicator?: ReactNode;
   /** What it MEANS, in the reader's terms. "leastLoaded" does not say what it
-   *  is least-loaded against. */
-  description?: string;
+   *  is least-loaded against. A node when the line is still being read (an
+   *  `InlineSkeleton`), never a "Loading" sentence. */
+  description?: ReactNode;
+  /**
+   * Visible but not choosable right now, and the description says why.
+   *
+   * aria-disabled rather than `disabled`, on purpose: a disabled button leaves
+   * the tab order, and then the one line explaining why it cannot be chosen is
+   * unreachable by keyboard and unread by a screen reader -- the person sees a
+   * choice they cannot take and cannot find out why.
+   */
+  unavailable?: boolean;
 }
 
 /**
@@ -955,8 +965,9 @@ export function ChoiceStack({
           type="button"
           role="radio"
           aria-checked={value === option.value}
+          aria-disabled={option.unavailable || undefined}
           className="os-choice-card"
-          onClick={() => onChange(option.value)}
+          onClick={() => { if (!option.unavailable) onChange(option.value); }}
         >
           <span className={voice === "prose" ? "os-choice-card-name" : "os-choice-card-name os-mono"}>
             {option.label}{option.indicator ? <> {option.indicator}</> : null}
