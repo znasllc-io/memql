@@ -3161,15 +3161,26 @@ function registerRunSurface(
   // Each act runs with the window's progress area naming it, so the seconds
   // between the confirmation and the answer (validate, then submit) never look
   // like a click that did nothing, and ends in ONE toast: what happened, with
-  // the next act as a button when there is one.
+  // the next act as a button when there is one. The progress starts when the
+  // act does (`started`, past its confirmation), never behind the modal.
   const trainingAct = async (
     verb: string,
     request: TrainingRequest,
-    act: () => Promise<TrainingOutcome>
-  ): Promise<TrainingOutcome> =>
-    Promise.resolve(
-      window.withProgress({ location: ProgressLocation.Window, title: `${verb} ${request.name}` }, act)
-    );
+    act: (started: () => void) => Promise<TrainingOutcome>
+  ): Promise<TrainingOutcome> => {
+    let settled: () => void = () => {};
+    const started = (): void => {
+      void window.withProgress(
+        { location: ProgressLocation.Window, title: `${verb} ${request.name}` },
+        () => new Promise<void>((resolve) => (settled = resolve))
+      );
+    };
+    try {
+      return await act(started);
+    } finally {
+      settled();
+    }
+  };
   const promoteNext = (request: TrainingRequest) => ({
     label: 'Promote',
     run: () => commands.executeCommand(COMMAND_PROMOTE, request),
@@ -3181,11 +3192,11 @@ function registerRunSurface(
     // without one returns rather than guessing at the active editor.
     commands.registerCommand(COMMAND_DRY_RUN, async (request?: TrainingRequest) => {
       if (request === undefined) return;
-      reportTraining(await trainingAct('Checking', request, () => training.dryRun(request)), trainingOutput, promoteNext(request));
+      reportTraining(await trainingAct('Checking', request, (started) => training.dryRun(request, started)), trainingOutput, promoteNext(request));
     }),
     commands.registerCommand(COMMAND_TRY_IN_SESSION, async (request?: TrainingRequest) => {
       if (request === undefined) return;
-      const outcome = await trainingAct('Defining', request, () => training.tryInSession(request));
+      const outcome = await trainingAct('Defining', request, (started) => training.tryInSession(request, started));
       reportTraining(outcome, trainingOutput, promoteNext(request));
       // The lens that says "this session" is the half of the temporariness
       // message that survives the toast being dismissed, so it has to redraw
@@ -3194,11 +3205,11 @@ function registerRunSurface(
     }),
     commands.registerCommand(COMMAND_STAGE, async (request?: TrainingRequest) => {
       if (request === undefined) return;
-      reportTraining(await trainingAct('Staging', request, () => training.stage(request)), trainingOutput, promoteNext(request));
+      reportTraining(await trainingAct('Staging', request, (started) => training.stage(request, started)), trainingOutput, promoteNext(request));
     }),
     commands.registerCommand(COMMAND_PROMOTE, async (request?: TrainingRequest) => {
       if (request === undefined) return;
-      const outcome = await trainingAct('Promoting', request, () => training.promote(request));
+      const outcome = await trainingAct('Promoting', request, (started) => training.promote(request, started));
       if (outcome.status !== 'breaking') {
         reportTraining(outcome, trainingOutput);
         return;
@@ -3222,15 +3233,15 @@ function registerRunSurface(
       );
       if (answer !== override) return;
       reportTraining(
-        await trainingAct('Promoting', request, () =>
-          training.promoteWithOverride(request, outcome.cluster, outcome.bundle, outcome.diffs)
+        await trainingAct('Promoting', request, (started) =>
+          training.promoteWithOverride(request, outcome.cluster, outcome.bundle, outcome.diffs, started)
         ),
         trainingOutput
       );
     }),
     commands.registerCommand(COMMAND_DEMOTE, async (request?: TrainingRequest) => {
       if (request === undefined) return;
-      reportTraining(await trainingAct('Demoting', request, () => training.demote(request)), trainingOutput);
+      reportTraining(await trainingAct('Demoting', request, (started) => training.demote(request, started)), trainingOutput);
     }),
     // The ONE training lens's click: the acts legal from this construct's
     // state, each with the line that says what it does, in the order of the

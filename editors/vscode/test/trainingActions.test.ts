@@ -1100,3 +1100,43 @@ test("a failed act's toast names its error ID once", () => {
   // The full record still carries it, for the log search.
   assert.ok(report.body.includes("Error ID: ERR-a1b2c3"));
 });
+
+// -----------------------------------------------------------------------------
+// When an act counts as started
+// -----------------------------------------------------------------------------
+//
+// `started` is where the window's progress begins. It used to wrap the whole
+// act, so "Promoting spaceParticipants" ran behind the modal asking whether to
+// promote it, and a No had shown progress for something that never happened.
+
+test("each confirmed act starts after its confirmation, and a declined one never does", async () => {
+  for (const act of ["tryInSession", "stage", "promote", "demote"] as const) {
+    const h = harness();
+    const seen: number[] = [];
+    await h.actions[act](REQUEST, () => seen.push(h.confirms.length));
+    assert.deepEqual(seen, [1], `${act} started before (or without) its confirmation`);
+
+    const declined = harness();
+    declined.answerConfirm(false);
+    let started = 0;
+    const outcome = await declined.actions[act](REQUEST, () => {
+      started += 1;
+    });
+    assert.equal(outcome.status, "declined");
+    assert.equal(started, 0, `${act} showed progress for a No`);
+  }
+});
+
+test("a dry run starts at once, and one refused before it began never starts", async () => {
+  const h = harness();
+  let started = 0;
+  await h.actions.dryRun(REQUEST, () => {
+    started += 1;
+  });
+  assert.equal(started, 1);
+  h.setConnected(false);
+  await h.actions.dryRun(REQUEST, () => {
+    started += 1;
+  });
+  assert.equal(started, 1, "a dry run with no connection showed progress");
+});

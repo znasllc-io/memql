@@ -143,7 +143,12 @@ test("running a saved run from a file without a language server says so", () => 
 });
 
 test("training acts show progress and end in one toast with the next act", () => {
-  assert.match(EXTENSION, /window\.withProgress\(\{ location: ProgressLocation\.Window, title: `\$\{verb\} \$\{request\.name\}` \}/);
+  assert.match(EXTENSION, /\{ location: ProgressLocation\.Window, title: `\$\{verb\} \$\{request\.name\}` \}/);
+  // The progress is the act's own `started`, never the click: every act hands
+  // it through, so no spinner runs behind a confirmation.
+  for (const act of ["dryRun", "tryInSession", "stage", "promote", "demote"]) {
+    assert.match(EXTENSION, new RegExp(`\\(started\\) => training\\.${act}\\(request, started\\)`), `${act} shows progress from the click`);
+  }
   // Dry run, try and stage offer Promote as their next act.
   for (const command of ["COMMAND_DRY_RUN", "COMMAND_TRY_IN_SESSION", "COMMAND_STAGE"]) {
     const at = EXTENSION.indexOf(`registerCommand(${command}`);
