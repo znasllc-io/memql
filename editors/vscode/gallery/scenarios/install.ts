@@ -462,7 +462,9 @@ function done(id: string, title: string, input: Partial<DoneInput>): Scenario {
   return page(DONE, id, title, full.kind === "added" ? "Add a cluster" : "Install MemQL", () => doneScreen(full));
 }
 
-const KEY = "mql_rk_7Q2x-9fKp-L3vD-8wZr-Tn4B-Hc6M-Ye1J";
+// An example, and visibly one: a real key is 32 random bytes, and a random-
+// looking fixture reads to a secret scanner as a leaked one.
+const KEY = "mql_rk_EXAMPLE-0000-0000-0000-0000-0000-0000";
 
 const dones: Scenario[] = [
   done("install-done", "Installed, recovery key to save", {

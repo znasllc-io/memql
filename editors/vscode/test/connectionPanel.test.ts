@@ -87,20 +87,46 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r));
 }
 
+/**
+ * Waits for the page to reach a state, on real timers.
+ *
+ * NOT A FIXED NUMBER OF TICKS. The page reads the cluster list from disk before
+ * it renders, and how many turns of the event loop a real file read takes
+ * depends on the machine: twenty setImmediate turns was enough on a laptop and
+ * not on a CI runner, where these tests read an unopened page. So each test
+ * waits for the thing it is about to assert on, and fails naming it.
+ */
+async function waitFor<T>(probe: () => T | undefined | false, what: string, ms = 5000): Promise<T> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const value = probe();
+    if (value !== undefined && value !== false) return value;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+/** The page's webview once it has rendered its first document. */
+function openedPage(): Promise<NonNullable<(typeof recorded.webviews)[number]>> {
+  return waitFor(() => {
+    const webview = recorded.webviews.at(-1);
+    return webview !== undefined && webview.html !== "" ? webview : undefined;
+  }, "the page to render");
+}
+
 test("the page renders the cluster's state, and a state change patches rather than repaints", async () => {
   resetRecorded();
   const conns = fakeConnections({ status: "disconnected" });
   const panel = ConnectionPanel.open(CONTEXT, deps(conns.manager, clustersFile()), "local");
-  await settle();
-  const webview = recorded.webviews.at(-1);
-  assert.ok(webview !== undefined);
+  const webview = await openedPage();
+  await waitFor(() => /memql\.localhost/.test(webview.html), "the page to name the cluster");
   assert.match(webview.html, /memql\.localhost/);
   assert.match(webview.html, /data-act="signIn"/, "Sign in is the page's act when nothing is stored");
 
   webview.send({ type: "ready" });
   const documents = webview.renders;
   conns.set({ status: "connecting", clusterName: "local" });
-  await settle();
+  await waitFor(() => webview.posted.some((m) => (m as { type?: string }).type === "patch"), "a patch");
   assert.equal(webview.renders, documents, "a state change reassigned the whole document");
   const patch = webview.posted.find((m) => (m as { type?: string }).type === "patch") as
     | { regions: Record<string, string> }
@@ -115,11 +141,13 @@ test("Disconnect on the page is for THIS cluster", async () => {
   resetRecorded();
   const conns = fakeConnections({ status: "connected", clusterName: "local", nodeId: "n" });
   ConnectionPanel.open(CONTEXT, deps(conns.manager, clustersFile()), "local");
-  await settle();
-  const webview = recorded.webviews.at(-1)!;
+  const webview = await openedPage();
+  await waitFor(() => /data-act="disconnect"/.test(webview.html) || undefined, "the connected page");
   webview.send({ type: "disconnect" });
-  await settle();
-  const at = recorded.executed.lastIndexOf("memql.clusters.disconnect");
+  const at = await waitFor(() => {
+    const i = recorded.executed.lastIndexOf("memql.clusters.disconnect");
+    return i >= 0 ? i : undefined;
+  }, "the page to ask to disconnect").catch(() => -1);
   assert.ok(at >= 0, "the page did not ask to disconnect");
   const node = recorded.executedArgs[at]?.[0] as { cluster?: { name?: string } } | undefined;
   assert.equal(node?.cluster?.name, "local", "disconnect was not scoped to the page's cluster");
@@ -130,8 +158,10 @@ test("the page's acts reach their commands with the page's cluster", async () =>
   resetRecorded();
   const conns = fakeConnections({ status: "disconnected" });
   ConnectionPanel.open(CONTEXT, deps(conns.manager, clustersFile()), "local");
-  await settle();
-  const webview = recorded.webviews.at(-1)!;
+  const webview = await openedPage();
+  // The first document is the page's loading shape, which offers no act; an
+  // act posted before the facts are read is ignored, rightly. Wait for them.
+  await waitFor(() => /data-act="signIn"/.test(webview.html), "the signed-out page").catch(() => undefined);
   for (const [act, command] of [
     ["signIn", "memql.clusters.signIn"],
     ["signInWithCode", "memql.clusters.signInWithCode"],
@@ -140,8 +170,9 @@ test("the page's acts reach their commands with the page's cluster", async () =>
     ["connect", "memql.clusters.select"],
     ["repair", "memql.clusters.repair"],
   ] as const) {
+    const before = recorded.executed.length;
     webview.send({ type: act });
-    await settle();
+    await waitFor(() => recorded.executed.length > before, `${act} to run a command`).catch(() => undefined);
     assert.equal(recorded.executed.at(-1), command, act);
   }
   webview.close();
@@ -159,10 +190,11 @@ test("Cancel during a sign-in stops the sign-in, not the connection", async () =
     }),
     "local",
   );
-  await settle();
-  const webview = recorded.webviews.at(-1)!;
+  const webview = await openedPage();
+  await waitFor(() => /Waiting for you in the browser/.test(webview.html), "the sign-in state");
   assert.match(webview.html, /Waiting for you in the browser/);
   webview.send({ type: "cancel" });
+  await waitFor(() => cancelled.length > 0, "the sign-in to be cancelled").catch(() => undefined);
   await settle();
   assert.deepEqual(cancelled, ["local"]);
   assert.equal(recorded.executed.includes("memql.clusters.disconnect"), false);
@@ -173,7 +205,8 @@ test("a cluster no longer in the list says so", async () => {
   resetRecorded();
   const conns = fakeConnections({ status: "disconnected" });
   ConnectionPanel.open(CONTEXT, deps(conns.manager, clustersFile()), "gone");
-  await settle();
-  assert.match(recorded.webviews.at(-1)!.html, /This cluster is no longer in your list\./);
-  recorded.webviews.at(-1)!.close();
+  const webview = await openedPage();
+  await waitFor(() => /This cluster is no longer in your list\./.test(webview.html), "the removed-cluster page").catch(() => undefined);
+  assert.match(webview.html, /This cluster is no longer in your list\./);
+  webview.close();
 });

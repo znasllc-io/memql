@@ -505,7 +505,7 @@ smoke("every webview surface opens without throwing", async () => {
   const expected: string[] = [];
 
   ConceptPanel.open(context, connections, concept);
-  expected.push(`Concept: ${concept.entity}`);
+  expected.push(concept.entity);
 
   // The page is titled with the cluster's own name (its display label once
   // the entry is read). The registry here does not exist, so the entry is
@@ -527,7 +527,7 @@ smoke("every webview surface opens without throwing", async () => {
   expected.push("smoke-cluster");
 
   RunPanel.open(context, runHost, runTarget);
-  expected.push(`Run: ${runTarget.name}`);
+  expected.push(`Run ${runTarget.name}`);
 
   ResultPanel.show(context, runHost, {
     status: "ok",
@@ -539,7 +539,7 @@ smoke("every webview surface opens without throwing", async () => {
   });
 
   AutomationRunPanel.open(context, automationHost, automationTarget);
-  expected.push(`Run automation: ${automationTarget.name}`);
+  expected.push(`Run ${automationTarget.name}`);
 
   StepTracePanel.show(context, automationTarget, new StepTraceModel());
 
@@ -582,6 +582,12 @@ smoke("every webview surface opens without throwing", async () => {
       browseRows: () => {
         throw new Error("no console handoff in the smoke lane");
       },
+      openInOs: () => {
+        throw new Error("no MemQL OS handoff in the smoke lane");
+      },
+      run: () => {
+        throw new Error("no run in the smoke lane");
+      },
     },
     // The cluster this record was "read from" (memql#4253). The smoke lane has
     // no connection, so "" is the honest answer -- and it is the value that
@@ -589,7 +595,7 @@ smoke("every webview surface opens without throwing", async () => {
     // them unreachable here.
     ""
   );
-  expected.push("Construct: trainedResponder");
+  expected.push("trainedResponder");
 
   // The instance page (memql#3739). Opened against a machine with NO local
   // cluster, which is the state it has to render first and the one an operator
@@ -620,7 +626,9 @@ smoke("every webview surface opens without throwing", async () => {
       throw new Error("no install flow in the smoke lane");
     },
   });
-  expected.push("Deployment: local");
+  // Nothing is installed here, so the page is the local cluster that is not
+  // there yet, and says so in its tab.
+  expected.push("Local cluster");
 
   try {
     // Tabs appear asynchronously -- createWebviewPanel returns before the
