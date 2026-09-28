@@ -19,12 +19,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { roleVisibility } from "../src/deploy/actions.js";
-import { moveFlowFor } from "../src/deploy/instanceActions.js";
+import { localOverviewBar, moveFlowFor, remoteOverviewBar } from "../src/deploy/instanceActions.js";
 import { upgradeVerdict } from "../src/deploy/upgrade.js";
 import type { Instance } from "../src/state/deployments.js";
 import { describeVersion } from "../src/version/describe.js";
 import type { ReleaseListing } from "../src/version/releaseCache.js";
-import { renderInstanceOverview, renderRemoteInstance } from "../src/webview/deploymentScreens.js";
+import { localOverviewScreen } from "../src/webview/deploymentScreens.js";
 
 const listing = (tags: string[], error?: string): ReleaseListing => ({
   tags,
@@ -77,7 +77,8 @@ test("a cluster behind the newest release is offered the move", () => {
   const verdict = verdictFor(local("v0.17.1"), PRE_BARRIER);
   assert.equal(verdict.kind, "offer");
   if (verdict.kind !== "offer") return;
-  assert.equal(verdict.label, "Upgrade to v0.18.0");
+  assert.equal(verdict.label, "Update to v0.18.0");
+  assert.equal(verdict.title, "Update local");
   assert.equal(verdict.target.from, "v0.17.1");
   assert.equal(verdict.target.to, "v0.18.0");
   assert.equal(verdict.target.flow, "upgradeToTag");
@@ -86,44 +87,31 @@ test("a cluster behind the newest release is offered the move", () => {
   assert.equal(verdict.phrase, "v0.18.0");
 });
 
-test("the confirmation names the instance, the move, and the machinery", () => {
+test("the confirmation is one short question: which cluster, from where, to where", () => {
   const verdict = verdictFor(local("v0.17.1"), PRE_BARRIER);
   if (verdict.kind !== "offer") return assert.fail("expected an offer");
-  assert.match(verdict.confirmation, /Move local from v0\.17\.1 to v0\.18\.0\./);
-  // The third part, which is the one that gets dropped: a local move re-runs
-  // fifteen install steps and someone watching that without being told reads it
-  // as a reinstall of their machine.
-  assert.match(verdict.confirmation, /re-runs the install graph/);
-  assert.match(verdict.confirmation, /verifies first and\s+skips|verifies first and skips/);
+  assert.equal(verdict.confirmation, "Update local from v0.17.1 to v0.18.0?");
+  // No mechanism in a one-line input box: how the move runs is the progress
+  // screen's to show.
+  assert.doesNotMatch(verdict.confirmation, /graph|overlay|reconcile|retag/);
 });
 
-test("a move over a checkout-mode cluster says it returns to released images", () => {
-  // The lane crossing, stated in the confirmation the operator reads (memql#4246).
-  // Without it the only notice is the Deployments row afterwards, which stops
-  // saying `checkout <commit>` and starts saying a version -- a developer whose
-  // edits quietly stopped running has no reason to look there.
-  const verdict = verdictFor(
-    { ...local("v0.17.1"), imageSource: "checkout" },
-    PRE_BARRIER,
-  );
+test("a move over a checkout-mode cluster says the operator's own build is replaced", () => {
+  const verdict = verdictFor({ ...local("v0.17.1"), imageSource: "checkout" }, PRE_BARRIER);
   if (verdict.kind !== "offer") return assert.fail("expected an offer");
-  assert.match(verdict.confirmation, /returns local to released images/);
-  assert.match(verdict.confirmation, /runs a checkout build today/);
+  assert.match(verdict.confirmation, /Your own build is replaced with released images\./);
 
   // Said only when it is true: a released-lane cluster crosses nothing.
   const plain = verdictFor(local("v0.17.1"), PRE_BARRIER);
   if (plain.kind !== "offer") return assert.fail("expected an offer");
-  assert.doesNotMatch(plain.confirmation, /returns local to released images/);
+  assert.doesNotMatch(plain.confirmation, /Your own build/);
 });
 
-test("the remote confirmation names the OTHER machinery", () => {
+test("the remote confirmation says it deploys now", () => {
   const verdict = verdictFor(remote("v0.17.1"), PRE_BARRIER);
   if (verdict.kind !== "offer") return assert.fail("expected an offer");
-  assert.match(verdict.confirmation, /Move staging from v0\.17\.1 to v0\.18\.0\./);
-  assert.match(verdict.confirmation, /cuts a deployment record/);
-  // The engine is the authority and the confirmation says so, rather than
-  // implying this editor decided the operator may.
-  assert.match(verdict.confirmation, /cluster decides whether you may/);
+  assert.equal(verdict.confirmation, "Update staging to v0.18.0? It deploys now.");
+  assert.doesNotMatch(verdict.confirmation, /deployment record|decides whether you may/);
 });
 
 test("every state but behind is offered nothing", () => {
@@ -203,13 +191,11 @@ test("a move across a barrier is refused, with the runbook", () => {
   assert.equal(verdict.kind, "refused");
   if (verdict.kind !== "refused") return;
   assert.equal(verdict.barriers.length, 1);
+  // A refusal that says only "no" is a dead end: the runbook travels with it,
+  // and the page links it beside the sentence rather than quoting a path.
   assert.equal(verdict.docHref, "docs/public/operate/upgrade-barriers.md");
-  assert.match(verdict.message, /is not a retag, so it was not run/);
-  // The barrier's own summary, quoted rather than paraphrased: it is the
-  // sentence a reviewer approved when the barrier was added.
-  assert.match(verdict.message, /CloudNativePG/);
-  // A refusal that says only "no" is a dead end.
-  assert.match(verdict.message, /docs\/public\/operate\/upgrade-barriers\.md/);
+  assert.equal(verdict.message, "v0.19.0 needs manual upgrade steps.");
+  assert.doesNotMatch(verdict.message, /retag|docs\//);
 });
 
 test("a move that stops at the barrier is not refused", () => {
@@ -227,77 +213,50 @@ test("the remote path is refused by the same barrier", () => {
 
 // --- the button --------------------------------------------------------------
 
-const OVERVIEW = { runs: [], actions: [], nowMs: 0, error: "", diagnosticsOpen: false } as const;
-
-test("the page draws the button when the move is offered", () => {
-  const instance = local("v0.17.1");
-  const html = renderInstanceOverview({
-    ...OVERVIEW,
+function localPage(instance: Instance, releases: ReleaseListing): string {
+  const upgrade = verdictFor(instance, releases);
+  const parts = localOverviewScreen({
     instance,
-    releases: PRE_BARRIER,
-    upgrade: verdictFor(instance, PRE_BARRIER),
-  });
-  assert.match(html, /data-act="upgrade"/);
-  assert.match(html, /Upgrade to v0\.18\.0/);
-});
-
-test("the page draws the button for a REFUSED move too", () => {
-  // Hiding it would leave an operator looking at a row that says
-  // `v0.19.0 available` beside a page that offers nothing, with no way to find
-  // out why. Pressing it produces the refusal and the runbook.
-  const instance = local("v0.18.0");
-  const html = renderInstanceOverview({
-    ...OVERVIEW,
-    instance,
-    releases: NEWEST,
-    upgrade: verdictFor(instance, NEWEST),
-  });
-  assert.match(html, /data-act="upgrade"/);
-  assert.match(html, /not a retag/);
-});
-
-test("the page draws no button when there is nothing to offer", () => {
-  const instance = local("v0.19.0");
-  const html = renderInstanceOverview({
-    ...OVERVIEW,
-    instance,
-    releases: NEWEST,
-    upgrade: verdictFor(instance, NEWEST),
-  });
-  assert.doesNotMatch(html, /data-act="upgrade"/);
-});
-
-test("the remote page draws it on the same terms", () => {
-  const instance = remote("v0.17.1");
-  const html = renderRemoteInstance({
-    instance,
+    bar: localOverviewBar({ instance, connection: "connected", upgrade }),
     runs: [],
-    pipeline: { kind: "present", title: "Deploy", detail: "", actions: [] },
     nowMs: 0,
-    outcome: "",
-    error: "",
-    releases: PRE_BARRIER,
-    upgrade: verdictFor(instance, PRE_BARRIER, "owner"),
-    diagnosticsOpen: false,
+    upgrade,
+    releases,
+    detailsOpen: false,
+    home: "/home/me",
   });
-  assert.match(html, /data-act="upgrade"/);
-  assert.match(html, /Upgrade to v0\.18\.0/);
+  return parts.head + parts.body + parts.actions;
+}
+
+test("the page offers the update as its primary act when the move is offered", () => {
+  const html = localPage(local("v0.17.1"), PRE_BARRIER);
+  assert.match(html, /data-tone="primary" data-act="update" data-value="v0\.18\.0"/);
+  assert.match(html, /Update to v0\.18\.0…/);
 });
 
-test("everything the button draws is escaped", () => {
-  const instance: Instance = {
-    name: "<img src=x>",
-    kind: "local",
-    presence: "installed-healthy",
-    connected: false,
-    version: "v0.17.1",
-  };
-  const html = renderInstanceOverview({
-    ...OVERVIEW,
-    instance,
-    releases: PRE_BARRIER,
-    upgrade: verdictFor(instance, PRE_BARRIER),
-  });
+test("a REFUSED move is not a button that refuses: it is a fact with the guide", () => {
+  // The old page drew the button enabled and refused only on click.
+  const html = localPage(local("v0.18.0"), NEWEST);
+  assert.doesNotMatch(html, /data-act="update"/);
+  assert.match(html, /needs manual upgrade steps/);
+  assert.match(html, /data-act="openGuide"/);
+});
+
+test("the page offers no update when there is nothing to offer", () => {
+  assert.doesNotMatch(localPage(local("v0.19.0"), NEWEST), /data-act="update"/);
+});
+
+test("the remote page offers it on the same terms, when the cluster can deploy", () => {
+  const instance = remote("v0.17.1");
+  const upgrade = verdictFor(instance, PRE_BARRIER, "owner");
+  const pipeline = { kind: "present" as const, line: "", engineMessage: "", actions: [], rollouts: [] };
+  const bar = remoteOverviewBar({ instance, connection: "connected", upgrade, pipeline, runs: [] });
+  assert.equal(bar.acts.find((a) => a.tone === "primary")?.id, "update");
+  assert.equal(bar.acts.find((a) => a.tone === "primary")?.label, "Update to v0.18.0…");
+});
+
+test("everything the page draws is escaped", () => {
+  const html = localPage({ name: "<img src=x>", kind: "local", presence: "installed-healthy", connected: true, registered: true, version: "v0.17.1" }, PRE_BARRIER);
   assert.doesNotMatch(html, /<img src=x>/);
   assert.match(html, /&lt;img src=x&gt;/);
 });

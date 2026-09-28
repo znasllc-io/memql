@@ -214,7 +214,7 @@ import {
   CONNECTED_KEY,
   NOT_CONNECTED_REFUSAL,
 } from './state/connectionContext.js';
-import { DEPLOYMENTS_INSTANCE_KEY } from './state/deploymentsCatalog.js';
+import { connectionWordFor, type ConnectionFacts } from './state/deploymentsCatalog.js';
 import { DeploymentPanel, type DeploymentPanelDeps } from './webview/deploymentPanel.js';
 import { SITE_CONCEPT, consoleConceptUrl, consoleTarget } from './clusters/consoleUrl.js';
 import { isCatalogUri } from './constructs/catalogTarget.js';
@@ -1588,52 +1588,61 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       ? undefined
       : { commit: extensionBuildStamp.commit, dirty: extensionBuildStamp.dirty };
 
+  // The connection as the Deployments surfaces read it: which cluster, and
+  // where this editor stands with it in the shared vocabulary
+  // (`memql.connectionState`). One function for the tree and the page, so the
+  // heading and the page cannot word the same connection two ways.
+  const deploymentsConnection = (): ConnectionFacts | undefined => {
+    const state = connections?.state;
+    if (state === undefined || state.status === 'disconnected') return undefined;
+    return {
+      clusterName: state.clusterName,
+      connected: state.status === 'connected',
+      word: connectionWordFor(state, state.clusterName),
+    };
+  };
+  // Deployment history is ORDINARY CONCEPT ROWS, read through the same
+  // browseConceptPage the concept browser uses -- no deploy-control bridge
+  // involved (memql#3311). Issued as one pair so the records and their
+  // per-tier specs describe one instant.
+  const deploymentsReader = () => {
+    const query = connections?.query;
+    if (query === undefined) return undefined;
+    return async () => {
+      const [deployments, specs] = await Promise.all([
+        browseConceptPage(query, DEPLOYMENT_CONCEPT, { pageSize: 200 }),
+        browseConceptPage(query, DEPLOYMENT_NODE_SPEC_CONCEPT, { pageSize: 200 }),
+      ]);
+      return { deployments: deployments.rows, specs: specs.rows };
+    };
+  };
+
   const deploymentsTree = new DeploymentsTreeProvider({
     clustersPath,
     receiptPath: defaultReceiptPath(),
     presence: () => presence.get(),
     ...(buildStampForCatalog !== undefined ? { buildStamp: buildStampForCatalog } : {}),
-    // The ONE connection answer, read rather than re-derived (design D1). Note
-    // it is the manager's state through the shared mapping, NOT this file's own
-    // reading of it: the workbench evaluates the manifest's `when` clauses
-    // against the same booleans, and a view that disagreed with them would
-    // render an empty tree with no welcome in it.
+    // The ONE connection answer, read rather than re-derived (design D1): the
+    // workbench evaluates the manifest's `when` clauses against the same
+    // booleans, and a view that disagreed would render an empty tree with no
+    // welcome in it.
     connectionContext: () => connectionContextKeys(connections?.state ?? { status: 'disconnected' }),
-    // The instance line, promoted out of the wrapper row that used to carry it
-    // (memql#4426).
+    // The instance line, promoted out of the wrapper row (memql#4426).
     setDescription: (description) => {
       if (deploymentsView !== undefined) deploymentsView.description = description;
     },
-    // What the view title menu's instance actions are scoped by, now that
-    // there is no row to scope them with.
-    setInstanceContext: (value) => {
-      void commands.executeCommand('setContext', DEPLOYMENTS_INSTANCE_KEY, value);
+    // What the view title menu's acts are scoped by: what the selection is,
+    // and whether it has a checkout and a branch to act on.
+    setContextKeys: (keys) => {
+      for (const [key, value] of Object.entries(keys)) {
+        void commands.executeCommand('setContext', key, value);
+      }
     },
-    // The SHARED cache the Clusters tree uses (memql#3996). Single-flight, so
-    // both trees open still cost one `git ls-remote`; constructing a second one
-    // here would double the work and let the two surfaces disagree about what
-    // the newest release is.
+    // The SHARED cache the Clusters tree uses (memql#3996): single-flight, so
+    // both trees cost one `git ls-remote`.
     releases: releaseCache,
-    connection: () => {
-      const state = connections?.state;
-      if (state === undefined || state.status === 'disconnected') return undefined;
-      return { clusterName: state.clusterName, connected: state.status === 'connected' };
-    },
-    // Deployment history is ORDINARY CONCEPT ROWS, read through the same
-    // browseConceptPage the concept browser uses -- no deploy-control bridge
-    // involved (memql#3311 records that decision). Issued as one pair so the
-    // records and their per-tier specs describe one instant.
-    readDeployments: () => {
-      const query = connections?.query;
-      if (query === undefined) return undefined;
-      return async () => {
-        const [deployments, specs] = await Promise.all([
-          browseConceptPage(query, DEPLOYMENT_CONCEPT, { pageSize: 200 }),
-          browseConceptPage(query, DEPLOYMENT_NODE_SPEC_CONCEPT, { pageSize: 200 }),
-        ]);
-        return { deployments: deployments.rows, specs: specs.rows };
-      };
-    },
+    connection: deploymentsConnection,
+    readDeployments: deploymentsReader,
   });
 
   /**
@@ -1654,32 +1663,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       presence: () => presence.get(),
       ...(buildStampForCatalog !== undefined ? { buildStamp: buildStampForCatalog } : {}),
     },
-    // Same shared cache as the two trees (memql#3996): the page's `latest`
-    // fact and the row's availability clause are the same claim, and they
-    // must not be able to differ.
+    // Same shared cache as the two trees (memql#3996).
     releases: releaseCache,
-    // The same two thunks the tree takes, for the same reason: a remote
-    // instance's version AND its history are the connected cluster's rows,
-    // and the connection changes without this page being told.
-    connection: () => {
-      const state = connections?.state;
-      if (state === undefined || state.status === 'disconnected') return undefined;
-      return { clusterName: state.clusterName, connected: state.status === 'connected' };
-    },
-    readDeployments: () => {
-      const query = connections?.query;
-      if (query === undefined) return undefined;
-      return async () => {
-        const [deployments, specs] = await Promise.all([
-          browseConceptPage(query, DEPLOYMENT_CONCEPT, { pageSize: 200 }),
-          browseConceptPage(query, DEPLOYMENT_NODE_SPEC_CONCEPT, { pageSize: 200 }),
-        ]);
-        return { deployments: deployments.rows, specs: specs.rows };
-      };
-    },
+    connection: deploymentsConnection,
+    readDeployments: deploymentsReader,
     // Rebuilt per call from the LIVE dispatcher rather than cached: the
-    // ConnectionManager drops it the moment the socket dies, and a cached
-    // client would go on writing into a dead stream.
+    // ConnectionManager drops it the moment the socket dies.
     deployPort: () => {
       const dispatcher = connections?.dispatcher;
       return dispatcher === undefined ? undefined : new DeployControlClient(dispatcher);
@@ -1690,10 +1679,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       const access = await query.getMyAccess().catch(() => null);
       return roleVisibility(access?.role);
     },
-    confirm: (prompt, phrase) =>
+    // A version move, a rollback and a rollout abort are confirmed by typing
+    // the target back. One short question and the phrase; nothing else.
+    confirm: ({ title, prompt, phrase }) =>
       Promise.resolve(
         window.showInputBox({
-          title: 'MemQL: confirm',
+          title,
           prompt,
           placeHolder: phrase,
           ignoreFocusOut: true,
@@ -1702,19 +1693,57 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     installRoot: installRootFor(context),
     receiptFile: defaultReceiptPath(),
     refreshTree: () => {
-      // The presence memo is invalidated too: a deployment that succeeded
-      // is one of the two events that change the verdict deterministically,
-      // and waiting out the TTL would show the operator the machine as it
-      // was before their run.
+      // The presence memo is invalidated too: a run that changed the machine
+      // is one of the events that change the verdict deterministically.
       presence.invalidate();
       deploymentsTree.refresh();
       clustersTree.refresh();
     },
-    // THE RE-PARENTING SEAM. Installing, repairing and uninstalling are the
-    // wizard's flows, opened from the instance page rather than reimplemented
-    // behind it (design section 5.2: re-parented, not rewritten).
+    // The two wizard flows only the wizard has. Install, repair and uninstall
+    // are reached through their own commands, which own their panels.
     openInstallFlow: (action) => {
       AddClusterPanel.show(context, presence, addClusterDeps(), action);
+    },
+    // Connect: the Clusters view's own select, handed the registered entry so
+    // it dials without a picker.
+    connectTo: async (name) => {
+      const registry = await readClustersFileSafe(clustersPath);
+      const cluster = registry.ok ? registry.file.clusters.find((c) => c.name === name) : undefined;
+      await commands.executeCommand('memql.clusters.select', cluster === undefined ? undefined : { cluster, selected: false });
+    },
+    // Every run's lines, redacted, where the wizard writes its own.
+    logLine: (line) => installOutput?.appendLine(redactForDisplay(line, os.homedir())),
+    showOutput: () => installOutput?.show(true),
+    // The page re-reads on what changes under it: the connection, and the
+    // three files under ~/.memql the trees watch.
+    onDidChange: (listener) => {
+      const unsubscribe = connections?.onDidChangeState(() => listener());
+      const watching = deploymentsWatchers.flatMap((w) => [w.onDidChange(listener), w.onDidCreate(listener), w.onDidDelete(listener)]);
+      return {
+        dispose: () => {
+          unsubscribe?.();
+          for (const d of watching) d.dispose();
+        },
+      };
+    },
+    onRunSettled: (run, pageVisible) => {
+      // THE CONSTRUCT CATALOG IS STALE after a build: the cluster loaded a new
+      // DSL tree, and every construct's training state was decided against
+      // the one that is gone.
+      if (run.status === 'done' && (run.request.kind === 'rebuild' || run.request.kind === 'pullRebuild')) {
+        void commands.executeCommand('memql.constructs.refresh');
+      }
+      // A toast only when nobody is looking at the page, which says it already.
+      if (pageVisible) return;
+      // The page's own words for where the run ended: "local is on v0.24.0",
+      // "Couldn't create the cluster", "Stopped".
+      const open = 'Open';
+      const settled = run.progress();
+      const line = `MemQL: ${run.status === 'done' ? (settled.title ?? run.words.done) : settled.status}.`;
+      const show = run.status === 'failed' ? window.showErrorMessage(line, open) : window.showInformationMessage(line, open);
+      void Promise.resolve(show).then((choice) => {
+        if (choice === open) DeploymentPanel.show(context, deploymentPanelDeps(), run.request.instance);
+      });
     },
   });
 
@@ -1727,94 +1756,96 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   deploymentsView = window.createTreeView('memqlDeployments', {
     treeDataProvider: deploymentsTree,
   });
+  // The view keeps itself current while it is seen, which is why its title
+  // bar has no Refresh (the command stays in the palette).
+  const deploymentsVisibility = (deploymentsView as { onDidChangeVisibility?: TreeView<DeploymentNode>['onDidChangeVisibility'] })
+    .onDidChangeVisibility;
+  if (typeof deploymentsVisibility === 'function') {
+    context.subscriptions.push(
+      deploymentsVisibility.call(deploymentsView, (event: { visible: boolean }) => deploymentsTree.setVisible(event.visible)),
+    );
+  }
+  deploymentsTree.setVisible((deploymentsView as { visible?: boolean }).visible === true);
+  context.subscriptions.push({ dispose: () => deploymentsTree.dispose() });
+
+  // No local checkout: said once, with the act that makes one.
+  const noCheckout = async (): Promise<void> => {
+    const repair = 'Repair';
+    const choice = await window.showInformationMessage('MemQL: no local checkout found.', repair);
+    if (choice === repair) void commands.executeCommand('memql.clusters.repair');
+  };
   context.subscriptions.push(
     deploymentsView,
     commands.registerCommand('memql.deployments.refresh', () => deploymentsTree.refresh()),
-    // Create deployment on a machine with NO local cluster is the install
-    // graph, which is the same run the "+" opened -- re-parented, not
-    // rewritten. Scoped to the ABSENT selection only (memql#4426: the view
-    // title menu's `memql.deploymentsInstance == memqlLocalInstanceAbsent`,
-    // where it used to be the absent instance ROW), and offered a second time
-    // from the Deployments and Clusters welcomes, which is where an operator
-    // with nothing installed actually is. Moving an INSTALLED instance to
-    // another tag is a different flow and lands with the instance page (#3739).
+    // INSTALL on a machine with no local cluster: the wizard's install flow
+    // (its own panel). The Deployments welcome and title menu offer it only
+    // when nothing is installed.
     commands.registerCommand('memql.deployments.createDeployment', () => {
       AddClusterPanel.show(context, presence, addClusterDeps(), 'install');
     }),
-    // The instance page (memql#3739). It takes the catalog inputs rather than a
-    // resolved instance, because the page re-reads the machine every time it is
-    // revealed -- a receipt written by a run the page itself started is the
-    // ordinary case, and a page holding a snapshot from when it opened would
-    // report the version it replaced.
+    // THE LOCAL CLUSTER'S page, always -- the command's title says Local, and it
+    // used to open whichever cluster was selected, remote ones included.
     commands.registerCommand('memql.deployments.open', () => {
-      // THE SELECTION, not the local instance (memql#4426). This used to be
-      // reached from an instance ROW, which named its own instance; the row is
-      // gone and the command is now in the view title menu, where there is
-      // nothing to name one. Falling back to the local instance the way the
-      // palette entry did would open the wrong page for every operator whose
-      // selected cluster is remote -- silently, since both pages look right.
-      //
-      // "" is passed through when nothing is selected, which the panel reads as
-      // the local instance. That is the palette's old behaviour preserved for
-      // the palette's old case: the command is not offered in the title menu
-      // without `memql.clusterSelected`, so this only happens from the palette.
+      DeploymentPanel.show(context, deploymentPanelDeps(), '');
+    }),
+    // The SELECTED cluster's page, from the Deployments title bar; the local
+    // one when nothing is selected.
+    commands.registerCommand('memql.deployments.openCluster', () => {
       DeploymentPanel.show(context, deploymentPanelDeps(), deploymentsTree.selectedInstance()?.name ?? '');
     }),
-    // Selecting a deployment opens it (memql#4427). The row carries the run and
-    // the instance it belongs to, because the detail page's action buttons are
-    // the INSTANCE's role-gated set, contextualised by what this run did --
-    // there is no second catalog of run-scoped verbs.
+    // A history row opens its run (memql#4427) -- live, when it is still going.
     commands.registerCommand('memql.deployments.openRun', (node?: DeploymentNode) => {
       if (node === undefined || node.kind !== 'run') return;
       DeploymentPanel.showRun(context, deploymentPanelDeps(), node.instance, node.run.id);
     }),
-    // "Rebuild Local Cluster From Checkout" (memql#4246). Registered here, in
-    // the Deployments surface, because that is where it BELONGS -- but the
-    // caller that matters most is the `edited` training lens, which offers it
-    // beside a construct whose source no longer matches what the cluster
-    // loaded. That lens is the reason the id lives in state/training.ts.
-    //
-    // It opens the page rather than running: a rebuild takes minutes and
-    // changes which images a cluster runs, so it goes through the same
-    // checklist an operator reaching it from the instance row sees. A command
-    // that started a 45-minute build from a lens click would be a different
-    // thing entirely.
-    commands.registerCommand(COMMAND_REBUILD, async () => {
-      await DeploymentPanel.openAction(context, deploymentPanelDeps(), 'rebuildFromCheckout');
+    // Sign in to the selected cluster, from the Deployments title bar: THE
+    // sign-in act, with the cluster named so no picker stands in front of it.
+    commands.registerCommand('memql.deployments.signIn', () => {
+      const state = connections?.state;
+      const name = deploymentsTree.selectedInstance()?.name ?? (state === undefined || state.status === 'disconnected' ? undefined : state.clusterName);
+      void commands.executeCommand('memql.clusters.signIn', ...(name === undefined ? [] : [name]));
     }),
-    // "Open Local Checkout" (memql#4246) -- the ONE place this editor opens
-    // the directory the install cloned, shared by the instance row's inline
-    // icon, the Connection page and the install wizard's done screen. All
-    // three post `openCheckout` and land here rather than each resolving the
-    // path and calling `vscode.openFolder` itself.
+    // Change version, from the title menu and the palette: the page, on the
+    // version picker.
+    commands.registerCommand('memql.deployments.changeVersion', async () => {
+      const opened = await DeploymentPanel.openAction(context, deploymentPanelDeps(), 'changeVersion');
+      if (!opened) void window.showInformationMessage('MemQL: no local cluster to change.');
+    }),
+    // "Rebuild Local Cluster From Checkout" (memql#4246). The caller that
+    // matters most is the `edited` training lens, which offers it beside a
+    // construct whose source no longer matches what the cluster loaded; that
+    // lens is why the id lives in state/training.ts. It opens the page's
+    // rebuild screen rather than running: a rebuild takes minutes and changes
+    // which images a cluster runs.
+    commands.registerCommand(COMMAND_REBUILD, async () => {
+      const opened = await DeploymentPanel.openAction(context, deploymentPanelDeps(), 'rebuildFromCheckout');
+      if (!opened) await noCheckout();
+    }),
+    // Pull the latest code into the checkout, then rebuild from it.
+    commands.registerCommand('memql.deployments.updateAndRebuild', async () => {
+      const opened = await DeploymentPanel.openAction(context, deploymentPanelDeps(), 'updateAndRebuild');
+      if (!opened) await noCheckout();
+    }),
+    // "Open Local Checkout" (memql#4246) -- the ONE place this editor opens the
+    // directory the install cloned, shared by the page, the Connection page
+    // and the wizard's done screen.
     commands.registerCommand('memql.deployments.openCheckout', async () => {
       const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
       const dir = recordedStackDir(receipt);
-      // "" is UNKNOWN, never "somewhere else" -- recordedStackDir's own rule,
-      // restated at the one call site that turns it into an action rather
-      // than a hint. A machine registered by hand, or an install that never
-      // reached the clone step, has nothing here to open.
       if (dir === '') {
-        void window.showInformationMessage(
-          'MemQL: no checkout is recorded for the local cluster. Install or repair it to clone one.'
-        );
+        await noCheckout();
         return;
       }
-      // A NEW WINDOW ONLY WHEN ONE IS ALREADY OPEN. With nothing open, this IS
-      // the window the operator is looking at, and forcing a second one would
-      // leave this one sitting empty. With something open, replacing it in
-      // place would discard whatever they were doing there.
+      // A NEW WINDOW ONLY WHEN ONE IS ALREADY OPEN: replacing it in place would
+      // discard whatever the operator was doing there.
       const hasWorkspace = (workspace.workspaceFolders ?? []).length > 0;
       await commands.executeCommand('vscode.openFolder', Uri.file(dir), {
         forceNewWindow: hasWorkspace,
       });
     }),
   );
-  // The connection decides a remote instance's version and its history -- and,
-  // since memql#4426, WHICH cluster this view is about and whether it renders
-  // at all. A connect or a drop is therefore not merely new content: it is the
-  // difference between the timeline and the "Not connected" welcome, so the
-  // repaint here is what makes the welcome appear and disappear on time.
+  // The connection decides a remote instance's version and its history -- and
+  // WHICH cluster this view is about and whether it renders at all.
   connections.onDidChangeState(() => deploymentsTree.refresh());
   // The Deployments tree reads three files that change underneath it, all in
   // ~/.memql and all outside any workspace -- so each needs a RelativePattern

@@ -61,7 +61,11 @@ import * as path from "node:path";
 // the code stopped publishing the key at all, which is the failure that makes
 // a menu entry silently unreachable.
 import { CLUSTER_SELECTED_KEY } from "../src/state/connectionContext.js";
-import { DEPLOYMENTS_INSTANCE_KEY } from "../src/state/deploymentsCatalog.js";
+import {
+  DEPLOYMENTS_HAS_BRANCH_KEY,
+  DEPLOYMENTS_HAS_CHECKOUT_KEY,
+  DEPLOYMENTS_INSTANCE_KEY,
+} from "../src/state/deploymentsCatalog.js";
 
 // dist-test/test/<name>.js is where esbuild.test.js puts this file, so the
 // manifest is two levels up. Read at runtime rather than imported: it is the
@@ -111,6 +115,13 @@ const LOCAL_ROW: WhenContext = { view: "memqlClusters", viewItem: "memqlLocalClu
 const LOCAL_INSTANCE_SELECTED: WhenContext = {
   view: "memqlDeployments",
   [DEPLOYMENTS_INSTANCE_KEY]: "memqlLocalInstance",
+};
+// The same, with a checkout recorded on a branch: what Rebuild, Open checkout
+// and Pull and rebuild need to have something to act on.
+const LOCAL_WITH_CHECKOUT: WhenContext = {
+  ...LOCAL_INSTANCE_SELECTED,
+  [DEPLOYMENTS_HAS_CHECKOUT_KEY]: true,
+  [DEPLOYMENTS_HAS_BRANCH_KEY]: true,
 };
 const ABSENT_INSTANCE_SELECTED: WhenContext = {
   view: "memqlDeployments",
@@ -322,13 +333,23 @@ test("every action the instance row offered is reachable from the title menu", (
   const installed = [
     "memql.clusters.uninstall",
     "memql.clusters.repair",
-    "memql.deployments.rebuildFromCheckout",
-    "memql.deployments.openCheckout",
+    "memql.deployments.changeVersion",
   ];
   for (const command of installed) {
     assert.ok(
       titleEntriesFor(command).some((entry) => matches(entry, LOCAL_INSTANCE_SELECTED)),
       `${command} is unreachable: it left the instance row and did not arrive in the title menu`
+    );
+  }
+  // The three that act on the checkout, where there is one.
+  for (const command of [
+    "memql.deployments.rebuildFromCheckout",
+    "memql.deployments.openCheckout",
+    "memql.deployments.updateAndRebuild",
+  ]) {
+    assert.ok(
+      titleEntriesFor(command).some((entry) => matches(entry, LOCAL_WITH_CHECKOUT)),
+      `${command} is unreachable with a checkout recorded`
     );
   }
   assert.ok(
@@ -339,12 +360,49 @@ test("every action the instance row offered is reachable from the title menu", (
   );
 });
 
-test("opening the instance page is offered whenever a cluster is selected", () => {
+test("acts on the checkout are withheld where no checkout is recorded", () => {
+  // The old menu offered Rebuild and Open checkout for every installed local
+  // cluster, and without a checkout the click landed silently on the overview
+  // or a dead-end toast.
+  for (const command of [
+    "memql.deployments.rebuildFromCheckout",
+    "memql.deployments.openCheckout",
+    "memql.deployments.updateAndRebuild",
+  ]) {
+    assert.deepEqual(
+      titleEntriesFor(command).filter((entry) => matches(entry, LOCAL_INSTANCE_SELECTED)),
+      [],
+      `${command} is offered with no checkout recorded`
+    );
+  }
+  // A checkout pinned to a tag has nothing to pull.
+  assert.deepEqual(
+    titleEntriesFor("memql.deployments.updateAndRebuild").filter((entry) =>
+      matches(entry, { ...LOCAL_WITH_CHECKOUT, [DEPLOYMENTS_HAS_BRANCH_KEY]: false })
+    ),
+    [],
+  );
+});
+
+test("the Deployments title bar has no Refresh: the view keeps itself current", () => {
+  assert.deepEqual(titleEntriesFor("memql.deployments.refresh"), []);
+});
+
+test("Sign in sits on the Deployments title bar exactly when the selected cluster needs it", () => {
+  const entries = titleEntriesFor("memql.deployments.signIn");
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].group?.startsWith("navigation"), true, "sign-in is an inline act");
+  assert.ok(matches(entries[0], { view: "memqlDeployments", "memql.connectionState": "signIn" }));
+  assert.equal(matches(entries[0], { view: "memqlDeployments", "memql.connectionState": "connected" }), false);
+});
+
+test("opening the cluster page is offered whenever a cluster is selected", () => {
   // The route the instance ROW used to be: its `command` opened the page. With
   // the row gone the only way back to it is this entry, so it is gated on the
-  // connection key alone -- every selected cluster has an instance page, local
-  // or remote.
-  const entries = titleEntriesFor("memql.deployments.open");
+  // connection key alone -- every selected cluster has a page, local or
+  // remote. It opens the SELECTED cluster; "Open Local Deployment" stays in the
+  // palette and now always opens the local one, as its title says.
+  const entries = titleEntriesFor("memql.deployments.openCluster");
   assert.equal(entries.length, 1, "expected exactly one open-instance entry in view/title");
   for (const context of [
     LOCAL_INSTANCE_SELECTED,

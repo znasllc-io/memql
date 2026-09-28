@@ -1,157 +1,126 @@
-// The instance page: what this deployment is, and the four things you can do
-// to it.
+// The cluster page: one cluster's state and version, its history, and the acts
+// legal from where it stands.
 //
-// This is where the install machinery finally lives under a name that describes
-// it. Three of the four actions are RE-PARENTED, NOT REWRITTEN -- installing on
-// a machine with no cluster, repairing one, and uninstalling one are the flows
-// the add-cluster wizard already drives, and this page opens them rather than
-// growing a second copy. A second implementation of an uninstall is a second
-// answer to "does this delete the operator's own k3d cluster".
+// WHAT THIS FILE IS. The webview lifecycle, the postMessage boundary, the reads
+// that feed the page and the dispatch of what the page asks for. WHAT IT DOES
+// NOT DECIDE: which acts exist (deploy/instanceActions.ts), what a state or a
+// run is called (state/deploymentsCatalog.ts), how each screen is drawn
+// (webview/deploymentScreens.ts), and how a long run is carried out
+// (deploy/localRun.ts) -- all of those run under bare `node --test`.
 //
-// The fourth is new, and it is the one this page exists for: MOVING AN
-// INSTALLED CLUSTER TO ANOTHER RELEASE TAG. That is a coherent deployment
-// because a wizard-installed cluster is a detached checkout at a tag with
-// ArgoCD reconciling the local overlay from it -- so it genuinely has a
-// version, and changing the version is the whole verb.
+// ONE DOCUMENT PER SCREEN, PATCHED AFTER. The page is built on the kit's
+// LiveView: moving to a new screen assigns a document, and everything that
+// changes while it shows -- a re-read of the machine, a run's bar and log --
+// arrives as a message the page applies in place. The old page reassigned the
+// whole document once a second during a run, which threw the reader to the
+// top and took focus off Cancel.
 //
-// AND IT IS THE INSTALL GRAPH, RE-RUN. Not a second graph and not a subset:
-// `stackCheckout` sees a tag it is not on and moves the checkout, `clusterUp`
-// reconciles, and every other step verifies first and skips. The same property
-// that makes re-running the graph a repair is what makes it a deployment. What
-// this page adds on top is the FORECAST (state/upgradePlan.ts), because a run
-// that reports fifteen steps and does work in two looks like a full reinstall
-// to whoever is watching it.
+// THE PAGE KEEPS ITSELF CURRENT. It re-reads when the connection changes, when
+// the files under ~/.memql change, when it becomes visible, and on a timer
+// while it is visible (briskly while a run is going). It used to re-read only
+// when opened, and offered acts that had stopped being legal.
 //
-// WHAT THIS FILE IS NOT ALLOWED TO DECIDE. Which actions an instance offers
-// (deploy/instanceActions.ts), what the rows say (state/deploymentsCatalog.ts),
-// what a tag list means (install/tags.ts), what a deployment will touch
-// (state/upgradePlan.ts) and what the run screens render (webview/
-// installScreens.ts) all live outside it, under bare `node --test`. This is the
-// webview lifecycle, the postMessage boundary, and the run loop.
+// A RUN IS NOT THE PAGE'S. Runs live in the machine's one run slot
+// (deploy/localRun.ts), so closing this tab leaves a run going, and opening the
+// page -- or a run's row -- while one is going shows it live, with Cancel when
+// Cancel can still act, and nothing that would start a second.
 //
-// Refs: #3739 #3733
+// Refs: #3739 #3733 #4427 #4246
 
 import { randomBytes } from "node:crypto";
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 
 import * as vscode from "vscode";
 
-import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
-
-import { brandStrip, brandStyleBlock } from "./brandTokens.js";
-import { LOG_PANE_SCRIPT, renderScreen } from "./screenLayout.js";
 import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
+import { pageDocument } from "./ui/document.js";
+import { LiveView } from "./ui/liveView.js";
+import { pageMessage, type PageToHost } from "./ui/protocol.js";
 
-import {
-  DEPLOY_ACTIONS,
-  confirmationMatches,
-  confirmationPhrase,
-  roleVisibility,
-  rolloutRequiresConfirmation,
-  type DeployActionId,
-  type RoleVisibility,
-} from "../deploy/actions.js";
+import { confirmationMatches, roleVisibility, type RoleVisibility } from "../deploy/actions.js";
 import {
   readDeploymentStatus,
   runDeployAction,
   type DeployActionRequest,
   type DeployControlPort,
   type DeployOutcome,
-  type StatusRead,
 } from "../deploy/controller.js";
-import { instanceActions, runDetailActions, type InstanceActionId } from "../deploy/instanceActions.js";
-import { upgradeVerdict, type UpgradeTarget, type UpgradeVerdict } from "../deploy/upgrade.js";
-import { describeVersion } from "../version/describe.js";
+import {
+  barOffers,
+  localOverviewBar,
+  offersLocal,
+  remoteOverviewBar,
+  runDetailBar,
+  type LocalActId,
+  type PageAct,
+  type PageBar,
+} from "../deploy/instanceActions.js";
+import { localRuns, type LocalRun, type LocalRunDeps, type LocalRuns } from "../deploy/localRun.js";
 import { pipelineState, type PipelineState } from "../deploy/pipelineState.js";
+import { upgradeVerdict, type UpgradeVerdict } from "../deploy/upgrade.js";
 import { readCheckoutState } from "../install/checkoutState.js";
-import type { ExecutionReport } from "../install/executor.js";
+import { graphDocumentPath, loadGraphFile, rebuildGraphPath, updateRebuildGraphPath, installGraphPath, type Graph } from "../install/graph.js";
 import { capabilityScriptPath, runCapabilityScript } from "../install/runner.js";
-import {
-  installSessionOptions,
-  runInstall,
-  runRebuild,
-  runUpdateRebuild,
-  type SessionHooks,
-} from "../install/session.js";
-import { listReleaseTags, tagProblem, type TagListing } from "../install/tags.js";
-import type { ReleaseCache } from "../version/releaseCache.js";
-import {
-  DEFAULT_INPUTS,
-  AddClusterState,
-  type StepProgress,
-} from "../state/addCluster.js";
+import { readReceipt, recordedCheckout, recordedStackBranch } from "../install/receipt.js";
+import type { SessionHooks } from "../install/session.js";
+import { tagProblem } from "../install/tags.js";
+import { readUpdateState, type UpdateState } from "../install/updateState.js";
 import type { Instance, Run } from "../state/deployments.js";
-import { buildCatalog, type CatalogInputs } from "../state/deploymentsCatalog.js";
 import {
-  recordedCheckout,
-  recordedStackBranch,
-  recordedDomain,
-  readReceipt,
-} from "../install/receipt.js";
-import { rebuiltMessage, updatedMessage } from "../state/imageLane.js";
-import { rebuildPreflightItems, type RebuildPreflightInputs } from "../state/rebuildPreflight.js";
-import {
-  updateIsBlocked,
-  updatePreflightItems,
-  type UpdatePreflightInputs,
-  type UpdateStrategy,
-} from "../state/updatePreflight.js";
-import { readUpdateState } from "../install/updateState.js";
-import { RunRecorder } from "../state/runRecorder.js";
-import { historicalWeights, type RunProgress } from "../state/runProgress.js";
-import { defaultRunsDir, RUN_LOG_KEEP } from "../state/runLog.js";
+  buildCatalog,
+  instanceConnectionWord,
+  parseItemDetail,
+  pollIntervalMs,
+  type CatalogInputs,
+  type ConnectionWord,
+} from "../state/deploymentsCatalog.js";
+import { rebuildCheck, type RebuildCheck, type RebuildPreflightInputs } from "../state/rebuildPreflight.js";
+import { defaultRunsDir } from "../state/runLog.js";
+import { updateCheck } from "../state/updatePreflight.js";
 import { isSameVersion, upgradePlan, upgradeSummary, type PlannedStepView } from "../state/upgradePlan.js";
-import { graphDocumentPath, loadGraphFile, type Graph } from "../install/graph.js";
-import { DEFAULT_LOCAL_DOMAIN } from "../install/stackPin.js";
+import { describeVersion } from "../version/describe.js";
+import type { ReleaseCache, ReleaseListing } from "../version/releaseCache.js";
 import {
-  renderChooseTag,
-  renderInstanceOverview,
-  renderRemoteInstance,
-  renderRunDetail,
+  DEPLOYMENT_STYLES,
+  OTHER_VERSION,
+  chooseVersionScreen,
+  loadingScreen,
+  localOverviewScreen,
+  memqlOsAddress,
+  missingRunScreen,
+  pullRebuildScreen,
+  rebuildScreen,
+  remoteOverviewScreen,
+  runDetailScreen,
+  runScreen,
+  stepLogFileOf,
+  unavailableScreen,
+  type ActOutcome,
+  type PageNotice,
 } from "./deploymentScreens.js";
-import {
-  renderFailedScreen,
-  renderRebuildScreen,
-  renderUpdateScreen,
-  renderRunningScreen,
-  type RunMode,
-} from "./installScreens.js";
-
-/** The same DEFAULT ceiling the wizard gives a step; a step's own `timeoutSeconds` in the graph outranks it (memql#4076) -- see addClusterPanel.ts for the full note. */
-const STEP_TIMEOUT_MS = 600_000;
 
 /**
- * The rebuild's own ceiling: 45 minutes, matching rebuild.json's
- * `timeoutSeconds` (memql#4246).
- *
- * The step's declared value outranks this anyway -- that is memql#4076's whole
- * mechanism -- so the number here is what a run would fall back to, and a
- * default sized to kill a wedged step in ten minutes would kill a first build
- * that is going perfectly well. Nine node images from a cold Docker cache is
- * structurally more than ten minutes.
- */
-const REBUILD_TIMEOUT_MS = 2_700_000;
-
-/**
- * How long the Docker gate is given before the checklist says it is not
- * answering.
- *
- * Short on purpose. This is a read-only classification on a checklist, not a
- * step of the run: a Docker that takes half a minute to answer is a Docker the
- * operator wants told about, and the run itself blocks on the same gate with
- * the graph's own budget.
+ * How long the Docker gate is given before the check says it is not running.
+ * Short: this is a read-only check before a run, and the run itself blocks on
+ * the same gate with the graph's own budget.
  */
 const DOCKER_PROBE_TIMEOUT_MS = 15_000;
 
+/** How often a visible run screen moves its bar between executor events. */
+const RUN_TICK_MS = 1_000;
+
+/** Where a runbook the page links to is read. */
+const DOCS_BASE = "https://github.com/znasllc-io/memql/blob/main/";
+
 type Screen =
-  | "overview"
-  | "runDetail"
-  | "chooseTag"
-  | "rebuildPreflight"
-  | "updatePreflight"
-  | "running"
-  | "failedStep";
+  | { kind: "overview" }
+  | { kind: "chooseVersion" }
+  | { kind: "rebuild" }
+  | { kind: "pullRebuild" }
+  | { kind: "run" }
+  | { kind: "runDetail"; runId: string };
 
 export interface DeploymentPanelDeps {
   /** Everything buildCatalog needs, minus what this panel resolves itself. */
@@ -159,177 +128,90 @@ export interface DeploymentPanelDeps {
   installRoot: string;
   receiptFile: string;
   runsDir?: string;
-  /** Repaints the Deployments tree after a run changes what it says. */
+  /** Repaints the Deployments and Clusters trees after something changed. */
   refreshTree: () => void;
-  /**
-   * Opens the add-cluster wizard on a named branch.
-   *
-   * Injected rather than imported, because it is the RE-PARENTING seam: this
-   * page decides that installing, repairing and uninstalling belong to a
-   * Deployments instance, and activation decides what runs them. A direct
-   * import would make this file the second place that knows how the wizard is
-   * constructed.
-   */
-  openInstallFlow: (action: "install" | "repair" | "uninstall") => void;
-  /** Injected by tests; the real spawn-based runner when absent. */
-  runScript?: SessionHooks["run"];
-  /** Injected by tests; the real `git ls-remote` when absent. */
-  listTags?: (cwd: string) => Promise<TagListing>;
-  /**
-   * The release listing, for the `latest` fact and the availability clause
-   * (memql#3996).
-   *
-   * The SHARED cache instance, not one built here: it is single-flight, so a
-   * page open beside the two trees still costs one `git ls-remote`. Optional
-   * for the reason the trees make it optional -- a test gets a page that
-   * renders versions and nothing else rather than one it cannot construct.
-   *
-   * Distinct from `listTags` above, deliberately. That one lists the tags of
-   * THIS cluster's checkout, which is what the operator is choosing among; this
-   * one answers "what has the project released", which is a question about the
-   * project. They are usually the same set and are not the same question.
-   */
+  /** The SHARED release listing (single-flight), for the update and the version list. */
   releases?: ReleaseCache;
-
-  // --- the remote half (memql#3740) ---
-
-  /**
-   * The live connection and the deployment read, as thunks.
-   *
-   * Same shape the Deployments tree takes and for the same reason: both change
-   * without this page being told, and a value captured when the panel opened
-   * would leave the connected cluster's history permanently unreadable.
-   */
+  /** The live connection, as a thunk: it changes without this page being told. */
   connection?: () => CatalogInputs["connection"];
   readDeployments?: () => CatalogInputs["readDeployments"];
-
-  /**
-   * The bridged deploy-control client for the CONNECTED cluster, or undefined
-   * when nothing is connected.
-   *
-   * A thunk rather than a value, and rebuilt per call rather than cached, for
-   * the reason clusterPanel.ts records: the ConnectionManager drops its
-   * dispatcher the moment the socket dies, so a cached client would go on
-   * writing into a dead stream.
-   */
+  /** The deploy-control client for the CONNECTED cluster, rebuilt per call. */
   deployPort?: () => DeployControlPort | undefined;
-  /** The caller's cluster role, for deciding which actions to DRAW. */
+  /** The caller's cluster role, for deciding which acts to draw. */
   readRole?: () => Promise<RoleVisibility>;
-  /**
-   * Asks the operator to type a phrase back. Injected because a modal is the
-   * extension host's, and because a test cannot click one.
-   */
-  confirm?: (prompt: string, phrase: string) => Promise<string | undefined>;
+  /** Asks for a phrase to be typed back; undefined is Cancel. */
+  confirm?: (c: { title: string; prompt: string; phrase: string }) => Promise<string | undefined>;
+  /** Opens the add-cluster wizard on the two flows only it has: adopt and reconnect. */
+  openInstallFlow: (action: "adopt" | "reconnect") => void;
+  /** Connects to a registered cluster by name (the Clusters view's select). */
+  connectTo?: (name: string) => Promise<void> | void;
+  /** Mirrors a run's log line to the MemQL output channel, and shows it. */
+  logLine?: (line: string) => void;
+  showOutput?: () => void;
+  /** Fires on anything the page should re-read for: a connection change, a file under ~/.memql. */
+  onDidChange?: (listener: () => void) => { dispose(): void };
+  /** The machine's run slot; tests inject their own. */
+  runs?: LocalRuns;
+  /** Called when a run the page started settles (toasts, construct refresh). */
+  onRunSettled?: (run: LocalRun, pageVisible: boolean) => void;
+  /** Injected by tests. */
+  runScript?: SessionHooks["run"];
+  graphs?: LocalRunDeps["graphs"];
+  home?: string;
+  now?: () => number;
 }
 
 export class DeploymentPanel {
   private static open_: DeploymentPanel | undefined;
 
   private readonly panel: vscode.WebviewPanel;
-  private readonly disposables: vscode.Disposable[] = [];
-  /**
-   * The RUN's state, borrowed whole from the wizard.
-   *
-   * Reused rather than reimplemented so Retry, Switch-to-guided and Cancel
-   * behave here exactly as they do there -- guided is per-step and rides on the
-   * step's own record, so a second state machine would be a second answer to
-   * what those three buttons do to a half-finished install.
-   */
-  private readonly state = new AddClusterState();
-
-  private screen: Screen = "overview";
-  /**
-   * Which run the detail screen is about (memql#4427). "" on every other
-   * screen.
-   *
-   * The ID rather than the Run, deliberately. This page re-reads the machine on
-   * every reveal -- that is the whole reason it takes catalog inputs instead of
-   * a resolved instance -- so a captured record would go on describing a run
-   * whose status has since settled. Looking it up by id per render means the
-   * detail page ages the same way the overview does.
-   */
-  private runId = "";
-  /** Which instance this page is about. Empty means the local one. */
+  private readonly live: LiveView;
+  private readonly disposables: { dispose(): void }[] = [];
+  private screen: Screen = { kind: "overview" };
+  /** Which cluster this page is about; "" is the local one. */
   private instanceName = "";
   private instance: Instance | undefined;
-  private pipeline: PipelineState | undefined;
-  private outcome = "";
   private runs: readonly Run[] = [];
-  private listing: TagListing = { tags: [], error: "" };
-  private roleVisibility: RoleVisibility | undefined;
-  private target = "";
-  private tagError = "";
-  private plan: PlannedStepView[] = [];
-  /** The install graph, read once per visit to the tag screen. */
-  private graph: Graph | undefined;
-  /** The node types the next rebuild builds; "" is every app node (memql#4246). */
-  private rebuildNodes = "";
-  /**
-   * The rebuild checklist's FACTS, undefined while they are being gathered.
-   *
-   * The facts, not the rendered items, and `nodes` is deliberately not among
-   * them: it is the one input on that screen the operator can still change, so
-   * the list is worded at RENDER time from these plus whatever is in the field
-   * now. Storing the finished items would leave a checklist saying "all app
-   * nodes" above a box reading `bff` -- a line that is wrong about the one
-   * thing the screen asked for.
-   */
-  private rebuildFacts: Omit<RebuildPreflightInputs, "nodes"> | undefined;
-  /**
-   * What the next update does when the checkout has commits its branch does not.
-   *
-   * Defaults to the answer that CHANGES LESS: refusing leaves the checkout
-   * exactly as it was and costs a second click, while combining writes a commit
-   * and can stop half-way with conflicts to resolve. A default that can leave a
-   * developer in a merge they did not ask for is the wrong way round.
-   */
-  private updateStrategy: UpdateStrategy = "fastForward";
-  /**
-   * The update checklist's FACTS, undefined while they are being gathered.
-   *
-   * Same shape and same reason as `rebuildFacts`, and `strategy` is left out of
-   * it for the reason `nodes` is: it is an input the operator can still change
-   * on that screen, so the list is worded at RENDER time from these plus
-   * whatever the field says now.
-   */
-  private updateFacts: Omit<UpdatePreflightInputs, "nodes" | "strategy"> | undefined;
-  /**
-   * Which run the progress screen is describing.
-   *
-   * A field rather than a constant since memql#4246: this page now drives two
-   * kinds of run, and a screen headed "Deploying to the local cluster" over a
-   * rebuild would name the one thing the operator did not ask for.
-   */
-  private runMode: RunMode = "deploy";
-  /**
-   * Whether the Diagnostics section is disclosed (memql#4456).
-   *
-   * THIS PANEL'S OWN, not `AddClusterState`'s, because it is about the PAGE
-   * rather than about a run: it survives a run starting and finishing, and the
-   * instance overview has one with no run in sight. `logsOpen` is the run's and
-   * is reset by `beginRun`; this would be wrong to reset there.
-   */
-  private diagnosticsOpen = false;
-  /** The in-flight read `pointAt` started, for a caller that must act on it. */
-  private loading: Promise<void> = Promise.resolve();
-  private error = "";
+  /** The first read has landed; before it the page is a skeleton. */
+  private loaded = false;
+  /** The cluster list would not read. */
+  private registryError = "";
+  private connection: ConnectionWord = "none";
+  private pipeline: PipelineState | undefined;
+  private visibility: RoleVisibility | undefined;
+  private outcome: ActOutcome | undefined;
+  private notice: PageNotice | undefined;
+  private detailsOpen = false;
+  private logsOpen = false;
+  // change version
+  private choice = "";
+  private typed = "";
+  private typedError = "";
+  private installGraph: Graph | undefined;
+  // rebuild and pull
+  private nodes = "";
+  private merge = false;
+  private check: RebuildCheck | undefined;
+  private update: UpdateState | undefined;
+  // a run from the history
+  private readonly logs = new Map<string, string>();
+  private readonly openLogs = new Set<string>();
+  private stepLabels: ReadonlyMap<string, string> = new Map();
+  // the run being shown, and its subscription
+  private watched: LocalRun | undefined;
+  private unwatch: (() => void) | undefined;
+  private tick: ReturnType<typeof setInterval> | undefined;
+  private poll: ReturnType<typeof setTimeout> | undefined;
+  private reading: Promise<void> = Promise.resolve();
   private disposed = false;
-  /** Non-undefined exactly while a run is in flight; also the cancel handle. */
-  private runAbort: AbortController | undefined;
 
   /**
-   * Opens the page for an instance, or re-points the one already open.
+   * Opens the page for a cluster, or re-points the one already open.
    *
-   * ONE PANEL for every instance rather than one per instance: the page is a
-   * console for whichever deployment the operator is looking at, and a tab per
-   * cluster would leave several of them showing states that stopped being true
-   * the moment a run finished somewhere else.
+   * ONE PANEL for every cluster: a tab per cluster would leave several showing
+   * states that stopped being true the moment a run finished elsewhere.
    */
-  static show(
-    context: vscode.ExtensionContext,
-    deps: DeploymentPanelDeps,
-    instanceName = "",
-  ): DeploymentPanel {
+  static show(context: vscode.ExtensionContext, deps: DeploymentPanelDeps, instanceName = ""): DeploymentPanel {
     const existing = DeploymentPanel.open_;
     if (existing !== undefined && !existing.disposed) {
       existing.panel.reveal(vscode.ViewColumn.Beside);
@@ -343,162 +225,209 @@ export class DeploymentPanel {
   }
 
   /**
-   * Opens the page on ONE DEPLOYMENT (memql#4427).
+   * Opens the page on one run from the history (memql#4427).
    *
-   * Through `show`, not beside it: this is the same panel on a different
-   * screen, and a second panel class for a detail view would be a second
-   * lifecycle to keep in step with a run that is still writing to disk.
-   *
-   * The screen is set AFTER `pointAt`, because `pointAt` resets to the overview
-   * whenever the instance changes -- which is exactly what an operator clicking
-   * a run on a newly selected cluster does. Setting it first would have the
-   * reset undo the navigation, and the click would appear to do nothing.
+   * A RUN THAT IS STILL GOING OPENS LIVE. Clicking the spinning row is the
+   * natural way to check on a run, and it used to swap the progress screen for
+   * a static snapshot with the whole cluster's acts on it.
    */
-  static showRun(
-    context: vscode.ExtensionContext,
-    deps: DeploymentPanelDeps,
-    instanceName: string,
-    runId: string,
-  ): DeploymentPanel {
+  static showRun(context: vscode.ExtensionContext, deps: DeploymentPanelDeps, instanceName: string, runId: string): DeploymentPanel {
     const panel = DeploymentPanel.show(context, deps, instanceName);
-    panel.openRun(runId);
+    panel.screen = panel.slot().current?.recordId === runId && panel.slot().inFlight ? { kind: "run" } : { kind: "runDetail", runId };
+    panel.notice = undefined;
+    void panel.openRunDetail();
+    panel.render();
     return panel;
   }
 
-  private openRun(runId: string): void {
-    this.runId = runId;
-    this.screen = "runDetail";
-    this.error = "";
-    // Paints now from whatever the last read left behind, and again when the
-    // read `show` started lands. A detail page that waited for the catalog
-    // would leave the click with no visible effect for as long as a presence
-    // probe takes.
-    this.render();
-  }
-
   /**
-   * Opens the page for the local instance and takes one of its actions
-   * (memql#4246).
+   * Opens the local cluster's page on one of its acts: the palette and the
+   * training lens reach Change version, Rebuild and Pull and rebuild this way.
    *
-   * WHY IT WAITS FOR THE LOAD `show` STARTED. Every other caller only needs the
-   * page to paint, so `pointAt` fires the read and does not wait -- but `choose`
-   * narrows the requested id against `instanceActions(instance)`, and an
-   * instance that has not been read yet offers nothing at all. Acting before it
-   * lands would open the page and silently do nothing, which is exactly the "a
-   * click that does nothing teaches a developer the extension is broken"
-   * failure the training surface guards against.
-   *
-   * The action is still NARROWED. This is a shortcut to a control the page
-   * draws, not a second authority: a machine with no recorded checkout offers
-   * no rebuild here either, and the command lands on the overview.
+   * NARROWED, NOT TRUSTED: the page waits for its read and takes the act only
+   * when the cluster offers it -- a machine with no recorded checkout has no
+   * rebuild -- and returns false so the caller can say why.
    */
   static async openAction(
     context: vscode.ExtensionContext,
     deps: DeploymentPanelDeps,
-    id: InstanceActionId,
-  ): Promise<void> {
-    await DeploymentPanel.show(context, deps).takeAction(id);
-  }
-
-  private async takeAction(id: InstanceActionId): Promise<void> {
-    await this.loading;
-    if (this.disposed) return;
-    await this.choose(id);
-  }
-
-  private pointAt(instanceName: string): void {
-    if (instanceName !== this.instanceName) {
-      // A different instance is a different page: nothing carried over from the
-      // last one is true about this one.
-      this.instanceName = instanceName;
-      this.screen = "overview";
-      this.pipeline = undefined;
-      this.outcome = "";
-      this.error = "";
+    id: Extract<LocalActId, "changeVersion" | "rebuildFromCheckout" | "updateAndRebuild">,
+  ): Promise<boolean> {
+    const panel = DeploymentPanel.show(context, deps);
+    await panel.reading;
+    const instance = panel.instance;
+    if (panel.disposed || instance === undefined || !offersLocal(instance, id)) return false;
+    if (panel.slot().inFlight) {
+      panel.screen = { kind: "run" };
+      panel.render();
+      return true;
     }
-    // Kept so `takeAction` can wait for THIS read rather than starting a second
-    // one beside it. Still fire-and-forget for every other caller.
-    this.loading = this.load();
+    if (id === "changeVersion") panel.openChangeVersion();
+    else if (id === "rebuildFromCheckout") await panel.openRebuild();
+    else await panel.openPullRebuild();
+    return true;
   }
 
   private constructor(
     _context: vscode.ExtensionContext,
     private readonly deps: DeploymentPanelDeps,
   ) {
-    this.panel = vscode.window.createWebviewPanel(
-      "memqlDeployment",
-      "MemQL deployment",
-      vscode.ViewColumn.Beside,
-      { enableScripts: true, retainContextWhenHidden: true },
+    this.panel = vscode.window.createWebviewPanel("memqlDeployment", "Cluster", vscode.ViewColumn.Beside, {
+      enableScripts: true,
+      retainContextWhenHidden: true,
+    });
+    this.live = new LiveView(
+      {
+        setHtml: (html) => {
+          this.panel.webview.html = html;
+        },
+        postMessage: (msg) => this.panel.webview.postMessage(msg),
+      },
+      (parts, screen) =>
+        pageDocument({
+          nonce: randomBytes(16).toString("base64"),
+          title: this.panel.title,
+          themeAttr: currentBodyThemeAttr(),
+          screen,
+          styles: DEPLOYMENT_STYLES,
+          ...(screen.startsWith("overview") || screen.startsWith("run:") ? {} : { escapeAct: "back" }),
+          ...parts,
+        }),
     );
     this.disposables.push(
-      // The palette is a MemQL setting now, not the editor's theme, so an
-      // OPEN panel repaints when either input moves (memql#4419).
-      ...onAppearanceChange(() => this.render()),
-      this.panel.onDidDispose(() => {
-        this.disposed = true;
-        // Abort FIRST. A run whose panel has gone has nowhere to report, and
-        // the receipt is written after every step, so stopping at the next wave
-        // boundary leaves the machine fully uninstallable.
-        this.runAbort?.abort();
-        if (DeploymentPanel.open_ === this) DeploymentPanel.open_ = undefined;
-        for (const d of this.disposables) d.dispose();
+      ...onAppearanceChange(() => {
+        this.live.invalidate();
+        this.render();
       }),
-      this.panel.webview.onDidReceiveMessage((message: unknown) => {
-        void this.onMessage(message);
+      this.panel.onDidDispose(() => this.dispose()),
+      this.panel.webview.onDidReceiveMessage((raw: unknown) => {
+        void this.onMessage(raw);
       }),
     );
+    // Not every host carries the view-state event (the test stub does not):
+    // a page that cannot tell when it is shown still re-reads on its timer.
+    const viewState = (this.panel as { onDidChangeViewState?: vscode.WebviewPanel["onDidChangeViewState"] }).onDidChangeViewState;
+    if (typeof viewState === "function") {
+      this.disposables.push(
+        viewState.call(this.panel, () => {
+          if (this.visible()) this.reload();
+        }),
+      );
+    }
+    const changes = this.deps.onDidChange?.(() => this.reload());
+    if (changes !== undefined) this.disposables.push(changes);
+    this.disposables.push({ dispose: this.slot().onDidStart(() => this.render()) });
     this.render();
   }
 
-  /** Re-reads the instance and its runs. */
+  private slot(): LocalRuns {
+    return this.deps.runs ?? localRuns;
+  }
+
+  private visible(): boolean {
+    return (this.panel as { visible?: boolean }).visible !== false;
+  }
+
+  private dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    // THE RUN IS NOT STOPPED. It belongs to the machine's run slot, and a tab
+    // closed during a 45-minute rebuild must not throw the rebuild away.
+    this.unwatch?.();
+    if (this.tick !== undefined) clearInterval(this.tick);
+    if (this.poll !== undefined) clearTimeout(this.poll);
+    if (DeploymentPanel.open_ === this) DeploymentPanel.open_ = undefined;
+    for (const d of this.disposables) d.dispose();
+  }
+
+  private pointAt(instanceName: string): void {
+    // "" and the local instance's own name are the same page, and treating
+    // them as two reset a page mid-run when the palette and the tree opened it.
+    const same =
+      instanceName === this.instanceName ||
+      (this.instance?.kind === "local" && (instanceName === "" || instanceName === this.instance.name));
+    if (!same) {
+      this.instanceName = instanceName;
+      this.instance = undefined;
+      this.loaded = false;
+      this.pipeline = undefined;
+      this.outcome = undefined;
+      this.notice = undefined;
+      this.screen = { kind: "overview" };
+    }
+    // A run going on this machine is what the page shows, whatever it was on.
+    if (this.slot().inFlight && this.screen.kind !== "runDetail") this.screen = { kind: "run" };
+    this.reload();
+  }
+
+  // -------------------------------------------------------------------------
+  // reading
+  // -------------------------------------------------------------------------
+
+  /** Re-read now, and schedule the next read while the page is visible. */
+  private reload(): void {
+    if (this.disposed) return;
+    this.reading = this.load();
+  }
+
   private async load(): Promise<void> {
+    const connection = this.deps.connection?.();
+    const readDeployments = this.deps.readDeployments?.();
     const catalog = await buildCatalog({
       ...this.deps.catalog,
-      ...(this.deps.connection !== undefined ? { connection: this.deps.connection() } : {}),
-      ...(this.deps.readDeployments !== undefined
-        ? { readDeployments: this.deps.readDeployments() }
-        : {}),
+      ...(connection !== undefined ? { connection } : {}),
+      ...(readDeployments !== undefined ? { readDeployments } : {}),
     });
     if (this.disposed) return;
+    this.registryError = catalog.error ?? "";
     this.instance =
       this.instanceName === ""
         ? catalog.instances.find((i) => i.kind === "local")
         : catalog.instances.find((i) => i.name === this.instanceName);
     this.runs = this.instance === undefined ? [] : (catalog.runs.get(this.instance.name) ?? []);
-    if (catalog.error !== undefined) this.error = catalog.error;
+    this.connection = this.instance === undefined ? "none" : instanceConnectionWord(this.instance, connection);
+    this.loaded = true;
     this.render();
-    if (this.instance?.kind === "remote") await this.loadPipeline(this.instance.name);
+    if (this.instance?.kind === "remote") await this.loadPipeline();
+    void this.warmReleases();
+    this.schedule();
+  }
+
+  /** The next read: briskly while something is running, slowly otherwise, never while hidden. */
+  private schedule(): void {
+    if (this.poll !== undefined) clearTimeout(this.poll);
+    this.poll = undefined;
+    if (this.disposed || !this.visible()) return;
+    this.poll = setTimeout(() => this.reload(), pollIntervalMs(this.runs));
+    // A timer must never keep the extension host alive on its own.
+    (this.poll as { unref?: () => void }).unref?.();
+  }
+
+  /** The release listing, fetched once per TTL and shared with the trees. */
+  private async warmReleases(): Promise<void> {
+    const releases = this.deps.releases;
+    if (releases === undefined) return;
+    const before = releases.peek()?.fetchedAt;
+    const after = await releases.get();
+    if (!this.disposed && after.fetchedAt !== before) this.render();
   }
 
   /**
-   * Which of the three states this cluster's deploy pipeline is in.
-   *
-   * Read on every load rather than once: a cluster that gains a deploy pack, or
-   * an operator whose role changes, are both things this page would otherwise
-   * go on being wrong about for as long as the tab stays open.
+   * Which of three states the remote cluster's deploy pipeline is in, and the
+   * caller's role. Only for a connected cluster: a page not connected says so
+   * on its bar, and never "no pipeline" on the strength of a socket it lacks.
    */
-  private async loadPipeline(name: string): Promise<void> {
+  private async loadPipeline(): Promise<void> {
+    if (this.connection !== "connected") {
+      this.pipeline = undefined;
+      return;
+    }
     const port = this.deps.deployPort?.();
     const visibility = (await this.deps.readRole?.()) ?? roleVisibility(undefined);
     if (this.disposed) return;
-    // Kept, because the upgrade button is drawn from the synchronous render
-    // path and cannot await a role read. Undefined until the first load, which
-    // upgradeVerdict reads as INDETERMINATE and therefore offers -- the same
-    // call src/deploy/actions.ts makes, for the same reason.
-    this.roleVisibility = visibility;
+    this.visibility = visibility;
     if (port === undefined) {
-      // NOT CONNECTED IS NOT "NO PIPELINE". The read never happened, so the
-      // page says which of the two it is rather than reporting the cluster has
-      // no deploy console on the strength of a socket this editor never opened.
-      const read: StatusRead = {
-        status: null,
-        message:
-          "This editor is not connected to this cluster, so its deployment status was not read. " +
-          "Connect to it from the Clusters view.",
-        reason: "unavailable",
-      };
-      this.pipeline = pipelineState(read, visibility);
+      this.pipeline = undefined;
       this.render();
       return;
     }
@@ -508,298 +437,517 @@ export class DeploymentPanel {
     this.render();
   }
 
+  private upgrade(): UpgradeVerdict {
+    const instance = this.instance;
+    if (instance === undefined) return { kind: "none", reason: "no instance loaded" };
+    return upgradeVerdict({
+      instance,
+      version: describeVersion({ recorded: instance.version, listing: this.deps.releases?.peek() }),
+      ...(this.visibility === undefined ? {} : { visibility: this.visibility }),
+    });
+  }
+
   // -------------------------------------------------------------------------
   // messages
   // -------------------------------------------------------------------------
 
-  private async onMessage(message: unknown): Promise<void> {
-    if (message === null || typeof message !== "object") return;
-    const { type, value } = message as { type?: unknown; value?: unknown };
-    if (typeof type !== "string") return;
+  private async onMessage(raw: unknown): Promise<void> {
+    if (this.live.handleMessage(raw)) return;
+    const msg = pageMessage(raw);
+    if (msg === undefined) return;
+    const rawValue = (msg as { value?: unknown }).value;
+    const value = typeof rawValue === "string" ? rawValue : undefined;
 
-    if (type === "upgrade") {
-      // Its OWN message rather than a "choose" id, because the upgrade button
-      // is not one of the instance actions: `choose` validates its id against
-      // instanceActions(), and adding a fourth entry there would put the
-      // move-to-newest button in the same list as install, repair and
-      // uninstall -- which is exactly the confusion the epic is trying to end.
-      await this.runUpgrade();
-      return;
-    }
-    if (type === "choose" && typeof value === "string") {
-      await this.choose(value as InstanceActionId);
-      return;
-    }
-    if (type === "deploy" && typeof value === "string") {
-      await this.runDeploy(value);
-      return;
-    }
-    if (type === "pickTag" && typeof value === "string") {
-      this.setTarget(value);
-      this.render();
-      return;
-    }
-    // The log disclosure and the Diagnostics section, which are the same
-    // component with two consumers (memql#4455). Both repaint: the flag they
-    // set is what the next render reads.
-    if (type === "toggleLogs") {
-      this.state.toggleLogs();
-      this.render();
-      return;
-    }
-    if (type === "toggleDiagnostics") {
-      this.diagnosticsOpen = !this.diagnosticsOpen;
-      this.render();
-      return;
-    }
-    // Recorded and NOT repainted -- a render would replace the document under
-    // the operator's scrollbar.
-    if (type === "logsFollow" && typeof value === "boolean") {
-      this.state.setLogsFollow(value);
-      return;
-    }
-    if (type === "input" && typeof value === "object" && value !== null) {
-      const { field, text } = value as { field?: unknown; text?: unknown };
-      // Recorded and NOT repainted, like every field on the wizard's forms: a
-      // repaint replaces the whole document and would take the caret with it.
-      if (field === "tag" && typeof text === "string") this.target = text.trim();
-      if (field === "nodes" && typeof text === "string") this.rebuildNodes = text.trim();
-      // The strategy is a <select>, so it has a CLOSED set of values and an
-      // unrecognised one is dropped rather than coerced -- a value that reached
-      // `install.updateStack` unrecognised would exit 2 with a message about a
-      // flag the operator never typed.
-      if (field === "strategy" && (text === "fastForward" || text === "merge")) {
-        this.updateStrategy = text;
-        // REPAINTED, unlike the text fields above: the checklist's "your own
-        // commits" line is worded from this, so leaving it stale would show an
-        // operator the consequences of the choice they just changed away from.
-        // There is no caret in a <select> to lose.
-        this.render();
-      }
-      return;
-    }
-    if (type === "beginRebuild") {
-      await this.startRebuild();
-      return;
-    }
-    if (type === "beginUpdate") {
-      await this.startUpdate();
-      return;
-    }
-    if (type === "beginDeploy") {
-      this.setTarget(this.target);
-      if (this.tagError !== "") {
-        this.render();
+    switch (msg.type) {
+      case "input":
+        this.onInput(String((msg as { field?: unknown }).field ?? ""), value ?? "");
+        return;
+      case "toggleDetails":
+        this.detailsOpen = (msg as { open?: unknown }).open === true;
+        return;
+      case "toggleLogs":
+        this.logsOpen = (msg as { open?: unknown }).open === true;
+        return;
+      case "toggleStepLog": {
+        const file = stepLogFileOf(String((msg as { disclosure?: unknown }).disclosure ?? ""));
+        if (file === "") return;
+        if ((msg as { open?: unknown }).open === true) this.openLogs.add(file);
+        else this.openLogs.delete(file);
         return;
       }
-      await this.startDeploy();
-      return;
-    }
-    if (type === "retry") {
-      this.state.retry();
-      this.render();
-      // RETRY RE-RUNS WHAT FAILED, not whatever this page's older half runs. The
-      // failure screen is shared by both kinds of run, so a retry that always
-      // called startDeploy would answer a failed rebuild by moving the cluster
-      // to a release tag -- silently, from a button labelled "Retry this step".
-      // NOT FRESH: `retry()` has just put this run's rows back to pending,
-      // and a fresh start would throw them (and a guided choice) away.
-      await (this.runMode === "rebuild"
-        ? this.startRebuild(false)
-        : this.runMode === "update"
-          ? this.startUpdate(false)
-          : this.startDeploy(false));
-      return;
-    }
-    if (type === "guided") {
-      // The rebuild failure screen draws no guided control (installScreens.ts
-      // says why), so this is a message the page never rendered -- dropped, the
-      // same call `choose` makes for an action an instance does not offer,
-      // rather than run as a second Retry.
-      if (this.runMode === "rebuild" || this.runMode === "update") return;
-      this.state.switchToGuided();
-      this.render();
-      await this.startDeploy(false);
-      return;
-    }
-    if (type === "cancel") {
-      this.runAbort?.abort();
-      this.state.cancel();
-      this.screen = "overview";
-      await this.load();
-      return;
-    }
-    if (type === "back") {
-      this.screen = "overview";
-      // Dropped with the screen, so a later reveal of this panel cannot land on
-      // a detail page for a run the operator has already navigated away from.
-      this.runId = "";
-      await this.load();
-      return;
+      case "openRun":
+        if (value !== undefined && this.runs.some((run) => run.id === value)) {
+          this.screen = this.slot().current?.recordId === value && this.slot().inFlight ? { kind: "run" } : { kind: "runDetail", runId: value };
+          this.notice = undefined;
+          await this.openRunDetail();
+          this.render();
+        }
+        return;
+      case "back":
+        this.back();
+        return;
+      case "openOs": {
+        const os = memqlOsAddress(this.instance?.domain);
+        if (os !== undefined) void vscode.env.openExternal(vscode.Uri.parse(os.url));
+        return;
+      }
+      case "openGuide": {
+        const verdict = this.upgrade();
+        if (verdict.kind === "refused" && value !== undefined && value === verdict.docHref) {
+          void vscode.env.openExternal(vscode.Uri.parse(`${DOCS_BASE}${verdict.docHref}`));
+        }
+        return;
+      }
+      case "openCheckout":
+        void vscode.commands.executeCommand("memql.deployments.openCheckout");
+        return;
+      case "cancel":
+        this.watched?.cancel();
+        return;
+      case "retry":
+        if (this.watched !== undefined && !this.watched.inFlight) {
+          this.logsOpen = false;
+          void this.watched.retry();
+          this.render();
+        }
+        return;
+      case "copyLog":
+        await this.copyLog();
+        return;
+      case "openOutput":
+        this.deps.showOutput?.();
+        return;
+      case "runRemedy": {
+        const remedy = this.watched?.failure?.remedy ?? "";
+        if (remedy !== "") openRemedyTerminal(remedy);
+        return;
+      }
+      case "checkAgain":
+        if (this.screen.kind === "rebuild") await this.openRebuild();
+        else if (this.screen.kind === "pullRebuild") await this.openPullRebuild();
+        return;
+      case "beginChange":
+        await this.beginChange(value);
+        return;
+      case "beginRebuild":
+        this.beginRebuild();
+        return;
+      case "beginPullRebuild":
+        this.beginPullRebuild();
+        return;
+      default:
+        await this.onBarAct(msg, value);
     }
   }
 
-  private async choose(id: InstanceActionId): Promise<void> {
+  /** A field changed. Recorded; repainted only where the screen depends on it. */
+  private onInput(fieldName: string, value: string): void {
+    switch (fieldName) {
+      case "version":
+        this.choice = value;
+        this.render();
+        return;
+      case "typed":
+        this.typed = value.trim();
+        this.typedError = this.typed === "" ? "" : (tagProblem(this.typed) ?? "");
+        this.render();
+        return;
+      case "nodes":
+        this.nodes = value.trim();
+        return;
+      case "merge":
+        this.merge = value === "true";
+        this.render();
+        return;
+    }
+  }
+
+  /** The act's bar, for whatever screen offered it. */
+  private currentBar(): PageBar | undefined {
+    const instance = this.instance;
+    if (instance === undefined) return undefined;
+    if (this.screen.kind === "runDetail") {
+      const runId = this.screen.runId;
+      const run = this.runs.find((r) => r.id === runId);
+      return run === undefined ? undefined : this.detailBar(instance, run);
+    }
+    return this.overviewBar(instance);
+  }
+
+  private overviewBar(instance: Instance): PageBar {
+    return instance.kind === "local"
+      ? localOverviewBar({ instance, connection: this.connection, upgrade: this.upgrade() })
+      : remoteOverviewBar({
+          instance,
+          connection: this.connection,
+          upgrade: this.upgrade(),
+          pipeline: this.pipeline,
+          ...(this.visibility === undefined ? {} : { visibility: this.visibility }),
+          runs: this.runs,
+        });
+  }
+
+  private detailBar(instance: Instance, run: Run): PageBar {
+    return runDetailBar({
+      instance,
+      run,
+      connection: this.connection,
+      ...(this.pipeline === undefined ? {} : { pipeline: this.pipeline }),
+      ...(this.visibility === undefined ? {} : { visibility: this.visibility }),
+      runInFlight: this.slot().inFlight,
+    });
+  }
+
+  /**
+   * An act from a bar. The webview is untrusted, so the act is narrowed
+   * against the bar the page was DRAWN from -- id AND target: a rollback
+   * aimed at a deployment other than the one on the button is dropped.
+   */
+  private async onBarAct(msg: PageToHost, value: string | undefined): Promise<void> {
+    const bar = this.currentBar();
+    if (bar === undefined) return;
+    if (msg.type === "more") {
+      const picked = await vscode.window.showQuickPick(
+        bar.more.map((act) => ({ label: act.label, act })),
+        { placeHolder: "More actions" },
+      );
+      if (picked !== undefined) await this.takeAct((picked as { act: PageAct }).act);
+      return;
+    }
+    const act = barOffers(bar, msg.type, value);
+    if (act !== undefined) await this.takeAct(act);
+  }
+
+  private async takeAct(act: PageAct): Promise<void> {
     const instance = this.instance;
     if (instance === undefined) return;
-    // The catalog decides what is offered; this only routes what it offered.
-    // A message naming an action this instance does not have is a webview
-    // saying something the page never rendered, and it is ignored.
-    if (!instanceActions(instance).some((a) => a.id === id)) return;
-
-    if (id === "repair") {
-      this.deps.openInstallFlow("repair");
-      return;
+    this.notice = undefined;
+    switch (act.id) {
+      case "install":
+        void vscode.commands.executeCommand("memql.deployments.createDeployment");
+        return;
+      case "repair":
+        void vscode.commands.executeCommand("memql.clusters.repair");
+        return;
+      case "uninstall":
+        void vscode.commands.executeCommand("memql.clusters.uninstall");
+        return;
+      case "adopt":
+      case "reconnect":
+        this.deps.openInstallFlow(act.id);
+        return;
+      case "signIn":
+        // THE sign-in act, with the cluster named: no picker in front of it.
+        void vscode.commands.executeCommand("memql.clusters.signIn", instance.name);
+        return;
+      case "connect":
+        await (this.deps.connectTo ?? ((name: string) => vscode.commands.executeCommand("memql.clusters.select", name)))(instance.name);
+        this.reload();
+        return;
+      case "changeVersion":
+        this.openChangeVersion(act.value);
+        return;
+      case "rebuildFromCheckout":
+        await this.openRebuild();
+        return;
+      case "updateAndRebuild":
+        await this.openPullRebuild();
+        return;
+      case "update":
+        await this.runUpdate();
+        return;
+      case "showRun":
+        this.screen = { kind: "run" };
+        this.render();
+        return;
+      case "deploy":
+      case "cutVersion":
+      case "rollback":
+      case "rolloutPromote":
+      case "rolloutAbort":
+        await this.runRemote(act);
+        return;
+      default:
+        return;
     }
-    if (id === "uninstall") {
-      this.deps.openInstallFlow("uninstall");
-      return;
-    }
-    if (id === "rebuildFromCheckout") {
-      // NOT RE-PARENTED INTO THE WIZARD, unlike repair and uninstall. Those are
-      // flows the wizard already drives end to end; a rebuild asks one optional
-      // question and needs facts about THIS instance -- its checkout, its image
-      // source -- which the wizard has no screen for and no reason to learn.
-      await this.openRebuild();
-      return;
-    }
-    if (id === "updateAndRebuild") {
-      await this.openUpdate();
-      return;
-    }
-    if (id !== "createDeployment") return;
-
-    if (instance.presence === "absent") {
-      // Nothing is here, so there is nothing to move: this is the install, and
-      // the install collects answers no receipt can supply.
-      this.deps.openInstallFlow("install");
-      return;
-    }
-
-    this.screen = "chooseTag";
-    this.target = "";
-    this.tagError = "";
-    this.plan = [];
-    this.graph = undefined;
-    this.render();
-    // The graph is what the forecast is derived FROM, so it is read before the
-    // tag list rather than lazily on the first keystroke -- a preview that
-    // appeared one character late would be answering about the previous choice.
-    try {
-      this.graph = await loadGraphFile(graphDocumentPath("install", this.deps.installRoot));
-    } catch (err) {
-      // A graph that will not load is a fault in the extension's own
-      // installation, not in the operator's choice. It costs the PREVIEW and
-      // nothing else: the run loads the graph itself and will fail loudly.
-      this.error = `The install graph could not be read, so there is no preview: ${
-        err instanceof Error ? err.message : String(err)
-      }`;
-    }
-    if (this.disposed) return;
-    await this.loadTags();
   }
 
-  private async loadTags(): Promise<void> {
-    const cwd = this.deps.installRoot;
-    const list = this.deps.listTags ?? ((dir: string) => listReleaseTags({ cwd: dir }));
-    this.listing = await list(cwd);
-    // Warmed in the same async phase, so the page paints once with both
-    // answers rather than twice. `render` below reads it back through peek().
-    await this.deps.releases?.get();
+  private back(): void {
+    if (this.screen.kind === "run") {
+      const run = this.watched;
+      if (run !== undefined && run.inFlight) return;
+      if (run !== undefined) this.slot().dismiss(run);
+    }
+    this.screen = { kind: "overview" };
+    this.notice = undefined;
+    this.reload();
+    this.render();
+  }
+
+  // -------------------------------------------------------------------------
+  // change version
+  // -------------------------------------------------------------------------
+
+  private openChangeVersion(preset?: string): void {
+    this.screen = { kind: "chooseVersion" };
+    this.choice = "";
+    this.typed = "";
+    this.typedError = "";
+    this.render();
+    void this.prepareChangeVersion(preset);
+  }
+
+  private async prepareChangeVersion(preset: string | undefined): Promise<void> {
+    if (this.installGraph === undefined) {
+      try {
+        this.installGraph = await loadGraphFile(graphDocumentPath("install", this.deps.installRoot));
+      } catch {
+        // The forecast is a courtesy; the run loads the graph itself and fails
+        // loudly if it cannot.
+      }
+    }
+    const listing = await this.deps.releases?.get();
+    if (this.disposed || this.screen.kind !== "chooseVersion") return;
+    if (preset !== undefined && preset !== "") {
+      if (listing?.tags.includes(preset) === true) this.choice = preset;
+      else {
+        this.choice = OTHER_VERSION;
+        this.typed = preset;
+      }
+    }
+    this.render();
+  }
+
+  /** The listing the version picker shows: undefined while loading. */
+  private listing(): ReleaseListing | undefined {
+    const releases = this.deps.releases;
+    if (releases === undefined) return { tags: [], fetchedAt: 0 };
+    return releases.peek();
+  }
+
+  /** The version the change would move to, when a valid one is chosen. */
+  private changeTarget(): string {
+    const tags = this.listing()?.tags ?? [];
+    if (tags.length > 0 && this.choice !== OTHER_VERSION) return this.choice;
+    return this.typed !== "" && tagProblem(this.typed) === undefined ? this.typed : "";
+  }
+
+  private async beginChange(value: string | undefined): Promise<void> {
+    const target = this.changeTarget();
+    if (this.screen.kind !== "chooseVersion" || target === "" || (value !== undefined && value !== target)) {
+      if (this.typed !== "") {
+        this.typedError = tagProblem(this.typed) ?? "";
+        this.render();
+      }
+      return;
+    }
+    this.startRun({ kind: "changeVersion", from: this.instance?.version ?? "", to: target });
+  }
+
+  // -------------------------------------------------------------------------
+  // the update (local run or remote cut-and-ship)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Update to the newest release: confirm once, typed, then move.
+   *
+   * ONE CONFIRMATION covers the remote path's two calls: prompting twice would
+   * turn one decision into a sequence the operator can be halfway through.
+   */
+  private async runUpdate(): Promise<void> {
+    const verdict = this.upgrade();
+    if (verdict.kind !== "offer") return;
+    const ok = await this.confirmTyped(verdict.title, verdict.confirmation, verdict.phrase);
+    if (!ok) return;
+    if (verdict.target.flow === "upgradeToTag") {
+      this.startRun({ kind: "update", from: verdict.target.from, to: verdict.target.to });
+      return;
+    }
+    const port = this.deps.deployPort?.();
+    if (port === undefined) return this.notConnected();
+    const cut = await runDeployAction(port, { id: "cutVersion", bump: "patch", version: verdict.target.to });
     if (this.disposed) return;
+    if (cut.kind === "error") return this.reportOutcome(cut);
+    // THE RECORD THE CUT JUST CREATED, BY ID -- never "whatever is newest
+    // now", which is a race with another operator's cut.
+    const record = cut.details.deploymentId ?? "";
+    if (record === "") {
+      this.deps.logLine?.(cut.line);
+      this.outcome = { tone: "error", line: `${verdict.target.to} is ready but wasn't deployed.`, auditId: cut.auditEventId, signIn: false };
+      this.reload();
+      return;
+    }
+    const ship = await runDeployAction(port, { id: "deploy", deploymentId: record });
+    if (this.disposed) return;
+    this.deps.logLine?.(cut.line);
+    this.reportOutcome(ship, ship.kind === "success" ? `Updating to ${verdict.target.to}.` : undefined, [cut.auditEventId]);
+  }
+
+  // -------------------------------------------------------------------------
+  // remote deploy-control acts
+  // -------------------------------------------------------------------------
+
+  private async runRemote(act: PageAct): Promise<void> {
+    const instance = this.instance;
+    const port = this.deps.deployPort?.();
+    if (instance === undefined) return;
+    if (port === undefined) return this.notConnected();
+    let request: DeployActionRequest;
+    let success: string | undefined;
+    switch (act.id) {
+      case "deploy": {
+        const version = this.runs.find((run) => run.id === act.value)?.toVersion ?? "";
+        request = { id: "deploy", deploymentId: act.value ?? "" };
+        success = version === "" ? undefined : `Deploying ${version}.`;
+        break;
+      }
+      case "cutVersion":
+        request = { id: "cutVersion", bump: "patch", version: "" };
+        break;
+      case "rollback": {
+        const target = this.runs.find((run) => run.id === act.value);
+        if (target === undefined) return;
+        const to = target.toVersion ?? "";
+        const phrase = to !== "" ? to : target.id;
+        const now = (instance.versionLabel ?? "") === "" ? "" : ` (now ${instance.versionLabel})`;
+        if (!(await this.confirmTyped(`Roll back ${instance.name}`, `Roll back ${instance.name} to ${phrase}${now}?`, phrase))) return;
+        request = { id: "rollback", toDeploymentId: target.id };
+        success = `Rolling back to ${phrase}.`;
+        break;
+      }
+      case "rolloutPromote":
+        request = { id: "rolloutAction", rollout: act.value ?? "", subAction: "promote" };
+        break;
+      case "rolloutAbort": {
+        const rollout = act.value ?? "";
+        // ABORT IS TYPED; PROMOTE IS NOT. Confirming both would train the
+        // operator to type through the prompt (deploy/actions.ts).
+        if (!(await this.confirmTyped(`Abort ${rollout}`, `Abort the ${rollout} rollout?`, rollout))) return;
+        request = { id: "rolloutAction", rollout, subAction: "abort" };
+        break;
+      }
+      default:
+        return;
+    }
+    const outcome = await runDeployAction(port, request);
+    if (this.disposed) return;
+    this.reportOutcome(outcome, outcome.kind === "success" ? success : undefined);
+  }
+
+  /** An outcome on the page as one sentence; the log line and audit ids go to Output and Details. */
+  private reportOutcome(outcome: DeployOutcome, success?: string, earlierAudits: readonly string[] = []): void {
+    this.deps.logLine?.(outcome.line);
+    const audits = [...earlierAudits, outcome.auditEventId].filter((id) => id !== "");
+    this.outcome = {
+      tone: outcome.kind === "success" ? "info" : "error",
+      line: success ?? outcome.message,
+      auditId: audits.join(", "),
+      signIn: outcome.needsSignIn,
+    };
+    this.reload();
+  }
+
+  private notConnected(): void {
+    this.notice = { tone: "error", line: "Not connected to this cluster.", acts: [{ act: "connect", label: "Connect" }] };
     this.render();
   }
 
   /**
-   * Records the chosen tag and re-derives the forecast.
-   *
-   * The forecast is recomputed on every change rather than once at Start: what
-   * the run will touch is the question the operator is answering, and a preview
-   * that lagged the field would be answering it about the previous choice.
+   * A typed confirmation: the phrase is the TARGET (a version, a rollout), so
+   * confirming means reading what is about to change. Cancel does nothing; a
+   * mismatch does nothing and says so.
    */
-  private setTarget(value: string): void {
-    this.target = value.trim();
-    if (this.target === "") {
-      this.tagError = "";
-      this.plan = [];
-      return;
+  private async confirmTyped(title: string, question: string, phrase: string): Promise<boolean> {
+    const ask = this.deps.confirm;
+    if (ask === undefined || phrase === "") return false;
+    const typed = await ask({ title, prompt: `${question} Type ${phrase} to confirm.`, phrase });
+    if (typed === undefined) return false;
+    if (!confirmationMatches(phrase, typed)) {
+      this.notice = { tone: "error", line: "That didn't match, so nothing changed." };
+      this.render();
+      return false;
     }
-    this.tagError = tagProblem(this.target) ?? "";
-    if (this.tagError !== "") {
-      this.plan = [];
-      return;
-    }
-    const graph = this.graph;
-    this.plan =
-      graph === undefined
-        ? []
-        : upgradePlan({ graph, from: this.instance?.version ?? "", to: this.target });
+    return true;
   }
 
   // -------------------------------------------------------------------------
-  // rebuild from checkout (memql#4246)
+  // rebuild and pull
   // -------------------------------------------------------------------------
 
   /**
-   * Opens the rebuild screen and gathers the facts its checklist states.
-   *
-   * PAINTS FIRST, THEN GATHERS. Docker's probe spawns a script and the git
-   * reads spawn three more, so a screen that waited for all of them would sit
-   * blank after a click. It renders with the field and no checklist -- the same
-   * shape the wizard's collect screen takes -- and repaints when the answers
-   * land.
-   *
-   * The staleness guard is the same one `computePreflight` uses: the facts are
-   * only adopted if this page is STILL on the rebuild screen when they arrive.
-   * An operator who clicked Back is not shown a checklist about a run they
-   * abandoned.
+   * The facts a build from the checkout depends on. PAINTS FIRST, THEN
+   * GATHERS -- the probes spawn scripts -- and adopts the answer only if the
+   * page is still on the screen that asked.
    */
-  private async openRebuild(): Promise<void> {
-    const instance = this.instance;
-    if (instance === undefined) return;
-    this.screen = "rebuildPreflight";
-    this.error = "";
-    this.rebuildFacts = undefined;
-    this.render();
-
+  private async gather(withUpdate: boolean): Promise<RebuildPreflightInputs & { update?: UpdateState }> {
+    const instance = this.instance!;
     const dir = instance.checkout ?? "";
-    const [dockerReachable, checkoutIsMemql, state] = await Promise.all([
+    const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
+    const [dockerReachable, checkoutIsMemql, state, update] = await Promise.all([
       this.dockerReachable(),
       isMemqlCheckout(dir),
       readCheckoutState(dir),
+      withUpdate ? readUpdateState(dir, { fallbackBranch: recordedStackBranch(receipt) }) : Promise.resolve(undefined),
     ]);
-    const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
-    if (this.disposed || this.screen !== "rebuildPreflight") return;
-    this.rebuildFacts = {
+    return {
       dockerReachable,
       checkoutDir: dir,
       checkoutIsMemql,
       ...(state === undefined ? {} : { state }),
-      // Off the INSTANCE, which derives it from the same receipt every other
-      // local fact comes from -- rather than a second read that could disagree
-      // with the row the operator is looking at.
+      ...(update === undefined ? {} : { update }),
       imageSource: instance.imageSource ?? "",
       releasedTag: recordedCheckout(receipt).tag,
-      // Off the INSTANCE for the same reason imageSource is: it is where the
-      // extension's own build stamp was already resolved, and a second read
-      // here could disagree with the row the operator just came from.
-      ...(instance.extensionCommit !== undefined
-        ? { extensionCommit: instance.extensionCommit }
-        : {}),
+      ...(instance.extensionCommit !== undefined ? { extensionCommit: instance.extensionCommit } : {}),
       ...(instance.extensionDirty === true ? { extensionDirty: true } : {}),
     };
+  }
+
+  private async openRebuild(): Promise<void> {
+    if (this.instance === undefined || !offersLocal(this.instance, "rebuildFromCheckout")) return;
+    this.screen = { kind: "rebuild" };
+    this.check = undefined;
+    this.render();
+    const inputs = await this.gather(false);
+    if (this.disposed || this.screen.kind !== "rebuild") return;
+    this.check = rebuildCheck(inputs);
     this.render();
   }
 
+  private async openPullRebuild(): Promise<void> {
+    if (this.instance === undefined || !offersLocal(this.instance, "updateAndRebuild")) return;
+    this.screen = { kind: "pullRebuild" };
+    this.check = undefined;
+    this.update = undefined;
+    this.merge = false;
+    this.render();
+    const inputs = await this.gather(true);
+    if (this.disposed || this.screen.kind !== "pullRebuild") return;
+    this.update = inputs.update;
+    this.check = updateCheck(inputs);
+    this.render();
+  }
+
+  private beginRebuild(): void {
+    const instance = this.instance;
+    if (this.screen.kind !== "rebuild" || instance === undefined || this.check === undefined || this.check.blocked) return;
+    this.startRun({ kind: "rebuild", checkout: instance.checkout ?? "", nodes: this.nodes });
+  }
+
+  private beginPullRebuild(): void {
+    const instance = this.instance;
+    if (this.screen.kind !== "pullRebuild" || instance === undefined || this.check === undefined || this.check.blocked) return;
+    this.startRun({
+      kind: "pullRebuild",
+      checkout: instance.checkout ?? "",
+      nodes: this.nodes,
+      branch: this.update?.branch ?? "",
+      strategy: this.merge ? "merge" : "fastForward",
+    });
+  }
+
   /**
-   * Whether Docker answers, asked with the install graph's own gate.
-   *
-   * `install.dockerAccess` is READ-ONLY by design -- its header says so at
-   * length -- and it is the same classification the install graph blocks on, so
-   * the checklist and the run cannot disagree about the same machine. Anything
-   * other than a clean exit is "not reachable": the script reports a missing
-   * daemon, a stopped one and one refusing this user all as exit 4, and each of
-   * those is a rebuild that will fail at its first command.
+   * Whether Docker answers, asked with the install graph's own read-only gate,
+   * so the check and the run cannot disagree about the same machine.
    */
   private async dockerReachable(): Promise<boolean> {
     const run = this.deps.runScript ?? runCapabilityScript;
@@ -812,976 +960,305 @@ export class DeploymentPanel {
       });
       return outcome.exitCode === 0;
     } catch {
-      // The probe is a courtesy on a checklist. A probe that could not be
-      // spawned says "not reachable", which is the fail-closed direction and
-      // costs an operator one sentence they can check for themselves.
       return false;
     }
   }
 
-  /**
-   * Rebuilds this cluster's images from its checkout.
-   *
-   * THE SAME RUN MACHINERY AS EVERY OTHER RUN ON THIS PAGE: `runRebuild` goes
-   * through `executeGraph`, so the progress rows, the receipt entry and the
-   * failure screen are the ones `startDeploy` already gets. What differs is the
-   * graph document, three params, and the wording.
-   *
-   * NO RECEIPT-DERIVED ANSWERS TO COLLECT. A deployment needs the domain and
-   * the owner because it re-runs the install graph; a rebuild runs one step
-   * that takes a directory, an Application name and a node list.
-   */
-  private async startRebuild(fresh = true): Promise<void> {
-    if (this.runAbort !== undefined) return;
-    const instance = this.instance;
-    const checkout = instance?.checkout ?? "";
-    if (instance === undefined || checkout === "") {
-      // The action is not offered without a checkout, so this is a message the
-      // page never rendered -- refused rather than run against a guessed path.
-      this.error =
-        "MemQL has no record of a checkout for this cluster, so there is nothing to build from. " +
-        "Repair the install to clone one.";
-      this.screen = "overview";
-      this.render();
-      return;
-    }
-
-    this.error = "";
-    this.runMode = "rebuild";
-    if (fresh) this.state.resetRun();
-    this.screen = "running";
-    this.render();
-
-    // The bar weighs each step by how long it last took on this machine.
-    this.state.setStepWeights(
-      await historicalWeights(this.deps.runsDir ?? defaultRunsDir(), { kinds: ["rebuild"] }),
-    );
-    const recorder = await RunRecorder.begin({
-      dir: this.deps.runsDir ?? defaultRunsDir(),
-      instance: instance.name,
-      kind: "rebuild",
-      entropy: randomBytes(4).toString("hex"),
-    });
-    // The tree reads the run log, so it can show this run before its first step
-    // reports -- a rebuild is minutes long, and that is a long time for a click
-    // to have left no trace.
-    this.deps.refreshTree();
-
-    const controller = new AbortController();
-    this.runAbort = controller;
-
-    let report: ExecutionReport | undefined;
-    let failure: string | undefined;
-    try {
-      report = await runRebuild(
-        {
-          root: this.deps.installRoot,
-          receiptFile: this.deps.receiptFile,
-          skip: new Set<string>(),
-          stepParams: {},
-          stackDir: checkout,
-          nodes: this.rebuildNodes,
-          timeoutMs: REBUILD_TIMEOUT_MS,
-        },
-        {
-          onEvent: (event) => {
-            this.state.apply(event);
-            void recorder.apply(event);
-            this.render();
-          },
-          signal: controller.signal,
-          ...(this.deps.runScript !== undefined ? { run: this.deps.runScript } : {}),
-        },
-      );
-    } catch (err) {
-      // A THROW IS NOT A FAILED STEP -- the same distinction startDeploy draws.
-      failure = err instanceof Error ? err.message : String(err);
-    } finally {
-      this.runAbort = undefined;
-    }
-
-    const cancelled = controller.signal.aborted;
-    const ok = !cancelled && failure === undefined && report?.ok === true;
-    await recorder.finish(cancelled ? "cancelled" : ok ? "succeeded" : "failed");
-    this.deps.refreshTree();
-
-    if (this.disposed) return;
-    if (failure !== undefined) {
-      this.error = failure;
-      this.state.finish({ ok: false });
-    } else {
-      this.state.finish({ ok: report?.ok === true });
-    }
-
-    if (ok) {
-      // THE CONSTRUCT CATALOG IS NOW STALE, and nothing else would notice. The
-      // cluster loaded a new DSL tree seconds ago, so every construct's
-      // training state was decided against the tree that is no longer there --
-      // which is the state the `edited` lens reads to offer this very button.
-      void vscode.commands.executeCommand("memql.constructs.refresh");
-      void vscode.window.showInformationMessage(
-        rebuiltMessage(
-          instance.name,
-          report?.outcomes.find((o) => o.id === "rebuildFromCheckout")?.envelope?.result,
-        ),
-      );
-    }
-
-    this.screen = this.state.failures.length > 0 ? "failedStep" : "overview";
-    if (this.screen === "overview") await this.load();
-    else this.render();
-  }
-
   // -------------------------------------------------------------------------
-  // update from origin and rebuild (memql#4578)
+  // runs
   // -------------------------------------------------------------------------
 
-  /**
-   * Opens the update screen and gathers the facts its checklist states.
-   *
-   * PAINTS FIRST, THEN GATHERS, and the staleness guard is `openRebuild`'s --
-   * both for its reasons. What this adds is one more async read, and the reason
-   * it is safe to put on a checklist is that `readUpdateState` DOES NOT FETCH:
-   * it asks the remote for one line and computes the two counts only when the
-   * answer is already in the local object store. A checklist that fetched would
-   * sit blank through the one-time deepening of a shallow clone.
-   *
-   * THE FALLBACK BRANCH COMES OFF THE RECEIPT. A checkout on no branch is
-   * ordinary here -- a release install detaches at a tag, a repair detaches at
-   * an exact commit -- and the install recorded which ref it asked for, so the
-   * page can offer the update instead of a refusal the operator cannot act on.
-   */
-  private async openUpdate(): Promise<void> {
+  /** Start a run in the machine's slot -- or, when one is going, show that one. */
+  private startRun(
+    request:
+      | { kind: "update" | "changeVersion"; from: string; to: string }
+      | { kind: "rebuild"; checkout: string; nodes: string }
+      | { kind: "pullRebuild"; checkout: string; nodes: string; branch: string; strategy: "merge" | "fastForward" },
+  ): void {
     const instance = this.instance;
     if (instance === undefined) return;
-    this.screen = "updatePreflight";
-    this.error = "";
-    this.updateFacts = undefined;
-    this.render();
-
-    const dir = instance.checkout ?? "";
-    const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
-    const recorded = recordedCheckout(receipt);
-    const [dockerReachable, checkoutIsMemql, state, update] = await Promise.all([
-      this.dockerReachable(),
-      isMemqlCheckout(dir),
-      readCheckoutState(dir),
-      readUpdateState(dir, { fallbackBranch: recordedStackBranch(receipt) }),
-    ]);
-    if (this.disposed || this.screen !== "updatePreflight") return;
-    this.updateFacts = {
-      dockerReachable,
-      checkoutDir: dir,
-      checkoutIsMemql,
-      ...(state === undefined ? {} : { state }),
-      ...(update === undefined ? {} : { update }),
-      imageSource: instance.imageSource ?? "",
-      releasedTag: recorded.tag,
-      ...(instance.extensionCommit !== undefined
-        ? { extensionCommit: instance.extensionCommit }
-        : {}),
-      ...(instance.extensionDirty === true ? { extensionDirty: true } : {}),
-    };
+    this.logsOpen = false;
+    this.notice = undefined;
+    this.slot().start(
+      { ...request, instance: instance.name },
+      {
+        installRoot: this.deps.installRoot,
+        receiptFile: this.deps.receiptFile,
+        runsDir: this.deps.runsDir ?? defaultRunsDir(),
+        ...(this.deps.runScript !== undefined ? { runScript: this.deps.runScript } : {}),
+        ...(this.deps.graphs !== undefined ? { graphs: this.deps.graphs } : {}),
+        ...(this.deps.now !== undefined ? { now: this.deps.now } : {}),
+        ...(this.deps.logLine !== undefined ? { log: this.deps.logLine } : {}),
+        onRecord: () => this.deps.refreshTree(),
+        onSettled: (run) => {
+          this.deps.onRunSettled?.(run, !this.disposed && this.visible());
+          this.reload();
+        },
+      },
+    );
+    this.screen = { kind: "run" };
     this.render();
   }
 
-  /**
-   * Brings this cluster's checkout up to date and then rebuilds from it.
-   *
-   * THE SAME RUN MACHINERY AGAIN. It differs from `startRebuild` in the graph
-   * document, three more params and the wording -- which is the whole argument
-   * for it being a second graph rather than a second implementation.
-   *
-   * A REFUSED UPDATE ENDS THE RUN, and that is the graph's doing rather than
-   * this method's: `rebuildFromCheckout` depends on `updateCheckout`, so a step
-   * that refuses stops the build from ever starting on a checkout the operator
-   * was just told could not be moved. The failure screen then offers what they
-   * were actually trying to do.
-   */
-  private async startUpdate(fresh = true): Promise<void> {
-    if (this.runAbort !== undefined) return;
-    const instance = this.instance;
-    const checkout = instance?.checkout ?? "";
-    if (instance === undefined || checkout === "") {
-      this.error =
-        "MemQL has no record of a checkout for this cluster, so there is nothing to update. " +
-        "Repair the install to clone one.";
-      this.screen = "overview";
+  /** Follow a run: its changes repaint the page, its lines stream into the log. */
+  private watch(run: LocalRun | undefined): void {
+    if (run === this.watched) return;
+    this.unwatch?.();
+    this.unwatch = undefined;
+    this.watched = run;
+    if (run === undefined) return;
+    this.live.log(run.log, { reset: true });
+    this.unwatch = run.onEvent((event) => {
+      if (this.disposed) return;
+      if (event.type === "log") {
+        this.live.log(event.lines, { reset: event.lines.length === 0 });
+        return;
+      }
+      if (run.status === "failed") this.logsOpen = true;
       this.render();
-      return;
-    }
-
-    this.error = "";
-    this.runMode = "update";
-    if (fresh) this.state.resetRun();
-    this.screen = "running";
-    this.render();
-
-    // The bar weighs each step by how long it last took on this machine.
-    this.state.setStepWeights(
-      await historicalWeights(this.deps.runsDir ?? defaultRunsDir(), { kinds: ["update"] }),
-    );
-    const recorder = await RunRecorder.begin({
-      dir: this.deps.runsDir ?? defaultRunsDir(),
-      instance: instance.name,
-      kind: "update",
-      entropy: randomBytes(4).toString("hex"),
     });
-    this.deps.refreshTree();
+  }
 
-    const controller = new AbortController();
-    this.runAbort = controller;
+  /** While a run screen is up and the run is going, keep its bar moving. */
+  private syncTicker(showingRun: boolean): void {
+    const going = showingRun && this.watched !== undefined && this.watched.inFlight;
+    if (going && this.tick === undefined) {
+      this.tick = setInterval(() => {
+        if (this.watched !== undefined) this.live.progress(this.watched.progress());
+      }, RUN_TICK_MS);
+      (this.tick as { unref?: () => void }).unref?.();
+    } else if (!going && this.tick !== undefined) {
+      clearInterval(this.tick);
+      this.tick = undefined;
+    }
+  }
 
-    // The branch the update moves to, resolved the same way the checklist
-    // resolved it: the checkout's own branch when it has one, and the ref the
-    // install recorded when it does not. Empty is passed as absent, which lets
-    // the script apply its own answer rather than being handed "".
-    const branch = this.updateFacts?.update?.branch ?? "";
-
-    let report: ExecutionReport | undefined;
-    let failure: string | undefined;
+  private async copyLog(): Promise<void> {
+    const text = this.live
+      .logLines()
+      .map((line) => (line.label === undefined ? line.text : `${line.label}  ${line.text}`))
+      .join("\n");
     try {
-      report = await runUpdateRebuild(
-        {
-          root: this.deps.installRoot,
-          receiptFile: this.deps.receiptFile,
-          skip: new Set<string>(),
-          stepParams: {},
-          stackDir: checkout,
-          nodes: this.rebuildNodes,
-          branch,
-          strategy: this.updateStrategy,
-          timeoutMs: REBUILD_TIMEOUT_MS,
-        },
-        {
-          onEvent: (event) => {
-            this.state.apply(event);
-            void recorder.apply(event);
-            this.render();
-          },
-          signal: controller.signal,
-          ...(this.deps.runScript !== undefined ? { run: this.deps.runScript } : {}),
-        },
-      );
-    } catch (err) {
-      failure = err instanceof Error ? err.message : String(err);
-    } finally {
-      this.runAbort = undefined;
+      await vscode.env.clipboard.writeText(text);
+    } catch {
+      // A host with no clipboard: the Output channel still has every line.
     }
-
-    const cancelled = controller.signal.aborted;
-    const ok = !cancelled && failure === undefined && report?.ok === true;
-    await recorder.finish(cancelled ? "cancelled" : ok ? "succeeded" : "failed");
-    this.deps.refreshTree();
-
-    if (this.disposed) return;
-    if (failure !== undefined) {
-      this.error = failure;
-      this.state.finish({ ok: false });
-    } else {
-      this.state.finish({ ok: report?.ok === true });
-    }
-
-    if (ok) {
-      // The catalog is stale for the reason startRebuild gives -- the cluster
-      // loaded a new DSL tree seconds ago -- and MORE so here, since the tree
-      // it loaded is not even the one that was on disk when the page opened.
-      void vscode.commands.executeCommand("memql.constructs.refresh");
-      void vscode.window.showInformationMessage(
-        updatedMessage(
-          instance.name,
-          report?.outcomes.find((o) => o.id === "updateCheckout")?.envelope?.result,
-          report?.outcomes.find((o) => o.id === "rebuildFromCheckout")?.envelope?.result,
-        ),
-      );
-    }
-
-    this.screen = this.state.failures.length > 0 ? "failedStep" : "overview";
-    if (this.screen === "overview") await this.load();
-    else this.render();
   }
 
-  // -------------------------------------------------------------------------
-  // the run
-  // -------------------------------------------------------------------------
-
-  /**
-   * Moves the cluster to the chosen tag.
-   *
-   * EVERY ANSWER BUT THE TAG COMES OFF THE RECEIPT, which is exactly what a
-   * repair does and for the same reason: this machine already answered these
-   * questions, and asking again invites a different answer that would seed a
-   * second identity or point the hosts block at a second domain. The tag is the
-   * one input that is deliberately new -- it is the whole verb.
-   */
-  private async startDeploy(fresh = true): Promise<void> {
-    if (this.runAbort !== undefined) return;
-    const target = this.target;
-    if (target === "" || this.tagError !== "") return;
-
-    this.error = "";
-    this.runMode = "deploy";
-    if (fresh) this.state.resetRun();
-    this.screen = "running";
-    this.render();
-
-    const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
-    // NO KEY-PATH REFUSAL HERE ANY MORE (epic memql#5088).
-    //
-    // This used to read `recordedProviderKeyFile` and, finding nothing, refuse
-    // to start: without a key path the run could not pass the `providerKey`
-    // gate, and the failure it would have produced is an exit 2 whose guidance
-    // reads "a fault in MemQL rather than in your machine".
-    //
-    // No receipt records a key path now -- there is no vendor API key in the
-    // product, and the wizard collects none -- so the refusal would fire on
-    // EVERY deployment of EVERY cluster, making the page's whole purpose
-    // unreachable while blaming a credential nothing has ever asked for.
-    // `providerFederation` skips satisfied, and every step behind it proceeds.
-    const from = this.instance?.version ?? "";
-    // The bar weighs each step by how long it last took on this machine.
-    this.state.setStepWeights(
-      await historicalWeights(this.deps.runsDir ?? defaultRunsDir(), { kinds: ["upgrade"] }),
-    );
-    const recorder = await RunRecorder.begin({
-      dir: this.deps.runsDir ?? defaultRunsDir(),
-      instance: this.instance?.name ?? "local",
-      kind: "upgrade",
-      ...(from !== "" ? { fromVersion: from } : {}),
-      toVersion: target,
-      entropy: randomBytes(4).toString("hex"),
-    });
-    // The tree reads the run log, so it can show this run before its first step
-    // reports.
-    this.deps.refreshTree();
-
-    const controller = new AbortController();
-    this.runAbort = controller;
-
-    let report: ExecutionReport | undefined;
-    let failure: string | undefined;
-    try {
-      report = await runInstall(
-        installSessionOptions({
-          root: this.deps.installRoot,
-          receiptFile: this.deps.receiptFile,
-          domain: recordedDomain(receipt) || DEFAULT_LOCAL_DOMAIN,
-          ownerEmail: DEFAULT_INPUTS.ownerEmail,
-          ownerFirstName: DEFAULT_INPUTS.ownerFirstName,
-          ownerLastName: DEFAULT_INPUTS.ownerLastName,
-          // THE ONE VALUE THAT IS NOT THE RECORDED ONE.
-          tag: target,
-          timeoutMs: STEP_TIMEOUT_MS,
-        }),
-        {
-          onEvent: (event) => {
-            this.state.apply(event);
-            void recorder.apply(event);
-            this.render();
-          },
-          signal: controller.signal,
-          ...(this.deps.runScript !== undefined ? { run: this.deps.runScript } : {}),
-        },
-      );
-    } catch (err) {
-      // A THROW IS NOT A FAILED STEP. Everything a step can do wrong arrives as
-      // an event and is already on screen; reaching here means the run could
-      // not be attempted at all.
-      failure = err instanceof Error ? err.message : String(err);
-    } finally {
-      this.runAbort = undefined;
-    }
-
-    const cancelled = controller.signal.aborted;
-    await recorder.finish(
-      cancelled ? "cancelled" : failure !== undefined || report?.ok !== true ? "failed" : "succeeded",
-    );
-    this.deps.refreshTree();
-
-    if (this.disposed) return;
-    if (failure !== undefined) {
-      this.error = failure;
-      this.state.finish({ ok: false });
-    } else {
-      this.state.finish({ ok: report?.ok === true });
-    }
-    this.screen = this.state.failures.length > 0 ? "failedStep" : "overview";
-    if (this.screen === "overview") await this.load();
-    else this.render();
-  }
-
-  /**
-   * Run one deploy-control action against the connected cluster.
-   *
-   * THE GATE IS NEVER THIS METHOD. The id is narrowed against the catalog
-   * because the postMessage channel is untrusted and an unrecognised id must be
-   * dropped rather than reaching `actionById` and throwing -- but whether the
-   * caller MAY run it is the engine's decision, taken again on the far side of
-   * the same gate the unary path runs. What comes back on a refusal names the
-   * role required, and it is rendered verbatim.
-   */
-  private async runDeploy(rawId: string): Promise<void> {
-    const spec = DEPLOY_ACTIONS.find((a) => a.id === rawId);
-    if (spec === undefined || this.instance === undefined) return;
-    const port = this.deps.deployPort?.();
-    if (port === undefined) {
-      this.outcome = "ERROR: not connected to this cluster.";
-      this.render();
-      return;
-    }
-    const request = await this.deployRequest(spec.id);
-    if (request === undefined) return;
-
-    const outcome = await runDeployAction(port, request);
-    if (this.disposed) return;
-    // The engine's own line, including the audit id and -- on a refusal -- the
-    // role that would have worked. Surfaced rather than reworded: a paraphrase
-    // is one more thing that can be wrong, and the operator may need to match
-    // it against a log line.
-    this.outcome = outcome.line;
-    await this.load();
-  }
-
-  // -------------------------------------------------------------------------
-  // the upgrade button (memql#3997)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Whether this page offers the move to the newest release, and what happens
-   * when it is taken.
-   *
-   * Recomputed per render rather than stored: the recorded version changes
-   * under this page (a run finishes, a learner writes) and the release listing
-   * arrives after the first paint, so a cached verdict would be answering about
-   * a cluster the page has since re-read.
-   */
-  private upgrade(): UpgradeVerdict {
-    const instance = this.instance;
-    if (instance === undefined) return { kind: "none", reason: "no instance loaded" };
-    return upgradeVerdict({
-      instance,
-      // peek(), never get(): this is called from the synchronous render path.
-      version: describeVersion({
-        recorded: instance.version,
-        listing: this.deps.releases?.peek(),
-      }),
-      ...(this.roleVisibility === undefined ? {} : { visibility: this.roleVisibility }),
-    });
-  }
-
-  /**
-   * The button, end to end: refuse, or confirm once and run.
-   *
-   * ONE CONFIRMATION covers the whole move, including the remote path's two
-   * RPCs. Prompting twice would turn a single decision into a sequence the
-   * operator can be halfway through, and there is no coherent state to be
-   * halfway into: a cut version with nothing shipped is a pending record they
-   * did not ask for.
-   */
-  private async runUpgrade(): Promise<void> {
-    const verdict = this.upgrade();
-    if (verdict.kind === "none") return;
-
-    if (verdict.kind === "refused") {
-      // REFUSAL, NOT A WARNING. The move can leave a cluster running with an
-      // empty graph and no error anywhere (version/barriers.ts says why), and a
-      // warning is something an operator clicks past.
-      //
-      // `error`, not `outcome`: this is "a failure this page produced" -- the
-      // type's own words -- rather than a line the engine wrote, and it is the
-      // field BOTH the local and the remote page render. Nothing was sent, so
-      // there is no audit id and no engine line to surface.
-      this.error = verdict.message;
-      this.render();
-      return;
-    }
-
-    const ask = this.deps.confirm ?? (async () => undefined);
-    const typed = await ask(
-      `${verdict.confirmation} Type ${verdict.phrase} to confirm.`,
-      verdict.phrase,
-    );
-    if (typed === undefined) return;
-    if (!confirmationMatches(verdict.phrase, typed)) {
-      this.error = `That did not match ${verdict.phrase}, so nothing was run.`;
-      this.render();
-      return;
-    }
-    this.error = "";
-
-    if (verdict.target.flow === "upgradeToTag") {
-      // The SAME run path "Create deployment" reaches, with the target already
-      // decided. Not a second implementation that could disagree with it about
-      // what a move does.
-      this.target = verdict.target.to;
-      this.tagError = "";
-      await this.startDeploy();
-      return;
-    }
-    await this.runRemoteUpgrade(verdict.target);
-  }
-
-  /**
-   * THE ONE PLACE THE REMOTE UPGRADE TOUCHES THE DEPLOY-CONTROL SURFACE.
-   *
-   * Epic memql#3943 is collapsing that surface to a single target and removing
-   * the environment parameter. Everything env-shaped about a remote upgrade is
-   * inside this function -- one `env` value, resolved once and passed to
-   * `cutVersion`, which is the only call on this path that still takes one
-   * (`deploy` already takes a deploymentId and nothing else). So the collapse
-   * is a line here rather than a scavenger hunt, and nothing about this button
-   * introduces a NEW env-shaped parameter.
-   *
-   * TWO RPCs, ONE DECISION. `cutVersion` writes a pending deployment record at
-   * the target version; `deploy` ships it. They are separate calls because the
-   * engine has no combined one, not because the operator made two choices --
-   * which is why the confirmation happened before either.
-   */
-  private async runRemoteUpgrade(target: UpgradeTarget): Promise<void> {
-    const port = this.deps.deployPort?.();
-    if (port === undefined) {
-      this.outcome = "ERROR: not connected to this cluster.";
-      this.render();
-      return;
-    }
-    const cut = await runDeployAction(port, {
-      id: "cutVersion",
-      bump: "patch",
-      // The version is NAMED rather than left to the engine's suggestion. The
-      // operator confirmed a specific release; cutting whatever comes next
-      // would ship a version nobody agreed to.
-      version: target.to,
-    });
-    if (this.disposed) return;
-    if (cut.kind === "error") {
-      // Verbatim, audit id and all -- including, on a refusal, the role that
-      // would have worked.
-      this.outcome = cut.line;
-      await this.load();
-      return;
-    }
-
-    // THE RECORD THE CUT JUST CREATED, BY ID. cutVersion returns it on
-    // ActionResult.details (component/deploycontrol/cutversion.go stamps
-    // `deploymentId`), so the ship names that row rather than "whatever is
-    // newest now".
-    //
-    // This read the catalog back and took runs[0] until memql#3997 carried
-    // `details` through deploy/controller.ts. That was correct almost always
-    // and wrong for whichever operator lost a race: two cuts against one
-    // cluster inside the reload window and the second ship names the first
-    // one's record. There is no window now, because there is no interval --
-    // the id came back with the cut.
-    const record = cut.details.deploymentId ?? "";
-    if (record === "") {
-      // An engine too old to stamp the id. REFUSE rather than fall back to the
-      // catalog: the fallback is the race this replaced, and a pending record
-      // nobody shipped is visible, inert and easy to ship by hand -- while the
-      // wrong record shipped is neither.
-      this.outcome = joinOutcomes(
-        cut,
-        `ERROR: ${target.to} was cut, but the cluster returned no deployment id, so nothing was shipped. ` +
-          `The pending record is on the Deployments list and can be shipped from there.`,
-      );
-      await this.load();
-      return;
-    }
-
-    const ship = await runDeployAction(port, { id: "deploy", deploymentId: record });
-    if (this.disposed) return;
-    // BOTH audit ids reach the operator. Two calls happened, the engine audited
-    // each, and reporting only the second would leave the cut untraceable.
-    this.outcome = joinOutcomes(cut, ship.line);
-    await this.load();
-  }
-
-  /**
-   * The parameters an action needs, and the confirmation the destructive ones
-   * demand.
-   *
-   * THE PHRASE IS THE TARGET, never the word "yes": re-typing the deployment
-   * being rolled back to forces the operator to look at what they selected.
-   * Undefined means "do not run" -- a cancelled prompt and a mismatched phrase
-   * are the same answer.
-   */
-  private async deployRequest(
-    id: DeployActionId,
-  ): Promise<DeployActionRequest | undefined> {
-    const ask = this.deps.confirm ?? (async () => undefined);
-    switch (id) {
-      case "cutVersion":
-        return { id, bump: "patch", version: "" };
-      case "deploy": {
-        // THE RECORD THIS PAGE RENDERED, BY ID (memql#4017). `load()` resolves
-        // it (state/deploymentHistory.pendingDeploymentId) and the overview
-        // prints it above this button, so the ship names the row the operator
-        // was looking at.
-        //
-        // This took `runs[0]` -- the newest record in the catalog the page last
-        // read, re-derived at the click -- and it was wrong twice over. It was
-        // not the PENDING record, and `deploy` transitions whatever it is given
-        // pending -> in_progress without checking what it is transitioning from
-        // (component/deploycontrol/deploy.go), so a cluster whose newest record
-        // had landed re-shipped a succeeded deployment. And it was resolved at
-        // the CLICK, so two cuts against one cluster inside the reload window
-        // and the ship named the other operator's record -- the same shape
-        // #4015 removed from the upgrade path by carrying the id the cut
-        // returned. There is no cut to return one here, so the id is fixed when
-        // the page is built instead.
-        const target = this.instance?.pendingDeploymentId ?? "";
-        if (target === "") {
-          // REFUSE rather than fall back to another record, for the reason the
-          // remote upgrade path gives about a missing id: a pending record
-          // nobody shipped is visible, inert and easy to ship by hand, while
-          // the wrong record shipped is none of those things.
-          this.outcome =
-            "ERROR: nothing is cut, so there is no pending deployment record to ship.";
-          this.render();
-          return undefined;
-        }
-        return { id, deploymentId: target };
+  /** Read what a run's detail shows beyond the record: step names and saved logs. */
+  private async openRunDetail(): Promise<void> {
+    if (this.stepLabels.size === 0) this.stepLabels = await readStepLabels(this.deps.installRoot);
+    const screen = this.screen;
+    if (screen.kind !== "runDetail") return;
+    const run = this.runs.find((r) => r.id === screen.runId);
+    if (run === undefined) return;
+    const dir = this.deps.runsDir ?? defaultRunsDir();
+    for (const item of run.items) {
+      if (item.status !== "failed") continue;
+      const file = parseItemDetail(item.detail).logFile;
+      if (file === "" || this.logs.has(file) || file.includes("/") || file.includes("\\")) continue;
+      try {
+        this.logs.set(file, await fs.readFile(path.join(dir, file), "utf8"));
+      } catch {
+        this.logs.set(file, "");
       }
-      case "rollback": {
-        // The newest run that actually LANDED, which is what a rollback target
-        // has to be -- rolling back to a record that failed would redeploy a
-        // digest that never worked.
-        const landed = this.runs.find((r) => r.status === "succeeded");
-        const target = landed?.id ?? "";
-        if (!(await this.confirmed(ask, id, target))) return undefined;
-        return { id, toDeploymentId: target };
-      }
-      case "rolloutAction": {
-        const subAction = "promote";
-        if (rolloutRequiresConfirmation(subAction) && !(await this.confirmed(ask, id, this.instance?.name ?? ""))) {
-          return undefined;
-        }
-        return { id, rollout: "", subAction };
-      }
-      default:
-        return undefined;
     }
-  }
-
-  private async confirmed(
-    ask: (prompt: string, phrase: string) => Promise<string | undefined>,
-    id: DeployActionId,
-    target: string,
-  ): Promise<boolean> {
-    const phrase = confirmationPhrase(id, target);
-    if (phrase === "") {
-      // An action with nothing identifiable to re-type must not proceed
-      // unchallenged -- see confirmationPhrase.
-      this.outcome = `ERROR: nothing to confirm against, so ${id} was not run.`;
-      this.render();
-      return false;
-    }
-    const typed = await ask(`Type ${phrase} to confirm.`, phrase);
-    if (typed === undefined) return false;
-    if (!confirmationMatches(phrase, typed)) {
-      this.outcome = `ERROR: that did not match ${phrase}, so ${id} was not run.`;
-      this.render();
-      return false;
-    }
-    return true;
+    if (!this.disposed) this.render();
   }
 
   // -------------------------------------------------------------------------
   // rendering
   // -------------------------------------------------------------------------
 
-  private bodyHtml(): string {
-    const instance = this.instance;
-    if (instance === undefined) {
-      return renderScreen({
-        title: "Deployments",
-        status: `<p class="lede">Reading this machine...</p>`,
-      });
-    }
-    switch (this.screen) {
-      case "runDetail": {
-        const run = this.runs.find((r) => r.id === this.runId);
-        if (run === undefined) {
-          // THE RECORD IS GONE, and this says so rather than falling back to
-          // the overview. The run log keeps the newest RUN_LOG_KEEP records and
-          // prunes the rest, and clusters.yaml is shared with the Cockpit, so a
-          // row can outlive its record for perfectly ordinary reasons. Bouncing
-          // silently to the overview would present that as a click that did
-          // nothing, which is the failure this whole screen exists to end.
-          return renderScreen({
-            title: "Deployment",
-            actions: `<button class="secondary" type="button" data-act="back">Back</button>`,
-            status: `<p class="lede">This deployment is no longer in the record. Local runs are pruned once there are more than ${RUN_LOG_KEEP} of them, and a remote deployment's rows come from the cluster.</p>`,
-          });
-        }
-        return renderRunDetail({
-          instance,
-          run,
-          actions: runDetailActions({
-            instance,
-            run,
-            // Undefined until the first role read lands, which
-            // `runDetailActions` reads as INDETERMINATE and therefore offers --
-            // the same call src/deploy/actions.ts makes, for the same reason.
-            ...(this.roleVisibility !== undefined ? { visibility: this.roleVisibility } : {}),
-            // Likewise absent until the status read returns: "not asked" is not
-            // "nothing offered", and blanking the actions for that instant
-            // would read as a cluster that lost its deploy console.
-            ...(this.pipeline === undefined
-              ? {}
-              : { pipelineOffers: this.pipeline.actions.map((action) => action.id) }),
-          }),
-          nowMs: Date.now(),
-          outcome: this.outcome,
-          error: this.error,
-          diagnosticsOpen: this.diagnosticsOpen,
-        });
-      }
-      case "chooseTag":
-        return renderChooseTag({
-          instance,
-          listing: this.listing,
-          target: this.target,
-          tagError: this.tagError,
-          plan: this.plan,
-          summary: this.plan.length === 0 ? "" : upgradeSummary(this.plan),
-          sameVersion: isSameVersion(instance.version ?? "", this.target),
-        });
-      case "rebuildPreflight":
-        return renderRebuildScreen({
-          checkoutDir: instance.checkout ?? "",
-          nodes: this.rebuildNodes,
-          ...(this.rebuildFacts === undefined
-            ? {}
-            : {
-                preflight: rebuildPreflightItems({
-                  ...this.rebuildFacts,
-                  nodes: this.rebuildNodes,
-                }),
-              }),
-        });
-      case "updatePreflight":
-        return renderUpdateScreen({
-          checkoutDir: instance.checkout ?? "",
-          nodes: this.rebuildNodes,
-          strategy: this.updateStrategy,
-          ...(this.updateFacts === undefined
-            ? {}
-            : {
-                preflight: updatePreflightItems({
-                  ...this.updateFacts,
-                  nodes: this.rebuildNodes,
-                  strategy: this.updateStrategy,
-                }),
-                blocked: updateIsBlocked(this.updateFacts.update),
-              }),
-        });
-      case "running":
-        return renderRunningScreen(this.runScreenInput(this.state.steps));
-      case "failedStep":
-        return renderFailedScreen({
-          ...this.runScreenInput(this.state.steps),
-          failures: this.state.failures,
-        });
-      case "overview":
-        if (instance.kind === "remote") {
-          return renderRemoteInstance({
-            instance,
-            runs: this.runs,
-            // Undefined only in the instant between the page opening and the
-            // status read returning. Rendering it as "not configured" would be
-            // a claim about the cluster made before anything asked it.
-            pipeline: this.pipeline ?? {
-              kind: "present",
-              title: "Deploy",
-              detail: "Reading this cluster's deployment status...",
-              actions: [],
-            },
-            nowMs: Date.now(),
-            outcome: this.outcome,
-            error: this.error,
-            // peek(), never get(): bodyHtml is synchronous. loadTags warms it.
-            releases: this.deps.releases?.peek(),
-            upgrade: this.upgrade(),
-            diagnosticsOpen: this.diagnosticsOpen,
-          });
-        }
-        return renderInstanceOverview({
-          instance,
-          runs: this.runs,
-          actions: instanceActions(instance),
-          nowMs: Date.now(),
-          error: this.error,
-          releases: this.deps.releases?.peek(),
-          upgrade: this.upgrade(),
-          diagnosticsOpen: this.diagnosticsOpen,
-        });
-    }
-  }
-
-  private runScreenInput(steps: StepProgress[]): {
-    steps: StepProgress[];
-    progress: RunProgress;
-    mode: RunMode;
-    running: boolean;
-    logsOpen: boolean;
-    logsFollow: boolean;
-  } {
-    return {
-      steps,
-      progress: this.state.progress(),
-      mode: this.runMode,
-      // Or STARTING: the run screen is up and no plan has arrived yet. A fresh
-      // run clears the rows before it paints, and between that and the plan
-      // the page is waiting on the run it just began -- not looking at one
-      // that "has not been run".
-      running: this.runAbort !== undefined || (this.screen === "running" && this.state.steps.length === 0),
-      // FROM THE SHARED STATE OBJECT, which this panel already owns an instance
-      // of -- so the wizard and this page hold the disclosure the same way, and
-      // a failure auto-discloses here for the same reason and by the same line
-      // of code (memql#4455).
-      logsOpen: this.state.logsOpen,
-      logsFollow: this.state.logsFollow,
-    };
-  }
-
   private render(): void {
     if (this.disposed) return;
-    const nonce = nonceValue();
-    this.panel.title =
-      this.instance === undefined ? "MemQL deployment" : `Deployment: ${this.instance.name}`;
-    this.panel.webview.html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-<title>${escapeHtml(this.instance?.name ?? "MemQL deployment")}</title>
-<style nonce="${nonce}">
-${brandStyleBlock()}
-${viewKitStyles}
+    const { key, parts, run } = this.compose();
+    this.watch(run);
+    this.panel.title = this.instance?.presence === "absent" ? "Local cluster" : (this.instance?.name ?? "Cluster");
+    this.live.render(key, parts);
+    if (run !== undefined && key.startsWith("run:")) this.live.progress(run.progress());
+    this.syncTicker(key.startsWith("run:"));
+  }
 
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
-         background: var(--vscode-editor-background); margin: 0;
-         padding: 16px 20px; max-width: 780px; }
-  h1 { font-size: 1.2em; margin: 0 0 4px; }
-  h2 { font-size: 1em; margin: 20px 0 6px; }
-  .lede { color: var(--memql-muted); margin: 0 0 16px; }
-  .notice { color: var(--memql-muted); margin: 0 0 12px; }
-  .facts { margin-bottom: 12px; }
-  .fact { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
-  .fact-key { flex: none; min-width: 8em; color: var(--memql-muted); }
-  .runs, .plan { list-style: none; margin: 0; padding: 0; }
-  .run, .plan-step { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
-  .run-kind, .plan-id { flex: none; min-width: 10em; }
-  .run-detail, .plan-detail { color: var(--memql-muted); }
-  .plan-mark { flex: none; width: 2em; color: var(--memql-muted); }
-  /* "Node types", never "Steps": a remote run's items are per-tier specs, not
-     script executions, and the label is what stops one being read as the other. */
-  .items-label { color: var(--memql-muted); margin: 2px 0 0 1em; }
-  .run-block { margin-bottom: 10px; }
-  .run-block .runs { margin-left: 1em; }
-  /* The steps that will actually change something read at full strength; the
-     ones expected to skip are quiet, because the question the forecast answers
-     is "what is this going to touch". */
-  .plan-step[data-effect="runs"] .plan-id { font-weight: 600; }
-  .plan-step[data-effect="skip"] { opacity: 0.65; }
-  .field { margin-bottom: 12px; }
-  .field label { display: block; margin-bottom: 3px; }
-  .field input, .field select { width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit;
-                 color: var(--memql-fg);
-                 background: var(--memql-surface);
-                 border: 1px solid var(--memql-border-strong); border-radius: 3px; }
-  .field[data-invalid="true"] input { border-color: var(--vscode-editorError-foreground); }
-  .hint { color: var(--memql-muted); margin-top: 3px; }
-  .said { margin: 0 0 8px; }
-  .remedy { font-family: var(--vscode-editor-font-family, monospace);
-            background: var(--memql-raised);
-            border: 1px solid var(--memql-border);
-            border-radius: 4px; padding: 8px 10px; margin: 6px 0 0;
-            overflow-x: auto; white-space: pre; }
-  .error { color: var(--memql-danger); margin-top: 3px; }
-  .actions { display: flex; gap: 8px; margin-top: 16px; }
-  button.primary, button.secondary {
-    font: inherit; padding: 4px 12px; cursor: pointer; border-radius: 2px;
-    border: 1px solid transparent; }
-  button.primary { background: var(--vscode-button-background);
-                   color: var(--vscode-button-foreground); }
-  button.secondary { background: var(--vscode-button-secondaryBackground);
-                     color: var(--vscode-button-secondaryForeground); }
-  button.destructive { color: var(--memql-data-string); }
-  button[disabled] { opacity: 0.5; cursor: default; }
-</style>
-</head>
-<body${currentBodyThemeAttr()}>
-${brandStrip("MemQL")}
-${this.bodyHtml()}
-<script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
-  document.addEventListener('click', (e) => {
-    const choose = e.target.closest('[data-choose]');
-    if (choose) { vscode.postMessage({ type: 'choose', value: choose.dataset.choose }); return; }
-    const deploy = e.target.closest('[data-deploy]');
-    if (deploy) { vscode.postMessage({ type: 'deploy', value: deploy.dataset.deploy }); return; }
-    const act = e.target.closest('[data-act]');
-    if (act && act.tagName !== 'SELECT') vscode.postMessage({ type: act.dataset.act });
-  });
-  // Recording only -- the host does NOT repaint on a keystroke, because a
-  // repaint replaces the whole document and would take the caret with it.
-  // The select is the exception: choosing a tag IS the decision, and the
-  // forecast beneath it has to follow. (No backticks in here: this script is
-  // itself inside a template literal.)
-  //
-  // BOUND TO BOTH EVENTS, as addClusterPanel binds its own sendField
-  // (memql#4578). A select fires input as well as change by the letter of the
-  // spec, so one listener SHOULD be enough -- but the update screen's strategy
-  // is this panel's first data-field select, nothing here has ever exercised
-  // that path, and this script is only ever tested as a STRING. The cost of
-  // both is a duplicate message the host handles idempotently; the cost of the
-  // assumption being wrong is a control that silently never takes effect.
-  const sendField = (e) => {
-    const field = e.target.closest('[data-field]');
-    if (field) vscode.postMessage({
-      type: 'input', value: { field: field.dataset.field, text: field.value } });
-  };
-  document.addEventListener('input', sendField);
-  document.addEventListener('change', sendField);
-  document.addEventListener('change', (e) => {
-    const pick = e.target.closest('select[data-act="pickTag"]');
-    if (pick) vscode.postMessage({ type: 'pickTag', value: pick.value });
-  });
-${LOG_PANE_SCRIPT}
-</script>
-</body>
-</html>`;
+  /** The screen to show now, as a LiveView key and its three regions. */
+  private compose(): { key: string; parts: { head: string; body: string; actions: string }; run?: LocalRun } {
+    const instance = this.instance;
+    if (this.registryError !== "") {
+      return {
+        key: "unavailable",
+        parts: unavailableScreen({
+          title: "Cluster",
+          line: "Can't read your cluster list.",
+          next: this.registryError,
+          bar: { state: "Unavailable", acts: [{ act: "back", label: "Try again", tone: "primary" }] },
+        }),
+      };
+    }
+    if (!this.loaded) return { key: "loading", parts: loadingScreen() };
+    if (instance === undefined) {
+      return {
+        key: "unavailable",
+        parts: unavailableScreen({
+          title: this.instanceName === "" ? "Local cluster" : this.instanceName,
+          line: "This cluster is no longer in your list.",
+          bar: { state: "Not in your list", acts: [] },
+        }),
+      };
+    }
+    const nowMs = (this.deps.now ?? Date.now)();
+    const home = this.deps.home ?? os.homedir();
+
+    // A RUN GOING ON THIS MACHINE IS THE PAGE for the local cluster, unless the
+    // operator deliberately opened another run from the history.
+    const current = this.slot().current;
+    const local = instance.kind === "local";
+    if (local && current !== undefined && (this.screen.kind === "run" || (current.inFlight && this.screen.kind === "overview"))) {
+      return {
+        key: `run:${current.startedAt}`,
+        run: current,
+        parts: runScreen({
+          words: current.words,
+          status: current.status,
+          progress: current.progress(nowMs),
+          failure: current.failure,
+          cancellable: current.cancellable,
+          logsOpen: this.logsOpen || current.status === "failed",
+        }),
+      };
+    }
+
+    switch (this.screen.kind) {
+      case "chooseVersion": {
+        const listing = this.listing();
+        const target = this.changeTarget();
+        const plan: PlannedStepView[] =
+          target === "" || this.installGraph === undefined
+            ? []
+            : upgradePlan({ graph: this.installGraph, from: instance.version ?? "", to: target });
+        return {
+          key: "chooseVersion",
+          parts: chooseVersionScreen({
+            instance,
+            listing,
+            choice: this.choice,
+            typed: this.typed,
+            typedError: this.typedError,
+            target,
+            plan,
+            summary: plan.length === 0 ? "" : upgradeSummary(plan),
+            sameVersion: isSameVersion(instance.version ?? "", target),
+          }),
+        };
+      }
+      case "rebuild":
+        return { key: "rebuild", parts: rebuildScreen({ instance, check: this.check, nodes: this.nodes, home }) };
+      case "pullRebuild":
+        return {
+          key: "pullRebuild",
+          parts: pullRebuildScreen({
+            instance,
+            check: this.check,
+            nodes: this.nodes,
+            home,
+            merge: this.merge,
+            offerMerge: this.update !== undefined && (this.update.ahead === undefined || this.update.ahead > 0),
+          }),
+        };
+      case "runDetail": {
+        const runId = this.screen.runId;
+        const run = this.runs.find((r) => r.id === runId);
+        if (run === undefined) return { key: `runDetail:${runId}`, parts: missingRunScreen(instance) };
+        return {
+          key: `runDetail:${runId}`,
+          parts: runDetailScreen({
+            instance,
+            run,
+            bar: this.detailBar(instance, run),
+            nowMs,
+            labels: this.stepLabels,
+            logs: this.logs,
+            openLogs: this.openLogs,
+            detailsOpen: this.detailsOpen,
+          }),
+        };
+      }
+      default: {
+        const bar = this.overviewBar(instance);
+        return {
+          key: `overview:${instance.name}`,
+          parts: local
+            ? localOverviewScreen({
+                instance,
+                bar,
+                runs: this.runs,
+                nowMs,
+                upgrade: this.upgrade(),
+                releases: this.deps.releases?.peek(),
+                ...(this.notice === undefined ? {} : { notice: this.notice }),
+                detailsOpen: this.detailsOpen,
+                home,
+              })
+            : remoteOverviewScreen({
+                instance,
+                bar,
+                connection: this.connection,
+                runs: this.runs,
+                nowMs,
+                pipeline: this.pipeline,
+                upgrade: this.upgrade(),
+                ...(this.outcome === undefined ? {} : { outcome: this.outcome }),
+                ...(this.notice === undefined ? {} : { notice: this.notice }),
+                detailsOpen: this.detailsOpen,
+              }),
+        };
+      }
+    }
   }
 }
 
 /**
- * A CSP nonce, from a CSPRNG.
- *
- * The same call the other panels make, and for the same reason: a nonce a page
- * can predict is a nonce an injected script can carry, which defeats its whole
- * purpose.
+ * A remedy command, typed into a terminal and NOT run: the operator reads it
+ * and presses Enter, which is how a step that needs a password gets run at all.
  */
-function nonceValue(): string {
-  return randomBytes(16).toString("base64");
+function openRemedyTerminal(command: string): void {
+  const terminal = vscode.window.createTerminal({ name: "MemQL fix" });
+  terminal.show();
+  terminal.sendText(command, false);
+}
+
+/**
+ * Every step id's short label, from the graph documents the runs came from.
+ * A document that will not read costs its labels and nothing else: the steps
+ * are then shown by id.
+ */
+async function readStepLabels(root: string): Promise<ReadonlyMap<string, string>> {
+  const files = [
+    graphDocumentPath("install", root),
+    installGraphPath(root, true),
+    graphDocumentPath("uninstall", root),
+    rebuildGraphPath(root),
+    updateRebuildGraphPath(root),
+  ];
+  const labels = new Map<string, string>();
+  for (const file of files) {
+    try {
+      const graph = await loadGraphFile(file);
+      for (const step of graph.steps) if (step.label !== "") labels.set(step.id, step.label);
+    } catch {
+      // See above.
+    }
+  }
+  return labels;
 }
 
 /**
  * Whether a directory is a MemQL checkout, by the two files `k3d.dev` itself
- * gates on (memql#4246).
- *
- * THE SAME TWO, deliberately: the script refuses a repo-root with no
- * `Dockerfile` or no `deploy/k8s/overlays/local/kustomization.yaml` with exit 4,
- * so a checklist testing anything else would pass a directory the run then
- * refuses -- which is the one thing a preflight must not do.
+ * gates on (memql#4246) -- the same two, so a check here never passes a folder
+ * the run would then refuse.
  */
 async function isMemqlCheckout(dir: string): Promise<boolean> {
   if (dir === "") return false;
-  const required = [
-    path.join(dir, "Dockerfile"),
-    path.join(dir, "deploy", "k8s", "overlays", "local", "kustomization.yaml"),
-  ];
+  const required = [path.join(dir, "Dockerfile"), path.join(dir, "deploy", "k8s", "overlays", "local", "kustomization.yaml")];
   const found = await Promise.all(
     required.map((file) =>
       fs
@@ -1791,15 +1268,4 @@ async function isMemqlCheckout(dir: string): Promise<boolean> {
     ),
   );
   return found.every((ok) => ok);
-}
-
-/**
- * Two engine outcomes as one line.
- *
- * BOTH survive, audit ids and all. A remote upgrade is two audited calls, and a
- * line reporting only the second would leave the cut version untraceable -- the
- * audit id is the deliverable of runDeployAction, not a decoration on it.
- */
-function joinOutcomes(first: DeployOutcome, second: string): string {
-  return `${first.line} ${second}`;
 }

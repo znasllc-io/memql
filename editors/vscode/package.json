@@ -187,8 +187,23 @@
       },
       {
         "view": "memqlDeployments",
-        "contents": "Not connected. Select a cluster to see its deployments.\n[Select Cluster](command:memql.clusters.select)\n[Install a local cluster](command:memql.deployments.createDeployment)",
-        "when": "!memql.clusterSelected"
+        "contents": "Not connected.\n[Select Cluster](command:memql.clusters.select)",
+        "when": "!memql.clusterSelected && memql.localClusterPresent"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "Not connected.\n[Install a Local Cluster](command:memql.deployments.createDeployment)\n[Select Cluster](command:memql.clusters.select)",
+        "when": "!memql.clusterSelected && !memql.localClusterPresent"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "Sign in to see this cluster's history.\n[Sign In](command:memql.deployments.signIn)",
+        "when": "memql.clusterSelected && memql.connectionState == signIn"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "No history yet.",
+        "when": "memql.clusterSelected && memql.connectionState == connected"
       },
       {
         "view": "memqlConstructs",
@@ -271,6 +286,24 @@
         "command": "memql.deployments.rebuildFromCheckout",
         "title": "MemQL: Rebuild Local Cluster From Checkout",
         "icon": "$(tools)"
+      },
+      {
+        "command": "memql.deployments.openCluster",
+        "title": "MemQL: Open Cluster Page",
+        "icon": "$(server)"
+      },
+      {
+        "command": "memql.deployments.signIn",
+        "title": "MemQL: Sign In",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "memql.deployments.changeVersion",
+        "title": "MemQL: Change Local Cluster Version..."
+      },
+      {
+        "command": "memql.deployments.updateAndRebuild",
+        "title": "MemQL: Pull and Rebuild Local Cluster"
       },
       {
         "command": "memql.clusters.repair",
@@ -433,6 +466,22 @@
           "when": "isWorkspaceTrusted"
         },
         {
+          "command": "memql.deployments.openCluster",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.deployments.signIn",
+          "when": "false"
+        },
+        {
+          "command": "memql.deployments.changeVersion",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.deployments.updateAndRebuild",
+          "when": "isWorkspaceTrusted"
+        },
+        {
           "command": "memql.clusters.add",
           "when": "isWorkspaceTrusted"
         },
@@ -543,39 +592,49 @@
       ],
       "view/title": [
         {
-          "command": "memql.deployments.open",
-          "when": "view == memqlDeployments && memql.clusterSelected",
+          "command": "memql.deployments.signIn",
+          "when": "view == memqlDeployments && memql.connectionState == signIn",
           "group": "navigation@0"
         },
         {
-          "command": "memql.deployments.openCheckout",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
-          "group": "navigation@2"
+          "command": "memql.deployments.openCluster",
+          "when": "view == memqlDeployments && memql.clusterSelected",
+          "group": "navigation@1"
         },
         {
           "command": "memql.deployments.createDeployment",
           "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstanceAbsent",
-          "group": "1_instance@1"
+          "group": "1_version@0"
+        },
+        {
+          "command": "memql.deployments.changeVersion",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
+          "group": "1_version@1"
         },
         {
           "command": "memql.deployments.rebuildFromCheckout",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
-          "group": "2_lifecycle@0"
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasCheckout",
+          "group": "1_version@2"
+        },
+        {
+          "command": "memql.deployments.updateAndRebuild",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasBranch",
+          "group": "1_version@3"
+        },
+        {
+          "command": "memql.deployments.openCheckout",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasCheckout",
+          "group": "2_open@1"
         },
         {
           "command": "memql.clusters.repair",
           "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
-          "group": "2_lifecycle@1"
+          "group": "3_lifecycle@1"
         },
         {
           "command": "memql.clusters.uninstall",
           "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
-          "group": "2_lifecycle@2"
-        },
-        {
-          "command": "memql.deployments.refresh",
-          "when": "view == memqlDeployments",
-          "group": "navigation@1"
+          "group": "3_lifecycle@2"
         },
         {
           "command": "memql.clusters.add",

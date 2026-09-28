@@ -1,400 +1,422 @@
-// What a Deployments instance offers, given what it is and what state it is in.
+// What a cluster offers, given what it is and where this editor stands with it
+// -- the ONE authority on which acts a Deployments surface draws.
 //
-// One table, read off design §5.2:
+// Two questions, answered here and nowhere else:
 //
-//   Action                 local, absent  local, installed          remote
-//   Create deployment      install graph  stackCheckout + up        deploy-control Deploy
-//   Repair                 --             re-run graph              --
-//   Rebuild from checkout  --             k3d.dev over the checkout --
-//   Update and rebuild     --             the same, latest first    --
-//   Uninstall              --             uninstall graph           --
-//   Cut version            --             --                        developer+
-//   Promote                --             --                        admin+
-//   Rollout action         --             --                        admin+
-//   Rollback               --             --                        owner only
+//  1. WHICH LIFECYCLE ACTS ARE LEGAL for the local cluster (`localActs`). The
+//     title menu's `when` clauses, the palette commands and the page all narrow
+//     against this, so no surface offers an act another one withholds.
+//
+//     Action               absent   installed        unreceipted
+//     Install              yes      --               --
+//     Change version       --       yes              --
+//     Repair               --       yes              --
+//     Rebuild from ckout   --       with a checkout  --
+//     Pull and rebuild     --       with a branch    --
+//     Uninstall            --       yes              yes (a delete)
+//     Reconnect            --       when not listed  --
+//     Connect (adopt)      --       --               yes
+//
+//  2. WHAT A PAGE'S ACTION BAR SAYS AND OFFERS (`localOverviewBar`,
+//     `remoteOverviewBar`, `runDetailBar`): the state in words and the acts
+//     legal from it, at most three with one primary. Every other legal act
+//     goes behind "More" (a quick pick) rather than being dropped, so the cap
+//     costs a click and never a capability.
 //
 // TWO RULES DECIDE EVERY CELL.
 //
-//  1. PRESENCE DECIDES WHAT IS OFFERED, AND IT IS A REAL GATE -- but a gate on
-//     this machine, not on anyone's authority. Install appears for `absent` and
-//     for nothing else, because an install run over a cluster that already
-//     exists is not a wasted click: it is a k3d cluster, a hosts block and a
-//     trust-store CA rebuilt underneath a working parity stack. Uninstall is
-//     the exact complement.
+//  - PRESENCE IS A REAL GATE -- on this machine, not on anyone's authority.
+//    Install appears for `absent` and for nothing else, because an install run
+//    over a cluster that exists rebuilds a k3d cluster, a hosts block and a
+//    trust-store CA underneath a working stack. Uninstall is the complement.
 //
-//  2. THE ROLE TIER IS A COURTESY, NEVER A CONTROL. Every tier below mirrors
-//     `component/deploycontrol/service.go` and exists so the UI can hide an
-//     action a caller cannot use. The real refusal arrives from the engine
-//     naming the role required. src/deploy/actions.ts states this doctrine for
-//     the deploy surface; this file extends it rather than amending it, and
-//     takes its tiers from that catalog instead of re-spelling them, so the two
-//     cannot drift apart.
+//  - THE ROLE TIER IS A COURTESY, NEVER A CONTROL. Every tier mirrors
+//    `component/deploycontrol/service.go` so a page can hide what a caller
+//    cannot use; the engine refuses on its own, naming the role required
+//    (src/deploy/actions.ts states the doctrine).
 //
-// "Create deployment" is ONE action with three flows rather than three actions,
-// and that is the design's whole claim: a deployment moves an instance to a
-// version, and installing, upgrading a pinned checkout and shipping a remote
-// release are the same verb reaching different machinery. The flow says which
-// machinery; the label does not change, because the operator's intent did not.
+// AN ACT WHOSE ONLY OUTCOME IS A REFUSAL IS ABSENT. That is what put three bugs
+// right here: Deploy offered with nothing prepared, a rollout promote with no
+// rollout to name, and a rollback aimed at the deployment already running.
+// Each is now offered only with its target in hand, and carries it.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 //
 // Refs: #3736 #3733
 
-import {
-  actionById,
-  satisfiesTier,
-  type DeployActionId,
-  type RoleTier,
-  type RoleVisibility,
-} from "./actions.js";
+import { satisfiesTier, type DeployActionId, type RoleVisibility } from "./actions.js";
+import type { PipelineState } from "./pipelineState.js";
+import type { UpgradeVerdict } from "./upgrade.js";
 import type { Instance, Run } from "../state/deployments.js";
+import {
+  clusterState,
+  runRowStatus,
+  type ConnectionWord,
+  type StateTone,
+} from "../state/deploymentsCatalog.js";
 
-export type InstanceActionId =
-  | "createDeployment"
+/**
+ * Which machinery moves a cluster to a version: the install graph re-run at a
+ * tag on this machine, or a deploy-control cut-and-ship against a remote.
+ * Named after what runs, so a caller cannot route an update into the full
+ * install graph -- the one mistake that rebuilds a working cluster.
+ */
+export type InstanceActionFlow = "upgradeToTag" | "deployControl";
+
+export function moveFlowFor(instance: Instance): InstanceActionFlow {
+  return instance.kind === "local" ? "upgradeToTag" : "deployControl";
+}
+
+// ---------------------------------------------------------------------------
+// the local cluster's lifecycle
+// ---------------------------------------------------------------------------
+
+export type LocalActId =
+  | "install"
+  | "adopt"
+  | "reconnect"
   | "repair"
-  | "rebuildFromCheckout"
-  | "updateAndRebuild"
   | "uninstall"
+  | "changeVersion"
+  | "rebuildFromCheckout"
+  | "updateAndRebuild";
+
+/**
+ * The lifecycle acts legal for a local cluster right now.
+ *
+ * A REBUILD NEEDS SOMETHING TO BUILD FROM (a recorded checkout), and a PULL
+ * NEEDS SOMETHING TO PULL (a branch) -- a strictly narrower condition, because
+ * a release install has a checkout pinned to a tag and nothing to update it to
+ * (memql#5073). A cluster found here that no install recorded can only be
+ * adopted as it is, or deleted: repair and change version have nothing to
+ * reverse or replay (memql#5118).
+ */
+export function localActs(instance: Instance): LocalActId[] {
+  if (instance.kind !== "local") return [];
+  if (instance.presence === "absent") return ["install"];
+  if (instance.presence === "present-unreceipted") return ["adopt", "uninstall"];
+  const acts: LocalActId[] = ["changeVersion", "repair", "uninstall"];
+  const hasCheckout = (instance.checkout ?? "") !== "";
+  if (hasCheckout) acts.push("rebuildFromCheckout");
+  if (hasCheckout && (instance.checkoutBranch ?? "") !== "") acts.push("updateAndRebuild");
+  if (instance.registered === false) acts.push("reconnect");
+  return acts;
+}
+
+export function offersLocal(instance: Instance, id: LocalActId): boolean {
+  return localActs(instance).includes(id);
+}
+
+// ---------------------------------------------------------------------------
+// what an action bar offers
+// ---------------------------------------------------------------------------
+
+export type PageActId =
+  | LocalActId
+  | "update"
+  | "connect"
+  | "signIn"
+  | "deploy"
   | "cutVersion"
-  | "rolloutAction"
-  | "rollback";
+  | "rolloutPromote"
+  | "rolloutAbort"
+  | "rollback"
+  | "showRun"
+  | "more";
 
-/**
- * Which machinery an action reaches.
- *
- * Named after what runs, not after what it is called, so a panel switching on
- * this cannot accidentally route an upgrade into the full install graph -- the
- * one mistake here that rebuilds a working cluster.
- */
-export type InstanceActionFlow =
-  /** The full install graph, every step. */
-  | "installGraph"
-  /** `stackCheckout` at a chosen tag, then `clusterUp`. */
-  | "upgradeToTag"
-  /** The install graph again: every step verifies first and skips when satisfied. */
-  | "repairGraph"
-  /** The one-step rebuild graph: k3d.dev over the recorded checkout, image-source=checkout. */
-  | "rebuildGraph"
-  /** The two-step graph: bring the recorded checkout up to date, then rebuild from it. */
-  | "updateRebuildGraph"
-  /** The uninstall graph, behind its removal preview. */
-  | "uninstallGraph"
-  /** A deploy-control RPC against the target cluster. */
-  | "deployControl";
-
-export interface InstanceAction {
-  id: InstanceActionId;
+/** One act on a bar: what the page posts is `{ type: id, value }`. */
+export interface PageAct {
+  id: PageActId;
   label: string;
-  detail: string;
-  flow: InstanceActionFlow;
-  /**
-   * The engine tier this action MIRRORS. Present only for deploy-control
-   * actions -- a local action runs on the operator's own machine and there is
-   * no cluster role to mirror.
-   */
-  tier?: RoleTier;
-  /** The deploy-control action driven, when `flow` is "deployControl". */
-  deployAction?: DeployActionId;
-  /**
-   * Whether the action makes the operator type a phrase back.
-   *
-   * Read off `DEPLOY_ACTIONS` rather than decided here, so the run detail page
-   * can draw the destructive one destructively without a second list of which
-   * actions those are. Present only for deploy-control actions; a local action
-   * that needs a confirmation gets it from the flow it opens.
-   */
-  typeToConfirm?: boolean;
+  /** The act's target: a version, a deployment id, a rollout name. */
+  value?: string;
+  /** The one button. Absent is a text act. */
+  tone?: "primary" | "danger";
 }
 
-/** "Create deployment", as the local machine's three states reach it. */
-const CREATE_LOCAL_ABSENT: InstanceAction = {
-  id: "createDeployment",
-  label: "Create deployment",
-  detail: "Install a local MemQL cluster on this machine.",
-  flow: "installGraph",
-};
-
-const CREATE_LOCAL_INSTALLED: InstanceAction = {
-  id: "createDeployment",
-  label: "Create deployment",
-  // Named as a MOVE rather than as "upgrade", because the tag list is not
-  // filtered to newer tags: going back to a previous release is the same
-  // operation and the same button, and calling it an upgrade would make the
-  // one that matters during an incident read as the wrong control.
-  detail: "Move this cluster to another release tag.",
-  flow: "upgradeToTag",
-};
-
-const REPAIR: InstanceAction = {
-  id: "repair",
-  label: "Repair",
-  // Re-running the graph IS the repair -- every step verifies first and skips
-  // when already satisfied -- so this is the same graph the install runs, not a
-  // second implementation that could disagree with it.
-  detail: "Re-run the install steps. Anything already in place is left alone.",
-  flow: "repairGraph",
-};
-
-/**
- * "Rebuild from checkout" (memql#4246) -- the only action that takes a cluster
- * OFF released images.
- *
- * A wizard install runs released images pulled at a tag, and the checkout it
- * cloned sits there inert. This is what makes it run: build the node images
- * from that checkout, import them, point the Application at them, restart.
- *
- * It is NOT a fourth "Create deployment" flow, and the label says so. The other
- * three move a cluster BETWEEN releases -- same lane, different version; this
- * changes which lane the cluster is in, which is a different question and gets
- * its own name rather than hiding inside a verb that means "move to a version".
- */
-const REBUILD: InstanceAction = {
-  id: "rebuildFromCheckout",
-  label: "Rebuild from checkout",
-  detail: "Build images from the recorded checkout, import them, and roll the cluster onto them.",
-  flow: "rebuildGraph",
-};
-
-/**
- * "Update from origin and rebuild" (memql#4578) -- the same crossing as REBUILD,
- * with the latest code in it.
- *
- * IT IS NOT A MODE OF REBUILD, and the two live side by side because they
- * answer two different questions. "Test just what I have" is the offline one
- * and is what a developer wants mid-change; "test the latest with what I have"
- * is what they want before they push. Folding the second into the first as a
- * checkbox would put a network fetch and a moving working tree behind a button
- * whose label promises neither.
- *
- * IT IS OFFERED UNDER THE SAME GATE. A rebuild needs something to build from;
- * this needs the same thing and nothing more. Whether the checkout can actually
- * be moved -- a branch to move to, no merge half-finished, no colliding edits
- * -- is answered by the checklist and then by the run, both of which can say
- * WHY. Withholding the button on those grounds would be the panel guessing at a
- * refusal it is not the authority on.
- */
-const UPDATE_AND_REBUILD: InstanceAction = {
-  id: "updateAndRebuild",
-  label: "Update from origin and rebuild",
-  detail:
-    "Bring the recorded checkout up to date, then build images from it and roll the cluster onto them.",
-  flow: "updateRebuildGraph",
-};
-
-const UNINSTALL: InstanceAction = {
-  id: "uninstall",
-  label: "Uninstall",
-  detail: "Remove it from this machine. You will see exactly what goes first.",
-  flow: "uninstallGraph",
-};
-
-/**
- * The deploy-control actions a remote instance offers.
- *
- * The label and description come from DEPLOY_ACTIONS via `actionById`, so the
- * wording an operator reads here is the wording the deploy surface already
- * uses, and the tier is read off the same row the engine's gate is mirrored in.
- */
-function fromDeployAction(
-  id: InstanceActionId,
-  deployAction: DeployActionId,
-  overrides: { label?: string; detail?: string } = {},
-): InstanceAction {
-  const spec = actionById(deployAction);
-  return {
-    id,
-    label: overrides.label ?? spec.label,
-    detail: overrides.detail ?? spec.description,
-    flow: "deployControl",
-    tier: spec.tier,
-    deployAction,
-    typeToConfirm: spec.typeToConfirm,
-  };
+export interface PageBar {
+  /** The state in words: "Connected", "Not signed in". */
+  state: string;
+  /** What it means, in one clause, when the word needs it. */
+  detail?: string;
+  tone: StateTone;
+  /** At most three, the button last. */
+  acts: PageAct[];
+  /** The legal acts that did not fit, offered from the "More" act. */
+  more: PageAct[];
 }
 
-const REMOTE_ACTIONS: readonly InstanceAction[] = [
-  fromDeployAction("createDeployment", "deploy", {
-    label: "Create deployment",
-    detail:
-      "Ship the selected pending deployment record. Asynchronous: success means accepted and kicked off, not deployed.",
-  }),
-  fromDeployAction("cutVersion", "cutVersion"),
-  fromDeployAction("rolloutAction", "rolloutAction"),
-  fromDeployAction("rollback", "rollback"),
-];
+/** The "More" act, when there is more than fits. */
+const MORE: PageAct = { id: "more", label: "More…" };
 
 /**
- * The actions this instance offers.
+ * At most three acts, the button last; the rest behind More.
  *
- * `visibility` is consulted for remote instances only, and an INDETERMINATE
- * role offers everything -- the same call src/deploy/actions.ts makes, for the
- * same reason: a caller whose role could not be read may well be an owner, and
- * hiding the surface would lock them out of something they are entitled to
- * while the engine would have refused anything they are not.
- *
- * A local instance ignores it entirely. Nothing here asks a cluster for
- * permission to change the machine it is running on.
+ * `texts` are in priority order. When everything fits it is drawn as given;
+ * when it does not, the button and the first text stay and the rest go behind
+ * More -- so the cap on the bar is never a cap on what can be done.
  */
-export function instanceActions(
-  instance: Instance,
-  visibility?: RoleVisibility,
-): InstanceAction[] {
-  if (instance.kind === "local") {
-    // A REBUILD NEEDS SOMETHING TO BUILD FROM, and that is the whole gate on it
-    // (memql#4246). `checkout` is `recordedStackDir`, which is "" for a machine
-    // registered by hand and for an install that never reached the clone step.
-    // Offering a button whose only possible outcome is a refusal teaches an
-    // operator that the extension is broken.
-    const hasCheckout = (instance.checkout ?? "") !== "";
-    // AND AN UPDATE NEEDS SOMETHING TO UPDATE TO, which is a STRICTLY NARROWER
-    // condition (memql#5073). A release install has a checkout -- the manifests
-    // are cloned from it -- so `hasCheckout` offered both, and the second could
-    // never run: its checkout is detached at a tag, `recordedStackBranch`
-    // answers "" for a pinned install deliberately, and the preflight refused
-    // every time. That is the default install path, so it was most operators,
-    // and it is the rule four lines above being broken by the case it did not
-    // consider.
-    //
-    // REBUILD STAYS OFFERED THERE. It is the documented lane crossing
-    // (memql#4246) -- build the tag's own source and roll onto it -- and it
-    // works. Only the UPDATE half has nothing to do.
-    const hasBranch = (instance.checkoutBranch ?? "") !== "";
-    const rebuild = hasCheckout
-      ? hasBranch
-        ? [REBUILD, UPDATE_AND_REBUILD]
-        : [REBUILD]
-      : [];
-    return instance.presence === "absent"
-      ? [CREATE_LOCAL_ABSENT]
-      : // `installed-unreachable` gets the same set as `installed-healthy`:
-        // something is on the machine either way, and repair is precisely the
-        // action for the one that is not answering. Ordering puts it first
-        // there, since an operator looking at a broken cluster came to fix it.
-        instance.presence === "installed-unreachable"
-        ? [REPAIR, CREATE_LOCAL_INSTALLED, ...rebuild, UNINSTALL]
-        : [CREATE_LOCAL_INSTALLED, REPAIR, ...rebuild, UNINSTALL];
+function fit(primary: PageAct | undefined, texts: readonly PageAct[]): { acts: PageAct[]; more: PageAct[] } {
+  const room = primary === undefined ? 3 : 2;
+  if (texts.length <= room) return { acts: [...texts, ...(primary === undefined ? [] : [primary])], more: [] };
+  const keep = texts.slice(0, room - 1);
+  return { acts: [...keep, MORE, ...(primary === undefined ? [] : [primary])], more: texts.slice(room - 1) };
+}
+
+function bar(state: ReturnType<typeof clusterState>, primary: PageAct | undefined, texts: PageAct[]): PageBar {
+  return { state: state.word, tone: state.tone, ...fit(primary, texts) };
+}
+
+const CHANGE_VERSION: PageAct = { id: "changeVersion", label: "Change version…" };
+const PULL_AND_REBUILD: PageAct = { id: "updateAndRebuild", label: "Pull and rebuild…" };
+const REBUILD: PageAct = { id: "rebuildFromCheckout", label: "Rebuild from checkout…", tone: "primary" };
+
+export interface LocalBarInput {
+  instance: Instance;
+  connection: ConnectionWord;
+  upgrade: UpgradeVerdict;
+}
+
+/**
+ * The local cluster page's bar.
+ *
+ * THE PRIMARY IS WHAT THE STATE ASKS FOR. Not installed: Install. Found but
+ * not ours: Connect to it as it is. Not in the list: Reconnect. Signed out:
+ * Sign in. Not running: Repair. Connected: Rebuild when it runs your own
+ * build (that is what refreshes it), otherwise Update when a newer release
+ * exists, otherwise nothing -- a cluster that needs nothing is not handed a
+ * button.
+ *
+ * Repair, Uninstall and Rebuild on a released cluster are not on the bar; they
+ * are in the Deployments title menu and the palette, which open the same flows.
+ */
+export function localOverviewBar(i: LocalBarInput): PageBar {
+  const { instance } = i;
+  const state = clusterState(instance, i.connection);
+  const acts = localActs(instance);
+  const change = acts.includes("changeVersion") ? [CHANGE_VERSION] : [];
+  switch (state.key) {
+    case "notInstalled":
+      return bar(state, { id: "install", label: "Install", tone: "primary" }, []);
+    case "unreceipted":
+      return bar(state, { id: "adopt", label: "Connect", tone: "primary" }, [{ id: "uninstall", label: "Delete…" }]);
+    case "notListed":
+      return bar(state, { id: "reconnect", label: "Reconnect", tone: "primary" }, change);
+    case "signIn":
+      return bar(state, { id: "signIn", label: "Sign in", tone: "primary" }, change);
+    case "notRunning":
+      return bar(state, { id: "repair", label: "Repair", tone: "primary" }, change);
+    case "notConnected":
+    case "cantReach":
+      return bar(state, { id: "connect", label: "Connect", tone: "primary" }, change);
+    case "connecting":
+      return bar(state, undefined, []);
+    case "notSetUp":
+      return bar(state, undefined, change);
+    case "connected": {
+      const texts: PageAct[] = [];
+      if (acts.includes("updateAndRebuild")) texts.push(PULL_AND_REBUILD);
+      texts.push(...change);
+      let primary: PageAct | undefined;
+      if (instance.imageSource === "checkout" && acts.includes("rebuildFromCheckout")) primary = REBUILD;
+      else if (i.upgrade.kind === "offer") primary = { id: "update", label: `${i.upgrade.label}…`, value: i.upgrade.target.to, tone: "primary" };
+      return bar(state, primary, texts);
+    }
   }
-
-  if (visibility === undefined || visibility.kind === "indeterminate") {
-    return [...REMOTE_ACTIONS];
-  }
-  return REMOTE_ACTIONS.filter(
-    (action) => action.tier === undefined || satisfiesTier(visibility.role, action.tier),
-  );
 }
 
+// ---------------------------------------------------------------------------
+// a remote cluster
+// ---------------------------------------------------------------------------
+
 /**
- * The same actions, ORDERED FOR THE RUN AN OPERATOR IS LOOKING AT
- * (memql#4427).
+ * The deployment a rollback lands on: the newest SUCCEEDED run that is not the
+ * one running now.
  *
- * THIS ADDS NO VERBS AND REMOVES NONE. It is `instanceActions` with one entry
- * moved to the front, and that constraint is the whole design: a detail page
- * that composed its own set would become a second authority on what an
- * instance offers, and the first thing a second authority does is offer a
- * button the first one withheld -- which is how the doctrine at the top of this
- * file ("never offer a button whose only outcome is a refusal") gets broken
- * without anybody editing the table it is written beside.
- *
- * THE TABLE, and it is read top to bottom:
- *
- *   remote instance          -- untouched. The deploy-control set arrives
- *                               already filtered by the caller's role and
- *                               already in the order deploy/actions.ts states;
- *                               rollback stays owner-only there, not here.
- *   local, run failed        -- Repair leads. Re-running the graph is what
- *                               answers a failed local run, and the operator
- *                               opened this page because of the failure.
- *   local, checkout lane     -- Rebuild From Checkout leads. The cluster is
- *                               running a developer's own build, so the verb
- *                               that refreshes it is the one they came for.
- *   otherwise                -- the instance's own order stands.
- *
- * FAILURE OUTRANKS THE LANE, deliberately. The lane is a standing fact about
- * the cluster and will still be true tomorrow; the failure is a fact about THIS
- * run, which is the thing the page is about. Leading with Rebuild over a failed
- * run would answer a question the operator did not ask.
- *
- * A LEAD THE INSTANCE DOES NOT OFFER IS SIMPLY NOT APPLIED. An `absent` local
- * instance offers only Create deployment, and a machine with no recorded
- * checkout is offered no rebuild (see `instanceActions`) -- so the reordering
- * finds nothing to move and the set is returned as it came. That is what makes
- * "no button whose only outcome is a refusal" hold here for free: this function
- * can only ever permute.
+ * NOT the newest succeeded run, which is the current deployment itself: the
+ * engine's RollbackDeployment redeploys the target's digest as a new record,
+ * so aiming it there re-ships what is already running. Undefined when there is
+ * no current deployment to roll back from, or nothing older that landed.
  */
-export interface RunDetailActionsInput {
+export function rollbackTarget(runs: readonly Run[], currentId: string | undefined): Run | undefined {
+  const current = (currentId ?? "").trim();
+  if (current === "") return undefined;
+  const at = runs.findIndex((run) => run.id === current);
+  if (at < 0) return undefined;
+  return runs.slice(at + 1).find((run) => run.status === "succeeded");
+}
+
+/** Whether the caller's role admits an action -- an indeterminate role admits everything. */
+function admits(visibility: RoleVisibility | undefined, pipeline: PipelineState, id: DeployActionId): boolean {
+  if (!pipeline.actions.some((action) => action.id === id)) return false;
+  if (visibility === undefined || visibility.kind === "indeterminate") return true;
+  const spec = pipeline.actions.find((action) => action.id === id);
+  return spec !== undefined && satisfiesTier(visibility.role, spec.tier);
+}
+
+export interface RemoteBarInput {
+  instance: Instance;
+  connection: ConnectionWord;
+  upgrade: UpgradeVerdict;
+  /** Undefined until the status read lands. */
+  pipeline: PipelineState | undefined;
+  visibility?: RoleVisibility;
+  /** Newest first. */
+  runs: readonly Run[];
+}
+
+/** A deploy-control act a remote cluster offers, with its target. */
+function remoteActs(i: RemoteBarInput): { primary: PageAct | undefined; texts: PageAct[] } {
+  const pipeline = i.pipeline;
+  if (pipeline === undefined) return { primary: undefined, texts: [] };
+  const texts: PageAct[] = [];
+  let primary: PageAct | undefined;
+
+  // Deploy ships the record that is PREPARED AND NOT SHIPPED, by id -- and is
+  // absent when there is none, rather than drawn beside a line saying so.
+  const pending = (i.instance.pendingDeploymentId ?? "").trim();
+  if (pipeline.kind === "present" && pending !== "" && admits(i.visibility, pipeline, "deploy")) {
+    const version = i.runs.find((run) => run.id === pending)?.toVersion ?? "";
+    primary = { id: "deploy", label: version === "" ? "Deploy" : `Deploy ${version}`, value: pending, tone: "primary" };
+  }
+  // The update cuts at the named release and ships it, under one confirmation.
+  // Not where the cluster has no deploy pipeline: both calls would be refused.
+  if (i.upgrade.kind === "offer" && pipeline.kind !== "notConfigured") {
+    const update: PageAct = { id: "update", label: `${i.upgrade.label}…`, value: i.upgrade.target.to };
+    if (primary === undefined) primary = { ...update, tone: "primary" };
+    else texts.push(update);
+  }
+  if (pipeline.kind === "present" && admits(i.visibility, pipeline, "cutVersion")) {
+    const cut: PageAct = { id: "cutVersion", label: "Prepare next version" };
+    if (primary === undefined) primary = { ...cut, tone: "primary" };
+    else texts.push(cut);
+  }
+  if (pipeline.kind === "present" && admits(i.visibility, pipeline, "rollback")) {
+    const target = rollbackTarget(i.runs, i.instance.currentDeploymentId);
+    if (target !== undefined) {
+      const to = target.toVersion ?? "";
+      texts.push({ id: "rollback", label: to === "" ? "Roll back…" : `Roll back to ${to}…`, value: target.id });
+    }
+  }
+  // Promote and abort only NAME a rollout that is part-way through: the engine
+  // refuses a blank one, which is all the old button ever sent.
+  if (pipeline.kind === "present" && admits(i.visibility, pipeline, "rolloutAction")) {
+    for (const rollout of pipeline.rollouts) {
+      texts.push({ id: "rolloutPromote", label: `Promote ${rollout}`, value: rollout });
+      texts.push({ id: "rolloutAbort", label: `Abort ${rollout}…`, value: rollout });
+    }
+  }
+  return { primary, texts };
+}
+
+/** The remote cluster page's bar. */
+export function remoteOverviewBar(i: RemoteBarInput): PageBar {
+  const state = clusterState(i.instance, i.connection);
+  switch (state.key) {
+    case "signIn":
+      return bar(state, { id: "signIn", label: "Sign in", tone: "primary" }, []);
+    case "notConnected":
+      return bar(state, { id: "connect", label: "Connect", tone: "primary" }, []);
+    case "cantReach":
+      return bar(state, { id: "connect", label: "Retry", tone: "primary" }, []);
+    case "connected": {
+      const { primary, texts } = remoteActs(i);
+      return bar(state, primary, texts);
+    }
+    default:
+      return bar(state, undefined, []);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// one run
+// ---------------------------------------------------------------------------
+
+export interface RunDetailBarInput {
   instance: Instance;
   run: Run;
+  connection: ConnectionWord;
+  pipeline?: PipelineState;
   visibility?: RoleVisibility;
-  /**
-   * The deploy-control actions the CLUSTER can currently take -- the ids from
-   * `pipelineState().actions`. Remote instances only.
-   *
-   * WHY THE SET IS INTERSECTED AND NEVER UNIONED. `instanceActions` filters by
-   * the caller's ROLE; the pipeline state answers a different question that the
-   * role cannot -- whether this cluster has a deploy pipeline at all, and
-   * whether its status read was even visible. An engine-only cluster refuses
-   * every deploy-control action by design (pipelineState's header), so drawing
-   * the role-permitted set over one would be a row of buttons whose only
-   * outcome is a refusal -- the exact thing the doctrine at the top of this file
-   * forbids. Intersecting can only remove, so no verb appears here that the
-   * instance page would not also have offered.
-   *
-   * ABSENT MEANS "NOT ASKED", NOT "NOTHING OFFERED". The status read is
-   * asynchronous and the page paints before it lands; treating the gap as an
-   * empty pipeline would blank the actions for an instant on every open, which
-   * reads as a cluster that lost its deploy console. Undefined therefore leaves
-   * the role-gated set alone, which is the same call `roleVisibility`
-   * indeterminate makes one question earlier.
-   */
-  pipelineOffers?: readonly DeployActionId[];
-}
-
-export function runDetailActions(input: RunDetailActionsInput): InstanceAction[] {
-  const { instance, run } = input;
-  const actions = instanceActions(instance, input.visibility);
-  if (instance.kind === "remote") {
-    const offers = input.pipelineOffers;
-    if (offers === undefined) return actions;
-    return actions.filter(
-      (action) => action.deployAction !== undefined && offers.includes(action.deployAction),
-    );
-  }
-  const lead: InstanceActionId | undefined =
-    run.status === "failed"
-      ? "repair"
-      : instance.imageSource === "checkout"
-        ? "rebuildFromCheckout"
-        : undefined;
-  if (lead === undefined) return actions;
-  const at = actions.findIndex((action) => action.id === lead);
-  if (at <= 0) return actions;
-  return [actions[at], ...actions.slice(0, at), ...actions.slice(at + 1)];
+  /** A local run is going on this machine now (not this one: that shows live). */
+  runInFlight: boolean;
 }
 
 /**
- * Which machinery moves THIS instance to a version (memql#3997).
+ * A recorded run's bar: its outcome in a word, and only the acts about THIS
+ * run.
  *
- * Read off the "Create deployment" rows above rather than restated, because
- * that is the claim: the upgrade button is not a fourth way to move a cluster,
- * it is the existing move with the target already decided. A second copy of
- * this mapping is how an upgrade would one day route a local instance into the
- * full install graph -- the one mistake the InstanceActionFlow doc calls out.
+ * A READ-ONLY RECORD OFFERS NAVIGATION, NOT THE CLUSTER'S WHOLE SET. The old
+ * detail page repeated every instance act, and its Roll back ignored the run
+ * on screen. Now:
  *
- * `absent` has no answer and callers must not ask: nothing is installed, so
- * there is nothing to move. It returns the local flow rather than throwing,
- * and upgradeVerdict refuses on presence before it ever reaches here.
+ *   a local run that failed or was interrupted -> Retry, which is the act the
+ *     run came from (a version change to the same version, the same rebuild,
+ *     a repair), and only when that act is legal now;
+ *   a remote run that landed and is not the one running -> Roll back to it;
+ *   a run going now elsewhere on this machine -> Show progress, and nothing
+ *     that could start a second run beside it.
  */
-export function moveFlowFor(instance: Instance): InstanceActionFlow {
-  return instance.kind === "local"
-    ? CREATE_LOCAL_INSTALLED.flow
-    : (REMOTE_ACTIONS.find((a) => a.id === "createDeployment")?.flow ?? "deployControl");
+export function runDetailBar(i: RunDetailBarInput): PageBar {
+  const row = runRowStatus(i.run, 0, { prepared: i.run.id === (i.instance.pendingDeploymentId ?? "") });
+  const base = { state: row.statusWord, tone: row.tone };
+  if (i.instance.kind === "local") {
+    if (i.runInFlight) return { ...base, acts: [{ id: "showRun", label: "Show current run" }], more: [] };
+    if (i.run.status !== "failed" && i.run.status !== "interrupted") return { ...base, acts: [], more: [] };
+    const retry = retryFor(i.instance, i.run);
+    return { ...base, acts: retry === undefined ? [] : [retry], more: [] };
+  }
+  const pipeline = i.pipeline;
+  if (
+    i.connection === "connected" &&
+    pipeline !== undefined &&
+    pipeline.kind === "present" &&
+    i.run.status === "succeeded" &&
+    i.run.id !== (i.instance.currentDeploymentId ?? "") &&
+    admits(i.visibility, pipeline, "rollback")
+  ) {
+    const to = i.run.toVersion ?? "";
+    return {
+      ...base,
+      acts: [{ id: "rollback", label: to === "" ? "Roll back to this…" : `Roll back to ${to}…`, value: i.run.id, tone: "danger" }],
+      more: [],
+    };
+  }
+  return { ...base, acts: [], more: [] };
 }
 
-/** Whether an instance offers a given action in its current state. */
-export function offersAction(
-  instance: Instance,
-  id: InstanceActionId,
-  visibility?: RoleVisibility,
-): boolean {
-  return instanceActions(instance, visibility).some((action) => action.id === id);
+/** The act that re-attempts a local run, labelled Retry, when it is legal now. */
+function retryFor(instance: Instance, run: Run): PageAct | undefined {
+  const legal = localActs(instance);
+  const act = (id: LocalActId, value?: string): PageAct | undefined =>
+    legal.includes(id) ? { id, label: "Retry", tone: "primary", ...(value === undefined ? {} : { value }) } : undefined;
+  switch (run.kind) {
+    case "install":
+      return legal.includes("install") ? act("install") : act("repair");
+    case "repair":
+      return act("repair");
+    case "uninstall":
+      return act("uninstall");
+    case "upgrade":
+      return (run.toVersion ?? "") === "" ? undefined : act("changeVersion", run.toVersion);
+    case "rebuild":
+      return act("rebuildFromCheckout");
+    case "update":
+      return act("updateAndRebuild");
+    case "rollout":
+      return undefined;
+  }
+}
+
+/**
+ * Whether a posted act is one the bar offered, target and all.
+ *
+ * The webview is a separate process and its messages are untrusted: an act
+ * the page never drew -- or a rollback aimed at a different deployment than
+ * the one named on the button -- is dropped here rather than run.
+ */
+export function barOffers(barValue: PageBar, id: string, value: string | undefined): PageAct | undefined {
+  return [...barValue.acts, ...barValue.more].find(
+    (act) => act.id === id && act.id !== "more" && (act.value ?? "") === (value ?? ""),
+  );
 }

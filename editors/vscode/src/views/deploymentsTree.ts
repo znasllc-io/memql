@@ -1,8 +1,8 @@
-// The Deployments tree: the SELECTED cluster's deployment runs, newest first.
+// The Deployments tree: the SELECTED cluster's history, newest first.
 //
-//   DEPLOYMENTS   local · healthy · v0.17.0
-//   |- upgrade   v0.16.1 -> v0.17.0   succeeded   2d ago
-//   \- install                        succeeded   9d ago
+//   DEPLOYMENTS   local · Connected · v0.17.0
+//   |- Updated        v0.16.1 → v0.17.0 · 2d ago
+//   \- Installed      v0.16.1 · 9d ago
 //
 // This file renders state and owns none, the way views/clustersTree.ts does.
 // Which runs belong to the selection, what each row says and which icon it
@@ -47,12 +47,15 @@ import type { Instance, Run } from "../state/deployments.js";
 import type { ConnectionContextSource } from "../state/connectionContext.js";
 import {
   buildCatalog,
+  deploymentsContextKeys,
+  instanceConnectionWord,
+  pollIntervalMs,
   runsForSelected,
-  selectedInstanceContext,
   selectedViewDescription,
   runRowStatus,
   type Catalog,
   type CatalogInputs,
+  type DeploymentsContextKeys,
   type RunRowIcon,
 } from "../state/deploymentsCatalog.js";
 import type { ReleaseCache } from "../version/releaseCache.js";
@@ -65,7 +68,7 @@ import type { ReleaseCache } from "../version/releaseCache.js";
  * be one of them. The instance member is gone with the wrapper row it drew.
  */
 export type DeploymentNode =
-  | { kind: "run"; run: Run; instance: string }
+  | { kind: "run"; run: Run; instance: string; prepared?: boolean }
   // The single synthetic row shown when clusters.yaml will not read. Mirrors
   // views/clustersTree.ts: readClustersFile deliberately throws on a malformed
   // or torn file (the Cockpit writes it too, without a lock), and an unhandled
@@ -114,19 +117,18 @@ export type DeploymentsTreeDeps = Omit<CatalogInputs, "connection" | "readDeploy
    */
   setDescription?: (description: string) => void;
   /**
-   * Where `memql.deploymentsInstance` is written (memql#4426).
+   * Where the title menu's keys are written: `memql.deploymentsInstance`,
+   * `memql.deploymentsHasCheckout`, `memql.deploymentsHasBranch` (memql#4426).
    *
-   * The view title menu's instance actions are scoped by it, so it is written
-   * on EVERY pass -- including as "" -- for the reason the description is:
-   * a stale value left over from the last selection would offer Uninstall over
-   * a remote cluster, and the doctrine this extension holds to is that a button
-   * whose only outcome is a refusal must not be drawn.
+   * Written on EVERY pass -- including as ""/false -- for the reason the
+   * description is: a stale value left over from the last selection would
+   * offer Uninstall over a remote cluster, or Rebuild over a machine with no
+   * checkout, and an act whose only outcome is a refusal must not be drawn.
    *
-   * A callback for the same reason `setDescription` is one: `setContext` is a
-   * `vscode` API and this provider is constructed before activation has one to
-   * hand it.
+   * A callback because `setContext` is a `vscode` API and this provider is
+   * constructed before activation has one to hand it.
    */
-  setInstanceContext?: (value: string) => void;
+  setContextKeys?: (keys: DeploymentsContextKeys) => void;
 };
 
 export class DeploymentsTreeProvider implements vscode.TreeDataProvider<DeploymentNode> {
@@ -136,6 +138,10 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
   // The catalog is built once per expansion pass. Rebuilding per call would
   // re-probe the front door and re-read the cluster once per visible row.
   private catalog: Catalog | undefined;
+  /** The selected cluster's runs as last drawn, which set the polling pace. */
+  private runs: readonly Run[] = [];
+  private visible = false;
+  private poll: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly deps: DeploymentsTreeDeps) {}
 
@@ -156,34 +162,78 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
     // and no `git ls-remote` on the strength of a view it is not going to draw.
     if (!this.deps.connectionContext().clusterSelected) {
       this.deps.setDescription?.("");
-      this.deps.setInstanceContext?.("");
+      this.deps.setContextKeys?.(deploymentsContextKeys(undefined));
+      this.runs = [];
       return [];
     }
 
     const catalog = await this.load();
-    const selected = runsForSelected(catalog, this.deps.connection());
+    const connection = this.deps.connection();
+    const selected = runsForSelected(catalog, connection);
+    this.runs = selected.runs;
+    this.schedule();
     // Written on every pass, including when it is "": the selection changes
     // without this view being told, and a description left over from the
     // previous cluster is a heading that names the wrong machine.
-    this.deps.setDescription?.(selectedViewDescription(selected.instance, this.deps.releases?.peek()));
-    this.deps.setInstanceContext?.(selectedInstanceContext(selected.instance));
+    this.deps.setDescription?.(
+      selectedViewDescription(
+        selected.instance,
+        this.deps.releases?.peek(),
+        selected.instance === undefined ? "none" : instanceConnectionWord(selected.instance, connection),
+      ),
+    );
+    this.deps.setContextKeys?.(deploymentsContextKeys(selected.instance));
     if (catalog.error !== undefined) return [{ kind: "error", message: catalog.error }];
     // Fire-and-forget, exactly as views/clustersTree.ts does it: THIS is what
     // triggers the first release fetch, so activation stays offline and the
     // work is caused by somebody actually looking at the tree. Not awaited,
     // because the rows must render now from what is already known.
     void this.learnReleases();
+    const pending = selected.instance?.pendingDeploymentId ?? "";
     return selected.runs.map((run) => ({
       kind: "run" as const,
       run,
       instance: selected.instance?.name ?? run.instance,
+      ...(pending !== "" && run.id === pending ? { prepared: true } : {}),
     }));
   }
 
   getTreeItem(node: DeploymentNode): vscode.TreeItem {
     return node.kind === "error"
-      ? errorItem(node.message)
+      ? errorItem(node.message, this.deps.clustersPath)
       : runItem(node, (this.deps.now ?? Date.now)());
+  }
+
+  /**
+   * Whether the view is on screen (TreeView.onDidChangeVisibility).
+   *
+   * THE VIEW KEEPS ITSELF CURRENT WHILE IT IS SEEN, which is why it has no
+   * Refresh button: becoming visible re-reads, and while it stays visible it
+   * re-reads on a timer -- briskly while a run is going (a remote deploy
+   * settles on the cluster, and nothing else tells this editor), slowly
+   * otherwise. Hidden, it reads nothing.
+   */
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    if (visible) this.refresh();
+    else this.cancelPoll();
+  }
+
+  /** Stop polling for good (the view is being disposed). */
+  dispose(): void {
+    this.cancelPoll();
+  }
+
+  private schedule(): void {
+    this.cancelPoll();
+    if (!this.visible) return;
+    this.poll = setTimeout(() => this.refresh(), pollIntervalMs(this.runs));
+    (this.poll as { unref?: () => void }).unref?.();
+  }
+
+  private cancelPoll(): void {
+    if (this.poll !== undefined) clearTimeout(this.poll);
+    this.poll = undefined;
   }
 
   /**
@@ -243,7 +293,7 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
       releases: _releases,
       connectionContext: _connectionContext,
       setDescription: _setDescription,
-      setInstanceContext: _setInstanceContext,
+      setContextKeys: _setContextKeys,
       ...rest
     } = this.deps;
     const resolvedConnection = connection();
@@ -260,7 +310,7 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
 }
 
 function runItem(node: Extract<DeploymentNode, { kind: "run" }>, nowMs: number): vscode.TreeItem {
-  const status = runRowStatus(node.run, nowMs);
+  const status = runRowStatus(node.run, nowMs, { prepared: node.prepared === true });
   const item = new vscode.TreeItem(status.label, vscode.TreeItemCollapsibleState.None);
   item.description = status.description;
   item.tooltip = status.tooltip;
@@ -279,15 +329,19 @@ function runItem(node: Extract<DeploymentNode, { kind: "run" }>, nowMs: number):
   return item;
 }
 
-function errorItem(message: string): vscode.TreeItem {
-  const item = new vscode.TreeItem(
-    "Failed to read clusters.yaml",
-    vscode.TreeItemCollapsibleState.None,
-  );
+/**
+ * The one row drawn when clusters.yaml will not read: what is wrong in words,
+ * the parser's message and the file in the tooltip, and a click that opens the
+ * file -- because the fix is usually in it.
+ */
+function errorItem(message: string, clustersPath: string | undefined): vscode.TreeItem {
+  const item = new vscode.TreeItem("Can't read your cluster list", vscode.TreeItemCollapsibleState.None);
   item.contextValue = "memqlDeploymentsError";
-  item.description = message;
-  item.tooltip = `ERROR: ${message}`;
+  item.tooltip = clustersPath === undefined ? message : `${clustersPath}\n${message}`;
   item.iconPath = new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
+  if (clustersPath !== undefined) {
+    item.command = { command: "vscode.open", title: "Open", arguments: [vscode.Uri.file(clustersPath)] };
+  }
   return item;
 }
 

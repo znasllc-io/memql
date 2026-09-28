@@ -102,7 +102,7 @@ test("a run over a checkout-mode cluster says it returns to released images", ()
   });
   const lane = crossing.find((i) => i.label === "Image source");
   assert.equal(lane?.state, "attention");
-  assert.match(lane?.detail ?? "", /returns local to released v0\.17\.0 images/);
+  assert.match(lane?.detail ?? "", /Your own build is replaced with released v0\.17\.0 images/);
   assert.match(lane?.detail ?? "", /Rebuild from checkout brings them back/);
 
   // A cluster already on released images is not crossing anything, so nothing
