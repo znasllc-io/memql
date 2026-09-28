@@ -26,6 +26,52 @@ func writeNative(w http.ResponseWriter, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
+// A handler that refuses with its own HTML page names the refusal in these two
+// response headers, so the native representation can carry the human heading
+// and message instead of a bare status text.
+//
+// WHY HEADERS. The refusing handler writes a self-contained HTML page (it must
+// render before any client context is trusted, see renderAuthorizeError), and
+// it sits several middlewares deep -- CSRF, preAuth -- none of which pass the
+// nativeResponse through as its own type. A header survives every wrapper
+// because they all share the one header map; nativeUI reads both and strips
+// them before anything reaches the wire, so they are never visible to a
+// browser or a client.
+//
+// Before this, MemQL OS showed only "Bad Request" for every refused
+// /authorize (an unregistered client or redirect URI), because the non-JSON
+// branch below replaced the page with http.StatusText -- which is how a
+// misconfigured editor sign-in read as an unexplained dead end.
+const (
+	refusalHeadingHeader = "X-Memql-Refusal-Heading"
+	refusalMessageHeader = "X-Memql-Refusal-Message"
+)
+
+// markRefusal records a refusal's heading and message for nativeUI.
+func markRefusal(h http.Header, heading, message string) {
+	h.Set(refusalHeadingHeader, heading)
+	h.Set(refusalMessageHeader, message)
+}
+
+// nativeRefusalBody is the native representation of a refused request: the
+// `error` the OS already displays, as one sentence built from the heading and
+// the message, plus both halves for a client that lays them out itself.
+func nativeRefusalBody(status int, heading, message string) map[string]string {
+	heading = strings.TrimSpace(heading)
+	message = strings.TrimSpace(message)
+	if heading == "" && message == "" {
+		return map[string]string{"error": http.StatusText(status)}
+	}
+	text := heading
+	switch {
+	case heading == "":
+		text = message
+	case message != "":
+		text = strings.TrimRight(heading, ".") + ". " + message
+	}
+	return map[string]string{"error": text, "heading": heading, "message": message}
+}
+
 // Native UI trust comes from the installed service configuration, never a
 // proposed setup domain, request Host, or third-party OAuth registration.
 func (s *Server) nativeOrigin(r *http.Request) string {
@@ -80,6 +126,10 @@ func (s *Server) nativeUI(next http.HandlerFunc) http.HandlerFunc {
 		}
 		out := &nativeResponse{header: make(http.Header)}
 		next(out, r)
+		refusalHeading := out.header.Get(refusalHeadingHeader)
+		refusalMessage := out.header.Get(refusalMessageHeader)
+		out.header.Del(refusalHeadingHeader)
+		out.header.Del(refusalMessageHeader)
 		for key, values := range out.header {
 			w.Header()[key] = values
 		}
@@ -96,7 +146,7 @@ func (s *Server) nativeUI(next http.HandlerFunc) http.HandlerFunc {
 				}
 				w.Header().Set("Content-Type", NativeMediaType)
 				w.WriteHeader(status)
-				writeNative(w, map[string]string{"error": http.StatusText(status)})
+				writeNative(w, nativeRefusalBody(status, refusalHeading, refusalMessage))
 				return
 			}
 		} else if r.Method == http.MethodGet && strings.Contains(out.header.Get("Content-Type"), "text/html") && r.URL.Path != githubconnect.AppSetupStartPath {

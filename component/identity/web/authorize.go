@@ -54,12 +54,14 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// clients work exactly like static MEMQL_IDENTITY_REGISTERED_CLIENTS.
 	rc, selfRegistered := identity.ResolveClientWithOrigin(r.Context(), s.Cfg, s.Store, clientID)
 	if clientID == "" || rc == nil {
+		s.logAuthorizeRefusal(r, "client_id is not registered", clientID, redirectURI)
 		s.renderAuthorizeError(w, http.StatusBadRequest,
 			"Unknown client",
 			"The application requesting access is not registered with this server. The authorization request cannot continue.")
 		return
 	}
 	if redirectURI == "" || !identity.ClientAllowsRedirectURI(r.Context(), s.Cfg, s.Store, clientID, redirectURI) {
+		s.logAuthorizeRefusal(r, "redirect_uri not registered for client_id", clientID, redirectURI)
 		s.renderAuthorizeError(w, http.StatusBadRequest,
 			"Invalid redirect URI",
 			"The redirect URI in this authorization request is not registered for the requesting application. For your security, the request cannot continue.")
@@ -134,6 +136,27 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, "login", webtempl.Login(data), data)
 }
 
+// logAuthorizeRefusal records a step-1 refusal at INFO.
+//
+// These refusals used to leave no trace at all: the page was rendered and
+// nothing was logged or audited, so a client configured with the wrong
+// client_id (the VS Code extension signing in as `cockpit`) failed in the
+// browser with nothing in the identity log to say which client, or why. The
+// redirect_uri is logged too because it is half of the pair being judged; it
+// is the client's callback address, not a credential. INFO rather than WARN:
+// an unregistered client is an ordinary misconfiguration on the caller's side,
+// not a fault in this service.
+func (s *Server) logAuthorizeRefusal(r *http.Request, reason, clientID, redirectURI string) {
+	if s.Logger == nil {
+		return
+	}
+	s.Logger.InfoContext(r.Context(), "authorize refused",
+		"reason", reason,
+		"client_id", clientID,
+		"redirect_uri", redirectURI,
+	)
+}
+
 // redirectAuthorizeError 302-redirects to the client's redirect_uri with
 // the OAuth error envelope appended as query params (error,
 // error_description, and state when present), per OAuth 2.0 §4.1.2.1.
@@ -163,6 +186,9 @@ func (s *Server) redirectAuthorizeError(w http.ResponseWriter, r *http.Request, 
 // (which needs asset wiring) so it renders correctly even on the
 // validation paths that fire before any client context is trusted.
 func (s *Server) renderAuthorizeError(w http.ResponseWriter, status int, heading, message string) {
+	// The native representation (MemQL OS) carries the same heading and
+	// message rather than a bare status text; nativeUI reads and strips these.
+	markRefusal(w.Header(), heading, message)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	noStoreHTMLHeaders(w)
 	w.WriteHeader(status)
