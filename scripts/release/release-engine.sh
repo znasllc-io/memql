@@ -59,7 +59,14 @@
 # read ONCE and passed as --target, so the commit whose VERSION was checked is
 # the commit that gets tagged rather than whatever the branch points at a moment
 # later. An already-PUBLISHED release is left alone: it is history, and this run
-# only waits for its build.
+# only waits for its build. A VERSION refusal also reports
+# result.reason=version_file_stale, the console cut's code for the same rule, so
+# a caller can tell it from the draft refusal without reading the message.
+#
+# BARE X.Y.Z ONLY. VERSION is never suffixed (VERSIONING.md), the console cut
+# and the docs bundle accept nothing else, and a pre-release accepted here could
+# only be released by breaking that rule -- so a suffixed version is a bad
+# parameter rather than a release this script half-supports.
 #
 # Exit codes: 0 ok | 2 bad param | 3 refused (a draft release, or a stale or
 # missing VERSION) | 4 gh or python3 missing or unauthenticated | 5 GitHub call
@@ -76,7 +83,7 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 cap_init "release.engine" \
     "Publish a GitHub release for an engine version and verify the image build it triggers actually started."
 
-cap_spec_param_required "version" "the engine version to release, with or without a leading v (e.g. v0.19.8 or 0.19.8)"
+cap_spec_param_required "version" "the engine version to release, X.Y.Z with no suffix, with or without a leading v (e.g. v0.19.8 or 0.19.8)"
 cap_spec_param "repo"         "owner/name of the repository (default: znasllc-io/memql)"
 cap_spec_param "notes"        "release notes body; when omitted GitHub generates them from the commits since the previous tag"
 cap_spec_param "targetSha"    "commit the tag should point at when the tag does not already exist (default: the default branch head)"
@@ -132,8 +139,8 @@ function normalise_version() {
     # release in ImagePullBackOff.
     BARE="${VERSION_IN#v}"
     TAG="v${BARE}"
-    [[ "$BARE" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+.][0-9A-Za-z.-]+)?$ ]] \
-        || cap_fail 2 "--version ${VERSION_IN} is not a semver version. Expected X.Y.Z (optionally with a pre-release or build suffix), with or without a leading v."
+    [[ "$BARE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+        || cap_fail 2 "--version ${VERSION_IN} is not a release version. Expected X.Y.Z, with or without a leading v; a pre-release or build suffix is refused because VERSION, which must equal the tag, is never suffixed (VERSIONING.md)."
     note "releasing ${TAG} (image tag ${BARE}) in ${REPO}"
     return 0
 }
@@ -207,6 +214,24 @@ function resolve_version_ref() {
     return 0
 }
 
+# version_remedy prints what resolves a VERSION refusal at VERSION_REF.
+#
+# THE REMEDY DEPENDS ON WHETHER THE TAG EXISTS. For a tag this run would create,
+# a prepare pull request moves the default branch's head to a commit whose
+# VERSION is right, and a re-run tags that. For a tag that ALREADY exists --
+# this capability's main case, a tag pushed by hand with no Release -- VERSION
+# is read at the tag, and no pull request can change the commit a tag points
+# at: telling the operator to land one would send every re-run back to the same
+# refusal.
+function version_remedy() {
+    if [[ "$VERSION_REF" == "$TAG" ]]; then
+        printf '%s' "The tag ${TAG} already exists, and no pull request can change the commit a tag points at. Delete the tag, then re-run at a commit whose VERSION reads ${BARE}: the default branch's head once a prepare pull request setting VERSION to ${BARE} has merged, or the commit you pass as targetSha. A tag cut before VERSION was required to equal the tag cannot pass this check where it stands."
+    else
+        printf '%s' "Land a pull request setting VERSION to ${BARE}, then re-run this capability."
+    fi
+    return 0
+}
+
 # verify_version_file refuses (exit 3) unless VERSION at VERSION_REF reads BARE.
 #
 # The root listing is read first so a MISSING file is told apart from a failed
@@ -225,7 +250,8 @@ function verify_version_file() {
         cap_fail 5 "could not list the root of ${REPO} at ${VERSION_REF} (gh's error is above), so VERSION could not be checked"
     fi
     if ! grep -qx 'VERSION' <<<"$listing"; then
-        cap_fail 3 "there is no VERSION file at ${VERSION_REF} in ${REPO}. VERSION must equal the tag a release is cut at (VERSIONING.md); land a pull request adding VERSION with the single line ${BARE}, then re-run this capability."
+        cap_result_set "reason" "version_file_stale"
+        cap_fail 3 "there is no VERSION file at ${VERSION_REF} in ${REPO}. VERSION must equal the tag a release is cut at (VERSIONING.md), and at ${TAG} it must read ${BARE}. $(version_remedy)"
     fi
     if ! raw="$(gh api -H 'Accept: application/vnd.github.raw+json' "repos/${REPO}/contents/VERSION?ref=${VERSION_REF}")"; then
         cap_fail 5 "could not read VERSION at ${VERSION_REF} in ${REPO} (gh's error is above)"
@@ -235,7 +261,8 @@ function verify_version_file() {
     VERSION_FILE="$(printf '%s\n' "$raw" | sed -n '1p' | tr -d '[:space:]')"
     cap_result_set "versionFile" "$VERSION_FILE"
     if [[ "$VERSION_FILE" != "$BARE" ]]; then
-        cap_fail 3 "VERSION at ${VERSION_REF} reads '${VERSION_FILE}', and this would release ${TAG}. VERSION must equal the tag a release is cut at, so every reader of the file -- the docs bundle among them -- names the release it belongs to (VERSIONING.md). Land a pull request setting VERSION to ${BARE}, then re-run this capability."
+        cap_result_set "reason" "version_file_stale"
+        cap_fail 3 "VERSION at ${VERSION_REF} reads '${VERSION_FILE}', and this would release ${TAG}. VERSION must equal the tag a release is cut at, so every reader of the file -- the docs bundle among them -- names the release it belongs to (VERSIONING.md). $(version_remedy)"
     fi
     note "VERSION at ${VERSION_REF} reads ${VERSION_FILE}, matching ${TAG}"
     return 0

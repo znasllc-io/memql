@@ -171,6 +171,23 @@ func assertRefused(t *testing.T, r engineRun, mention string) {
 	}
 }
 
+// assertVersionRefusal is assertRefused plus the machine-readable half: a
+// VERSION refusal reports result.reason=version_file_stale, the console cut's
+// code for the same rule, so a caller tells it from the draft refusal without
+// matching prose. It returns the refusal message for further checks.
+func assertVersionRefusal(t *testing.T, r engineRun, mention string) string {
+	t.Helper()
+	assertRefused(t, r, mention)
+	env := r.envelope(t)
+	result, _ := env["result"].(map[string]any)
+	if result["reason"] != "version_file_stale" {
+		t.Errorf("result.reason = %v, want version_file_stale", result["reason"])
+	}
+	errBlock, _ := env["error"].(map[string]any)
+	msg, _ := errBlock["message"].(string)
+	return msg
+}
+
 // TestReleaseEngineRefusesAStaleVersion is the lag itself: VERSION still names
 // the previous release. Refused on a real run AND on a dry run, because a dry
 // run that passed and a real run that then refused would make the dry run a
@@ -180,7 +197,10 @@ func TestReleaseEngineRefusesAStaleVersion(t *testing.T) {
 		t.Run("dryRun="+dry, func(t *testing.T) {
 			r := runReleaseEngine(t, map[string]string{"FAKE_VERSION": "1.2.2\n"},
 				"--version=v1.2.3", "--repo=acme/widget", "--pollSeconds=0", "--dryRun="+dry)
-			assertRefused(t, r, "reads '1.2.2'")
+			msg := assertVersionRefusal(t, r, "reads '1.2.2'")
+			if !strings.Contains(msg, "Land a pull request setting VERSION to 1.2.3") {
+				t.Errorf("the refusal for a tag not yet created does not name the prepare pull request: %s", msg)
+			}
 			result, _ := r.envelope(t)["result"].(map[string]any)
 			if result["versionFile"] != "1.2.2" {
 				t.Errorf("result.versionFile = %v, want 1.2.2 -- the refusal must report what it read", result["versionFile"])
@@ -194,9 +214,65 @@ func TestReleaseEngineRefusesAStaleVersion(t *testing.T) {
 func TestReleaseEngineRefusesAMissingVersion(t *testing.T) {
 	r := runReleaseEngine(t, map[string]string{"FAKE_VERSION_ABSENT": "1"},
 		"--version=1.2.3", "--repo=acme/widget", "--pollSeconds=0")
-	assertRefused(t, r, "no VERSION file")
+	assertVersionRefusal(t, r, "no VERSION file")
 	if reads := r.calls("contents/VERSION"); len(reads) != 0 {
 		t.Errorf("the file was fetched although the listing said it is absent: %v", reads)
+	}
+}
+
+// TestReleaseEngineExistingTagRefusalNamesARemedyThatWorks is the capability's
+// main case -- a tag pushed by hand with no Release -- meeting a stale VERSION.
+// VERSION is read AT THE TAG, so "land a pull request setting VERSION" cannot
+// help: a merge to the default branch does not move an existing tag, and every
+// re-run would be refused again. The refusal must say what does resolve it.
+func TestReleaseEngineExistingTagRefusalNamesARemedyThatWorks(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		env     map[string]string
+		mention string
+	}{
+		{"stale", map[string]string{"FAKE_TAG_EXISTS": "1", "FAKE_VERSION": "0.15.0\n"}, "reads '0.15.0'"},
+		{"missing", map[string]string{"FAKE_TAG_EXISTS": "1", "FAKE_VERSION_ABSENT": "1"}, "no VERSION file"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, dry := range []string{"false", "true"} {
+				r := runReleaseEngine(t, tc.env,
+					"--version=0.19.3", "--repo=acme/widget", "--pollSeconds=0", "--dryRun="+dry)
+				msg := assertVersionRefusal(t, r, tc.mention)
+				for _, want := range []string{"v0.19.3 already exists", "Delete the tag", "targetSha"} {
+					if !strings.Contains(msg, want) {
+						t.Errorf("dryRun=%s: the existing-tag refusal does not say %q: %s", dry, want, msg)
+					}
+				}
+				if strings.Contains(msg, "Land a pull request") {
+					t.Errorf("dryRun=%s: the existing-tag refusal offers a pull request, which cannot move a tag: %s", dry, msg)
+				}
+				if reads := r.calls("?ref=v0.19.3"); len(reads) == 0 {
+					t.Errorf("dryRun=%s: VERSION was not checked at the existing tag: %v", dry, r.ghLog)
+				}
+			}
+		})
+	}
+}
+
+// TestReleaseEngineRefusesASuffixedVersion: VERSION is never suffixed and must
+// equal the tag, so a pre-release could only pass the VERSION check by breaking
+// that rule. It is a bad parameter, refused before any repository call.
+func TestReleaseEngineRefusesASuffixedVersion(t *testing.T) {
+	for _, v := range []string{"1.2.3-rc.1", "v1.2.3+build.7", "1.2.3.4"} {
+		t.Run(v, func(t *testing.T) {
+			r := runReleaseEngine(t, map[string]string{"FAKE_VERSION": v + "\n"},
+				"--version="+v, "--repo=acme/widget", "--pollSeconds=0")
+			if r.code != 2 {
+				t.Fatalf("exit = %d, want 2 (bad parameter)", r.code)
+			}
+			if api := r.calls("api "); len(api) != 0 {
+				t.Errorf("a refused version still reached the repository: %v", api)
+			}
+			if created := r.calls("release"); len(created) != 0 {
+				t.Errorf("a refused version still reached releases: %v", created)
+			}
+		})
 	}
 }
 

@@ -147,7 +147,7 @@ func (i *Integration) Cut(ctx context.Context, req CutRequest) (Outcome, error) 
 
 	// Before the dry-run return, so the plan a card shows is one the cut
 	// would accept -- see versionfile.go.
-	if err := i.checkVersionFile(ctx, cfg, headSha, next); err != nil {
+	if err := i.checkVersionFile(ctx, cfg, headSha, previous, next, bump); err != nil {
 		return Outcome{}, err
 	}
 
@@ -166,7 +166,11 @@ func (i *Integration) Cut(ctx context.Context, req CutRequest) (Outcome, error) 
 		// value of this path is that it exercises the credential, the
 		// repository name and the arithmetic against the real API
 		// without producing a release -- which is what makes it the
-		// runbook's first step after seeding a token.
+		// runbook's first step after seeding a token. It makes only
+		// READS, so it proves the token can read the repository and
+		// nothing about whether it may create the tag or the Release:
+		// those refusals (credential_unavailable on a 403, ref_exists,
+		// tag_created_release_failed) exist only past this return.
 		out.DryRun = true
 		out.Status = "dry_run"
 		return out, nil

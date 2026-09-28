@@ -43,13 +43,15 @@ The version of a MemQL build is the **git tag** it was cut from
   any other change -- and both cut paths (the console cut in
   `integrations/release/` and the `releaseEngine` capability,
   `scripts/release/release-engine.sh`) read it at the commit they are
-  about to tag and refuse when it names anything else
-  (`version_file_stale`). The docs bundle build refuses the same
-  mismatch, so the bundle's one `version` field is the tag's. Between
-  cuts `VERSION` therefore names the release `main` was last cut at, or
-  the one a merged prepare PR is about to cut. It is never a build
-  stamp, never suffixed, and since memql#3998 **never read by the
-  binary**; tooling reads it (`make version`, `make release`
+  about to tag and refuse when it names anything else: the console cut
+  with the refusal code `version_file_stale`, `releaseEngine` with exit
+  3 and `result.reason` `version_file_stale`. The docs bundle build
+  refuses the same mismatch, so the bundle's one `version` field is the
+  tag's. Between cuts `VERSION` therefore names the release `main` was
+  last cut at, or the one a merged prepare PR is about to cut. It is
+  never a build stamp, never suffixed (both cut paths and the bundle
+  build accept a bare `X.Y.Z` only), and since memql#3998 **never read
+  by the binary**; tooling reads it (`make version`, `make release`
   defaulting). It is deliberately **unprefixed**: it feeds the
   `memql:X.Y.Z` image tag, where a leading `v` does not belong. The `v`
   lives on the git tag only.

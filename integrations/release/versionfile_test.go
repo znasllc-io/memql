@@ -41,7 +41,63 @@ func TestCutRefusesAStaleVersionFile(t *testing.T) {
 			t.Errorf("the refusal does not name %s: %v", want, err)
 		}
 	}
+	// VERSION names the release already cut, so the prepare step was skipped
+	// and no bump can reach 0.17.1 again. Advice to "choose the bump that
+	// reaches it" would send the operator after a release that exists.
+	if !strings.Contains(err.Error(), "has not landed") {
+		t.Errorf("the refusal does not say the prepare pull request is missing: %v", err)
+	}
+	if strings.Contains(err.Error(), "bump reaches") {
+		t.Errorf("the refusal offers a bump that reaches a release already cut: %v", err)
+	}
 	assertNothingCreated(t, f, engine)
+}
+
+// TestStaleVersionRefusalNamesTheRemedyThatFits drives each cause the refusal
+// distinguishes. The newest tag is v1.0.0 and the operator asked for a patch, so
+// the cut computes v1.0.1; what VERSION says instead decides what to do.
+func TestStaleVersionRefusalNamesTheRemedyThatFits(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    []string
+		notWant []string
+	}{
+		{"the prepare step skipped: VERSION is the last tag", "1.0.0\n",
+			[]string{"has not landed", "setting VERSION to 1.0.1"}, []string{"bump reaches"}},
+		{"older than the last tag", "0.15.0\n",
+			[]string{"has not landed", "v1.0.0"}, []string{"bump reaches"}},
+		{"prepared for a minor, cut as a patch", "1.1.0\n",
+			[]string{"the minor bump reaches", "cut with bump minor"}, []string{"has not landed"}},
+		{"prepared for a major, cut as a patch", "2.0.0\n",
+			[]string{"the major bump reaches", "cut with bump major"}, []string{"has not landed"}},
+		{"newer, but no single bump reaches it", "1.5.0\n",
+			[]string{"setting VERSION to 1.0.1"}, []string{"bump reaches", "has not landed"}},
+		{"a leading v", "v1.0.1\n",
+			[]string{"unprefixed", "setting VERSION to 1.0.1"}, []string{"bump reaches"}},
+		{"not a version", "next\n",
+			[]string{"setting VERSION to 1.0.1"}, []string{"bump reaches", "has not landed"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head").withVersionFile(tc.content)
+			i, engine := ownerIntegration(t, f)
+			_, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
+			if got := RefusalCode(err); got != CodeVersionFileStale {
+				t.Fatalf("refusal = %q, want %q (error: %v)", got, CodeVersionFileStale, err)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("the refusal does not say %q: %v", w, err)
+				}
+			}
+			for _, nw := range tc.notWant {
+				if strings.Contains(err.Error(), nw) {
+					t.Errorf("the refusal says %q, which does not fit this cause: %v", nw, err)
+				}
+			}
+			assertNothingCreated(t, f, engine)
+		})
+	}
 }
 
 // TestDryRunRefusesAStaleVersionFile holds the rule cut.go states: everything

@@ -34,7 +34,11 @@ import (
 // BEFORE THE DRY-RUN RETURN, on purpose. cut.go's rule is that everything that
 // can refuse has refused before the first irreversible step, and a dry run is
 // the plan the card shows: a plan that would be refused has to say so, or the
-// operator learns it only after confirming.
+// operator learns it only after confirming. Between cuts VERSION names the
+// last release, so the card's dry run is refused here until the prepare pull
+// request merges. That is the expected answer, and it still comes after the
+// token has listed tags and read main's head and VERSION, so it still proves
+// the credential can read the repository (release-cutting.md section 4).
 
 // versionFilePath is the file the check reads.
 const versionFilePath = "VERSION"
@@ -75,7 +79,10 @@ func (c *Client) ReadVersionFile(ctx context.Context, token string, repo repoRef
 // the file (the Makefile, the docs bundle build). A leading `v` is a mismatch:
 // VERSION is the unprefixed semver the image tag uses, and the `v` lives on
 // the git tag only.
-func (i *Integration) checkVersionFile(ctx context.Context, cfg settings, sha string, next version) error {
+//
+// The remedy is chosen by what the file says -- see staleVersionRemedy -- so
+// the refusal never suggests an action that cannot resolve it.
+func (i *Integration) checkVersionFile(ctx context.Context, cfg settings, sha string, previous, next version, bump string) error {
 	raw, found, err := i.github.ReadVersionFile(ctx, cfg.token, cfg.repo, sha)
 	if err != nil {
 		return err
@@ -90,8 +97,46 @@ func (i *Integration) checkVersionFile(ctx context.Context, cfg settings, sha st
 		return nil
 	}
 	return refuse(CodeVersionFileStale,
-		"%s at main's head (%s) reads %q, and this cut would tag %s. VERSION must equal the tag a cut creates, so every reader of the file -- the docs bundle among them -- names the release it belongs to. Land a pull request setting %s to %s, then cut again; if %q is the release you meant, choose the bump that reaches it.",
-		versionFilePath, shortSha(sha), clampMessage(got), next.tag(), versionFilePath, next.bare(), clampMessage(got))
+		"%s at main's head (%s) reads %q, and this cut would tag %s (the %s bump from %s). VERSION must equal the tag a cut creates, so every reader of the file -- the docs bundle among them -- names the release it belongs to. %s",
+		versionFilePath, shortSha(sha), clampMessage(got), next.tag(), bump, previous.tag(),
+		staleVersionRemedy(got, previous, next))
+}
+
+// staleVersionRemedy says what resolves a VERSION that does not read next.
+//
+// THREE DIFFERENT CAUSES, THREE DIFFERENT FIXES, and the common one is the one
+// a single generic sentence got wrong:
+//
+//   - VERSION names a release that is NOT NEWER than the newest tag. The usual
+//     case by far: VERSION equals the last tag until a prepare pull request
+//     moves it, so this is the prepare step skipped. No bump reaches a release
+//     that is already cut, so the only remedy is the pull request.
+//   - VERSION names a newer release that a DIFFERENT bump reaches (prepared
+//     0.24.0, cut with patch). The prepare step happened; the button choice was
+//     wrong, and cutting with that bump is the fix.
+//   - Anything else -- a leading v, a suffix, a version no single bump reaches,
+//     text that is not a version -- is fixed by a pull request setting VERSION.
+func staleVersionRemedy(got string, previous, next version) string {
+	pr := fmt.Sprintf("Land a pull request setting %s to %s, then cut again.", versionFilePath, next.bare())
+	if strings.TrimPrefix(got, "v") == next.bare() {
+		return fmt.Sprintf("The value is right and the spelling is not: %s is unprefixed, and the v belongs on the git tag only. %s",
+			versionFilePath, pr)
+	}
+	named, ok := parseReleaseTag("v" + got)
+	if !ok {
+		return pr
+	}
+	if !named.newer(previous) {
+		return fmt.Sprintf("%s still names %s, and the newest release tag is already %s, so the pull request that prepares this release has not landed. %s",
+			versionFilePath, named.bare(), previous.tag(), pr)
+	}
+	for _, part := range []string{"patch", "minor", "major"} {
+		if reached, err := previous.bump(part); err == nil && reached == named {
+			return fmt.Sprintf("%s names %s, which the %s bump reaches from %s: if that is the release you meant, cut with bump %s instead. Otherwise land a pull request setting %s to %s, then cut again.",
+				versionFilePath, named.bare(), part, previous.tag(), part, versionFilePath, next.bare())
+		}
+	}
+	return pr
 }
 
 // firstLineOf returns the first line of s with surrounding whitespace removed.

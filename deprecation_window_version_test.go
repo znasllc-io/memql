@@ -51,9 +51,14 @@ import (
 // stops being able to cut X.Y.0 for anything new. An unrecorded form is held to
 // the tree; a recorded one is checked for agreement instead.
 
-// releasedForms names every form whose deprecation warning has ALREADY SHIPPED
-// in a cut release, mapped to the release it first warned in -- which must be
-// the form's own DeprecatedIn.
+// releasedForms names every form whose deprecation warning is FIXED IN A
+// RELEASE, mapped to the release it first warns in -- which must be the form's
+// own DeprecatedIn. That is a release already cut, or the X.Y.0 a merged
+// prepare pull request is about to cut: the prepare pull request records the
+// forms it carries in the same change that sets VERSION, because from that
+// commit on the tree can no longer tell "ships in X.Y.0" from "dated X.Y.0 and
+// landing in a later minor". Either way the entry never names a release beyond
+// VERSION.
 //
 // v0.23.0 (da2222f4778278fdf955758c005f38d1ecc8ff43) shipped this
 // warning. Its original deprecation/refusal dates remain historical facts.
@@ -100,9 +105,24 @@ func TestEveryDeprecatedFormIsDatedToTheReleaseThatWillCarryIt(t *testing.T) {
 			continue
 		}
 		if dep != next {
-			t.Errorf(`form %s is dated to %s, but this tree cuts %s next.
+			t.Error(misdatedFormMessage(f, version, next))
+		}
+	}
+}
 
-DeprecatedIn must name the release that will FIRST carry this form's warning, because
+// misdatedFormMessage explains a form dated to a release other than the one
+// that will first carry it, and says what to change.
+//
+// ONE CASE LEADS WITH THE LEDGER. When VERSION is X.Y.0 and the form is dated
+// X.Y.0, two different commits look identical from here: the prepare pull
+// request for X.Y.0, whose forms ship in X.Y.0 and are recorded in
+// releasedForms; and a form written after X.Y.0 was cut, which first ships in
+// the next minor and must be re-dated. The first is the one that meets this
+// message on every minor prepare pull request carrying a form, and following
+// the re-dating advice there would publish a date one minor late and delay the
+// refusal with it -- so that case names the ledger first and the re-date second.
+func misdatedFormMessage(f deprecation.Form, version string, next minorRelease) string {
+	redate := fmt.Sprintf(`DeprecatedIn must name the release that will FIRST carry this form's warning, because
 that release is also what the language reference publishes and what RefusedFrom counts
 %d minor releases from. A form dated earlier than the release that carries it gives
 operators fewer than the %d minors of warning the page promises; a form dated later
@@ -113,18 +133,59 @@ warns before the date it publishes.
   %s   %s  <- change this to %s.0
 
 Changing DeprecatedIn moves the refusal with it: RefusedFrom is derived, so %s.0
-refuses at %s rather than at %s. If instead this form's warning has genuinely
-already shipped in %s -- or this is the prepare pull request setting VERSION to
-the release that first carries it -- record that in releasedForms above; that is
-the one case this gate cannot see for itself.`,
-				f.Rule, f.DeprecatedIn, next,
-				deprecation.MinimumMinorReleases, deprecation.MinimumMinorReleases,
-				version, next,
-				f.Rule, f.DeprecatedIn, next,
-				next, next.plusMinors(deprecation.MinimumMinorReleases), f.RefusedFrom(),
-				f.DeprecatedIn)
-		}
+refuses at %s rather than at %s.`,
+		deprecation.MinimumMinorReleases, deprecation.MinimumMinorReleases,
+		version, next,
+		f.Rule, f.DeprecatedIn, next,
+		next, next.plusMinors(deprecation.MinimumMinorReleases), f.RefusedFrom())
+
+	if isPreparePullRequestDate(f.DeprecatedIn, version) {
+		return fmt.Sprintf(`form %s is dated to %s, and VERSION reads %s.
+
+If this is the prepare pull request for %s -- the change that sets VERSION to it --
+this form's warning ships in %s and the date is right: record it in releasedForms
+above,
+
+  %q: %q,
+
+The prepare pull request owes that entry for every form its release is the first
+to carry, because from this commit on nothing in the tree tells "ships in %s"
+apart from "dated %s and landing later".
+
+Otherwise %s is already cut and this form is not in it, so it first ships in
+%s.0:
+
+%s`,
+			f.Rule, f.DeprecatedIn, version,
+			version, version, f.Rule, f.DeprecatedIn,
+			version, version,
+			version, next,
+			redate)
 	}
+
+	return fmt.Sprintf(`form %s is dated to %s, but this tree cuts %s next.
+
+%s
+
+If instead this form's warning has genuinely already shipped in %s, record that in
+releasedForms above; that is the one case this gate cannot see for itself.`,
+		f.Rule, f.DeprecatedIn, next, redate, f.DeprecatedIn)
+}
+
+// isPreparePullRequestDate reports whether a form dated deprecatedIn could be
+// carried by the release a merged prepare pull request is about to cut: VERSION
+// is an X.Y.0 and the form is dated to that same X.Y.
+func isPreparePullRequestDate(deprecatedIn, version string) bool {
+	parts := strings.Split(strings.TrimPrefix(strings.TrimSpace(version), "v"), ".")
+	if len(parts) != 3 || parts[2] != "0" {
+		return false
+	}
+	dep, ok := minorOf(deprecatedIn)
+	if !ok {
+		return false
+	}
+	cur, ok := minorOf(version)
+	return ok && dep == cur
 }
 
 // minorRelease is a MAJOR.MINOR point, the resolution a window is counted in.
@@ -244,5 +305,52 @@ func TestTheVersionGateRejectsAFormDatedBeforeTheReleaseThatCarriesIt(t *testing
 	written, _ := nextMinorRelease("0.22.8")
 	if dated != written {
 		t.Fatalf("a form dated 0.23.0 on a tree at 0.22.8 must be accepted; the gate wants %s", written)
+	}
+}
+
+// The prepare pull request for a minor is the one commit that meets this gate
+// with a correctly dated form every time it carries one, so its message must
+// lead with the ledger rather than with a re-date that would publish the date
+// one minor late. Every other misdating keeps the re-date as its lead.
+func TestTheMisdatedFormMessageLeadsWithTheFixThatFits(t *testing.T) {
+	form := deprecation.Form{Rule: "acme_form", DeprecatedIn: "0.24.0"}
+
+	next, _ := nextMinorRelease("0.24.0")
+	prepare := misdatedFormMessage(form, "0.24.0", next)
+	ledger := strings.Index(prepare, "record it in releasedForms")
+	redate := strings.Index(prepare, "<- change this to 0.25.0")
+	if ledger < 0 || redate < 0 || ledger > redate {
+		t.Errorf("on the prepare pull request for 0.24.0 the ledger must come first and the re-date second:\n%s", prepare)
+	}
+	if !strings.Contains(prepare, `"acme_form": "0.24.0"`) {
+		t.Errorf("the prepare-case message does not spell the ledger entry to add:\n%s", prepare)
+	}
+
+	next, _ = nextMinorRelease("0.24.1")
+	late := misdatedFormMessage(form, "0.24.1", next)
+	if strings.Contains(late, "prepare pull request for") {
+		t.Errorf("0.24.1 has no prepare pull request for 0.24.0 left to be; the message must not offer one:\n%s", late)
+	}
+	if !strings.HasPrefix(late, "form acme_form is dated to 0.24.0, but this tree cuts 0.25 next.") {
+		t.Errorf("a form landing after its release was cut must lead with the re-date:\n%s", late)
+	}
+}
+
+func TestIsPreparePullRequestDate(t *testing.T) {
+	for _, tc := range []struct {
+		deprecatedIn, version string
+		want                  bool
+	}{
+		{"0.24.0", "0.24.0", true},   // the prepare pull request for 0.24.0
+		{"0.24.0", "v0.24.0", true},  // either spelling of VERSION
+		{"0.24.0", "0.24.1", false},  // 0.24.0 is behind the tree
+		{"0.25.0", "0.24.0", false},  // the tree's next minor: the gate accepts it without help
+		{"0.23.0", "0.24.0", false},  // an earlier minor
+		{"0.24.0", "0.24", false},    // not a release
+		{"garbage", "0.24.0", false}, // not a date
+	} {
+		if got := isPreparePullRequestDate(tc.deprecatedIn, tc.version); got != tc.want {
+			t.Errorf("isPreparePullRequestDate(%q, %q) = %v, want %v", tc.deprecatedIn, tc.version, got, tc.want)
+		}
 	}
 }

@@ -2349,7 +2349,7 @@ export interface ReleaseCutArgs {
   notes?: string;
   /** Also open a pull request bumping the VS Code extension's DEFAULT_STACK_TAG to the new tag. A PR that cannot be opened is recorded as a note on the release row and never fails the cut, which has already published by then. */
   bumpExtensionPin?: boolean;
-  /** Compute the plan -- next version and base sha -- and run every refusal check, a stale VERSION included, but write nothing, create nothing, publish nothing. The first validation of a freshly seeded credential should use this. */
+  /** Compute the plan -- next version and base sha -- and run every check that comes before the first write, a stale VERSION included, but write nothing, create nothing, publish nothing. It makes only reads, so it proves the token can read the repository and cannot prove it may create tags or Releases. Between cuts it answers version_file_stale until the pull request setting VERSION to the next release has merged. The first validation of a freshly seeded credential should use this. */
   dryRun?: boolean;
 }
 

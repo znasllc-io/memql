@@ -90,7 +90,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"bump":             "string (required) -- \"major\" | \"minor\" | \"patch\".",
 				"notes":            "string (optional) -- prose prepended to GitHub's generated release notes.",
 				"bumpExtensionPin": "boolean (optional) -- also open a PR bumping the VS Code extension's DEFAULT_STACK_TAG.",
-				"dryRun":           "boolean (optional) -- compute the plan, run every refusal check, and create nothing.",
+				"dryRun":           "boolean (optional) -- compute the plan and run every check that precedes the first write; create nothing. Makes only reads, so it cannot prove the token may create tags or Releases.",
 			},
 		},
 		{
