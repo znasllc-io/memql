@@ -209,6 +209,16 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		CorrelationId: req.GetCorrelationId(),
 	}, timeout)
 
+	// THE CALLER MAY ALREADY HAVE GONE: the node layer ends this context when
+	// the dispatch's cancel arrives, even one read before this goroutine ran.
+	// Nothing has been sent to the machine yet, so that is a refusal before
+	// start, not an exec for nobody.
+	if err := dispatchCtx.Err(); err != nil {
+		h.sendRefusal(send, requestId, ForwardCallerCancelled,
+			"the caller gave up before the dispatch reached the machine: "+err.Error())
+		return
+	}
+
 	// FROM HERE ON, NOTHING IS RE-PICKABLE. The envelope is on its way to the
 	// machine, so every remaining answer is reported with
 	// refused_before_start false, including a mid-call disconnect: an exec

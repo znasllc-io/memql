@@ -95,3 +95,45 @@ func TestSendRequestHandsTheRequestToTheLiveStreamAndSaysWhenItEnds(t *testing.T
 		t.Fatal("the stream the request went out on ended and its sender was not told")
 	}
 }
+
+func cancelEnvelope() *nodev1.NodeClientMessage {
+	return &nodev1.NodeClientMessage{MessageId: "c", Payload: &nodev1.NodeClientMessage_ModelPullForwardCancel{
+		ModelPullForwardCancel: &nodev1.ModelPullForwardCancel{RequestId: "r"}}}
+}
+
+// A CANCEL IS NOT A REQUEST. Nobody waits on it, and the call it names may
+// outlive the stream it was asked on -- a pull and a probe run under a context
+// the stream ending does not cancel. So a cancel posted while the connection
+// is between attempts is queued for the next one, where SendRequest would
+// have dropped it and left the download running.
+func TestSendCancelQueuesForTheNextAttemptWhereARequestWouldBeRefused(t *testing.T) {
+	pm := NewPeerManager(testIdentity(), testLogger())
+	if err := pm.SendCancel("agent-gone", cancelEnvelope()); err == nil {
+		t.Fatal("a cancel to a node this one has never heard of was reported as queued")
+	}
+
+	pm.RegisterMonitored(&nodev1.PeerInfo{NodeId: "agent-known", NodeType: string(NodeTypeAgent)})
+	conn := newPeerConnection(testIdentity(), "agent-known", "127.0.0.1:1", testLogger())
+	pm.AttachConnection("agent-known", conn)
+
+	// Between attempts: a request is refused, a cancel is queued.
+	if _, err := pm.SendRequest("agent-known", requestEnvelope()); err == nil {
+		t.Fatal("precondition: a request with no live stream must be refused")
+	}
+	if err := pm.SendCancel("agent-known", cancelEnvelope()); err != nil {
+		t.Fatalf("a cancel posted between attempts was refused: %v", err)
+	}
+	select {
+	case got := <-conn.sendCh:
+		if got.GetModelPullForwardCancel().GetRequestId() != "r" {
+			t.Fatalf("the outbox carried %+v", got)
+		}
+	default:
+		t.Fatal("the cancel was reported queued and is not on the connection's outbox")
+	}
+
+	conn.Close()
+	if err := pm.SendCancel("agent-known", cancelEnvelope()); err == nil {
+		t.Fatal("a cancel on a closed connection was reported as queued")
+	}
+}

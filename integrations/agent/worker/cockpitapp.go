@@ -73,40 +73,6 @@ func (e *CockpitAppExecutor) WithLedger(ledger *LedgerWriter) *CockpitAppExecuto
 	return e
 }
 
-// DelegationPolicyReader resolves a user's delegation preference.
-// Narrow on purpose so this file does not import the engine.
-type DelegationPolicyReader interface {
-	DelegationPolicy(ctx context.Context, ownerUserId string) (DelegationPolicy, error)
-}
-
-// DelegationPolicy is the subset of v1:worker:delegationPolicy the
-// executor reads.
-type DelegationPolicy struct {
-	Found                  bool
-	PreferSubscriptionApps bool
-	EligibleKinds          []string
-	AppOrder               []string
-	MaxConcurrentSessions  int
-	WorkspaceRoot          string
-	CredentialLifetime     time.Duration
-}
-
-// AllowsKind reports whether this policy permits delegating a task of
-// the given kind. An empty EligibleKinds list allows NOTHING rather
-// than everything: opting into delegation should not silently opt
-// every task kind in with it.
-func (p DelegationPolicy) AllowsKind(kind string) bool {
-	if !p.PreferSubscriptionApps {
-		return false
-	}
-	for _, k := range p.EligibleKinds {
-		if k == kind {
-			return true
-		}
-	}
-	return false
-}
-
 // cockpitAppRegistry holds the process-wide executor so init() can
 // register a placeholder that the app wiring later completes. The
 // registry maps a NAME to an implementation, and the implementation

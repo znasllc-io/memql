@@ -126,11 +126,26 @@ ModelForward shape):
   "nothing started", so the Route tries its next Source. The app gate's
   refusal comes back under its own code (`kill_switch_engaged`,
   `app_not_named_by_owner`) exactly as on the agent itself.
-- **Cancellation and loss cross the hop.** A caller that gives up sends a
-  cancel and the session on the machine is stopped. A holder that goes away
-  mid-call is noticed when its stream ends, not waited out; the session may
-  have run there, so the call is not re-run on a second machine -- the Route
-  moves on to its next Source instead.
+- **Cancellation and loss cross the hop.** A caller that has already given
+  up -- typically because a slower first Source used up the triage's deadline
+  -- sends nothing at all. A caller that gives up mid-call sends a cancel and
+  the session on the machine is stopped. The holder registers every forwarded
+  call before it runs it, so a cancel that arrives right behind its request,
+  or even ahead of it, still stops it: the call is refused before anything
+  opens (`caller_cancelled`). The call also carries the caller's remaining
+  deadline, so a cancel that never arrives still ends the session when the
+  caller stopped waiting, not at the ten-minute ceiling. A holder that goes
+  away mid-call is noticed when its stream ends, not waited out; the session
+  may have run there, so the call is not re-run on a second machine -- the
+  Route moves on to its next Source instead. An answer that arrived just
+  before the stream ended is still the answer.
+- **The same app, whichever node asks.** `app:*` follows the owner's
+  delegation policy `appOrder` on the planner exactly as on the agent, so one
+  Route never picks Claude Code in triage and Codex in the reply.
+- **A vision call keeps its refusal.** When the holder cannot land a vision
+  call's images, the refusal comes back as `app_vision_staging_failed`, not as
+  "no machine can run this app", and no other machine is tried: the images
+  land in the holder's storage, which the next machine would share.
 
 **Only the chat door forwards.** A chat, structured or vision turn is one call
 and crosses; a tool-needing STEP (the session door, below) does not -- it runs
@@ -138,7 +153,10 @@ as a session subrun on the replica whose delegate opens it. On a node that does
 not hold the stream, a tool turn therefore passes an app Source over with
 "a step handover opens its session on the agent holding the machine's stream"
 and takes the next Source in the Route. System work with no acting user never
-gets an app door on any node: a session's credential names a person.
+gets an app door on any node: a session's credential names a person. The
+inference-status row (`appEligible`, `runnableApps`) asks the chat door's
+question, so a replica that can forward to the laptop reports the app door
+open -- which is what its chat and structured calls find.
 
 > A cockpit that reports no apps at all is normal — that is what a build older
 > than the app protocol does, and what a machine with neither binary on PATH
@@ -527,6 +545,7 @@ kubectl logs -n memql deploy/agent | grep 'cockpit-app container executor instal
 | `executorBackend "..." is not registered` at task creation | the name was validated against `RegisteredExecutors()`. With an empty registry the message says so |
 | `app_holder_unreachable` / "the agent holding its stream (...) is not reachable from this node" | the registration names an agent replica this node cannot reach (restarted, or the row is stale). Nothing started; the route moved on. The machine re-registers on a live replica within a heartbeat |
 | `app_holder_gone` | the agent holding the machine went away while the session ran. The session may have run on the machine; the call is not re-run elsewhere and the route moved on |
+| `caller_cancelled` | the caller gave up -- a cancel, or its deadline passed -- before the session opened on the machine. Nothing ran. Common when a slower first Source in the Route used up the call's deadline |
 | "a step handover opens its session on the agent holding the machine's stream" | a TOOL turn resolved on a node that does not hold the machine's stream. Chat and structured calls forward; a step does not. Expected on the planner and on the replica without the laptop |
 | "No agent replica is holding this session any more" | the node holding the session died, or the session outlived the longest any session may run. `workerAppSessionStaleSweep` closed the row a few minutes after its last heartbeat. Whatever the app already did on the machine stays there; ask again to start a new session |
 

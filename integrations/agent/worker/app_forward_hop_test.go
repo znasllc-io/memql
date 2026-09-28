@@ -277,7 +277,7 @@ func newAppHop(t *testing.T) *appHop {
 	link.streamCtx, link.streamCancel = context.WithCancel(context.Background())
 	link.router = newForwardRouter(link, func() (string, string) { return hopPlanner, "planner" }, logger)
 	senderStore := &fakeFleet{machines: []Candidate{laptopRow()}, owner: hopOwner}
-	remote := NewRemoteAppInference(senderStore, link.router, hopPlanner, logger)
+	remote := NewRemoteAppInference(senderStore, nil, link.router, hopPlanner, logger)
 	remote.clock = fleetNow
 
 	t.Cleanup(func() {

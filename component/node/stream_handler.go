@@ -167,6 +167,10 @@ type nodeService struct {
 	// (memql#3380). Non-nil only on the identity node, the only node that
 	// carries a DeployControlService.
 	deployControlForwardHandler DeployControlForwardHandler
+	// forwards is the table of worker-family forwarded calls this replica is
+	// serving, registered on the receive loop so a cancel always finds its
+	// call (forward_inflight.go). Usable as a zero value.
+	forwards forwardCalls
 }
 
 // Stream handles a bidirectional streaming connection from a peer node.
@@ -711,7 +715,30 @@ func (s *nodeService) handleWorkerForwardRequest(peerId string, req *nodev1.Work
 	// which arrives on the same stream. stream.Context() still bounds it: a
 	// stream that ends takes the dispatch with it, because its answer has
 	// nowhere left to go.
-	go s.workerForwardHandler.HandleForwardedRequest(stream.Context(), req, stream.Send)
+	s.serveForward(stream.Context(), forwardFamilyWorker, peerId, req.GetRequestId(), func(ctx context.Context) {
+		s.workerForwardHandler.HandleForwardedRequest(ctx, req, stream.Send)
+	})
+}
+
+// serveForward registers one forwarded call HERE, on the receive loop, and
+// runs it on its own goroutine under the context the registration returns.
+//
+// Registering before the goroutine exists is the point (forward_inflight.go):
+// the call's cancel arrives right behind it on this same stream, and a cancel
+// matched only against a table the handler fills from its own goroutine was
+// lost whenever it was read first -- and the call then ran to its ceiling. A
+// cancel that arrived even before the request keeps it from running at all.
+func (s *nodeService) serveForward(base context.Context, family, peerId, requestId string, run func(ctx context.Context)) {
+	ctx, end, ok := s.forwards.begin(base, family, peerId, requestId)
+	if !ok {
+		s.logger.Info("forwarded call not run: its cancel arrived first",
+			"family", family, "peer_id", peerId, "request_id", requestId)
+		return
+	}
+	go func() {
+		defer end()
+		run(ctx)
+	}()
 }
 
 // handleWorkerForwardCancel stops in-flight work for a forwarded dispatch the
@@ -721,6 +748,7 @@ func (s *nodeService) handleWorkerForwardCancel(peerId string, cancel *nodev1.Wo
 		return
 	}
 	s.logger.Debug("worker forward cancel", "peer_id", peerId, "request_id", cancel.GetRequestId())
+	s.forwards.cancel(forwardFamilyWorker, peerId, cancel.GetRequestId())
 	s.workerForwardHandler.CancelForwardedRequest(context.Background(), cancel.GetRequestId())
 }
 
@@ -753,7 +781,9 @@ func (s *nodeService) handleModelForwardRequest(peerId string, req *nodev1.Model
 	// generation runs for as long as the model takes, and inline it held this
 	// peer's receive loop -- and the ModelForwardCancel that would end it --
 	// for the duration.
-	go s.workerForwardHandler.HandleForwardedModelCall(stream.Context(), req, stream.Send)
+	s.serveForward(stream.Context(), forwardFamilyModel, peerId, req.GetRequestId(), func(ctx context.Context) {
+		s.workerForwardHandler.HandleForwardedModelCall(ctx, req, stream.Send)
+	})
 }
 
 // handleModelForwardCancel stops an in-flight forwarded model call.
@@ -762,6 +792,7 @@ func (s *nodeService) handleModelForwardCancel(peerId string, cancel *nodev1.Mod
 		return
 	}
 	s.logger.Debug("model forward cancel", "peer_id", peerId, "request_id", cancel.GetRequestId())
+	s.forwards.cancel(forwardFamilyModel, peerId, cancel.GetRequestId())
 	s.workerForwardHandler.CancelForwardedModelCall(context.Background(), cancel.GetRequestId())
 }
 
@@ -801,7 +832,13 @@ func (s *nodeService) handleModelPullForwardRequest(peerId string, req *nodev1.M
 	// handlers spawn their own worker goroutines for long-running work, so this
 	// does not block the receive path"); a pull is the longest-running thing on
 	// this surface and needs it most.
-	go s.workerForwardHandler.HandleForwardedModelPull(context.WithoutCancel(stream.Context()), req, stream.Send)
+	//
+	// The pull keeps the base context it always had -- one the stream ending
+	// does not cancel -- and the registration adds its cancel on top, so the
+	// ModelPullForwardCancel ends it whichever goroutine reads it first.
+	s.serveForward(context.WithoutCancel(stream.Context()), forwardFamilyModelPull, peerId, req.GetRequestId(), func(ctx context.Context) {
+		s.workerForwardHandler.HandleForwardedModelPull(ctx, req, stream.Send)
+	})
 }
 
 // handleModelPullForwardCancel stops an in-flight forwarded pull.
@@ -810,6 +847,7 @@ func (s *nodeService) handleModelPullForwardCancel(peerId string, cancel *nodev1
 		return
 	}
 	s.logger.Debug("model pull forward cancel", "peer_id", peerId, "request_id", cancel.GetRequestId())
+	s.forwards.cancel(forwardFamilyModelPull, peerId, cancel.GetRequestId())
 	s.workerForwardHandler.CancelForwardedModelPull(context.Background(), cancel.GetRequestId())
 }
 
@@ -841,7 +879,9 @@ func (s *nodeService) handleModelProbeForwardRequest(peerId string, req *nodev1.
 	// reading heartbeats and every other forward from that peer for the
 	// duration. It would also make the cancel unreachable, since
 	// ModelProbeForwardCancel arrives on the SAME stream.
-	go s.workerForwardHandler.HandleForwardedModelProbe(context.WithoutCancel(stream.Context()), req, stream.Send)
+	s.serveForward(context.WithoutCancel(stream.Context()), forwardFamilyModelProbe, peerId, req.GetRequestId(), func(ctx context.Context) {
+		s.workerForwardHandler.HandleForwardedModelProbe(ctx, req, stream.Send)
+	})
 }
 
 // handleModelProbeForwardCancel stops an in-flight forwarded probe.
@@ -850,6 +890,7 @@ func (s *nodeService) handleModelProbeForwardCancel(peerId string, cancel *nodev
 		return
 	}
 	s.logger.Debug("model probe forward cancel", "peer_id", peerId, "request_id", cancel.GetRequestId())
+	s.forwards.cancel(forwardFamilyModelProbe, peerId, cancel.GetRequestId())
 	s.workerForwardHandler.CancelForwardedModelProbe(context.Background(), cancel.GetRequestId())
 }
 
@@ -882,7 +923,9 @@ func (s *nodeService) handleAppCallForwardRequest(peerId string, req *nodev1.App
 	// most after a pull: it runs for minutes, and inline it would stop this
 	// node reading heartbeats, events and every other forward from the peer
 	// -- including the AppCallForwardCancel that would end it.
-	go s.workerForwardHandler.HandleForwardedAppCall(stream.Context(), req, stream.Send)
+	s.serveForward(stream.Context(), forwardFamilyApp, peerId, req.GetRequestId(), func(ctx context.Context) {
+		s.workerForwardHandler.HandleForwardedAppCall(ctx, req, stream.Send)
+	})
 }
 
 // handleAppCallForwardCancel stops an in-flight forwarded app call.
@@ -891,6 +934,7 @@ func (s *nodeService) handleAppCallForwardCancel(peerId string, cancel *nodev1.A
 		return
 	}
 	s.logger.Debug("app call forward cancel", "peer_id", peerId, "request_id", cancel.GetRequestId())
+	s.forwards.cancel(forwardFamilyApp, peerId, cancel.GetRequestId())
 	s.workerForwardHandler.CancelForwardedAppCall(context.Background(), cancel.GetRequestId())
 }
 

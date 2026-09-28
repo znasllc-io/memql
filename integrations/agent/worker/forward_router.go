@@ -43,6 +43,12 @@ import (
 // dispatch never left this node, so the caller may try another machine.
 var ErrNoPeerForNode = errors.New("agent.worker: no reachable peer for the machine's replica")
 
+// ForwardCallerCancelled is the refusal a holder answers with when the call's
+// caller had already given up by the time the call reached its point of no
+// return -- the cancel arrived, or the caller's deadline passed, before
+// anything was sent to the machine. Refused before start: nothing ran.
+const ForwardCallerCancelled = "caller_cancelled"
+
 // PeerSender is "hand this envelope to the replica with this node id", and it
 // is a seam rather than a direct PeerManager call for one reason: a
 // *peerConnection is unexported, so without it the hop this file exists to
@@ -119,6 +125,54 @@ func (p peerManagerSender) SendRequest(nodeId string, msg *nodev1.NodeClientMess
 		return nil, ErrNoPeerForNode
 	}
 	return p.peerMgr.SendRequest(nodeId, msg)
+}
+
+// SendCancel queues a cancel on the peer's GENERAL outbox, which carries it
+// on the live stream or on the next attempt after a reconnect
+// (node.PeerManager.SendCancel). Not SendRequest: nobody parks on a cancel,
+// and a pull or a probe outlives the stream it was asked on, so a cancel
+// dropped during a reconnect left the download running.
+func (p peerManagerSender) SendCancel(nodeId string, msg *nodev1.NodeClientMessage) bool {
+	if p.peerMgr == nil {
+		return false
+	}
+	return p.peerMgr.SendCancel(nodeId, msg) == nil
+}
+
+// The production sender IS stream-aware and HAS a cancel path. Asserted at
+// compile time, because both are discovered by a type assertion at the call
+// site: a signature that drifted would quietly fall back to Send, and the app
+// forward would lose holder-gone detection (waiting out 10m30s) and every
+// forward its reconnect-proof cancel -- with every test still green.
+var (
+	_ PeerSender   = peerManagerSender{}
+	_ streamSender = peerManagerSender{}
+	_ cancelSender = peerManagerSender{}
+)
+
+// cancelSender is a PeerSender with a separate, fire-and-forget path for
+// CANCELS. A sender without one (the in-process test links) gets its cancels
+// through Send.
+type cancelSender interface {
+	SendCancel(nodeId string, msg *nodev1.NodeClientMessage) bool
+}
+
+// sendCancel hands a best-effort cancel to the peer. The receiver matches it
+// by request id whichever order it arrives in relative to its request
+// (component/node/forward_inflight.go), so the transport is free to queue it
+// across a reconnect.
+func (r *ForwardRouter) sendCancel(nodeId string, msg *nodev1.NodeClientMessage) {
+	if r == nil || r.sender == nil {
+		return
+	}
+	if cs, ok := r.sender.(cancelSender); ok {
+		if !cs.SendCancel(nodeId, msg) {
+			r.logger.Debug("forward cancel could not be queued; the call ends with its stream or its own timeout",
+				"target_node_id", nodeId)
+		}
+		return
+	}
+	r.sender.Send(nodeId, msg)
 }
 
 // forwardCall is one parked dispatch: where the answer goes, and where the
@@ -276,7 +330,7 @@ func (r *ForwardRouter) ForwardDispatch(
 	case <-ctx.Done():
 		// Best-effort cancel. The receiving replica stops in-flight work and
 		// frees the machine's concurrency slot.
-		r.sender.Send(nodeId, &nodev1.NodeClientMessage{
+		r.sendCancel(nodeId, &nodev1.NodeClientMessage{
 			MessageId: id.NewShortId(),
 			Payload: &nodev1.NodeClientMessage_WorkerForwardCancel{
 				WorkerForwardCancel: &nodev1.WorkerForwardCancel{RequestId: requestId},

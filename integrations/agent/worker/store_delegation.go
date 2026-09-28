@@ -1,4 +1,4 @@
-//go:build agent
+//go:build agent || planner
 
 package worker
 
@@ -11,6 +11,45 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/num"
 )
+
+// The delegation policy is read on the agent (the cockpit-app executor, the
+// app door) AND on the planner, whose app door orders `app:*` by the owner's
+// appOrder exactly as the agent's does -- one Route must not pick Claude Code
+// in triage and Codex in the reply for the same owner.
+
+// DelegationPolicyReader resolves a user's delegation preference.
+// Narrow on purpose so its readers do not import the engine.
+type DelegationPolicyReader interface {
+	DelegationPolicy(ctx context.Context, ownerUserId string) (DelegationPolicy, error)
+}
+
+// DelegationPolicy is the subset of v1:worker:delegationPolicy the
+// executor reads.
+type DelegationPolicy struct {
+	Found                  bool
+	PreferSubscriptionApps bool
+	EligibleKinds          []string
+	AppOrder               []string
+	MaxConcurrentSessions  int
+	WorkspaceRoot          string
+	CredentialLifetime     time.Duration
+}
+
+// AllowsKind reports whether this policy permits delegating a task of
+// the given kind. An empty EligibleKinds list allows NOTHING rather
+// than everything: opting into delegation should not silently opt
+// every task kind in with it.
+func (p DelegationPolicy) AllowsKind(kind string) bool {
+	if !p.PreferSubscriptionApps {
+		return false
+	}
+	for _, k := range p.EligibleKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
+}
 
 // DelegationPolicy resolves the user's app-delegation preference
 // (memql#4362).

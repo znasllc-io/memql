@@ -39,7 +39,10 @@ func (a *App) wireWorkerForwarding(identity *node.Identity, peers *node.PeerMana
 		parent.SetWorkerForwardResponseSink(forward)
 	}
 	dialer.SetWorkerForwardResponseSink(forward)
-	providers.SetFleetInference(agentworker.NewRemoteFleetInference(&agentworker.EngineStore{Engine: a.engine}, forward, identity.ID, a.Logger))
-	providers.SetAppInference(agentworker.NewRemoteAppInference(&agentworker.EngineStore{Engine: a.engine}, forward, identity.ID, a.Logger))
+	store := &agentworker.EngineStore{Engine: a.engine}
+	providers.SetFleetInference(agentworker.NewRemoteFleetInference(store, forward, identity.ID, a.Logger))
+	// The store is the delegation-policy reader too: `app:*` on the planner
+	// follows the owner's appOrder, exactly as it does on the agent.
+	providers.SetAppInference(agentworker.NewRemoteAppInference(store, store, forward, identity.ID, a.Logger))
 	a.Logger.Info("planner fleet and app inference wired through the agent holding each machine", "node_id", identity.ID)
 }

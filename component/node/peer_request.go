@@ -44,3 +44,38 @@ func (pm *PeerManager) SendRequest(nodeId string, msg *nodev1.NodeClientMessage)
 	}
 	return done, nil
 }
+
+// SendCancel queues a CANCEL for a forward this node sent on the named peer's
+// general outbox: the current stream attempt if one is live, the next one if
+// the connection is between attempts.
+//
+// A CANCEL IS NOT A REQUEST, and the two transports are chosen for opposite
+// reasons. Nobody parks on a cancel, so "queued for the next attempt" is not a
+// hang; and the call it names may outlive the stream it was asked on -- a pull
+// and a probe run under a context the stream ending does not cancel -- so a
+// cancel SendRequest dropped during a reconnect left a download running.
+//
+// It can overtake its request: the send loop drains this outbox and the
+// attempt's request queue in whichever order a select picks. The receiver
+// remembers a cancel for a request it has not seen and does not run it when
+// it arrives (forward_inflight.go).
+//
+// It reports an error only when there is no connection to queue on or the
+// outbox refused the message; the caller has nothing to wait for either way.
+func (pm *PeerManager) SendCancel(nodeId string, msg *nodev1.NodeClientMessage) error {
+	if pm == nil {
+		return fmt.Errorf("node: no peer manager to send through")
+	}
+	entry := pm.Get(nodeId)
+	if entry == nil {
+		return fmt.Errorf("node: %s is not a known peer", nodeId)
+	}
+	conn, ok := pm.sendTarget(entry)
+	if !ok {
+		return fmt.Errorf("node: this node holds no connection to %s", nodeId)
+	}
+	if !conn.trySend(msg) {
+		return fmt.Errorf("node: %s: the outbox is full or the connection is closed", nodeId)
+	}
+	return nil
+}

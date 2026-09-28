@@ -571,3 +571,37 @@ func TestTheWildcardTakesAnAppHeldByAnotherAgent(t *testing.T) {
 		t.Errorf("the wildcard chose %q, want %q", apps.lastReq.AppId, appIdCodex)
 	}
 }
+
+// THE READINESS ROW ASKS THE CHAT DOOR'S QUESTION. Inference through an app is
+// one chat, structured or vision turn, and that crosses to the agent holding
+// the machine -- so a node that can forward there CAN get inference through
+// it, and the row that says whether this caller can get inference must say
+// so. Reading the local-only session predicate here had an agent replica
+// report "no app door" while every chat and structured call through
+// app:claude-code on it succeeded.
+func TestTheReadinessRowCountsAnAppThisNodeCanForwardTo(t *testing.T) {
+	held := runnableDoor(appIdClaudeCode)
+	held.Machines[0].LocalStream = false
+	held.Machines[0].Forwardable = true
+	r := newProviderRegistry()
+	r.SetAppInference(&stubApps{doors: []AppDoor{held}})
+	e := &MemQLEngine{providers: r}
+
+	d := e.inferenceDoors(userCtx("alice"))
+	if !d.AppEligible || len(d.RunnableApps) != 1 || d.RunnableApps[0] != appIdClaudeCode {
+		t.Fatalf("appEligible=%v runnableApps=%v, want the forwardable app counted", d.AppEligible, d.RunnableApps)
+	}
+	if len(d.Doors) != 1 || d.Doors[0] != InferenceDoorApp {
+		t.Fatalf("doors = %v, want [app]", d.Doors)
+	}
+
+	// The control: a machine that is offline opens nothing, forwardable or not.
+	asleep := held
+	asleep.Machines = []AppMachine{held.Machines[0]}
+	asleep.Machines[0].Online = false
+	r2 := newProviderRegistry()
+	r2.SetAppInference(&stubApps{doors: []AppDoor{asleep}})
+	if d := (&MemQLEngine{providers: r2}).inferenceDoors(userCtx("alice")); d.AppEligible {
+		t.Fatal("an offline machine made the app door eligible")
+	}
+}

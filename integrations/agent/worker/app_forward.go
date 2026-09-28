@@ -127,6 +127,19 @@ func (r *ForwardRouter) ForwardAppCall(
 	if r == nil || r.sender == nil {
 		return AppForwardOutcome{RefusedBeforeStart: true}, ErrNoPeerForNode
 	}
+	// A CALLER THAT HAS ALREADY GIVEN UP SENDS NOTHING. Not a request, and so
+	// not the cancel that would have had to catch it on the holder: a request
+	// sent with a done context put a Claude Code session on somebody's laptop
+	// for nobody, whenever that cancel lost the race. The realistic path here
+	// is a structured fallback reaching this source after a slow first Source
+	// used up the deadline.
+	if err := ctx.Err(); err != nil {
+		return AppForwardOutcome{
+			ErrorCode:          ForwardCallerCancelled,
+			ErrorMessage:       "the caller gave up before the call was sent: " + err.Error(),
+			RefusedBeforeStart: true,
+		}, err
+	}
 	// THE MANDATORY ASSERTION (memql#3205), re-asserted from the context for
 	// the reason ForwardDispatch states. This envelope carries the acting
 	// user's prompt and opens a session on their machine, so its absence
@@ -142,9 +155,7 @@ func (r *ForwardRouter) ForwardAppCall(
 			RefusedBeforeStart: true,
 		}, nil
 	}
-	if timeout <= 0 || timeout > appSessionMaxDuration {
-		timeout = appSessionMaxDuration
-	}
+	timeout = appCallTimeout(ctx, timeout)
 
 	requestId := id.NewShortId()
 	call := &appForwardCall{resp: make(chan *nodev1.AppCallForwardResponse, 1)}
@@ -191,6 +202,16 @@ func (r *ForwardRouter) ForwardAppCall(
 	case resp := <-call.resp:
 		return appOutcomeFromWire(resp), nil
 	case <-streamDone:
+		// AN ANSWER THAT ARRIVED IS AN ANSWER. The dialer's receive goroutine
+		// hands the holder's response to call.resp and only then sees the
+		// stream end, so when both are ready select picks one at random -- and
+		// picking this case threw Claude Code's work away and had the route
+		// spend the call again on its next Source.
+		select {
+		case resp := <-call.resp:
+			return appOutcomeFromWire(resp), nil
+		default:
+		}
 		// No answer can come back on a stream that ended. NOT refused: the
 		// session may well have started on the machine.
 		return AppForwardOutcome{
@@ -204,7 +225,7 @@ func (r *ForwardRouter) ForwardAppCall(
 		if ctx.Err() == nil {
 			reason = "sender_timeout"
 		}
-		r.sender.Send(nodeId, &nodev1.NodeClientMessage{
+		r.sendCancel(nodeId, &nodev1.NodeClientMessage{
 			MessageId: id.NewShortId(),
 			Payload: &nodev1.NodeClientMessage_AppCallForwardCancel{
 				AppCallForwardCancel: &nodev1.AppCallForwardCancel{RequestId: requestId, Reason: reason},
@@ -241,6 +262,26 @@ func (r *ForwardRouter) DispatchAppCall(resp *nodev1.AppCallForwardResponse) {
 	default:
 		r.logger.Warn("app call forward response dropped (channel full)", "request_id", resp.GetRequestId())
 	}
+}
+
+// appCallTimeout is how long the holder may run one forwarded call: the
+// inference ceiling, or the caller's own remaining deadline when that is
+// nearer.
+//
+// Carried in the envelope so that even a cancel that never arrives -- the
+// holder's connection to this node dropped, say -- stops the session when the
+// caller would have stopped waiting, rather than at the ten-minute ceiling on
+// somebody's subscription.
+func appCallTimeout(ctx context.Context, timeout time.Duration) time.Duration {
+	if timeout <= 0 || timeout > appSessionMaxDuration {
+		timeout = appSessionMaxDuration
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if left := time.Until(deadline); left < timeout {
+			timeout = left
+		}
+	}
+	return timeout
 }
 
 // -----------------------------------------------------------------------------
@@ -341,6 +382,18 @@ func (h *ForwardHandler) HandleForwardedAppCall(
 	callCtx, ccancel := context.WithTimeout(cctx, timeout)
 	defer ccancel()
 
+	// THE CALLER MAY ALREADY HAVE GONE. The node layer ends this context when
+	// the call's cancel arrives, including one read before this goroutine ran
+	// (component/node/forward_inflight.go), and the envelope's timeout is the
+	// caller's own deadline. Either way nothing has opened yet, so the answer
+	// is a refusal before start rather than a session for nobody. The app
+	// door asks again at its own point of no return (callOnWorker).
+	if err := callCtx.Err(); err != nil {
+		h.sendAppRefusal(send, requestId, ForwardCallerCancelled,
+			"the caller gave up before the session opened: "+err.Error())
+		return
+	}
+
 	// The ACTING USER is the verified subject, never the envelope's hint.
 	res, refused, err := apps.ServeForwardedAppCall(callCtx, registrationId, appCallFromEnvelope(owner, req))
 	if err != nil {
@@ -412,6 +465,13 @@ func appRefusalWire(err error) (code, message string) {
 	if errors.As(err, &gate) {
 		return gate.code, gate.message
 	}
+	// A VISION-STAGING failure crosses as its code and its reason, and is
+	// rebuilt as the same type on the sender (forwardAppCall): "the image did
+	// not land" must not arrive reading as "no machine can run this app".
+	var vision *memqlengine.AppVisionStagingFailed
+	if errors.As(err, &vision) {
+		return vision.Code(), vision.Reason
+	}
 	var coded interface{ Code() string }
 	if errors.As(err, &coded) {
 		return coded.Code(), err.Error()
@@ -443,7 +503,7 @@ func appCallEnvelope(requestId, registrationId, ownerUserId string, req memqleng
 		Effort:         req.Effort,
 		Inputs:         append([]string(nil), req.Inputs...),
 		Pin:            &nodev1.AppCallPin{Pinned: req.Pin.Pinned, By: req.Pin.By},
-		TimeoutSec:     int32(timeout / time.Second),
+		TimeoutSec:     envelopeTimeoutSec(timeout),
 		Authority:      authority,
 	}
 	for _, m := range req.Messages {
@@ -461,6 +521,20 @@ func appCallEnvelope(requestId, registrationId, ownerUserId string, req memqleng
 		env.Images = append(env.Images, &nodev1.AppCallImage{MimeType: img.MimeType, Data: img.Data})
 	}
 	return env
+}
+
+// envelopeTimeoutSec renders a timeout in whole seconds for the wire, rounded
+// UP and never below one: a caller with 400ms left must not reach the holder
+// as "no timeout", which the receiver reads as the ten-minute ceiling.
+func envelopeTimeoutSec(timeout time.Duration) int32 {
+	secs := (timeout + time.Second - 1) / time.Second
+	if secs < 1 {
+		secs = 1
+	}
+	if secs > time.Duration(appSessionMaxDuration/time.Second) {
+		secs = time.Duration(appSessionMaxDuration / time.Second)
+	}
+	return int32(secs)
 }
 
 // appCallFromEnvelope is appCallEnvelope's inverse on the receiver, with the
@@ -638,7 +712,8 @@ func appCandidateRefusal(c Candidate, owner string, req memqlengine.AppCallReque
 // returned as it is: the session may have run, and running it on a second
 // machine is a second spend rather than a retry. Every failure reads as a
 // shut door (ErrAppUnavailable), so the caller's route moves on to its next
-// source.
+// source -- except a vision-staging refusal, which comes back as the
+// AppVisionStagingFailed a local call returns.
 func forwardAppCall(
 	ctx context.Context,
 	forward *ForwardRouter,
@@ -654,6 +729,12 @@ func forwardAppCall(
 	}
 	lastErr := ""
 	for _, c := range candidates {
+		// A caller that has given up tries no further machine: sending one
+		// would be a session on somebody's laptop for nobody.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return memqlengine.AppCallResult{},
+				fmt.Errorf("%w: %s: the caller gave up before %s was tried: %w", memqlengine.ErrAppUnavailable, req.AppId, c.Label(), ctxErr)
+		}
 		holder := strings.TrimSpace(c.ConnectedNodeId)
 		out, err := forward.ForwardAppCall(ctx, holder, c.RegistrationId, owner, req, appSessionMaxDuration)
 		if err == nil && out.Ok() {
@@ -671,6 +752,18 @@ func forwardAppCall(
 		if isAppGateCode(out.ErrorCode) {
 			return memqlengine.AppCallResult{}, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable,
 				&appGateRefusal{code: out.ErrorCode, message: out.ErrorMessage})
+		}
+		// A VISION-STAGING FAILURE comes back as the type a local call
+		// returns, and stops the walk: the images land in the HOLDER's
+		// storage, so the owner's next machine on the same holder meets the
+		// same problem, and a storage fault must not end up reading as "no
+		// machine can run this app" (memqlengine.AppVisionStagingRefusalCode).
+		if out.ErrorCode == memqlengine.AppVisionStagingRefusalCode {
+			return memqlengine.AppCallResult{}, &memqlengine.AppVisionStagingFailed{
+				AppId:  req.AppId,
+				Images: len(req.Images),
+				Reason: strings.TrimSpace(out.ErrorMessage + " (on " + c.Label() + ", answered by " + holder + ")"),
+			}
 		}
 		if out.RefusedBeforeStart || errors.Is(err, ErrNoPeerForNode) {
 			considered[c.RegistrationId] = reason
@@ -728,21 +821,24 @@ func appForwardReason(out AppForwardOutcome, err error, holder string) string {
 type RemoteAppInference struct {
 	router     *Router
 	store      FleetStore
+	policies   DelegationPolicyReader
 	forward    *ForwardRouter
 	selfNodeId string
 	logger     *slog.Logger
 	clock      func() time.Time
 }
 
-// NewRemoteAppInference builds the planner's app door over its fleet store and
-// its existing forward to the agents.
-func NewRemoteAppInference(store FleetStore, forward *ForwardRouter, selfNodeId string, logger *slog.Logger) *RemoteAppInference {
+// NewRemoteAppInference builds the planner's app door over its fleet store,
+// the owner's delegation policy (for the `app:*` order) and its existing
+// forward to the agents.
+func NewRemoteAppInference(store FleetStore, policies DelegationPolicyReader, forward *ForwardRouter, selfNodeId string, logger *slog.Logger) *RemoteAppInference {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &RemoteAppInference{
 		router:     NewRouter(store, logger, time.Now),
 		store:      store,
+		policies:   policies,
 		forward:    forward,
 		selfNodeId: selfNodeId,
 		logger:     logger,
@@ -769,11 +865,33 @@ func (a *RemoteAppInference) Doors(ctx context.Context, actingUserId string) ([]
 	}), nil
 }
 
-// AppOrder is nil on this node: the owner's delegation policy is read where
-// app sessions are delegated, and `app:*` falls back to the engine's own
-// closed order here -- the honest degrade AppInference.AppOrder takes on a
-// failed read.
-func (a *RemoteAppInference) AppOrder(context.Context, string) ([]string, error) { return nil, nil }
+// AppOrder reads the owner's preferred app order off their delegation policy,
+// the same read the agent's app door makes: one Route must pick the same app
+// for `app:*` whichever node resolves it, or the planner runs Claude Code in
+// triage and the agent Codex in the reply for the same owner.
+func (a *RemoteAppInference) AppOrder(ctx context.Context, actingUserId string) ([]string, error) {
+	if a == nil {
+		return nil, nil
+	}
+	return appOrderFor(ctx, a.policies, actingUserId)
+}
+
+// appOrderFor is the owner's delegationPolicy.appOrder, or nil when there is
+// no reader, no acting user or no policy row -- `app:*` then takes the
+// engine's own closed order.
+func appOrderFor(ctx context.Context, policies DelegationPolicyReader, actingUserId string) ([]string, error) {
+	if policies == nil || strings.TrimSpace(actingUserId) == "" {
+		return nil, nil
+	}
+	policy, err := policies.DelegationPolicy(ctx, actingUserId)
+	if err != nil {
+		return nil, err
+	}
+	if !policy.Found {
+		return nil, nil
+	}
+	return policy.AppOrder, nil
+}
 
 // Call forwards one app-door call to the agent holding a machine that can run
 // it, trying the owner's machines in the fleet router's order.

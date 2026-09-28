@@ -190,17 +190,10 @@ func (a *AppInference) holdsStream(c Candidate) bool {
 
 // AppOrder reads the owner's preferred app order off their delegation policy.
 func (a *AppInference) AppOrder(ctx context.Context, actingUserId string) ([]string, error) {
-	if a == nil || a.policies == nil || strings.TrimSpace(actingUserId) == "" {
+	if a == nil {
 		return nil, nil
 	}
-	policy, err := a.policies.DelegationPolicy(ctx, actingUserId)
-	if err != nil {
-		return nil, err
-	}
-	if !policy.Found {
-		return nil, nil
-	}
-	return policy.AppOrder, nil
+	return appOrderFor(ctx, a.policies, actingUserId)
 }
 
 // Call runs one inference turn through an app session.
@@ -319,6 +312,14 @@ func (a *AppInference) ServeForwardedAppCall(ctx context.Context, registrationId
 // whether a session was opened on it -- the line after which nothing is
 // re-pickable.
 func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker, owner string, req memqlengine.AppCallRequest) (res memqlengine.AppCallResult, started bool, err error) {
+	// A CALLER THAT HAS GIVEN UP OPENS NOTHING. Asked first, before anything
+	// is staged, and again at the point of no return below: a session opened
+	// with a done context runs until the machine notices, on the owner's
+	// subscription, for nobody.
+	if err := ctx.Err(); err != nil {
+		return memqlengine.AppCallResult{}, false, &callerGone{appId: req.AppId, err: err}
+	}
+
 	// CAN THIS REPLICA STAGE AT ALL (issue memql#5523) -- asked before
 	// anything is written, because it is a CONFIGURATION fact and costs
 	// nothing to answer. A node with no blob storage refuses the call here
@@ -425,6 +426,13 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 		ModelCall: true,
 	}
 
+	// Asked again here, at the point of no return: staging images can take a
+	// while, and a caller that gave up meanwhile still opens nothing (its
+	// staged inputs are released by the deferred Release above).
+	if err := ctx.Err(); err != nil {
+		return memqlengine.AppCallResult{}, false, &callerGone{appId: req.AppId, err: err}
+	}
+
 	// FROM HERE ON, NOTHING IS RE-PICKABLE: the session row is written and
 	// the start goes on the wire, so the call may have run on the machine.
 	result, err := a.runner.Run(ctx, w, spec, nil)
@@ -457,6 +465,25 @@ func (a *AppInference) callOnWorker(ctx context.Context, w *workerservice.Worker
 		Billing: appBilling(result.Billing),
 	}, true, nil
 }
+
+// callerGone is an app-door call refused before its session opened because
+// its caller had already given up. It reads as a shut door
+// (ErrAppUnavailable) AND as the caller's own cancellation, and crosses the
+// hop under ForwardCallerCancelled.
+type callerGone struct {
+	appId string
+	err   error
+}
+
+func (e *callerGone) Error() string {
+	return fmt.Sprintf("%v: %s: the caller gave up before the session opened: %v",
+		memqlengine.ErrAppUnavailable, e.appId, e.err)
+}
+
+// Code is the stable tag the hop carries it under.
+func (e *callerGone) Code() string { return ForwardCallerCancelled }
+
+func (e *callerGone) Unwrap() []error { return []error{memqlengine.ErrAppUnavailable, e.err} }
 
 // selectMachine picks a machine this replica holds that can run the app,
 // through the fleet router. When none can, it returns the machines a SIBLING
