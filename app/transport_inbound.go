@@ -97,12 +97,35 @@ func (a *App) registeredGitHubWebhook() inbound.RegisteredSource {
 		if source != githubconnect.SourceCluster || !cfg.Configured() {
 			return inbound.SourceConfig{}, false
 		}
-		return inbound.SourceConfig{
-			Secret:          cfg.WebhookSecret,
-			Scheme:          inbound.SchemeHMACSHA256Hex,
-			SignatureHeader: "X-Hub-Signature-256",
-			SignaturePrefix: "sha256=",
-			DedupeHeader:    "X-GitHub-Delivery",
-		}, true
+		return githubWebhookPolicy(cfg.WebhookSecret), true
+	}
+}
+
+// githubDeliveryHeaders is what a GitHub delivery stages as `headersJson`.
+//
+// NAMED, rather than left empty, because the event is not in the body:
+// GitHub says WHICH event a delivery is (push, ping, installation) only in
+// X-GitHub-Event, so a row staged with `headersJson: "{}"` cannot tell a
+// reader what arrived (memql#5707 residual). The delivery id correlates the
+// row with GitHub's own delivery log, and the hook id says which of the
+// app's webhooks sent it. None is a credential; the signature header is
+// refused by the receiver whatever a list says.
+//
+// The ENV-configured source stages the same three only when an operator sets
+// MEMQL_INBOUND_SOURCE_GITHUB_FORWARD_HEADERS, which github-connect.md's
+// example does -- TestTheGitHubDeliveryHeadersAreOneListInTwoPaths holds the
+// two together.
+var githubDeliveryHeaders = []string{"X-GitHub-Event", "X-GitHub-Delivery", "X-GitHub-Hook-ID"}
+
+// githubWebhookPolicy is the fixed policy for a registered GitHub App's
+// webhook, given the secret GitHub generated for it.
+func githubWebhookPolicy(secret string) inbound.SourceConfig {
+	return inbound.SourceConfig{
+		Secret:          secret,
+		Scheme:          inbound.SchemeHMACSHA256Hex,
+		SignatureHeader: "X-Hub-Signature-256",
+		SignaturePrefix: "sha256=",
+		DedupeHeader:    "X-GitHub-Delivery",
+		ForwardHeaders:  append([]string(nil), githubDeliveryHeaders...),
 	}
 }
