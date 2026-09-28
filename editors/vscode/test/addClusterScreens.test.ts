@@ -314,5 +314,7 @@ test("a finished uninstall that left a record behind says which, and keeps the e
     removed: 4, kept: 0, followUpProblem: "the cluster is off this machine, but the record of the install could not be removed", logsOpen: false,
   }).body;
   assert.doesNotMatch(recorded, /still in your clusters/, "the list entry went; only the record stayed");
-  assert.match(recorded, /The MemQL Install output has the details\./);
+  // The way to the details is a button, not a sentence naming a channel.
+  assert.match(recorded, /data-act="openOutput"[^>]*>Open in Output</);
+  assert.doesNotMatch(recorded, /output has the details/i);
 });

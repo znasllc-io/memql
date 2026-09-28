@@ -291,7 +291,7 @@ const forms = scenario("kit-forms", "Fields and switches", () => ({
     switchRow({
       id: "s-data",
       label: "Delete the cluster's data",
-      note: "Removes every database in the cluster. This can't be undone.",
+      note: "This can't be undone.",
       checked: true,
       tone: "danger",
       data: { "switch-act": "deleteData" },

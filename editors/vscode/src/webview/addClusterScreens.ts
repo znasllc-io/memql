@@ -1013,11 +1013,9 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
   if (input.unreadable === true) {
     return {
       head: top,
-      body: notice({
-        tone: "error",
-        line: "Couldn't work out what would be removed.",
-        next: "The MemQL Install output has the details.",
-      }),
+      // The details are one click away on the bar (Open in Output), so the
+      // notice does not also say where they are.
+      body: notice({ tone: "error", line: "Couldn't work out what would be removed." }),
       actions: actionBar({
         state: "Nothing was removed",
         tone: "warn",
@@ -1049,7 +1047,9 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
 
   const confirmed = input.deleteData !== undefined && input.deleteData.on && phraseMatches(input.deleteData.phrase);
   // The kept cluster moves into "Will be removed" the moment the consent is
-  // whole, so the list says what the button will do.
+  // whole, so the list says what the button will do. SAID ONCE: that row is
+  // the one place "every database in it" appears; the switch that consents to
+  // it says only that it is final.
   const rows = input.rows.map((row) => {
     if (row.id !== "removeCluster" || !row.kept) return row;
     return confirmed
@@ -1086,7 +1086,7 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
     body += switchRow({
       id: "delete-data",
       label: "Delete the cluster's data",
-      note: "Deletes every database in it. This can't be undone.",
+      note: "This can't be undone.",
       checked: d.on,
       tone: "danger",
       data: { "switch-act": "deleteData" },
@@ -1194,7 +1194,11 @@ export function uninstalledScreen(input: UninstalledInput): RegionParts {
       ? ""
       : input.stillListed === true
         ? notice({ tone: "warn", line: "It's uninstalled, but it's still in your clusters.", next: "Remove it from the list in the Clusters view." })
-        : notice({ tone: "warn", line: "It's uninstalled, but MemQL still has a record of it.", next: "The MemQL Install output has the details." })) +
+        : notice({
+            tone: "warn",
+            line: "It's uninstalled, but MemQL still has a record of it.",
+            acts: [{ act: "openOutput", label: "Open in Output", tone: "secondary" }],
+          })) +
     logsDisclosure(input.logsOpen, input.logLines ?? [], "Uninstall log");
   return {
     head: "",

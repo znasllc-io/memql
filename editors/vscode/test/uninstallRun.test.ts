@@ -765,6 +765,9 @@ test("the preview of a cluster with no install record says what it is, and claim
   // The list says what goes -- the cluster and every database in it -- ONCE:
   // under "Will be removed", not again as a sentence over the button.
   assert.match(confirmed, /Will be removed<\/h2><ul class="ac-list" role="list"><li class="ac-row"><span class="ac-row-name">The cluster<\/span><span class="ac-row-detail">memql, and every database in it/);
+  // ...and the switch that consents to it does not say it again.
+  assert.equal(confirmed.match(/every database/g)?.length, 1, "the deletion is described once");
+  assert.match(confirmed, /This can&#39;t be undone\.|This can't be undone\./);
   assert.doesNotMatch(confirmed, /mq-actbar-confirm/, "the deletion said a second time over the bar");
 });
 
