@@ -77,7 +77,7 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 	case airoute.ModalityChat:
 		client, resolved, err = r.resolveChat(ctx, req)
 	case airoute.ModalityStructured:
-		client, resolved, err = r.resolveDirect(ctx, req, modalityStructured)
+		client, resolved, err = r.resolveStructured(ctx, req)
 	case airoute.ModalityVision:
 		client, resolved, err = r.resolveDirect(ctx, req, modalityVision)
 	case airoute.ModalityEmbedding:

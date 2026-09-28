@@ -89,12 +89,26 @@ type Resolved struct {
 	// client is built around the STEP rather than the turn. Nil means the
 	// ordinary path applies.
 	Client any
+
+	// localSeen is true when the walk passed a local or app source on its way
+	// to this winner, or the winner is one. A fallback wrapper reads it before
+	// hopping to a vendor (fallbackHopRefusal): falling BACK to paid inference
+	// after a local source is what the cost ceiling governs, and the wrapper
+	// starts at the winner, so it cannot see the part of the route before it.
+	localSeen bool
 }
 
 // CallRecord is the payload for one v1:router:call row. Populated by
 // observed providers as the call progresses; handed to recordCall at
 // stream end (or immediately on pre-flight error).
 type CallRecord struct {
+	// CallId is the row's own shortId. An OBSERVER sets it to the attempt id
+	// it opened the call under, so the row can be named before it is written:
+	// a caller that journals the call records which decision row stands
+	// behind it (airoute.Served.RouterCallId). Empty mints a fresh one at
+	// write time, which is what a fallback_used or cache row still does.
+	CallId string
+
 	// Attribution + identity
 	RequestId  string
 	Partition  string
@@ -204,6 +218,10 @@ type CallRecord struct {
 	// local app on a user's machine.
 	ExecutionSurface string
 }
+
+// RouterCallConcept is the concept every ledger row is written to. A row's
+// full id is this, a colon, and the CallRecord's CallId.
+const RouterCallConcept = "v1:router:call"
 
 // Billing values. They mirror v1:router:call.billing,
 // v1:worker:appSession.billing and planner.Billing* so one vocabulary

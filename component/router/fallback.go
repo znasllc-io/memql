@@ -244,48 +244,66 @@ func (f *fallbackWithTools) LastSession() (memql.AppSessionOutcome, bool) {
 }
 
 // fallbackChat mirrors fallbackStreamWithTools for the non-streaming
-// synchronous ChatAIProvider path.
+// synchronous ChatAIProvider path, and serves the bare PROMPT form beside it
+// (Call), which is how the DSL's ai(...) reaches a model.
 type fallbackChat struct {
 	router   *Router
 	chain    []string
 	req      ResolveRequest
 	resolved Resolved
+	served   servedTracker
 }
 
 func (f *fallbackChat) CallChat(ctx context.Context, messages []common.ChatMessage) (string, error) {
-	var lastErr error
-	var lastFailedResolved Resolved
+	var reply string
+	err := f.router.fallbackWalk(ctx, f.req, f.resolved, f.chain, modalityChat, &f.served,
+		func(ctx context.Context, client any, resolved Resolved) (string, error) {
+			observed := &observedChat{
+				inner:    client.(common.ChatAIProvider),
+				router:   f.router,
+				resolved: resolved,
+				req:      f.req,
+			}
+			var err error
+			reply, err = observed.CallChat(ctx, messages)
+			return observed.callId, err
+		})
+	return reply, err
+}
 
-	for _, name := range f.chain {
-		client, resolved, ok := f.router.providerLookup(ctx, f.req, name, modalityChat)
-		if !ok {
-			continue
-		}
-		resolved = resolved.withDecisionFrom(f.resolved)
-		inner := client.(common.ChatAIProvider)
+// Call is the bare prompt form, memql.AIProvider: one string in, whatever the
+// source's own prompt surface answers out.
+//
+// IT WALKS THE ROUTE TOO. The DSL's ai(...) used to take the resolution's
+// winner and call its registry client directly, so a source that failed at
+// call time failed the step with a route still standing behind it, and the
+// call wrote no decision record. Keeping the prompt surface -- rather than
+// sending the prompt through CallChat -- keeps what each source answers: a
+// vendor's prompt form hands back parsed JSON when the model answered JSON,
+// and an ai() expression reads that value.
+func (f *fallbackChat) Call(ctx context.Context, prompt string) (any, error) {
+	var value any
+	err := f.router.fallbackWalk(ctx, f.req, f.resolved, f.chain, modalityChat, &f.served,
+		func(ctx context.Context, client any, resolved Resolved) (string, error) {
+			observed := &observedChat{
+				inner:    client.(common.ChatAIProvider),
+				router:   f.router,
+				resolved: resolved,
+				req:      f.req,
+			}
+			var err error
+			value, err = observed.Call(ctx, prompt)
+			return observed.callId, err
+		})
+	return value, err
+}
 
-		if lastErr != nil {
-			f.router.recordObserved(ctx, fallbackRecord(f.req, lastFailedResolved, lastErr))
-		}
-
-		observed := &observedChat{
-			inner:    inner,
-			router:   f.router,
-			resolved: resolved,
-			req:      f.req,
-		}
-		reply, err := observed.CallChat(ctx, messages)
-		if err == nil {
-			return reply, nil
-		}
-		lastErr = err
-		lastFailedResolved = resolved
+// LastServed reports the source the most recent call ended on.
+func (f *fallbackChat) LastServed() (airoute.Served, bool) {
+	if f == nil {
+		return airoute.Served{}, false
 	}
-
-	if lastErr != nil {
-		return "", lastErr
-	}
-	return "", errNoChainEntryAvailable
+	return f.served.last()
 }
 
 // fallbackRecord builds a CallRecord for a failed pre-flight attempt

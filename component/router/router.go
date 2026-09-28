@@ -163,18 +163,27 @@ func (r *Router) resolveChat(ctx context.Context, req ResolveRequest) (common.Ch
 }
 
 // ResolveStructured picks a provider for a structured-output call -- the
-// classifiers, the routing prompts, every CallChatStructured site.
-//
-// There is no fallback wrapper and no observer on this surface yet: the
-// observed* wrappers cover the three chat surfaces, and wrapping a fourth
-// without a ledger row to write would be an empty layer. The RESOLUTION is
-// still recorded in full on Resolved.Decision.
+// classifiers, the routing prompts, every CallChatStructured site -- and
+// returns it wrapped, like the chat surfaces: a source that fails at call time
+// hands the call to the next one on the route, and every attempt writes its
+// v1:router:call row (fallback_structured.go).
 func (r *Router) ResolveStructured(req ResolveRequest) (common.ChatStructuredProvider, Resolved, error) {
-	client, resolved, err := r.resolveDirect(context.Background(), req, modalityStructured)
+	return r.resolveStructured(context.Background(), req)
+}
+
+func (r *Router) resolveStructured(ctx context.Context, req ResolveRequest) (common.ChatStructuredProvider, Resolved, error) {
+	chain, resolved, err := r.resolveChain(ctx, req, modalityStructured)
 	if err != nil {
 		return nil, Resolved{}, err
 	}
-	return client.(common.ChatStructuredProvider), resolved, nil
+	req = r.stampRequestId(req)
+	resolved.Chain = chain
+	return &fallbackStructured{
+		router:   r,
+		chain:    chain,
+		req:      req,
+		resolved: resolved,
+	}, resolved, nil
 }
 
 // ResolveVision picks a provider for a vision call -- an image or a document
@@ -323,6 +332,11 @@ type chainWinner struct {
 	// that carries it is not the registry entry's appProvider.
 	client    any
 	remaining []string
+	// localSeen is true when a local or app source came before this winner in
+	// the walked route, or is this winner. It is the walk's own sawLocalDoor,
+	// carried out so a fallback wrapper hopping to a vendor later asks the
+	// cost ceiling on exactly the condition the walk asks it on.
+	localSeen bool
 }
 
 // resolveChain decides which provider serves this call, and records the whole
@@ -688,6 +702,7 @@ func (r *Router) walkChain(
 				entry:     entry,
 				door:      cand.Door,
 				remaining: r.remainingNames(ctx, req, candidates[ci:], chain[idx+1:], banned),
+				localSeen: sawLocalDoor,
 			}, nil
 		}
 	}
@@ -771,6 +786,7 @@ func (r *Router) resolvedFrom(
 		Decision:     decision,
 		Entry:        winner.entry,
 		Client:       winner.client,
+		localSeen:    winner.localSeen,
 	}
 }
 
@@ -1134,7 +1150,11 @@ func (r *Router) writeRecord(rec CallRecord) {
 		Claims:  map[string]any{"sub": "system:router"},
 	})
 
-	args := buildRouterCallArgs(rec, id.NewShortId())
+	callId := strings.TrimSpace(rec.CallId)
+	if callId == "" {
+		callId = id.NewShortId()
+	}
+	args := buildRouterCallArgs(rec, callId)
 	query, err := langparser.RenderCall("recordRouterCall", args)
 	if err != nil {
 		r.recordsDropped.Add(1)
