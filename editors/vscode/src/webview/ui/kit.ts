@@ -97,7 +97,7 @@ export function button(a: Act): string {
   const spinner = a.busy === true ? `<span class="mq-spin" aria-hidden="true"></span>` : "";
   return (
     `<button type="button" class="${cls}"${toneAttr} data-act="${escapeHtml(a.act)}"${value}` +
-    `${dataAttrs(a.data, ["act", "value"])}${title}${busy}>${spinner}${escapeHtml(a.label)}</button>`
+    `${dataAttrs(a.data, ["act", "value", "tone"])}${title}${busy}>${spinner}${escapeHtml(a.label)}</button>`
   );
 }
 
@@ -533,6 +533,10 @@ export function formatElapsed(ms: number): string {
  * every part the page script updates in place carries a `data-part` hook, so a
  * `progress` message moves the bar -- which then animates -- without repainting
  * anything around it.
+ *
+ * The title is the page's h1, so a progress screen renders no `head()` above
+ * it; the reason, the "Show logs" disclosure and the log that follow it sit on
+ * the same centred column.
  */
 export function progress(i: ProgressInput): string {
   const id = escapeHtml(i.id ?? "mq-progress");

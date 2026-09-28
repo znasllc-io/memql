@@ -299,7 +299,7 @@ const forms = scenario("kit-forms", "Fields and switches", () => ({
     field({
       id: "f-confirm",
       label: "Type delete memql data to confirm",
-      controlHtml: textInput({ id: "f-confirm", field: "confirm", value: "delete memql" }),
+      controlHtml: textInput({ id: "f-confirm", field: "confirm", value: "delete memql data" }),
     }) +
     switchRow({ id: "s-danger-off", label: "Delete downloaded images", tone: "danger", checked: false }),
   actions: actionBar({
@@ -347,7 +347,6 @@ const notices = scenario("kit-notices", "Notices, disclosures and the log", () =
       label: "Show logs",
       openLabel: "Hide logs",
       open: true,
-      meta: lineCount(INSTALL_LOG.length),
       bodyHtml: logPane({
         id: "install-log",
         ariaLabel: "Install log",
@@ -380,6 +379,11 @@ function progressPage(id: string, title: string, build: () => KitPage): Scenario
   return { id, group: "Progress", title, render: (theme) => kitDocument(theme, build(), id) };
 }
 
+/**
+ * The run screen's log, behind a plain "Show logs". No line count beside it:
+ * the count is noise on the one control a person opens to read the lines, and
+ * it goes stale the moment the log streams.
+ */
 function logsDisclosure(open: boolean, lines: readonly LogLine[]): string {
   return disclosure({
     act: "toggleLogs",
@@ -387,7 +391,6 @@ function logsDisclosure(open: boolean, lines: readonly LogLine[]): string {
     label: "Show logs",
     openLabel: "Hide logs",
     open,
-    meta: lineCount(lines.length),
     bodyHtml: logPane({
       id: "run-log",
       ariaLabel: "Install log",
@@ -401,10 +404,6 @@ function logsDisclosure(open: boolean, lines: readonly LogLine[]): string {
 }
 
 const CANCEL: Act = { act: "cancel", label: "Cancel" };
-
-function lineCount(n: number): string {
-  return n === 1 ? "1 line" : `${n} lines`;
-}
 
 const progressStart = progressPage("progress-start", "Starting (indeterminate)", () => ({
   title: "Installing MemQL",
@@ -495,9 +494,11 @@ const skeletons = scenario("kit-skeletons", "Loading shapes", () => ({
 // ---------------------------------------------------------------------------
 
 /**
- * A page that receives what a LiveView would send after `ready`: progress,
- * a burst of log lines, a patch of the action bar and a disclosure opened by
- * the host. The capture is the runtime's work, not the renderer's.
+ * A page that receives what a LiveView would send after `ready` once Cancel
+ * was pressed mid-run: progress moved to stopping, a burst of log lines, a
+ * patch of the action bar and a disclosure opened by the host. The capture is
+ * the runtime's work, not the renderer's: the document itself was rendered at
+ * step 1 with no lines, a running bar and Cancel on the floor.
  */
 const runtimeLive: Scenario = {
   id: "runtime-live",
@@ -518,12 +519,12 @@ const runtimeLive: Scenario = {
     const lines = JSON.stringify(
       Array.from({ length: 40 }, (_, n) => ({ label: "Creating the cluster", text: `INFO[${String(n).padStart(4, "0")}] line ${n + 1}` })),
     );
-    const stopping = JSON.stringify(actionBar({ state: "Stopping", detail: "After the current step", tone: "busy", acts: [] }));
+    const stopping = JSON.stringify(actionBar({ state: "Stopping", tone: "busy", acts: [] }));
     return withHostScript(
       doc,
       `
 setTimeout(function () {
-  window.postMessage({ type: 'progress', percent: 71, status: 'Starting services 7 of 9', stepText: 'Step 10 of 16', startedAt: ${STARTED}, state: 'running' }, '*');
+  window.postMessage({ type: 'progress', percent: 71, status: 'Stopping after the current step', stepText: 'Step 10 of 16', startedAt: ${STARTED}, state: 'stopping' }, '*');
   window.postMessage({ type: 'log', lines: ${lines} }, '*');
   window.postMessage({ type: 'setDisclosure', id: 'run-logs', open: true }, '*');
   window.postMessage({ type: 'patch', regions: { actions: ${stopping} } }, '*');

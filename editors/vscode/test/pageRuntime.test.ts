@@ -8,8 +8,10 @@
 // the script against a small hand-made document that records listeners, which
 // is enough to check the page-to-host half of the protocol: `ready` on load,
 // the click message with its data attributes, fields, switches and Escape.
-// The host-to-page half (patch, progress, log) moves real DOM and is checked
-// in a real browser by the gallery's `runtime-live` scenario.
+// The host-to-page half (patch, progress, log) moves real DOM, so it is
+// checked in headless Chrome instead: `npm run gallery:check` runs
+// gallery/checks/runtime.checks.js against a real kit page and fails on any
+// check that does not hold. Run it after changing runtime.ts.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -20,6 +22,10 @@ test("the runtime can be embedded in a template literal", () => {
   assert.ok(!PAGE_RUNTIME.includes("`"), "no backtick");
   assert.ok(!PAGE_RUNTIME.includes("${"), "no dollar-brace");
   assert.ok(!PAGE_RUNTIME.includes("\\"), "no backslash: a template literal would reinterpret it");
+  // It is also inlined in a <script> element, which the first of these would
+  // end early and the second would turn into an HTML comment.
+  assert.ok(!/<\/script/i.test(PAGE_RUNTIME), "no closing script tag");
+  assert.ok(!PAGE_RUNTIME.includes("<!--"), "no comment opener");
   assert.ok(PAGE_RUNTIME.includes(`var LOG_LIMIT = ${PAGE_LOG_LIMIT};`), "the page keeps as many lines as LiveView buffers");
 });
 

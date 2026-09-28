@@ -17,10 +17,18 @@
 // last ASSIGNED html when it is shown again -- without any of the patches that
 // followed. So the page posts `ready` on every load, and `handleMessage` then
 // brings that fresh document up to date: the regions that differ from what was
-// assigned, the latest progress, and the whole buffered log. Until the first
-// `ready`, renders of the same screen are only remembered (re-assigning the
-// document every time would reload a page that never gets far enough to say
-// it is ready).
+// assigned, the latest progress, and the whole buffered log.
+//
+// UNTIL THE PAGE IS READY, A CHANGED RENDER RE-ASSIGNS THE DOCUMENT. A patch
+// posted before `ready` has nothing to land on, so the only way to show a
+// render then is a new document. That also keeps two things honest: a page
+// whose script never runs still shows the latest state rather than the first
+// one, and a panel test driven through the stub -- which never says `ready`
+// unless the test does -- reads every render from `webview.html` exactly as
+// it did before the panel adopted this class. An unchanged render assigns
+// nothing, and progress and log lines never assign at all, so the reloads are
+// bounded by how often the screen's own regions change before the first
+// `ready`, which is milliseconds after an assignment.
 //
 // PROGRESS VALUES WIN. Within one screen the page re-applies the latest
 // `progress` message after every patch, so a region re-rendered from older
@@ -92,13 +100,16 @@ export class LiveView {
 
   /**
    * Show a screen. A new `screenKey` (or the first render, or one after
-   * `invalidate`) assigns a whole document; the same key posts only the
-   * regions that changed, or nothing when none did.
+   * `invalidate`) assigns a whole document, and so does a changed render of
+   * the same screen before its page has said `ready`; after that the same key
+   * posts only the regions that changed, or nothing when none did.
    */
   render(screenKey: string, parts: RegionParts): void {
     const next: RegionParts = { head: parts.head, body: parts.body, actions: parts.actions };
     this.latest = next;
-    if (screenKey !== this.screen || this.assigned === undefined) {
+    const assigned = this.assigned;
+    const sameScreen = screenKey === this.screen && assigned !== undefined;
+    if (!sameScreen || (!this.ready && changedRegions(assigned, next) !== undefined)) {
       this.screen = screenKey;
       this.assigned = next;
       this.shown = next;

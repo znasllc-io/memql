@@ -43,6 +43,11 @@
 // before the browser saw them and the third would silently change meaning.
 // test/pageRuntime.test.ts holds that line.
 //
+// TESTED IN TWO PLACES. test/pageRuntime.test.ts runs the page-to-host half
+// under `node --test`; the host-to-page half needs a real DOM and runs in
+// headless Chrome with `npm run gallery:check` (gallery/checks/). Run both
+// after changing this file.
+//
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
 /** The most lines a log pane keeps; older lines are dropped from the top. Matches LiveView's buffer. */
@@ -139,7 +144,16 @@ export const PAGE_RUNTIME = `
 
   // ---------- fields and switches ----------
 
+  // The value each field last posted, so the change event that follows the
+  // last input event does not post it twice. A value the HOST writes (a patch,
+  // a focus restore) is recorded here too: the host already knows it, and a
+  // person who then types or pastes the value they had before must still be
+  // heard -- otherwise a cleared confirmation phrase, pasted back in one go,
+  // would never reach the host.
   var lastPosted = new WeakMap();
+  function noteHostValue(el) {
+    if (el.hasAttribute && el.hasAttribute('data-field')) lastPosted.set(el, fieldValue(el));
+  }
   function onFieldEvent(event) {
     var el = event.target;
     if (!(el instanceof Element)) return;
@@ -219,18 +233,26 @@ export const PAGE_RUNTIME = `
       if (from.getAttribute(attr.name) !== attr.value) from.setAttribute(attr.name, attr.value);
     });
   }
+  // A control's live state follows the host's HTML, with one exception: the
+  // text of the field the person is typing in, which is theirs until they
+  // leave it. A checkbox or switch has no half-typed state to protect, so it
+  // follows the host even while focused -- a host that refuses or resets a
+  // choice must be able to show it, or the page would claim a choice the host
+  // does not hold.
   function syncFormState(from, to) {
-    if (from === document.activeElement) return;
-    if (from.nodeName === 'INPUT') {
-      if (from.type === 'checkbox' || from.type === 'radio') {
-        var checked = to.hasAttribute('checked');
-        if (from.checked !== checked) from.checked = checked;
-      } else {
-        var value = to.getAttribute('value') || '';
-        if (from.value !== value) from.value = value;
+    if (from.nodeName === 'INPUT' && (from.type === 'checkbox' || from.type === 'radio')) {
+      var checked = to.hasAttribute('checked');
+      if (from.checked !== checked) {
+        from.checked = checked;
+        noteHostValue(from);
       }
-    } else if (from.nodeName === 'TEXTAREA') {
-      if (from.value !== to.textContent) from.value = to.textContent;
+      return;
+    }
+    if (from === document.activeElement) return;
+    var value = from.nodeName === 'INPUT' ? to.getAttribute('value') || '' : from.nodeName === 'TEXTAREA' ? to.textContent : null;
+    if (value !== null && from.value !== value) {
+      from.value = value;
+      noteHostValue(from);
     }
   }
   function morphNode(from, to) {
@@ -292,7 +314,11 @@ export const PAGE_RUNTIME = `
     if (!key || (key.el.isConnected && document.activeElement === key.el)) return;
     var next = findSuccessor(key);
     if (!next || typeof next.focus !== 'function') return;
-    if (key.text !== null && (next.nodeName === 'INPUT' || next.nodeName === 'TEXTAREA')) next.value = key.text;
+    if (key.text !== null && (next.nodeName === 'INPUT' || next.nodeName === 'TEXTAREA') &&
+        next.type !== 'checkbox' && next.type !== 'radio') {
+      next.value = key.text;
+      noteHostValue(next);
+    }
     next.focus({ preventScroll: true });
     if (key.start !== null && typeof next.setSelectionRange === 'function') {
       try { next.setSelectionRange(key.start, key.end); } catch (err) { /* not a text control */ }

@@ -203,6 +203,9 @@ test("a data-* key that is not a plain attribute name throws rather than becomin
   assert.throws(() => button({ act: "a", label: "A", data: { 'x" onclick="1': "v" } }), /not a usable data-\* attribute name/);
   assert.throws(() => button({ act: "a", label: "A", data: { Upper: "v" } }), /not a usable/);
   assert.throws(() => button({ act: "a", label: "A", data: { act: "other" } }), /written by the kit/);
+  // A second data-tone would be dropped by the parser in favour of the kit's,
+  // silently, so it is refused instead.
+  assert.throws(() => button({ act: "a", label: "A", tone: "primary", data: { tone: "danger" } }), /written by the kit/);
   assert.match(button({ act: "a", label: "A", data: { "switch-act": "v" } }), / data-switch-act="v"/);
 });
 

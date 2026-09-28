@@ -163,7 +163,9 @@ export function kitStyles(): string {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--memql-ok) 22%, transparent); }
   .mq-dot[data-tone="warn"] { background: var(--memql-warn); }
   .mq-dot[data-tone="error"] { background: var(--memql-danger); }
-  .mq-dot[data-tone="busy"] { width: 12px; height: 12px; background: none;
+  /* The spinner is drawn larger than a dot but occupies a dot's 8px, so the
+     state word starts at the same x whatever the tone. */
+  .mq-dot[data-tone="busy"] { width: 12px; height: 12px; margin: 0 -2px; background: none;
     border: 1.5px solid color-mix(in srgb, var(--memql-accent) 25%, transparent);
     border-top-color: var(--memql-accent); animation: mq-spin 0.8s linear infinite; }
 
@@ -207,7 +209,9 @@ export function kitStyles(): string {
   .mq-switch-text { display: flex; flex-direction: column; gap: 1px; min-width: 0;
                     line-height: 20px; }
   .mq-switch-note { color: var(--memql-muted); font-size: 0.923em; line-height: 1.4; }
-  .mq-switch + .mq-field { margin: 6px 0 12px 40px; }
+  /* A field that belongs to the switch above it (a typed confirmation) sits
+     under the switch's words and ends where every other field ends. */
+  .mq-switch + .mq-field { margin: 6px 0 12px 40px; max-width: calc(34rem - 40px); }
 
   /* ---- notices ---- */
   .mq-notice { display: flex; align-items: flex-start; gap: 10px; box-sizing: border-box;
@@ -225,6 +229,9 @@ export function kitStyles(): string {
   .mq-notice-line { margin: 0; font-weight: 500; }
   .mq-notice-next { margin: 0; color: var(--memql-muted); }
   .mq-notice-acts { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 -4px -6px; }
+  /* The fix, as a text act, must not read as another line of the notice. */
+  .mq-notice-acts > .mq-textbtn { color: var(--memql-accent); font-weight: 500; }
+  .mq-notice-acts > .mq-textbtn:hover { color: var(--memql-accent); }
 
   /* ---- a command a person may copy or run ---- */
   .mq-code { display: flex; align-items: center; gap: 8px; box-sizing: border-box;
@@ -274,7 +281,7 @@ export function kitStyles(): string {
 
   /* ---- one progress screen for every long operation ---- */
   .mq-progress { display: flex; flex-direction: column; align-items: center; gap: 8px;
-                 box-sizing: border-box; width: 100%; max-width: 420px; margin: 0 auto;
+                 box-sizing: border-box; width: 100%; max-width: 560px; margin: 0 auto;
                  padding: 44px 0 16px; text-align: center; }
   .mq-progress-mark { color: var(--memql-accent); line-height: 0; margin-bottom: 10px; }
   .mq-progress-mark .memql-mark { display: block; }
@@ -295,9 +302,10 @@ export function kitStyles(): string {
   .mq-progress-meta { margin: 0; min-height: 1.45em; color: var(--memql-muted);
                       font-size: 0.923em; font-variant-numeric: tabular-nums; }
   /* The progress screen is one centred column: what follows the block (the
-     reason, the log) sits under it on the same axis, not at the page edge. */
-  .mq-progress ~ :is(.mq-notice, .mq-disclosure, .mq-empty, .mq-code) {
-    max-width: 600px; margin-left: auto; margin-right: auto; }
+     reason, the log) sits under it on the same axis and the same width, so
+     "Show logs" starts where the bar starts rather than hanging off it. */
+  .mq-progress ~ :is(.mq-notice, .mq-disclosure, .mq-empty, .mq-code, .mq-logbox) {
+    max-width: 560px; margin-left: auto; margin-right: auto; }
 ${barRules()}
 
   /* ---- loading is the shape of the content ---- */

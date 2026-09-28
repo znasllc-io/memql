@@ -9,8 +9,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { LiveView, type LogLine, type RegionParts } from "../src/webview/ui/liveView.js";
+import { pageDocument } from "../src/webview/ui/document.js";
 import { pageMessage } from "../src/webview/ui/protocol.js";
 import { PAGE_LOG_LIMIT } from "../src/webview/ui/runtime.js";
+import { recorded, resetRecorded, window } from "./support/vscodeStub.js";
 
 interface Recorder {
   html: string[];
@@ -43,18 +45,29 @@ test("the first render assigns the whole document", () => {
   assert.deepEqual(r.posts, []);
 });
 
-test("before ready, the same screen is remembered, not re-assigned", () => {
-  // Re-assigning on every render would reload a page that never gets far
-  // enough to post ready -- an install renders several times a second.
+test("before ready, a changed render of the same screen re-assigns the document", () => {
+  // A patch posted before ready has nothing to land on. Re-assigning is what
+  // keeps a page whose script never ran current, and what lets a panel test
+  // that never sends ready keep reading every render from webview.html.
   const r = recorder();
   r.view.render("running", PARTS);
   r.view.render("running", { ...PARTS, body: "B2" });
   r.view.render("running", { ...PARTS, body: "B3" });
-  assert.equal(r.html.length, 1);
+  assert.deepEqual(r.html, [
+    `<doc screen="running">H1|B1|A1</doc>`,
+    `<doc screen="running">H1|B2|A1</doc>`,
+    `<doc screen="running">H1|B3|A1</doc>`,
+  ]);
   assert.deepEqual(r.posts, []);
 
+  r.view.render("running", { ...PARTS, body: "B3" });
+  assert.equal(r.html.length, 3, "an unchanged render assigns nothing");
+
   assert.equal(r.view.handleMessage({ type: "ready" }), true);
-  assert.deepEqual(r.posts, [{ type: "patch", regions: { body: "B3" } }], "ready brings the page up to the latest render");
+  assert.deepEqual(r.posts, [], "the page already shows the latest render");
+  r.view.render("running", { ...PARTS, body: "B4" });
+  assert.equal(r.html.length, 3, "once ready, a change is a patch");
+  assert.deepEqual(r.posts, [{ type: "patch", regions: { body: "B4" } }]);
 });
 
 test("after ready, the same screen posts only the regions that changed", () => {
@@ -85,7 +98,8 @@ test("a new screen assigns the document again, and waits for its ready", () => {
 
   const before = r.posts.length;
   r.view.render("failed", { ...PARTS, body: "failure 2" });
-  assert.equal(r.posts.length, before, "not ready yet: remembered only");
+  assert.equal(r.posts.length, before, "not ready yet: nothing is posted to a loading page");
+  assert.equal(r.html.at(-1), `<doc screen="failed">H1|failure 2|A1</doc>`, "the new screen's document is re-assigned instead");
 });
 
 test("invalidate makes the next render assign the whole document", () => {
@@ -182,4 +196,38 @@ test("pageMessage accepts a typed message and nothing else", () => {
   assert.equal(pageMessage({ value: "x" }), undefined);
   assert.equal(pageMessage(null), undefined);
   assert.equal(pageMessage("ready"), undefined);
+});
+
+test("through a stub panel: html until ready, then patches, progress and log on posted", () => {
+  // The adoption path a panel takes, end to end against the test stub the
+  // panel tests use: the two-line target adapter, a real pageDocument wrap,
+  // and the page's side played by send(). A panel test that never sends ready
+  // reads every render from html; one that does reads the rest from posted.
+  resetRecorded();
+  const surface = window.createWebviewPanel("memql.probe", "Probe");
+  const panel = recorded.webviews.at(-1);
+  assert.ok(panel !== undefined);
+  const view = new LiveView(
+    { setHtml: (h) => (surface.webview.html = h), postMessage: (m) => surface.webview.postMessage(m) },
+    (parts, screen) => pageDocument({ nonce: "n0nce", title: "Probe", themeAttr: "", screen, ...parts }),
+  );
+  surface.webview.onDidReceiveMessage((raw) => view.handleMessage(raw));
+
+  view.render("run", { head: "<h1>One</h1>", body: "", actions: "" });
+  view.render("run", { head: "<h1>Two</h1>", body: "", actions: "" });
+  assert.equal(panel.renders, 2);
+  assert.ok(panel.html.includes("<h1>Two</h1>"), "before ready, html is the latest render");
+  view.progress({ percent: 30, status: "Creating the cluster", state: "running" });
+  view.log([line(1)]);
+  assert.deepEqual(panel.posted, [], "nothing is posted to a page that is still loading");
+
+  panel.send({ type: "ready" });
+  assert.deepEqual(panel.posted, [
+    { type: "progress", percent: 30, status: "Creating the cluster", state: "running" },
+    { type: "log", lines: [line(1)], reset: true },
+  ]);
+  view.render("run", { head: "<h1>Two</h1>", body: "<p>Body</p>", actions: "" });
+  assert.equal(panel.renders, 2, "a ready page is patched, not reloaded");
+  assert.deepEqual(panel.posted.at(-1), { type: "patch", regions: { body: "<p>Body</p>" } });
+  panel.close();
 });
