@@ -207,6 +207,26 @@ plan that was cancelled leaves a headless agent working on somebody's laptop.
 A worker disconnect ends every live session with a named error rather than
 leaving callers parked until their own deadlines expire.
 
+**Only the replica holding a session ends its row, so a sweep ends the rest.**
+While a replica holds a session its drain re-writes the row's `heartbeatAt`
+every two seconds, and keeps the recording run's heartbeat fresh too.
+`workerAppSessionStaleSweep` runs every two minutes on the cron leader and
+fails a `starting` or `running` row whose heartbeat is older than 90 seconds
+(the holder is gone), or whose session started more than 4.5 hours ago (longer
+than any session may run). It writes no `result`, so an answer the app
+submitted over MCP survives the close. The machine being online is not the
+test: after a pod restart it re-registers on another replica within seconds,
+while the session the dead pod held is orphaned. Both graces are
+`globalVariable`s an operator can widen without a release:
+`MEMQL_APP_SESSION_STALL_GRACE_SECONDS` and `MEMQL_APP_SESSION_MAX_AGE_SECONDS`.
+
+**A recording run is its driver's, not the dispatcher's.** The recording (and
+every other Go-written journal) carries `triggeredBy: journal:<template>`, and
+the work dispatcher never adopts a run with that prefix. Before it did, every
+agent replica claimed each recording a millisecond after it opened, could not
+load a template called `appSession`, and failed it `automation_not_runnable`
+over the session's own outcome.
+
 ---
 
 ## The back-channel credential
@@ -424,7 +444,7 @@ kubectl logs -n memql deploy/agent | grep 'cockpit-app container executor instal
 | `cockpit-app: no credential minter configured` | `MEMQL_IDENTITY_VERIFIER_BASE_URL` or `MEMQL_NODE_BOOTSTRAP_TOKEN` is unset on the agent. The run is REFUSED rather than started with a blank bearer — an app with no credential reaches nothing over MCP and reports that as "MemQL's tools are broken" |
 | `no machine online with claude-code allowed and signed in` | check Fleet -> Machines page; the badge says which half is missing |
 | `executorBackend "..." is not registered` at task creation | the name was validated against `RegisteredExecutors()`. With an empty registry the message says so |
-| A session stuck in `starting` | the node holding it died. The row is the record; a live session cannot survive its node |
+| "No agent replica is holding this session any more" | the node holding the session died, or the session outlived the longest any session may run. `workerAppSessionStaleSweep` closed the row a few minutes after its last heartbeat. Whatever the app already did on the machine stays there; ask again to start a new session |
 
 ### Environment
 

@@ -51,6 +51,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -90,12 +91,45 @@ const (
 	KindReasoning     = "reasoning"
 )
 
+// TriggerPrefix marks a run a Go DRIVER writes and runs itself: its
+// triggeredBy is `journal:<template>`.
+//
+// Such a run carries a goal, `running` and an automationName -- the template
+// WORD the feed filters by, which names no automation anybody registered --
+// and that is exactly the shape the work dispatcher takes for compiled goal
+// work. Before the marker, every agent replica claimed each journal run about
+// a millisecond after it opened, failed to load a template called
+// "libraryAnalyzeFile" or "appSession", and failed the run
+// automation_not_runnable over whatever its driver was recording. The
+// dispatcher (integrations/work.IsDriverOwnedRun) refuses a run carrying this
+// prefix, and so does every recovery path in its sweep.
+//
+// Here rather than in integrations/work because this package is the one
+// every writer of such a run can import: integrations/work's own recording
+// writer uses it too, so there is one spelling and not two to keep in step.
+const TriggerPrefix = "journal:"
+
+// TriggeredBy is the triggeredBy a driver-owned run of this template carries.
+func TriggeredBy(template string) string {
+	return TriggerPrefix + strings.TrimSpace(template)
+}
+
+// HeartbeatInterval is how often an open run says it is still being worked.
+//
+// The work sweep closes a `running` run whose heartbeat is older than a
+// minute as abandoned by a node that went away -- and nothing else beats for a
+// run a driver owns, because no executor runs it. A third of that window, so
+// one lost write never closes a live pass.
+const HeartbeatInterval = 20 * time.Second
+
 // Journal writes the rows.
 type Journal struct {
 	engine Executor
 	logger *slog.Logger
 	now    func() time.Time
 	nodeID string
+	// beat overrides HeartbeatInterval so a test can watch several beats.
+	beat time.Duration
 }
 
 // New builds a journal. A nil engine yields a journal whose methods are all
@@ -107,7 +141,7 @@ func New(engine Executor, logger *slog.Logger, nodeID string) *Journal {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Journal{engine: engine, logger: logger, now: time.Now, nodeID: nodeID}
+	return &Journal{engine: engine, logger: logger, now: time.Now, nodeID: nodeID, beat: HeartbeatInterval}
 }
 
 // Work describes the pass being opened.
@@ -165,6 +199,12 @@ type Run struct {
 	owner   string
 	order   []StepDecl
 	started time.Time
+	// stop ends the heartbeat and done says it has ended; closing twice is
+	// guarded by stopOnce, because a caller may close a run on more than one
+	// path.
+	stop     chan struct{}
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // GoalID and RunID are what a caller records elsewhere -- a log line, a
@@ -241,7 +281,9 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 		arg("automationName", template),
 		arg("templateFingerprint", fingerprint(template, w.Steps)),
 		objectArg("input", w.Input),
-		arg("triggeredBy", "system"),
+		// DRIVER-OWNED (TriggerPrefix): this package writes and closes the
+		// run, and the dispatcher must never adopt it.
+		arg("triggeredBy", TriggeredBy(template)),
 		arg("mode", "live"),
 		arg("status", "running"),
 		arg("nodeId", j.nodeID),
@@ -253,19 +295,71 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 	if _, err := j.engine.Execute(auth.ContextWithInternalOrigin(ctx), runCall); err != nil {
 		return nil, fmt.Errorf("workjournal: open run: %w", err)
 	}
-	if len(order) > 0 {
-		j.exec(ctx, call("mutation updateWorkRun",
-			arg("runId", runID),
-			stringListArg("stepOrder", order),
-		))
-	}
+	// The first heartbeat rides the stepOrder write: `createWorkRun` takes no
+	// heartbeatAt, and a run whose driver dies before the first tick is then
+	// judged from the moment it opened rather than from its start time alone.
+	j.exec(ctx, call("mutation updateWorkRun",
+		arg("runId", runID),
+		stringListArg("stepOrder", order),
+		arg("heartbeatAt", started.Format(time.RFC3339Nano)),
+	))
 	// The goal is now being worked. `createWorkGoal` stamps `open` and has
 	// no status argument, so this is the only thing that can say so.
 	j.exec(ctx, call("mutation updateWorkGoal",
 		arg("goalId", goalID),
 		arg("status", "active"),
 	))
-	return &Run{j: j, goalID: goalID, runID: runID, owner: owner, order: w.Steps, started: started}, nil
+	run := &Run{
+		j: j, goalID: goalID, runID: runID, owner: owner, order: w.Steps, started: started,
+		stop: make(chan struct{}), done: make(chan struct{}),
+	}
+	go run.heartbeat(ctx)
+	return run, nil
+}
+
+// heartbeat says the run is still being worked, every HeartbeatInterval,
+// until the run closes or the caller's context ends.
+//
+// A GOROUTINE AND NOT A WRITE PER STEP, because the stages that need it most
+// are the long ones: the Library pass embeds every chunk of a large file inside
+// one `index` step, and a delegated app session is one step that can run for
+// hours. A beat written only at step boundaries would let the work sweep close
+// either as abandoned while it was still running.
+//
+// The caller's context ending stops it as well as close() does: the pass runs
+// on that context, so a pass whose context is gone is not being worked any
+// more, and a heartbeat that outlived it would keep a dead run looking alive.
+func (r *Run) heartbeat(ctx context.Context) {
+	defer close(r.done)
+	every := r.j.beat
+	if every <= 0 {
+		every = HeartbeatInterval
+	}
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		select {
+		case <-r.stop:
+			return
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation updateWorkRun",
+				arg("runId", r.runID),
+				arg("heartbeatAt", r.j.now().UTC().Format(time.RFC3339Nano)),
+			))
+		}
+	}
+}
+
+// stopHeartbeat ends the heartbeat and waits for it, so no beat can land after
+// the close that follows. Safe to call more than once.
+func (r *Run) stopHeartbeat() {
+	if r == nil || r.stop == nil {
+		return
+	}
+	r.stopOnce.Do(func() { close(r.stop) })
+	<-r.done
 }
 
 // Step is one stage in flight.
@@ -350,13 +444,26 @@ func (r *Run) close(ctx context.Context, status string, outcome map[string]any, 
 	if r == nil || r.j == nil {
 		return
 	}
+	// Before the close is written, so no beat can land after it: a heartbeat
+	// on a finished run is harmless to the sweep, but it is a lie in the
+	// run's history.
+	r.stopHeartbeat()
 	finished := r.j.now().UTC()
+	errorCode, errorMessage := arg("errorCode", code), arg("errorMessage", message)
+	if status == "succeeded" {
+		// THE ONE BLANK THIS PACKAGE SENDS, and it is sent on purpose. A run
+		// that succeeded carries no error, and the read-merge keeps whatever an
+		// earlier write named -- which is how a Library pass that finished
+		// kept the automation_not_runnable a dispatcher wrote over it while it
+		// ran. Clearing is the only way to say "none" on an update.
+		errorCode, errorMessage = clearArg("errorCode"), clearArg("errorMessage")
+	}
 	r.j.exec(auth.ContextWithUserActor(ctx, r.owner), call("mutation updateWorkRun",
 		arg("runId", r.runID),
 		arg("status", status),
 		objectArg("outcome", outcome),
-		arg("errorCode", code),
-		arg("errorMessage", message),
+		errorCode,
+		errorMessage,
 		arg("finishedAt", finished.Format(time.RFC3339)),
 		objectArg("spent", map[string]any{"wallClockMs": finished.Sub(r.started).Milliseconds()}),
 	))
@@ -426,6 +533,12 @@ func arg(name, value string) string {
 		return ""
 	}
 	return name + ": " + langparser.QuoteString(value)
+}
+
+// clearArg renders an argument as the empty string -- a deliberate CLEAR on a
+// read-merge update, which arg would drop. See close for the one caller.
+func clearArg(name string) string {
+	return name + `: ""`
 }
 
 func intArg(name string, value int) string {

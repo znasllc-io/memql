@@ -823,6 +823,10 @@ mutation appSession createAppSession {
     credentialRef: args.credentialRef ?? ""
     credentialExpiresAt: args.credentialExpiresAt ?? ""
     args.startedAt
+    // The replica writing the row IS the holder, so the open is its first
+    // report: a session whose replica dies before the drain's first flush
+    // is judged from the moment it started, not left unjudgeable.
+    heartbeatAt: args.startedAt
   }
 }
 
@@ -850,6 +854,13 @@ mutation appSession createAppSession {
 // out-of-order or duplicate. It is written so the LOSS IS VISIBLE: a
 // procedure lifted from an incomplete recording would otherwise be lifted
 // as if it were complete.
+//
+// `status` and `heartbeatAt` are the HOLDER's, and both are written only
+// when named. The MCP node allocates a step through here too, from a
+// different replica and possibly after the session ended -- an app that
+// calls `submit` and exits races its own end -- so a default here would
+// resurrect a finished row to `running`, or keep an orphaned one looking
+// held for as long as its app kept calling MemQL.
 
 /// Advance a live app-session row's recording counters, and allocate the next step seq.
 ///
@@ -868,6 +879,9 @@ mutation appSession recordAppSessionProgress {
     recordedSteps  int
     droppedActions  int
     status         enum("starting", "running")
+    /// When the replica holding the session wrote this. Named only by the holder's drain; see the
+    /// concept's heartbeatAt for why the MCP node's allocation must not name it.
+    heartbeatAt    string
   }
   update {
     // NOT `?? 0`. A caller advancing only the drop count must not reset the
@@ -876,8 +890,12 @@ mutation appSession recordAppSessionProgress {
     // default here is what would break it.
     args.recordedSteps
     args.droppedActions
+    // NOT `?? "running"`, for the same reason and a sharper one: this used
+    // to default, and the MCP node's allocation -- which names no status --
+    // flipped a session that had already ended back to `running`.
+    args.status
+    args.heartbeatAt
     id: args.sessionId
-    status: args.status ?? "running"
   }
 }
 

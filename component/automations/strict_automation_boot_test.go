@@ -189,7 +189,13 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // sections a succeeded goal run worked out live, so the next goal asking for
 // the same section is served it instead of planning it again (D24). One
 // added, none removed; measured by the strict loader on this tree.
-const shippedAutomationCount = 74
+//
+// 74 -> 75 with workerAppSessionStaleSweep, the fourth worker sweep and the
+// one v1:worker:appSession's status description promised before it existed:
+// a session is held by one replica and only that replica ends its row, so a
+// pod restart left it at `running` for good. One added, none removed;
+// measured by the strict loader on this tree.
+const shippedAutomationCount = 75
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

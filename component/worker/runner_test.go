@@ -26,14 +26,14 @@ func (s *recordingAppSessionStore) CreateAppSession(_ context.Context, row AppSe
 	return nil
 }
 
-func (s *recordingAppSessionStore) RecordAppSessionProgress(_ context.Context, sessionId string, recordedSteps, droppedActions int, status string) error {
+func (s *recordingAppSessionStore) RecordAppSessionProgress(_ context.Context, sessionId string, recordedSteps, droppedActions int, status string, heartbeatAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// A NEGATIVE COUNT MEANS "the caller did not name this field", which is
 	// how the allocator advances one counter without resetting the other.
 	// Recording it as 0 would make this fake claim a write the real store
 	// never makes.
-	row := AppSessionRow{ID: sessionId, Status: status}
+	row := AppSessionRow{ID: sessionId, Status: status, HeartbeatAt: heartbeatAt}
 	if recordedSteps >= 0 {
 		row.RecordedSteps = recordedSteps
 	}

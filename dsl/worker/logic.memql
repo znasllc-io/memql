@@ -170,3 +170,46 @@ logic workerStaleConnectionSweep {
   )
   return stranded.nodes()
 }
+
+
+// workerAppSessionStaleSweep
+// ==========================
+//
+// The promise dsl/worker/concepts.memql made about v1:worker:appSession for
+// as long as the concept has existed, and that nothing kept: "a session that
+// never reaches a terminal status is one whose node died holding it -- the
+// sweep marks those failed". There was no sweep. Every pod restart, every
+// agent crash and every refused terminal write left a row at `running` for
+// good -- live in the Fleet views, and counted by liveAppSessionsForUser,
+// which is what the planner's maxConcurrentSessions cap reads.
+//
+// A session is held by ONE agent replica, the one holding the machine's
+// stream, and its drain re-writes heartbeatAt every couple of seconds while it
+// does. So the question is not "is the machine online" -- it usually is, on
+// another replica, within seconds of a restart -- but "is anybody still
+// holding THIS session", and only the heartbeat answers it.
+
+/// Every app session nobody is holding, judged by TWO cutoffs.
+///
+/// The STALL grace is against heartbeatAt, which the holder's drain re-writes every two seconds
+/// (component/worker's recordingPublishInterval); the default of 90s is some forty missed flushes,
+/// so a replica that is merely slow is never taken for a dead one. The MAX AGE is against
+/// startedAt, and it defaults to the four-hour credential lifetime and session ceiling plus half an
+/// hour: nothing legitimately runs that long, and it is the only judgment available for a row
+/// written before heartbeatAt existed.
+///
+/// Both are read from globalVariables so an operator can widen them on a slow cluster without a
+/// release, and both default generously: failing a session that is merely slow is worse than
+/// leaving a dead one on screen for another minute.
+logic workerAppSessionStaleSweep {
+  args {
+    event object!
+  }
+  stallGrace := query globalVariable(name: "MEMQL_APP_SESSION_STALL_GRACE_SECONDS")
+  maxAge := query globalVariable(name: "MEMQL_APP_SESSION_MAX_AGE_SECONDS")
+  abandoned := query openAppSessions(
+    heartbeatBefore: addDuration(now, "PT-" + (stallGrace.first().value ?? "90") + "S"),
+    startedBefore: addDuration(now, "PT-" + (maxAge.first().value ?? "16200") + "S")
+  )
+  return abandoned.nodes()
+}

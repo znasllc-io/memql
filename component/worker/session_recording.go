@@ -68,6 +68,10 @@ type sessionRecording struct {
 	// event and belongs ON a step (design D16), so it waits for one rather
 	// than getting a step of its own that did nothing.
 	fingerprintPending map[string]any
+	// runBeatEvery throttles the recording RUN's heartbeat, and lastRunBeat
+	// is when it last went out. See Publish.
+	runBeatEvery time.Duration
+	lastRunBeat  time.Time
 }
 
 // newSessionRecording opens the recording, or returns nil when this node has
@@ -90,6 +94,8 @@ func newSessionRecording(ctx context.Context, r *SessionRunner, spec RunSpec) *s
 		owner:      spec.OwnerUserId,
 		app:        spec.App,
 		provenance: ArtifactProvenance{App: spec.App, SessionId: spec.SessionId},
+
+		runBeatEvery: r.runHeartbeatInterval(),
 	}
 	if rec.logger == nil {
 		rec.logger = slog.Default()
@@ -103,6 +109,7 @@ func newSessionRecording(ctx context.Context, r *SessionRunner, spec RunSpec) *s
 		RunId:        spec.RecordingRunId,
 		ParentRunId:  spec.RunId,
 		ParentStepId: spec.StepId,
+		ModelCall:    spec.ModelCall,
 	})
 	if err != nil {
 		rec.logger.Warn("app session: could not open the recording; the session runs unrecorded",
@@ -299,25 +306,47 @@ func (s *sessionRecording) allocateSeq(ctx context.Context) int {
 	return seq
 }
 
-// Publish writes how much of the session was LOST onto the row.
+// Publish writes how much of the session was LOST onto the row, and is the
+// HOLDER'S HEARTBEAT.
 //
 // It no longer writes the step count: that is the allocator's, and a second
 // writer of the same field would undo an allocation the MCP node had already
 // taken. The drop count has one writer -- this one -- so it is published from
 // here.
+//
+// THE HEARTBEAT RIDES THE SAME WRITE. The drain calls this on every flush for
+// as long as this replica holds the session, so it is the one writer that can
+// say "somebody is still holding this": the session row's heartbeatAt, which
+// workerAppSessionStaleSweep judges a live row by, and -- throttled -- the
+// recording run's, which the work sweep abandons a running run without. The
+// run's beat is throttled because every run write is broadcast to every
+// replica, and the sweep's window is a minute, not a flush.
 func (s *sessionRecording) Publish(ctx context.Context, store AppSessionStore, status string) {
 	if s == nil || store == nil {
 		return
 	}
+	now := time.Now().UTC()
 	s.mu.Lock()
 	dropped := s.sequence.Dropped()
+	beatRun := s.lastRunBeat.IsZero() || now.Sub(s.lastRunBeat) >= s.runBeatEvery
+	if beatRun {
+		s.lastRunBeat = now
+	}
 	s.mu.Unlock()
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	// -1 for recordedSteps means "do not name it".
-	if err := store.RecordAppSessionProgress(writeCtx, s.sessionId, -1, dropped, status); err != nil {
+	if err := store.RecordAppSessionProgress(writeCtx, s.sessionId, -1, dropped, status, now); err != nil {
 		s.logger.Warn("app session: could not publish recording progress",
 			"session_id", s.sessionId, "error", err)
+	}
+	if beatRun {
+		if err := s.recorder.HeartbeatRecording(writeCtx, RecordingHeartbeat{
+			SessionId: s.sessionId, OwnerUserId: s.owner, RunId: s.runId, At: now,
+		}); err != nil {
+			s.logger.Warn("app session: could not heartbeat the recording run; the work sweep may close it as abandoned",
+				"session_id", s.sessionId, "run_id", s.runId, "error", err)
+		}
 	}
 }
 

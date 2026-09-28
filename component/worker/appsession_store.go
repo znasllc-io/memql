@@ -78,7 +78,11 @@ type AppSessionRow struct {
 	ErrorMessage string
 	CancelReason string
 	StartedAt    time.Time
-	EndedAt      time.Time
+	// HeartbeatAt is when the replica HOLDING the session last reported it
+	// alive. The create stamps it from StartedAt in the mutation, and only
+	// the holder's progress writes advance it; the stale sweep reads it.
+	HeartbeatAt time.Time
+	EndedAt     time.Time
 }
 
 // AppSessionStore is the persistence surface for session rows. Kept
@@ -86,7 +90,10 @@ type AppSessionRow struct {
 // not obliged to implement it.
 type AppSessionStore interface {
 	CreateAppSession(ctx context.Context, row AppSessionRow) error
-	RecordAppSessionProgress(ctx context.Context, sessionId string, recordedSteps, droppedActions int, status string) error
+	// RecordAppSessionProgress advances the recording counters and, when the
+	// HOLDING replica writes, its heartbeat. A negative count, an empty
+	// status and a zero heartbeatAt each mean "do not name this field".
+	RecordAppSessionProgress(ctx context.Context, sessionId string, recordedSteps, droppedActions int, status string, heartbeatAt time.Time) error
 	EndAppSession(ctx context.Context, row AppSessionRow) error
 	// ClaimRecordingSlot reads where this session's steps go -- its owner and
 	// its recording run -- and takes the next step position, advancing the
@@ -165,7 +172,7 @@ func (s *EngineStore) CreateAppSession(ctx context.Context, row AppSessionRow) e
 // No owner to borrow here -- the progress write names only the session -- but
 // the internal-origin stamp is still required: the mutation is @serverOnly and
 // an unstamped context reads as a client call.
-func (s *EngineStore) RecordAppSessionProgress(ctx context.Context, sessionId string, recordedSteps, droppedActions int, status string) error {
+func (s *EngineStore) RecordAppSessionProgress(ctx context.Context, sessionId string, recordedSteps, droppedActions int, status string, heartbeatAt time.Time) error {
 	if s == nil || s.Engine == nil {
 		return nil
 	}
@@ -184,6 +191,14 @@ func (s *EngineStore) RecordAppSessionProgress(ctx context.Context, sessionId st
 	if strings.TrimSpace(status) != "" {
 		args["status"] = status
 	}
+	// THE HOLDER'S HEARTBEAT, and only the holder's. The stale sweep judges a
+	// live row by it; the MCP node's allocation below writes this row too,
+	// from another replica, and naming a heartbeat there would keep a session
+	// looking held for as long as its app kept calling MemQL after the replica
+	// running it had died.
+	if !heartbeatAt.IsZero() {
+		args["heartbeatAt"] = heartbeatAt.UTC().Format(time.RFC3339Nano)
+	}
 	return s.executeMutation(appSessionWriteContext(ctx, ""), "recordAppSessionProgress", args)
 }
 
@@ -196,7 +211,7 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 	// known=false and zeroes, and billing stays "unknown" -- folding
 	// silence into either metered or subscription is precisely what
 	// would make "what did the subscription cover" untrustworthy.
-	return s.executeMutation(appSessionWriteContext(ctx, row.OwnerUserId), "endAppSession", map[string]any{
+	args := map[string]any{
 		"sessionId": row.ID,
 		"status":    row.Status,
 		"exitCode":  row.ExitCode,
@@ -215,9 +230,19 @@ func (s *EngineStore) EndAppSession(ctx context.Context, row AppSessionRow) erro
 		"appSessionRef":       row.AppSessionRef,
 		"errorMessage":        row.ErrorMessage,
 		"cancelReason":        row.CancelReason,
-		"result":              resultArg(row.Result),
 		"endedAt":             row.EndedAt.UTC().Format(time.RFC3339Nano),
-	})
+	}
+	// NAMED ONLY WHEN THERE IS ONE -- resultArg's contract, which this map
+	// used to break by carrying the key unconditionally. A present key with a
+	// nil value renders as `result: null`, the engine keeps an explicit null
+	// (only an ABSENT argument is dropped), and null in the concept's `object`
+	// field fails validation for the whole terminal write. Every session that
+	// ended without a structured answer -- a free-text run, a refused start, a
+	// disconnect -- was left at `running` that way.
+	if result := resultArg(row.Result); result != nil {
+		args["result"] = result
+	}
+	return s.executeMutation(appSessionWriteContext(ctx, row.OwnerUserId), "endAppSession", args)
 }
 
 // ClaimRecordingSlot implements the shared allocator.
@@ -261,7 +286,8 @@ func (s *EngineStore) ClaimRecordingSlot(ctx context.Context, sessionId, ownerUs
 	if !found {
 		return RecordingSlot{}, fmt.Errorf("worker.store: no session row is readable for %s", sessionId)
 	}
-	if err := s.RecordAppSessionProgress(ctx, sessionId, slot.Seq+1, -1, ""); err != nil {
+	// No status and no heartbeat: this is the MCP node, not the holder.
+	if err := s.RecordAppSessionProgress(ctx, sessionId, slot.Seq+1, -1, "", time.Time{}); err != nil {
 		return slot, err
 	}
 	return slot, nil

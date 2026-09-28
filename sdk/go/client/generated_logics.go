@@ -553,6 +553,28 @@ func UsersDueDeletionReminderBuild(args UsersDueDeletionReminderArgs) string {
 	return b.String()
 }
 
+// WorkerAppSessionStaleSweep -- Every app session nobody is holding, judged by TWO cutoffs.
+// The STALL grace is against heartbeatAt, which the holder's drain re-writes every two seconds (component/worker's recordingPublishInterval); the default of 90s is some forty missed flushes, so a replica that is merely slow is never taken for a dead one. The MAX AGE is against startedAt, and it defaults to the four-hour credential lifetime and session ceiling plus half an hour: nothing legitimately runs that long, and it is the only judgment available for a row written before heartbeatAt existed.
+// Both are read from globalVariables so an operator can widen them on a slow cluster without a release, and both default generously: failing a session that is merely slow is worse than leaving a dead one on screen for another minute.
+type WorkerAppSessionStaleSweepArgs struct {
+	Event map[string]any
+}
+
+// WorkerAppSessionStaleSweep calls the engine logic workerAppSessionStaleSweep.
+func (qc *QueryClient) WorkerAppSessionStaleSweep(ctx context.Context, args WorkerAppSessionStaleSweepArgs) (*Result, error) {
+	call := WorkerAppSessionStaleSweepBuild(args)
+	return qc.executeNamed(ctx, "workerAppSessionStaleSweep", call)
+}
+
+func WorkerAppSessionStaleSweepBuild(args WorkerAppSessionStaleSweepArgs) string {
+	var b strings.Builder
+	b.WriteString("logic workerAppSessionStaleSweep(")
+	b.WriteString("event: ")
+	b.WriteString(renderMemQLValue(args.Event))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkerInvocationRetentionSweep -- Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window via addDuration with a negative ISO duration, reads `query expiredWorkerInvocations(createdBefore: cutoff)` and returns its nodes() -- rows past retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's `for` loop soft-deletes each unconditionally.
 type WorkerInvocationRetentionSweepArgs struct {
 	Event map[string]any

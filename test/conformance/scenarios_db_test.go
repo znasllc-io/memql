@@ -1034,8 +1034,21 @@ func renderScenarioArg(t *testing.T, v any) string {
 			items[i] = renderScenarioArg(t, e)
 		}
 		return "[" + strings.Join(items, ", ") + "]"
+	case map[string]any:
+		// An object argument -- an app's submitted answer, say. Keys in order,
+		// so one scenario renders one statement.
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		fields := make([]string, len(keys))
+		for i, k := range keys {
+			fields[i] = ast.QuoteString(k) + ": " + renderScenarioArg(t, v[k])
+		}
+		return "{" + strings.Join(fields, ", ") + "}"
 	}
-	t.Fatalf("a seed argument is a string, a number, a boolean or a list of them; got %T", v)
+	t.Fatalf("a seed argument is a string, a number, a boolean, or a list or object of them; got %T", v)
 	return ""
 }
 

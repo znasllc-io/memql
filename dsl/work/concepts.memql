@@ -61,7 +61,7 @@ concept run {
   variables              object  @description("The bound args (epic A2).")
   input                  object  @description("The automation's input envelope, restored on resume.")
   inputFingerprint       string  @description("Hash of input, for verification on resume.")
-  triggeredBy            string  @description("How the run was triggered: schedule, event, manual, a sub-automation, or resumed:<runId>.")
+  triggeredBy            string  @description("How the run was triggered: schedule, event, manual, a sub-automation, or resumed:<runId>. Two prefixes mark a run its DRIVER writes and runs, which the work dispatcher never adopts: procedure:<mode> (a learned procedure's replay) and journal:<template> (a Go-written journal -- the Library's analysis pass, a delegated step's child run, an app session's recording). Such a run carries a goal and names a template word that is no automation, which is otherwise exactly what the dispatcher executes.")
   triggerEvent           object  @description("{topic, kind, payload} of the triggering event, when there was one. Restored on resume.")
   callerSuppliedPayload  bool  @description("The trigger payload came from a caller (MCP, a dry-run), so a resume must NOT restore internal origin to it (memql#2888, memql#2890).")
   mode                   enum("live", "replay", "fork")!  @description("live serves nothing from the journal; replay serves every model call from it; fork serves the shared prefix.")

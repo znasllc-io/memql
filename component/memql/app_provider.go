@@ -482,6 +482,21 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 	if strings.TrimSpace(req.ActingUserId) == "" {
 		req.ActingUserId = actingUserFromContext(ctx)
 	}
+	// THE CALLING RUN AND STEP, filled only if empty -- applyCallAttribution's
+	// rule, for its reason. A model call answered by an app is made inside a
+	// step, and without these the session it opens names no run: it cannot be
+	// traced to the work that caused it, and its recording opens as a goal of
+	// its own. StepId is the step KEY, the run context's own currency and the
+	// session door's handover contract; the recorder is what decides that one
+	// model call claims nothing on that step (worker.RecordingOpen.ModelCall).
+	if rc, inRun := common.RunFromContext(ctx); inRun && strings.TrimSpace(rc.RunId) != "" {
+		if strings.TrimSpace(req.RunId) == "" {
+			req.RunId = rc.RunId
+		}
+		if strings.TrimSpace(req.StepId) == "" {
+			req.StepId = rc.StepKey
+		}
+	}
 
 	if p.wildcard {
 		chosen, err := p.resolveWildcard(ctx, a, req)

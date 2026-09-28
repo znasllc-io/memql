@@ -32,6 +32,12 @@ const (
 	// stdout chunks a minute and a row-write each would saturate the engine
 	// to deliver a count nobody reads between ticks.
 	recordingPublishInterval = 2 * time.Second
+	// recordingRunHeartbeatInterval throttles the recording RUN's heartbeat.
+	// A third of the work sweep's one-minute abandon window: three beats per
+	// window, so one lost write never closes a held session's recording, and
+	// not one per flush, because every run write is broadcast to every
+	// replica in the mesh.
+	recordingRunHeartbeatInterval = 20 * time.Second
 	// transcriptTruncationNotice is appended once the bound is hit.
 	// Marked rather than silent: a transcript that stops without
 	// saying why reads as a run that stopped.
@@ -57,6 +63,41 @@ type SessionRunner struct {
 	Contents ContentStore
 	// Clock is injectable for tests.
 	Clock func() time.Time
+
+	// flushEvery and runHeartbeatEvery override the two heartbeat cadences,
+	// so a test can watch several beats without waiting the production
+	// seconds. Zero is the production value.
+	flushEvery        time.Duration
+	runHeartbeatEvery time.Duration
+}
+
+func (r *SessionRunner) flushInterval() time.Duration {
+	if r != nil && r.flushEvery > 0 {
+		return r.flushEvery
+	}
+	return recordingPublishInterval
+}
+
+func (r *SessionRunner) runHeartbeatInterval() time.Duration {
+	if r != nil && r.runHeartbeatEvery > 0 {
+		return r.runHeartbeatEvery
+	}
+	return recordingRunHeartbeatInterval
+}
+
+// heartbeat writes the holder's heartbeat onto the session row and nothing
+// else: no status, because a heartbeat is not a chunk, and no counters,
+// because with no recorder there are none. A failure is logged -- the next
+// flush tries again, and the sweep's grace is many flushes long.
+func (r *SessionRunner) heartbeat(ctx context.Context, sessionId string) {
+	if r.Store == nil {
+		return
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := r.Store.RecordAppSessionProgress(writeCtx, sessionId, -1, -1, "", r.now()); err != nil && r.Logger != nil {
+		r.Logger.Warn("worker: app session heartbeat failed", "session_id", sessionId, "error", err)
+	}
 }
 
 // RunSpec is one delegated run.
@@ -70,6 +111,10 @@ type RunSpec struct {
 	Inputs      []string
 	RunId       string
 	StepId      string
+	// ModelCall marks a session that answers one model call the step at
+	// RunId/StepId made, rather than doing that step's work. See
+	// RecordingOpen.ModelCall for what the recording does differently.
+	ModelCall bool
 	// AppSessionRef names the app's own session on the attach path.
 	AppSessionRef string
 	// RequireLabels narrows machine selection beyond the app: label.
@@ -321,7 +366,7 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 	drained := make(chan struct{})
 	go func() {
 		defer close(drained)
-		flush := time.NewTicker(recordingPublishInterval)
+		flush := time.NewTicker(r.flushInterval())
 		defer flush.Stop()
 		for {
 			select {
@@ -345,6 +390,16 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 					progress(chunk)
 				}
 			case <-flush.C:
+				if recording == nil {
+					// NO RECORDER, STILL A HOLDER. The flush is the only
+					// evidence this replica holds the session, and the stale
+					// sweep fails a live row that stops showing it -- so a
+					// node with no recorder wired says so with a status-less
+					// heartbeat, rather than leaving a row that never changes
+					// and cannot be told from one whose replica has gone.
+					r.heartbeat(ctx, spec.SessionId)
+					continue
+				}
 				recording.Publish(ctx, r.Store, AppSessionStatusRunning)
 			case <-ctx.Done():
 				// Publish what was recorded before giving up, so a cancelled
