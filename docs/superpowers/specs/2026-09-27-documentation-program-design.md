@@ -286,6 +286,19 @@ second would be a second way to publish. `scripts/docs/current-check.sh`, a
 capability script under the contract test, fails weekly when the newest tag
 has no asset or the site's version meta differs (docs-current PR 2).
 
+> **Amended 2026-09-28 (#5714).** The cut reads `VERSION` and never writes
+> it. Writing it in a release commit is not available: `main` refuses direct
+> pushes to every identity (the ruleset), and tagging a commit that is not on
+> `main` would leave `main`'s `VERSION` behind, build images from `main`'s
+> head rather than the tagged commit, and blind `already_released_at_head`.
+> So a "prepare X.Y.Z" pull request sets `VERSION` and merges first, and both
+> cut paths read the file at the commit they are about to tag and refuse a
+> mismatch: `integrations/release/cut.go` with `version_file_stale`,
+> `scripts/release/release-engine.sh` with exit 3 and the same reason. The
+> equality, the bundle's refusal, `engineVersion` leaving the manifest and the
+> weekly check stand as decided. The runbook,
+> `docs/public/operate/release-cutting.md`, carries the prepare step.
+
 ### D13 -- The sync job commits directly to the instance's main
 
 The instance's `docs-sync.yml` runs on dispatch, hourly and by hand; replaces
