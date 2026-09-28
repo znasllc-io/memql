@@ -26,7 +26,7 @@ import { browseConceptPage, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import type { ClusterFacts } from "../clusters/facts.js";
 import { readClustersFileSafe } from "../clusters/file.js";
-import type { ClusterConfig } from "../clusters/model.js";
+import { displayLabel, type ClusterConfig } from "../clusters/model.js";
 import { clusterPage, type ClusterPageAct, type SignInFlight } from "../clusters/connectionView.js";
 import { SITE_CONCEPT, consoleTarget } from "../clusters/consoleUrl.js";
 import type { ConnectionManager } from "../connection/manager.js";
@@ -61,6 +61,8 @@ export class ConnectionPanel {
   private readonly disposables: vscode.Disposable[] = [];
   private clusterName = "";
   private cluster: ClusterConfig | undefined;
+  /** The label last shown, kept if the cluster leaves the list while the page is open. */
+  private knownLabel = "";
   private registryError: string | undefined;
   private facts: ClusterFacts | undefined;
   private identity: { email: string; role: string } | "loading" | "unavailable" = "loading";
@@ -164,6 +166,7 @@ export class ConnectionPanel {
     if (clusterName !== this.clusterName) {
       this.clusterName = clusterName;
       this.cluster = undefined;
+      this.knownLabel = "";
       this.facts = undefined;
       this.identity = "loading";
       this.identityFor = "";
@@ -186,6 +189,7 @@ export class ConnectionPanel {
     }
     this.registryError = undefined;
     this.cluster = result.file.clusters.find((c) => c.name === this.clusterName);
+    if (this.cluster !== undefined) this.knownLabel = displayLabel(this.cluster);
     if (this.cluster === undefined) {
       this.render();
       return;
@@ -252,6 +256,7 @@ export class ConnectionPanel {
     const page = clusterPage({
       clusterName: this.clusterName,
       cluster: this.cluster,
+      knownLabel: this.knownLabel,
       ...(this.registryError !== undefined ? { registryError: this.registryError } : {}),
       facts: this.facts,
       connection: this.deps.connections.state,

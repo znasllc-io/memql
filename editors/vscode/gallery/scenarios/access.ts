@@ -130,7 +130,11 @@ export const scenarios: readonly Scenario[] = [
     cluster: REMOTE,
   }),
   page("access-cluster-loading", "Cluster page: loading", { facts: undefined }),
-  page("access-cluster-removed", "Cluster page: removed from the list", { cluster: undefined, clusterName: "local" }),
+  page("access-cluster-removed", "Cluster page: removed from the list", {
+    cluster: undefined,
+    clusterName: "local",
+    knownLabel: "memql.localhost",
+  }),
   page("access-cluster-registry-error", "Cluster page: cluster list unreadable", {
     registryError: "clusters.yaml is malformed: line 3",
   }),

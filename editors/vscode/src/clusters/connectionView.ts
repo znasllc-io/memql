@@ -52,6 +52,12 @@ export interface ClusterPageInput {
   clusterName: string;
   /** The entry, or undefined when it is no longer in the list. */
   cluster: ClusterConfig | undefined;
+  /**
+   * The label the page last showed for this cluster. A cluster removed while
+   * its page is open keeps the name the person knew it by, rather than
+   * turning into its registry key (`local` for `memql.localhost`).
+   */
+  knownLabel?: string;
   /** Set when clusters.yaml could not be read at all. */
   registryError?: string;
   /** The facts (facts.ts), once read; undefined while the first read is in flight. */
@@ -118,10 +124,11 @@ export function clusterPage(input: ClusterPageInput): ClusterPage {
 
   const cluster = input.cluster;
   if (cluster === undefined) {
+    const known = (input.knownLabel ?? "").trim() || input.clusterName;
     return {
       screen,
-      title: input.clusterName,
-      head: head({ title: input.clusterName }),
+      title: known,
+      head: head({ title: known }),
       body: emptyState({ line: "This cluster is no longer in your list.", acts: [act("close", "Close", "secondary")] }),
       actions: "",
     };

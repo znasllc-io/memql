@@ -217,6 +217,15 @@ test("a cluster no longer in the list says so, with Close", () => {
   assert.deepEqual(bar(page.body), ["close:Close"]);
 });
 
+test("a cluster removed while its page is open keeps the name the page showed", () => {
+  // Not its registry key: the row, the page and the toasts all said
+  // "memql.localhost", and "local" is a name the person never saw.
+  const page = clusterPage(input({ cluster: undefined, knownLabel: "memql.localhost" }));
+  assert.equal(page.title, "memql.localhost");
+  assert.match(page.head, /memql\.localhost/);
+  assert.equal(clusterPage(input({ cluster: undefined })).title, "local", "with nothing shown before, the key is all there is");
+});
+
 test("an unreadable cluster list says so, with Open file", () => {
   const page = clusterPage(input({ registryError: "clusters.yaml is malformed: line 3" }));
   assert.match(text(page.body), /Can't read your cluster list\./);
