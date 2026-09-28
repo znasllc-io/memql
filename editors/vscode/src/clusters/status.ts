@@ -290,3 +290,31 @@ export function retriesEndedNotice(next: ConnectionState): "reconnect" | "signIn
   if (next.reason === "lost" || next.reason === "unreachable") return "reconnect";
   return SIGN_IN_REASONS[next.reason] !== undefined ? "signIn" : undefined;
 }
+
+/**
+ * Which cluster `memql.clusters.signIn` (and its code variant) is about, from
+ * what the command was handed.
+ *
+ *   a row or page node  -> that cluster (`node`)
+ *   a cluster's name    -> that entry (`name`): the cross-view contract lets
+ *                          any view offer Sign in by name
+ *   nothing             -> the cluster the live connection's refusal names,
+ *                          when sign-in is what it needs (`name`): a welcome's
+ *                          "Sign in" link carries no argument, and asking the
+ *                          person which cluster would put a dialog in front of
+ *                          the one act they clicked. Otherwise the picker.
+ */
+export function signInTarget(
+  arg: unknown,
+  connection: ConnectionState,
+): { kind: "node" } | { kind: "name"; name: string } | { kind: "pick" } {
+  if (typeof arg === "object" && arg !== null) {
+    const cluster = (arg as { cluster?: { name?: unknown } }).cluster;
+    if (typeof cluster?.name === "string" && cluster.name !== "") return { kind: "node" };
+  }
+  if (typeof arg === "string" && arg.trim() !== "") return { kind: "name", name: arg.trim() };
+  if (connection.status === "error" && SIGN_IN_REASONS[connection.reason] !== undefined) {
+    return { kind: "name", name: connection.clusterName };
+  }
+  return { kind: "pick" };
+}

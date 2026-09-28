@@ -17,6 +17,7 @@ import {
   clusterStatus,
   retriesEndedNotice,
   rowClickAction,
+  signInTarget,
   stateWord,
   versionNote,
 } from "../src/clusters/status.js";
@@ -214,4 +215,20 @@ test("the end of a run of retries is announced once, with the right fix", () => 
   assert.equal(retriesEndedNotice({ status: "connecting", clusterName: "local" }), undefined);
   assert.equal(retriesEndedNotice(retrying), undefined, "still retrying: nothing to say yet");
   assert.equal(retriesEndedNotice(ordinary), undefined, "an ordinary failure is not the end of retries");
+});
+
+test("Sign in takes a node, a cluster's name, or nothing -- and nothing means the cluster asking for it", () => {
+  const node = { cluster: cluster(), selected: true };
+  assert.deepEqual(signInTarget(node, DISCONNECTED), { kind: "node" });
+  // The cross-view contract: any view may offer Sign in by name.
+  assert.deepEqual(signInTarget("staging", DISCONNECTED), { kind: "name", name: "staging" });
+  // A welcome's link carries no argument: the cluster whose connection was
+  // refused on a credential, with no picker in front of the one act clicked.
+  assert.deepEqual(signInTarget(undefined, error("missingCredential")), { kind: "name", name: "local" });
+  assert.deepEqual(signInTarget(undefined, error("reauthenticationRequired")), { kind: "name", name: "local" });
+  // Nothing asks for a sign-in: the picker.
+  assert.deepEqual(signInTarget(undefined, DISCONNECTED), { kind: "pick" });
+  assert.deepEqual(signInTarget(undefined, error("unreachable")), { kind: "pick" });
+  assert.deepEqual(signInTarget(undefined, { status: "connected", clusterName: "local", nodeId: "n" }), { kind: "pick" });
+  assert.deepEqual(signInTarget("", DISCONNECTED), { kind: "pick" });
 });

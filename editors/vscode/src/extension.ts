@@ -80,6 +80,7 @@ import {
   clusterStatus,
   retriesEndedNotice,
   rowClickAction,
+  signInTarget,
 } from './clusters/status.js';
 import { fileOnlyFacts, gatherClusterFacts, signedInKey, type ClusterFacts } from './clusters/facts.js';
 import { planLocalReconnect } from './clusters/reconnect.js';
@@ -2539,8 +2540,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     }),
     // memql#3403. Reached from the Clusters view's context menu (which supplies
     // the node) and from the palette (which cannot, so it asks).
-    commands.registerCommand('memql.clusters.signIn', async (node?: ClusterNode) => {
-      const target = node ?? (await pickCluster(clustersPath));
+    // Takes a row or page node, a cluster's NAME (the cross-view contract),
+    // or nothing -- a welcome's link -- which means the cluster whose
+    // connection asks for a sign-in (clusters/status.ts signInTarget).
+    commands.registerCommand('memql.clusters.signIn', async (arg?: ClusterNode | string) => {
+      const target = await resolveSignInTarget(arg, clustersPath);
       if (target === undefined || target.cluster.name === '') {
         return;
       }
@@ -2963,8 +2967,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // command also refreshes the tree and reconnects the selected cluster. It used
   // to reach a second sign-in implementation that did neither.
   context.subscriptions.push(
-    commands.registerCommand('memql.clusters.signInWithCode', async (node?: ClusterNode) => {
-      const target = node ?? (await pickCluster(clustersPath));
+    commands.registerCommand('memql.clusters.signInWithCode', async (arg?: ClusterNode | string) => {
+      const target = await resolveSignInTarget(arg, clustersPath);
       if (target === undefined || target.cluster.name === '') {
         return;
       }
@@ -4352,6 +4356,17 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
     return undefined;
   }
   return { cluster: picked.cluster, selected: picked.inUse };
+}
+
+/** The node a sign-in command is about; see signInTarget for the argument forms. */
+async function resolveSignInTarget(arg: unknown, clustersPath: string): Promise<ClusterNode | undefined> {
+  const target = signInTarget(arg, connections?.state ?? { status: 'disconnected' });
+  if (target.kind === 'node') return arg as ClusterNode;
+  if (target.kind === 'pick') return pickCluster(clustersPath);
+  const registry = await readClustersFileSafe(clustersPath);
+  const cluster = registry.ok ? registry.file.clusters.find((c) => c.name === target.name) : undefined;
+  if (cluster === undefined) return pickCluster(clustersPath);
+  return { cluster, selected: registry.ok && registry.file.selectedCluster === cluster.name };
 }
 
 interface SignInDeps {
