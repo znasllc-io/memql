@@ -168,3 +168,98 @@ func TestAReplayedPrivacyBodyUnderAnotherTopicQueuesNothingOnTheAppLevelSource(t
 		}
 	}
 }
+
+// Whether a store was installed through the managed app is a fact about the
+// STORE and the app's CLIENT ID, and it must not move with the state of the
+// app's own secret (memql#5707 residual). Connect sealed a copy of that secret
+// as the store's webhook secret, and the copy keeps verifying the per-store
+// URL when the app's row is gone or cannot be unsealed -- so in every one of
+// these states a privacy delivery on the per-store URL is still refused, and
+// nothing is queued. Before this, an UNSEALABLE app secret surfaced as an
+// error from managedApp, read as "not managed", and the per-store delivery
+// was accepted.
+func TestAManagedStoreIsKnownByItsClientIDWhateverStateTheAppSecretIsIn(t *testing.T) {
+	const body = `{"shop_domain":"acme.myshopify.com","customer":{"id":991},"data_request":{"id":7}}`
+	for _, tc := range []struct {
+		name   string
+		break_ func(h *testHarness)
+	}{
+		{"secret sealed and resolvable", func(*testHarness) {}},
+		{"no secret row", func(h *testHarness) { h.engine.setRows(namedRowsQuery(conceptGlobalSecret, managedClientSecret), nil) }},
+		{"empty sealed value", func(h *testHarness) {
+			h.engine.setRows(namedRowsQuery(conceptGlobalSecret, managedClientSecret), []map[string]any{{"encryptedValue": ""}})
+		}},
+		{"unsealable secret", func(h *testHarness) {
+			h.conn.stores.secrets = func(context.Context, string) (string, error) { return "", fmt.Errorf("MEMQL_MASTER_KEY rotated") }
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := managedWebhookHarness(t)
+			h.engine.setRows("stores", []map[string]any{{"id": "acme", "domain": "acme.myshopify.com", "appClientId": "managed-app", "status": StatusLive}})
+			tc.break_(h)
+			store, ok := h.conn.stores.ByID(context.Background(), "acme")
+			if !ok {
+				t.Fatal("the store did not resolve")
+			}
+			managed, err := h.conn.storeSignsWithManagedSecret(context.Background(), store)
+			if err != nil || !managed {
+				t.Fatalf("storeSignsWithManagedSecret = %v, %v; want true, nil -- the client id alone identifies a managed install", managed, err)
+			}
+			req := memqlsync.InboundRequest{Source: "shopify-acme", Body: []byte(body), Headers: map[string]string{strings.ToLower(HeaderTopic): TopicDataRequest}}
+			if _, err := h.conn.Apply(context.Background(), req); err == nil || len(h.engine.callsTo("queueComplianceJob")) != 0 {
+				t.Fatalf("a managed store's per-store privacy delivery: err=%v, jobs=%d; want a refusal and no job", err, len(h.engine.callsTo("queueComplianceJob")))
+			}
+		})
+	}
+}
+
+// The other side of the same predicate. With no managed client id on the
+// cluster nothing identifies a store as one of its installs, and a store whose
+// client id is another app's is a custom app's: both keep their per-store
+// privacy URL. A client id that cannot be READ is neither answer, so it is an
+// error -- the delivery fails with that reason rather than being queued or
+// being refused as a misconfigured Partner dashboard.
+func TestAStoreNotIdentifiedAsManagedKeepsItsPerStorePrivacyURL(t *testing.T) {
+	const body = `{"shop_domain":"acme.myshopify.com","customer":{"id":991},"data_request":{"id":7}}`
+	for _, tc := range []struct {
+		name, client string
+		setup        func(h *testHarness)
+		wantManaged  bool
+		wantErr      bool
+	}{
+		{"no managed client id on the cluster", "managed-app", func(h *testHarness) {
+			h.engine.setRows(namedRowsQuery(conceptGlobalVariable, managedClientID), nil)
+		}, false, false},
+		{"another app's client id", "custom-app", func(*testHarness) {}, false, false},
+		{"no client id on the store", "", func(*testHarness) {}, false, false},
+		{"the client id cannot be read", "managed-app", func(h *testHarness) {
+			h.engine.fail[callName(namedRowsQuery(conceptGlobalVariable, managedClientID))] = fmt.Errorf("connection reset")
+		}, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := managedWebhookHarness(t)
+			h.engine.setRows("stores", []map[string]any{{"id": "acme", "domain": "acme.myshopify.com", "appClientId": tc.client, "status": StatusLive}})
+			store, ok := h.conn.stores.ByID(context.Background(), "acme")
+			if !ok {
+				t.Fatal("the store did not resolve")
+			}
+			tc.setup(h)
+			managed, err := h.conn.storeSignsWithManagedSecret(context.Background(), store)
+			if managed != tc.wantManaged || (err != nil) != tc.wantErr {
+				t.Fatalf("storeSignsWithManagedSecret = %v, %v; want %v, err=%v", managed, err, tc.wantManaged, tc.wantErr)
+			}
+			req := memqlsync.InboundRequest{Source: "shopify-acme", Body: []byte(body), Headers: map[string]string{strings.ToLower(HeaderTopic): TopicDataRequest}}
+			_, applyErr := h.conn.Apply(context.Background(), req)
+			queued := len(h.engine.callsTo("queueComplianceJob"))
+			if tc.wantErr {
+				if applyErr == nil || queued != 0 || len(h.engine.callsTo("createAuditEvent")) != 0 {
+					t.Fatalf("an unreadable client id: err=%v, jobs=%d, audits=%d; want an error, no job and no refusal audit", applyErr, queued, len(h.engine.callsTo("createAuditEvent")))
+				}
+				return
+			}
+			if applyErr != nil || queued != 1 {
+				t.Fatalf("a store not identified as managed: err=%v, jobs=%d; want its per-store privacy delivery queued", applyErr, queued)
+			}
+		})
+	}
+}

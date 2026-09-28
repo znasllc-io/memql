@@ -124,6 +124,16 @@ func connectorCallSites() []struct {
 			"targetType": "shopifyStore", "targetId": "acme",
 			"detail": map[string]any{"topic": "customers/redact"}, "outcome": "success",
 		}},
+		// apply.go -- a privacy delivery refused on a managed store's per-store
+		// URL is audited as blocked, and storeHealth counts those events.
+		{"createAuditEvent", map[string]any{
+			"eventId": "aud2", "occurredAt": "2026-08-23T12:00:00Z", "category": "data",
+			"action": privacyRefusalAction, "actorUserId": "system:connector:shopify",
+			"targetType": "shopifyStore", "targetId": "acme",
+			"detail":  map[string]any{"topic": "customers/redact", "source": "shopify-acme"},
+			"outcome": "blocked", "failureReason": privacyRefusalReason,
+		}},
+		{"auditEventsByTarget", map[string]any{"targetId": "acme"}},
 		{"createGeneratedOutput", map[string]any{
 			"outputId": "shpdr1", "title": "export.json", "summary": "s",
 			"body": `{"rows":{}}`, "format": "text", "mimeType": "application/json", "source": "derived",
