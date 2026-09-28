@@ -148,4 +148,4 @@ export function connectionStateWord(state: ConnectionState): ConnectionStateWord
  * welcomes open with it -- and two copies of a refusal are two refusals an
  * operator has to learn are the same one.
  */
-export const NOT_CONNECTED_REFUSAL = "Not connected. Select a cluster first.";
+export const NOT_CONNECTED_REFUSAL = "Not connected to a cluster.";

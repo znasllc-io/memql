@@ -87,6 +87,7 @@ import {
   type TrainingPrompt,
 } from "./report.js";
 import { SessionDefinitions } from "./session.js";
+import { NOT_CONNECTED_REFUSAL } from "../state/connectionContext.js";
 import { isTransportClose, withVersionSkewHint } from "../version/skewHint.js";
 
 /**
@@ -643,7 +644,7 @@ export class TrainingActions {
     const cluster = this.deps.cluster();
     if (cluster === undefined) {
       return {
-        outcome: this.error(action, request, "Not connected. Select a cluster first."),
+        outcome: this.error(action, request, NOT_CONNECTED_REFUSAL),
       };
     }
     const engine = this.deps.engine();

@@ -55,6 +55,7 @@ import { bundleOrigin, type Bundle } from "./bundle.js";
 import { mapBundleDiagnostics, type MappedDiagnostic } from "./diagnostics.js";
 import { WriteConfirmationGate, writeConfirmationMessage } from "./preflight.js";
 import { SessionRegistry } from "./session.js";
+import { NOT_CONNECTED_REFUSAL } from "../state/connectionContext.js";
 
 /** The phase a failure happened in, so the UI can say WHERE it broke rather than only that it did. */
 export type RunPhase = "preflight" | "bundle" | "validate" | "define" | "invoke";
@@ -207,7 +208,7 @@ export class RunOrchestrator {
 
     const cluster = this.deps.cluster();
     if (cluster === undefined) {
-      return fail(target, "preflight", "Not connected. Select a cluster first.");
+      return fail(target, "preflight", NOT_CONNECTED_REFUSAL);
     }
     const engine = this.deps.engine();
     if (engine === undefined) {

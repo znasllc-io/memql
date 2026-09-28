@@ -393,7 +393,7 @@ interface Manifest {
   memql?: { edition?: string; status?: string; grammarVersion?: string };
   version?: string;
   contributes: {
-    commands: { command: string; title: string }[];
+    commands: { command: string; title: string; category?: string }[];
     menus: Record<string, { command: string; when?: string }[]>;
   };
 }
@@ -413,7 +413,10 @@ test("the command is contributed, registered, and reachable from the palette", (
     (c) => c.command === "memql.language.showReference",
   );
   assert.ok(declared !== undefined, "memql.language.showReference is not contributed");
-  assert.equal(declared.title, "MemQL: Show Language Reference");
+  // The palette reads "MemQL: Show Language Reference" from the category, and
+  // menus show the bare title.
+  assert.equal(declared.title, "Show Language Reference");
+  assert.equal(declared.category, "MemQL");
 
   const extension = fs.readFileSync(path.join(ROOT, "src", "extension.ts"), "utf8");
   assert.ok(

@@ -158,8 +158,8 @@ and under-replica alarms are cluster state, MemQL OS already draws them, and
 two surfaces answering one question diverge on the day the second one ships.
 That is the rule, not a preference about which UI is nicer -- so a pod grid
 proposed for this extension has its answer before anyone writes it. Every
-cluster's OS is one click away: **Open Console**, on the Clusters row and on
-the connection page.
+cluster's OS is one click away: **Open MemQL OS**, on the Clusters row and on
+the cluster page.
 
 Full rationale: [the Deployments surface design](https://github.com/znasllc-io/memql/blob/main/docs/superpowers/specs/2026-08-14-vscode-deployments-surface-design.md).
 
@@ -168,7 +168,7 @@ Full rationale: [the Deployments surface design](https://github.com/znasllc-io/m
 The **selected** cluster's deployment runs, newest first. One cluster, flat.
 
 ```
-DEPLOYMENTS   local · healthy · v0.19.1
+DEPLOYMENTS   memql.localhost · Connected · v0.19.1
 |- upgrade   v0.16.1 -> v0.17.0   succeeded   2d ago
 \- install                        succeeded   9d ago
 ```
@@ -180,16 +180,16 @@ the selection in **Clusters** switches this view with it. With nothing selected
 the view is empty and says so, with the two ways out of that state:
 
 ```
-Not connected. Select a cluster to see its deployments.
-Select Cluster
-Install a local cluster
+Not connected to a cluster.
+Install Local Cluster
+Connect to a Cluster
 ```
 
 There is no `local` wrapper row (memql#4426). It used to be there so that a
 machine with nothing installed had somewhere to start; that entry point now
 lives in three places instead -- the welcome above, the Clusters welcome, and
-**Create Deployment** in this view's title menu -- and the instance's own
-actions (Repair, Rebuild From Checkout, Uninstall, Open Local Checkout) moved to
+**Install Local Cluster...** in this view's title menu -- and the instance's own
+actions (Repair, Rebuild From Checkout, Uninstall, Open Checkout Folder) moved to
 the title menu with it. Nothing lost a route.
 
 **An instance** is a MemQL you operate. It is derived rather than declared:
@@ -496,7 +496,7 @@ A **concept** is a schema, so its detail page carries one more action nothing
 else does: **Browse rows in MemQL OS**, which opens that concept's rows at
 `?concept=<id>` in the cluster's MemQL OS. It is the return leg of the
 handoff: MemQL OS hands a definition to the editor, and the editor hands a
-concept's rows back. The address is resolved the same way **Open Console**
+concept's rows back. The address is resolved the same way **Open MemQL OS**
 resolves it -- from MemQL OS's own site row when there is a connection to read
 it over, composed from the cluster's domain when there is not. No other kind has
 rows, so no other kind draws the button; the absence is the statement, exactly

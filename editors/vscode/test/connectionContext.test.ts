@@ -139,8 +139,8 @@ test("the refusal is one sentence, shared by the welcomes and by runs.execute", 
   // Design D2's Runs exception refuses with it at execution time; the three
   // welcomes open with the same words. Two spellings would be two refusals an
   // operator has to learn are the same one.
-  assert.equal(NOT_CONNECTED_REFUSAL, "Not connected. Select a cluster first.");
-  assert.ok(NOT_CONNECTED_REFUSAL.startsWith("Not connected."));
+  assert.equal(NOT_CONNECTED_REFUSAL, "Not connected to a cluster.");
+  assert.ok(NOT_CONNECTED_REFUSAL.startsWith("Not connected"));
 });
 
 test("memql.connectionState tells a sign-in problem from an outage", () => {

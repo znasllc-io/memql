@@ -97,7 +97,7 @@ function disconnectedHtml(connection: ClusterViewState): string {
     default:
       return emptyState({
         line: "Not connected.",
-        acts: [{ act: CONCEPT_ACTS.selectCluster, label: "Select a cluster", tone: "secondary" }],
+        acts: [{ act: CONCEPT_ACTS.selectCluster, label: "Connect to a cluster", tone: "secondary" }],
       });
   }
 }

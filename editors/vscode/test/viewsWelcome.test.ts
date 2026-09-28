@@ -86,7 +86,7 @@ for (const view of GATED) {
   test(`${view}'s welcome opens with the shared sentence and offers Select Cluster`, () => {
     const entry = noClusterWelcome(view)[0];
     assert.ok(
-      entry.contents.startsWith("Not connected."),
+      entry.contents.startsWith("Not connected to a cluster."),
       `${view}'s welcome does not open with the shared refusal: ${entry.contents}`
     );
     // ONE SENTENCE, then links.
@@ -133,7 +133,7 @@ test("with no cluster selected, Deployments says one line and the right act", ()
   // is Connect, Reconnect or Sign in as its state asks.
   assert.deepEqual(linkedCommands(present.contents), ["memql.deployments.open", "memql.clusters.select"]);
   assert.deepEqual(linkedCommands(absent.contents), ["memql.deployments.createDeployment", "memql.clusters.select"]);
-  for (const entry of entries) assert.equal(entry.contents.split("\n")[0], "Not connected.");
+  for (const entry of entries) assert.equal(entry.contents.split("\n")[0], "Not connected to a cluster.");
 });
 
 test("a selected cluster whose history cannot be read says what it needs, never nothing", () => {

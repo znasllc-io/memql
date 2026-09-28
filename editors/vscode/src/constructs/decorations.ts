@@ -94,9 +94,9 @@ export class TrainingDecorations {
     }
 
     // An id and a name, so the status bar's own menu lists it as "MemQL
-    // training" rather than under the extension's id.
+    // Training" rather than under the extension's id.
     this.status = vscode.window.createStatusBarItem("memql.training", vscode.StatusBarAlignment.Right, 90);
-    this.status.name = "MemQL training";
+    this.status.name = "MemQL Training";
     // The click-through (#3763), which is what turns the count from a notice
     // into a way back to the constructs it is about. Set once, in the
     // constructor: the item is only ever shown when there is something to list,

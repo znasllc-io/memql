@@ -88,7 +88,7 @@ export const COPY_GRAMMAR = "copyGrammar";
 export const COPY_VOCABULARY = "copyVocabulary";
 /** The search box's field name: the runtime posts `{ type: "input", field, value }`. */
 export const SEARCH_FIELD = "search";
-/** The message the page posts from "Select a cluster". */
+/** The message the page posts from "Connect to a cluster". */
 export const SELECT_CLUSTER = "selectCluster";
 /** The message the page posts from "Manage workspace trust", in an untrusted window. */
 export const MANAGE_TRUST = "manageTrust";
@@ -197,7 +197,7 @@ function notConnectedHtml(input: LanguageReferenceInput): string {
   if (input.offerSelectCluster) {
     return emptyState({
       line: "Connect to a cluster to see its grammar and vocabulary.",
-      acts: [{ act: SELECT_CLUSTER, label: "Select a cluster", tone: "secondary" }],
+      acts: [{ act: SELECT_CLUSTER, label: "Connect to a cluster", tone: "secondary" }],
     });
   }
   return emptyState({

@@ -300,7 +300,7 @@ test("run -- refuses with no cluster selected", async () => {
   const outcome = await h.orchestrator.run(target(), { spaceId: "s1" });
   assert.ok(outcome.status === "error");
   assert.equal(outcome.phase, "preflight");
-  assert.match(outcome.message, /Not connected\. Select a cluster first\./);
+  assert.match(outcome.message, /Not connected to a cluster\./);
   assert.deepEqual(h.engine.ops(), []);
 });
 

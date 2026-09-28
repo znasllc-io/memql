@@ -73,7 +73,7 @@ explains the states, permissions, and effects of each action.
 
 ### MemQL OS and the editor
 
-Use **Open Console** for the selected cluster's MemQL OS: the browser workspace
+Use **Open MemQL OS** for the selected cluster: the browser workspace
 for Fleet, Files, Deployables, Nexus, and other apps. The editor owns source
 files and cluster connections; OS apps organize work inside one cluster.
 

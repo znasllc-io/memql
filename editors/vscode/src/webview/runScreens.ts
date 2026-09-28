@@ -341,7 +341,7 @@ export function resultParts(input: ResultInput): RegionParts {
       // Refused before anything was sent: the fix is a connection.
       const disconnected = o.phase === "preflight" && /^Not connected/.test(o.message);
       const acts: Act[] = [];
-      if (disconnected) acts.push({ act: RESULT_ACTS.selectCluster, label: "Select a cluster" });
+      if (disconnected) acts.push({ act: RESULT_ACTS.selectCluster, label: "Connect to a cluster" });
       // The ERR- id is the only handle on the server-side log entry: shown
       // apart from the prose, and one click from the clipboard.
       if (o.errorId !== "") acts.push({ act: RESULT_ACTS.copyErrorId, label: "Copy error ID" });
