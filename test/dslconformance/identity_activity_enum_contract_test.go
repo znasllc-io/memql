@@ -128,7 +128,7 @@ func TestAuthActivityEnumsAgreeBetweenMutationAndConcept(t *testing.T) {
 // is stamped by that helper rather than by the literal.
 func TestIdentityActivityWritersMatchAuthActivityEnums(t *testing.T) {
 	mutation, concept := authActivityEnumsFromDSL(t)
-	scan := scanIdentityAuditWriters(t)
+	scan := scanAuditWriters(t, "component/identity")
 
 	type row struct {
 		pos, field, value string

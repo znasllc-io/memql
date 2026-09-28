@@ -683,19 +683,19 @@ func (r *SessionRunner) finishRow(ctx context.Context, row AppSessionRow, result
 	row.ErrorMessage = result.ErrorMessage
 	row.EndedAt = r.now()
 
+	// A detached context for both writes: the caller's may already be
+	// cancelled (that is one of the ways a run ends). Losing the terminal
+	// row would leave a session that reads as still running forever, and
+	// losing the audit would leave the trail with a start and no end.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	if r.Store != nil {
-		// A detached context: the caller's may already be cancelled
-		// (that is one of the ways a run ends), and losing the
-		// terminal row would leave a session that reads as still
-		// running forever.
-		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
 		if err := r.Store.EndAppSession(writeCtx, row); err != nil && r.Logger != nil {
 			r.Logger.Warn("worker: persist app session end failed",
 				"session_id", row.ID, "error", err)
 		}
 	}
-	r.audit(ctx, "app_session_ended", spec, w, map[string]any{
+	r.audit(writeCtx, "app_session_ended", spec, w, map[string]any{
 		"app":          spec.App,
 		"status":       result.Status,
 		"exitCode":     result.ExitCode,
@@ -773,15 +773,19 @@ func (r *SessionRunner) audit(ctx context.Context, action string, spec RunSpec, 
 	detail["stepId"] = spec.StepId
 	if w != nil {
 		detail["machine"] = w.Name
+		detail["workerId"] = w.RegistrationId
+		detail["workerIdentityId"] = w.IdentityId
 	}
-	target := ""
-	if w != nil {
-		target = w.RegistrationId
-	}
+	// THE ENGINE is the actor: it opened this session for the owner, who is
+	// actorUserId. It presented no v1:identity:identity credential to do it --
+	// the session's back-channel bearer is a service-account JWT with no row
+	// (appSession.credentialRef) -- so ActorIdentityId stays empty rather than
+	// borrowing an id that did not act. The target is the SESSION the
+	// targetType names; the machine it ran on is in detail.
 	r.Auditor.Emit(ctx, AuditEvent{
 		Action:      action,
-		Actor:       "user:" + spec.OwnerUserId,
-		Target:      target,
+		ActorLabel:  "engine",
+		Target:      spec.SessionId,
 		TargetType:  "appSession",
 		OwnerUserId: spec.OwnerUserId,
 		Detail:      detail,
