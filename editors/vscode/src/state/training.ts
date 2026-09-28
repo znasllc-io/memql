@@ -240,18 +240,54 @@ export const COMMAND_STAGE = "memql.training.stage";
  */
 export const COMMAND_REBUILD = "memql.deployments.rebuildFromCheckout";
 
+/**
+ * The ONE training lens's command: a quick pick of the acts legal for the
+ * construct's state (memql's lens line used to carry the state and up to four
+ * act lenses beside Run). Palette-hidden: it takes the lens's payload.
+ */
+export const COMMAND_CHOOSE = "memql.training.choose";
+
 export interface TrainingAction {
   title: string;
   command: string;
+  /** One line under the act in the quick pick: what it does, in plain words. */
+  description: string;
+}
+
+/** What the chooser is handed by the lens: the construct, and its legal acts. */
+export interface TrainingChoice {
+  uri: string;
+  name: string;
+  actions: TrainingAction[];
 }
 
 export interface TrainingLensPlan {
   construct: TrainingConstruct;
-  /** The leading label: the state, in the developer's words. */
+  /** The lens's title: the state, in the developer's words. */
   label: string;
   /** A sentence for the lens tooltip, or "" when the label says enough. */
   detail: string;
   actions: TrainingAction[];
+}
+
+/** A construct's state as the lens and the list name it: words, not the wire enum. */
+export function stateWords(state: TrainingState, cluster?: { local: boolean }): string {
+  switch (state) {
+    case "untrained":
+      return "Not on cluster";
+    case "drifted":
+      return "Differs from cluster";
+    case "trained":
+      return "Live";
+    case "seeded":
+      return "Built in";
+    case "edited":
+      return cluster === undefined ? "Edited" : cluster.local ? "Edited · needs rebuild" : "Edited · needs rollout";
+    case "staged":
+      return "Staged · only you";
+    case "unknown":
+      return "";
+  }
 }
 
 export interface TrainingLensOptions {
@@ -277,7 +313,20 @@ export interface TrainingLensOptions {
    * that has nothing to build.
    */
   cluster?: { name: string; local: boolean };
+  /**
+   * Whether a construct is defined for THIS SESSION only (Try in session).
+   *
+   * Folded into the state lens rather than drawn as a lens of its own: the
+   * construct is still `untrained` on the cluster and still wants its acts
+   * offered, and what this adds is a fact about the connection -- a copy is
+   * answering calls now and will stop without notice.
+   */
+  sessionDefined?: (name: string) => boolean;
 }
+
+/** What the lens adds for a construct defined for this session only. */
+export const SESSION_SUFFIX = " · this session";
+export const SESSION_DETAIL = "Callable in this session only, until you disconnect. Promote to keep it.";
 
 /**
  * The lens plan for each construct, in document order.
@@ -297,10 +346,12 @@ export function trainingLensPlans(
     // into them -- `detailFor` is also what the status bar's list renders, and
     // that surface has no cluster to be told about.
     const edited = construct.state === "edited";
+    const session = options.sessionDefined?.(construct.name) === true;
+    const detail = edited ? editedDetail(options.cluster) : detailFor(construct.state);
     out.push({
       construct,
-      label: construct.state,
-      detail: edited ? editedDetail(options.cluster) : detailFor(construct.state),
+      label: `${stateWords(construct.state, options.cluster)}${session ? SESSION_SUFFIX : ""}`,
+      detail: session ? `${detail} ${SESSION_DETAIL}` : detail,
       actions:
         options.offerActions !== true
           ? []
@@ -326,75 +377,88 @@ function editedDetail(cluster: TrainingLensOptions["cluster"]): string {
   if (cluster === undefined) return detailFor("edited");
   return cluster.local
     ? `Your source differs from what ${cluster.name} loaded. Rebuild from checkout applies it.`
-    : `Your source differs from what ${cluster.name} runs -- seeded constructs change by rollout.`;
+    : `Your source differs from what ${cluster.name} runs. A rollout applies it.`;
 }
 
 function editedActions(cluster: TrainingLensOptions["cluster"]): TrainingAction[] {
-  // A REMOTE cluster gets words and no button, deliberately: what applies the
+  // A REMOTE cluster gets words and no act, deliberately: what applies the
   // edit there is a rollout, which happens in a pipeline this editor has no
   // hand in. A disabled control would suggest the editor could do it if only
   // something were different.
   if (cluster === undefined || !cluster.local) return [];
-  return [{ title: "Rebuild from checkout", command: COMMAND_REBUILD }];
+  return [{ title: "Rebuild from checkout", command: COMMAND_REBUILD, description: `Rebuild ${cluster.name} from this checkout.` }];
 }
 
-/** The sentence behind the one-word label, for the states where it is not obvious. */
+/** The sentence behind the lens's words, for its tooltip and the status bar's list. */
 function detailFor(state: TrainingState): string {
   switch (state) {
     case "untrained":
-      return "This cluster has no record of this construct. Saving the file does not change that.";
+      return "Not on the cluster yet. Saving doesn't publish it.";
     case "drifted":
-      return "This cluster knows this construct, but not this version of it. Promoting updates the trained version.";
+      return "The cluster has a different version. Promote to replace it.";
     case "trained":
-      return "Promoted, persisted, and live on this cluster.";
+      return "Promoted and live for everyone.";
     case "seeded":
       // The one state whose whole content is why there is nothing to do.
-      return "Loaded from disk when the cluster booted, rather than promoted -- so there is nothing here to demote, and changing it needs a rollout.";
+      return "Built into the cluster. Changing it needs a rebuild or a rollout, not a promote.";
     case "edited":
-      return "Loaded from disk when the cluster booted, and your source no longer matches what it loaded. Nothing here can be promoted -- a seeded construct changes by rollout.";
+      return "Your source differs from what the cluster loaded. A rebuild or a rollout applies it.";
     case "staged":
-      return "Staged on this cluster: persisted and replayed at boot, and callable by you and by nobody else. Train it to make it live for everyone.";
+      return "Staged: only you can call it. Promote to make it live for everyone.";
     case "unknown":
       return "";
   }
 }
 
+// THE ORDER IS THE ESCALATION: a check that changes nothing, a session that
+// ends, a private copy that does not, and one everybody gets. The quick pick
+// shows them in this order, each with the line that says what it does.
+const DRY_RUN: TrainingAction = {
+  title: "Dry run",
+  command: COMMAND_DRY_RUN,
+  description: "Check that it compiles. Changes nothing.",
+};
+const TRY_IN_SESSION: TrainingAction = {
+  title: "Try in this session",
+  command: COMMAND_TRY_IN_SESSION,
+  description: "Only you, until you disconnect.",
+};
+const STAGE: TrainingAction = {
+  title: "Stage",
+  command: COMMAND_STAGE,
+  description: "Saved on the cluster. Only you can call it.",
+};
+const DEMOTE: TrainingAction = {
+  title: "Demote",
+  command: COMMAND_DEMOTE,
+  description: "Remove it from the cluster.",
+};
+
 function actionsFor(state: TrainingState): TrainingAction[] {
   switch (state) {
     case "untrained":
-      return [
-        { title: "Dry-run", command: COMMAND_DRY_RUN },
-        { title: "Try in session", command: COMMAND_TRY_IN_SESSION },
-        // Stage sits BETWEEN the two it is offered with, and in that order,
-        // because the order is the escalation: a session that ends, a private
-        // one that does not, and one everybody gets.
-        { title: "Stage", command: COMMAND_STAGE },
-        { title: "Promote", command: COMMAND_PROMOTE },
-      ];
+      return [DRY_RUN, TRY_IN_SESSION, STAGE, { title: "Promote", command: COMMAND_PROMOTE, description: "Live for everyone." }];
     case "drifted":
       return [
-        { title: "Dry-run", command: COMMAND_DRY_RUN },
-        { title: "Try in session", command: COMMAND_TRY_IN_SESSION },
-        { title: "Stage", command: COMMAND_STAGE },
-        // Named, because promoting over an existing definition is a different
-        // act from promoting a new one and the lens is where that is noticed.
-        { title: "Promote (updates the trained version)", command: COMMAND_PROMOTE },
+        DRY_RUN,
+        TRY_IN_SESSION,
+        STAGE,
+        // Said, because promoting over an existing definition is a different
+        // act from promoting a new one and the pick is where that is noticed.
+        { title: "Promote", command: COMMAND_PROMOTE, description: "Replaces the live version for everyone." },
       ];
     case "trained":
-      return [{ title: "Demote", command: COMMAND_DEMOTE }];
+      return [DEMOTE];
     case "staged":
       return [
         // Re-stage: how an edited staged construct is updated. Offered first
-        // because it is the smallest of the three and the one a developer
-        // iterating will reach for repeatedly.
-        { title: "Re-stage", command: COMMAND_STAGE },
-        // TRAIN IS COMMAND_PROMOTE, and the title is where the difference is
-        // said. On the wire it IS a promote -- the engine flips the same
-        // persisted row rather than writing a second one -- so a separate
-        // command would have been a second name for one operation. The title
-        // names the consequence, which is what the developer is deciding about.
-        { title: "Train (make it live for everyone)", command: COMMAND_PROMOTE },
-        { title: "Demote", command: COMMAND_DEMOTE },
+        // because it is the one a developer iterating reaches for repeatedly.
+        { title: "Re-stage", command: COMMAND_STAGE, description: "Update your staged copy." },
+        // MAKING IT LIVE IS COMMAND_PROMOTE. On the wire it IS a promote -- the
+        // engine flips the same persisted row -- so a separate command would
+        // be a second name for one operation. One name for it, too: Promote.
+        { title: "Promote", command: COMMAND_PROMOTE, description: "Make it live for everyone." },
+        DEMOTE,
       ];
     case "edited":
       // NOT ANSWERED HERE. `edited` is the one state whose actions depend on
@@ -469,27 +533,22 @@ export function countStates(constructs: readonly TrainingConstruct[]): TrainingC
  * reason.
  */
 export function statusBarText(counts: TrainingCounts): string {
-  const parts: string[] = [];
-  if (counts.untrained > 0) parts.push(`${counts.untrained} untrained`);
-  if (counts.drifted > 0) parts.push(`${counts.drifted} drifted`);
-  if (counts.edited > 0) parts.push(`${counts.edited} edited`);
-  return parts.join(" · ");
+  const n = counts.untrained + counts.drifted + counts.edited;
+  return n === 0 ? "" : `${n} not live`;
 }
 
-/** The hover, which is where "saving is not promoting" is said in words. */
+/** The hover: what the count is made of, and that saving is not publishing. */
 export function statusBarTooltip(counts: TrainingCounts): string {
-  if (statusBarText(counts) === "") return "";
-  const lines = ["Saving this file does not promote anything to the cluster."];
-  if (counts.untrained > 0) {
-    lines.push(`${counts.untrained} construct(s) this cluster has no record of.`);
-  }
-  if (counts.drifted > 0) {
-    lines.push(`${counts.drifted} construct(s) the cluster knows in an older version.`);
-  }
-  if (counts.edited > 0) {
-    lines.push(`${counts.edited} construct(s) whose source no longer matches what the cluster loaded.`);
-  }
-  return lines.join("\n");
+  const n = counts.untrained + counts.drifted + counts.edited;
+  if (n === 0) return "";
+  const parts: string[] = [];
+  if (counts.untrained > 0) parts.push(`${counts.untrained} not on cluster`);
+  if (counts.drifted > 0) parts.push(`${counts.drifted} differ${counts.drifted === 1 ? "s" : ""} from cluster`);
+  if (counts.edited > 0) parts.push(`${counts.edited} edited`);
+  return [
+    `${n} construct${n === 1 ? "" : "s"} in this file ${n === 1 ? "isn't" : "aren't"} live on the cluster: ${parts.join(", ")}.`,
+    "Saving doesn't publish. Click to go to one.",
+  ].join("\n");
 }
 
 // -----------------------------------------------------------------------------
@@ -545,10 +604,10 @@ export function trainingListEntries(
       continue;
     out.push({
       construct,
-      label: `${construct.kind} ${construct.name}`,
-      description: construct.state,
-      // The lens's own sentence, reused rather than rewritten: two wordings for
+      label: construct.name,
+      // The lens's own words, reused rather than rewritten: two wordings for
       // one state are two things to keep in step, and the second one drifts.
+      description: `${construct.kind} · ${stateWords(construct.state)}`,
       detail: detailFor(construct.state),
     });
   }

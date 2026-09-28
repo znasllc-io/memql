@@ -34,6 +34,7 @@ import type {
 import { DemoteOutcomeRemoved, DemoteOutcomeRetired } from "@znasllc-io/memql-sdk-core/authoring";
 
 import type { ClosureMember, TrainingBundle } from "./closure.js";
+import { stateWords } from "../state/training.js";
 
 /** What the adapter turns into a modal. */
 export interface TrainingPrompt {
@@ -89,15 +90,13 @@ function closureLines(bundle: TrainingBundle, display: (path: string) => string)
       // state, because a bundle is compiled and promoted whole. Listing the
       // trained ones too is what keeps this an honest inventory rather than a
       // flattering one.
-      lines.push(`    ${c.state.padEnd(9)} ${c.kind} ${c.name}`);
+      lines.push(`    ${c.kind} ${c.name} · ${stateWords(c.state).toLowerCase()}`);
     }
   }
   const unclassified = bundle.members.filter((m) => m.reason === "unclassified");
   if (unclassified.length > 0) {
     lines.push("");
-    lines.push(
-      "Left out, because the language server could not say what state they are in:",
-    );
+    lines.push("Not included (state unknown):");
     for (const member of unclassified) lines.push(`    ${display(member.path)}`);
   }
   return lines;
@@ -108,6 +107,13 @@ export function constructCount(bundle: TrainingBundle): number {
   return bundle.members
     .filter((m) => m.included)
     .reduce((total, m) => total + m.constructs.length, 0);
+}
+
+/** The line over a confirmation's closure list. */
+function dependencyLead(dependencies: number): string {
+  return dependencies === 0
+    ? "Includes:"
+    : `Includes ${dependencies} dependency file${dependencies === 1 ? "" : "s"} the cluster doesn't have. All of it goes, or none of it:`;
 }
 
 /** The dependency files a bundle carries beyond the active one. */
@@ -135,17 +141,15 @@ export function sessionPrompt(
   display: (path: string) => string,
 ): TrainingPrompt {
   const detail = [
-    `"${name}" and everything in this bundle become callable by name on ${cluster.label}, for this connection only.`,
+    `Only you can call it on ${cluster.label}, and only until you disconnect. Nothing is saved.`,
     "",
-    "TEMPORARY. Nothing is persisted, nothing is visible to anyone else, and every definition is dropped the moment the connection drops or you switch cluster. Promote is what makes a construct outlive the session.",
-    "",
-    "This bundle carries:",
+    "Includes:",
     ...closureLines(bundle, display),
   ].join("\n");
   return {
-    message: `Define "${name}" on ${cluster.label} for this session only?`,
+    message: `Try "${name}" on ${cluster.label} for this session?`,
     detail,
-    confirmLabel: "Define for this session",
+    confirmLabel: "Try in this session",
   };
 }
 
@@ -172,21 +176,14 @@ export function promotePrompt(
   const detail = [
     ...(cluster.local
       ? []
-      : [
-          `${cluster.label} is not marked local in clusters.yaml. This writes to a shared cluster: the constructs are persisted, every session on it can call them, and a restart replays them.`,
-          "",
-        ]),
-    dependencies.length === 0
-      ? "This promotes:"
-      : `This promotes "${name}" together with ${dependencies.length} dependency file(s) the cluster does not have. All of it goes, or none of it does:`,
+      : [`${cluster.label} isn't a local cluster: everyone on it can call these afterwards.`, ""]),
+    dependencyLead(dependencies.length),
     ...closureLines(bundle, display),
-    "",
-    "Promote is owner-only. If you are not the cluster owner the engine refuses and says so.",
   ].join("\n");
   return {
     message: `Promote "${name}" to ${cluster.label}?`,
     detail,
-    confirmLabel: "Promote",
+    confirmLabel: `Promote to ${cluster.label}`,
   };
 }
 
@@ -215,14 +212,12 @@ export function stagePrompt(
 ): TrainingPrompt {
   const dependencies = dependencyMembers(bundle);
   const detail = [
-    `"${name}" becomes durable on ${cluster.label}: persisted, replayed when the cluster restarts, and callable BY YOU AND BY NOBODY ELSE until you train it.`,
+    `Saved on ${cluster.label}, and only you can call it until it is promoted.`,
     "",
-    dependencies.length === 0
-      ? "This stages:"
-      : `This stages "${name}" together with ${dependencies.length} dependency file(s) the cluster does not have. All of it goes, or none of it does:`,
+    dependencyLead(dependencies.length),
     ...closureLines(bundle, display),
     "",
-    "A concept cannot be staged. If the closure declares one the engine refuses the whole bundle and names it -- train the concept, then stage the constructs bound to it.",
+    "A concept can't be staged: promote it first.",
   ].join("\n");
   return {
     message: `Stage "${name}" on ${cluster.label}?`,
@@ -245,13 +240,12 @@ export function demotePrompt(
   name: string,
 ): TrainingPrompt {
   const detail = [
-    `"${name}" stops being callable on ${cluster.label}. The withdrawal is persisted and every node applies it within seconds.`,
-    "",
-    "Only this construct. Anything it depends on stays promoted -- other constructs may still bind against it.",
-    "",
-    "If this is a concept: rows written under it outlive its definition, so one with rows is RETIRED rather than removed. It stays registered, its rows stay readable, new writes to it are refused, and its name stays claimed. Only a concept with no rows is removed outright.",
-    "",
-    "Demote is owner-only. If you are not the cluster owner the engine refuses and says so.",
+    `It stops being callable on ${cluster.label}. Anything it depends on stays promoted.`,
+    // Only for a concept, where it is true: a concept with rows is retired, not
+    // removed. Only the engine can count the rows, so both outcomes are named.
+    ...(kind === "concept"
+      ? ["", "If it has rows it is retired instead of removed: the rows stay readable, new writes are refused, and the name stays taken."]
+      : []),
   ].join("\n");
   return {
     message: `Demote ${kind} "${name}" from ${cluster.label}?`,
@@ -278,11 +272,11 @@ export function breakingOverridePrompt(diffs: readonly ConceptSchemaDiff[]): Tra
     .flatMap((d) => d.changes.filter((c) => c.breaking))
     .map((c) => (c.field === "" ? c.kind : c.field));
   const detail = [
-    "The engine refused this promote because the schema change would strand rows already written under the concept. Overriding lands it anyway.",
+    "This schema change would strand rows already written under the concept. Overriding promotes it anyway.",
     "",
     conceptDiffReport(diffs),
     "",
-    "The override is recorded. The engine audits it on v1:identity:auditEvent, naming the concept and the fields.",
+    "The cluster audits the override, naming the concept and the fields.",
   ].join("\n");
   return {
     message:
@@ -313,7 +307,7 @@ export function conceptDiffReport(diffs: readonly ConceptSchemaDiff[]): string {
   const lines: string[] = [];
   for (const diff of diffs) {
     lines.push(
-      `${diff.concept}  --  ${diff.breaking ? "BREAKING" : "additive"}${diff.overridden ? ", override applied" : ""}`,
+      `${diff.concept} · ${diff.breaking ? "breaking" : "additive"}${diff.overridden ? ", override applied" : ""}`,
     );
     for (const change of diff.changes) lines.push(...changeLines(change));
     if (diff.summary !== "") {
@@ -334,7 +328,7 @@ function changeLines(change: ConceptSchemaChange): string[] {
   const subject = change.field === "" ? change.kind : `${change.kind} ${change.field}`;
   const transition =
     change.was === "" && change.now === "" ? "" : `  ${describeSide(change.was)} -> ${describeSide(change.now)}`;
-  const lines = [`  ${change.breaking ? "BREAKING" : "additive"}  ${subject}${transition}`];
+  const lines = [`  ${change.breaking ? "breaking" : "additive"}  ${subject}${transition}`];
   if (change.detail !== "") lines.push(`      ${change.detail}`);
   lines.push(`      ${rowsLine(change)}`);
   if (change.referencedBy.length > 0) {
@@ -353,7 +347,7 @@ function changeLines(change: ConceptSchemaChange): string[] {
  */
 function rowsLine(change: ConceptSchemaChange): string {
   if (!change.rowCountKnown) {
-    return "rows affected: not counted (this node has no database to count against)";
+    return "rows affected: unknown";
   }
   return `rows affected: ${change.rowsAffected}`;
 }

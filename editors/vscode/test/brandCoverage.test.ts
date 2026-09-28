@@ -304,10 +304,13 @@ test("the *Screens.ts fragment modules are exempt because they build no document
     .filter((name) => name.endsWith("Screens.ts"))
     .sort();
   assert.deepEqual(screens, [
+    "automationScreens.ts",
+    "conceptScreens.ts",
     "constructScreens.ts",
     "deploymentScreens.ts",
     "installScreens.ts",
     "languageReferenceScreens.ts",
+    "runScreens.ts",
   ]);
   for (const name of screens) {
     const text = read(path.join(PANEL_DIR, name));
@@ -338,7 +341,12 @@ const CONSTRUCT: CatalogConstruct = {
   source: "",
 };
 
-const DEPS = { viewSourceFromCluster: () => Promise.resolve(), browseRows: () => Promise.resolve() };
+const DEPS = {
+  viewSourceFromCluster: () => Promise.resolve(),
+  browseRows: () => Promise.resolve(),
+  openInOs: () => Promise.resolve(),
+  run: () => Promise.resolve(),
+};
 
 const CONTEXT = { subscriptions: [] as { dispose(): unknown }[] } as unknown as ExtensionContext;
 

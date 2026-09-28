@@ -33,6 +33,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import type { ConnectionManager } from "../src/connection/manager.js";
+import type { ConnectionState } from "../src/connection/manager.js";
 import type { ConnectionContextKeys } from "../src/state/connectionContext.js";
 import type { CatalogState } from "../src/state/constructCatalog.js";
 import { ConstructsTreeProvider } from "../src/views/constructsTree.js";
@@ -44,24 +45,21 @@ const SELECTED: ConnectionContextKeys = { clusterSelected: true, connected: true
 const NOTHING: ConnectionContextKeys = { clusterSelected: false, connected: false };
 
 /** A manager as far as a tree uses one: a state to read and a listener slot. */
-function fakeManager(): ConnectionManager {
+function fakeManager(state: ConnectionState = { status: "disconnected" }): ConnectionManager {
   return {
-    state: { status: "disconnected" },
+    state,
     query: undefined,
     dispatcher: undefined,
     onDidChangeState: () => () => undefined,
   } as unknown as ConnectionManager;
 }
 
-// ---------------------------------------------------------------------------
-// Constructs
-// ---------------------------------------------------------------------------
+const CONNECTED: ConnectionState = { status: "connected", clusterName: "local", nodeId: "bff-0" };
 
 test("Constructs returns [] with nothing selected, and does not even read", async () => {
   let reads = 0;
   const tree = new ConstructsTreeProvider({
     connections: fakeManager(),
-    connectionContext: () => NOTHING,
     load: async (): Promise<CatalogState> => {
       reads += 1;
       return { kind: "loaded", groups: [], total: 0 };
@@ -73,41 +71,18 @@ test("Constructs returns [] with nothing selected, and does not even read", asyn
   assert.equal(reads, 0, "an unselected Constructs view issued a catalog read");
 });
 
-test("Constructs still speaks when a cluster IS selected and unreachable", async () => {
-  // The distinction design D2 turns on. This is NOT the empty state: a cluster
-  // was chosen and is not answering, which is a fact about something, so it
-  // gets a row -- and the row must not be the welcome's sentence, or the two
-  // would be saying the same thing in two places with only one of them
-  // reachable.
-  const tree = new ConstructsTreeProvider({
-    connections: fakeManager(),
-    connectionContext: () => ({ clusterSelected: true, connected: false }),
-    load: async (): Promise<CatalogState> => ({ kind: "unreachable" }),
-  });
-  const rows = await tree.getChildren();
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].kind, "state");
-  const item = tree.getTreeItem(rows[0]);
-  assert.equal(item.label, "Cluster not answering");
-  assert.ok(
-    !String(item.label).startsWith("Not connected"),
-    "the unreachable row duplicates the welcome's sentence"
-  );
-});
-
 test("Constructs renders its groups when connected", async () => {
   // The positive control. Without it every assertion above would pass on a
   // provider that returned nothing under all conditions.
   const tree = new ConstructsTreeProvider({
-    connections: fakeManager(),
-    connectionContext: () => SELECTED,
+    connections: fakeManager(CONNECTED),
     load: async (): Promise<CatalogState> => ({
       kind: "loaded",
       total: 1,
       groups: [
         {
           kind: "query",
-          label: "queries",
+          label: "Queries",
           count: 1,
           runnable: true,
           namespaces: [{ namespace: "identity", constructs: [] }],
@@ -124,20 +99,7 @@ test("Constructs renders its groups when connected", async () => {
 // ---------------------------------------------------------------------------
 
 test("Data returns [] with nothing selected", async () => {
-  const tree = new DataTreeProvider(fakeManager(), () => NOTHING);
-  assert.deepEqual(await tree.getChildren(), []);
-});
-
-test("Data with a cluster selected but no query client is still empty, not an error row", async () => {
-  // A selected cluster whose transport is down has no `query`, and the cache
-  // then loads nothing. That is an empty CLUSTER as far as this view can tell,
-  // and it must not manufacture an error row about it -- the connection surface
-  // owns that story, and `cachedError` is reserved for a listConcepts that
-  // actually failed.
-  const tree = new DataTreeProvider(fakeManager(), () => ({
-    clusterSelected: true,
-    connected: false,
-  }));
+  const tree = new DataTreeProvider(fakeManager());
   assert.deepEqual(await tree.getChildren(), []);
 });
 

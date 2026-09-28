@@ -121,6 +121,7 @@ import { TrainingCodeLensProvider } from './constructs/trainingLens.js';
 import { TrainingDecorations } from './constructs/decorations.js';
 import { ClusterCatalogPublisher } from './constructs/clusterCatalog.js';
 import {
+  COMMAND_CHOOSE,
   COMMAND_DEMOTE,
   COMMAND_DRY_RUN,
   COMMAND_PROMOTE,
@@ -131,6 +132,7 @@ import {
   TRAINING_STATE_CAPABILITY,
   TRAINING_STATE_METHOD,
   parseTrainingConstructs,
+  type TrainingChoice,
   type TrainingConstruct,
 } from './state/training.js';
 import {
@@ -148,7 +150,6 @@ import {
 } from './training/closure.js';
 import { outcomeReport } from './training/outcomeReport.js';
 import type { TrainingPrompt } from './training/report.js';
-import { sessionLensPlans } from './training/session.js';
 import {
   defaultReceiptPath,
   readReceipt,
@@ -217,11 +218,12 @@ import {
 import { DEPLOYMENTS_INSTANCE_KEY } from './state/deploymentsCatalog.js';
 import { DeploymentPanel, type DeploymentPanelDeps } from './webview/deploymentPanel.js';
 import { SITE_CONCEPT, consoleConceptUrl, consoleTarget } from './clusters/consoleUrl.js';
-import { isCatalogUri } from './constructs/catalogTarget.js';
+import { catalogAutomationTarget, catalogRunTarget, isCatalogUri } from './constructs/catalogTarget.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
 import { IdentityAdminClient } from '@znasllc-io/memql-sdk-core/identityadmin';
-import { DataTreeProvider } from './views/dataTree.js';
+import { DataTreeProvider, type ConceptTreeNode } from './views/dataTree.js';
+import { clusterViewState } from './state/clusterViewState.js';
 import { ConstructsTreeProvider, type ConstructNode } from './views/constructsTree.js';
 import { ReadonlyMarker } from './constructs/readonlyDecorations.js';
 import {
@@ -239,6 +241,7 @@ import {
   catalogFrom,
   classifyCatalogFailure,
   toCatalogConstruct,
+  type CatalogConstruct,
   type CatalogState,
 } from './state/constructCatalog.js';
 import { ConstructsClient } from '@znasllc-io/memql-sdk-core/constructs';
@@ -646,11 +649,16 @@ function startLanguageClient(context: ExtensionContext): void {
     // found") read as "the extension is dead", which is exactly the wrong
     // thing to tell someone whose Clusters view is empty for an unrelated
     // reason.
-    window.showErrorMessage(
-      'MemQL: language features (highlighting, diagnostics, completion, hover) are unavailable -- no memql-lsp binary was found. ' +
-        'Set "memql.lsp.serverPath" in your user settings, bundle a platform binary, or install memql-lsp on your PATH. ' +
-        'The Clusters, Concepts and Runs views do not need it and still work.'
-    );
+    //
+    // ONE SENTENCE AND THE FIX AS A BUTTON: the one thing to do about it is
+    // point the setting at a binary. (It used to list three remedies and name
+    // a "Concepts" view that is called Data.)
+    const settings = 'Open Settings';
+    void Promise.resolve(
+      window.showErrorMessage("MemQL: Language features are off because memql-lsp wasn't found.", settings)
+    ).then((answer) => {
+      if (answer === settings) void commands.executeCommand('workbench.action.openSettings', 'memql.lsp.serverPath');
+    });
     return;
   }
 
@@ -1873,24 +1881,27 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // are core.
   const readonlyMarker = new ReadonlyMarker(context.workspaceState);
 
+  // The view's handle, for its message line (the one sentence a connected
+  // cluster with nothing loaded gets). Assigned right after the provider,
+  // which needs a way to reach it before the view exists.
+  let constructsView: TreeView<ConstructNode> | undefined;
   const constructsTree = new ConstructsTreeProvider({
     connections,
-    connectionContext: () => connectionContextKeys(connections?.state ?? { status: 'disconnected' }),
+    viewId: 'memqlConstructs',
+    setMessage: (message) => {
+      if (constructsView !== undefined) constructsView.message = message;
+    },
+    // No live session: the marking that rode the last catalog read is
+    // withdrawn. A marking kept past its connection is a claim nothing backs,
+    // and it would leave a developer's checkout read-only on the authority of
+    // a cluster this editor is no longer talking to.
+    unavailable: () => readonlyMarker.update(undefined, undefined),
     load: async (): Promise<CatalogState> => {
       const dispatcher = connections?.dispatcher;
       if (dispatcher === undefined) {
-        // NOT AN EMPTY CATALOG. An empty list reads as "this cluster has no
-        // constructs", which is the one wrong answer available here.
-        //
-        // Undefined for the marker too, and for the same reason spelled the
-        // other way round: no cluster is not an answer, so nothing is marked
-        // rather than everything.
+        // The session dropped between the state check and the read. Not an
+        // empty catalog; the state change that dropped it redraws the view.
         await readonlyMarker.update(undefined, undefined);
-        // REACHED ONLY WITH A CLUSTER SELECTED (memql#4425): the provider
-        // returns `[]` before it calls this when nothing is, so the manifest's
-        // welcome can render over the empty tree. What is left here is a
-        // cluster that WAS chosen and holds no live session -- which is a fact
-        // about something, and gets a row rather than a welcome.
         return { kind: 'unreachable' };
       }
       try {
@@ -1913,16 +1924,27 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       } catch (err) {
         // A cluster predating the message answers with an envelope the client
         // does not recognise, which throws -- rendered as a stated version
-        // mismatch naming ListConstructs, never as a blank view.
+        // mismatch, never as a blank view.
         //
         // A FAILED FETCH CLEARS THE MARKING as surely as a disconnection does.
         // Keeping the last cluster's answer would leave a developer's checkout
         // marked read-only on the authority of a call that just failed.
         await readonlyMarker.update(undefined, undefined);
+        // Recorded for real: the row is brief, and the whole text belongs in
+        // the MemQL Connection output.
+        noteDiagnostic(
+          connectionOutput,
+          'listing constructs failed',
+          err instanceof Error ? err.message : String(err)
+        );
         return classifyCatalogFailure(err);
       }
     },
   });
+  constructsView = window.createTreeView('memqlConstructs', { treeDataProvider: constructsTree });
+  // Promote, stage, demote and rebuild change what the cluster has loaded;
+  // nothing pushes that, so they redraw this view themselves.
+  refreshConstructsView = () => constructsTree.refresh();
   // Cluster documents (memql#4248): a construct's file, served read-only from
   // the cluster that loaded it, for the ordinary case where the catalog's path
   // names a tree this machine does not have. Every decision is in
@@ -1972,38 +1994,46 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // under a record read from `staging`, or opening `prod`'s console for a
   // concept picked out of `staging`'s catalog, is the failure both prevent.
   const constructPanelDeps = (): ConstructPanelDeps => ({
-    // Hand a concept's ROWS to the console (epic memql#5009, memql#5010).
+    // Hand a concept's ROWS to MemQL OS (epic memql#5009, memql#5010).
     //
     // THE PANEL'S CLUSTER DECIDES, not the connected one, which is the whole
-    // point of the note above -- opening prod's console for a concept picked
+    // point of the note above -- opening prod's MemQL OS for a concept picked
     // out of staging's catalog is the failure it names. Resolving the address
     // from the PANEL's entry is what prevents it, so this needs no refusal of
     // its own; `consoleUrlForCluster` only reaches for the live connection
     // when that connection IS this cluster, and composes the address
-    // otherwise.
-    //
-    // Which is also why this works DISCONNECTED, unlike its sibling above: it
-    // opens a page rather than fetching anything, and the composed address is
-    // a real answer.
-    browseRows: async (construct, panelCluster) => {
+    // otherwise. Which is also why this works disconnected: it opens a page
+    // rather than fetching anything.
+    openInOs: async (construct, panelCluster) => {
       const result = await readClustersFileSafe(clustersPath);
       const entry = result.ok
         ? result.file.clusters.find((c) => c.name === panelCluster)
         : undefined;
       if (entry === undefined) {
-        void window.showInformationMessage(
-          `MemQL: ${panelCluster} is not in clusters.yaml any more, so its console address cannot be worked out.`
-        );
+        void window.showInformationMessage(`MemQL: ${panelCluster} is no longer in your cluster list.`);
         return;
       }
       const url = consoleConceptUrl(await consoleUrlForCluster(entry), construct.name);
       if (url === '') {
-        void window.showErrorMessage(
-          'MemQL: no console address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
-        );
+        const edit = 'Edit Cluster';
+        const answer = await window.showErrorMessage('MemQL: This cluster has no web address.', edit);
+        if (answer === edit) await commands.executeCommand('memql.clusters.edit', { cluster: entry, selected: false });
         return;
       }
       await env.openExternal(Uri.parse(url));
+    },
+    // A concept's rows IN THE EDITOR: the same page the Data view opens, so
+    // "Browse rows" means one thing wherever it is offered. Refused across
+    // clusters for the reason the source read below is.
+    browseRows: async (construct, panelCluster) => {
+      const state = connections?.state;
+      const connected = state?.status === 'connected' ? state.clusterName : undefined;
+      const refusal = panelClusterRefusal(panelCluster, connected, 'browse its rows');
+      if (refusal !== undefined) {
+        void window.showInformationMessage(refusal);
+        return;
+      }
+      await openConceptRows(context, construct.name);
     },
     viewSourceFromCluster: async (construct, panelCluster) => {
       const state = connections?.state;
@@ -2028,19 +2058,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // channel, never into the document and never into the toast.
         const detail = err instanceof Error ? err.message : String(err);
         noteDiagnostic(connectionOutput, `reading ${construct.originPath} from "${clusterName}" failed`, detail);
-        void offerDetails('error', connectionOutput, `MemQL: ${clusterName} could not serve that file.`);
+        void offerDetails('error', connectionOutput, `MemQL: Couldn't read that file from ${clusterName}.`);
       }
     },
-    // Rows live inside the cluster, not on this machine, so this hands off to
-    // THE "BROWSE ROWS" ACTION IS GONE (epic memql#4984). It opened the
-    // portal's `/concepts/<id>` page for a construct; the portal is retired
-    // and MemQL OS has no concept browser, so there is no page to open. The
-    // action was REMOVED rather than pointed at the console root -- a menu
-    // item that opens a page which does not answer is worse than an absent
-    // one, because the person clicks it, gets a 404, and has learnt nothing
-    // about where the rows are. `viewSourceFromCluster` above, the other half
-    // of memql#4252's division of labour, is unaffected: it opens a construct's
-    // SOURCE, which the extension renders itself.
+    run: (construct, withArguments) => runCatalogConstruct(construct, withArguments),
   });
 
   // Everything the console handoff (memql#4251) needs from this function, in
@@ -2064,7 +2085,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       { scheme: CLUSTER_DOCUMENT_SCHEME, language: 'memql' },
       new ClusterDocumentLens()
     ),
-    window.registerTreeDataProvider('memqlConstructs', constructsTree),
+    constructsView,
     // BOTH READERS OF THE CLUSTER'S CATALOG, because there are two and only one
     // of them was refreshed here (memql#4246). The tree redraws its rows; the
     // language server holds a SECOND copy, pushed by ClusterCatalogPublisher,
@@ -2072,9 +2093,24 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // a rebuild the cluster has loaded a different tree, so a refresh that
     // moved only the rows would leave the lens saying `edited` about source the
     // cluster now matches -- still offering the rebuild that just ran.
-    commands.registerCommand('memql.constructs.refresh', () => {
+    //
+    // AND IT IS THE VIEW'S RETRY. The welcome a cluster that is not answering
+    // gets offers this command, so with the session down it dials the cluster
+    // again first -- a Refresh that re-read nothing from a dead session would
+    // be a button that does nothing.
+    commands.registerCommand('memql.constructs.refresh', async () => {
+      await redialUnreachableCluster(clustersPath);
       constructsTree.refresh();
       void refreshTrainingSurfaces();
+    }),
+    // A runnable construct's inline act. Palette-hidden: it takes the row. The
+    // catalog target is the one the construct page runs, so the tree and the
+    // page cannot disagree about what Run does -- an automation opens its
+    // form, a construct with a required argument opens the argument form, and
+    // anything else runs.
+    commands.registerCommand('memql.constructs.run', async (node?: ConstructNode) => {
+      if (node?.kind !== 'construct') return;
+      await runCatalogConstruct(node.construct);
     }),
     // Not palette-invokable ("when": "false"): it needs the construct the tree
     // row carries, which the palette cannot supply. Guarded anyway, so a
@@ -2119,38 +2155,43 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         void window.showInformationMessage(refusal);
         return;
       }
-      const dispatcher = connections?.dispatcher;
-      if (dispatcher === undefined) {
-        // Reachable when the lens carried no cluster claim to refuse on: a
-        // click that does nothing would read as the extension being broken.
-        void window.showInformationMessage('MemQL: connect to a cluster to read its constructs.');
-        return;
-      }
-      try {
-        const result = await new ConstructsClient(dispatcher).listConstructs();
-        const found = result.constructs.find((c) => c.kind === key.kind && c.name === key.name);
-        if (found === undefined) {
-          void window.showInformationMessage(`MemQL: the cluster has no ${key.kind} ${key.name} loaded.`);
-          return;
+      // The page opens AT ONCE, in its loading shape, and fills in when the
+      // catalog read answers -- or says why it could not, with Try again.
+      ConstructPanel.openLoading(context, key.name, constructPanelDeps(), key.cluster ?? '', async () => {
+        const dispatcher = connections?.dispatcher;
+        if (dispatcher === undefined) throw new Error('Not connected to this cluster.');
+        let result;
+        try {
+          result = await new ConstructsClient(dispatcher).listConstructs();
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          noteDiagnostic(connectionOutput, `listing constructs for ${key.kind} ${key.name} failed`, detail);
+          throw new Error("Couldn't read this cluster's constructs.");
         }
-        // `key.cluster` is the lens's own claim, already checked against the
-        // connection by detailsRefusal above -- so it is both the cluster this
-        // record came from and a value the panel can be held to.
-        ConstructPanel.open(context, toCatalogConstruct(found), constructPanelDeps(), key.cluster ?? '');
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        noteDiagnostic(connectionOutput, `listing constructs for ${key.kind} ${key.name} failed`, detail);
-        void offerDetails('error', connectionOutput, 'MemQL: the cluster could not list its constructs.');
-      }
+        const found = result.constructs.find((c) => c.kind === key.kind && c.name === key.name);
+        if (found === undefined) throw new Error(`This cluster has no ${key.kind} "${key.name}" loaded.`);
+        return toCatalogConstruct(found);
+      });
     })
   );
 
-  const conceptsTree = new DataTreeProvider(connections, () =>
-    connectionContextKeys(connections?.state ?? { status: 'disconnected' })
-  );
+  let dataView: TreeView<ConceptTreeNode> | undefined;
+  const conceptsTree = new DataTreeProvider(connections, {
+    viewId: 'memqlData',
+    setMessage: (message) => {
+      if (dataView !== undefined) dataView.message = message;
+    },
+    noteFailure: (message) => noteDiagnostic(connectionOutput, 'listing concepts failed', message),
+  });
+  dataView = window.createTreeView('memqlData', { treeDataProvider: conceptsTree });
   context.subscriptions.push(
-    window.registerTreeDataProvider('memqlData', conceptsTree),
-    commands.registerCommand('memql.data.refresh', () => conceptsTree.refresh())
+    dataView,
+    // Refresh, and the Retry of the welcome a cluster that is not answering
+    // gets -- see memql.constructs.refresh.
+    commands.registerCommand('memql.data.refresh', async () => {
+      await redialUnreachableCluster(clustersPath);
+      conceptsTree.refresh();
+    })
   );
 
   context.subscriptions.push(
@@ -2951,6 +2992,54 @@ function registerRuntimeSurface(context: ExtensionContext): void {
  */
 let refreshTrainingSurfaces: () => Promise<void> = async () => {};
 
+/**
+ * Redraws the Constructs view. Module-level for the reason
+ * `refreshTrainingSurfaces` is: the training acts that change what a cluster
+ * has loaded live in `registerRunSurface`, and the view in
+ * `registerRuntimeSurface`. Nothing pushes a catalog change, so without this a
+ * construct just promoted stayed out of the view until somebody pressed
+ * Refresh.
+ */
+let refreshConstructsView: () => void = () => {};
+
+/**
+ * Dials the selected cluster again when its last dial failed or its session
+ * dropped -- the Retry the Constructs and Data welcomes offer. A credential
+ * problem is left alone: that welcome offers Sign in, which is the act that
+ * fixes it, and a redial would only fail the same way.
+ */
+/**
+ * Runs a construct the cluster's catalog describes, through the ONE run path.
+ *
+ * The Constructs view's inline Run and the construct page share it, so the two
+ * cannot disagree about what Run does. An automation takes the other command,
+ * because the two take different TARGETS: an AutomationTarget carries a
+ * trigger and no args, a RunTarget carries args and no trigger (memql#3805).
+ * A construct with a required argument opens the argument form, as the lens
+ * does; anything else runs.
+ */
+async function runCatalogConstruct(construct: CatalogConstruct, withArguments = false): Promise<void> {
+  const automation = catalogAutomationTarget(construct);
+  if (automation !== undefined) {
+    await commands.executeCommand(COMMAND_RUN_AUTOMATION, automation);
+    return;
+  }
+  const target = catalogRunTarget(construct);
+  // A view-only construct has no target and the surfaces draw no Run for it;
+  // the webview channel is untrusted, so a message naming it stops here.
+  if (target === undefined) return;
+  await commands.executeCommand(withArguments ? COMMAND_RUN_WITH : COMMAND_RUN, target);
+}
+
+async function redialUnreachableCluster(clustersPath: string): Promise<void> {
+  const state = connections?.state;
+  if (state === undefined || state.status !== 'error' || clusterViewState(state) !== 'unreachable') return;
+  const registry = await readClustersFileSafe(clustersPath);
+  const cluster = registry.ok ? registry.file.clusters.find((c) => c.name === state.clusterName) : undefined;
+  if (cluster === undefined) return;
+  await connections?.connect(cluster);
+}
+
 // registerRunSurface wires memql#3309: CodeLens run affordances, the run
 // orchestrator, the arg form / result tabs, and the Runs tree.
 //
@@ -3027,9 +3116,12 @@ function registerRunSurface(
   // "nothing happens" is the wrong one for a command the palette offers. The
   // default explains instead.
   let showTrainingList: () => Promise<void> = async () => {
-    window.showInformationMessage(
-      'MemQL: training state needs the MemQL language server, which is not running. Set "memql.lsp.serverPath" or install memql-lsp on your PATH.'
+    const settings = 'Open Settings';
+    const answer = await window.showInformationMessage(
+      'MemQL: Training state needs the MemQL language server, which is not running.',
+      settings
     );
+    if (answer === settings) await commands.executeCommand('workbench.action.openSettings', 'memql.lsp.serverPath');
   };
 
   const training = new TrainingActions({
@@ -3044,33 +3136,56 @@ function registerRunSurface(
     confirmOverride: (prompt) => showTrainingModal(prompt),
     publishDiagnostics: (mapped) => trainingFailures.publish(mapped),
     display: (p) => displayPath(workspaceRoot, p),
-    catalogChanged: () => refreshTrainingSurfaces(),
+    // What a promote, a stage or a demote changed: the language server's copy
+    // of the catalog (the lenses and the gutter) AND the Constructs view, which
+    // nothing else would redraw.
+    catalogChanged: () => {
+      refreshConstructsView();
+      return refreshTrainingSurfaces();
+    },
+  });
+
+  // Each act runs with the window's progress area naming it, so the seconds
+  // between the confirmation and the answer (validate, then submit) never look
+  // like a click that did nothing, and ends in ONE toast: what happened, with
+  // the next act as a button when there is one.
+  const trainingAct = async (
+    verb: string,
+    request: TrainingRequest,
+    act: () => Promise<TrainingOutcome>
+  ): Promise<TrainingOutcome> =>
+    Promise.resolve(
+      window.withProgress({ location: ProgressLocation.Window, title: `${verb} ${request.name}` }, act)
+    );
+  const promoteNext = (request: TrainingRequest) => ({
+    label: 'Promote',
+    run: () => commands.executeCommand(COMMAND_PROMOTE, request),
   });
 
   context.subscriptions.push(
-    // All four are palette-hidden ("when": false): each takes the lens's
+    // All five are palette-hidden ("when": false): each takes the lens's
     // {uri, name} payload, which the palette cannot supply, and an invocation
     // without one returns rather than guessing at the active editor.
     commands.registerCommand(COMMAND_DRY_RUN, async (request?: TrainingRequest) => {
       if (request === undefined) return;
-      reportTraining(await training.dryRun(request), trainingOutput);
+      reportTraining(await trainingAct('Checking', request, () => training.dryRun(request)), trainingOutput, promoteNext(request));
     }),
     commands.registerCommand(COMMAND_TRY_IN_SESSION, async (request?: TrainingRequest) => {
       if (request === undefined) return;
-      const outcome = await training.tryInSession(request);
-      reportTraining(outcome, trainingOutput);
-      // The lens that says "defined for this session only" is the half of the
-      // temporariness message that survives the modal being dismissed, so it has
-      // to redraw now rather than at the next keystroke.
+      const outcome = await trainingAct('Defining', request, () => training.tryInSession(request));
+      reportTraining(outcome, trainingOutput, promoteNext(request));
+      // The lens that says "this session" is the half of the temporariness
+      // message that survives the toast being dismissed, so it has to redraw
+      // now rather than at the next keystroke.
       if (outcome.status === 'ok') refreshSessionLens();
     }),
     commands.registerCommand(COMMAND_STAGE, async (request?: TrainingRequest) => {
       if (request === undefined) return;
-      reportTraining(await training.stage(request), trainingOutput);
+      reportTraining(await trainingAct('Staging', request, () => training.stage(request)), trainingOutput, promoteNext(request));
     }),
     commands.registerCommand(COMMAND_PROMOTE, async (request?: TrainingRequest) => {
       if (request === undefined) return;
-      const outcome = await training.promote(request);
+      const outcome = await trainingAct('Promoting', request, () => training.promote(request));
       if (outcome.status !== 'breaking') {
         reportTraining(outcome, trainingOutput);
         return;
@@ -3089,27 +3204,35 @@ function registerRunSurface(
       trainingOutput.show(true);
       const override = 'Override and promote...';
       const answer = await window.showWarningMessage(
-        refusal?.headline ??
-          'The engine refused this promote. The classified diff is in the MemQL Training output.',
+        refusal?.headline ?? 'MemQL: Promote blocked by a breaking schema change.',
         override
       );
       if (answer !== override) return;
       reportTraining(
-        await training.promoteWithOverride(
-          request,
-          outcome.cluster,
-          outcome.bundle,
-          outcome.diffs
+        await trainingAct('Promoting', request, () =>
+          training.promoteWithOverride(request, outcome.cluster, outcome.bundle, outcome.diffs)
         ),
         trainingOutput
       );
     }),
     commands.registerCommand(COMMAND_DEMOTE, async (request?: TrainingRequest) => {
       if (request === undefined) return;
-      reportTraining(await training.demote(request), trainingOutput);
+      reportTraining(await trainingAct('Demoting', request, () => training.demote(request)), trainingOutput);
+    }),
+    // The ONE training lens's click: the acts legal from this construct's
+    // state, each with the line that says what it does, in the order of the
+    // escalation. Every act the lenses used to offer one by one is here.
+    commands.registerCommand(COMMAND_CHOOSE, async (choice?: TrainingChoice) => {
+      if (choice === undefined || choice.actions.length === 0) return;
+      const picked = await window.showQuickPick(
+        choice.actions.map((action) => ({ label: action.title, description: action.description, action })),
+        { placeHolder: choice.name }
+      );
+      if (picked === undefined) return;
+      await commands.executeCommand(picked.action.command, { uri: choice.uri, name: choice.name });
     }),
     // The one training command that IS in the palette. It navigates and submits
-    // nothing, and it takes no arguments -- the four above take the lens's
+    // nothing, and it takes no arguments -- the acts above take the lens's
     // {uri, name} payload, which the palette cannot supply.
     commands.registerCommand(COMMAND_SHOW_LIST, () => showTrainingList())
   );
@@ -3145,12 +3268,18 @@ function registerRunSurface(
   });
 
   const host: RunPanelHost = {
-    run: (target, values) => orchestrator.run(target, values),
+    // The window's progress area names what is running for as long as it runs:
+    // a slow cluster must not look like a click that did nothing. The Result
+    // tab carries the rest (it opens in its running state, see runAndShow).
+    run: (target, values) =>
+      Promise.resolve(
+        window.withProgress({ location: ProgressLocation.Window, title: `Running ${target.name}` }, () =>
+          orchestrator.run(target, values)
+        )
+      ),
     saveConfig: async (target, name, values) => {
       if (workspaceRoot === undefined) {
-        throw new Error(
-          'A run configuration is saved in the workspace, so this needs an open folder.'
-        );
+        throw new Error('Open a folder to save runs.');
       }
       const config: RunConfig = {
         name,
@@ -3158,7 +3287,9 @@ function registerRunSurface(
         construct: target.name,
         args: values,
       };
-      const relative = workspaceRelative(workspaceRoot, target.uri);
+      // A construct run from the CATALOG has no file, and none is written: a
+      // saved run with no file is replayed against the cluster's catalog.
+      const relative = isCatalogUri(target.uri) ? undefined : workspaceRelative(workspaceRoot, target.uri);
       if (relative !== undefined) config.file = relative;
       await writeRunConfigs(runConfigPath(workspaceRoot), (current) =>
         upsertRunConfig(current, config)
@@ -3167,8 +3298,15 @@ function registerRunSurface(
     },
     concepts: () => concepts,
     openRow: (conceptId, rowId) => {
-      void openRowInConcepts(context, conns, conceptId, rowId);
+      void openConceptRows(context, conceptId, rowId);
     },
+  };
+
+  // One run, shown: the Result tab opens at once in its running state, so a
+  // slow run is visible from the click, and fills in when the run settles.
+  const runAndShow = async (target: RunTarget, values: Record<string, unknown>): Promise<void> => {
+    ResultPanel.running(context, host, target);
+    ResultPanel.show(context, host, await host.run(target, values));
   };
 
   // memql#3310's automation half. It shares the orchestrator's write gate --
@@ -3193,9 +3331,7 @@ function registerRunSurface(
       automationRunner.run(target, request, trace, onProgress),
     saveConfig: async (target, name, request) => {
       if (workspaceRoot === undefined) {
-        throw new Error(
-          'A run configuration is saved in the workspace, so this needs an open folder.'
-        );
+        throw new Error('Open a folder to save runs.');
       }
       const config: RunConfig = {
         name,
@@ -3206,7 +3342,7 @@ function registerRunSurface(
         args: {},
         automation: automationConfigBlock(request),
       };
-      const relative = workspaceRelative(workspaceRoot, target.uri);
+      const relative = isCatalogUri(target.uri) ? undefined : workspaceRelative(workspaceRoot, target.uri);
       if (relative !== undefined) config.file = relative;
       await writeRunConfigs(runConfigPath(workspaceRoot), (current) =>
         upsertRunConfig(current, config)
@@ -3226,8 +3362,17 @@ function registerRunSurface(
     concept: (conceptId) => concepts.get(conceptId),
   };
 
-  const runsTree = new RunsTreeProvider(workspaceRoot);
-  context.subscriptions.push(window.registerTreeDataProvider('memqlRuns', runsTree));
+  let runsView: TreeView<RunsTreeNode> | undefined;
+  const runsTree = new RunsTreeProvider(workspaceRoot, {
+    // Read for the view's message only -- the rows are the developer's file
+    // and are listed whatever the connection is doing.
+    connected: () => conns.state.status === 'connected',
+    setMessage: (message) => {
+      if (runsView !== undefined) runsView.message = message;
+    },
+  });
+  runsView = window.createTreeView('memqlRuns', { treeDataProvider: runsTree });
+  context.subscriptions.push(runsView, { dispose: conns.onDidChangeState(() => runsTree.refresh()) });
 
   // The run-config file is plain text a developer (or an agent) edits
   // directly, so the tree has to follow the file rather than only its own
@@ -3333,53 +3478,15 @@ function registerRunSurface(
       languages.registerCodeLensProvider({ language: 'memql' }, trainingLens)
     );
 
-    // The lens that keeps "temporary" on screen (memql#3763).
-    //
-    // A SECOND PROVIDER rather than a fifth state on the first one, because it
-    // is not a state: a session-defined construct is still `untrained` on that
-    // cluster and still wants a Promote offered beside it. What this adds is a
-    // fact about the CONNECTION -- a copy of this source is answering calls
-    // right now and will stop without notice -- and the reason it needs saying
-    // at all is that a session-define and a promote are indistinguishable from
-    // the call site.
-    //
-    // It asks the server for itself rather than sharing the state lens's reply.
-    // VS Code refreshes the two providers independently, so a shared cache would
-    // be stale in whichever of them redrew second; and the cost is bounded to
-    // the case where something IS defined, because an empty session returns
-    // before making a request at all.
-    const sessionLensChanged = new EventEmitter<void>();
-    context.subscriptions.push(
-      sessionLensChanged,
-      languages.registerCodeLensProvider(
-        { language: 'memql' },
-        {
-          onDidChangeCodeLenses: sessionLensChanged.event,
-          provideCodeLenses: async (document) => {
-            const cluster = currentRunCluster(clustersPath, conns);
-            if (cluster === undefined) return [];
-            if (training.sessionDefinitions.defined(cluster.name).length === 0) return [];
-            const constructs = await requestTrainingStates(document.uri.fsPath);
-            if (constructs === undefined) return [];
-            return sessionLensPlans(constructs, (name) =>
-              training.sessionDefinitions.isDefined(cluster.name, name)
-            ).map(
-              (plan) =>
-                new CodeLens(lspRange(plan.signatureRange), {
-                  // NO COMMAND. Clicking it would have to do something, and
-                  // there is nothing to do -- undefining is not offered, and the
-                  // way to make it permanent is the Promote lens on the same
-                  // line.
-                  title: plan.title,
-                  command: '',
-                  tooltip: plan.tooltip,
-                })
-            );
-          },
-        }
-      )
-    );
-    refreshSessionLens = () => sessionLensChanged.fire();
+    // "Temporary" stays on screen (memql#3763), folded into the construct's one
+    // training lens ("Not on cluster · this session") rather than drawn as a
+    // lens of its own beside it. The lookup is read per paint, so a reconnect
+    // that drops every session definition drops the claim with it.
+    trainingLens.setSessionLookup((name) => {
+      const cluster = currentRunCluster(clustersPath, conns);
+      return cluster !== undefined && training.sessionDefinitions.isDefined(cluster.name, name);
+    });
+    refreshSessionLens = () => trainingLens.refresh();
 
     // What a promote or a demote has to redraw, in the order it has to redraw
     // it. THE CATALOG FIRST: training state is the server comparing a buffer
@@ -3390,7 +3497,6 @@ function registerRunSurface(
       await clusterCatalog.refresh();
       trainingLens.setClient(lspBridge);
       void trainingDecorations.refresh(window.activeTextEditor);
-      sessionLensChanged.fire();
     };
   }
 
@@ -3407,7 +3513,7 @@ function registerRunSurface(
         RunPanel.open(context, host, target);
         return;
       }
-      ResultPanel.show(context, host, await orchestrator.run(target, {}));
+      await runAndShow(target, {});
     }),
     commands.registerCommand(COMMAND_RUN_WITH, (target?: RunTarget) => {
       if (target === undefined) return;
@@ -3428,7 +3534,12 @@ function registerRunSurface(
     commands.registerCommand('memql.runs.refresh', () => runsTree.refresh()),
     commands.registerCommand('memql.runs.open', async () => {
       if (workspaceRoot === undefined) {
-        window.showErrorMessage('MemQL: run configurations live in the workspace; open a folder first.');
+        // Unreachable from the view, whose title offers this only with a folder
+        // open; the palette can still get here.
+        const open = 'Open Folder';
+        if ((await window.showInformationMessage('MemQL: Open a folder to save runs.', open)) === open) {
+          await commands.executeCommand('vscode.openFolder');
+        }
         return;
       }
       // Opens the actual file. The point of the format is that it IS plain
@@ -3449,27 +3560,24 @@ function registerRunSurface(
     commands.registerCommand('memql.runs.execute', async (node?: RunsTreeNode) => {
       if (node === undefined || node.kind !== 'run') return;
       // THE RUNS EXCEPTION, enforced at the moment a cluster is actually needed
-      // (memql#4425, design D2). Every other cluster-backed view empties itself
-      // when nothing is selected so its welcome can render; this one keeps
-      // listing, because `runs.json` is the developer's OWN file and hiding it
-      // would present their saved work as lost. So the gate lives here instead,
-      // on `memql.connected` rather than `memql.clusterSelected`: a run needs a
-      // live session, not merely a chosen cluster, and a cluster that is
-      // selected but not answering fails the same way.
-      //
-      // The sentence is the shared one, so the refusal an operator meets here
-      // and the welcomes they read in the sidebar are recognisably one message.
+      // (memql#4425, design D2). The view keeps listing the developer's own
+      // file whatever the connection is doing, and offers Run only while
+      // connected; this is the wall behind that, for a caller that is not the
+      // view. The refusal carries the fix.
       if (!connectionContextKeys(connections?.state ?? { status: 'disconnected' }).connected) {
-        window.showWarningMessage(`MemQL: ${NOT_CONNECTED_REFUSAL}`);
+        const select = 'Select Cluster';
+        if ((await window.showWarningMessage(`MemQL: ${NOT_CONNECTED_REFUSAL}`, select)) === select) {
+          await commands.executeCommand('memql.clusters.select');
+        }
         return;
       }
-      // An automation configuration OPENS THE FORM pre-filled rather than
-      // running straight away. Every other kind's saved configuration is a
-      // complete, replayable call; an automation's is a saved trigger event
-      // whose blast radius is its whole action chain, and the form is where
-      // the deployed-definition banner and the payload are both visible before
-      // the click. Nothing in this extension auto-runs, and a saved automation
-      // is the entry a repository is most likely to ship.
+      // An automation's saved run OPENS THE FORM pre-filled rather than
+      // running straight away. Every other kind's saved run is a complete,
+      // replayable call; an automation's is a saved trigger event whose blast
+      // radius is its whole action chain, and the form is where the
+      // deployed-definition line and the payload are both visible before the
+      // click. Nothing in this extension auto-runs, and a saved automation is
+      // the entry a repository is most likely to ship.
       if (node.config.kind === 'automation') {
         const automationTarget = await automationTargetForConfig(node.config, workspaceRoot);
         if (automationTarget === undefined) return;
@@ -3483,12 +3591,12 @@ function registerRunSurface(
       }
       const target = await targetForConfig(node.config, workspaceRoot);
       if (target === undefined) return;
-      ResultPanel.show(context, host, await orchestrator.run(target, node.config.args));
+      await runAndShow(target, node.config.args);
     }),
     commands.registerCommand('memql.runs.delete', async (node?: RunsTreeNode) => {
       if (node === undefined || node.kind !== 'run' || workspaceRoot === undefined) return;
       const confirmed = await window.showWarningMessage(
-        `Delete the run configuration "${node.config.name}"?`,
+        `Delete the saved run "${node.config.name}"?`,
         { modal: true },
         'Delete'
       );
@@ -3793,21 +3901,33 @@ async function showTrainingModal(prompt: TrainingPrompt): Promise<boolean> {
 // outcomeReport returns undefined for both. A superseded action was overtaken by
 // a newer one whose report belongs on screen instead, and telling somebody their
 // Cancel worked is noise.
-function reportTraining(outcome: TrainingOutcome, output: OutputChannel): void {
+function reportTraining(
+  outcome: TrainingOutcome,
+  output: OutputChannel,
+  next?: { label: string; run: () => unknown }
+): void {
   const report = writeTraining(outcome, output);
   if (report === undefined) return;
 
+  // The fix, or the next act, as the toast's first button: Show Problems for
+  // code that did not compile, Promote after a dry run, a session try or a
+  // stage that went through.
+  const problems = 'Show Problems';
   const details = 'Show details';
+  const first = outcome.status === 'invalid' ? problems : outcome.status === 'ok' ? next?.label : undefined;
+  const buttons = first === undefined ? [details] : [first, details];
   const shown =
     report.severity === 'error'
-      ? window.showErrorMessage(report.headline, details)
+      ? window.showErrorMessage(report.headline, ...buttons)
       : report.severity === 'warning'
-        ? window.showWarningMessage(report.headline, details)
-        : window.showInformationMessage(report.headline, details);
+        ? window.showWarningMessage(report.headline, ...buttons)
+        : window.showInformationMessage(report.headline, ...buttons);
   void Promise.resolve(shown).then((answer) => {
     // preserveFocus: revealing the record must not take the cursor out of the
     // file the developer is working in.
     if (answer === details) output.show(true);
+    else if (answer === problems) void commands.executeCommand('workbench.actions.view.problems');
+    else if (answer !== undefined && answer === next?.label) void next.run();
   });
 }
 
@@ -3998,17 +4118,28 @@ function workspaceRelative(workspaceRoot: string, uri: string): string | undefin
   return relative.split(path.sep).join('/');
 }
 
-// targetForConfig rebuilds a full RunTarget from a saved configuration by
-// asking the LANGUAGE SERVER about the file the configuration names.
+// targetForConfig rebuilds a full RunTarget from a saved run.
 //
-// It deliberately does not reconstruct the arg list from the saved values. The
-// declared order is what buildNamedCall renders with, and the construct's args
-// may have changed since the configuration was written -- so the authority has
-// to be the current buffer, read by the one parser, not the stored snapshot.
+// A saved run that names a FILE is resolved by asking the LANGUAGE SERVER about
+// that file: the declared order is what buildNamedCall renders with, and the
+// construct's args may have changed since the run was saved -- so the authority
+// has to be the current buffer, read by the one parser, not the stored
+// snapshot.
+//
+// A saved run with NO file was saved from a construct the cluster's catalog
+// described (the construct page, the Constructs view): there is no buffer, and
+// never was. It is resolved against the connected cluster's catalog instead,
+// and runs the definition the cluster has loaded -- exactly what it ran when it
+// was saved. This used to refuse with a sentence about a missing "file" the
+// extension itself had chosen not to write.
 async function targetForConfig(
   config: RunConfig,
   workspaceRoot: string | undefined
 ): Promise<RunTarget | undefined> {
+  if (config.file === undefined) {
+    const construct = await catalogConstructForConfig(config);
+    return construct === undefined ? undefined : catalogRunTarget(construct);
+  }
   const found = await constructForConfig(config, workspaceRoot);
   if (found === undefined) return undefined;
   return {
@@ -4023,14 +4154,18 @@ async function targetForConfig(
 // carries the TRIGGER rather than the args, for the same reason the lens does:
 // the trigger is what decides the form, and the args are always empty.
 //
-// It re-resolves through the language server rather than trusting the saved
-// entry, exactly as targetForConfig does -- a trigger can have been edited
-// since the configuration was written, and the form built from a stale one
-// would offer a row picker over the wrong concept.
+// It re-resolves rather than trusting the saved entry, exactly as
+// targetForConfig does -- a trigger can have been edited since the run was
+// saved, and the form built from a stale one would offer a row picker over the
+// wrong concept.
 async function automationTargetForConfig(
   config: RunConfig,
   workspaceRoot: string | undefined
 ): Promise<AutomationTarget | undefined> {
+  if (config.file === undefined) {
+    const construct = await catalogConstructForConfig(config);
+    return construct === undefined ? undefined : catalogAutomationTarget(construct);
+  }
   const found = await constructForConfig(config, workspaceRoot);
   if (found === undefined) return undefined;
   const target: AutomationTarget = { uri: found.uri, name: found.construct.name };
@@ -4038,20 +4173,50 @@ async function automationTargetForConfig(
   return target;
 }
 
-// constructForConfig is the shared lookup: open the file the configuration
-// names and ask the LANGUAGE SERVER to describe it.
+// catalogConstructForConfig finds a saved run's construct in the connected
+// cluster's catalog -- the resolution for a saved run with no file.
+async function catalogConstructForConfig(config: RunConfig): Promise<CatalogConstruct | undefined> {
+  const dispatcher = connections?.dispatcher;
+  if (dispatcher === undefined) {
+    window.showWarningMessage(`MemQL: ${NOT_CONNECTED_REFUSAL}`);
+    return undefined;
+  }
+  let listed;
+  try {
+    listed = await new ConstructsClient(dispatcher).listConstructs();
+  } catch (err) {
+    noteDiagnostic(connectionOutput, `listing constructs for "${config.name}" failed`, err instanceof Error ? err.message : String(err));
+    void offerDetails('error', connectionOutput, "MemQL: Couldn't read the cluster's constructs.");
+    return undefined;
+  }
+  const found = listed.constructs.find((c) => c.kind === config.kind && c.name === config.construct);
+  if (found === undefined) {
+    window.showErrorMessage(`MemQL: This cluster has no ${config.kind} "${config.construct}".`);
+    return undefined;
+  }
+  return toCatalogConstruct(found);
+}
+
+// constructForConfig is the shared lookup for a saved run that names a file:
+// open it and ask the LANGUAGE SERVER to describe it.
 //
 // The authority is the current buffer read by the one parser, never the stored
 // snapshot -- the construct may have been renamed, re-triggered or had its
-// args changed since the configuration was written.
+// args changed since the run was saved.
 async function constructForConfig(
   config: RunConfig,
   workspaceRoot: string | undefined
 ): Promise<{ uri: string; construct: ReturnType<typeof parseRunnableConstructs>[number] } | undefined> {
-  if (config.file === undefined || workspaceRoot === undefined) {
-    window.showErrorMessage(
-      `MemQL: the run configuration "${config.name}" names no file, so there is no buffer to run. Add a "file" pointing at the .memql file that declares ${config.construct}.`
+  if (config.file === undefined || workspaceRoot === undefined) return undefined;
+  // SAID, never silent. This returned without a word, so Run on a saved run
+  // did nothing at all in a window whose language server was missing.
+  if (client === undefined) {
+    const settings = 'Open Settings';
+    const answer = await window.showWarningMessage(
+      'MemQL: Running a saved run from a file needs the MemQL language server.',
+      settings
     );
+    if (answer === settings) await commands.executeCommand('workbench.action.openSettings', 'memql.lsp.serverPath');
     return undefined;
   }
   const uri = Uri.file(path.join(workspaceRoot, config.file.split('/').join(path.sep)));
@@ -4060,11 +4225,10 @@ async function constructForConfig(
     document = await workspace.openTextDocument(uri);
   } catch (err) {
     window.showErrorMessage(
-      `MemQL: cannot open ${config.file}: ${briefMessage(redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir()))}`
+      `MemQL: Couldn't open ${config.file}: ${briefMessage(redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir()))}`
     );
     return undefined;
   }
-  if (client === undefined) return undefined;
   // The one call in this extension that asks the server for constructs OUTSIDE
   // provideCodeLenses, so it needs its own failure story: a server that
   // predates memql/runnableConstructs rejects with MethodNotFound, and an
@@ -4076,18 +4240,20 @@ async function constructForConfig(
       textDocument: { uri: document.uri.toString() },
     });
   } catch (err) {
-    window.showErrorMessage(
-      `MemQL: the language server could not describe ${config.file}: ${err instanceof Error ? err.message : String(err)}`
-    );
+    noteDiagnostic(connectionOutput, `describing ${config.file} failed`, err instanceof Error ? err.message : String(err));
+    void offerDetails('error', connectionOutput, `MemQL: Couldn't read ${config.file}.`);
     return undefined;
   }
   const found = parseRunnableConstructs(raw).find(
     (c) => c.name === config.construct && c.kind === config.kind
   );
   if (found === undefined) {
-    window.showErrorMessage(
-      `MemQL: ${config.file} declares no ${config.kind} named ${config.construct}. The construct was renamed, or the file does not currently parse.`
+    const open = 'Open runs.json';
+    const answer = await window.showErrorMessage(
+      `MemQL: ${config.file} no longer has ${config.kind} "${config.construct}". It may have been renamed.`,
+      open
     );
+    if (answer === open) await commands.executeCommand('memql.runs.open');
     return undefined;
   }
   return { uri: document.uri.toString(), construct: found };
@@ -4148,32 +4314,31 @@ function buildAutomationEngine(conns: ConnectionManager): AutomationRunEngine | 
   };
 }
 
-// openRowInConcepts resolves the row's concept descriptor and opens the
-// Concepts tab on it -- the "click a row to open it in the Concepts surface"
-// link from a result.
-async function openRowInConcepts(
-  context: ExtensionContext,
-  conns: ConnectionManager,
-  conceptId: string,
-  rowId: string
-): Promise<void> {
-  const query = conns.query;
-  if (query === undefined || conceptId === '') return;
+// openConceptRows resolves a concept's descriptor and opens its rows in the
+// editor -- the Data view's page. Reached from a run Result's row (with the
+// row, which the page then selects) and from a concept's construct page.
+async function openConceptRows(context: ExtensionContext, conceptId: string, rowId?: string): Promise<void> {
+  const conns = connections;
+  const query = conns?.query;
+  if (conns === undefined || query === undefined) {
+    window.showWarningMessage(`MemQL: ${NOT_CONNECTED_REFUSAL}`);
+    return;
+  }
+  if (conceptId === '') return;
   let list: Concept[];
   try {
     list = await query.listConcepts();
   } catch (err) {
-    window.showErrorMessage(`MemQL: ${err instanceof Error ? err.message : String(err)}`);
+    noteDiagnostic(connectionOutput, 'listing concepts failed', err instanceof Error ? err.message : String(err));
+    void offerDetails('error', connectionOutput, "MemQL: Couldn't read this cluster's concepts.");
     return;
   }
   const concept = list.find((c) => c.id === conceptId);
   if (concept === undefined) {
-    window.showWarningMessage(
-      `MemQL: ${conceptId} is not registered on the connected cluster, so row ${rowId} has no Concepts view.`
-    );
+    window.showWarningMessage("MemQL: This row's concept isn't on the connected cluster.");
     return;
   }
-  ConceptPanel.open(context, conns, concept);
+  ConceptPanel.open(context, conns, concept, rowId);
 }
 
 // writeCluster runs a registry write and refreshes the tree, surfacing a

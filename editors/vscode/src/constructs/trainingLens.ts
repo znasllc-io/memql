@@ -21,22 +21,26 @@
 // Do not register it from here: a training module registering a Deployments
 // command is how an id ends up with two owners.
 //
-// THE ACTION LENSES ARE ON, as of #3763 -- which is the change that registers
-// the four commands they post to, and they were switched on in it for that
-// reason and no other. A Promote lens posting to an unregistered command fails
-// with "command not found", and a click that does nothing teaches a developer
-// the extension is broken, so the flip and the registration are one commit by
-// construction. `src/training/actions.ts` is what they reach.
+// ONE LENS PER CONSTRUCT. The state, in words ("Not on cluster"), and a click
+// that opens a quick pick of the acts legal from it -- Dry run, Try in this
+// session, Stage, Promote, Demote, Rebuild from checkout. It used to be the state
+// plus up to four act lenses plus a session lens, seven or eight on one line
+// beside Run; every act is still one pick away, and still reachable through
+// "Show CodeLens Commands for Current Line". The chooser
+// (`memql.training.choose`) is registered in extension.ts beside the acts it
+// runs; `src/training/actions.ts` is what they reach.
 //
 // Refs: #3763 #3761 #3745
 
 import * as vscode from "vscode";
 
 import {
+  COMMAND_CHOOSE,
   TRAINING_STATE_CAPABILITY,
   TRAINING_STATE_METHOD,
   parseTrainingConstructs,
   trainingLensPlans,
+  type TrainingChoice,
 } from "../state/training.js";
 import type { TrainingStateClient } from "./decorations.js";
 
@@ -46,6 +50,7 @@ export class TrainingCodeLensProvider implements vscode.CodeLensProvider {
 
   private client: TrainingStateClient | undefined;
   private cluster: { name: string; local: boolean } | undefined;
+  private sessionDefined: ((name: string) => boolean) | undefined;
 
   /** Point at a language client, or at nothing. Refreshes either way. */
   setClient(client: TrainingStateClient | undefined): void {
@@ -95,29 +100,50 @@ export class TrainingCodeLensProvider implements vscode.CodeLensProvider {
     const plans = trainingLensPlans(parseTrainingConstructs(raw), {
       offerActions: true,
       cluster: this.cluster,
+      sessionDefined: this.sessionDefined,
     });
     for (const plan of plans) {
       const range = toRange(plan.construct.signatureRange);
-      // The state label is NOT a command. It is a fact about the construct, and
-      // giving it a command would make a developer wonder what clicking it does.
+      // ONE LENS: the state in words. When the state has acts, clicking it
+      // opens a quick pick of exactly those (Dry run, Try in this session,
+      // Stage, Promote, Demote, Rebuild); when it has none it is a fact with
+      // no command, so nothing invites a click that does nothing.
+      if (plan.actions.length === 0) {
+        lenses.push(new vscode.CodeLens(range, { title: plan.label, command: "", tooltip: plan.detail }));
+        continue;
+      }
+      const choice: TrainingChoice = {
+        uri: document.uri.toString(),
+        name: plan.construct.name,
+        actions: plan.actions,
+      };
       lenses.push(
         new vscode.CodeLens(range, {
           title: plan.label,
-          command: "",
+          command: COMMAND_CHOOSE,
           tooltip: plan.detail,
+          arguments: [choice],
         }),
       );
-      for (const action of plan.actions) {
-        lenses.push(
-          new vscode.CodeLens(range, {
-            title: action.title,
-            command: action.command,
-            arguments: [{ uri: document.uri.toString(), name: plan.construct.name }],
-          }),
-        );
-      }
     }
     return lenses;
+  }
+
+  /**
+   * Point at the session's definitions, or at nothing. Refreshes either way.
+   *
+   * A construct defined for this session only says so in its lens ("Not on
+   * cluster · this session"). That used to be a second lens from a second
+   * provider on the same line.
+   */
+  setSessionLookup(lookup: ((name: string) => boolean) | undefined): void {
+    this.sessionDefined = lookup;
+    this.changed.fire();
+  }
+
+  /** Redraw: the session's definitions changed, which is not a document change. */
+  refresh(): void {
+    this.changed.fire();
   }
 
   dispose(): void {

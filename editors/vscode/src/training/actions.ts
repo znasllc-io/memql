@@ -335,7 +335,7 @@ export class TrainingActions {
         this.deps.publishDiagnostics(mapped);
         return { status: "invalid", action: "tryInSession", request, diagnostics: mapped };
       }
-      return this.refuse("tryInSession", request, defined.error, "The engine refused the bundle.");
+      return this.refuse("tryInSession", request, defined.error, "The cluster rejected this code.");
     }
 
     this.sessions.record(context.cluster.name, defined.defined);
@@ -630,7 +630,7 @@ export class TrainingActions {
     const cluster = this.deps.cluster();
     if (cluster === undefined) {
       return {
-        outcome: this.error(action, request, "No cluster selected. Pick one in the Clusters view."),
+        outcome: this.error(action, request, "Not connected. Select a cluster first."),
       };
     }
     const engine = this.deps.engine();
@@ -639,7 +639,7 @@ export class TrainingActions {
         outcome: this.error(
           action,
           request,
-          `Not connected to ${cluster.label}. Select the cluster in the Clusters view to connect.`,
+          `Not connected to ${cluster.label}.`,
         ),
       };
     }
@@ -662,7 +662,7 @@ export class TrainingActions {
         outcome: this.error(
           action,
           request,
-          `This file no longer declares "${request.name}". It was renamed or removed since the lens was drawn.`,
+          `"${request.name}" isn't in this file any more. It may have been renamed.`,
         ),
       };
     }
@@ -709,7 +709,7 @@ export class TrainingActions {
           outcome: this.error(
             action,
             request,
-            "The engine rejected the bundle without a per-construct diagnostic.",
+            "The cluster rejected this code without saying where.",
           ),
         };
       }

@@ -177,14 +177,14 @@ test('the missing-binary message names the language features, not the extension'
   assert.equal(recorded.errors.length, 1, `unexpected errors: ${recorded.errors.join(' | ')}`);
   const message = recorded.errors[0] ?? '';
 
-  // What is actually lost.
+  // What is actually lost, in one sentence.
   assert.match(message, /language features/i);
-  // The three ways out, unchanged from the original message.
-  assert.match(message, /memql\.lsp\.serverPath/);
-  assert.match(message, /PATH/);
-  // And the correction the issue asks for: it must not read as "the extension
-  // is dead" to someone staring at an empty Clusters view.
-  assert.match(message, /Clusters, Concepts and Runs/);
+  assert.match(message, /memql-lsp/);
+  // The fix is a button, so the setting's name is no longer spelled in prose.
+  assert.doesNotMatch(message, /serverPath/);
+  // It no longer names views at all -- it used to name a "Concepts" view,
+  // which is called Data.
+  assert.doesNotMatch(message, /Concepts/);
 });
 
 test('no language client is started, which is the half that genuinely failed', () => {
