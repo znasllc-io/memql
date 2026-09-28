@@ -894,7 +894,14 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   const current = manager.state;
   if (current.status !== 'connected' || current.clusterName !== cluster.name) {
     await commands.executeCommand('memql.clusters.select', { cluster, selected: false });
-    const settled = await awaitConnection(manager, cluster.name, HANDOFF_CONNECT_TIMEOUT_MS);
+    // A cluster nothing stored can sign in to is NOT dialled by select: it
+    // opens the cluster's page, Sign in first, and leaves any other live
+    // connection alone. So when the state does not name this cluster after
+    // the select, no connect is coming, and waiting for one would only turn
+    // "sign in first" into a thirty-second silence.
+    const after = manager.state;
+    const dialled = after.status !== 'disconnected' && after.clusterName === cluster.name;
+    const settled = dialled ? await awaitConnection(manager, cluster.name, HANDOFF_CONNECT_TIMEOUT_MS) : after;
     if (settled.status !== 'connected' || settled.clusterName !== cluster.name) {
       const why =
         settled.status === 'error'
@@ -918,10 +925,23 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
       // forward and did nothing, with the one explanation on a surface the
       // person can no longer see. Non-modal, and it names the cluster rather
       // than repeating the select command's diagnosis.
+      //
+      // Sign in AS A BUTTON when the credential is the problem -- the error
+      // names a sign-in reason, or select did not dial because nothing stored
+      // could sign in -- and "couldn't connect" otherwise, where signing in
+      // would not help.
       if (request.target === 'artifact') {
-        void window.showInformationMessage(
-          `MemQL: sign in to ${cluster.name} to open this artifact.`
-        );
+        const needsSignIn = !dialled || (settled.status === 'error' && signInCanRecover(settled.reason));
+        const label = displayLabel(cluster);
+        void (async () => {
+          if (!needsSignIn) {
+            await offerDetails('error', connectionOutput, `MemQL: Couldn't connect to ${label} to open this artifact.`);
+            return;
+          }
+          const signIn = 'Sign in';
+          const choice = await window.showInformationMessage(`MemQL: Sign in to ${label} to open this artifact.`, signIn);
+          if (choice === signIn) await commands.executeCommand('memql.clusters.signIn', { cluster, selected: false });
+        })();
       }
       return { outcome: 'noCluster', detail: why };
     }
