@@ -267,15 +267,19 @@ export function afterConnect(clusterName: string, connection: ConnectionState): 
 }
 
 /**
- * Whether a state change ends a run of retries after a drop, and what to
+ * Whether a published state ends a run of retries after a drop, and what to
  * offer: the retries run silently (the row reads "Connecting"), so the end of
  * them is the first thing the person is told -- Reconnect when the cluster
  * still does not answer, Sign in when it answered and refused the session.
- * Undefined for every other change, including a retry that connected.
+ * Undefined for every other state, including a retry that connected and a
+ * failure of a connect the person asked for (which reports its own).
+ *
+ * It reads the manager's own mark (`retriesEnded`) rather than comparing the
+ * state with the one before it: every try publishes "connecting" before it
+ * dials, so the state before the last failure is never the retrying error.
  */
-export function retriesEndedNotice(previous: ConnectionState, next: ConnectionState): "reconnect" | "signIn" | undefined {
-  const wasRetrying = previous.status === "error" && previous.retrying === true;
-  if (!wasRetrying || next.status !== "error" || next.retrying === true) return undefined;
+export function retriesEndedNotice(next: ConnectionState): "reconnect" | "signIn" | undefined {
+  if (next.status !== "error" || next.retriesEnded !== true) return undefined;
   if (next.reason === "lost" || next.reason === "unreachable") return "reconnect";
   return SIGN_IN_REASONS[next.reason] !== undefined ? "signIn" : undefined;
 }

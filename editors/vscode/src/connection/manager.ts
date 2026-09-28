@@ -68,6 +68,14 @@ export type ConnectionState =
        * which is when a surface offers Reconnect.
        */
       retrying?: boolean;
+      /**
+       * This failure ENDED a run of retries after a drop: the last try did not
+       * answer, or a try was refused on a credential. Set on exactly the one
+       * publish that ends them, so a listener can announce it once. Needed
+       * because each try publishes "connecting" before it dials, so the state
+       * before this one is not the retrying error and cannot say it.
+       */
+      retriesEnded?: boolean;
     };
 
 /**
@@ -448,8 +456,8 @@ export class ConnectionManager {
             : String(err),
         reason: expired ? "credentialExpired" : "unreachable",
         // A transport failure during the retries keeps retrying; a credential
-        // one never does.
-        ...(retry?.more === true && !expired ? { retrying: true } : {}),
+        // one never does, and either one that does not continue ends them.
+        ...(retry === undefined ? {} : retry.more && !expired ? { retrying: true } : { retriesEnded: true }),
       });
       return;
     }
@@ -465,6 +473,9 @@ export class ConnectionManager {
         clusterName: cluster.name,
         message: outcome.message,
         reason: outcome.reason,
+        // Refused before or after the dial on a credential (or no address):
+        // never retried, so during the retries it is the one that ends them.
+        ...(retry !== undefined ? { retriesEnded: true } : {}),
       });
       return;
     }

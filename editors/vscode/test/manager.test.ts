@@ -1043,3 +1043,100 @@ test("with no policy a drop is reported and not retried", async () => {
   await flush();
   assert.equal((manager.state as { retrying?: boolean }).retrying, undefined);
 });
+
+// THE END OF THE RETRIES, AS THE EXTENSION SEES IT. The Reconnect toast is
+// decided from the stream of published states (extension.ts feeds each one to
+// retriesEndedNotice). Every try publishes "connecting" before it dials, so
+// the state before the final failure is "connecting", not the retrying error
+// -- a decision that compared neighbouring states never saw the retries end,
+// and the toast never came. Driven through the real manager so the stream is
+// the one the editor gets.
+test("the end of the retries is announced once, through the connecting each try publishes", async () => {
+  const { retriesEndedNotice } = await import("../src/clusters/status.js");
+  const conn = fakeConn("n1");
+  let dials = 0;
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return dials === 1 ? Promise.resolve(conn) : Promise.reject(new Error("ECONNREFUSED"));
+    },
+    undefined,
+    undefined,
+    undefined,
+    { delaysMs: [10, 20], setTimer: timers.setTimer, clearTimer: timers.clearTimer },
+  );
+  await manager.connect(cluster("a"));
+  const notices: string[] = [];
+  const statuses: string[] = [];
+  manager.onDidChangeState((state) => {
+    statuses.push(state.status);
+    const notice = retriesEndedNotice(state);
+    if (notice !== undefined) notices.push(notice);
+  });
+  conn.terminate();
+  await flush();
+  await timers.fire();
+  await timers.fire();
+  assert.ok(statuses.includes("connecting"), "each try announces itself");
+  assert.deepEqual(notices, ["reconnect"], "the retries ending is said exactly once, with Reconnect");
+});
+
+test("a retry refused on a credential ends the retries with Sign in", async () => {
+  const { retriesEndedNotice } = await import("../src/clusters/status.js");
+  const conn = fakeConn("n1");
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => Promise.resolve(conn),
+    undefined,
+    undefined,
+    undefined,
+    {
+      delaysMs: [10, 20],
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+      reload: async (name) => cluster(name, { token: undefined }),
+    },
+  );
+  await manager.connect(cluster("a"));
+  const notices: string[] = [];
+  manager.onDidChangeState((state) => {
+    const notice = retriesEndedNotice(state);
+    if (notice !== undefined) notices.push(notice);
+  });
+  conn.terminate();
+  await flush();
+  await timers.fire();
+  assert.deepEqual(notices, ["signIn"]);
+});
+
+test("a person's own connect during the retries is not announced as the retries ending", async () => {
+  const { retriesEndedNotice } = await import("../src/clusters/status.js");
+  const conn = fakeConn("n1");
+  let dials = 0;
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return dials === 1 ? Promise.resolve(conn) : Promise.reject(new Error("ECONNREFUSED"));
+    },
+    undefined,
+    undefined,
+    undefined,
+    { delaysMs: [10, 20], setTimer: timers.setTimer, clearTimer: timers.clearTimer },
+  );
+  await manager.connect(cluster("a"));
+  const notices: string[] = [];
+  manager.onDidChangeState((state) => {
+    const notice = retriesEndedNotice(state);
+    if (notice !== undefined) notices.push(notice);
+  });
+  conn.terminate();
+  await flush();
+  // The click's own failure is reported by the click (memql.clusters.select),
+  // so a second toast here would say one thing twice.
+  await manager.connect(cluster("a"));
+  await flush();
+  assert.deepEqual(notices, []);
+  assert.equal(timers.pending(), 0);
+});

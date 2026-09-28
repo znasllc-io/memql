@@ -1483,7 +1483,6 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // AND THE ONE PLACE a connection that dropped and could not be retried is
   // announced: the retries run silently (the row reads "Connecting"), and only
   // when they stop is there something to say -- with Reconnect as the button.
-  let lastState: ConnectionState = connections.state;
   connections.onDidChangeState((state) => {
     if (state.status === 'error') {
       noteDiagnostic(
@@ -1492,8 +1491,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         state.message
       );
     }
-    const notice = retriesEndedNotice(lastState, state);
-    lastState = state;
+    const notice = retriesEndedNotice(state);
     if (notice !== undefined && state.status === 'error') {
       // Reconnect when the cluster still does not answer; Sign in when a
       // retry reached it and the session had ended while it was down.

@@ -193,12 +193,17 @@ test("after a click's connect: credential or address problems open the page, out
 });
 
 test("the end of a run of retries is announced once, with the right fix", () => {
+  // The manager marks the one failure that ends the retries (retriesEnded);
+  // the decision reads that mark, never the state before it -- every try
+  // publishes "connecting" first (manager.test.ts drives the real stream).
   const retrying: ConnectionState = { status: "error", clusterName: "local", reason: "lost", message: "x", retrying: true };
-  const gaveUp: ConnectionState = { status: "error", clusterName: "local", reason: "unreachable", message: "x" };
-  const refused: ConnectionState = { status: "error", clusterName: "local", reason: "reauthenticationRequired", message: "x" };
-  assert.equal(retriesEndedNotice(retrying, gaveUp), "reconnect");
-  assert.equal(retriesEndedNotice(retrying, refused), "signIn");
-  assert.equal(retriesEndedNotice(retrying, { status: "connected", clusterName: "local", nodeId: "n" }), undefined);
-  assert.equal(retriesEndedNotice(retrying, retrying), undefined, "still retrying: nothing to say yet");
-  assert.equal(retriesEndedNotice(gaveUp, gaveUp), undefined, "an ordinary failure is not the end of retries");
+  const gaveUp: ConnectionState = { status: "error", clusterName: "local", reason: "unreachable", message: "x", retriesEnded: true };
+  const refused: ConnectionState = { status: "error", clusterName: "local", reason: "reauthenticationRequired", message: "x", retriesEnded: true };
+  const ordinary: ConnectionState = { status: "error", clusterName: "local", reason: "unreachable", message: "x" };
+  assert.equal(retriesEndedNotice(gaveUp), "reconnect");
+  assert.equal(retriesEndedNotice(refused), "signIn");
+  assert.equal(retriesEndedNotice({ status: "connected", clusterName: "local", nodeId: "n" }), undefined);
+  assert.equal(retriesEndedNotice({ status: "connecting", clusterName: "local" }), undefined);
+  assert.equal(retriesEndedNotice(retrying), undefined, "still retrying: nothing to say yet");
+  assert.equal(retriesEndedNotice(ordinary), undefined, "an ordinary failure is not the end of retries");
 });
