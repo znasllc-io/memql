@@ -297,6 +297,33 @@ test("a branch install shows its branch and commit, never the word unknown", asy
   assert.equal(local.versionLabel, "main @ 3f2a9c1");
 });
 
+test("a branch or commit install shows what it runs and compares nothing, even when the registry recorded a release", async () => {
+  // The registry holds what the cluster REPORTED -- the nearest release for a
+  // build of main -- and `version` is what an update is compared from, so
+  // borrowing it would offer a branch install an "update" to a tag.
+  const registry = clusters({ clusters: [{ name: "local", endpoint: "api.memql.localhost:443", local: true, version: "v0.23.5" }] });
+  const branch = await buildCatalog(
+    baseInputs({
+      presence: presenceOf("installed-healthy"),
+      readReceiptFile: async () =>
+        receiptWith([{ result: { commit: "3f2a9c1e5b7d", refKind: "branch", ref: "main", dest: "/home/me/.memql/stack" } }]),
+      readClusters: registry,
+    }),
+  );
+  assert.equal(branch.instances[0].version, undefined);
+  assert.equal(branch.instances[0].versionLabel, "main @ 3f2a9c1");
+
+  const commit = await buildCatalog(
+    baseInputs({
+      presence: presenceOf("installed-healthy"),
+      readReceiptFile: async () => receiptWith([{ result: { commit: "9e8d7c6b5a4f", refKind: "commit", dest: "/home/me/.memql/stack" } }]),
+      readClusters: registry,
+    }),
+  );
+  assert.equal(commit.instances[0].version, undefined);
+  assert.equal(commit.instances[0].versionLabel, "9e8d7c6", "a commit build is named by its commit, not the release it reported");
+});
+
 test("a cluster whose receipt names no release falls back to the release the registry recorded", async () => {
   const catalog = await buildCatalog(
     baseInputs({

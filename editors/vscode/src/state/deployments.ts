@@ -84,7 +84,9 @@ export interface Instance {
   domain?: string;
   presence: PresenceVerdict;
   /**
-   * Local: the release tag the receipt's `stackCheckout` step recorded.
+   * Local: the release tag the receipt's `stackCheckout` step recorded, or --
+   * when the receipt records no checkout at all -- the release clusters.yaml
+   * says the cluster reported. Never set for a branch or commit install.
    * Remote: the current deployment's version.
    * Absent when it could not be resolved -- render it with displayVersion.
    */
@@ -357,17 +359,24 @@ export function localInstance(input: LocalInstanceInput): Instance {
   const registeredName = (input.registered?.name ?? "").trim();
   const domain = (input.registered?.domain ?? "").trim() || recordedDomain(input.receipt);
   const tag = recordedStackTag(input.receipt);
-  // THE REGISTRY'S RECORDED RELEASE WHEN THE RECEIPT NAMES NONE. A branch or
-  // from-source install records no tag by design (recordedStackTag), and a
-  // cluster built with `make up` has no receipt at all -- but the version
-  // learners write what the cluster reported into clusters.yaml, and that is a
-  // fact about this cluster, which "unknown" is not.
-  const version = tag !== "" ? tag : (input.registered?.version ?? "").trim();
   const checkout = recordedStackDir(input.receipt);
   const imageSource = recordedImageSource(input.receipt);
   const rebuild = recordedRebuild(input.receipt);
   const checkoutBranch = recordedStackBranch(input.receipt);
   const checkoutCommit = recordedStackCommit(input.receipt);
+  // THE REGISTRY'S RECORDED RELEASE WHEN THE RECEIPT NAMES NOTHING. A cluster
+  // with no receipt, or one whose receipt never recorded its checkout, has no
+  // better answer than what the version learners wrote into clusters.yaml --
+  // a fact about this cluster, which "unknown" is not.
+  //
+  // NEVER FOR A BRANCH OR COMMIT INSTALL. Its receipt names what it runs (the
+  // label says `main @ 3f2a9c1`), and what the cluster reports is the nearest
+  // release, not the code it serves. `version` is what an update is COMPARED
+  // from, so borrowing the reported release would offer "Update to v0.24.0"
+  // over a checkout of main -- a move to a tag, worded as an upgrade, from a
+  // version the cluster is not on.
+  const fromSource = tag === "" && (checkoutBranch !== "" || checkoutCommit !== "");
+  const version = tag !== "" ? tag : fromSource ? "" : (input.registered?.version ?? "").trim();
   const label = localVersionLabel({
     tag,
     registryVersion: (input.registered?.version ?? "").trim(),
@@ -415,10 +424,11 @@ export function localVersionLabel(i: {
     return `Your build ${i.rebuild.commit.trim().slice(0, 7)}`;
   }
   if (i.tag !== "") return i.tag;
+  // A recorded commit is what runs: the reported release of a commit build is
+  // the nearest tag, which the cluster is not on.
   const commit = i.commit.slice(0, 7);
-  if (i.branch !== "" && commit !== "") return `${i.branch} @ ${commit}`;
-  if (i.registryVersion !== "") return i.registryVersion;
-  return commit;
+  if (commit !== "") return i.branch !== "" ? `${i.branch} @ ${commit}` : commit;
+  return i.registryVersion;
 }
 
 // ---------------------------------------------------------------------------
