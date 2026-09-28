@@ -259,17 +259,19 @@ type fallbackChat struct {
 	req      ResolveRequest
 	resolved Resolved
 	served   servedTracker
+	calls    perCall
 }
 
 func (f *fallbackChat) CallChat(ctx context.Context, messages []common.ChatMessage) (string, error) {
 	var reply string
-	err := f.router.fallbackWalk(ctx, f.req, f.resolved, f.chain, modalityChat, &f.served,
+	req := f.calls.request(ctx, f.req)
+	err := f.router.fallbackWalk(ctx, req, f.resolved, f.chain, modalityChat, &f.served,
 		func(ctx context.Context, client any, resolved Resolved) (string, error) {
 			observed := &observedChat{
 				inner:    client.(common.ChatAIProvider),
 				router:   f.router,
 				resolved: resolved,
-				req:      f.req,
+				req:      req,
 			}
 			var err error
 			reply, err = observed.CallChat(ctx, messages)
@@ -290,13 +292,14 @@ func (f *fallbackChat) CallChat(ctx context.Context, messages []common.ChatMessa
 // and an ai() expression reads that value.
 func (f *fallbackChat) Call(ctx context.Context, prompt string) (any, error) {
 	var value any
-	err := f.router.fallbackWalk(ctx, f.req, f.resolved, f.chain, modalityChat, &f.served,
+	req := f.calls.request(ctx, f.req)
+	err := f.router.fallbackWalk(ctx, req, f.resolved, f.chain, modalityChat, &f.served,
 		func(ctx context.Context, client any, resolved Resolved) (string, error) {
 			observed := &observedChat{
 				inner:    client.(common.ChatAIProvider),
 				router:   f.router,
 				resolved: resolved,
-				req:      f.req,
+				req:      req,
 			}
 			var err error
 			value, err = observed.Call(ctx, prompt)

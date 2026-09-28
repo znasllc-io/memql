@@ -20,12 +20,16 @@ package router
 
 import (
 	"context"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // fallbackStructured walks a route on the structured-output surface.
@@ -35,6 +39,7 @@ type fallbackStructured struct {
 	req      ResolveRequest
 	resolved Resolved
 	served   servedTracker
+	calls    perCall
 }
 
 func (f *fallbackStructured) CallChatStructured(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, error) {
@@ -49,13 +54,14 @@ func (f *fallbackStructured) CallChatStructured(ctx context.Context, messages []
 func (f *fallbackStructured) CallChatStructuredWithUsage(ctx context.Context, messages []common.ChatMessage, schema common.StructuredSchema) (string, common.ChatUsage, error) {
 	var text string
 	var usage common.ChatUsage
-	err := f.router.fallbackWalk(ctx, f.req, f.resolved, f.chain, modalityStructured, &f.served,
+	req := f.calls.request(ctx, f.req)
+	err := f.router.fallbackWalk(ctx, req, f.resolved, f.chain, modalityStructured, &f.served,
 		func(ctx context.Context, client any, resolved Resolved) (string, error) {
 			observed := &observedStructured{
 				inner:    client.(common.ChatStructuredProvider),
 				router:   f.router,
 				resolved: resolved,
-				req:      f.req,
+				req:      req,
 			}
 			var err error
 			text, usage, err = observed.CallChatStructuredWithUsage(ctx, messages, schema)
@@ -112,6 +118,31 @@ func (o *observedStructured) CallChatStructuredWithUsage(ctx context.Context, me
 	rec.TokensEstimated = !usage.Reported
 	o.callId = o.router.recordAttempt(ctx, rec)
 	return text, usage, err
+}
+
+// perCall makes each call on a long-lived wrapper a call of its own on the
+// ledger.
+//
+// A wrapper is usually resolved for one call and dropped. Two are not: the
+// safety classifier and the work healer resolve their structured client once
+// at boot, with context.Background(), and keep it. Every row they wrote then
+// shared the boot resolution's request id and its caller kind --
+// "unattributed", because a background context has no actor -- whoever the
+// call actually ran for. So each call after the first gets a request id of
+// its own (the first keeps the resolution's, which the one-call case relies
+// on), and a caller kind the resolution could not know is read from the
+// call's own context. Neither field decides routing, so the walk is the one
+// the resolution chose.
+type perCall struct{ used atomic.Bool }
+
+func (p *perCall) request(ctx context.Context, req ResolveRequest) ResolveRequest {
+	if p.used.Swap(true) {
+		req.RequestId = id.NewShortId()
+	}
+	if kind := strings.TrimSpace(req.CallerKind); kind == "" || kind == auth.CallerKindUnattributed {
+		req.CallerKind = auth.CallerKindFromContext(ctx)
+	}
+	return req
 }
 
 // servedTracker keeps the last attempt a wrapper made, for LastServed.

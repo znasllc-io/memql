@@ -358,3 +358,44 @@ func TestALedgerRowWithNoFootprintRendersAnEmptyList(t *testing.T) {
 		t.Fatalf("touches = %#v, want an empty list: null is refused by the concept and drops the row", args["touches"])
 	}
 }
+
+// A CLIENT RESOLVED ONCE AT BOOT WRITES EACH CALL AS ITS OWN. The safety
+// classifier and the work healer resolve their structured client once, with
+// context.Background(), and keep it for the life of the process. Every row
+// they wrote shared that resolution's request id and its caller kind --
+// "unattributed" -- even when the call ran for a person. Each call now gets a
+// request id of its own after the first, and a caller kind the resolution
+// could not know is read from the call's own context. Routing is untouched:
+// neither field decides anything.
+func TestAStructuredClientResolvedOnceWritesEachCallAsItsOwn(t *testing.T) {
+	providers := memql.NewProviderRegistryForTest()
+	providers.RegisterWithParamsForTest("streamClaudeSonnet", "AnthropicStream", "claude-sonnet",
+		map[string]any{"contextWindow": 200000}, &everyCloud{})
+	r := New(providers, memql.NewPolicyRegistryForTest(map[string][]string{"vendor": {"streamClaudeSonnet"}}),
+		testRules(t, defaultRule("vendor")), nil, nil)
+	ledger := &countingLedger{writes: make(chan string, 4)}
+	r.engine = ledger
+
+	resolved, err := r.ResolveFor(context.Background(), structuredTriageRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callStructured(t, auth.ContextWithUserActor(context.Background(), "alice"), resolved.Client); err != nil {
+		t.Fatal(err)
+	}
+	first := ledger.args(t)
+	if _, err := callStructured(t, sweepContext(), resolved.Client); err != nil {
+		t.Fatal(err)
+	}
+	second := ledger.args(t)
+
+	if first["requestId"] == second["requestId"] {
+		t.Errorf("two calls on one boot-resolved client share request id %v", first["requestId"])
+	}
+	if first["callerKind"] != auth.CallerKindUser {
+		t.Errorf("a person's call on a boot-resolved client recorded callerKind %v, want %q", first["callerKind"], auth.CallerKindUser)
+	}
+	if second["callerKind"] != auth.CallerKindSystem {
+		t.Errorf("an automation's call on a boot-resolved client recorded callerKind %v, want %q", second["callerKind"], auth.CallerKindSystem)
+	}
+}
