@@ -613,3 +613,50 @@ test("a run that follows a failing buffer run clears its stale diagnostics even 
   assert.ok(h.published.length > 0, "the empty-bundle path never published, so stale diagnostics survive");
   assert.deepEqual(h.published[h.published.length - 1], [], "the last publish must be the clear");
 });
+
+// -----------------------------------------------------------------------------
+// When a run counts as started
+// -----------------------------------------------------------------------------
+//
+// `onStarted` is where the Result tab opens in its running state and the
+// window's progress begins. It used to be the click: a mutation on a remote
+// cluster then showed "Running" behind the modal asking whether to run it, and
+// a No left a tab open to say nothing ran.
+
+test("run -- onStarted fires only after the write confirmation is answered yes", async () => {
+  const h = harness();
+  h.setCluster({ name: "staging", label: "staging", local: false });
+  const order: string[] = [];
+  const mutation = target({ kind: "mutation", name: "createSpace", args: [] });
+  const outcome = await h.orchestrator.run(mutation, {}, () => {
+    order.push(`started after ${h.confirmations.length} confirmation(s)`);
+  });
+  assert.equal(outcome.status, "ok");
+  assert.deepEqual(order, ["started after 1 confirmation(s)"]);
+});
+
+test("run -- a declined confirmation never starts, so nothing shows a run", async () => {
+  const h = harness();
+  h.setCluster({ name: "staging", label: "staging", local: false });
+  h.setConfirmAnswer(false);
+  let started = 0;
+  const outcome = await h.orchestrator.run(target({ kind: "mutation", name: "createSpace", args: [] }), {}, () => {
+    started += 1;
+  });
+  assert.equal(outcome.status, "declined");
+  assert.equal(started, 0);
+});
+
+test("run -- a read starts at once, and a refused preflight never starts", async () => {
+  const h = harness();
+  let started = 0;
+  await h.orchestrator.run(target(), { spaceId: "s1" }, () => {
+    started += 1;
+  });
+  assert.equal(started, 1);
+  h.setConnected(false);
+  await h.orchestrator.run(target(), { spaceId: "s1" }, () => {
+    started += 1;
+  });
+  assert.equal(started, 1, "a run refused before it began showed progress");
+});

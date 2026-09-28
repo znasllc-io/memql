@@ -20,6 +20,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 import type { ExtensionContext } from "vscode";
 import type { Concept } from "@znasllc-io/memql-sdk-core/client";
@@ -152,6 +154,45 @@ test("the concept page's rows are buttons a keyboard can reach", async () => {
   const panel = lastPanel();
   assert.match(panel.html, /<button type="button" class="vk-row" data-act="selectRow" data-value="A"/);
   panel.close();
+});
+
+test("the concept page's Sign in reaches the sign-in command with an argument it can take", async () => {
+  // THE BUG: it passed the cluster's NAME, and memql.clusters.signIn takes a
+  // cluster row -- `target.cluster.name` on a string threw, so the button did
+  // nothing. It now sends no argument, as the view welcomes do.
+  resetRecorded();
+  const signedOut = {
+    ...connectionsWith({ pages: [], rows: {} }),
+    state: { status: "error", clusterName: "local", message: "expired", reason: "credentialExpired" },
+    query: undefined,
+    subscriptions: undefined,
+  } as unknown as ConnectionManager;
+  ConceptPanel.open(CONTEXT, signedOut, { ...SPACE, id: "v1:cognition:signin" } as Concept);
+  await settle();
+  const panel = lastPanel();
+  assert.match(visible(panel.html), /Sign in to see these rows\./);
+  panel.send({ type: "signIn" });
+  const at = recorded.executed.lastIndexOf("memql.clusters.signIn");
+  assert.ok(at >= 0, "Sign in reached no command");
+  for (const arg of recorded.executedArgs[at] ?? []) {
+    assert.equal(typeof arg, "object", "a bare value is not a cluster row");
+  }
+  panel.close();
+});
+
+test("no caller hands the sign-in command a bare cluster name", () => {
+  // memql.clusters.signIn takes a cluster ROW ({cluster, selected}) or nothing.
+  // The link-from-MemQL-OS toast passed `cluster.name` and threw on the click.
+  const src = path.join(__dirname, "..", "..", "src");
+  const files = [path.join(src, "extension.ts"), ...fs.readdirSync(path.join(src, "webview")).map((f) => path.join(src, "webview", f))];
+  for (const file of files) {
+    if (!file.endsWith(".ts")) continue;
+    const text = fs.readFileSync(file, "utf8");
+    for (const m of text.matchAll(/executeCommand\(\s*['"]memql\.clusters\.signIn['"]\s*,\s*([^\s,)]+)/g)) {
+      const arg = m[1] ?? "";
+      assert.ok(arg.startsWith("{") || arg === "node", `${path.basename(file)} passes ${arg} to memql.clusters.signIn`);
+    }
+  }
 });
 
 test("rowListHtml wraps each view-kit row in a button carrying its id, and marks the selected one", () => {
@@ -308,6 +349,49 @@ test("the Result tab opens in its running shape at the click, and fills in when 
 });
 
 const TARGET = { uri: "file:///w/q.memql", kind: "query" as const, name: "spaceParticipants", args: [] };
+
+test("a declined run opens no Result tab, and the form says it was cancelled", async () => {
+  // THE BUG: the Result tab opened in "Running" at the click, BEFORE the write
+  // confirmation, and a No then left it open to say nothing ran. The host now
+  // opens it once the run really starts, and a No is answered on the form.
+  resetRecorded();
+  RunPanel.open(
+    CONTEXT,
+    {
+      run: async () => ({ status: "declined", target: FORM_TARGET }),
+      saveConfig: async () => undefined,
+      concepts: () => new Map(),
+      openRow: () => undefined,
+    },
+    FORM_TARGET,
+  );
+  const panel = recorded.webviews.find((p) => p.viewType === "memqlRun");
+  assert.ok(panel !== undefined);
+  panel.send({ type: "input", field: "spaceId", value: "01J8Z2QK6N" });
+  panel.send({ type: "run" });
+  await settle();
+  assert.equal(
+    recorded.webviews.filter((p) => p.viewType === "memqlRunResult").length,
+    0,
+    "a run nobody confirmed opened a Result tab",
+  );
+  assert.match(visible(panel.html), /Cancelled\. Nothing ran\./);
+  assert.match(visible(panel.html), /Ready/);
+  panel.close();
+});
+
+test("the run host shows the running Result from the orchestrator's start, not from the click", () => {
+  const source = fs.readFileSync(path.join(__dirname, "..", "..", "src", "extension.ts"), "utf8");
+  const at = source.indexOf("const host: RunPanelHost = {");
+  const body = source.slice(at, source.indexOf("saveConfig:", at));
+  assert.match(body, /orchestrator\.run\(target, values, started\)/);
+  assert.match(body, /ResultPanel\.running\(context, host, target\)/);
+  const show = source.slice(source.indexOf("const runAndShow"), source.indexOf("};", source.indexOf("const runAndShow")));
+  assert.doesNotMatch(show, /ResultPanel\.running/, "the Runs view opens Running before any confirmation");
+  const form = fs.readFileSync(path.join(__dirname, "..", "..", "src", "webview", "runPanel.ts"), "utf8");
+  const doRun = form.slice(form.indexOf("private async doRun()"), form.indexOf("private async doSave()"));
+  assert.doesNotMatch(doRun, /ResultPanel\.running/, "the form opens Running before any confirmation");
+});
 
 // ---------------------------------------------------------------------------
 // The language reference

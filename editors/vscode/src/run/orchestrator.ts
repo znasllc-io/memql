@@ -189,7 +189,18 @@ export class RunOrchestrator {
     return this.writes;
   }
 
-  async run(target: RunTarget, values: Record<string, unknown>): Promise<RunOutcome> {
+  /**
+   * `onStarted` fires once the run is really going: past the preflight and
+   * past the write confirmation, before anything is sent. It is where a caller
+   * shows progress. Called any earlier, a Result tab would say "Running" behind
+   * a modal still asking whether to run at all, and would stay open after a
+   * No to say that nothing ran.
+   */
+  async run(
+    target: RunTarget,
+    values: Record<string, unknown>,
+    onStarted?: () => void,
+  ): Promise<RunOutcome> {
     // begin(), not current(): starting a run IS what makes every earlier one
     // stale. A second Run click supersedes the first outright.
     const token = this.latest.begin();
@@ -221,6 +232,7 @@ export class RunOrchestrator {
       if (!confirmed) return { status: "declined", target };
       this.writes.acknowledge(cluster.name, target.name);
     }
+    onStarted?.();
 
     let bundle: Bundle;
     try {

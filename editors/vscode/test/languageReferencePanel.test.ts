@@ -377,8 +377,9 @@ test("a cluster that never answers is given up on, and the page says what it kno
     "the page is still claiming the read is in flight",
   );
 
-  // What the extension knows, and a way out.
-  assert.match(panel.html, /This editor speaks edition 2026 \(frozen\), grammar 2026\.09-example-0123abcd\./);
+  // What the page knows, said once (the head's meta), and a way out.
+  assert.match(panel.html, /Edition 2026 · Frozen · Grammar 2026\.09-example-0123abcd · from local/);
+  assert.equal(panel.html.includes("This editor speaks"), false, "the same language is said twice");
   assert.equal((panel.html.match(/data-act="reload"/g) ?? []).length, 1, "no Try again");
   panel.close();
   live = undefined;

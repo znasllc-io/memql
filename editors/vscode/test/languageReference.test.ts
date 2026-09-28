@@ -496,10 +496,30 @@ test("a failed read says what did not come back, why, and offers the retry", () 
   assert.match(html, /local didn&#39;t return a grammar or a vocabulary\./);
   assert.match(html, /It didn&#39;t answer within 20s\./);
   assert.equal(html.match(/data-act="reload"/g)?.length, 1, "exactly one Try again");
-  // The reader is still told the language their editor speaks.
-  assert.match(html, /This editor speaks edition 2026 \(frozen\), grammar 2026\.09-example-0123abcd\./);
+  // The head's meta already names this language, and the editor speaks the
+  // same one: a second line saying so is the same fact twice.
+  assert.equal(html.includes("This editor speaks"), false, "the editor's language is said twice");
   // And not on a page that has the artifacts: there it would be noise.
   assert.equal(page({ pin: PIN }).includes("This editor speaks"), false);
+});
+
+test("a failed read names the editor's language only when it is not the cluster's", () => {
+  const failed = { grammar: undefined, vocabulary: undefined, error: "It didn't answer within 20s.", pin: PIN };
+  // Same edition, another grammar: the one difference the meta cannot show.
+  const otherGrammar = page({
+    ...failed,
+    identity: languageIdentity({
+      pin: PIN,
+      cluster: clusterLanguage("local", { edition: "2026", grammarVersion: "2026.10-other-89abcdef" }),
+    }),
+  });
+  assert.match(otherGrammar, /This editor speaks edition 2026 \(frozen\), grammar 2026\.09-example-0123abcd\./);
+  // A cluster that stated no edition: the editor's is all there is to go on.
+  const unstated = page({
+    ...failed,
+    identity: languageIdentity({ pin: PIN, cluster: clusterLanguage("local", { edition: "", grammarVersion: "" }) }),
+  });
+  assert.match(unstated, /This editor speaks edition 2026/);
 });
 
 test("a successful read offers no retry, and a disconnected page offers none either", () => {

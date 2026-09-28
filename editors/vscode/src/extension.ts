@@ -910,7 +910,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
         void (async () => {
           const signIn = 'Sign In';
           const answer = await window.showInformationMessage(`MemQL: Sign in to ${cluster.name} to open this file.`, signIn);
-          if (answer === signIn) await commands.executeCommand('memql.clusters.signIn', cluster.name);
+          if (answer === signIn) await commands.executeCommand('memql.clusters.signIn', { cluster, selected: false });
         })();
       }
       return { outcome: 'noCluster', detail: why };
@@ -3016,12 +3016,6 @@ let refreshTrainingSurfaces: () => Promise<void> = async () => {};
 let refreshConstructsView: () => void = () => {};
 
 /**
- * Dials the selected cluster again when its last dial failed or its session
- * dropped -- the Retry the Constructs and Data welcomes offer. A credential
- * problem is left alone: that welcome offers Sign in, which is the act that
- * fixes it, and a redial would only fail the same way.
- */
-/**
  * Runs a construct the cluster's catalog describes, through the ONE run path.
  *
  * The Constructs view's inline Run and the construct page share it, so the two
@@ -3044,6 +3038,12 @@ async function runCatalogConstruct(construct: CatalogConstruct, withArguments = 
   await commands.executeCommand(withArguments ? COMMAND_RUN_WITH : COMMAND_RUN, target);
 }
 
+/**
+ * Dials the selected cluster again when its last dial failed or its session
+ * dropped -- the Retry the Constructs and Data welcomes offer. A credential
+ * problem is left alone: that welcome offers Sign in, which is the act that
+ * fixes it, and a redial would only fail the same way.
+ */
 async function redialUnreachableCluster(clustersPath: string): Promise<void> {
   const state = connections?.state;
   if (state === undefined || state.status !== 'error' || clusterViewState(state) !== 'unreachable') return;
@@ -3281,15 +3281,22 @@ function registerRunSurface(
   });
 
   const host: RunPanelHost = {
-    // The window's progress area names what is running for as long as it runs:
-    // a slow cluster must not look like a click that did nothing. The Result
-    // tab carries the rest (it opens in its running state, see runAndShow).
-    run: (target, values) =>
-      Promise.resolve(
-        window.withProgress({ location: ProgressLocation.Window, title: `Running ${target.name}` }, () =>
-          orchestrator.run(target, values)
-        )
-      ),
+    // A run shows itself the moment it really starts -- past the write
+    // confirmation, never behind it: the Result tab opens in its running
+    // state, and the window's progress area names what is running until it
+    // settles, so a slow cluster never looks like a click that did nothing.
+    // A declined confirmation shows neither.
+    run: (target, values) => {
+      let settled: () => void = () => {};
+      const started = (): void => {
+        ResultPanel.running(context, host, target);
+        void window.withProgress(
+          { location: ProgressLocation.Window, title: `Running ${target.name}` },
+          () => new Promise<void>((resolve) => (settled = resolve))
+        );
+      };
+      return orchestrator.run(target, values, started).finally(() => settled());
+    },
     saveConfig: async (target, name, values) => {
       if (workspaceRoot === undefined) {
         throw new Error('Open a folder to save runs.');
@@ -3315,10 +3322,9 @@ function registerRunSurface(
     },
   };
 
-  // One run, shown: the Result tab opens at once in its running state, so a
-  // slow run is visible from the click, and fills in when the run settles.
+  // One run, shown: the Result tab opens in its running state as the run
+  // starts (host.run above), and fills in when it settles.
   const runAndShow = async (target: RunTarget, values: Record<string, unknown>): Promise<void> => {
-    ResultPanel.running(context, host, target);
     ResultPanel.show(context, host, await host.run(target, values));
   };
 

@@ -220,7 +220,9 @@ export const RESULT_ACTS = {
 
 export type ResultInput =
   | { state: "running"; target: Pick<RunTarget, "kind" | "name"> }
-  | { state: "settled"; outcome: Exclude<RunOutcome, { status: "superseded" }>; concepts: ReadonlyMap<string, ConceptLike>; jsonOpen: boolean };
+  // Never superseded (a newer run paints instead) and never declined (a run
+  // that was not confirmed never started, and its form says so).
+  | { state: "settled"; outcome: Exclude<RunOutcome, { status: "superseded" | "declined" }>; concepts: ReadonlyMap<string, ConceptLike>; jsonOpen: boolean };
 
 function rowsBody(rows: readonly Record<string, unknown>[], concepts: ReadonlyMap<string, ConceptLike>): string {
   if (rows.length === 0) return emptyState({ line: "No rows." });
@@ -320,8 +322,6 @@ export function resultParts(input: ResultInput): RegionParts {
         actions: "",
       };
     }
-    case "declined":
-      return { head: head({ title, meta: "Not run" }), body: emptyState({ line: "Cancelled. Nothing ran." }), actions: "" };
     case "error": {
       // Refused before anything was sent: the fix is a connection.
       const disconnected = o.phase === "preflight" && /^Not connected/.test(o.message);

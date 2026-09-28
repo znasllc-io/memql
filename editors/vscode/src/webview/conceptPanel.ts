@@ -147,13 +147,11 @@ export class ConceptPanel {
       titleFor(concept),
       vscode.ViewColumn.Active,
       // No retainContextWhenHidden. It keeps the hidden tab's whole webview
-      // process alive to preserve DOM state, and there is no DOM state here
-      // worth preserving: every render() replaces webview.html wholesale, so a
-      // revealed tab is repainted from ConceptPanelState (which lives in the
-      // extension host and survives regardless) rather than resumed. All it
-      // would buy is scroll position -- which the wholesale re-render already
-      // discards on any reload -- at the cost of a retained process per
-      // background concept tab.
+      // process alive, at the cost of a retained process per background
+      // concept tab. A revealed tab reloads its last document instead, says
+      // `ready`, and LiveView brings it up to date from ConceptPanelState
+      // (which lives in the extension host and survives regardless); what is
+      // lost is only the scroll position.
       { enableScripts: true },
     );
     this.live = new LiveView(
@@ -271,14 +269,12 @@ export class ConceptPanel {
       case CONCEPT_ACTS.selectCluster:
         void vscode.commands.executeCommand("memql.clusters.select");
         return;
-      case CONCEPT_ACTS.signIn: {
-        const state = this.connections.state;
-        void vscode.commands.executeCommand(
-          "memql.clusters.signIn",
-          ...(state.status === "disconnected" ? [] : [state.clusterName]),
-        );
+      case CONCEPT_ACTS.signIn:
+        // No argument, as the Constructs and Data welcomes send it: the
+        // command takes a cluster ROW (or nothing, and then asks), and a bare
+        // name is neither.
+        void vscode.commands.executeCommand("memql.clusters.signIn");
         return;
-      }
       case CONCEPT_ACTS.reconnect:
         // The Data view's Retry: it dials the selected cluster again, and the
         // connection change that follows reloads this page.

@@ -149,7 +149,7 @@ function bodyHtml(input: LanguageReferenceInput): string {
       acts: [{ act: RELOAD, label: "Try again" }],
     });
   }
-  if (grammar === undefined && vocabulary === undefined) return out + pinFallbackHtml(input.pin);
+  if (grammar === undefined && vocabulary === undefined) return out + pinFallbackHtml(input.pin, input.identity);
   out += `<div class="lr-search">${textInput({
     field: SEARCH_FIELD,
     id: "lr-search",
@@ -174,9 +174,17 @@ function editionNote(input: LanguageReferenceInput): string {
 /**
  * What the extension knows, for a page that asked a cluster and got nothing:
  * the language its own completion and diagnostics speak right now.
+ *
+ * SAID ONLY WHEN IT IS NEWS. The head's meta already names the cluster's
+ * edition and grammar; when this editor's pin is the same language, a second
+ * line saying so is the same fact twice. A different edition is the edition
+ * note's to say, so what is left is a cluster that stated no edition, and one
+ * in this edition with another grammar.
  */
-function pinFallbackHtml(pin: LanguagePin | undefined): string {
+function pinFallbackHtml(pin: LanguagePin | undefined, identity: LanguageIdentity): string {
   if (pin === undefined || pin.edition === "") return "";
+  const sameEdition = identity.edition === pin.edition;
+  if (identity.edition !== "" && (!sameEdition || identity.grammarVersion === pin.grammarVersion)) return "";
   const status = pin.status === "" ? "" : ` (${pin.status})`;
   const grammar = pin.grammarVersion === "" ? "" : `, grammar ${pin.grammarVersion}`;
   return `<p class="mq-empty-line lr-note">${escapeHtml(

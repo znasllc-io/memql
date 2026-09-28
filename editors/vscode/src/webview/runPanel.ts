@@ -55,7 +55,11 @@ import { pageMessage } from "./ui/protocol.js";
 
 /** What the arg form asks the extension to do when the user acts. */
 export interface RunPanelHost {
-  /** Run the construct with these values. */
+  /**
+   * Run the construct with these values. The host opens the Result tab in its
+   * running state once the run really starts -- after any write confirmation --
+   * so a form that asked for a run shows the result it gets back.
+   */
   run(target: RunTarget, values: Record<string, unknown>): Promise<RunOutcome>;
   /** Persist a named saved run in the workspace. */
   saveConfig(target: RunTarget, name: string, values: Record<string, unknown>): Promise<void>;
@@ -211,11 +215,12 @@ export class RunPanel {
     this.note = undefined;
     this.busy = true;
     this.render();
-    // The Result tab opens NOW, in its running shape, so a slow run is
-    // visible from the click rather than only once it lands.
-    ResultPanel.running(this.context, this.host, this.target);
     const outcome = await this.host.run(this.target, coerced.values);
     this.busy = false;
+    // A No to the write confirmation is answered HERE, where Run was pressed,
+    // exactly as the automation form answers it -- not by a Result tab opened
+    // to say that nothing happened.
+    if (outcome.status === "declined") this.note = { tone: "info", line: "Cancelled. Nothing ran." };
     this.render();
     ResultPanel.show(this.context, this.host, outcome);
   }
@@ -301,8 +306,9 @@ export class ResultPanel {
 
   static show(context: vscode.ExtensionContext, host: RunPanelHost, outcome: RunOutcome): void {
     // A superseded run has nothing to show: a newer run is already in flight
-    // and will paint over this the moment it lands.
-    if (outcome.status === "superseded") return;
+    // and will paint over this the moment it lands. A declined one never
+    // started, so it opened no tab and opens none now.
+    if (outcome.status === "superseded" || outcome.status === "declined") return;
     ResultPanel.present(context, host, { state: "settled", outcome, concepts: host.concepts(), jsonOpen: false });
   }
 
