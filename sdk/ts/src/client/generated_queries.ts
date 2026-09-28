@@ -6970,8 +6970,8 @@ export interface RouterDecisionsRecentArgs {
   /** Only decisions resolved at this level. */
   // Enum: fast | strong | reasoning | embeddings
   level?: string;
-  /** Only decisions served through this door. */
-  // Enum: local | app | federation
+  /** Only decisions served through this door. `session` is an app that was handed the whole step (epic memql#5391) -- the one door a person most needs to find in the history, and the concept's own door enum has carried it since that epic. */
+  // Enum: local | app | federation | session
   door?: string;
   /** Only decisions the named rule made. */
   rule?: string;

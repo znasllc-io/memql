@@ -165,12 +165,12 @@ func (r *Router) resolveChat(ctx context.Context, req ResolveRequest) (common.Ch
 // ResolveStructured picks a provider for a structured-output call -- the
 // classifiers, the routing prompts, every CallChatStructured site.
 //
-// There is no fallback wrapper and no observer on this surface yet: the
-// observed* wrappers cover the three chat surfaces, and wrapping a fourth
-// without a ledger row to write would be an empty layer. The RESOLUTION is
-// still recorded in full on Resolved.Decision.
+// The winner is wrapped in its OBSERVER (observer_structured.go), so every
+// structured call writes its v1:router:call row, the decision's `considered`
+// included. There is no fallback wrapper on this surface: a failed call is
+// recorded and returned to the caller.
 func (r *Router) ResolveStructured(req ResolveRequest) (common.ChatStructuredProvider, Resolved, error) {
-	client, resolved, err := r.resolveDirect(context.Background(), req, modalityStructured)
+	client, resolved, err := r.resolveStructured(context.Background(), req)
 	if err != nil {
 		return nil, Resolved{}, err
 	}
@@ -969,7 +969,7 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 		"policy":             rec.Policy,
 		"door":               rec.Door,
 		"considered":         consideredArgs(rec.Considered),
-		"touches":            rec.Touches,
+		"touches":            touchesArgs(rec.Touches),
 		"minContextTokens":   rec.MinContextTokens,
 		"machineOwnerUserId": rec.MachineOwnerUserId,
 	}
@@ -1001,6 +1001,18 @@ func consideredArgs(entries []airoute.ConsideredEntry) []map[string]any {
 		})
 	}
 	return out
+}
+
+// touchesArgs renders a call's footprint as the []string the concept's array
+// field takes, EMPTY RATHER THAN NIL: a nil slice renders as `null`, the
+// concept's validation refuses null for an array, and the refusal drops the
+// WHOLE row -- logged once, counted in RecordsDropped, and gone. A call that
+// names no footprint is most engine prompt calls and every structured one.
+func touchesArgs(touches []string) []string {
+	if touches == nil {
+		return []string{}
+	}
+	return touches
 }
 
 // billingOrMetered normalizes a record's billing for the ledger. An
