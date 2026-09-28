@@ -123,7 +123,10 @@ func (f *fallbackStreamWithTools) retryUnstartedStream(
 				f.router.recordObserved(ctx, fallbackRecord(f.req, failed, chunk.Error))
 				remaining := *f
 				remaining.chain = f.chain[next:]
-				remaining.resolved = f.resolved.withAttemptFailed(failed, chunk.Error)
+				// The walk so far travels with the retry: `failed` carries every
+				// earlier failure noted on its decision, and this one is added.
+				remaining.resolved = f.resolved
+				remaining.resolved.Decision.Considered = withFailureNoted(failed.Decision.Considered, failed.ProviderName, failed.Decision.Door, chunk.Error)
 				retry, err := remaining.CallChatStreamWithTools(ctx, messages, tools)
 				if err != nil {
 					if errors.Is(err, errNoChainEntryAvailable) {
