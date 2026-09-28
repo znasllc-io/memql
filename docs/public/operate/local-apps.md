@@ -208,13 +208,19 @@ A worker disconnect ends every live session with a named error rather than
 leaving callers parked until their own deadlines expire.
 
 **Only the replica holding a session ends its row, so a sweep ends the rest.**
-While a replica holds a session its drain re-writes the row's `heartbeatAt`
-every two seconds, and keeps the recording run's heartbeat fresh too.
+While a replica holds a session it re-writes the row's `heartbeatAt` every
+two seconds -- including after the app's output stops, while the transcript
+is stored -- and keeps the recording run's heartbeat fresh too (unless the run
+belongs to a delegated step, whose own journal beats it). A heartbeat names no
+status: the row is promoted to `running` once, on the first chunk, so a row
+the sweep has failed stays failed until the holder's own terminal write.
 `workerAppSessionStaleSweep` runs every two minutes on the cron leader and
 fails a `starting` or `running` row whose heartbeat is older than 90 seconds
 (the holder is gone), or whose session started more than 4.5 hours ago (longer
-than any session may run). It writes no `result`, so an answer the app
-submitted over MCP survives the close. The machine being online is not the
+than any session may run). It writes only the status, exit code, error and end
+time: no `result`, so an answer the app submitted over MCP survives the close,
+and no usage or billing, so a holder that ended the row first keeps its
+account. The machine being online is not the
 test: after a pod restart it re-registers on another replica within seconds,
 while the session the dead pod held is orphaned. Both graces are
 `globalVariable`s an operator can widen without a release:

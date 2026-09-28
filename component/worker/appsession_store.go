@@ -385,8 +385,10 @@ func (s *EngineStore) executeMutation(ctx context.Context, name string, args map
 	return nil
 }
 
-// stringsOrEmpty renders a nil slice as [] rather than null, so the
-// mutation's ?? default is never the thing that fires.
+// stringsOrEmpty renders a nil slice as [] rather than null. A NAMED argument
+// is written as given -- the engine keeps an explicit null, and the mutations
+// have no default to fall back on -- so a nil here would put null into an
+// array field, which is resultArg's failure for a list.
 func stringsOrEmpty(in []string) []string {
 	if in == nil {
 		return []string{}

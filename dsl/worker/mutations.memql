@@ -910,6 +910,19 @@ mutation appSession recordAppSessionProgress {
 // `unknown` rather than folding silence into either `metered` or
 // `subscription`. Inferring here is what would make the number the
 // owner asked for -- what the subscription covered -- untrustworthy.
+//
+// EVERY FIELD BUT THE STATUS AND THE END IS WRITTEN ONLY WHEN NAMED.
+// Two writers end a session. The holder names everything it has,
+// every time (component/worker.EngineStore.EndAppSession); the stale
+// sweep names only what it knows -- status, exitCode, errorMessage --
+// because nobody saw the session end. The sweep reads the open rows
+// and THEN ends each, so a holder that recovers in between has
+// already written the true account by the time the sweep's write
+// lands; a `?? {}` / `?? "unknown"` here overwrote that usage,
+// billing, transcript and artifact list with a dead session's blanks,
+// and the spend rollup reads them. The create already opens the row
+// with usage {}, billing "unknown" and an empty transcript, so a row
+// the sweep closes shows exactly those without a default here.
 
 /// Drive an app session to a terminal status with its reported usage.
 ///
@@ -947,20 +960,22 @@ mutation appSession endAppSession {
   update {
     id: args.sessionId
     args.status
-    exitCode: args.exitCode ?? 0
-    usage: args.usage ?? {}
-    billing: args.billing ?? "unknown"
-    transcriptFileId: args.transcriptFileId ?? ""
-    transcriptTruncated: args.transcriptTruncated ?? false
+    // Bare, all of them: see the header. A default here is what let a
+    // sweep that lost the race blank the holder's account.
+    args.exitCode
+    args.usage
+    args.billing
+    args.transcriptFileId
+    args.transcriptTruncated
     // NOT `?? 0`, for recordAppSessionProgress's reason: the end carries the
     // counters only when the recorder had them, and defaulting would report a
     // recorded session as having recorded nothing.
     args.recordedSteps
     args.droppedActions
-    producedArtifactIds: args.producedArtifactIds ?? []
-    appSessionRef: args.appSessionRef ?? ""
-    errorMessage: args.errorMessage ?? ""
-    cancelReason: args.cancelReason ?? ""
+    args.producedArtifactIds
+    args.appSessionRef
+    args.errorMessage
+    args.cancelReason
     // NOT `?? {}`. A session END that carries no result must not blank a
     // result a `submit` already recorded: the app volunteered its answer
     // mid-run and the harness simply had none to add. Omitting the key

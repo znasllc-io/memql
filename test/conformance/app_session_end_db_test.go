@@ -196,3 +196,70 @@ func TestAStatuslessProgressWriteKeepsTheStatus(t *testing.T) {
 		t.Errorf("recordedSteps = %v, want %d: the claim must still advance the allocator", row["recordedSteps"], slot.Seq+1)
 	}
 }
+
+// TestASweepEndThatLosesTheRaceKeepsTheHoldersAccount: workerAppSessionStale
+// Sweep reads the open rows and then ends each one, and the holder can end the
+// same row in between -- a replica that stalled past the grace and recovered
+// in time to finish. The sweep's write names only what it knows (status,
+// exitCode, errorMessage, endedAt), and it must write ONLY that: defaults for
+// the rest overwrote the holder's usage, billing, transcript and produced
+// artifacts with the empty values of a session nobody saw end, and the spend
+// rollup reads those.
+func TestASweepEndThatLosesTheRaceKeepsTheHoldersAccount(t *testing.T) {
+	env := appSessionEnv(t)
+	store := &workerservice.EngineStore{Engine: env.Eng}
+	owner := appSessionOwner("sweep-race")
+	sessionId := openAppSession(t, store, owner, "sweep-race")
+
+	if err := store.EndAppSession(context.Background(), workerservice.AppSessionRow{
+		ID:                  sessionId,
+		OwnerUserId:         owner,
+		Status:              workerservice.AppSessionStatusEnded,
+		Usage:               workerservice.AppSessionUsage{InputTokens: 900, OutputTokens: 350, Known: true},
+		Billing:             workerservice.BillingSubscription,
+		TranscriptFileId:    "v1:library:file:transcript-sweep-race",
+		ProducedArtifactIds: []string{"artifact-a"},
+		AppSessionRef:       "cc-sweep-race",
+		EndedAt:             time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("the holder's end: %v", err)
+	}
+
+	// The sweep's write, with exactly the arguments the automation names.
+	sweep, err := langparser.RenderCall("endAppSession", map[string]any{
+		"sessionId":    sessionId,
+		"status":       workerservice.AppSessionStatusFailed,
+		"exitCode":     -1,
+		"errorMessage": "No agent replica is holding this session any more",
+		"endedAt":      time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatalf("render the sweep's end: %v", err)
+	}
+	if _, err := env.Eng.Execute(auth.ContextWithUserActor(auth.ContextWithInternalOrigin(context.Background()), owner),
+		"mutation "+sweep); err != nil {
+		t.Fatalf("the sweep's end: %v", err)
+	}
+
+	row := appSessionRow(t, env, owner, sessionId)
+	if row["billing"] != workerservice.BillingSubscription {
+		t.Errorf("billing = %v, want the holder's subscription -- the sweep's end defaulted it back to unknown", row["billing"])
+	}
+	usage, _ := row["usage"].(map[string]any)
+	if usage["known"] != true || usage["inputTokens"] != float64(900) || usage["outputTokens"] != float64(350) {
+		t.Errorf("usage = %v, want the holder's reported spend -- the sweep's end blanked it", row["usage"])
+	}
+	if row["transcriptFileId"] != "v1:library:file:transcript-sweep-race" {
+		t.Errorf("transcriptFileId = %v, want the holder's transcript", row["transcriptFileId"])
+	}
+	if want := []any{"artifact-a"}; !reflect.DeepEqual(row["producedArtifactIds"], want) {
+		t.Errorf("producedArtifactIds = %#v, want the holder's %#v", row["producedArtifactIds"], want)
+	}
+	if row["appSessionRef"] != "cc-sweep-race" {
+		t.Errorf("appSessionRef = %v, want the holder's -- a later attach resumes by it", row["appSessionRef"])
+	}
+	// What the sweep DID name lands: the race costs the status, not the account.
+	if row["status"] != workerservice.AppSessionStatusFailed {
+		t.Errorf("status = %v, want the sweep's failed", row["status"])
+	}
+}

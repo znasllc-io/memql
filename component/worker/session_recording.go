@@ -26,6 +26,17 @@ import (
 	"time"
 )
 
+const (
+	// seqAllocationTimeout bounds one step-position claim against the row.
+	seqAllocationTimeout = 10 * time.Second
+	// closeRecordingTimeout bounds the recording's close. The close and the
+	// allocation before it are the one stretch of a session the holder does
+	// NOT heartbeat (the runner releases its hold first -- see
+	// holdThroughEnd), so together they must stay well inside the stale
+	// sweep's stall grace; TestTheUnheldCloseFitsInsideTheStallGrace pins it.
+	closeRecordingTimeout = 30 * time.Second
+)
+
 // sessionRecording holds one session's recording state.
 //
 // It is the ONLY writer of actions for its session, which is what lets the
@@ -72,6 +83,12 @@ type sessionRecording struct {
 	// is when it last went out. See Publish.
 	runBeatEvery time.Duration
 	lastRunBeat  time.Time
+	// beatsRun is false when the run was SUPPLIED by its driver (a delegated
+	// step's child run, design D7) rather than opened here. That driver's
+	// journal already heartbeats the run for as long as the step runs, and a
+	// second beat from here was a second updateWorkRun per window, broadcast
+	// to every replica, saying the same thing.
+	beatsRun bool
 }
 
 // newSessionRecording opens the recording, or returns nil when this node has
@@ -96,6 +113,7 @@ func newSessionRecording(ctx context.Context, r *SessionRunner, spec RunSpec) *s
 		provenance: ArtifactProvenance{App: spec.App, SessionId: spec.SessionId},
 
 		runBeatEvery: r.runHeartbeatInterval(),
+		beatsRun:     strings.TrimSpace(spec.RecordingRunId) == "",
 	}
 	if rec.logger == nil {
 		rec.logger = slog.Default()
@@ -281,7 +299,7 @@ func (s *sessionRecording) spillArgs(ctx context.Context, action ActionEvent) (s
 // restarting at 0.
 func (s *sessionRecording) allocateSeq(ctx context.Context) int {
 	if s.store != nil {
-		allocCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		allocCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), seqAllocationTimeout)
 		defer cancel()
 		slot, err := s.store.ClaimRecordingSlot(allocCtx, s.sessionId, s.owner)
 		if err != nil {
@@ -314,21 +332,26 @@ func (s *sessionRecording) allocateSeq(ctx context.Context) int {
 // taken. The drop count has one writer -- this one -- so it is published from
 // here.
 //
-// THE HEARTBEAT RIDES THE SAME WRITE. The drain calls this on every flush for
-// as long as this replica holds the session, so it is the one writer that can
-// say "somebody is still holding this": the session row's heartbeatAt, which
-// workerAppSessionStaleSweep judges a live row by, and -- throttled -- the
-// recording run's, which the work sweep abandons a running run without. The
-// run's beat is throttled because every run write is broadcast to every
-// replica, and the sweep's window is a minute, not a flush.
-func (s *sessionRecording) Publish(ctx context.Context, store AppSessionStore, status string) {
+// THE HEARTBEAT RIDES THE SAME WRITE. The runner's hold calls this on every
+// flush for as long as this replica holds the session, so it is the one writer
+// that can say "somebody is still holding this": the session row's heartbeatAt,
+// which workerAppSessionStaleSweep judges a live row by, and -- throttled --
+// the recording run's, which the work sweep abandons a running run without.
+// The run's beat is throttled because every run write is broadcast to every
+// replica, and the sweep's window is a minute, not a flush; and it is skipped
+// for a run its driver supplied, which that driver already beats.
+//
+// status is named only when non-empty, and the hold names it ONCE (see
+// sessionHold). It returns the ROW write's error, logged here as well, so the
+// hold can tell whether that one promotion landed.
+func (s *sessionRecording) Publish(ctx context.Context, store AppSessionStore, status string) error {
 	if s == nil || store == nil {
-		return
+		return nil
 	}
 	now := time.Now().UTC()
 	s.mu.Lock()
 	dropped := s.sequence.Dropped()
-	beatRun := s.lastRunBeat.IsZero() || now.Sub(s.lastRunBeat) >= s.runBeatEvery
+	beatRun := s.beatsRun && (s.lastRunBeat.IsZero() || now.Sub(s.lastRunBeat) >= s.runBeatEvery)
 	if beatRun {
 		s.lastRunBeat = now
 	}
@@ -336,9 +359,10 @@ func (s *sessionRecording) Publish(ctx context.Context, store AppSessionStore, s
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	// -1 for recordedSteps means "do not name it".
-	if err := store.RecordAppSessionProgress(writeCtx, s.sessionId, -1, dropped, status, now); err != nil {
+	rowErr := store.RecordAppSessionProgress(writeCtx, s.sessionId, -1, dropped, status, now)
+	if rowErr != nil {
 		s.logger.Warn("app session: could not publish recording progress",
-			"session_id", s.sessionId, "error", err)
+			"session_id", s.sessionId, "error", rowErr)
 	}
 	if beatRun {
 		if err := s.recorder.HeartbeatRecording(writeCtx, RecordingHeartbeat{
@@ -348,6 +372,7 @@ func (s *sessionRecording) Publish(ctx context.Context, store AppSessionStore, s
 				"session_id", s.sessionId, "run_id", s.runId, "error", err)
 		}
 	}
+	return rowErr
 }
 
 // StoreTranscript puts the session's prose in the Library (design D5: the
@@ -391,7 +416,7 @@ func (s *sessionRecording) Close(ctx context.Context, result RunResult, transcri
 	recorded, dropped = s.recorded, s.sequence.Dropped()
 	s.mu.Unlock()
 
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), closeRecordingTimeout)
 	defer cancel()
 	if err := s.recorder.CloseRecording(writeCtx, RecordingClose{
 		SessionId: s.sessionId, OwnerUserId: s.owner, RunId: s.runId,
