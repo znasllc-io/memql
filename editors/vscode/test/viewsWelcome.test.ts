@@ -53,8 +53,12 @@ interface Manifest {
 const manifest = JSON.parse(fs.readFileSync(MANIFEST, "utf8")) as Manifest;
 const welcomes = manifest.contributes.viewsWelcome;
 
-/** The three views a cluster's data flows into. Runs is deliberately not here. */
-const GATED = ["memqlDeployments", "memqlConstructs", "memqlData"] as const;
+/**
+ * The views a cluster's data flows into that share one welcome. Runs is
+ * deliberately not here, and Deployments has its own (below): it says which
+ * act is right, install or select, from whether a local cluster exists.
+ */
+const GATED = ["memqlConstructs", "memqlData"] as const;
 
 function welcomeFor(view: string): WelcomeEntry[] {
   return welcomes.filter((entry) => entry.view === view);
@@ -106,22 +110,63 @@ test("the welcomes and the runs refusal say the same first words", () => {
   for (const view of GATED) {
     assert.ok(welcomeFor(view)[0].contents.startsWith(opening));
   }
+  for (const entry of deploymentsUnselected()) {
+    assert.ok(entry.contents.startsWith(opening), entry.contents);
+  }
+});
+
+/** The Deployments welcomes shown with no cluster selected. */
+function deploymentsUnselected(): WelcomeEntry[] {
+  return welcomeFor("memqlDeployments").filter((entry) => (entry.when ?? "").startsWith(`!${CLUSTER_SELECTED_KEY}`));
+}
+
+test("with no cluster selected, Deployments says one line and the right act", () => {
+  // TWO WELCOMES, ONE LINE EACH, split on whether a local cluster exists: the
+  // old one offered Install on a machine that already had one.
+  const entries = deploymentsUnselected();
+  assert.equal(entries.length, 2);
+  const present = entries.find((e) => e.when === `!${CLUSTER_SELECTED_KEY} && memql.localClusterPresent`);
+  const absent = entries.find((e) => e.when === `!${CLUSTER_SELECTED_KEY} && !memql.localClusterPresent`);
+  assert.ok(present && absent, "the two welcomes are keyed on whether a local cluster is present");
+  // A local cluster that is here but not selected -- or not even in the list,
+  // which Select Cluster cannot reach -- opens on its own page, whose primary
+  // is Connect, Reconnect or Sign in as its state asks.
+  assert.deepEqual(linkedCommands(present.contents), ["memql.deployments.open", "memql.clusters.select"]);
+  assert.deepEqual(linkedCommands(absent.contents), ["memql.deployments.createDeployment", "memql.clusters.select"]);
+  for (const entry of entries) assert.equal(entry.contents.split("\n")[0], "Not connected.");
+});
+
+test("a selected cluster whose history cannot be read says what it needs, never nothing", () => {
+  // An empty tree under a selected cluster is either "no history yet" or "sign
+  // in to see it", and the welcome says which rather than leaving a blank view.
+  const signIn = welcomeFor("memqlDeployments").find((e) => (e.when ?? "").includes("memql.connectionState == signIn"));
+  assert.ok(signIn, "no sign-in welcome");
+  assert.ok((signIn.when ?? "").startsWith(CLUSTER_SELECTED_KEY));
+  assert.deepEqual(linkedCommands(signIn.contents), ["memql.deployments.signIn"]);
+  const empty = welcomeFor("memqlDeployments").find((e) => (e.when ?? "").includes("memql.connectionState == connected"));
+  assert.equal(empty?.contents, "No history yet.");
+});
+
+test("every connection state that can leave a selected cluster's history empty has a welcome line", () => {
+  // A blank view under a heading is the one thing a disconnected read must
+  // never look like. The history of a cluster this editor cannot read is
+  // empty for a reason, and the welcome says which.
+  const states = ["connected", "signIn", "connecting", "unreachable", "notConfigured"];
+  for (const state of states) {
+    const entry = welcomeFor("memqlDeployments").find(
+      (e) => e.when === `${CLUSTER_SELECTED_KEY} && memql.connectionState == ${state}`,
+    );
+    assert.ok(entry, `no welcome for ${state}`);
+    assert.equal(entry.contents.split("\n")[0]!.length <= 40, true, `${state}: more than one short line`);
+  }
 });
 
 test("only the Deployments welcome carries the install entry point", () => {
-  // WHERE THE `local` ROW'S JOB WENT (design D4). The Deployments view used to
-  // render a `local` row even on a machine with nothing installed, purely so an
-  // operator had somewhere to start. That row is gone; this link is one of the
-  // three places its job moved to, and the other two are the Clusters welcome
-  // and the view title menu.
-  //
-  // Constructs and Data do NOT get it: neither is where an operator would look
-  // to install a cluster, and a third copy of the offer would make the
-  // consistent sentence three different sentences.
+  // WHERE THE `local` ROW'S JOB WENT (design D4): the Deployments welcome, the
+  // Clusters welcome and the view title menu. Constructs and Data do NOT get
+  // it: neither is where an operator would look to install a cluster.
   assert.ok(
-    linkedCommands(welcomeFor("memqlDeployments")[0].contents).includes(
-      "memql.deployments.createDeployment"
-    ),
+    deploymentsUnselected().some((entry) => linkedCommands(entry.contents).includes("memql.deployments.createDeployment")),
     "the Deployments welcome lost the install entry point"
   );
   for (const view of ["memqlConstructs", "memqlData"] as const) {

@@ -23,12 +23,13 @@
 //     pretending a node-type spec is a step would invent a step log the data
 //     does not contain.
 //
-//  3. A DERIVED VERSION IS NEVER BLANK. `displayVersion` renders an
-//     unresolvable version as the word "unknown". That rule came from
-//     state/topology.ts, whose grid drew a node with no resolvable deployment
-//     the same way; it is carried forward here even as that file goes, because
-//     a blank cell reads as "no version" while the truth is "we could not work
-//     it out".
+//  3. A VERSION IS SHOWN FROM WHAT WAS RECORDED, OR NOT AT ALL. `versionLabel`
+//     is the tag, the branch and commit, the checkout build or the registry's
+//     recorded release -- whichever names what is running. The word "unknown"
+//     used to fill the gap (`displayVersion`), and it put a false claim in the
+//     Deployments heading for every branch install, whose commit was recorded
+//     all along. A surface with no label now leaves the version out; the word
+//     survives only where a sentence needs a noun (a forecast's "from").
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 //
@@ -83,12 +84,42 @@ export interface Instance {
   domain?: string;
   presence: PresenceVerdict;
   /**
-   * Local: the release tag the receipt's `stackCheckout` step recorded.
+   * Local: the release tag the receipt's `stackCheckout` step recorded, or --
+   * when the receipt records no checkout at all -- the release clusters.yaml
+   * says the cluster reported. Never set for a branch or commit install.
    * Remote: the current deployment's version.
    * Absent when it could not be resolved -- render it with displayVersion.
    */
   version?: string;
+  /**
+   * What a surface prints for the version (memql#4246 over the owner's
+   * "local · not answering · unknown"): the release tag when there is one,
+   * `main @ 3f2a9c1` for a branch install, `Your build 3f2a9c1` for a cluster
+   * running images built from the checkout, the registry's recorded release
+   * when the receipt names none. Absent when nothing names a version at all,
+   * and a surface then says NOTHING about the version rather than printing
+   * the word "unknown" -- the old rule, which put a false claim in the one
+   * heading the owner read.
+   *
+   * `version` stays the tag, because it is what gets COMPARED (an upgrade is
+   * offered from it, a forecast is computed from it); this is only what is
+   * shown.
+   */
+  versionLabel?: string;
   connected: boolean;
+  /**
+   * Local: whether clusters.yaml carries a `local: true` row for it. A local
+   * cluster that is installed but NOT in the list is reconnected, not signed
+   * in to -- there is no row to sign in against.
+   */
+  registered?: boolean;
+  /**
+   * Remote: the deployment the cluster is running now
+   * (deploymentHistory.currentDeploymentId). A rollback targets an OLDER
+   * landed record than this one; targeting this one re-ships what is already
+   * running.
+   */
+  currentDeploymentId?: string;
   /**
    * Remote: the record the Deploy button ships -- the newest CUT-but-unshipped
    * deployment (memql#4017). Absent when nothing is cut, when the records could
@@ -327,22 +358,41 @@ export interface LocalInstanceInput {
 export function localInstance(input: LocalInstanceInput): Instance {
   const registeredName = (input.registered?.name ?? "").trim();
   const domain = (input.registered?.domain ?? "").trim() || recordedDomain(input.receipt);
-  // The receipt's tag; else the version clusters.yaml records for the
-  // registered entry -- a cluster built with `make up` has no receipt, and
-  // its version is still known.
-  const version = recordedStackTag(input.receipt) || (input.registered?.version ?? "").trim();
+  const tag = recordedStackTag(input.receipt);
   const checkout = recordedStackDir(input.receipt);
   const imageSource = recordedImageSource(input.receipt);
   const rebuild = recordedRebuild(input.receipt);
   const checkoutBranch = recordedStackBranch(input.receipt);
   const checkoutCommit = recordedStackCommit(input.receipt);
+  // THE REGISTRY'S RECORDED RELEASE WHEN THE RECEIPT NAMES NOTHING. A cluster
+  // with no receipt, or one whose receipt never recorded its checkout, has no
+  // better answer than what the version learners wrote into clusters.yaml --
+  // a fact about this cluster, which "unknown" is not.
+  //
+  // NEVER FOR A BRANCH OR COMMIT INSTALL. Its receipt names what it runs (the
+  // label says `main @ 3f2a9c1`), and what the cluster reports is the nearest
+  // release, not the code it serves. `version` is what an update is COMPARED
+  // from, so borrowing the reported release would offer "Update to v0.24.0"
+  // over a checkout of main -- a move to a tag, worded as an upgrade, from a
+  // version the cluster is not on.
+  const fromSource = tag === "" && (checkoutBranch !== "" || checkoutCommit !== "");
+  const version = tag !== "" ? tag : fromSource ? "" : (input.registered?.version ?? "").trim();
+  const label = localVersionLabel({
+    tag,
+    registryVersion: (input.registered?.version ?? "").trim(),
+    branch: checkoutBranch,
+    commit: checkoutCommit,
+    ...(imageSource === "checkout" && rebuild !== undefined ? { rebuild } : {}),
+  });
   return {
     name: registeredName !== "" ? registeredName : LOCAL_INSTANCE_NAME,
     kind: "local",
     ...(domain !== "" ? { domain } : {}),
     presence: input.presence,
     ...(version !== "" ? { version } : {}),
+    ...(label !== "" ? { versionLabel: label } : {}),
     connected: input.connected,
+    registered: input.registered !== undefined,
     ...(checkout !== "" ? { checkout } : {}),
     ...(imageSource !== "" ? { imageSource } : {}),
     ...(rebuild !== undefined ? { rebuild } : {}),
@@ -351,6 +401,34 @@ export function localInstance(input: LocalInstanceInput): Instance {
     ...(input.buildStamp !== undefined ? { extensionCommit: input.buildStamp.commit } : {}),
     ...(input.buildStamp?.dirty ? { extensionDirty: true } : {}),
   };
+}
+
+/**
+ * The version a local cluster shows, from what was recorded (see
+ * `Instance.versionLabel`).
+ *
+ * ORDER IS WHAT IS RUNNING, MOST SPECIFIC FIRST. A rebuild from the checkout
+ * outranks the tag the install pinned, because the tag is no longer what the
+ * cluster serves. A branch install names its branch and commit rather than a
+ * registry version the cluster once reported, because the commit is exact and
+ * the reported version of a branch build is not a release.
+ */
+export function localVersionLabel(i: {
+  tag: string;
+  registryVersion: string;
+  branch: string;
+  commit: string;
+  rebuild?: RecordedRebuild;
+}): string {
+  if (i.rebuild !== undefined && i.rebuild.commit.trim() !== "") {
+    return `Your build ${i.rebuild.commit.trim().slice(0, 7)}`;
+  }
+  if (i.tag !== "") return i.tag;
+  // A recorded commit is what runs: the reported release of a commit build is
+  // the nearest tag, which the cluster is not on.
+  const commit = i.commit.slice(0, 7);
+  if (commit !== "") return i.branch !== "" ? `${i.branch} @ ${commit}` : commit;
+  return i.registryVersion;
 }
 
 // ---------------------------------------------------------------------------
@@ -392,6 +470,12 @@ export interface RemoteInstanceInput {
    * instance, because there is no record to name in either case.
    */
   pendingDeploymentId?: string;
+  /**
+   * The release clusters.yaml records for it, learned the last time this
+   * editor could ask. Shown when the deployment records cannot be read -- a
+   * cluster this editor is not connected to -- rather than no version at all.
+   */
+  registryVersion?: string;
 }
 
 /**
@@ -409,10 +493,11 @@ export interface RemoteInstanceInput {
  */
 export function remoteInstance(input: RemoteInstanceInput): Instance {
   const current = (input.currentDeploymentId ?? "").trim();
-  const version =
+  const deployed =
     current === ""
       ? ""
       : (indexDeployments(input.deployments ?? []).get(current)?.version ?? "");
+  const version = deployed !== "" ? deployed : (input.registryVersion ?? "").trim();
   const domain = (input.domain ?? "").trim();
   const pending = (input.pendingDeploymentId ?? "").trim();
   return {
@@ -420,8 +505,9 @@ export function remoteInstance(input: RemoteInstanceInput): Instance {
     kind: "remote",
     ...(domain !== "" ? { domain } : {}),
     presence: remotePresence(input.reachable),
-    ...(version !== "" ? { version } : {}),
+    ...(version !== "" ? { version, versionLabel: version } : {}),
     connected: input.connected,
+    ...(current !== "" ? { currentDeploymentId: current } : {}),
     ...(pending !== "" ? { pendingDeploymentId: pending } : {}),
   };
 }

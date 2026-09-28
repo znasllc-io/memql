@@ -8,9 +8,10 @@ import { GALLERY_THEMES, wrapDocument, type GalleryTheme, type Scenario } from "
 import { scenarios as kit } from "./scenarios/kit.js";
 import { scenarios as access } from "./scenarios/access.js";
 import { scenarios as install } from "./scenarios/install.js";
+import { scenarios as deployments } from "./scenarios/deployments.js";
 
 /** Every scenario, in index order. */
-export const SCENARIOS: readonly Scenario[] = [...kit, ...access, ...install];
+export const SCENARIOS: readonly Scenario[] = [...kit, ...access, ...install, ...deployments];
 
 /** One rendered gallery page. */
 export interface GalleryPage {

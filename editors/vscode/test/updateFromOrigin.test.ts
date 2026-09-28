@@ -14,15 +14,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { readUpdateState, type UpdateState } from "../src/install/updateState.js";
-import {
-  updateIsBlocked,
-  updatePreflightItems,
-  type UpdatePreflightInputs,
-} from "../src/state/updatePreflight.js";
+import { updateCheck, updateIsBlocked, type UpdatePreflightInputs } from "../src/state/updatePreflight.js";
 import { updateRebuildPlan, type SessionOptions } from "../src/install/session.js";
 import type { Step } from "../src/install/graph.js";
+import type { Instance } from "../src/state/deployments.js";
 import { updatedMessage } from "../src/state/imageLane.js";
-import { renderUpdateScreen } from "../src/webview/installScreens.js";
+import { pullRebuildScreen } from "../src/webview/deploymentScreens.js";
 
 // -----------------------------------------------------------------------------
 // reading the state
@@ -171,67 +168,66 @@ function inputs(over: Partial<UpdatePreflightInputs> = {}): UpdatePreflightInput
     dockerReachable: true,
     checkoutDir: "/home/me/.memql/src",
     checkoutIsMemql: true,
-    nodes: "",
     imageSource: "checkout",
     releasedTag: "v0.19.1",
-    strategy: "fastForward",
     update: state(),
     ...over,
   };
 }
 
-function detail(items: readonly { label: string; detail: string }[], label: string): string {
-  return items.find((i) => i.label === label)?.detail ?? "";
+function fact(check: ReturnType<typeof updateCheck>, label: string): string {
+  return check.facts.find((f) => f.label === label)?.value ?? "";
 }
 
-test("the checklist states the branch, the distance and what happens to uncommitted work", () => {
-  const items = updatePreflightItems(inputs({ update: state({ dirtyCount: 2 }) }));
-  assert.match(detail(items, "Branch"), /main, from origin/);
-  assert.match(detail(items, "Latest"), /3 new commits to apply/);
-  assert.match(detail(items, "Your changes"), /2 uncommitted files/);
-  assert.match(detail(items, "Your changes"), /stops and names them/);
-  // It is the rebuild checklist with an update in front, so the second step's
-  // own lines are still there -- one account of one run.
-  assert.notEqual(detail(items, "Docker"), "");
-  assert.notEqual(detail(items, "Nodes"), "");
+function lines(check: ReturnType<typeof updateCheck>): string[] {
+  return check.notices.map((n) => n.line);
+}
+
+test("the facts say what will be pulled: the branch, how far, and what is yours", () => {
+  const check = updateCheck(inputs({ update: state({ dirtyCount: 2, ahead: 1 }) }));
+  assert.equal(fact(check, "Branch"), "main from origin");
+  assert.equal(fact(check, "To pull"), "3 new commits");
+  assert.equal(fact(check, "Your commits"), "1 not on origin");
+  assert.equal(fact(check, "Uncommitted"), "2 files");
+  // A clean checkout with nothing of its own says neither.
+  const clean = updateCheck(inputs());
+  assert.equal(fact(clean, "Uncommitted"), "");
+  assert.equal(fact(clean, "Your commits"), "");
 });
 
 test("an unknown distance is said to be unknown rather than rendered as up to date", () => {
-  const items = updatePreflightItems(
-    inputs({ update: state({ ahead: undefined, behind: undefined }) }),
-  );
-  assert.match(detail(items, "Latest"), /not known until the update fetches/);
-  assert.doesNotMatch(detail(items, "Latest"), /Already at the tip/);
+  const check = updateCheck(inputs({ update: state({ ahead: undefined, behind: undefined }) }));
+  assert.equal(fact(check, "To pull"), "New commits available");
+  assert.equal(fact(updateCheck(inputs({ update: state({ behind: 0 }) })), "To pull"), "Up to date");
 });
 
-test("an unreachable remote is an attention line, and the run still gets to try", () => {
-  const items = updatePreflightItems(
-    inputs({ update: state({ remoteError: "could not resolve host", ahead: undefined, behind: undefined }) }),
-  );
-  const latest = items.find((i) => i.label === "Latest");
-  assert.equal(latest?.state, "attention");
-  assert.match(latest?.detail ?? "", /could not resolve host/);
+test("an unreachable remote is a notice, and the run still gets to try", () => {
+  const check = updateCheck(inputs({ update: state({ remoteError: "could not resolve host", ahead: undefined, behind: undefined }) }));
+  assert.ok(lines(check).includes("Couldn't reach origin."));
+  assert.equal(fact(check, "To pull"), "");
   // Not blocking: the run reaches the network properly and reports what it finds.
+  assert.equal(check.blocked, false);
   assert.equal(updateIsBlocked(state({ remoteError: "could not resolve host" })), false);
 });
 
-test("the strategy line says what happens to the checkout's own commits", () => {
-  assert.match(
-    detail(updatePreflightItems(inputs()), "Your own commits"),
-    /stops and says so rather than combining/,
-  );
-  assert.match(
-    detail(updatePreflightItems(inputs({ strategy: "merge" })), "Your own commits"),
-    /Combined with the latest/,
-  );
+test("a shallow checkout is warned about once, because the deepening is the slow part", () => {
+  assert.ok(lines(updateCheck(inputs({ update: state({ shallow: true }) }))).some((l) => /full history/.test(l)));
+  assert.ok(!lines(updateCheck(inputs())).some((l) => /history/.test(l)));
 });
 
-test("a shallow checkout is warned about once, because the deepening is the slow part", () => {
-  assert.match(
-    detail(updatePreflightItems(inputs({ update: state({ shallow: true }) })), "History"),
-    /first update fetches the rest/,
-  );
-  assert.equal(detail(updatePreflightItems(inputs()), "History"), "");
+test("a merge in progress or no branch blocks the pull, and says why in one line", () => {
+  const merging = updateCheck(inputs({ update: state({ inProgress: "a merge" }) }));
+  assert.equal(merging.blocked, true);
+  assert.ok(lines(merging).includes("A merge is in progress in this folder."));
+  const detached = updateCheck(inputs({ update: state({ branch: "" }) }));
+  assert.equal(detached.blocked, true);
+  assert.ok(lines(detached).includes("This folder isn't on a branch."));
+});
+
+test("the rebuild half's notices ride along -- one account of one run", () => {
+  const check = updateCheck(inputs({ dockerReachable: false }));
+  assert.ok(lines(check).includes("Docker isn't running."));
+  assert.equal(check.blocked, true);
 });
 
 // TWO BLOCKING CASES, AND ONLY TWO. Both are refusals the script makes before
@@ -248,10 +244,9 @@ test("only an unfinished operation and a missing branch block Start", () => {
 });
 
 test("a checkout git could not read says so instead of describing an update", () => {
-  const items = updatePreflightItems(inputs({ update: undefined }));
-  const source = items.find((i) => i.label === "Your source");
-  assert.equal(source?.state, "attention");
-  assert.match(source?.detail ?? "", /git could not read/);
+  const check = updateCheck(inputs({ update: undefined }));
+  assert.ok(lines(check).includes("Couldn't read the folder's git status."));
+  assert.equal(fact(check, "Branch"), "");
 });
 
 // -----------------------------------------------------------------------------
@@ -333,74 +328,68 @@ test("the update plan skips any step that is not one of its two", () => {
 
 test("the finished message is read off both envelopes, never off what was asked for", () => {
   const rebuild = { nodes: "bff agent", commit: "abc1234def567", dirtyCount: 2 };
-  assert.match(
+  assert.equal(
     updatedMessage("local", { outcome: "fastForward", behind: 12 }, rebuild),
-    /Brought your checkout up to date with 12 new commits\./,
+    "Pulled 12 new commits. local now runs your build (abc1234, 2 uncommitted files).",
   );
-  assert.match(
-    updatedMessage("local", { outcome: "upToDate", behind: 0 }, rebuild),
-    /^Already up to date\./,
-  );
-  assert.match(
-    updatedMessage("local", { outcome: "merged" }, rebuild),
-    /^Combined the latest with your own commits\./,
-  );
-  // The rebuild half is unchanged and still read off its own envelope.
-  assert.match(updatedMessage("local", { outcome: "upToDate" }, rebuild), /bff, agent/);
-  assert.match(updatedMessage("local", { outcome: "upToDate" }, rebuild), /abc1234/);
+  assert.match(updatedMessage("local", { outcome: "upToDate", behind: 0 }, rebuild), /^Already up to date\./);
+  assert.match(updatedMessage("local", { outcome: "merged" }, rebuild), /^Merged the latest with your commits\./);
+  // No node list and no double hyphen: a full rebuild names nine services
+  // nobody asked about.
+  assert.doesNotMatch(updatedMessage("local", { outcome: "upToDate" }, rebuild), /bff|--/);
 });
 
 test("an outcome the envelope did not carry is left unnamed rather than guessed", () => {
   const said = updatedMessage("local", {}, { nodes: "bff" });
-  assert.match(said, /^Updated your checkout\./);
-  assert.doesNotMatch(said, /up to date/);
-  // And a missing update envelope entirely still produces a sentence.
-  assert.match(updatedMessage("local", undefined, undefined), /Updated your checkout\./);
+  assert.match(said, /^Pulled the latest\./);
+  assert.doesNotMatch(said, /up to date/i);
+  assert.match(updatedMessage("local", undefined, undefined), /^Pulled the latest\. local now runs your build\.$/);
 });
 
 // -----------------------------------------------------------------------------
 // the screen
 // -----------------------------------------------------------------------------
 
-test("the screen offers both strategies and preselects the one that changes less", () => {
-  const html = renderUpdateScreen({ checkoutDir: "/src", nodes: "", strategy: "fastForward" });
-  assert.match(html, /<option value="fastForward" selected>/);
-  assert.match(html, /<option value="merge">/);
-  const merging = renderUpdateScreen({ checkoutDir: "/src", nodes: "", strategy: "merge" });
-  assert.match(merging, /<option value="merge" selected>/);
+const LOCAL: Instance = { name: "local", kind: "local", presence: "installed-healthy", connected: true, checkout: "/home/me/src", checkoutBranch: "main" };
+
+function screen(over: Partial<Parameters<typeof pullRebuildScreen>[0]> = {}): string {
+  const parts = pullRebuildScreen({
+    instance: LOCAL,
+    check: updateCheck(inputs({ checkoutDir: "/home/me/src" })),
+    nodes: "",
+    home: "/home/me",
+    merge: false,
+    offerMerge: true,
+    ...over,
+  });
+  // The kit escapes an apostrophe; the assertions read the words.
+  return (parts.head + parts.body + parts.actions).replace(/&#39;/g, "'");
+}
+
+test("merging your own commits is a switch, off by default -- the answer that changes less", () => {
+  const off = screen();
+  assert.match(off, /role="switch"[^>]*data-field="merge"/);
+  assert.doesNotMatch(off, /role="switch"[^>]* checked/);
+  assert.match(screen({ merge: true }), /role="switch" id="dp-merge" checked/);
+  // Offered only when the checkout may have commits of its own.
+  assert.doesNotMatch(screen({ offerMerge: false }), /data-field="merge"/);
 });
 
-test("Start is disabled while gathering and when the checklist found a blocking case", () => {
-  const items = [{ label: "Branch", state: "ok" as const, detail: "main, from origin." }];
-  const ready = renderUpdateScreen({
-    checkoutDir: "/src",
-    nodes: "",
-    strategy: "fastForward",
-    preflight: items,
-  });
-  assert.doesNotMatch(ready, /data-act="beginUpdate" disabled/);
-
-  const blocked = renderUpdateScreen({
-    checkoutDir: "/src",
-    nodes: "",
-    strategy: "fastForward",
-    preflight: items,
-    blocked: true,
-  });
-  assert.match(blocked, /data-act="beginUpdate" disabled/);
-
-  // STILL GATHERING. The run is sent a --branch resolved from this read, so a
-  // Start pressed before it lands would be refused for a missing parameter the
-  // operator never saw a field for -- and it says so rather than showing a dead
-  // button with no explanation.
-  const gathering = renderUpdateScreen({ checkoutDir: "/src", nodes: "", strategy: "fastForward" });
-  assert.match(gathering, /data-act="beginUpdate" disabled/);
-  assert.match(gathering, /Checking what an update would do/);
+test("the pull is offered when the check is clean, and absent -- not disabled -- when it is blocked or still checking", () => {
+  assert.match(screen(), /data-act="beginPullRebuild"/);
+  const blocked = screen({ check: updateCheck(inputs({ update: state({ inProgress: "a merge" }) })) });
+  assert.doesNotMatch(blocked, /data-act="beginPullRebuild"/);
+  assert.match(blocked, /Can't pull yet/);
+  const checking = screen({ check: undefined });
+  assert.doesNotMatch(checking, /data-act="beginPullRebuild"/);
+  assert.match(checking, /mq-skeleton/);
+  assert.doesNotMatch(checking, /Checking what an update would do/);
+  assert.doesNotMatch(`${blocked}${checking}`, /disabled/);
 });
 
-test("the screen names the checkout and promises what happens to uncommitted work", () => {
-  const html = renderUpdateScreen({ checkoutDir: "/home/me/src", nodes: "", strategy: "fastForward" });
-  assert.match(html, /\/home\/me\/src/);
-  assert.match(html, /uncommitted changes come along/);
-  assert.match(html, /tells you which files are involved/);
+test("the screen names the folder under ~ and never the word origin in its title", () => {
+  const html = screen();
+  assert.match(html, /~\/src/);
+  assert.match(html, />Pull and rebuild</);
+  assert.doesNotMatch(html, /Update from origin/);
 });

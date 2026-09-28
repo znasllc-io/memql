@@ -129,10 +129,10 @@ export function isReleaseTag(value: string): boolean {
 /** The message for a typed value that is not a release tag. */
 export function tagProblem(value: string): string | undefined {
   const trimmed = value.trim();
-  if (trimmed === "") return "Name the release tag to move this cluster to.";
-  if (!isReleaseTag(trimmed)) {
-    return `Release tags are spelled vMAJOR.MINOR.PATCH, for example v0.17.0. "${trimmed}" is not one, and the checkout would fail to find it.`;
-  }
+  if (trimmed === "") return "Enter a version.";
+  // The failure this catches is a checkout that cannot find the ref, which
+  // would surface deep in the run rather than under the box that produced it.
+  if (!isReleaseTag(trimmed)) return "Use a version like v0.24.0.";
   return undefined;
 }
 

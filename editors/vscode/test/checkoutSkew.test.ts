@@ -25,8 +25,9 @@ import { test } from "node:test";
 
 import { readBuildStamp } from "../src/version/buildStamp.js";
 import { checkoutSkew, checkoutSkewFactValue, shortCommit } from "../src/version/checkoutSkew.js";
-import { rebuildPreflightItems, type RebuildPreflightInputs } from "../src/state/rebuildPreflight.js";
-import { renderInstanceOverview } from "../src/webview/deploymentScreens.js";
+import { rebuildCheck, type RebuildPreflightInputs } from "../src/state/rebuildPreflight.js";
+import { localOverviewBar } from "../src/deploy/instanceActions.js";
+import { localOverviewScreen } from "../src/webview/deploymentScreens.js";
 import type { Instance } from "../src/state/deployments.js";
 import { STAGED_ROOT_DIR } from "../src/install/root.js";
 
@@ -111,54 +112,53 @@ test("an unstamped, corrupt, empty-commit or path-less read all answer undefined
 });
 
 // ---------------------------------------------------------------------------
-// where it is said: the instance page
+// where it is said: the cluster page
 // ---------------------------------------------------------------------------
 
-function overview(instance: Partial<Instance>): string {
-  return renderInstanceOverview({
-    instance: {
-      name: "local",
-      kind: "local",
-      presence: "installed-healthy",
-      connected: false,
-      ...instance,
-    } as Instance,
+function overview(instance: Partial<Instance>, detailsOpen = true): string {
+  const full = {
+    name: "local",
+    kind: "local",
+    presence: "installed-healthy",
+    connected: true,
+    registered: true,
+    ...instance,
+  } as Instance;
+  const parts = localOverviewScreen({
+    instance: full,
+    bar: localOverviewBar({ instance: full, connection: "connected", upgrade: { kind: "none", reason: "" } }),
     runs: [],
-    actions: [],
     nowMs: 0,
-    error: "",
-    releases: undefined,
     upgrade: { kind: "none", reason: "not what this file is about" },
-    diagnosticsOpen: true,
+    releases: undefined,
+    detailsOpen,
+    home: "/home/me",
   });
+  return parts.body;
+}
+
+/** The page above its Details disclosure: the facts a person reads first. */
+function primary(html: string): string {
+  const at = html.indexOf("mq-disclosure");
+  return at < 0 ? html : html.slice(0, at);
 }
 
 // A FACT, NOT AN ALERT, and PROMINENT only when it is news. The primary tier
 // carries it when the two have diverged, because that is the thing that
 // explains a whole class of "the product is broken" reports.
-test("a diverged extension is stated on the page, not buried in diagnostics", () => {
-  const html = overview({
-    checkout: "/src/memql",
-    checkoutCommit: CHECKOUT,
-    extensionCommit: EXT,
-  });
-  const facts = html.slice(0, html.indexOf("<h2>Deployments</h2>"));
-  assert.match(facts, /extension/, "the primary facts do not carry the build line");
-  assert.match(facts, new RegExp(shortCommit(EXT)));
-  assert.match(facts, new RegExp(shortCommit(CHECKOUT)));
+test("a diverged extension is stated on the page, not buried in Details", () => {
+  const html = overview({ checkout: "/src/memql", checkoutCommit: CHECKOUT, extensionCommit: EXT });
+  assert.match(primary(html), /From a different commit than your checkout/);
+  // The two commits themselves are for Details.
+  assert.match(html, new RegExp(shortCommit(EXT)));
 });
 
-// ...and QUIET when they agree. Two matching commits are a stamp, and this
-// page's own tiering (memql#4456) puts raw stamps behind the disclosure.
-test("an agreeing extension is a diagnostic stamp, not a headline", () => {
-  const html = overview({
-    checkout: "/src/memql",
-    checkoutCommit: EXT,
-    extensionCommit: EXT,
-  });
-  const facts = html.slice(0, html.indexOf("<h2>Deployments</h2>"));
-  assert.doesNotMatch(facts, /same commit as the checkout/, "an agreement was promoted to the headline");
-  assert.match(html, /same commit as the checkout/, "the agreement is not recorded anywhere");
+// ...and QUIET when they agree. Two matching commits are a stamp, kept under
+// Details for a support case.
+test("an agreeing extension is a Details stamp, not a headline", () => {
+  const html = overview({ checkout: "/src/memql", checkoutCommit: EXT, extensionCommit: EXT });
+  assert.doesNotMatch(primary(html), /Extension/, "an agreement was promoted to the headline");
+  assert.match(html, /Same commit as your checkout/, "the agreement is not recorded anywhere");
 });
 
 // A remote instance has no checkout, and a row saying so on every one of them
@@ -169,7 +169,7 @@ test("an instance with no checkout says nothing about a build it cannot compare"
 });
 
 // ---------------------------------------------------------------------------
-// where it matters: the preflight
+// where it matters: before a build from the checkout
 // ---------------------------------------------------------------------------
 
 const preflightBase: RebuildPreflightInputs = {
@@ -177,46 +177,36 @@ const preflightBase: RebuildPreflightInputs = {
   checkoutDir: "/src/memql",
   checkoutIsMemql: true,
   state: { ref: { kind: "branch", name: "main" }, commit: CHECKOUT, dirtyCount: 0, deployDirty: false },
-  nodes: "",
   imageSource: "checkout",
   releasedTag: "v0.17.0",
 };
 
-test("the preflight raises the skew where the operator is about to act on it", () => {
-  const item = rebuildPreflightItems({ ...preflightBase, extensionCommit: EXT }).find(
-    (i) => i.label === "Extension",
-  )!;
-  assert.equal(item.state, "attention");
-  assert.match(item.detail, new RegExp(shortCommit(EXT)));
-  assert.match(item.detail, new RegExp(shortCommit(CHECKOUT)));
+const SKEW_LINE = "This extension is from a different commit than your checkout.";
+
+test("the check raises the skew where the operator is about to act on it", () => {
+  const notices = rebuildCheck({ ...preflightBase, extensionCommit: EXT }).notices;
+  assert.ok(notices.some((n) => n.line === SKEW_LINE));
 });
 
 test("...and does not raise it when there is none", () => {
-  const item = rebuildPreflightItems({ ...preflightBase, extensionCommit: CHECKOUT }).find(
-    (i) => i.label === "Extension",
-  )!;
-  assert.equal(item.state, "ok");
+  assert.ok(!rebuildCheck({ ...preflightBase, extensionCommit: CHECKOUT }).notices.some((n) => n.line === SKEW_LINE));
 });
 
-// "Cannot tell you" is something to look at, for the reason the Git state line
-// gives about an unreadable repository: reporting it as fine is the
-// clean-tree-over-an-unreadable-checkout answer that file already refuses.
-test("an extension that cannot say what it is built from is attention, not ok", () => {
-  const item = rebuildPreflightItems(preflightBase).find((i) => i.label === "Extension")!;
-  assert.equal(item.state, "attention");
+// AN UNSTAMPED EXTENSION IS NOT RAISED. It is what every developer running the
+// extension from source sees, on every rebuild -- a notice that is always there
+// is the noise that hides the one that matters, and there is nothing to do
+// about it. The comparison is still in Details for a support case.
+test("an extension that cannot say what it is built from is not raised", () => {
+  assert.ok(!rebuildCheck(preflightBase).notices.some((n) => n.line === SKEW_LINE));
 });
 
-// THE COMMIT THE BUILD WILL ACTUALLY USE. The preflight compares against git's
+// THE COMMIT THE BUILD WILL ACTUALLY USE. The check compares against git's
 // CURRENT HEAD in the checkout, not the commit the receipt recorded at install
-// time -- which is exactly as stale as the last install, and on a from-source
-// lane that is the whole point.
-test("the preflight compares against the checkout's live HEAD, not the receipt", () => {
+// time -- which is exactly as stale as the last install.
+test("the check compares against the checkout's live HEAD, not the receipt", () => {
   const moved = "abcdef1234567890abcdef1234567890abcdef12";
-  const item = rebuildPreflightItems({
-    ...preflightBase,
-    state: { ...preflightBase.state!, commit: moved },
-    extensionCommit: EXT,
-  }).find((i) => i.label === "Extension")!;
-  assert.match(item.detail, new RegExp(shortCommit(moved)));
-  assert.doesNotMatch(item.detail, new RegExp(shortCommit(CHECKOUT)));
+  const agreeing = rebuildCheck({ ...preflightBase, state: { ...preflightBase.state!, commit: moved }, extensionCommit: moved });
+  assert.ok(!agreeing.notices.some((n) => n.line === SKEW_LINE), "compared against the receipt instead of HEAD");
+  const facts = rebuildCheck({ ...preflightBase, state: { ...preflightBase.state!, commit: moved }, extensionCommit: EXT }).facts;
+  assert.match(facts.find((f) => f.label === "Commit")?.value ?? "", new RegExp(shortCommit(moved)));
 });
