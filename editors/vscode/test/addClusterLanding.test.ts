@@ -62,8 +62,18 @@ test("repair is offered only where there is an install to replay", () => {
   assert.ok(!acts(facts({ verdict: "installed-healthy", registered: true, hasReceipt: false })).includes("repair"));
 });
 
-test("present but not in the list: connect to it, or uninstall it", () => {
+test("present but not in the list: connect to it, or uninstall it -- and repair it when it is not answering", () => {
+  assert.deepEqual(acts(facts({ verdict: "installed-healthy", registered: false, hasReceipt: true })), [
+    "reconnect",
+    "uninstall",
+    "connect",
+  ]);
+  // KEPT FROM BEFORE THE REDESIGN: a broken install that dropped out of the
+  // list is still repairable here (and from the menus, which ask this same
+  // function). Without it, Repair from the Deployments page dead-ended on
+  // the landing, and "Connect to it" signed in to a cluster not answering.
   assert.deepEqual(acts(facts({ verdict: "installed-unreachable", registered: false, hasReceipt: true })), [
+    "repair",
     "reconnect",
     "uninstall",
     "connect",

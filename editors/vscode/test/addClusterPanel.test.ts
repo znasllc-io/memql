@@ -598,6 +598,19 @@ test("Repair from a menu on a machine with nothing installed lands on the landin
   }
 });
 
+test("Repair from a menu reaches the form for a broken install that dropped out of the list", async () => {
+  // Kept from before the redesign: an install that is not answering is
+  // repairable whether or not it is still in the list. The Deployments
+  // page's Repair opens this page on that branch, and must not dead-end.
+  const h = await open({ verdict: "installed-unreachable", registered: false, action: "repair" });
+  try {
+    await until(() => /data-act="begin"/.test(h.html()), "the repair form");
+    assert.equal(h.panel.title, "Repair MemQL");
+  } finally {
+    h.close();
+  }
+});
+
 test("a guided install is not offered, and a posted one does nothing", async () => {
   // "Install guided" and "Switch this step to guided" set a flag nothing that
   // runs a step ever read; the remedy's Run in terminal is the manual path.

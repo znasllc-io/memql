@@ -96,7 +96,12 @@ const landings: Scenario[] = [
   ),
   landing(
     "install-landing-not-listed",
-    "Installed, removed from the list",
+    "Installed, removed from the list, running",
+    facts({ verdict: "installed-healthy", registered: false, hasReceipt: true }),
+  ),
+  landing(
+    "install-landing-not-listed-unreachable",
+    "Installed, removed from the list, not responding",
     facts({ verdict: "installed-unreachable", registered: false, hasReceipt: true }),
   ),
   landing("install-landing-make-up", "Present, made by make up, not listed", facts({ verdict: "present-unreceipted" })),

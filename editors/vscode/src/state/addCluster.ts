@@ -1844,11 +1844,23 @@ export function landingView(facts: LandingFacts): LandingView {
     case "installed-healthy":
     case "installed-unreachable": {
       const healthy = facts.verdict === "installed-healthy";
+      const repairChoice: LandingChoice = {
+        act: "repair",
+        label: "Repair",
+        note: "Runs the install again and fixes what is missing.",
+      };
       if (!facts.registered) {
+        // AN INSTALL THAT IS NOT ANSWERING IS REPAIRED FIRST, listed or not.
+        // Its record is here to replay, and a repair's hand-off puts it back
+        // in the list anyway; "Connect to it" alone would sign in to a cluster
+        // that is not answering, and Repair from a menu would dead-end here.
         return {
-          state: "Local cluster not in your list",
-          tone: "idle",
+          // Not answering is the fact that decides what to do first; "not in
+          // your list" is said by "Connect to it", which adds it.
+          state: healthy ? "Local cluster not in your list" : "Local cluster not responding",
+          tone: healthy ? "idle" : "warn",
           choices: [
+            ...(!healthy && facts.hasReceipt ? [repairChoice] : []),
             { act: "reconnect", label: "Connect to it", note: "Adds it to your clusters, then signs in." },
             UNINSTALL,
             CONNECT_ANOTHER,
@@ -1858,9 +1870,7 @@ export function landingView(facts: LandingFacts): LandingView {
       const enter: LandingChoice = facts.signedIn
         ? { act: "openOs", label: "Open MemQL OS", note: "You're signed in to this cluster." }
         : { act: "signIn", label: "Sign in", note: "Opens your browser to sign in." };
-      const repair: LandingChoice[] = facts.hasReceipt
-        ? [{ act: "repair", label: "Repair", note: "Runs the install again and fixes what is missing." }]
-        : [];
+      const repair: LandingChoice[] = facts.hasReceipt ? [repairChoice] : [];
       return {
         state: healthy ? "Local cluster running" : "Local cluster not responding",
         tone: healthy ? "live" : "warn",
