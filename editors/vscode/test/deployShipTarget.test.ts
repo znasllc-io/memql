@@ -37,7 +37,7 @@ import {
 import { remoteInstance, type Instance, type Run } from "../src/state/deployments.js";
 import { buildCatalog, type CatalogInputs } from "../src/state/deploymentsCatalog.js";
 import { remoteOverviewScreen } from "../src/webview/deploymentScreens.js";
-import { remoteOverviewBar } from "../src/deploy/instanceActions.js";
+import { remoteChoices, remoteOverviewBar } from "../src/deploy/instanceActions.js";
 import type { DeployActionSpec } from "../src/deploy/actions.js";
 import { DEPLOY_ACTIONS } from "../src/deploy/actions.js";
 
@@ -281,9 +281,11 @@ function remote(over: Partial<Instance> = {}): Instance {
 /** The bar and the page, as the panel builds them. */
 function render(instance: Instance, actions: DeployActionSpec[] = [DEPLOY_SPEC, CUT_SPEC], runs: readonly Run[] = []): string {
   const pipeline = { kind: "present" as const, line: "", engineMessage: "", actions, rollouts: [] };
+  const input = { instance, connection: "connected" as const, upgrade: { kind: "none" as const, reason: "" }, pipeline, runs };
   const parts = remoteOverviewScreen({
     instance,
-    bar: remoteOverviewBar({ instance, connection: "connected", upgrade: { kind: "none", reason: "" }, pipeline, runs }),
+    bar: remoteOverviewBar(input),
+    choices: remoteChoices(input),
     connection: "connected",
     runs,
     nowMs: 0,
@@ -296,27 +298,29 @@ function render(instance: Instance, actions: DeployActionSpec[] = [DEPLOY_SPEC, 
 
 test("Deploy carries the record the page was built with, and names its version", () => {
   // Resolved when the page is BUILT, so the click ships the record the
-  // operator was looking at -- the id travels on the act itself.
+  // operator was looking at: the id is fixed on the instance, and the Deploy
+  // control (deploy/controls.ts) sends it -- the act posts only its key.
   const runs: Run[] = [
     { id: "d2", instance: "staging", kind: "rollout", startedAt: "2026-08-12T00:00:00Z", status: "running", items: [], toVersion: "v0.9.3" },
   ];
   const html = render(remote({ pendingDeploymentId: "d2" }), [DEPLOY_SPEC], runs);
-  assert.match(html, /data-act="deploy" data-value="d2"/);
-  assert.match(html, />Deploy v0\.9\.3</);
+  assert.match(html, /data-tone="primary" data-act="deploy" data-value="deploy"[^>]*>Deploy v0\.9\.3</);
   // The internal id is not a sentence on the page any more; it is in Details.
   assert.doesNotMatch(html, /Deploy ships/);
+  assert.match(html, /<dt>Prepared<\/dt><dd class="mq-mono">d2<\/dd>/);
 });
 
 test("with nothing prepared there is no Deploy at all, rather than a Deploy that refuses", () => {
   const html = render(remote());
-  assert.doesNotMatch(html, /data-act="deploy"/);
-  assert.doesNotMatch(html, /Nothing is cut/);
-  assert.match(html, /data-act="cutVersion"/);
+  assert.doesNotMatch(html, /data-value="deploy"/);
+  assert.doesNotMatch(html, /Nothing is (cut|prepared)/);
+  // Preparing is what is offered instead: a choice per bump.
+  assert.match(html, /data-act="deploy" data-value="cutVersion:patch"[^>]*><span class="dp-row-label">Prepare next patch</);
 });
 
 test("Deploy is drawn only where the role can deploy", () => {
   assert.doesNotMatch(render(remote({ pendingDeploymentId: "d2" }), []), /data-act="deploy"/);
-  assert.doesNotMatch(render(remote({ pendingDeploymentId: "d2" }), [CUT_SPEC]), /data-act="deploy"/);
+  assert.doesNotMatch(render(remote({ pendingDeploymentId: "d2" }), [CUT_SPEC]), /data-value="deploy"/);
 });
 
 test("a ship target is escaped like every other value on the page", () => {

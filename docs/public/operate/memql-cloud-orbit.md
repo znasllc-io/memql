@@ -13,11 +13,11 @@ owner: znas
 **Epic:** memql#3852. **This task:** memql#3855.
 **Companions:** [the fleet control plane](memql-cloud.md), [billing](memql-cloud-billing.md).
 
-Three consoles, and it is worth fixing which is which before anything else:
+Three surfaces, and it is worth fixing which is which before anything else:
 
 | | What it is | Scope |
 |---|---|---|
-| **Cockpit** | the terminal IDE | a developer's machine |
+| **Cockpit** | the machine worker runtime and cluster CLI, installed as `memql` | one machine |
 | **MemQL OS** | the graphical ops console | one instance |
 | **Orbit** | the customer's control app | the fleet above them |
 
@@ -172,7 +172,7 @@ Stated rather than implied.
   to `actor.userId`, so an account has exactly one owner today. A second admin
   is a tier change plus a grant concept — not a re-model, but not a mutation
   either. Cheaper to do once a customer is asking than to guess the shape now.
-- **The Stripe billing-portal link.** It is a Stripe API call returning a
+- **The Stripe billing-portal link.** It is a Stripe API call returning a <!-- retired-vocabulary-ok: Stripe's customer billing portal, not MemQL's retired one -->
   short-lived URL, which needs the same server-side Stripe credential the
   [billing gaps](memql-cloud-billing.md#what-is-not-built-yet) need.
 

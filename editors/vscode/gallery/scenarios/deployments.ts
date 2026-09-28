@@ -22,7 +22,8 @@ import {
   unavailableScreen,
 } from "../../src/webview/deploymentScreens.js";
 import { roleVisibility, visibleActions } from "../../src/deploy/actions.js";
-import { localOverviewBar, remoteOverviewBar, runDetailBar } from "../../src/deploy/instanceActions.js";
+import type { VersionPreview } from "../../src/deploy/controller.js";
+import { localOverviewBar, remoteChoices, remoteOverviewBar, runDetailBar, type RemoteBarInput } from "../../src/deploy/instanceActions.js";
 import { failedStatus, runWords, type LocalRunRequest } from "../../src/deploy/localRun.js";
 import type { PipelineState } from "../../src/deploy/pipelineState.js";
 import type { UpgradeVerdict } from "../../src/deploy/upgrade.js";
@@ -210,6 +211,7 @@ const REMOTE: Instance = {
   connected: true,
   currentDeploymentId: "dep-7f3a91",
   pendingDeploymentId: "dep-9c2e44",
+  rollbackTargetId: "dep-5d0b12",
 };
 
 function remoteRun(over: Partial<Run> & Pick<Run, "id" | "status">): Run {
@@ -219,22 +221,48 @@ function remoteRun(over: Partial<Run> & Pick<Run, "id" | "status">): Run {
 const REMOTE_HISTORY: Run[] = [
   remoteRun({ id: "dep-9c2e44", status: "running", fromVersion: "v0.23.5", toVersion: "v0.24.0", startedAt: iso(12) }),
   remoteRun({ id: "dep-7f3a91", status: "succeeded", fromVersion: "v0.23.4", toVersion: "v0.23.5", startedAt: iso(60 * 30), finishedAt: iso(60 * 30 - 7) }),
-  remoteRun({ id: "dep-5d0b12", status: "superseded", fromVersion: "v0.23.0", toVersion: "v0.23.4", startedAt: iso(60 * 24 * 6), finishedAt: iso(60 * 24 * 6 - 9) }),
+  remoteRun({ id: "dep-5d0b12", status: "succeeded", fromVersion: "v0.23.0", toVersion: "v0.23.4", startedAt: iso(60 * 24 * 6), finishedAt: iso(60 * 24 * 6 - 9) }),
   remoteRun({ id: "dep-2a8f30", status: "failed", fromVersion: "v0.23.0", toVersion: "v0.23.3", startedAt: iso(60 * 24 * 8), finishedAt: iso(60 * 24 * 8 - 3) }),
 ];
+
+function rollout(name: string, phase: string): PipelineState["rollouts"][number] {
+  return { name, kind: "canary", phase, activeColor: "", previewColor: "", canaryWeight: 0, currentStep: -1, latestAnalysisResult: "" };
+}
 
 const PRESENT: PipelineState = {
   kind: "present",
   line: "",
   engineMessage: "",
   actions: visibleActions(roleVisibility("owner")),
-  rollouts: ["bff"],
+  rollouts: [rollout("bff", "Paused"), rollout("agent", "Healthy")],
 };
 
-function remotePage(instance: Instance, connection: ConnectionWord, pipeline: PipelineState | undefined, runs: readonly Run[]): RegionParts {
+/** What the next-version read proposes from v0.24.0, the release prepared last. */
+const PREVIEW: VersionPreview = {
+  suggestion: { currentVersion: "v0.24.0", nextPatch: "v0.24.1", nextMinor: "v0.25.0", nextMajor: "v1.0.0", source: "deployment" },
+  message: "",
+};
+
+function remotePage(
+  instance: Instance,
+  connection: ConnectionWord,
+  pipeline: PipelineState | undefined,
+  runs: readonly Run[],
+  over: { preview?: VersionPreview; visibility?: Parameters<typeof roleVisibility>[0] } = {},
+): RegionParts {
+  const input: RemoteBarInput = {
+    instance,
+    connection,
+    upgrade: NONE,
+    pipeline,
+    visibility: roleVisibility(over.visibility ?? "owner"),
+    runs,
+    ...(over.preview === undefined ? {} : { preview: over.preview }),
+  };
   return remoteOverviewScreen({
     instance,
-    bar: remoteOverviewBar({ instance, connection, upgrade: NONE, pipeline, visibility: roleVisibility("owner"), runs }),
+    bar: remoteOverviewBar(input),
+    choices: remoteChoices(input),
     connection,
     runs,
     nowMs: GALLERY_NOW,
@@ -247,9 +275,53 @@ function remotePage(instance: Instance, connection: ConnectionWord, pipeline: Pi
 const remoteConnected = scenario(
   "deploy-remote-connected",
   "Remote, owner, prepared version and a rollout",
-  () => remotePage(REMOTE, "connected", PRESENT, REMOTE_HISTORY),
+  () => remotePage(REMOTE, "connected", PRESENT, REMOTE_HISTORY, { preview: PREVIEW }),
   "staging",
 );
+
+/** v0.24.0 shipped and landed; nothing is prepared, and two services are part-way through. */
+const ROLLING_HISTORY: Run[] = [
+  remoteRun({ id: "dep-9c2e44", status: "succeeded", fromVersion: "v0.23.5", toVersion: "v0.24.0", startedAt: iso(12), finishedAt: iso(4) }),
+  ...REMOTE_HISTORY.slice(1),
+];
+
+const remoteRollouts = scenario(
+  "deploy-remote-rollouts",
+  "Remote, two rollouts in flight and the versions to prepare",
+  () =>
+    remotePage(
+      { ...REMOTE, version: "v0.24.0", versionLabel: "v0.24.0", currentDeploymentId: "dep-9c2e44", pendingDeploymentId: undefined, rollbackTargetId: "dep-7f3a91" },
+      "connected",
+      { ...PRESENT, rollouts: [rollout("bff", "Paused"), rollout("cognition", "Progressing"), rollout("agent", "Healthy")] },
+      ROLLING_HISTORY,
+      { preview: PREVIEW },
+    ),
+  "staging",
+);
+
+const remoteNoPreview = scenario(
+  "deploy-remote-nopreview",
+  "Remote, developer, next versions unreadable",
+  () =>
+    remotePage(
+      { ...REMOTE, pendingDeploymentId: undefined },
+      "connected",
+      { ...PRESENT, actions: visibleActions(roleVisibility("developer")) },
+      REMOTE_HISTORY.slice(1),
+      { preview: { suggestion: null, message: "next version suggestion unavailable (UNAVAILABLE)" }, visibility: "developer" },
+    ),
+  "staging",
+);
+
+const OUTCOME_INPUT: RemoteBarInput = {
+  instance: { ...REMOTE, pendingDeploymentId: undefined },
+  connection: "connected",
+  upgrade: NONE,
+  pipeline: { ...PRESENT, rollouts: [] },
+  visibility: roleVisibility("developer"),
+  runs: REMOTE_HISTORY,
+  preview: PREVIEW,
+};
 
 const remoteOutcome = scenario(
   "deploy-remote-outcome",
@@ -257,14 +329,8 @@ const remoteOutcome = scenario(
   () => ({
     ...remoteOverviewScreen({
       instance: { ...REMOTE, pendingDeploymentId: undefined },
-      bar: remoteOverviewBar({
-        instance: { ...REMOTE, pendingDeploymentId: undefined },
-        connection: "connected",
-        upgrade: NONE,
-        pipeline: { ...PRESENT, rollouts: [] },
-        visibility: roleVisibility("developer"),
-        runs: REMOTE_HISTORY,
-      }),
+      bar: remoteOverviewBar(OUTCOME_INPUT),
+      choices: remoteChoices(OUTCOME_INPUT),
       connection: "connected",
       runs: REMOTE_HISTORY,
       nowMs: GALLERY_NOW,
@@ -653,6 +719,8 @@ export const scenarios: readonly Scenario[] = [
   localAbsent,
   localUnreceipted,
   remoteConnected,
+  remoteRollouts,
+  remoteNoPreview,
   remoteOutcome,
   remoteSignIn,
   remoteNotConfigured,

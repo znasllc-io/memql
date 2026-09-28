@@ -6,21 +6,29 @@
 // AN ACT WHOSE ONLY OUTCOME IS A REFUSAL IS ABSENT: Deploy with nothing
 // prepared, a promote with no rollout to name, a rollback aimed at the
 // deployment already running. Each of those was drawn before this redesign.
+//
+// What a remote deploy act SENDS is deploy/controls.ts's (deployControls.test,
+// rollbackTarget.test); what is pinned here is WHERE each is drawn -- Deploy
+// and Roll back on the bar, a rollout's Promote and Abort on its own row, the
+// versions to prepare as a short list -- and that the bar stays within three.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { roleVisibility, visibleActions } from "../src/deploy/actions.js";
+import { deployControlByKey } from "../src/deploy/controls.js";
 import {
   barOffers,
   localActs,
   localOverviewBar,
   moveFlowFor,
   offersLocal,
+  remoteChoices,
+  remoteControlFacts,
   remoteOverviewBar,
-  rollbackTarget,
   runDetailBar,
   type PageBar,
+  type RemoteBarInput,
 } from "../src/deploy/instanceActions.js";
 import type { PipelineState } from "../src/deploy/pipelineState.js";
 import type { UpgradeVerdict } from "../src/deploy/upgrade.js";
@@ -181,6 +189,10 @@ function pipeline(over: Partial<PipelineState> = {}): PipelineState {
   return { kind: "present", line: "", engineMessage: "", actions: visibleActions(roleVisibility("owner")), rollouts: [], ...over };
 }
 
+function rollout(name: string, phase: string): PipelineState["rollouts"][number] {
+  return { name, kind: "bluegreen", phase, activeColor: "", previewColor: "", canaryWeight: 0, currentStep: -1, latestAnalysisResult: "" };
+}
+
 function remoteRun(id: string, status: Run["status"], toVersion: string, startedAt: string): Run {
   return { id, instance: "staging", kind: "rollout", status, toVersion, startedAt, items: [] };
 }
@@ -191,97 +203,120 @@ const HISTORY: Run[] = [
   remoteRun("dep-1", "succeeded", "v0.23.3", "2026-09-10T10:00:00Z"),
 ];
 
+/** A connected remote page's input, as the panel builds it. */
+function remoteInput(over: Partial<RemoteBarInput> & { instance?: Instance } = {}): RemoteBarInput {
+  return {
+    instance: remote({ currentDeploymentId: "dep-3", rollbackTargetId: "dep-1" }),
+    connection: "connected",
+    upgrade: NONE,
+    pipeline: pipeline(),
+    visibility: roleVisibility("owner"),
+    runs: HISTORY,
+    ...over,
+  };
+}
+
+const all = (bar: PageBar) => [...bar.acts, ...bar.more];
+
 test("Deploy is absent when nothing is prepared, and names the version when something is", () => {
-  const bare = remoteOverviewBar({
-    instance: remote({ currentDeploymentId: "dep-3" }),
-    connection: "connected",
-    upgrade: NONE,
-    pipeline: pipeline(),
-    visibility: roleVisibility("owner"),
-    runs: HISTORY,
-  });
-  assert.equal([...bare.acts, ...bare.more].some((a) => a.id === "deploy"), false);
-  // With nothing prepared, preparing is the offered act.
-  assert.equal(primary(bare)?.id, "cutVersion");
-
-  const runs = [remoteRun("dep-4", "running", "v0.24.0", "2026-09-28T09:00:00Z"), ...HISTORY];
-  const pending = remoteOverviewBar({
-    instance: remote({ currentDeploymentId: "dep-3", pendingDeploymentId: "dep-4" }),
-    connection: "connected",
-    upgrade: NONE,
-    pipeline: pipeline(),
-    visibility: roleVisibility("owner"),
-    runs,
-  });
-  assert.equal(primary(pending)?.id, "deploy");
-  assert.equal(primary(pending)?.label, "Deploy v0.24.0");
-  assert.equal(primary(pending)?.value, "dep-4");
-});
-
-test("the rollback targets the newest landed deployment OLDER than the one running", () => {
-  // THE BUG: it took the newest succeeded record, which IS the current one --
-  // and the engine then re-shipped what was already running.
-  assert.equal(rollbackTarget(HISTORY, "dep-3")?.id, "dep-1");
-  assert.equal(rollbackTarget(HISTORY, "dep-1"), undefined);
-  assert.equal(rollbackTarget(HISTORY, ""), undefined);
-  assert.equal(rollbackTarget(HISTORY, "gone"), undefined);
-
-  const bar = remoteOverviewBar({
-    instance: remote({ currentDeploymentId: "dep-3" }),
-    connection: "connected",
-    upgrade: NONE,
-    pipeline: pipeline(),
-    visibility: roleVisibility("owner"),
-    runs: HISTORY,
-  });
-  const rollback = [...bar.acts, ...bar.more].find((a) => a.id === "rollback");
-  assert.equal(rollback?.value, "dep-1");
-  assert.equal(rollback?.label, "Roll back to v0.23.3…");
-});
-
-test("promote and abort are offered per in-flight rollout, and never with a blank name", () => {
-  const without = remoteOverviewBar({
-    instance: remote({ currentDeploymentId: "dep-3" }),
-    connection: "connected",
-    upgrade: NONE,
-    pipeline: pipeline(),
-    visibility: roleVisibility("owner"),
-    runs: HISTORY,
-  });
-  assert.equal([...without.acts, ...without.more].some((a) => a.id === "rolloutPromote" || a.id === "rolloutAbort"), false);
-
-  const withRollout = remoteOverviewBar({
-    instance: remote({ currentDeploymentId: "dep-3" }),
-    connection: "connected",
-    upgrade: NONE,
-    pipeline: pipeline({ rollouts: ["bff"] }),
-    visibility: roleVisibility("owner"),
-    runs: HISTORY,
-  });
-  const all = [...withRollout.acts, ...withRollout.more];
+  const bare = remoteOverviewBar(remoteInput());
+  assert.equal(all(bare).some((a) => a.value === "deploy"), false);
+  // With nothing prepared, preparing is what is offered: a version per bump,
+  // as choices on the page rather than a fourth act on the bar.
   assert.deepEqual(
-    all.filter((a) => a.id === "rolloutPromote" || a.id === "rolloutAbort").map((a) => [a.id, a.value, a.label]),
+    remoteChoices(remoteInput()).versions.map((choice) => [choice.act.id, choice.act.value, choice.act.label]),
     [
-      ["rolloutPromote", "bff", "Promote bff"],
-      ["rolloutAbort", "bff", "Abort bff…"],
+      ["deploy", "cutVersion:patch", "Prepare next patch"],
+      ["deploy", "cutVersion:minor", "Prepare next minor"],
+      ["deploy", "cutVersion:major", "Prepare next major"],
     ],
   );
-  // More than fits: the rest are behind More, not dropped.
-  assert.ok(withRollout.acts.length <= 3);
-  assert.equal(withRollout.acts.some((a) => a.id === "more"), true);
+
+  const runs = [remoteRun("dep-4", "running", "v0.24.0", "2026-09-28T09:00:00Z"), ...HISTORY];
+  const input = remoteInput({ instance: remote({ currentDeploymentId: "dep-3", pendingDeploymentId: "dep-4" }), runs });
+  const pending = remoteOverviewBar(input);
+  assert.equal(primary(pending)?.id, "deploy");
+  assert.equal(primary(pending)?.label, "Deploy v0.24.0");
+  // The act posts the control's key; the record is fixed on the instance.
+  assert.equal(primary(pending)?.value, "deploy");
+  assert.deepEqual(deployControlByKey("deploy", remoteControlFacts(input))?.request, { id: "deploy", deploymentId: "dep-4" });
+});
+
+test("the versions to prepare name each version, with the bump as a quiet note", () => {
+  const choices = remoteChoices(
+    remoteInput({
+      preview: {
+        suggestion: { currentVersion: "v0.23.5", nextPatch: "v0.23.6", nextMinor: "v0.24.0", nextMajor: "v1.0.0", source: "deployment" },
+        message: "",
+      },
+    }),
+  );
+  assert.deepEqual(
+    choices.versions.map((choice) => [choice.act.value, choice.act.label, choice.note]),
+    [
+      ["cutVersion:patch:v0.23.6", "Prepare v0.23.6", "patch"],
+      ["cutVersion:minor:v0.24.0", "Prepare v0.24.0", "minor"],
+      ["cutVersion:major:v1.0.0", "Prepare v1.0.0", "major"],
+    ],
+  );
+  assert.equal(choices.previewMessage, "");
+  const failed = remoteChoices(remoteInput({ preview: { suggestion: null, message: "suggestion unavailable" } }));
+  assert.equal(failed.previewMessage, "suggestion unavailable");
+});
+
+test("Roll back is offered toward the release the history names, and names it", () => {
+  // Which release is deploymentHistory.rollbackTargetId's rule
+  // (rollbackTarget.test): the newest landed one before the release running.
+  const rollback = all(remoteOverviewBar(remoteInput())).find((a) => (a.value ?? "").startsWith("rollback:"));
+  assert.equal(rollback?.id, "deploy");
+  assert.equal(rollback?.value, "rollback:dep-1");
+  assert.equal(rollback?.label, "Roll back to v0.23.3…");
+  // No target, no act -- not a Roll back aimed at whatever landed last.
+  const none = remoteOverviewBar(remoteInput({ instance: remote({ currentDeploymentId: "dep-3" }) }));
+  assert.equal(all(none).some((a) => (a.value ?? "").startsWith("rollback")), false);
+});
+
+test("promote and abort are offered per in-flight rollout, on its own row, and never with a blank name", () => {
+  // Reported but settled: the group says none is in progress, and offers nothing.
+  const settled = remoteChoices(remoteInput({ pipeline: pipeline({ rollouts: [rollout("bff", "Healthy")] }) }));
+  assert.deepEqual(settled.rollouts, []);
+  // Not reported at all: no group.
+  assert.equal(remoteChoices(remoteInput()).rollouts, undefined);
+
+  const input = remoteInput({
+    pipeline: pipeline({ rollouts: [rollout("bff", "Paused"), rollout("agent", "Healthy"), rollout("", "Paused")] }),
+  });
+  const rows = remoteChoices(input).rollouts ?? [];
+  assert.deepEqual(
+    rows.map((row) => [row.name, row.phase, row.acts.map((a) => [a.id, a.value, a.label, a.ariaLabel])]),
+    [
+      [
+        "bff",
+        "Paused",
+        [
+          ["deploy", "rolloutAction:promote:bff", "Promote", "Promote bff"],
+          ["deploy", "rolloutAction:abort:bff", "Abort…", "Abort bff"],
+        ],
+      ],
+    ],
+  );
+  // The bar carries none of them, and stays within three with nothing behind More.
+  const bar = remoteOverviewBar(input);
+  assert.equal(all(bar).some((a) => (a.value ?? "").startsWith("rolloutAction")), false);
+  assert.ok(bar.acts.length <= 3);
+  assert.equal(bar.acts.some((a) => a.id === "more"), false);
 });
 
 test("a developer is offered prepare and deploy, never rollback or rollouts", () => {
-  const bar = remoteOverviewBar({
-    instance: remote({ currentDeploymentId: "dep-3", pendingDeploymentId: "dep-3" }),
-    connection: "connected",
-    upgrade: NONE,
-    pipeline: pipeline({ actions: visibleActions(roleVisibility("developer")), rollouts: ["bff"] }),
+  const input = remoteInput({
+    instance: remote({ currentDeploymentId: "dep-3", pendingDeploymentId: "dep-3", rollbackTargetId: "dep-1" }),
+    pipeline: pipeline({ actions: visibleActions(roleVisibility("developer")), rollouts: [rollout("bff", "Paused")] }),
     visibility: roleVisibility("developer"),
-    runs: HISTORY,
   });
-  const all = [...bar.acts, ...bar.more].map((a) => a.id);
-  assert.deepEqual(all.sort(), ["cutVersion", "deploy"]);
+  assert.deepEqual(all(remoteOverviewBar(input)).map((a) => a.value), ["deploy"]);
+  const choices = remoteChoices(input);
+  assert.equal(choices.versions.length, 3);
+  assert.equal(choices.rollouts, undefined);
 });
 
 test("a remote cluster this editor is not signed in to offers Sign in and nothing else", () => {
@@ -331,16 +366,20 @@ test("while a run is going, a past run's page offers only a way to it", () => {
   assert.deepEqual(ids(bar), ["showRun"]);
 });
 
-test("roll back is offered only on a landed remote run that is not the one running, aimed at THAT run", () => {
-  const instance = remote({ currentDeploymentId: "dep-3" });
+test("roll back is offered only on the page of the run it returns to, aimed at THAT run", () => {
+  const instance = remote({ currentDeploymentId: "dep-3", rollbackTargetId: "dep-1" });
   const bar = (run: Run) =>
     runDetailBar({ instance, run, connection: "connected", pipeline: pipeline(), visibility: roleVisibility("owner"), runInFlight: false });
   assert.deepEqual(bar(HISTORY[0]!).acts, [], "the running deployment");
   assert.deepEqual(bar(HISTORY[1]!).acts, [], "a failed one");
   const older = bar(HISTORY[2]!);
-  assert.equal(older.acts[0]?.id, "rollback");
-  assert.equal(older.acts[0]?.value, "dep-1");
+  assert.equal(older.acts[0]?.id, "deploy");
+  assert.equal(older.acts[0]?.value, "rollback:dep-1");
+  assert.equal(older.acts[0]?.label, "Roll back to v0.23.3…");
   assert.equal(older.acts[0]?.tone, "danger");
+  // A landed release further back than the one Roll back returns to: its page
+  // offers nothing, rather than a second, different rule for the same act.
+  assert.deepEqual(bar(remoteRun("dep-0", "succeeded", "v0.23.2", "2026-09-01T10:00:00Z")).acts, []);
   // An admin is not an owner.
   assert.deepEqual(
     runDetailBar({ instance, run: HISTORY[2]!, connection: "connected", pipeline: pipeline(), visibility: roleVisibility("admin"), runInFlight: false }).acts,
@@ -352,19 +391,19 @@ test("roll back is offered only on a landed remote run that is not the one runni
 // the untrusted boundary
 // -----------------------------------------------------------------------------
 
-test("a posted act runs only when the bar offered it, target and all", () => {
-  const bar = remoteOverviewBar({
-    instance: remote({ currentDeploymentId: "dep-3" }),
-    connection: "connected",
-    upgrade: NONE,
-    pipeline: pipeline({ rollouts: ["bff"] }),
-    visibility: roleVisibility("owner"),
-    runs: HISTORY,
-  });
-  assert.equal(barOffers(bar, "rollback", "dep-1")?.id, "rollback");
-  // A rollback aimed at a different deployment than the one on the button.
-  assert.equal(barOffers(bar, "rollback", "dep-3"), undefined);
-  assert.equal(barOffers(bar, "deploy", "dep-3"), undefined);
-  assert.equal(barOffers(bar, "rolloutAbort", "agent"), undefined);
+test("a posted act runs only when the page built it, target and all", () => {
+  const input = remoteInput({ pipeline: pipeline({ rollouts: [rollout("bff", "Paused")] }), upgrade: { ...OFFER, target: { ...OFFER.target, flow: "deployControl" } } as UpgradeVerdict });
+  const bar = remoteOverviewBar(input);
+  // A bar act is narrowed against the bar, value and all.
+  assert.equal(barOffers(bar, "update", "v0.24.0")?.id, "update");
+  assert.equal(barOffers(bar, "update", "v0.25.0"), undefined);
   assert.equal(barOffers(bar, "more", undefined), undefined);
+  // A deploy control is resolved by key against the controls the page's facts
+  // expand to: the one drawn resolves, a rollback aimed elsewhere and a rollout
+  // nobody reported do not.
+  const facts = remoteControlFacts(input);
+  assert.deepEqual(deployControlByKey("rollback:dep-1", facts)?.request, { id: "rollback", toDeploymentId: "dep-1" });
+  assert.equal(deployControlByKey("rollback:dep-3", facts), undefined);
+  assert.equal(deployControlByKey("rolloutAction:abort:agent", facts), undefined);
+  assert.deepEqual(deployControlByKey("rolloutAction:abort:bff", facts)?.request, { id: "rolloutAction", rollout: "bff", subAction: "abort" });
 });

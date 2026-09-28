@@ -139,7 +139,7 @@ func TestCapabilityScriptsAreNonInteractive(t *testing.T) {
 // surface for blocking prompts so a future `read -p` regression fails CI.
 func TestDeployScriptsAreNonInteractive(t *testing.T) {
 	root := repoRoot(t)
-	dirs := []string{"scripts/k3d", "scripts/deploy", "scripts/release"}
+	dirs := []string{"scripts/k3d", "scripts/deploy", "scripts/release", "scripts/docs"}
 	for _, d := range dirs {
 		full := filepath.Join(root, d)
 		if _, err := os.Stat(full); os.IsNotExist(err) {

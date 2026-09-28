@@ -20,6 +20,13 @@
 // while it is visible (briskly while a run is going). It used to re-read only
 // when opened, and offered acts that had stopped being legal.
 //
+// A DEPLOY ACT POSTS A KEY, NEVER A REQUEST. Deploy, Prepare, Roll back and a
+// rollout's Promote and Abort are deploy/controls.ts's controls: the page
+// posts the key of the one pressed, and `runDeploy` re-expands the controls
+// from this page's own facts and runs the one whose key matches. The webview
+// chooses among requests the extension built and never supplies one, and a
+// key whose target has moved since the paint runs nothing.
+//
 // A RUN IS NOT THE PAGE'S. Runs live in the machine's one run slot
 // (deploy/localRun.ts), so closing this tab leaves a run going, and opening the
 // page -- or a run's row -- while one is going shows it live, with Cancel when
@@ -39,23 +46,28 @@ import { pageDocument } from "./ui/document.js";
 import { LiveView } from "./ui/liveView.js";
 import { pageMessage, type PageToHost } from "./ui/protocol.js";
 
-import { confirmationMatches, roleVisibility, type RoleVisibility } from "../deploy/actions.js";
+import { confirmationMatches, roleVisibility, visibleActions, type RoleVisibility } from "../deploy/actions.js";
 import {
+  previewNextVersion,
   readDeploymentStatus,
   runDeployAction,
-  type DeployActionRequest,
   type DeployControlPort,
   type DeployOutcome,
+  type VersionPreview,
 } from "../deploy/controller.js";
+import { actionOfKey, deployControlByKey, versionOf, type DeployControl } from "../deploy/controls.js";
 import {
   barOffers,
   localOverviewBar,
   offersLocal,
+  remoteChoices,
+  remoteControlFacts,
   remoteOverviewBar,
   runDetailBar,
   type LocalActId,
   type PageAct,
   type PageBar,
+  type RemoteBarInput,
 } from "../deploy/instanceActions.js";
 import {
   SLOT_SHOW,
@@ -195,6 +207,11 @@ export class DeploymentPanel {
   private registryError = "";
   private connection: ConnectionWord = "none";
   private pipeline: PipelineState | undefined;
+  /**
+   * The next-version proposals the Prepare choices name, read beside the
+   * status. Undefined before that read, and for a role not offered Prepare.
+   */
+  private versionPreview: VersionPreview | undefined;
   private visibility: RoleVisibility | undefined;
   private outcome: ActOutcome | undefined;
   private notice: PageNotice | undefined;
@@ -377,6 +394,7 @@ export class DeploymentPanel {
       this.instance = undefined;
       this.loaded = false;
       this.pipeline = undefined;
+      this.versionPreview = undefined;
       this.outcome = undefined;
       this.notice = undefined;
       this.screen = { kind: "overview" };
@@ -447,6 +465,7 @@ export class DeploymentPanel {
   private async loadPipeline(): Promise<void> {
     if (this.connection !== "connected") {
       this.pipeline = undefined;
+      this.versionPreview = undefined;
       return;
     }
     const port = this.deps.deployPort?.();
@@ -455,12 +474,22 @@ export class DeploymentPanel {
     this.visibility = visibility;
     if (port === undefined) {
       this.pipeline = undefined;
+      this.versionPreview = undefined;
       this.render();
       return;
     }
-    const read = await readDeploymentStatus(port);
+    // THE PREVIEW IS READ BESIDE THE STATUS, not after it, so the Prepare
+    // choices paint once with their versions rather than first as bare bumps.
+    // Asked only when the role is offered Prepare: the read is gated where
+    // CutVersion is, and asking otherwise only collects a refusal to discard.
+    const wantsPreview = visibleActions(visibility).some((action) => action.id === "cutVersion");
+    const [read, preview] = await Promise.all([
+      readDeploymentStatus(port),
+      wantsPreview ? previewNextVersion(port) : Promise.resolve(undefined),
+    ]);
     if (this.disposed) return;
     this.pipeline = pipelineState(read, visibility);
+    this.versionPreview = preview;
     this.render();
   }
 
@@ -577,6 +606,12 @@ export class DeploymentPanel {
         }
         await this.onBarAct(msg, value);
         return;
+      case "deploy":
+        // A deploy control, by key. Not narrowed against the bar: the key is
+        // resolved against a fresh expansion of this page's controls, which
+        // is the stricter check (and covers the acts drawn on a row).
+        await this.runDeploy(value ?? "");
+        return;
       case "signIn":
       case "connect":
         // CONNECTION ACTS, legal wherever the page offers them -- the bar, an
@@ -627,14 +662,20 @@ export class DeploymentPanel {
   private overviewBar(instance: Instance): PageBar {
     return instance.kind === "local"
       ? localOverviewBar({ instance, connection: this.connection, upgrade: this.upgrade() })
-      : remoteOverviewBar({
-          instance,
-          connection: this.connection,
-          upgrade: this.upgrade(),
-          pipeline: this.pipeline,
-          ...(this.visibility === undefined ? {} : { visibility: this.visibility }),
-          runs: this.runs,
-        });
+      : remoteOverviewBar(this.remoteInput(instance));
+  }
+
+  /** What a remote page's bar and per-item acts are built from -- one builder for both. */
+  private remoteInput(instance: Instance): RemoteBarInput {
+    return {
+      instance,
+      connection: this.connection,
+      upgrade: this.upgrade(),
+      pipeline: this.pipeline,
+      ...(this.visibility === undefined ? {} : { visibility: this.visibility }),
+      runs: this.runs,
+      ...(this.versionPreview === undefined ? {} : { preview: this.versionPreview }),
+    };
   }
 
   private detailBar(instance: Instance, run: Run): PageBar {
@@ -714,11 +755,7 @@ export class DeploymentPanel {
         this.render();
         return;
       case "deploy":
-      case "cutVersion":
-      case "rollback":
-      case "rolloutPromote":
-      case "rolloutAbort":
-        await this.runRemote(act);
+        await this.runDeploy(act.value ?? "");
         return;
       default:
         return;
@@ -840,51 +877,58 @@ export class DeploymentPanel {
   // remote deploy-control acts
   // -------------------------------------------------------------------------
 
-  private async runRemote(act: PageAct): Promise<void> {
+  /**
+   * Run one deploy control against the connected cluster.
+   *
+   * THE GATE IS NEVER THIS METHOD. The key is resolved against the controls
+   * this page builds from its own facts (deploy/controls.ts) because the
+   * postMessage channel is untrusted: what the page posts chooses among
+   * requests this extension built, and never supplies one. Whether the caller
+   * MAY run the request is the engine's decision, taken again on the far side
+   * of the same gate the unary path runs; a refusal names the role required.
+   */
+  private async runDeploy(key: string): Promise<void> {
     const instance = this.instance;
+    // A local cluster has no deploy pipeline and its page draws no deploy
+    // control, so a key posted on it names nothing this page built.
+    if (actionOfKey(key) === undefined || instance === undefined || instance.kind !== "remote") return;
     const port = this.deps.deployPort?.();
-    if (instance === undefined) return;
     if (port === undefined) return this.notConnected();
-    let request: DeployActionRequest;
-    let success: string | undefined;
-    switch (act.id) {
-      case "deploy": {
-        const version = this.runs.find((run) => run.id === act.value)?.toVersion ?? "";
-        request = { id: "deploy", deploymentId: act.value ?? "" };
-        success = version === "" ? undefined : `Deploying ${version}.`;
-        break;
-      }
-      case "cutVersion":
-        request = { id: "cutVersion", bump: "patch", version: "" };
-        break;
-      case "rollback": {
-        const target = this.runs.find((run) => run.id === act.value);
-        if (target === undefined) return;
-        const to = target.toVersion ?? "";
-        const phrase = to !== "" ? to : target.id;
-        const now = (instance.versionLabel ?? "") === "" ? "" : ` (now ${instance.versionLabel})`;
-        if (!(await this.confirmTyped(`Roll back ${instanceLabel(instance)}`, `Roll back ${instanceLabel(instance)} to ${phrase}${now}?`, phrase))) return;
-        request = { id: "rollback", toDeploymentId: target.id };
-        success = `Rolling back to ${phrase}.`;
-        break;
-      }
-      case "rolloutPromote":
-        request = { id: "rolloutAction", rollout: act.value ?? "", subAction: "promote" };
-        break;
-      case "rolloutAbort": {
-        const rollout = act.value ?? "";
-        // ABORT IS TYPED; PROMOTE IS NOT. Confirming both would train the
-        // operator to type through the prompt (deploy/actions.ts).
-        if (!(await this.confirmTyped(`Abort ${rollout}`, `Abort the ${rollout} rollout?`, rollout))) return;
-        request = { id: "rolloutAction", rollout, subAction: "abort" };
-        break;
-      }
-      default:
-        return;
+    const facts = remoteControlFacts({ instance, runs: this.runs, pipeline: this.pipeline, preview: this.versionPreview });
+    const control = deployControlByKey(key, facts);
+    if (control === undefined) {
+      // Its target moved between the paint and the click: a reload landed, a
+      // rollout settled, the next version changed. Running what the act names
+      // NOW would send something other than what the button said.
+      return this.refuse("That's out of date, so nothing ran. The page now shows what's current.");
     }
-    const outcome = await runDeployAction(port, request);
+    if (control.request === undefined) {
+      // Nothing to name -- nothing prepared, nothing to roll back to. REFUSED
+      // rather than aimed at another record: a record nobody shipped is
+      // visible and easy to act on, the wrong record acted on is neither.
+      return this.refuse(control.refusal ?? "There's nothing for that to act on.");
+    }
+    const question = confirmQuestion(control, instance, this.runs);
+    if (control.confirm !== "" && !(await this.confirmTyped(control.label, question, control.confirm))) return;
+    const outcome = await runDeployAction(port, control.request);
     if (this.disposed) return;
-    this.reportOutcome(outcome, outcome.kind === "success" ? success : undefined);
+    this.toOverview();
+    this.reportOutcome(outcome, outcome.kind === "success" ? successLine(control, this.runs) : undefined);
+  }
+
+  /** A deploy act the page refused itself: one sentence, where it will be read. */
+  private refuse(line: string): void {
+    this.toOverview();
+    this.notice = { tone: "error", line };
+    this.render();
+  }
+
+  /**
+   * A deploy act taken from a run's page reports on the cluster's page, which
+   * is where outcomes and the history they change are shown.
+   */
+  private toOverview(): void {
+    if (this.screen.kind === "runDetail") this.screen = { kind: "overview" };
   }
 
   /** An outcome on the page as one sentence; the log line and audit ids go to Output and Details. */
@@ -901,6 +945,7 @@ export class DeploymentPanel {
   }
 
   private notConnected(): void {
+    this.toOverview();
     this.notice = { tone: "error", line: "Not connected to this cluster.", acts: [{ act: "connect", label: "Connect" }] };
     this.render();
   }
@@ -916,6 +961,7 @@ export class DeploymentPanel {
     const typed = await ask({ title, prompt: `${question} Type ${phrase} to confirm.`, phrase });
     if (typed === undefined) return false;
     if (!confirmationMatches(phrase, typed)) {
+      this.toOverview();
       this.notice = { tone: "error", line: "That didn't match, so nothing changed." };
       this.render();
       return false;
@@ -1276,6 +1322,7 @@ export class DeploymentPanel {
             : remoteOverviewScreen({
                 instance,
                 bar,
+                choices: remoteChoices(this.remoteInput(instance)),
                 connection: this.connection,
                 runs: this.runs,
                 nowMs,
@@ -1289,6 +1336,37 @@ export class DeploymentPanel {
       }
     }
   }
+}
+
+/**
+ * The question a deploy control's typed confirmation asks: what it does to
+ * which cluster, and what that cluster runs now.
+ */
+function confirmQuestion(control: DeployControl, instance: Instance, runs: readonly Run[]): string {
+  const request = control.request;
+  if (request?.id === "rollback") {
+    const to = versionOf(runs, request.toDeploymentId);
+    const now = (instance.versionLabel ?? "") === "" ? "" : ` It runs ${instance.versionLabel} now.`;
+    return `Roll back ${instanceLabel(instance)} to ${to === "" ? request.toDeploymentId : to}?${now}`;
+  }
+  if (request?.id === "rolloutAction") {
+    return `Abort the ${request.rollout} rollout? The release it was replacing keeps running.`;
+  }
+  return `${control.label}?`;
+}
+
+/** The page's sentence for a deploy control that went through, or undefined for the engine's own. */
+function successLine(control: DeployControl, runs: readonly Run[]): string | undefined {
+  const request = control.request;
+  if (request?.id === "deploy") {
+    const version = versionOf(runs, request.deploymentId);
+    return version === "" ? undefined : `Deploying ${version}.`;
+  }
+  if (request?.id === "rollback") {
+    const version = versionOf(runs, request.toDeploymentId);
+    return version === "" ? undefined : `Rolling back to ${version}.`;
+  }
+  return undefined;
 }
 
 /**

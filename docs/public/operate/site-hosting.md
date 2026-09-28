@@ -296,8 +296,9 @@ Three things worth knowing before you run it:
   cluster-owned -- an empty `ownerUserId`, which is what the seeded OS site
   carries. See `component/memql/platform_site_hostname_policy.go`.
 - **A user's hostname must be `<slug>.<domain>`** -- slug `[a-z0-9-]{3,40}`,
-  cluster-unique, and not one of `api`, `identity`, `mcp`, `os`, `portal`, `www`,
-  `admin`, `mail` or the apex, under the domain the cluster serves (derived
+  cluster-unique, and not one of `api`, `identity`, `mcp`, `os`, `vscode`,
+  `www`, `admin`, `mail`, `portal`, `voice`, `turn` or the apex, under the <!-- retired-vocabulary-ok: `portal` is a reserved site label in squatReservedSiteLabels -->
+  domain the cluster serves (derived
   through `component/frontdoor`, so it cannot disagree with the front door's
   own hosts). Any other hostname stays cluster-owner-only; a CLIENT's own
   domain is bound through the custom-domain flow, which verifies two DNS

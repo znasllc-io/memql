@@ -10,8 +10,10 @@
 // so nothing here builds a document, and the panel wraps them in one.
 //
 // NOTHING HERE DECIDES WHICH ACTS EXIST. deploy/instanceActions.ts computes the
-// bar (state, acts, and what goes behind More) and this only draws it; the
-// words a row or a state carries are state/deploymentsCatalog.ts's. A screen
+// bar (state, acts, and what goes behind More) and a remote page's per-item
+// acts (a rollout's Promote and Abort, the versions to prepare), and this only
+// draws them; what a deploy act sends is deploy/controls.ts's; the words a row
+// or a state carries are state/deploymentsCatalog.ts's. A screen
 // that composed its own acts would be a second authority, and the first thing
 // a second authority does is offer an act the first one withheld.
 //
@@ -47,7 +49,8 @@ import {
 import type { RegionParts } from "./ui/liveView.js";
 import type { LogLine, ProgressUpdate } from "./ui/protocol.js";
 
-import type { PageAct, PageBar } from "../deploy/instanceActions.js";
+import { actionOfKey } from "../deploy/controls.js";
+import type { PageAct, PageBar, RemoteChoices } from "../deploy/instanceActions.js";
 import type { RunFailure, RunWords } from "../deploy/localRun.js";
 import type { PipelineState } from "../deploy/pipelineState.js";
 import type { UpgradeVerdict } from "../deploy/upgrade.js";
@@ -87,6 +90,8 @@ export const DEPLOYMENT_STYLES = `
   .dp-row-desc { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
                  color: var(--memql-muted); font-variant-numeric: tabular-nums; }
   .dp-row-reason { flex-basis: 100%; margin: -2px 0 4px 18px; color: var(--memql-muted); }
+  .dp-row-acts { flex: none; display: flex; gap: 8px; margin-left: auto; }
+  .dp-row-acts > .mq-textbtn:last-child { margin-right: -6px; }
   .dp-note { margin: 6px 0 0; color: var(--memql-muted); }
   .dp-lede { margin: 0 0 14px; max-width: 80ch; color: var(--memql-muted); }
   .dp-select { appearance: auto; padding: 0 6px; }
@@ -100,13 +105,15 @@ export const DEPLOYMENT_STYLES = `
   .mq-notice + .mq-field { margin-top: 16px; }
 `;
 
-/** A bar act as the kit draws it. */
+/** A page act as the kit draws it. */
 function kitAct(a: PageAct): Act {
   return {
     act: a.id,
     label: a.label,
     ...(a.value === undefined ? {} : { value: a.value }),
     ...(a.tone === undefined ? {} : { tone: a.tone }),
+    ...(a.title === undefined ? {} : { title: a.title }),
+    ...(a.ariaLabel === undefined ? {} : { ariaLabel: a.ariaLabel }),
   };
 }
 
@@ -394,6 +401,8 @@ export interface ActOutcome {
 export interface RemoteOverviewInput {
   instance: Instance;
   bar: PageBar;
+  /** The per-item acts: rollout rows and versions to prepare (deploy/instanceActions.remoteChoices). */
+  choices: RemoteChoices;
   connection: ConnectionWord;
   runs: readonly Run[];
   nowMs: number;
@@ -406,7 +415,11 @@ export interface RemoteOverviewInput {
 
 /**
  * A remote cluster: what it runs, its deployment history, and the acts the
- * caller's role and its pipeline allow -- all on the bar.
+ * caller's role and its pipeline allow. The cluster's own acts -- Deploy, the
+ * update, Roll back -- are on the bar; an act about one item sits on that
+ * item: a rollout part-way through is a row under "Rollouts" carrying its
+ * Promote and Abort, and the versions the cluster can be prepared at are a
+ * short list under "Next version", each naming the version it prepares.
  *
  * NOT CONNECTED IS NOT "NO PIPELINE". The old page headed an editor that was
  * merely signed out "No deploy pipeline is configured for this cluster"; the
@@ -442,6 +455,9 @@ export function remoteOverviewScreen(i: RemoteOverviewInput): RegionParts {
   if (os !== undefined) rows.push({ label: "MemQL OS", valueHtml: factWithAct(os.shown, { act: "openOs", label: "Open" }) });
   if (rows.length > 0) body += facts(rows);
 
+  body += rolloutRows(i.choices);
+  body += versionChoices(i.choices);
+
   body += subhead("History");
   switch (i.connection) {
     case "connected":
@@ -461,7 +477,11 @@ export function remoteOverviewScreen(i: RemoteOverviewInput): RegionParts {
     { label: "Audit reference", value: i.outcome?.auditId ?? "", mono: true },
     { label: "Running", value: instance.currentDeploymentId ?? "", mono: true },
     { label: "Prepared", value: instance.pendingDeploymentId ?? "", mono: true },
+    // The record Roll back returns to, named only where Roll back is offered
+    // (its label names the version; this is the record, for a support case).
+    { label: "Roll back to", value: offersRollback(i.bar) ? (instance.rollbackTargetId ?? "") : "", mono: true },
     { label: "Status", value: i.pipeline?.engineMessage ?? "" },
+    { label: "Next version", value: i.choices.previewMessage },
   ];
   body += details(i.detailsOpen, detailRows);
 
@@ -470,6 +490,62 @@ export function remoteOverviewScreen(i: RemoteOverviewInput): RegionParts {
     body,
     actions: barHtml(i.bar),
   };
+}
+
+/** Whether a bar offers Roll back: a deploy act whose key is a rollback's. */
+function offersRollback(b: PageBar): boolean {
+  return [...b.acts, ...b.more].some((act) => act.id === "deploy" && actionOfKey(act.value ?? "") === "rollback");
+}
+
+/** A rollout's dot: waiting on a person, or moving. */
+function rolloutTone(phase: string): "warn" | "busy" {
+  return phase.trim().toLowerCase() === "paused" ? "warn" : "busy";
+}
+
+/**
+ * The rollouts part-way through, one row each with its own Promote and Abort.
+ * Nothing when the group is not offered; "None in progress" when the cluster
+ * runs rollouts and none is part-way through, so an absent Promote reads as
+ * nothing to promote rather than as an act withheld.
+ */
+function rolloutRows(choices: RemoteChoices): string {
+  if (choices.rollouts === undefined) return "";
+  if (choices.rollouts.length === 0) return subhead("Rollouts") + emptyState({ line: "None in progress." });
+  const rows = choices.rollouts
+    .map(
+      (row) =>
+        `<li class="dp-row"><span class="mq-dot" data-tone="${rolloutTone(row.phase)}" aria-hidden="true"></span>` +
+        `<span class="dp-row-label mq-mono">${escapeHtml(row.name)}</span><span class="dp-row-desc">${escapeHtml(row.phase)}</span>` +
+        `<span class="dp-row-acts">${row.acts.map((act) => button({ ...kitAct(act), tone: "text" })).join("")}</span></li>`,
+    )
+    .join("");
+  return subhead("Rollouts") + `<ul class="dp-list" aria-label="Rollouts">${rows}</ul>`;
+}
+
+/**
+ * The versions the cluster can be prepared at, one choice each, naming the
+ * version with its bump as a quiet note. Without a preview the choices name
+ * the bump alone, and a line says the numbers could not be read.
+ *
+ * EACH CHOICE IS A WHOLE ROW, as each run in the history is: a list of three
+ * things to pick from reads as a list, where three text acts in a column read
+ * as three sentences. The row posts what the kit's act would (`data-act`,
+ * `data-value`: the control's key).
+ */
+function versionChoices(choices: RemoteChoices): string {
+  if (choices.versions.length === 0) return "";
+  const rows = choices.versions
+    .map(({ act, note }) => {
+      const title = act.title === undefined ? "" : ` title="${escapeHtml(act.title)}"`;
+      return (
+        `<li><button type="button" class="dp-row" data-act="${escapeHtml(act.id)}" data-value="${escapeHtml(act.value ?? "")}"${title}>` +
+        `<span class="dp-row-label">${escapeHtml(act.label)}</span>` +
+        `${note === "" ? "" : `<span class="dp-row-desc">${escapeHtml(note)}</span>`}</button></li>`
+      );
+    })
+    .join("");
+  const note = choices.previewMessage === "" ? "" : `<p class="dp-note">Couldn't read the next version numbers.</p>`;
+  return subhead("Next version") + `<ul class="dp-list" aria-label="Next version">${rows}</ul>${note}`;
 }
 
 // ---------------------------------------------------------------------------

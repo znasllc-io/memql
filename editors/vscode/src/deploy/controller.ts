@@ -206,18 +206,23 @@ function successMessage(request: DeployActionRequest, details: Record<string, st
   }
 }
 
+/** What `previewNextVersion` read: the proposals, or why there are none. */
+export interface VersionPreview {
+  suggestion: Awaited<ReturnType<DeployControlPort["suggestNextVersion"]>> | null;
+  /** Why `suggestion` is null; "" when it is not. */
+  message: string;
+}
+
 /**
  * Preview the next version proposals before cutting.
  *
  * Read-only, but developer-or-above gated server-side -- it is the read
  * companion to cutVersion, so it is refused exactly where cutVersion would be.
  * Returns null on any failure and hands the caller a message instead: a
- * missing preview must degrade to "type the version yourself", never to a
- * blocked Cut button.
+ * missing preview must degrade to cutting by bump alone, with the engine
+ * computing the version (deploy/controls.ts), never to a blocked Cut button.
  */
-export async function previewNextVersion(
-  port: DeployControlPort,
-): Promise<{ suggestion: Awaited<ReturnType<DeployControlPort["suggestNextVersion"]>> | null; message: string }> {
+export async function previewNextVersion(port: DeployControlPort): Promise<VersionPreview> {
   try {
     return { suggestion: await port.suggestNextVersion(), message: "" };
   } catch (err) {

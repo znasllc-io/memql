@@ -9,8 +9,6 @@ owner: znas
 
 # MemQL Reserved Names
 
-> **Last updated:** 2026-06-11
-
 This document is the single index of every identifier MemQL reserves
 in the author surface. Field names, arg names, imported names, and
 function names that collide with one of these are rejected at load

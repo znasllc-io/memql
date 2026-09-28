@@ -224,7 +224,7 @@ contract.
   When changing a connection-config secret, cut the secret over **before** the
   sync scales pods up; bring **identity up first**. See
   [DB connection budget](db-connection-budget.md) and
-  Deployment Strategy (see the product pack repo's docs/operate/deployment-strategy.md).
+  [Scaling and upgrading an instance](instance-scale-and-upgrade.md).
 
 ---
 
@@ -244,7 +244,7 @@ contract.
 - [DB connection budget & graceful deploy](db-connection-budget.md) — the budget formula, pooler split, monitor + gate.
 - [Database platform](database-platform.md) — the CNPG operator stack, what an
   operator must provision, alerts, and the failover / restore drills.
-- Deployment Strategy (see the product pack repo's docs/operate/deployment-strategy.md) — release/lockfile/promote/GitOps.
+- [Scaling and upgrading an instance](instance-scale-and-upgrade.md) — version rolls, upgrade checks and verification.
 - [Infrastructure](infrastructure.md) — the AKS cluster.
 - [Environment Variables](env-vars.md) — the full env surface.
 - [Reproduce the cloud locally](reproduce-the-cloud-locally.md) — the local dev cluster.

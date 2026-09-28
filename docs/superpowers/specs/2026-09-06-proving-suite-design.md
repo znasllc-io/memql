@@ -505,8 +505,10 @@ that made it two is spent and the owner asked for one (2026-09-06).
 - [The work spine](2026-09-05-work-spine-design.md) -- the rows this measures.
 - [`docs/public/overview/why-memql-harness.md`](../../public/overview/why-memql-harness.md)
   -- the page the claims gate governs.
-- [`docs/public/overview/proving.md`](../../public/overview/proving.md) -- the
-  existing proving log; the scorecard is generated beside it, not into it.
+- `docs/public/overview/proving.md` -- the proving log this record was written
+  beside; the scorecard was generated beside it, not into it. The log was
+  deleted in memql#5721 (the documentation program's D24, owner decision 19:
+  no human proving log page), so the scorecard stands alone.
 - [`docs/internal/design/capability-script-contract.md`](../../internal/design/capability-script-contract.md)
   -- the envelope `memql-bench` adopts.
 - [`docs/public/ai/llm-cost-control.md`](../../public/ai/llm-cost-control.md)

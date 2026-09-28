@@ -34,6 +34,8 @@
 //
 // Refs: #3740 #3733
 
+import type { RolloutStatus } from "@znasllc-io/memql-sdk-core/deploy";
+
 import type { StatusRead } from "./controller.js";
 import { visibleActions, type DeployActionSpec, type RoleVisibility } from "./actions.js";
 
@@ -56,16 +58,17 @@ export interface PipelineState {
    */
   actions: DeployActionSpec[];
   /**
-   * The Argo Rollouts that are part-way through, by name -- the only ones a
-   * promote or an abort can act on. Empty when none is, and always for the
-   * failure states. Promote and abort are offered per rollout named here and
-   * never with a blank name, which the engine refuses.
+   * The Argo Rollouts the status read reported, which are what promote and
+   * abort act on (deploy/controls.ts narrows them to the ones part-way
+   * through). Empty for both failure states, which read nothing.
+   *
+   * CARRIED, where the rest of the status is dropped, because the RPC acts on
+   * a rollout BY NAME and this read is the only place the page learns one.
+   * Without it the act could only send an empty name, which the SDK refuses
+   * before anything leaves the editor.
    */
-  rollouts: string[];
+  rollouts: RolloutStatus[];
 }
-
-/** The rollout phases in which a promote or an abort has something to act on. */
-const IN_FLIGHT_PHASES = new Set(["paused", "progressing"]);
 
 /**
  * Classify the status read.
@@ -99,8 +102,8 @@ export function pipelineState(read: StatusRead, visibility: RoleVisibility): Pip
     line: "",
     engineMessage: "",
     actions: visibleActions(visibility),
-    rollouts: (read.status.rollouts ?? [])
-      .filter((rollout) => rollout.name.trim() !== "" && IN_FLIGHT_PHASES.has(rollout.phase.trim().toLowerCase()))
-      .map((rollout) => rollout.name.trim()),
+    // The SDK always sets the list; `?? []` is for a status built by hand,
+    // which a caller outside the SDK is free to do.
+    rollouts: read.status.rollouts ?? [],
   };
 }

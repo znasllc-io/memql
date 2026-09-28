@@ -153,6 +153,13 @@ func (c *Client) GetFile(ctx context.Context, token string, repo repoRef, path, 
 	if err := classify(status, body, "read "+path); err != nil {
 		return "", "", err
 	}
+	return decodeContents(path, body)
+}
+
+// decodeContents reads the body of a successful GET /contents/<path> reply,
+// returning the decoded file and its blob sha. Shared by GetFile and
+// ReadVersionFile, which differ only in what a 404 means.
+func decodeContents(path string, body []byte) (string, string, error) {
 	var decoded struct {
 		Content  string `json:"content"`
 		Encoding string `json:"encoding"`

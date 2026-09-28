@@ -8,7 +8,9 @@
 //   - closing the tab leaves the run going;
 //   - a read that fails is said, never an endless skeleton;
 //   - Sign in is THE sign-in command, with the cluster named;
-//   - a rollback goes to the run on screen, and a promote names its rollout;
+//   - a rollback goes to the run on screen when that is the release Roll back
+//     returns to, and a promote names its rollout -- each posted as the key of
+//     a control the page built (deploy/controls.ts), never as a request;
 //   - a typed confirmation that does not match changes nothing, and says so;
 //   - the page re-reads when the connection changes.
 //
@@ -447,14 +449,16 @@ test("a rollback goes to the run on screen, never to the deployment already runn
   const h = remoteHarness(calls);
   DeploymentPanel.showRun(context(), h.deps, "staging", "dep-1");
   await settle();
-  assert.match(text(), /Roll back to v0\.23\.3/);
+  assert.match(text(), /data-value="rollback:dep-1"[^>]*>Roll back to v0\.23\.3…</);
   // A rollback aimed at another deployment than the one on the button is dropped.
-  page().send({ type: "rollback", value: "dep-3" });
+  page().send({ type: "deploy", value: "rollback:dep-3" });
   await settle();
   assert.deepEqual(calls, []);
-  page().send({ type: "rollback", value: "dep-1" });
+  page().send({ type: "deploy", value: "rollback:dep-1" });
   await settle();
   assert.deepEqual(calls, ["rollback dep-1"]);
+  // The outcome is said on the cluster's page, where the history it changes is.
+  assert.match(text(), /Rolling back to v0\.23\.3\./);
   page().close();
 });
 
@@ -463,7 +467,7 @@ test("the running deployment's own page offers no rollback", async () => {
   const h = remoteHarness([]);
   DeploymentPanel.showRun(context(), h.deps, "staging", "dep-3");
   await settle();
-  assert.doesNotMatch(page().html, /data-act="rollback"/);
+  assert.doesNotMatch(page().html, /data-value="rollback:/);
   page().close();
 });
 
@@ -473,7 +477,7 @@ test("a promote names the rollout that is part-way through", async () => {
   const h = remoteHarness(calls);
   DeploymentPanel.show(context(), h.deps, "staging");
   await settle();
-  page().send({ type: "rolloutPromote", value: "bff" });
+  page().send({ type: "deploy", value: "rolloutAction:promote:bff" });
   await settle();
   assert.deepEqual(calls, ["promote bff"]);
   assert.match(text(), /Rollout promoted\./);
@@ -493,7 +497,7 @@ test("an expired session during an act says so, and its Sign in works from the n
   h.deps.deployPort = () => port;
   DeploymentPanel.show(context(), h.deps, "staging");
   await settle();
-  page().send({ type: "rolloutPromote", value: "bff" });
+  page().send({ type: "deploy", value: "rolloutAction:promote:bff" });
   await settle();
   assert.match(text(), /Your session has expired\./);
   // The notice's act, although the connected bar offers no sign-in.
@@ -767,7 +771,7 @@ test("a remote act that fails says so in one sentence, with the engine's words o
     }) as unknown as DeployControlPort;
   DeploymentPanel.show(context(), h.deps, "staging");
   await settle();
-  page().send({ type: "rolloutPromote", value: "bff" });
+  page().send({ type: "deploy", value: "rolloutAction:promote:bff" });
   await settle();
   assert.match(text(), /Couldn't promote the rollout/);
   assert.match(page().html, /data-act="openOutput">Show details</);

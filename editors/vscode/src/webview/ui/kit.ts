@@ -59,6 +59,11 @@ export interface Act {
   busy?: boolean;
   /** A tooltip, for a label that is ambiguous out of context. */
   title?: string;
+  /**
+   * The act's full name for assistive tech, when the visible label leans on
+   * the row it sits in ("Promote" on a rollout's row is "Promote memql-bff").
+   */
+  ariaLabel?: string;
   /** Extra `data-*` attributes, keys without the `data-` prefix; posted camelCased. */
   data?: Readonly<Record<string, string>>;
 }
@@ -93,11 +98,12 @@ export function button(a: Act): string {
   const toneAttr = isText ? "" : ` data-tone="${tone}"`;
   const value = a.value === undefined ? "" : ` data-value="${escapeHtml(a.value)}"`;
   const title = a.title === undefined ? "" : ` title="${escapeHtml(a.title)}"`;
+  const aria = a.ariaLabel === undefined || a.ariaLabel === "" ? "" : ` aria-label="${escapeHtml(a.ariaLabel)}"`;
   const busy = a.busy === true ? ` aria-busy="true" aria-disabled="true"` : "";
   const spinner = a.busy === true ? `<span class="mq-spin" aria-hidden="true"></span>` : "";
   return (
     `<button type="button" class="${cls}"${toneAttr} data-act="${escapeHtml(a.act)}"${value}` +
-    `${dataAttrs(a.data, ["act", "value", "tone"])}${title}${busy}>${spinner}${escapeHtml(a.label)}</button>`
+    `${dataAttrs(a.data, ["act", "value", "tone"])}${title}${aria}${busy}>${spinner}${escapeHtml(a.label)}</button>`
   );
 }
 

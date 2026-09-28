@@ -45,14 +45,16 @@ import (
 //  3. read tags + head sha  -- one walk, so the two answers cannot disagree.
 //  4. refuse if head is already released.
 //  5. compute the next version.
-//  6. dry run stops here    -- with the plan and nothing created.
-//  7. create the tag ref    -- ATOMIC, and therefore the concurrency gate.
-//  8. publish the Release   -- the step that fires the cascade.
-//  9. optional pin-bump PR  -- degrades to a note, never fails the cut.
-// 10. write the row + audit -- bookkeeping; a failure here is logged, not
+//  6. refuse unless VERSION at head reads it -- see versionfile.go. VERSION
+//     equals the tag a cut creates, and it arrives by pull request first.
+//  7. dry run stops here    -- with the plan and nothing created.
+//  8. create the tag ref    -- ATOMIC, and therefore the concurrency gate.
+//  9. publish the Release   -- the step that fires the cascade.
+// 10. optional pin-bump PR  -- degrades to a note, never fails the cut.
+// 11. write the row + audit -- bookkeeping; a failure here is logged, not
 //     propagated, because the release has already shipped.
 //
-// Seven and eight are the only irreversible steps, and they are adjacent and
+// Eight and nine are the only irreversible steps, and they are adjacent and
 // last-but-three on purpose: everything that can refuse has refused by then.
 
 // Outcome is what a cut returns to the DSL caller.
@@ -143,6 +145,12 @@ func (i *Integration) Cut(ctx context.Context, req CutRequest) (Outcome, error) 
 		return Outcome{}, err
 	}
 
+	// Before the dry-run return, so the plan a card shows is one the cut
+	// would accept -- see versionfile.go.
+	if err := i.checkVersionFile(ctx, cfg, headSha, previous, next, bump); err != nil {
+		return Outcome{}, err
+	}
+
 	out := Outcome{
 		Version:     next.tag(),
 		BareVersion: next.bare(),
@@ -158,7 +166,11 @@ func (i *Integration) Cut(ctx context.Context, req CutRequest) (Outcome, error) 
 		// value of this path is that it exercises the credential, the
 		// repository name and the arithmetic against the real API
 		// without producing a release -- which is what makes it the
-		// runbook's first step after seeding a token.
+		// runbook's first step after seeding a token. It makes only
+		// READS, so it proves the token can read the repository and
+		// nothing about whether it may create the tag or the Release:
+		// those refusals (credential_unavailable on a 403, ref_exists,
+		// tag_created_release_failed) exist only past this return.
 		out.DryRun = true
 		out.Status = "dry_run"
 		return out, nil

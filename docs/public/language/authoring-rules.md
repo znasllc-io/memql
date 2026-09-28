@@ -161,8 +161,9 @@ atomic rows with clean audit trails.
 **Cross-references**: see `dsl/library/automations.memql` and
 `dsl/identity/automations.memql` for live examples of this pattern.
 
-**Sense diagnostics for these gotchas** land at edit time in Cockpit
-(see [MemQL Sense & the DSL Spec](sense.md)). The rules live in
+**Sense diagnostics for these gotchas** land at edit time in the MemQL VS
+Code extension, through its offline language server `cmd/memql-lsp` (see
+[MemQL Sense & the DSL Spec](sense.md)). The rules live in
 `component/memql/sense/authoring_rules.go` and cover the most
 frequently hit traps:
 
@@ -893,9 +894,9 @@ Pick an explicit alternative. Live examples in the tree:
 `v1:identity:invitation.partitionId`.
 
 **Why it bites you -- and why the old reason is no longer the reason.**
-This section used to say the PK for partition-scoped rows is
-`(partition, id, createdAt)` and that a payload field of the same name
-would shadow the PK column. **That is no longer true** (memql#3305).
+This section used to say the PK for partition-scoped rows led with a
+`partition` column and that a payload field of the same name would shadow
+that PK column. **That is no longer true** (memql#3305).
 Partitioning was retired in #56: `"MemoryNodes"` has no `partition`
 column at all and its primary key is `(id, "createdAt")` -- read it in
 `component/database/memory-nodes/migrations/20260324000000_initial_setup.up.sql`,

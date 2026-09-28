@@ -38,13 +38,24 @@
 // AN ACT WHOSE ONLY OUTCOME IS A REFUSAL IS ABSENT. That is what put three bugs
 // right here: Deploy offered with nothing prepared, a rollout promote with no
 // rollout to name, and a rollback aimed at the deployment already running.
-// Each is now offered only with its target in hand, and carries it.
+// Each is now offered only with its target in hand.
+//
+// WHAT A DEPLOY ACT SENDS IS NOT DECIDED HERE. A remote cluster's deploy
+// controls -- Deploy, Prepare, Roll back, Promote and Abort -- are built by
+// deploy/controls.ts, which resolves each one's target from what the page read
+// and gives it a KEY. This file decides only WHERE each is drawn: Deploy and
+// Roll back on the bar, a rollout's Promote and Abort on that rollout's row,
+// the versions to prepare as a short list (`remoteChoices`). Every one posts
+// `{ type: "deploy", value: <key> }`, and the panel re-expands the controls
+// from its own facts and runs the one whose key matches.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 //
 // Refs: #3736 #3733
 
 import { satisfiesTier, type DeployActionId, type RoleVisibility } from "./actions.js";
+import type { VersionPreview } from "./controller.js";
+import { deployControls, type DeployControl, type DeployControlFacts } from "./controls.js";
 import type { PipelineState } from "./pipelineState.js";
 import type { UpgradeVerdict } from "./upgrade.js";
 import type { Instance, Run } from "../state/deployments.js";
@@ -111,27 +122,24 @@ export function offersLocal(instance: Instance, id: LocalActId): boolean {
 // what an action bar offers
 // ---------------------------------------------------------------------------
 
-export type PageActId =
-  | LocalActId
-  | "update"
-  | "connect"
-  | "signIn"
-  | "deploy"
-  | "cutVersion"
-  | "rolloutPromote"
-  | "rolloutAbort"
-  | "rollback"
-  | "showRun"
-  | "more";
+/**
+ * What a page act posts as its `type`. `deploy` is every deploy control
+ * (deploy/controls.ts), its `value` the control's key.
+ */
+export type PageActId = LocalActId | "update" | "connect" | "signIn" | "deploy" | "showRun" | "more";
 
 /** One act on a bar: what the page posts is `{ type: id, value }`. */
 export interface PageAct {
   id: PageActId;
   label: string;
-  /** The act's target: a version, a deployment id, a rollout name. */
+  /** The act's target: a version, or a deploy control's key. */
   value?: string;
   /** The one button. Absent is a text act. */
   tone?: "primary" | "danger";
+  /** What it does, as a tooltip, when the label says less. */
+  title?: string;
+  /** Its full name for assistive tech, when the label leans on its row. */
+  ariaLabel?: string;
 }
 
 export interface PageBar {
@@ -229,23 +237,6 @@ export function localOverviewBar(i: LocalBarInput): PageBar {
 // a remote cluster
 // ---------------------------------------------------------------------------
 
-/**
- * The deployment a rollback lands on: the newest SUCCEEDED run that is not the
- * one running now.
- *
- * NOT the newest succeeded run, which is the current deployment itself: the
- * engine's RollbackDeployment redeploys the target's digest as a new record,
- * so aiming it there re-ships what is already running. Undefined when there is
- * no current deployment to roll back from, or nothing older that landed.
- */
-export function rollbackTarget(runs: readonly Run[], currentId: string | undefined): Run | undefined {
-  const current = (currentId ?? "").trim();
-  if (current === "") return undefined;
-  const at = runs.findIndex((run) => run.id === current);
-  if (at < 0) return undefined;
-  return runs.slice(at + 1).find((run) => run.status === "succeeded");
-}
-
 /** Whether the caller's role admits an action -- an indeterminate role admits everything. */
 function admits(visibility: RoleVisibility | undefined, pipeline: PipelineState, id: DeployActionId): boolean {
   if (!pipeline.actions.some((action) => action.id === id)) return false;
@@ -263,9 +254,53 @@ export interface RemoteBarInput {
   visibility?: RoleVisibility;
   /** Newest first. */
   runs: readonly Run[];
+  /** The next-version proposals the Prepare choices name; undefined before (or without) the read. */
+  preview?: VersionPreview;
 }
 
-/** A deploy-control act a remote cluster offers, with its target. */
+/**
+ * The facts a remote page's deploy controls are resolved from. The panel
+ * resolves a click from the same four fields, so what a key names on the page
+ * is what it names at the click.
+ */
+export function remoteControlFacts(i: Pick<RemoteBarInput, "instance" | "runs" | "pipeline" | "preview">): DeployControlFacts {
+  return { instance: i.instance, runs: i.runs, rollouts: i.pipeline?.rollouts ?? [], preview: i.preview };
+}
+
+/**
+ * The deploy controls of one action this page may draw: the role admits it,
+ * the pipeline is there, and the control has a target to send. A control with
+ * nothing to send (nothing prepared, nothing to roll back to) is ABSENT here;
+ * the panel still refuses its key, in the control's own sentence, if one is
+ * posted anyway.
+ */
+function drawable(
+  i: { pipeline?: PipelineState | undefined; visibility?: RoleVisibility | undefined },
+  facts: DeployControlFacts,
+  id: DeployActionId,
+): DeployControl[] {
+  const pipeline = i.pipeline;
+  if (pipeline === undefined || pipeline.kind !== "present" || !admits(i.visibility, pipeline, id)) return [];
+  return deployControls([id], facts).filter((control) => control.request !== undefined);
+}
+
+/**
+ * A deploy control as a page act. One that asks for a typed confirmation is
+ * labelled with an ellipsis, as every act that asks for more is.
+ */
+export function controlAct(control: DeployControl, over: { label?: string; tone?: "primary" | "danger" } = {}): PageAct {
+  const label = over.label ?? control.label;
+  return {
+    id: "deploy",
+    label: control.confirm === "" ? label : `${label}…`,
+    value: control.key,
+    ...(over.tone === undefined ? {} : { tone: over.tone }),
+    ...(control.detail === "" ? {} : { title: control.detail }),
+    ...(label === control.label ? {} : { ariaLabel: control.label }),
+  };
+}
+
+/** The deploy-control acts a remote cluster's bar offers, with the update. */
 function remoteActs(i: RemoteBarInput): { primary: PageAct | undefined; texts: PageAct[] } {
   const pipeline = i.pipeline;
   if (pipeline === undefined) return { primary: undefined, texts: [] };
@@ -274,39 +309,97 @@ function remoteActs(i: RemoteBarInput): { primary: PageAct | undefined; texts: P
 
   // Deploy ships the record that is PREPARED AND NOT SHIPPED, by id -- and is
   // absent when there is none, rather than drawn beside a line saying so.
-  const pending = (i.instance.pendingDeploymentId ?? "").trim();
-  if (pipeline.kind === "present" && pending !== "" && admits(i.visibility, pipeline, "deploy")) {
-    const version = i.runs.find((run) => run.id === pending)?.toVersion ?? "";
-    primary = { id: "deploy", label: version === "" ? "Deploy" : `Deploy ${version}`, value: pending, tone: "primary" };
-  }
-  // The update cuts at the named release and ships it, under one confirmation.
-  // Not where the cluster has no deploy pipeline: both calls would be refused.
+  const facts = remoteControlFacts(i);
+  const deploy = drawable(i, facts, "deploy")[0];
+  if (deploy !== undefined) primary = controlAct(deploy, { tone: "primary" });
+  // The update prepares the named release and ships it, under one
+  // confirmation. Not where the cluster has no deploy pipeline: both calls
+  // would be refused.
   if (i.upgrade.kind === "offer" && pipeline.kind !== "notConfigured") {
     const update: PageAct = { id: "update", label: `${i.upgrade.label}…`, value: i.upgrade.target.to };
     if (primary === undefined) primary = { ...update, tone: "primary" };
     else texts.push(update);
   }
-  if (pipeline.kind === "present" && admits(i.visibility, pipeline, "cutVersion")) {
-    const cut: PageAct = { id: "cutVersion", label: "Prepare next version" };
-    if (primary === undefined) primary = { ...cut, tone: "primary" };
-    else texts.push(cut);
-  }
-  if (pipeline.kind === "present" && admits(i.visibility, pipeline, "rollback")) {
-    const target = rollbackTarget(i.runs, i.instance.currentDeploymentId);
-    if (target !== undefined) {
-      const to = target.toVersion ?? "";
-      texts.push({ id: "rollback", label: to === "" ? "Roll back…" : `Roll back to ${to}…`, value: target.id });
-    }
-  }
-  // Promote and abort only NAME a rollout that is part-way through: the engine
-  // refuses a blank one, which is all the old button ever sent.
-  if (pipeline.kind === "present" && admits(i.visibility, pipeline, "rolloutAction")) {
-    for (const rollout of pipeline.rollouts) {
-      texts.push({ id: "rolloutPromote", label: `Promote ${rollout}`, value: rollout });
-      texts.push({ id: "rolloutAbort", label: `Abort ${rollout}…`, value: rollout });
-    }
-  }
+  // Roll back names the release it returns to (deploymentHistory's
+  // rollbackTargetId), never the one running.
+  const rollback = drawable(i, facts, "rollback")[0];
+  if (rollback !== undefined) texts.push(controlAct(rollback));
   return { primary, texts };
+}
+
+/** A rollout part-way through, as a row carrying its own acts. */
+export interface RolloutRow {
+  name: string;
+  /** Argo's phase, as reported ("Paused"). */
+  phase: string;
+  /** Promote, then Abort. */
+  acts: PageAct[];
+}
+
+/** A version the cluster can be prepared at, as one choice. */
+export interface VersionChoice {
+  act: PageAct;
+  /** The bump, as a quiet note ("minor"); "" when the label already says it. */
+  note: string;
+}
+
+/**
+ * The acts a remote page draws in its BODY, because each is about one item
+ * rather than the cluster: a rollout's Promote and Abort on that rollout's row,
+ * and the versions to prepare as a short list -- three of them, which would
+ * fill the bar on their own.
+ */
+export interface RemoteChoices {
+  /**
+   * The rollouts in flight, one row each. Undefined when the group is not
+   * drawn at all: the role cannot promote, or the cluster reported no
+   * rollouts. Empty when it reported some and none is part-way through.
+   */
+  rollouts?: RolloutRow[];
+  /** A choice per bump, in patch, minor, major order; empty when Prepare is not offered. */
+  versions: VersionChoice[];
+  /** Why the versions name only the bump: the preview read failed. "" otherwise. */
+  previewMessage: string;
+}
+
+/** The remote page's per-item acts: rollout rows and versions to prepare. */
+export function remoteChoices(i: RemoteBarInput): RemoteChoices {
+  const none: RemoteChoices = { versions: [], previewMessage: "" };
+  if (clusterState(i.instance, i.connection).key !== "connected") return none;
+  const pipeline = i.pipeline;
+  if (pipeline === undefined || pipeline.kind !== "present") return none;
+
+  const facts = remoteControlFacts(i);
+  const versions = drawable(i, facts, "cutVersion").map((control) => ({
+    act: controlAct(control),
+    note: control.note ?? "",
+  }));
+  const previewMessage = versions.length === 0 ? "" : (i.preview?.message ?? "");
+
+  let rollouts: RolloutRow[] | undefined;
+  if (admits(i.visibility, pipeline, "rolloutAction") && pipeline.rollouts.length > 0) {
+    const controls = drawable(i, facts, "rolloutAction");
+    rollouts = pipeline.rollouts
+      .filter((rollout) => controls.some((control) => rolloutOf(control) === rollout.name))
+      .map((rollout) => ({
+        name: rollout.name,
+        phase: rollout.phase,
+        // The row names the rollout, so its acts say only the verb; their
+        // accessible names keep the whole of it ("Promote bff").
+        acts: controls
+          .filter((control) => rolloutOf(control) === rollout.name)
+          .map((control) => controlAct(control, { label: subActionOf(control) === "abort" ? "Abort" : "Promote" })),
+      }));
+  }
+  return { ...(rollouts === undefined ? {} : { rollouts }), versions, previewMessage };
+}
+
+function rolloutOf(control: DeployControl): string {
+  return control.request?.id === "rolloutAction" ? control.request.rollout : "";
+}
+
+function subActionOf(control: DeployControl): string {
+  return control.request?.id === "rolloutAction" ? control.request.subAction : "";
 }
 
 /** The remote cluster page's bar. */
@@ -353,7 +446,7 @@ export interface RunDetailBarInput {
  *   a local run that failed or was interrupted -> Retry, which is the act the
  *     run came from (a version change to the same version, the same rebuild,
  *     a repair), and only when that act is legal now;
- *   a remote run that landed and is not the one running -> Roll back to it;
+ *   the remote run Roll back returns to -> Roll back to it;
  *   a run going now elsewhere on this machine -> Show progress, and nothing
  *     that could start a second run beside it.
  */
@@ -366,21 +459,13 @@ export function runDetailBar(i: RunDetailBarInput): PageBar {
     const retry = retryFor(i.instance, i.run);
     return { ...base, acts: retry === undefined ? [] : [retry], more: [] };
   }
-  const pipeline = i.pipeline;
-  if (
-    i.connection === "connected" &&
-    pipeline !== undefined &&
-    pipeline.kind === "present" &&
-    i.run.status === "succeeded" &&
-    i.run.id !== (i.instance.currentDeploymentId ?? "") &&
-    admits(i.visibility, pipeline, "rollback")
-  ) {
-    const to = i.run.toVersion ?? "";
-    return {
-      ...base,
-      acts: [{ id: "rollback", label: to === "" ? "Roll back to this…" : `Roll back to ${to}…`, value: i.run.id, tone: "danger" }],
-      more: [],
-    };
+  // Roll back is offered on the page of the run it returns to -- the one
+  // deploymentHistory.rollbackTargetId names -- and on no other: the same
+  // control the cluster's bar draws, key and all.
+  if (i.connection === "connected" && i.run.id === (i.instance.rollbackTargetId ?? "")) {
+    const facts: DeployControlFacts = { instance: i.instance, runs: [i.run], rollouts: [], preview: undefined };
+    const rollback = drawable(i, facts, "rollback")[0];
+    if (rollback !== undefined) return { ...base, acts: [controlAct(rollback, { tone: "danger" })], more: [] };
   }
   return { ...base, acts: [], more: [] };
 }
@@ -412,8 +497,10 @@ function retryFor(instance: Instance, run: Run): PageAct | undefined {
  * Whether a posted act is one the bar offered, target and all.
  *
  * The webview is a separate process and its messages are untrusted: an act
- * the page never drew -- or a rollback aimed at a different deployment than
- * the one named on the button -- is dropped here rather than run.
+ * the page never drew -- or an update aimed at a different version than the
+ * one named on the button -- is dropped here rather than run. A deploy
+ * control is not narrowed here: the panel resolves its key against a fresh
+ * expansion of deploy/controls.ts, which is the stricter check.
  */
 export function barOffers(barValue: PageBar, id: string, value: string | undefined): PageAct | undefined {
   return [...barValue.acts, ...barValue.more].find(

@@ -1,0 +1,48 @@
+name: docs-current-check
+
+# Notice when memql.io's docs are not the newest release's (memql#5714).
+#
+# Runs scripts/docs/current-check.sh, which fails when the newest vX.Y.Z tag
+# has no docs-<X.Y.Z>.tgz asset on its GitHub Release, or when
+# https://memql.io/docs/ carries a memql-docs-version meta naming another
+# version (or none). The script's header says what each failure means.
+#
+# WHY A SCHEDULED CHECK AND NOT A GATE. What it watches is the state of a
+# release and of a live site, not the contents of a commit: no PR can cause the
+# drift and no PR can fix it, so gating merges on it would block work nobody in
+# the PR can act on. It runs weekly and on demand, and it is deliberately NOT
+# part of `ci-required`.
+#
+# WHAT IT WOULD HAVE CAUGHT. Every release from v0.20.22 to v0.23.5 went out
+# with no docs asset, and the site went on serving bundle 0.21.25, while every
+# workflow on the path stayed green. Each hop is an event handler, and one that
+# silently does not fire looks exactly like one that has not fired yet; this
+# reads the two ends of the pipeline and says whether they agree.
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC -- a week of stale docs is the
+                        # longest this lets pass unnoticed
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+# READ ONLY, and deliberately so: the check lists tags, reads one release's
+# asset names and fetches a public page. It publishes and uploads nothing.
+permissions:
+  contents: read
+
+jobs:
+  current:
+    name: docs-current-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: check the newest release's docs asset and the site's version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/docs/current-check.sh --repo="$GITHUB_REPOSITORY"

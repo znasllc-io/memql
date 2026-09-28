@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 	"github.com/znasllc-io/memql/core/env"
 )
 
@@ -142,15 +143,29 @@ type Config struct {
 //	MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_PREFIX
 //	MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_HEADER
 //	MEMQL_INBOUND_SOURCE_<NAME>_DEDUPE_HEADER
+//	MEMQL_INBOUND_SOURCE_<NAME>_FORWARD_HEADERS     comma-separated; staged as headersJson
 //	MEMQL_INBOUND_SOURCE_<NAME>_ELEMENT_SEPARATOR   e.g. "," for a k=v list header
 //	MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_ELEMENT   e.g. "v1"
 //	MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_ELEMENT   e.g. "t"
+//
+// FORWARD_HEADERS is the only way an ENV source stages delivery metadata: with
+// it unset the row carries `headersJson: "{}"`, whatever the sender sent. A
+// connector or registered source brings its own list (InboundSource /
+// SourceConfig.ForwardHeaders) and reads none of these vars.
 //
 // Misconfiguration is reported through the logger and costs the source its
 // slot; it never costs the node its boot, and it never admits the source
 // unverified. A receiver serving one of five sources is a visible, partial
 // outage; a receiver serving five sources with one of them unsigned is a
 // silent hole.
+//
+// A source named after a DECLARED connector is misconfiguration of that kind
+// (memql#5707 residual): the connector reads a row under its own name as
+// verified by its own secret, so the name is not the environment's to pin.
+// It is dropped here, at boot, with the env vars named, rather than left to
+// resolveSource's per-request refusal -- which answers the same 404 but says
+// so only in a log line written when a delivery arrives, so a deploy
+// configured that way booted clean and failed every delivery silently.
 func LoadConfig(logger *slog.Logger) Config {
 	reader := env.NewEnvReader("MEMQL_INBOUND")
 	cfg := Config{
@@ -197,6 +212,17 @@ func loadSource(name string) (SourceConfig, error) {
 			"(want %s)", name, sourceNamePattern)
 	}
 	prefix := "MEMQL_INBOUND_SOURCE_" + envSuffix(name) + "_"
+	// DECLARED, not bound: shopify and its kin are declared from an init(),
+	// so the answer is the same at every point of boot and on every node of
+	// this build, while binding happens later in the integrations phase. The
+	// dispatcher that reads the staged row may run on another replica, which
+	// is why "not bound HERE yet" is no reason to admit the pin.
+	if memqlsync.IsDeclared(name) {
+		return SourceConfig{}, fmt.Errorf("%s* pins %q, which is the %q connector's own source name: "+
+			"the connector reads a row staged under it as verified by its own secret, so an env secret "+
+			"may not verify one -- remove %s* and %q from MEMQL_INBOUND_SOURCE_ALLOWLIST, or rename the "+
+			"source", prefix, name, name, prefix, name)
+	}
 	src := SourceConfig{
 		Name:             name,
 		Secret:           os.Getenv(prefix + "SECRET"),

@@ -9,8 +9,6 @@ owner: znas
 
 # MemQL Events System
 
-**Last Updated:** 2026-02-21
-
 This document describes the event pub/sub system in MemQL, which enables real-time notifications for graph mutations, queries, AI completions, and session lifecycle events.
 
 ## Architecture
@@ -102,9 +100,14 @@ stay verbatim. See [Node Identifier Conventions](identifiers.md).)
 
 | Topic | Kind | Description |
 |-------|------|-------------|
-| `si.completion.started` | `SI_COMPLETION_STARTED` | Emitted when an AI request begins |
-| `si.completion.finished` | `SI_COMPLETION_FINISHED` | Emitted when an AI request succeeds |
-| `si.completion.error` | `SI_COMPLETION_ERROR` | Emitted when an AI request fails |
+| `ai.completion.started` | `si_completion_started` | Emitted when an AI request begins |
+| `ai.completion.finished` | `si_completion_finished` | Emitted when an AI request succeeds |
+| `ai.completion.error` | `si_completion_error` | Emitted when an AI request fails |
+
+The Kind column prints these three as the literal `eventKind` string, because
+here the names disagree: the topics (`TopicAICompletion*`) and the proto enum
+(`EVENT_KIND_AI_COMPLETION_*`) say `ai`, while `Kind.String()` still returns
+`si_completion_*` (`component/events/event.go`).
 
 **Payload for started/finished:**
 ```json

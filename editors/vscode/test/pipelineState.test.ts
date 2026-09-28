@@ -13,7 +13,8 @@ import assert from "node:assert/strict";
 
 import { roleVisibility } from "../src/deploy/actions.js";
 import type { StatusRead } from "../src/deploy/controller.js";
-import { remoteOverviewBar } from "../src/deploy/instanceActions.js";
+import { rolloutsInFlight } from "../src/deploy/controls.js";
+import { remoteChoices, remoteOverviewBar } from "../src/deploy/instanceActions.js";
 import { pipelineState, type PipelineState } from "../src/deploy/pipelineState.js";
 import type { Instance } from "../src/state/deployments.js";
 import type { ConnectionWord } from "../src/state/deploymentsCatalog.js";
@@ -79,7 +80,7 @@ test("an ok read with no status is still not a pipeline", () => {
   assert.deepEqual(state.actions, []);
 });
 
-test("only a rollout part-way through can be promoted or aborted, and it is named", () => {
+test("the rollouts the read reported are carried by name, and only those part-way through can be acted on", () => {
   const state = pipelineState(
     read({
       status: status([
@@ -92,7 +93,16 @@ test("only a rollout part-way through can be promoted or aborted, and it is name
     }),
     OWNER,
   );
-  assert.deepEqual(state.rollouts, ["bff", "cognition"]);
+  // Carried whole (the page names each one it draws); narrowed where an act is
+  // built (deploy/controls.ts), so a promote never goes out with a blank name.
+  assert.deepEqual(
+    state.rollouts.map((rollout) => rollout.name),
+    ["bff", "agent", "cognition", ""],
+  );
+  assert.deepEqual(
+    rolloutsInFlight(state.rollouts).map((rollout) => rollout.name),
+    ["bff", "cognition"],
+  );
   assert.deepEqual(pipelineState(read({ message: "x", reason: "unavailable" }), OWNER).rollouts, []);
 });
 
@@ -102,9 +112,11 @@ test("only a rollout part-way through can be promoted or aborted, and it is name
 
 function page(connection: ConnectionWord, pipeline: PipelineState | undefined, over: { outcome?: ActOutcome; instance?: Instance } = {}): string {
   const instance = over.instance ?? REMOTE;
+  const input = { instance, connection, upgrade: { kind: "none" as const, reason: "" }, pipeline, visibility: OWNER, runs: [] };
   const parts = remoteOverviewScreen({
     instance,
-    bar: remoteOverviewBar({ instance, connection, upgrade: { kind: "none", reason: "" }, pipeline, visibility: OWNER, runs: [] }),
+    bar: remoteOverviewBar(input),
+    choices: remoteChoices(input),
     connection,
     runs: [],
     nowMs: NOW,

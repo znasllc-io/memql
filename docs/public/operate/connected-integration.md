@@ -311,7 +311,7 @@ it. `component/edge/csp.go` names the cluster's identity origin in
 `connect-src` for exactly this reason (memql#3711 fix round 2) — and, because
 the edge serves every hosted site rather than one bundle on one origin, it
 does this for every site alike, never as a per-site carve-out
-(`TestPortalHasNoSpecialCaseInTheServingPath`). Without that origin, the OAuth
+(`TestPlatformSiteHasNoSpecialCaseInTheServingPath`). Without that origin, the OAuth
 token exchange is refused by the browser's own CSP before it reaches the
 network, while the top-level `/authorize` redirect still works — it is a
 navigation, and `connect-src` does not govern navigations — so, in that
