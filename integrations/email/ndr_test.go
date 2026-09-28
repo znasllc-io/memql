@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -191,6 +192,38 @@ func (e *recordingEngine) recorded() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return append([]string(nil), e.calls...)
+}
+
+// originEngine records, per call, the CONTEXT the staging write ran on: its
+// call origin and the actor's subject. recordingEngine drops the context,
+// which is why the rendered-text assertions above could not see a missing
+// stamp -- the text is identical with or without it.
+type originEngine struct {
+	mu    sync.Mutex
+	calls []originCall
+}
+
+type originCall struct {
+	query   string
+	origin  auth.CallOrigin
+	subject string
+}
+
+func (e *originEngine) Execute(ctx context.Context, query string) (any, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	call := originCall{query: query, origin: auth.OriginFromContext(ctx)}
+	if tok := auth.TokenInfoFromContext(ctx); tok != nil {
+		call.subject = tok.Subject
+	}
+	e.calls = append(e.calls, call)
+	return nil, nil
+}
+
+func (e *originEngine) recorded() []originCall {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]originCall(nil), e.calls...)
 }
 
 type stubClaimer struct {
@@ -519,6 +552,42 @@ func TestNDRPollIntervalReadsTheEnvironment(t *testing.T) {
 			t.Errorf("interval = %v, want the default", got)
 		}
 	})
+}
+
+// stageInboundRequest is @serverOnly (memql#5707), so the executor refuses a
+// staging write whose context does not carry internal origin -- and the
+// poller swallows that refusal into failedTotal and leaves the message
+// unread, so every bounce would stay in the mailbox forever with nothing but
+// a log line to say why. The poll context is handed in by the component
+// lifecycle and carries no origin of its own, so the stamp in
+// ndrActorContext is the ONLY thing that makes the write succeed. This pins
+// it on the context the engine actually receives, together with the named
+// reader actor the row is auditable as.
+func TestNDRStagesUnderInternalOriginAsTheReader(t *testing.T) {
+	srv := newNDRTestServer(t)
+	srv.hold("AAMkAD-message-1", realDSN)
+	engine := &originEngine{}
+	p := pollerAgainst(t, srv, engine, nil)
+
+	// A context that says CLIENT explicitly, so the assertion cannot pass by
+	// inheriting an origin from the caller: only the poller's own stamp can
+	// turn this into internal.
+	p.PollOnce(auth.ContextWithClientOrigin(context.Background()))
+
+	calls := engine.recorded()
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly one staging call, got %d", len(calls))
+	}
+	if !strings.HasPrefix(calls[0].query, "mutation stageInboundRequest(") {
+		t.Fatalf("the one call is not the staging write: %s", calls[0].query)
+	}
+	if !calls[0].origin.IsInternal() {
+		t.Errorf("stageInboundRequest ran with %s origin. It is @serverOnly, so the engine refuses it "+
+			"and the bounce stays unread; ndrActorContext must stamp internal origin", calls[0].origin)
+	}
+	if calls[0].subject != systemNDRActor {
+		t.Errorf("staging ran as %q, want the named reader actor %q", calls[0].subject, systemNDRActor)
+	}
 }
 
 func TestNDRPollerDoesNotStartWhenCampaignsAreOff(t *testing.T) {

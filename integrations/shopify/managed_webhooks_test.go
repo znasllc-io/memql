@@ -3,6 +3,7 @@ package shopify
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,6 +33,56 @@ func TestManagedPrivacyEndpointExistsWithoutAnyStoreOrListing(t *testing.T) {
 	h.engine.setRows(namedRowsQuery(conceptGlobalSecret, managedClientSecret), nil)
 	if _, ok := h.conn.InboundSource(context.Background(), ConnectorName); ok {
 		t.Fatal("missing app secret admitted a managed source")
+	}
+}
+
+// The APP-LEVEL source's staging allowlist, exactly. The receiver stages
+// precisely these request headers on the inboundRequest row and nothing else,
+// so this list IS the staged metadata for every compliance delivery: narrow it
+// and the topic -- which only travels in X-Shopify-Topic -- never reaches
+// Apply, so no privacy job is queued; widen it and whatever was added lands on
+// a row any operator can read. The per-store twin is proved end to end
+// against Postgres by test/inboundhop's exact-map assertion; this is the
+// app-level half, which had only a non-empty check.
+//
+// The names are spelled as the wire carries them rather than through the
+// Header* constants, so a renamed constant cannot move the list and this test
+// with it. The per-store source must offer the same list: a delivery's
+// metadata must not depend on which of the two URLs Shopify used.
+func TestTheAppLevelSourceStagesExactlyTheShopifyDeliveryMetadata(t *testing.T) {
+	want := []string{
+		"X-Shopify-Api-Version",
+		"X-Shopify-Event-Id",
+		"X-Shopify-Shop-Domain",
+		"X-Shopify-Topic",
+		"X-Shopify-Triggered-At",
+		"X-Shopify-Webhook-Id",
+	}
+	sorted := func(in []string) []string {
+		out := slices.Clone(in)
+		slices.Sort(out)
+		return out
+	}
+
+	app, ok := managedWebhookHarness(t).conn.InboundSource(context.Background(), ConnectorName)
+	if !ok {
+		t.Fatal("the app-level source did not resolve for a fully configured managed app")
+	}
+	if got := sorted(app.ForwardHeaders); !slices.Equal(got, want) {
+		t.Errorf("the app-level source stages %q, want exactly %q", got, want)
+	}
+	for _, h := range app.ForwardHeaders {
+		if strings.EqualFold(h, app.SignatureHeader) || strings.EqualFold(h, "Authorization") || strings.EqualFold(h, "Cookie") {
+			t.Errorf("the app-level source would stage the credential header %q", h)
+		}
+	}
+
+	perStore, ok := newHarness(t).conn.InboundSource(context.Background(), ConnectorName+"-"+testStoreID)
+	if !ok || perStore.Secret == "" {
+		t.Fatal("the per-store source did not resolve for the harness store")
+	}
+	if got := sorted(perStore.ForwardHeaders); !slices.Equal(got, want) {
+		t.Errorf("the per-store source stages %q, want the app-level list %q", got, want)
 	}
 }
 

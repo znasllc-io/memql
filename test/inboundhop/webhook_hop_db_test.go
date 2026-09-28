@@ -105,15 +105,7 @@ func TestWebhookReceiptAndDispatchAcrossEngines(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &receipt); err != nil {
 		t.Fatal(err)
 	}
-	result, err := b.Execute(seedCtx(), call("inboundRequestById", map[string]string{"requestId": receipt["id"]}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rows := memql.MaterializeRows(result)
-	if len(rows) != 1 {
-		t.Fatalf("engine B read %d staged rows", len(rows))
-	}
-	row := rows[0]
+	row := stagedRow(t, b, receipt["id"])
 	// Exactly the allowlisted X-Shopify-* metadata is staged: the topic and
 	// shop domain the request carried, and neither the unrequested header nor
 	// the bearer. (The credential-drop switch itself is proved by
@@ -141,18 +133,7 @@ func TestWebhookReceiptAndDispatchAcrossEngines(t *testing.T) {
 	if err := memqlsync.Bind(cb); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.RegisterIntegration(datasync.NewIntegration(engineAdapter{b}, nil)); err != nil {
-		t.Fatal(err)
-	}
-	loader := automations.NewLoader(automations.LoaderOptions{Logger: b.Logger})
-	auto, err := loader.LoadByName("dispatchInboundToConnector")
-	if err != nil {
-		t.Fatal(err)
-	}
-	executor := automations.NewExecutor(automations.ExecutorOptions{Engine: b, Logger: b.Logger, StepRegistry: steps.NewRegistry()})
-	defer executor.Close()
-	event := &events.Event{Topic: "graph.node.created.v1:platform:inboundRequest", Kind: events.KindNodeCreated, OriginNodeId: "receiver-a", Payload: received}
-	run, err := executor.ExecuteWithEvent(seedCtx(), auto, "webhook-hop-test", event)
+	run, err := dispatchOn(t, b, received)
 	if err != nil || run.Status != "completed" {
 		t.Fatalf("dispatch: %+v %v", run, err)
 	}
@@ -164,6 +145,98 @@ func TestWebhookReceiptAndDispatchAcrossEngines(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("cross-engine delivery queued %d jobs, want 1", count)
 	}
+	// The row itself says what happened to it. A job count alone cannot
+	// tell a delivery the dispatcher recorded from one it worked and then
+	// left `received`, which is the state an operator reads as "never
+	// arrived" and which re-fires on every re-stage. A compliance delivery
+	// queues its job inside Apply and returns no mirror writes, so the stamp
+	// this pins is Dispatch's zero-writes `processed`.
+	if status := rowString(stagedRow(t, b, receipt["id"]), "status"); status != "processed" {
+		t.Fatalf("after the hop the staged row is %q, want processed", status)
+	}
+}
+
+// A staged row whose delivery metadata cannot be parsed is stamped FAILED by
+// the shipped automation, on the row, rather than left `received`: @createOnly
+// keeps the bad headersJson on every re-stage, so a row left `received` would
+// re-fire identically forever and say nothing to the operator. The source is a
+// store's own, so a connector claims it; a source no connector serves is the
+// product automation's and is never stamped (component/datasync's
+// TestUnparseableMetadataOnAnUnservedSourceIsLeftAlone).
+//
+// The receiver never writes such a row, so it is staged here directly,
+// through the same @serverOnly mutation under internal origin, the way a
+// future stager with a bug would.
+func TestAnUnparseableStagedHeaderRowIsStampedFailed(t *testing.T) {
+	a, db := engineOverPostgres(t)
+	if a == nil {
+		return
+	}
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	storeID := "badmeta-" + suffix
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM "MemoryNodes" WHERE payload::text LIKE $1 OR id LIKE $1`, "%"+suffix+"%")
+	})
+	if _, err := a.Execute(seedCtx(), call("createStore", map[string]string{"storeId": storeID, "domain": storeID + ".myshopify.com",
+		"name": "Bad metadata test", "adminTokenRef": "unused", "webhookSecretRef": "unused"})); err != nil {
+		t.Fatal(err)
+	}
+	conn := shopify.NewConnector(a, nil, shopify.NewStoreRegistry(a, a.ResolveSystemSecret), shopify.NewAdminClient())
+	if err := memqlsync.Bind(conn); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { memqlsync.UnbindForTest(shopify.ConnectorName) })
+
+	requestID := "inb-badmeta-" + suffix
+	if _, err := a.Execute(seedCtx(), fmt.Sprintf(`mutation stageInboundRequest(requestId: %q, source: %q, medium: "webhook", `+
+		`body: "{}", headersJson: "[]", signatureVerified: true, receivedAt: "2026-09-27T12:00:00Z")`,
+		requestID, "shopify-"+storeID)); err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	row := stagedRow(t, a, requestID)
+	if _, err := dispatchOn(t, a, row); err != nil {
+		t.Logf("dispatch returned %v (the builtin errors after stamping, which the run records)", err)
+	}
+	after := stagedRow(t, a, requestID)
+	if status := rowString(after, "status"); status != "failed" {
+		t.Fatalf("a row whose headersJson is not an object is %q after dispatch, want failed", status)
+	}
+	if reason := rowString(after, "lastError"); reason != "invalid staged delivery headers" {
+		t.Errorf("lastError = %q, want the reason the dispatcher stamps", reason)
+	}
+}
+
+// stagedRow reads one staged inboundRequest row through the engine, the way
+// the automation's trigger payload is built from it.
+func stagedRow(t *testing.T, eng *memql.MemQLEngine, requestID string) map[string]any {
+	t.Helper()
+	result, err := eng.Execute(seedCtx(), call("inboundRequestById", map[string]string{"requestId": requestID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := memql.MaterializeRows(result)
+	if len(rows) != 1 {
+		t.Fatalf("read %d staged rows for %s, want 1", len(rows), requestID)
+	}
+	return rows[0]
+}
+
+// dispatchOn runs the SHIPPED dispatchInboundToConnector automation on eng for
+// one staged row, through the real executor: a tree-loaded automation, so its
+// step context carries internal origin exactly as it does in production.
+func dispatchOn(t *testing.T, eng *memql.MemQLEngine, row map[string]any) (*automations.AutomationExecution, error) {
+	t.Helper()
+	if err := eng.RegisterIntegration(datasync.NewIntegration(engineAdapter{eng}, nil)); err != nil {
+		t.Fatal(err)
+	}
+	auto, err := automations.NewLoader(automations.LoaderOptions{Logger: eng.Logger}).LoadByName("dispatchInboundToConnector")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := automations.NewExecutor(automations.ExecutorOptions{Engine: eng, Logger: eng.Logger, StepRegistry: steps.NewRegistry()})
+	t.Cleanup(executor.Close)
+	event := &events.Event{Topic: "graph.node.created.v1:platform:inboundRequest", Kind: events.KindNodeCreated, OriginNodeId: "receiver-a", Payload: row}
+	return executor.ExecuteWithEvent(seedCtx(), auto, "webhook-hop-test", event)
 }
 
 // engineOverPostgres boots a real engine over dbtest.DSN(), the way the
