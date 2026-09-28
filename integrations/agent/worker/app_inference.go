@@ -38,6 +38,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/core/common"
@@ -215,14 +216,12 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 			fmt.Errorf("%w: no app sessions on this node", memqlengine.ErrAppUnavailable)
 	}
 	owner := strings.TrimSpace(req.ActingUserId)
-	if owner == "" {
+	if auth.ActsForNoPerson(ctx, owner) {
 		// Refused rather than widened, exactly as the model-call path
 		// refuses a blank acting user: an app session's credential names a
-		// person, and there is no person here.
-		return memqlengine.AppCallResult{}, &memqlengine.AppUnavailable{
-			AppId:     req.AppId,
-			LastError: "an app call needs an acting user; system work has no app door",
-		}
+		// person, and there is no person here -- nor behind a system actor's
+		// non-empty id, which is what a scheduled automation carries.
+		return memqlengine.AppCallResult{}, &memqlengine.AppUnavailable{AppId: req.AppId, NoOwner: true}
 	}
 	if !workerservice.IsKnownAppId(req.AppId) {
 		return memqlengine.AppCallResult{}, &memqlengine.AppUnavailable{

@@ -130,6 +130,9 @@ func newValidatorIntegration(t *testing.T) (*Integration, *judgeEngine) {
 	i := New(judge, testLogger())
 	i.SetNow(func() time.Time { return testNow })
 	i.admitRow = func(context.Context, memorynodes.MemoryNode) bool { return true }
+	// An AGENT's integration: the node that serves answer checks (unclaimed
+	// here; the claim tests install one).
+	i.ServeAnswerChecks(nil)
 
 	run := actRunRow(runStatusSucceeded)
 	run["spent"] = map[string]any{"modelCalls": float64(1)}
@@ -152,6 +155,30 @@ func newValidatorIntegration(t *testing.T) (*Integration, *judgeEngine) {
 	)
 	rec.reply("workModelCallsForOwnerRun", map[string]any{"id": "v1:work:modelCall:m1", "stepKey": "draft", "promptRef": "draftReport"})
 	return i, judge
+}
+
+// journalRun turns the fixture into a DRIVER-OWNED run, shaped as the rows the
+// live cluster wrote on 2026-09-28: a succeeded run whose triggeredBy is a
+// journal's, a goal of its own that arrived `api` from the system, one
+// finished app_answer step and the model call that answered it -- everything
+// the check would otherwise read as a goal's answer worth judging.
+func journalRun(e *judgeEngine, triggeredBy, statement string) {
+	run := actRunRow(runStatusSucceeded, "app_answer")
+	run["triggeredBy"] = triggeredBy
+	run["automationName"] = strings.TrimPrefix(triggeredBy, "journal:")
+	run["parentRunId"] = "v1:work:run:parent"
+	run["spent"] = map[string]any{"modelCalls": float64(1)}
+	e.reply("workRunForOwner", run)
+	e.reply("workGoalForOwner", map[string]any{
+		"id": actGoalId, "ownerUserId": "v1:identity:user:" + actOwner,
+		"statement": statement, "origin": "system", "requestedVia": "api", "status": "open",
+	})
+	e.reply("workStepsForOwnerRun", map[string]any{
+		"id": "v1:work:step:app_answer", "key": "app_answer", "seq": float64(0), "status": "done",
+		"kind": "reasoning", "stepType": work.StepTypeAppAnswer, "attempt": float64(1), "version": float64(1),
+		"result": map[string]any{"answer": "Hi! What would you like help with?"},
+	})
+	e.reply("workModelCallsForOwnerRun", map[string]any{"id": "v1:work:modelCall:m1", "stepKey": "app_answer", "promptRef": ""})
 }
 
 // validatorCaller is the validateGoalAnswer automation: its synthetic actor,
@@ -354,6 +381,21 @@ func TestTheValidatorSkipsWhatItMustNotCheck(t *testing.T) {
 			run["goalId"] = ""
 			e.reply("workRunForOwner", run)
 		}, "no goal"},
+		// THE RECURSION SEEN LIVE on 2026-09-28: an app session's recording
+		// run carries a goal of its own that says `api`, so the check judged
+		// it -- and the check's own call, served by the same app door, opened
+		// a session whose recording was judged next. Both shapes of journal
+		// the app door writes are here: the recording of a model call and the
+		// D7 delegate's child run. Each answers a step of ANOTHER run.
+		{"an app session's recording", func(e *judgeEngine) {
+			journalRun(e, "journal:appSession", "claude-code answered a model call")
+		}, "journal"},
+		{"the delegate's child run of a handed-over step", func(e *judgeEngine) {
+			journalRun(e, "journal:appSession", "run this in claude-code: [system]")
+		}, "journal"},
+		{"the Library's analysis pass", func(e *judgeEngine) {
+			journalRun(e, "journal:libraryAnalyzeFile", "analyze report.pdf")
+		}, "journal"},
 		{"an answer version already checked", func(e *judgeEngine) {
 			e.reply("workObservationsForOwnerRun", validatorDecisionRow("v1:work:observation:val-1", "draft", 2, work.Axes{}, "fine"))
 		}, "already checked"},
@@ -466,5 +508,145 @@ func TestTheValidatorRefusesAReplyMissingAnAxis(t *testing.T) {
 	}
 	if len(mutationsIn(judge.recordingEngine)) != 0 {
 		t.Errorf("wrote %s", judge.summary())
+	}
+}
+
+// onceClaimer is the cluster guard's contract in memory: the first claim of a
+// (name, key) wins and every later one loses, whichever replica asks.
+type onceClaimer struct {
+	mu    sync.Mutex
+	held  map[string]bool
+	names []string
+	keys  []string
+}
+
+func (c *onceClaimer) ClaimWithTTL(_ context.Context, name, key string, ttl time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ttl <= 0 {
+		panic("a validator claim must expire, so a replica that dies mid-check does not hold it forever")
+	}
+	c.names = append(c.names, name)
+	c.keys = append(c.keys, key)
+	if c.held == nil {
+		c.held = map[string]bool{}
+	}
+	k := name + "|" + key
+	if c.held[k] {
+		return false
+	}
+	c.held[k] = true
+	return true
+}
+
+// ONE ANSWER VERSION IS CHECKED ONCE AMONG THE NODES THAT SERVE CHECKS. The
+// automation's own cluster guard keys on the triggering event's fingerprint,
+// and live on 2026-09-28 one run update arrived twice -- once from the bridge
+// and once from the durable run-delivery path, with different fingerprints --
+// and an agent consumes both. Two agent replicas sharing one claimer model
+// exactly that: both are handed the same succeeded run, and exactly one model
+// call is made.
+func TestTheValidatorChecksAnAnswerVersionOnceAcrossReplicas(t *testing.T) {
+	claimer := &onceClaimer{}
+	first, firstJudge := newValidatorIntegration(t)
+	second, secondJudge := newValidatorIntegration(t)
+	first.ServeAnswerChecks(claimer)
+	second.ServeAnswerChecks(claimer)
+
+	if _, err := first.handleValidateAnswer(validatorCaller(), validatorArgs(), 0); err != nil {
+		t.Fatalf("first replica: %v", err)
+	}
+	nodes, err := second.handleValidateAnswer(validatorCaller(), validatorArgs(), 0)
+	if err != nil {
+		t.Fatalf("second replica: %v", err)
+	}
+	if calls := firstJudge.calls() + secondJudge.calls(); calls != 1 {
+		t.Fatalf("the check made %d model calls across two replicas, want 1", calls)
+	}
+	if reason := rowString(decodeReply(t, nodes), "skipped"); !strings.Contains(reason, "another replica") {
+		t.Errorf("the losing replica's reply = %v, want a skip saying another replica has it", decodeReply(t, nodes))
+	}
+	if len(mutationsIn(secondJudge.recordingEngine)) != 0 {
+		t.Errorf("the losing replica wrote %s", secondJudge.summary())
+	}
+	// The key is the ANSWER VERSION: the run, the step and its version -- a
+	// later version of the same step is new work and must win its own claim.
+	if len(claimer.keys) == 0 || !strings.Contains(claimer.keys[0], actRunId) ||
+		!strings.Contains(claimer.keys[0], "draft") || !strings.Contains(claimer.keys[0], "2") {
+		t.Errorf("claim keys = %v, want the run, the step and the version", claimer.keys)
+	}
+}
+
+// A skip decided BEFORE the claim takes none: a journal run, a policy that is
+// off, a version already checked must not hold a claim a real check needs.
+func TestTheValidatorClaimsNothingItWillNotCheck(t *testing.T) {
+	claimer := &onceClaimer{}
+	i, judge := newValidatorIntegration(t)
+	i.ServeAnswerChecks(claimer)
+	journalRun(judge, "journal:appSession", "claude-code answered a model call")
+	if _, err := i.handleValidateAnswer(validatorCaller(), validatorArgs(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(claimer.keys) != 0 {
+		t.Errorf("a skipped check claimed %v", claimer.keys)
+	}
+}
+
+// A NODE THAT DOES NOT SERVE ANSWER CHECKS LEAVES THEM TO ONE THAT DOES, and
+// says so before it reads a row, claims anything or reaches a model.
+//
+// The live topology on 2026-09-28: every validateStepAnswer ran on the planner
+// AND on the agent. The planner's copy failed (no forwarded authority for a
+// fleet hop from an automation) and wrote a failed modelCall row onto the run
+// it was checking; the agent's opened the app session. Claiming only among
+// agents stopped the agent's own duplicate, but left the planner's copy
+// running unclaimed -- and once planner calls can reach an app by forwarding
+// to the agent that holds the machine (the planner/app-source design, 3a),
+// that copy is a second session for the same answer. Which node serves the
+// check is now explicit: the node that was not designated skips, whatever it
+// could reach, and the designated one's claim is the only claim.
+func TestANodeThatDoesNotServeAnswerChecksLeavesThemToOneThatDoes(t *testing.T) {
+	claimer := &onceClaimer{}
+	agent, agentJudge := newValidatorIntegration(t)
+	agent.ServeAnswerChecks(claimer)
+
+	// The planner: the same work integration, handed the same transition,
+	// never designated.
+	planner, plannerJudge := newValidatorIntegration(t)
+	planner.answerChecks = answerCheckRole{}
+
+	nodes, err := planner.handleValidateAnswer(validatorCaller(), validatorArgs(), 0)
+	if err != nil {
+		t.Fatalf("the planner's copy must be a skip, not a failure: %v", err)
+	}
+	if reason := rowString(decodeReply(t, nodes), "skipped"); !strings.Contains(reason, "agent") {
+		t.Errorf("the planner's reply = %v, want a skip that leaves the check to the agent", decodeReply(t, nodes))
+	}
+	if n := len(plannerJudge.recorded()); n != 0 {
+		t.Errorf("the planner read or wrote %d time(s) for a check it does not serve: %s", n, plannerJudge.summary())
+	}
+	if plannerJudge.calls() != 0 {
+		t.Errorf("the planner made %d model call(s) for a check it does not serve", plannerJudge.calls())
+	}
+	if len(claimer.keys) != 0 {
+		t.Errorf("the planner claimed %v; a claim it takes is a check the agent loses", claimer.keys)
+	}
+
+	if _, err := agent.handleValidateAnswer(validatorCaller(), validatorArgs(), 0); err != nil {
+		t.Fatalf("agent: %v", err)
+	}
+	if agentJudge.calls() != 1 {
+		t.Errorf("the agent made %d model call(s), want the one check", agentJudge.calls())
+	}
+}
+
+// THE OWNER GATE STILL COMES FIRST. A caller the check may not run for is
+// refused on every node, a non-serving one included: "this node does not
+// serve checks" must not read as permission granted elsewhere.
+func TestANonServingNodeStillRefusesACallerTheCheckMayNotRunFor(t *testing.T) {
+	i, _ := newValidatorIntegration(t)
+	i.answerChecks = answerCheckRole{}
+	if _, err := i.handleValidateAnswer(context.Background(), validatorArgs(), 0); err == nil {
+		t.Fatal("a caller with no internal origin was answered with a skip rather than refused")
 	}
 }

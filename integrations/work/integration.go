@@ -98,6 +98,12 @@ type Integration struct {
 	// see SetRunClaimer.
 	runClaimer RunClaimer
 
+	// answerChecks says whether THIS node serves the answer validator's check
+	// and, when it does, the claim that makes one answer version one check
+	// among the nodes that serve it (validator.go, ServeAnswerChecks). The
+	// zero value serves none: a node that was not designated skips.
+	answerChecks answerCheckRole
+
 	// rowsInFlight is the source of the abandoned sweep's rows. It is a
 	// FIELD rather than a method call so the sweep's per-row decisions --
 	// which run is parked, which is dead, whose authority each write borrows

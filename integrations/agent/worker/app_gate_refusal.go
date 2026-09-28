@@ -30,6 +30,13 @@ const AppGateKillSwitchUnreadable = "kill_switch_unreadable"
 // an explicit pin the session's owner did not make.
 const AppGateNotNamedByOwner = "app_not_named_by_owner"
 
+// AppGateNoOwner is the refusal code for a session that would act for nobody:
+// a scheduled automation, the maintenance principal, one of the cluster's own
+// principals, a connector, the anonymous actor, any other synthetic actor
+// (auth.ActsForNoPerson). The message is the engine's own AppNoOwnerReason,
+// so the router's skip line and this refusal read alike.
+const AppGateNoOwner = "app_no_owner"
+
 // appGateRefusal is a named refusal from the app gate. Both doors wrap it, so
 // errors.As finds it under whatever a door adds in front.
 type appGateRefusal struct {
@@ -49,7 +56,7 @@ func (r *appGateRefusal) Code() string { return r.code }
 // trying the owner's next machine, which the same gate would refuse.
 func isAppGateCode(code string) bool {
 	switch code {
-	case AppGateKillSwitchEngaged, AppGateKillSwitchUnreadable, AppGateNotNamedByOwner:
+	case AppGateKillSwitchEngaged, AppGateKillSwitchUnreadable, AppGateNotNamedByOwner, AppGateNoOwner:
 		return true
 	}
 	return false

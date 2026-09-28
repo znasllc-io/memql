@@ -31,6 +31,11 @@ func (a *App) integrationsAgent() {
 	// guard this needs -- and integrationsCore() above is what materializes
 	// the work plug-in it installs itself on.
 	a.wireWorkRunDispatcher()
+	// Answer checks are served HERE and nowhere else, claimed among agent
+	// replicas: every node sees the succeeded run, and a copy on a node that
+	// was not designated would be a second check -- on a route that puts an
+	// app first, a second session (app/integrations_work_validator.go).
+	a.wireAnswerChecks()
 
 	a.Logger.Info("agent integration providers registered")
 }

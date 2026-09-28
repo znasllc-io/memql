@@ -39,6 +39,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -234,6 +235,12 @@ func (p *sessionProvider) run(
 	actingUser := strings.TrimSpace(p.req.ActingUserId)
 	if actingUser == "" {
 		actingUser = actingUserFromContext(ctx)
+	}
+	// A STEP HANDED OVER FOR NOBODY IS REFUSED BEFORE THE DELEGATE, with the
+	// app door's own reason: the session would run on a person's machine
+	// under a credential naming that person, and there is no person here.
+	if auth.ActsForNoPerson(ctx, actingUser) {
+		return AppSessionOutcome{}, &AppUnavailable{AppId: p.appId, NoOwner: true}
 	}
 
 	out, err := d.RunStep(ctx, AppSessionHandover{

@@ -37,13 +37,16 @@ func (f *fallbackStreamWithTools) CallChatStreamWithTools(
 	}
 	var lastErr error
 	var lastFailedResolved Resolved
+	// The selection each attempt's decision is copied from; a failed attempt
+	// is noted on it, so every later row names the source that failed.
+	selection := f.resolved
 
 	for i, name := range f.chain {
 		client, resolved, ok := f.router.providerLookup(ctx, f.req, name, modalityStreamTools)
 		if !ok {
 			continue
 		}
-		resolved = resolved.withDecisionFrom(f.resolved)
+		resolved = resolved.withDecisionFrom(selection)
 		inner := client.(common.ChatStreamWithToolsProvider)
 
 		// If the previous attempt failed pre-flight, that failure was
@@ -67,6 +70,7 @@ func (f *fallbackStreamWithTools) CallChatStreamWithTools(
 		}
 		lastErr = err
 		lastFailedResolved = resolved
+		selection = selection.withAttemptFailed(resolved, err)
 	}
 
 	if lastErr != nil {
@@ -119,6 +123,10 @@ func (f *fallbackStreamWithTools) retryUnstartedStream(
 				f.router.recordObserved(ctx, fallbackRecord(f.req, failed, chunk.Error))
 				remaining := *f
 				remaining.chain = f.chain[next:]
+				// The walk so far travels with the retry: `failed` carries every
+				// earlier failure noted on its decision, and this one is added.
+				remaining.resolved = f.resolved
+				remaining.resolved.Decision.Considered = withFailureNoted(failed.Decision.Considered, failed.ProviderName, failed.Decision.Door, chunk.Error)
 				retry, err := remaining.CallChatStreamWithTools(ctx, messages, tools)
 				if err != nil {
 					if errors.Is(err, errNoChainEntryAvailable) {
@@ -175,13 +183,14 @@ func (f *fallbackWithTools) CallChatWithTools(
 ) (*common.ToolCallingChatResult, error) {
 	var lastErr error
 	var lastFailedResolved Resolved
+	selection := f.resolved
 
 	for _, name := range f.chain {
 		client, resolved, ok := f.router.providerLookup(ctx, f.req, name, modalityTools)
 		if !ok {
 			continue
 		}
-		resolved = resolved.withDecisionFrom(f.resolved)
+		resolved = resolved.withDecisionFrom(selection)
 		inner := client.(common.ToolCallingChatAIProvider)
 
 		if lastErr != nil {
@@ -203,6 +212,7 @@ func (f *fallbackWithTools) CallChatWithTools(
 		}
 		lastErr = err
 		lastFailedResolved = resolved
+		selection = selection.withAttemptFailed(resolved, err)
 	}
 
 	if lastErr != nil {
@@ -252,17 +262,19 @@ type fallbackChat struct {
 	req      ResolveRequest
 	resolved Resolved
 	served   servedTracker
+	calls    perCall
 }
 
 func (f *fallbackChat) CallChat(ctx context.Context, messages []common.ChatMessage) (string, error) {
 	var reply string
-	err := f.router.fallbackWalk(ctx, f.req, f.resolved, f.chain, modalityChat, &f.served,
+	req := f.calls.request(ctx, f.req)
+	err := f.router.fallbackWalk(ctx, req, f.resolved, f.chain, modalityChat, &f.served,
 		func(ctx context.Context, client any, resolved Resolved) (string, error) {
 			observed := &observedChat{
 				inner:    client.(common.ChatAIProvider),
 				router:   f.router,
 				resolved: resolved,
-				req:      f.req,
+				req:      req,
 			}
 			var err error
 			reply, err = observed.CallChat(ctx, messages)
@@ -283,13 +295,14 @@ func (f *fallbackChat) CallChat(ctx context.Context, messages []common.ChatMessa
 // and an ai() expression reads that value.
 func (f *fallbackChat) Call(ctx context.Context, prompt string) (any, error) {
 	var value any
-	err := f.router.fallbackWalk(ctx, f.req, f.resolved, f.chain, modalityChat, &f.served,
+	req := f.calls.request(ctx, f.req)
+	err := f.router.fallbackWalk(ctx, req, f.resolved, f.chain, modalityChat, &f.served,
 		func(ctx context.Context, client any, resolved Resolved) (string, error) {
 			observed := &observedChat{
 				inner:    client.(common.ChatAIProvider),
 				router:   f.router,
 				resolved: resolved,
-				req:      f.req,
+				req:      req,
 			}
 			var err error
 			value, err = observed.Call(ctx, prompt)
@@ -343,7 +356,7 @@ func fallbackRecord(req ResolveRequest, failedResolved Resolved, err error) Call
 		Rule:               failedResolved.Decision.Rule,
 		Policy:             failedResolved.Decision.Policy,
 		Door:               failedResolved.Decision.Door,
-		Considered:         failedResolved.Decision.Considered,
+		Considered:         withFailureNoted(failedResolved.Decision.Considered, failedResolved.ProviderName, failedResolved.Decision.Door, err),
 		Touches:            failedResolved.Decision.Touches,
 		MinContextTokens:   failedResolved.Decision.MinContextTokens,
 		MachineOwnerUserId: failedResolved.Decision.MachineOwnerUserId,

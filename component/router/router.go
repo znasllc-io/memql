@@ -992,7 +992,7 @@ func buildRouterCallArgs(rec CallRecord, callId string) map[string]any {
 		"policy":             rec.Policy,
 		"door":               rec.Door,
 		"considered":         consideredArgs(rec.Considered),
-		"touches":            rec.Touches,
+		"touches":            touchesArgs(rec.Touches),
 		"minContextTokens":   rec.MinContextTokens,
 		"machineOwnerUserId": rec.MachineOwnerUserId,
 	}
@@ -1024,6 +1024,18 @@ func consideredArgs(entries []airoute.ConsideredEntry) []map[string]any {
 		})
 	}
 	return out
+}
+
+// touchesArgs renders a call's footprint as the []string the concept's array
+// field takes, EMPTY RATHER THAN NIL: a nil slice renders as `null`, the
+// concept's validation refuses null for an array, and the refusal drops the
+// WHOLE row -- logged once, counted in RecordsDropped, and gone. A call that
+// names no footprint is most engine prompt calls and every structured one.
+func touchesArgs(touches []string) []string {
+	if touches == nil {
+		return []string{}
+	}
+	return touches
 }
 
 // billingOrMetered normalizes a record's billing for the ledger. An

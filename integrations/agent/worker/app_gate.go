@@ -50,6 +50,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
@@ -69,6 +70,14 @@ type PreferencesReader interface {
 // owner has online and never leaves anything behind. The pin is asked first
 // because it needs no read.
 func admitAppSession(ctx context.Context, prefs PreferencesReader, logger *slog.Logger, owner string, pin memqlengine.AppDoorPin) *appGateRefusal {
+	// NOBODY TO ACT FOR, first and with no read: a session runs on a person's
+	// own machine under a credential naming that person, and a system actor
+	// is a non-empty UserId that names no one. Asked here because all three
+	// ways in -- the chat door, the session door, a routed Task -- ask this
+	// gate, so one rule covers them.
+	if auth.ActsForNoPerson(ctx, owner) {
+		return &appGateRefusal{code: AppGateNoOwner, message: memqlengine.AppNoOwnerReason}
+	}
 	if refusal := appDoorPinRefusal(pin, owner); refusal != nil {
 		return refusal
 	}

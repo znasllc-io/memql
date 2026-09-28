@@ -35,6 +35,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -71,6 +72,19 @@ var ErrAppUnavailable = errors.New("no machine can run this app right now")
 // RefusalCodeNoLocalModel in the same vocabulary an operator reads across
 // the park card, the log line and the row.
 const AppRefusalCode = "no_app_available"
+
+// AppNoOwnerReason is why an app door is shut to a call that acts for nobody:
+// a scheduled automation, the maintenance principal, one of the cluster's own
+// principals, a connector, the anonymous actor, any other synthetic actor, a
+// bare Go call with no actor (auth.ActsForNoPerson).
+//
+// It is the reason the chain walk records against the app entry -- on the
+// decision row Fleet History reads -- and the walk then moves on to the next
+// source, so the call is never failed BECAUSE of it. The words are the
+// owner's: a session is a person's app on that person's machine, under a
+// credential whose subject is that person, and system work has no person to
+// name. There is deliberately no shared-app opt-in the way the fleet has one.
+const AppNoOwnerReason = "no owner: an app session acts as a person"
 
 // AppVisionStagingRefusalCode is the stable tag for a vision call through the
 // app door whose images could not be landed in the session workspace (issue
@@ -450,6 +464,15 @@ func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId, mo
 	}
 	client := &appProvider{registry: r, appId: appId, model: model, actingUserId: actingUserId, wildcard: wildcard}
 	entry := &ProviderConfigEntry{Config: cfg, Client: client}
+	// NOBODY TO ACT FOR IS ASKED FIRST, before whether this node can open a
+	// session at all: it is true on every node, it needs no machine read, and
+	// "app sources run on the agent holding the machine"
+	// (appSourcesNotOnThisNode) would send a reader to the agent for a call
+	// no replica could serve.
+	if auth.ActsForNoPerson(ctx, actingUserId) {
+		entry.err = errors.New(AppNoOwnerReason)
+		return entry, true
+	}
 	if a == nil {
 		entry.err = errors.New(appSourcesNotOnThisNode())
 		return entry, true
@@ -602,6 +625,12 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 	req.ActingUserId = p.actingUserId
 	if strings.TrimSpace(req.ActingUserId) == "" {
 		req.ActingUserId = actingUserFromContext(ctx)
+	}
+	// DEFENCE IN DEPTH: the router never hands out this client for a call
+	// that acts for nobody (appEntry shuts the door first), and a caller that
+	// holds one anyway is refused here, before any machine is asked.
+	if auth.ActsForNoPerson(ctx, req.ActingUserId) {
+		return AppCallResult{}, &AppUnavailable{AppId: p.appId, NoOwner: true}
 	}
 	req.Pin = p.pin
 	// THE CALLING RUN AND STEP, filled only if empty -- applyCallAttribution's
@@ -924,6 +953,10 @@ var (
 // opened".
 type AppUnavailable struct {
 	AppId string
+	// NoOwner is true when the call acts for nobody (AppNoOwnerReason). No
+	// machine was asked, so there is nothing to count or consider, and the
+	// refusal says the one thing that is true.
+	NoOwner bool
 	// Considered maps app id -> the reason it was ruled out.
 	Considered map[string]string
 	// Total is how many doors were looked at before filtering, which
@@ -939,6 +972,9 @@ func (e *AppUnavailable) Code() string { return AppRefusalCode }
 func (e *AppUnavailable) Error() string {
 	if e == nil {
 		return ErrAppUnavailable.Error()
+	}
+	if e.NoOwner {
+		return AppRefusalCode + ": " + AppNoOwnerReason
 	}
 	var b strings.Builder
 	if e.AppId == "*" {
@@ -986,6 +1022,9 @@ func (e *AppUnavailable) AsMap() map[string]any {
 		"appsTotal":    e.Total,
 		"appsRuledOut": considered,
 	}
+	if e.NoOwner {
+		out["reason"] = AppNoOwnerReason
+	}
 	if e.LastError != "" {
 		out["lastError"] = e.LastError
 	}
@@ -996,6 +1035,10 @@ func (e *AppUnavailable) AsMap() map[string]any {
 // report and the decision read the same source.
 func (r *ProviderRegistry) AppRefusal(ctx context.Context, actingUserId, appId string) *AppUnavailable {
 	out := &AppUnavailable{AppId: appId, Considered: map[string]string{}}
+	if auth.ActsForNoPerson(ctx, actingUserId) {
+		out.NoOwner = true
+		return out
+	}
 	if r == nil {
 		return out
 	}
