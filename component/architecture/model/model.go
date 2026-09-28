@@ -1,11 +1,11 @@
 // Package model defines the in-memory and on-disk schema for MemQL's
-// architecture graph: the intermediate representation that sits between
-// static analysis of the Go source and the cockpit's diagram renderer.
+// architecture graph -- the intermediate representation between static
+// analysis of the Go source and whatever renders it -- and for the platform
+// graph (platform.go), the system that code is deployed as.
 //
 // The model is intentionally renderer-agnostic. The same Model can be
-// drawn natively in the cockpit TUI (cli/canvas), exported to standard
-// notations (PlantUML, D2, Mermaid) for docs, or joined against
-// observability data by the stable, fully-qualified node IDs.
+// exported to a text notation such as Mermaid for docs, or joined
+// against observability data by the stable, fully-qualified node IDs.
 //
 // A Model is a typed graph: Nodes carry the entities (cluster, service,
 // package, type, function, ...) and Edges carry the relationships
@@ -144,8 +144,8 @@ type Edge struct {
 }
 
 // Model is the top-level container. Persisted as JSON
-// (topology.model.json) at the workspace root by the extractor and
-// loaded by the cockpit at startup.
+// (topology.model.json) by the extractor and embedded by
+// component/architecture/embedded.
 //
 // SchemaVersion is checked before unmarshaling.
 //
