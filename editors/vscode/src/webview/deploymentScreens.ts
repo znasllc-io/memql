@@ -15,6 +15,14 @@ import { escapeHtml } from "@znasllc-io/memql-view-kit";
 
 import { renderDisclosure, renderScreen } from "./screenLayout.js";
 
+import type { VersionPreview } from "../deploy/controller.js";
+import {
+  deployControls,
+  rolloutsInFlight,
+  versionOf,
+  type DeployControl,
+  type DeployControlFacts,
+} from "../deploy/controls.js";
 import type { InstanceAction } from "../deploy/instanceActions.js";
 import type { UpgradeVerdict } from "../deploy/upgrade.js";
 import { displayVersion, type Instance, type Run, type RunItem } from "../state/deployments.js";
@@ -454,16 +462,84 @@ function shipTargetLine(input: RemoteOverviewInput): string {
   if (target === "") {
     return `<p class="notice">Nothing is cut, so Deploy has no record to ship. Cut a version first.</p>`;
   }
-  const version = input.runs.find((run) => run.id === target)?.toVersion ?? "";
+  const version = versionOf(input.runs, target);
   return `<p class="notice">Deploy ships ${escapeHtml(target)}${
     version === "" ? "" : ` (${escapeHtml(version)})`
   }.</p>`;
+}
+
+/**
+ * WHICH record "Roll back" returns to, named on the page, for the reason the
+ * ship line gives: a line above the button tells the operator before they
+ * decide, where the type-to-confirm prompt tells them after.
+ *
+ * The rule for WHICH record is `deploymentHistory.rollbackTargetId`'s; this only
+ * says the answer, or that there is none.
+ */
+function rollbackTargetLine(input: RemoteOverviewInput): string {
+  if (!input.pipeline.actions.some((action) => action.id === "rollback")) return "";
+  const target = (input.instance.rollbackTargetId ?? "").trim();
+  if (target === "") {
+    return `<p class="notice">No earlier succeeded release is in this cluster's history, so Roll back has nothing to return to.</p>`;
+  }
+  const version = versionOf(input.runs, target);
+  return `<p class="notice">Roll back returns to ${escapeHtml(target)}${
+    version === "" ? "" : ` (${escapeHtml(version)})`
+  }.</p>`;
+}
+
+/**
+ * Why the Rollout action draws no buttons, when it draws none.
+ *
+ * Its buttons are one promote and one abort per rollout IN FLIGHT
+ * (deploy/controls.ts), so a cluster whose rollouts are all settled draws
+ * nothing for it -- and an action that silently vanished would read as one the
+ * role had hidden.
+ */
+function rolloutLine(input: RemoteOverviewInput): string {
+  if (!input.pipeline.actions.some((action) => action.id === "rolloutAction")) return "";
+  if (rolloutsInFlight(input.pipeline.rollouts).length > 0) return "";
+  return `<p class="notice">No Argo Rollout is in flight, so there is nothing to promote or abort.</p>`;
+}
+
+/**
+ * Why the Cut buttons name a bump rather than a version, when they do: the
+ * preview read failed, and the engine will compute the version at the cut.
+ * The engine's own words, as every other failed read on this page carries them.
+ */
+function cutPreviewLine(input: RemoteOverviewInput): string {
+  if (!input.pipeline.actions.some((action) => action.id === "cutVersion")) return "";
+  const message = input.versionPreview?.message ?? "";
+  if (message === "") return "";
+  return `<p class="notice">The next versions could not be previewed, so Cut names only the bump: ${escapeHtml(
+    message,
+  )}</p>`;
+}
+
+/**
+ * One deploy-control button.
+ *
+ * `data-deploy` carries the control's KEY, which the panel matches against a
+ * fresh expansion of its own facts (deploy/controls.ts) -- so the button says
+ * nothing the panel then trusts beyond which of its own controls was pressed.
+ */
+function deployControlButton(control: DeployControl, label = control.label): string {
+  return `<button class="${
+    control.destructive ? "secondary destructive" : "primary"
+  }" type="button" data-deploy="${escapeHtml(control.key)}" title="${escapeHtml(
+    control.detail,
+  )}">${escapeHtml(label)}</button>`;
 }
 
 export interface RemoteOverviewInput {
   instance: Instance;
   runs: readonly Run[];
   pipeline: PipelineState;
+  /**
+   * The next-version proposals the Cut buttons name, or undefined before
+   * they have been read -- in which case the buttons name the bump alone.
+   */
+  versionPreview?: VersionPreview;
   nowMs: number;
   /** The outcome line of the last action taken, or "" before any. */
   outcome: string;
@@ -491,15 +567,16 @@ export function renderRemoteInstance(input: RemoteOverviewInput): string {
   const { instance, pipeline } = input;
   const status = instanceRowStatus(instance, input.releases);
 
-  const actions = pipeline.actions
-    .map(
-      (action) =>
-        `<button class="${
-          action.typeToConfirm ? "secondary destructive" : "primary"
-        }" type="button" data-deploy="${escapeHtml(action.id)}" title="${escapeHtml(
-          action.description,
-        )}">${escapeHtml(action.label)}</button>`,
-    )
+  const actions = deployControls(
+    pipeline.actions.map((action) => action.id),
+    {
+      instance,
+      runs: input.runs,
+      rollouts: pipeline.rollouts,
+      preview: input.versionPreview,
+    },
+  )
+    .map((control) => deployControlButton(control))
     .join("");
 
   // THE RUN ROWS KEEP THEIR HEADLINE; THE PER-TIER BREAKDOWN DOES NOT
@@ -566,7 +643,10 @@ ${error}
 ${outcome}
 <h2>${escapeHtml(pipeline.title)}</h2>
 <p class="lede">${escapeHtml(pipeline.detail)}</p>
-${shipTargetLine(input)}`,
+${shipTargetLine(input)}
+${cutPreviewLine(input)}
+${rolloutLine(input)}
+${rollbackTargetLine(input)}`,
     details: `<div class="facts">
   <div class="fact"><span class="fact-key">version</span><span class="fact-value">${escapeHtml(
     displayVersion(instance.version),
@@ -610,6 +690,13 @@ export interface RunDetailInput {
   run: Run;
   /** From `runDetailActions` -- the instance's own set, reordered. */
   actions: readonly InstanceAction[];
+  /**
+   * What the deploy-control actions among `actions` are resolved from --
+   * the same facts the remote overview expands them with, so a button here
+   * names and sends what the same button there does. Absent, they resolve
+   * from the instance alone: no rollouts, no version preview.
+   */
+  deployFacts?: DeployControlFacts;
   nowMs: number;
   /**
    * The outcome line of the last action taken from this page, or "" before any.
@@ -724,18 +811,32 @@ export function renderRunDetail(input: RunDetailInput): string {
   // pages already post. The BUTTONS come from one place either way, which is
   // what keeps this page from becoming a second authority on what an instance
   // offers; only the wire differs, and it differs because the machinery does.
+  //
+  // A deploy-control action EXPANDS here exactly as it does on the overview
+  // (deploy/controls.ts): a Cut per bump, a promote and an abort per rollout in
+  // flight. Deploy keeps the instance's own label, "Create deployment", which
+  // is the one verb instanceActions names differently from the catalog.
+  const facts: DeployControlFacts = input.deployFacts ?? {
+    instance,
+    runs: [run],
+    rollouts: [],
+    preview: undefined,
+  };
   const actions = input.actions
-    .map((action) => {
+    .flatMap((action) => {
+      if (action.deployAction !== undefined) {
+        return deployControls([action.deployAction], facts).map((control) =>
+          deployControlButton(control, control.action === "deploy" ? action.label : control.label),
+        );
+      }
       const destructive = action.id === "uninstall" || action.typeToConfirm === true;
-      const attribute =
-        action.deployAction === undefined
-          ? `data-choose="${escapeHtml(action.id)}"`
-          : `data-deploy="${escapeHtml(action.deployAction)}"`;
-      return `<button class="${
-        destructive ? "secondary destructive" : "primary"
-      }" type="button" ${attribute} title="${escapeHtml(action.detail)}">${escapeHtml(
-        action.label,
-      )}</button>`;
+      return [
+        `<button class="${
+          destructive ? "secondary destructive" : "primary"
+        }" type="button" data-choose="${escapeHtml(action.id)}" title="${escapeHtml(
+          action.detail,
+        )}">${escapeHtml(action.label)}</button>`,
+      ];
     })
     .join("");
 

@@ -101,6 +101,14 @@ export interface Instance {
    */
   pendingDeploymentId?: string;
   /**
+   * Remote: the record Roll back returns to
+   * (`deploymentHistory.rollbackTargetId`). Absent when nothing earlier
+   * qualifies, when the records could not be read, and always for a local
+   * instance. On the instance for the reason `pendingDeploymentId` is: what is
+   * rolled back to is the record the page named.
+   */
+  rollbackTargetId?: string;
+  /**
    * Local only (memql#4246). `checkout` is the directory the install cloned
    * (`recordedStackDir`); `imageSource` is which lane set the images last,
    * `released` or `checkout` (`recordedImageSource`); `rebuild` is the last
@@ -382,6 +390,11 @@ export interface RemoteInstanceInput {
    * instance, because there is no record to name in either case.
    */
   pendingDeploymentId?: string;
+  /**
+   * The record Roll back returns to (`deploymentHistory.rollbackTargetId`),
+   * empty or absent exactly as `pendingDeploymentId` is.
+   */
+  rollbackTargetId?: string;
 }
 
 /**
@@ -393,9 +406,10 @@ export interface RemoteInstanceInput {
  * is current is `deploymentHistory.currentDeploymentId`'s judgement and is not
  * re-derived here.
  *
- * The ship target is the same arrangement: `pendingDeploymentId` decides which
- * record is cut-but-unshipped and this carries the answer. Two derivations over
- * one record list, neither of them made twice.
+ * The ship and rollback targets are the same arrangement: `pendingDeploymentId`
+ * decides which record is cut-but-unshipped, `rollbackTargetId` which record
+ * Roll back returns to, and this carries the answers. Derivations over one
+ * record list, none of them made twice.
  */
 export function remoteInstance(input: RemoteInstanceInput): Instance {
   const current = (input.currentDeploymentId ?? "").trim();
@@ -405,6 +419,7 @@ export function remoteInstance(input: RemoteInstanceInput): Instance {
       : (indexDeployments(input.deployments ?? []).get(current)?.version ?? "");
   const domain = (input.domain ?? "").trim();
   const pending = (input.pendingDeploymentId ?? "").trim();
+  const rollback = (input.rollbackTargetId ?? "").trim();
   return {
     name: input.name,
     kind: "remote",
@@ -413,6 +428,7 @@ export function remoteInstance(input: RemoteInstanceInput): Instance {
     ...(version !== "" ? { version } : {}),
     connected: input.connected,
     ...(pending !== "" ? { pendingDeploymentId: pending } : {}),
+    ...(rollback !== "" ? { rollbackTargetId: rollback } : {}),
   };
 }
 

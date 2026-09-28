@@ -286,7 +286,7 @@ function render(
     diagnosticsOpen: false,
     instance,
     runs,
-    pipeline: { kind: "present", title: "Deploy", detail: "", actions },
+    pipeline: { kind: "present", title: "Deploy", detail: "", actions, rollouts: [] },
     nowMs: 0,
     outcome: "",
     error: "",
