@@ -18,14 +18,15 @@ package worker
 // disagreement would present as a machine that is selectable from a policy and
 // unreachable from a task.
 //
-// WHAT IT DOES NOT REUSE: preDispatchCheck. That gate answers "may this AGENT
-// run a command on this user's computer", and an inference call is not that
-// question -- it is MemQL asking a model for an answer, on hardware the user
-// pointed at it by signing in. The consent that matters here is the one
-// already given: the app is `allowed` in the machine's own policy.yaml and
-// somebody signed into it. Running the computer-use scope gate over a chat
-// turn would refuse every call on a machine whose owner had not granted an
-// agent shell access, for a call that runs no shell command.
+// THE CONSENT IS THE APP GATE (app_gate.go), the same one the session door and
+// a delegated Task ask -- not preDispatchCheck. That gate answers "may this
+// AGENT run a command on this user's computer", and an app session is not that
+// question. The consent that matters here is the one already given: the app is
+// `allowed` in the machine's own policy.yaml, somebody signed into it, and the
+// owner's policy named it. Running the computer-use scope gate over a chat turn
+// would refuse every call on a machine whose owner had not granted an agent
+// shell access, for a call that runs no shell command. The kill switch, when
+// the owner explicitly engaged it, closes this door as it closes the others.
 
 import (
 	"context"
@@ -68,8 +69,11 @@ type AppInference struct {
 	registry *workerservice.Registry
 	runner   *workerservice.SessionRunner
 	policies DelegationPolicyReader
-	logger   *slog.Logger
-	clock    func() time.Time
+	// prefs is where the app gate reads the owner's kill switch -- the
+	// dispatcher's store, so this door and the session door read one graph.
+	prefs  PreferencesReader
+	logger *slog.Logger
+	clock  func() time.Time
 	// vision lands the images of a vision call in the session workspace
 	// (issue memql#5523). NIL ON A NODE WITH NO BLOB STORAGE, and a vision
 	// call then REFUSES rather than running without its images -- see
@@ -93,7 +97,7 @@ func NewAppInference(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &AppInference{
+	a := &AppInference{
 		router:   d.Router(),
 		store:    d.FleetStore(),
 		registry: d.Registry(),
@@ -102,6 +106,10 @@ func NewAppInference(
 		logger:   logger,
 		clock:    d.clock,
 	}
+	if d.store != nil {
+		a.prefs = d.store
+	}
+	return a
 }
 
 // SetVisionStager wires the blob surface a vision call needs.
@@ -261,6 +269,14 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		}
 	}
 
+	// THE APP GATE, before a machine is chosen -- the same consent the session
+	// door asks. A refusal reads as a shut door (ErrAppUnavailable), so a chat
+	// chain moves on to its next source exactly as it does for a laptop that
+	// is asleep, and the refusal's own name says which it was.
+	if refusal := appSessionConsent(ctx, a.prefs, a.logger, owner); refusal != nil {
+		return memqlengine.AppCallResult{}, fmt.Errorf("%w: %s", memqlengine.ErrAppUnavailable, refusal)
+	}
+
 	// CAN THIS REPLICA STAGE AT ALL (issue memql#5523) -- asked before a
 	// machine is chosen, because it is a CONFIGURATION fact and needs no
 	// machine to answer. A node with no blob storage refuses the call here
@@ -287,7 +303,8 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 	if req.Schema != nil {
 		schema = string(req.Schema.Schema)
 	}
-	sessionId := "v1:worker:appSession:" + id.NewShortId()
+	sessionShortId := id.NewShortId()
+	sessionId := "v1:worker:appSession:" + sessionShortId
 
 	// THE IMAGES, LANDED BEFORE THE SESSION STARTS (issue memql#5523).
 	//
@@ -335,9 +352,13 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		// two derivations disagree the day either changes.
 		Prompt:         visionPromptWithInputs(flattenMessages(req.Messages), staged),
 		ResponseSchema: schema,
-		RunId:          req.RunId,
-		StepId:         req.StepId,
-		MaxDuration:    appSessionMaxDuration,
+		// Empty unless the owner set a workspaceRoot, and empty means the
+		// machine chooses (AppSessionStart.workspace) -- see
+		// inferenceWorkspace. Nothing on this path refuses for it.
+		Workspace:   a.inferenceWorkspace(ctx, owner, sessionShortId),
+		RunId:       req.RunId,
+		StepId:      req.StepId,
+		MaxDuration: appSessionMaxDuration,
 		// The CHAT door carries the level too (epic memql#5391, design D8).
 		// The same app on the same machine should not answer a `fast` turn at
 		// the effort a `reasoning` one asked for merely because this door
@@ -405,12 +426,8 @@ func (a *AppInference) selectMachine(ctx context.Context, owner string, req memq
 	considered := map[string]string{}
 	for _, cand := range plan.Candidates {
 		w := a.registry.WorkerById(cand.RegistrationId)
-		if w == nil {
-			considered[cand.RegistrationId] = "its stream is held by another replica"
-			continue
-		}
-		if !w.RunsApp(req.AppId) {
-			considered[cand.RegistrationId] = req.AppId + " is not allowed and signed in"
+		if why := appMachineRefusal(w, owner, req.AppId); why != "" {
+			considered[cand.RegistrationId] = why
 			continue
 		}
 		if req.Schema != nil {
@@ -429,6 +446,28 @@ func (a *AppInference) selectMachine(ctx context.Context, owner string, req memq
 		Considered: considered,
 		Total:      plan.Total,
 	}
+}
+
+// inferenceWorkspace is the directory an inference session runs in.
+//
+// One directory per SESSION under the owner's delegationPolicy.workspaceRoot
+// when they set one: a turn is its own unit, its staged images land there, and
+// two turns running at once must not share a tree. With no root it is EMPTY,
+// which AppSessionStart.workspace defines as "the machine chooses" -- the
+// engine cannot know a path on somebody's machine, and a guessed one is a path
+// the cockpit refuses or, worse, creates. A policy read that fails is logged
+// and leaves the choice to the machine rather than refusing the call.
+func (a *AppInference) inferenceWorkspace(ctx context.Context, owner, sessionShortId string) string {
+	if a.policies == nil {
+		return ""
+	}
+	policy, err := a.policies.DelegationPolicy(ctx, owner)
+	if err != nil {
+		a.logger.Warn("app door: delegation policy lookup failed; the machine chooses the workspace",
+			"owner_user_id", owner, "error", err)
+		return ""
+	}
+	return workspaceUnderRoot(policy.WorkspaceRoot, sessionShortId)
 }
 
 // answerFrom picks the text a caller gets back from a finished session.

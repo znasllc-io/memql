@@ -23,7 +23,7 @@ type fakeStore struct {
 }
 
 func (s *fakeStore) UserPreferences(context.Context, string) (Preferences, error) {
-	return Preferences{ComputerUseEnabled: true}, nil
+	return Preferences{}, nil
 }
 
 func (s *fakeStore) AgentAuthorization(context.Context, string, string) (*Authorization, error) {

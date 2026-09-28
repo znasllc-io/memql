@@ -2550,6 +2550,12 @@ type AppSessionStart struct {
 	// session credential before the run starts.
 	Inputs []string `protobuf:"bytes,5,rep,name=inputs,proto3" json:"inputs,omitempty"`
 	// workspace is the absolute directory on the machine the app runs in.
+	// EMPTY MEANS THE MACHINE CHOOSES: the engine names a directory only
+	// when the owner set a delegationPolicy workspaceRoot, and otherwise
+	// sends none rather than inventing a path on a machine it cannot see.
+	// The cockpit then runs the session in a scratch directory of its own,
+	// under its own policy roots. A named directory is still subject to the
+	// cockpit's veto; an empty one is never a reason to refuse the session.
 	Workspace string `protobuf:"bytes,6,opt,name=workspace,proto3" json:"workspace,omitempty"`
 	// credential is the per-run bearer for mcp_endpoint. Short-lived,
 	// user-scoped, revoked at end; the cockpit writes it into the app's

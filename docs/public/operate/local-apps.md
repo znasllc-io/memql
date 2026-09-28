@@ -29,7 +29,7 @@ The engine drives exactly two apps today — **Claude Code** (`claude-code`) and
    executorBackend=cockpit-app:claude-code
         │
         ▼
-   cockpit-app backend  ──── consent gates ────►  refused, with a reason
+   cockpit-app backend  ────── app gate ───────►  refused, with a reason
    (agent node)                                    naming which gate
         │
         │  AppSessionStart {credential, mcpEndpoint, workspace, prompt}
@@ -292,20 +292,36 @@ as it does today.
 
 ## Consent
 
-An app run edits files and runs commands on somebody's own computer. It gets
-**exactly** the gates `workerHost` gets — the backend calls the same
-`preDispatchCheck` function, in the same package, rather than a copy:
+An app session has its **own** gate, not the computer-use gates `workerHost`
+takes. Those answer "may this *agent* run this command on this user's
+computer"; an app session is the owner's own app, on their own machine, doing
+work their own policy routed to it. Every app session asks the same gate
+(`integrations/agent/worker/app_gate.go`) — a step handed over through the
+session door, a delegated Task, and a turn through the chat or structured app
+door alike:
 
-1. **Per-task approval** — the Task must carry a `PlanId` from an approved
-   scope-elevation Plan.
-2. **The kill switch** — `v1:identity:user.preferences.computerUseEnabled`.
-3. **Standing scope** — the agent's `agentAuthorization.computerUseScope` must
-   be `full`; an app run does shell exec and file writes.
-4. **The safety classifier**, fail-closed on this surface.
-5. **Plus `apps.allow`** on the machine itself, which the cockpit enforces and
-   the routing label reflects.
+1. **`apps.allow` on the machine** — the app is allowed in that machine's
+   `policy.yaml` and somebody signed into it. The cockpit enforces it, the
+   registration reports it, and the `app:<id>` routing label reflects it.
+2. **The owner's policy names the app** — their routing policy names
+   `app:<id>` (session and chat doors), or their delegation policy lets the
+   Task kind go to an app. The router never resolves an app door a policy does
+   not name.
+3. **The machine is the owner's** — an app session runs only on its owner's
+   machines. There is no sharing opt-in for app sessions: the session's
+   back-channel credential names a person.
+4. **The kill switch**, when it is **explicitly** engaged —
+   `v1:identity:user.preferences.computerUseEnabled == false` closes every app
+   session. Unset is not engaged, and a preference read that fails is logged
+   and admits.
 
-A refusal names which gate refused it.
+No `agentAuthorization` row and no `computerUseScope` is read, and there is no
+per-task approval or classifier pass: a cluster where no agent was ever granted
+a shell still opens the sessions its owner's policy routes to an app.
+
+A refusal names which gate refused it (`kill_switch_engaged`, "is not
+allowed and signed in", "is not <owner>'s machine"). The kill switch is asked
+before a machine is chosen, so a refused call never opens anything on one.
 
 ---
 
@@ -323,7 +339,7 @@ apps reported by a machine.
 | `eligibleKinds` | task kinds that may be delegated. An **empty list allows nothing** — opting in does not opt every kind in with it |
 | `appOrder` | which apps to try, in order. An app not listed is never selected even on a machine that has it |
 | `maxConcurrentSessions` | live sessions across every machine. `0` reads as the default of 1, never as "none" |
-| `workspaceRoot` | where per-run directories are created. The cockpit still gets to veto a path outside its own roots |
+| `workspaceRoot` | where the engine names session directories: one per run for a handed-over step or Task, one per session for an inference turn. **Unset lets the machine choose** — `AppSessionStart.workspace` is sent empty and the cockpit uses a scratch directory under its own roots. The cockpit still gets to veto a path outside its own roots |
 | `credentialLifetimeSeconds` | default 4h, clamped to 8h at the mint |
 
 **If no machine with an allowed, signed-in app is online, the task runs
@@ -444,7 +460,7 @@ per platform.
 
 ## Related
 
-- [Workers runbook](workers-runbook.md) — the tool surface this shares its consent gates with
+- [Workers runbook](workers-runbook.md) — the tool surface, whose computer-use gates app sessions do not take
 - [MCP connect](mcp-connect.md) — the endpoint the back-channel dials
 - [LLM cost control](../ai/llm-cost-control.md) — the layered spend guardrails
 - [Service-account JWTs](auth/service-account-jwt.md) — the credential class

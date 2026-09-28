@@ -175,7 +175,7 @@ func (s *loopStore) RoutingPolicyForOwner(context.Context, string) (*agentworker
 func (s *loopStore) TouchWorkerSelected(context.Context, string, string) error { return nil }
 
 func (s *loopStore) UserPreferences(context.Context, string) (agentworker.Preferences, error) {
-	return agentworker.Preferences{ComputerUseEnabled: true}, nil
+	return agentworker.Preferences{}, nil
 }
 
 func (s *loopStore) AgentAuthorization(context.Context, string, string) (*agentworker.Authorization, error) {

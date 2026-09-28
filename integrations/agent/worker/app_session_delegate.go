@@ -13,9 +13,9 @@ package worker
 // WHAT IT REUSES, AND WHY THAT IS THE DESIGN. The run goes through
 // CockpitAppExecutor.Run -- the SAME executor a delegated task uses -- because
 // a routed step and a delegated task are the same act: opening an app session
-// on somebody's machine with the owner's consent gates in front of it. A second
-// path here would be a second set of gates, and the two would disagree exactly
-// once, on the case nobody tested. That executor is also the one thing in this
+// on somebody's machine with the owner's app gate (app_gate.go) in front of it.
+// A second path here would be a second set of gates, and the two would disagree
+// exactly once, on the case nobody tested. That executor is also the one thing in this
 // tree that had no production caller on the delegation path; this file is that
 // caller.
 //
