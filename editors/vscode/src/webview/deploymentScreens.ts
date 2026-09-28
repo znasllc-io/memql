@@ -42,6 +42,7 @@ import {
   textInput,
   type Act,
   type FactRow,
+  type LogPaneInput,
 } from "./ui/kit.js";
 import type { RegionParts } from "./ui/liveView.js";
 import type { LogLine, ProgressUpdate } from "./ui/protocol.js";
@@ -175,6 +176,20 @@ export function runList(runs: readonly Run[], nowMs: number, preparedId = ""): s
   return `<ul class="dp-list" aria-label="History">${rows}</ul>`;
 }
 
+/**
+ * A SAVED log, drawn with the kit's log pane but NOT as a live log region.
+ *
+ * The page runtime writes every `log` message into every `data-region="log"`
+ * on the page, and LiveView re-sends its buffer -- with a reset -- whenever a
+ * new document says `ready`. A run's page that had been watching a run would
+ * therefore empty a recorded step's log, or fill it with the last run's
+ * lines, the moment the run's own page came up. A saved log is a record, not
+ * a stream, so it is not addressable by the stream.
+ */
+export function savedLogPane(i: LogPaneInput): string {
+  return logPane(i).replace(' data-region="log"', "");
+}
+
 /** A Details disclosure over facts, or "" when there are none. */
 function details(open: boolean, rows: readonly FactRow[], extraHtml = ""): string {
   const present = rows.filter((row) => (row.value ?? "") !== "" || row.valueHtml !== undefined);
@@ -201,6 +216,8 @@ export interface UnavailableInput {
   title: string;
   line: string;
   next?: string;
+  /** The fix, when the page can do it (open the file the fault is in). */
+  noticeActs?: readonly Act[];
   bar: { state: string; acts: readonly Act[] };
 }
 
@@ -212,7 +229,12 @@ export interface UnavailableInput {
 export function unavailableScreen(i: UnavailableInput): RegionParts {
   return {
     head: head({ title: i.title }),
-    body: notice({ tone: "error", line: i.line, ...(i.next === undefined ? {} : { next: i.next }) }),
+    body: notice({
+      tone: "error",
+      line: i.line,
+      ...(i.next === undefined ? {} : { next: i.next }),
+      ...(i.noticeActs === undefined || i.noticeActs.length === 0 ? {} : { acts: i.noticeActs }),
+    }),
     actions: actionBar({ state: i.bar.state, tone: "error", acts: i.bar.acts }),
   };
 }
@@ -395,11 +417,14 @@ export function remoteOverviewScreen(i: RemoteOverviewInput): RegionParts {
   const { instance } = i;
   let body = pageNotice(i.notice);
   if (i.outcome !== undefined) {
-    body += notice({
-      tone: i.outcome.tone,
-      line: i.outcome.line,
-      ...(i.outcome.signIn ? { acts: [{ act: "signIn", label: "Sign in" }] } : {}),
-    });
+    // The fix beside the sentence: a sign-in when that is what failed;
+    // otherwise the engine's own words, which are in the Output channel.
+    const acts: Act[] = i.outcome.signIn
+      ? [{ act: "signIn", label: "Sign in" }]
+      : i.outcome.tone === "error"
+        ? [{ act: "openOutput", label: "Show details" }]
+        : [];
+    body += notice({ tone: i.outcome.tone, line: i.outcome.line, ...(acts.length === 0 ? {} : { acts }) });
   }
   if (i.connection === "connected" && i.pipeline !== undefined && i.pipeline.line !== "") {
     body += notice({ tone: "info", line: i.pipeline.line });
@@ -801,7 +826,7 @@ export function runDetailScreen(i: RunDetailInput): RegionParts {
       { label: "Started at", value: run.startedAt, mono: true },
       { label: "Finished at", value: run.finishedAt ?? "", mono: true },
     ],
-    raw === "" ? "" : logPane({ id: "dp-raw", ariaLabel: "Recorded steps", lines: raw.split("\n").map((text) => ({ text })) }),
+    raw === "" ? "" : savedLogPane({ id: "dp-raw", ariaLabel: "Recorded steps", lines: raw.split("\n").map((text) => ({ text })) }),
   );
 
   return {
@@ -860,10 +885,10 @@ function stepsList(run: Run, i: RunDetailInput): string {
             bodyHtml:
               text === undefined
                 ? skeleton({ shape: "list", rows: 2, label: "Loading the log" })
-                : logPane({
+                : savedLogPane({
                     id: `dp-steplog-pane-${failedItem.label}`,
                     ariaLabel: `${g.label} log`,
-                    lines: text.split("\n").map((line) => ({ text: line })),
+                    lines: text === "" ? [] : text.replace(/\n+$/, "").split("\n").map((line) => ({ text: line })),
                     empty: "The log is empty",
                   }),
           })}</li>`;
@@ -911,12 +936,24 @@ function servicesList(run: Run): string {
   return subhead("Services") + `<ul class="dp-list">${rows}</ul>`;
 }
 
-/** A run that is no longer in the record: said, with the way back. */
-export function missingRunScreen(instance: Instance): RegionParts {
+/**
+ * A run that is no longer in the record: said, with the way back.
+ *
+ * WHERE IT WENT DEPENDS ON WHOSE RECORD IT WAS. This machine keeps its latest
+ * RUN_LOG_KEEP runs and prunes the rest; a remote cluster's history is the
+ * cluster's own rows, which this editor neither keeps nor prunes.
+ */
+export function missingRunScreen(instance: Instance, keep: number): RegionParts {
   return {
-    head: head({ title: "Run", back: { act: "back", label: instance.name } }),
-    body: emptyState({ line: "This run is no longer available. Only the latest 50 are kept." }),
-    actions: "",
+    head: head({ title: instance.kind === "remote" ? "Deployment" : "Run", back: { act: "back", label: instance.name } }),
+    body: emptyState({
+      line:
+        instance.kind === "remote"
+          ? "This deployment is no longer in the cluster's history."
+          : `This run is no longer in the history. Only the latest ${keep} are kept.`,
+    }),
+    // The way back is the head's link; the bar says where the run stands.
+    actions: actionBar({ state: "Not in the history", tone: "idle", acts: [] }),
   };
 }
 

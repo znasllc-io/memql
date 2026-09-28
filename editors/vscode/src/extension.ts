@@ -215,7 +215,7 @@ import {
   NOT_CONNECTED_REFUSAL,
 } from './state/connectionContext.js';
 import { connectionWordFor, type ConnectionFacts } from './state/deploymentsCatalog.js';
-import { DeploymentPanel, type DeploymentPanelDeps } from './webview/deploymentPanel.js';
+import { DeploymentPanel, type DeploymentPanelDeps, type OpenActionRefusal } from './webview/deploymentPanel.js';
 import { SITE_CONCEPT, consoleConceptUrl, consoleTarget } from './clusters/consoleUrl.js';
 import { isCatalogUri } from './constructs/catalogTarget.js';
 import { roleVisibility } from './deploy/actions.js';
@@ -1768,8 +1768,16 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   deploymentsTree.setVisible((deploymentsView as { visible?: boolean }).visible === true);
   context.subscriptions.push({ dispose: () => deploymentsTree.dispose() });
 
-  // No local checkout: said once, with the act that makes one.
-  const noCheckout = async (): Promise<void> => {
+  // Why a build from the checkout is not on offer, said once, with the act
+  // that changes it: Repair makes a missing checkout again; a checkout pinned
+  // to a release has no branch to pull, and moving it is a version change.
+  const noCheckout = async (reason: OpenActionRefusal = 'noCheckout'): Promise<void> => {
+    if (reason === 'noBranch') {
+      const change = 'Change Version';
+      const choice = await window.showInformationMessage('MemQL: the local checkout is on a release, so there is no branch to pull.', change);
+      if (choice === change) void commands.executeCommand('memql.deployments.changeVersion');
+      return;
+    }
     const repair = 'Repair';
     const choice = await window.showInformationMessage('MemQL: no local checkout found.', repair);
     if (choice === repair) void commands.executeCommand('memql.clusters.repair');
@@ -1807,9 +1815,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     }),
     // Change version, from the title menu and the palette: the page, on the
     // version picker.
+    // A machine with nothing installed lands on the page, which says so and
+    // offers Install.
     commands.registerCommand('memql.deployments.changeVersion', async () => {
-      const opened = await DeploymentPanel.openAction(context, deploymentPanelDeps(), 'changeVersion');
-      if (!opened) void window.showInformationMessage('MemQL: no local cluster to change.');
+      await DeploymentPanel.openAction(context, deploymentPanelDeps(), 'changeVersion');
     }),
     // "Rebuild Local Cluster From Checkout" (memql#4246). The caller that
     // matters most is the `edited` training lens, which offers it beside a
@@ -1818,13 +1827,13 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // rebuild screen rather than running: a rebuild takes minutes and changes
     // which images a cluster runs.
     commands.registerCommand(COMMAND_REBUILD, async () => {
-      const opened = await DeploymentPanel.openAction(context, deploymentPanelDeps(), 'rebuildFromCheckout');
-      if (!opened) await noCheckout();
+      const refused = await DeploymentPanel.openAction(context, deploymentPanelDeps(), 'rebuildFromCheckout');
+      if (refused !== undefined) await noCheckout(refused);
     }),
     // Pull the latest code into the checkout, then rebuild from it.
     commands.registerCommand('memql.deployments.updateAndRebuild', async () => {
-      const opened = await DeploymentPanel.openAction(context, deploymentPanelDeps(), 'updateAndRebuild');
-      if (!opened) await noCheckout();
+      const refused = await DeploymentPanel.openAction(context, deploymentPanelDeps(), 'updateAndRebuild');
+      if (refused !== undefined) await noCheckout(refused);
     }),
     // "Open Local Checkout" (memql#4246) -- the ONE place this editor opens the
     // directory the install cloned, shared by the page, the Connection page

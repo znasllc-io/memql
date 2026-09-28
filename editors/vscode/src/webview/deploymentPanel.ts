@@ -77,7 +77,7 @@ import {
   type ConnectionWord,
 } from "../state/deploymentsCatalog.js";
 import { rebuildCheck, type RebuildCheck, type RebuildPreflightInputs } from "../state/rebuildPreflight.js";
-import { defaultRunsDir } from "../state/runLog.js";
+import { RUN_LOG_KEEP, defaultRunsDir } from "../state/runLog.js";
 import { updateCheck } from "../state/updatePreflight.js";
 import { isSameVersion, upgradePlan, upgradeSummary, type PlannedStepView } from "../state/upgradePlan.js";
 import { describeVersion } from "../version/describe.js";
@@ -113,6 +113,13 @@ const RUN_TICK_MS = 1_000;
 
 /** Where a runbook the page links to is read. */
 const DOCS_BASE = "https://github.com/znasllc-io/memql/blob/main/";
+
+/**
+ * Why an act asked for from the palette or a lens is not on the page, when the
+ * page cannot say so itself: no checkout is recorded (Rebuild, Pull and
+ * rebuild), or the checkout is on a release with no branch to pull.
+ */
+export type OpenActionRefusal = "noCheckout" | "noBranch";
 
 type Screen =
   | { kind: "overview" }
@@ -246,26 +253,34 @@ export class DeploymentPanel {
    *
    * NARROWED, NOT TRUSTED: the page waits for its read and takes the act only
    * when the cluster offers it -- a machine with no recorded checkout has no
-   * rebuild -- and returns false so the caller can say why.
+   * rebuild. Returns why not when the page cannot say it itself: a cluster
+   * that is not installed, or was not installed here, shows that state and its
+   * act; an installed one that simply lacks the act does not, and the caller
+   * says which of the two things is missing.
    */
   static async openAction(
     context: vscode.ExtensionContext,
     deps: DeploymentPanelDeps,
     id: Extract<LocalActId, "changeVersion" | "rebuildFromCheckout" | "updateAndRebuild">,
-  ): Promise<boolean> {
+  ): Promise<OpenActionRefusal | undefined> {
     const panel = DeploymentPanel.show(context, deps);
     await panel.reading;
     const instance = panel.instance;
-    if (panel.disposed || instance === undefined || !offersLocal(instance, id)) return false;
+    if (panel.disposed || instance === undefined) return undefined;
+    if (!offersLocal(instance, id)) {
+      const installed = instance.presence === "installed-healthy" || instance.presence === "installed-unreachable";
+      if (!installed || id === "changeVersion") return undefined;
+      return (instance.checkout ?? "") === "" ? "noCheckout" : "noBranch";
+    }
     if (panel.slot().inFlight) {
       panel.screen = { kind: "run" };
       panel.render();
-      return true;
+      return undefined;
     }
     if (id === "changeVersion") panel.openChangeVersion();
     else if (id === "rebuildFromCheckout") await panel.openRebuild();
     else await panel.openPullRebuild();
-    return true;
+    return undefined;
   }
 
   private constructor(
@@ -500,6 +515,12 @@ export class DeploymentPanel {
       }
       case "openCheckout":
         void vscode.commands.executeCommand("memql.deployments.openCheckout");
+        return;
+      case "openClusterList":
+        // Only the fix a failed list read offers: the file the fault is in.
+        if (this.registryError !== "") {
+          void vscode.commands.executeCommand("vscode.open", vscode.Uri.file(this.deps.catalog.clustersPath));
+        }
         return;
       case "cancel":
         this.watched?.cancel();
@@ -1103,6 +1124,34 @@ export class DeploymentPanel {
   /** The screen to show now, as a LiveView key and its three regions. */
   private compose(): { key: string; parts: { head: string; body: string; actions: string }; run?: LocalRun } {
     const instance = this.instance;
+    const nowMs = (this.deps.now ?? Date.now)();
+
+    // A RUN GOING ON THIS MACHINE IS THE PAGE for the local cluster, unless the
+    // operator deliberately opened another run from the history. Decided BEFORE
+    // anything about the cluster list: the run needs none of it, and a list
+    // that tears mid-run (the Cockpit writes it without a lock, and the run's
+    // own steps rewrite it) or a first read still in flight must not take the
+    // live progress -- and its Cancel -- off the screen.
+    const current = this.slot().current;
+    const onLocal =
+      instance !== undefined
+        ? instance.kind === "local"
+        : this.instanceName === "" || (current !== undefined && this.instanceName === current.request.instance);
+    if (onLocal && current !== undefined && (this.screen.kind === "run" || (current.inFlight && this.screen.kind === "overview"))) {
+      return {
+        key: `run:${current.startedAt}`,
+        run: current,
+        parts: runScreen({
+          words: current.words,
+          status: current.status,
+          progress: current.progress(nowMs),
+          failure: current.failure,
+          cancellable: current.cancellable,
+          logsOpen: this.logsOpen || current.status === "failed",
+        }),
+      };
+    }
+
     if (this.registryError !== "") {
       return {
         key: "unavailable",
@@ -1110,6 +1159,8 @@ export class DeploymentPanel {
           title: "Cluster",
           line: "Can't read your cluster list.",
           next: this.registryError,
+          // The fix is usually in the file, so the file is one click away.
+          noticeActs: [{ act: "openClusterList", label: "Open the list" }],
           bar: { state: "Unavailable", acts: [{ act: "back", label: "Try again", tone: "primary" }] },
         }),
       };
@@ -1125,27 +1176,8 @@ export class DeploymentPanel {
         }),
       };
     }
-    const nowMs = (this.deps.now ?? Date.now)();
     const home = this.deps.home ?? os.homedir();
-
-    // A RUN GOING ON THIS MACHINE IS THE PAGE for the local cluster, unless the
-    // operator deliberately opened another run from the history.
-    const current = this.slot().current;
     const local = instance.kind === "local";
-    if (local && current !== undefined && (this.screen.kind === "run" || (current.inFlight && this.screen.kind === "overview"))) {
-      return {
-        key: `run:${current.startedAt}`,
-        run: current,
-        parts: runScreen({
-          words: current.words,
-          status: current.status,
-          progress: current.progress(nowMs),
-          failure: current.failure,
-          cancellable: current.cancellable,
-          logsOpen: this.logsOpen || current.status === "failed",
-        }),
-      };
-    }
 
     switch (this.screen.kind) {
       case "chooseVersion": {
@@ -1187,7 +1219,7 @@ export class DeploymentPanel {
       case "runDetail": {
         const runId = this.screen.runId;
         const run = this.runs.find((r) => r.id === runId);
-        if (run === undefined) return { key: `runDetail:${runId}`, parts: missingRunScreen(instance) };
+        if (run === undefined) return { key: `runDetail:${runId}`, parts: missingRunScreen(instance, RUN_LOG_KEEP) };
         return {
           key: `runDetail:${runId}`,
           parts: runDetailScreen({

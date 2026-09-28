@@ -612,7 +612,11 @@ const detailWhileRunning = scenario("deploy-detail-busy", "A past run while anot
   }),
 );
 
-const detailMissing = scenario("deploy-detail-missing", "A run no longer in the record", () => missingRunScreen(LOCAL));
+const detailMissing = scenario("deploy-detail-missing", "A run no longer in the record", () => missingRunScreen(LOCAL, 50));
+
+const detailMissingRemote = scenario("deploy-detail-gone", "A deployment no longer in the cluster's history", () =>
+  missingRunScreen(REMOTE, 50),
+);
 
 // ---------------------------------------------------------------------------
 // loading and unavailable
@@ -628,6 +632,7 @@ const unavailable = scenario(
       title: "Cluster",
       line: "Can't read your cluster list.",
       next: "clusters.yaml line 14: mapping values are not allowed here",
+      noticeActs: [{ act: "openClusterList", label: "Open the list" }],
       bar: { state: "Unavailable", acts: [{ act: "back", label: "Try again", tone: "primary" }] },
     }),
   "Cluster",
@@ -672,6 +677,7 @@ export const scenarios: readonly Scenario[] = [
   detailRemote,
   detailWhileRunning,
   detailMissing,
+  detailMissingRemote,
   loading,
   unavailable,
 ];

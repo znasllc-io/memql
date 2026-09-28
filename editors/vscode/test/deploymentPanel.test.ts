@@ -526,7 +526,7 @@ test("the rebuild screen's Repair fix opens Repair when the folder is not a MemQ
   }) as never;
   h.setConnection({ clusterName: "local", connected: true, word: "connected" });
   // From the palette or the title menu: the page opens on the rebuild screen.
-  assert.equal(await DeploymentPanel.openAction(context(), h.deps, "rebuildFromCheckout"), true);
+  assert.equal(await DeploymentPanel.openAction(context(), h.deps, "rebuildFromCheckout"), undefined);
   await until(() => /isn't a MemQL checkout/.test(text()), "the check");
   assert.doesNotMatch(page().html, /data-act="beginRebuild"/);
   page().send({ type: "repair" });
@@ -544,5 +544,235 @@ test("a remote cluster this editor is signed out of offers Sign in, never 'No de
   assert.match(text(), /Not signed in/);
   assert.match(page().html, /data-act="signIn"/);
   assert.doesNotMatch(text(), /deploy pipeline|not answering/i);
+  page().close();
+});
+
+// -----------------------------------------------------------------------------
+// review fixes
+// -----------------------------------------------------------------------------
+
+/** A log pane the page runtime streams into (the runtime's own script names the selector too). */
+const LIVE_LOG = /class="mq-log"[^>]*data-region="log"/;
+
+function startUpdate(h: Harness) {
+  return h.runs.start({ kind: "update", instance: "local", from: "v0.23.5", to: "v0.24.0" }, {
+    installRoot: REPO_ROOT,
+    receiptFile: h.deps.receiptFile,
+    runsDir: h.deps.runsDir!,
+    runScript: h.runner.run,
+    graphs: { update: TWO_WAVES },
+  })!;
+}
+
+test("a run going on this machine is the page from the first paint, before the cluster list has been read", async () => {
+  fresh();
+  const h = harness();
+  const run = startUpdate(h);
+  await until(() => h.runner.started.includes("install.binary"), "the run");
+  DeploymentPanel.show(context(), h.deps);
+  // No settle: the first document, before any read has landed.
+  assert.match(page().html, /Updating MemQL/);
+  assert.doesNotMatch(page().html, /class="mq-skeleton"/);
+  h.runner.release("install.binary");
+  await until(() => h.runner.started.includes("k3d.up"), "the second step");
+  h.runner.release("k3d.up");
+  await run.settled();
+  page().close();
+});
+
+test("a cluster list that tears mid-run leaves the live run and its Cancel on screen", async () => {
+  // The Cockpit writes clusters.yaml without a lock, and a run's own steps
+  // rewrite it: a read that lands on a half-written file must not replace the
+  // progress screen with an error that offers no way to stop the run.
+  fresh();
+  const h = harness();
+  const run = startUpdate(h);
+  await until(() => h.runner.started.includes("install.binary"), "the run");
+  DeploymentPanel.show(context(), h.deps);
+  await settle();
+  assert.match(page().html, /data-act="cancel"/);
+  h.deps.catalog.readClusters = async () => ({ ok: false as const, error: "unexpected end of the stream" });
+  h.change();
+  await settle();
+  assert.match(page().html, /Updating MemQL/);
+  assert.match(page().html, /data-act="cancel"/);
+  assert.doesNotMatch(text(), /Can't read your cluster list/);
+  h.runner.release("install.binary");
+  await until(() => h.runner.started.includes("k3d.up"), "the second step");
+  h.runner.release("k3d.up");
+  await run.settled();
+  page().close();
+});
+
+test("a cluster list that will not read offers the file itself as the fix", async () => {
+  fresh();
+  const h = harness();
+  h.deps.catalog.readClusters = async () => ({ ok: false as const, error: "bad yaml at line 3" });
+  DeploymentPanel.show(context(), h.deps);
+  await settle();
+  assert.match(page().html, /data-act="openClusterList"/);
+  page().send({ type: "openClusterList" });
+  await settle();
+  const at = recorded.executed.indexOf("vscode.open");
+  assert.notEqual(at, -1, "the list was not opened");
+  assert.equal((recorded.executedArgs[at]![0] as { fsPath?: string; path?: string }).fsPath ?? "", h.deps.catalog.clustersPath);
+  page().close();
+});
+
+test("a saved step log on a run's page is not a live log region, so the last run's stream cannot empty or overwrite it", async () => {
+  // The page runtime writes every `log` message into every live log region,
+  // and LiveView re-sends its buffer -- with a reset -- to each new document
+  // that says `ready`. A page that had been watching a run would otherwise
+  // wipe a recorded failure's saved output the moment its page came up.
+  fresh();
+  const past: Run = {
+    id: "run-past",
+    instance: "local",
+    kind: "upgrade",
+    fromVersion: "v0.23.4",
+    toVersion: "v0.23.5",
+    startedAt: "2026-09-25T03:00:00Z",
+    finishedAt: "2026-09-25T03:04:00Z",
+    status: "failed",
+    items: [{ label: "clusterUp", status: "failed", detail: "Port 443 is already in use · exit 1 · log=run-past.clusterUp.log" }],
+  };
+  const h = harness({ runList: [past] });
+  fs.mkdirSync(h.deps.runsDir!, { recursive: true });
+  fs.writeFileSync(path.join(h.deps.runsDir!, "run-past.clusterUp.log"), "Bind for 0.0.0.0:443 failed: port is already allocated\n");
+  h.setConnection({ clusterName: "local", connected: true, word: "connected" });
+
+  // Watch a run to its end on this page, as the page that started it would.
+  const run = startUpdate(h);
+  DeploymentPanel.show(context(), h.deps);
+  await until(() => h.runner.started.includes("install.binary"), "the run");
+  page().send({ type: "ready" });
+  assert.match(page().html, LIVE_LOG, "the run's own log is live");
+  h.runner.release("install.binary");
+  await until(() => h.runner.started.includes("k3d.up"), "the second step");
+  h.runner.release("k3d.up");
+  await run.settled();
+  await settle();
+  page().send({ type: "back" });
+  await settle();
+
+  page().send({ type: "openRun", value: "run-past" });
+  await until(() => /port is already allocated/.test(page().html), "the saved log");
+  page().send({ type: "ready" });
+  await settle();
+  assert.doesNotMatch(page().html, LIVE_LOG);
+  page().close();
+});
+
+test("a run no longer in the record is said per whose record it was, with the bar still on the floor", async () => {
+  fresh();
+  const local = harness();
+  DeploymentPanel.showRun(context(), local.deps, "local", "gone");
+  await settle();
+  assert.match(text(), /no longer in the history\. Only the latest 50 are kept\./);
+  assert.match(page().html, /mq-actbar-word">Not in the history</);
+  page().close();
+
+  fresh();
+  const remote = remoteHarness([]);
+  DeploymentPanel.showRun(context(), remote.deps, "staging", "dep-gone");
+  await settle();
+  assert.match(text(), /no longer in the cluster's history\./);
+  assert.doesNotMatch(text(), /latest 50/);
+  page().close();
+});
+
+function checkoutReceipt(result: Record<string, unknown>) {
+  return async () =>
+    ({
+      version: 1,
+      kind: "install",
+      createdAt: "2026-08-01T00:00:00Z",
+      entries: [
+        {
+          stepId: "stackCheckout",
+          script: "install/clone-stack.sh",
+          receipt: "checkout",
+          preExisting: false,
+          params: {},
+          result,
+          changed: true,
+          recordedAt: "2026-08-01T00:00:00Z",
+        },
+      ],
+    }) as never;
+}
+
+test("a branch install is never offered an update from the release its cluster reports", async () => {
+  // clusters.yaml records v0.23.5 for it, but the cluster runs main: "Update
+  // to v0.24.0" would move a checkout of main to a tag, worded as an upgrade
+  // from a version it is not on.
+  fresh();
+  const h = harness({
+    releases: createReleaseCache({ fetch: async () => ({ tags: ["v0.24.0", "v0.23.5"], error: "" }) }),
+  });
+  h.deps.catalog.readReceiptFile = checkoutReceipt({
+    dest: path.join(HOME, "stack"),
+    commit: "3f2a9c1e5b7d",
+    refKind: "branch",
+    ref: "main",
+  });
+  h.setConnection({ clusterName: "local", connected: true, word: "connected" });
+  DeploymentPanel.show(context(), h.deps);
+  await settle();
+  assert.match(page().html, /mq-head-meta">main @ 3f2a9c1</);
+  assert.doesNotMatch(page().html, /data-act="update"/);
+  assert.doesNotMatch(text(), /v0\.24\.0/);
+  page().close();
+});
+
+test("a checkout act the cluster lacks says which thing is missing; a page that says it itself gets no toast", async () => {
+  fresh();
+  const released = harness();
+  released.deps.catalog.readReceiptFile = checkoutReceipt({
+    dest: path.join(HOME, "stack"),
+    commit: "abc1234def",
+    refKind: "tag",
+    tag: "v0.23.5",
+  });
+  assert.equal(await DeploymentPanel.openAction(context(), released.deps, "updateAndRebuild"), "noBranch");
+  page().close();
+
+  fresh();
+  const bare = harness();
+  assert.equal(await DeploymentPanel.openAction(context(), bare.deps, "rebuildFromCheckout"), "noCheckout");
+  page().close();
+
+  fresh();
+  const absent = harness({ presence: "absent" });
+  assert.equal(await DeploymentPanel.openAction(context(), absent.deps, "rebuildFromCheckout"), undefined);
+  assert.match(page().html, /data-act="install"/);
+  page().close();
+});
+
+test("a remote act that fails says so in one sentence, with the engine's words one click away", async () => {
+  fresh();
+  const h = remoteHarness([]);
+  let shown = 0;
+  const logged: string[] = [];
+  h.deps.showOutput = () => {
+    shown += 1;
+  };
+  h.deps.logLine = (line) => logged.push(line);
+  h.deps.deployPort = () =>
+    ({
+      getDeploymentStatus: async () => ({ rollouts: [{ name: "bff", phase: "Paused" }] }),
+      rolloutAction: async () => {
+        throw new Error("rollout bff: analysis run failed");
+      },
+    }) as unknown as DeployControlPort;
+  DeploymentPanel.show(context(), h.deps, "staging");
+  await settle();
+  page().send({ type: "rolloutPromote", value: "bff" });
+  await settle();
+  assert.match(text(), /Couldn't promote the rollout/);
+  assert.match(page().html, /data-act="openOutput">Show details</);
+  assert.ok(logged.some((line) => line.includes("analysis run failed")), "the engine's words did not reach Output");
+  page().send({ type: "openOutput" });
+  assert.equal(shown, 1);
   page().close();
 });
