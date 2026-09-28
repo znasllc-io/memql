@@ -27,11 +27,8 @@ of [the Deployables program](../../superpowers/specs/2026-09-02-deployables-prog
 | The MemQL OS front end | The shell's capture module: window errors, unhandled rejections, `console.error` and `console.warn`, batched and sent over the connection the OS already holds through `logsRecordClient` | the app id and section of the focused window, the page, a per-tab session id, and the user, stamped server-side |
 | The pipelines that name a subject | `logger.Subject(concept, id)` on the line | `subject` and `subjectConcept`: the deployment, site, plan or user the line is about |
 
-Two things are deliberately NOT persisted:
+One thing is deliberately NOT persisted:
 
-- **The portal.** Retired in epic memql#4984. It was never instrumented, so it
-  has no component name and appears in no facet -- which is why its removal
-  changed nothing here.
 - **A hosted site's browser console.** MemQL has no anonymous write, the
   edge's `apiProxy` carries no site id, and a new HTTP route needs the
   owner's explicit approval under the gRPC-first policy. The recommended

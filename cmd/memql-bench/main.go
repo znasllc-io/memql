@@ -109,7 +109,7 @@ func main() {
 func run(argv []string, stdout, stderr io.Writer) int {
 	spec := capability.Spec{
 		Id:      "bench.run",
-		Summary: "Run the memQL proving corpus and publish what it measured",
+		Summary: "Run the MemQL proving corpus and publish what it measured",
 		Params: []capability.Param{
 			{Name: "do", Description: "run | gate | scorecard | record", Required: true},
 			{Name: "tier", Description: "ci (replayed, no provider) or live (real providers)"},

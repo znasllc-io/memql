@@ -10,7 +10,6 @@ owner: znas
 # Environment Variables -- MemQL
 
 **Audience:** engineers running MemQL locally or operating it in lab/prod.
-**Last updated:** 2026-04-25 (post env-var refactor; Phase 8 complete)
 **Companion doc:** the product frontend repo's env-vars doc covers the frontend side.
 
 ---

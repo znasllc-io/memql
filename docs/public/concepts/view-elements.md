@@ -132,7 +132,7 @@ needing two timestamps declares the more specific one first.
 **Naming a slot settles it.** Steps 2-4 run only for slots the caller
 did *not* speak about. If `options.bindings` mentions a slot at all,
 the automatic resolution is skipped for it -- so an **empty list is how
-a caller declines a slot**, which is how a predefined view asks the stat
+a caller declines a slot**, which is how a view asks the stat
 strip for a row count and no summed measures (`revocationEpoch total` is
 a true number and a meaningless one). The same rule means a misspelled
 field name reports the slot unmet rather than quietly substituting
@@ -244,8 +244,8 @@ palettes within a release.
   depending on which is on screen. The difference is space: a pie needs
   a 320x240 block, the rail is one line tall. That is what lets a page
   header carry "how does this population divide" above the population
-  itself, which is how a predefined view opens
-  (memql#3319). Layout is the axis a form is allowed to differ on.
+  itself, which is how a composed view opens.
+  Layout is the axis a form is allowed to differ on.
 - **A boolean category is not "true" / "false".** A boolean grouping
   field goes through `statusText`, so an active/inactive split reads
   "active" and "not active" -- the same rule the status badge follows
@@ -316,29 +316,20 @@ and it is enforced: a concept id literal or a comparison against
 
 ---
 
-## 7. Predefined views, and the line they may not cross
+## 7. Composed views, and the line they may not cross
 
-> **RETIRED, and recorded rather than deleted.** Predefined views, composed
-> views and the arrangement engine were the MemQL Portal's page system, and
-> epic memql#4984 retired the portal and `dsl/portalviews` with it. What
-> follows is the account of a system that ran, kept because the ELEMENT library
-> below it did not go anywhere -- `sdk/ts-viewkit` still ships, and the VS Code
-> extension still renders through it. The line this section draws is the one a
-> future surface over those elements would have to hold again.
+> A **composed view** is a layout over these elements. The browser system that
+> composed them -- five hand-designed screens, a runtime composer, and the gate
+> described below -- was retired with epic memql#4984; the element library was
+> not. `sdk/ts-viewkit` still ships, and the VS Code extension still renders
+> through it. This section is the line any surface over those elements has to
+> hold.
 
-Five concepts got a hand-designed screen in the portal, because they
-are the ones an operator lives in: people (`v1:identity:user`), agents
-(`v1:agents:agent`), customers (`v1:identity:account`), deployments
-(`v1:cluster:deployment`) and audit (`v1:identity:auditEvent`). They
-lived in `clients/portal/src/views/`, addressed at `/views/:viewId` and
-`/views/:viewId/rows/:rowId` (memql#3319).
-
-**A predefined view is a LAYOUT CHOICE OVER THESE ELEMENTS.** It picks
-elements, names their requirement slots, and arranges the bands. It
-does not render a row, and it does not read a display card -- it names
-an element's slot and lets the fitness profile resolve the field, the
-same as everything else. All five follow one grammar, so learning one
-screen teaches five:
+**A view is a LAYOUT CHOICE OVER THESE ELEMENTS.** It picks elements, names
+their requirement slots, and arranges the bands. It does not render a row, and
+it does not read a display card -- it names an element's slot and lets the
+fitness profile resolve the field, the same as everything else. One grammar
+serves every view, so learning one screen teaches all of them:
 
 | Band | Question | Typical element |
 |---|---|---|
@@ -346,35 +337,26 @@ screen teaches five:
 | shape | how does that divide? | the proportion rail |
 | roll | which ones, specifically? | table, timeline or board |
 
-**Where the line is, and how it is held.** If a view needs something no
-element provides, the answer is a new **element**, not markup in the
-view -- otherwise the library stops being what makes a new concept work
-for free, and the designed screens drift onto a second renderer. The
-proportion rail is the worked example: these views needed share-of-whole
-in one line of height, the pie needs a block, so the rail was added to
-the library and every concept has it now.
+**Where the line is.** If a view needs something no element provides, the
+answer is a new **element**, not markup in the view -- otherwise the library
+stops being what makes a new concept work for free, and designed screens drift
+onto a second renderer. The proportion rail is the worked example: views needed
+share-of-whole in one line of height, the pie needs a block, so the rail was
+added to the library and every concept has it now.
 
-The third tier -- a view a PERSON composed at runtime, over a concept nobody
-designed for -- was built on the same elements and the same requirement
-declarations. An element carries one further piece of metadata for it: `band`,
-saying which of the three questions above the element answers, so a newly
-written element took its place in a composed arrangement with no change to the
-composer. Its own page went with the portal; the metadata stayed, because it
-costs nothing and it is what a replacement would read.
+A view composed at runtime, over a concept nobody designed for, reads one
+further piece of element metadata: `band`, saying which of the three questions
+above the element answers, so a newly written element takes its place in a
+composed arrangement with no change to the composer. No composer ships today;
+the metadata stays because it costs nothing and it is what one would read.
 
-That rule was mechanical, not editorial.
-`portal_view_composition_test.go` (repo root, so weakening it edited Go)
-scanned the view tree and failed on row markup (`<table>`, `<tr>`, `<ul>`,
-svg primitives), on iteration that could produce a row (`.map`,
-`.forEach`), on a second VNode-to-React bridge, and on reading
-`displayCard` directly. It could not tell whether the element a view chose
-was the *right* one, and it did not police a single field read off one
-object -- its own header said so at length.
-
-**That gate is GONE, deleted with the view bodies it scanned (epic
-memql#4984), and nothing enforces this rule today.** It is written in the
-past tense deliberately: a document that describes a retired check in the
-present tense is worse than one that omits it, because a reader plans
-against protection that is not there. A future surface over these elements
-would need to bring its own equivalent -- the rule is still right, it just
-has no enforcer.
+**Nothing enforces this rule today.** The root test that scanned the view tree
+-- failing on row markup (`<table>`, `<tr>`, `<ul>`, svg primitives), on
+iteration that could produce a row (`.map`, `.forEach`), on a second
+VNode-to-React bridge, and on reading `displayCard` directly -- was deleted
+with the view bodies it scanned (epic memql#4984). It is written in the past
+tense deliberately: a document that describes a retired check in the present
+tense is worse than one that omits it, because a reader plans against
+protection that is not there. A future surface over these elements would need
+to bring its own equivalent -- the rule is still right, it just has no
+enforcer.

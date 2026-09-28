@@ -19,14 +19,14 @@ the cluster. It runs as its own node-type binary
 - What is left of the admin web app at `/admin/*`: the sign-in
   pages, and an `/admin/` root that answers `410 Gone`. Six of its
   seven screens (users, tokens, audit, JWKS, cluster settings, and
-  the dashboard) moved into the MemQL portal in memql#3324 and into MemQL OS
-  when epic memql#4984 retired the portal, writes and owner/admin gate
-  together -- see [../memql-os.md](../memql-os.md).
-  Deployments followed in memql#3380: `DeployControlService` still
-  runs against an on-disk overlay checkout and therefore exists only
-  on this node, but a bff now forwards the deploy RPCs here over
-  `NodeService.Stream`, carrying the caller's authority so the
-  owner-only rollback gate is unchanged by the hop.
+  the dashboard) now live in MemQL OS (memql#3324, epic memql#4984),
+  writes and owner/admin gate together -- see [../memql-os.md](../memql-os.md).
+  Deployments left in memql#3380 and are driven from the VS Code
+  Deployments panel ([../deployment-console.md](../deployment-console.md)):
+  `DeployControlService` still runs against an on-disk overlay checkout
+  and therefore exists only on this node, but a bff forwards the deploy
+  RPCs here over `NodeService.Stream`, carrying the caller's authority so
+  the owner-only rollback gate is unchanged by the hop.
 - The JWKS feed at `/.well-known/jwks.json` that every other node
   binary fetches to verify access tokens.
 - The Personal Access Token (PAT) layer for CLI clients.
@@ -558,7 +558,7 @@ EVERYTHING the sender needs is created on the MAILBOX tenant:
   `MEMQL_EMAIL_AZURE_CLIENT_ID` / `_CLIENT_SECRET` = that app's.
 
 Find the tenant without guessing -- both answers come from the domain,
-not from whichever portal you happen to be signed in to:
+not from whichever tenant your browser session happens to be signed in to:
 
 ```bash
 # Which tenant does this login name belong to? (NameSpaceType Managed /
@@ -1007,9 +1007,10 @@ It used to be `0.7 * (exp - Date.now())`, which compares the identity service's
 clock with the browser's. A browser running ahead by a little less than the TTL
 saw every freshly minted token as nearly expired and rotated **every few
 seconds, indefinitely**; ahead by more than the TTL, the delay was zero and it
-rotated at network speed. A second amplifier sat in the portal, whose session
-probe ran on every route change rather than once per cold load -- so clicking a
-row in the Audit Trail wrote a row in the Audit Trail. Both are fixed
+rotated at network speed. A second amplifier sat in a since-retired browser
+console, whose session probe ran on every route change rather than once per
+cold load -- so clicking a row in the Audit Trail wrote a row in the Audit
+Trail. Both are fixed
 (memql#4326, memql#4327); the floor is what makes a pathological token harmless
 even if some future arithmetic goes wrong again.
 

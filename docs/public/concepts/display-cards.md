@@ -14,8 +14,8 @@ owner: znas
 A **display card** is the handful of fields a view puts in a row's
 chrome: what to call the row, what to say under the name, and what
 badge to hang off the end. It is declared once, on the concept, and
-every concept-agnostic surface -- the Cockpit's Concepts
-tab, the VS Code concept panel, anything built on
+every concept-agnostic surface -- the Concepts app in MemQL OS, the
+VS Code concept panel, anything built on
 [`@znasllc-io/memql-view-kit`](../../../sdk/ts-viewkit) -- reads the
 same declaration.
 

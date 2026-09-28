@@ -40,7 +40,7 @@ automatically.
 | 1. Rate ceiling | calls/window → synthetic 429 | process, per-lane | yes (drains) | `ai_guard.go` |
 | 1. Loop breaker | identical-request repeats → 429 | per-fingerprint | yes (cooldown) | `ai_guard.go` |
 | 2. Automation budget | executions/window → skip; bounded fail-open | process, per-automation | yes (window) | `component/automations/budget.go`, `cluster_guard.go` |
-| 3. Loop terminal conditions | per-turn iteration / convergence / wallclock caps | per invocation | n/a | agent + planner loops |
+| 3. Loop terminal conditions | per-turn iteration / convergence / wallclock caps | per invocation | n/a | agent loops + the work run's ceilings |
 | 4. Per-scope budget | cumulative latch per plan-lineage / work run | per plan/run | **No (latches)** | `ai_guard.go` via context (#1144) |
 
 Layer 0 is the backstop **behind** every other layer: even when a higher
@@ -141,7 +141,7 @@ checked, in order: (0) kill-switch latch → (1) loop breaker → (1) rate
 ceiling → (3) cumulative accounting. Crossing a cumulative cap **latches the
 breaker open permanently**: every further call returns a terminal **402**
 (non-retryable in both vendor SDKs, so it surfaces as a clear terminal error
-to the agent/planner loop) and makes **no vendor request**. It does not drain
+to the calling loop) and makes **no vendor request**. It does not drain
 until the process restarts (or the guard is reset).
 
 The $ figure is a deliberately **conservative upper bound** estimated from
@@ -202,7 +202,7 @@ residual gap is *cross-turn* cumulative spend, which Layers 0 and 4 close.
 |---|---|---|---|---|
 | Agent tool loop | `integrations/agent/streaming.go`, `nonstreaming.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 180s wallclock (`MEMQL_TURN_WALLCLOCK_TIMEOUT_SECONDS`) | none → **Layer 0 / 4** | 3 repeat-failures (`MEMQL_TOOL_LOOP_MAX_REPEAT_FAILURES`), 3 all-errored rounds, 2 produceArtifact re-delegations |
 | Engine AI tool loop | `component/memql/ai_tool_loop.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 8 tool-calls/iter | none → **Layer 0 / 4** | all-errored guard, identical-call breaker |
-| Planner decompose loop | `integrations/planner/agent_loop.go` | 5 iters/cycle (`MEMQL_PLANNER_MAX_ITERATIONS_PER_CYCLE`) | 8 calls + 2M tokens/plan (`MEMQL_PLANNER_MAX_INVOCATIONS_PER_PLAN`, `MEMQL_PLANNER_DEFAULT_TOKEN_BUDGET`) | 2 identical decisions (`MEMQL_PLANNER_MAX_IDENTICAL_DECISIONS`) |
+| Work run | `integrations/work/runceilings.go`, `component/work/budget.go` | n/a -- a run is not a turn loop | the goal's `ceilings` (tokens, cost, model calls, retries, events, wall clock), checked before every call; a breach parks the run | 4 repair attempts per authoring bundle (`MEMQL_AUTHORING_MAX_REPAIRS`) |
 | Suggest | `component/grpc/` AiSuggest | single call | n/a | n/a |
 
 Verdict: no loop lacks a per-turn terminal condition. The agent / engine tool
@@ -217,14 +217,14 @@ being explicit about, because the two existing controls want opposite answers:
 
 | Control | Subscription tokens | Why |
 |---|---|---|
-| The **dollar ceiling** (`plan.tokenBudget`) | **excluded** | MemQL was not charged. Counting them parks a plan over money nobody paid — and the more a user leans on the subscription they already pay for, the sooner their plans stop, which is exactly backwards |
-| The **loop caps** (per-plan call counts, the identical-request breaker) | **included** | A runaway decompose loop that happened to route through a subscription is still a runaway loop. A cap blind to those calls is a hole the cheapest path walks straight through |
+| The **dollar ceiling** (the goal's `ceilings.tokenBudget`) | **excluded** | MemQL was not charged. Counting them parks a run over money nobody paid — and the more a user leans on the subscription they already pay for, the sooner their runs stop, which is exactly backwards |
+| The **loop caps** (the run's model-call count, the identical-request breaker) | **included** | A runaway loop that happened to route through a subscription is still a runaway loop. A cap blind to those calls is a hole the cheapest path walks straight through |
 
 So the spend is split rather than summed:
 
 - `v1:work:run.spent.tokensSubscription` accumulates covered tokens,
-  separately from `tokenSpent`. `component/planner/budget.go`'s `CheckCall`
-  subtracts only `tokenSpent` from the ceiling.
+  separately from `tokens`. `component/work/budget.go`'s `CheckCeilings`
+  compares only the metered `tokens` against the ceiling.
 - `v1:router:call.billing` (`metered | subscription | unknown`) and
   `executionSurface` carry it on the ledger, so a cost reader can separate
   "what we spent" from "what ran somewhere we do not pay for" without a join.
@@ -324,10 +324,7 @@ went with memql#5000.
 | `MEMQL_TOOL_LOOP_MAX_ITERATIONS` | 120 (clamp 200) |
 | `MEMQL_TOOL_LOOP_MAX_REPEAT_FAILURES` | 3 |
 | `MEMQL_TURN_WALLCLOCK_TIMEOUT_SECONDS` | 180 |
-| `MEMQL_PLANNER_MAX_ITERATIONS_PER_CYCLE` | 5 |
-| `MEMQL_PLANNER_MAX_INVOCATIONS_PER_PLAN` | 8 |
-| `MEMQL_PLANNER_DEFAULT_TOKEN_BUDGET` | 2000000 |
-| `MEMQL_PLANNER_MAX_IDENTICAL_DECISIONS` | 2 |
+| `MEMQL_AUTHORING_MAX_REPAIRS` | 4 |
 
 ### Layer 4 — per-scope budget
 | env | default | meaning |
@@ -342,8 +339,9 @@ one plan-lineage or one work run, so a runaway within one scope is
 unambiguous and latching it kills just that loop — other plans are
 unaffected and no restart is needed. Caps sit above the 120-iteration per-turn
 cap so a single deep turn never trips them. Scopes are stamped via
-`ContextWithBudgetScope` at the streaming + non-streaming agent loops and the
-planner decompose loop.
+`ContextWithBudgetScope` at the streaming + non-streaming agent loops, the
+work run's execution context (`app/work_execution_context.go`) and the compile
+pass (`integrations/work/compile.go`).
 
 ## Reproducing a runaway safely (local)
 

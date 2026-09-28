@@ -202,12 +202,19 @@ Run this **before** syncing, and again after any change that could rotate the
 internal CA:
 
 ```bash
-scripts/deploy/verify-internal-tls.sh --context=<ctx> --namespace=memql
+kubectl --context=<ctx> -n memql get secret memql-ca \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d > memql-ca.crt
+kubectl --context=<ctx> -n memql get secret identity-tls \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d > identity-tls.crt
+openssl verify -CAfile memql-ca.crt -untrusted identity-tls.crt identity-tls.crt
 ```
 
-It compares the CA in the `memql-ca` trust bundle every mesh pod mounts against
-the CA that actually signed identity's serving certificate, and exits 3 when
-they disagree.
+It checks the anchor in the `memql-ca` trust bundle every mesh pod mounts
+against the chain identity's serving certificate presents.
+`identity-tls.crt: OK` means they agree, and any other answer means they do
+not. The contract is the one
+`deploy/k8s/components/internal-tls/internal-ca.yaml` states: `ca.crt`
+verifies `identity-tls`.
 
 **Why this is worth its own step.** When those two drift, every mesh node
 rejects identity with `remote error: tls: bad certificate` -- and **every pod
@@ -224,7 +231,7 @@ the leaf are issued from that one issuer. What remains is ordinary: **pods read
 outgoing CA until they are restarted. The check tells you whether that restart
 is owed.
 
-If it exits 3, a restart alone is not enough -- reissue the leaf first:
+If it does not answer `OK`, a restart alone is not enough -- reissue the leaf first:
 
 ```bash
 kubectl -n memql delete secret identity-tls     # cert-manager remints from the current CA

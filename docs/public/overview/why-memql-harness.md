@@ -169,10 +169,11 @@ and its two controls. The figure is on [the scorecard](proving-scorecard.md).
 - **A process-wide LLM rate ceiling** at the provider chokepoint
   (`component/memql/ai_guard.go`), so no code path can stampede a
   provider.
-- **Per-plan token budgets** enforced *before* each call
-  (`component/planner/budget.go`): work parks instead of making the next
-  call when it would exceed a cumulative, persisted ceiling that survives
-  retries.
+- **Per-run ceilings** checked *before* each call
+  (`component/work/budget.go`, enforced in `integrations/work/runceilings.go`):
+  a run parks instead of making the next call when it would cross a ceiling
+  its goal declares -- tokens, cost, model calls, retries, events or
+  wall-clock time -- and carries on when a person raises that ceiling.
 - **Loop breakers** -- repeat-failure and redelegation-refusal guards
   stop the classic "model apologizes and tries the same thing forever".
 - **An up-front estimate and approval gate**, and model tiering that is
@@ -199,7 +200,7 @@ like every other concept.
 
 Those properties belong to the platform and the harness inherits them.
 The same code compiles by build tag into a mesh of node types that
-discover each other and bridge events with dedup and TTL; there is a real
+discover each other and bridge events with dedup and a hop budget; there is a real
 identity service (magic-link, passkeys, JWT, JWKS) and machine
 credentials for service-to-service calls; and the run, step, goal and
 approval rows carry broadcast routing rules, so a run's status flips on
@@ -220,11 +221,8 @@ their tests are green on `main`, and not before.
 ## How developers use it
 
 1. **Declare** your concepts, tools and automations in `.memql` files.
-2. **Drive** it from the **Cockpit** (terminal-native ops) or **MemQL OS**
-   in a browser.
-3. **Run** it as one binary locally or as the node mesh for scale; same
-   DSL, same behavior, only configuration changes.
-4. **Extend** in Go only when you need to, through self-registering
+2. **Drive** it from **MemQL OS** in a browser.
+3. **Extend** in Go only when you need to, through self-registering
    plug-ins with a narrow `PluginContext`.
 
 > Next: [MemQL vs. agent libraries](vs-other-harnesses.md) -- an honest

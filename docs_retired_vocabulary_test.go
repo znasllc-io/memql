@@ -82,8 +82,8 @@ import (
 // rule above (and the review history behind lifecycle_docs_conformance_test.go),
 // a special-cased site misses the next paraphrase as easily as an absent
 // gate would. Extend retiredVocabulary ONLY with a pattern whose full
-// current-tree hit list has been personally triaged the same way the five
-// patterns below were.
+// current-tree hit list has been personally triaged the same way every
+// pattern below was -- each entry's comment records its probe.
 
 // vocabScopeFiles enumerates README.md plus every tracked
 // docs/public/**.md file via `git ls-files -z`. See snippetScopeFiles in
@@ -137,7 +137,7 @@ func lineIsVocabExempt(line string) bool {
 
 var retiredVocabulary = []struct{ pattern, reason, ref string }{
 	{`(?i)partition-access|per-partition (isolation|scope)`, "partition tenancy retired", "memql#56"},
-	{`(?i)management at .?/admin/`, "/admin/ app retired; portal owns admin", "memql#3943-era"},
+	{`(?i)management at .?/admin/`, "/admin/ app retired; MemQL OS owns admin", "memql#3943-era"},
 	{`(?i)sealed (genesis )?envelope`, "superseded by component/envregistry", "memql#3963"},
 	// Task 3's original pattern was the bare substring `MEMQL_MASTER_KEY`,
 	// probed only against README/CONTRIBUTING/VERSIONING/COMPATIBILITY/
@@ -156,6 +156,51 @@ var retiredVocabulary = []struct{ pattern, reason, ref string }{
 	// catches a future regression shaped like the original bug.
 	{`(?i)MEMQL_MASTER_KEY (is|serves as|acts as) (the |a )?(operator )?(credential|bearer token)`, "master key decrypts; operator key authenticates — docs must not present it as a credential", "memql#3519"},
 	{`az acr build|make release\b`, "hand-built release images superseded by the build server", "CLAUDE.md image-build rule"},
+
+	// The seven below are memql#5721 (docs-readers PR 1, the prose truth
+	// sweep). Each was run over the full vocabScope before it was frozen, and
+	// the counts are that probe's; every hit was fixed or carries the marker.
+	//
+	// The AI completion topics are ai.completion.* (TopicAICompletion* in
+	// component/events/event.go) and the proto enum is
+	// EVENT_KIND_AI_COMPLETION_*. Upper-case SI_COMPLETION names neither:
+	// Kind.String() returns lower-case si_completion_* until the kind rename,
+	// and events.md prints that string verbatim, which this pattern leaves
+	// alone. Probe: 3 lines, events.md's AI table, fixed.
+	{`(?i:\bsi\.completion\b)|SI_COMPLETION`, "the AI completion topics are ai.completion.*; SI_COMPLETION is neither the proto enum nor Kind.String()", "memql#5721"},
+	// The Cockpit's terminal UI -- the editor, the Topology view, the deploy
+	// menu -- was deleted on 2026-08-25; the Cockpit is the machine worker
+	// runtime and cluster CLI, installed as `memql`. Probe: 2 lines
+	// (why-memql-harness.md, memql-cloud-orbit.md), fixed. "TUI" is NOT in
+	// the pattern: every current use of it says the TUI was removed.
+	{`(?i)cockpit[^.|]{0,80}\b(IDE|ops console|operations console|terminal-native)\b|\bterminal[- ](native|IDE)\b`, "the Cockpit's terminal UI is deleted; it is the machine worker runtime and cluster CLI", "memql#4550"},
+	// A local run is the k3d parity cluster (`make up`): the same node mesh
+	// as the cloud, never one binary. Probe: 1 line (why-memql-harness.md),
+	// removed.
+	{`(?i)\b(one|a single|single)[- ]binary\b[^.]{0,40}\blocal|\bsingle[- ]binary mode\b`, "a local run is the k3d node mesh, not one binary", "memql#2061"},
+	// The MemQL portal is retired. The bare word, because every paraphrase of
+	// it carries the word. Probe: 31 lines in 11 pages once the proving log
+	// was deleted; 26 reworded or removed, 5 marked -- Microsoft's Azure
+	// portal (2), Stripe's billing portal (1), and `portal` as a label
+	// squatReservedSiteLabels still holds (2).
+	{`(?i)\bportal\b`, "the MemQL portal is retired; MemQL OS replaced it", "memql#4984"},
+	// "carrier repo" is retired vocabulary: product DSL is a runtime bundle
+	// on a product-agnostic engine image, not a carrier build. Probe: 7 lines
+	// in 5 pages, fixed. "carrier-built" and "carrier build" stay unmatched:
+	// every current use of them negates the retired model.
+	{`(?i)\bcarrier[- ]repo|\bproduct[- ]pack repo`, "the carrier repo is retired; product DSL ships as a runtime bundle", "memql#2472"},
+	// The node types are agent, bff, edge, identity, mcp, planner and
+	// workbench (app/build_*.go, ENGINE_NODE_TYPES). The pattern matches the
+	// shapes that PRESENT cognition or voice as one -- a build tag, a binary,
+	// a NODE= or MEMQL_NODE_TYPE= value, a member of a node-type list -- and
+	// not the stable pages that record their removal. Probe: 0 lines.
+	{`(?i)-tags[ =]+"?(cognition|voice)\b|\bbin/memql-(cognition|voice)\b|\bNODE(_TYPE)?=(cognition|voice)\b|\bBUILD_TAGS=(cognition|voice)\b|\b(bff|agent|planner|identity|workbench|mcp|edge)\b[\x60*]*\s*(,|/|\||and|or)\s*[\x60*]*(cognition|voice)\b|\b(cognition|voice)\b[\x60*]*\s*(,|/|\||and|or)\s*[\x60*]*(bff|agent|planner|identity|workbench|mcp|edge)\b`, "cognition and voice are not node types", "memql#4988"},
+	// "MemoryNodes" has no partition column; its primary key is
+	// (id, "createdAt") (component/database/memory-nodes/migrations/
+	// 20260324000000_initial_setup.up.sql). Probe: 1 line, a past-tense
+	// correction in authoring-rules.md, reworded.
+	{`(?i)\bpartition\s*,\s*id\s*,\s*"?createdAt`, "the memory-nodes primary key is (id, createdAt); partition tenancy is retired", "memql#56"},
+
 	// extend ONLY with patterns whose full current-tree hit list you have
 	// personally triaged (probe first; see the gate comment above).
 }
