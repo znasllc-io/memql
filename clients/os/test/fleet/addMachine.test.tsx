@@ -503,7 +503,11 @@ describe("cancel after a mint asks which of two things", () => {
     expect(within(bar()).getByText("Cancel?")).toBeTruthy();
     expect(screen.getByText(/token is revoked/)).toBeTruthy();
     // The uninstall line is offered right here, for a person who already ran the install.
-    expect((screen.getByLabelText("the uninstall command") as HTMLInputElement).value).toBe(uninstallCommand("mac"));
+    // It names the cluster the install line enrolled the machine with, so the
+    // uninstaller removes that enrollment rather than asking which one.
+    expect((screen.getByLabelText("the uninstall command") as HTMLInputElement).value).toBe(
+      uninstallCommand("mac", { clusterUrl: workerClusterUrl("memql.example.com") }),
+    );
     await click(within(bar()).getByRole("button", { name: "Revoke the token and cancel" }));
     await settle();
     expect(h.revoke).toHaveBeenCalledTimes(1);
@@ -610,15 +614,31 @@ describe("the install and uninstall lines", () => {
     );
   });
 
-  it("composes the uninstall line the same way, with its two flags", () => {
-    expect(uninstallCommand("linux")).toBe(
-      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-linux.sh | bash -s --",
+  it("composes the uninstall line the same way: the cluster first, then its two optional flags", () => {
+    expect(uninstallCommand("linux", { clusterUrl: "https://api.example.com" })).toBe(
+      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-linux.sh | bash -s -- --cluster=https://api.example.com",
     );
-    expect(uninstallCommand("mac", { purge: true, userLocal: true })).toBe(
-      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-mac.sh | bash -s -- --purge --user-local",
+    expect(uninstallCommand("mac", { clusterUrl: "https://api.example.com", purge: true, userLocal: true })).toBe(
+      "curl -fsSL https://raw.githubusercontent.com/znasllc-io/memql-cockpit/main/scripts/install/uninstall-mac.sh | bash -s -- --cluster=https://api.example.com --purge --user-local",
     );
     for (const platform of INSTALL_PLATFORMS) {
-      expect(uninstallCommand(platform, { purge: true })).not.toContain("\n");
+      expect(uninstallCommand(platform, { clusterUrl: "https://api.example.com", purge: true })).not.toContain("\n");
     }
+  });
+
+  it("the uninstall line always names a cluster, and a placeholder that fails loudly when none is published", () => {
+    // The uninstaller of 2026-09-27 refused a bare line ("choose --cluster=URL
+    // or --all-homes", exit 2) -- copied straight from the machine page. The
+    // cluster is therefore never optional on the composed line.
+    for (const platform of INSTALL_PLATFORMS) {
+      expect(uninstallCommand(platform, { clusterUrl: "https://api.example.com" })).toContain(" --cluster=https://api.example.com");
+      expect(uninstallCommand(platform)).toContain(" --cluster=<your cluster URL>");
+      expect(uninstallCommand(platform, { clusterUrl: "" })).toContain(" --cluster=<your cluster URL>");
+    }
+    // The install line's spelling is the enrollment's spelling, and the
+    // uninstall line repeats it exactly: no scheme dropped, no slash added.
+    const cluster = workerClusterUrl("memql.example.com");
+    expect(installCommand({ platform: "mac", clusterUrl: cluster, token: TOKEN, computerUse: false, inference: false })).toContain(` --cluster ${cluster}`);
+    expect(uninstallCommand("mac", { clusterUrl: cluster })).toContain(` --cluster=${cluster}`);
   });
 });
