@@ -1957,7 +1957,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // notice, and the toast is short and points at the record.
     onError: (headline, detail) => {
       noteDiagnostic(connectionOutput, headline, detail);
-      void offerDetails('error', connectionOutput, 'MemQL: a cluster document could not be read from its cluster.');
+      void offerDetails('error', connectionOutput, "MemQL: Couldn't load this file from the cluster.");
     },
   });
   // Library artifacts (memql#4748): a file MemQL OS handed over, served
@@ -1978,7 +1978,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     },
     onError: (headline, detail) => {
       noteDiagnostic(connectionOutput, headline, detail);
-      void offerDetails('error', connectionOutput, 'MemQL: a Library artifact could not be read from its cluster.');
+      void offerDetails('error', connectionOutput, "MemQL: Couldn't load this file from the cluster.");
     },
   });
   // ONE FACTORY, THREE CALL SITES: they all open the same singleton panel and

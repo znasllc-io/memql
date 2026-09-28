@@ -317,10 +317,14 @@ function outcomeHtml(trace: TraceView): string {
     case "failed": {
       const failedStep = trace.steps.find((step) => step.status === "failed");
       const message = trace.complete?.error ?? "";
+      // SAID ONCE: a failed step that carries its own error shows it under the
+      // step, so the notice only says where; the run's message is shown here
+      // only when no step says it.
+      const stepSaysIt = failedStep !== undefined && failedStep.error !== "";
       return notice({
         tone: "error",
         line: failedStep === undefined ? "The automation failed." : `Failed at step ${failedStep.sequence}.`,
-        next: message === "" ? undefined : briefMessage(message, 300),
+        next: message === "" || stepSaysIt ? undefined : briefMessage(message, 300),
       });
     }
     case "cancelled":

@@ -660,6 +660,11 @@
           "group": "navigation@1"
         },
         {
+          "command": "memql.language.showReference",
+          "when": "view == memqlConstructs",
+          "group": "9_reference@1"
+        },
+        {
           "command": "memql.data.refresh",
           "when": "view == memqlData",
           "group": "navigation@1"
