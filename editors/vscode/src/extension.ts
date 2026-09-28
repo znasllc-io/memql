@@ -759,7 +759,7 @@ const HANDOFF_ADD_FOLDER_TIMEOUT_MS = 5_000;
 function noteHandoffFailure(err: unknown): void {
   const detail = err instanceof Error ? err.message : String(err);
   noteDiagnostic(connectionOutput, 'Handoff from the console failed', detail);
-  void offerDetails('error', connectionOutput, 'MemQL: the console handoff could not be completed.');
+  void offerDetails('error', connectionOutput, "MemQL: The link from MemQL OS couldn't be opened.");
 }
 
 /**
@@ -787,8 +787,9 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   //    runs before anything is trusted.
   const request = parseOpenRequest({ path: uri.path, query: uri.query });
   if ('error' in request) {
-    window.showErrorMessage(`MemQL: this link cannot be opened -- ${request.error}.`);
+    // The validator's words go to the channel; the toast says what happened.
     noteDiagnostic(connectionOutput, 'Handoff refused', request.error);
+    void offerDetails('error', connectionOutput, "MemQL: This link from MemQL OS isn't valid.");
     return { outcome: 'refused', detail: request.error };
   }
 
@@ -806,7 +807,11 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
       'Handoff from the console',
       `${request.domain} ${describeOpenRequest(request)} -> untrusted workspace`
     );
-    window.showWarningMessage('MemQL: trust this workspace to open constructs from the console.');
+    void (async () => {
+      const manage = 'Manage Trust';
+      const answer = await window.showWarningMessage('MemQL: Trust this workspace to open links from MemQL OS.', manage);
+      if (answer === manage) await commands.executeCommand('workbench.trust.manage');
+    })();
     return { outcome: 'untrusted', detail: 'the runtime surface is not registered' };
   }
   const manager = connections;
@@ -839,10 +844,10 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     // cluster is a separate act the operator performs afterwards.
     void (async () => {
       const choice = await window.showInformationMessage(
-        `MemQL: no registered cluster for ${request.domain}.`,
-        'Add cluster...'
+        `MemQL: ${request.domain} isn't in your cluster list.`,
+        'Add Cluster...'
       );
-      if (choice !== 'Add cluster...') return;
+      if (choice !== 'Add Cluster...') return;
       // The ORDINARY prompts, prefilled with what the link stated and nothing
       // else. A dismissal at any field returns undefined and writes nothing.
       const edited = await promptForCluster({
@@ -861,8 +866,12 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     // NAMED, NOT HIDDEN. Two entries for one domain is a developer with two
     // credentials, and which one answered is the first thing they will want to
     // know if the catalog looks wrong.
-    void window.showInformationMessage(
-      `MemQL: ${request.domain} is registered as ${cluster.name}; also as ${match.alsoMatched.join(', ')}.`
+    // To the channel, not a toast: which entry answered matters when the
+    // catalog looks wrong, and is noise every other time.
+    noteDiagnostic(
+      connectionOutput,
+      'Handoff from the console',
+      `${request.domain} is registered as ${cluster.name}; also as ${match.alsoMatched.join(', ')}`
     );
   }
 
@@ -898,9 +907,11 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
       // person can no longer see. Non-modal, and it names the cluster rather
       // than repeating the select command's diagnosis.
       if (request.target === 'artifact') {
-        void window.showInformationMessage(
-          `MemQL: sign in to ${cluster.name} to open this artifact.`
-        );
+        void (async () => {
+          const signIn = 'Sign In';
+          const answer = await window.showInformationMessage(`MemQL: Sign in to ${cluster.name} to open this file.`, signIn);
+          if (answer === signIn) await commands.executeCommand('memql.clusters.signIn', cluster.name);
+        })();
       }
       return { outcome: 'noCluster', detail: why };
     }
@@ -936,7 +947,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     // answer available here.
     const detail = err instanceof Error ? err.message : String(err);
     noteDiagnostic(connectionOutput, `reading the catalog from "${cluster.name}" failed`, detail);
-    void offerDetails('error', connectionOutput, `MemQL: ${cluster.name} could not list its constructs.`);
+    void offerDetails('error', connectionOutput, `MemQL: Couldn't read ${cluster.name}'s constructs.`);
     return { outcome: 'noCluster', detail: 'the catalog could not be read' };
   }
 
@@ -963,7 +974,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
 
   if (landing.kind === 'notLoaded' || found === undefined) {
     void window.showInformationMessage(
-      `MemQL: ${cluster.name} has no ${request.kind} ${request.name} loaded.`
+      `MemQL: ${cluster.name} has no ${request.kind} "${request.name}" loaded.`
     );
     return { outcome: 'notLoaded', detail: landing.kind };
   }
@@ -1027,7 +1038,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     noteDiagnostic(connectionOutput, `opening ${request.kind} ${request.name} failed`, detail);
-    void offerDetails('error', connectionOutput, `MemQL: ${request.kind} ${request.name} could not be opened.`);
+    void offerDetails('error', connectionOutput, `MemQL: Couldn't open ${request.kind} "${request.name}".`);
     // `${kind} failed`, never the bare landing kind: a caller comparing details
     // must not read a failure as the landing it was aiming for.
     return { outcome: 'noCluster', detail: `${landing.kind} failed` };
@@ -1078,7 +1089,7 @@ async function landOnArtifact(
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     noteDiagnostic(connectionOutput, `reading artifact ${request.id} from "${cluster.name}" failed`, detail);
-    void offerDetails('error', connectionOutput, `MemQL: ${cluster.name} could not read this artifact.`);
+    void offerDetails('error', connectionOutput, `MemQL: Couldn't read this file from ${cluster.name}.`);
     return { outcome: 'noCluster', detail: 'the artifact could not be read' };
   }
   if (!lookup.found) {
@@ -1092,7 +1103,7 @@ async function landOnArtifact(
     // "that row is not yours", and a message that guessed would be wrong half
     // the time in the direction that leaks.
     void window.showInformationMessage(
-      `MemQL: ${cluster.name} has no artifact you can open at that id.`
+      `MemQL: This file isn't available on ${cluster.name}.`
     );
     return { outcome: 'notLoaded', detail: 'no such artifact' };
   }
@@ -1106,9 +1117,11 @@ async function landOnArtifact(
       'Handoff from the console',
       `${cluster.name} ${describeOpenRequest(request)} -> no https address`
     );
-    void window.showErrorMessage(
-      `MemQL: no https address is known for ${cluster.name}. Give it a domain in ~/.memql/clusters.yaml.`
-    );
+    void (async () => {
+      const edit = 'Edit Cluster';
+      const answer = await window.showErrorMessage(`MemQL: ${cluster.name} has no domain set.`, edit);
+      if (answer === edit) await commands.executeCommand('memql.clusters.edit', { cluster, selected: false });
+    })();
     return { outcome: 'noCluster', detail: 'no https address for the cluster' };
   }
 
@@ -1138,7 +1151,7 @@ async function landOnArtifact(
     // one. Detached, because a non-modal notification does not time out and the
     // dialog must not wait behind it.
     void window.showInformationMessage(
-      `MemQL: ${fileName} is offered as a file because ${delivery.reason}.`
+      `MemQL: ${fileName} opens as a file because ${delivery.reason}. Choose where to save it.`
     );
     const saved = await offerArtifactSave({
       url: artifactContentUrl(base, request.id),
@@ -1162,16 +1175,16 @@ async function landOnArtifact(
         `saving ${fileName} from "${cluster.name}" failed`,
         `${saved.failure.reason}: ${saved.failure.detail}`
       );
-      void offerDetails('error', connectionOutput, `MemQL: ${fileName} could not be saved.`);
+      void offerDetails('error', connectionOutput, `MemQL: Couldn't save ${fileName}.`);
       return { outcome: 'noCluster', detail: `save failed (${saved.failure.reason})` };
     }
-    void window.showInformationMessage(`MemQL: saved ${fileName}.`);
+    void window.showInformationMessage(`MemQL: Saved ${fileName}.`);
     noteDiagnostic(connectionOutput, 'Handoff from the console', `${cluster.name} saved ${fileName}`);
     return { outcome: 'saved', detail: 'artifactFile' };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     noteDiagnostic(connectionOutput, `opening artifact ${fileName} failed`, detail);
-    void offerDetails('error', connectionOutput, `MemQL: ${fileName} could not be opened.`);
+    void offerDetails('error', connectionOutput, `MemQL: Couldn't open ${fileName}.`);
     // `${kind} failed`, never the bare delivery kind, for the reason the
     // construct path states: a caller comparing details must not read a failure
     // as the landing it was aiming for.
@@ -1219,16 +1232,16 @@ async function openCheckoutFor(
   // the operator's window. This is the one handoff step that can lose work if
   // it is answered by accident.
   const pick = await window.showInformationMessage(
-    `Open the local checkout (${checkout}) to edit this construct?`,
+    `Open your checkout (${checkout}) to edit this construct?`,
     { modal: true },
-    'Open in new window',
-    'Add to this workspace'
+    'Open in New Window',
+    'Add to Workspace'
   );
-  if (pick === 'Open in new window') {
+  if (pick === 'Open in New Window') {
     await openFolderOrUnpark(surface, Uri.file(checkout), true);
     return { outcome: 'opened', detail: 'openCheckout' };
   }
-  if (pick === 'Add to this workspace') {
+  if (pick === 'Add to Workspace') {
     const folder = Uri.file(checkout);
     workspace.updateWorkspaceFolders(workspace.workspaceFolders?.length ?? 0, 0, { uri: folder });
     // updateWorkspaceFolders returns a "was it started" boolean, not a promise:
