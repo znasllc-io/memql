@@ -13,6 +13,7 @@ import (
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/component/workjournal"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -164,6 +165,65 @@ func (f *appGateFixture) inference(policies DelegationPolicyReader) *AppInferenc
 	return NewAppInference(f.dispatcher, f.runner, policies, testLogger())
 }
 
+// journalWrites counts what a delegate's journal wrote. A child run is the
+// first thing the journal writes, so zero writes is "no child run opened".
+type journalWrites struct {
+	mu      sync.Mutex
+	queries []string
+}
+
+func (j *journalWrites) journal() *workjournal.Journal {
+	return workjournal.New(workjournal.ExecutorFunc(func(_ context.Context, q string) (any, error) {
+		j.mu.Lock()
+		defer j.mu.Unlock()
+		j.queries = append(j.queries, q)
+		return nil, nil
+	}), nil, "node-a")
+}
+
+func (j *journalWrites) count() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return len(j.queries)
+}
+
+// delegate is the session door's own entry point over the real executor, with
+// a journal whose writes are counted.
+func (f *appGateFixture) delegate(t *testing.T, writes *journalWrites) *AppSessionDelegate {
+	t.Helper()
+	return NewAppSessionDelegate(f.executor(t, nil), writes.journal(), nil, testLogger())
+}
+
+// refusalCode is the app gate's named code on err, or "" when err is not a
+// refusal from the gate.
+func refusalCode(err error) string {
+	var refusal *appGateRefusal
+	if errors.As(err, &refusal) {
+		return refusal.Code()
+	}
+	return ""
+}
+
+// sessionHandover is what the router's session door hands the delegate for an
+// Ask's `reason` step, reached through pin.
+func sessionHandover(pin memqlengine.AppDoorPin) memqlengine.AppSessionHandover {
+	return memqlengine.AppSessionHandover{
+		ActingUserId: "user-1",
+		AgentId:      "v1:agents:agent:assistant",
+		AppId:        workerservice.AppIdClaudeCode,
+		RunId:        "v1:work:run:ask-1",
+		StepId:       "reason",
+		Prompt:       "hello",
+		Pin:          pin,
+	}
+}
+
+func pinnedChatTurn(pin memqlengine.AppDoorPin) memqlengine.AppCallRequest {
+	req := chatTurn()
+	req.Pin = pin
+	return req
+}
+
 // handedOverStep is what the session door (design D7) hands the executor for
 // an Ask's `reason` step.
 func handedOverStep() planner.ExecutorRequest {
@@ -241,21 +301,33 @@ func TestTheExplicitKillSwitchClosesBothDoorsByName(t *testing.T) {
 	}
 }
 
-// TestAnUnreadableKillSwitchDoesNotCloseTheDoor: the switch closes app sessions
-// only when it is explicitly engaged. A preference read that fails is not an
-// engaged switch, and neither door treats it as one.
-func TestAnUnreadableKillSwitchDoesNotCloseTheDoor(t *testing.T) {
+// TestAnUnreadableKillSwitchRefusesByItsOwnName: a preference read that FAILS
+// says nothing about what the owner did, so it neither admits (the switch may
+// be engaged, and a database hiccup must not open a session on a machine the
+// owner switched off) nor reads as the switch (the owner did not switch
+// anything off, and the refusal must not tell them they did). Both doors
+// refuse under the read's own code, before a machine is chosen.
+func TestAnUnreadableKillSwitchRefusesByItsOwnName(t *testing.T) {
 	f := newAppGateFixture(t, "user-1")
 	f.store.prefsErr = errors.New("user lookup: statement timeout")
 
-	if _, err := f.executor(t, nil).Run(context.Background(), handedOverStep(), nil); !errors.Is(err, errSessionCaptured) {
-		t.Fatalf("session door: err = %v, want the session to reach the machine", err)
+	_, err := f.executor(t, nil).Run(context.Background(), handedOverStep(), nil)
+	if code := refusalCode(err); code != AppGateKillSwitchUnreadable {
+		t.Fatalf("session door: refusal %q (err: %v), want %q", code, err, AppGateKillSwitchUnreadable)
 	}
-	if _, err := f.inference(nil).Call(context.Background(), chatTurn()); !reachedMachine(err) {
-		t.Fatalf("chat door: err = %v, want the session to reach the machine", err)
+
+	_, err = f.inference(nil).Call(context.Background(), chatTurn())
+	if code := refusalCode(err); code != AppGateKillSwitchUnreadable {
+		t.Fatalf("chat door: refusal %q (err: %v), want %q", code, err, AppGateKillSwitchUnreadable)
 	}
-	if got := f.capture.started(); len(got) != 2 {
-		t.Fatalf("%d session(s) reached the machine, want 2", len(got))
+	if !errors.Is(err, memqlengine.ErrAppUnavailable) {
+		t.Fatalf("chat door: err = %v, want it to read as a shut door so a chat chain moves on", err)
+	}
+	if strings.Contains(err.Error(), AppGateKillSwitchEngaged) {
+		t.Fatalf("chat door: err = %v names the switch as engaged, and nobody engaged it", err)
+	}
+	if got := f.capture.started(); len(got) != 0 {
+		t.Fatalf("%d session(s) reached the machine with the switch unreadable", len(got))
 	}
 }
 
@@ -303,16 +375,19 @@ func TestAnAppSessionRunsOnlyOnItsOwnersMachine(t *testing.T) {
 }
 
 // TestTheChatDoorLetsTheMachineChooseItsWorkspace is the workspace contract on
-// the chat door: AppSessionStart.workspace EMPTY means the machine chooses. The
-// engine names a directory only when the owner set a delegationPolicy
-// workspaceRoot, and then it is one directory per session under that root; it
-// never invents a path on somebody's machine, and an empty one is sent rather
-// than refused.
+// the chat door: AppSessionStart.workspace EMPTY means the machine chooses, and
+// an inference turn ALWAYS leaves the choice to the machine -- the owner's
+// delegationPolicy.workspaceRoot included. A turn is one session and nothing
+// outlives it, so a directory the engine named for it would be a directory
+// nobody removes (the machine cannot tell it from a run's, which later steps
+// reuse), holding copies of every image the turn was shown. The machine's
+// scratch directory is created and removed with the session. The engine never
+// invents a path on somebody's machine, and an empty one is sent rather than
+// refused.
 func TestTheChatDoorLetsTheMachineChooseItsWorkspace(t *testing.T) {
 	cases := []struct {
 		name     string
 		policies DelegationPolicyReader
-		wantRoot string
 	}{
 		{name: "no policy reader", policies: nil},
 		{name: "no policy row", policies: fixedPolicy{}},
@@ -321,7 +396,6 @@ func TestTheChatDoorLetsTheMachineChooseItsWorkspace(t *testing.T) {
 		{
 			name:     "the owner's root",
 			policies: fixedPolicy{policy: DelegationPolicy{Found: true, WorkspaceRoot: "/Users/u/memql-work/"}},
-			wantRoot: "/Users/u/memql-work",
 		},
 	}
 	for _, tc := range cases {
@@ -335,12 +409,8 @@ func TestTheChatDoorLetsTheMachineChooseItsWorkspace(t *testing.T) {
 			if len(got) != 1 {
 				t.Fatalf("%d session(s) reached the machine, want 1", len(got))
 			}
-			want := ""
-			if tc.wantRoot != "" {
-				want = tc.wantRoot + "/" + lastSegment(got[0].SessionId)
-			}
-			if got[0].Workspace != want {
-				t.Fatalf("workspace = %q, want %q", got[0].Workspace, want)
+			if got[0].Workspace != "" {
+				t.Fatalf("workspace = %q, want empty (the machine chooses)", got[0].Workspace)
 			}
 		})
 	}
@@ -384,5 +454,102 @@ func TestTheSessionDoorLetsTheMachineChooseWithoutARoot(t *testing.T) {
 func TestAWorkspaceWithoutAUnitOfWorkIsTheMachines(t *testing.T) {
 	if got := sessionWorkspace(planner.ExecutorRequest{}, "/Users/u/memql-work"); got != "" {
 		t.Fatalf("workspace = %q, want empty (the machine chooses)", got)
+	}
+}
+
+// TestAPinTheOwnerDidNotMakeOpensNoSession is the other half of the owner's
+// consent. A routing rule's chain names an app only because the routing
+// configuration wrote it there; an EXPLICIT PIN skips every rule, so it is
+// consent only when the person the session runs for made it. Here an agent
+// owned by user-2 stores the pin app:claude-code and a turn of user-1's run
+// resolves through it: the session would open on user-1's machine, edit files
+// and run commands there, and call MemQL with user-1's credential, for a
+// choice user-1 never made. Both doors refuse it by name, before a machine is
+// chosen -- and the session door before a child run is opened. A pin that no
+// person made (a prompt author's default, a deploy env var) is refused the
+// same way.
+func TestAPinTheOwnerDidNotMakeOpensNoSession(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pin  memqlengine.AppDoorPin
+	}{
+		{name: "another user's agent pinned it", pin: memqlengine.AppDoorPin{Pinned: true, By: "v1:identity:user:user-2"}},
+		{name: "no person pinned it", pin: memqlengine.AppDoorPin{Pinned: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAppGateFixture(t, "user-1")
+			writes := &journalWrites{}
+
+			_, err := f.delegate(t, writes).RunStep(context.Background(), sessionHandover(tc.pin))
+			if code := refusalCode(err); code != AppGateNotNamedByOwner {
+				t.Fatalf("session door: refusal %q (err: %v), want %q", code, err, AppGateNotNamedByOwner)
+			}
+			if n := writes.count(); n != 0 {
+				t.Fatalf("session door: the refused step still wrote %d journal row(s); a refusal opens no child run", n)
+			}
+
+			_, err = f.inference(nil).Call(context.Background(), pinnedChatTurn(tc.pin))
+			if code := refusalCode(err); code != AppGateNotNamedByOwner {
+				t.Fatalf("chat door: refusal %q (err: %v), want %q", code, err, AppGateNotNamedByOwner)
+			}
+			if !errors.Is(err, memqlengine.ErrAppUnavailable) {
+				t.Fatalf("chat door: err = %v, want it to read as a shut door", err)
+			}
+
+			if got := f.capture.started(); len(got) != 0 {
+				t.Fatalf("%d session(s) reached user-1's machine through a pin user-1 did not make", len(got))
+			}
+		})
+	}
+}
+
+// TestTheOwnersOwnPinAndARulesChainBothOpenTheSession is the control: a pin the
+// session's owner made -- their own step override, their own request naming
+// the app, whichever spelling of their id it carries -- and a chain a routing
+// rule chose both open the session on both doors.
+func TestTheOwnersOwnPinAndARulesChainBothOpenTheSession(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		pin  memqlengine.AppDoorPin
+	}{
+		{name: "a rule's chain", pin: memqlengine.AppDoorPin{}},
+		{name: "the owner's own pin", pin: memqlengine.AppDoorPin{Pinned: true, By: "user-1"}},
+		{name: "the owner's own pin, canonical", pin: memqlengine.AppDoorPin{Pinned: true, By: "v1:identity:user:user-1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newAppGateFixture(t, "user-1")
+			writes := &journalWrites{}
+
+			if _, err := f.delegate(t, writes).RunStep(context.Background(), sessionHandover(tc.pin)); !errors.Is(err, errSessionCaptured) {
+				t.Fatalf("session door: err = %v, want the session to reach the machine", err)
+			}
+			if _, err := f.inference(nil).Call(context.Background(), pinnedChatTurn(tc.pin)); !reachedMachine(err) {
+				t.Fatalf("chat door: err = %v, want the session to reach the machine", err)
+			}
+			if got := f.capture.started(); len(got) != 2 {
+				t.Fatalf("%d session(s) reached the machine, want 2", len(got))
+			}
+		})
+	}
+}
+
+// TestARefusedSessionDoorOpensNoChildRun: the gate is asked before the session
+// door opens anything. A refused step leaves no child v1:work:run behind, no
+// childRunId on the parent step, and its refusal under its own code -- not a
+// child run failed as app_session_failed with the reason buried in its text.
+func TestARefusedSessionDoorOpensNoChildRun(t *testing.T) {
+	f := newAppGateFixture(t, "user-1")
+	f.store.prefs = Preferences{KillSwitchEngaged: true}
+	writes := &journalWrites{}
+
+	out, err := f.delegate(t, writes).RunStep(context.Background(), sessionHandover(memqlengine.AppDoorPin{}))
+	if code := refusalCode(err); code != AppGateKillSwitchEngaged {
+		t.Fatalf("refusal %q (err: %v), want %q", code, err, AppGateKillSwitchEngaged)
+	}
+	if out.ChildRunId != "" || writes.count() != 0 {
+		t.Fatalf("the refused step opened child run %q with %d journal write(s)", out.ChildRunId, writes.count())
+	}
+	if got := f.capture.started(); len(got) != 0 {
+		t.Fatalf("%d session(s) reached the machine with the kill switch engaged", len(got))
 	}
 }

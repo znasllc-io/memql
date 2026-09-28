@@ -295,33 +295,49 @@ as it does today.
 An app session has its **own** gate, not the computer-use gates `workerHost`
 takes. Those answer "may this *agent* run this command on this user's
 computer"; an app session is the owner's own app, on their own machine, doing
-work their own policy routed to it. Every app session asks the same gate
+work that was routed to it. Every app session asks the same gate
 (`integrations/agent/worker/app_gate.go`) — a step handed over through the
-session door, a delegated Task, and a turn through the chat or structured app
-door alike:
+session door and a turn through the chat or structured app door alike, and a
+delegated Task through the same executor:
 
 1. **`apps.allow` on the machine** — the app is allowed in that machine's
    `policy.yaml` and somebody signed into it. The cockpit enforces it, the
    registration reports it, and the `app:<id>` routing label reflects it.
-2. **The owner's policy names the app** — their routing policy names
-   `app:<id>` (session and chat doors), or their delegation policy lets the
-   Task kind go to an app. The router never resolves an app door a policy does
-   not name.
-3. **The machine is the owner's** — an app session runs only on its owner's
-   machines. There is no sharing opt-in for app sessions: the session's
-   back-channel credential names a person.
+2. **The machine is the owner's** — an app session runs only on the machines
+   of the person it runs for. There is no sharing opt-in for app sessions: the
+   session's back-channel credential names a person.
+3. **A decision named the app** — and the router reaches an app door two ways:
+   - **A routing rule's chain.** The chain names `app:<id>` because the
+     cluster's AI routing configuration wrote it there. That configuration is
+     **one document for the whole cluster**, not a per-owner policy; what makes
+     the session the owner's is items 1 and 2 — the door resolves only against
+     their own machines, where their own `apps.allow` consented to it.
+   - **An explicit pin** — a provider named on the request itself, which skips
+     every rule. A pin opens a session only when **the person the session runs
+     for made it**: their own request naming the app, their own step
+     override. A pin anybody else made — another user's agent whose record
+     stores `app:<id>`, a prompt author's `@defaultProvider`, a deploy-time env
+     var — is refused as `app_not_named_by_owner`. The router carries which of
+     the two a door was, and who made a pin, to the gate.
+
+   A delegated Task reaches an app because the owner's delegation policy
+   routed its kind there, and carries no pin.
 4. **The kill switch**, when it is **explicitly** engaged —
    `v1:identity:user.preferences.computerUseEnabled == false` closes every app
-   session. Unset is not engaged, and a preference read that fails is logged
-   and admits.
+   session. Unset is not engaged. A preference read that **fails** is neither,
+   and refuses as `kill_switch_unreadable`: it neither opens a machine the
+   owner may have switched off nor tells them they switched it off.
 
 No `agentAuthorization` row and no `computerUseScope` is read, and there is no
 per-task approval or classifier pass: a cluster where no agent was ever granted
-a shell still opens the sessions its owner's policy routes to an app.
+a shell still opens the sessions routed to its owners' apps.
 
-A refusal names which gate refused it (`kill_switch_engaged`, "is not
-allowed and signed in", "is not <owner>'s machine"). The kill switch is asked
-before a machine is chosen, so a refused call never opens anything on one.
+A refusal names which gate refused it (`app_not_named_by_owner`,
+`kill_switch_engaged`, `kill_switch_unreadable`, "is not allowed and signed
+in", "is not <owner>'s machine"). The pin and the kill switch are asked before
+a machine is chosen — and on the session door before the step's child run is
+opened — so a refused call never opens anything, on the machine or in the
+Work feed.
 
 ---
 
@@ -339,8 +355,15 @@ apps reported by a machine.
 | `eligibleKinds` | task kinds that may be delegated. An **empty list allows nothing** — opting in does not opt every kind in with it |
 | `appOrder` | which apps to try, in order. An app not listed is never selected even on a machine that has it |
 | `maxConcurrentSessions` | live sessions across every machine. `0` reads as the default of 1, never as "none" |
-| `workspaceRoot` | where the engine names session directories: one per run for a handed-over step or Task, one per session for an inference turn. **Unset lets the machine choose** — `AppSessionStart.workspace` is sent empty and the cockpit uses a scratch directory under its own roots. The cockpit still gets to veto a path outside its own roots |
+| `workspaceRoot` | where the engine names a directory for a handed-over step or Task: one per run. An inference turn (chat or structured) never gets one — it is one session, and the machine chooses. **Unset lets the machine choose** for every session — `AppSessionStart.workspace` is sent empty and the machine runs it in a scratch directory under its own roots. The cockpit still gets to veto a path outside its own roots |
 | `credentialLifetimeSeconds` | default 4h, clamped to 8h at the mint |
+
+> **Pending the cockpit release.** The machine-chooses half of this contract
+> lives in memql-cockpit. Cockpit releases up to v0.16.0 still refuse an
+> **empty** `AppSessionStart.workspace` ("no workspace in AppSessionStart"), so
+> until the release that creates a scratch directory ships, an app session
+> opens only for a step or Task whose owner set a `workspaceRoot` — and an
+> inference turn through the app door fails on the machine.
 
 **If no machine with an allowed, signed-in app is online, the task runs
 in-process.** A plan never waits for a laptop to wake up: a delegation design

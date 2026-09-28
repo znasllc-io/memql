@@ -21,12 +21,14 @@ package worker
 // THE CONSENT IS THE APP GATE (app_gate.go), the same one the session door and
 // a delegated Task ask -- not preDispatchCheck. That gate answers "may this
 // AGENT run a command on this user's computer", and an app session is not that
-// question. The consent that matters here is the one already given: the app is
-// `allowed` in the machine's own policy.yaml, somebody signed into it, and the
-// owner's policy named it. Running the computer-use scope gate over a chat turn
-// would refuse every call on a machine whose owner had not granted an agent
-// shell access, for a call that runs no shell command. The kill switch, when
-// the owner explicitly engaged it, closes this door as it closes the others.
+// question. The consent that matters here is the app `allowed` in the machine's
+// own policy.yaml with somebody signed into it, on the owner's own machine,
+// reached through a routing rule's chain or through a pin the owner made
+// themselves -- a pin skips every rule, so one anybody else made is refused.
+// Running the computer-use scope gate over a chat turn would refuse every call
+// on a machine whose owner had not granted an agent shell access, for a call
+// that runs no shell command. The kill switch, when the owner explicitly
+// engaged it, closes this door as it closes the others.
 
 import (
 	"context"
@@ -270,11 +272,12 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 	}
 
 	// THE APP GATE, before a machine is chosen -- the same consent the session
-	// door asks. A refusal reads as a shut door (ErrAppUnavailable), so a chat
-	// chain moves on to its next source exactly as it does for a laptop that
-	// is asleep, and the refusal's own name says which it was.
-	if refusal := appSessionConsent(ctx, a.prefs, a.logger, owner); refusal != nil {
-		return memqlengine.AppCallResult{}, fmt.Errorf("%w: %s", memqlengine.ErrAppUnavailable, refusal)
+	// door asks, with the pin the router bound on this resolution. A refusal
+	// reads as a shut door (ErrAppUnavailable), so a chat chain moves on to
+	// its next source exactly as it does for a laptop that is asleep, and the
+	// refusal's own code says which it was.
+	if refusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin); refusal != nil {
+		return memqlengine.AppCallResult{}, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable, refusal)
 	}
 
 	// CAN THIS REPLICA STAGE AT ALL (issue memql#5523) -- asked before a
@@ -303,8 +306,7 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 	if req.Schema != nil {
 		schema = string(req.Schema.Schema)
 	}
-	sessionShortId := id.NewShortId()
-	sessionId := "v1:worker:appSession:" + sessionShortId
+	sessionId := "v1:worker:appSession:" + id.NewShortId()
 
 	// THE IMAGES, LANDED BEFORE THE SESSION STARTS (issue memql#5523).
 	//
@@ -352,10 +354,15 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		// two derivations disagree the day either changes.
 		Prompt:         visionPromptWithInputs(flattenMessages(req.Messages), staged),
 		ResponseSchema: schema,
-		// Empty unless the owner set a workspaceRoot, and empty means the
-		// machine chooses (AppSessionStart.workspace) -- see
-		// inferenceWorkspace. Nothing on this path refuses for it.
-		Workspace:   a.inferenceWorkspace(ctx, owner, sessionShortId),
+		// EMPTY, ALWAYS: the machine chooses (AppSessionStart.workspace). An
+		// inference turn is one session and nothing outlives it, so it
+		// belongs in a directory of the machine's own choosing, whose
+		// lifetime the machine owns. A directory the engine named under the
+		// owner's workspaceRoot would be one nobody removes (the machine
+		// cannot tell it from a run's, which later steps reuse), holding a
+		// copy of every image the turn was shown. The root names a RUN's
+		// directory, on the session door.
+		Workspace:   "",
 		RunId:       req.RunId,
 		StepId:      req.StepId,
 		MaxDuration: appSessionMaxDuration,
@@ -446,28 +453,6 @@ func (a *AppInference) selectMachine(ctx context.Context, owner string, req memq
 		Considered: considered,
 		Total:      plan.Total,
 	}
-}
-
-// inferenceWorkspace is the directory an inference session runs in.
-//
-// One directory per SESSION under the owner's delegationPolicy.workspaceRoot
-// when they set one: a turn is its own unit, its staged images land there, and
-// two turns running at once must not share a tree. With no root it is EMPTY,
-// which AppSessionStart.workspace defines as "the machine chooses" -- the
-// engine cannot know a path on somebody's machine, and a guessed one is a path
-// the cockpit refuses or, worse, creates. A policy read that fails is logged
-// and leaves the choice to the machine rather than refusing the call.
-func (a *AppInference) inferenceWorkspace(ctx context.Context, owner, sessionShortId string) string {
-	if a.policies == nil {
-		return ""
-	}
-	policy, err := a.policies.DelegationPolicy(ctx, owner)
-	if err != nil {
-		a.logger.Warn("app door: delegation policy lookup failed; the machine chooses the workspace",
-			"owner_user_id", owner, "error", err)
-		return ""
-	}
-	return workspaceUnderRoot(policy.WorkspaceRoot, sessionShortId)
 }
 
 // answerFrom picks the text a caller gets back from a finished session.

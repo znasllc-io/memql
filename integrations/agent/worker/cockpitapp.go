@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/core/id"
@@ -186,42 +187,71 @@ func (e *CockpitAppExecutor) Backend() string { return BackendCockpitApp }
 // ExecutorResult.
 //
 // The gate order matters and is deliberate: identity, then app,
-// then the APP GATE's consent, then the machine. Running the consent
-// before selection means a refused run never reveals which machines
-// the user has online; running it after would make "you have no
-// machine for this" and "you may not do this" both present as the
-// same failure.
+// then the APP GATE, then the machine. Running the gate before
+// selection means a refused run never reveals which machines the user
+// has online; running it after would make "you have no machine for
+// this" and "you may not do this" both present as the same failure.
+//
+// A TASK CARRIES NO PIN. It reaches an app because the owner's delegation
+// policy routed its kind there (planner.DecideDelegation), which is a
+// decision of theirs the way a routing rule's chain is. Nothing in the tree
+// dispatches container Tasks yet (planner.LookupContainerExecutor has no
+// caller), and the dispatcher that does must hand this executor only the
+// Tasks that policy routed. The session door, which carries a pin, asks the
+// gate itself before it opens a child run, and runs through runAdmitted.
 func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorRequest, progress planner.ProgressCallback) (planner.ExecutorResult, error) {
-	started := time.Now()
-
-	// An empty owner is a REFUSAL, never a wildcard. Worker
-	// registrations are per-user and the back-channel credential is
-	// minted with this as its subject; a blank one would either match
-	// nobody or, worse, be treated as "any".
-	ownerUserId := strings.TrimSpace(req.OwnerUserId)
-	if ownerUserId == "" {
-		return planner.ExecutorResult{}, errors.New("cockpit-app: task has no owner; a machine-touching backend cannot run unattributed")
+	ownerUserId, _, err := appSessionTarget(req)
+	if err != nil {
+		return planner.ExecutorResult{}, err
 	}
+	if refusal := e.admitSession(ctx, ownerUserId, memqlengine.AppDoorPin{}); refusal != nil {
+		return planner.ExecutorResult{}, fmt.Errorf("cockpit-app: %w", refusal)
+	}
+	return e.runAdmitted(ctx, req, progress)
+}
 
-	appId := planner.BackendArg(taskBackend(req))
+// admitSession is the APP GATE (app_gate.go), the one the chat door asks too:
+// a pin owner did not make, and the kill switch. No agent scope is read: an
+// app session is not an agent's shell command, and a cluster where nobody
+// granted one still opens the sessions its owner routed to an app.
+func (e *CockpitAppExecutor) admitSession(ctx context.Context, ownerUserId string, pin memqlengine.AppDoorPin) *appGateRefusal {
+	return admitAppSession(ctx, e.prefs, e.logger, ownerUserId, pin)
+}
+
+// appSessionTarget is the owner and app a request names, or the refusal that
+// says which is missing.
+//
+// An empty owner is a REFUSAL, never a wildcard. Worker registrations are
+// per-user and the back-channel credential is minted with it as its subject; a
+// blank one would either match nobody or, worse, be treated as "any".
+func appSessionTarget(req planner.ExecutorRequest) (ownerUserId, appId string, err error) {
+	ownerUserId = strings.TrimSpace(req.OwnerUserId)
+	if ownerUserId == "" {
+		return "", "", errors.New("cockpit-app: task has no owner; a machine-touching backend cannot run unattributed")
+	}
+	appId = planner.BackendArg(taskBackend(req))
 	if appId == "" {
-		return planner.ExecutorResult{}, errors.New(
+		return "", "", errors.New(
 			"cockpit-app: executorBackend must name an app, e.g. \"cockpit-app:claude-code\"")
 	}
 	if !workerservice.IsKnownAppId(appId) {
-		return planner.ExecutorResult{}, fmt.Errorf(
+		return "", "", fmt.Errorf(
 			"cockpit-app: %q is not an app this engine drives (known: %s)",
 			appId, strings.Join(workerservice.KnownAppIds(), ", "))
 	}
+	return ownerUserId, appId, nil
+}
 
-	// THE APP GATE (app_gate.go), the one the chat door asks too. The
-	// machine's apps.allow and the owner's policy naming this app are the
-	// consent; what is asked here is whether the owner has since switched
-	// computer use off. No agent scope is read: an app session is not an
-	// agent's shell command, and a cluster where nobody granted one still
-	// opens the sessions its owner's policy routes to an app.
-	if refusal := appSessionConsent(ctx, e.prefs, e.logger, ownerUserId); refusal != nil {
-		return planner.ExecutorResult{}, fmt.Errorf("cockpit-app: %s", refusal)
+// runAdmitted runs a request the app gate has ALREADY ADMITTED: machine
+// selection, the session, and the ledger row. Its callers are Run, and the
+// session door (app_session_delegate.go), which asks the gate with the door's
+// pin before it opens the child run the session is recorded into.
+func (e *CockpitAppExecutor) runAdmitted(ctx context.Context, req planner.ExecutorRequest, progress planner.ProgressCallback) (planner.ExecutorResult, error) {
+	started := time.Now()
+
+	ownerUserId, appId, err := appSessionTarget(req)
+	if err != nil {
+		return planner.ExecutorResult{}, err
 	}
 
 	policy := DelegationPolicy{}
@@ -352,10 +382,9 @@ func sessionRunSpec(req planner.ExecutorRequest, appId, ownerUserId, workspace s
 //
 // EMPTY IS A VALID ANSWER, and it means the machine chooses
 // (AppSessionStart.workspace): with no root, or with a root and no unit of
-// work to key a directory by, the session names no workspace and the cockpit
-// makes one of its own. The engine never invents a path on somebody's
-// machine, and never runs a session in the root itself -- the tree every
-// other run's directory lives in.
+// work to key a directory by, the session names no workspace. The engine never
+// invents a path on somebody's machine, and never runs a session in the root
+// itself -- the tree every other run's directory lives in.
 func sessionWorkspace(req planner.ExecutorRequest, root string) string {
 	if w := strings.TrimSpace(req.Workspace); w != "" {
 		return w
@@ -364,16 +393,7 @@ func sessionWorkspace(req planner.ExecutorRequest, root string) string {
 	if fresh := stringFromInput(req, "freshWorkspace"); isWorkspaceDirName(fresh) {
 		dir = fresh
 	}
-	return workspaceUnderRoot(root, dir)
-}
-
-// workspaceUnderRoot joins one directory name onto the owner's
-// delegationPolicy.workspaceRoot, or answers "" -- the machine chooses -- when
-// either is missing. It is the one place both doors compose a workspace, so
-// the chat door and the session door cannot disagree about what a root means.
-func workspaceUnderRoot(root, dir string) string {
 	root = strings.TrimRight(strings.TrimSpace(root), "/")
-	dir = strings.TrimSpace(dir)
 	if root == "" || dir == "" {
 		return ""
 	}

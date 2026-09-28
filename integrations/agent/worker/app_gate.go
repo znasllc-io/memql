@@ -3,37 +3,54 @@
 package worker
 
 // app_gate.go -- the consent gate in front of every APP SESSION: a step handed
-// over through the session door (design D7), a delegated Task, and one turn
-// through the chat / structured app door. Both front doors ask it, so an app
-// session has one consent story whichever way it was reached.
+// over through the session door (design D7), and one turn through the chat /
+// structured app door. Both front doors ask it, so an app session has one
+// consent story whichever way it was reached.
 //
 // IT IS NOT THE COMPUTER-USE GATE, and that is the owner's decision.
 // preDispatchCheck answers "may this AGENT run this command on this user's
 // computer": per-task approval, the agent's standing computerUseScope, the
 // classifier over the command. An app session is a different act, and its
-// consent is given in two places the owner already controls:
+// consent is two things together:
 //
 //   - THE MACHINE: the app is in apps.allow of that machine's policy.yaml and
 //     somebody signed into it. That is what "allowed and signed in" on the
-//     registration reports, and what the `app:<id>` routing label means.
-//   - THE OWNER'S POLICY: their routing policy names `app:<id>` (the session
-//     and chat doors), or their delegation policy lets a Task kind go to an
-//     app. That is decided before a call gets here -- the router never
-//     resolves an app door a policy does not name.
+//     registration reports, what the `app:<id>` routing label means, and what
+//     appMachineRefusal asks of the live registration -- which must also be
+//     the session owner's own.
+//   - A DECISION NAMING THE APP. The router reaches an app door two ways, and
+//     only one of them is a decision by construction:
+//       - A ROUTING RULE'S CHAIN. The chain names the app because the cluster's
+//         routing configuration wrote it there. That configuration is ONE
+//         document for the whole cluster (PolicyRegistry.SnapshotRouting has
+//         no owner key), not a per-owner policy: what makes the session the
+//         owner's is that the door resolves only against their own machines,
+//         where their own apps.allow consented to it.
+//       - AN EXPLICIT PIN (ResolveRequest.ExplicitProvider). A pin skips every
+//         rule, so it is consent only when the person the session runs for
+//         made it -- their own request naming the app, their own step
+//         override. A pin anybody else made (another user's agent, a prompt
+//         author's @defaultProvider, a deploy-time env var) would open this
+//         person's machine for a choice they never made, and
+//         appDoorPinRefusal refuses it by name. The router says which of the
+//         two the door was (memql.AppDoorPin).
 //
 // Requiring standing scope `full` on top refused every session on a cluster
 // where no agent had been granted a shell -- for work the owner had consented
-// to on the machine and in the policy -- so no agentAuthorization row is read.
+// to on the machine and in the configuration -- so no agentAuthorization row
+// is read.
 //
-// What this file adds is the one switch the owner can throw from MemQL itself:
-// the computer-use kill switch. It closes app sessions when it is EXPLICITLY
-// engaged and not otherwise.
+// And the one switch the owner can throw from MemQL itself: the computer-use
+// kill switch closes app sessions when it is EXPLICITLY engaged and not
+// otherwise. A switch that cannot be read is neither, and is refused under its
+// own name.
 
 import (
 	"context"
 	"log/slog"
 	"strings"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
 
@@ -42,6 +59,19 @@ import (
 // same switch.
 const AppGateKillSwitchEngaged = "kill_switch_engaged"
 
+// AppGateKillSwitchUnreadable is the refusal code when the owner's kill switch
+// could not be read.
+//
+// SEPARATE FROM AppGateKillSwitchEngaged on purpose. A read that failed says
+// nothing about what the owner did: admitting on it would open a session on a
+// machine they may have switched off, and reporting it as the switch would
+// tell them they switched computer use off when they did not.
+const AppGateKillSwitchUnreadable = "kill_switch_unreadable"
+
+// AppGateNotNamedByOwner is the refusal code for an app door reached through
+// an explicit pin the session's owner did not make.
+const AppGateNotNamedByOwner = "app_not_named_by_owner"
+
 // PreferencesReader is the one read the app gate makes. The dispatcher's Store
 // satisfies it, so both doors read the switch from the graph the tool path
 // reads it from.
@@ -49,24 +79,56 @@ type PreferencesReader interface {
 	UserPreferences(ctx context.Context, userId string) (Preferences, error)
 }
 
-// appGateRefusal is a named refusal from the app gate.
+// appGateRefusal is a named refusal from the app gate. Both doors wrap it, so
+// errors.As finds it under whatever a door adds in front.
 type appGateRefusal struct {
-	Code    string
-	Message string
+	code    string
+	message string
 }
 
-func (r *appGateRefusal) Error() string { return r.Code + ": " + r.Message }
+func (r *appGateRefusal) Error() string { return r.code + ": " + r.message }
 
-// appSessionConsent decides whether owner may open an app session right now.
-// Nil admits.
+// Code is the stable machine-readable tag, in the shape the engine's other
+// refusals expose it (memqlengine.AppVisionStagingFailed.Code).
+func (r *appGateRefusal) Code() string { return r.code }
+
+// admitAppSession is the whole gate short of the machine: whether owner may
+// open an app session reached through pin, right now. Nil admits.
 //
-// It is asked BEFORE a machine is selected, so a refused call never reveals
-// which machines the owner has online, and never opens anything on one.
+// It is asked BEFORE a machine is selected, and on the session door before a
+// child run is opened, so a refused call never reveals which machines the
+// owner has online and never leaves anything behind. The pin is asked first
+// because it needs no read.
+func admitAppSession(ctx context.Context, prefs PreferencesReader, logger *slog.Logger, owner string, pin memqlengine.AppDoorPin) *appGateRefusal {
+	if refusal := appDoorPinRefusal(pin, owner); refusal != nil {
+		return refusal
+	}
+	return appSessionConsent(ctx, prefs, logger, owner)
+}
+
+// appDoorPinRefusal refuses an app door reached through a pin that owner did
+// not make. A rule's chain (the zero pin) is not a pin and is not refused.
+func appDoorPinRefusal(pin memqlengine.AppDoorPin, owner string) *appGateRefusal {
+	if !pin.Pinned || sameSubject(pin.By, owner) {
+		return nil
+	}
+	by := "no person"
+	if strings.TrimSpace(pin.By) != "" {
+		by = strings.TrimSpace(pin.By)
+	}
+	return &appGateRefusal{
+		code: AppGateNotNamedByOwner,
+		message: "this app was pinned by " + by + ", not by " + strings.TrimSpace(owner) +
+			", and an app session opens on " + strings.TrimSpace(owner) + "'s own machine only for a routing rule " +
+			"or their own pin",
+	}
+}
+
+// appSessionConsent is the kill switch: whether owner has switched computer use
+// off. Nil admits.
 //
-// A preference read that FAILS admits, with a warning. The switch closes app
-// sessions only when the owner engaged it, and a read that failed says nothing
-// about what they did; refusing on it would turn a database hiccup into "you
-// switched computer use off", which they did not.
+// A nil reader admits: it is a node with no store, which has no switch to read
+// -- the tool path's preDispatchCheck skips the switch on the same node.
 func appSessionConsent(ctx context.Context, prefs PreferencesReader, logger *slog.Logger, owner string) *appGateRefusal {
 	if prefs == nil {
 		return nil
@@ -76,14 +138,18 @@ func appSessionConsent(ctx context.Context, prefs PreferencesReader, logger *slo
 		if logger == nil {
 			logger = slog.Default()
 		}
-		logger.Warn("app gate: user preferences lookup failed; the kill switch reads as not engaged",
+		logger.Warn("app gate: user preferences lookup failed; the app session is refused rather than opened past a switch nobody could read",
 			"owner_user_id", owner, "error", err)
-		return nil
+		return &appGateRefusal{
+			code: AppGateKillSwitchUnreadable,
+			message: "the computer-use kill switch for this user could not be read (" + err.Error() + "), " +
+				"so whether they switched computer use off is unknown",
+		}
 	}
 	if p.KillSwitchEngaged {
 		return &appGateRefusal{
-			Code: AppGateKillSwitchEngaged,
-			Message: "computer use is switched off for this user (preferences.computerUseEnabled is false), " +
+			code: AppGateKillSwitchEngaged,
+			message: "computer use is switched off for this user (preferences.computerUseEnabled is false), " +
 				"which closes app sessions until it is switched back on",
 		}
 	}

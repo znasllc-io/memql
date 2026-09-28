@@ -904,6 +904,12 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 				"provider", entry.Config.Name, "effort", effort, "requestId", req.RequestId)
 		}
 	}
+	// And HOW THE DOOR WAS REACHED, for an app door's own gate: a rule's chain
+	// named it, or a pin skipped every rule -- and whose pin. Only the router
+	// knows which, and only an app door asks (session_door.go's appDoorPin).
+	if pinnable, ok := client.(interface{ WithAppDoorPin(memql.AppDoorPin) any }); ok {
+		client = pinnable.WithAppDoorPin(appDoorPin(req, name))
+	}
 	return client, resolved, true
 }
 

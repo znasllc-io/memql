@@ -170,6 +170,30 @@ func (d AppDoor) SupportsStructured() bool {
 	return false
 }
 
+// AppDoorPin says how an app door was reached, for the app gate on the agent
+// side (integrations/agent/worker/app_gate.go).
+//
+// AN APP SESSION OPENS ON THE ACTING USER'S OWN MACHINE, and its consent is
+// that machine's apps.allow plus a decision naming the app. A routing rule's
+// chain is such a decision: the cluster's routing configuration wrote the
+// entry. An EXPLICIT PIN skips every rule (component/router's resolveChain),
+// so it is that decision only when the person the session runs for made it --
+// their own request naming a provider, their own step override. A pin anybody
+// else made (another user's agent, a prompt author's @defaultProvider, a
+// deploy-time env var) is not that person's consent to work on their machine,
+// and the gate refuses it by name.
+//
+// The zero value is a rule's chain. The router is the only thing that fills
+// it, because it is the only thing that knows which of the two the door was.
+type AppDoorPin struct {
+	// Pinned is true when the call pinned this door (ResolveRequest.
+	// ExplicitProvider) rather than a rule choosing a chain that named it.
+	Pinned bool
+	// By is the person who made the pin (ResolveRequest.PinnedBy); empty
+	// when no person did.
+	By string
+}
+
 // AppCallRequest is one turn handed to an app.
 type AppCallRequest struct {
 	// ActingUserId scopes the call to that user's machines. EMPTY IS SYSTEM
@@ -203,6 +227,10 @@ type AppCallRequest struct {
 	// Inputs are Library artifact ids the cockpit pulls into the session
 	// workspace before the run starts.
 	Inputs []string
+
+	// Pin is how the router reached this door, bound per resolution the way
+	// Level is. The app gate reads it; see AppDoorPin.
+	Pin AppDoorPin
 
 	// Images are the images of a VISION call, as bytes (issue memql#5523,
 	// design D11 of the app-session record).
@@ -422,6 +450,10 @@ type appProvider struct {
 	// effort is a person's explicit effort for this one call (epic
 	// memql#5414), bound per resolution for the reason level is.
 	effort string
+	// pin is how the router reached this door (AppDoorPin), bound per
+	// resolution for the reason level is: the entry is shared by a pinned
+	// call and a routed one alike.
+	pin AppDoorPin
 
 	lastMu      sync.Mutex
 	lastSurface string
@@ -482,6 +514,7 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 	if strings.TrimSpace(req.ActingUserId) == "" {
 		req.ActingUserId = actingUserFromContext(ctx)
 	}
+	req.Pin = p.pin
 
 	if p.wildcard {
 		chosen, err := p.resolveWildcard(ctx, a, req)
@@ -524,25 +557,38 @@ func (p *appProvider) WithLevel(level string) any {
 	if p == nil {
 		return p
 	}
-	return &appProvider{
-		registry:     p.registry,
-		appId:        p.appId,
-		model:        p.model,
-		actingUserId: p.actingUserId,
-		wildcard:     p.wildcard,
-		level:        strings.TrimSpace(level),
-		effort:       p.effort,
-	}
+	q := p.rebound()
+	q.level = strings.TrimSpace(level)
+	return q
 }
 
 // WithEffort binds one resolution's effort (epic memql#5414, design D20), for
-// WithLevel's reasons: the entry is shared and an effort is one call's. Each
-// binding carries the other forward, so the order the router applies them in
-// cannot drop one.
+// WithLevel's reasons: the entry is shared and an effort is one call's.
 func (p *appProvider) WithEffort(effort string) any {
 	if p == nil {
 		return p
 	}
+	q := p.rebound()
+	q.effort = strings.TrimSpace(effort)
+	return q
+}
+
+// WithAppDoorPin binds how the router reached this door for one resolution,
+// for WithLevel's reasons: the entry is shared by a pinned call and a routed
+// one alike, and the app gate must not read one call's pin as another's.
+func (p *appProvider) WithAppDoorPin(pin AppDoorPin) any {
+	if p == nil {
+		return p
+	}
+	q := p.rebound()
+	q.pin = pin
+	return q
+}
+
+// rebound is a fresh provider carrying every per-resolution binding forward, so
+// the order the router applies them in cannot drop one, and with its own
+// per-call bookkeeping.
+func (p *appProvider) rebound() *appProvider {
 	return &appProvider{
 		registry:     p.registry,
 		appId:        p.appId,
@@ -550,7 +596,8 @@ func (p *appProvider) WithEffort(effort string) any {
 		actingUserId: p.actingUserId,
 		wildcard:     p.wildcard,
 		level:        p.level,
-		effort:       strings.TrimSpace(effort),
+		effort:       p.effort,
+		pin:          p.pin,
 	}
 }
 

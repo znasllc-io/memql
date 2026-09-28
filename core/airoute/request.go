@@ -124,6 +124,19 @@ type ResolveRequest struct {
 	// refused at load when it names a policy.
 	ExplicitProvider string
 
+	// PinnedBy is the PERSON who made ExplicitProvider, when a person did: the
+	// caller who named a provider on their own request, the person whose step
+	// override named the model, the owner of the agent whose record stores
+	// it. EMPTY when nothing is pinned, and when the pin is nobody's in
+	// particular -- a prompt's @defaultProvider, a DSL provider argument, a
+	// deploy-time env var.
+	//
+	// NOTHING ROUTES ON IT. It is consent evidence the router carries to an
+	// app door: a pin skips every rule, an app session opens on the acting
+	// user's own machine, and the app gate admits a pinned app door only when
+	// the pin is that user's own.
+	PinnedBy string
+
 	// Effort is a PERSON'S explicit reasoning effort for this one call (epic
 	// memql#5414, design D20): low, medium, high, xhigh or max, from a step
 	// re-run or branched with a different effort. EMPTY MEANS THE LEVEL

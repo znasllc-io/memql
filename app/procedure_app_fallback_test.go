@@ -97,6 +97,12 @@ func TestTheFallbackHandsTheStepToTheRecordedAppThroughTheSessionDoor(t *testing
 	if req.ExplicitProvider != "app:claude-code" {
 		t.Fatalf("explicit provider = %q, want the app the procedure was recorded from", req.ExplicitProvider)
 	}
+	// The pin is the OWNER's: their own goal goes back to the app their own
+	// recording came from. The app gate opens a pinned door only for a pin
+	// the session's owner made.
+	if req.PinnedBy != "v1:identity:user:owner" {
+		t.Fatalf("pinned by %q, want the goal's owner", req.PinnedBy)
+	}
 	if req.RunId != "v1:work:run:goalrun" || req.StepId != "v1:work:step:goalrun-replayed" || req.UserId != "v1:identity:user:owner" || req.AgentId != testReasoningAgent.Id {
 		t.Fatalf("request identity = %+v", req)
 	}

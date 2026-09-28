@@ -36,36 +36,39 @@ func TestEveryAiHandlerCallSiteCarriesTheExpectedLevelAndModality(t *testing.T) 
 		promptName       string
 		wantStructured   bool
 		explicitProvider string
+		pinnedBy         string
 	}{
 		{
 			site:       "handleAiChatNonStream",
-			req:        chatResolveRequest(messages, ""),
+			req:        chatResolveRequest(messages, "", "v1:identity:user:asker"),
 			level:      airoute.LevelStrong,
 			modality:   airoute.ModalityChat,
 			promptName: askPromptName,
 		},
 		{
 			site:             "handleAiChatNonStream (caller pinned a provider)",
-			req:              chatResolveRequest(messages, "chat54Mini"),
+			req:              chatResolveRequest(messages, "chat54Mini", "v1:identity:user:asker"),
 			level:            airoute.LevelStrong,
 			modality:         airoute.ModalityChat,
 			promptName:       askPromptName,
 			explicitProvider: "chat54Mini",
+			pinnedBy:         "v1:identity:user:asker",
 		},
 		{
 			site:       "handleAiChatStream",
-			req:        chatStreamResolveRequest(messages, ""),
+			req:        chatStreamResolveRequest(messages, "", "v1:identity:user:asker"),
 			level:      airoute.LevelStrong,
 			modality:   airoute.ModalityStreamingChat,
 			promptName: askPromptName,
 		},
 		{
 			site:             "handleAiChatStream (caller pinned a provider)",
-			req:              chatStreamResolveRequest(messages, "streamClaudeSonnet"),
+			req:              chatStreamResolveRequest(messages, "streamClaudeSonnet", "v1:identity:user:asker"),
 			level:            airoute.LevelStrong,
 			modality:         airoute.ModalityStreamingChat,
 			promptName:       askPromptName,
 			explicitProvider: "streamClaudeSonnet",
+			pinnedBy:         "v1:identity:user:asker",
 		},
 		{
 			site:           "callSuggestWithSchema",
@@ -100,6 +103,12 @@ func TestEveryAiHandlerCallSiteCarriesTheExpectedLevelAndModality(t *testing.T) 
 				t.Errorf("ExplicitProvider is %q, expected %q -- a caller-named provider is a PIN, never a registry lookup",
 					c.req.ExplicitProvider, c.explicitProvider)
 			}
+			// A caller-named provider is the CALLER's pin, and an unpinned
+			// call names nobody -- the app gate admits a pinned app door only
+			// when the pin is the session owner's own.
+			if c.req.PinnedBy != c.pinnedBy {
+				t.Errorf("PinnedBy is %q, expected %q", c.req.PinnedBy, c.pinnedBy)
+			}
 		})
 	}
 }
@@ -117,8 +126,8 @@ func TestTheChatSitesEstimateTheirContextFloor(t *testing.T) {
 	short := []common.ChatMessage{{Role: "user", Content: "hi"}}
 	long := []common.ChatMessage{{Role: "user", Content: strings.Repeat("a very long turn. ", 4000)}}
 
-	shortFloor := chatResolveRequest(short, "").Needs.MinContextTokens
-	longFloor := chatResolveRequest(long, "").Needs.MinContextTokens
+	shortFloor := chatResolveRequest(short, "", "").Needs.MinContextTokens
+	longFloor := chatResolveRequest(long, "", "").Needs.MinContextTokens
 
 	if shortFloor <= 0 {
 		t.Fatalf("the short turn declares a floor of %d; a zero floor admits every entry and is indistinguishable "+
@@ -132,7 +141,7 @@ func TestTheChatSitesEstimateTheirContextFloor(t *testing.T) {
 	// The streaming site is the same turn with a different modality, so its
 	// floor must be the same number. A divergence here means one of the two
 	// stopped counting the messages.
-	if got := chatStreamResolveRequest(long, "").Needs.MinContextTokens; got != longFloor {
+	if got := chatStreamResolveRequest(long, "", "").Needs.MinContextTokens; got != longFloor {
 		t.Fatalf("the streaming site declares floor %d for the same messages the non-streaming site floors at %d",
 			got, longFloor)
 	}
