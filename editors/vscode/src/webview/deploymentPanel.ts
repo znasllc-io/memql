@@ -57,7 +57,15 @@ import {
   type PageAct,
   type PageBar,
 } from "../deploy/instanceActions.js";
-import { localRuns, type LocalRun, type LocalRunDeps, type LocalRuns } from "../deploy/localRun.js";
+import {
+  SLOT_SHOW,
+  localRuns,
+  slotRefusal,
+  type LocalRun,
+  type LocalRunDeps,
+  type LocalRuns,
+  type SlotBusy,
+} from "../deploy/localRun.js";
 import { pipelineState, type PipelineState } from "../deploy/pipelineState.js";
 import { upgradeVerdict, type UpgradeVerdict } from "../deploy/upgrade.js";
 import { readCheckoutState } from "../install/checkoutState.js";
@@ -286,7 +294,7 @@ export class DeploymentPanel {
   }
 
   private constructor(
-    _context: vscode.ExtensionContext,
+    private readonly context: vscode.ExtensionContext,
     private readonly deps: DeploymentPanelDeps,
   ) {
     this.panel = vscode.window.createWebviewPanel("memqlDeployment", "Cluster", vscode.ViewColumn.Beside, {
@@ -1022,11 +1030,22 @@ export class DeploymentPanel {
   ): void {
     const instance = this.instance;
     if (instance === undefined) return;
+    // THE ADD CLUSTER PAGE MAY HOLD THE SLOT: an install, a repair or an
+    // uninstall going there is refused here, with the way to it. A run of this
+    // page's own going is shown instead, below.
+    const busy = this.slot().busy();
+    if (busy !== undefined && !this.slot().inFlight) {
+      refuseForSlot(busy);
+      return;
+    }
     this.logsOpen = false;
     this.notice = undefined;
+    const name = instance.name;
     this.slot().start(
-      { ...request, instance: instance.name, label: instanceLabel(instance) },
+      { ...request, instance: name, label: instanceLabel(instance) },
       {
+        // The Show on the Add Cluster page's refusal: this page, on this run.
+        reveal: () => DeploymentPanel.show(this.context, this.deps, name),
         installRoot: this.deps.installRoot,
         receiptFile: this.deps.receiptFile,
         runsDir: this.deps.runsDir ?? defaultRunsDir(),
@@ -1270,6 +1289,17 @@ export class DeploymentPanel {
       }
     }
   }
+}
+
+/**
+ * A run refused because the machine is busy with another: one sentence, and
+ * Show, which brings the running one forward. A toast rather than a page
+ * notice, because the run it points at is on another page.
+ */
+function refuseForSlot(busy: SlotBusy): void {
+  void Promise.resolve(vscode.window.showWarningMessage(slotRefusal(busy), SLOT_SHOW)).then((choice) => {
+    if (choice === SLOT_SHOW) busy.reveal();
+  });
 }
 
 /**

@@ -179,6 +179,8 @@ export interface LocalRunDeps {
   onRecord?: () => void;
   /** The run settled -- done, failed or stopped. */
   onSettled?: (run: LocalRun) => void;
+  /** Brings the page showing this run forward: the Show on another page's refusal. */
+  reveal?: () => void;
 }
 
 /** A failure the page leads with: the step, its reason, and the command that fixes it. */
@@ -231,6 +233,11 @@ export class LocalRun {
 
   get inFlight(): boolean {
     return this.status === "running" || this.status === "stopping";
+  }
+
+  /** Brings the page showing this run forward, when its starter said how. */
+  reveal(): void {
+    this.deps.reveal?.();
   }
 
   /**
@@ -541,28 +548,86 @@ function resultSentence(request: LocalRunRequest, report: ExecutionReport | unde
 }
 
 /**
+ * A run the Add Cluster page holds the slot for -- an install, a repair or an
+ * uninstall. Those runs live in that page (their password prompt, their
+ * recovery key); the slot only needs to know one is going, what to call it
+ * and how to show it.
+ */
+export interface HeldRun {
+  /** What the cluster is busy doing, lower case: "installing". */
+  busy: string;
+  /** Brings the page running it forward. */
+  reveal(): void;
+}
+
+/** What is running on this machine now, as a refusal names it and its Show reaches it. */
+export interface SlotBusy {
+  busy: string;
+  reveal(): void;
+}
+
+/**
+ * The one sentence a run refused by the slot says. The fix is its Show
+ * button, which reveals the run that holds the slot.
+ */
+export function slotRefusal(busy: SlotBusy): string {
+  return `MemQL: The local cluster is busy ${busy.busy}.`;
+}
+
+/** The button beside `slotRefusal`. */
+export const SLOT_SHOW = "Show";
+
+/**
  * The machine's one run slot.
  *
  * One at a time, because every run here changes the same cluster and the same
  * receipt: two at once is two answers to what the machine is. `current` keeps
  * the LAST run after it settles, so a page reopened after a failure can still
  * show it with Retry, until the next run replaces it or the page is left.
+ *
+ * TWO PAGES SHARE IT. The Deployment page's runs (update, change version,
+ * rebuild, pull and rebuild) are `LocalRun`s the slot owns; the Add Cluster
+ * page's (install, repair, uninstall) stay in that page and `hold` the slot
+ * while they go. Either page asks `busy()` before it starts, and a run that
+ * would be the second is refused with `slotRefusal` and a Show.
  */
 export class LocalRuns {
   private current_: LocalRun | undefined;
+  private held_: HeldRun | undefined;
   private readonly listeners = new Set<(run: LocalRun) => void>();
 
   get current(): LocalRun | undefined {
     return this.current_;
   }
 
+  /** A run of this slot's own is going (the Add Cluster page's are `busy()`). */
   get inFlight(): boolean {
     return this.current_?.inFlight === true;
   }
 
-  /** Start a run, or undefined when one is already going. */
+  /** Whatever is running on this machine now, from either page; undefined when nothing is. */
+  busy(): SlotBusy | undefined {
+    const run = this.current_;
+    if (run !== undefined && run.inFlight) return { busy: run.words.busy.toLowerCase(), reveal: () => run.reveal() };
+    return this.held_;
+  }
+
+  /**
+   * The Add Cluster page takes the slot for a run of its own. Returns the
+   * release, which the page calls when the run settles; undefined, and nothing
+   * held, when something is already running.
+   */
+  hold(run: HeldRun): (() => void) | undefined {
+    if (this.busy() !== undefined) return undefined;
+    this.held_ = run;
+    return () => {
+      if (this.held_ === run) this.held_ = undefined;
+    };
+  }
+
+  /** Start a run, or undefined when one is already going on either page. */
   start(request: LocalRunRequest, deps: LocalRunDeps): LocalRun | undefined {
-    if (this.inFlight) return undefined;
+    if (this.busy() !== undefined) return undefined;
     const run = new LocalRun(request, deps);
     this.current_ = run;
     for (const listener of [...this.listeners]) listener(run);

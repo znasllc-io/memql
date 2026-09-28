@@ -50,6 +50,7 @@ import {
   setNextInputBoxResult,
   type StubWebviewPanel,
 } from "./support/vscodeStub.js";
+import { LocalRuns } from "../src/deploy/localRun.js";
 
 // dist-test/test/<bundle>.js -> the repository root. The same four levels
 // addClusterPanel.test.ts walks, and for the same reason: the graph under test is
@@ -205,6 +206,9 @@ function openPanel(options: {
     // that does not -- from a single test run.
     sudoIsFree: async () => options.sudoIsFree,
     sudoAccepts: async () => options.passwordAccepted ?? true,
+    // A slot of its own per case: a run an earlier case left going must not
+    // refuse this one (test/runSlot.test.ts holds the sharing).
+    runs: new LocalRuns(),
   };
   AddClusterPanel.show({ subscriptions: [] } as unknown as ExtensionContext, presence(), deps, "install");
   return recorded.webviews[recorded.webviews.length - 1]!;

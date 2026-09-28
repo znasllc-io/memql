@@ -48,8 +48,10 @@ import {
   recorded,
   resetRecorded,
   setNextInputBoxResult,
+  setNextWarningMessageChoice,
   type StubWebviewPanel,
 } from "./support/vscodeStub.js";
+import { LocalRuns } from "../src/deploy/localRun.js";
 
 // dist-test/test -> dist-test -> editors/vscode -> editors -> the repository.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -272,6 +274,7 @@ interface OpenOptions {
   isSignedIn?: (name: string) => boolean;
   removeRegistryEntry?: (name: string) => Promise<unknown>;
   probeCluster?: AddClusterDeps["probeCluster"];
+  runs?: LocalRuns;
 }
 
 async function open(options: OpenOptions = {}): Promise<Harness> {
@@ -301,6 +304,9 @@ async function open(options: OpenOptions = {}): Promise<Harness> {
     ...(options.isSignedIn ? { isSignedIn: options.isSignedIn } : {}),
     // Never the real https probe: a unit lane does not dial out.
     probeCluster: options.probeCluster ?? (async () => ({ ok: false, reason: "no network in this lane" })),
+    // A slot of its own per case, unless the case shares one on purpose: a run
+    // an earlier case left going must not refuse this one.
+    runs: options.runs ?? new LocalRuns(),
   };
 
   AddClusterPanel.show(
@@ -1926,6 +1932,56 @@ test("Cancel during an uninstall says it is stopping until the step finishes", a
     assert.deepEqual(barActs(h.html()), []);
     gate.release();
     await until(() => /data-act="resume"|MemQL is uninstalled/.test(h.html()), "the run to settle");
+  } finally {
+    gate.release();
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// the machine's run slot, shared with the Deployment page
+// -----------------------------------------------------------------------------
+
+test("an install is refused while the machine is busy with another run, with Show to it", async () => {
+  // A rebuild on the Deployment page and an install here would be two
+  // answers to what the machine is. The second is refused in one sentence,
+  // and Show brings the running one forward.
+  const runs = new LocalRuns();
+  let revealed = 0;
+  const release = runs.hold({ busy: "rebuilding", reveal: () => (revealed += 1) });
+  assert.ok(release !== undefined);
+  const h = await open({ runs });
+  try {
+    await until(() => /Install MemQL on this computer/.test(h.html()), "the landing");
+    setNextWarningMessageChoice("Show");
+    beginInstall(h);
+    await until(() => recorded.warnings.includes("MemQL: The local cluster is busy rebuilding."), "the refusal");
+    assert.deepEqual(recorded.warningActions[recorded.warnings.indexOf("MemQL: The local cluster is busy rebuilding.")], ["Show"]);
+    await until(() => revealed === 1, "Show to reveal the running one");
+    assert.doesNotMatch(h.html(), /Installing MemQL/, "the install started anyway");
+    assert.equal(h.runner.calls.some((c) => c.capability === "install.dockerAccess"), false, "a step ran");
+  } finally {
+    release!();
+    h.close();
+  }
+});
+
+test("an install holds the machine's slot while it runs, and gives it back when it settles", async () => {
+  const runs = new LocalRuns();
+  const runner = await fakeRunner();
+  const gate = gateOn(runner, "install.dockerAccess");
+  const h = await open({ runner, runs });
+  try {
+    beginInstall(h);
+    await until(gate.reached, "the install to be running");
+    const busy = runs.busy();
+    assert.ok(busy !== undefined, "the Deployment page would start a run under this install");
+    assert.equal(busy.busy, "installing");
+    // The Deployment page's start is refused while it holds it.
+    assert.equal(runs.hold({ busy: "rebuilding", reveal: () => undefined }), undefined);
+    gate.release();
+    await until(() => INSTALLED.test(h.html()), "the run to settle");
+    assert.equal(runs.busy(), undefined, "the slot was not given back");
   } finally {
     gate.release();
     h.close();

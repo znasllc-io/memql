@@ -97,6 +97,7 @@ import {
 } from "../state/addCluster.js";
 import { recordDiagnostic, type DiagnosticSink } from "../state/diagnostics.js";
 import { LOCAL_INSTANCE_NAME } from "../state/deployments.js";
+import { SLOT_SHOW, localRuns, slotRefusal, type LocalRuns } from "../deploy/localRun.js";
 import {
   DEFAULT_STEP_TIMEOUT_SECONDS,
   failureGuidance,
@@ -299,6 +300,11 @@ export interface AddClusterDeps {
   listLocalClusters?: () => Promise<string[]>;
   /** Whether the editor holds a live session with the named cluster; never, when absent. */
   isSignedIn?: (clusterName: string) => boolean;
+  /**
+   * The machine's run slot, shared with the Deployment page; tests inject
+   * their own. An install, repair or uninstall holds it while it goes.
+   */
+  runs?: LocalRuns;
 }
 
 /** What detection found, held for the landing and for checking a command's act. */
@@ -344,6 +350,8 @@ export class AddClusterPanel {
   // ---- a run (install, repair or uninstall: one at a time) ----
   /** The cancel handle; set exactly while the executor is running. */
   private runAbort: AbortController | undefined;
+  /** Gives back the machine's run slot, while a run of this page holds it. */
+  private releaseSlot: (() => void) | undefined;
   /** From Install or Retry until the run settles, including the password prompt before it. */
   private runInFlight = false;
   /** Why the run could not be attempted at all. Not a step failure. */
@@ -482,6 +490,45 @@ export class AddClusterPanel {
   /** Whether an install, repair or uninstall is in flight (the password prompt included). */
   private runBusy(): boolean {
     return this.runInFlight || this.uninstalling;
+  }
+
+  // ---------------------------------------------------------------------------
+  // the machine's run slot, shared with the Deployment page
+  // ---------------------------------------------------------------------------
+
+  private slot(): LocalRuns {
+    return this.deps.runs ?? localRuns;
+  }
+
+  /**
+   * Whether a run on the Deployment page -- an update, a version change, a
+   * rebuild -- stops this one starting. Says so, with Show, when it does.
+   * Checked BEFORE the state moves, so a refused start leaves the page where
+   * it was.
+   */
+  private refusedBySlot(): boolean {
+    const busy = this.slot().busy();
+    if (busy === undefined) return false;
+    void Promise.resolve(vscode.window.showWarningMessage(slotRefusal(busy), SLOT_SHOW)).then((choice) => {
+      if (choice === SLOT_SHOW) busy.reveal();
+    });
+    return true;
+  }
+
+  /** Takes the slot for this page's run; Show on the other page's refusal brings this page forward. */
+  private holdSlot(busy: string): void {
+    this.giveBackSlot();
+    this.releaseSlot = this.slot().hold({
+      busy,
+      reveal: () => {
+        if (!this.disposed) this.panel.reveal(vscode.ViewColumn.Beside);
+      },
+    });
+  }
+
+  private giveBackSlot(): void {
+    this.releaseSlot?.();
+    this.releaseSlot = undefined;
   }
 
   /** The tab is called what the page is doing. */
@@ -838,6 +885,7 @@ export class AddClusterPanel {
       return;
     }
     if (this.checks !== undefined && this.checks.some((check) => check.tone === "error")) return;
+    if (this.refusedBySlot()) return;
     this.passwordProblem = undefined;
     if (this.state.beginRun()) {
       this.startFreshRun();
@@ -876,6 +924,9 @@ export class AddClusterPanel {
     if (this.runInFlight) return;
     const action = this.state.action;
     if (action !== "install" && action !== "installGuided" && action !== "repair") return;
+    // Taken in the same tick the entry point checked it, so nothing can start
+    // in between; given back when this run settles, below.
+    this.holdSlot(action === "repair" ? "repairing" : "installing");
     this.runInFlight = true;
     this.startTicker();
     try {
@@ -896,6 +947,7 @@ export class AddClusterPanel {
       }
     } finally {
       this.runInFlight = false;
+      this.giveBackSlot();
       this.stopTicker();
       this.runEndedAt = Date.now();
       this.flushLog();
@@ -1194,6 +1246,7 @@ export class AddClusterPanel {
       return;
     }
     if (this.state.screen !== "failedStep" || !this.installRetryable()) return;
+    if (this.refusedBySlot()) return;
     this.state.retry();
     this.startFreshRun();
     this.render();
@@ -1208,6 +1261,7 @@ export class AddClusterPanel {
       return;
     }
     if (this.state.screen !== "done" || !this.state.cancelled) return;
+    if (this.refusedBySlot()) return;
     if (this.state.beginRun()) {
       this.startFreshRun();
       void this.startRun();
@@ -1875,6 +1929,8 @@ export class AddClusterPanel {
       this.render();
       return;
     }
+    if (this.refusedBySlot()) return;
+    this.holdSlot("uninstalling");
     this.uninstalling = true;
     this.uninstall.begin();
     this.startFreshRun();
@@ -1894,6 +1950,7 @@ export class AddClusterPanel {
       }
     } finally {
       this.uninstalling = false;
+      this.giveBackSlot();
       this.uninstallAbort = undefined;
       this.stopTicker();
       this.runEndedAt = Date.now();

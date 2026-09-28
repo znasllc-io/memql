@@ -37,7 +37,7 @@ import type { ConnectionFacts } from "../src/state/deploymentsCatalog.js";
 import type { Run } from "../src/state/deployments.js";
 import { createReleaseCache } from "../src/version/releaseCache.js";
 import { DeploymentPanel, type DeploymentPanelDeps } from "../src/webview/deploymentPanel.js";
-import { recorded, resetRecorded, type StubWebviewPanel } from "./support/vscodeStub.js";
+import { recorded, resetRecorded, setNextWarningMessageChoice, type StubWebviewPanel } from "./support/vscodeStub.js";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "memql-deploy-panel-"));
@@ -774,5 +774,62 @@ test("a remote act that fails says so in one sentence, with the engine's words o
   assert.ok(logged.some((line) => line.includes("analysis run failed")), "the engine's words did not reach Output");
   page().send({ type: "openOutput" });
   assert.equal(shown, 1);
+  page().close();
+});
+
+// -----------------------------------------------------------------------------
+// the machine's run slot, shared with the Add Cluster page
+// -----------------------------------------------------------------------------
+
+test("an update is refused while the Add Cluster page holds the machine, with Show to it", async () => {
+  // An uninstall going on the Add Cluster page, and an update started here
+  // under it, would rebuild images into a cluster being deleted.
+  fresh();
+  const h = harness({
+    releases: createReleaseCache({ fetch: async () => ({ tags: ["v0.24.0", "v0.23.5"], error: "" }) }),
+    confirm: async (c) => c.phrase,
+  });
+  let revealed = 0;
+  const release = h.runs.hold({ busy: "uninstalling", reveal: () => (revealed += 1) });
+  assert.ok(release !== undefined);
+  h.setConnection({ clusterName: "local", connected: true, word: "connected" });
+  DeploymentPanel.show(context(), h.deps);
+  await settle();
+  setNextWarningMessageChoice("Show");
+  page().send({ type: "update", value: "v0.24.0" });
+  await settle();
+  const at = recorded.warnings.indexOf("MemQL: The local cluster is busy uninstalling.");
+  assert.ok(at >= 0, `no refusal; saw ${JSON.stringify(recorded.warnings)}`);
+  assert.deepEqual(recorded.warningActions[at], ["Show"]);
+  assert.equal(revealed, 1, "Show did not reach the running page");
+  assert.equal(h.runs.current, undefined, "an update started under the uninstall");
+  assert.deepEqual(h.runner.started, [], "a step ran");
+  release!();
+  page().close();
+});
+
+test("a run started here carries the way back to this page, for the Add Cluster page's Show", async () => {
+  fresh();
+  const h = harness({
+    releases: createReleaseCache({ fetch: async () => ({ tags: ["v0.24.0", "v0.23.5"], error: "" }) }),
+    confirm: async (c) => c.phrase,
+  });
+  h.setConnection({ clusterName: "local", connected: true, word: "connected" });
+  DeploymentPanel.show(context(), h.deps);
+  await settle();
+  page().send({ type: "update", value: "v0.24.0" });
+  await settle();
+  const busy = h.runs.busy();
+  assert.ok(busy !== undefined, "the update is not holding the machine");
+  assert.equal(busy.busy, "updating");
+  const before = recorded.webviews.filter((w) => !w.disposed).length;
+  busy.reveal();
+  assert.equal(recorded.webviews.filter((w) => !w.disposed).length, before, "Show opened a second page instead of this one");
+  await until(() => h.runner.started.includes("install.binary"), "the run");
+  h.runner.release("install.binary");
+  await until(() => h.runner.started.includes("k3d.up"), "the second step");
+  h.runner.release("k3d.up");
+  await until(() => !h.runs.inFlight, "the run to settle");
+  assert.equal(h.runs.busy(), undefined, "a settled run still holds the machine");
   page().close();
 });
