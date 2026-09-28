@@ -35,6 +35,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -307,6 +308,24 @@ func (r *ProviderRegistry) SetAppInference(a AppInference) {
 	r.apps = a
 }
 
+// appSourcesNotOnThisNode is why an app source is passed over on a node with no
+// app sessions installed -- every node but the agent.
+//
+// IT SAYS WHERE APP SOURCES DO RUN, because that is what a reader of the
+// decision record can act on (the planner/app-source design, section 3a). An
+// app session travels over the machine's WorkerService stream, which
+// terminates on the agent replica holding it; a planner's triage whose route
+// puts an app source first passes over it on every call until planner calls
+// are forwarded there. "This node has no app sessions installed" read like a
+// fault to repair on the planner, which is not where the fix is.
+//
+// The node type is MEMQL_NODE_TYPE, the identity every other per-node reading
+// uses (envregistry.ResolveNodeType).
+func appSourcesNotOnThisNode() string {
+	return "app sources run on the agent holding the machine; this " +
+		envregistry.ResolveNodeType() + " node cannot open one"
+}
+
 // AppInferenceInstalled reports whether this node can open app sessions at
 // all, which distinguishes "you have not signed in anywhere" from "the node
 // answering this request has no worker service".
@@ -404,7 +423,7 @@ func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId, mo
 	client := &appProvider{registry: r, appId: appId, model: model, actingUserId: actingUserId, wildcard: wildcard}
 	entry := &ProviderConfigEntry{Config: cfg, Client: client}
 	if a == nil {
-		entry.err = fmt.Errorf("this node has no app sessions installed")
+		entry.err = errors.New(appSourcesNotOnThisNode())
 		return entry, true
 	}
 
@@ -498,7 +517,7 @@ func (p *appProvider) inference() AppInference {
 func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResult, error) {
 	a := p.inference()
 	if a == nil {
-		return AppCallResult{}, fmt.Errorf("%w: this node has no app sessions installed", ErrAppUnavailable)
+		return AppCallResult{}, fmt.Errorf("%w: %s", ErrAppUnavailable, appSourcesNotOnThisNode())
 	}
 	req.AppId = p.appId
 	if strings.TrimSpace(req.Model) == "" {
@@ -914,7 +933,11 @@ func (r *ProviderRegistry) AppRefusal(ctx context.Context, actingUserId, appId s
 	a := r.apps
 	r.mu.RUnlock()
 	if a == nil {
-		out.Considered["(this node)"] = "this node has no app sessions installed"
+		// ONE SENTENCE, NOT A PER-APP LIST. Nothing about any app or machine
+		// was looked at, so a line per app would be a list of the same fact;
+		// the router inlines Considered beside the entry's own reason, which
+		// already says it.
+		out.LastError = appSourcesNotOnThisNode()
 		return out
 	}
 	doors, err := a.Doors(ctx, actingUserId)
