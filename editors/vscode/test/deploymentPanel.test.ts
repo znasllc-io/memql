@@ -24,6 +24,7 @@ import * as path from "node:path";
 import type { ExtensionContext } from "vscode";
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { CODE_UNAUTHENTICATED, DeployControlError } from "@znasllc-io/memql-sdk-core/deploy";
 
 import { roleVisibility } from "../src/deploy/actions.js";
 import type { DeployControlPort } from "../src/deploy/controller.js";
@@ -476,6 +477,61 @@ test("a promote names the rollout that is part-way through", async () => {
   await settle();
   assert.deepEqual(calls, ["promote bff"]);
   assert.match(text(), /Rollout promoted\./);
+  page().close();
+});
+
+test("an expired session during an act says so, and its Sign in works from the notice", async () => {
+  fresh();
+  const calls: string[] = [];
+  const h = remoteHarness(calls);
+  const port = {
+    getDeploymentStatus: async () => ({ rollouts: [{ name: "bff", phase: "Paused" }] }),
+    rolloutAction: async () => {
+      throw new DeployControlError("rollout_action", CODE_UNAUTHENTICATED, "no actor");
+    },
+  } as unknown as DeployControlPort;
+  h.deps.deployPort = () => port;
+  DeploymentPanel.show(context(), h.deps, "staging");
+  await settle();
+  page().send({ type: "rolloutPromote", value: "bff" });
+  await settle();
+  assert.match(text(), /Your session has expired\./);
+  // The notice's act, although the connected bar offers no sign-in.
+  page().send({ type: "signIn" });
+  await settle();
+  const at = recorded.executed.indexOf("memql.clusters.signIn");
+  assert.deepEqual(recorded.executedArgs[at], ["staging"]);
+  page().close();
+});
+
+test("the rebuild screen's Repair fix opens Repair when the folder is not a MemQL checkout", async () => {
+  fresh();
+  const h = harness();
+  h.deps.catalog.readReceiptFile = async () => ({
+    version: 1,
+    kind: "install",
+    createdAt: "2026-08-01T00:00:00Z",
+    entries: [
+      {
+        stepId: "stackCheckout",
+        script: "install/clone-stack.sh",
+        receipt: "checkout",
+        preExisting: false,
+        params: {},
+        result: { dest: path.join(HOME, "no-such-checkout"), commit: "abc1234def", refKind: "tag", tag: "v0.23.5" },
+        changed: true,
+        recordedAt: "2026-08-01T00:00:00Z",
+      },
+    ],
+  }) as never;
+  h.setConnection({ clusterName: "local", connected: true, word: "connected" });
+  // From the palette or the title menu: the page opens on the rebuild screen.
+  assert.equal(await DeploymentPanel.openAction(context(), h.deps, "rebuildFromCheckout"), true);
+  await until(() => /isn't a MemQL checkout/.test(text()), "the check");
+  assert.doesNotMatch(page().html, /data-act="beginRebuild"/);
+  page().send({ type: "repair" });
+  await settle();
+  assert.equal(recorded.executed.includes("memql.clusters.repair"), true);
   page().close();
 });
 

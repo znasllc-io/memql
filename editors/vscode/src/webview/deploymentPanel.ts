@@ -535,6 +535,23 @@ export class DeploymentPanel {
       case "beginPullRebuild":
         this.beginPullRebuild();
         return;
+      case "repair":
+        // The fix a rebuild check offers when the folder is not a MemQL
+        // checkout; everywhere else Repair is a bar act, narrowed there.
+        if ((this.screen.kind === "rebuild" || this.screen.kind === "pullRebuild") && this.check?.notices.some((n) => n.fix === "repair")) {
+          void vscode.commands.executeCommand("memql.clusters.repair");
+          return;
+        }
+        await this.onBarAct(msg, value);
+        return;
+      case "signIn":
+      case "connect":
+        // CONNECTION ACTS, legal wherever the page offers them -- the bar, an
+        // expired session's notice, a not-connected notice. They change nothing
+        // about the cluster, so they are not narrowed against the bar.
+        this.notice = undefined;
+        if (this.instance !== undefined) await this.takeAct({ id: msg.type as "signIn" | "connect", label: "" });
+        return;
       default:
         await this.onBarAct(msg, value);
     }
@@ -641,7 +658,10 @@ export class DeploymentPanel {
         void vscode.commands.executeCommand("memql.clusters.signIn", instance.name);
         return;
       case "connect":
-        await (this.deps.connectTo ?? ((name: string) => vscode.commands.executeCommand("memql.clusters.select", name)))(instance.name);
+        // Through the Clusters view's own select, handed the registered entry
+        // by activation; without that seam, its picker.
+        if (this.deps.connectTo !== undefined) await this.deps.connectTo(instance.name);
+        else await vscode.commands.executeCommand("memql.clusters.select");
         this.reload();
         return;
       case "changeVersion":
