@@ -144,12 +144,13 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 				"on an agent node running WorkerService")
 	}
 	owner := strings.TrimSpace(h.ActingUserId)
-	if owner == "" {
-		// The same refusal CockpitAppExecutor.Run makes, made earlier so the
-		// child run is never opened under a blank actor -- a row written that
-		// way is readable by nobody, including the operator asking what ran.
+	if auth.NamesNoPerson(owner) {
+		// The same refusal the app gate makes, made earlier so the child run
+		// is never opened under an actor that names nobody -- a row written
+		// that way is readable by nobody, including the operator asking what
+		// ran.
 		return memqlengine.AppSessionOutcome{}, fmt.Errorf(
-			"app session: the step has no owner; a machine-touching door cannot run unattributed")
+			"app session: the step has %s; a machine-touching door cannot run unattributed", memqlengine.AppNoOwnerReason)
 	}
 
 	// THE APP GATE, BEFORE ANYTHING IS OPENED (app_gate.go): a pin the owner
