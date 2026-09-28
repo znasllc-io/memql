@@ -419,7 +419,8 @@ test("a probe that discovers nothing omits issuer rather than writing empty", as
 test("a local install is refused from a remote window, with the reason", () => {
   const problem = localInstallRemoteProblem("ssh-remote");
   assert.ok(problem !== undefined, "a remote window was allowed to install a local cluster");
-  assert.match(problem, /ssh-remote/, "the refusal does not say what is different about this window");
+  assert.match(problem, /Remote SSH/, "the refusal does not say what is different about this window");
+  assert.doesNotMatch(problem, /ssh-remote|a ssh/, "the remoteName id, not the name a person reads");
   assert.match(
     problem,
     /Open a local VS Code window/,

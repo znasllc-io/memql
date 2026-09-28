@@ -30,6 +30,7 @@ import {
   type UninstallPreviewInput,
 } from "../../src/webview/addClusterScreens.js";
 import { removalRows, sharedToolRows, type RowStep } from "../../src/install/removalPreview.js";
+import { localInstallRemoteProblem } from "../../src/install/stackPin.js";
 import { landingView, type Inputs, type LandingFacts } from "../../src/state/addCluster.js";
 import type { PreflightCheck } from "../../src/state/preflight.js";
 import { pageDocument } from "../../src/webview/ui/document.js";
@@ -181,7 +182,7 @@ const forms: Scenario[] = [
     versionChoices: [],
     checks: READY,
     moreOpen: false,
-    remoteProblem: "This is a ssh-remote window. Open a local VS Code window to install MemQL on this computer.",
+    remoteProblem: localInstallRemoteProblem("ssh-remote") ?? "",
   }),
   form("install-options-password-refused", "Install, back from a refused password", {
     action: "install",

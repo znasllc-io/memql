@@ -371,9 +371,22 @@ export function localInstallRemoteProblem(remoteName: string | undefined): strin
   if (remote === "") return undefined;
   // ONE SENTENCE AND THE WAY THROUGH (the reasons above are for the reader of
   // this file). The window kind is named because it is what is different
-  // about this window; the way through is the local window.
-  return `This is a ${remote} window. Open a local VS Code window to install MemQL on this computer.`;
+  // about this window -- in the words VS Code's own status bar uses, not the
+  // `remoteName` id ("a ssh-remote window") -- and the way through is the
+  // local window.
+  const kind = REMOTE_KINDS[remote] ?? remote;
+  return `This window is connected through ${kind}. Open a local VS Code window to install MemQL on your computer.`;
 }
+
+/** What each remote kind is called where a person reads it; an unknown one is named as VS Code reports it. */
+const REMOTE_KINDS: Readonly<Record<string, string>> = {
+  "ssh-remote": "Remote SSH",
+  "dev-container": "a dev container",
+  "attached-container": "a container",
+  wsl: "WSL",
+  codespaces: "Codespaces",
+  tunnel: "a tunnel",
+};
 
 export function installDomainProblem(domain: string): string | undefined {
   const trimmed = domain.trim();
