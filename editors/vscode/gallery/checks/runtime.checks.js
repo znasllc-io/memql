@@ -142,6 +142,29 @@
     await host({ type: 'setDisclosure', id: 'logs', open: true });
     check('the host can open it', byId('logs').hidden === false && toggle.getAttribute('aria-expanded') === 'true');
 
+    // ---- a failure opens the log at the failed step, not at its tail ----
+    var anchored = [];
+    for (var a = 0; a < 120; a += 1) {
+      anchored.push(a === 60 ? { label: 'Creating the cluster', text: 'the failed step starts here', anchor: true } : { text: 'line ' + a });
+    }
+    toggle.click();
+    await host({ type: 'log', lines: anchored, reset: true });
+    check('an anchor in a hidden pane waits for the pane to open', pane.querySelector('[data-anchor="true"]') !== null);
+    await host({ type: 'setDisclosure', id: 'logs', open: true });
+    var mark = pane.querySelector('[data-anchor]');
+    var offset = mark.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+    check('opening the pane scrolls the anchored line to its top', offset >= 0 && offset < 24, offset);
+    check('and stops following the tail', pane.getAttribute('data-follow') === 'false', pane.getAttribute('data-follow'));
+    var held = pane.scrollTop;
+    await host({ type: 'log', lines: [{ text: 'a later line' }] });
+    check('later lines do not carry the anchored line away', pane.scrollTop === held, [held, pane.scrollTop]);
+    toggle.click();
+    toggle.click();
+    check('the anchor is used once, not on every open', pane.querySelector('[data-anchor="true"]') === null);
+    pane.scrollTop = pane.scrollHeight;
+    fire(pane, 'scroll');
+    await sleep(20);
+
     // ---- focus survives a replaced control; keyed nodes are kept ----
     phrase = document.querySelector('[data-field="phrase"]');
     phrase.focus();

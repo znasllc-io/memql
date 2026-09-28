@@ -447,7 +447,8 @@ export function disclosure(i: DisclosureInput): string {
 
 /** One log line, as the page script also builds it. */
 function logLine(line: LogLine): string {
-  const tone = line.tone === undefined ? "" : ` data-tone="${line.tone}"`;
+  const tone =
+    (line.tone === undefined ? "" : ` data-tone="${line.tone}"`) + (line.anchor === true ? ` data-anchor="true"` : "");
   const label = line.label === undefined || line.label === "" ? "" : `<span class="mq-log-label">${escapeHtml(line.label)}</span>`;
   return `<div class="mq-log-line"${tone}>${label}<span class="mq-log-text">${escapeHtml(line.text)}</span></div>`;
 }

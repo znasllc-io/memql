@@ -37,7 +37,6 @@ import { PLATFORM_DETECT_STEP } from "../src/install/platform.js";
 import type { StepProgress } from "../src/state/addCluster.js";
 import { newLocalRun, type Instance, type Run } from "../src/state/deployments.js";
 import {
-  renderCollectScreen,
   renderFailedScreen,
   renderRebuildScreen,
   renderRunningScreen,
@@ -127,10 +126,6 @@ function assertLogsLast(name: string, html: string): void {
 // offers no actions has no row to hoist, and the assertion above passes it
 // without needing to know that.
 const SCREENS: readonly { name: string; html: string }[] = [
-  {
-    name: "collect",
-    html: renderCollectScreen({ action: "install", values: DEFAULT_INPUTS, errors: [] }),
-  },
   {
     name: "rebuild",
     html: renderRebuildScreen({ checkoutDir: "/home/me/src", nodes: "" }),

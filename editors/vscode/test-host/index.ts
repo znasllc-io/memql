@@ -1006,14 +1006,22 @@ async function withinDeadline<T>(what: string, work: Promise<T>, ms: number): Pr
   return raced as T;
 }
 
-/** The page's title, which the workbench also uses as its tab label. */
-const ADD_CLUSTER_TAB = "Add a MemQL cluster";
+/**
+ * The page's title, which the workbench also uses as its tab label.
+ *
+ * THE TITLE FOLLOWS THE ACT (src/webview/addClusterScreens.ts TAB_TITLES): the
+ * "+" opens "Add a cluster", and the same one panel is called "Install MemQL",
+ * "Repair MemQL" or "Uninstall MemQL" while it is doing that. The "+" case
+ * below only ever sees the first.
+ */
+const ADD_CLUSTER_TAB = "Add a cluster";
+const ADD_CLUSTER_PANEL_TABS: readonly string[] = [ADD_CLUSTER_TAB, "Install MemQL", "Repair MemQL", "Uninstall MemQL"];
 
-/** Every open tab carrying the add-a-cluster page's label, across all groups. */
+/** Every open tab carrying one of the add-a-cluster page's labels, across all groups. */
 function addClusterTabs(): vscode.Tab[] {
   return vscode.window.tabGroups.all
     .flatMap((group) => group.tabs)
-    .filter((tab) => tab.label === ADD_CLUSTER_TAB);
+    .filter((tab) => ADD_CLUSTER_PANEL_TABS.includes(tab.label));
 }
 
 // WHAT ONLY A HOST CAN SAY ABOUT THE "+".

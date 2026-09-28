@@ -18,6 +18,13 @@ export interface LogLine {
   text: string;
   /** `error` for a line worth the danger colour, `muted` for chatter. */
   tone?: "error" | "muted";
+  /**
+   * Open the log HERE rather than at its tail: the first line of the step
+   * that failed. The page scrolls the line into view the first time its pane
+   * is visible, and stops following the tail, so the lines that follow a
+   * failure do not scroll the reason away.
+   */
+  anchor?: boolean;
 }
 
 /** Where a long operation stands. */

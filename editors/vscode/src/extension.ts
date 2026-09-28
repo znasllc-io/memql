@@ -2387,13 +2387,24 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     receiptFile: string;
     removeRegistryEntry: (name: string) => Promise<ClusterConfig>;
     diagnostics: DiagnosticSink;
+    showDiagnostics: () => void;
+    listLocalClusters: () => Promise<string[]>;
+    isSignedIn: (name: string) => boolean;
   } => ({
     clustersPath,
     refreshTree: () => clustersTree.refresh(),
     installRoot: installRootFor(context),
     // The MemQL Install channel (memql#4194): where every run's full,
-    // redacted stderr lives.
+    // redacted stderr lives. The page's "Open in Output" brings it forward.
     diagnostics: sinkFor(installOutput),
+    showDiagnostics: () => installOutput?.show(true),
+    // What lets the uninstall preview see a cluster that has no install
+    // record -- `make up`'s, or one adopted into the list -- rather than
+    // refusing it: the same k3d listing presence reads.
+    listLocalClusters: () => listK3dClusters({ root: installRootFor(context) }),
+    // The done screen's one next act: Open MemQL OS once signed in, Sign in
+    // before.
+    isSignedIn: (name) => connectedTo(connections, name),
     // ONE receipt path for the install that writes it, the uninstall that
     // reverses it and the repair that reads a key path back out of it. The
     // page used to resolve it three times for itself.
@@ -2456,6 +2467,18 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           ? registry.file.clusters.find((c) => c.name === dialing.name)
           : undefined;
         if (known !== undefined && known.endpoint.trim() !== '') dialing = known;
+      }
+      // A QUIET SELECT is the Add a cluster page handing over the cluster it
+      // has just installed or added: make it the one in use and connect, and
+      // say nothing -- that page offers the next step itself (Sign in, with
+      // the one-time recovery key beside it), so a page or toast from here
+      // would say it a second time over the top of it.
+      if ((node as { quiet?: unknown } | undefined)?.quiet === true) {
+        await setSelectedCluster(clustersPath, dialing.name);
+        clustersTree.refresh();
+        await connections?.connect(dialing);
+        clustersTree.refresh();
+        return;
       }
       const openPage = (): Thenable<unknown> =>
         commands.executeCommand(
@@ -2792,15 +2815,14 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       AddClusterPanel.show(context, presence, addClusterDeps());
     }),
     // The irreversible half of the pair D1 keeps apart (memql#3476). It is
-    // contributed on `memqlLocalCluster` rows only and never as an inline icon,
-    // so it cannot be hit by aiming at the trash can next to it.
+    // offered from the palette and the Deployments title menu -- never as an
+    // inline icon, so it cannot be hit by aiming at something next to it.
     //
     // THE TREE ROW IS NOT AN ARGUMENT. There is exactly one local cluster --
     // the receipt describes one install and presence finds one `local: true`
     // entry -- so the page uninstalls THE local cluster rather than the row
-    // that was clicked. From the palette, where no row exists, the behaviour is
-    // therefore identical; a machine with nothing installed gets the preview's
-    // own refusal, which names the missing receipt.
+    // that was clicked. On a machine with nothing to uninstall the page shows
+    // the landing, which says what is (and is not) here.
     commands.registerCommand('memql.clusters.uninstall', () => {
       AddClusterPanel.show(context, presence, addClusterDeps(), 'uninstall');
     }),

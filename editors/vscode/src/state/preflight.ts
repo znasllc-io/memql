@@ -1,19 +1,19 @@
-// The "Before it runs" checklist on the install / repair collect screen
-// (memql#4195).
+// The checks on the install / repair form (memql#4195), as a compact list.
 //
-// The wizard already KNEW these three facts before starting a run -- the graph
-// document either loads or the run refuses at its first step, the graph either
-// carries elevated steps or not, and the receipt either records a usable
-// provider-key path or the form will ask for one. It just told nobody until
-// the moment each fact bit. A guided flow states them up front, so the
-// operator knows what the run will need before clicking it.
+// The wizard already KNOWS these facts before a run starts -- the installer's
+// own files either load or the run refuses at its first step, and a password
+// either will be asked for or not -- so it says them before Install is
+// pressed rather than at the moment each one bites.
 //
 // PURE PROJECTION: the panel gathers the inputs (graph load, `sudo -n` probe,
 // receipt read) and this module only words them, so the wording is testable
 // under bare `node --test` (cmd/memql-lsp/vscodeimportrule_test.go).
+//
+// `PreflightItem` is the older row shape the rebuild and update checklists
+// (rebuildPreflight.ts, updatePreflight.ts) still use; the install form uses
+// `PreflightCheck`.
 
 import type { ImageSource } from "../install/receipt.js";
-import { returnsToReleasedImages } from "./imageLane.js";
 
 export interface PreflightItem {
   label: string;
@@ -40,82 +40,72 @@ export interface PreflightInputs {
   releasedTag?: string;
 }
 
-export function preflightItems(inputs: PreflightInputs): PreflightItem[] {
-  const items: PreflightItem[] = [];
+/**
+ * One check on the install form, as the compact list draws it: a label and
+ * ONE word for its state, with a short line only where there is something to
+ * act on or expect.
+ *
+ * WHAT THE LIST NO LONGER SAYS. "Install graph -- 16 steps, loaded. Every step
+ * verifies first and skips when already satisfied", "No step needs elevation"
+ * and "sudo on this machine runs without asking" were true and asked nothing
+ * of anyone; a list of rows that all read OK teaches a reader to skip the one
+ * that does not. So a check that has nothing to say is not drawn -- the
+ * password row appears only when a password will be asked for, and the image
+ * row only when this run crosses from a checkout build to a release.
+ */
+export interface PreflightCheck {
+  label: string;
+  /** The state in one word: "Ready", "Needed", "Missing", "Replaced". */
+  word: string;
+  tone: "ok" | "attention" | "error";
+  /** One short line, when there is something to do or expect. */
+  note?: string;
+}
 
-  if (inputs.graph.ok) {
-    items.push({
-      label: "Install graph",
-      state: "ok",
-      detail: `${inputs.graph.steps} steps, loaded. Every step verifies first and skips when already satisfied.`,
-    });
-  } else {
-    items.push({
-      label: "Install graph",
-      state: "attention",
-      detail: `could not be read (${inputs.graph.error}). The run will refuse before its first step.`,
+/** The checks for the install or repair form. Pure; see PreflightInputs. */
+export function preflightChecks(inputs: PreflightInputs): PreflightCheck[] {
+  const checks: PreflightCheck[] = [];
+
+  checks.push(
+    inputs.graph.ok
+      ? { label: "Installer", word: "Ready", tone: "ok" }
+      : {
+          label: "Installer",
+          word: "Missing",
+          tone: "error",
+          // The read error itself goes to the MemQL Install output; what a
+          // person can do about a missing file inside the extension is this.
+          note: "Reinstall the MemQL extension.",
+        },
+  );
+
+  if (inputs.graph.ok && inputs.graph.needsElevation && !inputs.sudoFree) {
+    checks.push({
+      label: "Your password",
+      word: "Needed",
+      tone: "attention",
+      note: "Asked once, to update the hosts file and trust a local certificate.",
     });
   }
 
-  if (!inputs.graph.ok || !inputs.graph.needsElevation) {
-    items.push({
-      label: "Privileges",
-      state: "ok",
-      detail: "No step needs elevation on this run.",
-    });
-  } else if (inputs.sudoFree) {
-    items.push({
-      label: "Privileges",
-      state: "ok",
-      detail: "Some steps edit system files; sudo on this machine runs without asking.",
-    });
-  } else {
-    items.push({
-      label: "Privileges",
-      state: "attention",
-      detail:
-        "Some steps edit system files (the hosts file, the certificate store). " +
-        "Your password will be asked once, by the editor's own prompt, and held in memory for this run only.",
-    });
-  }
-
-  // THE "PROVIDER KEY FILE" LINE IS GONE (epic memql#5088), on both branches.
-  //
-  // It said, before Start, what the run was about to do with the key path the
-  // operator had named or the receipt had recorded. There is no key path
-  // anywhere in the product now: both cloud vendors are reached by workload
-  // identity federation, whose credential is a projected token inside a pod.
-  // A checklist line about a value nothing collects is one an operator has to
-  // interpret before they can ignore it, which is the opposite of what a
-  // "Before it runs" list is for.
-  //
-  // What a local cluster does about models instead is said once, on the
-  // collect screen, where the fields used to be.
-
-  // THE LANE CROSSING, IN THE OTHER DIRECTION (memql#4246).
-  //
-  // state/rebuildPreflight.ts says a rebuild switches this machine to
-  // checkout-built images; this says what an install, upgrade or repair
-  // switches back, and it is said BEFORE the run for the same reason. The only
-  // notice otherwise is the Deployments row afterwards, which stops saying
-  // `checkout <commit>` and starts saying a version -- and a developer whose
-  // own edits quietly stopped running has no reason to go and look there.
-  //
-  // Only when it is actually a crossing. A cluster already on released images
-  // crosses nothing, and a line on every install would be the noise that makes
-  // the one that matters unreadable.
+  // THE LANE CROSSING (memql#4246): a run over a cluster on checkout-built
+  // images returns it to released ones, and a developer whose own edits
+  // quietly stopped running has no reason to go and look for why. Only when it
+  // is actually a crossing.
   if (inputs.imageSource === "checkout") {
-    items.push({
-      label: "Image source",
-      state: "attention",
-      // The shared sentence (state/imageLane.ts), plus the one clause only this
-      // surface can offer: the way back.
-      detail: `${returnsToReleasedImages(
-        "local",
-        inputs.releasedTag ?? "",
-      )} Rebuild from checkout brings them back.`,
+    const tag = (inputs.releasedTag ?? "").trim();
+    checks.push({
+      label: "Images",
+      word: "Replaced",
+      tone: "attention",
+      note: `Your checkout build is replaced by ${tag === "" ? "the release" : `release ${tag}`}. Rebuild from checkout brings it back.`,
     });
   }
 
-  return items;
+  return checks;
+}
+
+/** Whether the checks allow the run to start at all (the installer's own files are there). */
+export function preflightBlocks(checks: readonly PreflightCheck[]): boolean {
+  return checks.some((check) => check.tone === "error");
 }

@@ -387,8 +387,10 @@ export interface StubWebviewPanel {
   close(): void;
 }
 
-/** The object handed to the extension. Its `html` writes land on the stub. */
+/** The object handed to the extension. Its `html` and `title` writes land on the stub. */
 interface WebviewPanelSurface {
+  /** The tab's label; a panel whose flow changes renames its tab. */
+  title: string;
   webview: {
     html: string;
     onDidReceiveMessage(handler: (message: unknown) => void): StubDisposable;
@@ -423,6 +425,12 @@ function createStubWebviewPanel(viewType: string, title: string): {
   };
 
   const surface: WebviewPanelSurface = {
+    get title(): string {
+      return handle.title;
+    },
+    set title(value: string) {
+      handle.title = value;
+    },
     webview: {
       // The extension assigns `panel.webview.html`; the assignment is the whole
       // render, so it is captured on the handle rather than kept here.

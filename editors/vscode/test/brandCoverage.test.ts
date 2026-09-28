@@ -292,7 +292,7 @@ test("every panel document inlines the brand tokens", () => {
 });
 
 test("the *Screens.ts fragment modules are exempt because they build no document", () => {
-  // EXEMPT BY CONSTRUCTION, not by name. These four modules produce HTML
+  // EXEMPT BY CONSTRUCTION, not by name. These modules produce HTML
   // FRAGMENTS that are interpolated into a panel's document, so they inherit
   // that document's <style> block and have nowhere of their own to put one.
   // Asserting that they emit no document is what keeps the exemption honest:
@@ -304,6 +304,7 @@ test("the *Screens.ts fragment modules are exempt because they build no document
     .filter((name) => name.endsWith("Screens.ts"))
     .sort();
   assert.deepEqual(screens, [
+    "addClusterScreens.ts",
     "constructScreens.ts",
     "deploymentScreens.ts",
     "installScreens.ts",

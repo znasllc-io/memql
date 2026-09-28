@@ -26,6 +26,8 @@
 //     posts its act with `open` so the host remembers;
 //   - a log pane (`[data-region=log]`) follows its tail while scrolled to the
 //     bottom, stops when the person scrolls up, and resumes at the bottom;
+//     a line marked `data-anchor` (a failure's first line) is scrolled to
+//     once, the first time its pane is visible, and stops the follow;
 //   - host messages: `patch` (region HTML), `progress`, `log`, `setDisclosure`.
 //
 // A PATCH IS A MORPH, NOT A REPLACEMENT. The new region HTML is parsed into a
@@ -102,10 +104,23 @@ export const PAGE_RUNTIME = `
 
   // ---------- disclosures ----------
 
+  // A line marked as the place to open the log (a failure's first line) is
+  // scrolled to once, the first time its pane is visible, and the pane stops
+  // following the tail so later lines do not carry the reason away.
+  function scrollToAnchor(pane) {
+    if (pane.clientHeight === 0) return false;
+    var anchor = pane.querySelector('[data-anchor="true"]');
+    if (!anchor) return false;
+    anchor.setAttribute('data-anchor', 'shown');
+    pane.scrollTop += anchor.getBoundingClientRect().top - pane.getBoundingClientRect().top - 6;
+    pane.setAttribute('data-follow', 'false');
+    return true;
+  }
   function followLogsIn(root) {
     var panes = root.matches && root.matches('[data-region="log"]') ? [root] : [];
     root.querySelectorAll('[data-region="log"]').forEach(function (p) { panes.push(p); });
     panes.forEach(function (pane) {
+      if (scrollToAnchor(pane)) return;
       if (pane.getAttribute('data-follow') !== 'false') pane.scrollTop = pane.scrollHeight;
     });
   }
@@ -429,6 +444,7 @@ export const PAGE_RUNTIME = `
     var row = document.createElement('div');
     row.className = 'mq-log-line';
     if (line && (line.tone === 'error' || line.tone === 'muted')) row.setAttribute('data-tone', line.tone);
+    if (line && line.anchor === true) row.setAttribute('data-anchor', 'true');
     if (line && line.label) {
       var label = document.createElement('span');
       label.className = 'mq-log-label';
@@ -450,6 +466,7 @@ export const PAGE_RUNTIME = `
       lines.forEach(function (line) { batch.appendChild(lineNode(line)); });
       pane.appendChild(batch);
       while (pane.childElementCount > LOG_LIMIT) pane.removeChild(pane.firstElementChild);
+      if (scrollToAnchor(pane)) return;
       if (follow) pane.scrollTop = pane.scrollHeight;
     });
   }

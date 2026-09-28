@@ -367,3 +367,53 @@ export async function historicalWeights(
     return {};
   }
 }
+
+// ---------------------------------------------------------------------------
+// the failed step, in the negative
+// ---------------------------------------------------------------------------
+
+/**
+ * A step label's leading gerund and the base verb that says it failed.
+ *
+ * EVERY GERUND THE GRAPH DOCUMENTS OPEN WITH. The labels are short present
+ * participles ("Creating the cluster"), written for the running bar; a
+ * failure names the same step in the negative, "Couldn't create the cluster".
+ * test/runProgress.test.ts reads every label in scripts/install/graph/*.json
+ * and fails when one starts with a gerund this table does not carry, so a new
+ * step cannot quietly fall through to the fallback below.
+ *
+ * Two words first: "Setting up" is one verb, and matching "Setting" alone
+ * would make it "Couldn't set up up".
+ */
+const FAILED_VERBS: readonly (readonly [string, string])[] = [
+  ["Setting up", "set up"],
+  ["Checking", "check"],
+  ["Installing", "install"],
+  ["Adding", "add"],
+  ["Downloading", "download"],
+  ["Creating", "create"],
+  ["Building", "build"],
+  ["Preparing", "prepare"],
+  ["Removing", "remove"],
+  ["Rebuilding", "rebuild"],
+];
+
+/**
+ * The failure status for a step label: "Couldn't create the cluster".
+ *
+ * A label that does not open with a known gerund keeps its own words and says
+ * so after them ("<label> failed"), which is grammatical whatever the label
+ * is; an empty label says only that something failed.
+ */
+export function failedLabel(label: string): string {
+  const trimmed = label.trim();
+  if (trimmed === "") return "Something failed";
+  for (const [gerund, verb] of FAILED_VERBS) {
+    if (trimmed === gerund) return `Couldn't ${verb}`;
+    if (trimmed.startsWith(`${gerund} `)) return `Couldn't ${verb} ${trimmed.slice(gerund.length + 1)}`;
+  }
+  return `${trimmed} failed`;
+}
+
+/** The gerunds `failedLabel` understands, for the test that holds the graph documents to it. */
+export const FAILED_LABEL_GERUNDS: readonly string[] = FAILED_VERBS.map(([gerund]) => gerund);

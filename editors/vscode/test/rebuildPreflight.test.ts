@@ -108,7 +108,7 @@ test("the checklist words the same string the run will be given", () => {
 // the rebuild's own screens
 // -----------------------------------------------------------------------------
 
-test("a failed rebuild offers Retry and Back -- guided has nothing to offer it", () => {
+test("a failed rebuild offers Retry and Back, and no run offers guided", () => {
   // "Switch to guided" is a WIZARD concept: it re-runs one step with the
   // operator driving the privileged part by hand. A rebuild is one unprivileged
   // step, so the control is a second Retry wearing a name that promises
@@ -136,9 +136,10 @@ test("a failed rebuild offers Retry and Back -- guided has nothing to offer it",
   assert.match(rebuild, /data-act="cancel"/);
   assert.doesNotMatch(rebuild, /data-act="guided"/);
 
-  // Every other run keeps it: the wizard's graph has privileged steps, which is
-  // the whole case for the control.
-  assert.match(
+  // And no other run has it either (memql#5118 audit): "Switch to guided" set
+  // a flag nothing that runs a step ever read, and re-ran the graph exactly as
+  // Retry does. The remedy's terminal command is the manual path.
+  assert.doesNotMatch(
     renderFailedScreen({
       steps: [failure],
       mode: "deploy",

@@ -381,7 +381,7 @@ test("Create deployment on a refused platform does not offer a tag field", () =>
     summary: "",
   });
   assert.match(html, /linux\/amd64/);
-  assert.match(html, /will not change that/);
+  assert.match(html, /Retrying won(?:'|&#39;)t change that/);
   assert.doesNotMatch(html, /data-field="tag"/);
   assert.doesNotMatch(html, /Type the tag/);
   assert.doesNotMatch(html, /<select/);

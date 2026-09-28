@@ -36,7 +36,8 @@ import { removalPreviewItems } from "../src/install/removalPreview.js";
 import type { RunScript } from "../src/install/runner.js";
 import { previewUninstall, runUninstall, type SessionOptions } from "../src/install/session.js";
 import { failureGuidance } from "../src/state/installProgress.js";
-import { uninstallConfirmCopy, uninstallDoneSentence } from "../src/webview/installScreens.js";
+import { removalRows, sharedToolRows } from "../src/install/removalPreview.js";
+import { uninstallPreviewScreen, uninstalledScreen } from "../src/webview/addClusterScreens.js";
 import { UninstallRunState } from "../src/state/uninstallRun.js";
 
 function graph(doc: unknown): Graph {
@@ -732,46 +733,51 @@ test("a run that kept NOTHING takes both records, exactly as before", async () =
   assert.deepEqual(order, ["remove:local", "deleteReceipt", "invalidate", "refresh"]);
 });
 
-test("the confirmation does not claim a receipt when there is none", () => {
-  // THE SCREEN IMMEDIATELY BEFORE THE ONE DESTRUCTIVE ACT IN THE WIZARD. Its
-  // ordinary lede rests the operator's confidence on the install receipt, which
-  // is the right argument everywhere except the one verdict whose whole premise
-  // is that nothing recorded this cluster. Reassurance that is not true is
-  // worse than none, and this is where it would be read.
-  const ordinary = uninstallConfirmCopy(false);
-  const unreceipted = uninstallConfirmCopy(true);
-
-  assert.match(ordinary.lede, /built from the install receipt/);
-  assert.ok(
-    !/receipt/.test(unreceipted.lede),
-    `the unreceipted lede still points at a receipt that does not exist: ${unreceipted.lede}`,
+test("the preview of a cluster with no install record says what it is, and claims no record", async () => {
+  // THE SCREEN IMMEDIATELY BEFORE THE ONE DESTRUCTIVE ACT. A `make up`
+  // cluster has no receipt; the preview plans the one removal the observation
+  // supports -- the cluster, KEPT -- and the page must neither reassure with a
+  // record that does not exist nor offer an Uninstall that would do nothing.
+  const preview = await previewUninstall(
+    { ...options({ receiptFile: "/nonexistent/receipt.json" }), unreceiptedCluster: "memql" },
+    { graph: UNINSTALL_GRAPH },
   );
-  // It says what the list IS instead, so the operator knows why there is one row.
-  assert.match(unreceipted.lede, /Nothing recorded this cluster/);
-  assert.match(unreceipted.lede, /k3d reports/);
+  const screen = (deleteData: { on: boolean; phrase: string }) => {
+    const parts = uninstallPreviewScreen({
+      loading: false,
+      rows: removalRows(preview),
+      sharedTools: sharedToolRows(preview),
+      chosen: new Set(),
+      deleteData,
+      clusterName: "memql",
+    });
+    return parts.head + parts.body + parts.actions;
+  };
+  const off = screen({ on: false, phrase: "" });
+  assert.doesNotMatch(off, /receipt|artifact/i, "the page names an internal the reader cannot act on");
+  assert.match(off, /The cluster<\/span><span class="ac-row-detail">Kept unless you delete its data/);
+  assert.doesNotMatch(off, /data-act="uninstallStart"/, "Uninstall is offered for a run that would remove nothing");
 
-  // Both still say the list is the confirmation -- that is the wizard's promise
-  // on this screen, and it holds either way.
-  for (const copy of [ordinary, unreceipted]) {
-    assert.match(copy.lede, /no second prompt/);
-    assert.notEqual(copy.title, "");
-  }
-  // And the titles differ: "Uninstall the local cluster" is a claim about
-  // MemQL's own install, which this is not.
-  assert.notEqual(ordinary.title, unreceipted.title);
+  // The switch and the phrase are what make it a removal, and only both.
+  assert.doesNotMatch(screen({ on: true, phrase: "delete memql" }), /data-act="uninstallStart"/);
+  const confirmed = screen({ on: true, phrase: "delete memql data" });
+  assert.match(confirmed, /data-act="uninstallStart"[^>]*>Uninstall and delete data</);
+  // The list says what goes -- the cluster and every database in it -- ONCE:
+  // under "Will be removed", not again as a sentence over the button.
+  assert.match(confirmed, /Will be removed<\/h2><ul class="ac-list" role="list"><li class="ac-row"><span class="ac-row-name">The cluster<\/span><span class="ac-row-detail">memql, and every database in it/);
+  assert.doesNotMatch(confirmed, /mq-actbar-confirm/, "the deletion said a second time over the bar");
 });
 
-test("the done sentence changes when anything was kept", () => {
-  const clean = uninstallDoneSentence(false);
-  const kept = uninstallDoneSentence(true);
-  assert.notEqual(clean, kept);
+test("the finished uninstall says whether anything was kept", () => {
+  const clean = uninstalledScreen({ removed: 4, kept: 0, followUpProblem: "", logsOpen: false });
+  const kept = uninstalledScreen({ removed: 3, kept: 1, followUpProblem: "", logsOpen: false });
+  assert.notEqual(clean.body, kept.body);
+  assert.match(clean.body, /Nothing left behind/);
+  assert.match(clean.body, /4 removed</);
   // The claim that was FALSE on a machine where the cluster is still running.
-  assert.match(clean, /Everything the install put on this machine has been taken back/);
-  assert.ok(
-    !/Everything the install put on this machine has been taken back/.test(kept),
-    `the kept sentence still claims a complete removal: ${kept}`,
-  );
-  assert.match(kept, /still on this machine/);
+  assert.doesNotMatch(kept.body, /Nothing left behind/);
+  assert.match(kept.body, /Kept what was here before MemQL/);
+  assert.match(kept.body, /3 removed · 1 kept/);
 });
 
 test("no registered cluster is an ordinary case, not a problem", async () => {
