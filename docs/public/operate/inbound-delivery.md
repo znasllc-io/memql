@@ -112,14 +112,19 @@ Note there is no `..._SIGNATURE_PREFIX` here and it would not help: `v1=` is not
 a *leading* prefix, because `t=<unix>,` comes first. That is precisely the shape
 the element vars exist for.
 
-A Shopify-shaped one:
+A Shopify-shaped one, for a custom app's webhook secret. The source is named
+`shopify-custom`, not `shopify`: a connector's own name is its app-level
+source (for Shopify, the three compliance topics, verified with the managed
+app's secret), and the receiver refuses an env pin on a name a bound connector
+claims -- the connector would otherwise read a body verified by the env secret
+as app-signed.
 
 ```bash
-MEMQL_INBOUND_SOURCE_SHOPIFY_SIGNATURE_SCHEME=hmac-sha256-base64
-MEMQL_INBOUND_SOURCE_SHOPIFY_SIGNATURE_HEADER=X-Shopify-Hmac-Sha256
-MEMQL_INBOUND_SOURCE_SHOPIFY_DEDUPE_HEADER=X-Shopify-Webhook-Id
-MEMQL_INBOUND_SOURCE_SHOPIFY_FORWARD_HEADERS=X-Shopify-Topic,X-Shopify-Shop-Domain,X-Shopify-Webhook-Id
-MEMQL_INBOUND_SOURCE_SHOPIFY_SECRET=<shared secret>
+MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_SCHEME=hmac-sha256-base64
+MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_HEADER=X-Shopify-Hmac-Sha256
+MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_DEDUPE_HEADER=X-Shopify-Webhook-Id
+MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_FORWARD_HEADERS=X-Shopify-Topic,X-Shopify-Shop-Domain,X-Shopify-Webhook-Id
+MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SECRET=<shared secret>
 ```
 
 `..._SECRET` is secret material. It belongs in the deployment's secret store,

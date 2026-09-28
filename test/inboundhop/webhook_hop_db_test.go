@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -94,6 +95,7 @@ func TestWebhookReceiptAndDispatchAcrossEngines(t *testing.T) {
 	req.Header.Set(shopify.HeaderTopic, shopify.TopicDataRequest)
 	req.Header.Set(shopify.HeaderShopDomain, shop)
 	req.Header.Set("Authorization", "Bearer must-not-persist")
+	req.Header.Set("X-Unrequested", "leak-me")
 	response := httptest.NewRecorder()
 	inbound.NewHandler(inbound.Config{Enabled: true, MaxBodyBytes: 4096}, engineAdapter{a}, nil).ServeHTTP(response, req)
 	if response.Code != http.StatusAccepted {
@@ -112,8 +114,18 @@ func TestWebhookReceiptAndDispatchAcrossEngines(t *testing.T) {
 		t.Fatalf("engine B read %d staged rows", len(rows))
 	}
 	row := rows[0]
-	if strings.Contains(rowString(row, "headersJson"), "must-not-persist") {
-		t.Fatal("credential persisted")
+	// Exactly the allowlisted X-Shopify-* metadata is staged: the topic and
+	// shop domain the request carried, and neither the unrequested header nor
+	// the bearer. (The credential-drop switch itself is proved by
+	// TestVerifiedDeliveryStagesOnlyAllowedMetadata, whose allowlist names
+	// Authorization; the Shopify allowlist never does.)
+	var staged map[string]string
+	if err := json.Unmarshal([]byte(rowString(row, "headersJson")), &staged); err != nil {
+		t.Fatalf("staged headersJson %q: %v", rowString(row, "headersJson"), err)
+	}
+	want := map[string]string{"x-shopify-topic": shopify.TopicDataRequest, "x-shopify-shop-domain": shop}
+	if !maps.Equal(staged, want) {
+		t.Fatalf("staged delivery headers %v, want %v", staged, want)
 	}
 	// Transfer only the durable event over a serialization boundary, then
 	// replace the receipt-side connector with B's independent instance.
