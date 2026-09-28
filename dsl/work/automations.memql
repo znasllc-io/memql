@@ -42,8 +42,9 @@ automation workJournalRetentionSweep {
 /// Check a goal run's answer the moment the run succeeds, before a person looks (epic memql#5414,
 /// design D22). Fires on the TRANSITION only -- `args.oldStatus` is what makes a heartbeat or a later
 /// summary write on an already-succeeded run not fire it again -- and only for a goal's run. Every
-/// other rule is the handler's, which reads the cluster's feedbackPolicy, skips a run that reached
-/// no model, was not asked for through Nexus or the API, or is a driver-owned journal (an app
+/// other rule is the handler's, which serves the check on agent nodes only (every other node skips
+/// before it reads anything), reads the cluster's feedbackPolicy, skips a run that reached no
+/// model, was not asked for through Nexus or the API, or is a driver-owned journal (an app
 /// session's recording, the D7 delegate's child run) of another run's step, and never checks the
 /// same answer version twice. One bounded model call at most, and it writes a decision observation and the run's
 /// validation summary -- never a like, never a construct. The OWNER travels with the event, exactly

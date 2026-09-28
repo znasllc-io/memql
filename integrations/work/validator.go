@@ -25,11 +25,13 @@ package work
 // under that owner's borrowed authority, and a hint that does not own the run
 // reads nothing. The shape learnFromSucceededRun's handler already has.
 //
-// WHEN IT SKIPS, IT SAYS WHY: the cluster's feedbackPolicy turns it off, the
-// run is not a goal's run asked for through Nexus or the API, it is a replay
-// (which exists to reach no model, and a check would spend one), it is a
-// driver-owned JOURNAL, it reached no model, or this answer version was
-// already checked. A skip is an answer, not an error.
+// WHEN IT SKIPS, IT SAYS WHY: this node does not serve answer checks (they
+// run on agent nodes; ServeAnswerChecks), the cluster's feedbackPolicy turns
+// it off, the run is not a goal's run asked for through Nexus or the API, it
+// is a replay (which exists to reach no model, and a check would spend one),
+// it is a driver-owned JOURNAL, it reached no model, or this answer version
+// was already checked -- here or, a moment ago, on another agent replica. A
+// skip is an answer, not an error.
 //
 // A JOURNAL IS NEVER CHECKED, and the reason is a recursion seen live
 // (2026-09-28): an app session's recording run and the D7 delegate's child run
@@ -133,8 +135,26 @@ func validatorOwner(ctx context.Context, args map[string]any) (string, error) {
 	return owner, nil
 }
 
+// notAnAnswerCheckerReason is the skip a node that does not serve answer
+// checks answers with.
+const notAnAnswerCheckerReason = "answer checks run on agent nodes, which execute goal runs and hold the machines' streams; " +
+	"this node does not serve them and leaves this one to the agent"
+
 // validateAnswer is the handler body, under the owner's borrowed authority.
 func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (map[string]any, error) {
+	// A NODE THAT DOES NOT SERVE CHECKS SKIPS FIRST: before it reads a row,
+	// claims anything or reaches a model. Every node runs this automation
+	// (the run event is broadcast, and the planner consumes run delivery
+	// too), so without this each copy would check what it could reach -- the
+	// planner's failed live with a model call journaled onto the run it was
+	// checking, and once planner calls can reach an app by forwarding to the
+	// agent holding the machine, it would be a second session for one
+	// answer. The designation is explicit rather than inferred from what a
+	// node happens to be unable to reach today.
+	role := i.answerCheckRoleRef()
+	if !role.serves {
+		return skipped(notAnAnswerCheckerReason), nil
+	}
 	st := i.store()
 	// The automation's internal origin is what got this call through the
 	// gate, and it stops there. Every read below runs as the OWNER, unstamped
@@ -226,7 +246,7 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 	if text == "" {
 		return skipped(fmt.Sprintf("version %d of %s recorded no answer to check", version, stepKey)), nil
 	}
-	// ONE CHECK PER ANSWER VERSION among the replicas that hold a claimer,
+	// ONE CHECK PER ANSWER VERSION among the nodes that serve checks,
 	// claimed after every skip that spends nothing and right before the one
 	// that spends a model call. The automation's own cluster guard keys on
 	// the triggering event's fingerprint, and one run transition can reach a
@@ -234,9 +254,9 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 	// arrived from the bridge and again from the durable run-delivery path),
 	// so one answer was checked twice -- and on a route that puts an app
 	// first, twice is two sessions. The "already checked" test above cannot
-	// close that race: both read before either writes. Which replicas claim
-	// is app/'s decision (app/integrations_work_validator.go).
-	if claimer := i.validatorClaimerRef(); claimer != nil {
+	// close that race: both read before either writes. Which nodes serve
+	// checks is app/'s decision (app/integrations_work_validator.go).
+	if claimer := role.claimer; claimer != nil {
 		key := fmt.Sprintf("%s#%s@%d", runId, stepKey, version)
 		if !claimer.ClaimWithTTL(ctx, validatorClaimName, key, validatorClaimTTL) {
 			return skipped(fmt.Sprintf("version %d of %s is being checked by another replica", version, stepKey)), nil
@@ -347,20 +367,30 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 
 func skipped(reason string) map[string]any { return map[string]any{"skipped": reason} }
 
-// SetValidatorClaimer installs the cross-replica claim on one answer version's
-// check. First call wins, as SetRunClaimer does.
-func (i *Integration) SetValidatorClaimer(c RunClaimer) {
-	i.mu.Lock()
-	defer i.mu.Unlock()
-	if i.validatorClaimer == nil {
-		i.validatorClaimer = c
-	}
+// answerCheckRole is whether this node serves answer checks, and the claim
+// among the nodes that do.
+type answerCheckRole struct {
+	serves bool
+	// claimer makes one answer version one check among the serving nodes. A
+	// nil one DEGRADES rather than refuses: the check then runs unclaimed,
+	// which is a duplicate model call at worst, never a duplicate side effect.
+	claimer RunClaimer
 }
 
-func (i *Integration) validatorClaimerRef() RunClaimer {
+// ServeAnswerChecks designates this node as one that serves the answer
+// validator's check, claimed through c among the nodes so designated. Which
+// nodes those are is app/'s decision (app/integrations_work_validator.go),
+// made once at boot.
+func (i *Integration) ServeAnswerChecks(c RunClaimer) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.answerChecks = answerCheckRole{serves: true, claimer: c}
+}
+
+func (i *Integration) answerCheckRoleRef() answerCheckRole {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
-	return i.validatorClaimer
+	return i.answerChecks
 }
 
 // feedbackPolicy is v1:work:feedbackPolicy:primary as values. An absent or

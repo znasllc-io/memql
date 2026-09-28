@@ -98,12 +98,11 @@ type Integration struct {
 	// see SetRunClaimer.
 	runClaimer RunClaimer
 
-	// validatorClaimer is the cross-replica gate on the answer validator's
-	// one model call (validator.go), installed on the replicas that can serve
-	// the check. Unlike runClaimer, a nil one DEGRADES: the check then runs
-	// unclaimed, which is a duplicate model call at worst, never a duplicate
-	// side effect.
-	validatorClaimer RunClaimer
+	// answerChecks says whether THIS node serves the answer validator's check
+	// and, when it does, the claim that makes one answer version one check
+	// among the nodes that serve it (validator.go, ServeAnswerChecks). The
+	// zero value serves none: a node that was not designated skips.
+	answerChecks answerCheckRole
 
 	// rowsInFlight is the source of the abandoned sweep's rows. It is a
 	// FIELD rather than a method call so the sweep's per-row decisions --

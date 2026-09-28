@@ -130,6 +130,9 @@ func newValidatorIntegration(t *testing.T) (*Integration, *judgeEngine) {
 	i := New(judge, testLogger())
 	i.SetNow(func() time.Time { return testNow })
 	i.admitRow = func(context.Context, memorynodes.MemoryNode) bool { return true }
+	// An AGENT's integration: the node that serves answer checks (unclaimed
+	// here; the claim tests install one).
+	i.ServeAnswerChecks(nil)
 
 	run := actRunRow(runStatusSucceeded)
 	run["spent"] = map[string]any{"modelCalls": float64(1)}
@@ -536,19 +539,19 @@ func (c *onceClaimer) ClaimWithTTL(_ context.Context, name, key string, ttl time
 	return true
 }
 
-// ONE ANSWER VERSION IS CHECKED ONCE ACROSS THE CLUSTER. The automation's own
-// cluster guard keys on the triggering event's fingerprint, and live on
-// 2026-09-28 the planner received each run update twice -- once from the
-// bridge and once from the durable run-delivery path, with different
-// fingerprints -- so the agent AND the planner each ran the check for one
-// transition. Two replicas sharing one claimer model exactly that: both are
-// handed the same succeeded run, and exactly one model call is made.
+// ONE ANSWER VERSION IS CHECKED ONCE AMONG THE NODES THAT SERVE CHECKS. The
+// automation's own cluster guard keys on the triggering event's fingerprint,
+// and live on 2026-09-28 one run update arrived twice -- once from the bridge
+// and once from the durable run-delivery path, with different fingerprints --
+// and an agent consumes both. Two agent replicas sharing one claimer model
+// exactly that: both are handed the same succeeded run, and exactly one model
+// call is made.
 func TestTheValidatorChecksAnAnswerVersionOnceAcrossReplicas(t *testing.T) {
 	claimer := &onceClaimer{}
 	first, firstJudge := newValidatorIntegration(t)
 	second, secondJudge := newValidatorIntegration(t)
-	first.SetValidatorClaimer(claimer)
-	second.SetValidatorClaimer(claimer)
+	first.ServeAnswerChecks(claimer)
+	second.ServeAnswerChecks(claimer)
 
 	if _, err := first.handleValidateAnswer(validatorCaller(), validatorArgs(), 0); err != nil {
 		t.Fatalf("first replica: %v", err)
@@ -579,12 +582,71 @@ func TestTheValidatorChecksAnAnswerVersionOnceAcrossReplicas(t *testing.T) {
 func TestTheValidatorClaimsNothingItWillNotCheck(t *testing.T) {
 	claimer := &onceClaimer{}
 	i, judge := newValidatorIntegration(t)
-	i.SetValidatorClaimer(claimer)
+	i.ServeAnswerChecks(claimer)
 	journalRun(judge, "journal:appSession", "claude-code answered a model call")
 	if _, err := i.handleValidateAnswer(validatorCaller(), validatorArgs(), 0); err != nil {
 		t.Fatal(err)
 	}
 	if len(claimer.keys) != 0 {
 		t.Errorf("a skipped check claimed %v", claimer.keys)
+	}
+}
+
+// A NODE THAT DOES NOT SERVE ANSWER CHECKS LEAVES THEM TO ONE THAT DOES, and
+// says so before it reads a row, claims anything or reaches a model.
+//
+// The live topology on 2026-09-28: every validateStepAnswer ran on the planner
+// AND on the agent. The planner's copy failed (no forwarded authority for a
+// fleet hop from an automation) and wrote a failed modelCall row onto the run
+// it was checking; the agent's opened the app session. Claiming only among
+// agents stopped the agent's own duplicate, but left the planner's copy
+// running unclaimed -- and once planner calls can reach an app by forwarding
+// to the agent that holds the machine (the planner/app-source design, 3a),
+// that copy is a second session for the same answer. Which node serves the
+// check is now explicit: the node that was not designated skips, whatever it
+// could reach, and the designated one's claim is the only claim.
+func TestANodeThatDoesNotServeAnswerChecksLeavesThemToOneThatDoes(t *testing.T) {
+	claimer := &onceClaimer{}
+	agent, agentJudge := newValidatorIntegration(t)
+	agent.ServeAnswerChecks(claimer)
+
+	// The planner: the same work integration, handed the same transition,
+	// never designated.
+	planner, plannerJudge := newValidatorIntegration(t)
+	planner.answerChecks = answerCheckRole{}
+
+	nodes, err := planner.handleValidateAnswer(validatorCaller(), validatorArgs(), 0)
+	if err != nil {
+		t.Fatalf("the planner's copy must be a skip, not a failure: %v", err)
+	}
+	if reason := rowString(decodeReply(t, nodes), "skipped"); !strings.Contains(reason, "agent") {
+		t.Errorf("the planner's reply = %v, want a skip that leaves the check to the agent", decodeReply(t, nodes))
+	}
+	if n := len(plannerJudge.recorded()); n != 0 {
+		t.Errorf("the planner read or wrote %d time(s) for a check it does not serve: %s", n, plannerJudge.summary())
+	}
+	if plannerJudge.calls() != 0 {
+		t.Errorf("the planner made %d model call(s) for a check it does not serve", plannerJudge.calls())
+	}
+	if len(claimer.keys) != 0 {
+		t.Errorf("the planner claimed %v; a claim it takes is a check the agent loses", claimer.keys)
+	}
+
+	if _, err := agent.handleValidateAnswer(validatorCaller(), validatorArgs(), 0); err != nil {
+		t.Fatalf("agent: %v", err)
+	}
+	if agentJudge.calls() != 1 {
+		t.Errorf("the agent made %d model call(s), want the one check", agentJudge.calls())
+	}
+}
+
+// THE OWNER GATE STILL COMES FIRST. A caller the check may not run for is
+// refused on every node, a non-serving one included: "this node does not
+// serve checks" must not read as permission granted elsewhere.
+func TestANonServingNodeStillRefusesACallerTheCheckMayNotRunFor(t *testing.T) {
+	i, _ := newValidatorIntegration(t)
+	i.answerChecks = answerCheckRole{}
+	if _, err := i.handleValidateAnswer(context.Background(), validatorArgs(), 0); err == nil {
+		t.Fatal("a caller with no internal origin was answered with a skip rather than refused")
 	}
 }
