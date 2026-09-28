@@ -61,7 +61,12 @@ const REBUILD_TIMEOUT_MS = 2_700_000;
 
 export type LocalRunKind = "update" | "changeVersion" | "rebuild" | "pullRebuild";
 
-export type LocalRunRequest =
+/**
+ * One run, for one instance. `instance` is the registry key the record is filed
+ * under; `label` is what the run's sentences call it ("memql.localhost is on
+ * v0.24.0"), and the key stands in when a caller has no label.
+ */
+export type LocalRunRequest = (
   | { kind: "update" | "changeVersion"; instance: string; from: string; to: string }
   | { kind: "rebuild"; instance: string; checkout: string; nodes: string }
   | {
@@ -71,7 +76,14 @@ export type LocalRunRequest =
       nodes: string;
       branch: string;
       strategy: UpdateStrategy;
-    };
+    }
+) & { label?: string };
+
+/** What a run's sentences call its cluster. */
+function spokenName(request: LocalRunRequest): string {
+  const label = (request.label ?? "").trim();
+  return label !== "" ? label : request.instance;
+}
 
 /** How each kind of run reads: the title while it runs, its bar word, and its done title. */
 export interface RunWords {
@@ -497,12 +509,12 @@ export class LocalRun {
   }
 }
 
-/** The done screen's title: where the cluster is now. */
-function doneTitle(request: LocalRunRequest): string {
+/** The done screen's title: where the cluster is now, by the name the page shows. */
+export function doneTitle(request: LocalRunRequest): string {
   switch (request.kind) {
     case "update":
     case "changeVersion":
-      return `${request.instance} is on ${request.to}`;
+      return `${spokenName(request)} is on ${request.to}`;
     case "rebuild":
       return "Rebuilt from your checkout";
     case "pullRebuild":
@@ -520,11 +532,11 @@ function resultSentence(request: LocalRunRequest, report: ExecutionReport | unde
       return "Ready to use";
     case "rebuild": {
       const nodes = rebuiltNodes(request.nodes, result("rebuildFromCheckout"));
-      const sentence = rebuiltMessage(request.instance, result("rebuildFromCheckout"));
+      const sentence = rebuiltMessage(spokenName(request), result("rebuildFromCheckout"));
       return nodes === "" ? sentence : `${sentence.replace(/\.$/, "")} for ${nodes}.`;
     }
     case "pullRebuild":
-      return updatedMessage(request.instance, result("updateCheckout"), result("rebuildFromCheckout"));
+      return updatedMessage(spokenName(request), result("updateCheckout"), result("rebuildFromCheckout"));
   }
 }
 

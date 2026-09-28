@@ -80,6 +80,13 @@ export type InstanceKind = "local" | "remote";
 export interface Instance {
   /** The clusters.yaml slot key, or "local" for an unregistered local install. */
   name: string;
+  /**
+   * What a surface calls it (instanceLabel): the name the Clusters view shows
+   * -- the list's display name -- or, for a local install with no list entry,
+   * its domain. `name` is a KEY, and it is "local" for every local cluster, so
+   * a page titled by it names nothing a person recognises.
+   */
+  label?: string;
   kind: InstanceKind;
   domain?: string;
   presence: PresenceVerdict;
@@ -319,7 +326,7 @@ export interface LocalInstanceInput {
   /** The install receipt, when one was read. Null when nothing installed from here. */
   receipt: Receipt | null;
   /** The `local: true` clusters.yaml row, when one is registered. */
-  registered?: { name?: string; domain?: string; version?: string };
+  registered?: { name?: string; displayName?: string; domain?: string; version?: string };
   /** Whether this editor currently holds a live session against it. */
   connected: boolean;
   /**
@@ -384,8 +391,14 @@ export function localInstance(input: LocalInstanceInput): Instance {
     commit: checkoutCommit,
     ...(imageSource === "checkout" && rebuild !== undefined ? { rebuild } : {}),
   });
+  // The Clusters view's own rule for a listed cluster (displayLabel); the
+  // domain for one that is installed and not listed; the words when there is
+  // neither.
+  const displayName = (input.registered?.displayName ?? "").trim();
+  const shown = displayName !== "" ? displayName : registeredName !== "" ? registeredName : domain !== "" ? domain : "Local cluster";
   return {
     name: registeredName !== "" ? registeredName : LOCAL_INSTANCE_NAME,
+    label: shown,
     kind: "local",
     ...(domain !== "" ? { domain } : {}),
     presence: input.presence,
@@ -451,6 +464,8 @@ export function remotePresence(reachable: boolean): PresenceVerdict {
 export interface RemoteInstanceInput {
   /** The clusters.yaml slot key. */
   name: string;
+  /** The list's display name, when it has one. */
+  displayName?: string;
   domain?: string;
   /** Whether the cluster answered -- a live session, or a probe. */
   reachable: boolean;
@@ -500,8 +515,10 @@ export function remoteInstance(input: RemoteInstanceInput): Instance {
   const version = deployed !== "" ? deployed : (input.registryVersion ?? "").trim();
   const domain = (input.domain ?? "").trim();
   const pending = (input.pendingDeploymentId ?? "").trim();
+  const displayName = (input.displayName ?? "").trim();
   return {
     name: input.name,
+    label: displayName !== "" ? displayName : input.name,
     kind: "remote",
     ...(domain !== "" ? { domain } : {}),
     presence: remotePresence(input.reachable),
@@ -510,6 +527,12 @@ export function remoteInstance(input: RemoteInstanceInput): Instance {
     ...(current !== "" ? { currentDeploymentId: current } : {}),
     ...(pending !== "" ? { pendingDeploymentId: pending } : {}),
   };
+}
+
+/** The name a surface gives an instance: its label, else its key. */
+export function instanceLabel(instance: Instance): string {
+  const label = (instance.label ?? "").trim();
+  return label !== "" ? label : instance.name;
 }
 
 /**

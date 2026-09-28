@@ -312,7 +312,7 @@ export interface TrainingLensOptions {
    * cluster this editor cannot say is local is how a click reaches a command
    * that has nothing to build.
    */
-  cluster?: { name: string; local: boolean };
+  cluster?: { name: string; local: boolean; label?: string };
   /**
    * Whether a construct is defined for THIS SESSION only (Try in session).
    *
@@ -383,9 +383,10 @@ export function trainingLensPlans(
  */
 function editedDetail(cluster: TrainingLensOptions["cluster"]): string {
   if (cluster === undefined) return detailFor("edited");
+  const shown = cluster.label ?? cluster.name;
   return cluster.local
-    ? `Your source differs from what ${cluster.name} loaded. Rebuild from checkout applies it.`
-    : `Your source differs from what ${cluster.name} runs. A rollout applies it.`;
+    ? `Your source differs from what ${shown} loaded. Rebuild from checkout applies it.`
+    : `Your source differs from what ${shown} runs. A rollout applies it.`;
 }
 
 function editedActions(cluster: TrainingLensOptions["cluster"]): TrainingAction[] {
@@ -394,7 +395,7 @@ function editedActions(cluster: TrainingLensOptions["cluster"]): TrainingAction[
   // hand in. A disabled control would suggest the editor could do it if only
   // something were different.
   if (cluster === undefined || !cluster.local) return [];
-  return [{ title: "Rebuild from checkout", command: COMMAND_REBUILD, description: `Rebuild ${cluster.name} from this checkout.` }];
+  return [{ title: "Rebuild from checkout", command: COMMAND_REBUILD, description: `Rebuild ${cluster.label ?? cluster.name} from this checkout.` }];
 }
 
 /** The sentence behind the lens's words, for its tooltip and the status bar's list. */

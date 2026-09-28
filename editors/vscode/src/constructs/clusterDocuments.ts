@@ -115,6 +115,12 @@ export class ClusterDocumentProvider implements vscode.TextDocumentContentProvid
  * necessarily the cluster these bytes came from -- see `detailsRefusal`.
  */
 export class ClusterDocumentLens implements vscode.CodeLensProvider {
+  /**
+   * `label` names the cluster the way the Clusters view does; the key in the
+   * uri is what the Details act carries, because that is what it compares.
+   */
+  constructor(private readonly label: (clusterName: string) => string = (clusterName) => clusterName) {}
+
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
     const ref = parseClusterDocumentUri({ authority: document.uri.authority, path: document.uri.path, query: document.uri.query });
     if (ref === undefined) return [];
@@ -123,7 +129,7 @@ export class ClusterDocumentLens implements vscode.CodeLensProvider {
     // so nothing to wonder about clicking), then the way to the detail page.
     return [
       new vscode.CodeLens(top, {
-        title: `From ${ref.cluster} (read-only)`,
+        title: `From ${this.label(ref.cluster)} (read-only)`,
         command: "",
       }),
       new vscode.CodeLens(top, {

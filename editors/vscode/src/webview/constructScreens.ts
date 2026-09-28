@@ -61,7 +61,10 @@ export type ConstructSource =
 
 export interface ConstructPageInput {
   construct: CatalogConstruct;
-  /** The cluster the record was read from, or "" when the opener could not say. */
+  /**
+   * The cluster the record was read from, as the page names it -- its display
+   * name, never the registry key -- or "" when the opener could not say.
+   */
   cluster: string;
   source: ConstructSource;
   /** Whether the Details disclosure is open (remembered by the host). */

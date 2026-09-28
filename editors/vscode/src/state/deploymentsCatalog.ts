@@ -50,6 +50,7 @@ import { describeVersion } from "../version/describe.js";
 import type { ReleaseListing } from "../version/releaseCache.js";
 import {
   LOCAL_INSTANCE_NAME,
+  instanceLabel,
   localInstance,
   remoteInstance,
   runsFromDeployments,
@@ -152,6 +153,7 @@ export async function buildCatalog(inputs: CatalogInputs): Promise<Catalog> {
         ? {
             registered: {
               name: registered.name,
+              ...(registered.displayName !== undefined ? { displayName: registered.displayName } : {}),
               domain: registered.domain,
               ...(registered.version !== undefined ? { version: registered.version } : {}),
             },
@@ -178,6 +180,7 @@ export async function buildCatalog(inputs: CatalogInputs): Promise<Catalog> {
     const isConnected = connection?.connected === true && connection.clusterName === cluster.name;
     const instance = remoteInstance({
       name: cluster.name,
+      ...(cluster.displayName !== undefined ? { displayName: cluster.displayName } : {}),
       ...(cluster.domain !== undefined ? { domain: cluster.domain } : {}),
       // Reachability is only ever KNOWN for the cluster we hold a connection
       // to. For the rest the honest verdict is the one that says it does not
@@ -430,7 +433,7 @@ export function selectedViewDescription(
 ): string {
   if (instance === undefined) return "";
   const state = clusterState(instance, connection);
-  const parts = [instance.name, state.heading];
+  const parts = [instanceLabel(instance), state.heading];
   if (state.key === "notInstalled") return parts.join(" · ");
   const label = (instance.versionLabel ?? "").trim();
   if (label !== "") parts.push(label);

@@ -48,7 +48,7 @@ function doc(theme: GalleryTheme, id: string, title: string, parts: RegionParts)
   });
 }
 
-function scenario(id: string, title: string, build: () => RegionParts, pageTitle = "local"): Scenario {
+function scenario(id: string, title: string, build: () => RegionParts, pageTitle = "memql.localhost"): Scenario {
   return { id, group: GROUP, title, render: (theme) => doc(theme, id, pageTitle, build()) };
 }
 
@@ -59,6 +59,7 @@ const CURRENT_RELEASES: ReleaseListing = { tags: ["v0.23.5", "v0.23.4", "v0.23.0
 
 const LOCAL: Instance = {
   name: "local",
+  label: "memql.localhost",
   kind: "local",
   presence: "installed-healthy",
   domain: "memql.localhost",
@@ -94,10 +95,10 @@ const LOCAL_HISTORY: Run[] = [
 const NONE: UpgradeVerdict = { kind: "none", reason: "no newer release" };
 const OFFER: UpgradeVerdict = {
   kind: "offer",
-  target: { instanceName: "local", from: "v0.23.5", to: "v0.24.0", flow: "upgradeToTag" },
+  target: { instanceName: "memql.localhost", from: "v0.23.5", to: "v0.24.0", flow: "upgradeToTag" },
   label: "Update to v0.24.0",
-  title: "Update local",
-  confirmation: "Update local from v0.23.5 to v0.24.0?",
+  title: "Update memql.localhost",
+  confirmation: "Update memql.localhost from v0.23.5 to v0.24.0?",
   phrase: "v0.24.0",
 };
 
@@ -165,7 +166,7 @@ const localRefused = scenario("deploy-local-refused", "Local, update needs manua
     "connected",
     {
       kind: "refused",
-      target: { instanceName: "local", from: "v0.18.0", to: "v0.24.0", flow: "upgradeToTag" },
+      target: { instanceName: "memql.localhost", from: "v0.18.0", to: "v0.24.0", flow: "upgradeToTag" },
       label: "Update to v0.24.0",
       message: "v0.24.0 needs manual upgrade steps.",
       barriers: [],
@@ -191,7 +192,7 @@ const localAbsent = scenario(
 );
 
 const localUnreceipted = scenario("deploy-local-unreceipted", "A cluster this editor didn't install", () =>
-  localPage({ name: "local", kind: "local", presence: "present-unreceipted", connected: false, registered: false }, "none", NONE, [], RELEASES),
+  localPage({ name: "local", label: "memql.localhost", kind: "local", presence: "present-unreceipted", connected: false, registered: false }, "none", NONE, [], RELEASES),
 );
 
 // ---------------------------------------------------------------------------
@@ -200,6 +201,7 @@ const localUnreceipted = scenario("deploy-local-unreceipted", "A cluster this ed
 
 const REMOTE: Instance = {
   name: "staging",
+  label: "staging.memql.example.com",
   kind: "remote",
   presence: "installed-healthy",
   domain: "staging.memql.example.com",
@@ -417,8 +419,8 @@ const pullBlocked = scenario("deploy-pull-blocked", "Pull and rebuild, a merge i
 // a run, as it happens
 // ---------------------------------------------------------------------------
 
-const UPDATE: LocalRunRequest = { kind: "update", instance: "local", from: "v0.23.5", to: "v0.24.0" };
-const REBUILD: LocalRunRequest = { kind: "rebuild", instance: "local", checkout: `${HOME}/.memql/stack`, nodes: "" };
+const UPDATE: LocalRunRequest = { kind: "update", instance: "local", label: "memql.localhost", from: "v0.23.5", to: "v0.24.0" };
+const REBUILD: LocalRunRequest = { kind: "rebuild", instance: "local", label: "memql.localhost", checkout: `${HOME}/.memql/stack`, nodes: "" };
 const STARTED = GALLERY_NOW - 184_000;
 
 const UPDATE_LOG: LogLine[] = [
@@ -469,7 +471,7 @@ const runRebuilding = scenario("deploy-run-rebuild", "Rebuilding, one long step 
 );
 
 const runStopping = scenario("deploy-run-stopping", "Changing version, stopping", () =>
-  runPage({ kind: "changeVersion", instance: "local", from: "v0.23.5", to: "v0.23.4" }, "stopping", { percent: 41, statusLine: "Stopping after the current step", stepText: "Step 9 of 16", cancellable: false, logsOpen: false }),
+  runPage({ kind: "changeVersion", instance: "local", label: "memql.localhost", from: "v0.23.5", to: "v0.23.4" }, "stopping", { percent: 41, statusLine: "Stopping after the current step", stepText: "Step 9 of 16", cancellable: false, logsOpen: false }),
 );
 
 const runFailed = scenario("deploy-run-failed", "Updating, failed", () =>
@@ -505,7 +507,7 @@ const runLive: Scenario = {
     const parts = runPage(UPDATE, "running", { statusLine: "Starting", stepText: "", cancellable: true, logsOpen: true });
     const lines = JSON.stringify(UPDATE_LOG);
     return withHostScript(
-      doc(theme, "deploy-run-live", "local", { ...parts, body: parts.body.replace(/<div class="mq-log-line"[\s\S]*?<\/div><\/div>/g, "") }),
+      doc(theme, "deploy-run-live", "memql.localhost", { ...parts, body: parts.body.replace(/<div class="mq-log-line"[\s\S]*?<\/div><\/div>/g, "") }),
       `
 setTimeout(function () {
   window.postMessage({ type: 'progress', percent: 62, status: 'Waiting for bff to sync', stepText: 'Step 11 of 16', startedAt: ${STARTED}, state: 'running' }, '*');

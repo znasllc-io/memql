@@ -67,7 +67,7 @@ import { readReceipt, recordedCheckout, recordedStackBranch } from "../install/r
 import type { SessionHooks } from "../install/session.js";
 import { tagProblem } from "../install/tags.js";
 import { readUpdateState, type UpdateState } from "../install/updateState.js";
-import type { Instance, Run } from "../state/deployments.js";
+import { instanceLabel, type Instance, type Run } from "../state/deployments.js";
 import {
   buildCatalog,
   instanceConnectionWord,
@@ -177,6 +177,8 @@ export class DeploymentPanel {
   private screen: Screen = { kind: "overview" };
   /** Which cluster this page is about; "" is the local one. */
   private instanceName = "";
+  /** The name the page last showed it by, kept for when it leaves the list. */
+  private knownLabel = "";
   private instance: Instance | undefined;
   private runs: readonly Run[] = [];
   /** The first read has landed; before it the page is a skeleton. */
@@ -363,6 +365,7 @@ export class DeploymentPanel {
       (this.instance?.kind === "local" && (instanceName === "" || instanceName === this.instance.name));
     if (!same) {
       this.instanceName = instanceName;
+      this.knownLabel = "";
       this.instance = undefined;
       this.loaded = false;
       this.pipeline = undefined;
@@ -400,6 +403,7 @@ export class DeploymentPanel {
         ? catalog.instances.find((i) => i.kind === "local")
         : catalog.instances.find((i) => i.name === this.instanceName);
     this.runs = this.instance === undefined ? [] : (catalog.runs.get(this.instance.name) ?? []);
+    if (this.instance !== undefined) this.knownLabel = instanceLabel(this.instance);
     this.connection = this.instance === undefined ? "none" : instanceConnectionWord(this.instance, connection);
     this.loaded = true;
     this.render();
@@ -851,7 +855,7 @@ export class DeploymentPanel {
         const to = target.toVersion ?? "";
         const phrase = to !== "" ? to : target.id;
         const now = (instance.versionLabel ?? "") === "" ? "" : ` (now ${instance.versionLabel})`;
-        if (!(await this.confirmTyped(`Roll back ${instance.name}`, `Roll back ${instance.name} to ${phrase}${now}?`, phrase))) return;
+        if (!(await this.confirmTyped(`Roll back ${instanceLabel(instance)}`, `Roll back ${instanceLabel(instance)} to ${phrase}${now}?`, phrase))) return;
         request = { id: "rollback", toDeploymentId: target.id };
         success = `Rolling back to ${phrase}.`;
         break;
@@ -1021,7 +1025,7 @@ export class DeploymentPanel {
     this.logsOpen = false;
     this.notice = undefined;
     this.slot().start(
-      { ...request, instance: instance.name },
+      { ...request, instance: instance.name, label: instanceLabel(instance) },
       {
         installRoot: this.deps.installRoot,
         receiptFile: this.deps.receiptFile,
@@ -1115,7 +1119,7 @@ export class DeploymentPanel {
     if (this.disposed) return;
     const { key, parts, run } = this.compose();
     this.watch(run);
-    this.panel.title = this.instance?.presence === "absent" ? "Local cluster" : (this.instance?.name ?? "Cluster");
+    this.panel.title = this.instance === undefined ? "Cluster" : this.instance.presence === "absent" ? "Local cluster" : instanceLabel(this.instance);
     this.live.render(key, parts);
     if (run !== undefined && key.startsWith("run:")) this.live.progress(run.progress());
     this.syncTicker(key.startsWith("run:"));
@@ -1170,7 +1174,7 @@ export class DeploymentPanel {
       return {
         key: "unavailable",
         parts: unavailableScreen({
-          title: this.instanceName === "" ? "Local cluster" : this.instanceName,
+          title: this.knownLabel !== "" ? this.knownLabel : this.instanceName === "" ? "Local cluster" : this.instanceName,
           line: "This cluster is no longer in your list.",
           bar: { state: "Not in your list", acts: [] },
         }),

@@ -29,13 +29,14 @@
 
 import { actionById, satisfiesTier, type RoleTier, type RoleVisibility } from "./actions.js";
 import { moveFlowFor, type InstanceActionFlow } from "./instanceActions.js";
-import type { Instance } from "../state/deployments.js";
+import { instanceLabel, type Instance } from "../state/deployments.js";
 import { barriersCrossed, type UpgradeBarrier } from "../version/barriers.js";
 import { returnsToReleasedImages } from "../state/imageLane.js";
 import type { VersionDescription } from "../version/describe.js";
 
 /** Which machinery a move reaches, and between which two versions. */
 export interface UpgradeTarget {
+  /** The cluster as the confirmation names it (instanceLabel), never its key. */
   instanceName: string;
   /**
    * What the cluster records today.
@@ -144,7 +145,7 @@ export function upgradeVerdict(input: UpgradeVerdictInput): UpgradeVerdict {
   const from = (instance.version ?? "").trim();
   const to = version.latest;
   const target: UpgradeTarget = {
-    instanceName: instance.name,
+    instanceName: instanceLabel(instance),
     from,
     to,
     flow: moveFlowFor(instance),
@@ -188,7 +189,7 @@ export function upgradeVerdict(input: UpgradeVerdictInput): UpgradeVerdict {
     kind: "offer",
     target,
     label: upgradeLabel(to),
-    title: `Update ${instance.name}`,
+    title: `Update ${instanceLabel(instance)}`,
     confirmation: confirmationMessage(instance, target),
     // The TARGET, never the word "yes": re-typing the version forces the
     // operator to look at what they are moving to. Same call the deploy
@@ -225,7 +226,7 @@ function confirmationMessage(instance: Instance, target: UpgradeTarget): string 
   // THE LANE CROSSING, IN THE CONFIRMATION AN OPERATOR ACTUALLY READS
   // (memql#4246): a move over a cluster running checkout-built images returns
   // it to released ones, and nothing else on this path would say so.
-  return instance.imageSource === "checkout" ? `${head} ${returnsToReleasedImages(instance.name, "")}` : head;
+  return instance.imageSource === "checkout" ? `${head} ${returnsToReleasedImages(instanceLabel(instance), "")}` : head;
 }
 
 /**

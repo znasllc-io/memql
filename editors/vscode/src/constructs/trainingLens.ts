@@ -49,7 +49,7 @@ export class TrainingCodeLensProvider implements vscode.CodeLensProvider {
   readonly onDidChangeCodeLenses = this.changed.event;
 
   private client: TrainingStateClient | undefined;
-  private cluster: { name: string; local: boolean } | undefined;
+  private cluster: { name: string; local: boolean; label?: string } | undefined;
   private sessionDefined: ((name: string) => boolean) | undefined;
 
   /** Point at a language client, or at nothing. Refreshes either way. */
@@ -68,7 +68,7 @@ export class TrainingCodeLensProvider implements vscode.CodeLensProvider {
    * by rollout" on screen beside a cluster that rebuilds on request -- until
    * the developer happened to type in the file.
    */
-  setCluster(cluster: { name: string; local: boolean } | undefined): void {
+  setCluster(cluster: { name: string; local: boolean; label?: string } | undefined): void {
     this.cluster = cluster;
     this.changed.fire();
   }

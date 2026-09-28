@@ -82,6 +82,11 @@ export interface ConstructPanelDeps {
    * preflight and the Result tab are the ones that already exist.
    */
   run: (construct: CatalogConstruct, withArguments: boolean) => Promise<void>;
+  /**
+   * The name the page shows for a cluster key: the Clusters view's label. The
+   * key itself is what every act above compares; this is only what is said.
+   */
+  clusterLabel?: (cluster: string) => string;
 }
 
 /**
@@ -390,7 +395,7 @@ export class ConstructPanel {
           `construct:${construct.kind}:${construct.name}`,
           constructPageParts({
             construct,
-            cluster: this.cluster,
+            cluster: this.cluster === "" ? "" : (this.deps.clusterLabel?.(this.cluster) ?? this.cluster),
             source: this.source,
             detailsOpen: this.detailsOpen,
             error: this.error,

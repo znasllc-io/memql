@@ -176,16 +176,16 @@ const CONCEPTS = new Map<string, ConceptLike>([
 
 const constructScenarios: Scenario[] = [
   scenario("author-construct-query", "Construct: a query with arguments", CONSTRUCT_PAGE_STYLES, () =>
-    constructPageParts({ construct: QUERY, cluster: "local", source: "workspace" }),
+    constructPageParts({ construct: QUERY, cluster: "memql.localhost", source: "workspace" }),
   ),
   scenario("author-construct-automation", "Construct: an automation", CONSTRUCT_PAGE_STYLES, () =>
-    constructPageParts({ construct: AUTOMATION, cluster: "local", source: "cluster", detailsOpen: true }),
+    constructPageParts({ construct: AUTOMATION, cluster: "memql.localhost", source: "cluster", detailsOpen: true }),
   ),
   scenario("author-construct-concept", "Construct: a concept (no run)", CONSTRUCT_PAGE_STYLES, () =>
-    constructPageParts({ construct: CONCEPT_CONSTRUCT, cluster: "local", source: "workspace" }),
+    constructPageParts({ construct: CONCEPT_CONSTRUCT, cluster: "memql.localhost", source: "workspace" }),
   ),
   scenario("author-construct-staged", "Construct: staged, with its source on the page", CONSTRUCT_PAGE_STYLES, () =>
-    constructPageParts({ construct: PROMOTED, cluster: "local", source: "none" }),
+    constructPageParts({ construct: PROMOTED, cluster: "memql.localhost", source: "none" }),
   ),
   scenario("author-construct-loading", "Construct: loading", CONSTRUCT_PAGE_STYLES, () => constructLoadingParts()),
   scenario("author-construct-error", "Construct: the read failed", CONSTRUCT_PAGE_STYLES, () =>

@@ -92,12 +92,16 @@ export function detailsRefusal(
   documentCluster: string,
   connectedCluster: string | undefined,
   need = "open its details",
+  label: (clusterName: string) => string = (clusterName) => clusterName,
 ): string | undefined {
   if (documentCluster === "" || connectedCluster === documentCluster) return undefined;
+  // Compared by registry key, SAID by display name: two clusters can share a
+  // label, never a key.
+  const from = label(documentCluster);
   if (connectedCluster === undefined) {
-    return `MemQL: This is from ${documentCluster}. Connect to ${documentCluster} to ${need}.`;
+    return `MemQL: This is from ${from}. Connect to ${from} to ${need}.`;
   }
-  return `MemQL: This is from ${documentCluster}, but you're connected to ${connectedCluster}. Connect to ${documentCluster} to ${need}.`;
+  return `MemQL: This is from ${from}, but you're connected to ${label(connectedCluster)}. Connect to ${from} to ${need}.`;
 }
 
 /**
@@ -127,10 +131,11 @@ export function panelClusterRefusal(
   panelCluster: string,
   connectedCluster: string | undefined,
   need: string,
+  label?: (clusterName: string) => string,
 ): string | undefined {
   // `need` is threaded through, so the refusal names the act that was asked
   // for -- it used to say "open its details" about a click on Open source.
-  const mismatch = detailsRefusal(panelCluster, connectedCluster, need);
+  const mismatch = detailsRefusal(panelCluster, connectedCluster, need, label);
   if (mismatch !== undefined) return mismatch;
   if (connectedCluster === undefined) return `MemQL: Connect to a cluster to ${need}.`;
   return undefined;

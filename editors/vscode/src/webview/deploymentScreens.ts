@@ -51,7 +51,7 @@ import type { PageAct, PageBar } from "../deploy/instanceActions.js";
 import type { RunFailure, RunWords } from "../deploy/localRun.js";
 import type { PipelineState } from "../deploy/pipelineState.js";
 import type { UpgradeVerdict } from "../deploy/upgrade.js";
-import type { Instance, Run } from "../state/deployments.js";
+import { instanceLabel, type Instance, type Run } from "../state/deployments.js";
 import {
   formatWhen,
   itemReason,
@@ -274,7 +274,7 @@ function isInstalled(instance: Instance): boolean {
 export function localOverviewScreen(i: LocalOverviewInput): RegionParts {
   const { instance } = i;
   const installed = isInstalled(instance);
-  const title = installed ? instance.name : "Local cluster";
+  const title = installed ? instanceLabel(instance) : "Local cluster";
   const meta = installed ? (instance.versionLabel ?? "") : "";
 
   let body = pageNotice(i.notice);
@@ -466,7 +466,7 @@ export function remoteOverviewScreen(i: RemoteOverviewInput): RegionParts {
   body += details(i.detailsOpen, detailRows);
 
   return {
-    head: head({ title: instance.name, ...((instance.versionLabel ?? "") === "" ? {} : { meta: instance.versionLabel }) }),
+    head: head({ title: instanceLabel(instance), ...((instance.versionLabel ?? "") === "" ? {} : { meta: instance.versionLabel }) }),
     body,
     actions: barHtml(i.bar),
   };
@@ -585,7 +585,7 @@ export function chooseVersionScreen(i: ChooseVersionInput): RegionParts {
         });
 
   return {
-    head: head({ title: "Change version", back: { act: "back", label: instance.name } }),
+    head: head({ title: "Change version", back: { act: "back", label: instanceLabel(instance) } }),
     body,
     actions,
   };
@@ -641,7 +641,7 @@ export interface RebuildScreenInput {
 /** Rebuild from checkout: what will be built, what needs attention, and which services. */
 export function rebuildScreen(i: RebuildScreenInput): RegionParts {
   return {
-    head: head({ title: "Rebuild from checkout", back: { act: "back", label: i.instance.name } }),
+    head: head({ title: "Rebuild from checkout", back: { act: "back", label: instanceLabel(i.instance) } }),
     body: checkBody(i.check, i.home) + servicesField(i.nodes),
     actions: checkBar(i.check, "Can't rebuild yet", { act: "beginRebuild", label: "Rebuild", tone: "primary" }),
   };
@@ -665,7 +665,7 @@ export function pullRebuildScreen(i: PullRebuildScreenInput): RegionParts {
       })
     : "";
   return {
-    head: head({ title: "Pull and rebuild", back: { act: "back", label: i.instance.name } }),
+    head: head({ title: "Pull and rebuild", back: { act: "back", label: instanceLabel(i.instance) } }),
     body: checkBody(i.check, i.home) + servicesField(i.nodes) + (i.check === undefined ? "" : merge),
     actions: checkBar(i.check, "Can't pull yet", { act: "beginPullRebuild", label: "Pull and rebuild", tone: "primary" }),
   };
@@ -830,7 +830,7 @@ export function runDetailScreen(i: RunDetailInput): RegionParts {
   );
 
   return {
-    head: head({ title: runNoun(run), ...(meta === "" ? {} : { meta }), back: { act: "back", label: instance.name } }),
+    head: head({ title: runNoun(run), ...(meta === "" ? {} : { meta }), back: { act: "back", label: instanceLabel(instance) } }),
     body,
     actions: barHtml(i.bar),
   };
@@ -945,7 +945,7 @@ function servicesList(run: Run): string {
  */
 export function missingRunScreen(instance: Instance, keep: number): RegionParts {
   return {
-    head: head({ title: instance.kind === "remote" ? "Deployment" : "Run", back: { act: "back", label: instance.name } }),
+    head: head({ title: instance.kind === "remote" ? "Deployment" : "Run", back: { act: "back", label: instanceLabel(instance) } }),
     body: emptyState({
       line:
         instance.kind === "remote"
