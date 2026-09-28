@@ -704,7 +704,8 @@ smoke("the remote instance page renders all three pipeline states", async () => 
       );
       await waitFor(
         `the remote page (${label}) to title itself (saw: ${openTabLabels().join(", ")})`,
-        () => openTabLabels().includes("Deployment: staging"),
+        // The page is titled with the cluster's own name, as its row is.
+        () => openTabLabels().includes("staging"),
         15_000
       );
       info(`remote instance page rendered: ${label}`);

@@ -644,7 +644,7 @@
         },
         {
           "command": "memql.clusters.disconnect",
-          "when": "isWorkspaceTrusted && memql.clusterSelected"
+          "when": "isWorkspaceTrusted"
         },
         {
           "command": "memql.clusters.signInWithCode",
@@ -672,7 +672,7 @@
         },
         {
           "command": "memql.runs.open",
-          "when": "isWorkspaceTrusted && workbenchState != empty"
+          "when": "isWorkspaceTrusted"
         },
         {
           "command": "memql.runs.execute",
