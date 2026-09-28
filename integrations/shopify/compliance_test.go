@@ -25,8 +25,9 @@ func complianceDelivery(topic string, body map[string]any) memqlsync.InboundRequ
 func TestAComplianceDeliveryIsQueuedNotRunInline(t *testing.T) {
 	h := newHarness(t)
 	req := complianceDelivery(TopicRedact, map[string]any{
-		"shop_domain": "acme-widgets.myshopify.com",
-		"customer":    map[string]any{"id": 991},
+		"shop_domain":      "acme-widgets.myshopify.com",
+		"customer":         map[string]any{"id": 991},
+		"orders_to_redact": []any{},
 	})
 	writes, err := h.conn.Apply(context.Background(), req)
 	if err != nil {
@@ -70,7 +71,7 @@ func TestTheHoldsAreTheRegulatedOnes(t *testing.T) {
 	}
 
 	redact, err := parseComplianceJob(TopicRedact, store,
-		complianceDelivery(TopicRedact, map[string]any{"shop_domain": store.Domain, "customer": map[string]any{"id": 1}}), received)
+		complianceDelivery(TopicRedact, map[string]any{"shop_domain": store.Domain, "customer": map[string]any{"id": 1}, "orders_to_redact": []any{}}), received)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,5 +237,38 @@ func TestAComplianceJobRunsOnlyWhenItsHoldHasElapsed(t *testing.T) {
 	}
 	if ran != 0 {
 		t.Fatalf("ran %d jobs before the hold elapsed", ran)
+	}
+}
+
+// One captured, still-valid privacy delivery replayed under each other
+// compliance topic queues nothing. The topic is an unsigned header and the
+// three payloads share one signing secret per app, so the operation is bound
+// to the payload shape only its own topic carries: without that, a
+// customers/data_request body replayed as customers/redact or shop/redact
+// is a real redaction (memql#5707 review).
+func TestAReplayedPrivacyBodyUnderAnotherTopicQueuesNothing(t *testing.T) {
+	const shop = "acme-widgets.myshopify.com"
+	bodies := map[string]map[string]any{
+		TopicDataRequest: {"shop_domain": shop, "customer": map[string]any{"id": 991}, "data_request": map[string]any{"id": 42}, "orders_requested": []any{}},
+		TopicRedact:      {"shop_domain": shop, "customer": map[string]any{"id": 991}, "orders_to_redact": []any{}},
+		TopicShopRedact:  {"shop_domain": shop, "shop_id": 954889},
+	}
+	for signedAs, body := range bodies {
+		for _, replayedAs := range []string{TopicDataRequest, TopicRedact, TopicShopRedact} {
+			t.Run(signedAs+" replayed as "+replayedAs, func(t *testing.T) {
+				h := newHarness(t)
+				_, err := h.conn.Apply(context.Background(), complianceDelivery(replayedAs, body))
+				queued := len(h.engine.callsTo("queueComplianceJob"))
+				if signedAs == replayedAs {
+					if err != nil || queued != 1 {
+						t.Fatalf("the genuine delivery: queued=%d err=%v", queued, err)
+					}
+					return
+				}
+				if err == nil || queued != 0 {
+					t.Fatalf("a replay under another topic queued %d jobs (err=%v); the signed body must decide the operation", queued, err)
+				}
+			})
+		}
 	}
 }

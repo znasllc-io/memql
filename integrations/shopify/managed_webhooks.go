@@ -55,3 +55,16 @@ func (c *Connector) managedComplianceStore(ctx context.Context, req memqlsync.In
 	client, _, err := c.managedApp(ctx)
 	return store, err == nil && client != "" && store.AppClientID == client
 }
+
+// storeSignsWithManagedSecret says whether the store's per-store webhook
+// secret is the managed app's. Connect Shopify seals a COPY of the app client
+// secret as the webhook secret of every store it installs (connect_write.go),
+// so that store's per-store source and the app-level source verify the same
+// signature.
+func (c *Connector) storeSignsWithManagedSecret(ctx context.Context, store Store) bool {
+	if store.AppClientID == "" {
+		return false
+	}
+	client, _, err := c.managedApp(ctx)
+	return err == nil && client != "" && store.AppClientID == client
+}

@@ -192,6 +192,39 @@ func TestTheDispatcherStampsTheRequestRow(t *testing.T) {
 	}
 }
 
+// A staged row whose metadata cannot be parsed is stamped `failed` before
+// any connector is asked, not left `received` to re-fire identically on
+// every re-stage.
+func TestUnparseableStagedMetadataStampsTheRowFailed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{"headers that are not a JSON object", map[string]any{"headersJson": "[]"}},
+		{"a receipt time that is not RFC3339", map[string]any{"receivedAt": "2026-09-27T23:59:60Z"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := newFakeEngine()
+			c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
+			i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
+			args := map[string]any{"inboundRequestId": "req-bad", "source": "shopify", "body": "{}"}
+			for k, v := range tc.args {
+				args[k] = v
+			}
+			if _, err := i.handleDispatchInbound(context.Background(), args, 0); err == nil {
+				t.Fatal("unparseable metadata was dispatched as if it were valid")
+			}
+			stamps := engine.callsContaining("updateInboundRequestStatus")
+			if len(stamps) != 1 || !strings.Contains(stamps[0], `status: "failed"`) {
+				t.Fatalf("stamped %q, want exactly one `failed` stamp", stamps)
+			}
+			if c.applyCalls != 0 {
+				t.Fatal("the connector was asked to apply a delivery whose metadata never parsed")
+			}
+		})
+	}
+}
+
 // A source no connector serves is skipped, not failed: /inbound/{source}
 // is a shared door and most of what comes through belongs to something
 // else.

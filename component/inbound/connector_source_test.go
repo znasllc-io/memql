@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -220,5 +221,30 @@ func TestTheRequestPathOnlyStages(t *testing.T) {
 	}
 	if !strings.HasPrefix(strings.TrimSpace(eng.calls[0]), "mutation stageInboundRequest") {
 		t.Errorf("the one call was not the stage:\n%s", eng.calls[0])
+	}
+}
+
+// An env pin on a connector's OWN name is a contradiction, not an override.
+// The connector reads a delivery under that name as "verified by my app
+// secret" and binds the tenant off the signed body on that premise, so a body
+// verified by the env secret would be handed to it as app-signed. Refused
+// with 404, nothing staged. A per-tenant name stays env-wins (the test above)
+// and so does a bare connector name no connector claims (memql#5707 review).
+func TestAnEnvPinOnAConnectorsOwnClaimedNameIsRefused(t *testing.T) {
+	withConnector(t, &fakeConnector{name: "shopify", sources: map[string]memqlsync.InboundSource{
+		"shopify": {Scheme: SchemeHMACSHA256Hex, SignatureHeader: "X-Sig", Secret: "app-secret"},
+	}})
+	src := hexSource()
+	src.Name = "shopify"
+	eng := &fakeEngine{}
+	h := NewHandler(Config{Enabled: true, MaxBodyBytes: 1024, Tolerance: 5 * time.Minute,
+		Sources: map[string]SourceConfig{"shopify": src}}, eng, quietLogger())
+	body := `{"shop_domain":"acme.myshopify.com"}`
+	r := httptest.NewRequest(http.MethodPost, "/inbound/shopify", strings.NewReader(body))
+	r.Header.Set("X-Sig", hex.EncodeToString(sign(testSecret, []byte(body))))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusNotFound || len(eng.calls) != 0 {
+		t.Fatalf("a body signed with the env secret was admitted under the connector's own name: %d, %d staged", rec.Code, len(eng.calls))
 	}
 }

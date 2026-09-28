@@ -96,6 +96,14 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 		topic = header(req, HeaderTopic)
 	}
 	if isComplianceTopic(topic) {
+		if req.Source != ConnectorName && c.storeSignsWithManagedSecret(ctx, store) {
+			// A store installed through the managed app signs its per-store
+			// deliveries with the app secret, so a captured privacy delivery
+			// replays onto the per-store URL as well. Privacy topics for such
+			// a store are accepted only on the app-level source, where the
+			// webhook id collapses a replay (memql#5707 review).
+			return nil, fmt.Errorf("shopify: %s for a managed-app store must arrive on the app-level source, not %s", topic, req.Source)
+		}
 		return nil, c.enqueueComplianceJob(ctx, store, topic, req)
 	}
 	if !store.Ingests() {

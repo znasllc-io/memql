@@ -129,14 +129,20 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 		Body:       []byte(argString(args, "body")),
 		ReceivedAt: time.Now().UTC(),
 	}
+	// Either parse failure is stamped before it is returned, as Dispatch
+	// stamps an apply failure: a row left `received` says nothing to the
+	// operator and, because @createOnly keeps the bad value, re-fires
+	// identically on every re-stage (memql#5707 review).
 	if raw := argString(args, "headersJson"); raw != "" {
 		if err := json.Unmarshal([]byte(raw), &req.Headers); err != nil {
+			i.dispatcher.stamp(OperatorContext(ctx), req.RequestId, "failed", "invalid staged delivery headers")
 			return nil, fmt.Errorf("datasync: invalid staged delivery headers")
 		}
 	}
 	if raw := argString(args, "receivedAt"); raw != "" {
 		at, err := time.Parse(time.RFC3339Nano, raw)
 		if err != nil {
+			i.dispatcher.stamp(OperatorContext(ctx), req.RequestId, "failed", "invalid staged delivery timestamp")
 			return nil, fmt.Errorf("datasync: invalid staged delivery timestamp")
 		}
 		req.ReceivedAt = at.UTC()

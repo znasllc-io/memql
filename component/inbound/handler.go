@@ -242,6 +242,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // changed to say so.
 func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig, bool) {
 	if src, ok := h.cfg.Sources[name]; ok {
+		// A connector's OWN name is not a per-tenant pin. The connector reads
+		// a delivery under that name as "verified by my app secret" and binds
+		// the tenant off the signed body on that premise; an env pin on the
+		// same name would verify with a different secret and hand it a body
+		// it never signed for. That contradiction fails closed (memql#5707
+		// review). A per-tenant name, and a bare connector name no connector
+		// claims, stay ENV WINS.
+		if _, bound := memqlsync.Lookup(name); bound {
+			if _, claimed := memqlsync.SourceFor(ctx, name); claimed {
+				h.logger.Error("inbound receiver: env source collides with a connector's own source, refusing with 404",
+					"source", name, "env", "MEMQL_INBOUND_SOURCE_"+envSuffix(name)+"_*")
+				return SourceConfig{}, false
+			}
+		}
 		return src, true
 	}
 	// THE REGISTERED TIER, after the environment and before the connectors.

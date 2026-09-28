@@ -51,7 +51,7 @@ func TestManagedComplianceBindsSignedShopToRegisteredApp(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := managedWebhookHarness(t)
 			h.engine.setRows("stores", []map[string]any{{"id": "acme", "domain": "acme.myshopify.com", "appClientId": tc.client, "status": StatusPaused}})
-			req := memqlsync.InboundRequest{Source: ConnectorName, Body: []byte(fmt.Sprintf(`{"shop_domain":%q,"customer":{"id":991}}`, tc.bodyDomain)), Headers: map[string]string{strings.ToLower(HeaderShopDomain): tc.headerDomain, strings.ToLower(HeaderTopic): tc.topic}}
+			req := memqlsync.InboundRequest{Source: ConnectorName, Body: []byte(fmt.Sprintf(`{"shop_domain":%q,"customer":{"id":991},"orders_to_redact":[]}`, tc.bodyDomain)), Headers: map[string]string{strings.ToLower(HeaderShopDomain): tc.headerDomain, strings.ToLower(HeaderTopic): tc.topic}}
 			_, err := h.conn.Apply(context.Background(), req)
 			if err != nil {
 				t.Fatal(err)
@@ -68,5 +68,34 @@ func TestPerStorePrivacyRejectsAnotherSignedShop(t *testing.T) {
 	_, err := h.conn.Apply(context.Background(), complianceDelivery(TopicShopRedact, map[string]any{"shop_domain": "another.myshopify.com"}))
 	if err == nil || len(h.engine.callsTo("queueComplianceJob")) != 0 {
 		t.Fatal("another store's signed payload queued a purge")
+	}
+}
+
+// A store installed through the managed app signs its per-store deliveries
+// with the app secret, so a captured privacy delivery replays onto the
+// per-store URL too. Its privacy topics are accepted only on the app-level
+// source, where the webhook id collapses a replay; the same delivery on the
+// per-store URL is refused with nothing queued. A custom-app store keeps
+// its per-store compliance URL (memql#5707 review).
+func TestManagedStorePrivacyArrivesOnlyOnTheAppLevelSource(t *testing.T) {
+	const body = `{"shop_domain":"acme.myshopify.com","customer":{"id":991},"data_request":{"id":7}}`
+	for _, tc := range []struct {
+		name, client, source string
+		want                 bool
+	}{
+		{"managed store on its per-store source", "managed-app", "shopify-acme", false},
+		{"managed store on the app-level source", "managed-app", ConnectorName, true},
+		{"custom-app store on its per-store source", "custom-app", "shopify-acme", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := managedWebhookHarness(t)
+			h.engine.setRows("stores", []map[string]any{{"id": "acme", "domain": "acme.myshopify.com", "appClientId": tc.client, "status": StatusPaused}})
+			req := memqlsync.InboundRequest{Source: tc.source, Body: []byte(body), Headers: map[string]string{strings.ToLower(HeaderTopic): TopicDataRequest, strings.ToLower(HeaderShopDomain): "acme.myshopify.com"}}
+			_, err := h.conn.Apply(context.Background(), req)
+			queued := len(h.engine.callsTo("queueComplianceJob")) == 1
+			if queued != tc.want || (err == nil) != tc.want {
+				t.Fatalf("queued=%v err=%v, want queued=%v", queued, err, tc.want)
+			}
+		})
 	}
 }

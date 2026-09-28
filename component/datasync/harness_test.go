@@ -82,6 +82,7 @@ type fakeConnector struct {
 
 	applyWrites []memqlsync.MirrorWrite
 	applyErr    error
+	applyCalls  int
 
 	// propagate is consulted per call with the attempt number, so a test
 	// can script "fail twice then succeed".
@@ -107,6 +108,9 @@ func (c *fakeConnector) EnsureSubscriptions(context.Context) error {
 }
 
 func (c *fakeConnector) Apply(context.Context, memqlsync.InboundRequest) ([]memqlsync.MirrorWrite, error) {
+	c.mu.Lock()
+	c.applyCalls++
+	c.mu.Unlock()
 	if c.applyErr != nil {
 		return nil, c.applyErr
 	}
