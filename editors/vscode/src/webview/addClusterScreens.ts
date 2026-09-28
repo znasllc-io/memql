@@ -917,7 +917,8 @@ export interface AddedInput {
 /** A remote cluster is in the list. The next act is signing in to it. */
 export function addedScreen(input: AddedInput): RegionParts {
   return {
-    head: head({ title: input.name, meta: "Added" }),
+    // The bar says it is in the list; the head does not say it again.
+    head: head({ title: input.name }),
     body:
       facts([
         { label: "Address", value: input.address, mono: true },
