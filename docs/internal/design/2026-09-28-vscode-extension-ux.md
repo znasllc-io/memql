@@ -90,7 +90,8 @@ Install, repair, uninstall, deploy, rebuild and update use one screen
   scrolls up. Copy and Open in Output sit on the log's header.
 - Action bar: busy state ("Installing") with Cancel as a text act. After Cancel
   the state reads "Stopping after the current step" until the run settles.
-- Failure: the bar turns red, the status reads "Couldn't <label>", one notice
+- Failure: the bar turns red, the status names the step in the negative
+  ("Couldn't create the cluster": the label's verb in its base form), one notice
   gives the reason and the remedy command with Run in terminal, and the log
   opens at the failed step. Acts: Cancel, Retry (only when retryable).
 - Done: the mark, "MemQL is installed", and the one next act as primary.
