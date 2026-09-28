@@ -121,6 +121,14 @@ function identity(options: FakeIdentityOptions = {}): FakeIdentity {
         });
       }
 
+      // The browser flow's pre-validation of its authorization URL. Answered
+      // with the accepting login page, and kept out of urls() for the same
+      // reason as the pre-flight: these cases are about the grants.
+      if (new URL(url).searchParams.has("response_type")) {
+        calls.pop();
+        return reply(200, { page: "login" });
+      }
+
       // /register has no branch here on purpose: it is not a request this
       // extension may make any more (memql#4517). Every call is recorded above
       // regardless of which branch answers it, so the `urls()` assertions are

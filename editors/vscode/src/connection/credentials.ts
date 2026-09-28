@@ -165,6 +165,13 @@ export interface HttpRequestInit {
    * body -- an empty string included -- so this cannot be modelled as "" .
    */
   body?: string;
+  /**
+   * `manual` for a probe whose answer is the status itself (the sign-in
+   * pre-validation): a redirect is then reported, not followed.
+   */
+  redirect?: "follow" | "manual" | "error";
+  /** Bounds a probe; the real fetch honours it, test doubles may ignore it. */
+  signal?: AbortSignal;
 }
 
 export interface HttpResponseLike {

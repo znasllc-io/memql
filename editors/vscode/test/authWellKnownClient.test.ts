@@ -89,6 +89,12 @@ function recorder(): RequestLog {
     urls,
     registerCalls: () => urls.filter((u) => new URL(u).pathname === "/register").length,
     fetch: async (url) => {
+      // The pre-validation GET of the authorization URL itself: accepted, and
+      // not counted -- the claims below are about which OAuth endpoints a
+      // sign-in drives.
+      if (new URL(url).searchParams.has("response_type")) {
+        return json(200, { page: "login" });
+      }
       urls.push(url);
       const path = new URL(url).pathname;
       // The RFC 8414 pre-flight (memql#4624).

@@ -90,6 +90,16 @@
 //                       a body with no access_token. The code is spent either
 //                       way -- a retry means a whole new flow.
 //
+//   clientRefused       The pre-validation GET of the authorization URL (made
+//                       before any browser opens) was REFUSED: identity
+//                       answered 400, which it does only for a client it does
+//                       not know or a redirect URI not registered for it. So
+//                       the cluster does not accept sign-in from this editor
+//                       at all -- typically one older than the editor's
+//                       built-in client. Nothing was opened. NOT retryable and
+//                       NOT a fallback trigger: the device grant presents the
+//                       same client and is refused the same way.
+//
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
 export type AuthFlowErrorKind =
@@ -102,7 +112,8 @@ export type AuthFlowErrorKind =
   | "authorizationDenied"
   | "stateMismatch"
   | "invalidCallback"
-  | "exchangeRejected";
+  | "exchangeRejected"
+  | "clientRefused";
 
 /**
  * The single error type every function in `src/auth/` rejects with.
@@ -113,8 +124,19 @@ export type AuthFlowErrorKind =
  */
 export class AuthFlowError extends Error {
   readonly kind: AuthFlowErrorKind;
+  /**
+   * The identity service's OWN sentence, when it gave one -- the role-floor
+   * refusal names the person's role and who can raise it, which no summary
+   * here can know. A toast carries it verbatim; `message` stays the full
+   * record for the Output channel.
+   */
+  readonly serverMessage?: string;
 
-  constructor(kind: AuthFlowErrorKind, message: string, options?: { cause?: unknown }) {
+  constructor(
+    kind: AuthFlowErrorKind,
+    message: string,
+    options?: { cause?: unknown; serverMessage?: string },
+  ) {
     super(message);
     // `name` is set explicitly because a bundler may rename the class, and
     // isAuthFlowError() below reads it as the structural fallback.
@@ -123,6 +145,8 @@ export class AuthFlowError extends Error {
     if (options?.cause !== undefined) {
       (this as { cause?: unknown }).cause = options.cause;
     }
+    const server = (options?.serverMessage ?? "").trim();
+    if (server !== "") this.serverMessage = server;
   }
 }
 

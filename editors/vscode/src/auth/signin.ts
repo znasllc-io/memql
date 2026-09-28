@@ -200,8 +200,17 @@ export type SignInFailureLevel = "silent" | "warning" | "error";
 
 export interface SignInFailureReport {
   level: SignInFailureLevel;
-  /** The sentence to show. Empty exactly when `level` is "silent". */
+  /**
+   * The one sentence a toast shows: what happened, in the person's words.
+   * Empty exactly when `level` is "silent". The fix is the toast's button
+   * (clusters/signInRecovery.ts), never a command named in prose.
+   */
   message: string;
+  /**
+   * The full record for the MemQL Connection output: the flow's own
+   * explanation, with every protocol detail it carries. Empty when silent.
+   */
+  detail: string;
   /**
    * Whether running the same command again could plausibly succeed. A UI may
    * offer a retry affordance on true; it must not on false.
@@ -210,32 +219,33 @@ export interface SignInFailureReport {
 }
 
 /**
- * describeSignInFailure turns a rejection into what the operator should see.
+ * describeSignInFailure turns a rejection into what the person should see.
  *
  * It branches on `kind`, NEVER on message text. The kinds are the contract
  * errors.ts documents; prose is not, and a UI that pattern-matched on sentences
  * would silently mis-handle the day one of them is reworded.
  *
- * The flow's own message already says WHAT happened, and it says it well -- so
- * this adds the half the flow deliberately does not know: what to do next,
- * which depends on the editor's surfaces (the Sign In command, clusters.yaml)
- * rather than on the protocol.
+ * TWO TEXTS, ONE FOR EACH READER. The toast gets one plain sentence naming the
+ * cluster by the label its row shows; the flow's own explanation -- endpoints,
+ * status codes, OAuth error codes -- goes to the Output channel as `detail`.
+ * The toast used to be both, truncated at 140 characters, which cut off the
+ * part that said what to do.
  */
-export function describeSignInFailure(clusterName: string, err: unknown): SignInFailureReport {
+export function describeSignInFailure(clusterLabel: string, err: unknown): SignInFailureReport {
   if (!isAuthFlowError(err)) {
     return {
       level: "error",
-      message: `MemQL: signing in to "${clusterName}" failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Couldn't sign in to ${clusterLabel}.`,
+      detail: err instanceof Error ? err.message : String(err),
       retryable: false,
     };
   }
-  const advice = adviceFor(err.kind);
+  const level = levelFor(err.kind);
+  if (level === "silent") return { level, message: "", detail: "", retryable: false };
   return {
-    level: levelFor(err.kind),
-    message:
-      levelFor(err.kind) === "silent"
-        ? ""
-        : `MemQL: signing in to "${clusterName}" failed. ${err.message}${advice === "" ? "" : ` ${advice}`}`,
+    level,
+    message: sentenceFor(err.kind, clusterLabel, err.serverMessage),
+    detail: err.message,
     retryable: retryableFor(err.kind),
   };
 }
@@ -258,38 +268,45 @@ function levelFor(kind: AuthFlowErrorKind): SignInFailureLevel {
 // `retryable` says whether the SAME command run again could work. It is not a
 // judgement about severity: `stateMismatch` is the most serious kind here and
 // is marked not-retryable precisely because a forged or replayed callback wants
-// a human looking at it, not a second attempt one click away.
+// a human looking at it, not a second attempt one click away. `clientRefused`
+// is not retryable because the cluster refused this editor's client outright,
+// and both grants present the same one.
 function retryableFor(kind: AuthFlowErrorKind): boolean {
   switch (kind) {
     case "misconfigured":
     case "browserUnavailable":
     case "stateMismatch":
+    case "clientRefused":
       return false;
     default:
       return true;
   }
 }
 
-function adviceFor(kind: AuthFlowErrorKind): string {
+function sentenceFor(kind: AuthFlowErrorKind, label: string, server: string | undefined): string {
   switch (kind) {
     case "misconfigured":
-      return 'Edit the cluster ("MemQL: Edit Cluster") and set its domain, or add an `issuer` to clusters.yaml.';
+      return `${label} has no domain set.`;
     case "registrationFailed":
-      return "Nothing was opened and no credential changed. Retry once the identity service is reachable.";
+      return `Couldn't reach the sign-in service for ${label}.`;
     case "bindFailed":
-      return "This is a local machine problem -- a firewall or sandbox preventing a loopback listener -- not a problem with the cluster.";
+      return "Something on this computer blocked the sign-in.";
     case "timeout":
-      return 'Run "MemQL: Sign In" again and finish the page in your browser. If the page can never reach this machine -- a remote or firewalled host -- run "MemQL: Sign In With a Device Code" instead.';
+      return "Sign-in didn't finish in time.";
     case "browserUnavailable":
-      return "This host cannot open a browser. Sign in on a machine that can and put the resulting `token` (and `refresh_token`) into clusters.yaml.";
+      return "This window can't open a browser.";
     case "authorizationDenied":
-      return "No credential was issued and nothing stored changed. Signing in from an editor needs the developer role or above on the cluster; if the message above names your role, ask a cluster owner or admin to raise it.";
+      // The server's own sentence when it gave one: the role-floor refusal
+      // names the person's role and who can raise it.
+      return server !== undefined ? `${label} declined the sign-in. ${server}` : `${label} declined the sign-in.`;
     case "stateMismatch":
-      return "The authorization code was discarded without being redeemed. Something replayed or forged the callback -- do not simply retry until you know what.";
+      return "The sign-in response didn't match this request, so it was rejected.";
     case "invalidCallback":
-      return "Retrying starts a fresh sign-in; if it recurs, the identity service is returning a callback this editor cannot read.";
+      return "The sign-in response couldn't be read.";
     case "exchangeRejected":
-      return "The authorization code is spent either way, so a retry runs a whole new sign-in.";
+      return `Couldn't finish signing in to ${label}.`;
+    case "clientRefused":
+      return `${label} doesn't accept sign-in from VS Code. Update it to the current MemQL release.`;
     case "cancelled":
       return "";
   }
