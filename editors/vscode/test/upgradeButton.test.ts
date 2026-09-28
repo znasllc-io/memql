@@ -272,7 +272,7 @@ test("the remote page draws it on the same terms", () => {
   const html = renderRemoteInstance({
     instance,
     runs: [],
-    pipeline: { kind: "present", title: "Deploy", detail: "", actions: [] },
+    pipeline: { kind: "present", title: "Deploy", detail: "", actions: [], rollouts: [] },
     nowMs: 0,
     outcome: "",
     error: "",
