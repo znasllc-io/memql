@@ -120,12 +120,24 @@ jobs:
           else
             CANDIDATES="v$VERSION $VERSION"
           fi
+          #
+          # Only a 404 means "not this spelling". Any other failure -- auth,
+          # rate limit, network -- is reported as itself and fails the run,
+          # rather than being read as a missing tag and misdiagnosed below.
           REF=""
           for name in $CANDIDATES; do
-            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$name" --silent 2>/dev/null; then
+            if out=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$name" --silent 2>&1); then
               REF="$name"
               break
             fi
+            case "$out" in
+              *"HTTP 404"*) ;;
+              *)
+                echo "ERROR: could not ask whether $name is a tag in $GITHUB_REPOSITORY:" >&2
+                echo "$out" >&2
+                exit 1
+                ;;
+            esac
           done
           if [ -z "$REF" ]; then
             echo "ERROR: neither $VERSION nor v$VERSION is a tag in $GITHUB_REPOSITORY; a docs bundle is built at its release tag, so there is nothing to build" >&2
@@ -212,4 +224,5 @@ jobs:
       # token that can write to that repository, and GITHUB_TOKEN cannot. It
       # goes HERE, after the upload, using the GitHub App installation token,
       # once the docs-current housekeeping task confirms the App's permissions
-      # cover dispatch. Until then the instance's hourly poll picks the asset up.
+      # cover dispatch. Until then the asset waits for the instance's scheduled
+      # docs sync (memql#5716) to poll for it.
