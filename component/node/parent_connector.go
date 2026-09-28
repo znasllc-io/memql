@@ -403,6 +403,16 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 			qpsink.DispatchModelProbeProgress(payload.ModelProbeForwardProgress)
 		}
 
+	case *nodev1.NodeServerMessage_AppCallForwardResponse:
+		// Terminal answer for an app-door call this node forwarded (the
+		// planner/app-source design, section 3a).
+		pc.mu.Lock()
+		asink := pc.workerForwardSink
+		pc.mu.Unlock()
+		if asink != nil {
+			asink.DispatchAppCall(payload.AppCallForwardResponse)
+		}
+
 	case *nodev1.NodeServerMessage_DeployControlForwardResponse:
 		// Reply to a deploy-control forward this node originated. Set on the
 		// bff; no-op otherwise.

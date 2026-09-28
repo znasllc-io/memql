@@ -67,6 +67,13 @@ type ForwardHandler struct {
 	modelProbeMu       sync.Mutex
 	modelProbeInflight map[string]context.CancelFunc
 
+	// In-flight app-door calls (the planner/app-source design, section 3a),
+	// and the app door they run through. apps is nil on a replica with no
+	// app door, which refuses every forwarded app call before start.
+	appMu       sync.Mutex
+	appInflight map[string]context.CancelFunc
+	apps        AppCallServer
+
 	// groups resolves the verified caller's ACTIVE groups for a machine lent
 	// to a group (epic memql#5344). Nil is workerservice.InstalledGroups --
 	// THIS replica's membership source, never anything the envelope says.
@@ -94,6 +101,7 @@ func NewForwardHandler(registry *workerservice.Registry, store FleetStore, logge
 		modelInflight:      make(map[string]context.CancelFunc),
 		modelPullInflight:  make(map[string]context.CancelFunc),
 		modelProbeInflight: make(map[string]context.CancelFunc),
+		appInflight:        make(map[string]context.CancelFunc),
 	}
 }
 

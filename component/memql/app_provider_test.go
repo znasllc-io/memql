@@ -117,9 +117,10 @@ func TestAnAppEntryIsAvailableOnlyWhenAMachineCanRunIt(t *testing.T) {
 		t.Error("an offline machine must leave the door shut")
 	}
 
-	// Online, but its stream is held by a sibling replica. Skipped rather
-	// than failed: the app-session envelope has no cross-node forward yet,
-	// and a door this node cannot walk through is a shut door.
+	// Online, but its stream is held by a sibling replica this node cannot
+	// forward to (no AppCallForward wired). Skipped rather than failed: a
+	// door this node cannot walk through is a shut door. The forwardable case
+	// is TestAForwardableMachineOpensTheChatDoorButNotTheSessionDoor.
 	elsewhere := runnableDoor(appIdClaudeCode)
 	elsewhere.Machines[0].LocalStream = false
 	r3 := newProviderRegistry()
@@ -134,10 +135,11 @@ func TestAnAppEntryIsAvailableOnlyWhenAMachineCanRunIt(t *testing.T) {
 // the same state as "nobody is signed in", flowing through the same path.
 //
 // THE REASON NAMES WHERE APP SOURCES DO RUN, and which node this is (the
-// planner/app-source design, section 3a). A planner's triage whose route puts
-// an app source first reads this line on every decision record until planner
-// calls are forwarded to the agent holding the machine; "this node has no app
-// sessions installed" read like a fault to fix on the planner.
+// planner/app-source design, section 3a). A node with no app door wired --
+// neither sessions of its own nor a forward to the agent holding the machine
+// -- reads this line on every decision record whose route puts an app source
+// first; "this node has no app sessions installed" read like a fault to fix
+// on that node.
 func TestANodeWithNoAppSessionsHasAnUnavailableDoor(t *testing.T) {
 	t.Setenv("MEMQL_NODE_TYPE", "planner")
 	const want = "app sources run on the agent holding the machine; this planner node cannot open one"
@@ -492,5 +494,80 @@ func TestAppProviderCallCarriesRunContext(t *testing.T) {
 	}
 	if apps.lastReq.RunId != "" || apps.lastReq.StepId != "" {
 		t.Errorf("a call outside any run named run %q step %q", apps.lastReq.RunId, apps.lastReq.StepId)
+	}
+}
+
+// A MACHINE HELD BY ANOTHER AGENT OPENS THE CHAT DOOR AND NOT THE SESSION DOOR
+// (the planner/app-source design, section 3a).
+//
+// A chat or structured turn crosses to the holding agent over AppCallForward,
+// so a node that can forward sees the door open -- which is the whole of how a
+// planner's triage, compile and compose reach a signed-in Claude Code. A STEP
+// HANDOVER does not cross: it runs as a session subrun on the replica whose
+// session delegate opens it, so for a tool turn the door stays shut on every
+// node that does not hold the stream, and says where it would open.
+func TestAForwardableMachineOpensTheChatDoorButNotTheSessionDoor(t *testing.T) {
+	t.Setenv("MEMQL_NODE_TYPE", "planner")
+	held := runnableDoor(appIdClaudeCode)
+	held.Machines[0].LocalStream = false
+	held.Machines[0].Forwardable = true
+	r := newProviderRegistry()
+	r.SetAppInference(&stubApps{doors: []AppDoor{held}, answer: `{"complexity":"trivial"}`})
+
+	entry, _ := r.EntryForUser(userCtx("alice"), "alice", AppReferencePrefix+appIdClaudeCode)
+	if !entry.Available {
+		t.Fatalf("a machine this node can forward to must open the chat door: %v", entry.Err())
+	}
+	if _, err := entry.Client.(common.ChatStructuredProvider).CallChatStructured(userCtx("alice"),
+		[]common.ChatMessage{{Role: "user", Content: "triage"}}, common.StructuredSchema{Name: "t", Schema: []byte(`{"type":"object"}`)}); err != nil {
+		t.Fatalf("a structured turn through a forwardable door: %v", err)
+	}
+
+	why := r.AppSessionRefusalHere(userCtx("alice"), "alice", appIdClaudeCode)
+	if why == "" {
+		t.Fatal("a step handover opened on a node that does not hold the machine's stream: the session " +
+			"would have nowhere to run and, as a session winner, no remaining chain")
+	}
+	for _, want := range []string{"agent holding", "planner"} {
+		if !strings.Contains(why, want) {
+			t.Errorf("the session door's reason %q does not say %q -- it must say where a step handover runs", why, want)
+		}
+	}
+
+	// The holding replica opens both.
+	local := runnableDoor(appIdClaudeCode)
+	r2 := newProviderRegistry()
+	r2.SetAppInference(&stubApps{doors: []AppDoor{local}})
+	if why := r2.AppSessionRefusalHere(userCtx("alice"), "alice", appIdClaudeCode); why != "" {
+		t.Errorf("the replica holding the stream refused the session door: %s", why)
+	}
+	if why := r2.AppSessionRefusalHere(userCtx("alice"), "alice", AppWildcardId); why != "" {
+		t.Errorf("the wildcard refused the session door on the holding replica: %s", why)
+	}
+	// And a node with no app inference at all says what it always said.
+	if why := newProviderRegistry().AppSessionRefusalHere(userCtx("alice"), "alice", appIdClaudeCode); why != appSourcesNotOnThisNode() {
+		t.Errorf("reason = %q, want %q", why, appSourcesNotOnThisNode())
+	}
+}
+
+// The wildcard's choice between apps is a CHAT-door choice, so it counts a
+// door this node can forward to as open.
+func TestTheWildcardTakesAnAppHeldByAnotherAgent(t *testing.T) {
+	held := runnableDoor(appIdCodex)
+	held.Machines[0].LocalStream = false
+	held.Machines[0].Forwardable = true
+	apps := &stubApps{doors: []AppDoor{held}, answer: "ok"}
+	r := newProviderRegistry()
+	r.SetAppInference(apps)
+	entry, _ := r.EntryForUser(userCtx("alice"), "alice", AppWildcard)
+	if !entry.Available {
+		t.Fatalf("the wildcard door is shut over an app this node can forward to: %v", entry.Err())
+	}
+	if _, err := entry.Client.(common.ChatStructuredProvider).CallChatStructured(userCtx("alice"),
+		[]common.ChatMessage{{Role: "user", Content: "decide"}}, common.StructuredSchema{Name: "d", Schema: []byte(`{"type":"object"}`)}); err != nil {
+		t.Fatalf("the wildcard refused an app held by another agent: %v", err)
+	}
+	if apps.lastReq.AppId != appIdCodex {
+		t.Errorf("the wildcard chose %q, want %q", apps.lastReq.AppId, appIdCodex)
 	}
 }

@@ -85,22 +85,40 @@ type ForwardRouter struct {
 	// a request id.
 	modelProbeMu       sync.Mutex
 	modelProbeInflight map[string]*modelProbeForwardCall
+	// App-door calls in a fifth table (the planner/app-source design, section
+	// 3a), for the reason each family has its own: separate id spaces, so an
+	// app session's answer can never be delivered to a generation.
+	appMu       sync.Mutex
+	appInflight map[string]*appForwardCall
 }
 
 // peerManagerSender is the production PeerSender: look the replica up by node
-// id and send on its connection.
+// id and hand the envelope to its CURRENT stream.
+//
+// A SEND THAT FAILED IS REPORTED AS FAILED. This used to put the envelope on
+// the connection's general outbox and answer true regardless -- and that
+// outbox drops a message when it is full or closed, saying so only in a log
+// line, and between reconnect attempts queues it for a stream that does not
+// exist yet. Every forward here parks on its answer, so a dropped request
+// parked its caller until the caller's own deadline for an answer that could
+// not come, where "not sent" would have been a refusal before start and a
+// re-pick. node.PeerManager.SendRequest is the transport the AI forward
+// already used for exactly this reason.
 type peerManagerSender struct{ peerMgr *node.PeerManager }
 
 func (p peerManagerSender) Send(nodeId string, msg *nodev1.NodeClientMessage) bool {
+	_, err := p.SendRequest(nodeId, msg)
+	return err == nil
+}
+
+// SendRequest hands the envelope to the peer's current stream and returns the
+// channel that closes when that stream ends -- how an app call learns that
+// the agent holding the machine went away mid-call.
+func (p peerManagerSender) SendRequest(nodeId string, msg *nodev1.NodeClientMessage) (<-chan struct{}, error) {
 	if p.peerMgr == nil {
-		return false
+		return nil, ErrNoPeerForNode
 	}
-	peer := p.peerMgr.Get(nodeId)
-	if peer == nil || peer.Connection == nil {
-		return false
-	}
-	peer.Connection.Send(msg)
-	return true
+	return p.peerMgr.SendRequest(nodeId, msg)
 }
 
 // forwardCall is one parked dispatch: where the answer goes, and where the
@@ -138,6 +156,7 @@ func newForwardRouter(sender PeerSender, self func() (string, string), logger *s
 		modelInflight:      make(map[string]*modelForwardCall),
 		modelPullInflight:  make(map[string]*modelPullForwardCall),
 		modelProbeInflight: make(map[string]*modelProbeForwardCall),
+		appInflight:        make(map[string]*appForwardCall),
 	}
 }
 

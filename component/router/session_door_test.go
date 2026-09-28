@@ -472,3 +472,90 @@ func TestASessionCallWritesItsLedgerRow(t *testing.T) {
 			args["servedModel"], args["servedEffort"])
 	}
 }
+
+// heldElsewhere is an app a machine has allowed and signed in, whose stream
+// ANOTHER agent holds: this node can forward one call there (AppCallForward)
+// and cannot open a session.
+func heldElsewhere(appId string) memql.AppDoor {
+	d := openApp(appId)
+	d.Machines[0].LocalStream = false
+	d.Machines[0].Forwardable = true
+	return d
+}
+
+// THE SESSION DOOR STAYS LOCAL WHILE THE CHAT DOOR FORWARDS (the planner/
+// app-source design, section 3a, precondition 3).
+//
+// A chat or structured turn reaches an app held by another agent by forwarding
+// that one call. A STEP does not cross: it runs as a session subrun on the
+// replica whose delegate opens it. So on a node holding no stream, a tool turn
+// must pass the app over exactly as it did before forwarding existed -- with a
+// reason saying where a handover runs -- rather than take it as a session
+// winner that cannot run and, by the park rule, has no chain behind it.
+func TestAToolTurnPassesOverAnAppHeldByAnotherAgent(t *testing.T) {
+	t.Setenv("MEMQL_NODE_TYPE", "planner")
+	r, cloud, delegate := sessionRouter(t, []memql.AppDoor{heldElsewhere("claude-code")})
+
+	_, resolved, err := r.resolveWithTools(context.Background(), toolRequest())
+	if err != nil {
+		t.Fatalf("resolveWithTools: %v", err)
+	}
+	if resolved.Decision.Door == airoute.DoorSession {
+		t.Fatal("a tool turn on a node holding no stream took the app as a session winner: the session " +
+			"cannot run here, and a session winner has no remaining chain")
+	}
+	if resolved.ProviderName != "streamClaudeSonnet" {
+		t.Fatalf("ProviderName = %q, want the entry behind the app", resolved.ProviderName)
+	}
+	var reason string
+	for _, c := range resolved.Decision.Considered {
+		if c.Entry == memql.AppReferencePrefix+"claude-code" {
+			reason = c.Reason
+		}
+	}
+	if !strings.Contains(reason, "agent holding") {
+		t.Fatalf("the decision does not say why the app was passed over on a tool turn: %q (%+v)",
+			reason, resolved.Decision.Considered)
+	}
+	_ = cloud
+	if delegate.runs != 0 {
+		t.Fatalf("a session was opened on a node holding no stream: %d", delegate.runs)
+	}
+}
+
+// A STEPLESS tool call is passed over too, not refused, when the app is held
+// elsewhere: no session could open here with or without a step, and before
+// forwarding this door was simply shut on such a node -- the stepless refusal
+// is for a door that COULD have taken the step.
+func TestAStepLessToolTurnPassesOverAnAppHeldByAnotherAgent(t *testing.T) {
+	r, _, delegate := sessionRouter(t, []memql.AppDoor{heldElsewhere("claude-code")})
+	req := toolRequest()
+	req.StepId = ""
+	_, resolved, err := r.resolveWithTools(context.Background(), req)
+	if err != nil {
+		t.Fatalf("a stepless tool turn was refused over a door this node could never open a session on: %v", err)
+	}
+	if resolved.ProviderName != "streamClaudeSonnet" || delegate.runs != 0 {
+		t.Fatalf("resolved %q (delegate=%d), want the entry behind the app", resolved.ProviderName, delegate.runs)
+	}
+}
+
+// And the same door answers a CHAT turn from that node, as an app turn.
+func TestAChatTurnTakesAnAppHeldByAnotherAgent(t *testing.T) {
+	r, _, delegate := sessionRouter(t, []memql.AppDoor{heldElsewhere("claude-code")})
+	_, resolved, err := r.resolveChat(context.Background(), ResolveRequest{
+		Level:    airoute.LevelStrong,
+		Modality: airoute.ModalityChat,
+		UserId:   "alice",
+		Needs:    airoute.Needs{MinContextTokens: 8000},
+	})
+	if err != nil {
+		t.Fatalf("resolveChat: %v", err)
+	}
+	if resolved.ProviderName != memql.AppReferencePrefix+"claude-code" || resolved.Decision.Door != DoorApp {
+		t.Fatalf("resolved %q through %q, want the app through the app door", resolved.ProviderName, resolved.Decision.Door)
+	}
+	if delegate.runs != 0 {
+		t.Fatalf("a chat turn opened a session: %d", delegate.runs)
+	}
+}

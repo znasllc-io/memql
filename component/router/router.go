@@ -680,9 +680,16 @@ func (r *Router) walkChain(
 			// to reach the same answer when the fallback wrapper re-resolves
 			// this winner by name.
 			if serves, why := servesModality(entry.Client, mod); !serves {
-				sessionClient, isSession, sessionErr := r.sessionDoorFor(req, cand.Name, mod)
+				sessionClient, isSession, skip, sessionErr := r.sessionDoorFor(ctx, req, cand.Name, mod)
 				if sessionErr != nil {
 					return nil, sessionErr
+				}
+				if skip != "" {
+					// Held by another agent: the chat door is open from
+					// here and the session door is not, so the entry is
+					// passed over as a shut door would be.
+					report.note(cand.Name, skip)
+					continue
 				}
 				if isSession {
 					// NO REMAINING CHAIN, and that is the park rule (design D7,
@@ -886,7 +893,7 @@ func (r *Router) providerLookup(ctx context.Context, req ResolveRequest, name st
 		// walk already resolved, which means the request carried a step. If it
 		// ever did arrive, a session winner's chain is itself alone, so the
 		// skip exhausts the chain and refuses rather than reaching a vendor.
-		sessionClient, isSession, err := r.sessionDoorFor(req, name, mod)
+		sessionClient, isSession, _, err := r.sessionDoorFor(ctx, req, name, mod)
 		if err != nil || !isSession {
 			return nil, Resolved{}, false
 		}

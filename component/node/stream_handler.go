@@ -98,6 +98,14 @@ type WorkerForwardHandler interface {
 	// unwired hop does not degrade -- it refuses.
 	HandleForwardedModelProbe(ctx context.Context, req *nodev1.ModelProbeForwardRequest, send func(*nodev1.NodeServerMessage) error)
 	CancelForwardedModelProbe(ctx context.Context, requestId string)
+	// HandleForwardedAppCall is the same hop for one app-door call -- a chat,
+	// structured or vision turn answered by a signed-in Claude Code or Codex
+	// (the planner/app-source design, section 3a). It joins this interface
+	// for the ModelCall half's reason: the same subsystem answering about the
+	// same machines through the same install point. An unwired hop refuses
+	// before start, so the caller's chain moves on to its next source.
+	HandleForwardedAppCall(ctx context.Context, req *nodev1.AppCallForwardRequest, send func(*nodev1.NodeServerMessage) error)
+	CancelForwardedAppCall(ctx context.Context, requestId string)
 }
 
 // WorkerForwardResponseSink is the originating replica's receiver for replies
@@ -115,6 +123,8 @@ type WorkerForwardResponseSink interface {
 	// The model-probe half (epic memql#5146).
 	DispatchModelProbe(resp *nodev1.ModelProbeForwardResponse)
 	DispatchModelProbeProgress(p *nodev1.ModelProbeForwardProgress)
+	// The app-door call half (the planner/app-source design, section 3a).
+	DispatchAppCall(resp *nodev1.AppCallForwardResponse)
 }
 
 // DeployControlForwardHandler is the identity-node-side entry point for a
@@ -452,6 +462,10 @@ func (s *nodeService) handleMessage(peerId string, msg *nodev1.NodeClientMessage
 		s.handleModelProbeForwardRequest(peerId, payload.ModelProbeForwardRequest, stream)
 	case *nodev1.NodeClientMessage_ModelProbeForwardCancel:
 		s.handleModelProbeForwardCancel(peerId, payload.ModelProbeForwardCancel)
+	case *nodev1.NodeClientMessage_AppCallForwardRequest:
+		s.handleAppCallForwardRequest(peerId, payload.AppCallForwardRequest, stream)
+	case *nodev1.NodeClientMessage_AppCallForwardCancel:
+		s.handleAppCallForwardCancel(peerId, payload.AppCallForwardCancel)
 
 	default:
 		s.logger.Debug("unhandled message type from peer",
@@ -689,7 +703,15 @@ func (s *nodeService) handleWorkerForwardRequest(peerId string, req *nodev1.Work
 		})
 		return
 	}
-	s.workerForwardHandler.HandleForwardedRequest(stream.Context(), req, stream.Send)
+	// ON ITS OWN GOROUTINE. A dispatch runs until the machine answers -- up to
+	// the dispatch timeout -- and this function runs on the peer stream's
+	// RECEIVE loop. Inline, one exec held that loop for its whole run: no
+	// heartbeat, no event forward and no other request from this peer was
+	// read, and neither was the WorkerForwardCancel for this very dispatch,
+	// which arrives on the same stream. stream.Context() still bounds it: a
+	// stream that ends takes the dispatch with it, because its answer has
+	// nowhere left to go.
+	go s.workerForwardHandler.HandleForwardedRequest(stream.Context(), req, stream.Send)
 }
 
 // handleWorkerForwardCancel stops in-flight work for a forwarded dispatch the
@@ -727,7 +749,11 @@ func (s *nodeService) handleModelForwardRequest(peerId string, req *nodev1.Model
 		})
 		return
 	}
-	s.workerForwardHandler.HandleForwardedModelCall(stream.Context(), req, stream.Send)
+	// ON ITS OWN GOROUTINE, for handleWorkerForwardRequest's reason: a
+	// generation runs for as long as the model takes, and inline it held this
+	// peer's receive loop -- and the ModelForwardCancel that would end it --
+	// for the duration.
+	go s.workerForwardHandler.HandleForwardedModelCall(stream.Context(), req, stream.Send)
 }
 
 // handleModelForwardCancel stops an in-flight forwarded model call.
@@ -825,6 +851,47 @@ func (s *nodeService) handleModelProbeForwardCancel(peerId string, cancel *nodev
 	}
 	s.logger.Debug("model probe forward cancel", "peer_id", peerId, "request_id", cancel.GetRequestId())
 	s.workerForwardHandler.CancelForwardedModelProbe(context.Background(), cancel.GetRequestId())
+}
+
+// handleAppCallForwardRequest dispatches an inbound app-door call to this
+// replica's local handler (the planner/app-source design, section 3a).
+//
+// The no-handler answer is a REFUSAL THAT SAYS NOTHING RAN, for the reason
+// handleWorkerForwardRequest states: there is no handler, so no session was
+// opened, and the sender's chain may move on to its next source.
+func (s *nodeService) handleAppCallForwardRequest(peerId string, req *nodev1.AppCallForwardRequest, stream nodev1.NodeService_StreamServer) {
+	if s.workerForwardHandler == nil {
+		s.logger.Warn("app call forward request received but no handler configured",
+			"peer_id", peerId, "request_id", req.GetRequestId(),
+		)
+		_ = stream.Send(&nodev1.NodeServerMessage{
+			MessageId:   id.NewShortId(),
+			CorrelateTo: req.GetRequestId(),
+			Payload: &nodev1.NodeServerMessage_AppCallForwardResponse{
+				AppCallForwardResponse: &nodev1.AppCallForwardResponse{
+					RequestId:          req.GetRequestId(),
+					ErrorCode:          "not_configured",
+					ErrorMessage:       "no worker forward handler on this node",
+					RefusedBeforeStart: true,
+				},
+			},
+		})
+		return
+	}
+	// ON ITS OWN GOROUTINE, and an app session is the case that needs it
+	// most after a pull: it runs for minutes, and inline it would stop this
+	// node reading heartbeats, events and every other forward from the peer
+	// -- including the AppCallForwardCancel that would end it.
+	go s.workerForwardHandler.HandleForwardedAppCall(stream.Context(), req, stream.Send)
+}
+
+// handleAppCallForwardCancel stops an in-flight forwarded app call.
+func (s *nodeService) handleAppCallForwardCancel(peerId string, cancel *nodev1.AppCallForwardCancel) {
+	if s.workerForwardHandler == nil {
+		return
+	}
+	s.logger.Debug("app call forward cancel", "peer_id", peerId, "request_id", cancel.GetRequestId())
+	s.workerForwardHandler.CancelForwardedAppCall(context.Background(), cancel.GetRequestId())
 }
 
 // SetWorkerForwardHandler installs the agent-side handler for inbound worker
