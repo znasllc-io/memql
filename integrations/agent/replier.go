@@ -268,45 +268,8 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// where it is data an owner can read, override and see on every decision
 	// record.
 	//
-	// What is left is the PIN, which still wins over every rule, in the order
-	// it always had:
-	//   1. Per-turn hint on the message (cognition override, used for
-	//      hot-fixing a specific turn).
-	//   2. Agent's stored providerConfig.llm.provider -- the user's
-	//      explicit choice on the agent record.
-	//   3. Agent's stored providerConfig.llm.model (promoted to
-	//      provider when the model id matches a provider registry name).
-	//
-	// There was a fourth -- a deploy-time env pin -- and epic memql#5137
-	// deleted it. A provider named in a Deployment manifest is a routing
-	// decision no rule can see and no decision record can explain.
-	explicitProvider := strings.TrimSpace(msg.Hints["provider"])
-	explicitModel := strings.TrimSpace(msg.Hints["model"])
-
-	// Agent-stored preferences (surfaced via buildPromptData -> assistant.*).
-	//
-	// providerConfig.llm.policyName is NOT read any more. A stored policy name
-	// was a call site naming a chain, which is the decision rules took over;
-	// an agent that wants a different chain gets a rule, where the choice is
-	// visible to everyone rather than buried on one row.
-	agentExplicitProvider := agentLLMField(data, "provider")
-	agentExplicitModel := agentLLMField(data, "model")
-
-	if explicitProvider == "" {
-		explicitProvider = agentExplicitProvider
-	}
-	if explicitModel == "" {
-		explicitModel = agentExplicitModel
-	}
-	// An explicit model hint/agent-preference maps into ExplicitProvider
-	// only if a provider registry entry exists with that name. The
-	// policy catalog currently names providers after their default
-	// model (e.g. streamClaudeSonnet, stream54Mini), so model-by-name
-	// lookup is the common case; unknown model names fall through to
-	// the policy + default-provider chain below.
-	if explicitProvider == "" && explicitModel != "" {
-		explicitProvider = explicitModel
-	}
+	// What is left is the PIN, which still wins over every rule -- turnPin.
+	explicitProvider, pinnedBy := r.turnPin(ctx, msg, data)
 
 	// operatorEnabled still travels on the prepared turn -- it gates the
 	// operator tool surface -- it just no longer picks a policy here.
@@ -346,6 +309,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 		Needs:            airoute.Needs{Tools: true},
 		Role:             role,
 		ExplicitProvider: explicitProvider,
+		PinnedBy:         pinnedBy,
 	}
 	// A PERSON'S OVERRIDE FOR THIS STEP (epic memql#5414, design D20). A work
 	// turn somebody re-ran or branched runs at the level they asked for, on
@@ -1558,6 +1522,55 @@ func ensureDomain(existing []string, needed string) []string {
 		}
 	}
 	return append(append([]string{}, existing...), needed)
+}
+
+// turnPin is the provider a reply turn PINS, and the person who made the pin.
+//
+// The pin still wins over every rule, in the order it always had:
+//  1. Per-turn hint on the message (cognition override, used for
+//     hot-fixing a specific turn).
+//  2. Agent's stored providerConfig.llm.provider -- the user's
+//     explicit choice on the agent record.
+//  3. Per-turn model hint, then the agent's stored providerConfig.llm.model,
+//     promoted to provider: the policy catalog names providers after their
+//     default model (e.g. streamClaudeSonnet, stream54Mini), so model-by-name
+//     lookup is the common case, and an unknown model name refuses as an
+//     unregistered pin.
+//
+// There was a fourth -- a deploy-time env pin -- and epic memql#5137
+// deleted it. A provider named in a Deployment manifest is a routing
+// decision no rule can see and no decision record can explain.
+//
+// providerConfig.llm.policyName is NOT read any more. A stored policy name was
+// a call site naming a chain, which is the decision rules took over; an agent
+// that wants a different chain gets a rule, where the choice is visible to
+// everyone rather than buried on one row.
+//
+// WHO MADE THE PIN travels with it (ResolveRequest.PinnedBy). A pin skips
+// every rule, and an app door reached through one opens a session on the
+// acting user's own machine, so the app gate admits it only when the pin is
+// that user's own. A hint is the CALLER's -- the person on the stream the turn
+// arrived on; an agent's stored preference is the AGENT OWNER's, who is not
+// the acting user when somebody else's agent answers their turn.
+func (r *Replier) turnPin(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg, data map[string]any) (provider, pinnedBy string) {
+	for _, source := range []struct {
+		value  string
+		hinted bool
+	}{
+		{value: strings.TrimSpace(msg.Hints["provider"]), hinted: true},
+		{value: agentLLMField(data, "provider")},
+		{value: strings.TrimSpace(msg.Hints["model"]), hinted: true},
+		{value: agentLLMField(data, "model")},
+	} {
+		if source.value == "" {
+			continue
+		}
+		if source.hinted {
+			return source.value, turnOwnerFromActor(ctx)
+		}
+		return source.value, r.resolveOwnerForAgent(ctx, msg.AgentId)
+	}
+	return "", ""
 }
 
 // agentLLMField reads a field from data["assistant"].providerConfig.llm,

@@ -189,6 +189,7 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 func (r *Replier) resolveBackgroundEscalation(ctx context.Context, baseReq router.ResolveRequest, cheapProviderName string) common.ToolCallingChatAIProvider {
 	escReq := baseReq
 	escReq.ExplicitProvider = "" // escalation always goes through the rules
+	escReq.PinnedBy = ""         // and with no pin, nobody made one
 	// The escalation tag is what the shipped `backgroundEscalation` rule keys
 	// on, and that rule RAISES THE LEVEL rather than naming a stronger model
 	// -- which is the whole reason the escalation survives a fleet change.

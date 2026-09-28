@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/planner"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/core/id"
@@ -23,14 +25,15 @@ import (
 // executionSurface + executorBackend, and nothing in the tree ever
 // called it -- so a containerExecutor Task had nowhere to land.
 //
-// It lives in this package rather than a sibling one so it can reuse
-// preDispatchCheck unexported. That is not a shortcut: D4's whole
-// point is that an app run needs EXACTLY the gates workerHost needs
-// -- per-task approval, the kill switch, standing scope, the
-// classifier -- and a copy of those gates in another package is a
-// copy that drifts. Reusing the function means an app run cannot
-// quietly end up with a weaker check than a shell command through the
-// same machine.
+// It lives in this package rather than a sibling one so it shares the
+// fleet router, the registry and the APP GATE (app_gate.go) with the
+// chat door in app_inference.go. An app run does NOT take the gates a
+// shell command through the same machine takes -- per-task approval,
+// standing computerUseScope, the classifier -- which was design D4's
+// answer and is no longer the owner's: an app session's consent is the
+// machine's apps.allow and the owner's policy naming the app, with the
+// kill switch able to close it. One gate for both doors means the two
+// cannot drift into different consent stories.
 
 // BackendCockpitApp is the registered backend name. Tasks name a
 // specific app as "cockpit-app:<appId>"; the base name is what
@@ -47,12 +50,15 @@ const defaultAppSessionMaxDuration = 4 * time.Hour
 // CockpitAppExecutor runs a Task by opening an app session on one of
 // the owner's cockpit machines.
 type CockpitAppExecutor struct {
-	logger     *slog.Logger
-	dispatcher *Dispatcher
-	runner     *workerservice.SessionRunner
-	router     *Router
-	registry   *workerservice.Registry
-	policies   DelegationPolicyReader
+	logger   *slog.Logger
+	runner   *workerservice.SessionRunner
+	router   *Router
+	registry *workerservice.Registry
+	policies DelegationPolicyReader
+	// prefs is where the app gate reads the owner's kill switch. Nil admits,
+	// which is what a node with no store can honestly say about a switch it
+	// cannot read.
+	prefs PreferencesReader
 	// ledger records the run's reported spend on v1:router:call. Nil
 	// disables the write; the run still happens, because losing a
 	// cost row must not lose the work.
@@ -152,15 +158,14 @@ func NewCockpitAppExecutor(logger *slog.Logger, dispatcher *Dispatcher, runner *
 		return nil, errors.New("cockpit-app: logger required")
 	}
 	if dispatcher == nil {
-		return nil, errors.New("cockpit-app: dispatcher required (it owns the consent gates)")
+		return nil, errors.New("cockpit-app: dispatcher required (it owns the fleet router, the registry and the owner's preferences)")
 	}
 	if runner == nil {
 		return nil, errors.New("cockpit-app: session runner required")
 	}
-	return &CockpitAppExecutor{
-		logger:     logger,
-		dispatcher: dispatcher,
-		runner:     runner,
+	exec := &CockpitAppExecutor{
+		logger: logger,
+		runner: runner,
 		// The dispatcher's router and registry, not new ones: two routers
 		// would read the same owner policy twice, possibly at different
 		// moments, and give the two paths different answers to "which
@@ -168,7 +173,11 @@ func NewCockpitAppExecutor(logger *slog.Logger, dispatcher *Dispatcher, runner *
 		router:   dispatcher.Router(),
 		registry: dispatcher.Registry(),
 		policies: policies,
-	}, nil
+	}
+	if dispatcher.store != nil {
+		exec.prefs = dispatcher.store
+	}
+	return exec, nil
 }
 
 // Backend implements planner.ContainerExecutor.
@@ -178,54 +187,71 @@ func (e *CockpitAppExecutor) Backend() string { return BackendCockpitApp }
 // ExecutorResult.
 //
 // The gate order matters and is deliberate: identity, then app,
-// then the SHARED consent gates, then the machine. Running the
-// consent gates before selection means a refused run never reveals
-// which machines the user has online; running them after would make
-// "you have no machine for this" and "you may not do this" both
-// present as the same failure.
+// then the APP GATE, then the machine. Running the gate before
+// selection means a refused run never reveals which machines the user
+// has online; running it after would make "you have no machine for
+// this" and "you may not do this" both present as the same failure.
+//
+// A TASK CARRIES NO PIN. It reaches an app because the owner's delegation
+// policy routed its kind there (planner.DecideDelegation), which is a
+// decision of theirs the way a routing rule's chain is. Nothing in the tree
+// dispatches container Tasks yet (planner.LookupContainerExecutor has no
+// caller), and the dispatcher that does must hand this executor only the
+// Tasks that policy routed. The session door, which carries a pin, asks the
+// gate itself before it opens a child run, and runs through runAdmitted.
 func (e *CockpitAppExecutor) Run(ctx context.Context, req planner.ExecutorRequest, progress planner.ProgressCallback) (planner.ExecutorResult, error) {
-	started := time.Now()
-
-	// An empty owner is a REFUSAL, never a wildcard. Worker
-	// registrations are per-user and the back-channel credential is
-	// minted with this as its subject; a blank one would either match
-	// nobody or, worse, be treated as "any".
-	ownerUserId := strings.TrimSpace(req.OwnerUserId)
-	if ownerUserId == "" {
-		return planner.ExecutorResult{}, errors.New("cockpit-app: task has no owner; a machine-touching backend cannot run unattributed")
+	ownerUserId, _, err := appSessionTarget(req)
+	if err != nil {
+		return planner.ExecutorResult{}, err
 	}
+	if refusal := e.admitSession(ctx, ownerUserId, memqlengine.AppDoorPin{}); refusal != nil {
+		return planner.ExecutorResult{}, fmt.Errorf("cockpit-app: %w", refusal)
+	}
+	return e.runAdmitted(ctx, req, progress)
+}
 
-	appId := planner.BackendArg(taskBackend(req))
+// admitSession is the APP GATE (app_gate.go), the one the chat door asks too:
+// a pin owner did not make, and the kill switch. No agent scope is read: an
+// app session is not an agent's shell command, and a cluster where nobody
+// granted one still opens the sessions its owner routed to an app.
+func (e *CockpitAppExecutor) admitSession(ctx context.Context, ownerUserId string, pin memqlengine.AppDoorPin) *appGateRefusal {
+	return admitAppSession(ctx, e.prefs, e.logger, ownerUserId, pin)
+}
+
+// appSessionTarget is the owner and app a request names, or the refusal that
+// says which is missing.
+//
+// An empty owner is a REFUSAL, never a wildcard. Worker registrations are
+// per-user and the back-channel credential is minted with it as its subject; a
+// blank one would either match nobody or, worse, be treated as "any".
+func appSessionTarget(req planner.ExecutorRequest) (ownerUserId, appId string, err error) {
+	ownerUserId = strings.TrimSpace(req.OwnerUserId)
+	if ownerUserId == "" {
+		return "", "", errors.New("cockpit-app: task has no owner; a machine-touching backend cannot run unattributed")
+	}
+	appId = planner.BackendArg(taskBackend(req))
 	if appId == "" {
-		return planner.ExecutorResult{}, errors.New(
+		return "", "", errors.New(
 			"cockpit-app: executorBackend must name an app, e.g. \"cockpit-app:claude-code\"")
 	}
 	if !workerservice.IsKnownAppId(appId) {
-		return planner.ExecutorResult{}, fmt.Errorf(
+		return "", "", fmt.Errorf(
 			"cockpit-app: %q is not an app this engine drives (known: %s)",
 			appId, strings.Join(workerservice.KnownAppIds(), ", "))
 	}
+	return ownerUserId, appId, nil
+}
 
-	// D4: the SAME gates a shell command through this machine gets.
-	// An app run edits files and runs commands on the user's own
-	// computer; there is no weaker consent story that is honest about
-	// what it does. `exec` is the action whose requirement is `full`,
-	// which is the tier an autonomous coding agent actually needs.
-	gate := e.dispatcher.preDispatchCheck(ctx, Request{
-		Tool:        "workerHost",
-		Action:      "exec",
-		AgentId:     req.AgentId,
-		OwnerUserId: ownerUserId,
-		RunId:       req.RunId,
-		StepId:      req.StepId,
-		Args: map[string]any{
-			"app":       appId,
-			"kind":      req.Kind,
-			"workspace": req.Workspace,
-		},
-	})
-	if gate.deny {
-		return planner.ExecutorResult{}, fmt.Errorf("cockpit-app: %s: %s", gate.errorCode, gate.errorMessage)
+// runAdmitted runs a request the app gate has ALREADY ADMITTED: machine
+// selection, the session, and the ledger row. Its callers are Run, and the
+// session door (app_session_delegate.go), which asks the gate with the door's
+// pin before it opens the child run the session is recorded into.
+func (e *CockpitAppExecutor) runAdmitted(ctx context.Context, req planner.ExecutorRequest, progress planner.ProgressCallback) (planner.ExecutorResult, error) {
+	started := time.Now()
+
+	ownerUserId, appId, err := appSessionTarget(req)
+	if err != nil {
+		return planner.ExecutorResult{}, err
 	}
 
 	policy := DelegationPolicy{}
@@ -352,19 +378,24 @@ func sessionRunSpec(req planner.ExecutorRequest, appId, ownerUserId, workspace s
 // request named: the new session must not run inside the tree the previous
 // version's later steps changed. A name that is not one plain directory name
 // is never joined, since it could place the workspace outside the root the
-// owner chose; the delegate refuses such a name before it gets here. With no
-// root the session names no workspace, exactly as before.
+// owner chose; the delegate refuses such a name before it gets here.
+//
+// EMPTY IS A VALID ANSWER, and it means the machine chooses
+// (AppSessionStart.workspace): with no root, or with a root and no unit of
+// work to key a directory by, the session names no workspace. The engine never
+// invents a path on somebody's machine, and never runs a session in the root
+// itself -- the tree every other run's directory lives in.
 func sessionWorkspace(req planner.ExecutorRequest, root string) string {
 	if w := strings.TrimSpace(req.Workspace); w != "" {
 		return w
 	}
-	root = strings.TrimRight(strings.TrimSpace(root), "/")
-	if root == "" {
-		return ""
-	}
-	dir := req.RunId
+	dir := strings.TrimSpace(req.RunId)
 	if fresh := stringFromInput(req, "freshWorkspace"); isWorkspaceDirName(fresh) {
 		dir = fresh
+	}
+	root = strings.TrimRight(strings.TrimSpace(root), "/")
+	if root == "" || dir == "" {
+		return ""
 	}
 	return root + "/" + dir
 }
@@ -403,30 +434,56 @@ func (e *CockpitAppExecutor) selectMachine(ctx context.Context, ownerUserId, app
 	// indistinguishable from a laptop being asleep.
 	//
 	// So the ROUTER applies the owner's policy and ordering over the
-	// Task's own requirements, and the app filter is RunsApp below --
-	// the same predicate the label derivation uses, so the two cannot
-	// disagree. TestAppRequirementIsNotAnExactLabelMatch pins the
+	// Task's own requirements, and the app filter is the app gate's
+	// appMachineRefusal below -- RunsApp, the same predicate the label
+	// derivation uses, so the two cannot disagree, plus the machine being
+	// the owner's. TestAppRequirementIsNotAnExactLabelMatch pins the
 	// semantics that force this.
 	plan, err := e.router.Plan(ctx, ownerUserId, workerservice.CapabilityHeadless, require, nil)
 	if err != nil {
 		return nil, fmt.Errorf("cockpit-app: routing %s: %w", appId, err)
 	}
+	considered := make(map[string]string, len(plan.Candidates)+len(plan.Rejected))
 	for _, candidate := range plan.Candidates {
 		// Only a machine whose stream THIS replica holds can carry a
 		// session today: the app-session envelope has no cross-node
 		// forward yet (the tool path's WorkerForward does, memql#4352).
 		// Skipping rather than failing is what makes a second replica
 		// holding the machine a routing outcome rather than an error.
-		if w := e.registry.WorkerById(candidate.RegistrationId); w != nil && w.RunsApp(appId) {
-			return w, nil
+		w := e.registry.WorkerById(candidate.RegistrationId)
+		if why := appMachineRefusal(w, ownerUserId, appId); why != "" {
+			considered[candidate.RegistrationId] = why
+			continue
 		}
+		return w, nil
 	}
 	if plan.Total == 0 {
 		return nil, fmt.Errorf("cockpit-app: no machines are registered to this user")
 	}
+	for reg, why := range plan.Rejected {
+		considered[reg] = why
+	}
 	return nil, fmt.Errorf(
-		"cockpit-app: none of this user's %d machine(s) has %s allowed and signed in on a stream this replica holds",
-		plan.Total, appId)
+		"cockpit-app: none of this user's %d machine(s) can carry a %s session from this replica%s",
+		plan.Total, appId, consideredSuffix(considered))
+}
+
+// consideredSuffix renders why each machine was passed over, in a stable
+// order, as " -- id: reason; id: reason". Empty when nothing was considered.
+func consideredSuffix(considered map[string]string) string {
+	if len(considered) == 0 {
+		return ""
+	}
+	regs := make([]string, 0, len(considered))
+	for reg := range considered {
+		regs = append(regs, reg)
+	}
+	sort.Strings(regs)
+	parts := make([]string, 0, len(regs))
+	for _, reg := range regs {
+		parts = append(parts, reg+": "+considered[reg])
+	}
+	return " -- " + strings.Join(parts, "; ")
 }
 
 // mergeRequireLabels returns the Task's own require-labels with any

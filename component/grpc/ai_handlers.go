@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/structpb"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
@@ -32,6 +33,10 @@ import (
 // available", "no streaming provider available" -- each answered a different
 // question with the same shrug, and none of them could say which of the four
 // doors was shut or what to do about it.
+//
+// AND IT IS THE CALLER'S PIN (ResolveRequest.PinnedBy). The app gate opens a
+// pinned app door only for a pin the session's owner made, and a provider
+// named on this stream was named by the person on its other end.
 
 // chatResolveRequest is the non-streaming chat turn: an Ask, answered whole.
 //
@@ -39,26 +44,46 @@ import (
 // is the product. The context floor is estimated from the messages the call
 // actually carries -- a floor of zero admits every entry and reads on the
 // decision record exactly like a floor that was measured and cleared.
-func chatResolveRequest(messages []common.ChatMessage, providerName string) airoute.ResolveRequest {
+func chatResolveRequest(messages []common.ChatMessage, providerName, caller string) airoute.ResolveRequest {
 	return airoute.ResolveRequest{
 		Level:            airoute.LevelStrong,
 		Modality:         airoute.ModalityChat,
 		PromptName:       askPromptName,
 		Needs:            airoute.Needs{MinContextTokens: minContextForMessages(messages)},
 		ExplicitProvider: providerName,
+		PinnedBy:         callerPin(providerName, caller),
 	}
+}
+
+// chatCaller is the person on the other end of this stream: the one who named
+// the provider, when the request named one.
+func chatCaller(ctx context.Context) string {
+	if access, ok := auth.AccessFromContext(ctx); ok && access != nil {
+		return strings.TrimSpace(access.UserId)
+	}
+	return ""
+}
+
+// callerPin is who made a caller-named pin: the caller, when there is a pin to
+// have made.
+func callerPin(providerName, caller string) string {
+	if strings.TrimSpace(providerName) == "" {
+		return ""
+	}
+	return strings.TrimSpace(caller)
 }
 
 // chatStreamResolveRequest is the same turn with the tokens arriving as they
 // are produced. Same level and same prompt; only the modality differs, because
 // only the interface the provider must satisfy differs.
-func chatStreamResolveRequest(messages []common.ChatMessage, providerName string) airoute.ResolveRequest {
+func chatStreamResolveRequest(messages []common.ChatMessage, providerName, caller string) airoute.ResolveRequest {
 	return airoute.ResolveRequest{
 		Level:            airoute.LevelStrong,
 		Modality:         airoute.ModalityStreamingChat,
 		PromptName:       askPromptName,
 		Needs:            airoute.Needs{MinContextTokens: minContextForMessages(messages)},
 		ExplicitProvider: providerName,
+		PinnedBy:         callerPin(providerName, caller),
 	}
 }
 
@@ -294,7 +319,7 @@ func chatCallContext(ctx context.Context, provider, registrationId string) (cont
 
 func (s *streamSession) handleAiChatNonStream(ctx context.Context, requestId, correlate string, messages []common.ChatMessage, providerName string) {
 	chatProvider, _, err := memqlengine.ResolveAITyped[common.ChatAIProvider](
-		ctx, s.service.engine, chatResolveRequest(messages, providerName))
+		ctx, s.service.engine, chatResolveRequest(messages, providerName, chatCaller(ctx)))
 	if err != nil {
 		s.sendAiModelError(requestId, correlate, "no model is reachable for this chat turn", err)
 		return
@@ -326,7 +351,7 @@ func (s *streamSession) handleAiChatStream(ctx context.Context, requestId, corre
 	defer cancel()
 
 	streamProvider, _, err := memqlengine.ResolveAITyped[common.ChatStreamProvider](
-		ctx, s.service.engine, chatStreamResolveRequest(messages, providerName))
+		ctx, s.service.engine, chatStreamResolveRequest(messages, providerName, chatCaller(ctx)))
 	if err != nil {
 		s.sendAiModelError(requestId, correlate, "no model is reachable for this streaming chat turn", err)
 		return

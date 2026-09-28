@@ -25,7 +25,13 @@ type recordingExecutor struct {
 	err  error
 }
 
-func (r *recordingExecutor) Run(_ context.Context, req planner.ExecutorRequest, _ planner.ProgressCallback) (planner.ExecutorResult, error) {
+// admitSession admits: these tests are about what the delegate hands over, and
+// the gate's own tests (app_gate_test.go) drive the real one.
+func (r *recordingExecutor) admitSession(context.Context, string, memqlengine.AppDoorPin) *appGateRefusal {
+	return nil
+}
+
+func (r *recordingExecutor) runAdmitted(_ context.Context, req planner.ExecutorRequest, _ planner.ProgressCallback) (planner.ExecutorResult, error) {
 	r.runs++
 	r.got = req
 	return r.out, r.err

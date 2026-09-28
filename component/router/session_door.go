@@ -61,7 +61,26 @@ func (r *Router) sessionDoorFor(req ResolveRequest, name string, mod providerMod
 		Effort:       strings.TrimSpace(req.Effort),
 		RunId:        req.RunId,
 		StepId:       req.StepId,
+		Pin:          appDoorPin(req, name),
 	}), true, nil
+}
+
+// appDoorPin says how the app door `name` was reached on this request, for the
+// app gate on the agent node (memql.AppDoorPin).
+//
+// A PIN IS THE ONLY WAY TO AN APP DOOR THAT NO RULE NAMED. resolveChain walks
+// the pin ALONE when there is one, and an `app:` entry never expands into
+// other names (expandEntry), so a door whose name is the request's pin was
+// reached through it. Any other door -- a rule's chain, or the consented cloud
+// chain a person said yes to -- is not a pin, whatever PinnedBy the request
+// happens to carry. Who made the pin is the request's to say; the router
+// cannot know it.
+func appDoorPin(req ResolveRequest, name string) memql.AppDoorPin {
+	pinned := strings.TrimSpace(req.ExplicitProvider)
+	if pinned == "" || pinned != strings.TrimSpace(name) {
+		return memql.AppDoorPin{}
+	}
+	return memql.AppDoorPin{Pinned: true, By: strings.TrimSpace(req.PinnedBy)}
 }
 
 // toolNeeding maps the router's internal modality onto the shared vocabulary's

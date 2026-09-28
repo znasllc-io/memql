@@ -397,11 +397,18 @@ bounded by the delegation policy's `maxConcurrentSessions`, and blocking an
 hour-long run behind a five-minute tool queue would deadlock the caller for
 reasons nothing in the request states.
 
-**Consent is this runbook's model, unchanged.** The app-session path calls the
-same `preDispatchCheck` `workerHost` does — per-task approval, kill switch,
-standing scope at `full`, the classifier — plus `apps.allow`. There is no
-weaker consent tier for app runs, because an app run does exactly what a shell
-command does: edits files and runs commands on the user's computer.
+**Consent is the app gate, not this runbook's tool gates.** An app session is
+the owner's own app on their own machine, doing work that was routed to it, so
+it does not take `preDispatchCheck` — no per-task approval, no standing
+`computerUseScope`, no classifier pass. Its consent is `apps.allow` on the
+machine (allowed and signed in), the machine being the owner's, and a decision
+naming the app: a routing rule's chain (the cluster's one routing
+configuration), or an explicit pin the owner made themselves — a pin anybody
+else made is refused as `app_not_named_by_owner`. The kill switch still closes
+every app session, but only when it is **explicitly** engaged
+(`computerUseEnabled == false`); unset does not, and a switch that cannot be
+read refuses as `kill_switch_unreadable`. See
+[Local apps → Consent](local-apps.md#consent).
 
 **Per-user delegation policy** (`v1:worker:delegationPolicy`, edited at
 Fleet in MemQL OS) decides *when*. An absent row means never delegate.

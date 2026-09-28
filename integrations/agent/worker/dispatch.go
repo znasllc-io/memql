@@ -65,7 +65,12 @@ type Store interface {
 
 // Preferences carries the dispatch-relevant user preference fields.
 type Preferences struct {
-	ComputerUseEnabled bool
+	// KillSwitchEngaged is true ONLY when the user explicitly switched
+	// computer use off (preferences.computerUseEnabled == false). Unset is
+	// not engaged (Q13: opt in to disable), and the zero value says so --
+	// a reader that finds no row, or a fake that sets nothing, cannot close
+	// anything by accident.
+	KillSwitchEngaged bool
 }
 
 // Authorization carries the dispatch-relevant agentAuthorization
@@ -608,11 +613,11 @@ func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResu
 	if d.store != nil {
 		prefs, err := d.store.UserPreferences(ctx, req.OwnerUserId)
 		if err != nil {
-			d.logger.Warn("user preferences lookup failed; treating as kill-switch enabled",
+			d.logger.Warn("user preferences lookup failed; the kill switch reads as not engaged",
 				"owner_user_id", req.OwnerUserId,
 				"error", err,
 			)
-		} else if !prefs.ComputerUseEnabled {
+		} else if prefs.KillSwitchEngaged {
 			return gateResult{
 				deny:               true,
 				requiredCapability: required.Capability,

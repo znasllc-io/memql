@@ -88,6 +88,10 @@ type AppSessionHandover struct {
 	// Inputs are Library artifact ids the cockpit pulls into the session
 	// workspace before the run starts.
 	Inputs []string
+	// Pin is how the router reached this door: a rule's chain, or an explicit
+	// pin and the person who made it. The delegate's app gate refuses a pin
+	// the session's owner did not make, before anything is opened.
+	Pin AppDoorPin
 }
 
 // AppSessionOutcome is what the session produced.
@@ -170,6 +174,8 @@ type SessionRequest struct {
 	Effort       string
 	RunId        string
 	StepId       string
+	// Pin is how the router reached the door. See AppDoorPin.
+	Pin AppDoorPin
 }
 
 // SessionProvider builds the client behind a `session` winner.
@@ -242,6 +248,7 @@ func (p *sessionProvider) run(
 		Prompt:         flattenForSession(messages),
 		Tools:          tools,
 		ResponseSchema: schema,
+		Pin:            p.req.Pin,
 	})
 	if err != nil {
 		return out, err

@@ -18,14 +18,17 @@ package worker
 // disagreement would present as a machine that is selectable from a policy and
 // unreachable from a task.
 //
-// WHAT IT DOES NOT REUSE: preDispatchCheck. That gate answers "may this AGENT
-// run a command on this user's computer", and an inference call is not that
-// question -- it is MemQL asking a model for an answer, on hardware the user
-// pointed at it by signing in. The consent that matters here is the one
-// already given: the app is `allowed` in the machine's own policy.yaml and
-// somebody signed into it. Running the computer-use scope gate over a chat
-// turn would refuse every call on a machine whose owner had not granted an
-// agent shell access, for a call that runs no shell command.
+// THE CONSENT IS THE APP GATE (app_gate.go), the same one the session door and
+// a delegated Task ask -- not preDispatchCheck. That gate answers "may this
+// AGENT run a command on this user's computer", and an app session is not that
+// question. The consent that matters here is the app `allowed` in the machine's
+// own policy.yaml with somebody signed into it, on the owner's own machine,
+// reached through a routing rule's chain or through a pin the owner made
+// themselves -- a pin skips every rule, so one anybody else made is refused.
+// Running the computer-use scope gate over a chat turn would refuse every call
+// on a machine whose owner had not granted an agent shell access, for a call
+// that runs no shell command. The kill switch, when the owner explicitly
+// engaged it, closes this door as it closes the others.
 
 import (
 	"context"
@@ -68,8 +71,11 @@ type AppInference struct {
 	registry *workerservice.Registry
 	runner   *workerservice.SessionRunner
 	policies DelegationPolicyReader
-	logger   *slog.Logger
-	clock    func() time.Time
+	// prefs is where the app gate reads the owner's kill switch -- the
+	// dispatcher's store, so this door and the session door read one graph.
+	prefs  PreferencesReader
+	logger *slog.Logger
+	clock  func() time.Time
 	// vision lands the images of a vision call in the session workspace
 	// (issue memql#5523). NIL ON A NODE WITH NO BLOB STORAGE, and a vision
 	// call then REFUSES rather than running without its images -- see
@@ -93,7 +99,7 @@ func NewAppInference(
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &AppInference{
+	a := &AppInference{
 		router:   d.Router(),
 		store:    d.FleetStore(),
 		registry: d.Registry(),
@@ -102,6 +108,10 @@ func NewAppInference(
 		logger:   logger,
 		clock:    d.clock,
 	}
+	if d.store != nil {
+		a.prefs = d.store
+	}
+	return a
 }
 
 // SetVisionStager wires the blob surface a vision call needs.
@@ -261,6 +271,15 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		}
 	}
 
+	// THE APP GATE, before a machine is chosen -- the same consent the session
+	// door asks, with the pin the router bound on this resolution. A refusal
+	// reads as a shut door (ErrAppUnavailable), so a chat chain moves on to
+	// its next source exactly as it does for a laptop that is asleep, and the
+	// refusal's own code says which it was.
+	if refusal := admitAppSession(ctx, a.prefs, a.logger, owner, req.Pin); refusal != nil {
+		return memqlengine.AppCallResult{}, fmt.Errorf("%w: %w", memqlengine.ErrAppUnavailable, refusal)
+	}
+
 	// CAN THIS REPLICA STAGE AT ALL (issue memql#5523) -- asked before a
 	// machine is chosen, because it is a CONFIGURATION fact and needs no
 	// machine to answer. A node with no blob storage refuses the call here
@@ -335,9 +354,18 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		// two derivations disagree the day either changes.
 		Prompt:         visionPromptWithInputs(flattenMessages(req.Messages), staged),
 		ResponseSchema: schema,
-		RunId:          req.RunId,
-		StepId:         req.StepId,
-		MaxDuration:    appSessionMaxDuration,
+		// EMPTY, ALWAYS: the machine chooses (AppSessionStart.workspace). An
+		// inference turn is one session and nothing outlives it, so it
+		// belongs in a directory of the machine's own choosing, whose
+		// lifetime the machine owns. A directory the engine named under the
+		// owner's workspaceRoot would be one nobody removes (the machine
+		// cannot tell it from a run's, which later steps reuse), holding a
+		// copy of every image the turn was shown. The root names a RUN's
+		// directory, on the session door.
+		Workspace:   "",
+		RunId:       req.RunId,
+		StepId:      req.StepId,
+		MaxDuration: appSessionMaxDuration,
 		// The CHAT door carries the level too (epic memql#5391, design D8).
 		// The same app on the same machine should not answer a `fast` turn at
 		// the effort a `reasoning` one asked for merely because this door
@@ -405,12 +433,8 @@ func (a *AppInference) selectMachine(ctx context.Context, owner string, req memq
 	considered := map[string]string{}
 	for _, cand := range plan.Candidates {
 		w := a.registry.WorkerById(cand.RegistrationId)
-		if w == nil {
-			considered[cand.RegistrationId] = "its stream is held by another replica"
-			continue
-		}
-		if !w.RunsApp(req.AppId) {
-			considered[cand.RegistrationId] = req.AppId + " is not allowed and signed in"
+		if why := appMachineRefusal(w, owner, req.AppId); why != "" {
+			considered[cand.RegistrationId] = why
 			continue
 		}
 		if req.Schema != nil {
