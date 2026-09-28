@@ -2953,20 +2953,23 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   registerRunSurface(context, clustersPath, connections);
 
   // RECONNECT WITHOUT A CLICK. The cluster in use when the window last closed
-  // is connected again when it opens -- but only when something stored can
-  // authenticate it (clusters/facts.ts): a cluster that needs a sign-in is
-  // left for its row and page to say so, rather than dialled into a refusal.
-  // A failure here is shown only as the row's state; the reason is in the
+  // is connected again when it opens, when something stored can authenticate
+  // it. A failure here is shown only as the row's state; the reason is in the
   // Connection output. Nothing is awaited: activation does not wait on the
   // network, and a click in the meantime simply wins.
+  //
+  // A CLUSTER THAT NEEDS A SIGN-IN (or has no address) IS HANDED TO THE
+  // MANAGER TOO, and that is not a dial: the manager refuses it before any
+  // network call (runAuthenticated resolves the credential first) and
+  // publishes the refusal. That is what makes `memql.connectionState` read
+  // "signIn" -- the word every other view's welcome keys on -- from the first
+  // frame, where it used to read "none" (no cluster) for a cluster the
+  // Clusters row marks as in use and asks to sign in to.
   void (async () => {
     const registry = await readClustersFileSafe(clustersPath);
     if (!registry.ok || registry.file.selectedCluster === '') return;
     const cluster = registry.file.clusters.find((c) => c.name === registry.file.selectedCluster);
-    if (cluster === undefined) return;
-    const facts = await factsForCluster(cluster);
-    const at = clusterStatus({ cluster, connection: { status: 'disconnected' }, facts });
-    if (at.state !== 'idle' || connections?.state.status !== 'disconnected') return;
+    if (cluster === undefined || connections?.state.status !== 'disconnected') return;
     await connections.connect(cluster);
   })().catch(() => undefined);
 

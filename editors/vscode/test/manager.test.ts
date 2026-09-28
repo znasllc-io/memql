@@ -1140,3 +1140,46 @@ test("a person's own connect during the retries is not announced as the retries 
   assert.deepEqual(notices, []);
   assert.equal(timers.pending(), 0);
 });
+
+// WHAT THE WINDOW SAYS ON OPENING about a cluster in use that needs a sign-in.
+// Activation hands the selected cluster to connect() whatever it holds
+// (extension.ts, "RECONNECT WITHOUT A CLICK"), because this is what connect()
+// does with nothing to present: refuse before any dial and publish the
+// refusal -- so memql.connectionState reads "signIn" from the first frame, not
+// "none" (no cluster) under a row that asks to sign in.
+test("connecting a cluster with nothing stored publishes signIn, without a dial or a 'connecting'", async () => {
+  let dials = 0;
+  const keys: Array<{ clusterSelected: boolean; connected: boolean; connectionState: string }> = [];
+  const seen: string[] = [];
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return Promise.resolve(fakeConn("x"));
+    },
+    undefined,
+    undefined,
+    (k) => keys.push(k),
+  );
+  manager.onDidChangeState((s) => seen.push(s.status));
+  await manager.connect(cluster("local", { token: undefined }));
+  assert.equal(dials, 0);
+  assert.deepEqual(seen, ["error"], "never flashed as connecting");
+  assert.deepEqual(keys.at(-1), { clusterSelected: true, connected: false, connectionState: "signIn" });
+});
+
+test("connecting a cluster with no address publishes notConfigured, without a dial", async () => {
+  let dials = 0;
+  const keys: Array<{ connectionState: string }> = [];
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return Promise.resolve(fakeConn("x"));
+    },
+    undefined,
+    undefined,
+    (k) => keys.push(k),
+  );
+  await manager.connect(cluster("draft", { endpoint: "", token: undefined }));
+  assert.equal(dials, 0);
+  assert.equal(keys.at(-1)?.connectionState, "notConfigured");
+});
