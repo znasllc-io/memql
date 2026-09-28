@@ -9,12 +9,12 @@ import (
 // description_vocabulary_test.go -- znasllc-io/memql#4456.
 //
 // WHAT THIS GATE IS FOR. A step's `description` is not a comment: it is the
-// sentence an operator reads. The wizard renders the running step's
-// description under the progress bar as the whole of what it says about a
-// ten-minute operation (memql#4454), and the CLI prints the same string. One
-// source, two surfaces, and no other narration on either -- so a description
-// written in the vocabulary of the thing that implements it is the product
-// describing itself as a build system.
+// sentence an operator reads. The wizard's step list shows it for every step
+// of a ten-minute operation (memql#4454), and it is what the step's short
+// `label` stands for (label_vocabulary_test.go gates that). One source, several
+// surfaces, and no other narration on any of them -- so a description written
+// in the vocabulary of the thing that implements it is the product describing
+// itself as a build system.
 //
 // They all were. "Inventory the machine: OS/arch support, docker daemon, port
 // availability, free disk." is a commit message. "Write the identity bootstrap
@@ -118,16 +118,23 @@ func checkDescription(t *testing.T, where, text string) {
 	}
 }
 
+// shippedGraphs is every document the loader embeds. Both vocabulary gates
+// (this one and label_vocabulary_test.go) range over it, so a document added
+// to graph.go and not here is a document neither gate reads -- which is how
+// update-rebuild.json went unchecked until the label gate listed it.
+var shippedGraphs = []struct {
+	name string
+	load func() (*Graph, error)
+}{
+	{"install.json", Install},
+	{"install-main.json", InstallFromMain},
+	{"uninstall.json", Uninstall},
+	{"rebuild.json", Rebuild},
+	{"update-rebuild.json", UpdateRebuild},
+}
+
 func TestShippedDescriptionsAreWrittenForOperators(t *testing.T) {
-	for _, doc := range []struct {
-		name string
-		load func() (*Graph, error)
-	}{
-		{"install.json", Install},
-		{"install-main.json", InstallFromMain},
-		{"uninstall.json", Uninstall},
-		{"rebuild.json", Rebuild},
-	} {
+	for _, doc := range shippedGraphs {
 		t.Run(doc.name, func(t *testing.T) {
 			// THE EMBEDDED DOCUMENT, not the file on disk, so this gate covers
 			// exactly the bytes that ship rather than a copy beside them.

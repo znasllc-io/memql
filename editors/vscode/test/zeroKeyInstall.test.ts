@@ -188,6 +188,7 @@ function step(id: string, script = "install.verifyProviderKey"): Step {
   return {
     id,
     script,
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,

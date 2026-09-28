@@ -26,6 +26,17 @@ import {
 } from "../connection/endpoint.js";
 import type { HandoffResult } from "../install/handoff.js";
 import { installDomainProblem, DEFAULT_LOCAL_DOMAIN, DEFAULT_STACK_TAG } from "../install/stackPin.js";
+import { runProgressOf } from "./installProgress.js";
+import type { ProgressPhase, RunProgress } from "./runProgress.js";
+import {
+  appendLog,
+  copyStep,
+  markFinished,
+  markPhase,
+  markStarted,
+  recordsForAttempt,
+  upsertStep,
+} from "./stepRecords.js";
 
 /** Where the operator is. */
 export type Screen =
@@ -57,6 +68,8 @@ export type StepState = "pending" | "running" | "done" | "skipped" | "preserved"
 
 export interface StepProgress {
   id: string;
+  /** The graph's short label ("Creating the cluster"); "" until the plan arrives. */
+  label: string;
   description: string;
   state: StepState;
   /** The sentence a non-ok status carried. */
@@ -80,6 +93,20 @@ export interface StepProgress {
    * Empty when the failure has no single command that fixes it.
    */
   remedy: string;
+  /** When this attempt started the step, in epoch milliseconds. */
+  startedAt?: number;
+  /** When this attempt settled the step, in epoch milliseconds. */
+  finishedAt?: number;
+  /** What the running step last reported about itself (`cap_progress`). */
+  phase?: ProgressPhase;
+  /**
+   * What the step came to on the PREVIOUS attempt, kept for display only.
+   *
+   * Every attempt starts every step from `pending` so the bar never runs
+   * backwards within it; this is the one thing the new attempt keeps from the
+   * last, so a screen can still say a step passed before.
+   */
+  previousState?: StepState;
 }
 
 /**
@@ -599,7 +626,15 @@ export class AddClusterState {
   /** Whether `version` carries an operator's answer rather than a default. */
   private versionTouched = false;
   private fieldErrors: FieldError[] = [];
-  private progress: StepProgress[] = [];
+  private records: StepProgress[] = [];
+  // THE PROGRESS BAR'S MEMORY. `progress(now)` never reports less than it did
+  // last time within one attempt, and this is where "last time" lives; a new
+  // attempt's `runStarted` sets it back to zero.
+  private highWater = 0;
+  // Per-step expected seconds measured on this machine (runProgress.ts
+  // `historicalWeights`). Empty means the defaults, which is a fine bar.
+  private weights: Readonly<Record<string, number>> = {};
+  private readonly clock: () => number;
   private failedId: string | undefined;
   private wasCancelled = false;
   private didSucceed = false;
@@ -679,6 +714,14 @@ export class AddClusterState {
   // what is happening NOW; there is nothing above the tail worth landing on.
   private logsFollowTail = true;
 
+  /**
+   * `now` is the clock step timings are read from, in epoch milliseconds --
+   * injectable so a test can say exactly how long a step has been running.
+   */
+  constructor(options: { now?: () => number } = {}) {
+    this.clock = options.now ?? ((): number => Date.now());
+  }
+
   get screen(): Screen {
     return this.currentScreen;
   }
@@ -711,11 +754,31 @@ export class AddClusterState {
     return [...this.fieldErrors];
   }
   get steps(): StepProgress[] {
-    return this.progress.map((p) => ({ ...p }));
+    return this.records.map(copyStep);
   }
   get failed(): StepProgress | undefined {
-    const found = this.progress.find((p) => p.id === this.failedId);
-    return found === undefined ? undefined : { ...found };
+    const found = this.records.find((p) => p.id === this.failedId);
+    return found === undefined ? undefined : copyStep(found);
+  }
+
+  /**
+   * How far the run has got at `now`: the weighted percent, the status line
+   * and "Step n of m" (state/runProgress.ts).
+   *
+   * NOT A PURE READ, deliberately: it remembers the percent it returns, so the
+   * next call within this attempt can never report less. That is what keeps
+   * the bar from running backwards when a step's own count restarts below the
+   * time-based estimate it replaces.
+   */
+  progress(now: number = this.clock()): RunProgress {
+    const result = runProgressOf(this.records, now, { highWater: this.highWater }, this.weights);
+    this.highWater = result.highWater;
+    return result;
+  }
+
+  /** Expected seconds per step id, measured on this machine. See `weights`. */
+  setStepWeights(weights: Readonly<Record<string, number>>): void {
+    this.weights = { ...weights };
   }
   /**
    * EVERY failed step, in graph order.
@@ -727,7 +790,7 @@ export class AddClusterState {
    * confident advice about a step they may not even be looking at.
    */
   get failures(): StepProgress[] {
-    return this.progress.filter((p) => p.state === "failed").map((p) => ({ ...p }));
+    return this.records.filter((p) => p.state === "failed").map(copyStep);
   }
   get connectInputs(): ConnectInputs {
     return { ...this.connectValues };
@@ -1167,6 +1230,7 @@ export class AddClusterState {
     // run's output while this one has produced none.
     this.logsShown = false;
     this.logsFollowTail = true;
+    this.highWater = 0;
     return true;
   }
 
@@ -1460,28 +1524,34 @@ export class AddClusterState {
         // a step first appears when it STARTS, so the checklist grows from
         // empty and never says how much is left.
         //
-        // upsert, so a RE-RUN (Retry, or a repair) keeps what the previous
-        // attempt established. The steps that already passed re-report as
-        // skipped; showing them blank again in between would be a display of
-        // this event rather than of the machine.
-        for (const step of event.steps) this.upsert(step.id, step.description);
+        // A NEW ATTEMPT STARTS EVERY STEP FROM PENDING (Retry, a repair, or
+        // the next run on the same page), with a fresh high-water mark. The
+        // steps that already passed re-report as skipped within a second;
+        // counting them done in between would put the bar ahead of the run and
+        // then pull it back. stepRecords.recordsForAttempt keeps what each came
+        // to last time as `previousState`.
+        this.records = recordsForAttempt(this.records, event.steps);
+        this.highWater = 0;
         return;
       }
       case "stepStarted": {
-        const entry = this.upsert(event.step.id, event.step.description);
-        entry.state = "running";
+        const entry = this.upsert(event.step.id, event.step.label, event.step.description);
+        markStarted(entry, this.clock());
+        return;
+      }
+      case "stepPhase": {
+        const entry = this.upsert(event.step.id, event.step.label, event.step.description);
+        markPhase(entry, event.label, event.done, event.total);
         return;
       }
       case "stepLog": {
-        const entry = this.upsert(event.step.id, event.step.description);
-        entry.log = entry.log === "" ? event.line : `${entry.log}\n${event.line}`;
+        const entry = this.upsert(event.step.id, event.step.label, event.step.description);
+        appendLog(entry, event.line);
         return;
       }
       case "stepFinished": {
-        const entry = this.upsert(event.step.id, event.step.description);
-        entry.state = STATUS_TO_STATE[event.outcome.status] ?? "done";
-        entry.reason = event.outcome.reason ?? "";
-        entry.exitCode = event.outcome.exitCode;
+        const entry = this.upsert(event.step.id, event.step.label, event.step.description);
+        markFinished(entry, event.outcome, this.clock());
         // Off the ENVELOPE, not parsed out of the human sentence: the capability
         // contract puts structured facts in `result`, and a remedy recovered by
         // pattern-matching prose would break the first time a message was
@@ -1516,24 +1586,8 @@ export class AddClusterState {
     }
   }
 
-  private upsert(id: string, description: string): StepProgress {
-    const existing = this.progress.find((p) => p.id === id);
-    if (existing !== undefined) {
-      if (description !== "" && existing.description === "") existing.description = description;
-      return existing;
-    }
-    const fresh: StepProgress = {
-      id,
-      description,
-      state: "pending",
-      reason: "",
-      exitCode: null,
-      log: "",
-      guided: false,
-      remedy: "",
-    };
-    this.progress.push(fresh);
-    return fresh;
+  private upsert(id: string, label: string, description: string): StepProgress {
+    return upsertStep(this.records, id, label, description);
   }
 
   // ---------------------------------------------------------------------------
@@ -1549,7 +1603,7 @@ export class AddClusterState {
     // the same property that makes repair an install re-run -- so leaving the
     // other failures marked `failed` would show the operator a stale verdict
     // about a step that is being attempted again in front of them.
-    const failed = this.progress.filter((p) => p.state === "failed");
+    const failed = this.records.filter((p) => p.state === "failed");
     if (failed.length === 0) return;
     for (const entry of failed) this.resetForAnotherAttempt(entry);
     this.failedId = undefined;
@@ -1564,7 +1618,7 @@ export class AddClusterState {
    * for the other eleven.
    */
   switchToGuided(): void {
-    const failed = this.progress.filter((p) => p.state === "failed");
+    const failed = this.records.filter((p) => p.state === "failed");
     if (failed.length === 0) return;
     for (const entry of failed) {
       entry.guided = true;
@@ -1583,10 +1637,14 @@ export class AddClusterState {
    * be the one that is no longer happening.
    */
   private resetForAnotherAttempt(entry: StepProgress): void {
+    if (entry.state !== "pending" && entry.state !== "running") entry.previousState = entry.state;
     entry.state = "pending";
     entry.reason = "";
     entry.exitCode = null;
     entry.log = "";
+    delete entry.startedAt;
+    delete entry.finishedAt;
+    delete entry.phase;
   }
 
   /**
@@ -1609,10 +1667,3 @@ export class AddClusterState {
     this.currentScreen = "done";
   }
 }
-
-const STATUS_TO_STATE: Record<string, StepState> = {
-  ok: "done",
-  failed: "failed",
-  skipped: "skipped",
-  preserved: "preserved",
-};

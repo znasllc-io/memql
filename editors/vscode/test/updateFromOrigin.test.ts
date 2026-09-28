@@ -272,6 +272,7 @@ function step(id: string, script: string): Step {
   return {
     id,
     script,
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,

@@ -768,3 +768,66 @@ func TestNoCapabilityScriptHandRollsABooleanComparison(t *testing.T) {
 		})
 	}
 }
+
+// TestCapProgressWritesOneStderrLine pins `cap_progress`, the structured
+// progress line a long capability writes while it works.
+//
+// Its contract has two readers that must agree: a human at a terminal, who just
+// sees the line, and the editor's runner (editors/vscode/src/install/runner.ts),
+// which recognises the `::memql-progress::` prefix, turns the line into a phase
+// under the progress bar and keeps it out of the step's log. So the shape is
+// asserted byte for byte, and so is where it goes: STDERR only, because stdout
+// belongs to the one result envelope. And because reporting progress must never
+// be able to fail a capability, a malformed count still exits 0 and still
+// reports the label.
+func TestCapProgressWritesOneStderrLine(t *testing.T) {
+	root := repoRoot(t)
+	lib := filepath.Join(root, "scripts", "lib", "capability.sh")
+
+	harness := filepath.Join(t.TempDir(), "capprogress_harness.sh")
+	body := "#!/usr/bin/env bash\n" +
+		"set -euo pipefail\n" +
+		"source \"" + lib + "\"\n" +
+		"cap_init \"test.capProgress\" \"cap_progress harness\"\n" +
+		"cap_progress \"$@\"\n" +
+		"cap_ok\n"
+	if err := os.WriteFile(harness, []byte(body), 0o755); err != nil {
+		t.Fatalf("write harness: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		args   []string
+		stderr string
+	}{
+		{"with a count", []string{"Starting services", "5", "9"}, "::memql-progress:: 5/9 Starting services\n"},
+		{"without a count", []string{"Installing ArgoCD"}, "::memql-progress:: - Installing ArgoCD\n"},
+		{"zero done is a count", []string{"Building images", "0", "3"}, "::memql-progress:: 0/3 Building images\n"},
+		{"a malformed count drops the count, not the line", []string{"Importing images", "two", "3"}, "::memql-progress:: - Importing images\n"},
+		{"a zero total is no count", []string{"Importing images", "0", "0"}, "::memql-progress:: - Importing images\n"},
+		{"half a count is no count", []string{"Importing images", "2"}, "::memql-progress:: - Importing images\n"},
+		{"an empty label reports nothing", []string{""}, ""},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("bash", append([]string{harness}, tc.args...)...)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("cap_progress failed the script: %v\nstderr:\n%s", err, stderr.String())
+			}
+			if got := stderr.String(); got != tc.stderr {
+				t.Errorf("stderr = %q, want %q", got, tc.stderr)
+			}
+			if strings.Contains(stdout.String(), "memql-progress") {
+				t.Errorf("a progress line reached stdout, which belongs to the result envelope:\n%s", stdout.String())
+			}
+			var env envelope
+			if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env); err != nil || !env.OK {
+				t.Errorf("stdout is not exactly one ok envelope (%v):\n%s", err, stdout.String())
+			}
+		})
+	}
+}

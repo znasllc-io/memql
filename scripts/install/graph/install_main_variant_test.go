@@ -42,6 +42,7 @@ func applyMainDeltas(t *testing.T, g *Graph) *Graph {
 				ID:             "buildImages",
 				Script:         "k3d.dev",
 				TimeoutSeconds: 2700,
+				Label:          "Building MemQL",
 				Description: "Building MemQL from the source just downloaded and starting the " +
 					"cluster on it.",
 				Params:      map[string]string{"image-source": "checkout"},

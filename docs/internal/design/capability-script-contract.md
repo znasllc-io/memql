@@ -231,6 +231,7 @@ Key helpers (full reference in the file header):
 | `cap_require <name> <value>`    | fail (exit 2) when a required param is empty              |
 | `cap_confirm_or_die <got> <exp>`| non-interactive replacement for a `read -p` confirmation  |
 | `cap_info/cap_warn/cap_error`   | human logging — **to stderr**                            |
+| `cap_progress <label> [<done> <total>]` | one structured progress line — **to stderr** (see below) |
 | `cap_result_set <k> <strval>`   | add a string field to `result`                            |
 | `cap_result_set_raw <k> <json>` | add a number/bool/object field to `result`                |
 | `cap_changed`                   | mark that this run mutated state                          |
@@ -240,6 +241,30 @@ Key helpers (full reference in the file header):
 The library installs an `EXIT` trap so that **even an uncaught `set -e` abort
 emits a failure envelope** — there is no silent death. Success paths must call
 `cap_ok` explicitly; the conformance test enforces this.
+
+### Progress lines: `cap_progress`
+
+A long capability (creating a cluster, building images) can say where it has
+got to without breaking the stdout rule. `cap_progress` writes exactly one line
+to **stderr**:
+
+```text
+::memql-progress:: <done>/<total> <label>      cap_progress "Starting services" 5 9
+::memql-progress:: - <label>                   cap_progress "Installing ArgoCD"
+```
+
+- `<label>` is short, sentence case, in the operator's words — it is shown as
+  the status line under a progress bar ("Starting services 5 of 9").
+- `<done>` and `<total>` are whole numbers counting the phase's **own** units
+  (services, images), not the whole step. Pass both or neither; a malformed
+  count is dropped and the label still reported, because reporting progress
+  must never fail a capability.
+- The line is **not a log line**. The editor's runner
+  (`editors/vscode/src/install/runner.ts`) recognises the prefix, turns the line
+  into a `stepPhase` event and keeps it out of the step's log, its saved failure
+  output and the run record. A human at a terminal simply sees it.
+- It is advisory. Nothing verifies against it and nothing may depend on it: the
+  result envelope stays the only statement of what a capability did.
 
 ## Capability descriptor (`--print-spec`)
 
@@ -288,7 +313,9 @@ source `capability.sh`):
 - rejects an undeclared flag with exit 2 + a failure envelope whose
   `error.code` is 2 (#2508);
 - resolves every key of a multi-key stdin-JSON params object -- stdin is
-  buffered once in the parent shell, never re-read per `cap_param` (#2508).
+  buffered once in the parent shell, never re-read per `cap_param` (#2508);
+- `cap_progress` writes its one line to stderr and nothing to stdout, in both
+  shapes, and never fails the script on a malformed count.
 
 New capability scripts are picked up automatically. A script that is *not* a
 capability backend (a pure status reporter, a dev convenience) need not adopt

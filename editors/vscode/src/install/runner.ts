@@ -105,6 +105,68 @@ export interface ScriptRun {
   timeoutMs?: number;
   /** Called with each line the script writes to stderr, as it arrives. */
   onLog?: (line: string) => void;
+  /**
+   * Called with each `cap_progress` line the script writes, INSTEAD of onLog.
+   *
+   * A progress line is a statement about where the step has got to, not an
+   * account of what it did, so it never reaches the log, the failure output or
+   * the run record. Without this callback such lines are dropped the same way.
+   */
+  onProgress?: (progress: ProgressLine) => void;
+}
+
+/**
+ * The prefix `cap_progress` (scripts/lib/capability.sh) writes to stderr.
+ *
+ * Kept in step with the shell by capability_contract_test.go on that side and
+ * progressLines.test.ts on this one: the shell writes exactly this, and a line
+ * that starts with it is read as progress rather than logged.
+ */
+export const PROGRESS_PREFIX = "::memql-progress::";
+
+/** One parsed `cap_progress` line: a phase label, and a count when it has one. */
+export interface ProgressLine {
+  label: string;
+  done?: number;
+  total?: number;
+}
+
+const PROGRESS_COUNT_RE = /^(\d+)\/(\d+)$/;
+
+/**
+ * Reads a `cap_progress` line, or returns null for any other line.
+ *
+ * The two shapes the shell writes:
+ *
+ *     ::memql-progress:: 3/9 Starting services
+ *     ::memql-progress:: - Installing ArgoCD
+ *
+ * LENIENT ABOUT THE COUNT, STRICT ABOUT THE LABEL. A count that does not parse
+ * leaves the whole remainder as the label, and a total of zero drops the count,
+ * because the script plainly meant to report a phase and a status line with a
+ * stray token in it is better than one that vanished. A line with no label at
+ * all is not progress and stays in the log, where a broken call is visible.
+ */
+export function parseProgressLine(line: string): ProgressLine | null {
+  const trimmed = line.replace(/\r$/, "");
+  if (!trimmed.startsWith(PROGRESS_PREFIX)) return null;
+  const rest = trimmed.slice(PROGRESS_PREFIX.length).trim();
+  if (rest === "") return null;
+  const space = rest.search(/\s/);
+  const head = space === -1 ? rest : rest.slice(0, space);
+  const tail = space === -1 ? "" : rest.slice(space).trim();
+  if (head === "-") {
+    return tail === "" ? null : { label: tail };
+  }
+  const count = PROGRESS_COUNT_RE.exec(head);
+  if (count !== null) {
+    if (tail === "") return null;
+    const done = Number(count[1]);
+    const total = Number(count[2]);
+    if (total > 0) return { label: tail, done: Math.min(done, total), total };
+    return { label: tail };
+  }
+  return { label: rest };
 }
 
 export interface ScriptOutcome {
@@ -223,10 +285,31 @@ export const runCapabilityScript: RunScript = async (run: ScriptRun): Promise<Sc
     let logCarry = "";
     let settled = false;
 
+    // Every stderr line passes through here exactly once. A progress line goes
+    // to onProgress and nowhere else -- not the log, and not the stderr the
+    // outcome carries into a failure's output and the run record.
+    const takeLine = (line: string, terminated: boolean): void => {
+      const progress = parseProgressLine(line);
+      if (progress !== null) {
+        run.onProgress?.(progress);
+        return;
+      }
+      stderr += terminated ? `${line}\n` : line;
+      run.onLog?.(line);
+    };
+
     const finish = (exitCode: number, signal: NodeJS.Signals | null, failure?: string): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      // The unterminated tail, on every way out -- a timeout included. It still
+      // reaches `stderr` verbatim, but only a tail with something in it is
+      // worth a log line.
+      if (logCarry !== "") {
+        if (logCarry.trim() === "") stderr += logCarry;
+        else takeLine(logCarry, false);
+        logCarry = "";
+      }
       const parsed = parseEnvelope(stdout);
       resolve({
         argv,
@@ -277,12 +360,10 @@ export const runCapabilityScript: RunScript = async (run: ScriptRun): Promise<Sc
     });
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
-      if (!run.onLog) return;
       logCarry += chunk;
       const lines = logCarry.split("\n");
       logCarry = lines.pop() ?? "";
-      for (const line of lines) run.onLog(line);
+      for (const line of lines) takeLine(line, true);
     });
 
     child.on("error", (err) => {
@@ -293,7 +374,6 @@ export const runCapabilityScript: RunScript = async (run: ScriptRun): Promise<Sc
       );
     });
     child.on("close", (code, signal) => {
-      if (run.onLog && logCarry.trim() !== "") run.onLog(logCarry);
       finish(code ?? (signal ? SYNTHESISED_EXIT_CODES.signalled : 1), signal);
     });
   });

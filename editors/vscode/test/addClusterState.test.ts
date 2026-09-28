@@ -21,6 +21,7 @@ function step(id: string, description = id): Step {
   return {
     id,
     script: "install.binary",
+    label: "Working",
     description,
     elevation: "none",
     retained: false,
@@ -258,9 +259,9 @@ test("the plan is on screen before anything runs, every step pending", () => {
   s.apply({
     type: "runStarted",
     steps: [
-      { id: "detect", description: "look at the machine" },
-      { id: "binary", description: "place a tool" },
-      { id: "cluster", description: "create the cluster" },
+      { id: "detect", label: "Checking this computer", description: "look at the machine" },
+      { id: "binary", label: "Installing tools", description: "place a tool" },
+      { id: "cluster", label: "Creating the cluster", description: "create the cluster" },
     ],
   } as ExecEvent);
 
@@ -278,18 +279,19 @@ test("the plan is on screen before anything runs, every step pending", () => {
   assert.equal(s.steps.find((p) => p.id === "cluster")?.state, "pending", "the steps ahead stay ahead");
 });
 
-test("a re-run keeps what the previous attempt established", () => {
-  // Retry re-runs the WHOLE graph, so `runStarted` arrives a second time. If it
-  // reset the list, every step the operator had watched succeed would blink back
-  // to pending -- a display of the event rather than of the machine.
+test("a re-run starts every step again, and remembers what each came to", () => {
+  // Retry re-runs the WHOLE graph, so `runStarted` arrives a second time. Each
+  // step starts from pending, so the progress bar never runs ahead of the run
+  // and then back; the steps that passed re-report as skipped within a second.
+  // What each came to last time is kept beside it for display.
   const s = new AddClusterState();
   s.chooseAction("install");
   s.beginRun();
   const plan = {
     type: "runStarted",
     steps: [
-      { id: "binary", description: "place a tool" },
-      { id: "cluster", description: "create the cluster" },
+      { id: "binary", label: "Installing tools", description: "place a tool" },
+      { id: "cluster", label: "Creating the cluster", description: "create the cluster" },
     ],
   } as ExecEvent;
 
@@ -299,8 +301,13 @@ test("a re-run keeps what the previous attempt established", () => {
   s.retry();
   s.apply(plan);
 
-  assert.equal(s.steps.find((p) => p.id === "binary")?.state, "done");
-  assert.equal(s.steps.find((p) => p.id === "cluster")?.state, "pending");
+  const binary = s.steps.find((p) => p.id === "binary");
+  const cluster = s.steps.find((p) => p.id === "cluster");
+  assert.equal(binary?.state, "pending");
+  assert.equal(binary?.previousState, "done");
+  assert.equal(cluster?.state, "pending");
+  assert.equal(cluster?.previousState, "failed");
+  assert.equal(binary?.label, "Installing tools");
 });
 
 test("every executor status reaches the screen, including preserved", () => {

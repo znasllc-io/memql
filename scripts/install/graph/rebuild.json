@@ -6,6 +6,7 @@
     {
       "id": "rebuildFromCheckout",
       "script": "k3d.dev",
+      "label": "Rebuilding MemQL",
       "description": "Building MemQL from your source checkout, loading it into the cluster, and restarting the cluster on it.",
       "params": {
         "image-source": "checkout"

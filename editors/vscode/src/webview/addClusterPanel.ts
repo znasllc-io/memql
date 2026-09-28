@@ -117,6 +117,7 @@ import { failureGuidance, runIsSettled, toStepViews } from "../state/installProg
 import { RunRecorder } from "../state/runRecorder.js";
 import { LOCAL_INSTANCE_NAME } from "../state/deployments.js";
 import { defaultRunsDir } from "../state/runLog.js";
+import { historicalWeights } from "../state/runProgress.js";
 // The install-run screens, shared with Deployments (memql#3738). INPUT_FIELDS
 // comes back with them because the message handler validates an incoming
 // field name against the same list the form rendered from -- two lists would
@@ -1038,10 +1039,17 @@ export class AddClusterPanel {
     // attempt's commit over the choice just made.
     const pin = checkoutPinFor(action, priorReceipt, inputs.version);
 
+    // The bar weighs each step by how long it last took on this machine, read
+    // before this run's own record exists.
+    const runKind = action === "repair" ? "repair" : "install";
+    this.state.setStepWeights(
+      await historicalWeights(this.deps.runsDir ?? defaultRunsDir(), { kinds: [runKind] }),
+    );
+
     const recorder = await RunRecorder.begin({
       dir: this.deps.runsDir ?? defaultRunsDir(),
       instance: LOCAL_INSTANCE_NAME,
-      kind: action === "repair" ? "repair" : "install",
+      kind: runKind,
       // A repair returns the cluster to the checkout its receipt names, so that
       // is both where it came from and where it is going. An install has
       // neither: nothing was here.
@@ -1676,6 +1684,9 @@ export class AddClusterPanel {
     const uninstalledVersion = recordedStackTag(
       await readReceipt(this.deps.receiptFile).catch(() => null),
     );
+    this.uninstall.setStepWeights(
+      await historicalWeights(this.deps.runsDir ?? defaultRunsDir(), { kinds: ["uninstall"] }),
+    );
     const recorder = await RunRecorder.begin({
       dir: this.deps.runsDir ?? defaultRunsDir(),
       instance: LOCAL_INSTANCE_NAME,
@@ -1986,6 +1997,7 @@ ${LOG_PANE_SCRIPT}
   private runHtml(): string {
     return renderRunningScreen({
       steps: this.state.steps,
+      progress: this.state.progress(),
       logsOpen: this.state.logsOpen,
       logsFollow: this.state.logsFollow,
       mode: this.state.action === "repair" ? "repair" : "install",
@@ -2001,6 +2013,7 @@ ${LOG_PANE_SCRIPT}
     return renderFailedScreen({
       failures: this.state.failures,
       steps: this.state.steps,
+      progress: this.state.progress(),
       logsOpen: this.state.logsOpen,
       logsFollow: this.state.logsFollow,
       mode: this.state.action === "repair" ? "repair" : "install",
@@ -2638,6 +2651,7 @@ ${overrides}`;
     const steps = this.uninstall.steps;
     const block = {
       steps,
+      progress: this.uninstall.progress(),
       mode: "uninstall" as const,
       running: !runIsSettled(steps),
       // Read off the STEPS rather than off the report, so the finished

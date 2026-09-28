@@ -99,6 +99,7 @@ import {
 } from "../state/updatePreflight.js";
 import { readUpdateState } from "../install/updateState.js";
 import { RunRecorder } from "../state/runRecorder.js";
+import { historicalWeights, type RunProgress } from "../state/runProgress.js";
 import { defaultRunsDir, RUN_LOG_KEEP } from "../state/runLog.js";
 import { isSameVersion, upgradePlan, upgradeSummary, type PlannedStepView } from "../state/upgradePlan.js";
 import { graphDocumentPath, loadGraphFile, type Graph } from "../install/graph.js";
@@ -848,6 +849,10 @@ export class DeploymentPanel {
     this.screen = "running";
     this.render();
 
+    // The bar weighs each step by how long it last took on this machine.
+    this.state.setStepWeights(
+      await historicalWeights(this.deps.runsDir ?? defaultRunsDir(), { kinds: ["rebuild"] }),
+    );
     const recorder = await RunRecorder.begin({
       dir: this.deps.runsDir ?? defaultRunsDir(),
       instance: instance.name,
@@ -1008,6 +1013,10 @@ export class DeploymentPanel {
     this.screen = "running";
     this.render();
 
+    // The bar weighs each step by how long it last took on this machine.
+    this.state.setStepWeights(
+      await historicalWeights(this.deps.runsDir ?? defaultRunsDir(), { kinds: ["update"] }),
+    );
     const recorder = await RunRecorder.begin({
       dir: this.deps.runsDir ?? defaultRunsDir(),
       instance: instance.name,
@@ -1125,6 +1134,10 @@ export class DeploymentPanel {
     // unreachable while blaming a credential nothing has ever asked for.
     // `providerFederation` skips satisfied, and every step behind it proceeds.
     const from = this.instance?.version ?? "";
+    // The bar weighs each step by how long it last took on this machine.
+    this.state.setStepWeights(
+      await historicalWeights(this.deps.runsDir ?? defaultRunsDir(), { kinds: ["upgrade"] }),
+    );
     const recorder = await RunRecorder.begin({
       dir: this.deps.runsDir ?? defaultRunsDir(),
       instance: this.instance?.name ?? "local",
@@ -1602,6 +1615,7 @@ export class DeploymentPanel {
 
   private runScreenInput(steps: StepProgress[]): {
     steps: StepProgress[];
+    progress: RunProgress;
     mode: RunMode;
     running: boolean;
     logsOpen: boolean;
@@ -1609,6 +1623,7 @@ export class DeploymentPanel {
   } {
     return {
       steps,
+      progress: this.state.progress(),
       mode: this.runMode,
       running: this.runAbort !== undefined,
       // FROM THE SHARED STATE OBJECT, which this panel already owns an instance

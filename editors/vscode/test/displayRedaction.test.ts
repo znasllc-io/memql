@@ -74,6 +74,7 @@ test("the run log pane renders nothing that redactForDisplay would have scrubbed
     steps: [
       {
         id: "seedBootstrap",
+        label: "",
         description: "Creating your owner account",
         state: "failed",
         reason: "",
@@ -113,6 +114,7 @@ test("a CLOSED pane carries no output at all, redacted or otherwise", () => {
     steps: [
       {
         id: "clusterUp",
+        label: "",
         description: "Creating the cluster",
         state: "done",
         reason: "",

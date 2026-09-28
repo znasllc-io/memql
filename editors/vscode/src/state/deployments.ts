@@ -227,7 +227,14 @@ export interface RunItem {
   label: string;
   status: RunItemStatus;
   detail?: string;
+  /** The item's latest transition: its start while running, its finish once settled. */
   at?: string;
+  /**
+   * When the step started, kept beside `at` once it has finished, so the record
+   * holds the step's real duration (state/runProgress.ts weighs the next run's
+   * progress bar by it). Absent on records written before it was kept.
+   */
+  startedAt?: string;
 }
 
 export interface Run {
