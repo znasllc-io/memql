@@ -279,8 +279,9 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		Settings: answerAffectingParams(entry.Config.Params),
 		Messages: []common.ChatMessage{{Role: "user", Content: text}},
 	}
+	client := withResolvedLevel(entry.Client, resolution.Decision, req.Level)
 	result, err := r.seam.serve(ctx, journalReq, invocation.TemplateId, func(ctx context.Context) (modelCallOutcome, error) {
-		v, callErr := entry.Client.Call(ctx, text)
+		v, callErr := client.Call(ctx, text)
 		return modelCallOutcome{Value: v, Local: isFleet}, callErr
 	})
 	if err != nil {
@@ -318,6 +319,37 @@ func (r *aiRuntime) Invoke(ctx context.Context, invocation *AIInvocation, data a
 		r.semantic.Store(ctx, namespace, text, result)
 	}
 	return result, nil
+}
+
+// withResolvedLevel binds the level a resolution served at onto the provider
+// record an ai() expression calls.
+//
+// An ai() expression calls the registry RECORD the router resolved, not the
+// router's wrapped client, so the per-resolution binding the router applies in
+// providerLookup never reaches it. The level is the binding that decides how
+// fast a local call is: it is what turns a model's hidden thinking off on
+// Ollama, and without it goalComplexityTriage -- a `fast` ai() prompt -- spent
+// 26 s to 2 m 51 s on qwen3.5:4b producing thousands of hidden tokens before a
+// fifty-token answer.
+//
+// The SERVED level is the one bound, since that is what ran; a resolution
+// that names none (a pin resolved outside the rules) falls back to the level
+// the call asked for. A provider with no level knob -- a vendor record -- is
+// returned as it is, and so is one whose binding would not answer the ai()
+// surface, rather than calling something that cannot take the prompt.
+func withResolvedLevel(client AIProvider, decision airoute.Decision, asked airoute.Level) AIProvider {
+	level := decision.ServedLevel
+	if level == "" {
+		level = asked
+	}
+	levelled, ok := client.(interface{ WithLevel(string) any })
+	if !ok || level == "" {
+		return client
+	}
+	if bound, ok := levelled.WithLevel(string(level)).(AIProvider); ok {
+		return bound
+	}
+	return client
 }
 
 // noteCacheServed records the decision behind an answer a cache served.
