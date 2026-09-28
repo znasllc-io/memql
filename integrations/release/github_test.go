@@ -64,14 +64,35 @@ type fakeGitHub struct {
 	pinCommits  []string
 	pinPROpened bool
 
+	// files is every other file GET /contents/<path> serves, keyed by
+	// repository path -- VERSION, in practice. A path in neither files nor
+	// pinFile answers 404, which is what GitHub says about a file that does
+	// not exist at that ref. Routed BY PATH on purpose: serving one body for
+	// every path would hand the VERSION read the stackPin.ts fixture.
+	files map[string]string
+	// fileReads records each contents read as "<path>@<ref>", so a test can
+	// prove WHICH commit VERSION was read at.
+	fileReads []string
+
 	server *httptest.Server
 }
 
 func newFakeGitHub(t *testing.T, tags []tagRef, headSha string) *fakeGitHub {
 	t.Helper()
-	f := &fakeGitHub{tags: tags, headSha: headSha}
+	f := &fakeGitHub{tags: tags, headSha: headSha, files: map[string]string{}}
 	f.server = httptest.NewServer(http.HandlerFunc(f.handle))
 	t.Cleanup(f.server.Close)
+	return f
+}
+
+// withVersionFile sets what VERSION reads. Every cut that reaches the VERSION
+// check needs one, and it is the version that cut is expected to tag: VERSION
+// equals the tag a cut creates, so a fixture that disagreed would be testing
+// the refusal rather than the thing the test is named for.
+func (f *fakeGitHub) withVersionFile(content string) *fakeGitHub {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.files[versionFilePath] = content
 	return f
 }
 
@@ -158,14 +179,27 @@ func (f *fakeGitHub) handle(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case strings.Contains(r.URL.Path, "/contents/") && r.Method == http.MethodGet:
-		if f.pinFailAt == "read" {
-			writeJSON(w, http.StatusForbidden, map[string]any{"message": "Resource not accessible by personal access token"})
-			return
+		path := r.URL.Path[strings.Index(r.URL.Path, "/contents/")+len("/contents/"):]
+		f.fileReads = append(f.fileReads, path+"@"+r.URL.Query().Get("ref"))
+		var content string
+		if path == pinFile {
+			if f.pinFailAt == "read" {
+				writeJSON(w, http.StatusForbidden, map[string]any{"message": "Resource not accessible by personal access token"})
+				return
+			}
+			content = f.pinContent
+		} else {
+			body, ok := f.files[path]
+			if !ok {
+				writeJSON(w, http.StatusNotFound, map[string]any{"message": "Not Found"})
+				return
+			}
+			content = body
 		}
 		// Wrapped at 60 columns exactly as GitHub does, which the strict
 		// base64 decoder rejects -- so the unwrap in GetFile is
 		// exercised rather than assumed.
-		encoded := base64.StdEncoding.EncodeToString([]byte(f.pinContent))
+		encoded := base64.StdEncoding.EncodeToString([]byte(content))
 		var wrapped strings.Builder
 		for idx := 0; idx < len(encoded); idx += 60 {
 			end := min(idx+60, len(encoded))
@@ -292,7 +326,7 @@ func TestCutComputesTheNextVersionFromTheNEWESTTag(t *testing.T) {
 		{"major", "v1.0.0"},
 	} {
 		t.Run(tc.bump, func(t *testing.T) {
-			f := newFakeGitHub(t, tags, "headsha1234567")
+			f := newFakeGitHub(t, tags, "headsha1234567").withVersionFile(strings.TrimPrefix(tc.want, "v") + "\n")
 			i, _ := ownerIntegration(t, f)
 			out, err := i.Cut(ownerCtx(), CutRequest{Bump: tc.bump})
 			if err != nil {
@@ -317,7 +351,7 @@ func TestCutWalksEveryPageOfTags(t *testing.T) {
 	for n := 0; n < 150; n++ {
 		tags = append(tags, tagRef{Name: fmt.Sprintf("v0.%d.0", n), Sha: fmt.Sprintf("sha%d", n)})
 	}
-	f := newFakeGitHub(t, tags, "headsha")
+	f := newFakeGitHub(t, tags, "headsha").withVersionFile("0.149.1\n")
 	i, _ := ownerIntegration(t, f)
 	out, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
 	if err != nil {
@@ -329,7 +363,7 @@ func TestCutWalksEveryPageOfTags(t *testing.T) {
 }
 
 func TestCutTagsMainsHeadAndRecordsIt(t *testing.T) {
-	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "oldsha"}}, "abcdef1234567890")
+	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "oldsha"}}, "abcdef1234567890").withVersionFile("1.0.1\n")
 	i, engine := ownerIntegration(t, f)
 	out, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"})
 	if err != nil {
@@ -358,7 +392,7 @@ func TestCutOrdersTagBeforeRelease(t *testing.T) {
 	// The order is the concurrency gate: GitHub's ref-create is atomic and
 	// the Release API is not, so creating the Release first would open the
 	// race the tag closes.
-	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head")
+	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head").withVersionFile("1.1.0\n")
 	i, _ := ownerIntegration(t, f)
 	if _, err := i.Cut(ownerCtx(), CutRequest{Bump: "minor"}); err != nil {
 		t.Fatalf("cut: %v", err)
@@ -382,7 +416,7 @@ func TestCutRefusesWhenTheNextTagAlreadyExists(t *testing.T) {
 	f := newFakeGitHub(t, []tagRef{
 		{Name: "v1.0.0", Sha: "old"},
 		{Name: "v1.0.1", Sha: "someone-elses-cut"},
-	}, "head")
+	}, "head").withVersionFile("1.0.2\n")
 	// The arithmetic sees v1.0.1 as newest and computes v1.0.2, so to
 	// reach ref_exists the fake must refuse the create instead.
 	f.tagStatus = http.StatusUnprocessableEntity
@@ -489,7 +523,7 @@ func TestCutReportsTheHalfDoneStateAndRecordsIt(t *testing.T) {
 	// The tag lands and the Release does not. Nothing will build, and the
 	// repository now carries a tag whose origin only this cluster knows --
 	// so the row is what makes it explicable later.
-	f := newFakeGitHub(t, []tagRef{{Name: "v2.3.4", Sha: "old"}}, "head")
+	f := newFakeGitHub(t, []tagRef{{Name: "v2.3.4", Sha: "old"}}, "head").withVersionFile("2.3.5\n")
 	f.releaseStatus = http.StatusUnprocessableEntity
 	i, engine := ownerIntegration(t, f)
 
@@ -523,7 +557,7 @@ func TestCutReportsTheHalfDoneStateAndRecordsIt(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDryRunComputesThePlanAndCreatesNothing(t *testing.T) {
-	f := newFakeGitHub(t, []tagRef{{Name: "v3.1.4", Sha: "old"}}, "deadbeefcafe")
+	f := newFakeGitHub(t, []tagRef{{Name: "v3.1.4", Sha: "old"}}, "deadbeefcafe").withVersionFile("3.2.0\n")
 	i, engine := ownerIntegration(t, f)
 
 	out, err := i.Cut(ownerCtx(), CutRequest{Bump: "minor", DryRun: true})
@@ -560,7 +594,7 @@ func TestDryRunComputesThePlanAndCreatesNothing(t *testing.T) {
 // permanently empty with every other test in this file still green. Asserting
 // the ORIGIN each call arrived under is what makes that unmissable.
 func TestCutWritesUnderInternalOrigin(t *testing.T) {
-	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head")
+	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head").withVersionFile("1.0.1\n")
 	i, engine := ownerIntegration(t, f)
 	if _, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"}); err != nil {
 		t.Fatalf("cut: %v", err)
@@ -577,7 +611,7 @@ func TestCutWritesUnderInternalOrigin(t *testing.T) {
 }
 
 func TestCutWritesTheAuditEventBesideTheRow(t *testing.T) {
-	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head")
+	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head").withVersionFile("1.0.1\n")
 	i, engine := ownerIntegration(t, f)
 	if _, err := i.Cut(ownerCtx(), CutRequest{Bump: "patch"}); err != nil {
 		t.Fatalf("cut: %v", err)
@@ -607,7 +641,7 @@ func TestCutWritesTheAuditEventBesideTheRow(t *testing.T) {
 // which produces a second version of the same code and is the worst outcome
 // available here.
 func TestBookkeepingFailureDoesNotFailAPublishedCut(t *testing.T) {
-	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head")
+	f := newFakeGitHub(t, []tagRef{{Name: "v1.0.0", Sha: "old"}}, "head").withVersionFile("1.0.1\n")
 	i, _ := ownerIntegration(t, f)
 	i.store = NewStore(&failingEngine{})
 

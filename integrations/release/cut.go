@@ -45,14 +45,16 @@ import (
 //  3. read tags + head sha  -- one walk, so the two answers cannot disagree.
 //  4. refuse if head is already released.
 //  5. compute the next version.
-//  6. dry run stops here    -- with the plan and nothing created.
-//  7. create the tag ref    -- ATOMIC, and therefore the concurrency gate.
-//  8. publish the Release   -- the step that fires the cascade.
-//  9. optional pin-bump PR  -- degrades to a note, never fails the cut.
-// 10. write the row + audit -- bookkeeping; a failure here is logged, not
+//  6. refuse unless VERSION at head reads it -- see versionfile.go. VERSION
+//     equals the tag a cut creates, and it arrives by pull request first.
+//  7. dry run stops here    -- with the plan and nothing created.
+//  8. create the tag ref    -- ATOMIC, and therefore the concurrency gate.
+//  9. publish the Release   -- the step that fires the cascade.
+// 10. optional pin-bump PR  -- degrades to a note, never fails the cut.
+// 11. write the row + audit -- bookkeeping; a failure here is logged, not
 //     propagated, because the release has already shipped.
 //
-// Seven and eight are the only irreversible steps, and they are adjacent and
+// Eight and nine are the only irreversible steps, and they are adjacent and
 // last-but-three on purpose: everything that can refuse has refused by then.
 
 // Outcome is what a cut returns to the DSL caller.
@@ -140,6 +142,12 @@ func (i *Integration) Cut(ctx context.Context, req CutRequest) (Outcome, error) 
 	}
 	next, err := previous.bump(bump)
 	if err != nil {
+		return Outcome{}, err
+	}
+
+	// Before the dry-run return, so the plan a card shows is one the cut
+	// would accept -- see versionfile.go.
+	if err := i.checkVersionFile(ctx, cfg, headSha, next); err != nil {
 		return Outcome{}, err
 	}
 

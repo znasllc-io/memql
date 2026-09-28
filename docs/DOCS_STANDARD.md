@@ -107,7 +107,10 @@ it's `internal`.
    registry + `component/architecture`), so reference can never drift.
 3. **Bundle:** `scripts/docs/build-docs-bundle.sh` selects the public set,
    runs the generator, and emits `docs-bundle/` = the markdown tree + a
-   `manifest.json` (nav tree, section map, `version`, `engineVersion`).
+   `manifest.json` (`version`, `pageCount`, the `areas` section map, and the
+   `nav` tree). `version` is the one version field: the build refuses a
+   `--version` that is not `X.Y.Z` or differs from the `VERSION` file, which
+   equals the release tag (VERSIONING.md).
 4. **Release:** when a GitHub Release is published on a bare `X.Y.Z` tag, the
    `publish-docs-bundle` workflow (`.github/workflows/publish-docs-bundle.yml`)
    builds the bundle **at that tag** on the build server and attaches

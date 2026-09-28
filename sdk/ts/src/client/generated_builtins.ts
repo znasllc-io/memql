@@ -2340,7 +2340,7 @@ QueryClient.prototype.recordFeedback = function (this: QueryClient, args: Record
   return this.executeNamed("recordFeedback", buildRecordFeedback(args), opts);
 };
 
-/** Cut a new release of MemQL: compute the next version from the repository's existing vX.Y.Z tags, create the tag at main's head, and publish a GitHub Release -- which is what fires the image-build cascade. Owner role only, enforced in Go before any network call. Returns the version, the Release URL and the base sha. Requires MEMQL_RELEASE_REPO and the MEMQL_GITHUB_RELEASE_TOKEN credential. */
+/** Cut a new release of MemQL: compute the next version from the repository's existing vX.Y.Z tags, create the tag at main's head, and publish a GitHub Release -- which is what fires the image-build cascade. Refuses with version_file_stale unless the repo-root VERSION file at main's head already reads the version being cut; VERSION arrives by pull request before the cut. Owner role only, enforced in Go before any network call. Returns the version, the Release URL and the base sha. Requires MEMQL_RELEASE_REPO and the MEMQL_GITHUB_RELEASE_TOKEN credential. */
 export interface ReleaseCutArgs {
   /** Which part of the newest existing version to increment. major and minor zero the parts below them. */
   // Enum: major | minor | patch
@@ -2349,7 +2349,7 @@ export interface ReleaseCutArgs {
   notes?: string;
   /** Also open a pull request bumping the VS Code extension's DEFAULT_STACK_TAG to the new tag. A PR that cannot be opened is recorded as a note on the release row and never fails the cut, which has already published by then. */
   bumpExtensionPin?: boolean;
-  /** Compute the plan -- next version and base sha -- and write nothing, create nothing, publish nothing. The first validation of a freshly seeded credential should use this. */
+  /** Compute the plan -- next version and base sha -- and run every refusal check, a stale VERSION included, but write nothing, create nothing, publish nothing. The first validation of a freshly seeded credential should use this. */
   dryRun?: boolean;
 }
 

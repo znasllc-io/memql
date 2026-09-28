@@ -49,7 +49,23 @@
 # `release: [published]`, so it produces exactly the silent no-images state this
 # script exists to detect -- while looking, in the GitHub UI, like a release.
 #
-# Refs: memql#4485 memql#4493 memql#2519 memql#4061 memql#2221
+# A STALE VERSION IS REFUSED TOO (memql#5714). The repo-root VERSION file equals
+# the tag of the commit a release tags (VERSIONING.md), so before creating a
+# release this reads VERSION at exactly the commit the tag points at -- the
+# existing tag, or the commit it will be created on -- and refuses when the file
+# names anything else. The same rule as the console cut
+# (integrations/release/versionfile.go, refusal version_file_stale). When the
+# tag does not exist yet and no targetSha is given, the default branch's head is
+# read ONCE and passed as --target, so the commit whose VERSION was checked is
+# the commit that gets tagged rather than whatever the branch points at a moment
+# later. An already-PUBLISHED release is left alone: it is history, and this run
+# only waits for its build.
+#
+# Exit codes: 0 ok | 2 bad param | 3 refused (a draft release, or a stale or
+# missing VERSION) | 4 gh or python3 missing or unauthenticated | 5 GitHub call
+# failed, or no build appeared
+#
+# Refs: memql#4485 memql#4493 memql#2519 memql#4061 memql#2221 memql#5714
 
 set -euo pipefail
 
@@ -88,6 +104,8 @@ PUBLISHED_AT=""
 RUN_STATUS=""
 RUN_CONCLUSION=""
 NOTES_OUT=""
+VERSION_REF=""
+VERSION_FILE=""
 
 function note() {
     NOTES_OUT="${NOTES_OUT:+${NOTES_OUT}; }$1"
@@ -151,6 +169,78 @@ function resolve_existing_release() {
     return 0
 }
 
+# resolve_version_ref sets VERSION_REF to the commit the release's tag points
+# at, or will point at once created.
+#
+#   the tag exists       -> the tag itself; gh release create uses it as is
+#   targetSha was given  -> that sha, which is already passed as --target
+#   neither              -> the default branch's head, read once here and then
+#                           assigned to TARGET_SHA so it is ALSO passed as
+#                           --target. Without that, gh release create would tag
+#                           whatever the branch points at when it runs, which
+#                           need not be the commit VERSION was read at.
+#
+# Tag existence is asked through matching-refs, which answers an empty list for
+# an absent tag -- so "absent" and "could not ask" are different outcomes here
+# rather than one failed call read two ways. matching-refs is a PREFIX match
+# (v1.2.3 also matches v1.2.30), hence the exact select.
+function resolve_version_ref() {
+    local existing branch
+    if ! existing="$(gh api "repos/${REPO}/git/matching-refs/tags/${TAG}" \
+            --jq ".[] | select(.ref == \"refs/tags/${TAG}\") | .ref")"; then
+        cap_fail 5 "could not ask GitHub whether the tag ${TAG} exists in ${REPO} (gh's error is above), so there is no commit to check VERSION at"
+    fi
+    if [[ -n "$existing" ]]; then
+        VERSION_REF="$TAG"
+        return 0
+    fi
+    if [[ -z "$TARGET_SHA" ]]; then
+        if ! branch="$(gh api "repos/${REPO}" --jq '.default_branch')" || [[ -z "$branch" ]]; then
+            cap_fail 5 "could not read the default branch of ${REPO} (gh's error is above), so there is no commit to check VERSION at"
+        fi
+        if ! TARGET_SHA="$(gh api "repos/${REPO}/commits/${branch}" --jq '.sha')" || [[ -z "$TARGET_SHA" ]]; then
+            cap_fail 5 "could not read the head of ${branch} in ${REPO} (gh's error is above), so there is no commit to check VERSION at"
+        fi
+        note "the tag ${TAG} will be created at ${branch}'s head ${TARGET_SHA}"
+    fi
+    VERSION_REF="$TARGET_SHA"
+    return 0
+}
+
+# verify_version_file refuses (exit 3) unless VERSION at VERSION_REF reads BARE.
+#
+# The root listing is read first so a MISSING file is told apart from a failed
+# call without parsing gh's error text: a listing that succeeds and does not
+# name VERSION means the file is absent at that commit. The file itself is then
+# fetched RAW, which needs no base64 decoding (GNU `base64 -d` and BSD
+# `base64 -D` disagree) and no JSON parsing. The listing is captured and
+# searched with a here-string, never piped into `grep -q`: under pipefail an
+# early grep exit can SIGPIPE the writer and fail a check that matched.
+function verify_version_file() {
+    resolve_version_ref
+    cap_result_set "versionRef" "$VERSION_REF"
+
+    local listing raw
+    if ! listing="$(gh api "repos/${REPO}/contents?ref=${VERSION_REF}" --jq '.[].name')"; then
+        cap_fail 5 "could not list the root of ${REPO} at ${VERSION_REF} (gh's error is above), so VERSION could not be checked"
+    fi
+    if ! grep -qx 'VERSION' <<<"$listing"; then
+        cap_fail 3 "there is no VERSION file at ${VERSION_REF} in ${REPO}. VERSION must equal the tag a release is cut at (VERSIONING.md); land a pull request adding VERSION with the single line ${BARE}, then re-run this capability."
+    fi
+    if ! raw="$(gh api -H 'Accept: application/vnd.github.raw+json' "repos/${REPO}/contents/VERSION?ref=${VERSION_REF}")"; then
+        cap_fail 5 "could not read VERSION at ${VERSION_REF} in ${REPO} (gh's error is above)"
+    fi
+    # First line, all whitespace removed -- the same reading the Makefile and
+    # scripts/docs/build-docs-bundle.sh take.
+    VERSION_FILE="$(printf '%s\n' "$raw" | sed -n '1p' | tr -d '[:space:]')"
+    cap_result_set "versionFile" "$VERSION_FILE"
+    if [[ "$VERSION_FILE" != "$BARE" ]]; then
+        cap_fail 3 "VERSION at ${VERSION_REF} reads '${VERSION_FILE}', and this would release ${TAG}. VERSION must equal the tag a release is cut at, so every reader of the file -- the docs bundle among them -- names the release it belongs to (VERSIONING.md). Land a pull request setting VERSION to ${BARE}, then re-run this capability."
+    fi
+    note "VERSION at ${VERSION_REF} reads ${VERSION_FILE}, matching ${TAG}"
+    return 0
+}
+
 function publish_release() {
     resolve_existing_release
 
@@ -163,6 +253,10 @@ function publish_release() {
             cap_fail 3 "a DRAFT release exists for ${TAG}. A draft emits no 'release: [published]' event, so it builds no images while looking like a release in the UI. Publish it in the GitHub UI (or delete it and re-run), then re-run this capability."
             ;;
     esac
+
+    # Before the dry-run return: a dry run that passed here and a real run that
+    # then refused would make the dry run a promise it cannot keep.
+    verify_version_file
 
     if [[ "$DRY_RUN" == "true" ]]; then
         note "--dryRun: would publish a release for ${TAG}; nothing created"

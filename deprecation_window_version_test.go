@@ -30,11 +30,14 @@ import (
 //
 // # Why VERSION is the right thing to read
 //
-// VERSION carries the plain semver the next release will be cut at
-// (VERSIONING.md), so it is the one fact in the tree that says which release
-// this code will first appear in. The BINARY never reads it (memql#3998) and
-// this does not change that: a test is not a binary, and nothing at run time
-// consults the file.
+// VERSION equals the tag of the commit a release cut tags (VERSIONING.md,
+// memql#5714): between cuts it names the release main was last cut at, and a
+// "prepare" pull request moves it to the next one immediately before the cut.
+// Either way, code not yet released first appears in a LATER release than the
+// one VERSION names, so VERSION is the one fact in the tree that bounds which
+// release this code will first appear in. The BINARY never reads it
+// (memql#3998) and this does not change that: a test is not a binary, and
+// nothing at run time consults the file.
 //
 // # Why there is a ledger
 //
@@ -43,8 +46,10 @@ import (
 // forever on a fact that is correct. Nothing in the tree distinguishes "shipped
 // in 0.23.0" from "claims 0.23.0 and is landing in 0.24" -- only the release
 // history does -- so that one bit is recorded here, once, by the release that
-// ships it. An unrecorded form is held to the tree; a recorded one is checked
-// for agreement instead.
+// ships it: the prepare pull request that sets VERSION to X.Y.0 records every
+// form dated X.Y.0 in the same change, because that is the moment the tree
+// stops being able to cut X.Y.0 for anything new. An unrecorded form is held to
+// the tree; a recorded one is checked for agreement instead.
 
 // releasedForms names every form whose deprecation warning has ALREADY SHIPPED
 // in a cut release, mapped to the release it first warned in -- which must be
@@ -109,8 +114,9 @@ warns before the date it publishes.
 
 Changing DeprecatedIn moves the refusal with it: RefusedFrom is derived, so %s.0
 refuses at %s rather than at %s. If instead this form's warning has genuinely
-already shipped in %s, record that in releasedForms above -- that is the one case
-this gate cannot see for itself.`,
+already shipped in %s -- or this is the prepare pull request setting VERSION to
+the release that first carries it -- record that in releasedForms above; that is
+the one case this gate cannot see for itself.`,
 				f.Rule, f.DeprecatedIn, next,
 				deprecation.MinimumMinorReleases, deprecation.MinimumMinorReleases,
 				version, next,
@@ -155,15 +161,22 @@ func minorOf(v string) (minorRelease, bool) {
 	return minorRelease{major: major, minor: minor}, true
 }
 
-// nextMinorRelease is the next MINOR release this tree will cut, read off
-// VERSION.
+// nextMinorRelease is the first MINOR release that can carry code this tree
+// adds, read off VERSION: always the minor after VERSION's own.
 //
-// VERSION is "the plain semver the next release will be cut at" (VERSIONING.md),
-// so the patch is what decides: a VERSION ending in .0 IS the minor release
-// being prepared, and any other patch means the next release is a patch of the
-// current minor and the next MINOR is the one after it. Getting this backwards
-// would fail the gate on the very commit that prepares the release carrying a
-// form -- the one moment the date is most certainly right.
+// VERSION equals the tag of the commit a cut tags (VERSIONING.md, memql#5714),
+// so it names a release that is already cut -- or, for the few minutes between
+// a merged prepare pull request and the cut, one whose contents are already
+// fixed. Code not in that release lands in a later one, and the first later
+// MINOR is VERSION's minor plus one, whatever the patch.
+//
+// It used to read the patch: a VERSION ending in .0 was taken to be the minor
+// being PREPARED, because VERSION was then described as "the release the next
+// cut will be". Under the tag-equality rule a .0 VERSION is, nearly always, a
+// minor that has ALREADY SHIPPED, and that reading told a form written the day
+// after 0.24.0 was cut to date itself 0.24.0 -- the exact landing-late date this
+// gate exists to refuse. The prepare pull request for X.Y.0 now records the
+// forms X.Y.0 carries in releasedForms, which is the ledger's own rule.
 func nextMinorRelease(version string) (minorRelease, bool) {
 	parts := strings.Split(strings.TrimPrefix(strings.TrimSpace(version), "v"), ".")
 	if len(parts) != 3 {
@@ -177,27 +190,25 @@ func nextMinorRelease(version string) (minorRelease, bool) {
 	if err != nil || patch < 0 {
 		return minorRelease{}, false
 	}
-	if patch == 0 {
-		return at, true
-	}
 	return at.plusMinors(1), true
 }
 
 // The arithmetic above decides whether a date is a lie, so it is tested rather
-// than trusted -- particularly the .0 case, which is the release-prep commit.
+// than trusted -- particularly the .0 case, which is a minor that has shipped
+// (or whose prepare pull request has fixed its contents), not one still open.
 func TestNextMinorReleaseReadsVersionTheWayVersioningMdDefinesIt(t *testing.T) {
 	for _, tc := range []struct {
 		version string
 		want    string
 		ok      bool
 	}{
-		{"0.22.8", "0.23", true},  // a patch is next, so the next MINOR is the one after
-		{"0.23.0", "0.23", true},  // the minor itself is being prepared
-		{"0.23.1", "0.24", true},  // it shipped; the next minor is the one after
-		{"1.0.0", "1.0", true},    //
+		{"0.22.8", "0.23", true},  // 0.22.8 is cut; new code lands in 0.22.9 or 0.23.0
+		{"0.23.0", "0.24", true},  // 0.23.0 is cut (or prepared); new code misses it
+		{"0.23.1", "0.24", true},  //
+		{"1.0.0", "1.1", true},    //
 		{"1.4.12", "1.5", true},   //
 		{"v0.22.8", "0.23", true}, // a v-prefixed tag reads the same
-		{"0.22", "", false},       // not a release: the patch decides, so it must be there
+		{"0.22", "", false},       // not a release: VERSION is always X.Y.Z
 		{"dev", "", false},
 		{"", "", false},
 	} {

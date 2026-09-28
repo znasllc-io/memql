@@ -27,6 +27,13 @@ deliberately stale and NOTHING here touches it; `scripts/release/release.sh`
 pushes (repository ruleset), so anything requiring a COMMIT goes through a PR
 and the merge queue.
 
+> **Later change (2026-09-28, memql#5714).** `VERSION` is no longer
+> deliberately stale: it equals the tag of the commit a cut tags, it reaches
+> `main` by pull request before the cut, and the cut reads it at the commit it
+> tags and refuses a mismatch (`version_file_stale`). The runbook,
+> `docs/public/operate/release-cutting.md`, is current; this record is not
+> rewritten.
+
 So "cut a new version" == "create the tag and publish the Release"; CI does
 the rest. That is exactly the surface the automation drives -- it does NOT
 build images, push images, or bypass any gate.
