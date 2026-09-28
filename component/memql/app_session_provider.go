@@ -239,7 +239,7 @@ func (p *sessionProvider) run(
 	// A STEP HANDED OVER FOR NOBODY IS REFUSED BEFORE THE DELEGATE, with the
 	// app door's own reason: the session would run on a person's machine
 	// under a credential naming that person, and there is no person here.
-	if auth.NamesNoPerson(actingUser) {
+	if auth.ActsForNoPerson(ctx, actingUser) {
 		return AppSessionOutcome{}, &AppUnavailable{AppId: p.appId, NoOwner: true}
 	}
 

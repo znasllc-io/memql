@@ -74,9 +74,10 @@ const AppGateKillSwitchUnreadable = "kill_switch_unreadable"
 const AppGateNotNamedByOwner = "app_not_named_by_owner"
 
 // AppGateNoOwner is the refusal code for a session that would act for nobody:
-// a scheduled automation, the maintenance principal, a connector, the
-// anonymous actor (auth.NamesNoPerson). The message is the engine's own
-// AppNoOwnerReason, so the router's skip line and this refusal read alike.
+// a scheduled automation, the maintenance principal, one of the cluster's own
+// principals, a connector, the anonymous actor, any other synthetic actor
+// (auth.ActsForNoPerson). The message is the engine's own AppNoOwnerReason,
+// so the router's skip line and this refusal read alike.
 const AppGateNoOwner = "app_no_owner"
 
 // PreferencesReader is the one read the app gate makes. The dispatcher's Store
@@ -112,7 +113,7 @@ func admitAppSession(ctx context.Context, prefs PreferencesReader, logger *slog.
 	// is a non-empty UserId that names no one. Asked here because all three
 	// ways in -- the chat door, the session door, a routed Task -- ask this
 	// gate, so one rule covers them.
-	if auth.NamesNoPerson(owner) {
+	if auth.ActsForNoPerson(ctx, owner) {
 		return &appGateRefusal{code: AppGateNoOwner, message: memqlengine.AppNoOwnerReason}
 	}
 	if refusal := appDoorPinRefusal(pin, owner); refusal != nil {

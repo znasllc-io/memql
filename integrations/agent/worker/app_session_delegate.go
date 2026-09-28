@@ -144,7 +144,7 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 				"on an agent node running WorkerService")
 	}
 	owner := strings.TrimSpace(h.ActingUserId)
-	if auth.NamesNoPerson(owner) {
+	if auth.ActsForNoPerson(ctx, owner) {
 		// The same refusal the app gate makes, made earlier so the child run
 		// is never opened under an actor that names nobody -- a row written
 		// that way is readable by nobody, including the operator asking what

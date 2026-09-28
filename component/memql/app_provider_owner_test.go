@@ -58,6 +58,15 @@ func ownerlessCallers() []struct {
 		{"a connector", auth.ConnectorActor("shopify").UserId,
 			auth.ContextWithConnectorActor(context.Background(), "shopify")},
 		{"the anonymous actor", auth.AnonymousUserId, context.Background()},
+		// The cluster's own named principal (the proving suite writes as it).
+		{"a cluster principal", "cluster:proving-suite", auth.ContextWithAccess(context.Background(), &auth.AccessContext{
+			UserId: "cluster:proving-suite", Role: auth.RoleOwner, Unranked: true, Synthetic: true,
+		})},
+		// A synthetic actor under a prefix no string rule names: the
+		// context's own flag is what says it is the cluster acting.
+		{"a synthetic actor under an unknown prefix", "bench:tomorrow", auth.ContextWithAccess(context.Background(), &auth.AccessContext{
+			UserId: "bench:tomorrow", Role: auth.RoleOwner, Unranked: true, Synthetic: true,
+		})},
 	}
 }
 

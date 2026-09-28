@@ -256,7 +256,7 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 			fmt.Errorf("%w: no app sessions on this node", memqlengine.ErrAppUnavailable)
 	}
 	owner := strings.TrimSpace(req.ActingUserId)
-	if auth.NamesNoPerson(owner) {
+	if auth.ActsForNoPerson(ctx, owner) {
 		// Refused rather than widened, exactly as the model-call path
 		// refuses a blank acting user: an app session's credential names a
 		// person, and there is no person here -- nor behind a system actor's

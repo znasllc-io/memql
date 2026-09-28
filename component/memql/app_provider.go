@@ -74,8 +74,9 @@ var ErrAppUnavailable = errors.New("no machine can run this app right now")
 const AppRefusalCode = "no_app_available"
 
 // AppNoOwnerReason is why an app door is shut to a call that acts for nobody:
-// a scheduled automation, the maintenance principal, a connector, the
-// anonymous actor, a bare Go call with no actor (auth.NamesNoPerson).
+// a scheduled automation, the maintenance principal, one of the cluster's own
+// principals, a connector, the anonymous actor, any other synthetic actor, a
+// bare Go call with no actor (auth.ActsForNoPerson).
 //
 // It is the reason the chain walk records against the app entry -- on the
 // decision row Fleet History reads -- and the walk then moves on to the next
@@ -440,7 +441,7 @@ func (r *ProviderRegistry) appEntry(ctx context.Context, actingUserId, appId, mo
 	// "app sources run on the agent holding the machine"
 	// (appSourcesNotOnThisNode) would send a reader to the agent for a call
 	// no replica could serve.
-	if auth.NamesNoPerson(actingUserId) {
+	if auth.ActsForNoPerson(ctx, actingUserId) {
 		entry.err = errors.New(AppNoOwnerReason)
 		return entry, true
 	}
@@ -558,7 +559,7 @@ func (p *appProvider) call(ctx context.Context, req AppCallRequest) (AppCallResu
 	// DEFENCE IN DEPTH: the router never hands out this client for a call
 	// that acts for nobody (appEntry shuts the door first), and a caller that
 	// holds one anyway is refused here, before any machine is asked.
-	if auth.NamesNoPerson(req.ActingUserId) {
+	if auth.ActsForNoPerson(ctx, req.ActingUserId) {
 		return AppCallResult{}, &AppUnavailable{AppId: p.appId, NoOwner: true}
 	}
 	req.Pin = p.pin
@@ -964,7 +965,7 @@ func (e *AppUnavailable) AsMap() map[string]any {
 // report and the decision read the same source.
 func (r *ProviderRegistry) AppRefusal(ctx context.Context, actingUserId, appId string) *AppUnavailable {
 	out := &AppUnavailable{AppId: appId, Considered: map[string]string{}}
-	if auth.NamesNoPerson(actingUserId) {
+	if auth.ActsForNoPerson(ctx, actingUserId) {
 		out.NoOwner = true
 		return out
 	}
