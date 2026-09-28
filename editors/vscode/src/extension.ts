@@ -74,7 +74,13 @@ import { revokeRefreshToken, signOutMessage, type RevocationOutcome } from './au
 import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { refreshTokenFieldPlan, resolveCredentialInput, tokenFieldPlan } from './clusters/form.js';
 import { displayLabel, type ClusterConfig } from './clusters/model.js';
-import { clusterRowText, clusterStatus } from './clusters/status.js';
+import {
+  afterConnect,
+  clusterRowText,
+  clusterStatus,
+  retriesEndedNotice,
+  rowClickAction,
+} from './clusters/status.js';
 import { fileOnlyFacts, gatherClusterFacts, signedInKey, type ClusterFacts } from './clusters/facts.js';
 import { planLocalReconnect } from './clusters/reconnect.js';
 import { completeInstallHandoff } from './install/handoff.js';
@@ -1486,16 +1492,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         state.message
       );
     }
-    const wasRetrying = lastState.status === 'error' && lastState.retrying === true;
+    const notice = retriesEndedNotice(lastState, state);
     lastState = state;
-    if (wasRetrying && state.status === 'error' && state.retrying !== true) {
-      if (state.reason === 'lost' || state.reason === 'unreachable') {
-        void announceLostConnection(state.clusterName, clustersPath, 'reconnect');
-      } else if (signInCanRecover(state.reason)) {
-        // The retry reached the cluster and was refused on the credential:
-        // the session ended while the connection was down.
-        void announceLostConnection(state.clusterName, clustersPath, 'signIn');
-      }
+    if (notice !== undefined && state.status === 'error') {
+      // Reconnect when the cluster still does not answer; Sign in when a
+      // retry reached it and the session had ended while it was down.
+      void announceLostConnection(state.clusterName, clustersPath, notice);
     }
   });
 
@@ -2443,25 +2445,16 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           { preserveFocus: true }
         );
 
-      const current = connections?.state;
-      if (
-        current !== undefined &&
-        (current.status === 'connected' || current.status === 'connecting') &&
-        current.clusterName === dialing.name
-      ) {
-        await openPage();
-        return;
-      }
-
+      const current = connections?.state ?? { status: 'disconnected' as const };
       const facts = await factsForCluster(dialing);
-      const at = clusterStatus({ cluster: dialing, connection: { status: 'disconnected' }, facts });
-      if (at.state === 'signIn') {
-        // Known before any dial: nothing stored can authenticate. Tearing
-        // down a live connection to another cluster to learn that would leave
-        // the person connected to nothing, so that one is kept; with nothing
-        // live, this cluster becomes the one in use (an install's hand-off
-        // selects the cluster it just built).
-        if (current?.status !== 'connected' || current.clusterName === dialing.name) {
+      if (rowClickAction(dialing, current, facts) === 'openPage') {
+        // Connected (or connecting) to it already, or known before any dial
+        // that nothing stored can authenticate (clusters/status.ts). In the
+        // second case, tearing down a live connection to another cluster to
+        // learn that would leave the person connected to nothing, so that one
+        // is kept; with nothing live, this cluster becomes the one in use (an
+        // install's hand-off selects the cluster it just built).
+        if (current.status !== 'connected' || current.clusterName === dialing.name) {
           await setSelectedCluster(clustersPath, dialing.name);
           clustersTree.refresh();
         }
@@ -2472,9 +2465,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       await setSelectedCluster(clustersPath, dialing.name);
       clustersTree.refresh();
       await connections?.connect(dialing);
-      const state = connections?.state;
-      if (state?.status !== 'error' || state.clusterName !== dialing.name) return;
-      if (signInCanRecover(state.reason) || state.reason === 'notConfigured') {
+      const state = connections?.state ?? { status: 'disconnected' as const };
+      const next = afterConnect(dialing.name, state);
+      if (next === 'done' || state.status !== 'error') return;
+      if (next === 'openPage') {
         // The page says it, with Sign in (or Edit) as its primary act.
         await openPage();
         return;
@@ -4610,15 +4604,21 @@ async function runSignInToCluster(
         await connections?.connect(fresh);
         const state = connections?.state;
         if (state?.status === 'error' && state.clusterName === fresh.name) {
-          const retry = 'Retry';
+          // Rare, and said by cause: a credential refused straight after a
+          // sign-in carries Sign in; anything else is the cluster not answering.
+          const credential = signInCanRecover(state.reason);
+          const fix = credential ? 'Sign in' : 'Retry';
           void (async () => {
             const choice = await offerDetails(
               'error',
               connectionOutput,
-              `MemQL: Signed in, but ${label} isn't answering.`,
-              retry
+              credential
+                ? `MemQL: ${label} refused the new sign-in.`
+                : `MemQL: Signed in, but ${label} isn't answering.`,
+              fix
             );
-            if (choice === retry) await commands.executeCommand('memql.clusters.select', { cluster: fresh, selected: true });
+            if (choice === 'Sign in') await signInToCluster(fresh, deps);
+            else if (choice === 'Retry') await commands.executeCommand('memql.clusters.select', { cluster: fresh, selected: true });
           })();
           return true;
         }

@@ -11,9 +11,12 @@ import assert from "node:assert/strict";
 import { factsFrom, type ClusterFacts } from "../src/clusters/facts.js";
 import type { ClusterConfig } from "../src/clusters/model.js";
 import {
+  afterConnect,
   clusterContextValue,
   clusterRowText,
   clusterStatus,
+  retriesEndedNotice,
+  rowClickAction,
   stateWord,
   versionNote,
 } from "../src/clusters/status.js";
@@ -152,4 +155,50 @@ test("a dial refused on an untrusted certificate is not a stopped cluster", () =
   assert.deepEqual(status, { state: "unreachable", lost: false, untrusted: true });
   assert.equal(stateWord(status, local, false), "Can't reach", "not \"Not running\": it answered");
   assert.equal(clusterRowText(local, status, false, undefined).tooltip.split("\n")[0], "This computer doesn't trust the cluster's certificate.");
+});
+
+test("a row click on the connected cluster opens its page instead of redialling", () => {
+  // Clicking the green row used to tear the live session down and dial again,
+  // dropping every session-defined construct with it.
+  const c = cluster();
+  assert.equal(rowClickAction(c, { status: "connected", clusterName: "local", nodeId: "n" }, SESSION), "openPage");
+  assert.equal(rowClickAction(c, { status: "connecting", clusterName: "local" }, SESSION), "openPage");
+});
+
+test("a row click on a cluster nothing can sign in opens its page, never a dial or a modal", () => {
+  assert.equal(rowClickAction(cluster(), { status: "disconnected" }, NOTHING), "openPage");
+  // Even while another cluster is connected: that connection is kept.
+  assert.equal(
+    rowClickAction(cluster(), { status: "connected", clusterName: "staging", nodeId: "n" }, NOTHING),
+    "openPage",
+  );
+});
+
+test("a row click on a cluster with a stored session connects", () => {
+  assert.equal(rowClickAction(cluster(), { status: "disconnected" }, SESSION), "connect");
+  assert.equal(
+    rowClickAction(cluster(), { status: "error", clusterName: "local", reason: "unreachable", message: "x" }, SESSION),
+    "connect",
+    "Retry after an outage dials again",
+  );
+});
+
+test("after a click's connect: credential or address problems open the page, outages get one line", () => {
+  assert.equal(afterConnect("local", { status: "connected", clusterName: "local", nodeId: "n" }), "done");
+  assert.equal(afterConnect("local", { status: "error", clusterName: "other", reason: "unreachable", message: "x" }), "done");
+  for (const reason of ["missingCredential", "credentialExpired", "reauthenticationRequired", "wrongTokenClass", "notConfigured"] as const) {
+    assert.equal(afterConnect("local", { status: "error", clusterName: "local", reason, message: "x" }), "openPage", reason);
+  }
+  assert.equal(afterConnect("local", { status: "error", clusterName: "local", reason: "unreachable", message: "x" }), "notice");
+});
+
+test("the end of a run of retries is announced once, with the right fix", () => {
+  const retrying: ConnectionState = { status: "error", clusterName: "local", reason: "lost", message: "x", retrying: true };
+  const gaveUp: ConnectionState = { status: "error", clusterName: "local", reason: "unreachable", message: "x" };
+  const refused: ConnectionState = { status: "error", clusterName: "local", reason: "reauthenticationRequired", message: "x" };
+  assert.equal(retriesEndedNotice(retrying, gaveUp), "reconnect");
+  assert.equal(retriesEndedNotice(retrying, refused), "signIn");
+  assert.equal(retriesEndedNotice(retrying, { status: "connected", clusterName: "local", nodeId: "n" }), undefined);
+  assert.equal(retriesEndedNotice(retrying, retrying), undefined, "still retrying: nothing to say yet");
+  assert.equal(retriesEndedNotice(gaveUp, gaveUp), undefined, "an ordinary failure is not the end of retries");
 });

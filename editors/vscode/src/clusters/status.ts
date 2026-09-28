@@ -230,3 +230,52 @@ export function clusterContextValue(
   if (inUse) parts.push("inUse");
   return parts.join(";");
 }
+
+/**
+ * What a click on a cluster's row does (memql.clusters.select).
+ *
+ *   openPage  it is connected or connecting (never tear down a live session
+ *             to dial it again), or nothing stored could sign it in (its page
+ *             has Sign in as the primary act -- no modal, no doomed dial)
+ *   connect   select it and connect
+ */
+export function rowClickAction(
+  cluster: ClusterConfig,
+  connection: ConnectionState,
+  facts: ClusterFacts,
+): "openPage" | "connect" {
+  if (
+    (connection.status === "connected" || connection.status === "connecting") &&
+    connection.clusterName === cluster.name
+  ) {
+    return "openPage";
+  }
+  const atRest = clusterStatus({ cluster, connection: { status: "disconnected" }, facts });
+  return atRest.state === "signIn" ? "openPage" : "connect";
+}
+
+/**
+ * What follows a connect that a click asked for: nothing (it connected, or
+ * something else superseded it), the page (a credential problem or no
+ * address: its primary act is the fix), or one line with the fix (the
+ * cluster did not answer).
+ */
+export function afterConnect(clusterName: string, connection: ConnectionState): "done" | "openPage" | "notice" {
+  if (connection.status !== "error" || connection.clusterName !== clusterName) return "done";
+  if (SIGN_IN_REASONS[connection.reason] !== undefined || connection.reason === "notConfigured") return "openPage";
+  return "notice";
+}
+
+/**
+ * Whether a state change ends a run of retries after a drop, and what to
+ * offer: the retries run silently (the row reads "Connecting"), so the end of
+ * them is the first thing the person is told -- Reconnect when the cluster
+ * still does not answer, Sign in when it answered and refused the session.
+ * Undefined for every other change, including a retry that connected.
+ */
+export function retriesEndedNotice(previous: ConnectionState, next: ConnectionState): "reconnect" | "signIn" | undefined {
+  const wasRetrying = previous.status === "error" && previous.retrying === true;
+  if (!wasRetrying || next.status !== "error" || next.retrying === true) return undefined;
+  if (next.reason === "lost" || next.reason === "unreachable") return "reconnect";
+  return SIGN_IN_REASONS[next.reason] !== undefined ? "signIn" : undefined;
+}
