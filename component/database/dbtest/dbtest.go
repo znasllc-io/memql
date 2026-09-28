@@ -20,6 +20,18 @@
 // first process migrates while the rest wait, then observe the applied
 // migrations and return -- the non-idempotent (column-rename) migrations can
 // never run concurrently.
+//
+// A SECOND lock sits underneath, and the advisory lock does not cover it. The
+// production migrator (component/database) takes bun's lock row in
+// bun_migration_locks on every Database.Start -- including the db-gated tests
+// that boot their own memory-nodes database mid-run (component/grpc, the pack
+// live-e2e suites), which never see the advisory lock. bun's Lock is a
+// TRY-lock, so a TestMain that reached it inside one of those windows used to
+// fail its whole package in 0.1s with "migrations table is already locked".
+// EnsureSchema now waits that holder out (bounded, with backoff) and retries,
+// still under the advisory lock, so the first process still migrates and the
+// rest still only observe. See migrateWaitingOutForeignLock for why taking the
+// bun lock inside the advisory lock would not have closed it.
 package dbtest
 
 import (
@@ -36,6 +48,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/znasllc-io/memql/component/database"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
@@ -55,11 +68,35 @@ const defaultDSN = "postgres://memql:memql_dev@localhost:5432/memql?sslmode=disa
 // (memql#2551).
 const schemaLockKey int64 = 7756010113207025510
 
+// migrationLockWait bounds how long EnsureSchema waits out bun's migration lock
+// row held by a migrator OUTSIDE the advisory lock. Those holders are brief: a
+// sibling test's Database.Start finds nothing to migrate and holds the row for
+// a no-op Migrate plus the TimescaleDB verification hook, about a tenth of a
+// second. Reaching the bound therefore means the row was stranded, not busy.
+//
+// It is kept short because it is also the price of a stranded row. The callers
+// queue behind the advisory lock, so each db-gated package in a shard spends
+// this long before failing: about ten minutes for a twenty-package shard,
+// inside the lane's 40-minute job timeout.
+const migrationLockWait = 30 * time.Second
+
+// lockRetryFirst and lockRetryMax shape the backoff between attempts: quick
+// enough that a sub-second hold costs a sub-second wait, capped so a long one
+// is not hammered with a fresh Database.Start every few milliseconds.
+const (
+	lockRetryFirst = 100 * time.Millisecond
+	lockRetryMax   = 2 * time.Second
+)
+
 // EnsureSchema migrates the shared test database to the current schema,
 // serialized across processes so the parallel db-gated package test binaries
 // never race on a half-created schema (memql#2551). It is idempotent: the
 // first process to acquire the advisory lock migrates; every other process
-// blocks on the lock, then observes the applied migrations and returns.
+// blocks on the lock, then observes the applied migrations and returns. When
+// bun's own migration lock row is held by a migrator outside the advisory lock
+// (a sibling package's test starting its own database), it waits that holder
+// out rather than failing the package; a row still held after
+// migrationLockWait is reported as stranded.
 //
 // It reports reachable=false (err=nil) when no Postgres is reachable, so the
 // caller can proceed to m.Run() and let the individual tests self-skip --
@@ -74,6 +111,12 @@ func EnsureSchema(ctx context.Context) (reachable bool, err error) {
 // unreachable-default behaviour is testable without a database and without
 // mutating a package-level const (memql#3096, #3148).
 func ensureSchema(ctx context.Context, fallbackDSN string) (reachable bool, err error) {
+	return ensureSchemaWith(ctx, fallbackDSN, migrationLockWait)
+}
+
+// ensureSchemaWith is ensureSchema with the migration-lock wait injected, so
+// the stranded-lock path is testable in seconds rather than migrationLockWait.
+func ensureSchemaWith(ctx context.Context, fallbackDSN string, lockWait time.Duration) (reachable bool, err error) {
 	dsn := strings.TrimSpace(os.Getenv(dsnEnv))
 	// usedDefault distinguishes "the operator named a DSN" from "this helper
 	// guessed one". The two deserve different answers on failure, and every
@@ -174,24 +217,11 @@ func ensureSchema(ctx context.Context, fallbackDSN string) (reachable bool, err 
 	}()
 
 	// Migrate via the production lifecycle. Under the advisory lock this is the
-	// ONLY migration touching the DB, so the non-idempotent (rename)
-	// migrations never run concurrently; a sibling that already applied them
-	// leaves bun_migrations recording the fact, and this call is a no-op.
-	mnd, err := memoryNodes.NewMemoryNodesDatabase()
-	if err != nil {
-		return true, fmt.Errorf("dbtest: NewMemoryNodesDatabase: %w", err)
-	}
-	mnd.Start(ctx)
-	select {
-	case <-mnd.Ready():
-	case <-time.After(90 * time.Second):
-		mnd.Stop(context.Background())
-		return true, fmt.Errorf("dbtest: shared test database did not become ready within 90s")
-	}
-	migErr := mnd.MigrationError()
-	mnd.Stop(context.Background())
-	if migErr != nil {
-		return true, fmt.Errorf("dbtest: migrate shared test schema: %w", migErr)
+	// only EnsureSchema migrating, so the non-idempotent (rename) migrations
+	// never run concurrently; a sibling that already applied them leaves
+	// bun_migrations recording the fact, and this call is a no-op.
+	if err := migrateWaitingOutForeignLock(ctx, dsn, lockWait); err != nil {
+		return true, err
 	}
 
 	// Blast-radius guard (memql#3415). Everything above this point is about
@@ -205,6 +235,75 @@ func ensureSchema(ctx context.Context, fallbackDSN string) (reachable bool, err 
 		return true, rerr
 	}
 	return true, nil
+}
+
+// migrateWaitingOutForeignLock runs migrateOnce until it is not refused by
+// bun's migration lock, waiting between attempts with a capped backoff for at
+// most lockWait. Any other outcome -- success or a real failure -- returns at
+// once. The caller holds the advisory lock throughout, so every other
+// EnsureSchema keeps waiting behind this one and still only observes.
+//
+// Why wait, rather than take bun's lock only while holding the advisory lock
+// so the two layers cannot interleave: that ordering already holds for every
+// EnsureSchema, and it was not enough. The holders this collides with are
+// production Database.Start calls inside sibling packages' tests, which take
+// bun's row without the advisory lock -- and the advisory lock is test-only
+// scaffolding the production migrator must not learn about. Bun's row is the
+// real cross-process migration lock, so the fix is to treat its refusal as
+// "busy" and wait.
+//
+// Each retry is a full migrateOnce -- the same acquisition production makes --
+// rather than a poll of bun_migration_locks, so nothing here depends on bun's
+// table naming, and an attempt that gets the row also re-checks the applied
+// migrations under it.
+func migrateWaitingOutForeignLock(ctx context.Context, dsn string, lockWait time.Duration) error {
+	deadline := time.Now().Add(lockWait)
+	delay := lockRetryFirst
+	for attempt := 1; ; attempt++ {
+		err := migrateOnce(ctx)
+		if err == nil || !errors.Is(err, database.ErrMigrationLockHeld) {
+			return err
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("dbtest: bun's migration lock on %s was still held after %v (%d attempts). "+
+				"The holders EnsureSchema waits for release it within a second; one that stays is a row "+
+				"stranded by a migration whose connection died mid-flight, which component/database "+
+				"keeps on purpose (migrationMayStillBeRunning). Once nothing is migrating, clear it with "+
+				"DELETE FROM bun_migration_locks: %w", SafeDSN(dsn), lockWait, attempt, err)
+		}
+		wait := min(delay, remaining)
+		fmt.Fprintf(os.Stderr, "dbtest: bun's migration lock is held by another process "+
+			"(attempt %d); retrying in %v\n", attempt, wait)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("dbtest: waiting out bun's migration lock: %w", ctx.Err())
+		case <-time.After(wait):
+		}
+		delay = min(delay*2, lockRetryMax)
+	}
+}
+
+// migrateOnce takes the shared test database through one production start --
+// migrations and post-migration hooks -- and reports the migration outcome.
+func migrateOnce(ctx context.Context) error {
+	mnd, err := memoryNodes.NewMemoryNodesDatabase()
+	if err != nil {
+		return fmt.Errorf("dbtest: NewMemoryNodesDatabase: %w", err)
+	}
+	mnd.Start(ctx)
+	select {
+	case <-mnd.Ready():
+	case <-time.After(90 * time.Second):
+		mnd.Stop(context.Background())
+		return fmt.Errorf("dbtest: shared test database did not become ready within 90s")
+	}
+	migErr := mnd.MigrationError()
+	mnd.Stop(context.Background())
+	if migErr != nil {
+		return fmt.Errorf("dbtest: migrate shared test schema: %w", migErr)
+	}
+	return nil
 }
 
 // AllowBootstrappedDBEnv opts a run back in to a database that belongs to a

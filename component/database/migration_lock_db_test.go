@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -66,6 +67,11 @@ func TestMigrationLockBlocksAnotherReplicaAndAllowsRetry(t *testing.T) {
 	if calls != 0 || runner.MigrationError() == nil || !runner.migrationsPending() {
 		t.Fatalf("ran without the other replica's lock: calls=%d err=%v", calls, runner.MigrationError())
 	}
+	// "Held" is the refusal a caller may wait out (dbtest.EnsureSchema does),
+	// so it must be recognisable without reading the message.
+	if !errors.Is(runner.MigrationError(), ErrMigrationLockHeld) {
+		t.Fatalf("a lock held by another migrator is not ErrMigrationLockHeld: %v", runner.MigrationError())
+	}
 	if err := owner.Unlock(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -119,6 +125,11 @@ func TestMigrationSQLFailureReleasesLockForRetry(t *testing.T) {
 	runner.runMigrations(context.Background(), db)
 	if runner.MigrationError() == nil {
 		t.Fatal("expected SQL error")
+	}
+	// A migration that FAILED is not a lock someone else holds: a caller
+	// that waits out ErrMigrationLockHeld would otherwise spin on it.
+	if errors.Is(runner.MigrationError(), ErrMigrationLockHeld) {
+		t.Fatalf("a failed migration was classified as a held lock: %v", runner.MigrationError())
 	}
 	sibling := lockedMigrationRunner(t, migrations)
 	sibling.runMigrations(context.Background(), db)
