@@ -20,6 +20,8 @@ shape goal workGoalFull {
   requestedVia
   closedAt
   closeReason
+  // The owner's routing choice (the Ask route picker's).
+  routing
 }
 
 /// Every run field, including the trust and chain fields resume restores.
@@ -76,6 +78,11 @@ shape run workRunFull {
   staleSteps
   rerun
   validation
+  // The owner's routing choice. The planner's compile claim and the agent's
+  // journal both read the run through this shape, and each stamps the choice
+  // onto the run context its model calls read -- so a field missing here is a
+  // choice no node would honour.
+  routing
 }
 
 /// What a run the loop protection stopped says about the stop, and nothing else: the fields the

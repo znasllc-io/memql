@@ -39,7 +39,7 @@ func TestAskConversationOwnershipAndServerTranscript(t *testing.T) {
 	require.Contains(t, fmt.Sprint(row), "Private answer")
 	_, err = e.Execute(mine, fmt.Sprintf(`mutation saveAskConversation(id: %s, title: "Forged", transcript: {})`, parser.QuoteString(conversationID)))
 	require.Error(t, err)
-	_, err = e.RunAsk(theirs, conversationID, "new-turn", "show private data", "", nil, nil)
+	_, err = e.RunAsk(theirs, conversationID, "new-turn", "show private data", "", AskRoute{}, nil, nil)
 	require.Error(t, err)
 	release, err := e.lockAskConversation(mine, conversationID)
 	require.NoError(t, err)
@@ -133,11 +133,11 @@ func TestAskUsesWorkIntakeAndPreservesTurnIdentity(t *testing.T) {
 	require.NoError(t, err)
 	conversationID := fmt.Sprint(MaterializeRows(result)[0]["id"])
 	var text string
-	answer, err := e.RunAsk(ctx, conversationID, "turn", "What can you do?", "app:todos", func(delta string) { text += delta }, nil)
+	answer, err := e.RunAsk(ctx, conversationID, "turn", "What can you do?", "app:todos", AskRoute{}, func(delta string) { text += delta }, nil)
 	require.NoError(t, err)
 	require.Equal(t, "Your workspace.", answer)
 	require.Equal(t, answer, text)
-	_, err = e.RunAsk(ctx, conversationID, "turn", "Do it again", "", nil, nil)
+	_, err = e.RunAsk(ctx, conversationID, "turn", "Do it again", "", AskRoute{}, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, calls, "a retried turn must never submit a second goal")
 	row, err := e.askRead(ctx, conversationID)
@@ -222,4 +222,65 @@ func TestWorkFleetCapabilityUsesOwnedExecutionIdentity(t *testing.T) {
 	_, err := e.workExecuteBuiltin(ctx, map[string]any{"name": "worker.agentworkerDispatchHost", "arguments": map[string]any{"action": "exec", "ownerUserId": "another-user", "agentId": "other-agent", "runId": "other-run", "stepId": "other-step"}}, 0)
 	require.ErrorContains(t, err, "policy_denied")
 	require.Equal(t, 1, calls)
+}
+
+// The turn's source choice reaches the goal BESIDE the request -- never as an
+// input the model reads -- stamped as the caller's own; a choice outside the
+// picker's vocabulary, or a route the cluster does not have, refuses the turn
+// before any goal exists.
+func TestAskHandsTheTurnsRouteChoiceToTheGoalAndRefusesAnUnknownOne(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	previousCatalog := auth.InstalledCapabilityCatalog()
+	auth.SetCapabilityCatalog(nil)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previousCatalog) })
+	user := "v1:identity:user:" + id.NewShortId()
+	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: auth.RoleWriter})
+	calls := 0
+	var handed common.RouteChoice
+	e.builtinExecutorHandlers["integration.work.createGoal"] = func(callCtx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+		calls++
+		handed = GoalRouteChoice(callCtx, user)
+		require.NotContains(t, fmt.Sprint(args), "claude-code", "the choice must not ride the goal's arguments or input")
+		runID := "v1:work:run:" + id.NewShortId()
+		call, err := parser.RenderCall("createWorkRun", map[string]any{"runId": runID, "goalId": "goal", "automationName": "shared", "templateFingerprint": "test", "triggeredBy": "manual", "status": "succeeded", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339)})
+		require.NoError(t, err)
+		_, err = e.Execute(auth.ContextWithInternalOrigin(callCtx), "mutation "+call)
+		require.NoError(t, err)
+		raw, _ := json.Marshal(map[string]any{"goalId": "goal", "runId": runID})
+		return []memorynodes.MemoryNode{{ID: "intake", Payload: raw}}, nil
+	}
+	result, err := e.Execute(ctx, `mutation createAskConversation(requestId: "routed", title: "New conversation")`)
+	require.NoError(t, err)
+	conversationID := fmt.Sprint(MaterializeRows(result)[0]["id"])
+
+	for _, refused := range []struct {
+		route AskRoute
+		code  string
+	}{
+		{AskRoute{Source: "app:cursor"}, RouteSourceInvalid},
+		{AskRoute{Level: "embeddings"}, RouteLevelInvalid},
+		{AskRoute{Source: "policy:noSuchRoute"}, RoutePolicyUnknown},
+	} {
+		_, err := e.RunAsk(ctx, conversationID, "refused-"+refused.code, "hi", "", refused.route, nil, nil)
+		var choiceErr *RouteChoiceError
+		require.ErrorAs(t, err, &choiceErr)
+		require.Equal(t, refused.code, choiceErr.Code)
+	}
+	require.Zero(t, calls, "a refused choice must not open a goal")
+	row, err := e.askRead(ctx, conversationID)
+	require.NoError(t, err)
+	require.NotContains(t, fmt.Sprint(row), "refused-", "a refused choice must not leave a turn behind")
+
+	_, err = e.RunAsk(ctx, conversationID, "turn", "hi", "", AskRoute{Source: "app:claude-code", Level: "strong"}, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	require.Equal(t, common.RouteChoice{Source: "app:claude-code", Level: "strong", By: user}, handed)
+	row, err = e.askRead(ctx, conversationID)
+	require.NoError(t, err)
+	require.Contains(t, fmt.Sprint(row["transcript"]), "app:claude-code", "the turn records the route it ran with")
+
+	// A shipped route is one of the cluster's routes.
+	_, err = e.RunAsk(ctx, conversationID, "turn-2", "again", "", AskRoute{Source: "policy:localFirst"}, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, "policy:localFirst", handed.Source)
 }

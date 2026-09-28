@@ -273,6 +273,57 @@ every decision record, and the cost ceiling still governs it.
 
 ---
 
+## A person's choice for one conversation (Ask)
+
+The Ask route picker chooses, for one conversation, a **source** and a **level**.
+They arrive on the turn (`AiChatMsg.provider` and `AiChatMsg.level`) and apply to
+**every model call of the turn's goal on every node** -- the planner's triage and
+compile as much as the agent's reply.
+
+| Source | Means |
+|---|---|
+| empty | Auto: the rules decide, exactly as without a choice |
+| `app:claude-code`, `app:codex`, `app:*` | pin that app on the owner's machine |
+| `fleet:strongest`, `fleet:fastest`, `fleet:<modelId>` | pin a local model |
+| `federation:cheapest`, `federation:strongest` | pin a vendor |
+| `policy:<name>` | a **route**: that policy's chain is walked instead of the rule's |
+
+**A pin is the owner's own and is never substituted.** It is walked as a one-entry
+chain, it skips every rule, and when it cannot serve the call refuses with
+`every_door_shut` naming what was pinned (`[pinned to app:claude-code: a pinned
+source is never substituted]`). Because the pin is the owner's, an app door reached
+through it passes the app gate on their machine.
+
+**A route fails over.** Its chain is walked entry by entry like a rule's -- so a
+planner that cannot reach an app door yet answers from the entry behind it. A route
+removed after the turn chose it is a plain error, not a park: no machine waking
+would ever serve it.
+
+**The level binds the run's steps** -- the reply, a compose. Calls made while
+compiling (triage, the compile pass) and the failure classifier run outside any
+step and keep the level they declare, while still going where the source says.
+Embeddings, vision and audio are never re-routed by a choice.
+
+A person's override for **one step** (re-run or branch) is more specific than their
+choice for the whole conversation, so its model and its level each win over it.
+
+**Where it lives.** The choice is written onto `v1:work:goal.routing` and
+`v1:work:run.routing` (`{source, level, by}`, `by` stamped by the server) -- never
+into the goal's input, which is what the model reads. The planner's compile claim
+and the agent's dispatch each build their run context from the run ROW, and the
+router applies the choice to every request it resolves (`router.ResolveFor` ->
+`memql.ApplyRunRouting`), so no node needs anything from the one that took the
+turn. A fork, a replay and a branch keep their source run's choice; a goal a run's
+step opens (a compose, `agent()`) inherits it for the same owner.
+
+**Refusals before any goal exists.** A word outside the table, or a level other than
+empty / `fast` / `strong` / `reasoning`, refuses the turn with gRPC
+`InvalidArgument` and metadata `code` = `route_source_invalid`,
+`route_level_invalid` or `route_policy_unknown` (an unknown route), `field` =
+`source` or `level`.
+
+---
+
 ## Reading what the router decided
 
 Every resolution writes one `v1:router:call` row, on success and on a park. Beyond

@@ -608,6 +608,12 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 		}
 	}
 
+	// A direct goal a run's step opened -- a compose, an agent() -- carries
+	// that run's routing choice when the run is the same person's.
+	routing, err := goalRouting(ctx, owner)
+	if err != nil {
+		return "", "", err
+	}
 	if err := st.createGoalRow(scoped, goalSeed{
 		GoalId:       goalId,
 		Statement:    statement,
@@ -616,6 +622,7 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 		RequestedVia: g.RequestedVia,
 		AccountIds:   g.AccountIds,
 		Ceilings:     g.Ceilings,
+		Routing:      routing,
 	}); err != nil {
 		return "", "", err
 	}
@@ -649,6 +656,7 @@ func (i *Integration) OpenDirectGoal(ctx context.Context, g DirectGoal) (goalId,
 		NodeId:             selfNodeId(),
 		StartedAt:          now,
 		OwnerUserId:        owner,
+		Routing:            routing,
 	}); err != nil {
 		return closeUnstarted(err)
 	}

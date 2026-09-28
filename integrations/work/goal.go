@@ -9,6 +9,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -97,6 +98,13 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 	owner := strings.TrimSpace(ac.UserId)
 	input := argMap(args, "input")
 	ceilings := argMap(args, "ceilings")
+	// The owner's routing choice: the request's own (Ask's route picker) or
+	// the run that opened this goal. Checked BEFORE any row exists, and
+	// written on the ROWS -- never into the input, which the model reads.
+	routing, err := goalRouting(ctx, owner)
+	if err != nil {
+		return nil, err
+	}
 
 	// The goal is written under the CALLER's own actor, unchanged.
 	// createWorkGoal stamps ownerUserId from actor.userId (the field is
@@ -110,6 +118,7 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 		Input:        input,
 		Ceilings:     ceilings,
 		RequestedVia: requestedVia,
+		Routing:      routing,
 	}); err != nil {
 		return nil, err
 	}
@@ -134,6 +143,7 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 		Status:             runStatusCompiling,
 		StartedAt:          now,
 		OwnerUserId:        owner,
+		Routing:            routing,
 	}); err != nil {
 		return nil, err
 	}
@@ -279,6 +289,23 @@ func validRequestedVia(v string) error {
 		return nil
 	}
 	return fmt.Errorf("work: requestedVia %q is not one of api, ask, nexus, responsibility, library, materializer, agent", v)
+}
+
+// goalRouting is the routing choice a goal owned by owner, opened on ctx,
+// carries (memql.GoalRouteChoice), re-checked against the grammar: the stamp
+// is an exported seam and an inherited value came off a row, and neither is
+// trusted to be a choice the picker could have made.
+func goalRouting(ctx context.Context, owner string) (common.RouteChoice, error) {
+	routing := memql.GoalRouteChoice(ctx, owner)
+	if routing.IsZero() {
+		return common.RouteChoice{}, nil
+	}
+	parsed, err := memql.ParseRouteChoice(routing.Source, routing.Level)
+	if err != nil {
+		return common.RouteChoice{}, fmt.Errorf("work: %w", err)
+	}
+	parsed.By = routing.By
+	return parsed, nil
 }
 
 // newRowId mints a canonical row id for a concept.

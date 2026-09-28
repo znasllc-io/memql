@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -403,9 +404,25 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 		}
 		resolved, err := r.consentOrRefusal(ctx, req, mod, report, "", decision)
 		if err != nil {
+			// A PIN IS NEVER SUBSTITUTED, and the refusal says so by name:
+			// "no door is open" alone reads as a fleet with nothing awake,
+			// when the truth is that one source was named and it cannot serve.
+			var refusal *InferenceUnavailable
+			if errors.As(err, &refusal) {
+				refusal.Pinned = explicit
+			}
 			return nil, Resolved{}, err
 		}
 		return chainAndResolved(resolved)
+	}
+
+	// A PERSON'S ROUTE replaces the rule's chain (ResolveRequest.Route): the
+	// Ask route picker's `policy:<name>`, applied to every call of the run it
+	// was chosen for. No rule is consulted and the level is the call's own --
+	// the person chose the route, and the chain FAILS OVER along it exactly as
+	// a rule's would.
+	if route := strings.TrimSpace(req.Route); route != "" {
+		return r.resolveRoute(ctx, req, mod, policies, route, report)
 	}
 
 	// THE DEGRADE LOOP. Each pass matches a rule AT THE CURRENT LEVEL, because
@@ -515,6 +532,50 @@ func (r *Router) resolveChain(ctx context.Context, req ResolveRequest, mod provi
 		policyName = lastRule.Policy
 	}
 	resolved, err := r.consentOrRefusal(ctx, req, mod, report, policyName, decision)
+	if err != nil {
+		return nil, Resolved{}, err
+	}
+	return chainAndResolved(resolved)
+}
+
+// resolveRoute walks the chain of the route a person chose.
+//
+// A ROUTE THAT IS NOT REGISTERED IS A PLAIN ERROR, not a door refusal. The
+// turn that chose it was checked against the cluster's routes, so reaching
+// here means the route was removed since -- a configuration fault an owner
+// fixes. Reported as "every door is shut" it would park the run waiting for a
+// machine to wake, and no machine waking would ever serve it.
+func (r *Router) resolveRoute(
+	ctx context.Context,
+	req ResolveRequest,
+	mod providerModality,
+	policies *memql.PolicyRegistry,
+	route string,
+	report *doorReporter,
+) ([]string, Resolved, error) {
+	if policies == nil {
+		return nil, Resolved{}, fmt.Errorf("router: the route %q chosen for this call cannot be walked: no policy registry is wired into this router", route)
+	}
+	policy, found := policies.Lookup(route)
+	if !found {
+		return nil, Resolved{}, fmt.Errorf("router: the route %q chosen for this call is not one of this cluster's routes; choose another route or Auto", route)
+	}
+	decision := airoute.Decision{
+		RequestedLevel:   req.Level,
+		Level:            req.Level,
+		ServedLevel:      req.Level,
+		Policy:           route,
+		Touches:          req.Touches,
+		MinContextTokens: req.Needs.MinContextTokens,
+	}
+	winner, err := r.walkChain(ctx, req, mod, policy.ProviderChain(), nil, report, route)
+	if err != nil {
+		return nil, Resolved{}, err
+	}
+	if winner != nil {
+		return chainAndResolved(r.resolvedFrom(winner, mod, route, report, decision))
+	}
+	resolved, err := r.consentOrRefusal(ctx, req, mod, report, route, decision)
 	if err != nil {
 		return nil, Resolved{}, err
 	}
