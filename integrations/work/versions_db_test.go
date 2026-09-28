@@ -368,6 +368,7 @@ func (j *dbJudge) CallAIStructured(_ context.Context, req airoute.ResolveRequest
 func TestTheValidatorsRowsLand(t *testing.T) {
 	a := openActsDB(t)
 	a.i.engine = &dbJudge{MemQLEngine: a.eng, prompts: realPrompts(t)}
+	a.i.ServeAnswerChecks(nil) // an agent's integration: the node that serves answer checks
 	goalId := newRowId(goalConcept)
 	a.write(t, "createWorkGoal", map[string]any{"goalId": goalId, "statement": "Summarise the week", "origin": "user", "requestedVia": "nexus"})
 	runId := a.openRun(t, map[string]any{"goalId": goalId})
@@ -435,6 +436,7 @@ func TestTheValidatorObeysThePolicyRow(t *testing.T) {
 	t.Cleanup(func() { setPolicy(true) })
 
 	a.i.engine = &dbJudge{MemQLEngine: a.eng, prompts: realPrompts(t)}
+	a.i.ServeAnswerChecks(nil) // an agent's integration: the node that serves answer checks
 	runId := a.openRun(t, nil)
 	a.writeVersion(t, runId, runId, "draft", 0, 1, nil, "An answer.", nil)
 	a.finishRun(t, runId, []string{"draft"}, nil)
