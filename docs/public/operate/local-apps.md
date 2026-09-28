@@ -157,7 +157,10 @@ Three kinds:
 > stayed dark. The app does not serve the turn; it takes the whole STEP, drives its
 > own loop, reaches MemQL's tools back over MCP, and answers once. The step records
 > a `childRunId` naming the subrun, and a call carrying no step is REFUSED at
-> resolution rather than falling through to the vendor behind it.
+> resolution rather than falling through to the vendor behind it. A call made
+> inside a run takes its run and step KEY from the run context when it did not
+> name them, so every work turn -- an Ask's `reason` step included, pinned or
+> not -- carries one; only a call outside any run is refused this way.
 >
 > **`run` is still the only kind anything initiates today.** The protocol carries all
 > three and the runner accepts all three; `open` and `attach` have no

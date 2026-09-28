@@ -85,13 +85,16 @@ func sessionRouter(t *testing.T, appDoors []memql.AppDoor) (*Router, *toolCloud,
 	return New(providers, policies, testRules(t, defaultRule("defaultChain")), nil, nil), cloud, delegate
 }
 
+// toolRequest names its step by KEY, as the run context does: the delegate
+// derives the step row's id from the run and the key (AppSessionHandover), so
+// a fixture that spelled the row id here would pass a value no caller sends.
 func toolRequest() ResolveRequest {
 	return ResolveRequest{
 		Level:    airoute.LevelStrong,
 		Modality: airoute.ModalityTools,
 		UserId:   "alice",
 		RunId:    "v1:work:run:r1",
-		StepId:   "v1:work:step:s1",
+		StepId:   "s1",
 		Needs:    airoute.Needs{Tools: true, MinContextTokens: 8000},
 	}
 }
@@ -140,7 +143,7 @@ func TestToolNeedingCallOnAnAppDoorYieldsASessionWinner(t *testing.T) {
 	if delegate.runs != 1 {
 		t.Fatalf("the delegate ran %d times, want exactly one session", delegate.runs)
 	}
-	if delegate.got.StepId != "v1:work:step:s1" {
+	if delegate.got.StepId != "s1" {
 		t.Fatalf("the handover must carry the step, got %+v", delegate.got)
 	}
 	if cloud.calls != 0 {
@@ -210,6 +213,95 @@ func TestToolNeedingCallWithNoStepRefusesAtResolution(t *testing.T) {
 	if cloud.calls != 0 || delegate.runs != 0 {
 		t.Fatalf("a stepless refusal must spend nothing (cloud=%d delegate=%d)", cloud.calls, delegate.runs)
 	}
+}
+
+// A WORK TURN THAT BUILT ITS OWN REQUEST STILL NAMES ITS STEP. The agent
+// replier builds its ResolveRequest itself and calls ResolveFor directly, so
+// the engine seam's attribution never runs for it; the run and step have to be
+// taken off the context HERE or an unpinned Ask turn reaches the session door
+// with nothing to hand over and is refused, with the local model behind it
+// never tried (the 2026-09-28 Ask failure). The run context names the step by
+// KEY, and the key is what the handover carries.
+func TestAWorkTurnResolvedFromItsRunContextOpensTheSession(t *testing.T) {
+	stepless := toolRequest()
+	stepless.RunId = ""
+	stepless.StepId = ""
+	inRun := common.ContextWithRun(context.Background(), common.RunContext{
+		RunId: "v1:work:run:ask", GoalId: "goal", StepKey: "reason", OwnerUserId: "alice",
+	})
+
+	for _, modality := range []airoute.Modality{airoute.ModalityTools, airoute.ModalityStreamingTools} {
+		t.Run(string(modality), func(t *testing.T) {
+			r, cloud, delegate := sessionRouter(t, []memql.AppDoor{openApp("claude-code")})
+			req := stepless
+			req.Modality = modality
+
+			resolved, err := r.ResolveFor(inRun, req)
+			if err != nil {
+				t.Fatalf("a work turn on an open app door was refused at resolution: %v", err)
+			}
+			if resolved.Resolution.Decision.Door != airoute.DoorSession {
+				t.Fatalf("Door = %q, want %q", resolved.Resolution.Decision.Door, airoute.DoorSession)
+			}
+			messages := []common.ChatMessage{{Role: "user", Content: "hello"}}
+			switch client := resolved.Client.(type) {
+			case common.ChatStreamWithToolsProvider:
+				ch, err := client.CallChatStreamWithTools(inRun, messages, nil)
+				if err != nil {
+					t.Fatalf("CallChatStreamWithTools: %v", err)
+				}
+				for chunk := range ch {
+					if chunk.Error != nil {
+						t.Fatalf("chunk error: %v", chunk.Error)
+					}
+				}
+			case common.ToolCallingChatAIProvider:
+				if _, err := client.CallChatWithTools(inRun, messages, nil); err != nil {
+					t.Fatalf("CallChatWithTools: %v", err)
+				}
+			default:
+				t.Fatalf("%s resolved to %T", modality, resolved.Client)
+			}
+			if delegate.runs != 1 || cloud.calls != 0 {
+				t.Fatalf("delegate runs=%d cloud calls=%d, want one session and no vendor call", delegate.runs, cloud.calls)
+			}
+			if delegate.got.RunId != "v1:work:run:ask" || delegate.got.StepId != "reason" {
+				t.Fatalf("the handover names run=%q step=%q, want the run context's run and step KEY",
+					delegate.got.RunId, delegate.got.StepId)
+			}
+		})
+	}
+
+	// FILL ONLY IF EMPTY. A caller that named its step knows something the
+	// context does not, and the context must not rename it.
+	t.Run("explicit step wins", func(t *testing.T) {
+		r, _, delegate := sessionRouter(t, []memql.AppDoor{openApp("claude-code")})
+		resolved, err := r.ResolveFor(inRun, toolRequest())
+		if err != nil {
+			t.Fatalf("ResolveFor: %v", err)
+		}
+		if _, err := resolved.Client.(common.ToolCallingChatAIProvider).CallChatWithTools(
+			inRun, []common.ChatMessage{{Role: "user", Content: "go"}}, nil); err != nil {
+			t.Fatalf("CallChatWithTools: %v", err)
+		}
+		if delegate.got.RunId != "v1:work:run:r1" || delegate.got.StepId != "s1" {
+			t.Fatalf("the context overwrote the caller's step: run=%q step=%q", delegate.got.RunId, delegate.got.StepId)
+		}
+	})
+
+	// AND NOTHING IS INVENTED. With no run on the context there is still no
+	// step, and the call still refuses rather than falling through to the
+	// vendor behind the door (design D7).
+	t.Run("no run still refuses", func(t *testing.T) {
+		r, cloud, delegate := sessionRouter(t, []memql.AppDoor{openApp("claude-code")})
+		if _, err := r.ResolveFor(context.Background(), stepless); err == nil ||
+			!strings.Contains(err.Error(), "no work step to hand over") {
+			t.Fatalf("a stepless call outside a run = %v, want the no-step refusal", err)
+		}
+		if cloud.calls != 0 || delegate.runs != 0 {
+			t.Fatalf("a stepless refusal must spend nothing (cloud=%d delegate=%d)", cloud.calls, delegate.runs)
+		}
+	})
 }
 
 // A SHUT app door is still a shut door. The session door changes which turns an

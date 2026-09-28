@@ -291,7 +291,7 @@ func TestAToolTurnTakesTheSessionDoorOrRefusesForWantOfAStep(t *testing.T) {
 	_, resolved, err := r.ResolveWithTools(ResolveRequest{
 		UserId: "alice",
 		RunId:  "v1:work:run:r1",
-		StepId: "v1:work:step:s1",
+		StepId: "s1",
 	})
 	if err != nil {
 		t.Fatalf("a tool turn with a step must take the app door as a session: %v", err)
