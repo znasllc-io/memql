@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
@@ -117,7 +118,27 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	}
 }
 
+// requireInternalOrigin is the gate of the two automation-driven builtins,
+// checked BEFORE any argument is read. A builtin cannot be @serverOnly, so
+// per the root CLAUDE.md its gate lives in the handler: dispatchInbound takes
+// a source, a body and a headersJson and hands them to a connector, which for
+// Shopify reaches a privacy purge, so a client -- or a product bundle's logic
+// -- calling it with chosen arguments would be the same door
+// stageInboundRequest's @serverOnly closed (memql#5707 review). The
+// automation executor stamps internal origin on a trusted automation's step
+// context (originForSource), which is how dispatchInboundToConnector and the
+// reconcile cron reach these; nothing else may.
+func requireInternalOrigin(ctx context.Context, name string) error {
+	if !auth.OriginFromContext(ctx).IsInternal() {
+		return fmt.Errorf("datasync: %s is driven by the engine's own automations and refuses a client-origin call", name)
+	}
+	return nil
+}
+
 func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternalOrigin(ctx, "dispatchInbound"); err != nil {
+		return nil, err
+	}
 	source := strings.TrimSpace(argString(args, "source"))
 	if source == "" {
 		return resultNode("skipped", "no source on the staged row")
@@ -161,6 +182,9 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 }
 
 func (i *Integration) handleReconcileDomains(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	if err := requireInternalOrigin(ctx, "reconcileDomains"); err != nil {
+		return nil, err
+	}
 	var swept, drifted int
 	for _, name := range memqlsync.BoundNames() {
 		connector, ok := memqlsync.Lookup(name)

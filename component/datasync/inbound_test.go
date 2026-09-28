@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
@@ -211,7 +212,7 @@ func TestUnparseableStagedMetadataStampsTheRowFailed(t *testing.T) {
 			for k, v := range tc.args {
 				args[k] = v
 			}
-			if _, err := i.handleDispatchInbound(context.Background(), args, 0); err == nil {
+			if _, err := i.handleDispatchInbound(auth.ContextWithInternalOrigin(context.Background()), args, 0); err == nil {
 				t.Fatal("unparseable metadata was dispatched as if it were valid")
 			}
 			stamps := engine.callsContaining("updateInboundRequestStatus")
@@ -269,4 +270,65 @@ func TestApplyingADeliveryRecordsInboundHealth(t *testing.T) {
 	if !strings.Contains(writes[0], "lagSeconds: 90") {
 		t.Errorf("health write %q does not record the 90s lag from the origin's version", writes[0])
 	}
+}
+
+// dispatchInbound is a builtin, so it carries its gate in the handler: a
+// call whose context does not carry internal origin -- a client, or a
+// product bundle's logic, choosing the source, body and headers -- is refused
+// before any argument is read, the connector is never asked and the row is
+// never stamped. The automation executor's step context carries the origin,
+// which is the one legitimate caller (proved end to end by
+// test/inboundhop against Postgres).
+func TestDispatchInboundRefusesACallWithoutInternalOrigin(t *testing.T) {
+	args := map[string]any{
+		"inboundRequestId": "req-forged", "source": "shopify", "body": `{"shop_domain":"acme.myshopify.com"}`,
+		"headersJson": `{"x-shopify-topic":"shop/redact"}`,
+	}
+	t.Run("client origin", func(t *testing.T) {
+		engine := newFakeEngine()
+		c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
+		i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
+		if _, err := i.handleDispatchInbound(context.Background(), args, 0); err == nil {
+			t.Fatal("a client-origin call reached the dispatcher")
+		}
+		if c.applyCalls != 0 {
+			t.Fatal("the connector was asked to apply a client-authored delivery")
+		}
+		if engine.countContaining("updateInboundRequestStatus") != 0 {
+			t.Fatal("a refused call stamped the row")
+		}
+	})
+	t.Run("internal origin", func(t *testing.T) {
+		engine := newFakeEngine()
+		c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
+		i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
+		if _, err := i.handleDispatchInbound(auth.ContextWithInternalOrigin(context.Background()), args, 0); err != nil {
+			t.Fatalf("the automation path was refused: %v", err)
+		}
+		if c.applyCalls != 1 {
+			t.Fatalf("Apply called %d times, want 1", c.applyCalls)
+		}
+		if stamps := engine.callsContaining("updateInboundRequestStatus"); len(stamps) != 1 || !strings.Contains(stamps[0], `status: "processed"`) {
+			t.Fatalf("stamped %q, want one processed stamp", stamps)
+		}
+	})
+}
+
+// reconcileDomains is the other automation-driven builtin and carries the
+// same gate, ahead of anything else: a client-origin call is refused before
+// the runner is touched.
+func TestReconcileDomainsRefusesACallWithoutInternalOrigin(t *testing.T) {
+	t.Run("client origin", func(t *testing.T) {
+		i := &Integration{} // no runner: the gate must answer before anything is dereferenced
+		if _, err := i.handleReconcileDomains(context.Background(), nil, 0); err == nil {
+			t.Fatal("a client-origin call reached the reconcile runner")
+		}
+	})
+	t.Run("internal origin", func(t *testing.T) {
+		store := NewStore(newFakeEngine())
+		i := &Integration{runner: NewRunner(store, NewApplier(store, newFakeWriter()), discardLogger()), logger: discardLogger()}
+		if _, err := i.handleReconcileDomains(auth.ContextWithInternalOrigin(context.Background()), nil, 0); err != nil {
+			t.Fatalf("the cron's own call was refused: %v", err)
+		}
+	})
 }
