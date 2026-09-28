@@ -252,6 +252,16 @@ test("a connected cluster with nothing loaded says so, and a failed read is a ro
   assert.doesNotMatch(String(item.tooltip), /output channel/i);
 });
 
+test("a session that drops between the state check and the read leaves no blank row", async () => {
+  // load() answers `unreachable` when the dispatcher is gone by the time it
+  // runs. That used to be drawn as a row with an empty label.
+  const tree = new ConstructsTreeProvider({
+    connections: fakeManager(CONNECTED).manager,
+    load: async () => ({ kind: "unreachable" }),
+  });
+  assert.deepEqual(await tree.getChildren(), []);
+});
+
 test("a runnable construct's row carries the value the inline Run is keyed on, and a view-only one does not", async () => {
   const construct = (runnable: boolean) => ({
     name: "spaceParticipants",

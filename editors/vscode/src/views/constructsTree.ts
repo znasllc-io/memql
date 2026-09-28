@@ -158,6 +158,13 @@ export class ConstructsTreeProvider implements vscode.TreeDataProvider<Construct
       // Overtaken while it ran: answer for the generation that is current NOW,
       // rather than painting a read the view has already moved past.
       if (!this.generation.isCurrent(token)) continue;
+      // The session dropped between the state check and the read. Nothing to
+      // draw -- not a blank row -- and the state change that dropped it is
+      // already on its way with the welcome for it.
+      if (state.kind === "unreachable" || state.kind === "loading") {
+        this.deps.setMessage?.(undefined);
+        return [];
+      }
       if (state.kind !== "loaded") {
         this.deps.setMessage?.(undefined);
         return [{ kind: "state", state }];
