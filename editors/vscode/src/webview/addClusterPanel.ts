@@ -721,7 +721,10 @@ export class AddClusterPanel {
         this.onDeleteDataSwitch(msg.checked === true);
         return;
       case "uninstallStart":
-        void this.startUninstall();
+        // ONLY FROM THE PREVIEW IT WAS CONSENTED ON. After a removal the
+        // preview is still held (Resume and Retry replay it), so without this
+        // a stale post from the finished screen started the removal again.
+        if (this.state.screen === "uninstallPreview" && this.uninstall.phase === "preview") void this.startUninstall();
         return;
       case "uninstallBack":
         this.uninstallBack();

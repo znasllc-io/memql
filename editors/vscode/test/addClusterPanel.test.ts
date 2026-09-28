@@ -1695,6 +1695,21 @@ test("mkcert cannot be chosen without the certificate authority it withdraws", a
   }
 });
 
+test("an uninstall starts only from its preview: a stale Uninstall after the removal runs nothing", async () => {
+  const h = await openUninstall();
+  try {
+    h.post({ type: "uninstallStart" });
+    await until(() => /MemQL is uninstalled/.test(h.html()), "the removal");
+    const calls = h.runner.calls.length;
+    h.post({ type: "uninstallStart" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(h.runner.calls.length, calls, "a second removal started from the finished screen");
+    assert.match(h.html(), /MemQL is uninstalled/);
+  } finally {
+    h.close();
+  }
+});
+
 test("switched-off tools are skipped and switched-on ones removed", async () => {
   const h = await openUninstall();
   try {
