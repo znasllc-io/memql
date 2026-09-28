@@ -21,7 +21,7 @@ verification is tracked separately from a passing typecheck.
 | Training | Review queue, knowledge domains and shared live collections. Document ingestion is an operation, with its own progress. |
 | Settings | Access roster, rules, decisions, language, cluster/mail facts, benchmark, tokens, keys, policies, integration reports and provider registry. Access's two sibling views use `LocalTabs`; saved preferences remain form choices. |
 | Identity | Shared form skeleton while the native identity page is fetched; passkey/email interactions retain meaningful operation status. |
-| Ask | Conversation-shaped history placeholder; active model calls retain the reverse response estimate. Sheet and widget share the same surface. |
+| Ask | Conversation-shaped history placeholder; active model calls retain the reverse response estimate. Sheet and widget share the same surface. The route picker keeps every Where row in place with an `InlineSkeleton` for its line until the machines feed and `inferenceStatus` answer; a failed read says so on the row, and with no connection (or a dropped feed) the rows say "Not connected" instead of keeping a skeleton. |
 | Shared surfaces | OS bootstrap, app setup facts, connection dialogs, `LiveList`, `RecordListSkeleton`, `ContentSkeleton`, `InlineSkeleton`, `LocalTabs`. |
 
 The governing rules are in [DESIGN.md](../DESIGN.md#loading-is-the-shape-of-the-content-never-a-message).

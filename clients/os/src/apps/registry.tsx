@@ -17,7 +17,7 @@ import {
   Waypoints,
 } from "lucide-react";
 
-import { AskSurface } from "../ask/AskSurface";
+import { AskSurface, FLEET_ROUTING_SECTION } from "../ask/AskSurface";
 import { useAsk } from "../ask/AskProvider";
 import { Mark } from "../chrome/Mark";
 import type { OsAppManifest, OsRegistry, OsWidgetManifest } from "../system/registry";
@@ -732,6 +732,7 @@ function AskWidgetBody() {
           liveVoice={liveVoice}
       availability={availability}
       onOpenFleet={() => { actions.openApp("fleet"); }}
+      onManageRoutes={() => { actions.openApp("fleet", FLEET_ROUTING_SECTION); }}
       voicePorts={voice}
       settings={settings}
       variant="widget"

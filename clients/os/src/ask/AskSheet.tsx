@@ -2,7 +2,7 @@ import { useEffect } from "react";
 
 import { useOs } from "../chrome/state";
 import { useAsk } from "./AskProvider";
-import { AskSurface } from "./AskSurface";
+import { AskSurface, FLEET_ROUTING_SECTION } from "./AskSurface";
 
 // The Ask sheet: anchored above the dock (a bottom sheet on phones via
 // CSS). Never a window, never counts against the desk cap (spec D6).
@@ -45,6 +45,7 @@ export function AskSheet() {
           liveVoice={liveVoice}
           onClose={closeAsk}
           onOpenFleet={() => { actions.openApp("fleet"); closeAsk(); }}
+          onManageRoutes={() => { actions.openApp("fleet", FLEET_ROUTING_SECTION); closeAsk(); }}
           voicePorts={voice}
           settings={settings}
           context={sheet.context}

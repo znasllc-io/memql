@@ -2,7 +2,7 @@ import { startAskVoice, type AskVoiceOptions } from "@znasllc-io/memql-sdk-core/
 import { aiChatStream, type AiChatOptions, type AiChatMessage } from "@znasllc-io/memql-sdk-core/ai";
 import { QueryClient, type Dispatcher } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../kit/rows";
-import type { AskCallbacks, AskHandle, AskTransport } from "./askController";
+import type { AskCallbacks, AskHandle, AskOptions, AskTransport } from "./askController";
 import type { AskActivity, AskConversationStore, AskTurn, ConversationSummary } from "./conversationSession";
 
 export type AskStreamFn = (dispatcher: Dispatcher, messages: AiChatMessage[], opts: AiChatOptions) => { deltas: AsyncIterable<{ textDelta?: string; metadata?: Record<string, unknown> }>; result: Promise<unknown> };
@@ -57,7 +57,7 @@ export class SdkAskTransport implements AskTransport {
     return startAskVoice(dispatcher, options, signal);
   };
 
-  ask(prompt: string, context: string | null, on: AskCallbacks, options?: { conversationId: string; turnId: string }): AskHandle {
+  ask(prompt: string, context: string | null, on: AskCallbacks, options?: AskOptions): AskHandle {
     const dispatcher = this.dispatcher();
     const abort = new AbortController();
     if (!dispatcher || !options) {
@@ -66,7 +66,7 @@ export class SdkAskTransport implements AskTransport {
     }
     void (async () => {
       try {
-        const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "" });
+        const handle = this.stream(dispatcher, [{ role: "user", content: prompt }], { signal: abort.signal, conversationId: options.conversationId, requestId: options.turnId, pageContext: context ?? "", provider: options.routing?.source ?? "", level: options.routing?.level ?? "" });
         let settled = false;
         let answer = "";
         const result = handle.result.then(value => { settled = true; return value; }, error => { settled = true; throw error; });

@@ -161,6 +161,32 @@ test("chat modes carry an optional selected-machine pin verbatim", async () => {
   }
 });
 
+// A conversation's route is two fields on the wire: `provider` names the
+// source ("app:claude-code", "fleet:strongest", ...) and `level` how much
+// intelligence the call needs ("fast" | "strong" | "reasoning"). Empty means
+// Auto -- the cluster's rules decide -- so an empty value is OMITTED rather
+// than sent as "", exactly like `provider`.
+test("chat modes carry an optional level beside the provider, omitted when empty", async () => {
+  for (const stream of [false, true]) {
+    for (const level of [undefined, "", "fast", "reasoning"]) {
+      const mock = new MockDispatcher();
+      const opts = { provider: "app:claude-code", level };
+      const messages = [{ role: "user", content: "hello" }];
+      const promise = stream
+        ? aiChatStream(mock.asDispatcher(), messages, opts).result
+        : aiChat(mock.asDispatcher(), messages, opts);
+      const sent = mock.lastSent() as unknown as { aiChat: Record<string, unknown> };
+      assert.equal(sent.aiChat.provider, "app:claude-code");
+      assert.equal(Object.hasOwn(sent.aiChat, "level"), Boolean(level), `level ${JSON.stringify(level)} stream=${stream}`);
+      if (level) assert.equal(sent.aiChat.level, level);
+      const reply = { aiChatResult: { requestId: mock.lastRequestId(), message: { role: "assistant", content: "hello" } } };
+      if (stream) mock.streamFrame(mock.lastRequestId(), reply);
+      else mock.reply(reply);
+      await promise;
+    }
+  }
+});
+
 test("aiChat -- rejects empty messages array", async () => {
   const mock = new MockDispatcher();
   await assert.rejects(
