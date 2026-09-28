@@ -382,6 +382,10 @@ func (a *AppInference) Call(ctx context.Context, req memqlengine.AppCallRequest)
 		// feature -- AppSessionStart.inputs already carried artifact ids and
 		// the landing filename was already the engine's to choose (design D11).
 		Inputs: appendStagedInputs(req.Inputs, staged),
+		// ONE MODEL CALL the step at RunId/StepId made, not the step's work:
+		// the recording names the calling run and claims nothing on its step
+		// (worker.RecordingOpen.ModelCall).
+		ModelCall: true,
 	}
 
 	result, err := a.runner.Run(ctx, w, spec, nil)

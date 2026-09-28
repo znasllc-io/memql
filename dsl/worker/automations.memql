@@ -198,3 +198,42 @@ automation workerStaleConnectionSweep {
     mutation clearWorkerConnectedNode(registrationId: item.id)
   }
 }
+
+
+// workerAppSessionStaleSweep
+// ==========================
+//
+// Every two minutes, fail the app sessions no replica is holding.
+//
+// The pull and probe sweeps' cadence, for their reason: a session left at
+// `running` is a spinner somebody is looking at, and it is also a slot in the
+// owner's maxConcurrentSessions cap that nothing will ever give back.
+//
+// It runs on the CRON LEADER, so exactly one replica sweeps -- and the rows it
+// closes belong to whatever replica has gone, which is why it cannot be the
+// holding replica's own job.
+//
+// It is on the maintenance-principal list (component/auth/maintenance_actor.go)
+// because openAppSessions reads across owners BY NATURE: a sweep for orphaned
+// sessions cannot know whose session was orphaned before it looks.
+
+/// Every two minutes: fail the app sessions no replica is holding. `decide` (pure) returns the
+/// orphans, judged against two separate cutoffs; the `for` loop closes each one.
+///
+/// NO `result` IS WRITTEN, deliberately: endAppSession is a read-merge that writes `result` only
+/// when named, so an answer the app submitted over MCP before its replica went away survives the
+/// close -- it is the one part of the session that was finished. exitCode -1 because no process
+/// reported one: 0 is a clean exit, and a session nobody saw end did not have one.
+@trigger(schedule="0 */2 * * * *")
+automation workerAppSessionStaleSweep {
+  decide := logic workerAppSessionStaleSweep(event: event)
+  for item in decide {
+    mutation endAppSession(
+      sessionId:    item.id,
+      status:       "failed",
+      exitCode:     -1,
+      errorMessage: "No agent replica is holding this session any more -- the node that ran it stopped reporting, or the session outlived the longest any session may run. Whatever the app already did on the machine stays there, and an answer it submitted is kept; asking again starts a new session.",
+      endedAt:      now
+    )
+  }
+}

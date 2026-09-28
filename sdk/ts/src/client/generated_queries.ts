@@ -5376,6 +5376,35 @@ QueryClient.prototype.oidcIdentityBySubject = function (this: QueryClient, args:
   return this.executeNamed("oidcIdentityBySubject", buildOidcIdentityBySubject(args), opts);
 };
 
+/** Every app session nobody is holding, for the sweep that closes them.
+TWO CUTOFFS, and they are not the pull sweep's two. A live row is judged by heartbeatAt, which the replica HOLDING the session re-writes every couple of seconds from the drain's flush -- so one stale heartbeat is the evidence that the holder has gone, whatever else still writes the row. The MCP node's step allocation and an app's `submit` write it too, from a different replica, and deliberately leave heartbeatAt alone: an app that keeps calling MemQL after the replica running its session died is exactly the orphan this finds. A registration's hold is NOT a usable signal: after a pod restart the machine re-registers on another replica within seconds, while the session the dead pod was running is orphaned for good.
+startedAt is the BACKSTOP. A session started longer ago than any session may run -- the credential lifetime plus a grace -- is over, whatever its heartbeat says; and it is the only judgment available for a row written before heartbeatAt existed.
+It reads under `actor.isClusterOwner == true` for the reason openModelPulls states at length -- its only caller is a cron under the cluster's MAINTENANCE PRINCIPAL, and writing the conjunct is what makes the failure loud: strip the principal and this returns zero rows, and the filter says why. */
+// Bound concept: v1:worker:appSession (machine-readable: BoundConcepts["openAppSessions"] in generated_concepts.ts).
+export interface OpenAppSessionsArgs {
+  /** A live row whose holder has not reported since this has lost its holder. */
+  heartbeatBefore: string;
+  /** A live row started before this has outlived every session's own limit. */
+  startedBefore: string;
+}
+
+export function buildOpenAppSessions(args: OpenAppSessionsArgs): string {
+  const parts: string[] = [];
+  parts.push("heartbeatBefore: " + renderMemQLValue(args.heartbeatBefore));
+  parts.push("startedBefore: " + renderMemQLValue(args.startedBefore));
+  return "query openAppSessions(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    openAppSessions(args: OpenAppSessionsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.openAppSessions = function (this: QueryClient, args: OpenAppSessionsArgs = {} as OpenAppSessionsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("openAppSessions", buildOpenAppSessions(args), opts);
+};
+
 /** Every probe nobody is driving, for the sweep that closes them.
 TWO CUTOFFS, for openModelPulls' reason and with the same trap: a row still at `requested` was never picked up and is judged against when it was ASKED FOR, while a row at `running` was claimed and then lost and is judged against when it last REPORTED. One cutoff applied to both fails every ACTIVE suite older than the claim grace and then flaps, because the next case stamps `running` back on the row.
 The stall grace must exceed the worker handle's own idle ceiling, or the row watcher gives up on a probe the runtime watcher has not -- and here the two are further apart than for a pull: a single 32K case on a modest machine can be minutes of silence that is not silence at all.

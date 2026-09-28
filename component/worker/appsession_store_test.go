@@ -145,7 +145,7 @@ func TestStoreMethodsDoNotReturnAContext(t *testing.T) {
 	// compiling -- which is the point.
 	var _ interface {
 		CreateAppSession(context.Context, AppSessionRow) error
-		RecordAppSessionProgress(context.Context, string, int, int, string) error
+		RecordAppSessionProgress(context.Context, string, int, int, string, time.Time) error
 		EndAppSession(context.Context, AppSessionRow) error
 	} = store
 }

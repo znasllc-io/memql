@@ -442,3 +442,37 @@ func eligibleForGate() FleetModel {
 	m.ContextWindow = MinimumContextWindow
 	return m
 }
+
+// TestAppProviderCallCarriesRunContext. A model call answered by an app is
+// made INSIDE a step, and the run context says which one -- but the door never
+// read it, so every session it opened had runId and stepId empty and could not
+// be traced back to the Ask run that caused it, and its recording opened as a
+// free-floating goal of its own. What the door carries is the step KEY, the
+// same contract the session door's handover uses; the recorder decides what a
+// model call may and may not claim on the calling step.
+func TestAppProviderCallCarriesRunContext(t *testing.T) {
+	apps := &stubApps{doors: []AppDoor{runnableDoor(appIdClaudeCode)}, answer: `{"ok":true}`}
+	r := newProviderRegistry()
+	r.SetAppInference(apps)
+	entry, _ := r.EntryForUser(userCtx("alice"), "alice", AppReferencePrefix+appIdClaudeCode)
+
+	inRun := common.ContextWithRun(userCtx("alice"), common.RunContext{RunId: "v1:work:run:ask", StepKey: "reason"})
+	if _, err := entry.Client.(common.ChatStructuredProvider).CallChatStructured(inRun,
+		[]common.ChatMessage{{Role: "user", Content: "classify"}},
+		common.StructuredSchema{Name: "verdict", Schema: json.RawMessage(`{"type":"object"}`)}); err != nil {
+		t.Fatalf("structured call through the app door: %v", err)
+	}
+	if apps.lastReq.RunId != "v1:work:run:ask" || apps.lastReq.StepId != "reason" {
+		t.Fatalf("the app was called with run %q step %q, want the calling run and step key", apps.lastReq.RunId, apps.lastReq.StepId)
+	}
+
+	// The control: outside a run there is nothing to carry, and nothing is
+	// invented.
+	if _, err := entry.Client.(common.ChatAIProvider).CallChat(userCtx("alice"),
+		[]common.ChatMessage{{Role: "user", Content: "hello"}}); err != nil {
+		t.Fatalf("chat through the app door: %v", err)
+	}
+	if apps.lastReq.RunId != "" || apps.lastReq.StepId != "" {
+		t.Errorf("a call outside any run named run %q step %q", apps.lastReq.RunId, apps.lastReq.StepId)
+	}
+}

@@ -479,6 +479,40 @@ query modelPull openModelPulls {
   shape   workerModelPullFull
 }
 
+/// Every app session nobody is holding, for the sweep that closes them.
+///
+/// TWO CUTOFFS, and they are not the pull sweep's two. A live row is judged by heartbeatAt, which
+/// the replica HOLDING the session re-writes every couple of seconds from the drain's flush -- so
+/// one stale heartbeat is the evidence that the holder has gone, whatever else still writes the
+/// row. The MCP node's step allocation and an app's `submit` write it too, from a different
+/// replica, and deliberately leave heartbeatAt alone: an app that keeps calling MemQL after the
+/// replica running its session died is exactly the orphan this finds. A registration's hold is
+/// NOT a usable signal: after a pod restart the machine re-registers on another replica within
+/// seconds, while the session the dead pod was running is orphaned for good.
+///
+/// startedAt is the BACKSTOP. A session started longer ago than any session may run -- the
+/// credential lifetime plus a grace -- is over, whatever its heartbeat says; and it is the only
+/// judgment available for a row written before heartbeatAt existed.
+///
+/// It reads under `actor.isClusterOwner == true` for the reason openModelPulls states at length --
+/// its only caller is a cron under the cluster's MAINTENANCE PRINCIPAL, and writing the conjunct is
+/// what makes the failure loud: strip the principal and this returns zero rows, and the filter says
+/// why.
+@actor
+@unbounded("stale app-session sweep -- an internal sweep that must see every live session")
+query appSession openAppSessions {
+  args {
+    /// A live row whose holder has not reported since this has lost its holder.
+    heartbeatBefore  string!
+    /// A live row started before this has outlived every session's own limit.
+    startedBefore    string!
+  }
+  filter  row => actor.isClusterOwner == true
+              && row.status in ["starting", "running"]
+              && (row.heartbeatAt < args.heartbeatBefore || row.startedAt < args.startedBefore)
+  shape   workerAppSessionCard
+}
+
 /// Every registration whose connectedNodeId names a replica that is no longer holding its stream
 /// (epic memql#5327, design D7).
 ///

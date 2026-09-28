@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,10 @@ type recordingAppSessionStore struct {
 	finished  []AppSessionRow
 	allocated map[string]int
 	allocErr  error
+	// refuseStatusWrites refuses that many progress writes naming a status,
+	// as an engine blip would. A refused write did not land, so it is not
+	// recorded in appends.
+	refuseStatusWrites int
 }
 
 func (s *recordingAppSessionStore) CreateAppSession(_ context.Context, row AppSessionRow) error {
@@ -26,14 +31,18 @@ func (s *recordingAppSessionStore) CreateAppSession(_ context.Context, row AppSe
 	return nil
 }
 
-func (s *recordingAppSessionStore) RecordAppSessionProgress(_ context.Context, sessionId string, recordedSteps, droppedActions int, status string) error {
+func (s *recordingAppSessionStore) RecordAppSessionProgress(_ context.Context, sessionId string, recordedSteps, droppedActions int, status string, heartbeatAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if status != "" && s.refuseStatusWrites > 0 {
+		s.refuseStatusWrites--
+		return errors.New("the engine went away for a moment")
+	}
 	// A NEGATIVE COUNT MEANS "the caller did not name this field", which is
 	// how the allocator advances one counter without resetting the other.
 	// Recording it as 0 would make this fake claim a write the real store
 	// never makes.
-	row := AppSessionRow{ID: sessionId, Status: status}
+	row := AppSessionRow{ID: sessionId, Status: status, HeartbeatAt: heartbeatAt}
 	if recordedSteps >= 0 {
 		row.RecordedSteps = recordedSteps
 	}

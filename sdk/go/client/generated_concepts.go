@@ -629,6 +629,7 @@ var BoundConcepts = map[string]string{
 	"oAuthClientByClientId":                            "v1:identity:oauthClient",
 	"oAuthClientCORSGrants":                            "v1:identity:oauthClient",
 	"oidcIdentityBySubject":                            "v1:identity:identity",
+	"openAppSessions":                                  "v1:worker:appSession",
 	"openModelProbes":                                  "v1:worker:modelProbe",
 	"openModelPulls":                                   "v1:worker:modelPull",
 	"openUploadSessionsForOwner":                       "v1:library:uploadSession",

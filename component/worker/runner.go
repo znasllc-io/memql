@@ -32,6 +32,12 @@ const (
 	// stdout chunks a minute and a row-write each would saturate the engine
 	// to deliver a count nobody reads between ticks.
 	recordingPublishInterval = 2 * time.Second
+	// recordingRunHeartbeatInterval throttles the recording RUN's heartbeat.
+	// A third of the work sweep's one-minute abandon window: three beats per
+	// window, so one lost write never closes a held session's recording, and
+	// not one per flush, because every run write is broadcast to every
+	// replica in the mesh.
+	recordingRunHeartbeatInterval = 20 * time.Second
 	// transcriptTruncationNotice is appended once the bound is hit.
 	// Marked rather than silent: a transcript that stops without
 	// saying why reads as a run that stopped.
@@ -57,6 +63,129 @@ type SessionRunner struct {
 	Contents ContentStore
 	// Clock is injectable for tests.
 	Clock func() time.Time
+
+	// flushEvery and runHeartbeatEvery override the two heartbeat cadences,
+	// so a test can watch several beats without waiting the production
+	// seconds. Zero is the production value.
+	flushEvery        time.Duration
+	runHeartbeatEvery time.Duration
+}
+
+func (r *SessionRunner) flushInterval() time.Duration {
+	if r != nil && r.flushEvery > 0 {
+		return r.flushEvery
+	}
+	return recordingPublishInterval
+}
+
+func (r *SessionRunner) runHeartbeatInterval() time.Duration {
+	if r != nil && r.runHeartbeatEvery > 0 {
+		return r.runHeartbeatEvery
+	}
+	return recordingRunHeartbeatInterval
+}
+
+// heartbeat writes the holder's heartbeat onto the session row, for a node with
+// no recorder: no counters, because with no recorder there are none, and the
+// status only when the hold names it. A failure is logged and returned -- the
+// next flush tries again, and the sweep's grace is many flushes long.
+func (r *SessionRunner) heartbeat(ctx context.Context, sessionId, status string) error {
+	if r.Store == nil {
+		return nil
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	err := r.Store.RecordAppSessionProgress(writeCtx, sessionId, -1, -1, status, r.now())
+	if err != nil && r.Logger != nil {
+		r.Logger.Warn("worker: app session heartbeat failed", "session_id", sessionId, "error", err)
+	}
+	return err
+}
+
+// sessionHold is this replica's hold on one session row, from the drain's
+// first flush to the moment the recording starts to close: the heartbeat that
+// says somebody is still holding it, and the row's one promotion to `running`.
+//
+// `running` IS SAID ONCE. It means the first chunk arrived, which happens
+// once, and every other write the holder makes is a heartbeat that names no
+// status. It used to be named on every flush, and that is what made the stale
+// sweep's close unstable: a holder that missed its heartbeats for the grace --
+// a database hiccup, a slow end -- had its row failed by the sweep, and its
+// next flush set the row back to `running` while it still carried the sweep's
+// endedAt, exitCode and errorMessage. A session past the startedAt backstop
+// flapped failed/running every two minutes until it ended. Now a row the sweep
+// failed stays failed until the holder's own terminal write, which carries the
+// true outcome and lands last.
+//
+// Not safe for concurrent use, and never needs to be: the drain owns it while
+// the session streams, and holdThroughEnd owns it after the drain has exited.
+type sessionHold struct {
+	runner    *SessionRunner
+	sessionId string
+	recording *sessionRecording
+	// chunked is set by the first chunk, and promoted once a write naming
+	// `running` has LANDED -- a refused one is named again by the next write,
+	// or one blip leaves a session that ran for an hour reading `starting`.
+	chunked, promoted bool
+	// ending is set once the chunks have stopped. A session that is ending is
+	// never promoted: its terminal write is on the way.
+	ending bool
+}
+
+// beat is one holder write: the recording's publish when this node records,
+// the bare heartbeat when it does not.
+func (h *sessionHold) beat(ctx context.Context) {
+	status := ""
+	if h.chunked && !h.promoted && !h.ending {
+		status = AppSessionStatusRunning
+	}
+	var err error
+	if h.recording != nil {
+		err = h.recording.Publish(ctx, h.runner.Store, status)
+	} else {
+		err = h.runner.heartbeat(ctx, h.sessionId, status)
+	}
+	if err == nil && status != "" {
+		h.promoted = true
+	}
+}
+
+// holdThroughEnd keeps the hold's heartbeat going on the flush cadence after
+// the drain has exited, and returns the release.
+//
+// THE CHUNKS STOP BEFORE THE ROWS ARE FINISHED. The transcript still has to
+// reach the Library -- up to a minute on a slow engine -- and the replica is
+// holding the session through all of it; a hold that ended with the drain let
+// the stale sweep fail a session in the middle of ending cleanly, and the work
+// sweep abandon its recording run.
+//
+// Release BEFORE the recording closes, and the release returns only once no
+// beat is in flight. Both beats are read-merges of the rows the close writes
+// -- the session row's allocator and the recording run's status -- and a beat
+// that read the run before the close and wrote after it would put a closed run
+// back to `running`. The close itself is bounded well inside the stall grace,
+// and is followed at once by the terminal write.
+func (r *SessionRunner) holdThroughEnd(ctx context.Context, hold *sessionHold) (release func()) {
+	hold.ending = true
+	stop := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		tick := time.NewTicker(r.flushInterval())
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				hold.beat(ctx)
+			}
+		}
+	}()
+	return func() {
+		close(stop)
+		<-stopped
+	}
 }
 
 // RunSpec is one delegated run.
@@ -70,6 +199,10 @@ type RunSpec struct {
 	Inputs      []string
 	RunId       string
 	StepId      string
+	// ModelCall marks a session that answers one model call the step at
+	// RunId/StepId made, rather than doing that step's work. See
+	// RecordingOpen.ModelCall for what the recording does differently.
+	ModelCall bool
 	// AppSessionRef names the app's own session on the attach path.
 	AppSessionRef string
 	// RequireLabels narrows machine selection beyond the app: label.
@@ -318,39 +451,54 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 	// the cancel leaves Run parked on <-drained for the life of the
 	// process. Cancel is a request to a machine that may be asleep,
 	// wedged or gone -- it is not a guarantee of an AppSessionEnd.
+	//
+	// NO RECORDER, STILL A HOLDER. The flush is the only evidence this replica
+	// holds the session, and the stale sweep fails a live row that stops
+	// showing it -- so a node with no recorder wired beats the row anyway,
+	// rather than leaving one that never changes and cannot be told from one
+	// whose replica has gone.
+	hold := &sessionHold{runner: r, sessionId: spec.SessionId, recording: recording}
 	drained := make(chan struct{})
 	go func() {
 		defer close(drained)
-		flush := time.NewTicker(recordingPublishInterval)
+		flush := time.NewTicker(r.flushInterval())
 		defer flush.Stop()
 		for {
 			select {
 			case chunk, ok := <-handle.Chunks():
 				if !ok {
-					recording.Publish(ctx, r.Store, AppSessionStatusRunning)
+					hold.beat(ctx)
 					return
 				}
+				first := !hold.chunked
+				hold.chunked = true
 				// THE STREAM DECIDES WHERE THE CHUNK GOES. An `event` is a
 				// completed action the cockpit normalized and becomes rows;
 				// stdout and stderr are the model's prose and become the
 				// transcript. Flattening both into one string, which is what
 				// this did, is what made a session a black box.
+				recorded := chunk.Stream == AppSessionStreamEvent && recording != nil
 				if chunk.Stream == AppSessionStreamEvent {
 					recording.Observe(ctx, chunk)
-					recording.Publish(ctx, r.Store, AppSessionStatusRunning)
 				} else {
 					collector.append(chunk)
+				}
+				// Written at once for the FIRST chunk of any kind, which is
+				// what promotes the row to `running`, and for every recorded
+				// action, whose drop count a Fleet reader is waiting on.
+				if first || recorded {
+					hold.beat(ctx)
 				}
 				if progress != nil {
 					progress(chunk)
 				}
 			case <-flush.C:
-				recording.Publish(ctx, r.Store, AppSessionStatusRunning)
+				hold.beat(ctx)
 			case <-ctx.Done():
 				// Publish what was recorded before giving up, so a cancelled
 				// run still says how far it got. That count is often the
 				// reason somebody cancelled.
-				recording.Publish(ctx, r.Store, AppSessionStatusRunning)
+				hold.beat(ctx)
 				return
 			}
 		}
@@ -358,6 +506,7 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 
 	outcome, waitErr := handle.Wait(ctx)
 	<-drained
+	releaseHold := r.holdThroughEnd(ctx, hold)
 
 	status := AppSessionStatusEnded
 	errMessage := ""
@@ -407,6 +556,8 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 	// a session that produced no output.
 	row.TranscriptFileId = recording.StoreTranscript(ctx, transcript, truncated, result.Model, result.Effort)
 	row.TranscriptTruncated = truncated
+	// Released here and not after the close: see holdThroughEnd.
+	releaseHold()
 	row.RecordedSteps, row.DroppedActions = recording.Close(ctx, result, row.TranscriptFileId)
 	result.TranscriptFileId = row.TranscriptFileId
 	result.RecordedActions, result.DroppedActions = row.RecordedSteps, row.DroppedActions

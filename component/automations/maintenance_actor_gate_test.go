@@ -128,6 +128,14 @@ func TestMaintenanceAutomationsAreArgued(t *testing.T) {
 		"sweepConstructReuse",
 		"sweepWaitingWorkRuns",
 		"workJournalRetentionSweep",
+		// workerAppSessionStaleSweep is the fourth worker sweep and the
+		// promise v1:worker:appSession's own status description made before
+		// it existed. A session is held by one replica and only that replica
+		// ends its row, so a pod restart left it at `running` for good --
+		// visible, and counted against the owner's session cap. Its read
+		// spans owners for the reason the sweeps below do, and without the
+		// principal it returns zero rows and no error.
+		"workerAppSessionStaleSweep",
 		"workerInvocationRetentionSweep",
 		// workerModelProbeStaleSweep (epic memql#5146) is the entry below's
 		// twin: same claim shape, same silence when the claiming replica
