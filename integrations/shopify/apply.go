@@ -81,6 +81,15 @@ func (c *Connector) Apply(ctx context.Context, req memqlsync.InboundRequest) ([]
 	if c == nil || c.stores == nil {
 		return nil, nil
 	}
+	if req.Source == ConnectorName {
+		if _, _, ok := c.managedAppSigning(ctx); !ok {
+			// A row under the app-level source name while the managed app has
+			// no client id or no sealed secret: nothing this connector trusts
+			// verified it, so it is refused with a reason rather than bound
+			// to a store by client id (memql#5707 review).
+			return nil, fmt.Errorf("shopify: delivery on the app-level source while the managed app's client id or sealed secret is missing; nothing verified it as app-signed")
+		}
+	}
 	store, ok := c.StoreFor(ctx, req)
 	if !ok {
 		// A delivery for a store nobody configured. Not an error: an
