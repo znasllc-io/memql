@@ -188,6 +188,11 @@ jobs:
               - 'examples/research-desk/research/memql.toml'
               - '**/*.md'
               - '**/*.memql'
+              # The docs bundle's boundary allowlist (memql#5717). The root
+              # package's docs_public_boundary_test.go READS it, and a stale
+              # entry fails that gate, so deleting an entry on its own must run
+              # the lane that proves the link it covered is gone.
+              - 'docs/public_boundary_allowlist.toml'
               # .claude/settings.json is TRACKED on purpose (the .gitignore
               # negation, memql#3344) and scripts/dev/repo_hygiene_test.go
               # asserts it stays non-ignored via sharedClaudeState. That test

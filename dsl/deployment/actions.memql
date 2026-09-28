@@ -449,6 +449,10 @@ action reportInstanceVersion {
 /// bridge is an event handler, and one that silently does not fire is indistinguishable from one
 /// that has not fired yet, until the version is deployed and every pod lands in ImagePullBackOff.
 /// Idempotent on an already-published release; REFUSES a draft, which emits no publish event.
+/// Also REFUSES, dry run included, when the repo-root VERSION file at the commit to be tagged does
+/// not read the version (VERSION equals the tag; result.reason is version_file_stale); for a tag
+/// that already exists, only re-creating it at a commit whose VERSION matches resolves that.
+/// version is a bare X.Y.Z, with or without a leading v.
 action releaseEngine {
   args {
     version     string!

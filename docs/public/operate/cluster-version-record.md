@@ -21,9 +21,11 @@ at risk on the other's next write.
 
 - `ServerHello.version` is the literal string `"v1"`. It names the wire
   protocol, not the release, and always has.
-- The `VERSION` file has read `0.15.0` at every tag since v0.16.1, and
-  until memql#3998 the Dockerfile overwrote even that with a build stamp
-  of the form `0.15.0-<epoch>` before the binary shipped. That stamping
+- The `VERSION` file read `0.15.0` at every tag from v0.16.1 to v0.21.25,
+  and until memql#3998 the Dockerfile overwrote even that with a build
+  stamp of the form `0.15.0-<epoch>` before the binary shipped. (Since
+  memql#5714 a release cut refuses when `VERSION` differs from the tag,
+  but the binary still does not read the file.) That stamping
   step is gone: the release now goes into the binary via the linker and
   nowhere else, and neither runtime stage copies a `VERSION` file.
 

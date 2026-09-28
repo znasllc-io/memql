@@ -284,15 +284,25 @@ func parseComplianceJob(topic string, store Store, req memqlsync.InboundRequest,
 	// topic the sender chooses. Each operation is therefore bound to the
 	// payload shape only its own topic carries (memql#5707 review):
 	// shop/redact is {shop_id, shop_domain} with no customer;
-	// customers/redact carries the customer and orders_to_redact;
+	// customers/redact carries the customer and no data_request;
 	// customers/data_request carries the customer and data_request.id.
+	//
+	// customers/redact does NOT require orders_to_redact (memql#5707
+	// residual), and that is a decision rather than leniency. Shopify
+	// documents the key as always present, but it separates nothing: the
+	// customer already tells this body from shop/redact, and the absent
+	// data_request tells it from customers/data_request, so every replay
+	// the check exists for is refused without it. Requiring it could only
+	// ever refuse a GENUINE redaction whose key was omitted -- a legal
+	// request turned into a failed row, with Shopify never resending it.
+	// The key still marks a body as a customer payload for shop/redact.
 	switch job.Topic {
 	case TopicShopRedact:
 		if hasCustomer || hasDataRequest || hasOrdersToRedact {
 			return ComplianceJob{}, fmt.Errorf("shopify: %s topic does not match the signed body (a customer payload is present)", job.Topic)
 		}
 	case TopicRedact:
-		if !hasCustomer || !hasOrdersToRedact || hasDataRequest {
+		if !hasCustomer || hasDataRequest {
 			return ComplianceJob{}, fmt.Errorf("shopify: %s topic does not match the signed body", job.Topic)
 		}
 	case TopicDataRequest:

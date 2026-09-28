@@ -6,6 +6,8 @@ import (
 	"path"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/docsmd"
 )
 
 // TestDocsFrontMatterConformsToStandard and TestDocsRootLayoutIsClosed
@@ -66,7 +68,7 @@ var (
 		"status":   {"stable", "draft", "historical"},
 		"area": {
 			"overview", "concepts", "language", "ai", "operate", "build",
-			"cockpit", "design", "planning", "ops",
+			"cockpit", "reference", "design", "planning", "ops",
 		},
 	}
 )
@@ -151,36 +153,18 @@ func TestDocsFrontMatterConformsToStandard(t *testing.T) {
 	}
 }
 
-// parseFrontMatterBlock parses the leading `---`-delimited YAML-ish block
-// this repo's docs use: line-by-line `key: value`, split on the first `:`.
-// It intentionally does not pull in a YAML library -- the front-matter
-// contract is a flat set of scalar keys, and a real YAML parser would
-// silently accept structures (nested maps, lists) the standard does not
-// define, defeating the point of a closed-set gate.
+// parseFrontMatterBlock parses the leading `---`-delimited block this repo's
+// docs use: line-by-line `key: value`, split on the first `:`, quotes
+// trimmed. It is core/docsmd.Parse, the reader cmd/docs-gen/bundle selects
+// pages with, so a page this gate passes is a page the bundle reads the same
+// way (memql#5717: the old bundler kept the quotes this gate trims, and
+// silently dropped `audience: "public"`). It intentionally does not pull in a
+// YAML library -- the front-matter contract is a flat set of scalar keys, and
+// a real YAML parser would silently accept structures (nested maps, lists)
+// the standard does not define, defeating the point of a closed-set gate.
 func parseFrontMatterBlock(content string) (map[string]string, bool) {
-	lines := strings.Split(content, "\n")
-	if len(lines) == 0 || strings.TrimRight(lines[0], "\r") != "---" {
-		return nil, false
-	}
-	block := map[string]string{}
-	for _, raw := range lines[1:] {
-		line := strings.TrimRight(raw, "\r")
-		if line == "---" {
-			return block, true
-		}
-		idx := strings.Index(line, ":")
-		if idx < 0 {
-			continue
-		}
-		key := strings.TrimSpace(line[:idx])
-		val := strings.TrimSpace(line[idx+1:])
-		val = strings.Trim(val, `"'`)
-		if key != "" {
-			block[key] = val
-		}
-	}
-	// Reached EOF without a closing `---`: not a valid block.
-	return nil, false
+	block, _, ok := docsmd.Parse(content)
+	return block, ok
 }
 
 func contains(list []string, want string) bool {

@@ -199,6 +199,21 @@ describe("the row's right-click menu", () => {
     }
   });
 
+  // Asking about a file is the person's explicit request, so it goes through
+  // askAbout -- the prop that opens Ask. askContext only notes context and
+  // never opens anything, so routing this through it would do nothing.
+  it("asks about the file through askAbout, not the context note", async () => {
+    h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "brief.pdf" })] });
+    const askAbout = vi.fn();
+    const askContext = vi.fn();
+    await renderFiles({ askAbout, askContext });
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /brief\.pdf/ }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "File" })).getByRole("menuitem", { name: "Ask about this file" }));
+    expect(askAbout).toHaveBeenCalledWith("app:files/browse file:brief.pdf");
+    expect(askContext).not.toHaveBeenCalledWith("app:files/browse file:brief.pdf");
+  });
+
   it("offers an archived row what an archived row can do", async () => {
     h.connection = fakeConnection({
       artifacts: [artifactRow({ id: "a-1", title: "old.zip", archived: true })],

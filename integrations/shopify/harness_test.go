@@ -42,10 +42,14 @@ type fakeEngine struct {
 	rows map[string][]map[string]any
 	// fail maps a function name to an error it returns.
 	fail map[string]error
+	// cursors maps a function name to the continuation token every call of
+	// it answers with -- a read that always has another page, which is how a
+	// test reaches a walker's page cap.
+	cursors map[string]string
 }
 
 func newFakeEngine() *fakeEngine {
-	return &fakeEngine{rows: map[string][]map[string]any{}, fail: map[string]error{}}
+	return &fakeEngine{rows: map[string][]map[string]any{}, fail: map[string]error{}, cursors: map[string]string{}}
 }
 
 func (f *fakeEngine) Execute(_ context.Context, q string) (*memql.ExecuteResult, error) {
@@ -54,11 +58,16 @@ func (f *fakeEngine) Execute(_ context.Context, q string) (*memql.ExecuteResult,
 	name := callName(q)
 	err := f.fail[name]
 	rows := f.rows[name]
+	cursor := f.cursors[name]
 	f.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	return resultWithRows(rows), nil
+	res := resultWithRows(rows)
+	if cursor != "" {
+		res.Meta = &memql.ResultMeta{Cursor: cursor, HasMore: true}
+	}
+	return res, nil
 }
 
 // resultWithRows builds an ExecuteResult a caller can materialise rows from.
