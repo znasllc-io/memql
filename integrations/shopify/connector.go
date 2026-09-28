@@ -266,6 +266,9 @@ func (c *Connector) InboundSource(ctx context.Context, name string) (memqlsync.I
 	if c == nil || c.stores == nil {
 		return memqlsync.InboundSource{}, false
 	}
+	if name == ConnectorName {
+		return c.managedInboundSource(ctx)
+	}
 	prefix := ConnectorName + "-"
 	if !strings.HasPrefix(name, prefix) {
 		return memqlsync.InboundSource{}, false
@@ -279,19 +282,18 @@ func (c *Connector) InboundSource(ctx context.Context, name string) (memqlsync.I
 
 // StoreFor resolves the store a staged delivery belongs to.
 //
-// The SOURCE NAME is authoritative and the shop-domain header is the
-// fallback, in that order and not the other way round: the source
-// decided which secret verified the signature, so trusting a header over
-// it would let a delivery signed for one store be attributed to another.
+// Per-store source names are authoritative. The managed app-level privacy
+// source instead resolves the signed shop_domain and verifies app ownership.
+// An unknown source never falls back to an unsigned shop-domain header.
 func (c *Connector) StoreFor(ctx context.Context, req memqlsync.InboundRequest) (Store, bool) {
+	if req.Source == ConnectorName {
+		return c.managedComplianceStore(ctx, req)
+	}
 	prefix := ConnectorName + "-"
 	if strings.HasPrefix(req.Source, prefix) {
 		if store, ok := c.stores.ByID(ctx, strings.TrimPrefix(req.Source, prefix)); ok {
 			return store, true
 		}
-	}
-	if domain := header(req, HeaderShopDomain); domain != "" {
-		return c.stores.ByDomain(ctx, domain)
 	}
 	return Store{}, false
 }

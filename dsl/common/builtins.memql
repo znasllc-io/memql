@@ -720,6 +720,8 @@ builtin datasyncDispatchInbound {
   source            string
   topic             string
   body              string
+  headersJson       string
+  receivedAt        string
 }
 
 @executor("integration.datasync.reconcileDomains")

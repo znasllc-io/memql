@@ -178,14 +178,14 @@ func parseVersionTime(s string) (time.Time, bool) {
 type Dispatcher struct {
 	store   *Store
 	applier *Applier
-	lookup  func(name string) (memqlsync.Connector, bool)
+	lookup  func(ctx context.Context, name string) (memqlsync.Connector, bool)
 	now     func() time.Time
 	logger  *slog.Logger
 }
 
 // NewDispatcher builds the inbound router.
 func NewDispatcher(store *Store, applier *Applier) *Dispatcher {
-	return &Dispatcher{store: store, applier: applier, lookup: memqlsync.Lookup, now: time.Now}
+	return &Dispatcher{store: store, applier: applier, lookup: memqlsync.ConnectorForSource, now: time.Now}
 }
 
 // WithLogger gives the dispatcher somewhere to say that a health write was
@@ -217,7 +217,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req memqlsync.InboundRequest)
 	if source == "" {
 		return out, nil
 	}
-	connector, ok := d.lookup(source)
+	connector, ok := d.lookup(ctx, source)
 	if !ok || connector == nil {
 		return out, nil
 	}

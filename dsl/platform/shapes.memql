@@ -68,6 +68,7 @@ shape inboundRequest inboundRequestFull {
   medium
   body
   contentType
+  headersJson
   status
   dedupeKey
   signatureVerified

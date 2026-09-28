@@ -261,6 +261,11 @@ func parseComplianceJob(topic string, store Store, req memqlsync.InboundRequest,
 	if err != nil {
 		return ComplianceJob{}, fmt.Errorf("shopify: %s delivery is not JSON", topic)
 	}
+	// A managed app shares one signing secret across stores. A path or header
+	// alone cannot bind a privacy request to a tenant; the signed body must.
+	if domain := firstString(obj, "shop_domain"); domain == "" || !strings.EqualFold(domain, store.Domain) {
+		return ComplianceJob{}, fmt.Errorf("shopify: compliance delivery shop does not match the store")
+	}
 	job := ComplianceJob{
 		Topic:      strings.ToLower(strings.TrimSpace(topic)),
 		StoreID:    store.ID,
@@ -271,14 +276,37 @@ func parseComplianceJob(topic string, store Store, req memqlsync.InboundRequest,
 	if job.ReceivedAt.IsZero() {
 		job.ReceivedAt = now.UTC()
 	}
-	if cust, ok := obj["customer"].(map[string]any); ok {
+	cust, hasCustomer := obj["customer"].(map[string]any)
+	dataRequest, hasDataRequest := obj["data_request"].(map[string]any)
+	_, hasOrdersToRedact := obj["orders_to_redact"]
+	// The topic is an UNSIGNED header, and the three privacy payloads share
+	// one signing secret per app, so a captured delivery replays under any
+	// topic the sender chooses. Each operation is therefore bound to the
+	// payload shape only its own topic carries (memql#5707 review):
+	// shop/redact is {shop_id, shop_domain} with no customer;
+	// customers/redact carries the customer and orders_to_redact;
+	// customers/data_request carries the customer and data_request.id.
+	switch job.Topic {
+	case TopicShopRedact:
+		if hasCustomer || hasDataRequest || hasOrdersToRedact {
+			return ComplianceJob{}, fmt.Errorf("shopify: %s topic does not match the signed body (a customer payload is present)", job.Topic)
+		}
+	case TopicRedact:
+		if !hasCustomer || !hasOrdersToRedact || hasDataRequest {
+			return ComplianceJob{}, fmt.Errorf("shopify: %s topic does not match the signed body", job.Topic)
+		}
+	case TopicDataRequest:
+		if !hasCustomer || !hasDataRequest || firstString(dataRequest, "id") == "" {
+			return ComplianceJob{}, fmt.Errorf("shopify: %s topic does not match the signed body", job.Topic)
+		}
+	}
+	if hasCustomer {
 		if id := firstString(cust, "id"); id != "" {
 			job.CustomerGID = "gid://shopify/Customer/" + strings.TrimPrefix(id, "gid://shopify/Customer/")
 		}
 	}
-	job.RequestID = firstString(obj, "data_request", "id")
-	if dr, ok := obj["data_request"].(map[string]any); ok {
-		job.RequestID = firstString(dr, "id")
+	if hasDataRequest {
+		job.RequestID = firstString(dataRequest, "id")
 	}
 	if raw, ok := obj["orders_requested"].([]any); ok {
 		for _, v := range raw {

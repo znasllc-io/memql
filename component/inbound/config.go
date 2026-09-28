@@ -109,6 +109,8 @@ type SourceConfig struct {
 	// DedupeHeader names the sender's own idempotency key. Empty falls back to
 	// the SHA-256 of the body, which collapses byte-identical redeliveries.
 	DedupeHeader string
+	// ForwardHeaders is an explicit allowlist; credentials are never staged.
+	ForwardHeaders []string
 }
 
 // Config is the receiver's policy. Deny-by-default in the strongest sense:
@@ -203,6 +205,7 @@ func loadSource(name string) (SourceConfig, error) {
 		SignaturePrefix:  strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_PREFIX")),
 		TimestampHeader:  strings.TrimSpace(os.Getenv(prefix + "TIMESTAMP_HEADER")),
 		DedupeHeader:     strings.TrimSpace(os.Getenv(prefix + "DEDUPE_HEADER")),
+		ForwardHeaders:   splitAllowlist(os.Getenv(prefix + "FORWARD_HEADERS")),
 		ElementSeparator: strings.TrimSpace(os.Getenv(prefix + "ELEMENT_SEPARATOR")),
 		SignatureElement: strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_ELEMENT")),
 		TimestampElement: strings.TrimSpace(os.Getenv(prefix + "TIMESTAMP_ELEMENT")),

@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // executor_mutation_createonly_db_test.go is the real-engine reproduction +
@@ -100,6 +102,9 @@ func TestCreateOnly_ReStageDoesNotResetWorkerOwnedStatus(t *testing.T) {
 // fields refresh.
 func TestCreateOnly_InboundReStageKeepsTheProductsHandlingState(t *testing.T) {
 	eng, db, ctx := sharedReadMergeEngine(t)
+	// stageInboundRequest is @serverOnly (memql#5707): the receiver stages
+	// under internal origin, and so does this proof of its re-stage.
+	ctx = auth.ContextWithInternalOrigin(ctx)
 
 	const conceptName = "v1:platform:inboundRequest"
 	reqId := "in5426-" + uniqueSuffix("restage")

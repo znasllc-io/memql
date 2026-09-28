@@ -307,13 +307,29 @@ mutation outboundRequest updateOutboundRequestStatus {
 // second node.created firing -- this is at-least-once delivery with a
 // stable idempotency key, not exactly-once processing, and a product
 // automation has to branch on status before doing work.
+//
+// @serverOnly (memql#5707 review): the row's `source` and `headersJson`
+// drive dispatchInboundToConnector all the way to a connector's privacy
+// purge, so the row's provenance must be a server-side reader's -- the
+// inbound receiver or the NDR poller, each staging under internal origin
+// -- and never a client's. A client cannot stage a delivery.
 
 /// Stage a verified inbound delivery (memql#2957): insert a v1:platform:inboundRequest row with
 /// status='received' for a product automation to drain. Called by the engine inbound receiver once
 /// the source allowlist and signature check have passed; the signing secret is never part of the
 /// row. Idempotent by requestId: a redelivery preserves the product-owned handling state
 /// (@createOnly) instead of replaying it.
-@createOnly("status")
+///
+/// @serverOnly rather than actor.userId scoping (memql#5707 review): a staged delivery has no
+/// owner to scope to -- the sender is a third party that signed with a shared secret, and the
+/// receiver writes as a system actor with no user behind it, so actor.userId is empty for every
+/// legitimate caller and a self-scoped filter would match nothing and constrain nobody. What must
+/// hold is PROVENANCE: the row's `source` and `headersJson` drive dispatchInboundToConnector all
+/// the way to a connector's privacy purge, so the writer must be the receiver (or the NDR poller),
+/// each staging under internal origin, and never a client choosing a source name and a topic
+/// header. Only the wire bar expresses that.
+@createOnly("status", "headersJson", "receivedAt")
+@serverOnly
 mutation inboundRequest stageInboundRequest {
   args {
     requestId          string!
@@ -321,12 +337,13 @@ mutation inboundRequest stageInboundRequest {
     medium             string!
     body               string!
     contentType        string
+    headersJson        string
     dedupeKey          string
     signatureVerified  bool
     receivedAt         string
   }
   insert {
-    accept { source, medium, body, contentType, dedupeKey, signatureVerified, receivedAt }
+    accept { source, medium, body, contentType, headersJson, dedupeKey, signatureVerified, receivedAt }
     stamp {
       id: args.requestId
       status: "received"
