@@ -680,12 +680,17 @@ test("the endpoint is judged by the dialer, and reports what the dialer said", (
   // webSocketUrlFor is the function the connection layer actually calls, so
   // its refusal is the field error -- minus the "cluster \"x\": " prefix it
   // carries for callers with no field to attach a sentence to.
-  const s = connectForm({ name: "staging", endpoint: "https://api.example.com" });
+  const s = connectForm({ name: "staging", endpoint: "ftp://api.example.com" });
   assert.equal(s.connectDraft(), undefined);
   assert.equal(
     messageFor(s, "endpoint"),
-    'endpoint scheme must be ws:// or wss://, got "https://" -- store the gRPC host:port (or an explicit ws(s):// bridge URL), not a general-purpose URL',
+    "use an address like https://api.example.com or api.example.com:443, not ftp://",
   );
+});
+
+test("an https:// address is a front door the dialer accepts", () => {
+  const s = connectForm({ name: "staging", endpoint: "https://api.example.com" });
+  assert.equal(messageFor(s, "endpoint"), undefined);
 });
 
 test("a PAT in the token box is refused by name rather than left to fail at the handshake", () => {
@@ -726,7 +731,7 @@ test("every field is checked, so all the problems arrive at once", () => {
   const s = connectForm({
     name: "staging",
     domain: "https://example.com",
-    endpoint: "https://api.example.com",
+    endpoint: "ftp://api.example.com",
     token: "mql_pat_abcdef",
   });
   s.setRegistry(registry("staging"));

@@ -476,7 +476,7 @@ export function duplicateNameMessage(name: string): string {
  * free to accept something the dialer later rejects, and the operator would
  * find out at connect time with the form long since closed.
  *
- * Its message names the cluster ("cluster \"x\": endpoint scheme must be...")
+ * Its message names the cluster ("cluster \"x\": use an address like ...")
  * because its usual caller has no field to attach the sentence to. This one
  * does, and the label above the box already says which value is wrong, so the
  * prefix is stripped -- by exact match against the name we passed in, not by a
