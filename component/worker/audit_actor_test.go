@@ -40,22 +40,42 @@ const (
 )
 
 // recordingAuditLogger is the identity side of the bridge: what it receives is
-// what the DB sink would be asked to write.
+// what the DB sink would be asked to write. It also keeps ctx.Err() as it was
+// when each event arrived, because EngineAuditSink writes on that context: an
+// event handed over on a context that is already done is refused by the engine
+// before any row exists, and all that is left is one audit_db_write_failed WARN.
 type recordingAuditLogger struct {
-	mu     sync.Mutex
-	events []identity.AuditEvent
+	mu      sync.Mutex
+	events  []identity.AuditEvent
+	ctxErrs []error
 }
 
-func (r *recordingAuditLogger) Log(_ context.Context, ev identity.AuditEvent) {
+func (r *recordingAuditLogger) Log(ctx context.Context, ev identity.AuditEvent) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.events = append(r.events, ev)
+	r.ctxErrs = append(r.ctxErrs, ctx.Err())
 }
 
 func (r *recordingAuditLogger) all() []identity.AuditEvent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]identity.AuditEvent(nil), r.events...)
+}
+
+// assertWritableContext fails for every event that reached the sink on a
+// context that was already done -- a row the DB write would have lost.
+func (r *recordingAuditLogger) assertWritableContext(t *testing.T) {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, err := range r.ctxErrs {
+		if err != nil {
+			t.Errorf("%s: handed to the audit sink on a context that is already done (%v); the DB write "+
+				"fails with that error before a row exists, so the event reaches the log and never the trail",
+				r.events[i].Action, err)
+		}
+	}
 }
 
 // assertStorableActor fails when ActorIdentity is anything createAuditEvent
@@ -99,6 +119,9 @@ func TestWorkerStreamAuditNamesTheCredentialItWasAdmittedOn(t *testing.T) {
 	session.handleAuditEvent(context.Background(), &memqlv1.AuditEvent{Action: "tool_consent_granted", DetailJson: []byte(`{}`)})
 	session.close(nil)
 
+	// worker_disconnected is emitted from close(), whose first act is to
+	// cancel the session's context. Its row must still be written.
+	rec.assertWritableContext(t)
 	events := rec.all()
 	want := []string{"worker_registered", "tool_consent_granted", "worker_disconnected"}
 	if len(events) != len(want) {
@@ -149,6 +172,7 @@ func TestAppSessionAuditTargetsTheSession(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
+	rec.assertWritableContext(t)
 	events := rec.all()
 	want := []string{"app_session_started", "app_session_ended"}
 	if len(events) != len(want) {
@@ -177,6 +201,36 @@ func TestAppSessionAuditTargetsTheSession(t *testing.T) {
 			t.Errorf("%s: detail.actor = %v, want \"engine\"", ev.Action, got)
 		}
 	}
+}
+
+// TestAppSessionEndedAuditSurvivesACancelledRun: cancellation is one of the
+// ways a session ends, and the ended event is the only record in the trail that
+// it did. finishRow already writes the terminal row on a detached context for
+// exactly this reason; the audit must not go out on the dead one.
+func TestAppSessionEndedAuditSurvivesACancelledRun(t *testing.T) {
+	runner, session, _, _ := newRunnerFixture(t, SubscriptionPresent)
+	rec := &recordingAuditLogger{}
+	runner.Auditor = &IdentityAuditor{AuditLogger: rec}
+	spec := runSpec()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		waitForSession(t, session, spec.SessionId)
+		cancel()
+	}()
+	result, err := runner.Run(ctx, session.worker, spec, nil)
+	if err == nil || result.Status != AppSessionStatusCancelled {
+		t.Fatalf("Run = %q, %v; want a cancelled run", result.Status, err)
+	}
+
+	events := rec.all()
+	if len(events) != 2 || events[1].Action != "app_session_ended" {
+		t.Fatalf("audit events = %d, want app_session_started then app_session_ended", len(events))
+	}
+	if got := events[1].Detail["status"]; got != AppSessionStatusCancelled {
+		t.Errorf("app_session_ended detail.status = %v, want %q", got, AppSessionStatusCancelled)
+	}
+	rec.assertWritableContext(t)
 }
 
 // TestIdentityAuditorKeepsTheLabelOutOfTheIdentityField pins the bridge

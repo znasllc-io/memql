@@ -679,8 +679,17 @@ func (s *streamSession) close(cause error) {
 		}
 		// Emit an audit event mirroring "worker_registered" so downstream
 		// security telemetry has a paired connect/disconnect record.
+		//
+		// ON A DETACHED CONTEXT. s.cancel fired on the first line of close,
+		// so s.ctx is done here and the DB sink's write on it fails with
+		// context canceled before any row exists -- the disconnect would
+		// reach the log and never the trail. WithoutCancel keeps the
+		// stream's values (the write runs as the same caller); the timeout
+		// bounds a teardown that must not hang on a slow database.
 		if s.server != nil && s.server.auditor != nil {
-			s.server.auditor.Emit(s.ctx, AuditEvent{
+			auditCtx, cancelAudit := context.WithTimeout(context.WithoutCancel(s.ctx), 5*time.Second)
+			defer cancelAudit()
+			s.server.auditor.Emit(auditCtx, AuditEvent{
 				Action:          "worker_disconnected",
 				ActorIdentityId: s.worker.IdentityId,
 				ActorLabel:      "worker:" + s.worker.RegistrationId,
@@ -713,9 +722,8 @@ func (s *streamSession) close(cause error) {
 // THE CONTEXT COMES FROM Background(), NOT from the session. By the time close
 // runs, s.cancel has already fired and s.ctx is done, so a write on it would
 // be cancelled before it left the process -- and the failure would be silent,
-// because the flush is best-effort. The audit Emit just below still passes
-// s.ctx; that is a separate question about a separate sink and is not the
-// pattern to copy here.
+// because the flush is best-effort. The disconnect audit in close detaches for
+// the same reason.
 func (s *streamSession) clearConnectedNode() {
 	if s == nil || s.server == nil || s.server.store == nil || s.worker == nil {
 		return

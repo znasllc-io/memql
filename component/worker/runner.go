@@ -532,19 +532,19 @@ func (r *SessionRunner) finishRow(ctx context.Context, row AppSessionRow, result
 	row.ErrorMessage = result.ErrorMessage
 	row.EndedAt = r.now()
 
+	// A detached context for both writes: the caller's may already be
+	// cancelled (that is one of the ways a run ends). Losing the terminal
+	// row would leave a session that reads as still running forever, and
+	// losing the audit would leave the trail with a start and no end.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	if r.Store != nil {
-		// A detached context: the caller's may already be cancelled
-		// (that is one of the ways a run ends), and losing the
-		// terminal row would leave a session that reads as still
-		// running forever.
-		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
 		if err := r.Store.EndAppSession(writeCtx, row); err != nil && r.Logger != nil {
 			r.Logger.Warn("worker: persist app session end failed",
 				"session_id", row.ID, "error", err)
 		}
 	}
-	r.audit(ctx, "app_session_ended", spec, w, map[string]any{
+	r.audit(writeCtx, "app_session_ended", spec, w, map[string]any{
 		"app":          spec.App,
 		"status":       result.Status,
 		"exitCode":     result.ExitCode,

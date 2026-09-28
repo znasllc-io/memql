@@ -764,7 +764,7 @@ this UI a cluster-wide machine activity browser.
 
 | Where           | What lands                                         |
 |-----------------|----------------------------------------------------|
-| `v1:identity:auditEvent` | Security signals: `worker_registered`, `worker_disconnected`, `worker_revoked`, `app_session_started` / `app_session_ended`, `scope_elevation_*`, `worker_call_blocked_by_kill_switch`, `worker_call_denied_*`, `command_blocked`. Default 365-day retention (`MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS`). |
+| `v1:identity:auditEvent` | Security signals: `worker_registered`, `worker_disconnected`, the events the cockpit forwards on its stream, `app_session_started` / `app_session_ended`, `scope_elevation_requested`, `worker_call_blocked_by_kill_switch`, `worker_call_denied_by_policy`, `command_blocked`. Default 365-day retention (`MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS`). |
 | `v1:worker:invocation` | Per-call telemetry: tool, action, args (redacted), duration, outcome, exit code, byte counts, output preview, plus the `routing` record saying why this machine (section 5.7). Default 90-day retention (`WORKER_INVOCATION_RETENTION_DAYS`). |
 | Cockpit logs    | `~/.memql/state/worker.log` (LaunchAgent / systemd). |
 | Slog stream     | The `audit` slog logger on the agent node. Operator log retention applies here. |

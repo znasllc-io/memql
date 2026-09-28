@@ -36,15 +36,16 @@ import (
 )
 
 // sinkThrough is an identity.AuditLogger that writes each event with the real
-// DB sink and KEEPS the error, which SlogAuditLogger demotes to a WARN.
+// DB sink and KEEPS the error, which SlogAuditLogger demotes to a WARN. It
+// writes on the context the bridge hands it, as SlogAuditLogger does: a
+// context that is done by then loses the row just as a refusal does.
 type sinkThrough struct {
 	sink *identity.EngineAuditSink
-	ctx  context.Context
 	errs map[string]error
 }
 
-func (s *sinkThrough) Log(_ context.Context, ev identity.AuditEvent) {
-	s.errs[ev.Action] = s.sink.WriteAuditEvent(s.ctx, ev)
+func (s *sinkThrough) Log(ctx context.Context, ev identity.AuditEvent) {
+	s.errs[ev.Action] = s.sink.WriteAuditEvent(ctx, ev)
 }
 
 func TestWorkerAuditEventsPersist(t *testing.T) {
@@ -63,7 +64,7 @@ func TestWorkerAuditEventsPersist(t *testing.T) {
 	session := "v1:worker:appSession:sess-" + sfx
 	agent := "v1:agents:agent:agent-" + sfx
 
-	through := &sinkThrough{sink: &identity.EngineAuditSink{Engine: e.Eng}, ctx: e.Ctx, errs: map[string]error{}}
+	through := &sinkThrough{sink: &identity.EngineAuditSink{Engine: e.Eng}, errs: map[string]error{}}
 	bridge := &worker.IdentityAuditor{AuditLogger: through}
 
 	// The shapes the emitters produce (component/worker server.go, runner.go;
