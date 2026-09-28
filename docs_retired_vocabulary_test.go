@@ -172,8 +172,14 @@ var retiredVocabulary = []struct{ pattern, reason, ref string }{
 	// menu -- was deleted on 2026-08-25; the Cockpit is the machine worker
 	// runtime and cluster CLI, installed as `memql`. Probe: 2 lines
 	// (why-memql-harness.md, memql-cloud-orbit.md), fixed. "TUI" is NOT in
-	// the pattern: every current use of it says the TUI was removed.
-	{`(?i)cockpit[^.|]{0,80}\b(IDE|ops console|operations console|terminal-native)\b|\bterminal[- ](native|IDE)\b`, "the Cockpit's terminal UI is deleted; it is the machine worker runtime and cluster CLI", "memql#4550"},
+	// the pattern: every current use of it says the TUI was removed. The
+	// second half catches the Cockpit named as the EDITOR -- diagnostics "at
+	// edit time in Cockpit", or its editor / Concepts tab / Topology view
+	// doing something now; Sense's one consumer is the VS Code extension
+	// (sense.md). Probe: 1 line (authoring-rules.md), fixed. sense.md's "The
+	// Cockpit Editor was the second consumer" is past tense and stays
+	// unmatched.
+	{`(?i)cockpit[^.|]{0,80}\b(IDE|ops console|operations console|terminal-native)\b|\bterminal[- ](native|IDE)\b|\b(at|during) edit[- ]time in (the )?(memql )?cockpit\b|\bin (the )?(memql )?cockpit(['’]s)? (editor|concepts tab|topology view)\b|\bcockpit(['’]s)? (editor|concepts tab|topology view) (shows|renders|lists|draws|offers|surfaces|flags|underlines|displays|highlights)\b`, "the Cockpit's terminal UI is deleted; it is the machine worker runtime and cluster CLI", "memql#4550"},
 	// A local run is the k3d parity cluster (`make up`): the same node mesh
 	// as the cloud, never one binary. Probe: 1 line (why-memql-harness.md),
 	// removed.
@@ -187,8 +193,12 @@ var retiredVocabulary = []struct{ pattern, reason, ref string }{
 	// "carrier repo" is retired vocabulary: product DSL is a runtime bundle
 	// on a product-agnostic engine image, not a carrier build. Probe: 7 lines
 	// in 5 pages, fixed. "carrier-built" and "carrier build" stay unmatched:
-	// every current use of them negates the retired model.
-	{`(?i)\bcarrier[- ]repo|\bproduct[- ]pack repo`, "the carrier repo is retired; product DSL ships as a runtime bundle", "memql#2472"},
+	// every current use of them negates the retired model. "deploy estate" is
+	// the same pointer in other words -- "owned by the product pack's deploy
+	// estate" -- and the one use found wrapped between "pack's" and "deploy",
+	// where a pattern spanning both could not see it, so the phrase alone is
+	// matched. Probe: 1 line (identity-service.md), fixed.
+	{`(?i)\bcarrier[- ]repo|\bproduct[- ]pack(['’]s)? repo|\bdeploy estate\b`, "the carrier repo is retired; product DSL ships as a runtime bundle", "memql#2472"},
 	// The node types are agent, bff, edge, identity, mcp, planner and
 	// workbench (app/build_*.go, ENGINE_NODE_TYPES). The pattern matches the
 	// shapes that PRESENT cognition or voice as one -- a build tag, a binary,

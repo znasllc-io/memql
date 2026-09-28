@@ -108,6 +108,9 @@ it's `internal`.
 3. **Bundle:** `scripts/docs/build-docs-bundle.sh` selects the public set,
    runs the generator, and emits `docs-bundle/` = the markdown tree + a
    `manifest.json` (nav tree, section map, `version`, `engineVersion`).
+   HTML comments are stripped from the bundled markdown outside code: they
+   are gate markers the tests read from the source tree, and the site prints
+   a comment as literal text (`docs_bundle_comments_test.go`).
 4. **Release:** when a GitHub Release is published on a bare `X.Y.Z` tag, the
    `publish-docs-bundle` workflow (`.github/workflows/publish-docs-bundle.yml`)
    builds the bundle **at that tag** on the build server and attaches

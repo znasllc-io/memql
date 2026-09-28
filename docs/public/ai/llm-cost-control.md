@@ -202,7 +202,8 @@ residual gap is *cross-turn* cumulative spend, which Layers 0 and 4 close.
 |---|---|---|---|---|
 | Agent tool loop | `integrations/agent/streaming.go`, `nonstreaming.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 180s wallclock (`MEMQL_TURN_WALLCLOCK_TIMEOUT_SECONDS`) | none → **Layer 0 / 4** | 3 repeat-failures (`MEMQL_TOOL_LOOP_MAX_REPEAT_FAILURES`), 3 all-errored rounds, 2 produceArtifact re-delegations |
 | Engine AI tool loop | `component/memql/ai_tool_loop.go` | 120 iters (`MEMQL_TOOL_LOOP_MAX_ITERATIONS`), 8 tool-calls/iter | none → **Layer 0 / 4** | all-errored guard, identical-call breaker |
-| Work run | `integrations/work/runceilings.go`, `component/work/budget.go` | n/a -- a run is not a turn loop | the goal's `ceilings` (tokens, cost, model calls, retries, events, wall clock), checked before every call; a breach parks the run | 4 repair attempts per authoring bundle (`MEMQL_AUTHORING_MAX_REPAIRS`) |
+| Work run | `integrations/work/runceilings.go`, `component/work/budget.go` | n/a -- a run is not a turn loop | the goal's `ceilings` (tokens, cost, model calls, wall clock), checked before every call; a breach parks the run. `maxRetries` and `maxEvents` are declared but not enforced: the run logs a warning that they bound nothing | n/a |
+| Authoring compile | `integrations/planner/work_compile.go`, `agent_loop_authoring_emit.go` | n/a -- a compile is a bounded pass, not a turn loop | the run's `maxModelCalls`, counted across its design, emit and repair calls (`callCapGate`) | 4 repair attempts per authoring bundle (`MEMQL_AUTHORING_MAX_REPAIRS`) |
 | Suggest | `component/grpc/` AiSuggest | single call | n/a | n/a |
 
 Verdict: no loop lacks a per-turn terminal condition. The agent / engine tool

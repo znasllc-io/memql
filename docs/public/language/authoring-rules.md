@@ -161,8 +161,9 @@ atomic rows with clean audit trails.
 **Cross-references**: see `dsl/library/automations.memql` and
 `dsl/identity/automations.memql` for live examples of this pattern.
 
-**Sense diagnostics for these gotchas** land at edit time in Cockpit
-(see [MemQL Sense & the DSL Spec](sense.md)). The rules live in
+**Sense diagnostics for these gotchas** land at edit time in the MemQL VS
+Code extension, through its offline language server `cmd/memql-lsp` (see
+[MemQL Sense & the DSL Spec](sense.md)). The rules live in
 `component/memql/sense/authoring_rules.go` and cover the most
 frequently hit traps:
 

@@ -172,12 +172,19 @@ and its two controls. The figure is on [the scorecard](proving-scorecard.md).
 - **Per-run ceilings** checked *before* each call
   (`component/work/budget.go`, enforced in `integrations/work/runceilings.go`):
   a run parks instead of making the next call when it would cross a ceiling
-  its goal declares -- tokens, cost, model calls, retries, events or
-  wall-clock time -- and carries on when a person raises that ceiling.
+  its goal declares -- tokens, cost, model calls or wall-clock time -- and
+  carries on when a person raises that ceiling. A goal can also declare
+  `maxRetries` and `maxEvents`, but nothing enforces those two yet: they are
+  the executor's counters and never reach a model call, so the run logs a
+  warning that they bound nothing rather than pretending to check them.
 - **Loop breakers** -- repeat-failure and redelegation-refusal guards
   stop the classic "model apologizes and tries the same thing forever".
-- **An up-front estimate and approval gate**, and model tiering that is
-  cheap by default and escalates only on an explicit stuck signal.
+- **Model tiering** that is cheap by default and escalates only on an
+  explicit stuck signal (the agent's background lane,
+  `integrations/agent/nonstreaming.go`), and **an approval before an authored
+  automation goes live**: the bundle is dry-run in a sandbox, and its trace,
+  side-effect manifest and cost estimate are what a person approves
+  (`component/memql/authoring_dryrun.go`, `authoring_activation.go`).
 
 Every side-effecting step is performed under an idempotency key, and the
 proving suite checks it as a pass-or-fail property rather than scoring it.

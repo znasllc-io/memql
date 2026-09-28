@@ -65,6 +65,9 @@ func TestRetiredVocabularyCatchesTheRetiredShapes(t *testing.T) {
 		"The MemQL portal's Deployments view was it (memql#3319 + memql#3380)",
 		"Rollouts reference: the product carrier repo's `deploy/rollouts/README.md`",
 		"see the product pack repo's docs/operate/deployment-strategy.md",
+		"deploy estate since the deploy/release tooling moved there) wipes the",
+		"**Sense diagnostics for these gotchas** land at edit time in Cockpit",
+		"In the Cockpit's Concepts tab, pick a concept to browse its rows.",
 		"go build -tags voice -o bin/memql-voice .",
 		"make dev NODE=cognition",
 		"Node types (bff, voice, cognition, agent, planner) share one database.",
@@ -74,6 +77,8 @@ func TestRetiredVocabularyCatchesTheRetiredShapes(t *testing.T) {
 	allowed := []string{
 		"| `ai.completion.started` | `si_completion_started` | Emitted when an AI request begins |",
 		"> The Cockpit Editor was the second consumer until the Cockpit's TUI was",
+		"**Sense diagnostics for these gotchas** land at edit time in the MemQL VS",
+		"The rows it declares are the product's; the deployment estate is the operator's.",
 		"| **MemQL OS** | the graphical ops console | one instance |",
 		"So it is one binary per cluster.",
 		"linux/amd64, **before the cognition and voice node types were removed** -- so",

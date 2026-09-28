@@ -877,8 +877,8 @@ in every environment that runs env-seed mode.
 
 ### Staging DB reset stays auth-coherent (#1522)
 
-The staging DB reset (`staging-db-reset.sh`, owned by the product pack's
-deploy estate since the deploy/release tooling moved there) wipes the
+A staging DB reset (a `staging-db-reset.sh` shipped with the deployment that
+runs one; this repository carries no copy) wipes the
 staging database back to an empty schema. A DB wipe used to leave auth
 HALF-BROKEN: every `v1:identity:authSession` row and every mesh
 node-token grant lives in the DB, so the wipe invalidated them all, and
