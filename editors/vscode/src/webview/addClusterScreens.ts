@@ -741,7 +741,7 @@ export function runScreen(input: RunInput): RegionParts {
       break;
     case "stopped":
       bar = actionBar({
-        state: "Stopped",
+        state: "Not finished",
         tone: "idle",
         acts: [
           { act: "leave", label: "Back" },
@@ -983,7 +983,7 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
     return {
       head: top,
       body: skeleton({ shape: "list", rows: 3, label: "Reading what is installed" }),
-      actions: actionBar({ state: "Reading what is installed", tone: "busy", acts: [{ act: "uninstallBack", label: "Cancel" }] }),
+      actions: actionBar({ state: "Checking this computer", tone: "busy", acts: [{ act: "uninstallBack", label: "Cancel" }] }),
     };
   }
   if (input.nothingHere !== undefined) {
@@ -991,7 +991,8 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
       head: top,
       body: `<p class="ac-line">No local cluster was found on this computer.</p>`,
       actions: actionBar({
-        state: "Nothing to uninstall",
+        // Why "Remove from list" is here, when it is: the entry outlived the cluster.
+        state: input.nothingHere.removeFromList ? "Still in your clusters" : "Nothing to uninstall",
         tone: "idle",
         acts: [
           { act: "uninstallBack", label: "Back" },
