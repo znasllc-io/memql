@@ -9,9 +9,10 @@ import { scenarios as kit } from "./scenarios/kit.js";
 import { scenarios as access } from "./scenarios/access.js";
 import { scenarios as install } from "./scenarios/install.js";
 import { scenarios as deployments } from "./scenarios/deployments.js";
+import { scenarios as author } from "./scenarios/author.js";
 
 /** Every scenario, in index order. */
-export const SCENARIOS: readonly Scenario[] = [...kit, ...access, ...install, ...deployments];
+export const SCENARIOS: readonly Scenario[] = [...kit, ...access, ...install, ...deployments, ...author];
 
 /** One rendered gallery page. */
 export interface GalleryPage {

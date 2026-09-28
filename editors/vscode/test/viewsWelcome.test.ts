@@ -69,27 +69,27 @@ function linkedCommands(contents: string): string[] {
   return [...contents.matchAll(/\(command:([A-Za-z0-9_.]+)\)/g)].map((m) => m[1]);
 }
 
+/** The welcome a view shows with no cluster in hand: the one keyed on the selection. */
+function noClusterWelcome(view: string): WelcomeEntry[] {
+  return welcomeFor(view).filter((entry) => entry.when === `!${CLUSTER_SELECTED_KEY}`);
+}
+
 for (const view of GATED) {
   test(`${view} carries a welcome keyed on !${CLUSTER_SELECTED_KEY}`, () => {
-    const entries = welcomeFor(view);
-    assert.equal(entries.length, 1, `expected exactly one welcome for ${view}`);
     // The clause is asserted whole rather than merely "mentions the key",
     // because `memql.clusterSelected` without the `!` is the same typo class as
     // a misspelling and reads correctly at a glance: it would show the welcome
     // exactly when there IS a cluster.
-    assert.equal(entries[0].when, `!${CLUSTER_SELECTED_KEY}`, `${view}'s welcome clause`);
+    assert.equal(noClusterWelcome(view).length, 1, `expected exactly one no-cluster welcome for ${view}`);
   });
 
   test(`${view}'s welcome opens with the shared sentence and offers Select Cluster`, () => {
-    const entry = welcomeFor(view)[0];
+    const entry = noClusterWelcome(view)[0];
     assert.ok(
       entry.contents.startsWith("Not connected."),
       `${view}'s welcome does not open with the shared refusal: ${entry.contents}`
     );
-    // ONE SENTENCE, then links. The three read the same because they describe
-    // the same condition; only the noun changes ("its deployments", "its
-    // constructs", "its data"), which is the "consistent message that varies a
-    // bit per view" the epic was filed for.
+    // ONE SENTENCE, then links.
     const [sentence] = entry.contents.split("\n");
     assert.ok(
       sentence.length < 80,
@@ -108,7 +108,7 @@ test("the welcomes and the runs refusal say the same first words", () => {
   // one session must recognise them as one message rather than two policies.
   const opening = NOT_CONNECTED_REFUSAL.split(".")[0];
   for (const view of GATED) {
-    assert.ok(welcomeFor(view)[0].contents.startsWith(opening));
+    assert.ok(noClusterWelcome(view)[0].contents.startsWith(opening));
   }
   for (const entry of deploymentsUnselected()) {
     assert.ok(entry.contents.startsWith(opening), entry.contents);
@@ -169,11 +169,15 @@ test("only the Deployments welcome carries the install entry point", () => {
     deploymentsUnselected().some((entry) => linkedCommands(entry.contents).includes("memql.deployments.createDeployment")),
     "the Deployments welcome lost the install entry point"
   );
+  // Constructs and Data offer what a person with no cluster in hand can do
+  // about it -- select one, or add one when there is none to select (a
+  // Select Cluster alone opened an empty picker on a machine with no
+  // clusters). Neither is where somebody looks to install a cluster.
   for (const view of ["memqlConstructs", "memqlData"] as const) {
     assert.deepEqual(
-      linkedCommands(welcomeFor(view)[0].contents),
-      ["memql.clusters.select"],
-      `${view}'s welcome offers more than selecting a cluster`
+      linkedCommands(noClusterWelcome(view)[0].contents),
+      ["memql.clusters.select", "memql.clusters.add"],
+      `${view}'s no-cluster welcome offers the wrong acts`
     );
   }
 });
@@ -213,13 +217,25 @@ test("Runs has no connection-gated welcome", () => {
   // THE EXCEPTION, asserted as an absence. Runs lists `runs.json` from the
   // workspace -- files a developer wrote and a repository can ship -- and a
   // welcome keyed on the connection would replace them with a message about a
-  // cluster. It gates `memql.runs.execute` instead.
+  // cluster. It gates the Run act instead.
   for (const entry of welcomeFor("memqlRuns")) {
     assert.ok(
-      !(entry.when ?? "").includes(CLUSTER_SELECTED_KEY),
+      !(entry.when ?? "").includes(CLUSTER_SELECTED_KEY) && !(entry.when ?? "").includes("memql.connect"),
       "the Runs view grew a connection-gated welcome"
     );
   }
+});
+
+test("Runs says why it is empty: no saved runs, or no folder to save them in", () => {
+  // It used to be a blank panel with two icons in either case.
+  const entries = welcomeFor("memqlRuns");
+  const byWhen = new Map(entries.map((entry) => [entry.when, entry]));
+  const noRuns = byWhen.get("workbenchState != empty");
+  const noFolder = byWhen.get("workbenchState == empty");
+  assert.ok(noRuns !== undefined, "no welcome for a folder with no saved runs");
+  assert.ok(noFolder !== undefined, "no welcome for a window with no folder");
+  assert.deepEqual(linkedCommands(noRuns.contents), ["memql.runs.open"]);
+  assert.deepEqual(linkedCommands(noFolder.contents), ["vscode.openFolder"]);
 });
 
 test("every welcome names a view that exists and a command that is contributed", () => {
@@ -229,7 +245,8 @@ test("every welcome names a view that exists and a command that is contributed",
   const views = new Set(
     Object.values(manifest.contributes.views).flat().map((entry) => entry.id)
   );
-  const commands = new Set(manifest.contributes.commands.map((entry) => entry.command));
+  // Plus the editor's own command a welcome links to.
+  const commands = new Set([...manifest.contributes.commands.map((entry) => entry.command), "vscode.openFolder"]);
   for (const entry of welcomes) {
     assert.ok(views.has(entry.view), `welcome for unknown view ${entry.view}`);
     for (const command of linkedCommands(entry.contents)) {

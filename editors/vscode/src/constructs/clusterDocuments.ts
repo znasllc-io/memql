@@ -108,7 +108,7 @@ export class ClusterDocumentProvider implements vscode.TextDocumentContentProvid
 }
 
 /**
- * One lens at line 0: where the bytes came from, and the way to the detail page.
+ * Two lenses at line 0: where the bytes came from, and the way to the detail page.
  *
  * THE CLUSTER TRAVELS WITH THE KEY. A `{kind, name}` on its own would be
  * resolved against whatever is connected when the lens is CLICKED, which is not
@@ -118,9 +118,17 @@ export class ClusterDocumentLens implements vscode.CodeLensProvider {
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
     const ref = parseClusterDocumentUri({ authority: document.uri.authority, path: document.uri.path, query: document.uri.query });
     if (ref === undefined) return [];
+    const top = new vscode.Range(0, 0, 0, 0);
+    // TWO LENSES, a fact and an act: where these bytes came from (no command,
+    // so nothing to wonder about clicking), then the way to the detail page.
     return [
-      new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
-        title: `From ${ref.cluster} -- read-only -- Open construct details`,
+      new vscode.CodeLens(top, {
+        title: `From ${ref.cluster} (read-only)`,
+        command: "",
+      }),
+      new vscode.CodeLens(top, {
+        title: "Details",
+        tooltip: `Open ${ref.name}'s page`,
         command: "memql.constructs.showDetails",
         arguments: [{ cluster: ref.cluster, kind: ref.kind, name: ref.name }],
       }),

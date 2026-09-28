@@ -93,7 +93,10 @@ export class TrainingDecorations {
       );
     }
 
-    this.status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
+    // An id and a name, so the status bar's own menu lists it as "MemQL
+    // training" rather than under the extension's id.
+    this.status = vscode.window.createStatusBarItem("memql.training", vscode.StatusBarAlignment.Right, 90);
+    this.status.name = "MemQL training";
     // The click-through (#3763), which is what turns the count from a notice
     // into a way back to the constructs it is about. Set once, in the
     // constructor: the item is only ever shown when there is something to list,
@@ -165,7 +168,7 @@ export class TrainingDecorations {
     const painted = this.painted;
     if (painted === undefined) {
       vscode.window.showInformationMessage(
-        "MemQL: no training state for the active editor. Open a .memql file with a cluster connected."
+        "MemQL: Open a .memql file while connected to a cluster."
       );
       return;
     }
@@ -176,7 +179,7 @@ export class TrainingDecorations {
       // "everything here is on the cluster" is the good news this whole surface
       // exists to tell somebody.
       vscode.window.showInformationMessage(
-        "MemQL: every construct in this file is on the cluster -- nothing untrained, nothing drifted."
+        "MemQL: Everything in this file is live on the cluster."
       );
       return;
     }
@@ -189,12 +192,9 @@ export class TrainingDecorations {
         entry,
       })),
       {
-        // "not in this version" rather than "does not have": a drifted construct
-        // IS on the cluster, in an older version, and the two states are the
-        // distinction this whole surface is built around. A placeholder that
-        // collapsed them would undo it in the one place a developer reads while
-        // deciding what to do next.
-        placeHolder: "Constructs this cluster does not have in this version. Pick one to go to it.",
+        // "not live" rather than "not on the cluster": a construct that differs
+        // IS on the cluster, in another version, and each row says which.
+        placeHolder: "Go to a construct that isn't live",
         matchOnDescription: true,
         matchOnDetail: true,
       }

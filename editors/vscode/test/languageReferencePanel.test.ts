@@ -84,9 +84,9 @@ function reopen(deps: OpenDeps): void {
 test("with no cluster the panel renders the pin rather than waiting", () => {
   const panel = open({ reader: () => undefined });
   assert.equal(panel.viewType, "memqlLanguageReference");
-  assert.match(panel.html, /No cluster is connected/);
+  assert.match(panel.html, /Connect to a cluster to see its grammar and vocabulary/);
   assert.ok(panel.html.includes("2026.09-example-0123abcd"), "the pinned grammar version");
-  assert.ok(panel.html.includes("frozen"), "the pinned edition status");
+  assert.ok(panel.html.includes("Frozen"), "the pinned edition status");
   panel.close();
   live = undefined;
 });
@@ -147,7 +147,7 @@ test("a connected cluster is asked for both artifacts, and both land on the page
   assert.deepEqual([...calls].sort(), [GRAMMAR_CALL, VOCABULARY_CALL].sort());
   assert.ok(panel.html.includes("1 productions"), "the grammar did not reach the page");
   assert.ok(panel.html.includes("1 entries"), "the vocabulary did not reach the page");
-  assert.match(panel.html, /Read from the cluster local/);
+  assert.match(panel.html, /· from local</);
   // The search box appears only once there is something to search.
   assert.ok(panel.html.includes('id="lr-search"'), "no search box over two artifacts");
   panel.close();
@@ -179,8 +179,8 @@ test("a refused call is named on the page, and the other artifact still renders"
   await settle();
   // NAMED, because the two are separate calls with separate reasons to fail: a
   // cluster too old to carry one of them refuses that one by name.
-  assert.match(panel.html, /memqlGrammar\(\) could not be read: unknown builtin/);
-  assert.match(panel.html, /did not answer with a grammar/);
+  assert.match(panel.html, /local didn&#39;t return a grammar\./);
+  assert.match(panel.html, /unknown builtin/);
   assert.ok(panel.html.includes("1 entries"), "the vocabulary that DID answer is missing");
   panel.close();
   live = undefined;
@@ -264,7 +264,8 @@ test("a panel opened before the connection surface exists follows it after a re-
   // updated again for any connect, disconnect or switch.
   const host = lateHost();
   const panel = open(host.deps);
-  assert.match(panel.html, /No cluster is connected/);
+  // Untrusted: no connection surface, so the page offers trust, not a picker.
+  assert.match(panel.html, /Trust this workspace to connect to a cluster/);
 
   // Trust granted: the manager now exists. Running the command again re-opens
   // the singleton.
@@ -278,7 +279,7 @@ test("a panel opened before the connection surface exists follows it after a re-
   host.connect("local");
   host.fire();
   await settle();
-  assert.match(panel.html, /Read from the cluster local/, "the panel did not follow the connect");
+  assert.match(panel.html, /· from local</, "the panel did not follow the connect");
   panel.close();
   live = undefined;
 });
@@ -289,7 +290,8 @@ test("granting workspace trust re-binds an open panel, without re-opening it", a
   // listener calls this static -- it is the only thing in a position to.
   const host = lateHost();
   const panel = open(host.deps);
-  assert.match(panel.html, /No cluster is connected/);
+  // Untrusted: no connection surface, so the page offers trust, not a picker.
+  assert.match(panel.html, /Trust this workspace to connect to a cluster/);
 
   host.surfaceAppears();
   LanguageReferencePanel.connectionSurfaceChanged();
@@ -299,7 +301,7 @@ test("granting workspace trust re-binds an open panel, without re-opening it", a
   host.connect("prod");
   host.fire();
   await settle();
-  assert.match(panel.html, /Read from the cluster prod/);
+  assert.match(panel.html, /· from prod</);
   panel.close();
   live = undefined;
 });
@@ -353,40 +355,31 @@ test("a cluster that never answers is given up on, and the page says what it kno
         }),
     }),
   });
-  assert.match(panel.html, /Reading the grammar and the vocabulary from local/);
+  // Loading is the shape of the content; its words are for screen readers.
+  assert.match(panel.html, /<span class="mq-sr">Reading the grammar and vocabulary from local<\/span>/);
 
   await new Promise((resolve) => setTimeout(resolve, 40));
   assert.ok(sawSignal, "the read was made with no AbortSignal, so no deadline can reach it");
 
-  // It names the calls and the time they were given, rather than the SDK's
-  // bare "aborted" -- which would read as something the reader did. Both share
-  // one deadline, so both expiring is ONE piece of news: saying "the cluster
-  // may still be working on it" twice reads as two separate events.
-  assert.match(
-    panel.html,
-    /Neither memqlGrammar\(\) nor memqlVocabulary\(\) answered within 5ms, so the read was given up\. The cluster may still be working on them\./,
-  );
+  // It says what happened -- the cluster did not answer inside the time it
+  // was given -- rather than the SDK's bare "aborted", which would read as
+  // something the reader did. Both share one deadline, so both expiring is
+  // ONE piece of news, said once.
+  assert.match(panel.html, /It didn&#39;t answer within 5ms\./);
   assert.equal(
-    panel.html.split("so the read was given up").length - 1,
+    panel.html.split("didn&#39;t answer within").length - 1,
     1,
     "the deadline's sentence is printed more than once for one expiry",
   );
-
-  // And the sentence about what a cluster WOULD answer is not printed under an
-  // error that says it did not: the error is the explanation.
   assert.equal(
-    panel.html.includes("a cluster that has them answers"),
-    false,
-    "the page explains what a cluster would do directly under an error saying it did not",
-  );
-  assert.equal(
-    panel.html.includes("Reading the grammar and the vocabulary"),
+    panel.html.includes("Reading the grammar and vocabulary"),
     false,
     "the page is still claiming the read is in flight",
   );
 
-  // What the extension knows, and a way out.
-  assert.match(panel.html, /built against edition 2026 \(frozen\), grammar 2026\.09-example-0123abcd/);
+  // What the page knows, said once (the head's meta), and a way out.
+  assert.match(panel.html, /Edition 2026 · Frozen · Grammar 2026\.09-example-0123abcd · from local/);
+  assert.equal(panel.html.includes("This editor speaks"), false, "the same language is said twice");
   assert.equal((panel.html.match(/data-act="reload"/g) ?? []).length, 1, "no Try again");
   panel.close();
   live = undefined;

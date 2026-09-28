@@ -82,8 +82,9 @@ function key(clusterName: string, constructName: string): string {
  * It NAMES THE CLUSTER AND THE CONSTRUCT, which is the entire content of the
  * warning: "are you sure?" tells the developer nothing they can check, while
  * "run mutationCreateSpace against staging" is a claim they can immediately
- * recognise as right or wrong.
+ * recognise as right or wrong. The consequence follows in one clause: what is
+ * true of a cluster that is not local, never the file that records it.
  */
 export function writeConfirmationMessage(req: WriteConfirmationRequest): string {
-  return `Run the mutation "${req.constructName}" against ${req.clusterLabel}? That cluster is not marked local in clusters.yaml, so this writes real rows.`;
+  return `Run "${req.constructName}" on ${req.clusterLabel}? It isn't a local cluster, so this writes real data.`;
 }

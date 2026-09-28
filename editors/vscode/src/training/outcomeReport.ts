@@ -39,12 +39,17 @@ export interface TrainingReport {
 
 /** The verb each action reports in, so a headline reads as a sentence. */
 const VERB: Record<TrainingActionKind, string> = {
-  dryRun: "Dry-run",
+  dryRun: "Dry run",
   tryInSession: "Try in session",
   stage: "Stage",
   promote: "Promote",
   demote: "Demote",
 };
+
+/** "3 constructs": a count and its noun, without "construct(s)". */
+function constructs(n: number): string {
+  return `${n} construct${n === 1 ? "" : "s"}`;
+}
 
 /**
  * outcomeReport renders an outcome.
@@ -63,7 +68,7 @@ export function outcomeReport(outcome: TrainingOutcome): TrainingReport | undefi
     case "invalid":
       return {
         severity: "error",
-        headline: `${VERB[outcome.action]} failed: ${outcome.diagnostics.length} construct(s) did not compile. See Problems.`,
+        headline: `MemQL: ${VERB[outcome.action]} stopped: ${constructs(outcome.diagnostics.length)} didn't compile.`,
         body: [
           `${VERB[outcome.action]} of "${outcome.request.name}" stopped at validation. Nothing reached the cluster.`,
           "",
@@ -74,17 +79,19 @@ export function outcomeReport(outcome: TrainingOutcome): TrainingReport | undefi
     case "error":
       return {
         severity: "error",
+        // The id is lifted out of the message (training/actions.ts), so the
+        // message already carries it; naming it again would say it twice.
         headline:
-          outcome.errorId === ""
-            ? `${VERB[outcome.action]} failed: ${outcome.message}`
-            : `${VERB[outcome.action]} failed (${outcome.errorId}): ${outcome.message}`,
+          outcome.errorId === "" || outcome.message.includes(outcome.errorId)
+            ? `MemQL: ${VERB[outcome.action]} failed: ${outcome.message}`
+            : `MemQL: ${VERB[outcome.action]} failed (${outcome.errorId}): ${outcome.message}`,
         body: [
           `${VERB[outcome.action]} of "${outcome.request.name}" failed.`,
           "",
           outcome.message,
           ...(outcome.errorId === ""
             ? []
-            : ["", `Engine error id: ${outcome.errorId} -- quote it to find the server-side log entry.`]),
+            : ["", `Error ID: ${outcome.errorId}. Quote it to find the cluster's log entry.`]),
         ].join("\n"),
       };
 
@@ -95,7 +102,7 @@ export function outcomeReport(outcome: TrainingOutcome): TrainingReport | undefi
       // part they can act on.
       return {
         severity: "warning",
-        headline: `Promote refused: a breaking schema change. Review the diff, then override deliberately if it is meant.`,
+        headline: "MemQL: Promote blocked by a breaking schema change. Override only if you mean it.",
         body: [
           `Promote of "${outcome.request.name}" to ${outcome.cluster.label} was refused. Nothing was promoted.`,
           "",
@@ -117,31 +124,31 @@ function okReport(
     case "dryRun":
       return {
         severity: "info",
-        headline: `Dry-run clean: ${outcome.result.constructs} construct(s) compile and bind against ${where}.`,
+        headline: `MemQL: Dry run passed on ${where}: ${constructs(outcome.result.constructs)}, nothing changed.`,
         body: [
-          `Dry-run of "${outcome.request.name}" against ${where}.`,
+          `Dry run of "${outcome.request.name}" on ${where}.`,
           "",
-          "Every construct in the bundle compiled and bound. NOTHING WAS CHANGED: a dry-run is a compile against a read-only clone of the registry, so the cluster is exactly as it was.",
+          "Everything compiled and bound. Nothing was changed: a dry run compiles against a read-only copy of the cluster's registry.",
         ].join("\n"),
       };
 
     case "tryInSession":
       return {
         severity: "info",
-        headline: `Defined for this session only: ${outcome.result.defined.length} construct(s) on ${where}. Not promoted.`,
+        headline: `MemQL: "${outcome.request.name}" is live on ${where} for this session only.`,
         body: [
           `"${outcome.request.name}" is callable by name on ${where}, on this connection and nowhere else.`,
           "",
           constructList(outcome.result.defined),
           "",
-          "TEMPORARY. Nothing is persisted, no other caller can see it, and every definition is dropped when the connection drops or you switch cluster -- silently, because the engine does not announce it. Promote is what makes a construct outlive the session.",
+          "Temporary: nothing is saved, nobody else can call it, and it is dropped without notice when the connection drops or you switch cluster. Promote keeps it.",
         ].join("\n"),
       };
 
     case "stage":
       return {
         severity: "info",
-        headline: `Staged ${outcome.result.staged.length} construct(s) on ${where}. Callable by you only.`,
+        headline: `MemQL: Staged "${outcome.request.name}" on ${where}. Only you can call it.`,
         body: [
           `"${outcome.request.name}" is durable on ${where} and callable by you and by nobody else.`,
           "",
@@ -151,7 +158,7 @@ function okReport(
           // one the whole tier exists to be able to say. Try in session's report
           // ends by naming Promote as what outlives the connection; this is the
           // other thing that does, without making the construct everyone's.
-          "PERSISTED, and replayed when the cluster restarts -- unlike Try in session, this survives the connection. No other caller on this cluster can see or call it. Train it (Promote) to make it live for everyone.",
+          "Saved, and replayed when the cluster restarts: unlike Try in session, it survives the connection. Nobody else can call it. Promote makes it live for everyone.",
         ].join("\n"),
       };
 
@@ -159,19 +166,16 @@ function okReport(
       return {
         severity: outcome.result.overridden ? "warning" : "info",
         headline: outcome.result.overridden
-          ? `Promoted ${outcome.result.promoted.length} construct(s) to ${where} WITH a breaking-change override.`
-          : `Promoted ${outcome.result.promoted.length} construct(s) to ${where}.`,
+          ? `MemQL: Promoted "${outcome.request.name}" to ${where}, with a breaking-change override.`
+          : `MemQL: Promoted "${outcome.request.name}" to ${where}.`,
         body: [
           `Promote of "${outcome.request.name}" to ${where} succeeded.`,
           "",
           constructList(outcome.result.promoted),
           "",
-          "Persisted, registered into the shared registry, and broadcast -- every node serves them within seconds and a restart replays them.",
+          "Saved and live for everyone: every node serves them within seconds, and a restart replays them.",
           ...(outcome.result.overridden
-            ? [
-                "",
-                "A BREAKING SCHEMA CHANGE WAS OVERRIDDEN. The engine has audited it on v1:identity:auditEvent, naming the concept and the fields.",
-              ]
+            ? ["", "A breaking schema change was overridden. The cluster audited it, naming the concept and the fields."]
             : []),
           ...(outcome.result.conceptDiffs.length === 0
             ? []
@@ -201,8 +205,8 @@ function demoteHeadline(outcomes: readonly DemoteOutcome[], where: string): stri
   // of them; a literal here would be a third spelling nothing keeps in step.
   const retired = outcomes.filter((o) => o.outcome === DemoteOutcomeRetired);
   if (retired.length === 0) {
-    return `Demoted ${outcomes.length} construct(s) from ${where}. The name(s) are free again.`;
+    return `MemQL: Demoted ${constructs(outcomes.length)} from ${where}. ${outcomes.length === 1 ? "The name is" : "The names are"} free again.`;
   }
   const rows = retired.reduce((total, o) => total + o.rowCount, 0);
-  return `Demoted from ${where}: ${retired.length} retired (${rows} row(s) keep the name claimed), ${outcomes.length - retired.length} removed.`;
+  return `MemQL: Demoted from ${where}: ${retired.length} retired (${rows} row${rows === 1 ? "" : "s"} keep the name taken), ${outcomes.length - retired.length} removed.`;
 }

@@ -242,8 +242,11 @@ test("a badge is short enough for the editor to accept it", () => {
   }
 });
 
-test("the two reasons read differently, and each names its way out", () => {
-  assert.notEqual(reasonBadge("coreSealed"), reasonBadge("remoteCluster"));
+test("one badge for one fact, and each reason names its way out in its tooltip", () => {
+  // The badge says read-only; WHY is the hover's. Three letters (C, R, L) that
+  // meant nothing until hovered are one mark now, the one cluster documents use.
+  assert.equal(reasonBadge("coreSealed"), "RO");
+  assert.equal(reasonBadge("remoteCluster"), "RO");
 
   const core = reasonTooltip("coreSealed", "staging");
   const remote = reasonTooltip("remoteCluster", "staging");
@@ -253,7 +256,7 @@ test("the two reasons read differently, and each names its way out", () => {
   // selection that resolves it. A badge that only said "read-only" would leave
   // an operator with no next step in either case.
   assert.match(core, /new file/);
-  assert.match(remote, /Select the local cluster/);
+  assert.match(remote, /Select a local cluster/);
   // ...and OPEN ITS CHECKOUT, which is the half a developer sitting in a second
   // clone of the same repository would otherwise have no way to guess.
   assert.match(remote, /checkout/);
@@ -262,7 +265,7 @@ test("the two reasons read differently, and each names its way out", () => {
 
 test("a local cluster whose checkout is elsewhere gets a hint, not a lock", () => {
   const hint = checkoutHint("local", "/home/me/.memql/src");
-  assert.match(hint, /not the checkout/);
+  assert.match(hint, /not this folder/);
   assert.match(hint, /\/home\/me\/\.memql\/src/);
   assert.match(hint, /local/);
 });

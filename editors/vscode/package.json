@@ -228,13 +228,53 @@
       },
       {
         "view": "memqlConstructs",
-        "contents": "Not connected. Select a cluster to browse its constructs.\n[Select Cluster](command:memql.clusters.select)",
+        "contents": "Not connected.\n[Select a Cluster](command:memql.clusters.select)\n[Add a Cluster](command:memql.clusters.add)",
+        "when": "!memql.clusterSelected"
+      },
+      {
+        "view": "memqlConstructs",
+        "contents": "Sign in to see constructs.\n[Sign In](command:memql.clusters.signIn)",
+        "when": "memql.connectionState == signIn"
+      },
+      {
+        "view": "memqlConstructs",
+        "contents": "The cluster isn't answering.\n[Retry](command:memql.constructs.refresh)",
+        "when": "memql.connectionState == unreachable"
+      },
+      {
+        "view": "memqlConstructs",
+        "contents": "This cluster has no address.\n[Edit Cluster](command:memql.clusters.edit)",
+        "when": "memql.connectionState == notConfigured"
+      },
+      {
+        "view": "memqlData",
+        "contents": "Not connected.\n[Select a Cluster](command:memql.clusters.select)\n[Add a Cluster](command:memql.clusters.add)",
         "when": "!memql.clusterSelected"
       },
       {
         "view": "memqlData",
-        "contents": "Not connected. Select a cluster to browse its data.\n[Select Cluster](command:memql.clusters.select)",
-        "when": "!memql.clusterSelected"
+        "contents": "Sign in to see data.\n[Sign In](command:memql.clusters.signIn)",
+        "when": "memql.connectionState == signIn"
+      },
+      {
+        "view": "memqlData",
+        "contents": "The cluster isn't answering.\n[Retry](command:memql.data.refresh)",
+        "when": "memql.connectionState == unreachable"
+      },
+      {
+        "view": "memqlData",
+        "contents": "This cluster has no address.\n[Edit Cluster](command:memql.clusters.edit)",
+        "when": "memql.connectionState == notConfigured"
+      },
+      {
+        "view": "memqlRuns",
+        "contents": "No saved runs yet. Save one from a construct's Run form.\n[Open runs.json](command:memql.runs.open)",
+        "when": "workbenchState != empty"
+      },
+      {
+        "view": "memqlRuns",
+        "contents": "Open a folder to save runs.\n[Open Folder](command:vscode.openFolder)",
+        "when": "workbenchState == empty"
       }
     ],
     "commands": [
@@ -282,6 +322,11 @@
       {
         "command": "memql.constructs.showDetails",
         "title": "MemQL: Show Construct Details"
+      },
+      {
+        "command": "memql.constructs.run",
+        "title": "MemQL: Run",
+        "icon": "$(play)"
       },
       {
         "command": "memql.deployments.refresh",
@@ -428,6 +473,10 @@
         "title": "MemQL: Demote Construct From The Cluster"
       },
       {
+        "command": "memql.training.choose",
+        "title": "MemQL: Choose Training Action"
+      },
+      {
         "command": "memql.training.showList",
         "title": "MemQL: Show Untrained And Drifted Constructs"
       },
@@ -464,6 +513,10 @@
         },
         {
           "command": "memql.constructs.showDetails",
+          "when": "false"
+        },
+        {
+          "command": "memql.constructs.run",
           "when": "false"
         },
         {
@@ -615,6 +668,10 @@
           "when": "false"
         },
         {
+          "command": "memql.training.choose",
+          "when": "false"
+        },
+        {
           "command": "memql.training.showList",
           "when": "isWorkspaceTrusted"
         }
@@ -681,19 +738,19 @@
           "group": "navigation@1"
         },
         {
+          "command": "memql.language.showReference",
+          "when": "view == memqlConstructs",
+          "group": "9_reference@1"
+        },
+        {
           "command": "memql.data.refresh",
           "when": "view == memqlData",
           "group": "navigation@1"
         },
         {
           "command": "memql.runs.open",
-          "when": "view == memqlRuns",
+          "when": "view == memqlRuns && workbenchState != empty",
           "group": "navigation@1"
-        },
-        {
-          "command": "memql.runs.refresh",
-          "when": "view == memqlRuns",
-          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -754,13 +811,23 @@
         },
         {
           "command": "memql.runs.execute",
-          "when": "view == memqlRuns && viewItem == memqlRun",
+          "when": "view == memqlRuns && viewItem == memqlRun && memql.connected",
           "group": "inline@1"
+        },
+        {
+          "command": "memql.runs.execute",
+          "when": "view == memqlRuns && viewItem == memqlRun && memql.connected",
+          "group": "1_run@1"
         },
         {
           "command": "memql.runs.delete",
           "when": "view == memqlRuns && viewItem == memqlRun",
-          "group": "inline@2"
+          "group": "9_delete@1"
+        },
+        {
+          "command": "memql.constructs.run",
+          "when": "view == memqlConstructs && viewItem == memqlRunnableConstruct && memql.connected",
+          "group": "inline@1"
         }
       ]
     }

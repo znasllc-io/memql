@@ -73,7 +73,7 @@ test("details are refused when the connection is not the document's cluster, and
   const crossed = detailsRefusal("staging", "prod");
   assert.match(String(crossed), /staging/);
   assert.match(String(crossed), /prod/);
-  assert.match(String(crossed), /reconnect/i);
+  assert.match(String(crossed), /Connect to staging/);
 
   const none = detailsRefusal("staging", undefined);
   assert.match(String(none), /staging/);
@@ -86,11 +86,13 @@ test("a document with no cluster claim is not refused", () => {
   assert.equal(detailsRefusal("", "prod"), undefined);
 });
 
-test("the fetch-failed notice points at the channel and carries no raw error", () => {
+test("the fetch-failed notice names the file and the way back, and carries no raw error", () => {
   const notice = fetchFailedNotice("staging", "cognition/queries.memql");
   assert.match(notice, /staging/);
   assert.match(notice, /cognition\/queries\.memql/);
-  assert.match(notice, /MemQL Connection/);
+  assert.match(notice, /reconnect/i);
+  // One line: the toast that accompanies it carries Show details.
+  assert.equal(notice.split("\n").filter((l) => l !== "").length, 1);
   // Every line is a comment: the notice is rendered INTO a .memql buffer.
   for (const line of notice.split("\n").filter((l) => l !== "")) {
     assert.match(line, /^\/\//, `"${line}" is not a comment line`);
@@ -115,13 +117,18 @@ test("a panel action is refused when the connection is not the panel's own clust
   // "reconnect to staging" wins over the generic offer.
   const gone = String(panelClusterRefusal("staging", undefined, "read its source"));
   assert.match(gone, /staging/);
-  assert.equal(/connect to a cluster to/.test(gone), false);
+  assert.equal(/Connect to a cluster to/.test(gone), false);
+
+  // THE REFUSAL NAMES THE ACT THAT WAS ASKED FOR. It used to say "open its
+  // details" about a click on Open source.
+  assert.match(crossed, /read its source/);
+  assert.doesNotMatch(crossed, /open its details/);
 
   // Nothing connected and NO claim to check: fall back to naming what is
   // needed, in the caller's own words.
   assert.equal(
-    panelClusterRefusal("", undefined, "browse its rows in the portal"),
-    "MemQL: connect to a cluster to browse its rows in the portal.",
+    panelClusterRefusal("", undefined, "browse its rows"),
+    "MemQL: Connect to a cluster to browse its rows.",
   );
 
   // A panel with no claim, over a live connection, is never refused -- the
