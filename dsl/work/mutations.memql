@@ -355,9 +355,11 @@ mutation modelCall createWorkModelCall {
     served         string!
     response       object
     error          string
+    routerCallId   string
+    decision       object
   }
   insert {
-    accept { runId, stepKey, requestHash, provider, model, settings, promptRef, promptVersion, inputTokens, outputTokens, cost, latencyMs, served, response, error }
+    accept { runId, stepKey, requestHash, provider, model, settings, promptRef, promptVersion, inputTokens, outputTokens, cost, latencyMs, served, response, error, routerCallId, decision }
     stamp {
       id: args.modelCallId
       ownerUserId: actor.userId

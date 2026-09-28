@@ -132,7 +132,15 @@ func TestAnAppEntryIsAvailableOnlyWhenAMachineCanRunIt(t *testing.T) {
 
 // A node with no worker service has an UNAVAILABLE door, not a broken one --
 // the same state as "nobody is signed in", flowing through the same path.
+//
+// THE REASON NAMES WHERE APP SOURCES DO RUN, and which node this is (the
+// planner/app-source design, section 3a). A planner's triage whose route puts
+// an app source first reads this line on every decision record until planner
+// calls are forwarded to the agent holding the machine; "this node has no app
+// sessions installed" read like a fault to fix on the planner.
 func TestANodeWithNoAppSessionsHasAnUnavailableDoor(t *testing.T) {
+	t.Setenv("MEMQL_NODE_TYPE", "planner")
+	const want = "app sources run on the agent holding the machine; this planner node cannot open one"
 	r := newProviderRegistry()
 	entry, ok := r.EntryForUser(userCtx("alice"), "alice", AppReferencePrefix+appIdCodex)
 	if !ok {
@@ -141,8 +149,18 @@ func TestANodeWithNoAppSessionsHasAnUnavailableDoor(t *testing.T) {
 	if entry.Available {
 		t.Error("no app inference installed must mean unavailable")
 	}
-	if !strings.Contains(entry.Err().Error(), "no app sessions installed") {
-		t.Errorf("the reason must distinguish this node from a signed-out user: %v", entry.Err())
+	if entry.Err() == nil || entry.Err().Error() != want {
+		t.Errorf("reason = %v, want %q", entry.Err(), want)
+	}
+	// The refusal the router inlines beside that line adds nothing to it:
+	// the one sentence already says everything a reader can act on.
+	if refusal := r.AppRefusal(userCtx("alice"), "alice", appIdCodex); len(refusal.Considered) != 0 || refusal.LastError != want {
+		t.Errorf("refusal = %+v, want no per-app lines and the one sentence", refusal)
+	}
+	// And a call that reaches the client anyway refuses in the same words.
+	_, err := entry.Client.(common.ChatAIProvider).CallChat(userCtx("alice"), []common.ChatMessage{{Role: "user", Content: "hi"}})
+	if !errors.Is(err, ErrAppUnavailable) || !strings.Contains(err.Error(), want) {
+		t.Errorf("call err = %v, want ErrAppUnavailable naming %q", err, want)
 	}
 }
 

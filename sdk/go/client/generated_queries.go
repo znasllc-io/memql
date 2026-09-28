@@ -7076,7 +7076,7 @@ type RouterDecisionsRecentArgs struct {
 	// Only decisions resolved at this level.
 	// Enum: fast | strong | reasoning | embeddings
 	Level string
-	// Only decisions served through this door. `session` is an app that was handed the whole step (epic memql#5391) -- the one door a person most needs to find in the history, and the concept's own door enum has carried it since that epic.
+	// Only decisions served through this door. `session` is an app handed a whole step.
 	// Enum: local | app | federation | session
 	Door string
 	// Only decisions the named rule made.

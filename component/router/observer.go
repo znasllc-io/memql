@@ -2,9 +2,12 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -32,7 +35,7 @@ func (o *observedStreamWithTools) CallChatStreamWithTools(
 
 	innerCh, err := o.inner.CallChatStreamWithTools(ctx, messages, tools)
 	if err != nil {
-		o.router.recordObserved(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, 0, 0, start, time.Time{}, time.Now(), true, err, ctx.Err()))
+		o.router.recordAttempt(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, 0, 0, start, time.Time{}, time.Now(), true, err, ctx.Err()))
 		return nil, err
 	}
 
@@ -57,7 +60,7 @@ func (o *observedStreamWithTools) CallChatStreamWithTools(
 			if duration := end.Sub(start).Seconds(); duration > 0.1 {
 				rec.TokensPerSec = float64(outputTokens) / duration
 			}
-			o.router.recordObserved(ctx, rec)
+			o.router.recordAttempt(ctx, rec)
 		}
 		defer record()
 		for {
@@ -133,18 +136,20 @@ func (o *observedWithTools) CallChatWithTools(
 	outputTokens := EstimateTokensFromChars(outputChars)
 	// streaming=false, firstTokenAt=zero: a synchronous call has no
 	// meaningful TTFT, and buildRecord leaves timeToFirstTokenMs at 0.
-	o.router.recordObserved(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, time.Time{}, time.Now(), false, err, ctx.Err()))
+	o.router.recordAttempt(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, time.Time{}, time.Now(), false, err, ctx.Err()))
 	return result, err
 }
 
 // observedChat wraps a common.ChatAIProvider -- the non-streaming
 // synchronous chat surface used by suggest endpoints and the voice
-// (non-tool-calling) InvokeAI path.
+// (non-tool-calling) InvokeAI path -- and its bare prompt form.
 type observedChat struct {
 	inner    common.ChatAIProvider
 	router   *Router
 	resolved Resolved
 	req      ResolveRequest
+	// callId is the full id of the row this attempt wrote, once it returns.
+	callId string
 }
 
 func (o *observedChat) CallChat(ctx context.Context, messages []common.ChatMessage) (string, error) {
@@ -154,8 +159,48 @@ func (o *observedChat) CallChat(ctx context.Context, messages []common.ChatMessa
 
 	reply, err := o.inner.CallChat(ctx, messages)
 	outputTokens := EstimateTokensFromChars(len(reply))
-	o.router.recordObserved(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, time.Time{}, time.Now(), false, err, ctx.Err()))
+	o.callId = o.router.recordAttempt(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, time.Time{}, time.Now(), false, err, ctx.Err()))
 	return reply, err
+}
+
+// Call records one attempt of the bare prompt form (memql.AIProvider).
+//
+// A chat source without a prompt surface is refused as this attempt's failure
+// rather than skipped, so the route moves on and the row says why. Every
+// provider in the registry has one today; the refusal is for the day one does
+// not.
+func (o *observedChat) Call(ctx context.Context, prompt string) (any, error) {
+	start := time.Now()
+	ctx = startObservation(ctx, o.req, o.resolved, start)
+	inputTokens := EstimateMessageTokens([]common.ChatMessage{{Role: "user", Content: prompt}})
+
+	var value any
+	var err error
+	if caller, ok := o.inner.(memql.AIProvider); ok {
+		value, err = caller.Call(ctx, prompt)
+	} else {
+		err = fmt.Errorf("router: %s serves chat turns but has no prompt form for an ai() expression", o.resolved.ProviderName)
+	}
+	outputTokens := EstimateTokensFromChars(answerChars(value))
+	o.callId = o.router.recordAttempt(ctx, buildRecord(o.req, o.resolved, o.inner, inputTokens, outputTokens, 0, start, time.Time{}, time.Now(), false, err, ctx.Err()))
+	return value, err
+}
+
+// answerChars sizes a prompt-form answer for the token estimate. The form
+// answers any value -- a vendor parses a JSON reply -- so a non-string is sized
+// by its JSON encoding, which is roughly what the model emitted.
+func answerChars(value any) int {
+	switch v := value.(type) {
+	case nil:
+		return 0
+	case string:
+		return len(v)
+	}
+	b, err := json.Marshal(value)
+	if err != nil {
+		return 0
+	}
+	return len(b)
 }
 
 // buildRecord assembles the CallRecord for the ledger given what the

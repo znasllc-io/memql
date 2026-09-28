@@ -54,9 +54,7 @@ query call routerDecisionsRecent {
     since    string
     /// Only decisions resolved at this level.
     level    enum("fast", "strong", "reasoning", "embeddings")
-    /// Only decisions served through this door. `session` is an app that was handed the whole step
-    /// (epic memql#5391) -- the one door a person most needs to find in the history, and the concept's
-    /// own door enum has carried it since that epic.
+    /// Only decisions served through this door. `session` is an app handed a whole step.
     door     enum("local", "app", "federation", "session")
     /// Only decisions the named rule made.
     rule     string

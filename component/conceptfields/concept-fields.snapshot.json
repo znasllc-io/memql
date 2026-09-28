@@ -7992,6 +7992,7 @@
       "file": "work/concepts.memql",
       "fields": [
         "cost",
+        "decision",
         "error",
         "inputTokens",
         "latencyMs",
@@ -8003,6 +8004,7 @@
         "provider",
         "requestHash",
         "response",
+        "routerCallId",
         "runId",
         "served",
         "settings",
