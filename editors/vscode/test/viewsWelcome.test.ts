@@ -127,7 +127,10 @@ test("with no cluster selected, Deployments says one line and the right act", ()
   const present = entries.find((e) => e.when === `!${CLUSTER_SELECTED_KEY} && memql.localClusterPresent`);
   const absent = entries.find((e) => e.when === `!${CLUSTER_SELECTED_KEY} && !memql.localClusterPresent`);
   assert.ok(present && absent, "the two welcomes are keyed on whether a local cluster is present");
-  assert.deepEqual(linkedCommands(present.contents), ["memql.clusters.select"]);
+  // A local cluster that is here but not selected -- or not even in the list,
+  // which Select Cluster cannot reach -- opens on its own page, whose primary
+  // is Connect, Reconnect or Sign in as its state asks.
+  assert.deepEqual(linkedCommands(present.contents), ["memql.deployments.open", "memql.clusters.select"]);
   assert.deepEqual(linkedCommands(absent.contents), ["memql.deployments.createDeployment", "memql.clusters.select"]);
   for (const entry of entries) assert.equal(entry.contents.split("\n")[0], "Not connected.");
 });

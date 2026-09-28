@@ -187,7 +187,7 @@
       },
       {
         "view": "memqlDeployments",
-        "contents": "Not connected.\n[Select Cluster](command:memql.clusters.select)",
+        "contents": "Not connected.\n[Open Local Cluster](command:memql.deployments.open)\n[Select Cluster](command:memql.clusters.select)",
         "when": "!memql.clusterSelected && memql.localClusterPresent"
       },
       {
