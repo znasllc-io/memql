@@ -111,7 +111,9 @@ func render(p *Page, rs []resolution, allowed map[[3]string]bool, routeBase stri
 			if l.Definition {
 				edits = append(edits, edit{l.Start, l.End, ""})
 			} else {
-				edits = append(edits, edit{l.Start, l.End, l.Text})
+				// Unwrap to the text by deleting what surrounds it, so a
+				// link or image nested in the text keeps its own edit.
+				edits = append(edits, edit{l.Start, l.TextStart, ""}, edit{l.TextEnd, l.End, ""})
 			}
 		}
 	}

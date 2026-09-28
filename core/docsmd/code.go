@@ -7,18 +7,25 @@ import (
 
 // A fence opens with three or more backticks or tildes. CommonMark allows at
 // most three spaces of indent, but a fence inside a list item sits deeper, so
-// any indent is accepted: reading a line as a fence can only leave its content
-// alone, never strip or rewrite it. It closes on a line of the same character,
-// at least as long, with nothing after it but whitespace.
+// any indent is accepted here; where the indent makes the line indented code
+// instead, the scanner reads that first (scan.go). It closes on a line of the
+// same character, at least as long, with nothing after it but whitespace.
 var fenceLine = regexp.MustCompile("^[ \t]*(`{3,}|~{3,})")
 
-// fenceOpens reports the fence marker a line opens, or "".
+// fenceOpens reports the fence marker a line opens, or "". A backtick fence's
+// info string cannot hold a backtick: "```inline```" opens no fence, it is a
+// code span in a paragraph, and reading it as a fence would hide the rest of
+// the page from the link gate.
 func fenceOpens(body string) string {
-	m := fenceLine.FindStringSubmatch(body)
+	m := fenceLine.FindStringSubmatchIndex(body)
 	if m == nil {
 		return ""
 	}
-	return m[1]
+	marker := body[m[2]:m[3]]
+	if marker[0] == '`' && strings.Contains(body[m[3]:], "`") {
+		return ""
+	}
+	return marker
 }
 
 // fenceCloses reports whether body closes a fence opened with marker.
@@ -62,69 +69,6 @@ func closingRun(s string, from, n int) int {
 	}
 }
 
-// segment is one byte range of a line, and whether it is an HTML comment.
-type segment struct {
-	start, end int
-	comment    bool
-	code       bool
-}
-
-// scanLine walks one line that is outside a fenced block. It returns the
-// line's segments in order -- text, code spans and comments -- and whether a
-// comment is still open at its end. A code span runs to the next backtick run
-// of the same length; an unmatched run is literal backticks and is text.
-//
-// This is the one reading of "what on this line is code and what is a
-// comment", shared by StripHTMLComments and Mask so the bundle strips exactly
-// the comments whose links it did not rewrite.
-func scanLine(line string, inComment bool) (segs []segment, open bool) {
-	i := 0
-	for i < len(line) {
-		if inComment {
-			end := strings.Index(line[i:], "-->")
-			if end < 0 {
-				segs = append(segs, segment{i, len(line), true, false})
-				return segs, true
-			}
-			segs = append(segs, segment{i, i + end + 3, true, false})
-			i += end + 3
-			inComment = false
-			continue
-		}
-		opener := strings.Index(line[i:], "<!--")
-		if opener >= 0 {
-			opener += i
-		}
-		tickStart, tickEnd := backtickRun(line, i)
-		if tickStart >= 0 && (opener < 0 || tickStart < opener) {
-			if tickStart > i {
-				segs = append(segs, segment{i, tickStart, false, false})
-			}
-			if stop := closingRun(line, tickEnd, tickEnd-tickStart); stop >= 0 {
-				segs = append(segs, segment{tickStart, stop, false, true})
-				i = stop
-			} else {
-				segs = append(segs, segment{tickStart, tickEnd, false, false})
-				i = tickEnd
-			}
-			continue
-		}
-		if opener < 0 {
-			segs = append(segs, segment{i, len(line), false, false})
-			break
-		}
-		if opener > i {
-			segs = append(segs, segment{i, opener, false, false})
-		}
-		// The comment's own segment starts at its opener; the loop's
-		// in-comment branch extends it to the closer or the end of the line.
-		i = opener + 4
-		inComment = true
-		segs = append(segs, segment{opener, i, true, false})
-	}
-	return segs, inComment
-}
-
 // splitLines splits text into lines that keep their line endings. The last
 // line has none when text does not end in a newline.
 func splitLines(text string) []string {
@@ -160,47 +104,60 @@ func lineBody(line string) (body, ending string) {
 // cannot become a hard line break. A file with no comment comes back byte for
 // byte.
 //
-// These are the rules of the Python bundler this package replaced
-// (scripts/docs/_bundle.py on the docs-readers branch, memql#5721), ported
-// line for line so the two agree on every input.
+// What is a comment and what is code is the reading Mask and Links use (see
+// scan.go), so the bundle strips exactly the comments whose links it did not
+// read. The line rules are the Python bundler's this package replaced
+// (scripts/docs/_bundle.py on the docs-readers branch, memql#5721); the
+// fixture that pinned that bundler still pins this one.
 func StripHTMLComments(text string) string {
-	var out strings.Builder
-	fence := ""
-	inComment := false
-	for _, line := range splitLines(text) {
-		body, ending := lineBody(line)
-		if !inComment {
-			if fence != "" {
-				if fenceCloses(body, fence) {
-					fence = ""
-				}
-				out.WriteString(line)
-				continue
-			}
-			if marker := fenceOpens(body); marker != "" {
-				fence = marker
-				out.WriteString(line)
-				continue
-			}
+	var comments []region
+	for _, g := range read(text).regions {
+		if g.kind == regionComment {
+			comments = append(comments, g)
 		}
-		continued := inComment
-		segs, open := scanLine(body, inComment)
-		inComment = open
-		removed := false
+	}
+	if len(comments) == 0 {
+		return text
+	}
+	var out strings.Builder
+	next := 0 // the first comment that does not end before this line
+	off := 0
+	for _, raw := range splitLines(text) {
+		body, ending := lineBody(raw)
+		start, end := off, off+len(body)
+		off += len(raw)
+		for next < len(comments) && comments[next].end <= start {
+			next++
+		}
 		var kept strings.Builder
-		for _, s := range segs {
-			if s.comment {
-				removed = true
-				continue
+		removed, continued, openAtEnd := false, false, false
+		pos := start
+		for k := next; k < len(comments) && comments[k].start < end; k++ {
+			g := comments[k]
+			from, to := max(g.start, start), min(g.end, end)
+			if from > pos {
+				kept.WriteString(text[pos:from])
 			}
-			kept.WriteString(body[s.start:s.end])
+			if to > from {
+				removed = true
+			}
+			pos = max(pos, to)
+			if g.start < start {
+				continued = true
+			}
+			if g.end > end || g.open {
+				openAtEnd = true
+			}
 		}
 		if !removed {
-			out.WriteString(line)
+			out.WriteString(raw)
 			continue
 		}
+		if pos < end {
+			kept.WriteString(text[pos:end])
+		}
 		textOut := kept.String()
-		if inComment || strings.HasSuffix(strings.TrimRight(body, " \t\r\n\v\f"), "-->") {
+		if openAtEnd || strings.HasSuffix(strings.TrimRight(body, " \t\r\n\v\f"), "-->") {
 			textOut = strings.TrimRight(textOut, " \t")
 		}
 		if strings.TrimSpace(textOut) == "" {
@@ -217,48 +174,11 @@ func StripHTMLComments(text string) string {
 	return out.String()
 }
 
-// Mask returns content with every fenced code block, code span and HTML
-// comment blanked to spaces, byte for byte, line endings kept. Offsets into
-// the result are offsets into content, so a pattern matched on the mask can be
-// read and rewritten in the original -- which a stripping pass that deletes
-// the code cannot offer.
+// Mask returns content with every fenced or indented code block, code span
+// and HTML comment blanked to spaces, byte for byte, line endings kept.
+// Offsets into the result are offsets into content, so a pattern matched on
+// the mask can be read and rewritten in the original -- which a stripping
+// pass that deletes the code cannot offer.
 func Mask(content string) string {
-	masked := []byte(content)
-	blank := func(from, to int) {
-		for i := from; i < to; i++ {
-			if masked[i] != '\n' {
-				masked[i] = ' '
-			}
-		}
-	}
-	fence := ""
-	inComment := false
-	offset := 0
-	for _, line := range splitLines(content) {
-		body, _ := lineBody(line)
-		start := offset
-		offset += len(line)
-		if !inComment {
-			if fence != "" {
-				if fenceCloses(body, fence) {
-					fence = ""
-				}
-				blank(start, start+len(body))
-				continue
-			}
-			if marker := fenceOpens(body); marker != "" {
-				fence = marker
-				blank(start, start+len(body))
-				continue
-			}
-		}
-		segs, open := scanLine(body, inComment)
-		inComment = open
-		for _, s := range segs {
-			if s.comment || s.code {
-				blank(start+s.start, start+s.end)
-			}
-		}
-	}
-	return string(masked)
+	return read(content).mask(content)
 }

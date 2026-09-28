@@ -119,3 +119,85 @@ func TestMaskKeepsOffsetsAndBlanksCodeAndComments(t *testing.T) {
 		t.Error("line endings were not kept")
 	}
 }
+
+// A backtick fence's info string cannot hold a backtick, so this line opens
+// no fence: it is a code span in a paragraph. Reading it as a fence masked the
+// rest of the page, and every link after it went unchecked.
+func TestBacktickInfoStringOpensNoFence(t *testing.T) {
+	content := "```inline``` is a code span, not a fence.\n\nSee [the design](../../internal/x.md).\n"
+	if got := targets(content); len(got) != 1 || got[0] != "../../internal/x.md" {
+		t.Errorf("targets = %q: the line was read as a fence", got)
+	}
+	// A tilde fence's info string may hold backticks.
+	if got := targets("~~~ `x`\n[a](../n.md)\n~~~\n"); len(got) != 0 {
+		t.Errorf("targets = %q: a tilde fence was not read", got)
+	}
+	if fenceOpens("```go") != "```" || fenceOpens("```go `x`") != "" || fenceOpens("~~~ `x`") != "~~~" {
+		t.Error("fenceOpens disagrees with CommonMark on info strings")
+	}
+}
+
+// An indented code block is code, but only where CommonMark reads one: after
+// a blank line, and not where a list item owns the indent.
+func TestMaskIndentedCode(t *testing.T) {
+	for content, want := range map[string]string{
+		"Para.\n\n    [a](../n.md)\n\nText [b](../y.md).": "../y.md",
+		"    [a](../n.md)\n\n    [b](../n.md)\nText.":     "",
+		"\tcode [a](../n.md)\n":                           "",
+		"- item\n\n    [a](../y.md)":                      "../y.md",
+		"1. step\n\n    [a](../y.md)":                     "../y.md",
+		"[^1]: note\n\n    [a](../y.md)":                  "../y.md",
+		"Para\n    [a](../y.md)":                          "../y.md",
+		"- item\n\nPara.\n\n    [a](../n.md)":             "",
+		"Para.\n\n    ```\n[a](../y.md)":                  "../y.md",
+		"# Title\n    [a](../n.md)":                       "",
+		"* * *\n    [a](../n.md)":                         "",
+		"```\nx\n```\n    [a](../n.md)":                   "",
+	} {
+		if got := strings.Join(targets(content), " "); got != want {
+			t.Errorf("%q: read %q, want %q", content, got, want)
+		}
+	}
+}
+
+// A code span runs across the lines of its paragraph, and no further: not
+// past a blank line, and not into a block that interrupts the paragraph.
+func TestMaskCodeSpanAcrossLines(t *testing.T) {
+	for content, want := range map[string]string{
+		"Use `foo\n[x](../n.md)` here.":                            "",
+		"Use `foo\nbar` and [x](../y.md) and `baz`.":               "../y.md",
+		"Use `foo\n\n[x](../y.md)\n\nand ` here.":                  "../y.md",
+		"Use `a\n- item [x](../y.md) and ` b":                      "../y.md",
+		"Use `a\n# Head [x](../y.md) ` b":                          "../y.md",
+		"> Use `foo\n> bar` and [x](../y.md) and `baz`.":           "../y.md",
+		"| h | h | h |\n|---|---|---|\n| `a | [x](../y.md) | b` |": "../y.md",
+		"| h |\n|---|\n| `a \\| [x](../n.md) b` |":                 "",
+	} {
+		if got := strings.Join(targets(content), " "); got != want {
+			t.Errorf("%q: read %q, want %q", content, got, want)
+		}
+	}
+	in := "Use `foo\n[x](../n.md)` here."
+	if got := Mask(in); strings.Contains(got, "../n.md") || len(got) != len(in) || strings.Count(got, "\n") != 1 {
+		t.Errorf("Mask(%q) = %q", in, got)
+	}
+}
+
+func TestStripHTMLCommentsReadsCodeAsLinksDo(t *testing.T) {
+	for in, want := range map[string]string{
+		// A comment inside a code span that crosses lines is content.
+		"A `span\nstill <!-- kept --> code` stays.\n": "A `span\nstill <!-- kept --> code` stays.\n",
+		// A line that only looks like a fence does not protect what follows.
+		"```x``` then <!-- gone --> here.\n": "```x``` then  here.\n",
+		// `<!-->` is a whole, empty comment (CommonMark 0.31).
+		"a <!--> b\n": "a  b\n",
+		// Indented code is content.
+		"Para.\n\n    <!-- kept -->\n": "Para.\n\n    <!-- kept -->\n",
+		// An escaped opener is text.
+		"a \\<!-- b --> c\n": "a \\<!-- b --> c\n",
+	} {
+		if got := StripHTMLComments(in); got != want {
+			t.Errorf("StripHTMLComments(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

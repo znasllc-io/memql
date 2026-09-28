@@ -12,6 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/text"
+
 	"github.com/znasllc-io/memql/cmd/docs-gen/bundle"
 	"github.com/znasllc-io/memql/core/docsmd"
 )
@@ -128,16 +133,20 @@ func TestDocsBundleBuild(t *testing.T) {
 		page := readString(t, filepath.Join(out, filepath.FromSlash(p.Path)))
 		// Every link is a published route or leaves the site entirely; no
 		// relative path survives, so none can 404 or point into the repo.
-		for _, l := range docsmd.Links(page) {
-			if docsmd.IsExternal(l.Target) {
+		// The page is read by goldmark, not by docsmd, which wrote it: a link
+		// the bundle's own reader cannot see is exactly the one this must
+		// catch (docs_links_commonmark_test.go).
+		for _, dest := range commonmarkDestinations([]byte(page)) {
+			if leavesSite(dest) {
 				continue
 			}
-			if !routes[l.Path()] {
-				t.Errorf("%s:%d: link %q is neither a published route nor an absolute URL", p.Path, l.Line, l.Target)
+			if path, _, _ := strings.Cut(dest, "#"); !routes[path] {
+				t.Errorf("%s: link %q is neither a published route nor an absolute URL", p.Path, dest)
 			}
 		}
-		// No HTML comment outside code: stripping again changes nothing.
-		if docsmd.StripHTMLComments(page) != page {
+		// No HTML comment outside code, read both ways: stripping again
+		// changes nothing, and goldmark finds no comment in the page.
+		if docsmd.StripHTMLComments(page) != page || commonmarkHasComment([]byte(page)) {
 			t.Errorf("%s: an HTML comment outside code reached the bundle, where the site prints it as text", p.Path)
 		}
 	}
@@ -180,6 +189,45 @@ func TestDocsBundleCheckWritesNothing(t *testing.T) {
 	if len(entries) != 0 {
 		t.Errorf("check mode wrote %d entries into %s", len(entries), dir)
 	}
+}
+
+// leavesSite reports whether a link destination is off the repository's
+// files: a URL with a scheme, or a fragment of the page itself.
+func leavesSite(dest string) bool {
+	return dest == "" || strings.HasPrefix(dest, "#") || strings.HasPrefix(dest, "mailto:") ||
+		strings.HasPrefix(dest, "https://") || strings.HasPrefix(dest, "http://")
+}
+
+// commonmarkHasComment reports whether goldmark reads an HTML comment on
+// page, as a block or inline.
+func commonmarkHasComment(page []byte) bool {
+	md := goldmark.New(goldmark.WithExtensions(extension.GFM))
+	doc := md.Parser().Parse(text.NewReader(page))
+	found := false
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		var raw []byte
+		switch v := n.(type) {
+		case *ast.HTMLBlock:
+			for i := 0; i < v.Lines().Len(); i++ {
+				seg := v.Lines().At(i)
+				raw = append(raw, seg.Value(page)...)
+			}
+		case *ast.RawHTML:
+			for i := 0; i < v.Segments.Len(); i++ {
+				seg := v.Segments.At(i)
+				raw = append(raw, seg.Value(page)...)
+			}
+		}
+		if bytes.Contains(raw, []byte("<!--")) {
+			found = true
+			return ast.WalkStop, nil
+		}
+		return ast.WalkContinue, nil
+	})
+	return found
 }
 
 func readString(t *testing.T, path string) string { return string(readBytesFile(t, path)) }

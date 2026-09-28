@@ -265,6 +265,50 @@ rule   = "leaves-public" # a trailing comment
 	}
 }
 
+// Every CommonMark destination form is rewritten where it stands: a title
+// and angle brackets stay, and a link nested in an allowlisted link's text
+// keeps its own rewrite when the outer one is unwrapped.
+func TestRewriteEveryDestinationForm(t *testing.T) {
+	files := append(tree(), SourceFile{Path: "operate/forms.md", Content: md(public("Forms", "operate"),
+		"[titled](guide.md \"The guide\") [padded]( guide.md#install ) [angle](<auth/index.md>)\n"+
+			"[wrapped\ntext](guide.md) [![score](scorecard.json)](guide.md 'G')\n"+
+			"[![score](scorecard.json) and the design](../../internal/design/x.md \"T\")\n")})
+	allow, err := ParseAllowlist("allow.toml", []byte(`
+[[allow]]
+file   = "docs/public/operate/forms.md"
+target = "scorecard.json"
+rule   = "unrewritable-target"
+
+[[allow]]
+file   = "docs/public/operate/forms.md"
+target = "../../internal/design/x.md"
+rule   = "leaves-public"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	build(t, Options{Sources: files, Allow: allow, Out: dir})
+	got := read(t, filepath.Join(dir, "operate", "forms.md"))
+	for _, want := range []string{
+		`[titled](/docs/operate/guide/ "The guide")`,
+		`[padded]( /docs/operate/guide/#install )`,
+		`[angle](</docs/operate/auth/>)`,
+		"[wrapped\ntext](/docs/operate/guide/)",
+		`[score](/docs/operate/guide/ 'G')`,
+		"score and the design\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("forms.md lacks %q:\n%s", want, got)
+		}
+	}
+	for _, gone := range []string{"scorecard.json", "internal/design"} {
+		if strings.Contains(got, gone) {
+			t.Errorf("an allowlisted target %q reached the bundle:\n%s", gone, got)
+		}
+	}
+}
+
 func TestStaleAllowlistEntryFails(t *testing.T) {
 	allow, err := ParseAllowlist("allow.toml", []byte("[[allow]]\nfile = \"docs/public/operate/guide.md\"\ntarget = \"../../internal/fixed.md\"\nrule = \"leaves-public\"\n"))
 	if err != nil {

@@ -105,7 +105,17 @@ func TestDocsPublicBoundaryRefusesAnEscapingLink(t *testing.T) {
 		"# Seeded\n\n" +
 		"See [the design record](../../internal/design/platform-consolidation.md), " +
 		"[a spec](../../superpowers/specs/x.md#part), [the source](../../../component/memql/engine.go), " +
-		"and [a draft](research-draft.md).\n"
+		"and [a draft](research-draft.md).\n\n" +
+		// Every CommonMark way to write a destination, each leaving the public
+		// tree: the reader must see them all (docs_links_commonmark_test.go).
+		"A [titled link](../../internal/titled.md \"Design record\"), " +
+		"a [single-quoted one](../../internal/single.md 'T'), a [padded one]( ../../internal/padded.md ), " +
+		"an [angle-bracket one](<../../internal/angle.md>), " +
+		"a [![badge](https://example.com/b.svg)](../../internal/badge.md) badge, " +
+		"[text with [brackets]](../../internal/brackets.md), " +
+		"a [wrapped\nlink](../../internal/wrapped.md), and a [reference][r].\n\n" +
+		"```inline``` opens no fence, so [this](../../internal/after-fence.md) is still read.\n\n" +
+		"> [r]: ../../internal/reference.md\n"
 	draft := "---\ntitle: Draft\naudience: public\nstatus: draft\narea: operate\nsinceVersion: 0.9.0\nowner: acme\n---\n\n# Draft\n"
 	sources = append(sources,
 		bundle.SourceFile{Path: "operate/zz-seeded-escape.md", Content: []byte(seeded)},
@@ -120,6 +130,15 @@ func TestDocsPublicBoundaryRefusesAnEscapingLink(t *testing.T) {
 		"../../superpowers/specs/x.md#part":               bundle.RuleLeavesPublic,
 		"../../../component/memql/engine.go":              bundle.RuleLeavesPublic,
 		"research-draft.md":                               bundle.RuleUnselectedTarget,
+		"../../internal/titled.md":                        bundle.RuleLeavesPublic,
+		"../../internal/single.md":                        bundle.RuleLeavesPublic,
+		"../../internal/padded.md":                        bundle.RuleLeavesPublic,
+		"../../internal/angle.md":                         bundle.RuleLeavesPublic,
+		"../../internal/badge.md":                         bundle.RuleLeavesPublic,
+		"../../internal/brackets.md":                      bundle.RuleLeavesPublic,
+		"../../internal/wrapped.md":                       bundle.RuleLeavesPublic,
+		"../../internal/after-fence.md":                   bundle.RuleLeavesPublic,
+		"../../internal/reference.md":                     bundle.RuleLeavesPublic,
 	}
 	got := map[string]string{}
 	for _, v := range res.Violations {
