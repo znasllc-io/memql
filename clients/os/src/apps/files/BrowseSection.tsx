@@ -117,6 +117,7 @@ export function BrowseSection({
   folderLinks,
   confirmBeforeArchive,
   askContext,
+  askAbout,
   tasks,
   uploadFiles,
   uploadTree,
@@ -165,6 +166,7 @@ export function BrowseSection({
   folderLinks: Map<string, LinkState>;
   confirmBeforeArchive: boolean;
   askContext: (tag: string) => void;
+  askAbout?: (tag: string) => void;
   tasks: UploadTask[];
   uploadFiles: UploadTasksApi["uploadFiles"];
   uploadTree: UploadTasksApi["uploadTree"];
@@ -461,11 +463,17 @@ export function BrowseSection({
   };
 
   const rowMenuEntries = (row: ArtifactRow) => {
-    const ask = {
-      id: "ask",
-      label: "Ask about this file",
-      onSelect: () => askContext(`app:files/browse file:${artifactName(row)}`),
-    };
+    // An explicit request, so it OPENS Ask (askAbout); absent where the host
+    // has no Ask to open rather than an entry that does nothing.
+    const ask = askAbout
+      ? [
+          {
+            id: "ask",
+            label: "Ask about this file",
+            onSelect: () => askAbout(`app:files/browse file:${artifactName(row)}`),
+          },
+        ]
+      : [];
     // THE ONE HANDOFF TO THE MATERIALIZER (epic memql#4981, #4983), and it is
     // ABSENT rather than disabled when it is not legal (DESIGN.md rule 12):
     // absent when this file was not composed, and absent when the caller
@@ -503,7 +511,7 @@ export function BrowseSection({
         },
         download,
         ...openInMaterializer,
-        ask,
+        ...ask,
       ];
     }
     return [
@@ -529,7 +537,7 @@ export function BrowseSection({
         onSelect: () => setRowMove(row),
       },
       ...openInMaterializer,
-      ask,
+      ...ask,
       {
         id: "archive",
         // "Move to Bin" rather than "Delete": the action's name has to be what

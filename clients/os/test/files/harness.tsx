@@ -231,6 +231,8 @@ export async function renderFiles(opts: {
   consumeIntent?: (intentId: string) => void;
   /** The Ask tag the surface hands the shell, for the tests that pin it. */
   askContext?: (tag: string) => void;
+  /** The explicit "Ask about this" the shell always provides. */
+  askAbout?: (tag: string) => void;
   /**
    * The app registry, for the cases that turn on whether ANOTHER app is
    * installed (epic memql#4981: the Materializer handoff is absent when the
@@ -251,6 +253,7 @@ export async function renderFiles(opts: {
             sectionId={opts.section ?? "browse"}
             navigate={() => {}}
             askContext={opts.askContext ?? (() => {})}
+            askAbout={opts.askAbout ?? (() => {})}
             intent={opts.intent}
             consumeIntent={opts.consumeIntent ?? (() => {})}
             store={memSettingsStore(opts.settings ?? {})}

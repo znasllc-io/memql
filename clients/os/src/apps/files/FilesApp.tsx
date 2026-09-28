@@ -70,6 +70,7 @@ const FILES_LOG_CONCEPTS = [
 export function FilesApp({
   sectionId,
   askContext,
+  askAbout,
   intent,
   consumeIntent,
   store,
@@ -420,6 +421,7 @@ export function FilesApp({
       folderLinks={folderLinks}
       confirmBeforeArchive={settings.confirmBeforeArchive}
       askContext={askContext}
+      askAbout={askAbout}
       tasks={tasks}
       uploadFiles={uploadFiles}
       uploadTree={uploadTree}
