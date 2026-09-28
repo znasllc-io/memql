@@ -9,8 +9,6 @@ owner: znas
 
 # Permissions and Access Control
 
-**Last Updated:** 2026-08-18
-
 This document describes the permission model and access control rules for
 users, groups, and agents.
 

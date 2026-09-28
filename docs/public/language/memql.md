@@ -9,8 +9,6 @@ owner: znas
 
 # MemQL
 
-> **Last Updated:** September 13, 2026
-
 MemQL is the query and mutation language that powers the memory engine. It provides a deterministic, append-only interface for reading and writing concept-backed data stored in TimescaleDB. This document is the canonical reference for MemQL behavior. **Whenever the query language changes or new capabilities ship, update this guide alongside the code change.**
 
 ## When to Use MemQL

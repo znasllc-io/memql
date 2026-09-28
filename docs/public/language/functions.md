@@ -10,7 +10,6 @@ owner: znas
 # MemQL Function Language Specification
 
 > **Status:** Stable
-> **Last Updated:** September 13, 2026
 > **Purpose:** Specification for the function-like DSL constructs in MemQL
 
 ---

@@ -29,20 +29,17 @@ console-driven workflow; the underlying mechanics live in the
 deployment-v2 docs cross-linked at the bottom and are not duplicated
 here.
 
-## The surfaces
+## The surface
 
 | Surface | Where | Use it when |
 |---------|-------|-------------|
-| **Cockpit Topology** | MemQL Cockpit, cluster/Topology view | The designed operator surface, and the one that acts: node health, observability overlays, deployment state and every control inline. |
-| **VS Code -- Deployments** | the extension's activity-bar panel | What you operate, at what version, and the runs that changed it, without leaving the editor. |
+| **VS Code -- Deployments** | the extension's activity-bar panel (`editors/vscode/src/deploy`) | What you operate, at what version, and the runs that changed it, without leaving the editor. |
 
-> **There is no browser surface for this today.** The MemQL portal's
-> Deployments view was it (memql#3319 + memql#3380), and epic memql#4984
-> retired the portal without moving deploy control into MemQL OS -- the OS's
-> Settings -> Cluster section said in surface, before that epic, that deploy
-> control stayed with the portal and the cockpit, and half of that sentence is
-> now the whole of it. Everything below about the SERVICE, its gates, its
-> refusals and its audit trail is unchanged; only the third surface is gone.
+> **The VS Code Deployments panel is the only deploy-control surface.**
+> MemQL OS has none, and the Cockpit's Topology view and its `D` menu went
+> with the Cockpit's terminal UI on 2026-08-25 (memql#4550); the Cockpit is
+> now the machine worker runtime and cluster CLI. Everything below about the
+> SERVICE, its gates, its refusals and its audit trail holds for any caller.
 
 > **How a browser client would reach the deploy surface**, recorded because
 > the forward it needs is still built and still tested. `DeployControlService`
@@ -69,21 +66,24 @@ here.
 > with the fix (memql#3380). `/admin/` now answers `410 Gone` and points at the
 > console.
 
-Every surface calls the same role-gated **deploy-control API**
-(MemQL `DeployControlService`); none shells out to
-`kubectl` / `argocd` / `git` directly. They show the same data and
-offer the same actions. Pick whichever you are already in.
+The panel's deploy-control actions call the role-gated **deploy-control
+API** (MemQL `DeployControlService`); none of them shells out to
+`kubectl` / `argocd` / `git`. The same Deployments view also manages a local
+cluster on this machine -- install, repair, rebuild, uninstall -- and those
+flows do run `git` and the install graph's scripts, which use `kubectl`. They
+are not deploy control and never reach this service.
 
-A surface may HIDE an action the caller's role cannot take -- MemQL OS
-does, so an admin is not offered a rollback that would come back
-`PermissionDenied`. That is a courtesy, not a control: the gate is the
-service's, and it applies identically however the RPC arrived.
+The panel HIDES an action the caller's role cannot take
+(`editors/vscode/src/deploy/actions.ts`), so an admin is not offered a
+rollback that would come back `PermissionDenied`. That is a courtesy, not a
+control: the gate is the service's, and it applies identically however the
+RPC arrived.
 
 ### Two transports, one service (memql#3311)
 
 `DeployControlService` is a **unary** gRPC service mounted on the same
-listener as `MemqlService`. A native gRPC client (the Go SDK, the
-cockpit) dials it directly. A **browser cannot** -- and neither can
+listener as `MemqlService`. A native gRPC client (the Go SDK, `grpcurl`)
+dials it directly. A **browser cannot** -- and neither can
 anything else reaching MemQL through the `/memql/ws` WebSocket bridge,
 which tunnels `MemqlService.Stream` and nothing else.
 
@@ -91,7 +91,7 @@ So every deploy RPC is **also** reachable on the stream, as a
 `DeployControlMsg` envelope whose `request` oneof carries the service's
 own request messages verbatim (the reply is `DeployControlResult`). The
 TS SDK exposes it as `@znasllc-io/memql-sdk-core/deploy`; that is how
-the VS Code extension and the Cockpit drive the console.
+the VS Code extension drives the console.
 
 This is a transport, not a second implementation. The stream handler
 calls the identical service methods the unary path calls, so **the role
@@ -132,7 +132,7 @@ Two properties an operator should know:
 - **The gate is the same gate**, not a second copy of it. The stream
   handler stamps the caller's identity and invokes the *same* service
   methods the unary path serves, so the role matrix below and the audit
-  event hold identically on both surfaces -- and a parity test asserts a
+  event hold identically on both transports -- and a parity test asserts a
   denied role gets `PermissionDenied` from both, for every RPC.
 - **Errors ride inside the reply.** A multiplexed stream has no
   per-message status channel, so a bridged refusal comes back as
@@ -179,7 +179,7 @@ has a reference to quote rather than a timestamp to argue from.
 
 | Where you read it | |
 |---|---|
-| A hosted console | Beside the red banner: `Audited as <id> - open the trail` |
+| The VS Code Deployments panel | The outcome line: `ERROR: <action> requires the <roles> cluster role ... (audit <id>)` |
 | TS SDK | `DeployControlError.auditEventId` |
 | Go SDK | `client.AuditEventIdFromError(err)` |
 | Streamed wire | `DeployControlResult.audit_event_id` |
@@ -265,14 +265,11 @@ image digests in force in an environment, Argo CD sync and health, the
 live Rollouts, and the deploy gate's legs. That is the cluster's release
 posture, not a status badge.
 
-### Enforcement per surface
+### Enforcement
 
-- **A hosted console:** a Deployments view resolves your cluster role and
-  hides an action you cannot take. That is a courtesy, not the control:
-  the call still crosses to the identity node and is gated there.
-- **Cockpit:** the Topology view resolves your cluster role; non-admins
-  see a single `Deployments: owner/admin only` line, the deploy-control
-  read is never issued, and the action menu does not open.
+- **The VS Code Deployments panel:** resolves your cluster role and hides
+  an action you cannot take. That is a courtesy, not the control: the call
+  still reaches the identity node and is gated there.
 - **API:** every deploy-control RPC enforces its floor server-side, so
   the gate holds for a direct API caller -- below the floor you get
   `PermissionDenied`. This is one enforcement point, not one per
@@ -291,35 +288,69 @@ posture, not a status badge.
 
 ### What a non-admin sees: a deliberately split surface
 
-A deployment surface reads from two different places, and only one of
-them is deploy-control. This is by design, and it is why a
+The panel reads from two different places, and only one of them is
+deploy-control. This is by design, and it is why a
 developer/writer/reader sees a partly-populated page rather than an
 error page or an empty one:
 
 | What renders | Where it comes from | Who can see it |
 |--------------|---------------------|----------------|
-| Node topology | `v1:cluster:node` rows | any role |
 | Deployment history | `v1:cluster:deployment` rows | any role |
-| Per-tier composition of a deployment | `v1:cluster:deploymentNodeSpec` rows | any role |
-| Per-env status block (version, digests, Argo CD, Rollouts, gate) | `GetDeploymentStatus` | owner, admin |
-| Next-version preview | `SuggestNextVersion` | developer, admin, owner |
+| Per-tier composition of a deployment (under Diagnostics, as "Node types") | `v1:cluster:deploymentNodeSpec` rows | any role |
+| The Deploy section and its actions | `GetDeploymentStatus` | owner, admin |
 
 Concept rows go through the normal query surface and never touch the
-deploy-control gate; the status block and the version preview do. So a
-developer opening the VS Code Deployments view or a hosted Deployments
-view gets topology, history and per-tier composition as usual, with the
-status block replaced by an explanation naming the role required. That
-explanation is the designed behaviour of the surface, not a failure of
-it -- nothing is broken, and re-reading will not fix it. To see the
-status block, ask a cluster owner or admin for the role, or read it from
-a surface you are admitted to.
+deploy-control gate; the Deploy section does. So a
+developer opening the VS Code Deployments panel gets history and per-tier
+composition as usual, and in place of the Deploy section the heading
+"Deployment status is not visible at your role" over the engine's own
+refusal, which names the role required. That is the designed behaviour of
+the surface, not a failure of it -- nothing is broken, and re-reading will
+not fix it.
+
+The Deploy section draws its actions only when the status read answers
+(`editors/vscode/src/deploy/pipelineState.ts`), so it offers a developer
+none -- not even Cut version and Deploy, which the service admits at the
+developer floor. The upgrade button is the exception: it is gated on the
+role alone (`editors/vscode/src/deploy/upgrade.ts`), so a developer offered
+a newer release can cut and ship it in one confirmed step. Otherwise a
+developer cuts and deploys through `DeployControlClient` (`cutVersion` /
+`deploy` in `@znasllc-io/memql-sdk-core/deploy`, `CutVersion` / `Deploy` in
+`sdk/go`), or asks a cluster owner or admin for the role.
 
 ## Reading the console
 
-Both surfaces show the same installation's state. There is no env to
-scope by -- MemQL ships one installation shape (epic memql#3943); an
+The panel reads the cluster this editor is connected to. There is no env
+to scope by -- MemQL ships one installation shape (epic memql#3943); an
 operator who wants a second environment installs a second instance
 with its own console.
+
+For a remote cluster it shows (`editors/vscode/src/webview/deploymentScreens.ts`):
+
+- **What it runs** -- the version, the newest published release, and the
+  domain.
+- **The pipeline state**, one of three and none of them an error
+  (`editors/vscode/src/deploy/pipelineState.ts`):
+  - **Deploy** -- the status read answered. The actions your role admits
+    are drawn, with a line naming the pending record Deploy would ship.
+  - **No deploy pipeline is configured for this cluster** -- the read
+    failed for a reason other than the role gate, most often because the
+    cluster has no deploy pipeline at all. The engine's message is printed
+    as sent.
+  - **Deployment status is not visible at your role** -- the role gate
+    refused the read. The engine's refusal is printed as sent.
+- **Deployments** -- the history, one row per `v1:cluster:deployment`
+  record: what kind of run, when, and how it ended. A row opens that
+  deployment's detail page.
+- **Diagnostics** (collapsed) -- each deployment's per-tier
+  `v1:cluster:deploymentNodeSpec` rows, labelled "Node types" because they
+  declare a version, replica count and digest rather than record a step
+  that ran.
+
+The panel uses the status read to decide the pipeline state and draws none
+of its contents. The RPC returns more than the panel shows, and an SDK
+caller reads all of it (`getDeploymentStatus()` in
+`@znasllc-io/memql-sdk-core/deploy`, `GetDeploymentStatus` in `sdk/go`):
 
 - **Version + digests** -- the deployed release version and the
   per-component image `@sha256:` digests, read from the committed cloud
@@ -329,8 +360,7 @@ with its own console.
   separate per-version lockfile.
 - **Argo CD** -- the `memql` Application's sync status (Synced /
   OutOfSync), health (Healthy / Progressing / Degraded), last sync, and
-  drift (live-vs-desired). In the cockpit these are color-coded like
-  node health (green / amber / red) with a `[drift]` indicator.
+  drift (live-vs-desired).
 - **Rollouts** -- per Rollout: BFF blue/green active vs preview color;
   engine canary current step / set-weight; and the latest `AnalysisRun`
   result (pass / fail).
@@ -346,19 +376,33 @@ Reads are not audited per call.
 Each action is gated by [the role matrix](#the-role-matrix), audited, and none
 of them bypass Git or the reconciler:
 
-| Action | What it does | Confirmation |
-|--------|--------------|--------------|
-| **Cut a version** | Creates a `pending` `v1:cluster:deployment` record at the chosen next version. | Version or bump required. |
-| **Deploy** | Transitions a cut record to `in_progress` and returns an async ack; the deploy-pack automation observes ArgoCD and owns the terminal transition. | Deployment id required. |
-| **Roll back** | `git revert` of the overlay commit; Argo CD reconciles back to the prior digest set. | **Type-to-confirm** (re-enter the commit SHA, or `rollback`). |
-| **Rollout promote / abort** | `kubectl argo rollouts promote\|abort` for an engine Rollout. This is the ARGO verb -- advance or cancel an in-flight progressive rollout -- and is unrelated to any deploy promotion. | `abort` is **type-to-confirm**; `promote` is immediate. |
-| **Repair** | Asks ArgoCD to hard-refresh and re-sync this installation's Application from the committed overlay (prune included) and watches it until it is synced and healthy; records the repair on the deployment timeline. Nothing changes version. See [Repair](#repair-memql4209). | **Type-to-confirm** (type `repair`). Owner only. |
+| Action | RPC | What it does | In the panel |
+|--------|-----|--------------|--------------|
+| **Cut a version** | `CutVersion` | Creates a `pending` `v1:cluster:deployment` record at the chosen next version. | **Cut version** cuts the next patch version. The upgrade button, when it offers a newer release, cuts that exact version and ships the record the cut returned. |
+| **Deploy** | `Deploy` | Transitions a cut record to `in_progress` and returns an async ack; the deploy-pack automation observes ArgoCD and owns the terminal transition. | **Deploy** ships the pending record the page names. |
+| **Roll back to a prior deployment** | `RollbackDeployment` | Creates a new `in_progress` deployment record carrying a prior `succeeded` deployment's version and digest (and `previousDeploymentId`); the deploy-pack automation observes ArgoCD and lands it in `rolled_back` once ArgoCD reports it reconciled. | **Roll back** targets the newest `succeeded` deployment in the history; **type-to-confirm** (re-enter that deployment's id). Owner only. |
+| **Revert an overlay commit** | `Rollback` | `git revert --no-edit` of the overlay commit in a deploy checkout. An identity pod has no checkout and no `git`, so in a cluster it refuses with `no_overlay_checkout`. | none |
+| **Rollout promote / abort** | `RolloutAction` | `kubectl argo rollouts promote\|abort` for an engine Rollout. This is the ARGO verb -- advance or cancel an in-flight progressive rollout -- and is unrelated to any deploy promotion. It is a kubectl plugin verb with no single API call, so on an identity pod it refuses with `no_rollout_plugin` and runs only where the plugin is installed. | **Rollout promote / abort** sends `promote` without naming a rollout, so the SDK refuses it before anything is sent (`rollout is required`); the panel offers no abort. Name the rollout through the SDK (`rolloutAction(rollout, "promote" \| "abort")`) or use the break-glass verb below. |
+| **Repair** | `Repair` | Asks ArgoCD to hard-refresh and re-sync this installation's Application from the committed overlay (prune included) and watches it until it is synced and healthy; records the repair on the deployment timeline. Nothing changes version. Owner only. See [Repair](#repair-memql4209). | none. The panel's own **Repair**, offered for a local cluster, re-runs the install graph and is not this RPC. |
 
-Notes that hold on both surfaces:
+The panel's four deploy-control actions are catalogued in
+`editors/vscode/src/deploy/actions.ts`.
+`Rollback` and `Repair` have no panel control: call them through
+`DeployControlClient` -- `Rollback` / `Repair` in `sdk/go`, `rollback()` /
+`repair()` in `@znasllc-io/memql-sdk-core/deploy`.
 
-- **Confirmation.** Rollback, Rollout abort and Repair require an explicit
-  type-to-confirm step. A mismatched confirmation is rejected and the
-  action is never invoked.
+A refusal the panel shows is the identity node's own `PermissionDenied`,
+carried back verbatim through the bff that forwarded the call; an
+`UNAVAILABLE` means that bff could not reach an identity peer, which is a
+cluster problem rather than a permissions one.
+
+Notes:
+
+- **Confirmation.** In the panel, Roll back asks you to type the target
+  deployment's id back; a mismatch is rejected and the RPC is never sent.
+  The confirmation is the panel's alone: the service takes no confirmation
+  argument, so an SDK caller -- including every call to `Rollback` and
+  `Repair`, which only an SDK caller reaches -- is not asked for one.
 - **Audit.** Every action (and every denied attempt) writes a
   `v1:identity:auditEvent` (category `admin`, action
   `deployment_console_<verb>`, with the actor, target version /
@@ -368,46 +412,12 @@ Notes that hold on both surfaces:
   attempt alongside it -- see
   [A refusal gives you its audit id](#a-refusal-gives-you-its-audit-id-memql3334).
   No emojis.
-- **Actions do not auto-push.** Deploy / promote / rollback operate on
-  the overlay (via `promote.sh` / `git revert`) and surface the result
-  for review; landing the overlay change to `main` follows the normal
-  review path. Rollout promote/abort act on the live Rollout directly.
-
-### The retired portal surface
-
-> Recorded rather than deleted: this is what the browser surface DID, and it
-> is the shape any replacement would have to match. Epic memql#4984 retired
-> it with the portal.
-
-`/views/deployments` -> use the action controls
-on the Overview panel (deploy / promote), next to the version
-(rollback), and in the Rollouts table (per-rollout promote / abort).
-Destructive actions render an inline type-to-confirm field.
-There is ONE surface (memql#4264). `/cluster-ops` was the operations end
-of the same thing and redirects here; its four verbs -- cut, deploy, roll
-back and Repair (memql#4209, cluster-owner only and armed by typing
-`repair`) -- moved onto this view's Ship band, along with the
-confirmations that page had and this band did not. A repair record is
-never offered as a rollback target: a repair pins no version, so there is
-nothing to roll to.
-
-A hosted console's own bundle is served by the edge, but
-the RPC itself still crosses to a bff -- through the edge's `/_memql/*`
-proxy -- and from there to the identity node over the mesh forward, same
-as before. A refusal you see here is the identity node's own
-`PermissionDenied`, carried back verbatim; a `UNAVAILABLE` means the bff
-could not reach an identity peer, which is a cluster problem rather than
-a permissions one.
-
-### Cockpit
-
-In the cluster/Topology view, press **`D`** (capital D; lowercase `d`
-stays the pan key) to open the deploy-control menu. The menu walks you
-through the action and any required inputs / confirmation; the
-result line shows `SUCCESS:` / `ERROR:` (and `ERROR: requires
-owner/admin` if your role is insufficient). On success the deployment
-overlay refreshes immediately so Argo / Rollouts state reflects the new
-reality.
+- **Nothing here pushes.** Deploy and Roll back write deployment records
+  and observe ArgoCD; neither edits the overlay. The deploy is the overlay
+  change itself, landed on `main` through the normal review path and
+  reconciled by ArgoCD. `Rollback` leaves its revert commit in the deploy
+  checkout for review. Rollout promote/abort act on the live Rollout
+  directly.
 
 ## Where audit events land
 
@@ -430,9 +440,13 @@ are owned by the deployment-v2 runbooks:
 
 - Argo CD break-glass (suspend / resume auto-sync):
   [`deploy/argocd/README.md`](../../../deploy/argocd/README.md)
-- Rollouts promote / abort / watch reference: the product carrier repo's
-  `deploy/rollouts/README.md` (pack-owned since the product deploy estate
-  moved out of this repo)
+- Rollouts promote / abort / watch, from an operator machine with the
+  argo-rollouts kubectl plugin installed: `kubectl argo rollouts
+  promote|abort <name> -n memql` and `kubectl argo rollouts get rollout
+  <name> -n memql --watch`, against the controller `deploy/rollouts/install`
+  installs. The console's Rollout action runs the same promote / abort verb
+  only on the exec substrate (`component/deploycontrol/executor.go`); on an
+  identity pod it refuses and points here (`component/deploycontrol/k8sapi.go`)
 - Overlay digest-pin + promotion mechanics:
   [`deploy-bundle-runbook.md`](deploy-bundle-runbook.md)
 - Disaster recovery:
@@ -457,9 +471,9 @@ How a deploy now flows:
    `in_progress`, then returns. `RollbackDeployment` creates the new rollback
    record at `in_progress` (carrying the historical digest +
    `previousDeploymentId`), then returns.
-3. The `in_progress` CDC edge triggers `driveDeploymentInProgress`, which runs
-   promote through the **same Executor effects** (`scripts/release/promote.sh`)
-   and owns the terminal transition.
+3. The `in_progress` CDC edge triggers `driveDeploymentInProgress`, which
+   observes ArgoCD's reconciled state (`deployObserveReconciledState`,
+   `examples/deploypack/dsl/logic.memql`) and owns the terminal transition.
 
 ### Async response contract
 
@@ -577,14 +591,14 @@ refusal:
 | Below the owner floor / unauthenticated | `PERMISSION_DENIED` / `UNAUTHENTICATED` (a `RefusalInfo` detail unary, `DeployControlResult.audit_event_id` streamed) | the blocked event's |
 | Provider with no defined repair, a sync already running on the Application, a repair already in flight on this node, a kick-off that failed | `ActionResult.ok = false` with `details.reason` | the failure event's, on `ActionResult.audit_event_id` |
 
-Every surface shows the id beside the outcome either way.
+Both SDKs carry the id with the outcome either way.
 
 ### Honest progress: the repair record
 
 `ok = true` means **accepted and kicked off**, not "repaired". The RPC
 writes a `v1:cluster:deployment` record at `in_progress` **before** the
 kick-off -- its `notes` start with `repair:` and it carries the version in
-force -- so the timeline every surface already renders shows the repair from
+force -- so the deployment timeline already shows the repair from
 its first instant (marked `repair`). A kick-off that fails lands the
 record at `failed` in the same call. Otherwise a watcher on the identity
 node resolves it from what it **observes** on the Application:
