@@ -188,6 +188,13 @@ Release asset; the site replaces its set with the newest one.
    after contract v2; the transitional `nav` below keeps only the sidebar
    working.
 
+Two generated facts are committed rather than bundled: `make arch-model`
+writes the code's architecture model and `make platform-graph` the platform
+graph (roles, deployment, gRPC services, front door, routing, concepts,
+automations, OS navigation) into `component/architecture/embedded/`, each
+held to the tree by a drift gate. The diagrams the docs are drawn from read
+them.
+
 ### The manifest (schema 2)
 
 `manifest.json` is the set's table of contents. The site builds its

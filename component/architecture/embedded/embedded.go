@@ -1,30 +1,30 @@
-// Package embedded ships the workspace's architecture model baked
-// into every binary that imports it. The JSON file is regenerated
-// by `go generate` (which invokes memql-arch over the full workspace)
-// and embedded via //go:embed so consumers -- chiefly MemQL Cockpit --
-// see the same view of the system as the source tree at the commit
-// they were built from.
+// Package embedded ships two generated graphs baked into every binary that
+// imports it, so a reader sees the same view of the system as the source tree
+// at the commit it was built from:
 //
-// Consumers never read topology.model.json from disk; that file
-// exists only as the //go:embed source. Doing so keeps the cockpit
-// binary self-contained (no $XDG lookup, no install-path search) and
-// gives the model the same versioning guarantee as the rest of the
-// compiled code: if you check out a commit and build, the embedded
-// model matches that commit.
+//   - topology.model.json, the architecture model: services, packages, types,
+//     methods and fields, their imports, embeddings and implements edges, and
+//     the DSL automation trigger graph. STRUCTURAL ONLY: the call graph is not
+//     committed (memql#5727, owner decision 7); `memql-arch --calls` builds it
+//     on demand, and the drift gate does so to check it.
+//   - platform.graph.json, the platform graph (model/platform.go): the node
+//     roles and what each binary links, the Deployments and Services that run
+//     them, the gRPC services, the front door, the mesh routing table, the
+//     concepts and their relationships, the automations and the OS navigation.
+//     The docs diagrams and the OS's Cluster map read it.
 //
-// Regeneration:
+// The ids are shared -- a role is service:<type> in both, a package pkg:<path>
+// -- and they are the join key component/observe and
+// v1:cluster:nodeType.codeReference use too.
 //
-//	cd memql/component/architecture/embedded
-//	go generate
+// Consumers read the embedded bytes, never the files on disk: the files exist
+// only as //go:embed sources, which keeps a binary self-contained and gives
+// the graphs the versioning guarantee of compiled code.
 //
-// or, from the memql repo root:
-//
-//	go generate ./component/architecture/embedded/...
-//
-// The generated file is intentionally committed to the repo so
-// downstream modules (memql-cockpit) build cleanly without first
-// installing memql-arch, and so architectural changes show up in
-// code review the same way any other source change does.
+// Regeneration goes through make, and only through make -- `make arch-model`
+// and `make platform-graph` are the one place each flag set lives (memql#2844).
+// Both files are committed so that downstream modules build without first
+// running a generator, and so that a change to the system shows up in review.
 package embedded
 
 import (
@@ -36,17 +36,20 @@ import (
 
 // The model root is THIS repo (engine-only): the engine binary must not
 // embed sibling product repos' topology (engine/product decoupling,
-// memql#2428). A product pack contributes its own model to the cockpit's
-// drill-down via its own arch pass -- see memql#2432.
+// memql#2428). A product pack contributes its own model via its own arch
+// pass -- see memql#2432.
 // Regeneration goes through `make arch-model`, which is the ONE place the flag
 // set lives (memql#2844). This directive used to carry its own copy, missing
 // --reproducible and --cluster, so `make generate` silently reintroduced the
 // wall clock, the absolute workspace path and the folder-derived cluster name
 // that the gate exists to prevent -- and then the gate red.
-//go:generate sh -c "cd ../../.. && make arch-model"
+//go:generate sh -c "cd ../../.. && make arch-model platform-graph"
 
 //go:embed topology.model.json
 var ModelJSON []byte
+
+//go:embed platform.graph.json
+var PlatformGraphJSON []byte
 
 // Load returns the embedded model, decoded. Each call decodes
 // fresh so callers may mutate the returned graph (e.g. overlay
@@ -55,7 +58,14 @@ var ModelJSON []byte
 // Errors from Load indicate the embedded JSON has drifted from the
 // schema version this binary was built against -- in practice that
 // only happens if someone hand-edits the generated file. The fix is
-// always "go generate ./component/architecture/embedded/...".
+// always `make arch-model`.
 func Load() (*model.Model, error) {
 	return model.ReadJSON(bytes.NewReader(ModelJSON))
+}
+
+// LoadPlatformGraph returns the embedded platform graph, decoded fresh on
+// each call. An error means the file was hand-edited or written by a
+// different schema version; the fix is `make platform-graph`.
+func LoadPlatformGraph() (*model.PlatformGraph, error) {
+	return model.ReadPlatformGraph(bytes.NewReader(PlatformGraphJSON))
 }

@@ -23,9 +23,17 @@ import (
 // with NO gate. It drifted silently: #2840 removed the userId argument from
 // toggleComputerUseEnabled, the Go SDK regenerated correctly and
 // `make sdk-gen-check` reported no drift, but the architecture model kept
-// ToggleComputerUseEnabledArgs.UserId in 13 places. The cockpit's Topology tab
-// reads this file, so what it renders could disagree with the code
+// ToggleComputerUseEnabledArgs.UserId in 13 places. Everything that reads the
+// embedded model -- the docs generators, the observe runtime's FQN join,
+// v1:cluster:nodeType.codeReference -- could disagree with the code
 // indefinitely.
+//
+// THE CALL GRAPH IS NOT COMMITTED (memql#5727, owner decision 7). It was 63.9
+// of the artifact's 81.3 MB and nothing read it, so `make arch-model` now
+// writes the structural model only and TestCommittedModelHasNoCallGraph pins
+// that. The gate still BUILDS the call graph, on demand, wherever the full Go
+// suite runs -- see callGraphOnDemand -- and skips it in the docs-only
+// gate-inputs lane, where it would be the most expensive thing that PR paid for.
 //
 // WHY THIS IS A GO TEST AND NOT A CI STEP. It gates inside the ordinary
 // `go test ./...` lane, so it needs no workflow edit -- which matters because
@@ -80,8 +88,8 @@ import (
 //	symbol removed from the code, still in the model  -> the model LIES. FAIL.
 //	symbol added to the code, not yet in the model    -> the model is behind. OK.
 //
-// A missing symbol makes the cockpit render something that no longer exists. An
-// absent one makes it render slightly less than exists, which is what any
+// A missing symbol makes every reader describe something that no longer exists.
+// An absent one makes them describe slightly less than exists, which is what any
 // committed snapshot does between refreshes. Run `make arch-model` to catch up.
 //
 // EDGES ARE CHECKED TOO, AND ONLY SINCE memql#3050. Until then the check built
@@ -133,8 +141,21 @@ import (
 //     happen. The relationship is the fact worth gating; how many times it occurs
 //     in a function body is not.
 //
+// THE CALL GRAPH, SINCE memql#5727. The committed artifact no longer carries
+// one, so none of the checks above can be failed by one: an unexported
+// package-level function has no node, and with no committed `calls` edge
+// naming it, the artifact makes no claim about it for a deletion to falsify.
+// What the three checks above catch for unexported code is the rest of it -- an
+// unexported METHOD of a modelled type is a node, so deleting one is a stale
+// node. The regeneration here still passes --calls wherever callGraphOnDemand
+// says to, for two things only a built call graph can show: that the CHA pass
+// still builds over the whole workspace, and that it and the structural pass
+// still name the same symbols the same way (callGraphIsConsistent). The drift
+// ceiling ignores `calls` edges on both sides; the committed side has none.
+//
 // Skipped under -short: it shells out to the extractor over the whole
-// workspace (~6s). CI runs the suite without -short, so the gate is live there.
+// workspace (~6s structural, ~8s with the call graph, warm). CI runs the suite
+// without -short, so the gate is live there.
 func TestArchitectureModelIsNotStale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("regenerates the whole architecture model; skipped in -short")
@@ -152,7 +173,13 @@ func TestArchitectureModelIsNotStale(t *testing.T) {
 	// with a test that substring-grepped the Makefile -- which its own comment
 	// block satisfied.
 	before := sumFile(t, checkedIn)
-	cmd := exec.Command("make", "arch-model", "ARCH_MODEL_OUT="+regenerated)
+	withCalls, why := callGraphOnDemand()
+	t.Logf("call graph: %s", why)
+	args := []string{"arch-model", "ARCH_MODEL_OUT=" + regenerated}
+	if withCalls {
+		args = append(args, "ARCH_MODEL_CALLS=1")
+	}
+	cmd := exec.Command("make", args...)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("regenerating the model failed: %v\n%s", err, out)
@@ -172,13 +199,31 @@ func TestArchitectureModelIsNotStale(t *testing.T) {
 	// Always reported, green or red: the numbers are the cheap signal the gate
 	// itself is too permissive to assert on, and memql#3288 asked for them
 	// specifically. A reader of a passing run can see how far behind the artifact
-	// has drifted without regenerating anything themselves.
-	behindNodes, behindEdges := reportCounts(t, want, got)
+	// has drifted without regenerating anything themselves. Counted over the
+	// STRUCTURAL model: the on-demand call graph is not something the artifact is
+	// behind on, it is something the artifact deliberately does not carry.
+	gotStructural := structuralOnly(got)
+	behindNodes, behindEdges := reportCounts(t, want, gotStructural)
+
+	if withCalls {
+		calls := len(got.Edges) - len(gotStructural.Edges)
+		if calls < minCallEdges {
+			t.Errorf("the on-demand call graph has %d `calls` edges, floor %d: the CHA pass ran and "+
+				"produced next to nothing, which is a broken pass rather than a small program", calls, minCallEdges)
+		}
+		if bad, total := callGraphIsConsistent(got); total > 0 {
+			t.Errorf("the call graph names %d symbol(s) the structural pass of the SAME regeneration "+
+				"models differently:\n  %s\n\nEach is an exported function, or a method of a type the "+
+				"model has, with no node -- so the two passes disagree about its id (the receiver-name "+
+				"rule in callgraph.go and types.go, a generic, a pointer) and a sequence diagram built "+
+				"from the call graph would point at nothing (memql#5727).", total, join(bad))
+		}
+	}
 
 	if gone, total := staleNodes(want, live); total > 0 {
 		t.Errorf("the committed architecture model references %d node(s) that NO LONGER EXIST "+
-			"in the code:\n  %s\n\nThe cockpit's Topology tab reads this file, so it is rendering "+
-			"things that are gone. Run `make arch-model` and commit the result (memql#2844).",
+			"in the code:\n  %s\n\nEverything that reads this file is describing things that are "+
+			"gone. Run `make arch-model` and commit the result (memql#2844).",
 			total, join(gone))
 	}
 
@@ -199,13 +244,102 @@ func TestArchitectureModelIsNotStale(t *testing.T) {
 		t.Errorf("the committed architecture model asserts %d RELATIONSHIP(s) the regenerated "+
 			"model does not have:\n  %s\n\nTypically both endpoints still exist, which is why "+
 			"neither check above can see them: they are edges, not symbols. The model is claiming "+
-			"a call, import, containment or implements that the code no longer contains, and the "+
-			"cockpit draws it. The usual cause is a call site being deleted or moved while both "+
-			"functions survive. Run `make arch-model` and commit the result (memql#3288).",
+			"an import, containment, implements or trigger that the code no longer contains. Run "+
+			"`make arch-model` and commit the result (memql#3288).",
 			total, join(gone))
 	}
 
-	assertDriftIsBounded(t, behindNodes, len(got.Nodes), behindEdges, len(edgeTriples(got)))
+	assertDriftIsBounded(t, behindNodes, len(gotStructural.Nodes), behindEdges, len(edgeTriples(gotStructural)))
+}
+
+// minCallEdges is the floor on the on-demand call graph. Measured at 287,310
+// `calls` edges when the call graph left the artifact (memql#5727); the floor is
+// a third of that, low enough that no refactor reaches it and high enough that a
+// CHA pass which silently built over one package does.
+const minCallEdges = 100000
+
+// callGraphOnDemand decides whether this run builds the call graph.
+//
+// YES wherever the full Go suite runs -- ci.yml's go-tests shards, a push to
+// main, a developer's `go test` or `make arch-model-check` -- so the CHA pass is
+// exercised on every Go change. NO in go-checks' gate-inputs step, which runs
+// this package for a docs-, manifest- or script-only PR (memql#2972): nothing
+// such a PR can change reaches the call graph, and building it is the dearest
+// part of that lane (~55s of the CI shard's measured time, against ~8s warm on
+// a developer machine).
+//
+// The signal is RUN_GATES, the go-checks job's own env value, which is "true"
+// exactly when that step runs and never in a lane that runs the full suite --
+// so no workflow edit was needed. If it is ever renamed this silently falls to
+// YES, which costs time and loses no coverage.
+func callGraphOnDemand() (bool, string) {
+	if os.Getenv("RUN_GATES") == "true" {
+		return false, "skipped: RUN_GATES=true (ci.yml's docs-only gate-inputs step); the structural model is checked in full"
+	}
+	return true, "built on demand (ARCH_MODEL_CALLS=1); the committed artifact carries none"
+}
+
+// structuralOnly is m without its `calls` edges: what the committed artifact
+// is a snapshot of.
+func structuralOnly(m *model.Model) *model.Model {
+	out := &model.Model{SchemaVersion: m.SchemaVersion, Nodes: m.Nodes, Edges: make([]model.Edge, 0, len(m.Edges))}
+	for _, e := range m.Edges {
+		if e.Kind != model.EdgeCalls {
+			out.Edges = append(out.Edges, e)
+		}
+	}
+	return out
+}
+
+// callGraphIsConsistent reports the call-graph endpoints the structural pass of
+// the same model should have a node for and does not: an exported non-closure
+// function, or a method whose receiver type the model has as a type or
+// interface node. Everything else a call names -- an unexported function, a
+// closure (`f$1`), a method of an unexported or non-struct type -- is node-less
+// by design (see liveSymbols). Measured at zero when the check was added
+// (memql#5727): the two passes agree, and this keeps them agreeing.
+func callGraphIsConsistent(m *model.Model) (samples []string, total int) {
+	nodes := make(map[model.ID]bool, len(m.Nodes))
+	for _, n := range m.Nodes {
+		nodes[n.ID] = true
+	}
+	seen := map[model.ID]bool{}
+	var bad []string
+	check := func(id model.ID) {
+		if nodes[id] || seen[id] || strings.Contains(string(id), "$") {
+			return
+		}
+		seen[id] = true
+		s := string(id)
+		switch {
+		case strings.HasPrefix(s, "func:"):
+			name := s[strings.LastIndex(s, ".")+1:]
+			if name != "" && strings.ToUpper(name[:1]) == name[:1] && strings.ToLower(name[:1]) != name[:1] {
+				bad = append(bad, s)
+			}
+		case strings.HasPrefix(s, "method:"):
+			rest := strings.TrimPrefix(s, "method:")
+			open, close := strings.Index(rest, ".("), strings.LastIndex(rest, ").")
+			if open < 0 || close < open {
+				return
+			}
+			pkg, recv := rest[:open], rest[open+2:close]
+			if nodes[model.TypeID(pkg, recv)] || nodes[model.InterfaceID(pkg, recv)] {
+				bad = append(bad, s)
+			}
+		}
+	}
+	for _, e := range m.Edges {
+		if e.Kind == model.EdgeCalls {
+			check(e.From)
+			check(e.To)
+		}
+	}
+	sort.Strings(bad)
+	if len(bad) > 10 {
+		return bad[:10], len(bad)
+	}
+	return bad, len(bad)
 }
 
 // edgeTriple is an edge's IDENTITY for drift purposes: who, to whom, how.
@@ -330,8 +464,8 @@ func reportCounts(t *testing.T, want, got *model.Model) (behindNodes, behindEdge
 // slightly behind -- but "slightly" was enforced by nothing at all. memql#3288's
 // own words: "nothing forces that refresh; behind is bounded only by whoever
 // remembers." A model 40% behind is not a snapshot between refreshes, it is a
-// different codebase, and every consumer (the cockpit's Topology tab, the
-// observe runtime's FQN join) is reading it as current.
+// different codebase, and every consumer (the docs generators, the observe
+// runtime's FQN join) is reading it as current.
 //
 // A PERCENTAGE of the regenerated model, not an absolute, so it scales with the
 // tree -- and generous, because the failure it must not produce is a red gate on
@@ -360,7 +494,7 @@ func assertDriftIsBounded(t *testing.T, behindNodes, totalNodes, behindEdges, to
 			"(%.1f%%) behind a regeneration; the ceiling is %d%%.\n\nBeing SOMEWHAT behind is "+
 			"deliberate -- concurrent merges only add symbols and a gate that fails on someone "+
 			"else's merge is unwinnable. Being this far behind is not a snapshot between "+
-			"refreshes, it is a different codebase, and the cockpit renders it as current. "+
+			"refreshes, it is a different codebase, and every reader takes it as current. "+
 			"Run `make arch-model` and commit the result (memql#3288).",
 			behindNodes, totalNodes, pct(behindNodes, totalNodes),
 			behindEdges, totalEdges, pct(behindEdges, totalEdges), maxBehindPercent)
@@ -644,6 +778,25 @@ func TestCommittedModelIsSorted(t *testing.T) {
 	}
 }
 
+// TestCommittedModelHasNoCallGraph pins owner decision 7 (memql#5727): the
+// committed artifact is the STRUCTURAL model. The call graph was 63.9 of its
+// 81.3 MB with no consumer; `make arch-model` leaves --calls off and the drift
+// gate builds it on demand instead. A regeneration by hand with --calls would
+// put 287k edges back and pass every other test here.
+func TestCommittedModelHasNoCallGraph(t *testing.T) {
+	calls := 0
+	for _, e := range committedModel(t).Edges {
+		if e.Kind == model.EdgeCalls {
+			calls++
+		}
+	}
+	if calls > 0 {
+		t.Errorf("the committed model carries %d `calls` edges; it must carry none. Regenerate with "+
+			"`make arch-model`, which leaves --calls off -- ARCH_MODEL_CALLS=1 is the drift gate's "+
+			"on-demand build, never the artifact's.", calls)
+	}
+}
+
 // TestCommittedModelIsNotGutted stops the subset gate being satisfied by
 // deletion.
 //
@@ -657,20 +810,22 @@ func TestCommittedModelIsSorted(t *testing.T) {
 // model across many merges was only 0.76% behind, so this is years of slack
 // while still firing instantly on a gutted file.
 func TestCommittedModelIsNotGutted(t *testing.T) {
-	const minNodes, minEdges = 15000, 90000
+	// Structural since memql#5727: measured at 34,361 nodes and 36,359 edges
+	// when the call graph left the artifact.
+	const minNodes, minEdges = 15000, 20000
 	m := committedModel(t)
 	if len(m.Nodes) < minNodes {
 		t.Errorf("the committed model has %d nodes, floor is %d. Either the tree shrank "+
 			"dramatically or a regeneration dropped most of it -- the drift gate cannot tell, "+
 			"because a subset check is trivially satisfied by deletion.", len(m.Nodes), minNodes)
 	}
-	// Edges carry the call graph, so this also pins --calls: dropping it takes
-	// the model from ~121k edges to ~21k while leaving the node set identical,
-	// which the subset gate passes.
+	// The edge floor stands for the structural passes: imports, containment,
+	// implements, embeds, has_field and the automation triggers. A regeneration
+	// that dropped --types or --automations would leave far fewer.
 	if len(m.Edges) < minEdges {
-		t.Errorf("the committed model has %d edges, floor is %d. The most likely cause is "+
-			"regeneration WITHOUT --calls, which drops the CHA call graph (~121k edges to ~21k) "+
-			"and leaves the node set unchanged, so the drift gate stays green.",
+		t.Errorf("the committed model has %d edges, floor is %d. The most likely cause is a "+
+			"regeneration that dropped a structural pass (--types, --automations) -- the subset "+
+			"gate cannot see that, because a smaller model is a subset of a larger one.",
 			len(m.Edges), minEdges)
 	}
 }
@@ -693,7 +848,7 @@ func TestCommittedModelIsNotGutted(t *testing.T) {
 //	one extra top-level key -> every committed-file test PASSES,
 //	                           embedded.Load() -> "unknown field"
 //
-// That is worse than staleness: the cockpit loads NOTHING and CI is green. It
+// That is worse than staleness: every reader loads NOTHING and CI is green. It
 // is also the exact case ReadJSON's own doc anticipates -- "in practice that
 // only happens if someone hand-edits the generated file" -- which is how #2844
 // says the artifact drifted in the first place.
@@ -702,7 +857,7 @@ func TestCommittedModelLoadsThroughTheRealDecoder(t *testing.T) {
 		t.Fatalf("the committed artifact does not decode through model.ReadJSON, the strict "+
 			"decoder embedded.Load() uses: %v\n\nIt has DisallowUnknownFields and a schema-version "+
 			"check that plain json.Unmarshal does not, so every other test here can pass while "+
-			"the cockpit loads nothing at all (memql#2844).", err)
+			"every reader loads nothing at all (memql#2844).", err)
 	}
 }
 
