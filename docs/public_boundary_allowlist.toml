@@ -340,11 +340,6 @@ rule   = "leaves-public"
 
 [[allow]]
 file   = "docs/public/operate/memql-os.md"
-target = "../../superpowers/specs/2026-09-06-portal-removal-design.md"
-rule   = "leaves-public"
-
-[[allow]]
-file   = "docs/public/operate/memql-os.md"
 target = "supervised-visual-composition.md"
 rule   = "unselected-target"
 
@@ -428,15 +423,6 @@ file   = "docs/public/overview/proving-scorecard.md"
 target = "../../superpowers/specs/2026-09-06-proving-suite-design.md"
 rule   = "leaves-public"
 
-[[allow]]
-file   = "docs/public/overview/proving.md"
-target = "proving/2026-08-20.md"
-rule   = "unselected-target"
-
-[[allow]]
-file   = "docs/public/overview/proving.md"
-target = "proving/assets/"
-rule   = "unrewritable-target"
 
 [[allow]]
 file   = "docs/public/overview/quickstart.md"
