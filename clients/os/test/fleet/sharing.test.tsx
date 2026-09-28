@@ -867,13 +867,16 @@ describe("the sharing attention marker", () => {
     await waitFor(() => expect(within(link).getByRole("img", { name: "Unseen change" })).toBeTruthy());
     // Another section takes the window; Machines stays mounted behind it, and
     // its Sharing view is opened while it cannot be seen.
+    // (Routing, on screen, acknowledges its OWN change; only Sharing's is in
+    // question here.)
+    const sharing = () => acknowledged(conn).filter((a) => a.changeId === "fleet:machine-sharing");
     fleet.rerender("routing");
     fireEvent.click(link);
     await settle();
-    expect(acknowledged(conn)).toEqual([]);
+    expect(sharing()).toEqual([]);
     // Brought back into view, it is seen.
     fleet.rerender("machines");
-    await waitFor(() => expect(acknowledged(conn)).toHaveLength(1));
+    await waitFor(() => expect(sharing()).toHaveLength(1));
   });
 
   it("is never shown to somebody with no machine of their own to lend", async () => {

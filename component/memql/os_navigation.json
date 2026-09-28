@@ -242,16 +242,12 @@
         "name": "Machines"
       },
       {
-        "id": "policies",
-        "name": "Policies"
+        "id": "routing",
+        "name": "Routing"
       },
       {
         "id": "models",
         "name": "Model library"
-      },
-      {
-        "id": "routing",
-        "name": "Machine routing"
       },
       {
         "id": "apps",
@@ -493,7 +489,7 @@
       },
       {
         "id": "providers",
-        "name": "Doors",
+        "name": "Vendors",
         "requires": "app:settings/providers"
       },
       {

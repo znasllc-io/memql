@@ -65,7 +65,9 @@ vi.mock("@znasllc-io/memql-sdk-core/identity", () => ({
 
 const { MachinesProvider } = await import("../../src/live/machines");
 const { ModelsSection } = await import("../../src/apps/fleet/models/ModelsSection");
-const { RoutingSection } = await import("../../src/apps/fleet/routing/RoutingSection");
+const { MachinesTab } = await import("../../src/apps/fleet/routing/MachinesTab");
+const { renderRouting, routingConnection, routeRow } = await import("./routingHarness");
+const { fireEvent } = await import("@testing-library/react");
 const { AppsSection } = await import("../../src/apps/fleet/apps/AppsSection");
 const { WorkbenchesSection } = await import("../../src/apps/fleet/workbenches/WorkbenchesSection");
 const { FleetApp } = await import("../../src/apps/fleet/FleetApp");
@@ -655,69 +657,170 @@ const CASES: ActsCase[] = [
   },
 
   {
-    // THE CASE THIS FILE EXISTS FOR. Routing is being restyled, and its acts
-    // have to come out the other side spelled identically.
-    what: "Routing -- a saved policy",
+    // THE CASE THIS FILE EXISTS FOR. Routing was restyled -- twice now: the
+    // machine choice moved into Fleet > Routing's Machines tab -- and its acts
+    // have to come out the other side. What changed is LEGALITY, on purpose:
+    // Save and Discard changes are absent until something changed (DESIGN.md
+    // rule 12), and the first-save/edit split ("Create policy" / "Save
+    // policy") is one Save, because which write it takes is not a decision the
+    // person makes.
+    what: "Routing > Machines -- a saved row, untouched",
     open: async () => {
       h.connection = fakeConnection({ myRoutingPolicies: [POLICY] });
-      render(withSession(<RoutingSection />));
+      render(withSession(<MachinesTab header={(actions) => <div>{actions}</div>} />));
       await settle();
     },
     acts: [
-      { name: "About Machine routing", count: 1 },
-
+      { name: "About How a machine is chosen", count: 1 },
       { name: "Routing strategy", count: 1 },
-
       { name: "Routing fallback", count: 1 },
-
-      {
-        name: "Required labels",
-        count: 2,
-        note: "the chip list and the draft field",
-      },
+      { name: "Required labels", count: 2, note: "the chip list and the draft field" },
       { name: "Preferred labels", count: 2 },
       { name: "Preferred model order, one model id per line", count: 1 },
       { name: "Add", count: 2, note: "one per label map, and they must stay two" },
       { name: "Remove tier=gold", count: 1 },
       { name: "Remove room=studio", count: 1 },
-      { name: "Save policy", count: 1 },
-      { name: "Create policy", count: 0, note: "an existing row is edited in place" },
-      {
-        name: "Discard changes",
-        count: 1,
-        note: "offered (disabled) with nothing touched -- a disabled control is still the act",
-      },
-      {
-        name: "Re-read",
-        count: 0,
-        note: "never beside a live feed; the routing policy broadcasts",
-      },
+      { name: "Save", count: 0, note: "nothing changed, so nothing to save -- absent, never disabled" },
+      { name: "Discard changes", count: 0 },
+      { name: "Re-read", count: 0, note: "never beside a live feed; the machine-choice row broadcasts" },
     ],
   },
 
   {
-    // The same section with its feed behind. `Re-read` is offered ONLY here,
-    // and its appearance is itself the signal -- so a sweep of the live state
-    // alone would report the act missing and a sweep of this state alone
-    // would miss that it is conditional.
-    //
-    // A null connection is what puts the feed in `disconnected`, which is
-    // `feedIsBehind` by that function's own definition. The alternative --
-    // degrading a live collection -- is unreachable from the surface: the
-    // only thing that re-seeds it is the very button under test.
-    what: "Routing -- the feed behind",
+    what: "Routing > Machines -- edited",
     open: async () => {
-      h.connection = null;
-      render(withSession(<RoutingSection />));
+      h.connection = fakeConnection({ myRoutingPolicies: [POLICY] });
+      render(withSession(<MachinesTab header={(actions) => <div>{actions}</div>} />));
+      await settle();
+      fireEvent.change(screen.getByLabelText("Preferred model order, one model id per line"), { target: { value: "qwen3.5:4b" } });
       await settle();
     },
     acts: [
-      { name: "Reconnect machine routing", count: 1 },
-      { name: "Create policy", count: 1, note: "no row read, so the first save creates one" },
-      { name: "Save policy", count: 0 },
+      { name: "Save", count: 1 },
+      { name: "Discard changes", count: 1 },
+    ],
+  },
+
+  {
+    // The same tab with its feed behind. `Reconnect` is offered ONLY here.
+    // A null connection is what puts the feed in `disconnected`.
+    what: "Routing > Machines -- the feed behind",
+    open: async () => {
+      h.connection = null;
+      render(withSession(<MachinesTab header={(actions) => <div>{actions}</div>} />));
+      await settle();
+    },
+    acts: [
+      { name: "Reconnect machine choice", count: 1 },
       { name: "Routing strategy", count: 1 },
       { name: "Routing fallback", count: 1 },
-      { name: "Discard changes", count: 1 },
+      { name: "Save", count: 0 },
+    ],
+  },
+
+  {
+    // Fleet's old Policies section: the route list, and the Add that makes one.
+    what: "Routing > Routes",
+    open: async () => {
+      h.connection = routingConnection().connection;
+      await renderRouting("owner");
+    },
+    acts: [
+      { name: "Routing views", count: 1 },
+      { name: "Routes", count: 2, note: "the tab and the list" },
+      { name: "Rules", count: 1 },
+      { name: "Machines", count: 1 },
+      { name: "History", count: 1 },
+      { name: "About Routes", count: 1 },
+      { name: "Read the routes again", count: 1 },
+      { name: "New route", count: 1 },
+      { name: /^Open Local first,/, count: 1 },
+      { name: /^Open Embeddings,/, count: 1 },
+    ],
+  },
+
+  {
+    // "Edit sources", add/remove/reorder, and the one-line description.
+    what: "Routing > Routes -- a route's page",
+    open: async () => {
+      h.connection = routingConnection({ routes: [routeRow("localFirst", "fleet:strongest", ["app:*", "federation:cheapest"], { customized: true })] }).connection;
+      await renderRouting("owner");
+      await click(screen.getByRole("button", { name: /^Open Local first,/ }));
+    },
+    acts: [
+      { name: "About How a route works", count: 1 },
+      { name: /^(Description: .*|Add a description)$/, count: 1, note: "the one-line description, edited in place" },
+      { name: "Sources, in the order they are tried", count: 1 },
+      { name: /^1\. Strongest local model,/, count: 1 },
+      { name: "Remove Any signed-in app", count: 1 },
+      { name: "Add a source at the end", count: 1 },
+      { name: "Sources you can add", count: 1 },
+      { name: /^Claude Code:/, count: 1 },
+      { name: /^Codex:/, count: 1, note: "on no machine, and still offered" },
+      { name: /^Cheapest vendor:/, count: 1 },
+      // Any source the engine takes, by its exact name: a pinned app model,
+      // a model no machine offers yet, a vendor or provider by name (the old
+      // editor's "Specific model, app or policy..." field).
+      { name: "Specific source", count: 1 },
+      { name: "Add specific source", count: 0, note: "absent until something is typed; Enter adds too" },
+      // The rules a change reaches (the old "Used by task rules"), one click to them.
+      { name: /^Taken by \d+ rules?$/, count: 1 },
+      { name: "Restore shipped", count: 1, note: "a changed shipped route" },
+      { name: "Save route", count: 0, note: "untouched" },
+    ],
+  },
+
+  {
+    what: "Routing > Rules",
+    open: async () => {
+      h.connection = routingConnection().connection;
+      await renderRouting("owner", { intent: { id: "r", payload: { routingTab: "rules" } } });
+    },
+    acts: [
+      { name: "About How rules are tried", count: 1 },
+      { name: "Refine rules", count: 2, note: "the affordance's group and its opener share the name" },
+      { name: "Read the rules again", count: 1 },
+      { name: "Add a rule", count: 1 },
+      { name: "Rules, in the order they are tried", count: 1 },
+    ],
+  },
+
+  {
+    // The Rules page's "Edit as fields", now a rule's own page: every field,
+    // precedence included, and Remove.
+    what: "Routing > Rules -- a rule's page",
+    open: async () => {
+      const made = routingConnection();
+      made.state.rules = [...made.state.rules, { id: "mine", name: "mine", when: { tag: "nightly" }, level: "", policy: "localOnly", precedence: 10, onUnavailable: "degrade", excludes: [], locked: false, described: "" }];
+      h.connection = made.connection;
+      await renderRouting("owner", { intent: { id: "r", payload: { routingTab: "rules" } } });
+      await click(screen.getByRole("button", { name: /Tagged nightly/ }));
+    },
+    acts: [
+      { name: "Name", count: 1 },
+      { name: "the level asked for", count: 1 },
+      { name: "Value for the call's tag", count: 1 },
+      { name: "Route", count: 1 },
+      { name: "Ask for this level instead", count: 1 },
+      { name: "When nothing there is ready", count: 1 },
+      { name: "Precedence", count: 1 },
+      { name: "Check it", count: 1 },
+      { name: "Remove", count: 1 },
+      { name: "Cancel", count: 1 },
+    ],
+  },
+
+  {
+    what: "Routing > History",
+    open: async () => {
+      h.connection = routingConnection({ decisions: [{ id: "d", promptName: "agentReply", model: "qwen3", door: "local", outcome: "ok", billing: "local", considered: [] }] }).connection;
+      await renderRouting("admin", { intent: { id: "r", payload: { routingTab: "history" } } });
+    },
+    acts: [
+      { name: "About History", count: 1 },
+      { name: "Refine history", count: 2, note: "the affordance's group and its opener share the name" },
+      { name: "Read the history again", count: 1 },
+      { name: "Recent routed calls", count: 1 },
     ],
   },
 
@@ -833,7 +936,7 @@ const CASES: ActsCase[] = [
       // person can pick.
       { name: "Machines", count: 1, within: "Default section" },
       { name: "Model library", count: 1, within: "Default section" },
-      { name: "Machine routing", count: 1, within: "Default section" },
+      { name: "Routing", count: 1, within: "Default section" },
       { name: "Workspaces", count: 1, within: "Default section" },
       { name: "Activity", count: 1, within: "Default section" },
       { name: "Logs", count: 1, within: "Default section" },

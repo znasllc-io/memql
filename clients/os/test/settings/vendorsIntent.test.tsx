@@ -16,10 +16,9 @@ const h = vi.hoisted(() => {
         providerAuthStatus: vi.fn(async () => reply([])),
         integrationStatus: vi.fn(async () => reply([])),
         providersReload: vi.fn(async () => reply([])),
-        // The section reads the FLEET door too since epic memql#5088 -- a
-        // machine you own is one of the ways to reach a model, and on a local
-        // cluster it is the only one. Nothing in this file asserts on it; it
-        // is here so the section can render at all.
+        // The section reads inferenceStatus for the vendors' own state.
+        // Nothing in this file asserts on it; it is here so the section can
+        // render at all.
         inferenceStatus: vi.fn(async () => reply([{}])),
       },
     } as unknown,
@@ -101,7 +100,7 @@ describe("Settings, opened at a vendor", () => {
     expect(consume).toHaveBeenCalledExactlyOnceWith("intent-7");
   });
 
-  it("puts the cursor inside the OpenAI panel for the other door", async () => {
+  it("puts the cursor inside the OpenAI panel for the other vendor", async () => {
     await open({ vendor: "openai" });
     expect(document.querySelector('[data-os-vendor="openai"]')?.contains(document.activeElement)).toBe(true);
   });
@@ -117,10 +116,11 @@ describe("Settings, opened at a vendor", () => {
   it("renders the section unchanged when the shell hands it no intent at all", async () => {
     const { consume } = await open(null);
     expect(consume).not.toHaveBeenCalled();
-    // RE-POINTED TITLE. "AI providers" became "Doors" (epic memql#5153); what
-    // this asserts is unchanged -- the section renders its standing self when
-    // the shell asks it for nothing in particular.
-    expect(screen.getByRole("heading", { name: "Doors" })).toBeTruthy();
+    // RE-POINTED TITLE. "AI providers" became "Doors" (epic memql#5153) and
+    // then "Vendors" (routing redesign, 2026-09-28); what this asserts is
+    // unchanged -- the section renders its standing self when the shell asks
+    // it for nothing in particular.
+    expect(screen.getByRole("heading", { name: "Vendors" })).toBeTruthy();
     expect(document.querySelector("[data-os-vendor]")).toBeNull();
   });
 

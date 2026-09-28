@@ -244,8 +244,9 @@ rename, and stays silent on a heartbeat.
 
 `src/apps/fleet/` is the promotion of the foundation's read-only exemplar
 into the whole app: **Machines** (rename, operator labels, remove,
-per-machine detail, and the guided cockpit install), **Routing** (the policy
-editor and each call's routing record), **Workbenches** (per-plan workspaces
+per-machine detail, and the guided cockpit install), **Routing** (routes,
+rules, the machine choice and the history of what served -- see
+`src/apps/fleet/routing/`), **Workbenches** (per-plan workspaces
 by replica), and its own **Settings**. Five things about it generalize to
 every app epic after it:
 
@@ -2438,8 +2439,8 @@ For a meaningful UI/functionality change, add `attentionChanges` to the app's
 
 ```tsx
 attentionChanges: [{
-  id: "fleet:policy-editor", revision: "policy-editor-v2",
-  sectionId: "routing", label: "Policy editor improved",
+  id: "fleet:route-composer", revision: "route-composer-v2",
+  sectionId: "routing", label: "Route composer improved",
 }]
 ```
 
@@ -2456,11 +2457,11 @@ A deeper destination uses the same explicit target in declaration, marker and
 acknowledgment wrapper:
 
 ```tsx
-// Manifest entry: { id: "fleet:policy-editor", revision: "policy-editor-v2",
-//   sectionId: "routing", target: "policy-editor", label: "Policy editor improved" }
-<AttentionMarker appId="fleet" sectionId="routing" target="policy-editor" />
-{editorOpen && <AttentionDestination appId="fleet" sectionId="routing" target="policy-editor">
-  <PolicyEditor />
+// Manifest entry: { id: "fleet:route-composer", revision: "route-composer-v2",
+//   sectionId: "routing", target: "route-composer", label: "Route composer improved" }
+<AttentionMarker appId="fleet" sectionId="routing" target="route-composer" />
+{routeOpen && <AttentionDestination appId="fleet" sectionId="routing" target="route-composer">
+  <RouteComposer {...props} />
 </AttentionDestination>}
 ```
 

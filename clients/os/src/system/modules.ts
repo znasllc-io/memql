@@ -56,7 +56,7 @@ export const MODULE_SETTINGS_SECTION: Record<
   ModuleId,
   { app: string; place: string; section: string; name: string } | null
 > = {
-  ai: { app: "settings", place: "Settings", section: "providers", name: "Doors" },
+  ai: { app: "settings", place: "Settings", section: "providers", name: "Vendors" },
   email: { app: "settings", place: "Settings", section: "integrations", name: "Integrations" },
   storage: null,
   githubApp: { app: "deployables", place: "Deployables settings", section: "settings", name: "Sources" },

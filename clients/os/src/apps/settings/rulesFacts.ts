@@ -5,6 +5,8 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
 import { LEVELS, type LevelId } from "./routingFacts";
+import { engineWords, promptWords, refusalWords, retiredWordsIn, routeTitle } from "../fleet/routing/vocabulary";
+import type { PrecedenceChange } from "../fleet/routing/ruleOrder";
 
 // Rules, as facts (epic memql#5153, D1) -- and the arithmetic that keeps a UI
 // from destroying a distinction the engine preserves all the way down.
@@ -171,6 +173,35 @@ export function isFloorRule(rule: RuleRow): boolean {
 }
 
 /**
+ * The shipped rule that decides every call a rule with these conditions
+ * would match -- or null when some call could still reach it.
+ *
+ * LOCKED RULES EVALUATE FIRST, REGARDLESS OF PRECEDENCE (rule_registry.go),
+ * and the engine does not refuse a rule they shadow: it saves, validates, and
+ * never fires. A locked rule decides every such call when EACH of its
+ * conditions is one the draft also states with the same value -- then any call
+ * the draft matches, it matches first. `touches` is a prefix match in the
+ * router, so a draft touching `v1:identity:user` is shadowed by a rule
+ * touching `v1:identity:`. The floor is exempt: it runs last.
+ */
+export function shadowedBy(
+  when: Partial<Record<RuleWhenKey, string>>,
+  rules: readonly RuleRow[],
+): RuleRow | null {
+  for (const rule of rulesInOrder(rules)) {
+    if (!rule.locked || isFloorRule(rule)) continue;
+    const covers = (Object.keys(rule.when) as RuleWhenKey[]).every((key) => {
+      if (!(key in when)) return false;
+      const mine = when[key] ?? "";
+      const theirs = rule.when[key] ?? "";
+      return key === "touches" ? mine.startsWith(theirs) : mine === theirs;
+    });
+    if (covers) return rule;
+  }
+  return null;
+}
+
+/**
  * Rules in the order the engine evaluates them.
  *
  * Locked rules first, then precedence descending -- EXCEPT the floor, which
@@ -201,7 +232,17 @@ export function ruleSentence(rule: RuleRow): string {
   const conditions = RULE_WHEN_KEYS.filter((k) => k in rule.when).map((k) => {
     const value = rule.when[k] ?? "";
     if (value === "") return `${RULE_WHEN_MEANING[k]} is empty`;
-    return `${RULE_WHEN_MEANING[k]} is ${value}`;
+    // A prompt is an ENGINE id and can carry a retired routing word
+    // (`composeRoutingPolicy`); it is said in words. A tag or a kind of call
+    // is said as written unless it carries one. A role or a concept prefix is
+    // a value a person reads as written.
+    const said =
+      k === "prompt"
+        ? promptWords(value)
+        : (k === "tag" || k === "modality") && retiredWordsIn(value).length > 0
+          ? engineWords(value).toLowerCase()
+          : value;
+    return `${RULE_WHEN_MEANING[k]} is ${said}`;
   });
 
   const head =
@@ -212,15 +253,15 @@ export function ruleSentence(rule: RuleRow): string {
         : `When ${conditions.slice(0, -1).join(", ")} and ${conditions[conditions.length - 1]}`;
 
   const raise = rule.level === "" ? "" : ` ask for ${rule.level} and`;
-  const policy = rule.policy === "" ? "no policy" : rule.policy;
+  const route = rule.policy === "" ? "no route" : `the ${routeTitle(rule.policy)} route`;
   const tail =
     rule.onUnavailable === "park"
-      ? " If nothing there is available, park and wait for a person."
+      ? " If nothing there is ready, wait for a person."
       : rule.onUnavailable === "degrade"
-        ? " If nothing there is available, step down a level."
+        ? " If nothing there is ready, step down a level."
         : "";
 
-  return `${head},${raise} try ${policy}.${tail}`;
+  return `${head},${raise} take ${route}.${tail}`;
 }
 
 /**
@@ -232,7 +273,7 @@ export function ruleSentence(rule: RuleRow): string {
  */
 export const LOCKED_RULE_SENTENCE =
   "Shipped rules come back on every restart and cannot be edited or removed. " +
-  "A matching shipped rule takes priority over custom rules. The shipped catch-all runs last.";
+  "A matching shipped rule takes priority over yours. The shipped catch-all runs last.";
 
 /**
  * What the floor is, said on its own row.
@@ -242,7 +283,7 @@ export const LOCKED_RULE_SENTENCE =
  * is what makes "a call that matches no rule" impossible by construction.
  */
 export const FLOOR_RULE_SENTENCE =
-  "The floor. It states no conditions, so it catches everything nothing above it " +
+  "The last rule states no conditions, so it catches everything nothing above it " +
   "matched -- which is why it runs last, and why a call can never fall through.";
 
 /** A draft precedence that would collide with an existing rule. */
@@ -379,6 +420,8 @@ export interface RuleActionState {
   busy: boolean;
   failed: boolean;
   message: string;
+  /** A reorder that stopped after some of its writes landed. */
+  partial?: boolean;
 }
 
 export const IDLE_RULE_ACTION: RuleActionState = { busy: false, failed: false, message: "" };
@@ -390,6 +433,15 @@ export interface RuleActions {
   simulate: (rule: RuleRow) => Promise<Simulation>;
   activate: (rule: RuleRow) => Promise<boolean>;
   retire: (name: string, revision?: number) => Promise<boolean>;
+  /**
+   * Write new precedences, one save at a time, each naming the revision the
+   * last one produced. The plan (fleet/routing/ruleOrder.ts) is built so no
+   * intermediate state ties; a refusal part-way stops and says so, and the
+   * reload shows what did land.
+   */
+  reorder: (changes: readonly PrecedenceChange[], rules: readonly RuleRow[]) => Promise<boolean>;
+  /** The cluster takes revisioned saves, which is what a reorder is made of. */
+  reorderable: boolean;
   supported: boolean;
   clear: () => void;
 }
@@ -397,6 +449,17 @@ export interface RuleActions {
 export function useRuleActions(onChanged: () => void): RuleActions {
   const connection = useOsConnection();
   const [state, setState] = useState<RuleActionState>(IDLE_RULE_ACTION);
+  // A REFUSAL, READ. Routes and rules share one engine revision, so a refusal
+  // for staleness means somebody wrote since the page read -- the surface
+  // reads again (routes AND rules, `onChanged`) and says so in its own words.
+  const refused = useCallback(
+    (err: unknown): string => {
+      const read = refusalWords(err instanceof Error ? err.message : String(err));
+      if (read.stale) onChanged();
+      return read.text;
+    },
+    [onChanged],
+  );
   const supported = builtinOn(connection, "routingRuleSave") !== null || builtinOn(connection, "routingRuleActivate") !== null;
 
   const clear = useCallback(() => setState(IDLE_RULE_ACTION), []);
@@ -451,11 +514,11 @@ export function useRuleActions(onChanged: () => void): RuleActions {
         return {
           considered: 0,
           changed: 0,
-          refusal: err instanceof Error ? err.message : String(err),
+          refusal: refused(err),
         };
       }
     },
-    [connection],
+    [connection, refused],
   );
 
   const activate = useCallback(
@@ -483,15 +546,11 @@ export function useRuleActions(onChanged: () => void): RuleActions {
         onChanged();
         return true;
       } catch (err: unknown) {
-        setState({
-          busy: false,
-          failed: true,
-          message: err instanceof Error ? err.message : String(err),
-        });
+        setState({ busy: false, failed: true, message: refused(err) });
         return false;
       }
     },
-    [connection, onChanged],
+    [connection, onChanged, refused],
   );
 
   const retire = useCallback(
@@ -510,16 +569,63 @@ export function useRuleActions(onChanged: () => void): RuleActions {
         onChanged();
         return true;
       } catch (err: unknown) {
-        setState({
-          busy: false,
-          failed: true,
-          message: err instanceof Error ? err.message : String(err),
-        });
+        setState({ busy: false, failed: true, message: refused(err) });
+        return false;
+      }
+    },
+    [connection, onChanged, refused],
+  );
+
+  const reorderable = builtinOn(connection, "routingRuleSave") !== null;
+
+  const reorder = useCallback(
+    async (changes: readonly PrecedenceChange[], rules: readonly RuleRow[]): Promise<boolean> => {
+      const save = builtinOn(connection, "routingRuleSave");
+      if (save === null) {
+        setState({ busy: false, failed: true, message: "This cluster cannot reorder rules yet." });
+        return false;
+      }
+      if (changes.length === 0) return true;
+      setState({ busy: true, failed: false, message: "" });
+      let revision = rules.find((r) => typeof r.revision === "number")?.revision;
+      let written = 0;
+      try {
+        for (const change of changes) {
+          const rule = rules.find((r) => r.name === change.name);
+          if (rule === undefined) throw new Error(`${change.name} is no longer in the list; read the rules again.`);
+          if (revision === undefined) throw new Error("Read the rules again before reordering them.");
+          const result = await save({
+            name: rule.name,
+            conditions: rule.when,
+            expectedRevision: revision,
+            excludes: rule.excludes,
+            level: rule.level,
+            policy: rule.policy,
+            precedence: change.precedence,
+            onUnavailable: rule.onUnavailable,
+            description: rule.described,
+          });
+          written += 1;
+          const row = [...result.rows()][0];
+          const next = row === undefined ? undefined : flatten(row as Record<string, unknown>)["revision"];
+          revision = typeof next === "number" ? next : revision + 1;
+        }
+        setState({ busy: false, failed: false, message: "" });
+        onChanged();
+        return true;
+      } catch (err: unknown) {
+        // PART-WAY IS ITS OWN STATE. The rules already written now sit above
+        // the ones that were not, so the order on the cluster is neither the
+        // old one nor the one asked for -- and "that did not go through"
+        // would say nothing had changed.
+        const text = refusalWords(err instanceof Error ? err.message : String(err)).text;
+        setState({ busy: false, failed: true, partial: written > 0, message: text });
+        onChanged();
         return false;
       }
     },
     [connection, onChanged],
   );
 
-  return { state, describe, simulate, activate, retire, supported, clear };
+  return { state, describe, simulate, activate, retire, reorder, reorderable, supported, clear };
 }

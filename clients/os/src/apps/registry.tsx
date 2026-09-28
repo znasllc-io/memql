@@ -121,27 +121,31 @@ const settings: OsAppManifest = {
     // administration. `{ min: "developer" }` cannot express that -- the
     // ladder ranks developer 300 ABOVE admin 200, so a floor there admits
     // exactly the role the engine refuses.
-    // Settings -> AI is four sections named for what a person asks (epic
-    // memql#5153, D1/D2): where a call can come from, how much it needs, who
-    // gets what, and what actually happened. It replaces one page called "AI
-    // providers" that was three panels of prose.
+    // Settings -> AI keeps what is a CREDENTIAL or a cluster-wide VALUE
+    // (routing redesign, 2026-09-28): Vendors, where a vendor's ids are set,
+    // and the read-only Levels table. How a call is routed -- routes, rules and
+    // the history of what served -- lives in Fleet > Routing.
     //
-    // THE `providers` ID IS KEPT DELIBERATELY. Doors is that section's
-    // successor -- same role gate, same vendor forms, same intent -- and two
-    // things in epic 1's tree reach for `settings/providers` by name: the core
-    // gate's inference stop, and MODULE_SETTINGS_SECTION's `ai` entry. Renaming
-    // the id buys a nicer string and costs a cross-epic edit to a screen an
-    // owner cannot dismiss on a cluster with no other door. The id is not
-    // user-visible; the name is.
-    { id: "providers", name: "Doors", requires: "app:settings/providers" },
-    // Levels and Decisions are readable one rung wider than Doors and Rules
-    // (D7). `{ min: "admin" }` on this ladder admits admin (200), developer
-    // (300) and owner -- so this is WIDER than the owner-or-developer set, not
-    // narrower. A decision record carries neither prompt nor error message, so
-    // an admin answering "why did this go to a vendor" can have it.
+    // THE `providers` ID IS KEPT DELIBERATELY. Vendors is that section's
+    // successor (it was "Doors", and "AI providers" before that) -- same role
+    // gate, same vendor forms, same intent -- and two things reach for
+    // `settings/providers` by name: the core gate's inference stop, and
+    // MODULE_SETTINGS_SECTION's `ai` entry. The id is not user-visible; the
+    // name is.
+    { id: "providers", name: "Vendors", requires: "app:settings/providers" },
+    // Levels is readable one rung wider than Vendors (D7): `{ min: "admin" }`
+    // admits admin, developer and owner.
     { id: "levels", name: "Levels", requires: "app:settings/levels" },
-    { id: "rules", name: "Rules", requires: "app:settings/rules" },
-    { id: "decisions", name: "Decisions", requires: "app:settings/decisions" },
+    // RULES AND DECISIONS MOVED TO FLEET > ROUTING, AND THEIR GATES WITH THEM.
+    // The two sections stay declared as drill-downs under Levels -- off the
+    // rail, reached only by a link or an old deep link -- where each is a
+    // signpost to its new home. That keeps `app:settings/rules` and
+    // `app:settings/decisions` named by this registry, which is what the
+    // seeds' parity gate (component/memql, TestOsRegistryRequiresMatchTheAppSeeds)
+    // holds them to, and it is the same capability Fleet > Routing's Routes,
+    // Rules and History tabs ask for (fleet/routing/access.ts).
+    { id: "rules", name: "Rules", parent: "levels", requires: "app:settings/rules" },
+    { id: "decisions", name: "Decisions", parent: "levels", requires: "app:settings/decisions" },
     // Procedures (epic memql#5408): the certification ladder's values -- how
     // much evidence a learned procedure needs before it runs without a model.
     // AFTER Decisions, closing the AI group in the order a person learns it:
@@ -263,6 +267,15 @@ const fleet: OsAppManifest = {
   sections: FLEET_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
+  // Routing moved here and became one place (routing redesign, 2026-09-28):
+  // Fleet's Policies and Machine routing, and Settings' Rules and Decisions,
+  // are now Fleet > Routing's Routes, Rules, Machines and History. A person
+  // who knew where those were has to be told where they went -- that is a
+  // change in how they use it, not a restyling. The destination is the
+  // section, which every Fleet user can open (Machines is ungated).
+  attentionChanges: [
+    { id: "fleet:routing", revision: "routing-1", sectionId: "routing", label: "Routes, rules and history, all in Routing" },
+  ],
   component: FleetApp,
 };
 

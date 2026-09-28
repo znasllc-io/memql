@@ -169,8 +169,8 @@ export function useRoutingPolicy(): RoutingPolicyState {
         await write;
         setAnnouncement(
           held === null
-            ? "Routing policy created. Every call the router dispatches for you uses it from now on."
-            : "Routing policy saved.",
+            ? "Saved. Every call routed to your machines uses it from now on."
+            : "Saved.",
         );
         return true;
       } catch (err: unknown) {
