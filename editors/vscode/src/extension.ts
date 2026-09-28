@@ -427,12 +427,12 @@ async function copyEnrolmentLink(url: string): Promise<void> {
     void offerDetails(
       'error',
       connectionOutput,
-      'MemQL: the enrolment link could not be copied to the clipboard.'
+      "MemQL: Couldn't copy the passkey setup link."
     );
     return;
   }
   void window.showInformationMessage(
-    `MemQL: enrolment link copied. Open it in a browser on a machine that can reach this cluster -- it is single-use and expires in ${OWNERSHIP_LINK_TTL}.`
+    `MemQL: Passkey setup link copied. It works once and expires in ${OWNERSHIP_LINK_TTL}.`
   );
 }
 
@@ -4300,6 +4300,14 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
     return undefined;
   }
   const file = result.file;
+  if (file.clusters.length === 0) {
+    // An empty picker is a dead end: offer the two ways to get a cluster.
+    const add = { label: '$(add) Connect to a cluster', command: 'memql.clusters.add' };
+    const install = { label: '$(server) Install a local cluster', command: 'memql.deployments.createDeployment' };
+    const chosen = await window.showQuickPick([add, install], { placeHolder: 'No clusters yet' });
+    if (chosen !== undefined) await commands.executeCommand(chosen.command);
+    return undefined;
+  }
   const state = connections?.state ?? { status: 'disconnected' as const };
   // The same words as the tree (clusters/status.ts), with the stored-session
   // facts read the same way, so the two lists cannot disagree. The cluster in
@@ -4774,10 +4782,10 @@ async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
 
   const choice = await window.showInformationMessage(
     passkeyOfferMessage(displayLabel(cluster)),
-    'Enrol a passkey',
+    'Add passkey',
     'Not now'
   );
-  if (choice !== 'Enrol a passkey') {
+  if (choice !== 'Add passkey') {
     // Remembered for the session on an explicit decline AND on a dismissal:
     // closing the notification is an answer, and re-asking on the next connect
     // is how a prompt teaches people to dismiss it without reading.
@@ -4808,7 +4816,7 @@ async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
   try {
     const admin = new IdentityAdminClient(dispatcher);
     const minted = await window.withProgress(
-      { location: ProgressLocation.Notification, title: 'MemQL: minting an enrolment link...' },
+      { location: ProgressLocation.Notification, title: 'MemQL: Preparing passkey setup' },
       () => admin.issueEnrolmentLink(decision.userId)
     );
     // asExternalUri first, for the reason every other opener in this file does
@@ -4821,7 +4829,7 @@ async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
     // silence would leave them waiting for a browser tab that is not coming.
     const detail = err instanceof Error ? err.message : String(err);
     noteDiagnostic(connectionOutput, 'minting an enrolment link failed', detail);
-    void offerDetails('error', connectionOutput, 'MemQL: could not mint an enrolment link.');
+    void offerDetails('error', connectionOutput, "MemQL: Couldn't start passkey setup.");
   }
 }
 
