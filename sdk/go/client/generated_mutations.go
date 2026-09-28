@@ -12777,6 +12777,7 @@ type StageInboundRequestArgs struct {
 	Medium               string
 	Body                 string
 	ContentType          string
+	HeadersJson          string
 	DedupeKey            string
 	SignatureVerified    bool
 	SignatureVerifiedSet bool // set true to send signatureVerified; required because zero-value bool is ambiguous
@@ -12815,6 +12816,13 @@ func StageInboundRequestBuild(args StageInboundRequestArgs) string {
 		}
 		b.WriteString("contentType: ")
 		b.WriteString(quoteMemQL(args.ContentType))
+	}
+	if args.HeadersJson != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("headersJson: ")
+		b.WriteString(quoteMemQL(args.HeadersJson))
 	}
 	if args.DedupeKey != "" {
 		if b.Len() > 29 {

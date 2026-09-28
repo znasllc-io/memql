@@ -7409,6 +7409,7 @@ export interface StageInboundRequestArgs {
   medium: string;
   body: string;
   contentType?: string;
+  headersJson?: string;
   dedupeKey?: string;
   signatureVerified?: boolean;
   receivedAt?: string;
@@ -7421,6 +7422,7 @@ export function buildStageInboundRequest(args: StageInboundRequestArgs): string 
   parts.push("medium: " + renderMemQLValue(args.medium));
   parts.push("body: " + renderMemQLValue(args.body));
   if (args.contentType !== undefined) parts.push("contentType: " + renderMemQLValue(args.contentType));
+  if (args.headersJson !== undefined) parts.push("headersJson: " + renderMemQLValue(args.headersJson));
   if (args.dedupeKey !== undefined) parts.push("dedupeKey: " + renderMemQLValue(args.dedupeKey));
   if (args.signatureVerified !== undefined) parts.push("signatureVerified: " + renderMemQLValue(args.signatureVerified));
   if (args.receivedAt !== undefined) parts.push("receivedAt: " + renderMemQLValue(args.receivedAt));
