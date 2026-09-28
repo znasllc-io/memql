@@ -450,8 +450,8 @@ per milestone after the first.
 |---|---|---|
 | M0, the bridge (epic 1) | a Go-touching pull request under 7 min for a week | nothing |
 | M1, pipelines on pull requests | the MemQL check reports on every pull request for two weeks with no false green found by the queue run | the pull-request lanes in `ci.yml`; the ruleset requires the MemQL check |
-| M2, the queue | full-mode runs gate the merge queue for two weeks | `ci.yml` on `merge_group` and `push` |
-| M3, deploy and notify | `verify-rollout` and the notify stage run on three releases | the Python observer; the placeholder |
+| M2, the queue | full-mode runs gate the merge queue for two weeks (unmeasured while merges bypass the queue through the owner's merge script; documentation program record, D16) | `ci.yml` on `merge_group` and `push` |
+| M3, deploy and notify | `verify-rollout` and the notify stage run on three releases | the Python observer; the placeholder; `publish-docs-bundle.yml` and the instance's `docs-sync.yml`, once the deploy stage commits the docs set (documentation program record, D15) |
 | M4 | the engine image build moves to a pipeline on a released instance | `ci.yml` deleted; `build-engine-images.yml` last |
 
 "No false green" in M1 means a pull-request run that reported success on
