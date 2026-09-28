@@ -71,6 +71,9 @@ export class UninstallRunState {
   // a fact about the run they were reading, not a preference.
   private logsShown = false;
   private logsFollowTail = true;
+  // Cancel was pressed and the run has not come to rest; see
+  // AddClusterState.requestStop for why the phase does not move at the click.
+  private stopRequested = false;
   // The bar's high-water mark and the measured step weights, for the reasons
   // AddClusterState keeps its own (see `progress`).
   private highWater = 0;
@@ -139,6 +142,26 @@ export class UninstallRunState {
     this.logsFollowTail = follow;
   }
 
+  /** The page opened or closed the log; see `AddClusterState.setLogsOpen`. */
+  setLogsOpen(open: boolean): void {
+    this.logsShown = open;
+    if (open) this.logsFollowTail = true;
+  }
+
+  /** Cancel was pressed and the removal is still coming to rest. */
+  get stopping(): boolean {
+    return this.stopRequested;
+  }
+
+  /**
+   * Cancel was pressed. The removal stops at the next wave boundary -- a
+   * `k3d cluster delete` is not killed half-way -- so the phase stays
+   * `running` and the page says it is stopping until `finish` settles it.
+   */
+  requestStop(): void {
+    if (this.currentPhase === "running") this.stopRequested = true;
+  }
+
   /** Why the run could not start, when no step ever reported. */
   get problem(): string {
     return this.problemMessage;
@@ -168,6 +191,7 @@ export class UninstallRunState {
     this.logsShown = false;
     this.logsFollowTail = true;
     this.highWater = 0;
+    this.stopRequested = false;
   }
 
   /**
@@ -200,7 +224,7 @@ export class UninstallRunState {
       }
       case "stepStarted": {
         const row = this.upsert(event.step.id, event.step.label, event.step.description);
-        markStarted(row, this.clock());
+        markStarted(row, this.clock(), event.step.timeoutSeconds);
         return;
       }
       case "stepPhase": {
@@ -235,6 +259,7 @@ export class UninstallRunState {
 
   /** The run ended on its own terms. */
   finish(report: { ok: boolean; cancelled?: boolean }): void {
+    this.stopRequested = false;
     if (report.cancelled === true) {
       this.currentPhase = "stopped";
       return;
@@ -251,6 +276,7 @@ export class UninstallRunState {
    * that sits there having quietly done nothing.
    */
   fail(message: string): void {
+    this.stopRequested = false;
     this.currentPhase = "failed";
     this.problemMessage = message;
   }
@@ -268,13 +294,14 @@ export class UninstallRunState {
     this.problemMessage = "";
     this.followUpMessage = "";
     this.highWater = 0;
+    this.stopRequested = false;
   }
 
-  // Guided and remedy stay at their fresh values here: guided is an INSTALL
-  // affordance -- the operator runs one command by hand and the same verify
-  // decides when it is done -- and a removal step has no remedy to offer, since
-  // what it needs is an artifact the receipt already names. The fields exist
-  // because the row type is shared with the install run.
+  // THE REMEDY IS READ HERE TOO NOW (markFinished, for both machines). It used
+  // not to be, on the reasoning that a removal needs only an artifact the
+  // receipt already names -- and the hosts block's removal needs root, fails
+  // with exit 4 and a command to run when the password is declined, and was
+  // then shown the missing-package advice with no command at all.
   private upsert(id: string, label: string, description: string): StepProgress {
     return upsertStep(this.rows, id, label, description);
   }

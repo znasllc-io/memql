@@ -589,12 +589,12 @@
         },
         {
           "command": "memql.deployments.createDeployment",
-          "when": "view == memqlClusters",
+          "when": "view == memqlClusters && !memql.localClusterPresent",
           "group": "1_manage@1"
         },
         {
           "command": "memql.clusters.repair",
-          "when": "view == memqlClusters",
+          "when": "view == memqlClusters && memql.localClusterPresent",
           "group": "1_manage@2"
         },
         {

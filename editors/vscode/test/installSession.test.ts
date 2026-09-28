@@ -1599,7 +1599,7 @@ test("runInstall on an unsupported platform fails at detect and does not create 
   );
   const copy = failureGuidance(3, "", report.outcomes[0]?.reason ?? "");
   assert.match(copy.advice, /linux\/amd64/);
-  assert.match(copy.advice, /will not change that/);
+  assert.match(copy.advice, /Retrying won.t change that/);
   assert.equal(copy.retryable, false);
 });
 

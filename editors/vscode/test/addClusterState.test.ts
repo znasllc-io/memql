@@ -649,7 +649,7 @@ test("a typed endpoint wins over the one the domain would compose", () => {
 test("a missing name is refused", () => {
   const s = connectForm({ name: "   ", endpoint: "api.x.example.com:443" });
   assert.equal(s.connectDraft(), undefined);
-  assert.equal(messageFor(s, "name"), "A cluster name is required.");
+  assert.equal(messageFor(s, "name"), "Enter a name for this cluster.");
 });
 
 test("a name already in the registry is refused, and the message names the conflict", () => {
@@ -673,7 +673,7 @@ test("the duplicate check needs a registry, and without one the write-time wall 
 test("an endpoint that names nothing at all is refused", () => {
   const s = connectForm({ name: "staging" });
   assert.equal(s.connectDraft(), undefined);
-  assert.match(messageFor(s, "endpoint") ?? "", /An endpoint is required/);
+  assert.match(messageFor(s, "endpoint") ?? "", /Enter an endpoint/);
 });
 
 test("the endpoint is judged by the dialer, and reports what the dialer said", () => {
@@ -695,7 +695,9 @@ test("a PAT in the token box is refused by name rather than left to fail at the 
     token: "mql_pat_abcdef",
   });
   assert.equal(s.connectDraft(), undefined);
-  assert.match(messageFor(s, "token") ?? "", /Personal Access Token/);
+  // In the reader's words: no JWKS, no mesh, no bearer (memql#5118 audit).
+  assert.match(messageFor(s, "token") ?? "", /personal access token can't be used here/);
+  assert.doesNotMatch(messageFor(s, "token") ?? "", /JWKS|mesh|bearer|oauth/i);
 });
 
 test("a token that picked up a line break is refused", () => {
@@ -705,13 +707,13 @@ test("a token that picked up a line break is refused", () => {
     token: "eyJhbGciOi\nJSUzI1NiJ9",
   });
   assert.equal(s.connectDraft(), undefined);
-  assert.match(messageFor(s, "token") ?? "", /whitespace/);
+  assert.match(messageFor(s, "token") ?? "", /spaces or line breaks/);
 });
 
 test("a domain given as a URL is refused, and so is one with a space in it", () => {
   const scheme = connectForm({ name: "s", domain: "https://example.com" });
   assert.equal(scheme.connectDraft(), undefined);
-  assert.match(messageFor(scheme, "domain") ?? "", /drop the scheme/);
+  assert.match(messageFor(scheme, "domain") ?? "", /without https:\/\//);
 
   const spaced = connectForm({ name: "s", domain: "staging example.com" });
   assert.equal(spaced.connectDraft(), undefined);
@@ -880,7 +882,7 @@ test("an answer that is not a hostname is refused before anything runs", () => {
   // hostname pattern with an unescaped `.` matches more hosts than intended --
   // neither of which a substring check can get wrong.
   assert.ok(
-    message.includes("URL"),
+    message.includes("without https://"),
     `the refusal must say what is wrong with the answer: ${message}`,
   );
 });

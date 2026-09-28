@@ -285,7 +285,7 @@ test("a failure with no reason still keeps its output out of the summary", () =>
     logsFollow: true,
   });
   assert.doesNotMatch(html, /Traceback/);
-  assert.match(html, /without classifying what went wrong/);
+  assert.match(html, /The step failed\./);
 });
 
 test("the remedy stays OUTSIDE the pane, because it is an action and not a log line", () => {

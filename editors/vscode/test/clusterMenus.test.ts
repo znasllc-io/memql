@@ -398,8 +398,22 @@ test("repair moved with it, and to the same place", () => {
     "repair does not reach a selected local instance"
   );
   assert.ok(
-    entries.some((entry) => matches(entry, { view: "memqlClusters" })),
+    entries.some((entry) => matches(entry, { view: "memqlClusters", "memql.localClusterPresent": true })),
     "repair left the Clusters title menu"
+  );
+  // ONLY WHERE THERE IS SOMETHING TO REPAIR (memql#5118 audit): with no local
+  // cluster on this computer the Clusters menu offers Create Deployment
+  // instead, and Repair would have run a whole install under repair wording.
+  assert.equal(
+    entries.some((entry) => matches(entry, { view: "memqlClusters", "memql.localClusterPresent": false })),
+    false,
+    "repair is offered on a computer with no local cluster"
+  );
+  assert.ok(
+    titleEntriesFor("memql.deployments.createDeployment").some((entry) =>
+      matches(entry, { view: "memqlClusters", "memql.localClusterPresent": false })
+    ),
+    "create deployment left the Clusters title menu of a computer with nothing installed"
   );
   const deployments = entries.filter((entry) => (entry.when ?? "").includes("memqlDeployments"));
   assert.equal(deployments.length, 1, "expected exactly one Deployments repair entry");

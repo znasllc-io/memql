@@ -1194,6 +1194,13 @@ export interface PlannedStep {
   shared: boolean;
   /** What else the shared thing is good for -- shown beside the checkbox. */
   sharedReason: string;
+  /**
+   * The removals this one waits for, from the graph. A shared removal that
+   * waits on another shared one cannot be chosen alone: mkcert is what
+   * withdraws the certificate authority, so removing mkcert while keeping the
+   * authority would leave nothing able to take the authority back.
+   */
+  dependsOn: string[];
   action: "run" | "skip";
   params: Record<string, string>;
   /**
@@ -1254,6 +1261,7 @@ export async function previewUninstall(
         elevation: step.elevation,
         shared: step.shared,
         sharedReason: step.sharedReason,
+        dependsOn: [...(step.dependsOn ?? [])],
         action: "skip",
         params: {},
         reason: decision.reason,
@@ -1271,6 +1279,7 @@ export async function previewUninstall(
       elevation: step.elevation,
       shared: step.shared,
       sharedReason: step.sharedReason,
+      dependsOn: [...(step.dependsOn ?? [])],
       action: "run",
       params,
       // A PRESERVED step carries its reason too, not just a skip. The preview

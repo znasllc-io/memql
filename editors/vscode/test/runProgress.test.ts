@@ -25,6 +25,8 @@ import {
   defaultStepWeight,
   stepWeight,
   type ProgressStep,
+  failedLabel,
+  FAILED_LABEL_GERUNDS,
 } from "../src/state/runProgress.js";
 import { progressStepsOf, runProgressOf } from "../src/state/installProgress.js";
 import type { StepProgress, StepState } from "../src/state/addCluster.js";
@@ -362,4 +364,56 @@ test("runProgressOf is computeRunProgress over the projected rows", () => {
   assert.equal(progress.status, "Installing ArgoCD");
   assert.equal(progress.stepText, "Step 2 of 2");
   assert.equal(progress.percent, 50);
+});
+
+// -----------------------------------------------------------------------------
+// the failed step, in the negative
+// -----------------------------------------------------------------------------
+
+test("a failed step reads in the negative, the label's verb in its base form", () => {
+  assert.equal(failedLabel("Creating the cluster"), "Couldn't create the cluster");
+  assert.equal(failedLabel("Checking this computer"), "Couldn't check this computer");
+  assert.equal(failedLabel("Setting up browser trust"), "Couldn't set up browser trust");
+  assert.equal(failedLabel("Installing tools"), "Couldn't install tools");
+  assert.equal(failedLabel("Adding local addresses"), "Couldn't add local addresses");
+  assert.equal(failedLabel("Downloading MemQL"), "Couldn't download MemQL");
+  assert.equal(failedLabel("Building MemQL"), "Couldn't build MemQL");
+  assert.equal(failedLabel("Rebuilding MemQL"), "Couldn't rebuild MemQL");
+  assert.equal(failedLabel("Preparing sign-in"), "Couldn't prepare sign-in");
+  assert.equal(failedLabel("Removing the cluster"), "Couldn't remove the cluster");
+});
+
+test("a label that opens with no known gerund keeps its words, and grammar", () => {
+  // THE DEFECT this replaces: "<long description>. failed".
+  assert.equal(failedLabel("Deploy"), "Deploy failed");
+  assert.equal(failedLabel("  "), "Something failed");
+  assert.equal(failedLabel("Checking"), "Couldn't check");
+  // A gerund that merely BEGINS a word is not the gerund.
+  assert.equal(failedLabel("Checkingly odd"), "Checkingly odd failed");
+});
+
+test("every label the shipped graphs declare reads correctly in the negative", async () => {
+  // A new step whose label opens with a gerund this table does not carry
+  // would fall through to "<label> failed"; this makes that a failing test
+  // rather than a sentence nobody reads until an install breaks.
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const dir = path.resolve(__dirname, "..", "..", "..", "..", "scripts", "install", "graph");
+  let seen = 0;
+  for (const name of (await fs.readdir(dir)).filter((n) => n.endsWith(".json"))) {
+    const doc = JSON.parse(await fs.readFile(path.join(dir, name), "utf8")) as { steps: { id: string; label: string }[] };
+    for (const step of doc.steps) {
+      seen += 1;
+      const first = step.label.split(" ")[0] ?? "";
+      assert.ok(
+        FAILED_LABEL_GERUNDS.some((gerund) => step.label === gerund || step.label.startsWith(`${gerund} `)),
+        `${name}: ${step.id}'s label "${step.label}" opens with "${first}", which failedLabel does not know`,
+      );
+      const said = failedLabel(step.label);
+      assert.match(said, /^Couldn't [a-z]/, `${name}: ${step.id} reads "${said}"`);
+      // The gerund becomes a verb and "Couldn't" is added: one word more, nothing lost.
+      assert.equal(said.split(" ").length, step.label.split(" ").length + 1, `${name}: ${step.id} reads "${said}"`);
+    }
+  }
+  assert.ok(seen > 20, `only ${seen} labels read -- the graph documents were not found`);
 });
