@@ -135,11 +135,19 @@ jobs:
           set -euo pipefail
           tarball="docs-${VERSION}.tgz"
           [ -f "$tarball" ] || { echo "ERROR: $tarball was not produced" >&2; exit 1; }
+          # The listing goes to a file first, and grep reads the file. Piping
+          # `tar -tzf | grep -q` failed this step on every release from v0.20.22
+          # to v0.23.5: grep -q exits on the first match, tar takes EPIPE on its
+          # next write, and pipefail turns that into the "no manifest.json"
+          # branch for a bundle that has one. scripts/release's
+          # TestNoWorkflowQuietGrepsATarPipe refuses the pattern in any workflow.
+          listing="$RUNNER_TEMP/docs-bundle-listing.txt"
+          tar -tzf "$tarball" > "$listing"
           # A bundle with no manifest is unusable to the site; fail loudly rather
           # than attaching a broken asset.
-          tar -tzf "$tarball" | grep -qx './manifest.json' \
+          grep -qx './manifest.json' "$listing" \
             || { echo "ERROR: $tarball has no manifest.json" >&2; exit 1; }
-          echo "INFO: $tarball contains $(tar -tzf "$tarball" | grep -c '\.md$') markdown files"
+          echo "INFO: $tarball contains $(grep -c '\.md$' "$listing") markdown files"
 
       - name: attach to release
         if: steps.target.outputs.skip != 'true'
