@@ -308,7 +308,11 @@ MemQL uses a single long-lived branch: `main`.
    ```
 
    The script refuses on a red or pending check the RULESET REQUIRES
-   (`ci-required`, an `if: always()` aggregate) and reports the rest as
+   (`ci-required`, an `if: always()` aggregate), and on a required check that
+   has NOT REPORTED: `ci-required` gets no check run until every lane it
+   `needs:` finishes, so for most of a CI run it is absent, which is neither
+   red nor pending (memql#5709 merged through that). Every required context
+   must be present with a SUCCESS. The rest are reported as
    `failed (not required)` (memql#5016). `install-cluster-e2e` is not required
    and can be red on pristine `main`, but it DOES test the branch, so a red
    there is a log to read. (CodeQL's `Analyze` jobs left the pull-request path
