@@ -238,6 +238,12 @@ func (f *FleetInference) buildStart(req memqlengine.FleetCallRequest) *memqlv1.M
 		// A person's explicit effort for this one call (epic memql#5414,
 		// design D20). A runtime with no such knob ignores it.
 		Effort: req.Effort,
+		// The level the router resolved the call at. It never changes the
+		// model; on Ollama a `fast` call runs with the model's hidden
+		// thinking off, which is the difference between a 4B triage
+		// answering in seconds and thinking for minutes. Empty stays empty:
+		// the runtime runs at its own defaults.
+		Level: req.Level,
 		// Deliberately temperature 0 by default for the platform's own
 		// operations: every one of them (conductor, planner, suggest) parses
 		// what comes back, and a sampled answer to a structured prompt is a

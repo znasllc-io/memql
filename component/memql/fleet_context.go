@@ -12,23 +12,40 @@ import (
 // client or another resolution. Constructing a fresh provider also keeps its
 // per-call bookkeeping and mutex independent.
 func (p *fleetProvider) WithMinContextTokens(tokens int) any {
-	return &fleetProvider{
-		registry: p.registry, modelId: p.modelId, actingUserId: p.actingUserId,
-		selector: p.selector, attributes: p.attributes,
-		minContextTokens: max(p.minContextTokens, tokens),
-		effort:           p.effort,
-	}
+	q := p.rebound()
+	q.minContextTokens = max(p.minContextTokens, tokens)
+	return q
 }
 
 // WithEffort binds a person's explicit effort for one call (epic memql#5414,
-// design D20) the same way, carrying the floor forward so the order the router
-// applies the two bindings in cannot drop one.
+// design D20) the same way.
 func (p *fleetProvider) WithEffort(effort string) any {
+	q := p.rebound()
+	q.effort = strings.TrimSpace(effort)
+	return q
+}
+
+// WithLevel binds the level this resolution was made at, the way the router
+// binds it on an app door (epic memql#5391, design D8). It rides the call to
+// the machine as ModelCallStart.level. Without it a `fast` triage reached
+// Ollama with the model's hidden thinking on, and a 4B model spent thousands
+// of tokens -- tens of seconds to minutes -- before a fifty-token answer.
+func (p *fleetProvider) WithLevel(level string) any {
+	q := p.rebound()
+	q.level = strings.TrimSpace(level)
+	return q
+}
+
+// rebound is a fresh provider carrying every per-resolution binding forward,
+// so the order the router applies them in cannot drop one, with its own
+// per-call bookkeeping and mutex.
+func (p *fleetProvider) rebound() *fleetProvider {
 	return &fleetProvider{
 		registry: p.registry, modelId: p.modelId, actingUserId: p.actingUserId,
 		selector: p.selector, attributes: p.attributes,
 		minContextTokens: p.minContextTokens,
-		effort:           strings.TrimSpace(effort),
+		effort:           p.effort,
+		level:            p.level,
 	}
 }
 
