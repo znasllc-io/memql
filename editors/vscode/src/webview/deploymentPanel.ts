@@ -602,11 +602,13 @@ export class DeploymentPanel {
       // failure screen is shared by both kinds of run, so a retry that always
       // called startDeploy would answer a failed rebuild by moving the cluster
       // to a release tag -- silently, from a button labelled "Retry this step".
+      // NOT FRESH: `retry()` has just put this run's rows back to pending,
+      // and a fresh start would throw them (and a guided choice) away.
       await (this.runMode === "rebuild"
-        ? this.startRebuild()
+        ? this.startRebuild(false)
         : this.runMode === "update"
-          ? this.startUpdate()
-          : this.startDeploy());
+          ? this.startUpdate(false)
+          : this.startDeploy(false));
       return;
     }
     if (type === "guided") {
@@ -617,7 +619,7 @@ export class DeploymentPanel {
       if (this.runMode === "rebuild" || this.runMode === "update") return;
       this.state.switchToGuided();
       this.render();
-      await this.startDeploy();
+      await this.startDeploy(false);
       return;
     }
     if (type === "cancel") {
@@ -829,7 +831,7 @@ export class DeploymentPanel {
    * the owner because it re-runs the install graph; a rebuild runs one step
    * that takes a directory, an Application name and a node list.
    */
-  private async startRebuild(): Promise<void> {
+  private async startRebuild(fresh = true): Promise<void> {
     if (this.runAbort !== undefined) return;
     const instance = this.instance;
     const checkout = instance?.checkout ?? "";
@@ -846,6 +848,7 @@ export class DeploymentPanel {
 
     this.error = "";
     this.runMode = "rebuild";
+    if (fresh) this.state.resetRun();
     this.screen = "running";
     this.render();
 
@@ -995,7 +998,7 @@ export class DeploymentPanel {
    * was just told could not be moved. The failure screen then offers what they
    * were actually trying to do.
    */
-  private async startUpdate(): Promise<void> {
+  private async startUpdate(fresh = true): Promise<void> {
     if (this.runAbort !== undefined) return;
     const instance = this.instance;
     const checkout = instance?.checkout ?? "";
@@ -1010,6 +1013,7 @@ export class DeploymentPanel {
 
     this.error = "";
     this.runMode = "update";
+    if (fresh) this.state.resetRun();
     this.screen = "running";
     this.render();
 
@@ -1110,13 +1114,14 @@ export class DeploymentPanel {
    * second identity or point the hosts block at a second domain. The tag is the
    * one input that is deliberately new -- it is the whole verb.
    */
-  private async startDeploy(): Promise<void> {
+  private async startDeploy(fresh = true): Promise<void> {
     if (this.runAbort !== undefined) return;
     const target = this.target;
     if (target === "" || this.tagError !== "") return;
 
     this.error = "";
     this.runMode = "deploy";
+    if (fresh) this.state.resetRun();
     this.screen = "running";
     this.render();
 
@@ -1625,7 +1630,11 @@ export class DeploymentPanel {
       steps,
       progress: this.state.progress(),
       mode: this.runMode,
-      running: this.runAbort !== undefined,
+      // Or STARTING: the run screen is up and no plan has arrived yet. A fresh
+      // run clears the rows before it paints, and between that and the plan
+      // the page is waiting on the run it just began -- not looking at one
+      // that "has not been run".
+      running: this.runAbort !== undefined || (this.screen === "running" && this.state.steps.length === 0),
       // FROM THE SHARED STATE OBJECT, which this panel already owns an instance
       // of -- so the wizard and this page hold the disclosure the same way, and
       // a failure auto-discloses here for the same reason and by the same line

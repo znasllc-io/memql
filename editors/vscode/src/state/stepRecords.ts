@@ -96,10 +96,25 @@ export function markStarted(row: StepProgress, now: number): void {
   delete row.phase;
 }
 
-/** The running step reported a phase. A count is kept only when both halves arrived. */
-export function markPhase(row: StepProgress, label: string, done?: number, total?: number): void {
+/**
+ * The running step reported a phase, at `now` (epoch milliseconds). A count is
+ * kept only when both halves arrived.
+ *
+ * `since` is when THIS phase began: the first report carrying its label. A
+ * repeat of the same phase with a higher count keeps it, and a new phase starts
+ * its own -- which is what lets runProgress spread a count over the part of the
+ * step the clock had not already credited.
+ */
+export function markPhase(
+  row: StepProgress,
+  label: string,
+  done: number | undefined,
+  total: number | undefined,
+  now: number,
+): void {
+  const since = row.phase?.label === label && row.phase.since !== undefined ? row.phase.since : now;
   row.phase =
-    typeof done === "number" && typeof total === "number" ? { label, done, total } : { label };
+    typeof done === "number" && typeof total === "number" ? { label, done, total, since } : { label, since };
 }
 
 const STATUS_TO_STATE: Readonly<Record<string, StepState>> = {

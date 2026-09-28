@@ -258,7 +258,11 @@ to **stderr**:
 - `<done>` and `<total>` are whole numbers counting the phase's **own** units
   (services, images), not the whole step. Pass both or neither; a malformed
   count is dropped and the label still reported, because reporting progress
-  must never fail a capability.
+  must never fail a capability. A count with leading zeros is read as decimal.
+- The editor reads a count as filling what is left of the step from the moment
+  the phase began (the time already spent is kept), and holds the bar where it
+  is if a new phase starts lower -- so a step may report several counted
+  phases in turn ("Building images", then "Importing images").
 - The line is **not a log line**. The editor's runner
   (`editors/vscode/src/install/runner.ts`) recognises the prefix, turns the line
   into a `stepPhase` event and keeps it out of the step's log, its saved failure

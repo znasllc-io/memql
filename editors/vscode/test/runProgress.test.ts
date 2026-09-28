@@ -106,6 +106,22 @@ test("a step's own phase count outranks the clock", () => {
   assert.equal(progress.status, "Starting services 5 of 10");
 });
 
+test("a counted phase carries on from where the clock left the step", () => {
+  // Creating the cluster spent 40 of its expected 100 seconds on uncounted
+  // phases before its wait started counting services. 0 of 10 is where the
+  // clock left it, not the start of the step; each service fills a tenth of
+  // what was left.
+  const step = (done: number): ProgressStep[] => [
+    ps("clusterUp", "running", 100, {
+      startedAt: NOW - 70_000,
+      phase: { label: "Starting services", done, total: 10, since: NOW - 30_000 },
+    }),
+  ];
+  assert.equal(computeRunProgress(step(0), NOW).percent, 40);
+  assert.equal(computeRunProgress(step(5), NOW).percent, 70);
+  assert.equal(computeRunProgress(step(10), NOW).percent, 99, "the whole step, and still not a finished run");
+});
+
 test("a phase with no count names the phase and leaves the bar to the clock", () => {
   const progress = computeRunProgress(
     [ps("clusterUp", "running", 100, { startedAt: NOW - 30_000, phase: { label: "Installing ArgoCD" } })],
@@ -121,6 +137,30 @@ test("a count past its total is read as the whole step, never more", () => {
     NOW,
   );
   assert.equal(progress.percent, 50);
+});
+
+test("a failure holds the bar where the run broke", () => {
+  // clusterUp failed 240s into its 480; everything behind it was then skipped
+  // without running. Dropping those from the total the way a planned skip is
+  // dropped would carry this run to a full bar.
+  const steps = [
+    ps("detect", "ok", 5, { finishedAt: NOW - 300_000 }),
+    ps("providerFederation", "skipped", 1, { finishedAt: NOW - 299_000 }),
+    ps("clusterUp", "failed", 480, { startedAt: NOW - 250_000, finishedAt: NOW - 10_000 }),
+    ps("seedBootstrap", "skipped", 90, { finishedAt: NOW - 10_000 }),
+    ps("frontDoor", "skipped", 20, { finishedAt: NOW - 9_000 }),
+  ];
+  const progress = computeRunProgress(steps, NOW);
+  // (5 + 480 * 0.5) of (5 + 480 + 90 + 20): the planned skip left, the
+  // consequences did not.
+  assert.equal(progress.percent, 41);
+  assert.equal(progress.stepText, "Step 2 of 4", "it stopped on the failed step, of the steps meant to run");
+  assert.equal(progress.status, "clusterUp label", "it names where it broke, not 'Finishing'");
+});
+
+test("a failure never reads as a finished bar, even with every step settled", () => {
+  const progress = computeRunProgress([ps("a", "ok", 99), ps("b", "failed", 1)], NOW);
+  assert.ok(progress.percent < 100);
 });
 
 test("100 is reserved for a settled run", () => {
@@ -203,7 +243,7 @@ test("the bar never runs backwards when a phase count restarts below the clock",
 
 test("a new attempt, given no high-water mark, starts again from what is true", () => {
   const failed = computeRunProgress([ps("a", "ok", 10), ps("b", "failed", 10), ps("c", "skipped", 10)], NOW);
-  assert.equal(failed.percent, 100, "a failed run has settled");
+  assert.equal(failed.percent, 33, "the failed run stopped a third of the way in");
   const retry = computeRunProgress([ps("a", "pending", 10), ps("b", "pending", 10), ps("c", "pending", 10)], NOW);
   assert.equal(retry.percent, 0);
 });

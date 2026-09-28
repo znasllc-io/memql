@@ -136,13 +136,17 @@ function cap_step()  { printf '==> %s\n'    "$*" >&2; }
 # images), not the whole step; pass both or neither.
 #
 # Reporting progress must never be able to fail a capability, so a malformed
-# count is dropped (the label is still reported) rather than refused.
+# count is dropped (the label is still reported) rather than refused. A count
+# with leading zeros is read as decimal (10#): bash would otherwise take "08"
+# for a bad octal number and print its own error into the step's log.
 function cap_progress() {
-    local label="${1:-}" done="${2:-}" total="${3:-}"
+    local label="${1:-}" count_done="${2:-}" count_total="${3:-}"
     label="${label//$'\n'/ }"
+    label="${label//$'\r'/ }"
     [[ -n "$label" ]] || return 0
-    if [[ "$done" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] && (( total > 0 )); then
-        printf '::memql-progress:: %s/%s %s\n' "$done" "$total" "$label" >&2
+    if [[ "$count_done" =~ ^[0-9]{1,9}$ && "$count_total" =~ ^[0-9]{1,9}$ ]] \
+        && (( 10#$count_total > 0 )); then
+        printf '::memql-progress:: %d/%d %s\n' "$((10#$count_done))" "$((10#$count_total))" "$label" >&2
     else
         printf '::memql-progress:: - %s\n' "$label" >&2
     fi

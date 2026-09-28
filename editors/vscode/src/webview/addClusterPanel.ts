@@ -2003,8 +2003,10 @@ ${LOG_PANE_SCRIPT}
       mode: this.state.action === "repair" ? "repair" : "install",
       // `runAbort` is set for exactly as long as a run is in flight, which is
       // what distinguishes "starting, no step has reported yet" from "nothing
-      // has been run".
-      running: this.runAbort !== undefined,
+      // has been run". It is set only once the password prompt is answered, so
+      // a run screen with no plan yet is one that is starting too: `beginRun`
+      // clears the rows, and only the plan brings them back.
+      running: this.runAbort !== undefined || this.state.steps.length === 0,
     });
   }
 

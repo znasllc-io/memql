@@ -1230,6 +1230,12 @@ export class AddClusterState {
     // run's output while this one has produced none.
     this.logsShown = false;
     this.logsFollowTail = true;
+    // AND WITHOUT THE LAST RUN'S ROWS. The run screen is painted before this
+    // run's plan arrives (the platform check and the password prompt sit in
+    // between), and the last run's rows there would show its finished bar and
+    // closing sentence for a run that has not started. The plan replaces them
+    // when it lands; a Retry keeps them, through `retry`.
+    this.records = [];
     this.highWater = 0;
     return true;
   }
@@ -1541,7 +1547,7 @@ export class AddClusterState {
       }
       case "stepPhase": {
         const entry = this.upsert(event.step.id, event.step.label, event.step.description);
-        markPhase(entry, event.label, event.done, event.total);
+        markPhase(entry, event.label, event.done, event.total, this.clock());
         return;
       }
       case "stepLog": {
@@ -1605,9 +1611,7 @@ export class AddClusterState {
     // about a step that is being attempted again in front of them.
     const failed = this.records.filter((p) => p.state === "failed");
     if (failed.length === 0) return;
-    for (const entry of failed) this.resetForAnotherAttempt(entry);
-    this.failedId = undefined;
-    this.currentScreen = "running";
+    this.startAnotherAttempt();
   }
 
   /**
@@ -1620,31 +1624,54 @@ export class AddClusterState {
   switchToGuided(): void {
     const failed = this.records.filter((p) => p.state === "failed");
     if (failed.length === 0) return;
-    for (const entry of failed) {
-      entry.guided = true;
-      this.resetForAnotherAttempt(entry);
-    }
-    this.failedId = undefined;
-    this.currentScreen = "running";
+    for (const entry of failed) entry.guided = true;
+    this.startAnotherAttempt();
   }
 
   /**
-   * Drops every trace of the attempt that just failed.
+   * Forgets the previous run entirely, before a DIFFERENT run starts on the
+   * same page.
+   *
+   * The deployment page holds one machine for its lifetime and runs rebuilds,
+   * updates and moves through it. Its next run's plan replaces the rows the
+   * moment it arrives, but the page paints the run screen before that -- and
+   * painting the last run's rows there would show a finished bar, the last
+   * run's closing sentence and a Back button for a run that has not started.
+   * A Retry is not this: it keeps the rows (and a step switched to guided keeps
+   * that choice), through `retry` / `switchToGuided`.
+   */
+  resetRun(): void {
+    this.records = [];
+    this.failedId = undefined;
+    this.wasCancelled = false;
+    this.didSucceed = false;
+    this.logsShown = false;
+    this.logsFollowTail = true;
+    this.highWater = 0;
+  }
+
+  /**
+   * The screen for the attempt the operator just asked for, before its plan
+   * arrives.
+   *
+   * EVERY STEP GOES BACK TO PENDING, not only the failed ones, and the bar
+   * starts from zero -- which is exactly what the new attempt's `runStarted`
+   * will do (stepRecords.recordsForAttempt). Doing it here as well means the
+   * screen painted between the press and that event (a password prompt can
+   * sit in between) already shows the attempt that is coming, rather than the
+   * last one's finished bar followed by a jump back to the start.
    *
    * THE LOG GOES WITH THE REST. `apply()` APPENDS each `stepLog` line, so an
    * attempt that kept the previous output would render both runs concatenated
    * inside one disclosure with no boundary -- and the failure being read would
-   * be the one that is no longer happening.
+   * be the one that is no longer happening. What each step came to last time
+   * survives as `previousState`, and a guided choice survives as itself.
    */
-  private resetForAnotherAttempt(entry: StepProgress): void {
-    if (entry.state !== "pending" && entry.state !== "running") entry.previousState = entry.state;
-    entry.state = "pending";
-    entry.reason = "";
-    entry.exitCode = null;
-    entry.log = "";
-    delete entry.startedAt;
-    delete entry.finishedAt;
-    delete entry.phase;
+  private startAnotherAttempt(): void {
+    this.records = recordsForAttempt(this.records, this.records);
+    this.highWater = 0;
+    this.failedId = undefined;
+    this.currentScreen = "running";
   }
 
   /**

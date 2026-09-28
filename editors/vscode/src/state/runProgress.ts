@@ -13,7 +13,8 @@
 // has got:
 //
 //  1. its own phase count, when the script reports one (`cap_progress` in
-//     scripts/lib/capability.sh -- "Starting services 5 of 9");
+//     scripts/lib/capability.sh -- "Starting services 5 of 9"), spread over
+//     what was left of the step when that phase began;
 //  2. otherwise its elapsed time against its weight, capped at 90% so a step
 //     that overruns its estimate slows to a crawl instead of claiming it is
 //     finished;
@@ -26,6 +27,10 @@
 // sooner than expected; the caller keeps the high-water mark and passes it back
 // in, so the number shown is the most that has ever been true. A new attempt
 // (a Retry) starts a new high-water mark: it genuinely has more left to do.
+//
+// A FAILURE STOPS THE BAR WHERE IT HAPPENED. The steps behind a failed one are
+// skipped without running, and letting them leave the total the way a planned
+// skip does would carry a run that broke a third of the way in to a full bar.
 //
 // PURE except for `historicalWeights`, which reads the run records it is
 // pointed at. No `vscode` import (cmd/memql-lsp/vscodeimportrule_test.go), so
@@ -43,6 +48,13 @@ export interface ProgressPhase {
   /** Present together with `total` or not at all. */
   done?: number;
   total?: number;
+  /**
+   * When the step first reported THIS phase (epoch milliseconds). With it, a
+   * counted phase fills the part of the step the clock had not yet credited
+   * when the phase began, rather than restarting the step from nothing; see
+   * `runningFraction`. Absent, the count is the step's whole fraction.
+   */
+  since?: number;
 }
 
 export interface ProgressStep {
@@ -65,11 +77,16 @@ export interface RunProgress {
   /**
    * The one status line: the running step's current phase ("Starting services
    * 5 of 9") or its label, the heaviest running step's when a wave runs
-   * several; the next step's label between steps; "Finishing" once every step
-   * has settled.
+   * several; the next step's label between steps; once nothing is running
+   * after a failure, the label of the step that failed; "Finishing" once every
+   * step has settled without one.
    */
   status: string;
-  /** "Step 6 of 16", counting only steps that will run; "" when none will. */
+  /**
+   * "Step 6 of 16", counting only steps that will run; "" when none will. After
+   * a failure it stays on the failed step, and the steps skipped because of it
+   * stay in the count: the run stopped at step 6 of 16, it did not finish.
+   */
   stepText: string;
   /** Pass back in as `prior.highWater` on the next call within this attempt. */
   highWater: number;
@@ -146,14 +163,32 @@ function hasCount(phase: ProgressPhase | undefined): phase is ProgressPhase & { 
   );
 }
 
-/** How much of its own weight a running step has earned. */
+/** The share of its weight a step's elapsed time credits it at `at`, capped. */
+function elapsedFraction(step: ProgressStep, at: number): number {
+  if (step.startedAt === undefined) return 0;
+  const elapsed = Math.max(0, (at - step.startedAt) / 1000);
+  return Math.min(ELAPSED_CEILING, elapsed / weightOf(step));
+}
+
+/**
+ * How much of its own weight a running step has earned.
+ *
+ * A COUNTED PHASE FILLS WHAT IS LEFT OF THE STEP. Creating the cluster spends
+ * minutes on uncounted phases (the clock carries the bar through those) before
+ * its long wait starts counting services. Reading "0 of 9" as the whole step's
+ * fraction would stop the bar dead for as long as the count takes to overtake
+ * the clock. So when the phase says when it began, the count spreads over the
+ * part of the step the clock had not yet credited at that moment: 0 of 9 is
+ * where the clock left off, 9 of 9 is the whole step. A phase with no start
+ * (a caller that does not record one) is read as the whole step's fraction.
+ */
 function runningFraction(step: ProgressStep, now: number): number {
   if (hasCount(step.phase)) {
-    return Math.min(1, Math.max(0, step.phase.done / step.phase.total));
+    const counted = Math.min(1, Math.max(0, step.phase.done / step.phase.total));
+    const base = step.phase.since !== undefined ? elapsedFraction(step, step.phase.since) : 0;
+    return base + (1 - base) * counted;
   }
-  if (step.startedAt === undefined) return 0;
-  const elapsed = Math.max(0, (now - step.startedAt) / 1000);
-  return Math.min(ELAPSED_CEILING, elapsed / weightOf(step));
+  return elapsedFraction(step, now);
 }
 
 function labelOf(step: ProgressStep): string {
@@ -169,15 +204,31 @@ function labelOf(step: ProgressStep): string {
  * instead spreads the remaining steps over the whole bar. A skip can only ever
  * shrink what is left, so this never moves the bar backwards.
  *
- * 100 IS RESERVED FOR A SETTLED RUN. While anything is pending or running the
- * percent stops at 99, so a full bar always means the run is over.
+ * EXCEPT THE SKIPS A FAILURE CAUSES. Once a step has failed, the steps that
+ * depended on it are skipped without running, and dropping those would carry
+ * the bar to the end of a run that stopped part-way. A skip that settled
+ * before the first failure left the total as usual; one that settled at or
+ * after it (or whose time is unknown) stays in the total, undone. The failed
+ * step itself is credited only the share of its weight its running time had
+ * earned, so the bar holds where the run broke.
+ *
+ * 100 IS RESERVED FOR A RUN THAT FINISHED. While anything is pending or
+ * running, or once a step has failed, the percent stops at 99, so a full bar
+ * always means the run is over and went through.
  */
 export function computeRunProgress(
   steps: readonly ProgressStep[],
   now: number,
   prior?: { highWater: number },
 ): RunProgress {
-  const willRun = steps.filter((step) => step.status !== "skipped");
+  const failures = steps.filter((step) => step.status === "failed");
+  const failedAt = earliestFinish(failures);
+  const leftTheTotal = (step: ProgressStep): boolean =>
+    step.status === "skipped" &&
+    (failures.length === 0 ||
+      (failedAt !== undefined && step.finishedAt !== undefined && step.finishedAt < failedAt));
+
+  const willRun = steps.filter((step) => !leftTheTotal(step));
   const allSettled = steps.length > 0 && steps.every((step) => isSettled(step.status));
 
   let expected = 0;
@@ -185,28 +236,43 @@ export function computeRunProgress(
   for (const step of willRun) {
     const weight = weightOf(step);
     expected += weight;
-    if (isSettled(step.status)) behind += weight;
-    else if (step.status === "running") behind += weight * runningFraction(step, now);
+    if (step.status === "ok" || step.status === "preserved") behind += weight;
+    else if (step.status === "failed") {
+      if (step.finishedAt !== undefined) behind += weight * elapsedFraction(step, step.finishedAt);
+    } else if (step.status === "running") behind += weight * runningFraction(step, now);
   }
 
   let percent: number;
-  if (allSettled) percent = 100;
+  if (allSettled && failures.length === 0) percent = 100;
   else if (expected === 0) percent = 0;
   else percent = Math.min(99, Math.floor((behind / expected) * 100));
 
   const floor = prior !== undefined && Number.isFinite(prior.highWater) ? Math.min(100, Math.max(0, prior.highWater)) : 0;
   percent = Math.max(floor, Math.max(0, percent));
 
-  const settledCount = willRun.filter((step) => isSettled(step.status)).length;
-  const stepText =
-    willRun.length === 0 ? "" : `Step ${Math.min(settledCount + 1, willRun.length)} of ${willRun.length}`;
+  // The step being worked on is the one after every step that went through. A
+  // failed step did not go through, so after a failure the count stays on it.
+  const through = willRun.filter((step) => step.status === "ok" || step.status === "preserved").length;
+  const stepText = willRun.length === 0 ? "" : `Step ${Math.min(through + 1, willRun.length)} of ${willRun.length}`;
 
-  return { percent, status: statusLine(steps, allSettled), stepText, highWater: percent };
+  return { percent, status: statusLine(steps, allSettled, failures), stepText, highWater: percent };
 }
 
-function statusLine(steps: readonly ProgressStep[], allSettled: boolean): string {
+function earliestFinish(steps: readonly ProgressStep[]): number | undefined {
+  let earliest: number | undefined;
+  for (const step of steps) {
+    if (step.finishedAt === undefined) continue;
+    if (earliest === undefined || step.finishedAt < earliest) earliest = step.finishedAt;
+  }
+  return earliest;
+}
+
+function statusLine(
+  steps: readonly ProgressStep[],
+  allSettled: boolean,
+  failures: readonly ProgressStep[],
+): string {
   if (steps.length === 0) return "Starting";
-  if (allSettled) return "Finishing";
 
   // THE HEAVIEST RUNNING STEP SPEAKS. A wave runs its steps together, and the
   // line has room for one: the one the operator is actually waiting on is the
@@ -225,6 +291,15 @@ function statusLine(steps: readonly ProgressStep[], allSettled: boolean): string
     return labelOf(lead);
   }
 
+  // A run a failure stopped is not "Finishing" and has no next step: it is
+  // where it broke. The earliest failure, as everywhere else -- the rest may be
+  // consequences of it.
+  if (failures.length > 0) {
+    const failedAt = earliestFinish(failures);
+    return labelOf(failures.find((step) => step.finishedAt === failedAt) ?? failures[0]!);
+  }
+
+  if (allSettled) return "Finishing";
   // Between waves, or before the first step starts: what comes next.
   const next = steps.find((step) => step.status === "pending");
   return next === undefined ? "Finishing" : labelOf(next);

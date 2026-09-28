@@ -205,7 +205,7 @@ export class UninstallRunState {
       }
       case "stepPhase": {
         const row = this.upsert(event.step.id, event.step.label, event.step.description);
-        markPhase(row, event.label, event.done, event.total);
+        markPhase(row, event.label, event.done, event.total, this.clock());
         return;
       }
       case "stepLog": {

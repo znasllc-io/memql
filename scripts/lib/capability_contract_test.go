@@ -807,6 +807,11 @@ func TestCapProgressWritesOneStderrLine(t *testing.T) {
 		{"a zero total is no count", []string{"Importing images", "0", "0"}, "::memql-progress:: - Importing images\n"},
 		{"half a count is no count", []string{"Importing images", "2"}, "::memql-progress:: - Importing images\n"},
 		{"an empty label reports nothing", []string{""}, ""},
+		// Leading zeros are decimal. Read as octal, "08" is an arithmetic error
+		// bash prints into the step's log on its way to dropping the count.
+		{"leading zeros are decimal", []string{"Starting services", "08", "09"}, "::memql-progress:: 8/9 Starting services\n"},
+		{"a count too large to be one is no count", []string{"Building images", "99999999999", "9"}, "::memql-progress:: - Building images\n"},
+		{"a line break in the label cannot split the line", []string{"Starting\r\nservices", "1", "2"}, "::memql-progress:: 1/2 Starting  services\n"},
 	}
 	for _, tc := range cases {
 		tc := tc

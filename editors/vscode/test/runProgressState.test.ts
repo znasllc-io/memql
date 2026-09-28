@@ -108,11 +108,26 @@ test("a stepPhase is kept on the running step, and cleared when it settles", () 
   s.apply(plan("clusterUp"));
   s.apply(started("clusterUp"));
   s.apply({ type: "stepPhase", step: step("clusterUp"), label: "Starting services", done: 4, total: 9 });
-  assert.deepEqual(s.steps[0]?.phase, { label: "Starting services", done: 4, total: 9 });
+  assert.deepEqual(s.steps[0]?.phase, { label: "Starting services", done: 4, total: 9, since: 1_000_000 });
   assert.equal(s.steps[0]?.log, "", "a phase is not a log line");
   assert.equal(s.progress().status, "Starting services 4 of 9");
   s.apply(finished("clusterUp", "ok"));
   assert.equal(s.steps[0]?.phase, undefined);
+});
+
+test("a phase remembers when it began: a higher count keeps the start, a new phase starts its own", () => {
+  const c = clock();
+  const s = new AddClusterState({ now: c.now });
+  s.apply(plan("rebuildFromCheckout"));
+  s.apply(started("rebuildFromCheckout"));
+  c.advance(10_000);
+  s.apply({ type: "stepPhase", step: step("rebuildFromCheckout"), label: "Building images", done: 0, total: 3 });
+  c.advance(60_000);
+  s.apply({ type: "stepPhase", step: step("rebuildFromCheckout"), label: "Building images", done: 1, total: 3 });
+  assert.equal(s.steps[0]?.phase?.since, 1_010_000, "the same phase, further on");
+  c.advance(60_000);
+  s.apply({ type: "stepPhase", step: step("rebuildFromCheckout"), label: "Importing images", done: 0, total: 3 });
+  assert.equal(s.steps[0]?.phase?.since, 1_130_000, "a new phase");
 });
 
 test("the copy a caller gets shares no phase object with the record", () => {
@@ -139,9 +154,11 @@ test("progress(now) is weighted, and never runs backwards within an attempt", ()
   assert.equal(timed.status, "clusterUp label");
   assert.equal(timed.stepText, "Step 2 of 2");
 
-  // The step's first count is lower than the clock had it. The bar holds.
+  // The step's first count starts where the clock had carried it -- 1 of 9
+  // fills a ninth of the tenth the clock had not credited -- so the bar moves
+  // on from 91 rather than back to 10 + 90 / 9.
   s.apply({ type: "stepPhase", step: step("clusterUp"), label: "Starting services", done: 1, total: 9 });
-  assert.equal(s.progress().percent, 91);
+  assert.equal(s.progress().percent, 92);
   assert.equal(s.progress().status, "Starting services 1 of 9");
 
   s.apply(finished("clusterUp", "ok"));
@@ -160,9 +177,22 @@ test("each attempt's runStarted starts every step from pending, with a fresh bar
   s.apply({ type: "stepLog", step: step("cluster"), line: "pulling" });
   s.apply(finished("cluster", "failed"));
   const failedRun = s.progress();
-  assert.equal(failedRun.percent, 100, "a failed run has settled");
+  assert.ok(failedRun.percent < 100, "a failed run holds its bar short of the end");
 
+  // THE PRESS ALREADY SHOWS THE NEW ATTEMPT. The panel paints between Retry
+  // and the plan arriving (a password prompt can sit there), and that paint
+  // must not be the failed attempt's bar followed by a jump back to zero.
   s.retry();
+  const beforePlan = s.progress();
+  assert.equal(beforePlan.percent, 0);
+  assert.equal(beforePlan.stepText, "Step 1 of 2");
+  assert.deepEqual(
+    s.steps.map((row) => [row.id, row.state, row.previousState]),
+    [
+      ["binary", "pending", "done"],
+      ["cluster", "pending", "failed"],
+    ],
+  );
   s.apply(plan("binary", "cluster"));
   assert.deepEqual(
     s.steps.map((row) => [row.id, row.state, row.previousState]),
@@ -200,6 +230,37 @@ test("a second graph on the same page does not inherit the first graph's steps",
   assert.equal(s.progress().percent, 100);
 });
 
+test("beginRun drops the last run's rows, so a new run's first paint is not the old finished bar", () => {
+  const s = new AddClusterState({ now: clock().now });
+  s.chooseAction("install");
+  s.setInput("domain", "memql.localhost");
+  s.setInput("ownerFirstName", "Ada");
+  s.setInput("ownerLastName", "Lovelace");
+  s.setInput("ownerEmail", "ada@example.com");
+  assert.equal(s.beginRun(), true, `the form validates: ${JSON.stringify(s.errors)}`);
+  s.apply(plan("detect"));
+  s.apply(finished("detect", "ok"));
+  assert.equal(s.progress().percent, 100);
+  assert.equal(s.beginRun(), true);
+  assert.deepEqual(s.steps, []);
+  assert.deepEqual(s.progress(), { percent: 0, status: "Starting", stepText: "", highWater: 0 });
+});
+
+test("resetRun forgets the last run before a different one starts on the same page", () => {
+  // The deployment page paints its run screen before the next run's plan
+  // arrives. Without this, that paint is the previous run's finished bar.
+  const s = new AddClusterState({ now: clock().now });
+  s.apply(plan("rebuildFromCheckout"));
+  s.apply(finished("rebuildFromCheckout", "failed"));
+  assert.equal(s.logsOpen, true, "a failure opens the log");
+  assert.equal(s.progress().status, "rebuildFromCheckout label");
+  s.resetRun();
+  assert.deepEqual(s.steps, []);
+  assert.equal(s.failed, undefined);
+  assert.equal(s.logsOpen, false);
+  assert.deepEqual(s.progress(), { percent: 0, status: "Starting", stepText: "", highWater: 0 });
+});
+
 test("a step switched to guided stays guided into the next attempt", () => {
   const s = new AddClusterState({ now: clock().now });
   s.chooseAction("install");
@@ -207,6 +268,8 @@ test("a step switched to guided stays guided into the next attempt", () => {
   s.apply(plan("hostsBlock"));
   s.apply(finished("hostsBlock", "failed"));
   s.switchToGuided();
+  assert.equal(s.steps[0]?.guided, true, "guided before the plan arrives");
+  assert.equal(s.steps[0]?.state, "pending");
   s.apply(plan("hostsBlock"));
   assert.equal(s.steps[0]?.guided, true);
 });
@@ -239,7 +302,8 @@ test("the uninstall machine starts each attempt from pending, too", () => {
   s.begin();
   s.apply(plan("removeCluster"));
   s.apply(finished("removeCluster", "failed"));
-  assert.equal(s.progress().percent, 100);
+  assert.equal(s.progress().percent, 0, "a removal that failed before earning anything holds at nothing");
+  assert.equal(s.progress().status, "removeCluster label", "it names where it stopped");
   s.apply(plan("removeCluster"));
   assert.equal(s.steps[0]?.state, "pending");
   assert.equal(s.steps[0]?.previousState, "failed");
