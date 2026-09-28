@@ -14,8 +14,13 @@ end: it computes the next version, creates the tag, and publishes the GitHub
 Release that starts the image build for every node type.
 
 This is the manual half of an otherwise automatic pipeline. Nothing here builds
-images, pushes images, edits the repo-root `VERSION` file, or goes near
-`scripts/release/release.sh` -- whose `--push` path remains break-glass.
+images, pushes images, or goes near `scripts/release/release.sh` -- whose
+`--push` path remains break-glass.
+
+The repo-root `VERSION` file is **read, never written**. `VERSION` equals the
+tag of the commit a cut tags (`VERSIONING.md`), so a pull request setting it
+lands on `main` first and the cut then refuses with `version_file_stale` if the
+file names anything but the version it computes. Section 5 has the order.
 
 Design record:
 [2026-08-23-release-cut-automation-design.md](../../superpowers/specs/2026-08-23-release-cut-automation-design.md).
@@ -24,7 +29,9 @@ Design record:
 
 ## 1. What a cut actually does
 
-Three things happen, in this order, and the order is load-bearing:
+Three things happen, in this order, and the order is load-bearing. Before any
+of them, the cut reads `VERSION` at `main`'s head -- the exact commit it is
+about to tag -- and refuses unless the file reads the version it computed.
 
 1. **The tag is created** at the current head of `main`. GitHub's ref-create is
    atomic, which makes this the concurrency gate for the whole feature: two
@@ -117,12 +124,56 @@ nothing, publishes nothing, writes nothing**. It exercises the real credential
 against the real API, so it is a genuine test of the setup rather than a
 simulation of one.
 
-A successful dry run tells you three things: the token works, the repository
-name is right, and the version arithmetic found your existing tags.
+A successful dry run tells you four things: the token can read the
+repository, the repository name is right, the version arithmetic found your
+existing tags, and `VERSION` at `main`'s head already reads the version the cut
+would create.
+
+A dry run stops before the first write. It runs every check that comes before
+the tag is created and none of the ones that come with the writes, so it cannot
+prove the token may create tags or Releases: a token with only Contents: read
+passes a dry run, and the real cut then refuses with `credential_unavailable`
+when GitHub rejects the tag. `ref_exists` (somebody cut the same version in
+between), a `github_unreachable` on a write and `tag_created_release_failed`
+also appear only on a real cut.
+
+**Between cuts, the dry run answers `version_file_stale`, and that is
+expected.** `VERSION` reads the release `main` was last cut at until the
+prepare pull request for the next one merges (section 5), so until then the
+card's on-load dry run and the call above are refused with
+`version_file_stale`. The refusal comes after the token has listed the tags,
+read `main`'s head and read `VERSION`, and its message names the version the
+cut computed and the sha it would tag. So it still proves the credential can
+read the repository, that the repository name is right, and that the
+arithmetic found your tags. What it cannot tell you yet is whether the cut
+would go through; that waits for the prepare pull request.
 
 ---
 
 ## 5. Cutting
+
+### First: set `VERSION` by pull request
+
+`VERSION` equals the tag of the commit a cut tags, and `main` refuses direct
+pushes, so the value arrives the way every other change does:
+
+1. Open a pull request whose one change sets `VERSION` to the version you are
+   about to cut -- `0.24.0`, bare, no leading `v`. A minor release also records
+   in `releasedForms` (`deprecation_window_version_test.go`) every deprecated
+   form whose warning it is the first to carry; that test says so when it
+   applies.
+2. Merge it.
+3. Cut at once, with the bump that reaches that version. A change merged in
+   between moves `main`'s head, and the cut tags the new head -- which still
+   carries the right `VERSION`, but is not the commit you reviewed.
+
+A cut whose computed version differs from `VERSION` is refused with
+`version_file_stale` before anything is created, and so is its dry run. The
+refusal names both values. It is what stops the lag that shipped docs bundle
+0.21.25 labelled as engine 0.15.0: `VERSION` read `0.15.0` at every tag from
+v0.16.1 to v0.21.25.
+
+### Then: the card
 
 On a console's **Deployments** surface, the **Releases** card. It is visible only
 to owners -- a non-owner sees no card at all, and the engine refuses the call
@@ -175,6 +226,7 @@ The check is on demand. There is no poller and no schedule.
 | `github_unreachable` | transport failure or a 5xx. **Nothing was created** | retry; check GitHub's status |
 | `ref_exists` | the computed tag already exists | someone else cut it, or it was cut by hand. Re-read the card and cut again if you still need to |
 | `already_released_at_head` | `main`'s head already carries a release tag | land a change first. Cutting again would publish a second version of identical code |
+| `version_file_stale` | `VERSION` at `main`'s head is missing, or does not read the version this cut would create. **Nothing was created** | the message says which case it is. `VERSION` still names a release that is already cut: the prepare pull request has not merged, so merge one setting `VERSION` to the version you mean to cut (section 5) and cut again -- and if you were only validating a credential, this is the expected answer (section 4). `VERSION` names a newer release that a different bump reaches: cut with that bump. Anything else: fix `VERSION` by pull request |
 | `no_release_tags` | the repository has no `vX.Y.Z` tag at all | create the first tag and Release by hand. The first version of a repository is one a human chooses; the button takes over after that |
 | `tag_created_release_failed` | **half done** -- see below | act; nothing is building |
 | `version_not_cut` | Check images was asked about a version with no row here | it was cut by hand or on another installation. There is no row to move |
@@ -224,7 +276,9 @@ the same code.
   automation is seeded and none should be. An unattended release with nobody
   watching is not wanted.
 - **No image building or pushing.** The CI cascade owns that.
-- **No touching `VERSION`, `release.sh`, or the dispatch workflows.**
+- **No writing `VERSION`, and no touching `release.sh` or the dispatch
+  workflows.** `VERSION` is read and checked; the value itself reaches `main`
+  through a reviewed pull request, because `main` takes no push.
 - **No cutting other repositories.** The bundle and client repos have their own
   dispatch paths; the repository variable is singular on purpose.
 - **No workflow-run mapping.** The Actions API does not expose a run's dispatch
@@ -262,17 +316,19 @@ point: the bridge is an event handler, and one that silently does not fire is
 indistinguishable from one that has not fired yet -- until the version is
 deployed and every pod lands in `ImagePullBackOff`.
 
-Three behaviours worth knowing before using it:
+Five behaviours worth knowing before using it:
 
 | Situation | What happens |
 |---|---|
 | the release already exists, published | idempotent; it still waits for the build |
 | the release exists as a **draft** | **refused**. A draft emits no `release: [published]` event, so it builds no images while looking like a release in the UI |
+| `VERSION` at the commit to be tagged is missing or names another version | **refused** (exit 3, `result.reason` `version_file_stale`), dry run included, before anything is created -- the same rule as `version_file_stale` above. The commit checked is the existing tag, else `targetSha`, else the default branch's head read once and passed as `--target`, so the commit checked is the commit tagged. For a tag not yet created, a prepare pull request setting `VERSION` resolves it. For a tag that **already exists** it cannot: no merge moves a tag. Delete the tag and re-run at a commit whose `VERSION` reads the version (passed as `targetSha`, or the default branch's head once a prepare pull request has merged). A tag cut before `VERSION` had to equal the tag -- the unreleased `v0.16.0` to `v0.19.7` tags among them -- cannot pass where it stands |
+| `version` carries a pre-release or build suffix | **refused** as a bad parameter (exit 2). `VERSION` is never suffixed and must equal the tag, so a suffixed release could pass only by breaking that rule; the console cut and the docs bundle accept bare `X.Y.Z` alone too |
 | the build ran and **failed** | reported (`buildRunConclusion`), not swallowed. The bridge fired, which is what this checks; a failed build is a different problem with a different fix |
 
 ```bash
-scripts/release/release-engine.sh --version=0.19.10 --dryRun=true   # verify credential + state, create nothing
-scripts/release/release-engine.sh --version=0.19.10
+scripts/release/release-engine.sh --version=0.24.0 --dryRun=true   # verify credential + state, create nothing
+scripts/release/release-engine.sh --version=0.24.0
 ```
 
 The result reports the **GHCR** prefix as well as the tag. That half of the

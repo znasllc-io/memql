@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Assemble the docs bundle tree + manifest.json from docs/public.
 
-Invoked by build-docs-bundle.sh. Reads env: PUBLIC_DIR, OUT, VERSION,
-ENGINE_VERSION. Selects markdown files whose front-matter is
+Invoked by build-docs-bundle.sh. Reads env: PUBLIC_DIR, OUT, VERSION (already
+checked by the caller to equal the VERSION file, which equals the release tag).
+Selects markdown files whose front-matter is
 `audience: public`, copies them (plus any non-markdown generated assets,
 e.g. the architecture model JSON) into OUT preserving the path relative to
 docs/public, and writes OUT/manifest.json describing the nav tree by area.
@@ -14,7 +15,6 @@ import shutil
 PUBLIC = os.environ["PUBLIC_DIR"]
 OUT = os.environ["OUT"]
 VERSION = os.environ["VERSION"]
-ENGINE_VERSION = os.environ.get("ENGINE_VERSION", "")
 
 AREAS = ["overview", "concepts", "language", "ai", "build", "operate", "cockpit"]
 
@@ -84,7 +84,6 @@ def main():
 
     manifest = {
         "version": VERSION,
-        "engineVersion": ENGINE_VERSION,
         "pageCount": len(entries),
         "areas": AREAS,
         "nav": nav,

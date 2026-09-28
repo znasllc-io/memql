@@ -3,11 +3,17 @@
 // (dispatch-engine-images-on-release.yml, #2519 -> build-engine-images.yml with
 // the bare version).
 //
-// IT DOES NOT BUILD OR PUSH IMAGES, does not touch the repo-root VERSION file
-// (deliberately stale, and nothing here reads it), and does not go near
+// IT DOES NOT BUILD OR PUSH IMAGES, and does not go near
 // scripts/release/release.sh, whose --push path stays break-glass. Cutting is
 // the one manual half of an otherwise automatic pipeline, and this package is
 // exactly that half.
+//
+// IT READS THE REPO-ROOT VERSION FILE AND NEVER WRITES IT. VERSION equals the
+// tag of the commit a cut tags (VERSIONING.md), so the cut reads the file at
+// the sha it is about to tag and refuses with version_file_stale when it names
+// anything else. Writing it is not this package's job and is not possible from
+// here: `main` refuses direct pushes, so the value arrives through an ordinary
+// "prepare vX.Y.Z" pull request before the cut. See versionfile.go.
 //
 // THE OWNER ASK WAS "only the owners (role) have permissions to cut a new
 // version", and the gate that delivers it is in cut.go, in Go, before any
@@ -77,13 +83,14 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Name: "releaseCut",
 			Description: "Cut a new release: compute the next version from the repository's vX.Y.Z tags, " +
 				"create the tag at main's head, and publish a GitHub Release, which is what fires the " +
-				"image-build cascade. Owner role only, enforced before any network call.",
+				"image-build cascade. Refuses (version_file_stale) unless VERSION at main's head already " +
+				"reads the version being cut. Owner role only, enforced before any network call.",
 			Handler: i.handleCut,
 			ArgsSchema: map[string]string{
 				"bump":             "string (required) -- \"major\" | \"minor\" | \"patch\".",
 				"notes":            "string (optional) -- prose prepended to GitHub's generated release notes.",
 				"bumpExtensionPin": "boolean (optional) -- also open a PR bumping the VS Code extension's DEFAULT_STACK_TAG.",
-				"dryRun":           "boolean (optional) -- compute the plan and create nothing.",
+				"dryRun":           "boolean (optional) -- compute the plan and run every check that precedes the first write; create nothing. Makes only reads, so it cannot prove the token may create tags or Releases.",
 			},
 		},
 		{

@@ -36,20 +36,34 @@ tag from a different lineage.
 The version of a MemQL build is the **git tag** it was cut from
 (`vX.Y.Z` on `main`), not a number embedded in a file.
 
-- The in-repo `VERSION` file carries the **plain semver** the next
-  release will be cut at. It is a convenience for tooling (`make
-  version`, `make release` defaulting) — never a build stamp, never
-  suffixed, and since memql#3998 **never read by the binary**. It is
-  deliberately **unprefixed**: it feeds the `memql:X.Y.Z` image tag,
-  where a leading `v` does not belong. The `v` lives on the git tag
-  only.
+- The in-repo `VERSION` file **equals the tag of the commit a release
+  cut tags**, unprefixed: at `vX.Y.Z` it reads `X.Y.Z` (memql#5714). A
+  "prepare X.Y.Z" pull request bumps it immediately before the cut --
+  `main` takes no direct push, so the value arrives through review like
+  any other change -- and both cut paths (the console cut in
+  `integrations/release/` and the `releaseEngine` capability,
+  `scripts/release/release-engine.sh`) read it at the commit they are
+  about to tag and refuse when it names anything else: the console cut
+  with the refusal code `version_file_stale`, `releaseEngine` with exit
+  3 and `result.reason` `version_file_stale`. The docs bundle build
+  refuses the same mismatch, so the bundle's one `version` field is the
+  tag's. Between cuts `VERSION` therefore names the release `main` was
+  last cut at, or the one a merged prepare PR is about to cut. It is
+  never a build stamp, never suffixed (both cut paths and the bundle
+  build accept a bare `X.Y.Z` only), and since memql#3998 **never read
+  by the binary**; tooling reads it (`make version`, `make release`
+  defaulting). It is deliberately **unprefixed**: it feeds the
+  `memql:X.Y.Z` image tag, where a leading `v` does not belong. The `v`
+  lives on the git tag only.
 - **No `-<epoch>` suffixes.** Dev builds are identified by their git
   SHA (`scripts/release/release.sh` stamps
   `org.opencontainers.image.revision=<short-sha>` on every image, and
   flags a dirty tree). There is nothing to strip and nothing to
   reconcile.
-- A release is cut by tagging `main` (`git tag vX.Y.Z`). `make release
-  VERSION=X.Y.Z` builds an immutable `memql:X.Y.Z` image **locally** from
+- A release is cut by tagging `main` (`git tag vX.Y.Z`) once the
+  prepare pull request has set `VERSION` to `X.Y.Z`; see
+  [docs/public/operate/release-cutting.md](docs/public/operate/release-cutting.md).
+  `make release VERSION=X.Y.Z` builds an immutable `memql:X.Y.Z` image **locally** from
   that commit -- useful for inspecting what a release image contains, but
   it is not the cloud-release path: per CLAUDE.md's image-build rule, a
   deployable release image is built on the GitHub build server, not an

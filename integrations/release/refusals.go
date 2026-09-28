@@ -82,6 +82,16 @@ const (
 	// identical code, which reads as two releases and is one.
 	CodeAlreadyReleasedAtHead = "already_released_at_head"
 
+	// CodeVersionFileStale -- the repo-root VERSION file at the commit
+	// about to be tagged does not read the version being cut, or there is
+	// no VERSION file there at all. VERSION equals the tag of the commit a
+	// cut tags (VERSIONING.md), and `main` refuses direct pushes, so the
+	// value reaches main through an ordinary "prepare vX.Y.Z" pull request
+	// BEFORE the cut. Refusing here, rather than tagging anyway, is what
+	// stops the lag that shipped docs bundle 0.21.25 labelled as engine
+	// 0.15.0: every reader of the file then names the release it belongs to.
+	CodeVersionFileStale = "version_file_stale"
+
 	// CodeTagCreatedReleaseFailed -- the half-done state. See the file
 	// comment: the tag exists, the Release does not, and no images will be
 	// built until a human resolves it.
