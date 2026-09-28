@@ -204,6 +204,7 @@ export function StorePanel({ site, canBind, trail, back }: StorePanelProps) {
       ) : (
         <>
           <Identity store={store} report={report} />
+          <PrivacyRefusals report={report} />
           {/* TWO COLUMNS WHERE THERE IS ROOM, and this is DESIGN.md rule 9
               rather than decoration. Every block here is text at a readable
               measure -- the app caps a caption at 84ch, which is right -- so
@@ -292,6 +293,47 @@ function Identity({ store, report }: { store: StoreRow; report: StoreHealth | nu
       </div>
       {meta.length === 0 ? null : <p className="os-store-note">{meta.join(" · ")}</p>}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Privacy deliveries refused on the per-store URL
+// ---------------------------------------------------------------------------
+
+/**
+ * The one reading on this panel that is a legal request lost, so it reads
+ * first and in the error voice (memql#5707).
+ *
+ * A store installed through the managed app has Shopify's three privacy topics
+ * accepted ONLY at the app-level URL. A cluster set up by the older runbook
+ * still points them at the per-store one, where each is refused -- and
+ * Shopify, having been answered, never sends it again. The count is the
+ * engine's, read off the store's audit trail; so is the URL, because a URL
+ * composed here would be a second spelling of the cluster's api host.
+ *
+ * NOTHING IS DRAWN FOR A MEASURED ZERO OR AN ABSENT FIGURE. Zero is the
+ * healthy reading, and an engine that does not report the figure has not said
+ * anything is wrong.
+ */
+function PrivacyRefusals({ report }: { report: StoreHealth | null }) {
+  const privacy = report?.privacyDeliveries ?? null;
+  if (privacy === null || privacy.refused.kind !== "measured" || privacy.refused.value <= 0) return null;
+  const count = privacy.refused.value;
+  const requests = `${privacy.capped ? "At least " : ""}${count} privacy request${count === 1 ? "" : "s"}`;
+  const latest = privacy.lastRefusedAt === "" ? "" : ` The latest arrived ${new Date(privacy.lastRefusedAt).toLocaleString()}.`;
+  return (
+    <Notice
+      tone="error"
+      sentence={`${requests} from Shopify ${count === 1 && !privacy.capped ? "was" : "were"} refused: ${count === 1 && !privacy.capped ? "it" : "they"} arrived on this store's own URL.`}
+      next={
+        <>
+          This store was installed through the managed app, so customers/data_request, customers/redact and
+          shop/redact are accepted only at the app-level URL. In the app&rsquo;s configuration at Shopify (Dev
+          Dashboard or Partner Dashboard), set all three to <span className="os-mono">{privacy.appLevelUrl}</span>. Shopify does not resend a refused request;
+          each one is on the audit trail as shopify_privacy_delivery_refused.{latest}
+        </>
+      }
+    />
   );
 }
 

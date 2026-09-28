@@ -253,6 +253,11 @@ MEMQL_INBOUND_SOURCE_SHOPIFY_DEDUPE_HEADER=X-Shopify-Webhook-Id
 MEMQL_INBOUND_SOURCE_SHOPIFY_SECRET=<shared secret>
 ```
 
+(Superseded as a NAME since memql#5707: `shopify` became the Shopify
+connector's own app-level source, and the receiver drops an env source under a
+declared connector's name at boot. Today the same policy is spelled
+`shopify-custom`; see `docs/public/operate/inbound-delivery.md`.)
+
 ## 6. What a product writes
 
 Nothing in Go. An automation on the staged row:

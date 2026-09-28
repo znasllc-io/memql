@@ -65,6 +65,26 @@ export interface CostBucket {
   restoreRate: Figure;
 }
 
+/**
+ * Privacy deliveries refused on this store's per-store URL (memql#5707).
+ *
+ * A store installed through the managed app has its three privacy topics
+ * accepted ONLY at the app-level URL, and a cluster configured by the older
+ * runbook still points them at the per-store one -- so every mandatory privacy
+ * request is refused, and Shopify does not resend a refused one. The Go
+ * handler counts them off the store's audit trail.
+ */
+export interface PrivacyDeliveries {
+  /** A measured zero is "the trail was read and holds none". */
+  refused: Figure;
+  /** RFC3339, or "" when none was refused. */
+  lastRefusedAt: string;
+  /** True when the walk stopped at its page cap: `refused` is a floor. */
+  capped: boolean;
+  /** The URL to set in the Partner dashboard, composed by the engine. */
+  appLevelUrl: string;
+}
+
 /** What one reconcile pass of the webhook subscriptions did. */
 export interface SubscriptionRecord {
   existing: Figure;
@@ -108,6 +128,8 @@ export interface StoreHealth {
   costBucket: CostBucket | null;
   /** Absent until a subscription reconcile has been recorded. */
   subscriptions: SubscriptionRecord | null;
+  /** Null from an engine that does not report it. */
+  privacyDeliveries: PrivacyDeliveries | null;
 }
 
 const MAX_ENVELOPE_DEPTH = 4;
@@ -166,6 +188,18 @@ function toStoreHealth(value: unknown): StoreHealth {
     domains,
     costBucket: toCostBucket(r["costBucket"]),
     subscriptions: readSubscriptions(r["health"]),
+    privacyDeliveries: toPrivacyDeliveries(r["privacyDeliveries"]),
+  };
+}
+
+function toPrivacyDeliveries(value: unknown): PrivacyDeliveries | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const r = value as Record<string, unknown>;
+  return {
+    refused: figureFrom(r, "refused"),
+    lastRefusedAt: str(r["lastRefusedAt"]),
+    capped: r["capped"] === true,
+    appLevelUrl: str(r["appLevelUrl"]),
   };
 }
 
