@@ -9,8 +9,6 @@ owner: znas
 
 # MemQL Operator Capabilities
 
-> **Last updated:** 2026-07-05
-
 This document is the single index of agent capability slugs and how
 they expand into concrete tool names. Authoring an agent seed (`seed`
 construct under `dsl/agents/`) declares `capabilities.tools[]` --

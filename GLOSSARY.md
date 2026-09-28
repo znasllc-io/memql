@@ -5,8 +5,8 @@ path, or use this detailed reference index. Layout + rules:
 [docs/DOCS_STANDARD.md](docs/DOCS_STANDARD.md).
 
 - **`docs/public/`** — user/developer-facing reference. This is the
-  single source of truth the memql.io site renders, versioned per
-  release. Areas mirror the site sidebar.
+  single source of truth the memql.io site renders: one set per release,
+  the site serving the newest. Areas mirror the site sidebar.
 - **`docs/internal/`** — design rationale (ADRs), active plans, and ops
   runbooks. In-repo only; not published.
 - Root files are repo governance + the docs standard.
@@ -57,7 +57,7 @@ path, or use this detailed reference index. Layout + rules:
 
 ### Build Against It (`build/`)
 - [Audio Streaming](docs/public/build/audio-streaming.md) · [Build Tags](docs/public/build/build-tags.md) · [Plugin SDK](docs/public/build/plugin-sdk.md) · [Building a Pack](docs/public/build/building-a-pack.md) — worked-example developer guide: the `examples/referencepack` teaching pack, and how a STOREFRONT pack under `packs/` ships in the default build and how a shopper writes to one (epic memql#5532)
-- Generated reference (DSL constructs + concept catalog) lands in `docs/public/reference/_generated/` at release time (docs-gen).
+- Generated reference: the concept catalog, rendered from the DSL by `cmd/docs-gen bundle` into each release's docs set as `reference/concepts.md` (never written into `docs/public`). The bundle, its boundary gate and its manifest are [DOCS_STANDARD.md](docs/DOCS_STANDARD.md) section 5.
 
 ### Operate (`operate/`)
 

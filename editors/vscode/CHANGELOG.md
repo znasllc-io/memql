@@ -32,6 +32,15 @@
   line in a query used to replace the first without a word, so a query could
   lose its ownership filter and still look right. The editor now underlines the
   second copy (`query_clause_duplicate`) and says to merge the two.
+- **The Deployments panel's buttons send what they name.** Rollout promote /
+  abort could never run: it sent `promote` with no rollout, which the SDK
+  refused before sending, and it offered no abort. It is now a Promote and an
+  Abort per Argo Rollout in flight, each naming it, with Abort confirmed
+  against the rollout's name. Cut version, which always cut a patch, is one
+  button per bump naming the version it cuts (`Cut 1.5.0 (minor)`). Roll back,
+  which targeted the newest succeeded deployment and so usually the one
+  running, returns to the release before the one the cluster runs, and the
+  page names it before you press.
 
 ## 0.6.0
 

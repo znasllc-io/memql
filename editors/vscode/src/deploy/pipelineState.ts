@@ -33,6 +33,8 @@
 //
 // Refs: #3740 #3733
 
+import type { RolloutStatus } from "@znasllc-io/memql-sdk-core/deploy";
+
 import type { StatusRead } from "./controller.js";
 import { visibleActions, type DeployActionSpec, type RoleVisibility } from "./actions.js";
 
@@ -53,6 +55,17 @@ export interface PipelineState {
    * -- and one that reported no pipeline has nothing to act on.
    */
   actions: DeployActionSpec[];
+  /**
+   * The Argo Rollouts the status read reported, which are what the Rollout
+   * action promotes and aborts (deploy/controls.ts narrows them to the ones in
+   * flight). Empty for both failure states, which read nothing.
+   *
+   * CARRIED, where the rest of the status is dropped, because the RPC acts on
+   * a rollout BY NAME and this read is the only place the panel learns one.
+   * Without it the button could only send an empty name, which the SDK refuses
+   * before anything leaves the editor.
+   */
+  rollouts: RolloutStatus[];
 }
 
 /**
@@ -70,6 +83,7 @@ export function pipelineState(read: StatusRead, visibility: RoleVisibility): Pip
       title: "Deployment status is not visible at your role",
       detail: read.message,
       actions: [],
+      rollouts: [],
     };
   }
   if (read.reason === "unavailable" || read.status === null) {
@@ -81,6 +95,7 @@ export function pipelineState(read: StatusRead, visibility: RoleVisibility): Pip
           ? "The cluster did not answer the deployment-status read."
           : read.message,
       actions: [],
+      rollouts: [],
     };
   }
   return {
@@ -90,5 +105,8 @@ export function pipelineState(read: StatusRead, visibility: RoleVisibility): Pip
       "The engine decides every one of these. What is hidden here is hidden as a courtesy; " +
       "a refusal will name the role required.",
     actions: visibleActions(visibility),
+    // The SDK always sets the list; `?? []` is for a status built by hand,
+    // which a caller outside the SDK is free to do.
+    rollouts: read.status.rollouts ?? [],
   };
 }

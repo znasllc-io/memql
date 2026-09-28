@@ -639,6 +639,21 @@ docs-grammar:
 docs-grammar-check:
 	$(GO) test -count=1 -run 'TestGrammarPageIsGenerated|TestVocabularyPageIsGenerated' .
 
+## Build the release docs bundle, docs-<VERSION>.tgz at the repo root, from
+## docs/public (bundle contract v2, memql#5717): the published pages with
+## their links rewritten to site routes, the concept catalog, manifest.json,
+## llms.txt, llms-full.txt and the sitemap fragment. Needs full git history --
+## every page is dated by its last commit -- so a shallow clone is refused. The
+## release lane (publish-docs-bundle.yml) runs the same script at the tag.
+docs-bundle:
+	bash scripts/docs/build-docs-bundle.sh --version=$(VERSION)
+
+## Check docs/public against the public boundary, writing nothing: every link
+## on a published page must name another published page or leave the site.
+## The same check docs_public_boundary_test.go runs on every pull request.
+docs-bundle-check:
+	bash scripts/docs/build-docs-bundle.sh --version=$(VERSION) --check
+
 ## Classify authoring-surface breaks against the committed baseline
 ## (component/language/surface/2026.json).
 ##
@@ -786,7 +801,7 @@ test-cover:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check platform-graph platform-graph-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check docs-grammar docs-grammar-check memqlbreaking memqlbreaking-capture
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check platform-graph platform-graph-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check docs-grammar docs-grammar-check docs-bundle docs-bundle-check memqlbreaking memqlbreaking-capture
 
 ## Run go vet on all packages
 vet:

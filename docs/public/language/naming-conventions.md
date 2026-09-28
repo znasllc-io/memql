@@ -9,8 +9,6 @@ owner: znas
 
 # MemQL Naming Conventions
 
-> Last Updated: June 11, 2026
-
 ## Construct Names Carry No Kind Prefix
 
 **Decided (memql#2853): constructs are named for what they do, never for

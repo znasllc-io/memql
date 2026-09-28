@@ -12,7 +12,7 @@ import (
 // on it (docs_front_matter_test.go), and the keys' values are from that gate's
 // closed sets.
 const PageHeader = `---
-title: memQL Proving Scorecard
+title: MemQL Proving Scorecard
 audience: public
 status: stable
 area: overview
@@ -39,7 +39,7 @@ func RenderPage(s Scorecard) string {
 	b.WriteString(PageHeader)
 	b.WriteString("\n")
 	b.WriteString(generatedMarker)
-	b.WriteString("\n\n# memQL Proving Scorecard\n\n")
+	b.WriteString("\n\n# MemQL Proving Scorecard\n\n")
 
 	b.WriteString("What the platform measures about itself, and what it does not.\n" +
 		"Each number is a **median with its spread and its N**, stamped with the\n" +
@@ -214,9 +214,7 @@ func writeMethod(b *strings.Builder) {
 		"it: tokens, dollars and answer quality all read `unmeasured`, and they stay\n" +
 		"that way until the live tier runs.\n\n")
 	b.WriteString("Design record:\n" +
-		"[the proving suite](../../superpowers/specs/2026-09-06-proving-suite-design.md).\n" +
-		"The day-by-day walkthrough log is [the proving log](proving.md), which is a\n" +
-		"different artifact: it records what a person exercised by hand.\n")
+		"[the proving suite](../../superpowers/specs/2026-09-06-proving-suite-design.md).\n")
 }
 
 func familyTitle(f figure.Family) string {

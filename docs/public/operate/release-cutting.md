@@ -51,16 +51,17 @@ MemQL does step 1 and 2. CI does step 3. The platform records what it did on a
 
 **It cannot tell you the images exist.** Publishing a Release means the build
 was *asked for*. Whether it finished is a question only the container registry
-answers, which is what **Check images** is for -- see section 6.
+answers, which is what `releaseCutStatus` is for -- see section 6.
 
 ---
 
-## 2. Before the button works: two values to seed
+## 2. Before a cut works: two values to seed
 
 The engine is product-agnostic and carries **no repository default**. An
-installation that wants this button says which repository it cuts, and supplies
-a credential. Until both are seeded, the Releases card renders the missing step
-instead of the button.
+installation that cuts releases says which repository it cuts, and supplies a
+credential. Until both are seeded, a cut refuses with
+`release_repo_unconfigured` or `credential_unavailable`, naming the variable to
+seed and never a value.
 
 ### `MEMQL_RELEASE_REPO` -- a global variable
 
@@ -88,8 +89,12 @@ The Pull requests scope is genuinely optional. A token holding Contents alone
 is a correct token: a cut works, and the pin-bump follow-on records a note
 saying it could not open a PR rather than failing the release.
 
-Seed both from the console's configuration surface, or as environment values on
-the node. Resolution order is **global secret -> global variable -> environment**,
+Both are rows in `scripts/secrets/manifest.yaml`, so the secrets seeder writes
+them (`go run ./scripts/secrets seed --env-file <path>`, see
+[adding a global secret](env-vars.md#adding-a-global-secret)); the
+`setGlobalSecret` / `setGlobalVariable` mutations write them directly, and
+environment values on the node work too. Resolution order is
+**global secret -> global variable -> environment**,
 secret first because the token is a credential; the environment tier exists for
 the bootstrap window after `make up-refresh`, when concept storage is empty.
 
@@ -112,8 +117,8 @@ Do this before you seed the token, not after.
 
 ## 4. First run: a dry run
 
-The card issues a dry run on load, and that is also how you validate a freshly
-seeded credential by hand:
+A dry run is how you validate a freshly seeded credential, and how you see the
+plan before cutting for real:
 
 ```
 builtin releaseCut(bump: "patch", dryRun: true)
@@ -140,8 +145,7 @@ also appear only on a real cut.
 **Between cuts, the dry run answers `version_file_stale`, and that is
 expected.** `VERSION` reads the release `main` was last cut at until the
 prepare pull request for the next one merges (section 5), so until then the
-card's on-load dry run and the call above are refused with
-`version_file_stale`. The refusal comes after the token has listed the tags,
+call above is refused with `version_file_stale`. The refusal comes after the token has listed the tags,
 read `main`'s head and read `VERSION`, and its message names the version the
 cut computed and the sha it would tag. So it still proves the credential can
 read the repository, that the repository name is right, and that the
@@ -173,33 +177,51 @@ refusal names both values. It is what stops the lag that shipped docs bundle
 0.21.25 labelled as engine 0.15.0: `VERSION` read `0.15.0` at every tag from
 v0.16.1 to v0.21.25.
 
-### Then: the card
+### Then: the cut
 
-On a console's **Deployments** surface, the **Releases** card. It is visible only
-to owners -- a non-owner sees no card at all, and the engine refuses the call
-independently before any network request is made.
+There is **no UI control** for a cut today. The browser card that drove it was
+retired in epic memql#4984, and neither MemQL OS nor the VS Code extension
+replaced it. A cut is the `releaseCut` builtin, called by an owner:
 
-The card shows:
+```
+builtin releaseCut(bump: "patch", notes: "Why this cut", bumpExtensionPin: true)
+```
 
-- **the newest existing TAG**, read from GitHub. Not the newest row: a release
-  cut by hand creates a tag this cluster never hears about, so the tag is the
-  truth for "newest" and the rows below are only what this installation did.
-- **the form** -- a bump (patch, minor or major; major and minor zero the parts
-  below them), optional notes, and the extension pin-bump checkbox.
-- **the confirm phrase** `cut-a-release`, typed. A release is not undoable from
-  here: reversing one means deleting the tag and the Release on GitHub by hand.
+or from an SDK: `releaseCut({ bump: "patch" })` on the TS `QueryClient`,
+`ReleaseCut` in `sdk/go/client`. The engine refuses a non-owner in Go before any
+network request is made.
 
-Notes are **prepended** to GitHub's generated release notes rather than
-replacing them, so a sentence about why you cut sits above the generated list of
-changes.
+The arguments:
+
+- **`bump`** -- patch, minor or major; major and minor zero the parts below
+  them. The next version is computed from the repository's newest `vX.Y.Z`
+  TAG, not from any row here: a release cut by hand creates a tag this cluster
+  never hears about, so the tag is the truth for "newest" and the rows are only
+  what this installation did.
+- **`notes`** -- optional. Notes are **prepended** to GitHub's generated release
+  notes rather than replacing them, so a sentence about why you cut sits above
+  the generated list of changes.
+- **`bumpExtensionPin`** -- also open the pin-bump pull request (section 8).
+- **`dryRun`** -- compute the plan and create nothing (section 4).
+
+The call asks for no confirmation, and a release is not undoable from here:
+reversing one means deleting the tag and the Release on GitHub by hand. Run the
+dry run first and read its plan.
 
 ---
 
-## 6. Afterwards: Check images
+## 6. Afterwards: check the images
 
-Each row carries a **Check images** button. It asks the container registry for
-the manifests of a representative node-image set at the bare version, and gives
-one of three answers:
+`releaseCutStatus` checks one cut version:
+
+```
+builtin releaseCutStatus(version: "v0.19.10")
+```
+
+(`releaseCutStatus({ version })` on the TS `QueryClient`, `ReleaseCutStatus` in
+`sdk/go/client`). It asks the container registry for the manifests of a
+representative node-image set at the bare version, and gives one of three
+answers:
 
 | Answer | What it means |
 |---|---|
@@ -224,15 +246,15 @@ The check is on demand. There is no poller and no schedule.
 | `release_repo_unconfigured` | no repository configured, or GitHub cannot see it | seed `MEMQL_RELEASE_REPO`; check the token's repository access |
 | `credential_unavailable` | no token, or GitHub rejected it (401/403) | seed or re-mint `MEMQL_GITHUB_RELEASE_TOKEN` with Contents: read/write |
 | `github_unreachable` | transport failure or a 5xx. **Nothing was created** | retry; check GitHub's status |
-| `ref_exists` | the computed tag already exists | someone else cut it, or it was cut by hand. Re-read the card and cut again if you still need to |
+| `ref_exists` | the computed tag already exists | someone else cut it, or it was cut by hand. Run the dry run again and cut if you still need to |
 | `already_released_at_head` | `main`'s head already carries a release tag | land a change first. Cutting again would publish a second version of identical code |
 | `version_file_stale` | `VERSION` at `main`'s head is missing, or does not read the version this cut would create. **Nothing was created** | the message says which case it is. `VERSION` still names a release that is already cut: the prepare pull request has not merged, so merge one setting `VERSION` to the version you mean to cut (section 5) and cut again -- and if you were only validating a credential, this is the expected answer (section 4). `VERSION` names a newer release that a different bump reaches: cut with that bump. Anything else: fix `VERSION` by pull request |
-| `no_release_tags` | the repository has no `vX.Y.Z` tag at all | create the first tag and Release by hand. The first version of a repository is one a human chooses; the button takes over after that |
+| `no_release_tags` | the repository has no `vX.Y.Z` tag at all | create the first tag and Release by hand. The first version of a repository is one a human chooses; `releaseCut` takes over after that |
 | `tag_created_release_failed` | **half done** -- see below | act; nothing is building |
-| `version_not_cut` | Check images was asked about a version with no row here | it was cut by hand or on another installation. There is no row to move |
+| `version_not_cut` | `releaseCutStatus` was asked about a version with no row here | it was cut by hand or on another installation. There is no row to move |
 | `registry_check_failed` | the image check itself errored | the status is unchanged. Retry later |
-| `not_owner` | the caller does not hold the owner role | you will not meet this from a console -- the card is absent for a non-owner rather than refusing. It is what a direct SDK or MCP caller gets |
-| `invalid_bump` | the bump was not major/minor/patch | same: a console only offers the three, so this is a direct caller's typo |
+| `not_owner` | the caller does not hold the owner role | ask a cluster owner. The check runs before any network request, so nothing was created |
+| `invalid_bump` | the bump was not major/minor/patch | pass one of the three |
 
 ### The half-done state
 
@@ -252,7 +274,7 @@ bump will refuse with `ref_exists` naming that tag.
 
 ## 8. The extension pin-bump follow-on
 
-With the checkbox ticked, a successful cut also opens a pull request bumping
+With `bumpExtensionPin: true`, a successful cut also opens a pull request bumping
 `editors/vscode/src/install/stackPin.ts`'s `DEFAULT_STACK_TAG` to the new tag --
 the release an install checks out when it is not told otherwise.
 
@@ -295,12 +317,12 @@ the same code.
 
 ## 10. The same cut from a lifecycle automation
 
-The console button above is one path. `releaseEngine`
+The `releaseCut` builtin above is one path. `releaseEngine`
 (`scripts/release/release-engine.sh`, capability `release.engine`) is the
 other: the deploy pack's action, for a lifecycle that cuts a version as a step
-rather than a person pressing a button.
+rather than a person making the call.
 
-It exists because of a failure the button cannot have and a script can:
+It exists because of a failure the builtin cannot have and a script can:
 
 > A pushed git tag builds **nothing**. `build-engine-images` is
 > `workflow_dispatch`-only and its single automatic trigger is a
@@ -348,5 +370,4 @@ targets.
   sha. The decisions log ([the split](auth/access-model.md)), not the
   high-volume activity stream.
 
-Read the history from the console card, or with `query releaseCuts()` as an
-owner.
+Read the history with `query releaseCuts()` as an owner.

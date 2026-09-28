@@ -161,7 +161,7 @@ test("the remote instance page carries the same latest fact", () => {
   const html = renderRemoteInstance({
     instance: { name: "staging", kind: "remote", presence: "installed-healthy", connected: true },
     runs: [],
-    pipeline: { kind: "present", title: "Deploy", detail: "", actions: [] },
+    pipeline: { kind: "present", title: "Deploy", detail: "", actions: [], rollouts: [] },
     nowMs: 0,
     outcome: "",
     error: "",

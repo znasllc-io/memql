@@ -40,5 +40,4 @@ outside the currently served static-site contract; see
 [Deployables](../operate/deployables.md) for its exact boundaries.
 
 Follow [GitHub issues](https://github.com/znasllc-io/memql/issues) and the release
-notes for changes. Historical walkthroughs remain in the [proving log](proving.md);
-they describe what was observed at the recorded commit, not the current interface.
+notes for changes.
