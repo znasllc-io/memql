@@ -35,7 +35,7 @@ import { ConstructPanel } from "../src/webview/constructPanel.js";
 import { LanguageReferencePanel } from "../src/webview/languageReferencePanel.js";
 import { rowListHtml } from "../src/webview/rowListView.js";
 import { ResultPanel, RunPanel, type RunPanelHost } from "../src/webview/runPanel.js";
-import { recorded, resetRecorded, type StubWebviewPanel } from "./support/vscodeStub.js";
+import { recorded, resetRecorded, setNextInputBoxResult, type StubWebviewPanel } from "./support/vscodeStub.js";
 
 const CONTEXT = { subscriptions: [] as { dispose(): unknown }[] } as unknown as ExtensionContext;
 
@@ -377,6 +377,34 @@ test("a declined run opens no Result tab, and the form says it was cancelled", a
   );
   assert.match(visible(panel.html), /Cancelled\. Nothing ran\./);
   assert.match(visible(panel.html), /Ready/);
+  panel.close();
+});
+
+test("Save as on a Result saves the run it shows, with the values it ran with", async () => {
+  resetRecorded();
+  const saved: { name: string; values: Record<string, unknown> }[] = [];
+  const host: RunPanelHost = {
+    run: async () => ({ status: "declined", target: TARGET }),
+    saveConfig: async (_target, name, values) => {
+      saved.push({ name, values });
+    },
+    concepts: () => new Map(),
+    openRow: () => undefined,
+  };
+  ResultPanel.show(
+    CONTEXT,
+    host,
+    { status: "ok", target: TARGET, rows: [], raw: [], ranDeployedDefinition: false, injected: true },
+    { limit: 5 },
+  );
+  const panel = lastPanel();
+  assert.match(panel.html, /data-act="saveAs"/);
+  setNextInputBoxResult("recent five");
+  panel.send({ type: "saveAs" });
+  await settle();
+  await settle();
+  assert.deepEqual(saved, [{ name: "recent five", values: { limit: 5 } }]);
+  assert.ok(recorded.infos.some((m) => m.includes('Saved "recent five"')));
   panel.close();
 });
 

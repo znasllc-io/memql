@@ -3325,7 +3325,7 @@ function registerRunSurface(
   // One run, shown: the Result tab opens in its running state as the run
   // starts (host.run above), and fills in when it settles.
   const runAndShow = async (target: RunTarget, values: Record<string, unknown>): Promise<void> => {
-    ResultPanel.show(context, host, await host.run(target, values));
+    ResultPanel.show(context, host, await host.run(target, values), values);
   };
 
   // memql#3310's automation half. It shares the orchestrator's write gate --

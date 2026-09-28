@@ -222,7 +222,7 @@ export class RunPanel {
     // to say that nothing happened.
     if (outcome.status === "declined") this.note = { tone: "info", line: "Cancelled. Nothing ran." };
     this.render();
-    ResultPanel.show(this.context, this.host, outcome);
+    ResultPanel.show(this.context, this.host, outcome, coerced.values);
   }
 
   private async doSave(): Promise<void> {
@@ -295,6 +295,8 @@ export class ResultPanel {
   private readonly disposables: vscode.Disposable[] = [];
   private shown: ResultInput;
   private jsonOpen = false;
+  /** What the shown run was called with, for "Save as...". */
+  private values: Record<string, unknown> | undefined;
   /** Bumped per run, so each run's result is a new screen (a fresh scroll). */
   private run = 0;
   private disposed = false;
@@ -304,19 +306,39 @@ export class ResultPanel {
     ResultPanel.present(context, host, { state: "running", target });
   }
 
-  static show(context: vscode.ExtensionContext, host: RunPanelHost, outcome: RunOutcome): void {
+  /**
+   * `values` are what the run was called with, when the caller has them: they
+   * are what "Save as..." writes, so without them the page offers no save.
+   */
+  static show(
+    context: vscode.ExtensionContext,
+    host: RunPanelHost,
+    outcome: RunOutcome,
+    values?: Record<string, unknown>,
+  ): void {
     // A superseded run has nothing to show: a newer run is already in flight
     // and will paint over this the moment it lands. A declined one never
     // started, so it opened no tab and opens none now.
     if (outcome.status === "superseded" || outcome.status === "declined") return;
-    ResultPanel.present(context, host, { state: "settled", outcome, concepts: host.concepts(), jsonOpen: false });
+    ResultPanel.present(
+      context,
+      host,
+      { state: "settled", outcome, concepts: host.concepts(), jsonOpen: false, canSave: values !== undefined },
+      values,
+    );
   }
 
-  private static present(context: vscode.ExtensionContext, host: RunPanelHost, shown: ResultInput): void {
+  private static present(
+    context: vscode.ExtensionContext,
+    host: RunPanelHost,
+    shown: ResultInput,
+    values?: Record<string, unknown>,
+  ): void {
     const existing = ResultPanel.current;
     if (existing !== undefined && !existing.disposed) {
       if (shown.state === "running") existing.run += 1;
       existing.shown = shown;
+      existing.values = values;
       existing.jsonOpen = false;
       existing.panel.title = titleOf(shown);
       existing.render();
@@ -324,6 +346,7 @@ export class ResultPanel {
       return;
     }
     ResultPanel.current = new ResultPanel(context, host, shown);
+    ResultPanel.current.values = values;
   }
 
   private constructor(
@@ -375,6 +398,9 @@ export class ResultPanel {
       case RESULT_ACTS.json:
         this.jsonOpen = message.open === true;
         return;
+      case RESULT_ACTS.saveAs:
+        void this.saveAs();
+        return;
       case RESULT_ACTS.copyErrorId:
         if (this.shown.state === "settled" && this.shown.outcome.status === "error") {
           const id = this.shown.outcome.errorId;
@@ -389,6 +415,25 @@ export class ResultPanel {
       case RESULT_ACTS.selectCluster:
         void vscode.commands.executeCommand("memql.clusters.select");
         return;
+    }
+  }
+
+  /** Saves the shown run, with the values it ran with, under a name asked for now. */
+  private async saveAs(): Promise<void> {
+    if (this.shown.state !== "settled" || this.shown.outcome.status !== "ok" || this.values === undefined) return;
+    const { target } = this.shown.outcome;
+    const values = this.values;
+    const name = (await vscode.window.showInputBox({ prompt: "Name this saved run", placeHolder: target.name }))?.trim();
+    if (name === undefined || name === "") return;
+    try {
+      await this.host.saveConfig(target, name, values);
+    } catch (err) {
+      void vscode.window.showErrorMessage(`MemQL: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    const open = "Open runs.json";
+    if ((await vscode.window.showInformationMessage(`MemQL: Saved "${name}".`, open)) === open) {
+      await vscode.commands.executeCommand("memql.runs.open");
     }
   }
 

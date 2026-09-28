@@ -212,6 +212,7 @@ export function runFormParts(input: RunFormInput): RegionParts {
 /** The messages the result page posts. */
 export const RESULT_ACTS = {
   openRow: "openRow",
+  saveAs: "saveAs",
   json: "json",
   copyErrorId: "copyErrorId",
   showProblems: "showProblems",
@@ -222,7 +223,14 @@ export type ResultInput =
   | { state: "running"; target: Pick<RunTarget, "kind" | "name"> }
   // Never superseded (a newer run paints instead) and never declined (a run
   // that was not confirmed never started, and its form says so).
-  | { state: "settled"; outcome: Exclude<RunOutcome, { status: "superseded" | "declined" }>; concepts: ReadonlyMap<string, ConceptLike>; jsonOpen: boolean };
+  | {
+      state: "settled";
+      outcome: Exclude<RunOutcome, { status: "superseded" | "declined" }>;
+      concepts: ReadonlyMap<string, ConceptLike>;
+      jsonOpen: boolean;
+      /** The values it ran with are known, so the run can be saved from here. */
+      canSave?: boolean;
+    };
 
 function rowsBody(rows: readonly Record<string, unknown>[], concepts: ReadonlyMap<string, ConceptLike>): string {
   if (rows.length === 0) return emptyState({ line: "No rows." });
@@ -285,9 +293,14 @@ export function resultParts(input: ResultInput): RegionParts {
   switch (o.status) {
     case "ok": {
       const provenance = resultBannerFor({ ...o, kind: o.target.kind });
+      // SAVE WHAT JUST WORKED. A record act (it writes runs.json, nothing on
+      // the cluster), so it sits in the head. It is also the one way to save a
+      // construct that takes no arguments: its lens runs it straight away,
+      // with no form to save from.
+      const asideActs: Act[] = input.canSave === true ? [{ act: RESULT_ACTS.saveAs, label: "Save as..." }] : [];
       if (o.toolContent !== undefined) {
         return {
-          head: head({ title, meta: provenance }),
+          head: head({ title, meta: provenance, asideActs }),
           body: toolBody(o.toolContent) + jsonDisclosure(o.toolContent, input.jsonOpen),
           actions: "",
         };
@@ -295,7 +308,7 @@ export function resultParts(input: ResultInput): RegionParts {
       return {
         // The count only when there are rows: "0 rows" over "No rows." is
         // the same fact twice.
-        head: head({ title, meta: o.rows.length === 0 ? provenance : `${countText(o.rows.length)} · ${provenance}` }),
+        head: head({ title, meta: o.rows.length === 0 ? provenance : `${countText(o.rows.length)} · ${provenance}`, asideActs }),
         body: rowsBody(o.rows, input.concepts) + (o.rows.length === 0 ? "" : jsonDisclosure(o.raw, input.jsonOpen)),
         actions: "",
       };

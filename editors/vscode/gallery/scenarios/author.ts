@@ -301,6 +301,7 @@ const resultScenarios: Scenario[] = [
       state: "settled",
       concepts: CONCEPTS,
       jsonOpen: false,
+      canSave: true,
       outcome: {
         status: "ok",
         target: TARGET,
@@ -319,6 +320,7 @@ const resultScenarios: Scenario[] = [
       state: "settled",
       concepts: CONCEPTS,
       jsonOpen: false,
+      canSave: true,
       outcome: { status: "ok", target: TARGET, rows: [], raw: [], ranDeployedDefinition: true, injected: false },
     }),
   ),

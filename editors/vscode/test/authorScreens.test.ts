@@ -278,6 +278,25 @@ test("a result says what ran in its meta line, and a tool says its edits don't a
   });
   assert.doesNotMatch(none.head, /0 rows/);
   assert.match(words(none.body), /No rows\./);
+});
+
+test("a run that worked can be saved from its result, when the values it ran with are known", () => {
+  // A construct with no arguments has no form (its lens runs it at once), so
+  // the Result is where it is saved; "Run with..." used to be the only way.
+  const ok = { status: "ok" as const, target: TARGET, rows: [], raw: [], ranDeployedDefinition: false, injected: true };
+  const saveable = resultParts({ state: "settled", concepts: new Map(), jsonOpen: false, outcome: ok, canSave: true });
+  assert.match(saveable.head, /data-act="saveAs"/);
+  assert.doesNotMatch(saveable.actions, /saveAs/, "a record act in the action bar");
+  const unknownValues = resultParts({ state: "settled", concepts: new Map(), jsonOpen: false, outcome: ok });
+  assert.doesNotMatch(unknownValues.head, /saveAs/);
+  const failed = resultParts({
+    state: "settled",
+    concepts: new Map(),
+    jsonOpen: false,
+    canSave: true,
+    outcome: { status: "error", target: TARGET, phase: "invoke", message: "boom", errorId: "" },
+  });
+  assert.doesNotMatch(all(failed), /saveAs/, "a failed run offered to be saved");
   const tool = resultParts({
     state: "settled",
     concepts: new Map(),
