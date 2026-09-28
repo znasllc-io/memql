@@ -247,6 +247,11 @@ function jsonDisclosure(value: unknown, open: boolean): string {
   });
 }
 
+function fileName(filePath: string): string {
+  const parts = filePath.split(/[\\/]/);
+  return parts[parts.length - 1] ?? filePath;
+}
+
 function countText(n: number): string {
   return `${n} row${n === 1 ? "" : "s"}`;
 }
@@ -282,7 +287,11 @@ export function resultParts(input: ResultInput): RegionParts {
         .map(
           (d) =>
             `<li>${escapeHtml(d.message)}${
-              d.fileLevel ? "" : ` <span class="mq-head-meta">${escapeHtml(`${d.path}:${d.start.line + 1}:${d.start.character + 1}`)}</span>`
+              // The file's NAME and the position: the path is absolute, and the
+              // Problems panel (one click away) carries all of it.
+              d.fileLevel
+                ? ""
+                : ` <span class="mq-head-meta">${escapeHtml(`${fileName(d.path)}:${d.start.line + 1}:${d.start.character + 1}`)}</span>`
             }</li>`,
         )
         .join("");

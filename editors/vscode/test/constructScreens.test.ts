@@ -123,9 +123,11 @@ test("say it once: kind and namespace in the meta, no placeholder sentences, det
   assert.equal(constructMeta(construct()), "Query · cognition · Built in");
   // Promoted says where it lives in the bar, not the meta.
   assert.equal(constructMeta(construct({ origin: "promoted", namespace: "" })), "Query");
-  const html = page({ construct: construct({ sourceHash: "abc123" }) });
+  const html = page({ construct: construct({ sourceHash: "abc123", runnable: true, runnableKind: "query" }) });
   assert.doesNotMatch(html, /No description\.|takes no arguments|namespace.*none/);
   assert.match(html, /Arguments<span class="mq-subhead-meta">None/);
+  // A kind that never takes arguments has no Arguments section at all.
+  assert.doesNotMatch(page({ construct: construct({ kind: "concept" }) }), /Arguments/);
   // The file path and the hash are details: rendered, and closed.
   assert.match(html, /aria-expanded="false"[^>]*>.*Details/);
   assert.match(html, /abc123/);

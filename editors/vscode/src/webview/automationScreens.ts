@@ -399,7 +399,10 @@ export function traceParts(input: TraceInput): RegionParts {
   const headHtml = head({ title: input.name, meta: traceMeta(trace) });
   let body = "";
   // The ENGINE's sentence, gated on its own flag -- the authority on what ran.
-  const banner = trace.accepted === undefined ? "" : definitionBanner(trace.accepted);
+  // Said once the run has run: not over a refusal (nothing ran), and not in
+  // the past tense while it is still running.
+  const ran = trace.status === "completed" || trace.status === "failed" || trace.status === "cancelled";
+  const banner = trace.accepted === undefined || !ran ? "" : definitionBanner(trace.accepted);
   if (banner !== "") body += `<p class="mq-empty-line trace-note">${escapeHtml(banner)}</p>`;
   body += outcomeHtml(trace);
   body += stepsHtml(trace);

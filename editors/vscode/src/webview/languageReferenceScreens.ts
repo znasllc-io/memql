@@ -336,6 +336,7 @@ export const LANGUAGE_REFERENCE_STYLES = `
                background: var(--memql-bg); }
   .lr-search .mq-input { max-width: 34rem; }
   .lr-note { margin: -8px 0 12px; }
+  .lr-scope + .lr-scope { margin-top: 32px; }
   .lr-group[hidden], .lr-production[hidden], .lr-entry[hidden] { display: none; }
   .lr-group-head { margin: 16px 0 6px; font-size: 1em; font-weight: 500; }
   .lr-production { margin: 0 0 4px; padding: 5px 8px; max-width: 100%; box-sizing: border-box;

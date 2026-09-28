@@ -156,7 +156,10 @@ function argumentsHtml(construct: CatalogConstruct): string {
   // An automation's inputs are its trigger event, which its own form builds;
   // it declares no arguments, and saying "None" about it would mislead.
   if (construct.runnableKind === "automation") return "";
-  if (construct.args.length === 0) return subhead("Arguments", "None");
+  // "None" is news only about something that could take arguments: a query
+  // that takes none. A concept or a spec never does, and a section saying so
+  // would be a line about nothing.
+  if (construct.args.length === 0) return construct.runnableKind === undefined ? "" : subhead("Arguments", "None");
   const items = construct.args
     .map((arg) => {
       const flags: string[] = [arg.type];
@@ -234,6 +237,7 @@ export const CONSTRUCT_PAGE_STYLES = `
   .construct-arg-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; }
   .construct-arg-name { font-weight: 600; padding: 0; background: none; }
   .construct-arg .mq-field-hint { margin-top: 2px; }
-  .construct-source { margin: 0; max-width: 100%; overflow-x: auto; }
+  .construct-source { margin: 0; max-width: 100%; overflow-x: auto; background: var(--memql-raised);
+                      border-radius: var(--memql-radius); }
   .construct-source > code { display: block; padding: 10px 12px; white-space: pre; }
 `;

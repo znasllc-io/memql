@@ -218,7 +218,7 @@ import {
 import { DEPLOYMENTS_INSTANCE_KEY } from './state/deploymentsCatalog.js';
 import { DeploymentPanel, type DeploymentPanelDeps } from './webview/deploymentPanel.js';
 import { SITE_CONCEPT, consoleConceptUrl, consoleTarget } from './clusters/consoleUrl.js';
-import { catalogAutomationTarget, catalogRunTarget, isCatalogUri } from './constructs/catalogTarget.js';
+import { catalogAutomationTarget, catalogRunTarget, isCatalogUri, savedRunCatalogTarget } from './constructs/catalogTarget.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
 import { IdentityAdminClient } from '@znasllc-io/memql-sdk-core/identityadmin';
@@ -4137,8 +4137,8 @@ async function targetForConfig(
   workspaceRoot: string | undefined
 ): Promise<RunTarget | undefined> {
   if (config.file === undefined) {
-    const construct = await catalogConstructForConfig(config);
-    return construct === undefined ? undefined : catalogRunTarget(construct);
+    const found = await catalogTargetForConfig(config);
+    return found !== undefined && 'run' in found ? found.run : undefined;
   }
   const found = await constructForConfig(config, workspaceRoot);
   if (found === undefined) return undefined;
@@ -4163,8 +4163,8 @@ async function automationTargetForConfig(
   workspaceRoot: string | undefined
 ): Promise<AutomationTarget | undefined> {
   if (config.file === undefined) {
-    const construct = await catalogConstructForConfig(config);
-    return construct === undefined ? undefined : catalogAutomationTarget(construct);
+    const found = await catalogTargetForConfig(config);
+    return found !== undefined && 'automation' in found ? found.automation : undefined;
   }
   const found = await constructForConfig(config, workspaceRoot);
   if (found === undefined) return undefined;
@@ -4173,9 +4173,12 @@ async function automationTargetForConfig(
   return target;
 }
 
-// catalogConstructForConfig finds a saved run's construct in the connected
-// cluster's catalog -- the resolution for a saved run with no file.
-async function catalogConstructForConfig(config: RunConfig): Promise<CatalogConstruct | undefined> {
+// catalogTargetForConfig resolves a saved run with no file against the
+// connected cluster's catalog (constructs/catalogTarget.ts's
+// savedRunCatalogTarget), saying why when it cannot.
+async function catalogTargetForConfig(
+  config: RunConfig
+): Promise<ReturnType<typeof savedRunCatalogTarget>> {
   const dispatcher = connections?.dispatcher;
   if (dispatcher === undefined) {
     window.showWarningMessage(`MemQL: ${NOT_CONNECTED_REFUSAL}`);
@@ -4189,12 +4192,11 @@ async function catalogConstructForConfig(config: RunConfig): Promise<CatalogCons
     void offerDetails('error', connectionOutput, "MemQL: Couldn't read the cluster's constructs.");
     return undefined;
   }
-  const found = listed.constructs.find((c) => c.kind === config.kind && c.name === config.construct);
+  const found = savedRunCatalogTarget(config, listed.constructs.map(toCatalogConstruct));
   if (found === undefined) {
-    window.showErrorMessage(`MemQL: This cluster has no ${config.kind} "${config.construct}".`);
-    return undefined;
+    window.showErrorMessage(`MemQL: This cluster has no ${config.kind} "${config.construct}" to run.`);
   }
-  return toCatalogConstruct(found);
+  return found;
 }
 
 // constructForConfig is the shared lookup for a saved run that names a file:

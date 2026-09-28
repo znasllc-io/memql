@@ -146,3 +146,28 @@ export function catalogAutomationTarget(construct: CatalogConstruct): Automation
   if (construct.trigger !== undefined) target.trigger = { ...construct.trigger };
   return target;
 }
+
+/**
+ * The construct a SAVED RUN with no file names, found in a cluster's catalog.
+ *
+ * A saved run records a file when it was saved from one; one saved from a
+ * construct the catalog described (the construct page, the Constructs view)
+ * has no file and never had one. Such a run is replayed against the connected
+ * cluster's catalog -- the definition the cluster has loaded, which is exactly
+ * what it ran when it was saved. Before this, it refused with a sentence about
+ * a missing "file" the extension itself had chosen not to write.
+ *
+ * Undefined when the cluster has no construct of that kind and name, or when
+ * what it has cannot be run from here.
+ */
+export function savedRunCatalogTarget(
+  saved: { kind: string; construct: string },
+  catalog: readonly CatalogConstruct[],
+): { run: RunTarget } | { automation: AutomationTarget } | undefined {
+  const found = catalog.find((c) => c.kind === saved.kind && c.name === saved.construct);
+  if (found === undefined) return undefined;
+  const automation = catalogAutomationTarget(found);
+  if (automation !== undefined) return { automation };
+  const run = catalogRunTarget(found);
+  return run === undefined ? undefined : { run };
+}

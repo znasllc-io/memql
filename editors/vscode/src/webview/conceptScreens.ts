@@ -137,7 +137,10 @@ function listHtml(input: ConceptPageInput): string {
 function detailHtml(input: ConceptPageInput): string {
   switch (input.detail.state) {
     case "none":
-      return `<p class="mq-empty-line concept-hint">Select a row to see all of it.</p>`;
+      // Said only once there are rows to select.
+      return input.settled && input.rows.length > 0
+        ? `<p class="mq-empty-line concept-hint">Select a row to see all of it.</p>`
+        : "";
     case "loading":
       return skeleton({ shape: "facts", rows: 5, label: "Loading row" });
     case "missing":
@@ -184,7 +187,7 @@ export function conceptPageParts(input: ConceptPageInput): RegionParts {
 
 /** Panel-local layout: two panes that each scroll, stacked when narrow. */
 export const CONCEPT_PAGE_STYLES = `${ROW_LIST_STYLES}
-  .concept-panes { display: grid; grid-template-columns: minmax(200px, 36%) minmax(0, 1fr);
+  .concept-panes { display: grid; grid-template-columns: minmax(260px, 42%) minmax(0, 1fr);
                    column-gap: 24px; align-items: start; }
   .concept-pane { min-width: 0; max-height: calc(100vh - 120px); overflow: auto; }
   .concept-more { padding: 6px 0 2px; }
