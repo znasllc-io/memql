@@ -167,14 +167,26 @@ Release asset; the site replaces its set with the newest one.
    attaches `docs-<X.Y.Z>.tgz` to the release. `workflow_dispatch` rebuilds
    one release's set, by either tag spelling; a rebuild picks up no later
    docs fix.
-6. **Site.** The instance repository that hosts memql.io runs a docs sync
-   that replaces its docs set with the newest release's asset: hourly today,
-   and also on an `engine-docs-released` repository dispatch from the publish
-   workflow once the token for it is in place. The site renders the
-   manifest's version in the docs chrome and as
-   `<meta name="memql-docs-version" content="X.Y.Z">` on every docs page, and
+6. **Site.** This step belongs to the instance repository that hosts
+   memql.io; what follows is its side of the contract. Its docs sync
+   (memql#5716) replaces the instance's docs set with the newest release's
+   asset, on a schedule and, once the token for it is in place, on an
+   `engine-docs-released` repository dispatch from the publish workflow.
+   Its site renders the manifest's version in the docs chrome and as
+   `<meta name="memql-docs-version" content="X.Y.Z">` on every docs page
+   (memql#5715), and follows the absolute routes the bundle's links carry
+   (memql#5718).
    `scripts/docs/current-check.sh` fails weekly when the newest release tag
    has no asset or the site's version differs.
+
+   **Merge order.** A contract v2 page links other pages by absolute route
+   (`/docs/<slug>/`). The site's reader before memql#5718 resolves only
+   relative `.md` links and renders every other in-docs link as plain text,
+   so the first release built with contract v2 would unlink every
+   cross-page link on memql.io. memql#5718 (or, at the least, a reader that
+   follows `/docs/` routes) merges before the first engine release cut
+   after contract v2; the transitional `nav` below keeps only the sidebar
+   working.
 
 ### The manifest (schema 2)
 
@@ -192,7 +204,7 @@ navigation, meta tags and sitemap from it.
 | `pageCount` | The number of published pages. |
 | `areas` | `{id, title, order}` for each area with a page, from the one area table in `cmd/docs-gen/bundle`. |
 | `pages` | One entry per page, in sidebar order: `path`, `slug`, `url`, `title`, `area`, `order` (within its area), `description`, `descriptionDerived`, `exposure`, `sinceVersion`, `lastUpdated`, `generated`. |
-| `nav` | **Transitional**: schema 1's `{area, pages: [{path, title, sinceVersion}]}` tree, derived from `pages`, kept because the site's current reader builds its sidebar from it. It goes when the site reads `pages` (docs-current PR 6, memql#5718). |
+| `nav` | **Transitional**: schema 1's `{area, pages: [{path, title, sinceVersion}]}` tree, derived from `pages`, kept because the site's current reader builds its sidebar from it. It goes when the site reads `pages` (docs-current PR 6, memql#5718). It keeps the sidebar only: in-page links need the reader that follows routes (§5, step 6, merge order). |
 | `positioning`, `nodeTypes`, `providers`, `apps`, `diagrams` | Reserved, `null` until the change that fills each lands. `null` means "not produced by this release", never "empty". |
 
 **Docs version == engine release.** No separate docs version line.

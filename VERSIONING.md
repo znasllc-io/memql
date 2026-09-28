@@ -478,10 +478,11 @@ long as the page exists. The full pipeline is
   that differs from `VERSION`, which equals the tag (above), so the set
   carries the version of the release it was built from, and nothing
   else.
-- **The site replaces its set.** The instance repository that hosts
-  memql.io syncs the newest release's asset and replaces its docs with
-  it; it keeps no older set. Every docs page carries
-  `<meta name="memql-docs-version" content="X.Y.Z">`, and
+- **The site replaces its set.** That is the instance repository's side
+  of the contract: the instance that hosts memql.io replaces its docs
+  with the newest release's asset and keeps no older set (its docs sync,
+  memql#5716), and its site marks every docs page with
+  `<meta name="memql-docs-version" content="X.Y.Z">` (memql#5715).
   `scripts/docs/current-check.sh` fails weekly when the newest release
   tag has no asset or the site serves a different version.
 - **Generated reference** (today, the concept catalog) is rendered from
