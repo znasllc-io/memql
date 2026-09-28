@@ -2520,6 +2520,15 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // composed exactly as a finished install composes it (clusters/
     // reconnect.ts), then selected and connected like any row click.
     commands.registerCommand('memql.clusters.connectLocal', async () => {
+      // Already in the list (the palette can reach this with a local row
+      // present): use that entry rather than composing a second one over an
+      // entry the person may have edited by hand.
+      const registry = await readClustersFileSafe(clustersPath);
+      const listed = registry.ok ? registry.file.clusters.find((c) => c.local === true) : undefined;
+      if (listed !== undefined) {
+        await commands.executeCommand('memql.clusters.select', { cluster: listed, selected: registry.ok && registry.file.selectedCluster === listed.name });
+        return;
+      }
       const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
       const plan = planLocalReconnect(receipt);
       const result = await completeInstallHandoff(
