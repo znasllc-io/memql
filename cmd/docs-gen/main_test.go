@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
@@ -27,6 +29,7 @@ func TestRenderConceptCatalog(t *testing.T) {
 
 	for _, want := range []string{
 		"audience: public",
+		"area: reference",
 		"# Concept Catalog",
 		"| Field | Type | Required | Description |",
 	} {
@@ -53,5 +56,55 @@ func TestTypeString(t *testing.T) {
 		if got := typeString(c.in); got != c.want {
 			t.Errorf("typeString(%v) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// TestRunDispatchesSubcommands: an unknown or missing subcommand is a usage
+// error (exit 2), never a silent fall-through to the catalog.
+func TestRunDispatchesSubcommands(t *testing.T) {
+	for _, args := range [][]string{nil, {"nope"}, {"-out", "x"}} {
+		var out, errOut bytes.Buffer
+		if code := run(args, &out, &errOut); code != exitUsage {
+			t.Errorf("run(%q) = %d, want %d", args, code, exitUsage)
+		}
+		if !strings.Contains(errOut.String(), "usage: docs-gen") {
+			t.Errorf("run(%q) printed no usage: %s", args, errOut.String())
+		}
+	}
+}
+
+// TestBundleRefusesBeforeLoadingAnything: a missing or malformed version is
+// refused as a usage error, with the one JSON line the wrapper reads absent.
+func TestBundleRefusesBeforeLoadingAnything(t *testing.T) {
+	for _, args := range [][]string{{}, {"-version", "1.2.3", "extra"}, {"-bogus"}, {"-version", "v1.2.3"}} {
+		var out, errOut bytes.Buffer
+		if code := run(append([]string{"bundle"}, args...), &out, &errOut); code != exitUsage {
+			t.Errorf("bundle %q = %d, want %d (%s)", args, code, exitUsage, errOut.String())
+		}
+		if out.Len() != 0 {
+			t.Errorf("bundle %q wrote to stdout: %s", args, out.String())
+		}
+	}
+}
+
+// TestBundleCheckOverTheRealTree runs the subcommand as the release lane does
+// in its check step: against this repository, allowlist and all, writing
+// nothing, and printing one JSON summary line.
+func TestBundleCheckOverTheRealTree(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"bundle", "-version", "1.2.3", "-root", "../..", "-check"}, &out, &errOut)
+	if code != exitOK {
+		t.Fatalf("bundle -check = %d\n%s", code, errOut.String())
+	}
+	var summary struct {
+		Check      bool  `json:"check"`
+		Pages      int   `json:"pages"`
+		Violations []any `json:"violations"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &summary); err != nil {
+		t.Fatalf("stdout is not one JSON line: %v\n%s", err, out.String())
+	}
+	if !summary.Check || summary.Pages == 0 || len(summary.Violations) != 0 {
+		t.Errorf("summary = %+v", summary)
 	}
 }
