@@ -5,8 +5,15 @@ import type { ReactNode } from "react";
 
 import type { DoorId, InferenceReading } from "../../src/apps/settings/routingFacts";
 
-// Settings -> Doors (epic memql#4984; rebuilt by epic memql#5088; re-shaped
-// into a list by epic memql#5153).
+// Settings -> Vendors (epic memql#4984; rebuilt by epic memql#5088; re-shaped
+// into a list by epic memql#5153; renamed from Doors, and narrowed to the two
+// vendors, by the routing redesign of 2026-09-28).
+//
+// WHAT THE REDESIGN MOVED: the fleet and app rows were never credentials, and
+// which source a call tries is a ROUTE's question, so both went to Fleet >
+// Routing, where the tray shows every source's readiness and offers Add a
+// machine where there is none (test/fleet/routingComposer.test.tsx). Their
+// pure readings stay asserted here, below, because Levels still reads them.
 //
 // THIS SUITE IS THE RECORD OF WHAT THE SCREEN OWES, and epic memql#5153's D5
 // is "nothing lost" -- so when "AI providers" became "Doors" every assertion
@@ -97,13 +104,13 @@ const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
 const { LocalDesktopStore } = await import("../../src/system/store");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
 const { roleOpens } = await import("../seededAccess");
-const { DOORS_SECTION_RESOURCE, DOOR_WORDS } = await import(
-  "../../src/apps/settings/DoorsSection"
+const { VENDORS_SECTION_RESOURCE, VENDOR_WORDS } = await import(
+  "../../src/apps/settings/VendorsSection"
 );
 const { doorFor, localityOf, missingFederationFields, summarize } = await import(
   "../../src/apps/settings/providerFacts"
 );
-const { DOOR_COST, DOOR_NAMES, DOOR_ORDER, UNREAD_INFERENCE, doorReadings } = await import(
+const { DOOR_ORDER, UNREAD_INFERENCE, doorReadings } = await import(
   "../../src/apps/settings/routingFacts"
 );
 
@@ -157,15 +164,15 @@ async function renderDoors(role = "owner", domain = "example.com") {
 }
 
 /**
- * One door's row in the try-order list.
+ * One vendor's row.
  *
- * BY ID, NOT BY NAME. `data-os-doorid` is the engine's own door vocabulary and
- * is what the row is keyed on; reading a row by its rendered NAME would make
+ * BY ID, NOT BY NAME. `data-os-vendorid` is the engine's own vocabulary and is
+ * what the row is keyed on; reading a row by its rendered NAME would make
  * every assertion below a test of the copy as well as of the state.
  */
 function doorRow(id: DoorId): HTMLElement {
-  const row = document.querySelector<HTMLElement>(`[data-os-doorid="${id}"]`);
-  if (row === null) throw new Error(`no door row rendered for ${id}`);
+  const row = document.querySelector<HTMLElement>(`[data-os-vendorid="${id}"]`);
+  if (row === null) throw new Error(`no vendor row rendered for ${id}`);
   return row;
 }
 
@@ -176,19 +183,19 @@ function doorWordIn(id: DoorId): string {
 
 /** The state that row is in. */
 function doorStateIn(id: DoorId): string {
-  return doorRow(id).getAttribute("data-os-door") ?? "";
+  return doorRow(id).getAttribute("data-os-vendor-state") ?? "";
 }
 
-/** The doors as a reader takes them: top to bottom. */
+/** The vendors as a reader takes them: top to bottom. */
 function doorOrder(): string[] {
-  return [...document.querySelectorAll("[data-os-doorid]")].map(
-    (el) => el.getAttribute("data-os-doorid") ?? "",
+  return [...document.querySelectorAll("[data-os-vendorid]")].map(
+    (el) => el.getAttribute("data-os-vendorid") ?? "",
   );
 }
 
 /** ...and the names beside them, which is what a person actually reads. */
 function doorNamesInOrder(): string[] {
-  return [...document.querySelectorAll("[data-os-doorid] .os-row-name")].map((el) => el.textContent ?? "");
+  return [...document.querySelectorAll("[data-os-vendorid] .os-row-name")].map((el) => el.textContent ?? "");
 }
 
 /** Press a vendor row's act, which is what opens its panel. */
@@ -543,7 +550,7 @@ describe("which ids a draft is still missing", () => {
   });
 });
 
-describe("Settings -> Doors: there is no key", () => {
+describe("Settings -> Vendors: there is no key", () => {
   it("offers no field, button or label that would take one", async () => {
     const { container } = await renderDoors();
     expect(screen.queryByLabelText(/api key/i)).toBeNull();
@@ -582,81 +589,57 @@ describe("Settings -> Doors: there is no key", () => {
     expect(container.textContent).not.toMatch(/publishes no federation/i);
     expect(container.textContent).not.toMatch(/paste[^.]{0,20}key/i);
     // Both halves of the position, said standing on the page rather than
-    // behind a row: federation is the route for a vendor, and there is no key
-    // anywhere. The list's first draft dropped the first clause.
-    expect(container.textContent).toMatch(/federation is the only door/i);
+    // behind a row: the ids come from the vendor's own console, and there is
+    // no key anywhere.
+    expect(container.textContent).toMatch(/vendor's own console/i);
     expect(container.textContent).toMatch(/no API key to enter/i);
   });
 });
 
-describe("Settings -> Doors: the try order is the product", () => {
-  it("renders the four doors in the order a call tries them", async () => {
+describe("Settings -> Vendors: the two vendors, and where routing went", () => {
+  it("lists the two vendors, and nothing that is not a credential", async () => {
     await renderDoors();
-    expect(doorOrder()).toEqual(["fleet", "app", "anthropic", "openai"]);
-    // The same list, spelled once, is what every screen in this epic reads.
-    expect(doorOrder()).toEqual([...DOOR_ORDER]);
-    // And as a person reads it, which is the assertion that fails when a name
-    // and its row come apart.
-    expect(doorNamesInOrder()).toEqual([
-      DOOR_NAMES.fleet,
-      DOOR_NAMES.app,
-      DOOR_NAMES.anthropic,
-      DOOR_NAMES.openai,
-    ]);
+    expect(doorOrder()).toEqual(["anthropic", "openai"]);
+    expect(doorNamesInOrder()).toEqual(["Anthropic", "OpenAI"]);
+    // The fleet and the apps are sources, not credentials: they are in Fleet >
+    // Routing now, where their readiness is drawn.
+    expect(document.querySelector('[data-os-vendorid="fleet"]')).toBeNull();
+    expect(document.querySelector('[data-os-vendorid="app"]')).toBeNull();
+    expect(DOOR_ORDER.slice(2)).toEqual(["anthropic", "openai"]);
   });
 
   it("does not re-order itself on a local cluster", async () => {
-    // THE RE-POINTED ONE. "Puts the fleet first, because on a local cluster it
-    // is the only door" protected the fleet door's prominence where it is the
-    // only door; the list makes it first for everyone, permanently, so the
-    // assertion becomes that the order does not move. A screen that re-orders
-    // to flatter the cluster's current state teaches that the metered door is
-    // sometimes the recommendation, which is the opposite of the product.
     const local = await renderDoors("owner", "memql.localhost");
-    expect(doorOrder()).toEqual(["fleet", "app", "anthropic", "openai"]);
+    expect(doorOrder()).toEqual(["anthropic", "openai"]);
     local.unmount();
-    const cloud = await renderDoors("owner", "example.com");
-    expect(doorOrder()).toEqual(["fleet", "app", "anthropic", "openai"]);
-    cloud.unmount();
-    // ...and while the domain is still unread, which is the state every
-    // render passes through.
     await renderDoors("owner", "");
-    expect(doorOrder()).toEqual(["fleet", "app", "anthropic", "openai"]);
+    expect(doorOrder()).toEqual(["anthropic", "openai"]);
   });
 
-  it("states what every door costs, and says which two cost nothing", async () => {
-    // THE COST LINE IS THE ARGUMENT, not decoration: it is the only place a
-    // person learns, at the moment they are deciding, that the first two doors
-    // spend nothing and the last two bill.
+  it("says each vendor bills per call", async () => {
     await renderDoors();
-    for (const id of DOOR_ORDER) {
-      const cost = doorRow(id).querySelector(".os-record-summary > span:first-child")?.textContent ?? "";
-      expect(cost, id).toBe(DOOR_COST[id]);
-      expect(cost, id).not.toBe("");
-    }
-    expect(doorRow("fleet").textContent).toMatch(/Nothing is billed/i);
-    expect(doorRow("app").textContent).toMatch(/Nothing is billed here/i);
     expect(doorRow("anthropic").textContent).toMatch(/Billed per call/i);
     expect(doorRow("openai").textContent).toMatch(/Billed per call/i);
   });
+
+  it("says once, quietly, that routing is in Fleet, and takes a person there", async () => {
+    await renderDoors();
+    expect(screen.getAllByRole("button", { name: "Routing is in Fleet" })).toHaveLength(1);
+  });
 });
 
-describe("Settings -> Doors: the four doors", () => {
-  it("renders a federated vendor, an unset one and the fleet, each distinctly", async () => {
+describe("Settings -> Vendors: each vendor's state", () => {
+  it("renders a federated vendor and an unset one, each distinctly", async () => {
     await renderDoors();
-    expect(doorWordIn("openai")).toBe(DOOR_WORDS.open);
+    expect(doorWordIn("openai")).toBe(VENDOR_WORDS.open);
     expect(doorStateIn("openai")).toBe("open");
-    expect(doorWordIn("anthropic")).toBe(DOOR_WORDS.unset);
-    // RE-POINTED VALUE. The door vocabulary the list reads spells the shut
-    // state `shut`; the WORD a person sees is unchanged, which is the half
-    // this assertion was about.
+    expect(doorWordIn("anthropic")).toBe(VENDOR_WORDS.unset);
     expect(doorStateIn("anthropic")).toBe("shut");
-    expect(doorStateIn("fleet")).toBe("open");
     // Distinct is the whole requirement, and the word carries it in greyscale.
     expect(doorWordIn("openai")).not.toBe(doorWordIn("anthropic"));
   });
 
-  it("styles an unset door as normal, not as a failure", async () => {
+  it("styles an unset vendor as normal, not as a failure", async () => {
     h.state.providers = [];
     await renderDoors();
     const anthropic = doorRow("anthropic");
@@ -675,7 +658,7 @@ describe("Settings -> Doors: the four doors", () => {
     expect(within(panel).queryByRole("alert")).toBeNull();
   });
 
-  it("says what saving would do to a door that is already open", async () => {
+  it("says what saving would do to a vendor that is already set up", async () => {
     // An empty form under "Open" reads as unfinished. Rotating onto a
     // different service account is a real act and must stay reachable -- it
     // is just not the act the panel is about, so the caption says so.
@@ -723,7 +706,7 @@ describe("Settings -> Doors: the four doors", () => {
     expect(anthropic.textContent).not.toMatch(/Still needed/);
   });
 
-  it("renders a half-configured door as the actionable one, in the engine's own words", async () => {
+  it("renders a half-configured vendor as the actionable one, in the engine's own words", async () => {
     h.state.providers = [
       {
         name: "streamClaudeSonnet",
@@ -736,7 +719,7 @@ describe("Settings -> Doors: the four doors", () => {
     ];
     await renderDoors();
     expect(doorStateIn("anthropic")).toBe("half");
-    expect(doorWordIn("anthropic")).toBe(DOOR_WORDS.half);
+    expect(doorWordIn("anthropic")).toBe(VENDOR_WORDS.half);
     const anthropic = doorRow("anthropic");
     // The consequence, said plainly ON THE ROW -- this is the state that takes
     // the fleet down at its next restart, hours after the save that caused it,
@@ -748,7 +731,7 @@ describe("Settings -> Doors: the four doors", () => {
   });
 });
 
-describe("Settings -> Doors: a vendor's form opens behind its row", () => {
+describe("Settings -> Vendors: a vendor's form opens behind its row", () => {
   it("opens on the row's act and closes on the same one", async () => {
     h.state.providers = [];
     await renderDoors();
@@ -779,7 +762,7 @@ describe("Settings -> Doors: a vendor's form opens behind its row", () => {
   });
 });
 
-describe("Settings -> Doors: applying federation", () => {
+describe("Settings -> Vendors: saving the ids", () => {
   it("saves Anthropic's ids under its own vendor, without the optional workspace", async () => {
     await renderDoors();
     const anthropic = await openVendorPanel("anthropic", "Anthropic");
@@ -790,7 +773,7 @@ describe("Settings -> Doors: applying federation", () => {
     ] as const) {
       fireEvent.change(within(anthropic).getByLabelText(label), { target: { value } });
     }
-    fireEvent.click(within(anthropic).getByRole("button", { name: "Save Anthropic federation" }));
+    fireEvent.click(within(anthropic).getByRole("button", { name: "Save Anthropic ids" }));
     await settle();
     expect(h.state.federationCalls).toEqual([
       { vendor: "anthropic", ruleId: "fdrl_1", organizationId: "org-1", serviceAccountId: "sa-1" },
@@ -817,7 +800,7 @@ describe("Settings -> Doors: applying federation", () => {
     fireEvent.change(within(openai).getByLabelText("Service account id"), {
       target: { value: "svac_1" },
     });
-    fireEvent.click(within(openai).getByRole("button", { name: "Save OpenAI federation" }));
+    fireEvent.click(within(openai).getByRole("button", { name: "Save OpenAI ids" }));
     await settle();
     expect(h.state.federationCalls).toEqual([
       { vendor: "openai", identityProviderId: "idp_1", serviceAccountId: "svac_1" },
@@ -835,7 +818,7 @@ describe("Settings -> Doors: applying federation", () => {
     // so accepting one here would take the fleet down at its next restart.
     expect(
       within(openai)
-        .getByRole("button", { name: "Save OpenAI federation" })
+        .getByRole("button", { name: "Save OpenAI ids" })
         .hasAttribute("disabled"),
     ).toBe(true);
     expect(openai.textContent).toMatch(/Service account id/);
@@ -843,14 +826,14 @@ describe("Settings -> Doors: applying federation", () => {
   });
 });
 
-describe("Settings -> Doors: a local cluster cannot federate", () => {
+describe("Settings -> Vendors: a local cluster cannot federate", () => {
   it("withholds both forms and says why, rather than offering ids that cannot work", async () => {
     h.state.providers = [];
     await renderDoors("owner", "memql.localhost");
     for (const id of ["anthropic", "openai"] as const) {
       const row = doorRow(id);
       expect(doorStateIn(id)).toBe("shut");
-      expect(doorWordIn(id)).toBe(DOOR_WORDS.closed);
+      expect(doorWordIn(id)).toBe(VENDOR_WORDS.closed);
       // RE-POINTED. The reason used to live in the standing panel; it is now
       // on the row, and the ACT that would open a form is ABSENT rather than
       // disabled -- DESIGN.md rule 12's position, applied to a control whose
@@ -860,7 +843,7 @@ describe("Settings -> Doors: a local cluster cannot federate", () => {
       expect(row.textContent).toMatch(/no id typed here would ever be accepted/i);
     }
     // ...and there is no form anywhere on the surface to reach by any route.
-    expect(screen.queryByRole("button", { name: /Save .* federation/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Save .* ids/ })).toBeNull();
     expect(screen.queryByLabelText(/Service account id/)).toBeNull();
   });
 
@@ -873,18 +856,18 @@ describe("Settings -> Doors: a local cluster cannot federate", () => {
   });
 });
 
-describe("Settings -> Doors: who may see it", () => {
+describe("Settings -> Vendors: who may see it", () => {
   it("admits a developer and refuses a writer", async () => {
     // D7: a developer helps an owner through setup, so the four provider
     // builtins move to the owner-or-developer SET. It is a SET rather than a
     // floor because the ladder puts admin (200) BELOW developer (300) --
     // `{ min: "developer" }` would admit admin, whose concern is user
     // administration, and offer them a form the engine refuses field by field.
-    expect(roleOpens("developer", DOORS_SECTION_RESOURCE)).toBe(true);
-    expect(roleOpens("owner", DOORS_SECTION_RESOURCE)).toBe(true);
-    expect(roleOpens("admin", DOORS_SECTION_RESOURCE)).toBe(false);
-    expect(roleOpens("writer", DOORS_SECTION_RESOURCE)).toBe(false);
-    expect(roleOpens("reader", DOORS_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("developer", VENDORS_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("owner", VENDORS_SECTION_RESOURCE)).toBe(true);
+    expect(roleOpens("admin", VENDORS_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("writer", VENDORS_SECTION_RESOURCE)).toBe(false);
+    expect(roleOpens("reader", VENDORS_SECTION_RESOURCE)).toBe(false);
   });
 
   it("declares the same requirement in the manifest as in the section", () => {
@@ -893,13 +876,13 @@ describe("Settings -> Doors: who may see it", () => {
     // purpose -- deep links point at it by name.
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.find((s) => s.id === "providers")?.requires).toBe(
-      DOORS_SECTION_RESOURCE,
+      VENDORS_SECTION_RESOURCE,
     );
   });
 
   it("renders the whole surface for a developer session", async () => {
     await renderDoors("developer");
-    expect(doorOrder()).toEqual(["fleet", "app", "anthropic", "openai"]);
+    expect(doorOrder()).toEqual(["anthropic", "openai"]);
     expect(screen.getByRole("region", { name: "What this node can call" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Apply" })).toBeTruthy();
     // And the vendor forms are reachable, which is the half a developer is
@@ -908,7 +891,7 @@ describe("Settings -> Doors: who may see it", () => {
   });
 });
 
-describe("Settings -> Doors: the registry it can reach", () => {
+describe("Settings -> Vendors: the registry it can reach", () => {
   it("says what can be called, and names the credential source per provider", async () => {
     await renderDoors();
     const registry = screen.getByRole("region", { name: "What this node can call" });
@@ -958,24 +941,13 @@ describe("Settings -> Doors: the registry it can reach", () => {
     expect(container.querySelector(".os-settings")?.contains(detail)).toBe(true);
   });
 
-  it("keeps the fleet door standing when the provider read is refused", async () => {
-    // Two readings, settling separately. A refusal of one must never decide
-    // the state of the other -- they have different reasons to fail.
-    h.state.providerError = new Error("providerAuthStatus is owner-only");
-    await renderDoors("admin");
-    expect(doorRow("fleet")).toBeTruthy();
-    expect(doorStateIn("fleet")).toBe("open");
-    expect(doorRow("fleet").textContent).toMatch(/32,000-token floor/);
-  });
-
-  it("says the fleet reading failed rather than calling the door shut", async () => {
+  it("keeps the vendor rows standing when the inference read is refused", async () => {
+    // Two readings, settling separately: a vendor's state is the registry's,
+    // and a refused inferenceStatus must not decide it.
     h.state.inferenceError = new Error("inferenceStatus: not connected");
     await renderDoors();
-    expect(doorStateIn("fleet")).toBe("unknown");
-    expect(doorWordIn("fleet")).toBe(DOOR_WORDS.unknown);
-    expect(within(doorRow("fleet")).getByText("inferenceStatus: not connected")).toBeTruthy();
-    // The other free door settles off the same read, so it says the same.
-    expect(doorStateIn("app")).toBe("unknown");
+    expect(doorStateIn("openai")).toBe("open");
+    expect(doorStateIn("anthropic")).toBe("shut");
   });
 
   it("separates saving from applying, and says what Apply did", async () => {

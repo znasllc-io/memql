@@ -1,10 +1,10 @@
 import type { AskActivity, AskConversationStore } from "./conversationSession";
 // Shared contract for the cluster transport and injected test transports.
 
-import type { PolicyDraft } from "../apps/fleet/PolicyEditor";
+import type { RouteProposal } from "../apps/fleet/routing/routes";
 
 export interface AskCallbacks {
-  policyProposal?: (proposal: PolicyDraft) => void;
+  policyProposal?: (proposal: RouteProposal) => void;
   activity?: (event: AskActivity) => void;
   delta: (text: string) => void;
   done: () => void;

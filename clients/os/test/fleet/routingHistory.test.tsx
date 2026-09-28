@@ -1,12 +1,12 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { chooseOption } from "../selectControl";
 
-// Settings -> Decisions (epic memql#5153, D2).
+// Fleet > Routing > History (was Settings -> Decisions; epic memql#5153, D2,
+// and the routing redesign of 2026-09-28).
 //
 // ===========================================================================
 // THE HEADLINE ASSERTION: A FREE CALL NEVER RENDERS A MONEY FIGURE
@@ -25,10 +25,10 @@ import { chooseOption } from "../selectControl";
 // AND THE HALF THAT MAKES A RULE FALSIFIABLE
 // ===========================================================================
 // `considered` is kept on SUCCESS as well as on a refusal, because "this
-// policy had no alternative" and "its alternatives were all shut" look
+// route had no alternative" and "its alternatives were all shut" look
 // identical from the outcome and are the two situations an operator is
 // actually trying to tell apart. A chain of one says there was nowhere else
-// to look; a longer one says how many doors were tried first.
+// to look; a longer one says how many sources were tried first.
 //
 // ===========================================================================
 // THE FACETS NARROW THE QUESTION, NOT THE PAGE
@@ -41,96 +41,27 @@ import { chooseOption } from "../selectControl";
 // `when(args.x)` guards drop an absent argument and its connective as if
 // never written, while an empty string is a value and would filter on "".
 
-const h = vi.hoisted(() => {
-  const reply = (rows: unknown[]) => ({ rows: () => rows });
-  const state = {
-    decisions: [] as unknown[],
-    decisionsError: null as Error | null,
-    calls: [] as Record<string, unknown>[],
-    /** Reads this cluster does NOT have. See rules.test.tsx for the argument. */
-    missing: new Set<string>(),
-  };
-  const builtins: Record<string, unknown> = {
-    routerDecisionsRecent: vi.fn(async (args: Record<string, unknown>) => {
-      state.calls.push(args);
-      if (state.decisionsError !== null) throw state.decisionsError;
-      return reply(state.decisions);
-    }),
-  };
-  const query = new Proxy(builtins, {
-    get: (target, prop) =>
-      typeof prop === "string" && state.missing.has(prop) ? undefined : Reflect.get(target, prop),
-  });
-  const connection = {
-    nodeId: "bff-test",
-    engineVersion: "v9.9.9",
-    engineCommit: "abcdef123456",
-    subscriptions: null,
-    dispatcher: null,
-    query,
-    onStatusChange: () => () => {},
-  };
-  return { connection, state };
-});
-
+const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
   bridgePathFor: (base: string) => base + "_memql/ws",
   osBridgePath: "/_memql/ws",
 }));
 
-const { SessionProvider } = await import("../../src/chrome/access");
-const { OsProvider } = await import("../../src/chrome/state");
+const { renderRouting, routingConnection, ruleRow, shippedRules, settle } = await import("./routingHarness");
+const { DECISIONS_SECTION_RESOURCE } = await import("../../src/apps/fleet/routing/access");
 const { OS_REGISTRY } = await import("../../src/apps/registry");
-const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
-const { LocalDesktopStore } = await import("../../src/system/store");
-const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
-const { DECISIONS_SECTION_RESOURCE } = await import("../../src/apps/settings/DecisionsSection");
 const { roleOpens } = await import("../seededAccess");
 const { decisionFromRow, levelWords } = await import("../../src/apps/settings/decisionFacts");
 
-function memStorage(): Pick<Storage, "getItem" | "setItem"> {
-  const data = new Map<string, string>();
-  return { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => void data.set(k, v) };
-}
+afterEach(cleanup);
 
-function wrap(children: ReactNode, role: string) {
-  return (
-    <SessionProvider
-      value={{
-        access: { userId: "u-1", primaryEmail: "owner@example.com", role: role, roleName: "", rank: 0 },
-        config: {
-          ...UNKNOWN_RUNTIME_CONFIG,
-          domain: "example.com",
-          identityUrl: "https://identity.example.com",
-        },
-      }}
-    >
-      <OsProvider
-        registry={OS_REGISTRY}
-        actorRole={role}
-        grid={{ cols: 12, rows: 8 }}
-        store={new LocalDesktopStore(memStorage())}
-      >
-        {children}
-      </OsProvider>
-    </SessionProvider>
-  );
-}
+let calls: ReturnType<typeof routingConnection>["calls"];
+let state: ReturnType<typeof routingConnection>["state"];
 
-async function flush() {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-}
-
-async function renderDecisions(role = "owner") {
-  const view = render(
-    wrap(<SettingsApp sectionId="decisions" navigate={vi.fn()} askContext={vi.fn()} />, role),
-  );
-  await flush();
+async function renderHistory(role = "owner") {
+  const view = await renderRouting(role, { intent: { id: "to-history", payload: { routingTab: "history" } } });
+  await settle();
   return view;
 }
 
@@ -185,20 +116,22 @@ function titleOfCostIn(model: string): string {
 
 /** The arguments the most recent read was made with. */
 function lastArgs(): Record<string, unknown> {
-  const last = h.state.calls[h.state.calls.length - 1];
+  const all = calls.routerDecisionsRecent.mock.calls;
+  const last = all[all.length - 1]?.[0] as Record<string, unknown> | undefined;
   if (last === undefined) throw new Error("the decisions read was never made");
   return last;
 }
 
-beforeEach(() => {
-  vi.clearAllMocks();
-  h.state.missing = new Set<string>();
-  h.state.decisionsError = null;
-  h.state.calls = [];
-  h.state.decisions = [wireDecision()];
-});
+function use(decisions: Record<string, unknown>[] = [wireDecision()]) {
+  const made = routingConnection({ decisions, rules: [...shippedRules(), ruleRow({ name: "operatorReasoning", when: { prompt: "agentReply", role: "operator" }, locked: true, precedence: 60 })] });
+  h.connection = made.connection;
+  calls = made.calls;
+  state = made.state;
+}
 
-describe("Settings -> Decisions: who may see it", () => {
+beforeEach(() => use());
+
+describe("History: who may see it", () => {
   it("admits an admin, a developer and an owner, and refuses everyone below", () => {
     // `{ min: "admin" }` on this ladder admits admin (200), developer (300)
     // and owner (400) -- developer OUTRANKS admin here, which is the ordering
@@ -215,42 +148,42 @@ describe("Settings -> Decisions: who may see it", () => {
     expect(roleOpens("reader", DECISIONS_SECTION_RESOURCE)).toBe(false);
   });
 
-  it("declares the same requirement in the manifest as in the section", () => {
+  it("is the same resource Settings still declares for its signpost", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
-    expect(settings?.sections?.find((s) => s.id === "decisions")?.requires).toBe(
-      DECISIONS_SECTION_RESOURCE,
-    );
+    const section = settings?.sections?.find((s) => s.id === "decisions");
+    expect(section?.requires).toBe(DECISIONS_SECTION_RESOURCE);
+    expect(section?.parent).toBe("levels");
   });
 });
 
-describe("Settings -> Decisions: a cluster that records none", () => {
+describe("History: a cluster that records none", () => {
   it("says the CLUSTER does not record them, which is not 'nothing has been routed'", async () => {
-    h.state.missing.add("routerDecisionsRecent");
-    await renderDecisions();
-    expect(screen.getByText(/does not record routing decisions yet/)).toBeTruthy();
-    expect(screen.queryByText(/No calls have been routed yet/)).toBeNull();
+    state.missing.add("routerDecisionsRecent");
+    await renderHistory();
+    expect(screen.getByText(/does not record routed calls yet/)).toBeTruthy();
+    expect(screen.queryByText(/first routed call appears here/)).toBeNull();
   });
 
   it("says nothing has been routed on a cluster that DOES record them", async () => {
     // The control for the line above: the two empty states are different
     // sentences and only one of them is an invitation to wait.
-    h.state.decisions = [];
-    await renderDecisions();
-    expect(screen.getByText(/No calls have been routed yet/)).toBeTruthy();
-    expect(screen.queryByText(/does not record routing decisions yet/)).toBeNull();
+    use([]);
+    await renderHistory();
+    expect(screen.getByText(/first routed call appears here/)).toBeTruthy();
+    expect(screen.queryByText(/does not record routed calls yet/)).toBeNull();
   });
 
   it("renders the cluster's own refusal when the read is declined", async () => {
-    h.state.decisionsError = new Error("routerDecisionsRecent is admin-only");
-    await renderDecisions("developer");
-    expect(screen.getByText(/declined this read for developer/)).toBeTruthy();
+    calls.routerDecisionsRecent.mockRejectedValue(new Error("routerDecisionsRecent is admin-only"));
+    await renderHistory("developer");
+    expect(screen.getByText(/history could not be read/)).toBeTruthy();
     expect(screen.getByText("routerDecisionsRecent is admin-only")).toBeTruthy();
   });
 });
 
-describe("Settings -> Decisions: what a call cost", () => {
+describe("History: what a call cost", () => {
   it("NEVER prints a money figure for a call this cluster was not billed for", async () => {
-    h.state.decisions = [
+    use([
       wireDecision({ id: "d-local", billing: "local", door: "local", model: "qwen3-coder" }),
       wireDecision({
         id: "d-sub",
@@ -259,8 +192,8 @@ describe("Settings -> Decisions: what a call cost", () => {
         model: "claude-code",
         executionSurface: "cockpit-app:claude-code",
       }),
-    ];
-    await renderDecisions();
+    ]);
+    await renderHistory();
 
     // THE CELL SAYS "no charge"; the long form is the title. The door column
     // beside it already says WHICH free door, so repeating "your own machine"
@@ -285,7 +218,7 @@ describe("Settings -> Decisions: what a call cost", () => {
     // without the cacheKind guard this row printed `$0.0000` and claimed a
     // metered call that cost nothing rather than a call that never happened
     // (memql#5581).
-    h.state.decisions = [
+    use([
       wireDecision({
         id: "d-cache",
         billing: "metered",
@@ -297,8 +230,8 @@ describe("Settings -> Decisions: what a call cost", () => {
         inputTokens: 0,
         outputTokens: 0,
       }),
-    ];
-    await renderDecisions();
+    ]);
+    await renderHistory();
     expect(costIn("gpt-5.4-mini")).toBe("from cache");
     expect(titleOfCostIn("gpt-5.4-mini")).toBe("answered from the cache, nothing was sent");
     expect(rowFor("gpt-5.4-mini").textContent).not.toContain("$");
@@ -307,7 +240,7 @@ describe("Settings -> Decisions: what a call cost", () => {
   it("prints the figure for a call that WAS billed", async () => {
     // The control. Without it, "no `$` anywhere" would pass on a column that
     // never renders money at all.
-    h.state.decisions = [
+    use([
       wireDecision({
         billing: "metered",
         door: "federation",
@@ -315,8 +248,8 @@ describe("Settings -> Decisions: what a call cost", () => {
         model: "claude-sonnet-5",
         totalCost: 0.0123,
       }),
-    ];
-    await renderDecisions();
+    ]);
+    await renderHistory();
     expect(costIn("claude-sonnet-5")).toBe("$0.0123");
   });
 
@@ -324,15 +257,15 @@ describe("Settings -> Decisions: what a call cost", () => {
     // The other direction of the same rule: a billed call with no figure is
     // an em dash, not `$0.0000`. Rounding an unmeasured cost to zero is how
     // a metered call comes to look free.
-    h.state.decisions = [
+    use([
       wireDecision({
         billing: "metered",
         door: "federation",
         model: "claude-sonnet-5",
         totalCost: null,
       }),
-    ];
-    await renderDecisions();
+    ]);
+    await renderHistory();
     expect(costIn("claude-sonnet-5")).toBe("—");
     expect(rowFor("claude-sonnet-5").textContent).not.toContain("$");
   });
@@ -341,22 +274,22 @@ describe("Settings -> Decisions: what a call cost", () => {
     // `billing` falls to `unknown` when an app's usage report or a machine's
     // subscription signal is silent, and it is never inferred. Reading it as
     // free understates the bill; reading it as metered invents one.
-    h.state.decisions = [
+    use([
       wireDecision({ billing: "unknown", door: "app", model: "codex", totalCost: 0 }),
-    ];
-    await renderDecisions();
+    ]);
+    await renderHistory();
     expect(costIn("codex")).toBe("not reported");
     expect(rowFor("codex").textContent).not.toContain("$");
     expect(rowFor("codex").textContent).not.toContain("0.00");
   });
 });
 
-describe("Settings -> Decisions: what else the chain looked at", () => {
+describe("History: what else the call passed over", () => {
   it("expands in place to the walk, rather than paging away from the list", async () => {
     // DESIGN.md rule 11 is about a DETAIL PAGE. This is four lines under the
     // row -- paging to a route to read three chain entries would lose the
     // reader's place in the list they are scanning.
-    h.state.decisions = [
+    use([
       wireDecision({
         billing: "metered",
         door: "federation",
@@ -371,22 +304,24 @@ describe("Settings -> Decisions: what else the chain looked at", () => {
         ],
       }),
       wireDecision({ id: "d-2", model: "qwen3-coder" }),
-    ];
-    await renderDecisions();
+    ]);
+    await renderHistory();
     const row = rowFor("claude-sonnet-5");
     expect(row.querySelector(".os-decision-detail")).toBeNull();
 
     fireEvent.click(within(row).getByRole("button"));
     expect(row.querySelector(".os-decision-detail")).not.toBeNull();
-    expect(within(row).getByText("Decided by operatorReasoning, which chose localFirst.")).toBeTruthy();
-    expect(within(row).getByText("2 earlier doors were looked at first.")).toBeTruthy();
+    // The rule is named by what it matches, the route by its words -- never
+    // by their engine ids.
+    expect(within(row).getByText("Decided by Agent reply prompt · operator acting, which takes Local first.")).toBeTruthy();
+    expect(within(row).getByText("2 earlier sources were tried first.")).toBeTruthy();
 
-    const walk = within(row).getByRole("list", { name: "What the chain looked at" });
+    const walk = within(row).getByRole("list", { name: "Sources the call passed through" });
     const entries = within(walk).getAllByRole("listitem");
-    expect(entries.map((li) => li.querySelector(".os-mono")?.textContent)).toEqual([
-      "fleet:strongest",
-      "app:*",
-      "federation:anthropic",
+    expect(entries.map((li) => li.querySelector("span")?.textContent)).toEqual([
+      "Strongest local model",
+      "Any signed-in app",
+      "anthropic",
     ]);
     // Why each was passed over is the half that makes the row evidence: the
     // outcome alone cannot tell "no alternative" from "every alternative shut".
@@ -405,58 +340,58 @@ describe("Settings -> Decisions: what else the chain looked at", () => {
     // "There was nothing to try" and "everything else was shut" are the two
     // stories a vendor call can have, and they are the question this list
     // exists to answer.
-    await renderDecisions();
+    await renderHistory();
     const row = rowFor("qwen3-coder");
     fireEvent.click(within(row).getByRole("button"));
     expect(
-      within(row).getByText("There was nothing else in the chain, so this was the only place to look."),
+      within(row).getByText("Nothing else was in the route, so this was the only place to look."),
     ).toBeTruthy();
-    expect(within(row).queryByText(/earlier door/)).toBeNull();
+    expect(within(row).queryByText(/earlier source/)).toBeNull();
   });
 
   it("says so when the cluster recorded no walk at all", async () => {
     // An empty `considered` is not "nothing was tried" -- it is "nobody wrote
     // it down", and inventing a chain of one from it would be a claim.
-    h.state.decisions = [wireDecision({ model: "qwen3-coder", considered: [] })];
-    await renderDecisions();
+    use([wireDecision({ model: "qwen3-coder", considered: [] })]);
+    await renderHistory();
     const row = rowFor("qwen3-coder");
     fireEvent.click(within(row).getByRole("button"));
     expect(within(row).getByText("The cluster did not record what else it looked at.")).toBeTruthy();
-    expect(within(row).queryByRole("list", { name: "What the chain looked at" })).toBeNull();
+    expect(within(row).queryByRole("list", { name: "Sources the call passed through" })).toBeNull();
   });
 });
 
-describe("Settings -> Decisions: the facets narrow the QUESTION", () => {
+describe("History: the facets narrow the QUESTION", () => {
   it("sends no key for a facet nobody set, and sends the one that was", async () => {
-    await renderDecisions();
+    await renderHistory();
     // An empty facet is not a filter on "": the query's `when(args.x)` guards
     // drop an absent argument as if never written, and an empty string is a
     // value that would match nothing.
-    expect(h.state.calls).toHaveLength(1);
+    expect(calls.routerDecisionsRecent.mock.calls).toHaveLength(1);
     expect(lastArgs()).toEqual({});
 
-    fireEvent.click(screen.getByRole("button", { name: "Refine decisions" }));
-    chooseOption(screen.getByLabelText("Door"), "A paid vendor");
-    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Refine history" }));
+    chooseOption(screen.getByLabelText("Source"), "Vendors");
+    await settle();
 
     expect(Object.keys(lastArgs())).toEqual(["door"]);
     expect(lastArgs()).toEqual({ door: "federation" });
     // The narrowed question went to the CLUSTER, so a busy cluster's page 1
     // is not what got filtered.
-    expect(h.state.calls.length).toBeGreaterThan(1);
+    expect(calls.routerDecisionsRecent.mock.calls.length).toBeGreaterThan(1);
   });
 
   it("sends every facet that is set, and drops one that is cleared again", async () => {
-    await renderDecisions();
-    fireEvent.click(screen.getByRole("button", { name: "Refine decisions" }));
-    chooseOption(screen.getByLabelText("Level"), "reasoning");
-    await flush();
+    await renderHistory();
+    fireEvent.click(screen.getByRole("button", { name: "Refine history" }));
+    chooseOption(screen.getByLabelText("Level"), "Reasoning");
+    await settle();
     chooseOption(screen.getByLabelText("Outcome"), "Failed");
-    await flush();
+    await settle();
     expect(lastArgs()).toEqual({ level: "reasoning", outcome: "error" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove reasoning" }));
-    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Reasoning" }));
+    await settle();
     expect(Object.keys(lastArgs())).toEqual(["outcome"]);
     expect("level" in lastArgs()).toBe(false);
   });
@@ -487,17 +422,28 @@ describe("what a decision says about its level", () => {
   });
 
   it("marks the degraded row on the page too", async () => {
-    h.state.decisions = [
+    use([
       wireDecision({
         model: "qwen3-coder",
         degraded: true,
         requestedLevel: "reasoning",
         servedLevel: "strong",
       }),
-    ];
-    await renderDecisions();
+    ]);
+    await renderHistory();
     const level = rowFor("qwen3-coder").querySelector(".os-record-row");
     expect(level?.textContent).toContain("reasoning served as strong");
-    expect(level?.textContent).toContain("degraded");
+    expect(level?.textContent).toContain("stepped down");
   });
 });
+
+describe("History: the rule facet names rules by what they match", () => {
+  it("offers each rule in words and sends its engine name", async () => {
+    await renderHistory();
+    fireEvent.click(screen.getByRole("button", { name: "Refine history" }));
+    chooseOption(screen.getByLabelText("Rule"), "Fast work to Fast local first");
+    await settle();
+    expect(lastArgs()).toEqual({ rule: "fastLane" });
+  });
+});
+

@@ -9,7 +9,7 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { RoutingSection } = await import("../../src/apps/fleet/routing/RoutingSection");
+const { MachinesTab } = await import("../../src/apps/fleet/routing/MachinesTab");
 const { RoutingRecordView } = await import("../../src/apps/fleet/routing/RoutingRecordView");
 const { invocationFromRow } = await import("../../src/apps/fleet/rows");
 const { fakeConnection, withSession } = await import("./harness");
@@ -35,29 +35,37 @@ async function click(el: Element) {
   });
 }
 
+// Fleet > Routing > Machines, mounted alone: the section's Head is the tab's
+// business, so a pass-through stands in for it.
 function mount(connection: Conn) {
   h.connection = connection;
-  const view = render(withSession(<RoutingSection />));
+  const view = render(withSession(<MachinesTab header={(actions) => <div>{actions}</div>} />));
   view.container.querySelectorAll("details").forEach(el => { el.open = true; });
   return view;
+}
+
+/** The bar on the floor: the state in words, then the acts that are legal. */
+function barText(): string {
+  return screen.getByRole("group", { name: "What you can do with this" }).textContent ?? "";
 }
 
 beforeEach(() => {
   h.connection = null;
 });
 
-describe("the routing policy editor", () => {
+describe("how a machine is chosen (Routing > Machines)", () => {
   it("states the absent case and FABRICATES NO ROW until a save", async () => {
     const connection = fakeConnection({ myRoutingPolicies: [] });
     mount(connection);
 
-    expect(await screen.findByText(/Using the default/)).toBeTruthy();
+    await waitFor(() => expect(barText()).toContain("Default"));
     // The defaults are NAMED, because they are what the router applies to
     // this person today -- "not configured" and "configured to the defaults"
     // are different facts and only one of them is true here.
-    const note = screen.getByText(/Using the default/);
-    expect(note.textContent).toContain("first eligible machine");
-    expect(note.textContent).toContain("next match");
+    expect(barText()).toContain("First eligible machine");
+    expect(barText()).toContain("next match");
+    // Nothing to save until something changed: absent, never disabled.
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
 
     // Opening the section is a READ. Nothing was written.
     expect(connection.query.createRoutingPolicy).not.toHaveBeenCalled();
@@ -66,7 +74,7 @@ describe("the routing policy editor", () => {
 
   it("offers exactly the enum values, each with its meaning", async () => {
     mount(fakeConnection({ myRoutingPolicies: [] }));
-    await screen.findByText(/Using the default/);
+    await waitFor(() => expect(barText()).toContain("Default"));
 
     await click(screen.getByRole("combobox", { name: "Routing strategy" }));
     expect(screen.getAllByRole("option").map(el => el.textContent)).toEqual(["First eligible", "Take turns", "Least busy", "Best label match"]);
@@ -81,10 +89,11 @@ describe("the routing policy editor", () => {
   it("CREATES on the first save and mints an id for it", async () => {
     const connection = fakeConnection({ myRoutingPolicies: [] });
     mount(connection);
-    await screen.findByText(/Using the default/);
+    await waitFor(() => expect(barText()).toContain("Default"));
 
     await chooseStrategy("leastLoaded");
-    await click(screen.getByRole("button", { name: "Create policy" }));
+    expect(barText()).toContain("Unsaved");
+    await click(screen.getByRole("button", { name: "Save" }));
 
     expect(connection.query.updateRoutingPolicy).not.toHaveBeenCalled();
     const args = connection.query.createRoutingPolicy.mock.calls[0]?.[0] as {
@@ -121,7 +130,7 @@ describe("the routing policy editor", () => {
     );
 
     await chooseStrategy("labelMatch");
-    await click(screen.getByRole("button", { name: "Save policy" }));
+    await click(screen.getByRole("button", { name: "Save" }));
 
     expect(connection.query.createRoutingPolicy).not.toHaveBeenCalled();
     expect(connection.query.updateRoutingPolicy).toHaveBeenCalledWith({
@@ -224,12 +233,13 @@ describe("the routing policy editor", () => {
     const connection = fakeConnection({ myRoutingPolicies: [] });
     connection.query.createRoutingPolicy.mockRejectedValue(new Error("policy refused"));
     mount(connection);
-    await screen.findByText(/Using the default/);
+    await waitFor(() => expect(barText()).toContain("Default"));
 
     await chooseStrategy("labelMatch");
-    await click(screen.getByRole("button", { name: "Create policy" }));
+    await click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(screen.getByText("policy refused")).toBeTruthy());
+    expect(barText()).toContain("Unsaved");
     expect(isChosen(/Best label match/)).toBe(true);
   });
 });

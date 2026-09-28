@@ -444,7 +444,7 @@ describe("cancel after a mint asks which of two things", () => {
     expect(within(bar()).queryByText("Ready")).toBeNull();
     expect(within(bar()).queryByRole("button", { name: "Done" })).toBeNull();
     expect(stopStates().at(-1)).toBe("current");
-    rerenderAt(view, "policies");
+    rerenderAt(view, "routing");
     await act(async () => answer({ message: { content: "hello" } }));
     rerenderAt(view, "machines");
     await waitFor(() => expect(within(bar()).getByText("Ready")).toBeTruthy());

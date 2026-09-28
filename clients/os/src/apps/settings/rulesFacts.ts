@@ -5,6 +5,8 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
 import { LEVELS, type LevelId } from "./routingFacts";
+import { routeTitle } from "../fleet/routing/vocabulary";
+import type { PrecedenceChange } from "../fleet/routing/ruleOrder";
 
 // Rules, as facts (epic memql#5153, D1) -- and the arithmetic that keeps a UI
 // from destroying a distinction the engine preserves all the way down.
@@ -212,15 +214,15 @@ export function ruleSentence(rule: RuleRow): string {
         : `When ${conditions.slice(0, -1).join(", ")} and ${conditions[conditions.length - 1]}`;
 
   const raise = rule.level === "" ? "" : ` ask for ${rule.level} and`;
-  const policy = rule.policy === "" ? "no policy" : rule.policy;
+  const route = rule.policy === "" ? "no route" : `the ${routeTitle(rule.policy)} route`;
   const tail =
     rule.onUnavailable === "park"
-      ? " If nothing there is available, park and wait for a person."
+      ? " If nothing there is ready, wait for a person."
       : rule.onUnavailable === "degrade"
-        ? " If nothing there is available, step down a level."
+        ? " If nothing there is ready, step down a level."
         : "";
 
-  return `${head},${raise} try ${policy}.${tail}`;
+  return `${head},${raise} take ${route}.${tail}`;
 }
 
 /**
@@ -232,7 +234,7 @@ export function ruleSentence(rule: RuleRow): string {
  */
 export const LOCKED_RULE_SENTENCE =
   "Shipped rules come back on every restart and cannot be edited or removed. " +
-  "A matching shipped rule takes priority over custom rules. The shipped catch-all runs last.";
+  "A matching shipped rule takes priority over yours. The shipped catch-all runs last.";
 
 /**
  * What the floor is, said on its own row.
@@ -242,7 +244,7 @@ export const LOCKED_RULE_SENTENCE =
  * is what makes "a call that matches no rule" impossible by construction.
  */
 export const FLOOR_RULE_SENTENCE =
-  "The floor. It states no conditions, so it catches everything nothing above it " +
+  "The last rule states no conditions, so it catches everything nothing above it " +
   "matched -- which is why it runs last, and why a call can never fall through.";
 
 /** A draft precedence that would collide with an existing rule. */
@@ -390,6 +392,15 @@ export interface RuleActions {
   simulate: (rule: RuleRow) => Promise<Simulation>;
   activate: (rule: RuleRow) => Promise<boolean>;
   retire: (name: string, revision?: number) => Promise<boolean>;
+  /**
+   * Write new precedences, one save at a time, each naming the revision the
+   * last one produced. The plan (fleet/routing/ruleOrder.ts) is built so no
+   * intermediate state ties; a refusal part-way stops and says so, and the
+   * reload shows what did land.
+   */
+  reorder: (changes: readonly PrecedenceChange[], rules: readonly RuleRow[]) => Promise<boolean>;
+  /** The cluster takes revisioned saves, which is what a reorder is made of. */
+  reorderable: boolean;
   supported: boolean;
   clear: () => void;
 }
@@ -521,5 +532,49 @@ export function useRuleActions(onChanged: () => void): RuleActions {
     [connection, onChanged],
   );
 
-  return { state, describe, simulate, activate, retire, supported, clear };
+  const reorderable = builtinOn(connection, "routingRuleSave") !== null;
+
+  const reorder = useCallback(
+    async (changes: readonly PrecedenceChange[], rules: readonly RuleRow[]): Promise<boolean> => {
+      const save = builtinOn(connection, "routingRuleSave");
+      if (save === null) {
+        setState({ busy: false, failed: true, message: "This cluster cannot reorder rules yet." });
+        return false;
+      }
+      if (changes.length === 0) return true;
+      setState({ busy: true, failed: false, message: "" });
+      let revision = rules.find((r) => typeof r.revision === "number")?.revision;
+      try {
+        for (const change of changes) {
+          const rule = rules.find((r) => r.name === change.name);
+          if (rule === undefined) throw new Error(`${change.name} is no longer in the list; read the rules again.`);
+          if (revision === undefined) throw new Error("Read the rules again before reordering them.");
+          const result = await save({
+            name: rule.name,
+            conditions: rule.when,
+            expectedRevision: revision,
+            excludes: rule.excludes,
+            level: rule.level,
+            policy: rule.policy,
+            precedence: change.precedence,
+            onUnavailable: rule.onUnavailable,
+            description: rule.described,
+          });
+          const row = [...result.rows()][0];
+          const next = row === undefined ? undefined : flatten(row as Record<string, unknown>)["revision"];
+          revision = typeof next === "number" ? next : revision + 1;
+        }
+        setState({ busy: false, failed: false, message: "" });
+        onChanged();
+        return true;
+      } catch (err: unknown) {
+        setState({ busy: false, failed: true, message: err instanceof Error ? err.message : String(err) });
+        onChanged();
+        return false;
+      }
+    },
+    [connection, onChanged],
+  );
+
+  return { state, describe, simulate, activate, retire, reorder, reorderable, supported, clear };
 }

@@ -196,10 +196,10 @@ export function levelWords(row: DecisionRow): string {
 export function consideredSentence(row: DecisionRow): string {
   if (row.considered.length === 0) return "The cluster did not record what else it looked at.";
   if (row.considered.length === 1) {
-    return "There was nothing else in the chain, so this was the only place to look.";
+    return "Nothing else was in the route, so this was the only place to look.";
   }
   const passed = row.considered.filter((c) => !c.served).length;
-  return `${passed} earlier ${passed === 1 ? "door was" : "doors were"} looked at first.`;
+  return `${passed} earlier ${passed === 1 ? "source was" : "sources were"} tried first.`;
 }
 
 export interface DecisionFilters {

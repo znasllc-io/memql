@@ -100,12 +100,12 @@ describe("the doors an owner is offered", () => {
     expect(calls).toEqual([["fleet", "machines", { addMachine: { inference: true } }]]);
   });
 
-  it("opens Doors at the named vendor, for each federation door", () => {
+  it("opens Vendors at the named vendor, for each vendor", () => {
     const calls = mount("owner");
     fireEvent.click(screen.getByRole("radio", { name: /Anthropic/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Doors" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Vendors" }));
     fireEvent.click(screen.getByRole("radio", { name: /OpenAI/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Doors" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Vendors" }));
     expect(calls).toEqual([
       ["settings", "providers", { vendor: "anthropic" }],
       ["settings", "providers", { vendor: "openai" }],
@@ -134,10 +134,10 @@ describe("the doors a developer is offered", () => {
   it("gets the BUTTON for a federation door, since a developer may federate", () => {
     const calls = mount("developer");
     fireEvent.click(screen.getByRole("radio", { name: /Anthropic/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Open Doors" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Vendors" }));
     expect(calls).toEqual([["settings", "providers", { vendor: "anthropic" }]]);
     expect(
-      screen.queryByText("An owner can set Anthropic up in Settings, under Doors."),
+      screen.queryByText("An owner can set Anthropic up in Settings, under Vendors."),
     ).toBeNull();
   });
 
@@ -160,6 +160,6 @@ describe("with no shell to open into", () => {
     render(<InferenceStop />);
     expect(screen.getByText("Pair a machine in Fleet, under Machines.")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /Anthropic/ }));
-    expect(screen.getByText("An owner can set Anthropic up in Settings, under Doors.")).toBeTruthy();
+    expect(screen.getByText("An owner can set Anthropic up in Settings, under Vendors.")).toBeTruthy();
   });
 });

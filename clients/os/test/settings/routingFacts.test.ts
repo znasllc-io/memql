@@ -271,11 +271,11 @@ describe("the four levels", () => {
     expect(levelReadings(doorReadings(status(), noVendor)).map((l) => l.id)).toEqual([...LEVELS]);
   });
 
-  it("says every level PARKS when no door is open", () => {
+  it("says every level WAITS when no source is ready", () => {
     const levels = levelReadings(doorReadings(status({ fleetCatalogInstalled: true }), noVendor));
     for (const level of levels) {
       expect(level.door).toBeNull();
-      expect(level.sentence).toMatch(/No door is open/);
+      expect(level.sentence).toMatch(/No source is ready/);
       // There IS something to do here, so there is advice.
       expect(level.advice).not.toBe("");
     }
@@ -320,7 +320,7 @@ describe("the four levels", () => {
     const embeddings = levels.find((l) => l.id === "embeddings")!;
     const fast = levels.find((l) => l.id === "fast")!;
     expect(embeddings.sentence).toMatch(/waits rather than being written wrong/);
-    expect(fast.sentence).toMatch(/parks until one is/);
+    expect(fast.sentence).toMatch(/waits until one is/);
     // The distinction is the point, so it must not collapse into one sentence.
     expect(embeddings.sentence).not.toBe(fast.sentence);
     expect(embeddings.advice).toMatch(/embedding model/);

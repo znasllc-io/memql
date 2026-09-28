@@ -5,7 +5,6 @@ vi.mock('../../src/live/connection',()=>({useOsConnection:()=>h.connection,osBri
 const {fakeConnection,machineRow,withSession,rowsResult}=await import('./harness');
 const {FleetApp}=await import('../../src/apps/fleet/FleetApp');
 const {MachinesProvider,WORKER_REGISTRATION_CONCEPT}=await import('../../src/live/machines');
-const {PolicyEditor}=await import('../../src/apps/fleet/PolicyEditor');
 const {ActivityTarget,SemanticActivityProvider}=await import('../../src/kit/SemanticActivity');
 const {installSeededAccess}=await import('../seededAccess');
 afterEach(cleanup);
@@ -21,13 +20,8 @@ it('returns to the list when the selected machine disappears, never to another m
  await act(async()=>h.connection.subscriptions.emit(WORKER_REGISTRATION_CONCEPT,machineRow({id:'b',displayName:'Beta',revokedAt:new Date().toISOString()}),'NODE_UPDATED'));
  expect(await screen.findByRole('button',{name:/^Open Alpha/})).toBeTruthy();expect(screen.queryByRole('navigation',{name:'Machine views'})).toBeNull();expect(screen.queryByLabelText('Name for Alpha')).toBeNull();expect(screen.queryByText('That machine is no longer in this view')).toBeNull();
 });
-it('saves exactly the manually ordered chain and inspected revision, retaining a refused draft',async()=>{
- const save=vi.fn().mockRejectedValueOnce(new Error('stale revision')).mockResolvedValue(rowsResult([]));h.connection.query.routingPolicySave=save;
- render(withSession(<PolicyEditor seed={{name:'mine',description:'Local first',primary:'fleet:strongest',fallbacks:['app:*'],revision:7}}/>));
- fireEvent.click(screen.getByRole('button',{name:'Move source 2 earlier'}));fireEvent.click(screen.getByRole('button',{name:'Save policy'}));
- expect(await screen.findByText('stale revision')).toBeTruthy();expect((screen.getByLabelText('Policy name') as HTMLInputElement).value).toBe('mine');
- expect(save).toHaveBeenCalledWith({name:'mine',description:'Local first',primary:'app:*',fallbacks:['fleet:strongest'],expectedRevision:7});
-});
+// The route composer's exact-chain-and-revision save, and its refused draft,
+// are asserted where the composer lives: routingComposer.test.tsx.
 it('has no AI activity by default and never changes keyboard focus as activity updates',()=>{
  const view=render(<SemanticActivityProvider value={[]}><button>Manual control</button><ActivityTarget target="machine:a"><span>Equipment</span></ActivityTarget></SemanticActivityProvider>);
  const button=screen.getByRole('button');button.focus();expect(screen.queryByRole('status')).toBeNull();
