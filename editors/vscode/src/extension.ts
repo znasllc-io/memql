@@ -404,8 +404,12 @@ export function wireLanguageSkewNotice(
   readExtension: () => LanguageFacts,
   extensionId: string | undefined
 ): () => void {
-  return watchLanguageSkew(manager, readExtension, (notice, clusterName) =>
-    presentLanguageSkew(notice, clusterName, extensionId)
+  return watchLanguageSkew(
+    manager,
+    readExtension,
+    (notice, clusterName) => presentLanguageSkew(notice, clusterName, extensionId),
+    undefined,
+    clusterLabel
   );
 }
 
@@ -683,7 +687,7 @@ function startLanguageClient(context: ExtensionContext): void {
     // ONE SENTENCE AND THE FIX AS A BUTTON: the one thing to do about it is
     // point the setting at a binary. (It used to list three remedies and name
     // a "Concepts" view that is called Data.)
-    const settings = 'Open Settings';
+    const settings = 'Open settings';
     void Promise.resolve(
       window.showErrorMessage("MemQL: Language features are off because memql-lsp wasn't found.", settings)
     ).then((answer) => {
@@ -737,7 +741,7 @@ function startLanguageClient(context: ExtensionContext): void {
   void client.start().catch((err) => {
     const detail = err instanceof Error ? err.message : String(err);
     noteDiagnostic(connectionOutput, 'the language server failed to start', detail);
-    void offerDetails('error', connectionOutput, 'MemQL: the language server failed to start.');
+    void offerDetails('error', connectionOutput, "MemQL: The language server didn't start.");
   });
 }
 
@@ -852,7 +856,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   //    added.
   const registry = await readClustersFileSafe(surface.clustersPath);
   if (!registry.ok) {
-    window.showErrorMessage(`MemQL: ${registry.error}`);
+    void offerClusterListFix(surface.clustersPath);
     // 'Handoff from the console', not 'Handoff refused': the link was fine and the
     // REGISTRY was not, which is the outcome this returns. A headline naming
     // the other outcome sends a reader looking for a malformed link.
@@ -873,11 +877,9 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     // outcome is already decided either way: nothing opened, and adding a
     // cluster is a separate act the operator performs afterwards.
     void (async () => {
-      const choice = await window.showInformationMessage(
-        `MemQL: ${request.domain} isn't in your cluster list.`,
-        'Add Cluster...'
-      );
-      if (choice !== 'Add Cluster...') return;
+      const add = 'Add cluster';
+      const choice = await window.showInformationMessage(`MemQL: ${request.domain} isn't in your cluster list.`, add);
+      if (choice !== add) return;
       // The ORDINARY prompts, prefilled with what the link stated and nothing
       // else. A dismissal at any field returns undefined and writes nothing.
       const edited = await promptForCluster({
@@ -995,7 +997,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     // answer available here.
     const detail = err instanceof Error ? err.message : String(err);
     noteDiagnostic(connectionOutput, `reading the catalog from "${cluster.name}" failed`, detail);
-    void offerDetails('error', connectionOutput, `MemQL: Couldn't read ${cluster.name}'s constructs.`);
+    void offerDetails('error', connectionOutput, `MemQL: Couldn't read ${displayLabel(cluster)}'s constructs.`);
     return { outcome: 'noCluster', detail: 'the catalog could not be read' };
   }
 
@@ -1022,7 +1024,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
 
   if (landing.kind === 'notLoaded' || found === undefined) {
     void window.showInformationMessage(
-      `MemQL: ${cluster.name} has no ${request.kind} "${request.name}" loaded.`
+      `MemQL: ${displayLabel(cluster)} has no ${request.kind} "${request.name}" loaded.`
     );
     return { outcome: 'notLoaded', detail: landing.kind };
   }
@@ -1137,7 +1139,7 @@ async function landOnArtifact(
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     noteDiagnostic(connectionOutput, `reading artifact ${request.id} from "${cluster.name}" failed`, detail);
-    void offerDetails('error', connectionOutput, `MemQL: Couldn't read this file from ${cluster.name}.`);
+    void offerDetails('error', connectionOutput, `MemQL: Couldn't read this file from ${displayLabel(cluster)}.`);
     return { outcome: 'noCluster', detail: 'the artifact could not be read' };
   }
   if (!lookup.found) {
@@ -1150,9 +1152,7 @@ async function landOnArtifact(
     // both: an owner-gated query cannot distinguish "there is no such row" from
     // "that row is not yours", and a message that guessed would be wrong half
     // the time in the direction that leaks.
-    void window.showInformationMessage(
-      `MemQL: This file isn't available on ${cluster.name}.`
-    );
+    void window.showInformationMessage(`MemQL: This file isn't available on ${displayLabel(cluster)}.`);
     return { outcome: 'notLoaded', detail: 'no such artifact' };
   }
 
@@ -1166,8 +1166,8 @@ async function landOnArtifact(
       `${cluster.name} ${describeOpenRequest(request)} -> no https address`
     );
     void (async () => {
-      const edit = 'Edit Cluster';
-      const answer = await window.showErrorMessage(`MemQL: ${cluster.name} has no domain set.`, edit);
+      const edit = 'Edit cluster';
+      const answer = await window.showErrorMessage(`MemQL: ${displayLabel(cluster)} has no domain set.`, edit);
       if (answer === edit) await commands.executeCommand('memql.clusters.edit', { cluster, selected: false });
     })();
     return { outcome: 'noCluster', detail: 'no https address for the cluster' };
@@ -1181,6 +1181,7 @@ async function landOnArtifact(
     connectionOutput,
     'Handoff from the console',
     `${artifactProvenanceLine(cluster.name, meta)} -> ${delivery.kind} as ${fileName}` +
+      (delivery.kind === 'saveToDisk' ? ` (${delivery.reason})` : '') +
       (lookup.archived ? ' (archived)' : '')
   );
 
@@ -1198,9 +1199,7 @@ async function landOnArtifact(
     // having happened; the same dialog after "this is a PDF" reads as the right
     // one. Detached, because a non-modal notification does not time out and the
     // dialog must not wait behind it.
-    void window.showInformationMessage(
-      `MemQL: ${fileName} opens as a file because ${delivery.reason}. Choose where to save it.`
-    );
+    void window.showInformationMessage(`MemQL: ${fileName} can't open in the editor, so choose where to save it.`);
     const saved = await offerArtifactSave({
       url: artifactContentUrl(base, request.id),
       bearer,
@@ -1279,17 +1278,19 @@ async function openCheckoutFor(
   // MODAL, because the alternatives are mutually exclusive and both rearrange
   // the operator's window. This is the one handoff step that can lose work if
   // it is answered by accident.
+  const newWindow = 'Open in new window';
+  const addFolder = 'Add to workspace';
   const pick = await window.showInformationMessage(
-    `Open your checkout (${checkout}) to edit this construct?`,
-    { modal: true },
-    'Open in New Window',
-    'Add to Workspace'
+    'Open your MemQL checkout to edit this construct?',
+    { modal: true, detail: checkout },
+    newWindow,
+    addFolder
   );
-  if (pick === 'Open in New Window') {
+  if (pick === newWindow) {
     await openFolderOrUnpark(surface, Uri.file(checkout), true);
     return { outcome: 'opened', detail: 'openCheckout' };
   }
-  if (pick === 'Add to Workspace') {
+  if (pick === addFolder) {
     const folder = Uri.file(checkout);
     workspace.updateWorkspaceFolders(workspace.workspaceFolders?.length ?? 0, 0, { uri: folder });
     // updateWorkspaceFolders returns a "was it started" boolean, not a promise:
@@ -1855,11 +1856,18 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       }
       // A toast only when nobody is looking at the page, which says it already.
       if (pageVisible) return;
-      // The page's own words for where the run ended: "local is on v0.24.0",
-      // "Couldn't create the cluster", "Stopped".
+      // The page's own words for where the run ended: "memql.localhost is on
+      // v0.24.0", "Couldn't create the cluster". A stopped run names what
+      // stopped, since "Stopped" alone says nothing out of the page.
       const open = 'Open';
       const settled = run.progress();
-      const line = `MemQL: ${run.status === 'done' ? (settled.title ?? run.words.done) : settled.status}.`;
+      const ended =
+        run.status === 'done'
+          ? (settled.title ?? run.words.done)
+          : run.status === 'stopped'
+            ? `${run.words.title} stopped`
+            : settled.status;
+      const line = `MemQL: ${ended}.`;
       const show = run.status === 'failed' ? window.showErrorMessage(line, open) : window.showInformationMessage(line, open);
       void Promise.resolve(show).then((choice) => {
         if (choice === open) DeploymentPanel.show(context, deploymentPanelDeps(), run.request.instance);
@@ -1893,13 +1901,13 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // to a release has no branch to pull, and moving it is a version change.
   const noCheckout = async (reason: OpenActionRefusal = 'noCheckout'): Promise<void> => {
     if (reason === 'noBranch') {
-      const change = 'Change Version';
-      const choice = await window.showInformationMessage('MemQL: the local checkout is on a release, so there is no branch to pull.', change);
+      const change = 'Change version';
+      const choice = await window.showInformationMessage("MemQL: The local cluster's checkout is on a release, so there's nothing to pull.", change);
       if (choice === change) void commands.executeCommand('memql.deployments.changeVersion');
       return;
     }
     const repair = 'Repair';
-    const choice = await window.showInformationMessage('MemQL: no local checkout found.', repair);
+    const choice = await window.showInformationMessage('MemQL: The local cluster has no checkout.', repair);
     if (choice === repair) void commands.executeCommand('memql.clusters.repair');
   };
   context.subscriptions.push(
@@ -2162,13 +2170,13 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         ? result.file.clusters.find((c) => c.name === panelCluster)
         : undefined;
       if (entry === undefined) {
-        void window.showInformationMessage(`MemQL: ${panelCluster} is no longer in your cluster list.`);
+        void window.showInformationMessage(`MemQL: ${clusterLabel(panelCluster)} is no longer in your cluster list.`);
         return;
       }
       const url = consoleConceptUrl(await consoleUrlForCluster(entry), construct.name);
       if (url === '') {
-        const edit = 'Edit Cluster';
-        const answer = await window.showErrorMessage('MemQL: This cluster has no web address.', edit);
+        const edit = 'Edit cluster';
+        const answer = await window.showErrorMessage(`MemQL: ${displayLabel(entry)} has no domain set.`, edit);
         if (answer === edit) await commands.executeCommand('memql.clusters.edit', { cluster: entry, selected: false });
         return;
       }
@@ -2180,9 +2188,9 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     browseRows: async (construct, panelCluster) => {
       const state = connections?.state;
       const connected = state?.status === 'connected' ? state.clusterName : undefined;
-      const refusal = panelClusterRefusal(panelCluster, connected, 'browse its rows');
+      const refusal = panelClusterRefusal(panelCluster, connected, 'browse its rows', clusterLabel);
       if (refusal !== undefined) {
-        void window.showInformationMessage(refusal);
+        void showClusterRefusal(refusal, panelCluster);
         return;
       }
       await openConceptRows(context, construct.name);
@@ -2190,9 +2198,9 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     viewSourceFromCluster: async (construct, panelCluster) => {
       const state = connections?.state;
       const connected = state?.status === 'connected' ? state.clusterName : undefined;
-      const refusal = panelClusterRefusal(panelCluster, connected, 'read its source');
+      const refusal = panelClusterRefusal(panelCluster, connected, 'read its source', clusterLabel);
       if (refusal !== undefined) {
-        void window.showInformationMessage(refusal);
+        void showClusterRefusal(refusal, panelCluster);
         return;
       }
       // Defined whenever there was no refusal: panelClusterRefusal answers with
@@ -2210,10 +2218,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // channel, never into the document and never into the toast.
         const detail = err instanceof Error ? err.message : String(err);
         noteDiagnostic(connectionOutput, `reading ${construct.originPath} from "${clusterName}" failed`, detail);
-        void offerDetails('error', connectionOutput, `MemQL: Couldn't read that file from ${clusterName}.`);
+        void offerDetails('error', connectionOutput, `MemQL: Couldn't read that file from ${clusterLabel(clusterName)}.`);
       }
     },
     run: (construct, withArguments) => runCatalogConstruct(construct, withArguments),
+    clusterLabel,
   });
 
   // Everything the console handoff (memql#4251) needs from this function, in
@@ -2235,7 +2244,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     workspace.registerTextDocumentContentProvider(ARTIFACT_DOCUMENT_SCHEME, artifactDocuments),
     languages.registerCodeLensProvider(
       { scheme: CLUSTER_DOCUMENT_SCHEME, language: 'memql' },
-      new ClusterDocumentLens()
+      new ClusterDocumentLens(clusterLabel)
     ),
     constructsView,
     // BOTH READERS OF THE CLUSTER'S CATALOG, because there are two and only one
@@ -2301,10 +2310,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       const state = connections?.state;
       const refusal = detailsRefusal(
         key.cluster ?? '',
-        state?.status === 'connected' ? state.clusterName : undefined
+        state?.status === 'connected' ? state.clusterName : undefined,
+        undefined,
+        clusterLabel
       );
       if (refusal !== undefined) {
-        void window.showInformationMessage(refusal);
+        void showClusterRefusal(refusal, key.cluster ?? '');
         return;
       }
       // The page opens AT ONCE, in its loading shape, and fills in when the
@@ -2543,7 +2554,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // The owner-passkey step belongs to the install hand-off; everywhere else
     // it is an offer on the page (clusters/ownershipRoute.ts).
     commands.registerCommand('memql.clusters.select', async (node?: ClusterNode) => {
-      const target = node ?? (await pickCluster(clustersPath));
+      const target = node ?? (await pickCluster(clustersPath, 'Connect to Cluster'));
       if (target === undefined || target.cluster.name === '') {
         return;
       }
@@ -2701,7 +2712,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // that reads as the feature being broken. It is the same capability the
     // install graph runs, so the two cannot drift.
     commands.registerCommand('memql.clusters.takeOwnership', async (node?: ClusterNode) => {
-      const target = node ?? (await pickCluster(clustersPath));
+      const target = node ?? (await pickCluster(clustersPath, 'Create Owner Passkey'));
       if (target === undefined || target.cluster.name === '') {
         return;
       }
@@ -2738,11 +2749,18 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // cluster is what Repair re-records.
         const reason = err instanceof OwnershipError ? err.reason : undefined;
         const fix = reason === 'noOwner' ? 'Sign in' : reason === 'otherCluster' ? 'Repair' : undefined;
+        // The sentence is the refusal's own when it names a cause the person
+        // can act on; a failed or empty mint says only that setup did not
+        // start, and its detail is in the channel.
+        const sentence =
+          reason === 'notLocal' || reason === 'noOwner' || reason === 'otherCluster' || reason === 'noLink'
+            ? detail
+            : "Couldn't start passkey setup.";
         void (async () => {
           const choice = await offerDetails(
             'error',
             connectionOutput,
-            `MemQL: ${briefMessage(detail)}`,
+            `MemQL: ${sentence}`,
             ...(fix === undefined ? [] : [fix])
           );
           if (choice === 'Sign in') await signInToCluster(target.cluster, { clustersPath, store: signInStore, clustersTree });
@@ -2776,7 +2794,9 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // clipboard, since offering to copy it would hand them whatever the mint
         // actually printed and invite them to open it.
         const recoverable = err instanceof EnrolmentError && err.reason === 'browserUnavailable';
-        const headline = `MemQL: ${briefMessage(detail)}`;
+        const headline = recoverable
+          ? "MemQL: Couldn't open your browser for passkey setup."
+          : "MemQL: Couldn't start passkey setup.";
         // DETACHED, the shape this file uses wherever a toast carries a button
         // (memql#4079): a non-modal notification with an action does not time
         // out, so awaiting one holds the command open until somebody answers it.
@@ -2831,7 +2851,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // The counterpart: forget this cluster's session. The store owns what that
     // means in each of the two places a credential lives (memql#3404).
     commands.registerCommand('memql.clusters.signOut', async (node?: ClusterNode) => {
-      const target = node ?? (await pickCluster(clustersPath));
+      const target = node ?? (await pickCluster(clustersPath, 'Sign Out'));
       if (target === undefined || target.cluster.name === '') {
         return;
       }
@@ -2927,7 +2947,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       AddClusterPanel.show(context, presence, addClusterDeps(), 'repair');
     }),
     commands.registerCommand('memql.clusters.remove', async (node?: ClusterNode) => {
-      const target = node ?? (await pickCluster(clustersPath));
+      const target = node ?? (await pickCluster(clustersPath, 'Remove Cluster From List'));
       if (target === undefined || target.cluster.name === '') {
         return;
       }
@@ -2991,7 +3011,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       ConnectionPanel.refresh();
     }),
     commands.registerCommand('memql.clusters.edit', async (node?: ClusterNode) => {
-      const target = node ?? (await pickCluster(clustersPath));
+      const target = node ?? (await pickCluster(clustersPath, 'Edit Cluster'));
       if (target === undefined) {
         return;
       }
@@ -3026,7 +3046,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (connections === undefined) {
         return;
       }
-      const target = node ?? (await pickCluster(clustersPath));
+      const target = node ?? (await pickCluster(clustersPath, 'Show Cluster Details'));
       if (target === undefined || target.cluster.name === '') {
         return;
       }
@@ -3059,7 +3079,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // (memql#3711 and epic memql#4984); the composed half needed an edit each
     // time.
     commands.registerCommand('memql.clusters.openConsole', async (node?: ClusterNode) => {
-      const target = node ?? (await pickCluster(clustersPath));
+      const target = node ?? (await pickCluster(clustersPath, 'Open MemQL OS'));
       if (target === undefined || target.cluster.name === '') {
         return;
       }
@@ -3067,11 +3087,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (url === '') {
         // Rare: the row and the page offer this only when an address can be
         // composed. From the palette, the fix is the entry's domain.
-        const edit = 'Edit';
-        const choice = await window.showErrorMessage(
-          `MemQL: No MemQL OS address for ${displayLabel(target.cluster)}. Add its domain.`,
-          edit
-        );
+        const edit = 'Edit cluster';
+        const choice = await window.showErrorMessage(`MemQL: ${displayLabel(target.cluster)} has no domain set.`, edit);
         if (choice === edit) await commands.executeCommand('memql.clusters.edit', target);
         return;
       }
@@ -3294,9 +3311,9 @@ function registerRunSurface(
   // "nothing happens" is the wrong one for a command the palette offers. The
   // default explains instead.
   let showTrainingList: () => Promise<void> = async () => {
-    const settings = 'Open Settings';
+    const settings = 'Open settings';
     const answer = await window.showInformationMessage(
-      'MemQL: Training state needs the MemQL language server, which is not running.',
+      "MemQL: Training needs the MemQL language server, which isn't running.",
       settings
     );
     if (answer === settings) await commands.executeCommand('workbench.action.openSettings', 'memql.lsp.serverPath');
@@ -3547,7 +3564,7 @@ function registerRunSurface(
     browseRows: async (conceptId, cursor) => {
       const query = conns.query;
       if (query === undefined) {
-        throw new Error('Not connected. Select a cluster in the Clusters view.');
+        throw new Error(NOT_CONNECTED_REFUSAL);
       }
       return browseConceptPage(query, conceptId, {
         pageSize: 100,
@@ -3760,10 +3777,7 @@ function registerRunSurface(
       // connected; this is the wall behind that, for a caller that is not the
       // view. The refusal carries the fix.
       if (!connectionContextKeys(connections?.state ?? { status: 'disconnected' }).connected) {
-        const select = 'Select Cluster';
-        if ((await window.showWarningMessage(`MemQL: ${NOT_CONNECTED_REFUSAL}`, select)) === select) {
-          await commands.executeCommand('memql.clusters.select');
-        }
+        await refuseNotConnected();
         return;
       }
       // An automation's saved run OPENS THE FORM pre-filled rather than
@@ -3801,9 +3815,8 @@ function registerRunSurface(
           removeRunConfig(current, node.config.name)
         );
       } catch (err) {
-        window.showErrorMessage(
-          `MemQL: ${briefMessage(redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir()))}`
-        );
+        noteDiagnostic(connectionOutput, `deleting the saved run "${node.config.name}" failed`, err instanceof Error ? err.message : String(err));
+        void offerDetails('error', connectionOutput, "MemQL: Couldn't delete the saved run.");
         return;
       }
       runsTree.refresh();
@@ -4107,7 +4120,7 @@ function reportTraining(
   // The fix, or the next act, as the toast's first button: Show Problems for
   // code that did not compile, Promote after a dry run, a session try or a
   // stage that went through.
-  const problems = 'Show Problems';
+  const problems = 'Show problems';
   const details = 'Show details';
   const first = outcome.status === 'invalid' ? problems : outcome.status === 'ok' ? next?.label : undefined;
   const buttons = first === undefined ? [details] : [first, details];
@@ -4376,7 +4389,7 @@ async function catalogTargetForConfig(
 ): Promise<ReturnType<typeof savedRunCatalogTarget>> {
   const dispatcher = connections?.dispatcher;
   if (dispatcher === undefined) {
-    window.showWarningMessage(`MemQL: ${NOT_CONNECTED_REFUSAL}`);
+    void refuseNotConnected();
     return undefined;
   }
   let listed;
@@ -4408,7 +4421,7 @@ async function constructForConfig(
   // SAID, never silent. This returned without a word, so Run on a saved run
   // did nothing at all in a window whose language server was missing.
   if (client === undefined) {
-    const settings = 'Open Settings';
+    const settings = 'Open settings';
     const answer = await window.showWarningMessage(
       'MemQL: Running a saved run from a file needs the MemQL language server.',
       settings
@@ -4421,9 +4434,8 @@ async function constructForConfig(
   try {
     document = await workspace.openTextDocument(uri);
   } catch (err) {
-    window.showErrorMessage(
-      `MemQL: Couldn't open ${config.file}: ${briefMessage(redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir()))}`
-    );
+    noteDiagnostic(connectionOutput, `opening ${config.file} failed`, err instanceof Error ? err.message : String(err));
+    void offerDetails('error', connectionOutput, `MemQL: Couldn't open ${config.file}.`);
     return undefined;
   }
   // The one call in this extension that asks the server for constructs OUTSIDE
@@ -4445,7 +4457,7 @@ async function constructForConfig(
     (c) => c.name === config.construct && c.kind === config.kind
   );
   if (found === undefined) {
-    const open = 'Open runs.json';
+    const open = 'Edit saved runs';
     const answer = await window.showErrorMessage(
       `MemQL: ${config.file} no longer has ${config.kind} "${config.construct}". It may have been renamed.`,
       open
@@ -4518,7 +4530,7 @@ async function openConceptRows(context: ExtensionContext, conceptId: string, row
   const conns = connections;
   const query = conns?.query;
   if (conns === undefined || query === undefined) {
-    window.showWarningMessage(`MemQL: ${NOT_CONNECTED_REFUSAL}`);
+    void refuseNotConnected();
     return;
   }
   if (conceptId === '') return;
@@ -4554,10 +4566,56 @@ async function writeCluster(
   try {
     await write();
   } catch (err) {
-    window.showErrorMessage(`MemQL: ${err instanceof Error ? err.message : String(err)}`);
+    // The registry's own sentence ("a cluster named x already exists") goes to
+    // the channel; the toast says what did not happen.
+    noteDiagnostic(connectionOutput, 'saving the cluster list failed', err instanceof Error ? err.message : String(err));
+    void offerDetails('error', connectionOutput, "MemQL: Couldn't save the cluster.");
     return;
   }
   clustersTree.refresh();
+}
+
+/** The shared refusal, with its fix as the button: connect to a cluster. */
+async function refuseNotConnected(): Promise<void> {
+  const connect = 'Connect';
+  if ((await window.showWarningMessage(`MemQL: ${NOT_CONNECTED_REFUSAL}`, connect)) === connect) {
+    await commands.executeCommand('memql.clusters.select');
+  }
+}
+
+/**
+ * The one answer to a cluster list that will not parse: say so, and open the
+ * file, where the fault is. The parser's words go to the channel.
+ */
+async function offerClusterListFix(clustersPath: string): Promise<void> {
+  const open = 'Open file';
+  const choice = await window.showErrorMessage("MemQL: Can't read your cluster list.", open);
+  if (choice === open) await commands.executeCommand('vscode.open', Uri.file(clustersPath));
+}
+
+/**
+ * The name a toast gives a cluster it knows only by its registry key: the
+ * display name when the list has one. Read from the cached list, so a toast
+ * never waits on a file read to find a label.
+ */
+function clusterLabel(name: string): string {
+  const cluster = clusterCache.get(name);
+  return cluster === undefined ? name : displayLabel(cluster);
+}
+
+/**
+ * A refusal that names a cluster, with Connect beside it when that cluster is
+ * in the list: the fix for "this is from X" is to connect to X.
+ */
+async function showClusterRefusal(refusal: string, clusterName: string): Promise<void> {
+  const cluster = clusterCache.get(clusterName);
+  if (cluster === undefined) {
+    void window.showInformationMessage(refusal);
+    return;
+  }
+  const connect = 'Connect';
+  const choice = await window.showInformationMessage(refusal, connect);
+  if (choice === connect) await commands.executeCommand('memql.clusters.select', { cluster, selected: false });
 }
 
 // The console's URL for a cluster: the site row when there is a live
@@ -4578,16 +4636,14 @@ async function consoleUrlForCluster(cluster: ClusterConfig): Promise<string> {
   return consoleTarget(cluster, page?.rows ?? []).url;
 }
 
-async function pickCluster(clustersPath: string): Promise<ClusterNode | undefined> {
+async function pickCluster(clustersPath: string, title?: string): Promise<ClusterNode | undefined> {
   // readClustersFileSafe, not readClustersFile: the Clusters TREE already
   // renders a malformed file as a readable row, and this path must agree with
   // it. The throwing variant turned "Select Cluster" from the palette into a
   // raw command-error toast for a file the tree was calmly explaining.
   const result = await readClustersFileSafe(clustersPath);
   if (!result.ok) {
-    const open = 'Open file';
-    const choice = await window.showErrorMessage("MemQL: Can't read your cluster list.", open);
-    if (choice === open) await commands.executeCommand('vscode.open', Uri.file(clustersPath));
+    await offerClusterListFix(clustersPath);
     return undefined;
   }
   const file = result.file;
@@ -4595,7 +4651,7 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
     // An empty picker is a dead end: offer the two ways to get a cluster.
     const add = { label: '$(add) Connect to a cluster', command: 'memql.clusters.add' };
     const install = { label: '$(server) Install a local cluster', command: 'memql.deployments.createDeployment' };
-    const chosen = await window.showQuickPick([add, install], { placeHolder: 'No clusters yet' });
+    const chosen = await window.showQuickPick([add, install], { title, placeHolder: 'No clusters yet' });
     if (chosen !== undefined) await commands.executeCommand(chosen.command);
     return undefined;
   }
@@ -4617,7 +4673,9 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
     })
   );
   items.sort((a, b) => Number(b.inUse) - Number(a.inUse));
-  const picked = await window.showQuickPick(items, { placeHolder: 'Choose a cluster' });
+  // Titled with the act it picks for, so "Choose a cluster" is never asked
+  // without saying what for.
+  const picked = await window.showQuickPick(items, { title, placeHolder: 'Choose a cluster' });
   if (picked === undefined) {
     return undefined;
   }
@@ -4628,10 +4686,10 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
 async function resolveSignInTarget(arg: unknown, clustersPath: string): Promise<ClusterNode | undefined> {
   const target = signInTarget(arg, connections?.state ?? { status: 'disconnected' });
   if (target.kind === 'node') return arg as ClusterNode;
-  if (target.kind === 'pick') return pickCluster(clustersPath);
+  if (target.kind === 'pick') return pickCluster(clustersPath, 'Sign In');
   const registry = await readClustersFileSafe(clustersPath);
   const cluster = registry.ok ? registry.file.clusters.find((c) => c.name === target.name) : undefined;
-  if (cluster === undefined) return pickCluster(clustersPath);
+  if (cluster === undefined) return pickCluster(clustersPath, 'Sign In');
   return { cluster, selected: registry.ok && registry.file.selectedCluster === cluster.name };
 }
 
@@ -5372,11 +5430,15 @@ function reportIgnoredWorkspaceServerPath(
   if (!workspaceScoped) {
     return;
   }
-  window.showWarningMessage(
-    'MemQL: "memql.lsp.serverPath" is set in this workspace and has been IGNORED. ' +
-      'The path is read only from your user settings -- a workspace-supplied one would let an opened folder ' +
-      'point the extension at any executable on your machine. Set it in User Settings if you meant it.'
-  );
+  const settings = 'Open user settings';
+  void Promise.resolve(
+    window.showWarningMessage(
+      "MemQL: This workspace's memql.lsp.serverPath is ignored. Set it in your user settings instead.",
+      settings
+    )
+  ).then((answer) => {
+    if (answer === settings) void commands.executeCommand('workbench.action.openSettings', 'memql.lsp.serverPath');
+  });
 }
 
 // resolveOnPath returns the absolute path to an executable `name` found on the

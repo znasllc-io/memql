@@ -1422,7 +1422,7 @@ test("a copy that FAILED is not a copy: Back still asks", async () => {
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY, asked);
   try {
     h.post({ type: "copyRecoveryKey" });
-    await until(() => recorded.errors.some((e) => /couldn't copy the recovery key/.test(e)), "the refusal");
+    await until(() => recorded.errors.some((e) => /Couldn't copy the recovery key/.test(e)), "the refusal");
     assert.doesNotMatch(h.html(), />Copied</, "a failed copy is not shown as copied");
     h.post({ type: "back" });
     await until(() => asked.prompts.length > 0, "the confirmation");

@@ -1513,12 +1513,12 @@ export class AddClusterPanel {
       recordDiagnostic(this.deps.diagnostics, "the claim link could not be opened", detail, new Date().toISOString());
       if (err instanceof ClaimError && err.reason === "browserUnavailable") {
         void (async () => {
-          const chosen = await vscode.window.showErrorMessage("MemQL: couldn't open a browser.", COPY_LINK);
+          const chosen = await vscode.window.showErrorMessage("MemQL: Couldn't open a browser.", COPY_LINK);
           if (chosen === COPY_LINK) await this.copyClaimLink(url);
         })();
         return;
       }
-      void vscode.window.showErrorMessage("MemQL: couldn't open the claim link.");
+      void vscode.window.showErrorMessage("MemQL: Couldn't open the sign-in link.");
     }
   }
 
@@ -1533,10 +1533,10 @@ export class AddClusterPanel {
         err instanceof Error ? err.message : String(err),
         new Date().toISOString(),
       );
-      void vscode.window.showErrorMessage("MemQL: couldn't copy the link.");
+      void vscode.window.showErrorMessage("MemQL: Couldn't copy the link.");
       return;
     }
-    void vscode.window.showInformationMessage("MemQL: link copied. It works once.");
+    void vscode.window.showInformationMessage("MemQL: Link copied. It works once.");
   }
 
   /**
@@ -1555,7 +1555,7 @@ export class AddClusterPanel {
         err instanceof Error ? err.message : String(err),
         new Date().toISOString(),
       );
-      void vscode.window.showErrorMessage("MemQL: couldn't copy the recovery key. Select it on the page and copy it.");
+      void vscode.window.showErrorMessage("MemQL: Couldn't copy the recovery key. Select it on the page and copy it.");
       return;
     }
     // RECORDED ONLY ON SUCCESS (memql#4615): this is what tells the close
@@ -1569,10 +1569,13 @@ export class AddClusterPanel {
     try {
       await vscode.env.clipboard.writeText(this.runLog.text());
     } catch {
-      void vscode.window.showErrorMessage("MemQL: couldn't copy the log. Open it in Output instead.");
+      void (async () => {
+        const open = "Open in Output";
+        if ((await vscode.window.showErrorMessage("MemQL: Couldn't copy the log.", open)) === open) this.deps.showDiagnostics?.();
+      })();
       return;
     }
-    void vscode.window.showInformationMessage("MemQL: log copied.");
+    void vscode.window.showInformationMessage("MemQL: Log copied.");
   }
 
   /**
@@ -1851,7 +1854,7 @@ export class AddClusterPanel {
       await this.deps.removeRegistryEntry(name);
     } catch (err) {
       recordDiagnostic(this.deps.diagnostics, "the cluster could not be removed from the list", String(err), new Date().toISOString());
-      void vscode.window.showErrorMessage("MemQL: couldn't remove it from the list.");
+      void vscode.window.showErrorMessage("MemQL: Couldn't remove it from the list.");
       return;
     }
     this.presence.invalidate();
@@ -1917,7 +1920,7 @@ export class AddClusterPanel {
     if (this.disposed) return;
     if (password === "cancelled" || password === "refused" || this.uninstall.stopping) {
       this.uninstall.reset();
-      if (password === "refused") void vscode.window.showWarningMessage("MemQL: your password wasn't accepted. Nothing was removed.");
+      if (password === "refused") void vscode.window.showWarningMessage("MemQL: Your password wasn't accepted, so nothing was removed.");
       return;
     }
     const controller = new AbortController();
@@ -2251,7 +2254,7 @@ export class AddClusterPanel {
     // what was lost and where to get another.
     if (this.state.recoveryKeyWouldBeLost) {
       void vscode.window.showWarningMessage(
-        `MemQL: the recovery key wasn't saved, and it can't be shown again. ${RECOVERY_KEY_REPLACEABLE}`,
+        `MemQL: The recovery key wasn't saved and can't be shown again. ${RECOVERY_KEY_REPLACEABLE}`,
       );
     }
     if (AddClusterPanel.open_ === this) AddClusterPanel.open_ = undefined;

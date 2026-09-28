@@ -431,7 +431,7 @@ export class ResultPanel {
       void vscode.window.showErrorMessage(`MemQL: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
-    const open = "Open runs.json";
+    const open = "Edit saved runs";
     if ((await vscode.window.showInformationMessage(`MemQL: Saved "${name}".`, open)) === open) {
       await vscode.commands.executeCommand("memql.runs.open");
     }

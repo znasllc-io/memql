@@ -173,7 +173,7 @@ test("an unclaimed cluster is told apart from a mint that produced nothing", asy
       err instanceof OwnershipError &&
       err.reason === "noLink" &&
       /has no owner yet/.test(err.message) &&
-      /ownership wizard/.test(err.message),
+      /Claim it in your browser/.test(err.message),
   );
 });
 

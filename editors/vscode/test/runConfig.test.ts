@@ -231,7 +231,7 @@ test("writeRunConfigs -- REFUSES to overwrite a file that does not parse", async
   await fs.writeFile(file, "{ this is not json", "utf8");
   await assert.rejects(
     writeRunConfigs(file, (c) => upsertRunConfig(c, config())),
-    /refusing to overwrite/,
+    /nothing was saved/,
   );
   assert.equal(await fs.readFile(file, "utf8"), "{ this is not json");
 });

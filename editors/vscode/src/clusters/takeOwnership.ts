@@ -181,8 +181,8 @@ export async function mintOwnershipLink(
     throw new OwnershipError(
       "noLink",
       state === "awaitingFirstSignIn"
-        ? `${displayLabel(inputs.cluster)} has no owner yet. Claim it through its ownership wizard.`
-        : "Passkey setup produced no link.",
+        ? `${displayLabel(inputs.cluster)} has no owner yet. Claim it in your browser first.`
+        : "Couldn't start passkey setup.",
     );
   }
   return url.trim();

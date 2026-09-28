@@ -75,79 +75,77 @@ test("the same edition and grammar is a match, and a match shows nothing", () =>
 });
 
 test("a newer grammar whose release is newer than this extension is clusterNewer, naming the release", () => {
-  const skew = compareLanguage({ edition: "2026", grammarVersion: GRAMMAR_B, editorRelease: "0.5.0" }, EXTENSION);
+  const skew = compareLanguage({ edition: "2026", grammarVersion: GRAMMAR_B, editorRelease: "0.5.0" }, EXTENSION, "prod.memql.io");
   assert.equal(skew.state, "clusterNewer");
   assert.equal(
     skew.headline,
-    "This cluster's MemQL grammar is newer than this extension's. Update MemQL for Visual Studio Code and Cursor to 0.5.0 or newer so completion and diagnostics match the cluster.",
+    "MemQL: prod.memql.io uses a newer MemQL language. Update this extension to 0.5.0 or newer.",
   );
   assert.equal(skew.releaseToInstall, "0.5.0");
 });
 
 test("a later edition is clusterNewer, naming both editions and the release", () => {
-  const skew = compareLanguage({ edition: "2027", grammarVersion: GRAMMAR_B, editorRelease: "0.9.0" }, EXTENSION);
+  const skew = compareLanguage({ edition: "2027", grammarVersion: GRAMMAR_B, editorRelease: "0.9.0" }, EXTENSION, "prod.memql.io");
   assert.equal(skew.state, "clusterNewer");
-  assert.equal(
-    skew.headline,
-    "This cluster speaks MemQL edition 2027; this extension speaks edition 2026. Update MemQL for Visual Studio Code and Cursor to 0.9.0 or newer.",
-  );
+  assert.equal(skew.headline, "MemQL: prod.memql.io uses MemQL edition 2027. Update this extension to 0.9.0 or newer.");
   assert.equal(skew.releaseToInstall, "0.9.0");
 });
 
 test("a later edition with no release named still says which edition to get, and names no release", () => {
   // The release comes from the cluster; one that did not send it leaves the
   // notice naming the edition instead of inventing a version.
-  const skew = compareLanguage({ edition: "2027", grammarVersion: GRAMMAR_B, editorRelease: "" }, EXTENSION);
+  const skew = compareLanguage({ edition: "2027", grammarVersion: GRAMMAR_B, editorRelease: "" }, EXTENSION, "prod.memql.io");
   assert.equal(skew.state, "clusterNewer");
   assert.equal(
     skew.headline,
-    "This cluster speaks MemQL edition 2027; this extension speaks edition 2026. Update MemQL for Visual Studio Code and Cursor to a release that speaks edition 2027.",
+    "MemQL: prod.memql.io uses MemQL edition 2027. Update this extension to a release for that edition.",
   );
   assert.equal(skew.releaseToInstall, undefined);
 });
 
 test("a grammar first carried by an older release than this extension is clusterOlder", () => {
-  const skew = compareLanguage({ edition: "2026", grammarVersion: GRAMMAR_B, editorRelease: "0.3.1" }, EXTENSION);
+  const skew = compareLanguage({ edition: "2026", grammarVersion: GRAMMAR_B, editorRelease: "0.3.1" }, EXTENSION, "prod.memql.io");
   assert.equal(skew.state, "clusterOlder");
   assert.equal(
     skew.headline,
-    "This cluster runs an older MemQL grammar than this extension. Completion may offer forms it refuses until the cluster is updated.",
+    "MemQL: prod.memql.io uses an older MemQL language. Some completions may not work there until it's updated.",
   );
   assert.equal(skew.releaseToInstall, undefined, "an older cluster is not fixed by installing anything here");
 });
 
 test("an earlier edition is clusterOlder, naming both editions", () => {
-  const skew = compareLanguage({ edition: "2025", grammarVersion: GRAMMAR_B, editorRelease: "0.2.0" }, EXTENSION);
+  const skew = compareLanguage({ edition: "2025", grammarVersion: GRAMMAR_B, editorRelease: "0.2.0" }, EXTENSION, "prod.memql.io");
   assert.equal(skew.state, "clusterOlder");
   assert.equal(
     skew.headline,
-    "This cluster speaks MemQL edition 2025, older than this extension's edition 2026. Completion may offer forms it refuses until the cluster is updated.",
+    "MemQL: prod.memql.io uses the older MemQL edition 2025. Some completions may not work there until it's updated.",
   );
 });
 
-test("different grammars that cannot be ordered are differs, naming both grammar versions", () => {
+test("different grammars that cannot be ordered are differs, claiming no order", () => {
   // The release that carries the cluster's grammar is this extension's own
   // version, yet the grammars differ: a locally built extension. Or the
   // cluster named a release that is not one. Either way no order can be
-  // shown, so the notice claims none: it names both labels and the release
-  // to look for.
+  // shown, so the notice claims none: it says they differ and what resolves
+  // it, and the details name both grammar labels.
   for (const editorRelease of ["0.4.0", "main", "", undefined]) {
-    const skew = compareLanguage({ edition: "2026", grammarVersion: GRAMMAR_B, editorRelease }, EXTENSION);
+    const skew = compareLanguage({ edition: "2026", grammarVersion: GRAMMAR_B, editorRelease }, EXTENSION, "prod.memql.io");
     assert.equal(skew.state, "differs", `editorRelease ${JSON.stringify(editorRelease)}`);
     assert.equal(
       skew.headline,
-      `This cluster runs MemQL grammar ${GRAMMAR_B}; this extension was built for ${GRAMMAR_A}. Use the MemQL for Visual Studio Code and Cursor release built for this cluster's grammar (Show details has both).`,
+      "MemQL: prod.memql.io uses a different MemQL language from this extension. Use the extension release built for it.",
     );
+    assert.ok(skew.details.join("\n").includes(GRAMMAR_A) && skew.details.join("\n").includes(GRAMMAR_B));
     assert.equal(skew.releaseToInstall, undefined);
   }
 });
 
 test("editions that are not years cannot be ordered either", () => {
-  const skew = compareLanguage({ edition: "next", grammarVersion: GRAMMAR_B, editorRelease: "0.5.0" }, EXTENSION);
+  const skew = compareLanguage({ edition: "next", grammarVersion: GRAMMAR_B, editorRelease: "0.5.0" }, EXTENSION, "prod.memql.io");
   assert.equal(skew.state, "differs");
   assert.equal(
     skew.headline,
-    "This cluster speaks MemQL edition next; this extension was built for edition 2026. Use the MemQL for Visual Studio Code and Cursor release built for this cluster's edition (Show details has both).",
+    "MemQL: prod.memql.io uses MemQL edition next, and this extension is for 2026. Use the extension release built for it.",
   );
 });
 
@@ -179,17 +177,31 @@ const NOTICE_CASES: Array<{ name: string; cluster: LanguageFacts }> = [
   { name: "differs by edition", cluster: { edition: "next", grammarVersion: GRAMMAR_B, editorRelease: "0.5.0" } },
 ];
 
-test("every notice's headline names both sides, or the release to install", () => {
+test("every notice names the cluster it is about, and a newer one the release to install", () => {
+  // A reconnect or a switch can raise it at any moment, so a headline that
+  // said only "this cluster" could not be tied to one.
   for (const { name, cluster } of NOTICE_CASES) {
-    const skew = compareLanguage(cluster, EXTENSION);
+    const skew = compareLanguage(cluster, EXTENSION, "prod.memql.io");
     const h = skew.headline;
-    const namesBothSides = /\bcluster\b/i.test(h) && /\bextension\b/i.test(h);
-    const namesTheRelease = skew.releaseToInstall !== undefined && h.includes(skew.releaseToInstall);
-    assert.ok(namesBothSides || namesTheRelease, `${name}: ${h}`);
+    assert.ok(h.startsWith("MemQL: prod.memql.io "), `${name} must lead with the cluster's name: ${h}`);
     if (skew.releaseToInstall !== undefined) {
       assert.ok(h.includes(`to ${skew.releaseToInstall} or newer`), `${name} must name the release to install: ${h}`);
     }
   }
+});
+
+test("a headline is short: two sentences at most, and no long product name", () => {
+  for (const { name, cluster } of NOTICE_CASES) {
+    const h = compareLanguage(cluster, EXTENSION, "prod.memql.io").headline;
+    assert.ok(h.split(/(?<=\.)\s/).length <= 2, `${name}: ${h}`);
+    assert.doesNotMatch(h, /Visual Studio Code and Cursor/, `${name}: ${h}`);
+    assert.doesNotMatch(h, /Show details/, `${name}: the button is not named in prose: ${h}`);
+  }
+});
+
+test("with no label the cluster is still named, as this cluster", () => {
+  const skew = compareLanguage({ edition: "2026", grammarVersion: GRAMMAR_B, editorRelease: "0.5.0" }, EXTENSION);
+  assert.ok(skew.headline.startsWith("MemQL: This cluster uses"), skew.headline);
 });
 
 test("no notice claims an order it cannot show", () => {
@@ -209,9 +221,9 @@ test("every notice says what resolves it", () => {
   // update this extension, update the cluster, or use the release built for
   // the cluster's language.
   const resolution: Record<string, RegExp> = {
-    clusterNewer: /Update MemQL for Visual Studio Code and Cursor to /,
-    clusterOlder: / until the cluster is updated\.$/,
-    differs: /Use the MemQL for Visual Studio Code and Cursor release built for this cluster's (grammar|edition) \(Show details has both\)\.$/,
+    clusterNewer: /Update this extension to /,
+    clusterOlder: / until it's updated\.$/,
+    differs: /Use the extension release built for it\.$/,
   };
   for (const { name, cluster } of NOTICE_CASES) {
     const skew = compareLanguage(cluster, EXTENSION);
@@ -397,4 +409,28 @@ test("the watcher reads the extension's facts at connect, not at wiring", async 
   await manager.connect(cluster("prod"));
   assert.equal(reads, 1);
   assert.equal(presented.length, 1);
+});
+
+test("the watcher's headline names the cluster by its label, and remembers it by its key", async () => {
+  // The registry key of every local cluster is "local"; the Clusters view
+  // calls it by its display name, and so does the notice.
+  const manager = new ConnectionManager(() =>
+    Promise.resolve(fakeConn({ edition: "2026", grammarVersion: GRAMMAR_B, editorRelease: "0.5.0" })),
+  );
+  const presented: Array<{ cluster: string; notice: LanguageSkewNotice }> = [];
+  watchLanguageSkew(
+    manager,
+    () => EXTENSION,
+    (notice, clusterName) => presented.push({ cluster: clusterName, notice }),
+    undefined,
+    (name) => (name === "local" ? "memql.localhost" : name),
+  );
+  await manager.connect(cluster("local"));
+  assert.equal(presented.length, 1);
+  assert.equal(presented[0]?.cluster, "local", "the key still identifies the cluster to the caller");
+  assert.equal(
+    presented[0]?.notice.headline,
+    "MemQL: memql.localhost uses a newer MemQL language. Update this extension to 0.5.0 or newer.",
+  );
+  assert.doesNotMatch(presented[0]?.notice.headline ?? "", /\blocal\b/);
 });
