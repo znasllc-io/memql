@@ -197,6 +197,9 @@ func (r *Router) fallbackWalk(
 		}
 		lastErr = err
 		lastFailed = resolved
+		// Every later attempt's row -- the served one included -- names the
+		// source that just failed, and why (failure_reason.go).
+		selection = selection.withAttemptFailed(resolved, err)
 	}
 
 	if lastErr != nil {

@@ -246,6 +246,14 @@ func buildRecord(
 
 	servedModel, servedEffort := servedModelOf(inner)
 
+	// A FAILED ATTEMPT SAYS SO ON ITS OWN LINE OF THE WALK, where the
+	// Decisions list reads it (failure_reason.go). A cancelled one does not:
+	// the caller gave up, and the source did nothing wrong.
+	considered := resolved.Decision.Considered
+	if outcome == "error" {
+		considered = withFailureNoted(considered, resolved.ProviderName, resolved.Decision.Door, err)
+	}
+
 	return CallRecord{
 		RequestId:          req.RequestId,
 		Partition:          req.Partition,
@@ -286,7 +294,7 @@ func buildRecord(
 		Rule:             resolved.Decision.Rule,
 		Policy:           resolved.Decision.Policy,
 		Door:             resolved.Decision.Door,
-		Considered:       resolved.Decision.Considered,
+		Considered:       considered,
 		Touches:          resolved.Decision.Touches,
 		MinContextTokens: resolved.Decision.MinContextTokens,
 		// WHOSE MACHINE. Asked of the PROVIDER and falling back to the

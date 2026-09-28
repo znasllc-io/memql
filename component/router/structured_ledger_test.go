@@ -14,6 +14,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -101,15 +102,49 @@ func TestAStructuredCallRecordsTheAppDoorItPassedAndWhy(t *testing.T) {
 	}
 }
 
-// THE FAILURE IS ON THE ROW. A person's structured call the route sends to an
-// open app door, whose session then fails, writes an error row naming the app
-// door and carrying the failure -- the reason a person reads in Fleet History.
+// codedRefusal is a refusal with a stable code, the shape the agent's app gate
+// (kill switch, a pin the owner did not make, no owner) and the engine's own
+// typed refusals share. Its MESSAGE names a person, which is exactly why the
+// decision row must carry the code and the router's own words rather than it.
+type codedRefusal struct{ code, message string }
+
+func (r *codedRefusal) Error() string { return r.code + ": " + r.message }
+func (r *codedRefusal) Code() string  { return r.code }
+
+// killSwitchRefusal is the agent's refusal as the chat door returns it: the
+// engine's sentinel in front of the gate's coded refusal.
+func killSwitchRefusal() error {
+	return fmt.Errorf("%w: %w", memql.ErrAppUnavailable, &codedRefusal{
+		code:    "kill_switch_engaged",
+		message: "computer use is switched off for alice@example.com (preferences.computerUseEnabled is false)",
+	})
+}
+
+// failedLine is the app door's `considered` line on a rendered row.
+func failedLine(t *testing.T, args map[string]any) string {
+	t.Helper()
+	entry, ok := consideredArg(args, "app:claude-code")
+	if !ok {
+		t.Fatalf("the row does not name the app door it tried: %v", args["considered"])
+	}
+	reason, _ := entry["reason"].(string)
+	return reason
+}
+
+// THE FAILURE IS ON THE ROW, IN THE FIELD THE DECISIONS LIST READS. A person's
+// structured call the route sends to an open app door, whose gate then
+// refuses, writes an error row naming the app door. The reason goes on the app
+// door's `considered` line -- routerDecision projects `considered` and
+// deliberately not the error message -- as the refusal's stable CODE and the
+// router's own words, never the refusal's message, which names a person.
+// Before this the line said "selected", so Settings > Decisions showed a
+// failed call through a signed-in app with no reason at all.
 func TestAStructuredCallWhoseAppDoorFailsRecordsWhy(t *testing.T) {
 	providers := memql.NewProviderRegistryForTest()
 	providers.SetFleetInference(&stubFleetInference{})
 	apps := &failingApps{
 		stubAppInference: stubAppInference{doors: []memql.AppDoor{openApp("claude-code")}},
-		err:              errors.New("no machine can run this app right now: app_no_owner: the session was refused on the machine"),
+		err:              killSwitchRefusal(),
 	}
 	providers.SetAppInference(apps)
 	policies := memql.NewPolicyRegistryForTest(map[string][]string{
@@ -133,11 +168,113 @@ func TestAStructuredCallWhoseAppDoorFailsRecordsWhy(t *testing.T) {
 		t.Errorf("row = outcome %v provider %v door %v, want error / app:claude-code / app",
 			args["outcome"], args["providerName"], args["door"])
 	}
-	if msg, _ := args["errorMessage"].(string); !strings.Contains(msg, "the session was refused on the machine") {
-		t.Errorf("errorMessage = %q, want the app door's own failure", msg)
+	line := failedLine(t, args)
+	if !strings.HasPrefix(line, "failed when called: kill_switch_engaged") {
+		t.Errorf("the app door's line is %q, want it to say it failed when called, with the refusal's code", line)
+	}
+	if strings.Contains(line, "alice@example.com") || strings.Contains(line, "preferences.computerUseEnabled") {
+		t.Errorf("the app door's line %q carries the refusal's message; a decision row carries the code and the router's words", line)
 	}
 	if apps.calls != 1 {
 		t.Errorf("app calls = %d, want 1", apps.calls)
+	}
+}
+
+// ledgerRows drains n rendered rows. The ledger writes on its own goroutines,
+// so the rows of one walk arrive in no promised order; they are keyed by
+// outcome, which is unique within one fallback.
+func ledgerRows(t *testing.T, ledger *countingLedger, n int) map[string]map[string]any {
+	t.Helper()
+	out := map[string]map[string]any{}
+	for i := 0; i < n; i++ {
+		args := ledger.args(t)
+		out[fmt.Sprint(args["outcome"])] = args
+	}
+	return out
+}
+
+// A FAILED SOURCE IS NAMED ON EVERY ROW OF THE WALK, the served one included.
+// The route's first source is refused when called and the vendor behind it
+// serves. The row a person reads first is the SERVED one (Decisions lists
+// every outcome), and before this its walk still said the source in front
+// was "selected" -- a call that went to a paid vendor with nothing saying
+// the source the route preferred had failed.
+//
+// Scripted `fleet:` sources rather than a real app door: every app or fleet
+// call spends the process-wide LLM rate ceiling this package's tests share,
+// and the walk is door-agnostic. The app door's own failure is the test
+// above; its codes are TestAnUntypedFailureIsNamedByItsCategory's.
+func TestASourceThatFailsWhenCalledIsNamedOnEveryRowOfTheWalk(t *testing.T) {
+	refused := &codedRefusal{code: memql.RefusalCodeNoLocalModel, message: "laptop (alice's) is asleep"}
+	for _, surface := range []struct {
+		name     string
+		modality airoute.Modality
+		call     func(context.Context, any) error
+	}{
+		{"structured", airoute.ModalityStructured, func(ctx context.Context, client any) error {
+			_, err := callStructured(t, ctx, client)
+			return err
+		}},
+		{"chat", airoute.ModalityChat, func(ctx context.Context, client any) error {
+			_, err := client.(common.ChatAIProvider).CallChat(ctx, []common.ChatMessage{{Role: "user", Content: "hi"}})
+			return err
+		}},
+	} {
+		t.Run(surface.name, func(t *testing.T) {
+			first := &scriptedSource{fail: refused}
+			vendor := &scriptedSource{answer: `{"ok":true}`}
+			r := scriptedRouter(t, []string{"fleet:first", "vendor"},
+				map[string]*scriptedSource{"fleet:first": first, "vendor": vendor})
+			ledger := &countingLedger{writes: make(chan string, 8)}
+			r.engine = ledger
+			ctx := auth.ContextWithUserActor(context.Background(), "alice")
+
+			req := structuredRequest()
+			req.Modality = surface.modality
+			resolved, err := r.ResolveFor(ctx, req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := surface.call(ctx, resolved.Client); err != nil {
+				t.Fatalf("the vendor behind the refused source did not serve: %v", err)
+			}
+			rows := ledgerRows(t, ledger, 3)
+			for _, outcome := range []string{"ok", "error", "fallback_used"} {
+				args, ok := rows[outcome]
+				if !ok {
+					t.Fatalf("no %s row among %v", outcome, rows)
+				}
+				entry, _ := consideredArg(args, "fleet:first")
+				line, _ := entry["reason"].(string)
+				if !strings.HasPrefix(line, "failed when called: "+memql.RefusalCodeNoLocalModel) || strings.Contains(line, "alice") {
+					t.Errorf("the %s row's line for the failed source is %q, want the failure, its code and none of the refusal's text", outcome, line)
+				}
+			}
+			served, _ := consideredArg(rows["ok"], "vendor")
+			if served["reason"] != "selected from fallback chain" {
+				t.Errorf("the served row's vendor line = %v, want it selected from the fallback chain", served)
+			}
+			// The caller's resolution is not the walk's: it still reads as
+			// resolved, and a second call on the same client starts clean.
+			if line, _ := consideredReason(resolved.Resolution.Decision.Considered, "fleet:first"); line != "selected" {
+				t.Errorf("the walk rewrote the caller's resolution: fleet:first = %q", line)
+			}
+		})
+	}
+}
+
+// AN UNTYPED FAILURE SAYS ITS CATEGORY, NOT ITS TEXT. A vendor error can quote
+// anything the vendor chose to send back; the decision row names the
+// category the ledger already derives (rate_limit, timeout, auth, ...).
+func TestAnUntypedFailureIsNamedByItsCategory(t *testing.T) {
+	if got := FailureReason(errors.New("429 Too Many Requests: slow down, request body was: classify this secret")); !strings.HasPrefix(got, "failed when called: rate_limit") || strings.Contains(got, "secret") {
+		t.Errorf("FailureReason(429) = %q, want the rate_limit category and none of the text", got)
+	}
+	if got := FailureReason(&memql.AppUnavailable{AppId: "claude-code", NoOwner: true}); got != "failed when called: app_no_owner: "+memql.AppNoOwnerReason {
+		t.Errorf("FailureReason(no owner) = %q", got)
+	}
+	if got := FailureReason(fmt.Errorf("%w: claude-code on laptop: worker: session refused its workspace /Users/alice/private", memql.ErrAppUnavailable)); !strings.HasPrefix(got, "failed when called: "+memql.AppRefusalCode) || strings.Contains(got, "/Users/alice") {
+		t.Errorf("FailureReason(app session failed) = %q, want the app refusal code and none of the text", got)
 	}
 }
 
