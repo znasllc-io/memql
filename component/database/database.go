@@ -1351,7 +1351,7 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 		} else {
 			if err := migrator.Lock(runCtx); err != nil {
 				d.Logger.Warn("failed to acquire migration lock; deferring migrations", "error", err)
-				d.recordMigrationErr(fmt.Errorf("migration lock: %w", err))
+				d.recordMigrationErr(fmt.Errorf("migration lock: %w", migrationLockErr(err)))
 				return
 			}
 
@@ -1395,6 +1395,39 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 	// completes cleanly, and never again after that.
 	d.markMigrationsRan()
 }
+
+// ErrMigrationLockHeld marks a migration attempt that ran nothing because
+// another migrator's row was already in bun's lock table. bun's Lock is a
+// TRY-lock -- an INSERT into bun_migration_locks, refused by the row's unique
+// key while another migrator holds it -- so "held" says something about the
+// world rather than about this attempt: another process is migrating, or is
+// confirming there is nothing to migrate, right now. A node retries on its
+// monitor tick (tryPing, via migrationsPending). A caller that must not proceed
+// on an unmigrated schema and cannot wait for a tick -- dbtest.EnsureSchema --
+// tests for this with errors.Is on MigrationError() and waits the holder out.
+var ErrMigrationLockHeld = errors.New("migration lock held by another migrator")
+
+// pgUniqueViolation is the SQLSTATE of the refusal bun's Lock meets when the
+// lock row already exists.
+const pgUniqueViolation = "23505"
+
+// migrationLockErr tags a Lock failure with ErrMigrationLockHeld when its cause
+// is the lock row's unique key, and leaves every other cause -- a dropped
+// connection, a missing table -- untagged. The message is bun's own either way.
+func migrationLockErr(err error) error {
+	var pgErr pgdriver.Error
+	if errors.As(err, &pgErr) && pgErr.Field('C') == pgUniqueViolation {
+		return migrationLockHeldError{cause: err}
+	}
+	return err
+}
+
+// migrationLockHeldError keeps bun's message and answers errors.Is for both
+// ErrMigrationLockHeld and the driver error beneath it.
+type migrationLockHeldError struct{ cause error }
+
+func (e migrationLockHeldError) Error() string   { return e.cause.Error() }
+func (e migrationLockHeldError) Unwrap() []error { return []error{ErrMigrationLockHeld, e.cause} }
 
 // pgdriver does not send a PostgreSQL cancel when its socket/context deadline
 // expires. Releasing the lock then would let another replica overlap the orphan.

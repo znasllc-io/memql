@@ -173,8 +173,20 @@ func newConnectHarness(t *testing.T) *connectHarness {
 	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ab", 32))
 	engine := &connectEngine{fakeEngine: newFakeEngine(), writable: map[string]bool{"s1": true}}
 	storefront := newFakeStorefront(t)
+	// The time attribute is dropped so an assertion on h.logs reads only the
+	// level, message and attributes: a wall-clock timestamp whose millisecond
+	// field is .401 would otherwise read as the HTTP status leaking.
 	logs := &bytes.Buffer{}
-	conn := NewConnector(engine, slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})), NewStoreRegistry(engine, nil), NewAdminClient())
+	handler := slog.NewTextHandler(logs, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) == 0 && a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})
+	conn := NewConnector(engine, slog.New(handler), NewStoreRegistry(engine, nil), NewAdminClient())
 	conn.connectAppGate = func(context.Context, string) (func(), error) { return func() {}, nil }
 	conn.now = func() time.Time { return time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC) }
 	conn.storefrontEndpoint = func(domain, version string) (string, error) {
