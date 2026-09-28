@@ -318,7 +318,6 @@ export class AddClusterPanel {
   private readonly uninstall = new UninstallRunState();
   private readonly disposables: vscode.Disposable[] = [];
   private disposed = false;
-  private flow: PanelFlow = "add";
 
   // ---- detection ----
   /** Undefined while detection runs: the landing draws a skeleton, never a guess. */
@@ -479,8 +478,8 @@ export class AddClusterPanel {
     return this.runInFlight || this.uninstalling;
   }
 
+  /** The tab is called what the page is doing. */
   private setFlow(flow: PanelFlow): void {
-    this.flow = flow;
     const title = TAB_TITLES[flow];
     if (this.panel.title !== title) this.panel.title = title;
   }
