@@ -165,7 +165,6 @@ test("each reachable exit code gets its own explanation", () => {
   // Six, not four. 2/3/4/5 are the contract's classifications; 0 and 1 reach a
   // failed outcome without being one, and both are real.
   const codes = [0, 1, 2, 3, 4, 5];
-  const headlines = codes.map((c) => failureGuidance(c).headline);
   // 1 and 5 may share a headline ("The step failed.") -- what differs, and
   // what the person acts on, is the ADVICE: a catch-all points at the log, an
   // operation failure says a retry often helps.

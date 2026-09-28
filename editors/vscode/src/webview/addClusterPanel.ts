@@ -65,7 +65,6 @@ import {
   recordedImageSource,
   recordedOwner,
   recordedStackTag,
-  type Receipt,
 } from "../install/receipt.js";
 import { recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
 import { removalRows, sharedToolRows } from "../install/removalPreview.js";

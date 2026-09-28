@@ -373,7 +373,6 @@ async function until(condition: () => boolean, what: string): Promise<void> {
 }
 
 const INSTALLED = /MemQL is installed/;
-const SETTLED = /MemQL is installed|MemQL is repaired|Couldn't install|Couldn't repair/;
 
 /** Wraps a runner so ONE capability blocks until the case lets it go. Install before open(). */
 function gateOn(runner: FakeRunner, capability: string): { reached: () => boolean; release: () => void } {
