@@ -484,7 +484,10 @@ func answerFrom(result workerservice.RunResult, structured bool) (string, error)
 		// transcript, which carries the whole session's narration.
 		return string(result.Result), nil
 	}
-	return result.Transcript, nil
+	// The app's own output. The transcript also carries stderr -- the
+	// cockpit's note of which model the level ran as -- which is a record
+	// for a reader, not part of the reply.
+	return result.Answer, nil
 }
 
 // flattenMessages renders a conversation as the single prompt the harnesses

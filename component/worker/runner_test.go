@@ -290,6 +290,34 @@ func TestRunnerNonZeroExitIsFailed(t *testing.T) {
 	}
 }
 
+// TestRunnerAnswerIsTheAppsOwnOutput: the ANSWER a caller renders is what
+// the app wrote to stdout. stderr is diagnostics -- the cockpit's own note
+// saying which model a level ran as, the app's warnings -- and belongs in the
+// transcript a reader inspects, never in the reply. An Ask "hi" answered
+// through Claude Code used to render as
+// "[memql] level strong runs claude-code with --model sonnet ... Hi!".
+func TestRunnerAnswerIsTheAppsOwnOutput(t *testing.T) {
+	runner, session, _, _ := newRunnerFixture(t, SubscriptionPresent)
+	const note = "[memql] level strong runs claude-code with --model sonnet --effort high (the cockpit's built-in table)\n"
+	go func() {
+		waitForSession(t, session, "sess-run")
+		session.handleAppSessionChunk(&memqlv1.AppSessionChunk{SessionId: "sess-run", Stream: AppSessionStreamStderr, Data: []byte(note), Seq: 1})
+		session.handleAppSessionChunk(&memqlv1.AppSessionChunk{SessionId: "sess-run", Stream: AppSessionStreamStdout, Data: []byte("Hi! What would you like help with?"), Seq: 2})
+		session.handleAppSessionEnd(&memqlv1.AppSessionEnd{SessionId: "sess-run"})
+	}()
+
+	result, err := runner.Run(context.Background(), session.worker, runSpec(), nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Answer != "Hi! What would you like help with?" {
+		t.Errorf("answer = %q, want the app's stdout alone", result.Answer)
+	}
+	if !strings.Contains(result.Transcript, note) || !strings.Contains(result.Transcript, "Hi!") {
+		t.Errorf("transcript = %q, want both streams: it is the record a reader inspects", result.Transcript)
+	}
+}
+
 // TestRunnerBoundsTheTranscript: the row keeps a bounded, EXPLICITLY
 // marked transcript. A transcript that just stops reads as a run that
 // stopped, which is the wrong conclusion.

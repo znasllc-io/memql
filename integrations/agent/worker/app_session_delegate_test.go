@@ -56,6 +56,7 @@ func TestDelegateCarriesTheStepAndTheCallsOwnKnobs(t *testing.T) {
 		Output: map[string]any{
 			"sessionId":  "v1:worker:appSession:s1",
 			"workerId":   "reg-laptop",
+			"answer":     "worked",
 			"transcript": "worked",
 			"model":      "claude-sonnet-4-6",
 			"effort":     "high",
@@ -110,12 +111,17 @@ func TestDelegateCarriesTheStepAndTheCallsOwnKnobs(t *testing.T) {
 	}
 }
 
-// A structured answer comes back as RAW JSON beside the transcript, not
+// A structured answer comes back as RAW JSON beside the text answer, not
 // instead of it: a harness can answer the schema and still exit non-zero, and
-// a session that answered no schema still produced a transcript.
+// a session that answered no schema still said something. The text answer is
+// the app's own output, never the transcript, whose stderr carries the
+// cockpit's diagnostics.
 func TestDelegateKeepsBothTheAnswerAndTheTranscript(t *testing.T) {
 	ex := &recordingExecutor{out: planner.ExecutorResult{Output: map[string]any{
-		"sessionId": "s", "transcript": "chatter", "result": map[string]any{"ok": true},
+		"sessionId":  "s",
+		"answer":     "chatter",
+		"transcript": "[memql] level strong runs claude-code with --model sonnet --effort high (the cockpit's built-in table)\nchatter",
+		"result":     map[string]any{"ok": true},
 	}}}
 	d := newAppSessionDelegateFor(ex, nil, nil, nil)
 
@@ -136,7 +142,7 @@ func TestDelegateKeepsBothTheAnswerAndTheTranscript(t *testing.T) {
 		t.Fatalf("Result = %q", out.Result)
 	}
 	if out.Content != "chatter" {
-		t.Fatalf("the transcript is still the text answer, got %q", out.Content)
+		t.Fatalf("the text answer is the app's own output, got %q", out.Content)
 	}
 }
 
@@ -223,7 +229,7 @@ func TestDelegateRefusesWithNoExecutor(t *testing.T) {
 func TestDelegateReportsAFailedSession(t *testing.T) {
 	ex := &recordingExecutor{
 		out: planner.ExecutorResult{Output: map[string]any{
-			"sessionId": "v1:worker:appSession:s9", "transcript": "got halfway",
+			"sessionId": "v1:worker:appSession:s9", "answer": "got halfway", "transcript": "got halfway",
 		}, ArtifactIds: []string{"v1:library:artifact:a9"}},
 		err: errors.New("cockpit-app: claude-code run failed: exit 1"),
 	}

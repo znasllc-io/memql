@@ -229,9 +229,10 @@ func (d *AppSessionDelegate) RunStep(ctx context.Context, h memqlengine.AppSessi
 	// substitutes for the other: a harness can answer the schema and still
 	// exit non-zero, and a session that answered no schema still produced a
 	// transcript. Content is the TEXT answer either way, because that is what
-	// a chat surface renders.
+	// a chat surface renders -- the app's own output, not the transcript,
+	// whose stderr carries the cockpit's diagnostics.
 	out.Result = resultJSON(res.Output["result"])
-	out.Content = outputString(res.Output, "transcript")
+	out.Content = outputString(res.Output, "answer")
 	if out.Content == "" && len(out.Result) > 0 {
 		out.Content = string(out.Result)
 	}

@@ -247,6 +247,10 @@ type RunResult struct {
 	Billing             string
 	AppSessionRef       string
 	ProducedArtifactIds []string
+	// Answer is the app's own output -- its stdout, trimmed -- and is what a
+	// caller renders as the reply. Transcript is the RECORD: both streams,
+	// stderr's diagnostics included, for a reader inspecting the session.
+	Answer              string
 	Transcript          string
 	TranscriptTruncated bool
 	// TranscriptFileId is the Library file the prose went to, empty when the
@@ -543,6 +547,7 @@ func (r *SessionRunner) Run(ctx context.Context, w *Worker, spec RunSpec, progre
 		Billing:             DeriveBilling(outcome.Usage, w, spec.App),
 		AppSessionRef:       outcome.AppSessionRef,
 		ProducedArtifactIds: outcome.ProducedArtifactIds,
+		Answer:              collector.answerText(),
 		Transcript:          transcript,
 		TranscriptTruncated: truncated,
 		ErrorMessage:        errMessage,
@@ -804,12 +809,26 @@ type transcriptCollector struct {
 	seen      int
 	max       int64
 	truncated bool
+	// answer is the app's own output: every chunk except stderr, which is
+	// diagnostics (the cockpit's level note, the app's warnings) and belongs
+	// only in the transcript. A chunk naming no stream is the app's output,
+	// as it was before streams were named. Bounded by the same max.
+	answer strings.Builder
 }
 
 func (c *transcriptCollector) append(chunk AppSessionChunk) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.seen += len(chunk.Data)
+	if chunk.Stream != AppSessionStreamStderr {
+		if room := int(c.max) - c.answer.Len(); room > 0 {
+			if len(chunk.Data) <= room {
+				c.answer.Write(chunk.Data)
+			} else {
+				c.answer.Write(chunk.Data[:room])
+			}
+		}
+	}
 	if c.truncated {
 		return
 	}
@@ -832,4 +851,10 @@ func (c *transcriptCollector) snapshot() (string, int, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.buf.String(), c.seen, c.truncated
+}
+
+func (c *transcriptCollector) answerText() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.TrimSpace(c.answer.String())
 }

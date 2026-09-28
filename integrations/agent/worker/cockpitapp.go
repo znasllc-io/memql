@@ -298,7 +298,11 @@ func (e *CockpitAppExecutor) runAdmitted(ctx context.Context, req planner.Execut
 			"app":           appId,
 			"exitCode":      result.ExitCode,
 			"appSessionRef": result.AppSessionRef,
-			"transcript":    result.Transcript,
+			// The reply is the app's own output; the transcript is the record,
+			// stderr's diagnostics included. A caller rendering a turn reads
+			// "answer", never "transcript".
+			"answer":     result.Answer,
+			"transcript": result.Transcript,
 			// WHAT THE APP REPORTED, verbatim (design D9). Empty means it did
 			// not say, which every reader records as unknown -- never the
 			// level it was given, never the app id.
