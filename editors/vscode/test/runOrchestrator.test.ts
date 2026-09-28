@@ -300,7 +300,7 @@ test("run -- refuses with no cluster selected", async () => {
   const outcome = await h.orchestrator.run(target(), { spaceId: "s1" });
   assert.ok(outcome.status === "error");
   assert.equal(outcome.phase, "preflight");
-  assert.match(outcome.message, /No cluster selected/);
+  assert.match(outcome.message, /Not connected\. Select a cluster first\./);
   assert.deepEqual(h.engine.ops(), []);
 });
 
@@ -409,7 +409,7 @@ test("run -- a bundle refused with no per-construct diagnostic becomes an ordina
   const outcome = await h.orchestrator.run(target(), { spaceId: "s1" });
   assert.ok(outcome.status === "error");
   assert.equal(outcome.phase, "validate");
-  assert.match(outcome.message, /without a per-construct diagnostic/);
+  assert.match(outcome.message, /rejected this code without saying where/);
 });
 
 test("run -- a failing DEFINE surfaces its diagnostics too", async () => {

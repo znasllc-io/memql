@@ -106,7 +106,7 @@ test("parsePayloadText -- a JSON object is the payload", () => {
 test("parsePayloadText -- a parse error is reported inline, not as a run failure", () => {
   const parsed = parsePayloadText("{ nope");
   assert.equal(parsed.ok, false);
-  assert.match(parsed.ok ? "" : parsed.error, /not valid JSON/);
+  assert.match(parsed.ok ? "" : parsed.error, /^Invalid JSON/);
 });
 
 test("parsePayloadText -- an array or a scalar is refused", () => {

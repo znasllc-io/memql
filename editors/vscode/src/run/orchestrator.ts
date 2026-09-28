@@ -53,7 +53,7 @@ import {
 import { buildNamedCall, extractErrorId } from "./call.js";
 import { bundleOrigin, type Bundle } from "./bundle.js";
 import { mapBundleDiagnostics, type MappedDiagnostic } from "./diagnostics.js";
-import { WriteConfirmationGate } from "./preflight.js";
+import { WriteConfirmationGate, writeConfirmationMessage } from "./preflight.js";
 import { SessionRegistry } from "./session.js";
 
 /** The phase a failure happened in, so the UI can say WHERE it broke rather than only that it did. */
@@ -196,20 +196,23 @@ export class RunOrchestrator {
 
     const cluster = this.deps.cluster();
     if (cluster === undefined) {
-      return fail(target, "preflight", "No cluster selected. Pick one in the Clusters view.");
+      return fail(target, "preflight", "Not connected. Select a cluster first.");
     }
     const engine = this.deps.engine();
     if (engine === undefined) {
-      return fail(
-        target,
-        "preflight",
-        `Not connected to ${cluster.label}. Select the cluster in the Clusters view to connect.`,
-      );
+      return fail(target, "preflight", `Not connected to ${cluster.label}.`);
     }
 
     if (this.writes.required(target.kind, cluster.local, cluster.name, target.name)) {
+      // ONE sentence for the confirmation, spelled in preflight.ts; this used
+      // to carry its own copy of it.
       const confirmed = await this.deps.confirmWrite(
-        `Run the mutation "${target.name}" against ${cluster.label}? That cluster is not marked local in clusters.yaml, so this writes real rows.`,
+        writeConfirmationMessage({
+          clusterName: cluster.name,
+          clusterLabel: cluster.label,
+          constructName: target.name,
+          constructKind: target.kind,
+        }),
       );
       // The modal is an await like any other, and the user can take as long as
       // they like over it -- which makes it the LONGEST window in the run for
@@ -281,7 +284,7 @@ export class RunOrchestrator {
         // failed run and an empty Problems panel, so that case becomes an
         // ordinary error carrying the reason we do have.
         if (mapped.length === 0) {
-          return fail(target, "validate", "The engine rejected the bundle without a per-construct diagnostic.");
+          return fail(target, "validate", "The cluster rejected this code without saying where.");
         }
         return { status: "invalid", target, diagnostics: mapped, phase: "validate" };
       }
@@ -323,7 +326,7 @@ export class RunOrchestrator {
           return fail(
             target,
             "define",
-            defined.error === "" ? "The engine refused the bundle." : defined.error,
+            defined.error === "" ? "The cluster rejected this code." : defined.error,
           );
         }
         this.session.recordInjection(cluster.name, bundle.sources);

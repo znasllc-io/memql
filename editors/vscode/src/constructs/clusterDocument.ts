@@ -52,14 +52,11 @@ export function packLocator(originPath: string): { domain: string; path: string 
 }
 
 export function notConnectedNotice(cluster: string): string {
-  return (
-    `// Not connected to ${cluster}.\n` +
-    `// This document is served from the cluster; reconnect to ${cluster} and reopen it.\n`
-  );
+  return `// Not connected to ${cluster}. Reconnect and reopen this file.\n`;
 }
 
 export function notFoundNotice(cluster: string, originPath: string): string {
-  return `// ${cluster} does not serve ${originPath}.\n// The catalog named this path, but the pack browser has no such file.\n`;
+  return `// ${cluster} doesn't have ${originPath} any more.\n`;
 }
 
 /**
@@ -67,14 +64,11 @@ export function notFoundNotice(cluster: string, originPath: string): string {
  *
  * NEVER THE RAW ERROR. This text is rendered INTO a .memql buffer, so every
  * line is a comment and none of it is the transport's own words -- those go to
- * the MemQL Connection channel, through the redactor, which is what this points
- * the reader at. See the information policy (memql#4194).
+ * the MemQL Connection output through the redactor, reached from the toast's
+ * Show details. See the information policy (memql#4194).
  */
 export function fetchFailedNotice(cluster: string, originPath: string): string {
-  return (
-    `// ${cluster} could not be read for ${originPath}.\n` +
-    `// Reconnect and reopen it; the failure is recorded in the MemQL Connection output channel.\n`
-  );
+  return `// Couldn't load ${originPath} from ${cluster}. Reconnect and reopen it.\n`;
 }
 
 /**
@@ -97,12 +91,13 @@ export function fetchFailedNotice(cluster: string, originPath: string): string {
 export function detailsRefusal(
   documentCluster: string,
   connectedCluster: string | undefined,
+  need = "open its details",
 ): string | undefined {
   if (documentCluster === "" || connectedCluster === documentCluster) return undefined;
   if (connectedCluster === undefined) {
-    return `MemQL: this document came from ${documentCluster}. Reconnect to ${documentCluster} to open its details.`;
+    return `MemQL: This is from ${documentCluster}. Connect to ${documentCluster} to ${need}.`;
   }
-  return `MemQL: this document came from ${documentCluster}; you are connected to ${connectedCluster}. Reconnect to ${documentCluster} to open its details.`;
+  return `MemQL: This is from ${documentCluster}, but you're connected to ${connectedCluster}. Connect to ${documentCluster} to ${need}.`;
 }
 
 /**
@@ -133,9 +128,11 @@ export function panelClusterRefusal(
   connectedCluster: string | undefined,
   need: string,
 ): string | undefined {
-  const mismatch = detailsRefusal(panelCluster, connectedCluster);
+  // `need` is threaded through, so the refusal names the act that was asked
+  // for -- it used to say "open its details" about a click on Open source.
+  const mismatch = detailsRefusal(panelCluster, connectedCluster, need);
   if (mismatch !== undefined) return mismatch;
-  if (connectedCluster === undefined) return `MemQL: connect to a cluster to ${need}.`;
+  if (connectedCluster === undefined) return `MemQL: Connect to a cluster to ${need}.`;
   return undefined;
 }
 

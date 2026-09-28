@@ -108,13 +108,13 @@ test("coerceArgs -- an empty REQUIRED field is an error", () => {
   const result = coerceArgs(ARGS, { spaceId: "" });
   assert.equal(result.ok, false);
   assert.ok(!result.ok);
-  assert.equal(result.errors.spaceId, "required");
+  assert.equal(result.errors.spaceId, "Required");
 });
 
 test("coerceArgs -- a non-numeric number is refused, not silently zeroed", () => {
   const result = coerceArgs(ARGS, { spaceId: "s1", limit: "ten" });
   assert.ok(!result.ok);
-  assert.match(result.errors.limit ?? "", /not a number/);
+  assert.equal(result.errors.limit, "Enter a number");
 });
 
 test("coerceArgs -- a non-boolean boolean is refused", () => {
@@ -122,7 +122,7 @@ test("coerceArgs -- a non-boolean boolean is refused", () => {
   // value the developer did not type.
   const result = coerceArgs(ARGS, { spaceId: "s1", active: "yes" });
   assert.ok(!result.ok);
-  assert.match(result.errors.active ?? "", /not true or false/);
+  assert.equal(result.errors.active, "Enter true or false");
 });
 
 test("coerceArgs -- an enum value outside the closed set is refused BY NAME", () => {
@@ -130,25 +130,25 @@ test("coerceArgs -- an enum value outside the closed set is refused BY NAME", ()
   // so here names the field; the engine's refusal would not.
   const result = coerceArgs(ARGS, { spaceId: "s1", status: "archived" });
   assert.ok(!result.ok);
-  assert.match(result.errors.status ?? "", /must be one of: active, left/);
+  assert.equal(result.errors.status, "Choose one of: active, left");
 });
 
 test("coerceArgs -- an object field rejects a JSON array", () => {
   const result = coerceArgs(ARGS, { spaceId: "s1", filter: "[1,2]" });
   assert.ok(!result.ok);
-  assert.match(result.errors.filter ?? "", /must be a JSON object/);
+  assert.equal(result.errors.filter, "Enter a JSON object");
 });
 
 test("coerceArgs -- an array field rejects a JSON object", () => {
   const result = coerceArgs(ARGS, { spaceId: "s1", ids: '{"a":1}' });
   assert.ok(!result.ok);
-  assert.match(result.errors.ids ?? "", /must be a JSON array/);
+  assert.equal(result.errors.ids, "Enter a JSON array");
 });
 
 test("coerceArgs -- malformed JSON names the field", () => {
   const result = coerceArgs(ARGS, { spaceId: "s1", filter: "{oops" });
   assert.ok(!result.ok);
-  assert.match(result.errors.filter ?? "", /not valid JSON/);
+  assert.match(result.errors.filter ?? "", /^Invalid JSON( \(line \d+\))?$/);
 });
 
 test("coerceArgs -- an `any` field falls back to the literal text when it is not JSON", () => {
