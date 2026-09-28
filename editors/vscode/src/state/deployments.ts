@@ -288,7 +288,7 @@ export interface LocalInstanceInput {
   /** The install receipt, when one was read. Null when nothing installed from here. */
   receipt: Receipt | null;
   /** The `local: true` clusters.yaml row, when one is registered. */
-  registered?: { name?: string; domain?: string };
+  registered?: { name?: string; domain?: string; version?: string };
   /** Whether this editor currently holds a live session against it. */
   connected: boolean;
   /**
@@ -327,7 +327,10 @@ export interface LocalInstanceInput {
 export function localInstance(input: LocalInstanceInput): Instance {
   const registeredName = (input.registered?.name ?? "").trim();
   const domain = (input.registered?.domain ?? "").trim() || recordedDomain(input.receipt);
-  const version = recordedStackTag(input.receipt);
+  // The receipt's tag; else the version clusters.yaml records for the
+  // registered entry -- a cluster built with `make up` has no receipt, and
+  // its version is still known.
+  const version = recordedStackTag(input.receipt) || (input.registered?.version ?? "").trim();
   const checkout = recordedStackDir(input.receipt);
   const imageSource = recordedImageSource(input.receipt);
   const rebuild = recordedRebuild(input.receipt);

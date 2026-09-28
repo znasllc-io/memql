@@ -101,6 +101,9 @@ test("signInCanRecover covers exactly the credential failures", () => {
   assert.equal(signInCanRecover("missingCredential"), true);
   assert.equal(signInCanRecover("credentialExpired"), true);
   assert.equal(signInCanRecover("wrongTokenClass"), true);
+  // The "came back after a while" case: the stored session was refused and
+  // cleared. Its toast used to say to sign in and offer no button.
+  assert.equal(signInCanRecover("reauthenticationRequired"), true);
   // A fresh token does not make an endpoint appear, nor a cluster reachable.
   assert.equal(signInCanRecover("notConfigured"), false);
   assert.equal(signInCanRecover("unreachable"), false);
@@ -123,6 +126,9 @@ test("performSignIn persists the tokens", async () => {
         refreshToken: "refresh-1",
         expiresInSeconds: 900,
         expiresAtEpochSeconds: 1_800_000_900,
+        // The client the tokens were issued to travels with them to the store,
+        // which keeps it beside the refresh token.
+        clientId: "memql-vscode",
       },
     },
   ]);
@@ -142,14 +148,13 @@ test("performSignIn does NOT write clusters.yaml (memql#4517)", async () => {
   assert.deepEqual(rec.order, ["flow", "tokens"]);
 });
 
-test("performSignIn reports an operator's clientId override unchanged", async () => {
-  // An entry carrying an id from the deleted registration path must keep
-  // working: it is read as an override and neither migrated nor rewritten.
-  const rec = recorder(async () => tokens({ clientId: "existing" }));
-  const outcome = await performSignIn(cluster({ clientId: "existing" }), rec.deps);
+test("performSignIn hands the store the client the FLOW used, not the registry's", async () => {
+  // The registry's `client_id` belongs to whichever tool wrote the entry; the
+  // store must record the client the tokens were actually issued to.
+  const rec = recorder();
+  await performSignIn(cluster({ clientId: "cockpit" }), rec.deps);
 
-  assert.equal(outcome.clientId, "existing");
-  assert.equal(rec.persisted.length, 1, "the tokens are still stored");
+  assert.equal(rec.persisted[0]?.credentials.clientId, "memql-vscode");
 });
 
 test("performSignIn stores nothing when the flow fails", async () => {
@@ -192,46 +197,61 @@ const ALL_KINDS: AuthFlowErrorKind[] = [
   "stateMismatch",
   "invalidCallback",
   "exchangeRejected",
+  "clientRefused",
 ];
 
 test("describeSignInFailure handles every kind in the taxonomy", () => {
   // Exhaustive by construction: a kind added to errors.ts and forgotten here
-  // would fall off the switch and produce an undefined advice string.
+  // would fall off the switch and produce an undefined sentence.
   for (const kind of ALL_KINDS) {
-    const report = describeSignInFailure("local", new AuthFlowError(kind, `the ${kind} sentence`));
+    const report = describeSignInFailure("memql.localhost", new AuthFlowError(kind, `the ${kind} sentence`));
     if (kind === "cancelled") {
       assert.equal(report.level, "silent", "a user who cancelled already knows");
       assert.equal(report.message, "");
+      assert.equal(report.detail, "");
       continue;
     }
     assert.notEqual(report.message, "", `${kind} produced no message`);
-    assert.match(
-      report.message,
-      /^MemQL: signing in to "local" failed\./,
-      `${kind} must name the cluster`,
-    );
-    assert.ok(
-      report.message.includes(`the ${kind} sentence`),
-      `${kind} must carry the flow's own explanation through`,
-    );
-    assert.ok(
-      report.message.length > `MemQL: signing in to "local" failed. the ${kind} sentence`.length,
-      `${kind} must add a next action, not only restate the failure`,
-    );
+    // ONE plain sentence (two at most, when the server supplied its own) --
+    // the toast is not the record.
+    assert.ok(report.message.length <= 120, `${kind}: the toast is a paragraph: ${report.message}`);
+    assert.doesNotMatch(report.message, /MemQL:|clusters\.yaml|token|client_id|--/, `${kind}: ${report.message}`);
+    // The flow's own explanation is kept whole for the Output channel.
+    assert.equal(report.detail, `the ${kind} sentence`, `${kind} lost its detail`);
   }
+});
+
+test("describeSignInFailure names the cluster by the label the row shows", () => {
+  const report = describeSignInFailure("memql.localhost", new AuthFlowError("exchangeRejected", "x"));
+  assert.equal(report.message, "Couldn't finish signing in to memql.localhost.");
+});
+
+test("a refused client says the cluster doesn't accept VS Code, and what to do", () => {
+  const report = describeSignInFailure(
+    "memql.localhost",
+    new AuthFlowError("clientRefused", "refused", { serverMessage: "Invalid redirect URI. Not registered." }),
+  );
+  assert.equal(report.level, "error");
+  assert.equal(report.retryable, false);
+  assert.match(report.message, /^memql\.localhost doesn't accept sign-in from VS Code\. Update it/);
+});
+
+test("a declined sign-in carries the server's own sentence", () => {
+  const server = "Your role on it is reader. Ask a cluster owner or admin to raise your role.";
+  const report = describeSignInFailure(
+    "memql.localhost",
+    new AuthFlowError("authorizationDenied", "refused: access_denied -- x", { serverMessage: server }),
+  );
+  assert.equal(report.message, `memql.localhost declined the sign-in. ${server}`);
 });
 
 test("describeSignInFailure reports a timeout as a warning, not an error", () => {
   const report = describeSignInFailure("local", new AuthFlowError("timeout", "no callback"));
   assert.equal(report.level, "warning");
   assert.equal(report.retryable, true);
-  // Since timeout stopped triggering the device fallback (memql#4594), the
-  // advice is the only remaining route to the device grant for a host that
-  // cannot receive the callback -- so it must NAME the command.
-  assert.ok(
-    report.message.includes("MemQL: Sign In With a Device Code"),
-    `the timeout advice must name the device-code command; got: ${report.message}`,
-  );
+  // The way to a device code is the toast's button now (signInRecovery.ts),
+  // not a command named in prose.
+  assert.equal(report.message, "Sign-in didn't finish in time.");
 });
 
 test("describeSignInFailure refuses to mark a security refusal retryable", () => {
@@ -275,7 +295,8 @@ test("describeSignInFailure branches on kind, never on message text", () => {
 test("describeSignInFailure survives a rejection that is not an AuthFlowError", () => {
   const report = describeSignInFailure("local", new TypeError("fetch is not a function"));
   assert.equal(report.level, "error");
-  assert.match(report.message, /fetch is not a function/);
+  assert.equal(report.message, "Couldn't sign in to local.");
+  assert.match(report.detail, /fetch is not a function/);
   assert.equal(report.retryable, false);
 });
 
@@ -349,4 +370,17 @@ test("the two flows select DIFFERENT runners", async () => {
     deviceCode: stubRunner("device", seen),
   };
   assert.notEqual(selectSignInRunner("auto", runners), selectSignInRunner("deviceCode", runners));
+});
+
+test("a certificate this computer does not trust is said as such, not as a sign-in fault", () => {
+  const cause = Object.assign(new Error("unable to verify the first certificate"), {
+    code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  });
+  const report = describeSignInFailure(
+    "memql.localhost",
+    new AuthFlowError("registrationFailed", "Cannot sign in: fetch failed", { cause }),
+  );
+  assert.equal(report.message, "This computer doesn't trust the cluster's certificate.");
+  assert.equal(report.untrustedCertificate, true);
+  assert.equal(describeSignInFailure("x", new AuthFlowError("timeout", "no callback")).untrustedCertificate, false);
 });

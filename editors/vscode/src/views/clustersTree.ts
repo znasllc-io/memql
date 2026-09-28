@@ -4,12 +4,25 @@
 // writes, so the file is watched and the tree refreshes on external change.
 // The tree renders state; it does not own it -- selection is persisted to the
 // file and connection state lives in the ConnectionManager.
+//
+// WHAT A ROW SAYS AND OFFERS is decided in src/clusters/status.ts, over the
+// same state machine the cluster page uses: the state in words, the version
+// only when it tells something, the cluster in use marked, and a contextValue
+// carrying the flags the menus are gated on -- so the one inline act is the
+// state's next step (Sign in, or Open MemQL OS) and the context menu offers
+// only what is legal now.
 
 import * as vscode from "vscode";
 
+import { fileOnlyFacts, type ClusterFacts } from "../clusters/facts.js";
 import type { ClusterConfig } from "../clusters/model.js";
 import { displayLabel } from "../clusters/model.js";
-import { clusterRowStatus, clusterRowText, type ClusterRowIcon } from "../clusters/status.js";
+import {
+  clusterContextValue,
+  clusterRowText,
+  clusterStatus,
+  type ClusterState,
+} from "../clusters/status.js";
 import { readClustersFileSafe } from "../clusters/file.js";
 import type { ConnectionManager } from "../connection/manager.js";
 import type { ClusterVersionRefresher } from "../version/learners.js";
@@ -18,6 +31,13 @@ import type { ReleaseCache } from "../version/releaseCache.js";
 export interface ClusterNode {
   cluster: ClusterConfig;
   selected: boolean;
+  /**
+   * What this machine knows about the cluster's sign-in (clusters/facts.ts),
+   * read before the row renders so it never flashes "Sign in" for a cluster
+   * a stored session would connect. Absent on a node built by a caller that
+   * did not read them (a toast's argument, the palette).
+   */
+  facts?: ClusterFacts;
   // error is set only on the single synthetic row getChildren returns when
   // clusters.yaml fails to read (e.g. malformed YAML, or a torn concurrent
   // write from the cockpit -- the file is shared and not lock-protected).
@@ -26,6 +46,13 @@ export interface ClusterNode {
   // is caught (via readClustersFileSafe) and rendered as a row instead,
   // rather than the panel silently going blank.
   error?: string;
+}
+
+export interface ClustersTreeDeps {
+  /** The facts for one cluster; never rejects. */
+  factsFor?: (cluster: ClusterConfig) => Promise<ClusterFacts>;
+  /** Told after every read of the file, with what it listed (the welcome's presence key). */
+  onRead?: (clusters: readonly ClusterConfig[]) => void;
 }
 
 export class ClustersTreeProvider implements vscode.TreeDataProvider<ClusterNode> {
@@ -40,6 +67,7 @@ export class ClustersTreeProvider implements vscode.TreeDataProvider<ClusterNode
     // else rather than one that cannot be constructed.
     private readonly releases?: ReleaseCache,
     private readonly versions?: ClusterVersionRefresher,
+    private readonly deps: ClustersTreeDeps = {},
   ) {
     this.connections.onDidChangeState(() => this.changed.fire(undefined));
   }
@@ -70,15 +98,24 @@ export class ClustersTreeProvider implements vscode.TreeDataProvider<ClusterNode
       // show it) or leaving the panel looking merely empty.
       return [{ cluster: { name: "", endpoint: "" }, selected: false, error: result.error }];
     }
+    this.deps.onRead?.(result.file.clusters);
     // Fire-and-forget: THIS is what triggers the first release fetch and the
     // first version refresh, so activation stays offline and the work is
     // caused by somebody actually looking at the tree. Not awaited, because
     // the rows must render now from what is already known -- `peek()` in
     // getTreeItem -- rather than after a subprocess and two round trips.
     void this.learn(result.file.clusters);
-    return result.file.clusters.map((cluster) => ({
+    // The facts ARE awaited: they are local reads (SecretStorage and the
+    // receipt), and rendering before them would show "Sign in" on a row whose
+    // stored session a click would simply use.
+    const factsFor = this.deps.factsFor ?? ((cluster: ClusterConfig) => Promise.resolve(fileOnlyFacts(cluster)));
+    const facts = await Promise.all(
+      result.file.clusters.map((cluster) => factsFor(cluster).catch(() => undefined)),
+    );
+    return result.file.clusters.map((cluster, i) => ({
       cluster,
       selected: cluster.name === result.file.selectedCluster,
+      ...(facts[i] !== undefined ? { facts: facts[i] } : {}),
     }));
   }
 
@@ -116,69 +153,74 @@ export class ClustersTreeProvider implements vscode.TreeDataProvider<ClusterNode
 
   getTreeItem(node: ClusterNode): vscode.TreeItem {
     if (node.error !== undefined) {
-      const item = new vscode.TreeItem(
-        "Failed to read clusters.yaml",
-        vscode.TreeItemCollapsibleState.None,
-      );
+      // THE CLICK IS THE REMEDY: it opens the file at the parser's complaint.
+      // The full parser message is the tooltip; the watcher repaints after
+      // the fix.
+      const item = new vscode.TreeItem("Can't read your cluster list", vscode.TreeItemCollapsibleState.None);
       item.contextValue = "memqlClustersError";
-      item.description = node.error;
-      item.tooltip = `ERROR: ${node.error}`;
+      item.description = "Open the file to fix it";
+      item.tooltip = node.error;
       item.iconPath = new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
+      item.command = {
+        command: "vscode.open",
+        title: "Open File",
+        arguments: [vscode.Uri.file(this.clustersPath)],
+      };
       return item;
     }
 
+    const cluster = node.cluster;
+    const facts = node.facts ?? fileOnlyFacts(cluster);
+    const state = this.connections.state;
+    const status = clusterStatus({ cluster, connection: state, facts });
+    // The cluster in use: the selected one, or the one the live connection
+    // names (the two agree unless the file was edited underneath).
+    const inUse =
+      node.selected || (state.status !== "disconnected" && state.clusterName === cluster.name);
+    const label = displayLabel(cluster);
+    // MARKED, so a reader can tell which cluster every other view is about --
+    // including after a reload, before anything has connected.
     const item = new vscode.TreeItem(
-      displayLabel(node.cluster),
+      inUse ? { label, highlights: [[0, label.length]] } : label,
       vscode.TreeItemCollapsibleState.None,
     );
-    // Two context values, because the two kinds of row offer different actions:
-    // only a LOCAL cluster can be uninstalled from this machine, and a `when`
-    // clause is the only way to scope a menu entry to one of them.
-    //
-    // `=== true`, never a truthiness test, matching src/clusters/presence.ts and
-    // the field's own documentation: absent means NOT local, and every cluster
-    // registered before the flag existed carries no flag. Reading those as local
-    // would offer to uninstall an operator's staging cluster.
-    item.contextValue = node.cluster.local === true ? "memqlLocalCluster" : "memqlCluster";
+    item.contextValue = clusterContextValue(cluster, status, facts, inUse);
     item.command = {
       command: "memql.clusters.select",
       title: "Select Cluster",
       arguments: [node],
     };
-    // The icon, the description and the tooltip all come from decisions taken
-    // in a module that can be unit-tested (src/clusters/status.ts). This method
-    // is only the mapping onto VS Code's icon vocabulary.
-    //
     // `peek()`, never `get()`: this is a synchronous render path, and fetching
     // here would put a subprocess behind every repaint. The fetch is triggered
     // by getChildren instead, which repaints when it learns something.
-    const status = clusterRowStatus(node.cluster, this.connections.state);
-    const text = clusterRowText(node.cluster, this.connections.state, this.releases?.peek());
-    item.iconPath = themeIconFor(status.icon);
+    const text = clusterRowText(cluster, status, inUse, this.releases?.peek());
+    item.iconPath = themeIconFor(status.state, inUse);
     item.description = text.description;
     item.tooltip = text.tooltip;
+    item.accessibilityInformation = { label: text.accessibilityLabel };
     return item;
   }
 }
 
-// The `credential` icon is deliberately NOT the red error dot. memql#3385:
+// The `signIn` icon is deliberately NOT the red error dot. memql#3385:
 // "an operator ... sees a red cluster icon with no indication that the
 // CREDENTIAL is what expired, as distinct from the cluster going away." A key
 // says which of the two it is at a glance, and yellow says it is fixable from
-// here rather than being an outage.
-function themeIconFor(icon: ClusterRowIcon): vscode.ThemeIcon {
-  switch (icon) {
+// here rather than being an outage. An idle cluster in use is a filled dot, so
+// the working cluster is marked even before it connects.
+function themeIconFor(state: ClusterState, inUse: boolean): vscode.ThemeIcon {
+  switch (state) {
     case "connected":
       return new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor("charts.green"));
     case "connecting":
       return new vscode.ThemeIcon("loading~spin");
-    case "failed":
+    case "unreachable":
       return new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
-    case "credential":
+    case "signIn":
       return new vscode.ThemeIcon("key", new vscode.ThemeColor("charts.yellow"));
-    case "unconfigured":
+    case "notConfigured":
       return new vscode.ThemeIcon("warning", new vscode.ThemeColor("charts.yellow"));
     case "idle":
-      return new vscode.ThemeIcon("circle-outline");
+      return new vscode.ThemeIcon(inUse ? "circle-filled" : "circle-outline");
   }
 }

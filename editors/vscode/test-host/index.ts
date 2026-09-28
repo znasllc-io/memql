@@ -507,16 +507,24 @@ smoke("every webview surface opens without throwing", async () => {
   ConceptPanel.open(context, connections, concept);
   expected.push(`Concept: ${concept.entity}`);
 
+  // The page is titled with the cluster's own name (its display label once
+  // the entry is read). The registry here does not exist, so the entry is
+  // absent and the title stays the registry name: the "no longer in your
+  // list" screen, which is the one this lane can render with no cluster.
   ConnectionPanel.open(
     context,
     {
       clustersPath: path.join(os.tmpdir(), "memql-smoke-no-such-clusters.yaml"),
       connections,
-      readExpiry: async () => undefined,
+      factsFor: async () => ({ session: false, signedIn: false, ownerSetup: false, consoleUrl: "" }),
+      signInFlight: () => undefined,
+      cancelSignIn: () => undefined,
+      useCode: () => undefined,
+      showDetails: () => undefined,
     },
     "smoke-cluster",
   );
-  expected.push("Cluster: smoke-cluster");
+  expected.push("smoke-cluster");
 
   RunPanel.open(context, runHost, runTarget);
   expected.push(`Run: ${runTarget.name}`);
@@ -879,9 +887,12 @@ smoke("sign-in and sign-out are reachable from the palette and the Clusters view
       `${command}'s palette entry must carry the trust clause the runtime surface is gated on`
     );
 
+    // Cluster rows carry `memqlCluster;<state>[;flags]` (clusters/status.ts
+    // clusterContextValue), and each entry is gated on the state it is legal
+    // in -- Sign in on a signIn row, Sign out on a row with something stored.
     const inMenu = itemContext.find(
       (entry) =>
-        entry.command === command && (entry.when ?? "").includes("viewItem == memqlCluster")
+        entry.command === command && (entry.when ?? "").includes("viewItem =~ /^memqlCluster;")
     );
     assert.ok(
       inMenu !== undefined,

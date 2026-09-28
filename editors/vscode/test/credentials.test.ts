@@ -24,9 +24,11 @@ import assert from "node:assert/strict";
 
 import {
   accessTokenExpirySecretKey,
+  issuedClientSecretKey,
   refreshTokenSecretKey,
   type SecretStore,
 } from "../src/auth/store.js";
+import { WELL_KNOWN_CLIENT_ID } from "../src/auth/wellKnownClient.js";
 import type { ClusterConfig } from "../src/clusters/model.js";
 import {
   CredentialResolver,
@@ -228,11 +230,34 @@ test("an expired access token is exchanged against the identity token endpoint",
   assert.deepEqual(result, { ok: true, bearer: "REFRESHED" });
   assert.equal(http.calls.length, 1);
   assert.equal(http.calls[0]?.url, "https://identity.memql.localhost/oauth/token");
+  // The registry's `cockpit` is the Cockpit's client, not this token's: with
+  // nothing recorded beside the token, the editor presents its own.
   assert.deepEqual(http.calls[0]?.body, {
     grant_type: "refresh_token",
     refresh_token: "RT-1",
-    client_id: "cockpit",
+    client_id: WELL_KNOWN_CLIENT_ID,
   });
+});
+
+test("a refresh presents the client the token was issued to, as recorded beside it", async () => {
+  const http = okHttp();
+  const secrets = new FakeSecrets();
+  await secrets.store(refreshTokenSecretKey("local"), "RT-1");
+  await secrets.store(issuedClientSecretKey("local"), "recorded-client");
+
+  await resolver({ http, secrets }).resolve(
+    cluster({ token: jwtExpiringIn(-60), clientId: "cockpit" }),
+  );
+
+  assert.equal(http.calls[0]?.body.client_id, "recorded-client");
+});
+
+test("taking custody of a file refresh token records the client that presented it", async () => {
+  const secrets = new FakeSecrets();
+  await resolver({ http: okHttp(), secrets }).resolve(
+    cluster({ token: jwtExpiringIn(-60), refreshToken: "RT-1", clientId: "cockpit" }),
+  );
+  assert.equal(secrets.values.get(issuedClientSecretKey("local")), WELL_KNOWN_CLIENT_ID);
 });
 
 test("refresh is PROACTIVE: a token inside the skew window is renewed before it can fail", async () => {

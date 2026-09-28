@@ -25,10 +25,11 @@ import type { HttpRequestInit, HttpResponseLike } from "../src/connection/creden
 import { runAuthorizationFlow } from "../src/auth/flow.js";
 import { runDeviceCodeFlow } from "../src/auth/deviceCode.js";
 import {
+  EDITOR_CLIENT_ID,
   WELL_KNOWN_CLIENT_ID,
   WELL_KNOWN_REDIRECT_URI,
   normalizeIssuer,
-  resolveClientId,
+  refreshClientId,
 } from "../src/auth/wellKnownClient.js";
 
 const ISSUER = "https://identity.memql.localhost";
@@ -52,15 +53,18 @@ test("the well-known redirect URI carries no port", () => {
   assert.equal(parsed.pathname, "/callback");
 });
 
-test("resolveClientId falls back to the well-known id, and honours an override", () => {
-  assert.equal(resolveClientId(undefined), WELL_KNOWN_CLIENT_ID);
-  assert.equal(resolveClientId(""), WELL_KNOWN_CLIENT_ID);
-  assert.equal(resolveClientId("   "), WELL_KNOWN_CLIENT_ID, "whitespace is not a client_id");
-  // An operator's custom static client, or an id minted by the old
-  // registration path -- both are just override values now, so a cluster entry
-  // carrying either keeps working with nothing migrated.
-  assert.equal(resolveClientId("mcp_already_registered"), "mcp_already_registered");
-  assert.equal(resolveClientId("  padded  "), "padded");
+test("the editor signs in as its own client", () => {
+  assert.equal(EDITOR_CLIENT_ID, WELL_KNOWN_CLIENT_ID);
+});
+
+test("a refresh presents the client its token was issued to, else the editor's own", () => {
+  assert.equal(refreshClientId(undefined), EDITOR_CLIENT_ID);
+  assert.equal(refreshClientId(""), EDITOR_CLIENT_ID);
+  assert.equal(refreshClientId("   "), EDITOR_CLIENT_ID, "whitespace is not a client_id");
+  // What the store recorded beside the refresh token wins: that is the client
+  // identity actually issued it to.
+  assert.equal(refreshClientId("memql-vscode"), "memql-vscode");
+  assert.equal(refreshClientId("  recorded-client  "), "recorded-client");
 });
 
 test("normalizeIssuer trims whitespace and trailing slashes", () => {
@@ -85,6 +89,12 @@ function recorder(): RequestLog {
     urls,
     registerCalls: () => urls.filter((u) => new URL(u).pathname === "/register").length,
     fetch: async (url) => {
+      // The pre-validation GET of the authorization URL itself: accepted, and
+      // not counted -- the claims below are about which OAuth endpoints a
+      // sign-in drives.
+      if (new URL(url).searchParams.has("response_type")) {
+        return json(200, { page: "login" });
+      }
       urls.push(url);
       const path = new URL(url).pathname;
       // The RFC 8414 pre-flight (memql#4624).
@@ -190,12 +200,16 @@ test("the device flow authorizes as the well-known client and never calls /regis
   );
 });
 
-test("an operator's clientId override reaches both flows", async () => {
-  const overridden = { ...CLUSTER, clientId: "our-static-client" };
+test("the registry's client_id is another tool's, and neither flow uses it", async () => {
+  // THE FIELD FAILURE. The Cockpit writes `client_id: cockpit` into the shared
+  // clusters.yaml; identity registers that client for `/cockpit/callback` only.
+  // Reading it as the editor's client sent the loopback flow to a refused
+  // /authorize ("Bad Request" in the browser) and a ten-minute wait.
+  const cockpitEntry = { ...CLUSTER, clientId: "cockpit" };
 
   const browserNet = recorder();
   let authorizeUrl = "";
-  const browser = await runAuthorizationFlow(overridden, {
+  const browser = await runAuthorizationFlow(cockpitEntry, {
     fetch: browserNet.fetch,
     resolveExternalUri: (url) => url,
     openExternal: (url) => {
@@ -212,16 +226,16 @@ test("an operator's clientId override reaches both flows", async () => {
       close: () => {},
     }),
   });
-  assert.equal(browser.clientId, "our-static-client");
-  assert.equal(new URL(authorizeUrl).searchParams.get("client_id"), "our-static-client");
+  assert.equal(browser.clientId, EDITOR_CLIENT_ID);
+  assert.equal(new URL(authorizeUrl).searchParams.get("client_id"), EDITOR_CLIENT_ID);
   assert.equal(browserNet.registerCalls(), 0);
 
   const deviceNet = recorder();
-  const device = await runDeviceCodeFlow(overridden, {
+  const device = await runDeviceCodeFlow(cockpitEntry, {
     fetch: deviceNet.fetch,
     sleep: async () => {},
   });
-  assert.equal(device.clientId, "our-static-client");
+  assert.equal(device.clientId, EDITOR_CLIENT_ID);
   assert.equal(deviceNet.registerCalls(), 0);
 });
 

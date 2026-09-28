@@ -138,7 +138,7 @@ export async function buildCatalog(inputs: CatalogInputs): Promise<Catalog> {
       presence,
       receipt,
       ...(registered !== undefined
-        ? { registered: { name: registered.name, domain: registered.domain } }
+        ? { registered: { name: registered.name, domain: registered.domain, version: registered.version } }
         : {}),
       connected:
         connection?.connected === true &&
