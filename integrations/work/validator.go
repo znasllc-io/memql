@@ -27,9 +27,17 @@ package work
 //
 // WHEN IT SKIPS, IT SAYS WHY: the cluster's feedbackPolicy turns it off, the
 // run is not a goal's run asked for through Nexus or the API, it is a replay
-// (which exists to reach no model, and a check would spend one), it reached no
-// model, or this answer version was already checked. A skip is an answer, not
-// an error.
+// (which exists to reach no model, and a check would spend one), it is a
+// driver-owned JOURNAL, it reached no model, or this answer version was
+// already checked. A skip is an answer, not an error.
+//
+// A JOURNAL IS NEVER CHECKED, and the reason is a recursion seen live
+// (2026-09-28): an app session's recording run and the D7 delegate's child run
+// each carry a goal of their own that says `api`, so the check judged them --
+// and when routing sends the check itself to an app, its own call opened a
+// session whose recording was judged next. One Ask "hi" opened three Claude
+// Code sessions. A journal records a step of ANOTHER run; that run is the one
+// a person asked for, and the one whose answer this check is for.
 
 import (
 	"context"
@@ -37,6 +45,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -54,6 +63,13 @@ const (
 	validatorAutomationActor = "system:automation:validateGoalAnswer"
 	// validatorPrompt is the prompt the check renders.
 	validatorPrompt = "validateStepAnswer"
+	// validatorClaimName names the cross-replica claim on one answer
+	// version's check (SetValidatorClaimer).
+	validatorClaimName = "work.validateAnswer"
+	// validatorClaimTTL bounds how long a claim holds. Long enough to cover a
+	// check -- one bounded model call -- and short enough that a replica that
+	// died mid-check does not hold the version forever.
+	validatorClaimTTL = 15 * time.Minute
 	// maxValidatorAnswerBytes bounds the answer handed to the check. A longer
 	// one is cut, and the prompt is told so: a judge that saw half an answer
 	// must not be read as having judged the whole of it.
@@ -150,6 +166,9 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 	if rowString(run, "mode") == modeReplay {
 		return skipped("a replay reproduces a run's answer from its journal and reaches no model; checking it would spend the call the replay exists to avoid"), nil
 	}
+	if by := rowString(run, "triggeredBy"); IsDriverOwnedRun(by) {
+		return skipped(fmt.Sprintf("the run is a %s journal: it records a step of another run, and its answer is that run's to be checked, not a goal a person asked for", by)), nil
+	}
 	goal, err := st.goalForOwner(scoped, goalId)
 	if err != nil {
 		return nil, err
@@ -206,6 +225,21 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 	text, truncated := answerText(answer)
 	if text == "" {
 		return skipped(fmt.Sprintf("version %d of %s recorded no answer to check", version, stepKey)), nil
+	}
+	// ONE CHECK PER ANSWER VERSION ACROSS THE CLUSTER, claimed after every
+	// skip that spends nothing and right before the one that spends a model
+	// call. The automation's own cluster guard keys on the triggering event's
+	// fingerprint, and one run transition can reach a replica twice with two
+	// fingerprints (live on 2026-09-28 the planner took each run update from
+	// the bridge and again from the durable run-delivery path), so the agent
+	// and the planner each ran this check for one answer. The "already
+	// checked" test above cannot close that race: both read before either
+	// writes.
+	if claimer := i.validatorClaimerRef(); claimer != nil {
+		key := fmt.Sprintf("%s#%s@%d", runId, stepKey, version)
+		if !claimer.ClaimWithTTL(ctx, validatorClaimName, key, validatorClaimTTL) {
+			return skipped(fmt.Sprintf("version %d of %s is being checked by another replica", version, stepKey)), nil
+		}
 	}
 	judge, ok := i.engine.(answerJudge)
 	if !ok {
@@ -311,6 +345,22 @@ func (i *Integration) validateAnswer(ctx context.Context, owner, runId string) (
 }
 
 func skipped(reason string) map[string]any { return map[string]any{"skipped": reason} }
+
+// SetValidatorClaimer installs the cross-replica claim on one answer version's
+// check. First call wins, as SetRunClaimer does.
+func (i *Integration) SetValidatorClaimer(c RunClaimer) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.validatorClaimer == nil {
+		i.validatorClaimer = c
+	}
+}
+
+func (i *Integration) validatorClaimerRef() RunClaimer {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.validatorClaimer
+}
 
 // feedbackPolicy is v1:work:feedbackPolicy:primary as values. An absent or
 // unreadable row is the seed's own values (component/work.FeedbackPolicyFrom),

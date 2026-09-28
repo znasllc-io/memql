@@ -24,6 +24,9 @@ func (a *App) integrationsCore() {
 	// too -- produceArtifact is called from an Assistant's tool loop, which
 	// runs on a bff.
 	a.wireAgentWorkGoals()
+	// The answer validator's one model call is claimed across replicas: one
+	// run transition can reach a node twice (app/integrations_work_validator.go).
+	a.wireWorkValidatorClaim()
 	// Procedure learning's Gate 1 (epic memql#5408, gap G7): the plug-in is
 	// core, so its compile gate is installed on every node type too.
 	a.wireProcedureIntegration()
