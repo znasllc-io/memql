@@ -234,24 +234,31 @@ export function clusterContextValue(
 /**
  * What a click on a cluster's row does (memql.clusters.select).
  *
- *   openPage  it is connected or connecting (never tear down a live session
- *             to dial it again), or nothing stored could sign it in (its page
- *             has Sign in as the primary act -- no modal, no doomed dial)
- *   connect   select it and connect
+ *   openPage        it is connected or connecting (never tear down a live
+ *                   session to dial it again); or nothing stored could sign it
+ *                   in while ANOTHER cluster is live, which is kept -- its page
+ *                   has Sign in as the primary act
+ *   useAndOpenPage  nothing stored could sign it in and nothing else is live:
+ *                   it becomes the cluster in use and is handed to the
+ *                   manager, which refuses before any dial and publishes the
+ *                   sign-in state (so every view says what its page says),
+ *                   and its page opens. No modal, no doomed dial.
+ *   connect         select it and connect
+ *
+ * Kept apart from the second case, the first matters: selecting a cluster
+ * while leaving the manager on another one marked two rows "in use" and left
+ * `memql.connectionState` describing the wrong cluster.
  */
 export function rowClickAction(
   cluster: ClusterConfig,
   connection: ConnectionState,
   facts: ClusterFacts,
-): "openPage" | "connect" {
-  if (
-    (connection.status === "connected" || connection.status === "connecting") &&
-    connection.clusterName === cluster.name
-  ) {
-    return "openPage";
-  }
+): "openPage" | "useAndOpenPage" | "connect" {
+  const live = connection.status === "connected" || connection.status === "connecting";
+  if (live && connection.clusterName === cluster.name) return "openPage";
   const atRest = clusterStatus({ cluster, connection: { status: "disconnected" }, facts });
-  return atRest.state === "signIn" ? "openPage" : "connect";
+  if (atRest.state !== "signIn") return "connect";
+  return live ? "openPage" : "useAndOpenPage";
 }
 
 /**

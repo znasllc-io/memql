@@ -166,12 +166,20 @@ test("a row click on the connected cluster opens its page instead of redialling"
 });
 
 test("a row click on a cluster nothing can sign in opens its page, never a dial or a modal", () => {
-  assert.equal(rowClickAction(cluster(), { status: "disconnected" }, NOTHING), "openPage");
-  // Even while another cluster is connected: that connection is kept.
+  // Nothing live: it becomes the cluster in use (the manager refuses it
+  // without a dial and publishes signIn), and its page opens.
+  assert.equal(rowClickAction(cluster(), { status: "disconnected" }, NOTHING), "useAndOpenPage");
+  assert.equal(
+    rowClickAction(cluster(), { status: "error", clusterName: "staging", reason: "unreachable", message: "x" }, NOTHING),
+    "useAndOpenPage",
+    "a failed cluster is not live: the click moves the cluster in use, so only one row is marked",
+  );
+  // Another cluster live: that connection is kept, and only the page opens.
   assert.equal(
     rowClickAction(cluster(), { status: "connected", clusterName: "staging", nodeId: "n" }, NOTHING),
     "openPage",
   );
+  assert.equal(rowClickAction(cluster(), { status: "connecting", clusterName: "staging" }, NOTHING), "openPage");
 });
 
 test("a row click on a cluster with a stored session connects", () => {

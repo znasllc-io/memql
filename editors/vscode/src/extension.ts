@@ -2465,17 +2465,23 @@ function registerRuntimeSurface(context: ExtensionContext): void {
 
       const current = connections?.state ?? { status: 'disconnected' as const };
       const facts = await factsForCluster(dialing);
-      if (rowClickAction(dialing, current, facts) === 'openPage') {
-        // Connected (or connecting) to it already, or known before any dial
-        // that nothing stored can authenticate (clusters/status.ts). In the
-        // second case, tearing down a live connection to another cluster to
-        // learn that would leave the person connected to nothing, so that one
-        // is kept; with nothing live, this cluster becomes the one in use (an
-        // install's hand-off selects the cluster it just built).
-        if (current.status !== 'connected' || current.clusterName === dialing.name) {
-          await setSelectedCluster(clustersPath, dialing.name);
-          clustersTree.refresh();
-        }
+      const click = rowClickAction(dialing, current, facts);
+      if (click === 'openPage') {
+        // Connected (or connecting) to it already; or nothing stored can
+        // authenticate it while another cluster is live, which is kept --
+        // tearing it down to learn that would leave the person connected to
+        // nothing (clusters/status.ts).
+        await openPage();
+        return;
+      }
+      if (click === 'useAndOpenPage') {
+        // Nothing live: this cluster becomes the one in use (an install's
+        // hand-off selects the cluster it just built). The connect is not a
+        // dial -- the manager refuses before any network call and publishes
+        // the sign-in state, so the row, the page and every view agree.
+        await setSelectedCluster(clustersPath, dialing.name);
+        clustersTree.refresh();
+        await connections?.connect(dialing);
         await openPage();
         return;
       }
