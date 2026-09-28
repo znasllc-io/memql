@@ -226,7 +226,7 @@ describe("a rule as one line of English", () => {
       }),
     );
     expect(said).toBe(
-      "When the level asked for is reasoning, the prompt is agentReply and " +
+      "When the level asked for is reasoning, the prompt is Agent reply and " +
         "the role acting is operator, take the Local first route.",
     );
     // Two conditions take "and" with no comma before it.

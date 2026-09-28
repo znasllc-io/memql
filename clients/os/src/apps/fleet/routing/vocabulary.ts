@@ -154,6 +154,73 @@ export const MODALITY_TITLES: Record<string, string> = {
   transcribe: "Transcription",
 };
 
+/**
+ * The shipped prompts a shipped rule names, in words. A prompt's engine name
+ * can carry a retired word (`composeRoutingPolicy`), and a humanized id would
+ * put it on the screen, so these are spelled out. Any other prompt is
+ * humanized through `engineWords`.
+ */
+const PROMPT_TITLES: Record<string, string> = {
+  composeRoutingPolicy: "Route composing",
+  compileRule: "Rule compiling",
+  agentReply: "Agent reply",
+};
+
+/**
+ * An ENGINE id as words, with the retired routing words swapped for the
+ * product's. For ids the engine chose (prompt names, tags, rule names); a
+ * route a person named keeps the words they typed (`routeTitle`).
+ */
+export function engineWords(id: string): string {
+  return plainRoutingWords(humanize(id));
+}
+
+/** A prompt's name in words: "composeRoutingPolicy" -> "Route composing". */
+export function promptWords(name: string): string {
+  return PROMPT_TITLES[name] ?? engineWords(name);
+}
+
+/**
+ * The retired routing words in a sentence the ENGINE wrote, swapped for the
+ * product's: a refusal is rendered for a person to read, and "routing policies
+ * changed" is the engine's word for what the screen calls routes. Entry syntax
+ * (`fleet:`, `app:`) is left alone -- it is what the person typed.
+ */
+export function plainRoutingWords(text: string): string {
+  return text
+    .replace(/\bpolicy entr(y|ies)\b/gi, (_m, end: string) => (end === "y" ? "source" : "sources"))
+    .replace(/\bfederated providers?\b/gi, "vendor")
+    .replace(/\bpolicies\b/g, "routes")
+    .replace(/\bPolicies\b/g, "Routes")
+    .replace(/\bpolicy\b/g, "route")
+    .replace(/\bPolicy\b/g, "Route")
+    .replace(/\btask rules?\b/gi, (m) => (m.toLowerCase().endsWith("s") ? "rules" : "rule"))
+    .replace(/\bdoors\b/gi, "sources")
+    .replace(/\bdoor\b/gi, "source")
+    .replace(/\blanes\b/gi, "levels")
+    .replace(/\blane\b/gi, "level")
+    .replace(/(^|[^:\w])federation(?!:)\b/gi, "$1vendor");
+}
+
+/**
+ * An engine refusal, read for a person.
+ *
+ * STALE IS ITS OWN ANSWER. Routes and rules share ONE engine revision, and a
+ * write naming an older one is refused ("routing policies changed since
+ * revision 7", "routing configuration changed"). That is not a problem with
+ * the draft -- somebody wrote since the page read -- so it is said in the
+ * product's words and the surface reads again. Any other refusal is the
+ * engine's own sentence, with the retired words swapped.
+ */
+export function refusalWords(message: string): { stale: boolean; text: string } {
+  if (/changed since|configuration changed|refresh and (review|validate)/i.test(message)) {
+    return { stale: true, text: STALE_SENTENCE };
+  }
+  return { stale: false, text: plainRoutingWords(message) };
+}
+
+export const STALE_SENTENCE = "Routing changed since this page read it.";
+
 const TAG_TITLES: Record<string, string> = {
   background: "Background work",
   backgroundEscalation: "Background escalations",
@@ -174,11 +241,11 @@ export function whenWords(rule: Pick<RuleRow, "when" | "locked">): string {
   const parts: string[] = [];
   const w = rule.when;
   if ("level" in w) parts.push(w.level ? (w.level === "embeddings" ? "Embeddings" : `${levelTitle(w.level)} work`) : "No level");
-  if ("modality" in w) parts.push(w.modality ? MODALITY_TITLES[w.modality] ?? humanize(w.modality) : "No kind of call");
-  if ("prompt" in w) parts.push(w.prompt ? `${humanize(w.prompt)} prompt` : "No prompt");
+  if ("modality" in w) parts.push(w.modality ? MODALITY_TITLES[w.modality] ?? engineWords(w.modality) : "No kind of call");
+  if ("prompt" in w) parts.push(w.prompt ? `${promptWords(w.prompt)} prompt` : "No prompt");
   if ("role" in w) parts.push(w.role ? `${w.role} acting` : "No role acting");
   if ("actorRole" in w) parts.push(w.actorRole ? `${w.actorRole} watching` : "No role watching");
-  if ("tag" in w) parts.push(w.tag ? TAG_TITLES[w.tag] ?? `Tagged ${lower(humanize(w.tag))}` : "No tag");
+  if ("tag" in w) parts.push(w.tag ? TAG_TITLES[w.tag] ?? `Tagged ${lower(engineWords(w.tag))}` : "No tag");
   if ("touches" in w) parts.push(w.touches ? `Touches ${w.touches}` : "Touches nothing");
   if (parts.length === 0) return rule.locked ? "Everything else" : "Every call";
   return parts.map((p, i) => (i === 0 ? p.charAt(0).toUpperCase() + p.slice(1) : lower(p))).join(" · ");

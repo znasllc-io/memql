@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   RETIRED_ROUTING_WORDS,
+  STALE_SENTENCE,
   humanize,
+  promptWords,
+  refusalWords,
   retiredWordsIn,
   routeIdFrom,
   routeTitle,
@@ -15,12 +18,14 @@ import {
   readSource,
   routeStatus,
   servingIndex,
+  specificSourceProblem,
   trayGroups,
   type MachineFacts,
   type RoutingFacts,
 } from "../../src/apps/fleet/routing/sources";
 import { equip, moveSlot, removeSlot, routeBar } from "../../src/apps/fleet/routing/routeDraft";
-import { reorderPlan } from "../../src/apps/fleet/routing/ruleOrder";
+import { MAX_PRECEDENCE, reorderPlan } from "../../src/apps/fleet/routing/ruleOrder";
+import { ruleFromRow, shadowedBy, type RuleRow } from "../../src/apps/settings/rulesFacts";
 
 // The routing model, as arithmetic (Fleet > Routing, design brief sections 1-5).
 //
@@ -267,8 +272,16 @@ describe("the route's action bar", () => {
     expect(routeBar({ ...base, shipped: false }).state).toBe("Saved");
   });
 
+  it("says the scope at the moment of saving, with the count once the rules are read", () => {
+    expect(routeBar({ ...base, dirty: true }).detail).toBe("serves with Claude Code · applies to every rule that takes it");
+    expect(routeBar({ ...base, dirty: true, rulesTaking: 3 }).detail).toBe("serves with Claude Code · applies to 3 rules");
+    expect(routeBar({ ...base, dirty: true, rulesTaking: 1 }).detail).toBe("serves with Claude Code · applies to 1 rule");
+    expect(routeBar({ ...base, dirty: true, rulesTaking: 0 }).detail).toBe("serves with Claude Code · no rule takes it yet");
+    expect(routeBar({ ...base, dirty: true, serving: "" }).detail).toBe("applies to every rule that takes it");
+  });
+
   it("puts Save last, and only when the draft can be saved", () => {
-    expect(routeBar({ ...base, dirty: true })).toMatchObject({ state: "Unsaved", detail: "serves with Claude Code", acts: ["cancel", "save"] });
+    expect(routeBar({ ...base, dirty: true })).toMatchObject({ state: "Unsaved", acts: ["cancel", "save"] });
     expect(routeBar({ ...base, dirty: true, customized: true }).acts).toEqual(["cancel", "restore", "save"]);
     // ABSENT, never disabled.
     expect(routeBar({ ...base, dirty: true, valid: false }).acts).toEqual(["cancel"]);
@@ -320,6 +333,48 @@ describe("reordering custom rules", () => {
     expect(order).toEqual(["a", "c", "b"]);
   });
 
+  it("renumbers into the free range BELOW the current values when it fits, so renumbers do not ratchet up", () => {
+    const tight = [
+      { name: "a", precedence: 101 },
+      { name: "b", precedence: 100 },
+      { name: "c", precedence: 99 },
+    ];
+    expect(reorderPlan(tight, 2, 1)).toEqual([
+      { name: "a", precedence: 20 },
+      { name: "c", precedence: 10 },
+      { name: "b", precedence: 0 },
+    ]);
+  });
+
+  it("never writes past the engine's ceiling, and plans nothing when there is no room at all", () => {
+    const high = [
+      { name: "a", precedence: MAX_PRECEDENCE },
+      { name: "b", precedence: MAX_PRECEDENCE - 1 },
+      { name: "c", precedence: 0 },
+    ];
+    // b above a: nothing above the ceiling, nothing free below 0.
+    expect(reorderPlan(high, 1, 0)).toEqual([]);
+    const nearTop = [
+      { name: "a", precedence: MAX_PRECEDENCE - 5 },
+      { name: "b", precedence: MAX_PRECEDENCE - 6 },
+      { name: "c", precedence: 0 },
+    ];
+    // c between a and b: no integer there, no room below 0, and ten apart
+    // would pass the ceiling -- so one apart, above.
+    const plan = reorderPlan(nearTop, 2, 1);
+    expect(plan).toEqual([
+      { name: "a", precedence: MAX_PRECEDENCE - 2 },
+      { name: "c", precedence: MAX_PRECEDENCE - 3 },
+      { name: "b", precedence: MAX_PRECEDENCE - 4 },
+    ]);
+    const after = new Map(nearTop.map((r) => [r.name, r.precedence]));
+    for (const change of plan) {
+      expect(change.precedence).toBeLessThanOrEqual(MAX_PRECEDENCE);
+      after.set(change.name, change.precedence);
+      expect(new Set(after.values()).size).toBe(after.size);
+    }
+  });
+
   it("writes nothing for a move that goes nowhere", () => {
     expect(reorderPlan(custom, 1, 1)).toEqual([]);
     expect(reorderPlan(custom, 0, -1)).toEqual([]);
@@ -356,5 +411,139 @@ describe("the tray", () => {
     expect(f.machines.map((m) => m.name)).toEqual(["Studio"]);
     expect(f.machines[0]!.models.map((m) => m.modelId)).toEqual(["qwen3.5:4b"]);
     expect(f.vendor).toBe("idle");
+  });
+});
+
+describe("the engine's local floor and the router's app order", () => {
+  const small = { ...chat("tiny:1b", 1e9), structuredOutput: false };
+  const studio = machine({ id: "studio", name: "studio-mac", models: [small, chat("qwen3.8:27b", 27e9)], apps: [app("claude-code"), app("codex")] });
+
+  it("takes only the models the engine counts as eligible, once that has been read", () => {
+    expect(readSource("fleet:strongest", facts({ machines: [studio], eligibleModelIds: ["qwen3.8:27b"] })).fact).toBe("qwen3.8:27b");
+    const none = readSource("fleet:fastest", facts({ machines: [studio], eligibleModelIds: [] }));
+    expect(none.readiness).toBe("idle");
+    expect(none.reason).toBe("no online model meets the minimum");
+    // Not read: every chat model counts, as before.
+    expect(readSource("fleet:fastest", facts({ machines: [studio], eligibleModelIds: null })).readiness).toBe("ready");
+  });
+
+  it("reads the floor from inferenceStatus only where the answering node has the fleet catalog", () => {
+    const input = (fleetCatalogInstalled: boolean) =>
+      factsFrom({
+        machines: [],
+        machinesRead: true,
+        inference: { read: true, federationConfigured: false, error: "", eligibleModelIds: ["qwen3.8:27b"], fleetCatalogInstalled },
+        routes: [],
+        preference: [],
+      });
+    expect(input(true).eligibleModelIds).toEqual(["qwen3.8:27b"]);
+    expect(input(false).eligibleModelIds).toBeNull();
+  });
+
+  it("names the app the router would take for any app: the owner's order first, then the engine's", () => {
+    expect(readSource("app:*", facts({ machines: [studio] })).serves).toBe("Claude Code");
+    expect(readSource("app:*", facts({ machines: [studio], appOrder: ["codex"] })).serves).toBe("Codex");
+    // A machine listed first does not decide it.
+    const codexFirst = machine({ id: "a", name: "a", apps: [app("codex")] });
+    const claudeSecond = machine({ id: "b", name: "b", apps: [app("claude-code")] });
+    expect(readSource("app:*", facts({ machines: [codexFirst, claudeSecond] })).serves).toBe("Claude Code");
+  });
+
+  it("shows an embeddings-only model as not ready in a chat route's tray, and says why", () => {
+    const withEmbedder = machine({ id: "s", models: [chat("qwen3.8:27b"), embedder("nomic-embed")] });
+    const machines = trayGroups(facts({ machines: [withEmbedder] }), "mine", ["fleet:strongest"])[0]!.sources;
+    const nomic = machines.find((r) => r.entry === "fleet:nomic-embed")!;
+    expect(nomic.readiness).toBe("idle");
+    expect(nomic.reason).toBe("only makes embeddings");
+    expect(machines.find((r) => r.entry === "fleet:qwen3.8:27b")!.readiness).toBe("ready");
+  });
+});
+
+describe("a source typed by its exact name", () => {
+  const f = facts({ routes: [{ name: "localFirst", entries: ["fleet:strongest"] }] });
+
+  it("takes every form the engine takes", () => {
+    for (const entry of ["app:claude-code:opus", "app:codex", "app:*", "fleet:qwen3.5:4b", "federation:acme", "chat54Mini", "policy:localFirst", "embedder:active"]) {
+      expect([entry, specificSourceProblem(entry, f)]).toEqual([entry, ""]);
+    }
+  });
+
+  it("refuses the slips the engine would refuse at save, in one line", () => {
+    expect(specificSourceProblem("", f)).toBe("Type a source.");
+    expect(specificSourceProblem("app:claude code", f)).toBe("A source has no spaces.");
+    expect(specificSourceProblem("gpu:thing", f)).toBe("Start with fleet: or app:, or type a name.");
+    expect(specificSourceProblem("fleet:", f)).toBe("Name something after the colon.");
+    expect(specificSourceProblem("app:cursor", f)).toBe("cursor is not an app this cluster drives.");
+    expect(specificSourceProblem("app:*:opus", f)).toBe("Any signed-in app cannot pin a model.");
+    expect(specificSourceProblem("policy:nope", f)).toBe("There is no route by that name.");
+    for (const text of ["Start with fleet: or app:, or type a name.", "cursor is not an app this cluster drives."]) expect(retiredWordsIn(text)).toEqual([]);
+  });
+
+  it("reads a pinned app model and a vendor by name as sources", () => {
+    const studio = machine({ id: "studio", name: "studio-mac", apps: [app("claude-code")] });
+    const pinned = readSource("app:claude-code:opus", facts({ machines: [studio] }));
+    expect(pinned.label).toBe("Claude Code · opus");
+    expect(pinned.readiness).toBe("ready");
+    expect(readSource("federation:acme", facts({ vendor: "ready" })).label).toBe("acme");
+  });
+});
+
+describe("a rule a shipped rule already decides", () => {
+  const rule = (over: Partial<RuleRow> & { name: string }): RuleRow =>
+    ruleFromRow({ id: over.name, when: {}, level: "", policy: "localFirst", precedence: 10, onUnavailable: "degrade", excludes: [], locked: false, described: "", ...over } as never);
+  const shipped = [
+    rule({ name: "default", locked: true, precedence: 0 }),
+    rule({ name: "fastLane", when: { level: "fast" }, policy: "fastLocalFirst", locked: true, precedence: 45 }),
+    rule({ name: "operatorReasoning", when: { prompt: "agentReply", role: "operator" }, locked: true, precedence: 60 }),
+    rule({ name: "identityTouch", when: { touches: "v1:identity:" }, locked: true, precedence: 70 }),
+  ];
+
+  it("is decided by the shipped rule whose every condition it also states", () => {
+    expect(shadowedBy({ level: "fast" }, shipped)?.name).toBe("fastLane");
+    expect(shadowedBy({ level: "fast", tag: "nightly" }, shipped)?.name).toBe("fastLane");
+    expect(shadowedBy({ prompt: "agentReply", role: "operator", tag: "x" }, shipped)?.name).toBe("operatorReasoning");
+    // touches is a prefix in the router.
+    expect(shadowedBy({ touches: "v1:identity:user" }, shipped)?.name).toBe("identityTouch");
+  });
+
+  it("is not decided when some call could still reach it", () => {
+    expect(shadowedBy({ level: "strong" }, shipped)).toBeNull();
+    // operatorReasoning needs the operator role too, so other agent replies reach this.
+    expect(shadowedBy({ prompt: "agentReply" }, shipped)).toBeNull();
+    expect(shadowedBy({ touches: "v1:library:" }, shipped)).toBeNull();
+    // The floor runs last; it shadows nothing.
+    expect(shadowedBy({}, shipped)).toBeNull();
+    // Only SHIPPED rules evaluate first.
+    expect(shadowedBy({ tag: "a" }, [rule({ name: "mine", when: { tag: "a" } })])).toBeNull();
+  });
+});
+
+describe("the engine's words, read for a person", () => {
+  it("says a stale revision in the product's words, and marks it stale", () => {
+    for (const engine of [
+      "routing policies changed since revision 7; refresh and review before saving",
+      "routing configuration changed; refresh and validate again",
+      "routing changed since this draft was opened; cancel and refresh before editing",
+      "routing configuration changed; refresh before removing",
+    ]) {
+      expect(refusalWords(engine)).toEqual({ stale: true, text: STALE_SENTENCE });
+    }
+    expect(retiredWordsIn(STALE_SENTENCE)).toEqual([]);
+  });
+
+  it("keeps any other refusal, with the retired words swapped", () => {
+    const read = refusalWords('policy entry "app:cursor": "cursor" is not an app this engine drives -- the runnable set is claude-code, codex');
+    expect(read.stale).toBe(false);
+    expect(read.text).toBe('source "app:cursor": "cursor" is not an app this engine drives -- the runnable set is claude-code, codex');
+    expect(refusalWords("policy exceeds the description or 16-fallback limit").text).toBe("route exceeds the description or 16-fallback limit");
+    expect(retiredWordsIn(refusalWords("localFirst is a custom policy and has no shipped default").text)).toEqual([]);
+  });
+
+  it("names the shipped prompts a shipped rule matches without a retired word", () => {
+    expect(promptWords("composeRoutingPolicy")).toBe("Route composing");
+    expect(promptWords("compileRule")).toBe("Rule compiling");
+    expect(promptWords("agentReply")).toBe("Agent reply");
+    expect(retiredWordsIn(promptWords("policyOfTheLane"))).toEqual([]);
+    expect(whenWords({ when: { prompt: "composeRoutingPolicy" }, locked: true })).toBe("Route composing prompt");
   });
 });

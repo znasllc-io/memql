@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import "./routing.css";
 
 import { Head } from "../../../kit";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useSession } from "../../../chrome/access";
 import { accessAdmits, type OsAppProps } from "../../../system/registry";
+import { useRules } from "../../settings/rulesFacts";
 import { useTaskPolicies } from "../taskPolicies";
 import { DECISIONS_SECTION_RESOURCE, RULES_SECTION_RESOURCE } from "./access";
 import { HistoryTab } from "./HistoryTab";
@@ -32,6 +33,20 @@ import { useRoutingFacts } from "./useRoutingFacts";
 // VISITED TABS STAY MOUNTED, hidden, so a draft route or a half-written rule
 // survives a look at History. Each tab draws the section's Head on its list
 // page and its own Head on a drill-down, so there is one Head on screen.
+//
+// ONE REVISION, SO ONE RE-READ. The engine keeps routes and rules in ONE
+// revisioned document (component/memql/policy_customization.go,
+// PolicyDocument.Revision): a route save or reset and a rule validate, save or
+// removal each name the revision they read, and every write bumps it. So the
+// routes and the rules are read HERE, once, and every write in either tab --
+// landed or refused -- re-reads BOTH (`reloadAll`). A tab that re-read only
+// itself would leave the other one a revision behind, and its next write
+// would be refused every time.
+//
+// THE TABS REACH EACH OTHER. A rule a shipped rule already decides points at
+// the route to change instead ("Change Fast local first"), and a route says
+// how many rules take it, opening Rules on exactly those. Both arrive as a
+// request carrying a counter, so asking twice for the same thing still moves.
 
 export type RoutingTab = "routes" | "rules" | "machines" | "history";
 
@@ -74,8 +89,27 @@ export function RoutingSection({
 
   const [epoch, setEpoch] = useState(0);
   const catalog = useTaskPolicies(epoch, canCompose);
+  // History names a decision's rule by what it matches, so it reads the rules
+  // too -- it is gated on its own capability, which admits admins.
+  const rules = useRules(canCompose || canHistory);
+  const reloadRules = rules.reload;
+  const reloadAll = useCallback(() => {
+    setEpoch((n) => n + 1);
+    reloadRules();
+  }, [reloadRules]);
   const like = useMemo(() => routesLike(catalog.policies), [catalog.policies]);
-  const facts = useRoutingFacts(like);
+  const facts = useRoutingFacts(like, canCompose);
+
+  const [routeRequest, setRouteRequest] = useState<{ name: string; n: number } | null>(null);
+  const [rulesRequest, setRulesRequest] = useState<{ route: string; n: number } | null>(null);
+  const openRoute = useCallback((name: string) => {
+    setRouteRequest((held) => ({ name, n: (held?.n ?? 0) + 1 }));
+    setChosen("routes");
+  }, []);
+  const openRulesFor = useCallback((route: string) => {
+    setRulesRequest((held) => ({ route, n: (held?.n ?? 0) + 1 }));
+    setChosen("rules");
+  }, []);
 
   const header = (actions: ReactNode, meta?: ReactNode) => (
     <div className="fleet-routing-header">
@@ -91,13 +125,22 @@ export function RoutingSection({
       {panes.map((id) => (
         <div key={id} className="fleet-routing-tab" data-routing-tab={id} hidden={id !== tab}>
           {id === "routes" ? (
-            <RoutesTab header={header} catalog={catalog} facts={facts} reload={() => setEpoch((n) => n + 1)} onAddMachine={onAddMachine} />
+            <RoutesTab
+              header={header}
+              catalog={catalog}
+              facts={facts}
+              rules={rules}
+              reload={reloadAll}
+              request={routeRequest}
+              onOpenRules={openRulesFor}
+              onAddMachine={onAddMachine}
+            />
           ) : id === "rules" ? (
-            <RulesTab header={header} routes={catalog.policies} facts={facts} />
+            <RulesTab header={header} rules={rules} routes={catalog.policies} facts={facts} onChanged={reloadAll} onOpenRoute={openRoute} request={rulesRequest} />
           ) : id === "machines" ? (
             <MachinesTab header={header} />
           ) : (
-            <HistoryTab header={header} />
+            <HistoryTab header={header} rules={rules} />
           )}
         </div>
       ))}

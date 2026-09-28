@@ -758,6 +758,13 @@ const CASES: ActsCase[] = [
       { name: /^Claude Code:/, count: 1 },
       { name: /^Codex:/, count: 1, note: "on no machine, and still offered" },
       { name: /^Cheapest vendor:/, count: 1 },
+      // Any source the engine takes, by its exact name: a pinned app model,
+      // a model no machine offers yet, a vendor or provider by name (the old
+      // editor's "Specific model, app or policy..." field).
+      { name: "Specific source", count: 1 },
+      { name: "Add specific source", count: 0, note: "absent until something is typed; Enter adds too" },
+      // The rules a change reaches (the old "Used by task rules"), one click to them.
+      { name: /^Taken by \d+ rules?$/, count: 1 },
       { name: "Restore shipped", count: 1, note: "a changed shipped route" },
       { name: "Save route", count: 0, note: "untouched" },
     ],

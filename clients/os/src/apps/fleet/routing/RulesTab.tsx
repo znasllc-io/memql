@@ -5,7 +5,17 @@ import { AddButton } from "../../../kit/AddButton";
 import { InfoDetail } from "../../../kit/InfoDetail";
 import { EmptyState, Notice, RecordList, RecordListSkeleton, RefreshButton, Refine, Select } from "../../../kit";
 import { LEVELS } from "../../settings/routingFacts";
-import { LOCKED_RULE_SENTENCE, isFloorRule, ruleSentence, rulesInOrder, useRuleActions, useRules, type RuleRow } from "../../settings/rulesFacts";
+import {
+  FLOOR_RULE_SENTENCE,
+  LOCKED_RULE_SENTENCE,
+  isFloorRule,
+  ruleSentence,
+  rulesInOrder,
+  shadowedBy,
+  useRuleActions,
+  type RuleRow,
+  type RulesState,
+} from "../../settings/rulesFacts";
 import type { TaskPolicy } from "../taskPolicies";
 import { DescribeRulePage } from "./DescribeRulePage";
 import { reorderPlan } from "./ruleOrder";
@@ -31,37 +41,88 @@ import { levelTitle, routeTitle, whenWords } from "./vocabulary";
 // Yours can be opened, and REORDERED -- by dragging, or with Alt+Up / Alt+Down
 // on the row -- which writes precedences through `reorderPlan`, so no
 // intermediate state ever ties two rules.
+//
+// A RULE A SHIPPED ONE ALREADY DECIDES NEVER FIRES. Locked rules evaluate
+// before yours regardless of precedence, and the engine saves a rule they
+// shadow without a word. Such a row says so quietly ("a shipped rule decides
+// first"), and the wizard and the rule's page point at the route to change
+// instead (`shadowedBy`).
+//
+// THE RULES ARE READ BY THE SECTION, not here: routes and rules share one
+// engine revision, so every write re-reads both (`onChanged`).
 
 type Page = { kind: "list" } | { kind: "add" } | { kind: "describe" } | { kind: "fields"; seed: RuleRow | null };
 
 export function RulesTab({
   header,
+  rules,
   routes,
   facts,
+  onChanged,
+  onOpenRoute,
+  request,
 }: {
   header: (actions: ReactNode, meta?: ReactNode) => ReactNode;
+  /** Read once by the section, shared with Routes and History. */
+  rules: RulesState;
   routes: readonly TaskPolicy[];
   facts: RoutingFacts;
+  /** Re-read routes AND rules after a write, landed or refused. */
+  onChanged: () => void;
+  /** Open a route's page in Routes. */
+  onOpenRoute?: (route: string) => void;
+  /** Another tab asking for the rules that take a route. */
+  request?: { route: string; n: number } | null;
 }) {
-  const rules = useRules(true);
-  const actions = useRuleActions(rules.reload);
+  const actions = useRuleActions(onChanged);
   const [page, setPage] = useState<Page>({ kind: "list" });
+  const [routeFilter, setRouteFilter] = useState("");
   const toList = () => {
     actions.clear();
     setPage({ kind: "list" });
   };
   const ordered = useMemo(() => rulesInOrder(rules.rules), [rules.rules]);
 
+  useEffect(() => {
+    if (!request) return;
+    actions.clear();
+    setRouteFilter(request.route);
+    setPage({ kind: "list" });
+  }, [request?.n]);
+
   if (page.kind === "add") {
-    return <RuleWizard actions={actions} rules={ordered} routes={routes} facts={facts} onCancel={toList} onDescribe={() => { actions.clear(); setPage({ kind: "describe" }); }} onAdded={toList} />;
+    return <RuleWizard actions={actions} rules={ordered} routes={routes} facts={facts} onCancel={toList} onDescribe={() => { actions.clear(); setPage({ kind: "describe" }); }} onAdded={toList} onOpenRoute={onOpenRoute} />;
   }
   if (page.kind === "describe") {
-    return <DescribeRulePage actions={actions} onActivated={toList} onEditAsFields={(seed) => { actions.clear(); setPage({ kind: "fields", seed }); }} onBack={toList} />;
+    return (
+      <DescribeRulePage
+        actions={actions}
+        revision={ordered.find((r) => typeof r.revision === "number")?.revision}
+        rules={ordered}
+        onOpenRoute={onOpenRoute}
+        onActivated={toList}
+        onEditAsFields={(seed) => { actions.clear(); setPage({ kind: "fields", seed }); }}
+        onBack={toList}
+      />
+    );
   }
   if (page.kind === "fields") {
-    return <RuleFieldsPage actions={actions} routes={routes} seed={page.seed} existing={ordered} onDone={toList} onBack={toList} />;
+    return <RuleFieldsPage actions={actions} routes={routes} seed={page.seed} existing={ordered} onDone={toList} onBack={toList} onOpenRoute={onOpenRoute} />;
   }
-  return <RuleList header={header} rules={rules} actions={actions} ordered={ordered} onAdd={() => setPage({ kind: "add" })} onOpen={(seed) => setPage({ kind: "fields", seed })} />;
+  return (
+    <RuleList
+      header={header}
+      rules={rules}
+      actions={actions}
+      ordered={ordered}
+      routes={routes}
+      routeFilter={routeFilter}
+      setRouteFilter={setRouteFilter}
+      onReload={onChanged}
+      onAdd={() => setPage({ kind: "add" })}
+      onOpen={(seed) => setPage({ kind: "fields", seed })}
+    />
+  );
 }
 
 function RuleList({
@@ -69,13 +130,22 @@ function RuleList({
   rules,
   actions,
   ordered,
+  routes,
+  routeFilter,
+  setRouteFilter,
+  onReload,
   onAdd,
   onOpen,
 }: {
   header: (actions: ReactNode, meta?: ReactNode) => ReactNode;
-  rules: ReturnType<typeof useRules>;
+  rules: RulesState;
   actions: ReturnType<typeof useRuleActions>;
   ordered: RuleRow[];
+  routes: readonly TaskPolicy[];
+  routeFilter: string;
+  setRouteFilter: (route: string) => void;
+  /** Read routes AND rules again: they share one engine revision. */
+  onReload: () => void;
   onAdd: () => void;
   onOpen: (rule: RuleRow) => void;
 }) {
@@ -111,10 +181,11 @@ function RuleList({
   ];
 
   const q = search.trim().toLowerCase();
-  const filtering = q !== "" || level !== "" || origin !== "";
+  const filtering = q !== "" || level !== "" || origin !== "" || routeFilter !== "";
   const shown = shownOrder.filter((rule) => {
     if (origin === "shipped" && !rule.locked) return false;
     if (origin === "mine" && rule.locked) return false;
+    if (routeFilter !== "" && rule.policy !== routeFilter) return false;
     if (level !== "" && rule.level !== level && rule.when["level"] !== level) return false;
     if (q === "") return true;
     return [whenWords(rule), routeTitle(rule.policy), ruleSentence(rule), rule.locked ? "" : rule.name].some((text) => text.toLowerCase().includes(q));
@@ -143,6 +214,7 @@ function RuleList({
   const chips = [
     ...(level === "" ? [] : [{ id: "level", label: levelTitle(level), onRemove: () => setLevel("") }]),
     ...(origin === "" ? [] : [{ id: "origin", label: origin === "shipped" ? "Shipped" : "Yours", onRemove: () => setOrigin("") }]),
+    ...(routeFilter === "" ? [] : [{ id: "route", label: `Takes ${routeTitle(routeFilter)}`, onRemove: () => setRouteFilter("") }]),
   ];
 
   return (
@@ -164,16 +236,25 @@ function RuleList({
                 <option value="shipped">Shipped only</option>
                 <option value="mine">Yours only</option>
               </Select>
+              <Select id="fleet-rules-route" label="Route" value={routeFilter} onChange={setRouteFilter}>
+                <option value="">Any route</option>
+                {routeFilter !== "" && !routes.some((r) => r.name === routeFilter) ? <option value={routeFilter}>{routeTitle(routeFilter)}</option> : null}
+                {routes.map((r) => <option key={r.name} value={r.name}>{routeTitle(r.name)}</option>)}
+              </Select>
             </Refine>
           ) : null}
-          <RefreshButton label="Read the rules again" busy={rules.loading} onClick={rules.reload} />
+          <RefreshButton label="Read the rules again" busy={rules.loading} onClick={onReload} />
           {actions.supported && rules.supported ? <AddButton label="Add a rule" onClick={onAdd} /> : null}
         </>,
         rules.read && !rules.loading && !rules.error && rules.supported ? shown.length : undefined,
       )}
 
       {rules.error ? <Notice tone="warn" sentence="The rules could not be read." detail={rules.error} /> : null}
-      {actions.state.failed && actions.state.message ? <Notice tone="error" sentence="That did not go through." detail={actions.state.message} /> : null}
+      {actions.state.failed && actions.state.partial ? (
+        <Notice tone="warn" sentence="The order changed part-way." next="The list shows what was saved. Move the rule again to finish, or back to undo." detail={actions.state.message} />
+      ) : actions.state.failed && actions.state.message ? (
+        <Notice tone="error" sentence="That did not go through." detail={actions.state.message} />
+      ) : null}
 
       {!rules.supported ? (
         <EmptyState title="Rules unavailable">This cluster does not route by rules yet.</EmptyState>
@@ -190,7 +271,7 @@ function RuleList({
             {shown.map((rule) => (
               <li key={rule.name} data-os-locked={rule.locked || undefined} data-os-floor={isFloorRule(rule) || undefined}>
                 {rule.locked ? (
-                  <div className="fleet-rule-line" data-locked title={ruleSentence(rule)}>
+                  <div className="fleet-rule-line" data-locked title={isFloorRule(rule) ? `${ruleSentence(rule)} ${FLOOR_RULE_SENTENCE}` : ruleSentence(rule)}>
                     <Lock size={14} aria-hidden className="fleet-rule-lock" />
                     <span className="os-sr-only">Shipped. </span>
                     <RuleSentence rule={rule} />
@@ -239,7 +320,7 @@ function RuleList({
                     }}
                   >
                     {canMove ? <GripVertical size={14} aria-hidden className="fleet-rule-grip" /> : <span className="fleet-rule-grip" aria-hidden />}
-                    <RuleSentence rule={rule} />
+                    <RuleSentence rule={rule} note={shadowedBy(rule.when, ordered) ? "a shipped rule decides first" : ""} />
                   </button>
                 )}
               </li>

@@ -267,6 +267,15 @@ const fleet: OsAppManifest = {
   sections: FLEET_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
+  // Routing moved here and became one place (routing redesign, 2026-09-28):
+  // Fleet's Policies and Machine routing, and Settings' Rules and Decisions,
+  // are now Fleet > Routing's Routes, Rules, Machines and History. A person
+  // who knew where those were has to be told where they went -- that is a
+  // change in how they use it, not a restyling. The destination is the
+  // section, which every Fleet user can open (Machines is ungated).
+  attentionChanges: [
+    { id: "fleet:routing", revision: "routing-1", sectionId: "routing", label: "Routes, rules and history, all in Routing" },
+  ],
   component: FleetApp,
 };
 

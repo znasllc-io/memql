@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState, type DragEvent } from "react";
 import { Plus, X } from "lucide-react";
 
+import { Input } from "../../../kit";
 import { equip, moveSlot, removeSlot } from "./routeDraft";
 import { ReadinessDot, SourceGlyph, readinessWords } from "./SourceGlyph";
-import { placementProblem, readSource, servingIndex, trayGroups, type RoutingFacts } from "./sources";
+import { placementProblem, readSource, servingIndex, specificSourceProblem, trayGroups, type RoutingFacts } from "./sources";
 import { sourceLabel } from "./vocabulary";
 
 // THE COMPOSER: slots in a row, a tray of every source beneath them, and a thin
@@ -34,6 +35,18 @@ import { sourceLabel } from "./vocabulary";
 // Choosing is deliberate, not focus: a person tabbing from the slots to the
 // tray passes over every slot on the way, and a focus that chose would make
 // "append" silently replace the last one.
+//
+// ===========================================================================
+// ANY SOURCE THE ENGINE TAKES CAN BE TYPED
+// ===========================================================================
+// The tray lists what the cluster can SEE: runnable apps, models some machine
+// offers, the choices, the vendors, the routes. The engine takes more: an
+// app with its model pinned (`app:claude-code:opus`), a model no machine
+// offers yet, a vendor or a provider by its name. The last tray group is one
+// field for exactly that, and it equips like a tray source -- into the chosen
+// slot, or at the end, by Enter or its Add. Its shape is checked here
+// (`specificSourceProblem`) so a slip is refused in place; the engine
+// re-checks at save.
 //
 // ===========================================================================
 // A REFUSAL IS SAID WHERE IT HAPPENED
@@ -71,6 +84,8 @@ export function SourceComposer({
   const appendRef = useRef<HTMLButtonElement | null>(null);
   const trayRef = useRef<HTMLDivElement | null>(null);
   const [focusAt, setFocusAt] = useState<number | null>(null);
+  const exactId = useId();
+  const [exact, setExact] = useState("");
 
   // FOCUS FOLLOWS THE SLOT IT WAS ON. A slot moved by the keyboard is a new
   // element in a new place, and a person who pressed an arrow expects to be
@@ -85,18 +100,29 @@ export function SourceComposer({
   const serving = servingIndex(entries, facts).index;
   const target = chosen !== null && chosen < entries.length ? chosen : entries.length;
 
-  function place(entry: string, at: number) {
+  function place(entry: string, at: number): boolean {
     const replacing = at < entries.length;
     const problem = placementProblem(entry, entries, routeName, facts, replacing ? at : undefined);
     if (problem !== "") {
       setRefusal({ at, message: problem });
       onAnnounce?.(problem);
-      return;
+      return false;
     }
     setRefusal(null);
     setChosen(null);
     onChange(equip(entries, entry, at));
     onAnnounce?.(`${sourceLabel(entry)} is source ${at + 1}.`);
+    return true;
+  }
+
+  function placeExact() {
+    const problem = specificSourceProblem(exact, facts);
+    if (problem !== "") {
+      setRefusal({ at: target, message: problem });
+      onAnnounce?.(problem);
+      return;
+    }
+    if (place(exact.trim(), target)) setExact("");
   }
 
   function move(from: number, to: number) {
@@ -136,7 +162,7 @@ export function SourceComposer({
     event.preventDefault();
   };
 
-  const groups = readOnly ? [] : trayGroups(facts, routeName);
+  const groups = readOnly ? [] : trayGroups(facts, routeName, entries);
   const noMachines = facts.machinesRead && facts.machines.length === 0;
 
   return (
@@ -281,6 +307,15 @@ export function SourceComposer({
               </div>
             </div>
           ))}
+          <div className="fleet-tray-group" role="group" aria-label="By exact name">
+            <span className="fleet-tray-title">By exact name</span>
+            <div className="fleet-tray-sources fleet-tray-exact" title="An app with its model, a model no machine offers yet, or a vendor by name">
+              <Input id={exactId} label="Specific source" value={exact} placeholder="app:claude-code:opus" code onChange={setExact} onEnter={placeExact} />
+              {exact.trim() === "" ? null : (
+                <button type="button" className="fleet-reading-link" aria-label="Add specific source" onClick={placeExact}>Add</button>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -22,7 +22,7 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { renderRouting, routingConnection, routeRow, settle, studioMachine } = await import("./routingHarness");
+const { renderRouting, routingConnection, routeRow, ruleRow, settle, shippedRules, studioMachine } = await import("./routingHarness");
 
 afterEach(cleanup);
 
@@ -260,7 +260,7 @@ describe("saving and restoring", () => {
     expect(calls.routerListPolicies.mock.calls.length).toBeGreaterThan(1);
   });
 
-  it("keeps a refused draft, and says so", async () => {
+  it("keeps a draft refused for staleness, and says so in the product's words", async () => {
     use({ routes: [routeRow("mine", "fleet:strongest", ["app:*"], { shipped: false })] });
     state.saveError = new Error("routing policies changed since revision 7; refresh and review before saving");
     await renderRouting();
@@ -268,9 +268,23 @@ describe("saving and restoring", () => {
     fireEvent.click(tray(/^Claude Code:/));
     fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
     await settle();
-    expect(screen.getByText(/changed since revision 7/)).toBeTruthy();
+    expect(screen.getByText("Routing changed since this page read it.")).toBeTruthy();
+    expect(screen.queryByText(/routing policies/)).toBeNull();
     expect(slotNames()).toEqual(["Strongest local model", "Any signed-in app", "Claude Code"]);
     expect(within(bar()).getByText("Unsaved")).toBeTruthy();
+  });
+
+  it("keeps a draft the engine refused for another reason, with its reason in route words", async () => {
+    use({ routes: [routeRow("mine", "fleet:strongest", ["app:*"], { shipped: false })] });
+    state.saveError = new Error('policy entry "app:cursor": "cursor" is not an app this engine drives');
+    await renderRouting();
+    await openRoute("Mine");
+    fireEvent.click(tray(/^Claude Code:/));
+    fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+    await settle();
+    expect(screen.getByText("The route was not saved.")).toBeTruthy();
+    expect(screen.getByText('source "app:cursor": "cursor" is not an app this engine drives')).toBeTruthy();
+    expect(slotNames()).toEqual(["Strongest local model", "Any signed-in app", "Claude Code"]);
   });
 
   it("Cancel returns to the saved chain", async () => {
@@ -348,6 +362,88 @@ describe("saving and restoring", () => {
   });
 });
 
+describe("a source by its exact name", () => {
+  beforeEach(() => use({ routes: [routeRow("mine", "fleet:strongest", [], { shipped: false })] }));
+
+  function exact(): HTMLInputElement {
+    return screen.getByLabelText("Specific source") as HTMLInputElement;
+  }
+
+  it("pins an app's model with Enter, and it saves as typed", async () => {
+    await renderRouting();
+    await openRoute("Mine");
+    // Absent until there is something to add.
+    expect(screen.queryByRole("button", { name: "Add specific source" })).toBeNull();
+    fireEvent.change(exact(), { target: { value: "app:claude-code:opus" } });
+    fireEvent.keyDown(exact(), { key: "Enter" });
+    expect(slotNames()).toEqual(["Strongest local model", "Claude Code · opus"]);
+    expect(exact().value).toBe("");
+    fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+    await settle();
+    expect(calls.routingPolicySave).toHaveBeenCalledWith(expect.objectContaining({ primary: "fleet:strongest", fallbacks: ["app:claude-code:opus"] }));
+  });
+
+  it("adds a vendor by name with its Add, into the CHOSEN slot", async () => {
+    await renderRouting();
+    await openRoute("Mine");
+    fireEvent.click(slotButton(0));
+    fireEvent.change(exact(), { target: { value: "federation:acme" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add specific source" }));
+    expect(slotNames()).toEqual(["acme"]);
+  });
+
+  it("takes a model no machine offers yet, and says it is not on any machine", async () => {
+    await renderRouting();
+    await openRoute("Mine");
+    fireEvent.change(exact(), { target: { value: "fleet:llama4:70b" } });
+    fireEvent.keyDown(exact(), { key: "Enter" });
+    expect(slotButton(1).getAttribute("aria-label")).toBe("2. llama4:70b, not on any machine");
+  });
+
+  it("refuses a slip in place and keeps the words", async () => {
+    await renderRouting();
+    await openRoute("Mine");
+    fireEvent.change(exact(), { target: { value: "app:cursor" } });
+    fireEvent.keyDown(exact(), { key: "Enter" });
+    expect(screen.getByRole("alert").textContent).toBe("cursor is not an app this cluster drives.");
+    expect(slotNames()).toEqual(["Strongest local model"]);
+    expect(exact().value).toBe("app:cursor");
+  });
+});
+
+describe("the rules a route change reaches", () => {
+  it("counts the rules that take the route, and opens Rules on exactly those", async () => {
+    use({
+      rules: [
+        ...shippedRules(),
+        ruleRow({ name: "nightly", when: { tag: "nightly" }, policy: "localOnly", precedence: 20 }),
+        ruleRow({ name: "batch", when: { tag: "batch" }, policy: "localFirst", precedence: 10 }),
+      ],
+    });
+    await renderRouting();
+    await openRoute("Local only");
+    // The two shipped compiler rules take it too.
+    fireEvent.click(screen.getByRole("button", { name: "Taken by 3 rules" }));
+    await settle();
+    const list = screen.getByRole("list", { name: "Rules, in the order they are tried" });
+    expect(within(list).getAllByRole("listitem").map((li) => li.querySelector(".fleet-rule-when")?.textContent)).toEqual([
+      "Route composing prompt",
+      "Rule compiling prompt",
+      "Tagged nightly",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Refine rules" }));
+    expect((screen.getByLabelText("Route") as HTMLSelectElement | HTMLElement).textContent).toContain("Local only");
+  });
+
+  it("says the count in the bar while the route is unsaved", async () => {
+    await renderRouting();
+    await openRoute("Local first");
+    fireEvent.click(tray(/^Claude Code:/));
+    // The shipped floor and backgroundLane take Local first.
+    expect(within(bar()).getByText(/applies to \d+ rules/)).toBeTruthy();
+  });
+});
+
 describe("New route", () => {
   it("names, composes and saves a route in three steps, each forward act on the floor", async () => {
     await renderRouting();
@@ -367,6 +463,51 @@ describe("New route", () => {
     fireEvent.click(within(floor()).getByRole("button", { name: "Save route" }));
     await settle();
     expect(calls.routingPolicySave).toHaveBeenCalledWith({ name: "nightShift", description: "", primary: "app:claude-code", fallbacks: ["federation:cheapest"], expectedRevision: 7 });
+  });
+
+  it("waits for the re-read after saving, and never says the new route is gone", async () => {
+    await renderRouting();
+    fireEvent.click(screen.getByRole("button", { name: "New route" }));
+    const floor = () => screen.getByRole("group", { name: "What you can do with this" });
+    fireEvent.change(screen.getByLabelText("Route name"), { target: { value: "Night shift" } });
+    fireEvent.click(within(floor()).getByRole("button", { name: "Next" }));
+    fireEvent.click(tray(/^Claude Code:/));
+    fireEvent.click(within(floor()).getByRole("button", { name: "Next" }));
+    // Hold the re-read, and look at every render until it lands.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const read = calls.routerListPolicies.getMockImplementation()!;
+    calls.routerListPolicies.mockImplementation(async (...args: unknown[]) => { await held; return read(...args); });
+    // EVERY paint, not just the settled one: the flash lasted one render.
+    let flashed = false;
+    // The RECORDS, not the page when the observer runs: by then the next
+    // render may already have replaced what was painted.
+    const watch = new MutationObserver((records) => {
+      for (const r of records) for (const n of r.addedNodes) if (n.textContent?.includes("That route is gone")) flashed = true;
+    });
+    watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+    fireEvent.click(within(floor()).getByRole("button", { name: "Save route" }));
+    await settle();
+    release();
+    await settle();
+    watch.disconnect();
+    expect(flashed).toBe(false);
+    expect(slotNames()).toEqual(["Claude Code"]);
+  });
+
+  it("says the re-read failed, rather than that the new route is gone", async () => {
+    await renderRouting();
+    fireEvent.click(screen.getByRole("button", { name: "New route" }));
+    const floor = () => screen.getByRole("group", { name: "What you can do with this" });
+    fireEvent.change(screen.getByLabelText("Route name"), { target: { value: "Night shift" } });
+    fireEvent.click(within(floor()).getByRole("button", { name: "Next" }));
+    fireEvent.click(tray(/^Claude Code:/));
+    fireEvent.click(within(floor()).getByRole("button", { name: "Next" }));
+    calls.routerListPolicies.mockRejectedValue(new Error("connection lost"));
+    fireEvent.click(within(floor()).getByRole("button", { name: "Save route" }));
+    await settle();
+    expect(screen.queryByText("That route is gone")).toBeNull();
+    expect(screen.getByText("The route could not be read.")).toBeTruthy();
   });
 
   it("refuses a name that is taken, and says so on the floor", async () => {

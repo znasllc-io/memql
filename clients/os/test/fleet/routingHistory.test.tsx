@@ -48,7 +48,7 @@ vi.mock("../../src/live/connection", () => ({
   osBridgePath: "/_memql/ws",
 }));
 
-const { renderRouting, routingConnection, ruleRow, shippedRules, settle } = await import("./routingHarness");
+const { renderRouting, routingConnection, shippedRules, settle } = await import("./routingHarness");
 const { DECISIONS_SECTION_RESOURCE } = await import("../../src/apps/fleet/routing/access");
 const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { roleOpens } = await import("../seededAccess");
@@ -123,7 +123,8 @@ function lastArgs(): Record<string, unknown> {
 }
 
 function use(decisions: Record<string, unknown>[] = [wireDecision()]) {
-  const made = routingConnection({ decisions, rules: [...shippedRules(), ruleRow({ name: "operatorReasoning", when: { prompt: "agentReply", role: "operator" }, locked: true, precedence: 60 })] });
+  // The shipped rules include operatorReasoning, which most rows here name.
+  const made = routingConnection({ decisions, rules: shippedRules() });
   h.connection = made.connection;
   calls = made.calls;
   state = made.state;
@@ -444,6 +445,32 @@ describe("History: the rule facet names rules by what they match", () => {
     chooseOption(screen.getByLabelText("Rule"), "Fast work to Fast local first");
     await settle();
     expect(lastArgs()).toEqual({ rule: "fastLane" });
+    // The chip names the route too, so two rules with one condition read apart.
+    expect(screen.getByRole("button", { name: "Remove Fast work to Fast local first" })).toBeTruthy();
+  });
+
+  it("still offers a rule that has since been removed, by its name in words", async () => {
+    use([wireDecision({ rule: "nightlyIsCheap", model: "qwen3-coder" }), wireDecision({ id: "d-2", rule: "fastLane", model: "qwen3.5:4b" })]);
+    await renderHistory();
+    fireEvent.click(within(rowFor("qwen3-coder")).getByRole("button"));
+    expect(within(rowFor("qwen3-coder")).getByText(/Decided by a removed rule/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refine history" }));
+    chooseOption(screen.getByLabelText("Rule"), "Removed rule: Nightly is cheap");
+    await settle();
+    expect(lastArgs()).toEqual({ rule: "nightlyIsCheap" });
+    expect(screen.getByRole("button", { name: "Remove Removed rule: Nightly is cheap" })).toBeTruthy();
+  });
+
+  it("names a call's prompt in words, and finds it by either", async () => {
+    use([wireDecision({ promptName: "composeRoutingPolicy", model: "qwen3.8:27b" }), wireDecision({ id: "d-2", model: "qwen3-coder" })]);
+    await renderHistory();
+    expect(rowFor("qwen3.8:27b").textContent).toContain("Route composing");
+    expect(rowFor("qwen3.8:27b").textContent).not.toContain("composeRoutingPolicy");
+    fireEvent.click(screen.getByRole("button", { name: "Refine history" }));
+    fireEvent.change(screen.getByLabelText("Prompt or model"), { target: { value: "route composing" } });
+    expect(document.querySelectorAll(".os-decision-item")).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("Prompt or model"), { target: { value: "composeRoutingPolicy" } });
+    expect(document.querySelectorAll(".os-decision-item")).toHaveLength(1);
   });
 });
 

@@ -15,9 +15,16 @@
 //                neighbours (or 10 past the end it moved to). Nothing else
 //                changes, so nothing else can collide.
 //   RENUMBER     when there is no integer between the neighbours, every custom
-//                rule is renumbered into a FRESH range above the current
-//                maximum, in the new order. Each written value is larger than
+//                rule is renumbered into a FRESH range that no current value
+//                sits in -- the LOWEST such range that fits: below the
+//                current minimum when there is room there, otherwise above
+//                the current maximum. Each written value is then outside
 //                every value still unwritten, so no intermediate state ties.
+//                Preferring the low range keeps repeated renumbers from
+//                ratcheting upward, and every value stays within the engine's
+//                0..1,000,000; when neither range fits even one apart, there
+//                is no plan (an empty one) rather than a write the engine
+//                would refuse.
 
 export interface Ranked {
   name: string;
@@ -61,5 +68,13 @@ export function reorderPlan(rules: readonly Ranked[], from: number, to: number):
   if (target !== null) return [];
 
   const max = Math.max(...rules.map((r) => r.precedence));
-  return order.map((rule, i) => ({ name: rule.name, precedence: max + STEP * (order.length - i) }));
+  const min = Math.min(...rules.map((r) => r.precedence));
+  const n = order.length;
+  for (const step of [STEP, 1]) {
+    // Below: n values, top one strictly under the current minimum.
+    if (step * (n - 1) < min) return order.map((rule, i) => ({ name: rule.name, precedence: step * (n - 1 - i) }));
+    // Above: n values, bottom one strictly over the current maximum.
+    if (max + step * n <= MAX_PRECEDENCE) return order.map((rule, i) => ({ name: rule.name, precedence: max + step * (n - i) }));
+  }
+  return [];
 }

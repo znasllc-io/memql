@@ -15,8 +15,8 @@ import {
   type DecisionRow,
 } from "../../settings/decisionFacts";
 import { LEVELS } from "../../settings/routingFacts";
-import { useRules, type RuleRow } from "../../settings/rulesFacts";
-import { levelTitle, routeTitle, sourceLabel, whenWords } from "./vocabulary";
+import type { RuleRow, RulesState } from "../../settings/rulesFacts";
+import { engineWords, levelTitle, promptWords, routeTitle, sourceLabel, whenWords } from "./vocabulary";
 
 // Fleet > Routing > History: what actually served recent calls (was Settings
 // > Decisions). It is how a rule is checked -- a rule set nobody can read the
@@ -29,8 +29,13 @@ import { levelTitle, routeTitle, sourceLabel, whenWords } from "./vocabulary";
 //
 // THE RULE IS NAMED BY WHAT IT MATCHES. A decision records the rule's engine
 // name ("fastLane"), which is an id; the row says "Fast work", read off the
-// rules this cluster actually has. A name that is no longer among them is said
-// to be a removed rule rather than printed raw.
+// rules this cluster actually has (read once by the section). A name that is
+// no longer among them is said to be a removed rule, and the Rule facet still
+// offers it -- by its name in words -- so its calls stay findable.
+//
+// THE PROMPT IS NAMED IN WORDS TOO: `composeRoutingPolicy` is an engine id
+// carrying a retired word, so a row reads "Route composing". The search
+// matches the id and the words.
 //
 // FILTERED SERVER-SIDE: the query is keyset-paged at 200, so a facet filtered
 // in the browser would narrow the page rather than the search.
@@ -41,7 +46,14 @@ const SOURCE_WORD: Record<string, string> = {
   federation: "a vendor",
 };
 
-export function HistoryTab({ header }: { header: (actions: ReactNode, meta?: ReactNode) => ReactNode }) {
+export function HistoryTab({
+  header,
+  rules,
+}: {
+  header: (actions: ReactNode, meta?: ReactNode) => ReactNode;
+  /** The section's one read of the rules, for naming a decision's rule. */
+  rules: Pick<RulesState, "rules">;
+}) {
   const [level, setLevel] = useState("");
   const [source, setSource] = useState("");
   const [outcome, setOutcome] = useState("");
@@ -49,19 +61,26 @@ export function HistoryTab({ header }: { header: (actions: ReactNode, meta?: Rea
   const [open, setOpen] = useState("");
   const [search, setSearch] = useState("");
   const decisions = useDecisions(true, { ...NO_FILTERS, level, door: source, outcome, rule });
-  const rules = useRules(true);
   const byName = useMemo(() => new Map(rules.rules.map((r) => [r.name, r] as const)), [rules.rules]);
+  // Rules the decisions name that the cluster no longer has: still a facet.
+  const removed = useMemo(
+    () => [...new Set(decisions.rows.map((r) => r.rule))].filter((name) => name !== "" && !byName.has(name) && name !== rule).sort(),
+    [decisions.rows, byName, rule],
+  );
 
   // THE SEARCH NARROWS WHAT WAS READ; the facets narrow what is read. A
   // prompt or model name is not an argument the query takes.
   const q = search.trim().toLowerCase();
-  const rows = q === "" ? decisions.rows : decisions.rows.filter((r) => r.promptName.toLowerCase().includes(q) || r.model.toLowerCase().includes(q));
+  const rows =
+    q === ""
+      ? decisions.rows
+      : decisions.rows.filter((r) => r.promptName.toLowerCase().includes(q) || promptWords(r.promptName).toLowerCase().includes(q) || r.model.toLowerCase().includes(q));
 
   const chips = [
     ...(level === "" ? [] : [{ id: "level", label: levelTitle(level), onRemove: () => setLevel("") }]),
     ...(source === "" ? [] : [{ id: "source", label: SOURCE_WORD[source] ?? source, onRemove: () => setSource("") }]),
     ...(outcome === "" ? [] : [{ id: "outcome", label: outcome === "ok" ? "Served" : outcome === "error" ? "Failed" : "Cancelled", onRemove: () => setOutcome("") }]),
-    ...(rule === "" ? [] : [{ id: "rule", label: ruleWords(rule, byName), onRemove: () => setRule("") }]),
+    ...(rule === "" ? [] : [{ id: "rule", label: ruleChoiceWords(rule, byName), onRemove: () => setRule("") }]),
   ];
 
   return (
@@ -91,7 +110,9 @@ export function HistoryTab({ header }: { header: (actions: ReactNode, meta?: Rea
               </Select>
               <Select id="fleet-history-rule" label="Rule" value={rule} onChange={setRule}>
                 <option value="">Any rule</option>
-                {rules.rules.map((r) => <option key={r.name} value={r.name}>{`${whenWords(r)} to ${routeTitle(r.policy)}`}</option>)}
+                {rules.rules.map((r) => <option key={r.name} value={r.name}>{ruleChoiceWords(r.name, byName)}</option>)}
+                {rule !== "" && !byName.has(rule) ? <option value={rule}>{ruleChoiceWords(rule, byName)}</option> : null}
+                {removed.map((name) => <option key={`removed:${name}`} value={name}>{ruleChoiceWords(name, byName)}</option>)}
               </Select>
             </Refine>
           ) : null}
@@ -128,6 +149,16 @@ function ruleWords(name: string, byName: ReadonlyMap<string, RuleRow>): string {
   return rule ? `${whenWords(rule)}` : "a removed rule";
 }
 
+/**
+ * A rule as a facet choice and chip: what it matches AND where it goes, so two
+ * rules with the same conditions read apart. A removed one is named by its
+ * (engine) name in words -- there is nothing else left to call it.
+ */
+function ruleChoiceWords(name: string, byName: ReadonlyMap<string, RuleRow>): string {
+  const rule = byName.get(name);
+  return rule ? `${whenWords(rule)} to ${routeTitle(rule.policy)}` : `Removed rule: ${engineWords(name)}`;
+}
+
 function clockOf(value: string): string {
   if (value === "") return "";
   const at = new Date(value);
@@ -145,11 +176,12 @@ function clockOf(value: string): string {
 function DecisionLine({ row, byName, open, onOpen }: { row: DecisionRow; byName: ReadonlyMap<string, RuleRow>; open: boolean; onOpen: () => void }) {
   const level = levelWords(row);
   const where = SOURCE_WORD[row.door] ?? row.door;
-  const spoken = [formatMoment(row.createdAt), row.promptName, level, where, row.model, row.outcome === "ok" ? "served" : row.outcome].filter((p) => p !== "").join(", ");
+  const prompt = row.promptName === "" ? "" : promptWords(row.promptName);
+  const spoken = [formatMoment(row.createdAt), prompt, level, where, row.model, row.outcome === "ok" ? "served" : row.outcome].filter((p) => p !== "").join(", ");
   return (
     <div className="os-decision-item" data-os-source={row.door} data-os-outcome={row.outcome}>
       <RecordRow
-        name={row.promptName || "a call"}
+        name={prompt || "a call"}
         label={spoken}
         onOpen={onOpen}
         open={open}

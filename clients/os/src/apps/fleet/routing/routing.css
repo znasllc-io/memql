@@ -43,6 +43,8 @@
 button.fleet-route-description:hover { color: var(--os-ink); }
 button.fleet-route-description:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 3px; border-radius: 3px; }
 .fleet-route-description-input { max-width: 60ch; }
+/* How many rules take the route: one quiet line, a link when there are any. */
+.fleet-route-taken { align-self: flex-start; margin: -8px 0 0; font-size: var(--os-text-sm); color: var(--os-muted); }
 
 /* ---- the composer: the circuit ---- */
 .fleet-composer { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
@@ -98,6 +100,9 @@ button.fleet-route-description:focus-visible { outline: 2px solid var(--os-accen
 .fleet-tray-source:hover { background: var(--os-hover); }
 .fleet-tray-source:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 .fleet-tray-name { white-space: nowrap; }
+/* The exact-name field: a source the tray does not list, typed. */
+.fleet-tray-exact { align-items: center; }
+.fleet-tray-exact .os-input { width: min(22rem, 100%); }
 
 /* ---- the new-route review ---- */
 .fleet-route-review { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
@@ -118,6 +123,7 @@ button.fleet-rule-line[draggable="true"] { cursor: grab; }
 .fleet-rule-arrow { flex: none; color: var(--os-muted); }
 .fleet-rule-extra { font-size: var(--os-text-sm); color: var(--os-muted); }
 .fleet-rule-said { padding: 6px 0 2px; }
+.fleet-rule-described { margin: -6px 0 0; max-width: 80ch; font-size: var(--os-text-sm); color: var(--os-muted); }
 .fleet-rule-when-step { display: grid; gap: 12px; max-width: 34rem; }
 .fleet-rule-review { display: grid; gap: 14px; max-width: 34rem; }
 .fleet-rule-page .os-rule-textarea { max-width: 80ch; }

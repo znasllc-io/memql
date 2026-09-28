@@ -30,6 +30,7 @@ const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { SettingsApp } = await import("../../src/apps/settings/SettingsApp");
 const { UNKNOWN_RUNTIME_CONFIG } = await import("../../src/cluster/config");
 const { installSeededAccess } = await import("../seededAccess");
+const { shippedRulesFromDsl } = await import("./shippedRulesDsl");
 
 afterEach(cleanup);
 
@@ -70,11 +71,28 @@ function floorBar(): HTMLElement {
   return screen.getByRole("group", { name: "What you can do with this" });
 }
 
+// The SHIPPED rules as the DSL declares them -- all of them, read from
+// dsl/rules/rules.memql rather than from a literal that could leave out the
+// very rule whose words leak (it did: `policyCompilerLocalOnly` matches the
+// prompt `composeRoutingPolicy`).
 function use() {
   const made = routingConnection({
     routes: [...shippedRoutes().map((r) => (r.name === "localFirst" ? routeRow("localFirst", "fleet:strongest", ["app:*", "federation:cheapest", "policy:federationStrongest"], { customized: true }) : r))],
-    rules: [...shippedRules(), ruleRow({ name: "nightlyIsCheap", when: { tag: "nightly" }, policy: "federationStrongest", precedence: 10, onUnavailable: "park" })],
+    rules: [...shippedRulesFromDsl(), ruleRow({ name: "nightlyIsCheap", when: { tag: "nightly" }, policy: "federationStrongest", precedence: 10, onUnavailable: "park" })],
     decisions: [
+      {
+        id: "d-0",
+        createdAt: "2026-09-28T10:01:00Z",
+        promptName: "composeRoutingPolicy",
+        level: "strong",
+        rule: "policyCompilerLocalOnly",
+        policy: "localOnly",
+        door: "local",
+        model: "qwen3.8:27b",
+        outcome: "ok",
+        billing: "local",
+        considered: [{ entry: "fleet:strongest", door: "local", why: "", served: true }],
+      },
       {
         id: "d-1",
         createdAt: "2026-09-28T10:00:00Z",
@@ -136,7 +154,7 @@ describe("the routing surfaces speak Source, Route, Rule and Level", () => {
     expect(retired()).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
     expect(retired()).toEqual([]);
-    fireEvent.click(screen.getByRole("radio", { name: "Reasoning work" }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Reasoning work/ }));
     expect(retired()).toEqual([]);
     fireEvent.click(screen.getByRole("radio", { name: /Local, then best vendor/ }));
     expect(retired()).toEqual([]);
@@ -160,10 +178,31 @@ describe("the routing surfaces speak Source, Route, Rule and Level", () => {
     use();
     await renderRouting("owner", { intent: { id: "h", payload: { routingTab: "history" } } });
     await settle();
-    fireEvent.click(within(screen.getByRole("list", { name: "Recent routed calls" })).getAllByRole("button")[0]!);
-    // The call was decided by `fastLane`; the row says "Fast work".
-    expect(screen.getByText(/Decided by Fast work/)).toBeTruthy();
+    const rows = within(screen.getByRole("list", { name: "Recent routed calls" })).getAllByRole("button");
+    // `composeRoutingPolicy`, decided by `policyCompilerLocalOnly`.
+    fireEvent.click(rows[0]!);
+    expect(screen.getByText(/Decided by Route composing prompt/)).toBeTruthy();
     expect(retired()).toEqual([]);
+    // The call was decided by `fastLane`; the row says "Fast work".
+    fireEvent.click(rows[1]!);
+    expect(screen.getByText(/Decided by Fast work/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refine history" }));
+    expect(retired()).toEqual([]);
+  });
+});
+
+describe("the shipped rules the sweep reads are the ones the engine ships", () => {
+  it("reads all of dsl/rules/rules.memql", () => {
+    const names = shippedRulesFromDsl().map((r) => r.name);
+    expect(names).toContain("policyCompilerLocalOnly");
+    expect(names).toContain("operatorReasoning");
+    expect(names.length).toBeGreaterThanOrEqual(9);
+  });
+
+  it("holds the fixtures' literal copy (shared with the QA harness) to the DSL", () => {
+    const shape = (r: Record<string, unknown>) => ({ name: r.name, when: r.when, level: r.level ?? "", policy: r.policy, precedence: r.precedence, onUnavailable: r.onUnavailable, locked: r.locked });
+    const byName = (a: { name: unknown }, b: { name: unknown }) => String(a.name).localeCompare(String(b.name));
+    expect(shippedRules().map(shape).sort(byName)).toEqual(shippedRulesFromDsl().map(shape).sort(byName));
   });
 });
 

@@ -41,6 +41,17 @@ export interface RouteBar {
 export const ROUTE_SCOPE = "Applies to every rule that takes this route";
 
 /**
+ * The scope as the bar says it WHILE UNSAVED -- the moment of saving, beside
+ * what the draft would serve with. A count when the rules have been read, the
+ * general words when they have not.
+ */
+export function scopeWords(rulesTaking: number | null | undefined): string {
+  if (rulesTaking === null || rulesTaking === undefined) return "applies to every rule that takes it";
+  if (rulesTaking === 0) return "no rule takes it yet";
+  return `applies to ${rulesTaking} ${rulesTaking === 1 ? "rule" : "rules"}`;
+}
+
+/**
  * The bar for a route page, from its state.
  *
  * Save is last and primary, and only there when the draft could be saved.
@@ -58,6 +69,8 @@ export function routeBar(input: {
   confirmingRestore: boolean;
   /** What the draft would serve with, in words: "serves with Claude Code". */
   serving: string;
+  /** How many rules take the route; null or absent before the rules are read. */
+  rulesTaking?: number | null;
 }): RouteBar {
   if (input.protected) {
     return { state: "Protected", detail: "Changing it needs an embedding migration", tone: "none", acts: [] };
@@ -71,7 +84,7 @@ export function routeBar(input: {
     const acts: RouteAct[] = ["cancel"];
     if (restorable) acts.push("restore");
     if (input.valid) acts.push("save");
-    return { state: "Unsaved", detail: input.serving, tone: "paused", acts };
+    return { state: "Unsaved", detail: [input.serving, scopeWords(input.rulesTaking)].filter(Boolean).join(" · "), tone: "paused", acts };
   }
   if (restorable) return { state: "Changed from shipped", detail: ROUTE_SCOPE, tone: "live", acts: ["restore"] };
   return { state: input.shipped ? "Shipped" : "Saved", detail: ROUTE_SCOPE, tone: "live", acts: [] };

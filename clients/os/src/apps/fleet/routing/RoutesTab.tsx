@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Route } from "lucide-react";
 
 import { AddButton } from "../../../kit/AddButton";
 import { ContentSkeleton, InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { InfoDetail } from "../../../kit/InfoDetail";
 import { Chip, EmptyState, Notice, RecordList, RecordListSkeleton, RecordRow, RefreshButton } from "../../../kit";
+import type { RulesState } from "../../settings/rulesFacts";
 import type { TaskPolicy } from "../taskPolicies";
 import { NewRouteWizard } from "./NewRouteWizard";
 import { RouteComposer, type RouteDraftState } from "./RouteComposer";
@@ -22,6 +23,12 @@ import { routeTitle } from "./vocabulary";
 // goes back to the list and opens it again finds their change, and the row
 // says "Unsaved" in the meantime. They are not written to browser storage --
 // closing the window ends them, as every Fleet draft does.
+//
+// A ROUTE JUST CREATED IS PENDING, not missing. The wizard's save and the
+// page it opens land in one render, before the re-read that brings the route
+// back has even started -- so "That route is gone" would paint for a frame,
+// and stay if the re-read failed. The page waits for the NEXT settled read
+// (`catalog.settled`) and says what that read said.
 
 type Page = { kind: "list" } | { kind: "route"; name: string } | { kind: "new" };
 
@@ -41,20 +48,35 @@ export function RoutesTab({
   header,
   catalog,
   facts,
+  rules,
   reload,
+  request,
+  onOpenRules,
   onAddMachine,
 }: {
   header: (actions: ReactNode, meta?: ReactNode) => ReactNode;
-  catalog: { policies: TaskPolicy[]; loading: boolean; error: string };
+  catalog: { policies: TaskPolicy[]; loading: boolean; error: string; settled: number };
   facts: RoutingFacts;
+  /** The rules, read once for the section: how many take each route. */
+  rules?: Pick<RulesState, "rules" | "read">;
+  /** Re-read the routes AND the rules; they share one engine revision. */
   reload: () => void;
+  /** Another tab asking for a route's page ("Change Fast local first"). */
+  request?: { name: string; n: number } | null;
+  /** Open Rules on the rules that take this route. */
+  onOpenRules?: (route: string) => void;
   onAddMachine?: () => void;
 }) {
   const [page, setPage] = useState<Page>({ kind: "list" });
   const [drafts, setDrafts] = useState<Record<string, RouteDraftState>>({});
+  const [pending, setPending] = useState<{ name: string; after: number } | null>(null);
   const routes = useMemo(() => orderRoutes(catalog.policies), [catalog.policies]);
 
   const toList = useCallback(() => setPage({ kind: "list" }), []);
+
+  useEffect(() => {
+    if (request) setPage({ kind: "route", name: request.name });
+  }, [request?.n]);
 
   if (page.kind === "new") {
     return (
@@ -63,9 +85,11 @@ export function RoutesTab({
         facts={facts}
         onCancel={toList}
         onCreated={(name) => {
+          setPending({ name, after: catalog.settled });
           reload();
           setPage({ kind: "route", name });
         }}
+        onRefused={reload}
         onAddMachine={onAddMachine}
       />
     );
@@ -74,21 +98,34 @@ export function RoutesTab({
   if (page.kind === "route") {
     const route = routes.find((r) => r.name === page.name);
     if (route === undefined) {
-      // A route just created is not in the list until the re-read lands.
-      return catalog.loading ? (
-        <div className="os-deploy-scroll"><ContentSkeleton kind="detail" label="Loading the route" /></div>
-      ) : (
-        <MissingRoute onBack={toList} />
-      );
+      const waiting = catalog.loading || (pending !== null && pending.name === page.name && catalog.settled <= pending.after);
+      if (waiting) return <div className="os-deploy-scroll"><ContentSkeleton kind="detail" label="Loading the route" /></div>;
+      if (catalog.error) {
+        return (
+          <div className="os-deploy-scroll">
+            <Notice tone="warn" sentence="The route could not be read." detail={catalog.error} />
+            <button type="button" className="fleet-reading-link" onClick={reload}>Read the routes again</button>
+            <button type="button" className="fleet-reading-link" onClick={toList}>Back to the list</button>
+          </div>
+        );
+      }
+      return <MissingRoute onBack={toList} />;
     }
+    // The LAST KNOWN count through a re-read: the rules are read again after
+    // every write, and a line that vanished and came back would move the
+    // composer under the cursor at the moment of saving.
+    const known = rules !== undefined && (rules.read || rules.rules.length > 0);
+    const taking = known ? rules.rules.filter((r) => r.policy === route.name).length : null;
     return (
       <RoutePage
         route={route}
         facts={facts}
         draft={drafts[route.name]}
         setDrafts={setDrafts}
+        rulesTaking={taking}
         onBack={toList}
         onChanged={reload}
+        onOpenRules={onOpenRules ? () => onOpenRules(route.name) : undefined}
         onAddMachine={onAddMachine}
       />
     );
@@ -150,16 +187,20 @@ function RoutePage({
   facts,
   draft,
   setDrafts,
+  rulesTaking,
   onBack,
   onChanged,
+  onOpenRules,
   onAddMachine,
 }: {
   route: TaskPolicy;
   facts: RoutingFacts;
   draft: RouteDraftState | undefined;
   setDrafts: (update: (held: Record<string, RouteDraftState>) => Record<string, RouteDraftState>) => void;
+  rulesTaking: number | null;
   onBack: () => void;
   onChanged: () => void;
+  onOpenRules?: () => void;
   onAddMachine?: () => void;
 }) {
   const name = route.name;
@@ -175,7 +216,19 @@ function RoutePage({
       }),
     [name, setDrafts],
   );
-  return <RouteComposer route={route} facts={facts} draft={draft} onDraft={onDraft} onBack={onBack} onChanged={onChanged} onAddMachine={onAddMachine} />;
+  return (
+    <RouteComposer
+      route={route}
+      facts={facts}
+      draft={draft}
+      onDraft={onDraft}
+      rulesTaking={rulesTaking}
+      onBack={onBack}
+      onChanged={onChanged}
+      onOpenRules={onOpenRules}
+      onAddMachine={onAddMachine}
+    />
+  );
 }
 
 function MissingRoute({ onBack }: { onBack: () => void }) {

@@ -5,7 +5,7 @@ import { ChoiceStack, Field, Input, Notice, Select } from "../../../kit";
 import type { Act } from "../../../kit/ActionBar";
 import type { Stop } from "../../../kit/Rail";
 import { Wizard } from "../../../kit/Wizard";
-import type { RuleActions, RuleRow, RuleWhenKey } from "../../settings/rulesFacts";
+import { shadowedBy, type RuleActions, type RuleRow, type RuleWhenKey } from "../../settings/rulesFacts";
 import type { TaskPolicy } from "../taskPolicies";
 import { routeEntries } from "./routes";
 import { RuleSentence } from "./RuleSentence";
@@ -26,10 +26,17 @@ import { MODALITY_TITLES, routeIdFrom, routeTitle, whenWords } from "./vocabular
 // The rest of a rule (the level it asks for, what happens when nothing is
 // ready, its precedence) keeps its defaults here and is on the rule's own page
 // afterwards. A wizard adds; the page edits (DESIGN.md, "Adding only").
+//
+// A RULE A SHIPPED ONE ALREADY DECIDES IS NOT ADDED. Shipped rules evaluate
+// before yours regardless of precedence, so "Fast work -> Claude Code" beside
+// the shipped "Fast work -> Fast local first" saves, checks clean, and never
+// fires. The choice says so where it is made ("Already takes Fast local
+// first"), and Review offers the act that WOULD work -- changing that route --
+// instead of Add rule.
 
 type Step = "when" | "route" | "review";
 
-type WhenChoice = "level:fast" | "level:strong" | "level:reasoning" | "modality" | "prompt" | "tag" | "role" | "touches";
+type WhenChoice = "level:fast" | "level:strong" | "level:reasoning" | "modality" | "prompt" | "tag" | "role" | "actorRole" | "touches";
 
 const CHOICES: readonly { value: WhenChoice; label: string }[] = [
   { value: "level:fast", label: "Fast work" },
@@ -39,6 +46,7 @@ const CHOICES: readonly { value: WhenChoice; label: string }[] = [
   { value: "prompt", label: "A prompt" },
   { value: "tag", label: "A tag" },
   { value: "role", label: "Who is acting" },
+  { value: "actorRole", label: "Who is watching" },
   { value: "touches", label: "What it touches" },
 ];
 
@@ -46,6 +54,7 @@ const VALUE_LABEL: Record<string, string> = {
   prompt: "Prompt name",
   tag: "Tag",
   role: "Role",
+  actorRole: "Role watching",
   touches: "What it touches",
 };
 
@@ -57,6 +66,7 @@ export function RuleWizard({
   onCancel,
   onDescribe,
   onAdded,
+  onOpenRoute,
 }: {
   actions: RuleActions;
   rules: readonly RuleRow[];
@@ -65,6 +75,8 @@ export function RuleWizard({
   onCancel: () => void;
   onDescribe: () => void;
   onAdded: () => void;
+  /** Open a route's page: the act a shadowed rule offers instead of Add. */
+  onOpenRoute?: (route: string) => void;
 }) {
   const [step, setStep] = useState<Step>("when");
   const [choice, setChoice] = useState<WhenChoice | "">("");
@@ -77,6 +89,12 @@ export function RuleWizard({
   const when: Partial<Record<RuleWhenKey, string>> =
     choice === "" ? {} : choice.startsWith("level:") ? { level: choice.slice("level:".length) } : { [choice]: value.trim() };
   const whenAnswered = choice !== "" && (choice.startsWith("level:") || value.trim() !== "");
+  const shadow = whenAnswered ? shadowedBy(when, rules) : null;
+  const options = CHOICES.map((one) => {
+    if (!one.value.startsWith("level:")) return one;
+    const decided = shadowedBy({ level: one.value.slice("level:".length) }, rules);
+    return decided ? { ...one, description: `Already takes ${routeTitle(decided.policy)}` } : one;
+  });
   const custom = rules.filter((r) => !r.locked);
   const precedence = custom.length === 0 ? 10 : Math.max(...custom.map((r) => r.precedence)) + 10;
 
@@ -129,7 +147,7 @@ export function RuleWizard({
             label="When work looks like"
             voice="prose"
             value={choice}
-            options={CHOICES}
+            options={options}
             onChange={(next) => {
               const picked = next as WhenChoice;
               setChoice(picked);
@@ -201,14 +219,18 @@ export function RuleWizard({
       ? whenAnswered && !choice.startsWith("level:") ? { label: "Next", tone: "primary", onAct: () => setStep("route") } : null
       : step === "route"
         ? route !== "" ? { label: "Next", tone: "primary", onAct: () => setStep("review") } : null
-        : nameValid ? { label: "Add rule", tone: "primary", busy: working || actions.state.busy, onAct: () => void add() } : null;
+        : shadow !== null
+          ? onOpenRoute ? { label: `Change ${routeTitle(shadow.policy)}`, tone: "primary", onAct: () => onOpenRoute(shadow.policy) } : null
+          : nameValid ? { label: "Add rule", tone: "primary", busy: working || actions.state.busy, onAct: () => void add() } : null;
 
   const status =
     step === "when"
       ? { word: "Choose the work", detail: "" }
       : step === "route"
         ? { word: "Choose a route", detail: "" }
-        : { word: working ? "Adding" : "Ready to add", detail: nameValid ? "" : "Choose another name" };
+        : shadow !== null
+          ? { word: "Decided by a shipped rule", detail: `${whenWords(shadow)} already takes ${routeTitle(shadow.policy)}; change that route instead` }
+          : { word: working ? "Adding" : "Ready to add", detail: nameValid ? "" : "Choose another name" };
 
   return (
     <Wizard

@@ -11,7 +11,7 @@ import { catalogRevision } from "./routes";
 import { GlyphStrip } from "./SourceGlyph";
 import { SourceComposer } from "./SourceComposer";
 import { placementProblem, readSource, routeStatus, servingIndex, type RoutingFacts } from "./sources";
-import { routeIdFrom } from "./vocabulary";
+import { STALE_SENTENCE, refusalWords, routeIdFrom } from "./vocabulary";
 
 // New route: Name -> Sources -> Review, on the shell's one wizard (DESIGN.md,
 // "One wizard for adding"). The title is the Add control's own words. Each
@@ -27,12 +27,15 @@ export function NewRouteWizard({
   facts,
   onCancel,
   onCreated,
+  onRefused,
   onAddMachine,
 }: {
   routes: readonly TaskPolicy[];
   facts: RoutingFacts;
   onCancel: () => void;
   onCreated: (name: string) => void;
+  /** Re-read routes and rules after a refused save: they share one revision. */
+  onRefused?: () => void;
   onAddMachine?: () => void;
 }) {
   const connection = useOsConnection();
@@ -40,7 +43,7 @@ export function NewRouteWizard({
   const [name, setName] = useState("");
   const [entries, setEntries] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{ stale: boolean; text: string } | null>(null);
   const [announcement, setAnnouncement] = useState("");
 
   const id = routeIdFrom(name);
@@ -52,7 +55,7 @@ export function NewRouteWizard({
   async function save() {
     if (connection === null || busy) return;
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       await connection.query.routingPolicySave({
         name: id,
@@ -63,7 +66,8 @@ export function NewRouteWizard({
       });
       onCreated(id);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(refusalWords(err instanceof Error ? err.message : String(err)));
+      onRefused?.();
     } finally {
       setBusy(false);
     }
@@ -147,7 +151,13 @@ export function NewRouteWizard({
         }}
         status={{ word: statusWord.word, detail: statusWord.detail, tone: busy ? "busy" : "none" }}
         acts={[{ label: "Cancel", text: true, onAct: onCancel }, ...(forward ? [forward] : [])]}
-        notices={error === "" ? null : <Notice tone="error" sentence="The route was not added." next="Nothing was written. The cluster's own reason is below." detail={error} />}
+        notices={
+          error === null ? null : error.stale ? (
+            <Notice tone="warn" sentence={STALE_SENTENCE} next="Nothing was written. It has been read again, so saving now uses what is there." />
+          ) : (
+            <Notice tone="error" sentence="The route was not added." next="Nothing was written. The cluster's own reason is below." detail={error.text} />
+          )
+        }
         context={{ page: "New route", step }}
       />
       <p role="status" className="os-sr-only">{announcement}</p>

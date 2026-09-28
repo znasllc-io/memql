@@ -10,7 +10,7 @@ import { routeBar, type RouteAct } from "./routeDraft";
 import { routeEntries } from "./routes";
 import { SourceComposer } from "./SourceComposer";
 import { placementProblem, routeStatus, type RoutingFacts } from "./sources";
-import { routeTitle } from "./vocabulary";
+import { STALE_SENTENCE, refusalWords, routeTitle } from "./vocabulary";
 
 // A route's own page: the composer, one line of description, and the bar.
 //
@@ -19,10 +19,21 @@ import { routeTitle } from "./vocabulary";
 // (rule 12): the state in words, then Cancel and Restore shipped as text, then
 // Save route -- each present only when it is legal.
 //
-// THE SCOPE IS SAID ONCE, IN THE BAR. A saved route is cluster-wide: every
-// rule that takes it takes the change. That used to be a banner above the
-// editor that pushed it ~58px down under the cursor; it is the bar's quiet
-// detail now, where it is read at the moment of saving and moves nothing.
+// THE SCOPE IS SAID IN THE BAR. A saved route is cluster-wide: every rule
+// that takes it takes the change. That used to be a banner above the editor
+// that pushed it ~58px down under the cursor; it is the bar's quiet detail
+// now -- "Applies to every rule that takes this route" while the route is
+// saved, and, while it is Unsaved (the moment of saving), what the draft would
+// serve with AND how many rules take it ("serves with Claude Code · applies to
+// 3 rules"). Under the description, "Taken by 3 rules" opens Rules on exactly
+// those, so the rules a change reaches are one click away.
+//
+// A REFUSAL READS AGAIN. Routes and rules share one engine revision, so the
+// usual refusal is "somebody wrote since this page read" -- said in the
+// product's words, never the engine's ("routing policies changed since
+// revision 7"). After ANY refusal the section reads routes and rules again,
+// so Cancel shows the route as it is saved now and a second Save names the
+// current revision.
 //
 // A DRAFT OUTLIVES THE PAGE. It is held by the list (`draft` / `onDraft`), so
 // going back to the list and returning keeps an edit rather than silently
@@ -38,8 +49,10 @@ export function RouteComposer({
   facts,
   draft,
   onDraft,
+  rulesTaking = null,
   onBack,
   onChanged,
+  onOpenRules,
   onAddMachine,
 }: {
   route: TaskPolicy;
@@ -47,9 +60,13 @@ export function RouteComposer({
   /** The held edit, or undefined when the page shows the route as saved. */
   draft: RouteDraftState | undefined;
   onDraft: (draft: RouteDraftState | undefined) => void;
+  /** How many rules take this route, or null before the rules are read. */
+  rulesTaking?: number | null;
   onBack: () => void;
-  /** Re-read the routes after a write. */
+  /** Re-read the routes and the rules after a write, landed or refused. */
   onChanged: () => void;
+  /** Open Rules on the rules that take this route. */
+  onOpenRules?: () => void;
   onAddMachine?: () => void;
 }) {
   const connection = useOsConnection();
@@ -63,7 +80,7 @@ export function RouteComposer({
   const [committed, setCommitted] = useState("");
   const dirty = differs && JSON.stringify(shown) !== committed;
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<{ stale: boolean; text: string } | null>(null);
   const [confirmingRestore, setConfirmingRestore] = useState(false);
   const [announcement, setAnnouncement] = useState("");
 
@@ -74,8 +91,13 @@ export function RouteComposer({
   }, [draft, differs, onDraft]);
 
   const edit = (next: Partial<RouteDraftState>) => {
-    setError("");
+    setError(null);
     onDraft({ ...shown, ...next });
+  };
+
+  const refused = (err: unknown) => {
+    setError(refusalWords(err instanceof Error ? err.message : String(err)));
+    onChanged();
   };
 
   const valid = shown.entries.length > 0 && shown.entries.every((entry, i) => placementProblem(entry, shown.entries, route.name, facts, i) === "");
@@ -89,12 +111,13 @@ export function RouteComposer({
     busy,
     confirmingRestore,
     serving: status.word === "" ? "" : status.word.charAt(0).toLowerCase() + status.word.slice(1),
+    rulesTaking,
   });
 
   async function save() {
     if (connection === null || busy) return;
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       await connection.query.routingPolicySave({
         name: route.name,
@@ -107,7 +130,7 @@ export function RouteComposer({
       setAnnouncement(`${title} saved.`);
       onChanged();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      refused(err);
     } finally {
       setBusy(false);
     }
@@ -116,7 +139,7 @@ export function RouteComposer({
   async function restore() {
     if (connection === null || busy) return;
     setBusy(true);
-    setError("");
+    setError(null);
     try {
       await connection.query.routingPolicyReset({ name: route.name, expectedRevision: route.revision ?? 0 });
       setConfirmingRestore(false);
@@ -124,7 +147,8 @@ export function RouteComposer({
       setAnnouncement(`${title} uses its shipped sources again.`);
       onChanged();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      setConfirmingRestore(false);
+      refused(err);
     } finally {
       setBusy(false);
     }
@@ -133,7 +157,18 @@ export function RouteComposer({
   const acts: Act[] = bar.acts.map((act: RouteAct): Act => {
     switch (act) {
       case "cancel":
-        return { label: "Cancel", text: true, onAct: () => { onDraft(undefined); setError(""); } };
+        return {
+          label: "Cancel",
+          text: true,
+          onAct: () => {
+            onDraft(undefined);
+            // After a refusal, Cancel is "show me the route as it is saved
+            // now" -- read again rather than trust the copy the refusal said
+            // was stale.
+            if (error !== null) onChanged();
+            setError(null);
+          },
+        };
       case "restore":
         return { label: "Restore shipped", text: true, onAct: () => setConfirmingRestore(true) };
       case "keep":
@@ -164,8 +199,19 @@ export function RouteComposer({
             readOnly={route.protected === true}
             onChange={(description) => edit({ description })}
           />
-          {error === "" ? null : (
-            <Notice tone="error" sentence="The route was not saved." next="Your changes are still here. If it changed elsewhere, cancel to load it." detail={error} />
+          {rulesTaking === null ? null : rulesTaking === 0 ? (
+            <p className="fleet-route-taken">No rule takes it yet</p>
+          ) : onOpenRules ? (
+            <button type="button" className="fleet-reading-link fleet-route-taken" onClick={onOpenRules}>
+              {`Taken by ${rulesTaking} ${rulesTaking === 1 ? "rule" : "rules"}`}
+            </button>
+          ) : (
+            <p className="fleet-route-taken">{`Taken by ${rulesTaking} ${rulesTaking === 1 ? "rule" : "rules"}`}</p>
+          )}
+          {error === null ? null : error.stale ? (
+            <Notice tone="warn" sentence={STALE_SENTENCE} next="It has been read again. Cancel to see the route as it is saved now, or save to replace it." />
+          ) : (
+            <Notice tone="error" sentence="The route was not saved." next="Your changes are still here." detail={error.text} />
           )}
           <SourceComposer
             routeName={route.name}

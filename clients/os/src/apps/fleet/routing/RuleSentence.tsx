@@ -8,8 +8,15 @@ import { routeTitle, ruleExtras, whenWords } from "./vocabulary";
  * few quiet words. The arrow is an icon, never a typed character; a screen
  * reader hears "takes" in its place.
  */
-export function RuleSentence({ rule }: { rule: Pick<RuleRow, "when" | "locked" | "policy" | "level" | "onUnavailable"> }) {
-  const extras = ruleExtras(rule);
+export function RuleSentence({
+  rule,
+  note = "",
+}: {
+  rule: Pick<RuleRow, "when" | "locked" | "policy" | "level" | "onUnavailable">;
+  /** One more quiet fact about the rule, e.g. that a shipped rule decides first. */
+  note?: string;
+}) {
+  const extras = [ruleExtras(rule), note].filter(Boolean).join(" · ");
   return (
     <span className="fleet-rule-sentence">
       <span className="fleet-rule-when">{whenWords(rule)}</span>

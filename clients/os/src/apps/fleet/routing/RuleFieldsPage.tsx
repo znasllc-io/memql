@@ -8,6 +8,7 @@ import {
   RULE_WHEN_KEYS,
   RULE_WHEN_MEANING,
   precedenceTaken,
+  shadowedBy,
   simulationSentence,
   whenObjectFrom,
   type RuleActions,
@@ -17,7 +18,7 @@ import {
 } from "../../settings/rulesFacts";
 import type { TaskPolicy } from "../taskPolicies";
 import { RuleSentence } from "./RuleSentence";
-import { levelTitle, routeTitle } from "./vocabulary";
+import { levelTitle, routeTitle, whenWords } from "./vocabulary";
 
 // A rule's fields, as a page of its own (was Settings > Rules' "Edit as
 // fields" panel). It is where every part of a rule is reachable: the
@@ -49,6 +50,16 @@ import { levelTitle, routeTitle } from "./vocabulary";
 // (rule 12). Any edit withdraws the check: it belonged to one exact rule.
 // Remove is a text act beside them, only on a rule the person wrote, and it
 // asks first, in the bar.
+//
+// A RULE A SHIPPED ONE DECIDES IS NOT OFFERED A CHECK. Shipped rules run
+// before yours regardless of precedence; conditions a shipped rule already
+// covers make a rule that saves and never fires. The bar says which route
+// decides that work and offers to change it; Remove stays.
+//
+// THE REVISION IS THE LIST'S, NOT THE SEED'S. Routes and rules share one
+// engine revision, and the section re-reads both after every write -- so a
+// page opened before a write elsewhere names the CURRENT revision, taken from
+// the rules as they are now, rather than the one it was opened with.
 
 const ON_UNAVAILABLE = ["degrade", "park"] as const;
 
@@ -59,6 +70,7 @@ export function RuleFieldsPage({
   existing,
   onDone,
   onBack,
+  onOpenRoute,
 }: {
   actions: RuleActions;
   routes: readonly TaskPolicy[];
@@ -68,6 +80,8 @@ export function RuleFieldsPage({
   existing: readonly RuleRow[];
   onDone: () => void;
   onBack: () => void;
+  /** Open a route's page: offered when a shipped rule decides this work. */
+  onOpenRoute?: (route: string) => void;
 }) {
   const editing = seed !== null && existing.some((r) => r.name === seed.name);
   const [name, setName] = useState(seed?.name ?? "");
@@ -87,9 +101,10 @@ export function RuleFieldsPage({
   const nameValid = /^[a-z][A-Za-z0-9]*$/.test(name);
   const nameTaken = !editing && existing.some((r) => r.name === name);
 
+  const current = existing.find((r) => typeof r.revision === "number")?.revision ?? seed?.revision;
   const draft: RuleRow = {
     name,
-    revision: simulation?.revision ?? seed?.revision,
+    revision: simulation?.revision ?? current,
     when: whenObjectFrom(values, used),
     level,
     policy: route,
@@ -109,7 +124,8 @@ export function RuleFieldsPage({
     invalidate();
   };
 
-  const ready = !nameTaken && nameValid && precedenceValid && collision === null && route.trim() !== "";
+  const shadow = shadowedBy(draft.when, existing);
+  const ready = !nameTaken && nameValid && precedenceValid && collision === null && route.trim() !== "" && shadow === null;
   const checked = simulation !== null && simulation.refusal === "";
   const title = editing ? "Edit rule" : "New rule";
 
@@ -121,7 +137,7 @@ export function RuleFieldsPage({
           tone: "danger",
           busy: actions.state.busy,
           onAct: () => {
-            void actions.retire(seed!.name, seed!.revision).then((ok) => {
+            void actions.retire(seed!.name, current).then((ok) => {
               if (ok) onDone();
               else setRemoving(false);
             });
@@ -131,6 +147,9 @@ export function RuleFieldsPage({
     : [
         { label: "Cancel", text: true, onAct: onBack },
         ...(editing ? [{ label: "Remove", text: true, tone: "danger" as const, onAct: () => setRemoving(true) }] : []),
+        ...(shadow !== null && onOpenRoute
+          ? [{ label: `Change ${routeTitle(shadow.policy)}`, tone: "primary" as const, onAct: () => onOpenRoute(shadow.policy) }]
+          : []),
         ...(ready && simulation === null
           ? [{
               label: "Check it",
@@ -153,6 +172,9 @@ export function RuleFieldsPage({
               onAct: () => {
                 void actions.activate(draft).then((ok) => {
                   if (ok) onDone();
+                  // The check belonged to the revision it was made at; a
+                  // refusal re-read everything, so check again.
+                  else setSimulation(null);
                 });
               },
             }]
@@ -161,12 +183,16 @@ export function RuleFieldsPage({
 
   const state = removing
     ? "Remove this rule?"
-    : simulation === null
+    : shadow !== null
+      ? "Decided by a shipped rule"
+      : simulation === null
       ? ready ? "Not checked yet" : "Unfinished"
       : simulation.refusal === "" ? "Checked" : "Refused";
   const detail = removing
     ? "Calls it matched fall to the rules below it"
-    : simulation !== null
+    : shadow !== null
+      ? `${whenWords(shadow)} already takes ${routeTitle(shadow.policy)}; change that route instead`
+      : simulation !== null
       ? simulationSentence(simulation)
       : !nameValid
         ? "A name starts with a lower-case letter, then letters and digits"
@@ -184,6 +210,7 @@ export function RuleFieldsPage({
           <div className="fleet-rule-said">
             <RuleSentence rule={draft} />
           </div>
+          {draft.described ? <p className="fleet-rule-described">{`You wrote: “${draft.described}”`}</p> : null}
           <fieldset disabled={working || actions.state.busy} className="fleet-rule-edit-fields">
             <form className="os-form" onSubmit={(e) => e.preventDefault()}>
               <Field label="Name">

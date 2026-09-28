@@ -9,9 +9,14 @@
 // from a fact the cluster reported:
 //
 //   a local model   a machine that is online (its stream held, its heartbeat
-//                   fresh -- `isWorkerOnline`) offers it in its `model:` labels
+//                   fresh -- `isWorkerOnline`) offers it in its `model:` labels;
+//                   for the strongest/fastest SELECTORS, also one the engine
+//                   counts as eligible (`inferenceStatus.eligibleModelIds`:
+//                   structured output and the context floor), once read
 //   an app          a machine that is online reports it runnable (signed in,
-//                   allowed by the machine, an app this engine drives)
+//                   allowed by the machine, an app this engine drives); "any
+//                   app" names the one the router would take -- the owner's
+//                   delegation app order first, then the engine's own order
 //   a vendor        `inferenceStatus` says a vendor is set up
 //   another route   something in ITS chain is ready
 //
@@ -53,6 +58,15 @@ export interface RoutingFacts {
   routes: readonly RouteLike[];
   /** The owner's model order, which `fleet:strongest` honours first. */
   preference: readonly string[];
+  /**
+   * The models the engine counts as eligible for a local selector
+   * (`inferenceStatus.eligibleModelIds`: structured output and the context
+   * floor), or null when that has not been read -- then any chat model counts,
+   * as before the read.
+   */
+  eligibleModelIds?: readonly string[] | null;
+  /** The owner's delegation app order, which `app:*` honours first. */
+  appOrder?: readonly string[];
 }
 
 export interface SourceReading {
@@ -89,9 +103,17 @@ export interface MachineInput {
 export function factsFrom(input: {
   machines: readonly MachineInput[];
   machinesRead: boolean;
-  inference: { read: boolean; federationConfigured: boolean; error: string };
+  inference: {
+    read: boolean;
+    federationConfigured: boolean;
+    error: string;
+    eligibleModelIds?: readonly string[];
+    /** The answering node has the fleet catalog at all; without it the list is empty for a reason that is not the models'. */
+    fleetCatalogInstalled?: boolean;
+  };
   routes: readonly RouteLike[];
   preference: readonly string[];
+  appOrder?: readonly string[];
 }): RoutingFacts {
   return {
     machinesRead: input.machinesRead,
@@ -107,6 +129,11 @@ export function factsFrom(input: {
     vendor: !input.inference.read ? "unknown" : input.inference.federationConfigured ? "ready" : "idle",
     routes: input.routes,
     preference: input.preference,
+    eligibleModelIds:
+      input.inference.read && !input.inference.error && input.inference.fleetCatalogInstalled && input.inference.eligibleModelIds
+        ? input.inference.eligibleModelIds
+        : null,
+    appOrder: input.appOrder ?? [],
   };
 }
 
@@ -131,14 +158,21 @@ function embeddingsOnlyModel(facts: RoutingFacts, modelId: string): boolean {
 
 function readLocalSelector(entry: string, selector: string, facts: RoutingFacts): SourceReading {
   const online = facts.machines.filter((m) => m.online);
-  const models = online.flatMap((m) => chatModels(m).map((model) => ({ ...model, online: true })));
+  const chat = online.flatMap((m) => chatModels(m).map((model) => ({ ...model, online: true })));
+  // THE ENGINE'S FLOOR, once read: a selector takes only a model the engine
+  // counts as eligible, so a small model without structured output is not a
+  // "ready" the router would pass over.
+  const eligible = facts.eligibleModelIds ?? null;
+  const models = eligible === null ? chat : chat.filter((model) => eligible.includes(model.modelId));
   if (models.length === 0) {
     const reason =
       facts.machines.length === 0
         ? "no machine connected"
         : online.length === 0
           ? "no machine online"
-          : "no chat model on an online machine";
+          : chat.length === 0
+            ? "no chat model on an online machine"
+            : "no online model meets the minimum";
     return reading(entry, "idle", "", reason);
   }
   if (selector === "strongest") {
@@ -172,11 +206,16 @@ function readApp(entry: string, appId: string, facts: RoutingFacts): SourceReadi
   return reading(entry, "idle", holders[0]!.name, offline(holders.map((m) => m.name)));
 }
 
+/**
+ * The app `app:*` would take, in the router's order (resolveWildcard): the
+ * owner's delegation app order first, then the engine's own closed order --
+ * never the order the machines happen to be listed in.
+ */
 function readAnyApp(entry: string, facts: RoutingFacts): SourceReading {
-  for (const m of facts.machines) {
-    if (!m.online) continue;
-    const app = m.apps.find((a) => a.runnable);
-    if (app) return reading(entry, "ready", `${appLabel(app.id)} on ${m.name}`, "", false, appLabel(app.id));
+  const order = [...(facts.appOrder ?? []), ...RUNNABLE_APPS].filter((id, i, all) => all.indexOf(id) === i);
+  for (const appId of order) {
+    const on = facts.machines.find((m) => m.online && m.apps.some((a) => a.id === appId && a.runnable));
+    if (on) return reading(entry, "ready", `${appLabel(appId)} on ${on.name}`, "", false, appLabel(appId));
   }
   return reading(entry, "idle", "", "no signed-in app on an online machine");
 }
@@ -330,12 +369,19 @@ export interface TrayGroup {
  * a vendor nobody set up: each stays in the tray, quiet, with its reason --
  * the person has to be able to see why a route would not connect.
  */
-export function trayGroups(facts: RoutingFacts, routeName: string): TrayGroup[] {
+export function trayGroups(facts: RoutingFacts, routeName: string, entries: readonly string[] = []): TrayGroup[] {
   const appIds = [...RUNNABLE_APPS];
   const modelIds = Array.from(new Set(facts.machines.flatMap((m) => m.models.map((model) => model.modelId)))).sort();
+  // An embeddings-only model cannot serve a chat route, and placing it is
+  // refused -- so in a chat route's tray it is not "ready", it says why.
+  const chatRoute = !routeCarriesEmbeddings(routeName, entries);
+  const forRoute = (r: SourceReading): SourceReading =>
+    chatRoute && r.embeddingsOnly && r.kind === "local"
+      ? { ...r, readiness: "idle", reason: "only makes embeddings", serves: "" }
+      : r;
   const machines = [
     ...appIds.map((id) => readSource(`app:${id}`, facts)),
-    ...modelIds.map((id) => readSource(`fleet:${id}`, facts)),
+    ...modelIds.map((id) => forRoute(readSource(`fleet:${id}`, facts))),
   ];
   const choices = ["fleet:strongest", "fleet:fastest", "app:*"].map((e) => readSource(e, facts));
   const vendors = ["federation:cheapest", "federation:strongest"].map((e) => readSource(e, facts));
@@ -348,4 +394,34 @@ export function trayGroups(facts: RoutingFacts, routeName: string): TrayGroup[] 
     { id: "vendors", title: "Vendors", sources: vendors },
     { id: "routes", title: "Routes", sources: routes },
   ];
+}
+
+const ENTRY_SCHEMES = ["fleet", "app", "federation", "embedder", "policy"] as const;
+
+/**
+ * Why a source typed by its exact name cannot be placed, in one line -- or ""
+ * when its shape is one the engine takes. The engine is the authority and
+ * re-checks at save (parser.ValidatePolicyEntry); this catches the typing
+ * slips that would otherwise only surface as a refused save: a stray space,
+ * an unknown scheme, a scheme with nothing after it, an app it does not
+ * drive, a route that does not exist.
+ */
+export function specificSourceProblem(text: string, facts: RoutingFacts): string {
+  const entry = text.trim();
+  if (entry === "") return "Type a source.";
+  if (/\s/.test(entry)) return "A source has no spaces.";
+  if (!entry.includes(":")) return /^[A-Za-z][\w.-]*$/.test(entry) ? "" : "That is not a source name.";
+  const scheme = entry.slice(0, entry.indexOf(":"));
+  const rest = entry.slice(scheme.length + 1);
+  if (!(ENTRY_SCHEMES as readonly string[]).includes(scheme)) return "Start with fleet: or app:, or type a name.";
+  if (rest === "") return "Name something after the colon.";
+  if (scheme === "app") {
+    const appId = rest.split(":")[0]!;
+    if (appId === "*") return rest === "*" ? "" : "Any signed-in app cannot pin a model.";
+    if (!(RUNNABLE_APPS as readonly string[]).includes(appId)) return `${appId} is not an app this cluster drives.`;
+    if (rest.split(":").length > 2) return "Nothing follows the app's model.";
+  }
+  if (scheme === "policy" && !facts.routes.some((r) => r.name === rest)) return "There is no route by that name.";
+  if (scheme === "embedder" && rest !== "active") return "Only the active embeddings can be named.";
+  return "";
 }
