@@ -51,17 +51,33 @@ package dslconformance
 // being skipped: an unresolvable site is exactly where the next silent refusal
 // would hide, and the fix is to pass a literal or a constant.
 //
+// # The worker bridge
+//
+// component/identity is not the only producer. The worker stream server, the
+// app-session runner and the agent's dispatch gate emit worker.AuditEvent,
+// which worker.IdentityAuditor translates into an identity.AuditEvent -- so
+// their targetType values reach the same closed enums, one package removed
+// from where this test used to look. TestWorkerAuditWritersMatchAuditEventEnums
+// walks those trees too. It found `agent` (three dispatch denials) refused on
+// every emission, and the same sweep found every worker event putting a
+// free-form label ("user:<id>", "worker:<id>", "agent:<id>") into
+// actorIdentityId, a relationship to v1:identity:identity that refuses any
+// other concept at insert. So the worker test also checks the SHAPE of that
+// field: a resolved identity id or nothing.
+//
 // # What this does not catch
 //
-// A writer in another package (a product bundle's Go, a future node type)
-// writing createAuditEvent directly. The scope is the identity service, which
-// is the only writer of this mutation in the engine today.
+// A writer in another package (a product bundle's Go, a future node type,
+// the integrations that build identity.AuditEvent literals of their own)
+// writing createAuditEvent directly. The scope is the identity service and the
+// worker bridge.
 
 import (
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"sort"
@@ -197,7 +213,7 @@ func TestCreateAuditEventTargetTypeAcceptsPasskeyIdentity(t *testing.T) {
 
 // --- Go side: every AuditEvent literal the identity service can emit -------
 
-// auditSite is one identity.AuditEvent composite literal.
+// auditSite is one AuditEvent composite literal.
 //
 // A literal rarely reaches the logger as written: the device-code handlers
 // build one with no Category and hand it to auditDevice, which stamps
@@ -205,9 +221,15 @@ func TestCreateAuditEventTargetTypeAcceptsPasskeyIdentity(t *testing.T) {
 // records where the literal went -- the call it was an argument of, or the
 // local it was assigned to -- and field resolution follows it there.
 type auditSite struct {
-	pos    string
-	fields map[string]ast.Expr // Go field name -> value expression
-	fn     *ast.FuncDecl       // enclosing function, nil at package level
+	pos string
+	// dir is the repo-relative directory of the file the literal is in, and
+	// typePkg the repo-relative package that DECLARES the literal's type:
+	// component/identity for identity.AuditEvent, component/worker for
+	// worker.AuditEvent. The worker bridge test tells the two apart by it.
+	dir     string
+	typePkg string
+	fields  map[string]ast.Expr // Go field name -> value expression
+	fn      *ast.FuncDecl       // enclosing function, nil at package level
 	// via is set when the literal is a direct argument of a call: the callee's
 	// simple name and the argument position. Fields the callee assigns on that
 	// parameter count as the site's values.
@@ -223,7 +245,7 @@ type auditVia struct {
 	index  int
 }
 
-// identityAuditScan is the parsed, cross-referenced view of component/identity.
+// identityAuditScan is the parsed, cross-referenced view of the scanned trees.
 type identityAuditScan struct {
 	fset   *token.FileSet
 	sites  []auditSite
@@ -242,15 +264,33 @@ type auditCall struct {
 	fn     *ast.FuncDecl
 }
 
-func scanIdentityAuditWriters(t *testing.T) *identityAuditScan {
+// memqlModulePrefix is stripped off an import path to name a package by its
+// repo-relative directory, the same spelling a bare type's own directory has.
+const memqlModulePrefix = "github.com/znasllc-io/memql/"
+
+// scanAuditWriters walks each repo-relative root into ONE scan, so a constant
+// declared in one tree (identity.AuditCategoryAuthorization) resolves at a site
+// in another (the worker bridge).
+func scanAuditWriters(t *testing.T, roots ...string) *identityAuditScan {
 	t.Helper()
-	root := filepath.Join(repoRoot(t), "component", "identity")
 	s := &identityAuditScan{
 		fset:   token.NewFileSet(),
 		consts: map[string]string{},
 		funcs:  map[string][]*ast.FuncDecl{},
 	}
 	ambiguous := map[string]bool{}
+	for _, rel := range roots {
+		s.walkAuditRoot(t, filepath.Join(repoRoot(t), filepath.FromSlash(rel)), ambiguous)
+	}
+	for name := range ambiguous {
+		delete(s.consts, name)
+	}
+	return s
+}
+
+func (s *identityAuditScan) walkAuditRoot(t *testing.T, root string, ambiguous map[string]bool) {
+	t.Helper()
+	base := repoRoot(t)
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -271,6 +311,12 @@ func scanIdentityAuditWriters(t *testing.T) *identityAuditScan {
 		if perr != nil {
 			return fmt.Errorf("parse %s: %w", path, perr)
 		}
+		dir, rerr := filepath.Rel(base, filepath.Dir(path))
+		if rerr != nil {
+			return rerr
+		}
+		dir = filepath.ToSlash(dir)
+		imports := fileImports(file)
 		for _, decl := range file.Decls {
 			switch d := decl.(type) {
 			case *ast.GenDecl:
@@ -345,6 +391,8 @@ func scanIdentityAuditWriters(t *testing.T) *identityAuditScan {
 				}
 				site := auditSite{
 					pos:     s.fset.Position(x.Pos()).String(),
+					dir:     dir,
+					typePkg: auditTypePkg(x.Type, dir, imports),
 					fields:  map[string]ast.Expr{},
 					fn:      fn,
 					via:     via[x],
@@ -368,10 +416,37 @@ func scanIdentityAuditWriters(t *testing.T) *identityAuditScan {
 	if err != nil {
 		t.Fatalf("walking %s: %v", root, err)
 	}
-	for name := range ambiguous {
-		delete(s.consts, name)
+}
+
+// fileImports maps each import's local name to its repo-relative package
+// (or its full path, outside this module).
+func fileImports(file *ast.File) map[string]string {
+	out := map[string]string{}
+	for _, imp := range file.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			continue
+		}
+		name := p[strings.LastIndex(p, "/")+1:]
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		out[name] = strings.TrimPrefix(p, memqlModulePrefix)
 	}
-	return s
+	return out
+}
+
+// auditTypePkg is the repo-relative package declaring an AuditEvent literal's
+// type: the file's own directory for a bare `AuditEvent`, the import for a
+// qualified one.
+func auditTypePkg(typ ast.Expr, dir string, imports map[string]string) string {
+	if sel, ok := typ.(*ast.SelectorExpr); ok {
+		if x, ok := sel.X.(*ast.Ident); ok {
+			return imports[x.Name]
+		}
+		return ""
+	}
+	return dir
 }
 
 // auditEventLiteral returns the AuditEvent composite literal e is, or wraps
@@ -560,7 +635,7 @@ func (s *identityAuditScan) resolve(e ast.Expr, fn *ast.FuncDecl, depth int) (va
 				unres = append(unres, u...)
 			}
 			if !found {
-				return nil, []string{fmt.Sprintf("parameter %s of %s has no call site in component/identity", x.Name, fn.Name.Name)}
+				return nil, []string{fmt.Sprintf("parameter %s of %s has no call site in the scanned trees", x.Name, fn.Name.Name)}
 			}
 			return vals, unres
 		}
@@ -611,7 +686,7 @@ func exprString(fset *token.FileSet, e ast.Expr) string {
 // sources, so a new writer is covered the day it is written.
 func TestIdentityAuditWritersMatchAuditEventEnums(t *testing.T) {
 	mutation, concept := auditEventEnumsFromDSL(t)
-	scan := scanIdentityAuditWriters(t)
+	scan := scanAuditWriters(t, "component/identity")
 
 	// Floor, not a pin: the service emits well over this many today, and a
 	// scanner that found fewer is broken rather than the tree being tidier.
@@ -686,5 +761,154 @@ func TestIdentityAuditWritersMatchAuditEventEnums(t *testing.T) {
 		for _, r := range table {
 			t.Logf("%-60s %-10s %q", r.pos, r.field, r.value)
 		}
+	}
+}
+
+// --- The worker bridge -------------------------------------------------------
+
+// workerAuditRoots are the trees whose worker.AuditEvent literals reach
+// v1:identity:auditEvent through worker.IdentityAuditor: the stream server and
+// the app-session runner, and the agent's dispatch gate.
+var workerAuditRoots = []string{"component/worker", "integrations/agent/worker"}
+
+const (
+	identityAuditPkg = "component/identity"
+	workerAuditPkg   = "component/worker"
+)
+
+// checkAuditEnumValue fails a value one of the two DSL enums would refuse.
+func checkAuditEnumValue(t *testing.T, pos, field, value string, mutation, concept map[string]enumSet) {
+	t.Helper()
+	if value == "" {
+		return // the sink omits empty optionals; the concept stores "".
+	}
+	if !mutation[field][value] {
+		t.Errorf("%s: %s=%q is not in createAuditEvent's enum %v. The durable audit write for this "+
+			"action is refused on every emission and only the slog line survives. Add the value to "+
+			"dsl/identity/mutations.memql AND dsl/identity/concepts.memql, or emit a value the enum names.",
+			pos, field, value, mutation[field].sorted())
+		return
+	}
+	if !concept[field][value] {
+		t.Errorf("%s: %s=%q passes createAuditEvent but concept auditEvent refuses it %v",
+			pos, field, value, concept[field].sorted())
+	}
+}
+
+// checkActorIdentityExpr is the SHAPE rule for the actor-identity field.
+//
+// auditEvent.actorIdentityId is a relationship to v1:identity:identity, and the
+// insert canonicalizes it: a value whose embedded id names another concept
+// ("user:v1:identity:user:X" parses as v1:identity:user) is refused, and a
+// colon-bearing value with no version segment ("worker:25884ce0") is stored as
+// a foreign key to nothing. The only value that can be right is an identity id
+// somebody RESOLVED -- a credential's IdentityId -- so the rule is structural:
+// nothing, "", or an identifier whose name says it carries an identity id. A
+// concatenation is exactly the defect, whatever it evaluates to at runtime.
+func checkActorIdentityExpr(t *testing.T, pos, field string, e ast.Expr) {
+	t.Helper()
+	named := func(name string) bool { return strings.HasSuffix(strings.ToLower(name), "identityid") }
+	switch x := e.(type) {
+	case *ast.BasicLit:
+		if v, err := strconv.Unquote(x.Value); err == nil && v == "" {
+			return
+		}
+	case *ast.Ident:
+		if named(x.Name) {
+			return
+		}
+	case *ast.SelectorExpr:
+		if named(x.Sel.Name) {
+			return
+		}
+	}
+	t.Errorf("%s: %s is %s, which is not an identity id. It lands in auditEvent.actorIdentityId, a "+
+		"relationship to v1:identity:identity that refuses any other concept at insert -- pass a resolved "+
+		"IdentityId or leave it empty, and put a readable actor in the label.",
+		pos, field, types.ExprString(e))
+}
+
+// TestWorkerAuditWritersMatchAuditEventEnums extends the identity writers' lock
+// across the worker bridge. Every worker.AuditEvent literal is a site whose
+// targetType must be in both enums and whose actor-identity field must be an
+// identity id or nothing; the bridge's own identity.AuditEvent literal must
+// stamp a category and outcome the enums accept, and forward the event's
+// targetType (checked at the worker sites) rather than invent one.
+func TestWorkerAuditWritersMatchAuditEventEnums(t *testing.T) {
+	mutation, concept := auditEventEnumsFromDSL(t)
+	// component/identity is walked for its constants, which the bridge names
+	// (identity.AuditCategoryAuthorization); only sites under the worker roots
+	// are checked here.
+	scan := scanAuditWriters(t, append([]string{identityAuditPkg}, workerAuditRoots...)...)
+
+	under := func(dir string) bool {
+		for _, root := range workerAuditRoots {
+			if dir == root || strings.HasPrefix(dir, root+"/") {
+				return true
+			}
+		}
+		return false
+	}
+	var workerSites, bridgeSites int
+	for _, site := range scan.sites {
+		if !under(site.dir) {
+			continue
+		}
+		switch site.typePkg {
+		case workerAuditPkg:
+			workerSites++
+			values, unresolved, _ := scan.fieldValues(site, "TargetType")
+			for _, u := range unresolved {
+				t.Errorf("%s: TargetType cannot be resolved to string literals (%s)", site.pos, u)
+			}
+			for _, v := range values {
+				checkAuditEnumValue(t, site.pos, "targetType", v, mutation, concept)
+			}
+			if e, ok := site.fields["ActorIdentityId"]; ok {
+				checkActorIdentityExpr(t, site.pos, "ActorIdentityId", e)
+			}
+		case identityAuditPkg:
+			bridgeSites++
+			for dslField, goField := range map[string]string{"category": "Category", "outcome": "Outcome"} {
+				values, unresolved, present := scan.fieldValues(site, goField)
+				if !present && dslField == "category" {
+					t.Errorf("%s: the bridge sets no Category; createAuditEvent requires it", site.pos)
+				}
+				for _, u := range unresolved {
+					t.Errorf("%s: %s cannot be resolved to string literals (%s)", site.pos, goField, u)
+				}
+				for _, v := range values {
+					checkAuditEnumValue(t, site.pos, dslField, v, mutation, concept)
+				}
+			}
+			if e, ok := site.fields["TargetType"]; ok {
+				if sel, fwd := e.(*ast.SelectorExpr); !fwd || sel.Sel.Name != "TargetType" {
+					values, unresolved := scan.resolve(e, site.fn, 0)
+					for _, u := range unresolved {
+						t.Errorf("%s: TargetType cannot be resolved to string literals (%s)", site.pos, u)
+					}
+					for _, v := range values {
+						checkAuditEnumValue(t, site.pos, "targetType", v, mutation, concept)
+					}
+				}
+			}
+			if e, ok := site.fields["ActorIdentity"]; ok {
+				checkActorIdentityExpr(t, site.pos, "ActorIdentity", e)
+			}
+		default:
+			t.Errorf("%s: an AuditEvent literal of package %q under the worker trees; this gate knows only "+
+				"worker.AuditEvent and identity.AuditEvent -- teach it the new type or it is unchecked",
+				site.pos, site.typePkg)
+		}
+	}
+	// Floors, not pins: register, disconnect, the forwarded cockpit event and
+	// the app-session runner in component/worker, and four dispatch denials.
+	if workerSites < 8 {
+		t.Fatalf("found only %d worker.AuditEvent literals under %v (want >= 8); the scanner is broken, "+
+			"not the tree", workerSites, workerAuditRoots)
+	}
+	if bridgeSites < 1 {
+		t.Fatalf("found no identity.AuditEvent literal under %v -- worker.IdentityAuditor moved or the "+
+			"scanner is broken, and the bridge's category/outcome are unchecked", workerAuditRoots)
 	}
 }

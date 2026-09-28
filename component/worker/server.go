@@ -217,12 +217,16 @@ func (s *server) admitRegistration(
 		return nil, fmt.Errorf("send register ack: %w", err)
 	}
 	if s.auditor != nil {
+		// The machine acted, on the worker token that admitted this stream.
+		// That token is a v1:identity:identity row, which is the only thing
+		// auditEvent.actorIdentityId can hold; the readable actor is the label.
 		s.auditor.Emit(ctx, AuditEvent{
-			Action:      "worker_registered",
-			Actor:       "worker:" + registration.ID,
-			Target:      registration.ID,
-			TargetType:  "worker",
-			OwnerUserId: registration.OwnerUserId,
+			Action:          "worker_registered",
+			ActorIdentityId: registration.IdentityId,
+			ActorLabel:      "worker:" + registration.ID,
+			Target:          registration.ID,
+			TargetType:      "worker",
+			OwnerUserId:     registration.OwnerUserId,
 			Detail: map[string]any{
 				"name":         registration.Name,
 				"capabilities": registration.Capabilities,
@@ -677,11 +681,12 @@ func (s *streamSession) close(cause error) {
 		// security telemetry has a paired connect/disconnect record.
 		if s.server != nil && s.server.auditor != nil {
 			s.server.auditor.Emit(s.ctx, AuditEvent{
-				Action:      "worker_disconnected",
-				Actor:       "worker:" + s.worker.RegistrationId,
-				Target:      s.worker.RegistrationId,
-				TargetType:  "worker",
-				OwnerUserId: s.worker.OwnerUserId,
+				Action:          "worker_disconnected",
+				ActorIdentityId: s.worker.IdentityId,
+				ActorLabel:      "worker:" + s.worker.RegistrationId,
+				Target:          s.worker.RegistrationId,
+				TargetType:      "worker",
+				OwnerUserId:     s.worker.OwnerUserId,
 				Detail: map[string]any{
 					"name":                s.worker.Name,
 					"connectedAt":         s.worker.ConnectedAt.Format(time.RFC3339),
@@ -1214,13 +1219,14 @@ func (s *streamSession) handleAuditEvent(ctx context.Context, evt *memqlv1.Audit
 		return
 	}
 	s.server.auditor.Emit(ctx, AuditEvent{
-		Action:      evt.GetAction(),
-		Actor:       "worker:" + s.worker.RegistrationId,
-		Target:      s.worker.RegistrationId,
-		TargetType:  "worker",
-		OwnerUserId: s.worker.OwnerUserId,
-		Detail:      map[string]any{"raw": string(evt.GetDetailJson())},
-		Timestamp:   s.server.clock(),
+		Action:          evt.GetAction(),
+		ActorIdentityId: s.worker.IdentityId,
+		ActorLabel:      "worker:" + s.worker.RegistrationId,
+		Target:          s.worker.RegistrationId,
+		TargetType:      "worker",
+		OwnerUserId:     s.worker.OwnerUserId,
+		Detail:          map[string]any{"raw": string(evt.GetDetailJson())},
+		Timestamp:       s.server.clock(),
 	})
 }
 

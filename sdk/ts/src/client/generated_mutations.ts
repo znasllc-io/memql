@@ -1414,7 +1414,7 @@ export interface CreateAuditEventArgs {
   actorEmail?: string;
   actorRole?: string;
   actorIdentityId?: string;
-  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker
+  // Enum: user | session | identity | invitation | accessRequest | config | magicLinkRequest | authCode | clusterSettings | deviceCode | delegation | workerPairingCode | enrolmentToken | passkeyIdentity | badgeIdentity | appSession | shopifyStore | releaseCut | oauthClient | upstreamIdentity | rowOwnership | githubGrant | role | group | groupMembership | grant | worker | agent
   targetType?: string;
   targetId?: string;
   targetEmail?: string;

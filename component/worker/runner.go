@@ -622,15 +622,19 @@ func (r *SessionRunner) audit(ctx context.Context, action string, spec RunSpec, 
 	detail["stepId"] = spec.StepId
 	if w != nil {
 		detail["machine"] = w.Name
+		detail["workerId"] = w.RegistrationId
+		detail["workerIdentityId"] = w.IdentityId
 	}
-	target := ""
-	if w != nil {
-		target = w.RegistrationId
-	}
+	// THE ENGINE is the actor: it opened this session for the owner, who is
+	// actorUserId. It presented no v1:identity:identity credential to do it --
+	// the session's back-channel bearer is a service-account JWT with no row
+	// (appSession.credentialRef) -- so ActorIdentityId stays empty rather than
+	// borrowing an id that did not act. The target is the SESSION the
+	// targetType names; the machine it ran on is in detail.
 	r.Auditor.Emit(ctx, AuditEvent{
 		Action:      action,
-		Actor:       "user:" + spec.OwnerUserId,
-		Target:      target,
+		ActorLabel:  "engine",
+		Target:      spec.SessionId,
 		TargetType:  "appSession",
 		OwnerUserId: spec.OwnerUserId,
 		Detail:      detail,

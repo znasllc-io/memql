@@ -268,9 +268,23 @@ type Auditor interface {
 
 // AuditEvent is a worker-shaped security event. Translated to a
 // v1:identity:auditEvent row by the auditor implementation.
+//
+// The actor is TWO fields because the row has two places for it and only one
+// of them is free text. ActorIdentityId lands in auditEvent.actorIdentityId, a
+// relationship to v1:identity:identity that the insert canonicalizes: a value
+// naming any other concept is refused. So it carries the id of the credential
+// the actor presented -- a worker token -- or nothing when the actor presented
+// none (the engine opening an app session, an agent refused at the gate).
+// ActorLabel is the readable "who", which rides in detail.actor. One field
+// holding "user:<id>" or "worker:<id>" is what refused every worker audit row
+// once those ids became canonical.
 type AuditEvent struct {
-	Action        string
-	Actor         string
+	Action string
+	// ActorIdentityId is a v1:identity:identity id or empty. Never a label.
+	ActorIdentityId string
+	// ActorLabel is free text naming the actor ("worker:<registrationId>",
+	// "agent:<agentId>", "engine").
+	ActorLabel    string
 	Target        string
 	TargetType    string
 	CorrelationId string

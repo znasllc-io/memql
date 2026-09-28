@@ -815,11 +815,13 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 	if d.auditor == nil {
 		return
 	}
+	// The AGENT is the actor, and an agent is not a v1:identity:identity
+	// credential: it rides as the label, and ActorIdentityId stays empty.
 	switch gate.outcome {
 	case "denied_by_scope":
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "scope_elevation_requested",
-			Actor:         "agent:" + req.AgentId,
+			ActorLabel:    "agent:" + req.AgentId,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,
@@ -836,7 +838,7 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 	case "kill_switch_engaged":
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "worker_call_blocked_by_kill_switch",
-			Actor:         "agent:" + req.AgentId,
+			ActorLabel:    "agent:" + req.AgentId,
 			Target:        req.OwnerUserId,
 			TargetType:    "user",
 			OwnerUserId:   req.OwnerUserId,
@@ -846,7 +848,7 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 	case "denied_by_policy":
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "worker_call_denied_by_policy",
-			Actor:         "agent:" + req.AgentId,
+			ActorLabel:    "agent:" + req.AgentId,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,
@@ -878,7 +880,7 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 		}
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "command_blocked",
-			Actor:         "agent:" + req.AgentId,
+			ActorLabel:    "agent:" + req.AgentId,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,
