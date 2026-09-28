@@ -470,6 +470,17 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "platform/mutations.memql", Name: "discardOutboxEntry"}:   true,
 		{Path: "platform/mutations.memql", Name: "upsertSyncState"}:      true,
 		{Path: "platform/mutations.memql", Name: "setSyncPaused"}:        true,
+		// memql#5707 review. The inbound receiver's ONE write, and the NDR
+		// poller's. A staged delivery has no owner to scope to: the sender is
+		// a third party that signed with a shared secret and the receiver
+		// writes as a system actor, so actor.userId is empty for every
+		// legitimate caller and a self-scoped filter would match nothing.
+		// What must hold is PROVENANCE -- the row's `source` and `headersJson`
+		// drive dispatchInboundToConnector to a connector's privacy purge --
+		// and only the wire bar says a client cannot stage one. The receiver
+		// and the poller stamp internal origin; call_origin_conformance_test.go
+		// names both.
+		{Path: "platform/mutations.memql", Name: "stageInboundRequest"}: true,
 		// epic memql#4805. The custom-domain create, plus the six writes its
 		// reconciliation sweep makes on an operator's behalf.
 		//

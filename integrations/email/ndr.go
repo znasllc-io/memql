@@ -629,12 +629,17 @@ func renderNDRStageMutation(requestID, body, contentType, dedupeKey string, rece
 // ndrActorContext runs the staging write as a named system actor. There is no
 // user behind a bounce -- a mail server sent it -- and the write is auditable
 // as the reader rather than as nobody.
+//
+// It carries INTERNAL ORIGIN because stageInboundRequest is @serverOnly: a
+// staged row's provenance is a server-side reader's, never a client's
+// (memql#5707 review). Earned here by construction -- the poller reads the
+// mailbox itself; no request reaches this context.
 func ndrActorContext(ctx context.Context) context.Context {
-	return auth.ContextWithToken(ctx, &auth.TokenInfo{
+	return auth.ContextWithInternalOrigin(auth.ContextWithToken(ctx, &auth.TokenInfo{
 		Subject: systemNDRActor,
 		Claims: map[string]any{
 			"sub":  systemNDRActor,
 			"role": "system",
 		},
-	})
+	}))
 }

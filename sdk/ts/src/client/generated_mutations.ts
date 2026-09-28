@@ -7401,44 +7401,6 @@ QueryClient.prototype.stageConstructConceptData = function (this: QueryClient, a
   return this.executeNamed("stageConstructConceptData", buildStageConstructConceptData(args), opts);
 };
 
-/** Stage a verified inbound delivery (memql#2957): insert a v1:platform:inboundRequest row with status='received' for a product automation to drain. Called by the engine inbound receiver once the source allowlist and signature check have passed; the signing secret is never part of the row. Idempotent by requestId: a redelivery preserves the product-owned handling state (@createOnly) instead of replaying it. */
-// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["stageInboundRequest"] in generated_concepts.ts).
-export interface StageInboundRequestArgs {
-  requestId: string;
-  source: string;
-  medium: string;
-  body: string;
-  contentType?: string;
-  headersJson?: string;
-  dedupeKey?: string;
-  signatureVerified?: boolean;
-  receivedAt?: string;
-}
-
-export function buildStageInboundRequest(args: StageInboundRequestArgs): string {
-  const parts: string[] = [];
-  parts.push("requestId: " + renderMemQLValue(args.requestId));
-  parts.push("source: " + renderMemQLValue(args.source));
-  parts.push("medium: " + renderMemQLValue(args.medium));
-  parts.push("body: " + renderMemQLValue(args.body));
-  if (args.contentType !== undefined) parts.push("contentType: " + renderMemQLValue(args.contentType));
-  if (args.headersJson !== undefined) parts.push("headersJson: " + renderMemQLValue(args.headersJson));
-  if (args.dedupeKey !== undefined) parts.push("dedupeKey: " + renderMemQLValue(args.dedupeKey));
-  if (args.signatureVerified !== undefined) parts.push("signatureVerified: " + renderMemQLValue(args.signatureVerified));
-  if (args.receivedAt !== undefined) parts.push("receivedAt: " + renderMemQLValue(args.receivedAt));
-  return "mutation stageInboundRequest(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    stageInboundRequest(args: StageInboundRequestArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.stageInboundRequest = function (this: QueryClient, args: StageInboundRequestArgs = {} as StageInboundRequestArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("stageInboundRequest", buildStageInboundRequest(args), opts);
-};
-
 /** Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with status='pending' for the engine outbound worker to drain. Credentials are never part of the row; targets must satisfy the deployment's per-medium allowlist or the worker fails the row fast. Idempotent by requestId: a re-stage onto an existing row preserves the worker-owned status/attempts (@createOnly, fylo#63) rather than resetting delivery state. */
 // Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["stageOutboundRequest"] in generated_concepts.ts).
 export interface StageOutboundRequestArgs {

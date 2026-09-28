@@ -484,6 +484,8 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// integrations/shopify/connect_precondition_test.go drives every
 		// refusal and asserts no write is reached.
 		"integrations/shopify":           "the shopify CONNECTOR -- server-initiated mirror writes under the connector actor (epic memql#4378), plus REQUEST-DERIVED Connect Shopify writes under operatorContext, each downstream of the store part and the site checks (asserted by integrations/shopify/connect_precondition_test.go)",
+		"component/inbound":              "the inbound webhook receiver -- REQUEST-DERIVED, earned in the same function: its ONE Execute (stageInboundRequest, @serverOnly since memql#5707) runs after the source allowlist and the HMAC check in ServeHTTP on a context carrying no caller identity, and the receiver's own tests assert that an unlisted source or a bad signature stages nothing",
+		"integrations/email":             "the NDR mailbox reader -- server-initiated: the poller reads the bounce mailbox itself and stages each bounce through stageInboundRequest (@serverOnly since memql#5707); no request reaches its context",
 		"component/identity/recoverykey": "break-glass recovery-key store -- REQUEST-DERIVED on the redeem path; earned by the argument being a digest of a presented secret rather than a caller-chosen id, asserted by component/identity/recoverykey/store_internal_origin_test.go",
 		// REQUEST-DERIVED, and the SECOND exception -- not, as the first draft
 		// of this entry said, "a credential store whose reads are

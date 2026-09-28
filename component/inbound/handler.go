@@ -454,12 +454,18 @@ func memqlString(s string) string { return langparser.QuoteString(s) }
 // precedent).
 const systemInboundActor = "system:inbound"
 
+// The write also carries INTERNAL ORIGIN, which stageInboundRequest requires
+// (@serverOnly): the row's `source` and `headersJson` drive a connector all
+// the way to a privacy purge, so the row's provenance must be the receiver's
+// and never a client's. The stamp is earned in ServeHTTP before the one
+// Execute: the source allowlist and the signature check precede it
+// (memql#5707 review).
 func systemActorContext(ctx context.Context) context.Context {
-	return auth.ContextWithToken(ctx, &auth.TokenInfo{
+	return auth.ContextWithInternalOrigin(auth.ContextWithToken(ctx, &auth.TokenInfo{
 		Subject: systemInboundActor,
 		Claims: map[string]any{
 			"sub":  systemInboundActor,
 			"role": "system",
 		},
-	})
+	}))
 }
