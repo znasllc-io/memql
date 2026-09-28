@@ -318,6 +318,25 @@ test("the construct page opened from a cluster document shows its loading shape,
   panel.close();
 });
 
+test("a reused construct page names the construct it is loading, not the last one", async () => {
+  resetRecorded();
+  const deps = {
+    viewSourceFromCluster: async () => undefined,
+    browseRows: async () => undefined,
+    openInOs: async () => undefined,
+    run: async () => undefined,
+  };
+  ConstructPanel.open(CONTEXT, QUERY, deps, "local");
+  const panel = lastPanel();
+  let release!: (c: CatalogConstruct) => void;
+  ConstructPanel.openLoading(CONTEXT, "autoJoinSI", deps, "local", () => new Promise((resolve) => (release = resolve)));
+  assert.equal(recorded.webviews.length, 1, "the page is a singleton");
+  assert.equal(panel.title, "autoJoinSI", "the tab still names the previous construct while loading");
+  release({ ...QUERY, name: "autoJoinSI" });
+  await settle();
+  panel.close();
+});
+
 // ---------------------------------------------------------------------------
 // The result
 // ---------------------------------------------------------------------------

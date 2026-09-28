@@ -210,6 +210,10 @@ export class ConstructPanel {
       existing.deps = deps;
       existing.cluster = cluster;
       existing.shown = shown;
+      // The tab names what it is about to show, and a new construct opens with
+      // its details closed, as a fresh page would.
+      existing.panel.title = titleOf(shown);
+      existing.detailsOpen = false;
       return existing;
     }
     const panel = new ConstructPanel(context, shown, deps, cluster);

@@ -394,6 +394,7 @@ interface WebviewPanelSurface {
     onDidReceiveMessage(handler: (message: unknown) => void): StubDisposable;
     postMessage(message: unknown): Promise<boolean>;
   };
+  title: string;
   reveal(column?: number): void;
   onDidDispose(handler: () => void, thisArg?: unknown, disposables?: StubDisposable[]): StubDisposable;
   dispose(): void;
@@ -449,6 +450,14 @@ function createStubWebviewPanel(viewType: string, title: string): {
         handle.posted.push(message);
         return Promise.resolve(true);
       },
+    },
+    // The tab's title, as the extension last set it (a reused panel is
+    // retitled), mirrored onto the handle a test reads.
+    get title(): string {
+      return handle.title;
+    },
+    set title(value: string) {
+      handle.title = value;
     },
     reveal(_column?: number): void {
       handle.revealCount += 1;
