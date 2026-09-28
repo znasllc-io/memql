@@ -409,19 +409,23 @@ const runs: Scenario[] = [
     status: "Stopped",
     endedAt: GALLERY_NOW,
   }),
+  // No plan ever arrived, so the bar is empty; the installer's own error is
+  // detail, and it is in the log, opened.
   run("install-run-couldnt-start", "Couldn't start", {
     phase: "failed",
+    percent: 0,
     status: "Couldn't start",
     stepText: "",
     endedAt: GALLERY_NOW,
-    failures: [
+    failures: [{ id: "", line: "The install couldn't start.", next: "The log has the details." }],
+    logsOpen: true,
+    logLines: [
       {
-        id: "",
-        line: "The install couldn't start.",
-        next: "The installer's step list is missing from ~/.vscode/extensions/znasllc.memql/staged.",
+        text: "ENOENT: no such file or directory, open '~/.vscode/extensions/znasllc.memql/staged/scripts/install/graph/install.json'",
+        tone: "error",
+        anchor: true,
       },
     ],
-    logLines: [],
   }),
   run("install-repair-run", "Repairing", { mode: "repair", percent: 73, status: "Checking secure access", stepText: "Step 13 of 16" }),
 ];
@@ -599,6 +603,10 @@ const previews: Scenario[] = [
   preview("install-uninstall-nothing", "Nothing to uninstall, still in the list", UNRECEIPTED, {
     nothingHere: { removeFromList: true },
   }),
+  // A read that failed is a failure, never "nothing here".
+  preview("install-uninstall-unreadable", "Couldn't work out what would be removed", UNRECEIPTED, {
+    unreadable: true,
+  }),
 ];
 
 const UNINSTALL_LOG: LogLine[] = [
@@ -676,7 +684,8 @@ const uninstallRuns: Scenario[] = [
     uninstalledScreen({
       removed: 4,
       kept: 0,
-      followUpProblem: "clusters.yaml could not be written: permission denied",
+      followUpProblem: 'the cluster is off this machine, but "memql" could not be removed from the cluster list: permission denied',
+      stillListed: true,
       startedAt: GALLERY_NOW - 52_000,
       endedAt: GALLERY_NOW,
       logsOpen: false,

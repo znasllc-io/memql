@@ -66,6 +66,10 @@ const PLAN = {
   preserved: [] as RowStep[],
 };
 
+/** What completeLocalUninstall says when the list entry could not be dropped. */
+const LIST_PROBLEM =
+  "the cluster is off this machine, but \"memql\" could not be removed from the cluster list: EACCES: permission denied, open '/Users/ada/.memql/clusters.yaml'";
+
 function rowStep(over: Partial<RowStep> & { id: string }): RowStep {
   return { description: "", action: "run", reason: "", preserved: false, target: "", elevation: "none", shared: false, sharedReason: "", ...over };
 }
@@ -142,7 +146,22 @@ function everyScreen(): { name: string; parts: RegionParts }[] {
     name: "uninstall nothing",
     parts: uninstallPreviewScreen({ loading: false, nothingHere: { removeFromList: true }, rows: [], sharedTools: [], chosen: new Set(), clusterName: "memql" }),
   });
+  out.push({
+    name: "uninstall unreadable",
+    parts: uninstallPreviewScreen({ loading: false, unreadable: true, rows: [], sharedTools: [], chosen: new Set(), clusterName: "memql" }),
+  });
   out.push({ name: "uninstalled", parts: uninstalledScreen({ removed: 3, kept: 1, followUpProblem: "x", logsOpen: false }) });
+  out.push({
+    name: "uninstalled, still listed",
+    parts: uninstalledScreen({ removed: 3, kept: 0, followUpProblem: LIST_PROBLEM, stillListed: true, logsOpen: false }),
+  });
+  out.push({
+    name: "done, key lost",
+    parts: doneScreen({
+      kind: "installed", name: "m", address: "a", osUrl: "o", signedIn: false, canEnrol: false, claim: false,
+      recoveryKey: { state: "revealLost", value: "", revealed: false, copied: false },
+    }),
+  });
   return out;
 }
 
@@ -210,10 +229,14 @@ test("the done screen has one next act, and its facts claim no reachability", ()
     canEnrol: false,
     claim: false,
   });
-  assert.deepEqual(barActs(done), ["signIn"]);
+  assert.deepEqual(barActs(done), ["back", "signIn"]);
   assert.doesNotMatch(whole(done), /answers at|responding|reachable|running/);
   const signedIn = doneScreen({ kind: "installed", name: "m", address: "a", osUrl: "o", signedIn: true, canEnrol: true, claim: false });
-  assert.deepEqual(barActs(signedIn), ["openOs"], "signed in: MemQL OS, and no passkey prompt");
+  assert.deepEqual(barActs(signedIn), ["back", "openOs"], "signed in: MemQL OS, and no passkey prompt");
+  // Never four acts: an owner to enrol and a claim link do not both apply,
+  // and if a caller says they do, the passkey wins and the bar stays legal.
+  const both = doneScreen({ kind: "installed", name: "m", address: "a", osUrl: "o", signedIn: false, canEnrol: true, claim: true });
+  assert.deepEqual(barActs(both), ["back", "enrolPasskey", "signIn"]);
 });
 
 test("the recovery key is masked until Show, and copyable without being shown", () => {
@@ -260,4 +283,36 @@ test("the phrase field is there only while the switch is on", () => {
   assert.doesNotMatch(html(false), /data-field="deletePhrase"/);
   assert.match(html(true), /data-field="deletePhrase"/);
   assert.match(html(true), /data-tone="danger"/);
+});
+
+test("a lost recovery key names no screen that is not there", () => {
+  // MemQL OS has no recovery-key page, and the portal is retired: the old
+  // "Rotate it in MemQL OS, under Users" sent a person looking for nothing.
+  const lost = doneScreen({
+    kind: "installed", name: "m", address: "a", osUrl: "o", signedIn: false, canEnrol: false, claim: false,
+    recoveryKey: { state: "revealLost", value: "", revealed: false, copied: false },
+  }).body;
+  assert.match(lost, /Nobody holds this cluster&#39;s recovery key|Nobody holds this cluster's recovery key/);
+  const notice = lost.slice(lost.indexOf("mq-notice"));
+  assert.match(notice, /An owner can replace it later\./);
+  assert.doesNotMatch(notice, /MemQL OS|under Users|portal/);
+});
+
+test("an uninstall that could not be worked out is a failure with a way forward, never an empty computer", () => {
+  const parts = uninstallPreviewScreen({ loading: false, unreadable: true, rows: [], sharedTools: [], chosen: new Set(), clusterName: "memql" });
+  assert.match(parts.body, /Couldn&#39;t work out what would be removed|Couldn't work out what would be removed/);
+  assert.doesNotMatch(whole(parts), /No local cluster was found|removeFromList|uninstallStart/);
+  assert.deepEqual(barActs(parts), ["uninstallBack", "openOutput", "uninstallReload"]);
+});
+
+test("a finished uninstall that left a record behind says which, and keeps the errno off the page", () => {
+  const listed = uninstalledScreen({ removed: 4, kept: 0, followUpProblem: LIST_PROBLEM, stillListed: true, logsOpen: false }).body;
+  assert.match(listed, /still in your clusters/);
+  assert.match(listed, /Remove it from the list in the Clusters view\./);
+  assert.doesNotMatch(listed, /EACCES|clusters\.yaml|\/Users\//, "detail belongs in the output, not the page");
+  const recorded = uninstalledScreen({
+    removed: 4, kept: 0, followUpProblem: "the cluster is off this machine, but the record of the install could not be removed", logsOpen: false,
+  }).body;
+  assert.doesNotMatch(recorded, /still in your clusters/, "the list entry went; only the record stayed");
+  assert.match(recorded, /The MemQL Install output has the details\./);
 });

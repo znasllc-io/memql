@@ -457,9 +457,12 @@ them from one cluster.
       recovery key masked with **Show** and **Copy** (Copy works without
       Show, and the button then reads **Copied**), and **Sign in** as the one
       button, with **Set up a passkey** beside it when the owner has no
-      passkey yet. No modal appears over it
+      passkey yet, and **Back** as a text act. No modal appears over it
+- [ ] **Back** on the done screen with the key not copied asks first; leaving
+      lands on the landing, which offers **Sign in** / **Repair** /
+      **Uninstall** for the cluster just built -- never Install again
 - [ ] Closing the tab with the key not copied warns that it can't be shown
-      again and names MemQL OS as where to rotate it
+      again and that an owner can replace it later -- it names no screen
 - [ ] With a local cluster installed and in the list, the landing offers **Sign
       in** (or **Open MemQL OS** when signed in), **Repair** and **Uninstall**,
       and never Install. Stop it (`k3d cluster stop memql`): Repair moves first
@@ -500,6 +503,13 @@ this surface is reading one as the other:
       to **Will be removed**
 - [ ] **Cancel** and reopening Uninstall brings every switch back OFF and the
       phrase empty
+- [ ] Make `~/.memql/install-receipt.json` unreadable (a copy with a stray
+      character): Uninstall says **Couldn't work out what would be removed**
+      with **Back**, **Open in Output** and **Try again** -- never "No local
+      cluster was found", and never **Remove from list**. Put the file back
+      and **Try again** shows the list; an Install against the same broken
+      file says **The install couldn't start** with the detail in its log,
+      rather than sitting on "Starting"
 - [ ] Escape on the password prompt removes nothing and returns to the list
 - [ ] Anything the install FOUND rather than created is listed as kept and is
       still there afterwards

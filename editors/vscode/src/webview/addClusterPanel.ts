@@ -115,6 +115,7 @@ import {
   ADD_CLUSTER_STYLES,
   CONNECT_FIELD_IDS,
   INPUT_FIELDS,
+  RECOVERY_KEY_REPLACEABLE,
   TAB_TITLES,
   addedScreen,
   collectScreen,
@@ -366,6 +367,12 @@ export class AddClusterPanel {
   private uninstallPreview: UninstallPreview | undefined;
   /** Nothing to uninstall was found; `removeFromList` when a list entry still points at it. */
   private uninstallNothing: { removeFromList: boolean } | undefined;
+  /**
+   * The preview could not be worked out (an unreadable install record, a
+   * missing step list). NOT the same as nothing being here: a read that
+   * failed is shown as a failure, never as an empty computer.
+   */
+  private uninstallUnreadable = false;
   private uninstallLoading = false;
   /** Shared removals switched ON. Empty is the default and the safe answer (memql#3566). */
   private readonly removeShared = new Set<string>();
@@ -719,6 +726,11 @@ export class AddClusterPanel {
       case "uninstallBack":
         this.uninstallBack();
         return;
+      case "uninstallReload":
+        if (this.state.screen === "uninstallPreview" && this.uninstallUnreadable && !this.runBusy()) {
+          void this.loadUninstallPreview();
+        }
+        return;
       case "removeFromList":
         void this.removeFromList();
         return;
@@ -865,6 +877,20 @@ export class AddClusterPanel {
     this.startTicker();
     try {
       await this.runOnce(action === "repair" ? "repair" : "install");
+    } catch (err) {
+      // NOTHING MAY LEAVE THE PAGE ON "STARTING". What runs before the graph
+      // -- the install record read (an unparseable one throws), the platform
+      // check, the password agent -- used to reject out of here unhandled,
+      // and the page sat on a run that would never report, with a Cancel
+      // that had nothing to stop.
+      const raw = err instanceof Error ? err.message : String(err);
+      recordDiagnostic(this.deps.diagnostics, "the run could not be attempted", raw, new Date().toISOString());
+      await this.releaseSudoAgent();
+      if (!this.disposed && this.state.screen === "running") {
+        this.runError = redactForDisplay(raw, os.homedir());
+        this.state.finish({ ok: false });
+        this.showStartFailure(this.runError, () => this.state.setLogsOpen(true));
+      }
     } finally {
       this.runInFlight = false;
       this.stopTicker();
@@ -974,6 +1000,7 @@ export class AddClusterPanel {
     if (failure !== undefined) {
       this.runError = failure;
       this.state.finish({ ok: false });
+      this.showStartFailure(failure, () => this.state.setLogsOpen(true));
       return;
     }
 
@@ -1052,6 +1079,17 @@ export class AddClusterPanel {
         this.queueLine(this.runLog.add(event.step.id, event.step.label || event.step.id, reason, "error"));
       }
     }
+  }
+
+  /**
+   * A run that could not be attempted at all: its reason is the installer's
+   * own error text ("ENOENT ... install.json"), which is detail, so it goes in
+   * the log -- opened -- and the notice says only that it could not start.
+   */
+  private showStartFailure(detail: string, openLog: () => void): void {
+    this.runLog.add("", "", detail, "error");
+    openLog();
+    this.openLogAtFailure("");
   }
 
   /** The log opens at the failed step's first line; the screen changes. */
@@ -1570,6 +1608,14 @@ export class AddClusterPanel {
       });
       if (!proceed || this.disposed) return;
     }
+    // A cluster that was ADDED leaves nothing to come back to: the next
+    // Connect starts from an empty form, not from the one just saved (whose
+    // name is now taken).
+    if (this.added !== undefined) {
+      this.added = undefined;
+      this.state.discardConnect();
+      this.connectMoreOpen = false;
+    }
     this.state.back();
     this.uninstall.reset();
     this.toLanding();
@@ -1702,6 +1748,7 @@ export class AddClusterPanel {
     this.uninstall.reset();
     this.uninstallPreview = undefined;
     this.uninstallNothing = undefined;
+    this.uninstallUnreadable = false;
     this.resetConsents();
     this.state.back();
     this.toLanding();
@@ -1752,6 +1799,7 @@ export class AddClusterPanel {
     this.uninstall.reset();
     this.uninstallPreview = undefined;
     this.uninstallNothing = undefined;
+    this.uninstallUnreadable = false;
     this.uninstallUnreceipted = false;
     this.resetConsents();
     this.uninstallLoading = true;
@@ -1759,7 +1807,11 @@ export class AddClusterPanel {
     try {
       const presence = await this.presence.get().catch(() => undefined);
       this.localClusterName = presence?.clusterName;
-      const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
+      // AN UNREADABLE RECORD IS NOT A MISSING ONE. `readReceipt` answers null
+      // only when there is no file; a file it cannot parse throws, and that
+      // lands below as "couldn't work it out" -- not as "nothing here", which
+      // would have offered to drop the list entry for a cluster still there.
+      const receipt = await readReceipt(this.deps.receiptFile);
       if (receipt === null) {
         const listed =
           presence?.verdict === "present-unreceipted" ||
@@ -1781,7 +1833,7 @@ export class AddClusterPanel {
     } catch (err) {
       const detail = redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir());
       this.deps.diagnostics.appendLine(`the uninstall preview could not be read: ${detail}`);
-      this.uninstallNothing = { removeFromList: this.localClusterName !== undefined };
+      this.uninstallUnreadable = true;
     } finally {
       this.uninstallLoading = false;
       if (!this.disposed) this.render();
@@ -1824,6 +1876,16 @@ export class AddClusterPanel {
     this.render();
     try {
       await this.runUninstallOnce();
+    } catch (err) {
+      // As for an install: a throw before the removal starts (the platform
+      // check, the password agent) is a removal that could not start, never
+      // a page left on "Uninstalling" with nothing running behind it.
+      const detail = redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir());
+      this.deps.diagnostics.appendLine(`the uninstall could not run: ${detail}`);
+      if (!this.disposed && this.uninstall.phase === "running") {
+        this.uninstall.fail(detail);
+        this.showStartFailure(detail, () => this.uninstall.setLogsOpen(true));
+      }
     } finally {
       this.uninstalling = false;
       this.uninstallAbort = undefined;
@@ -1895,6 +1957,7 @@ export class AddClusterPanel {
       const detail = redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir());
       this.deps.diagnostics.appendLine(`the uninstall could not run: ${detail}`);
       this.uninstall.fail(detail);
+      this.showStartFailure(detail, () => this.uninstall.setLogsOpen(true));
     } finally {
       // `preserved` reaches the record untranslated: the uninstall KEPT something.
       await recorder.finish(controller.signal.aborted ? "cancelled" : undefined);
@@ -1921,7 +1984,10 @@ export class AddClusterPanel {
       refreshTree: () => this.deps.refreshTree(),
       deleteReceipt: () => deleteReceipt(this.deps.receiptFile),
     });
-    if (problem !== "") this.uninstall.noteFollowUpProblem(problem);
+    if (problem !== "") {
+      this.deps.diagnostics.appendLine(redactForDisplay(problem, os.homedir()));
+      this.uninstall.noteFollowUpProblem(problem);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2022,6 +2088,8 @@ export class AddClusterPanel {
       removed: steps.filter((step) => step.state === "done").length,
       kept: steps.filter((step) => step.state === "preserved").length,
       followUpProblem: u.followUpProblem,
+      // completeLocalUninstall names the list when the entry is what stayed.
+      stillListed: /cluster list/.test(u.followUpProblem),
       ...(this.runStartedAt === undefined ? {} : { startedAt: this.runStartedAt }),
       ...(this.runEndedAt === undefined ? {} : { endedAt: this.runEndedAt }),
       logsOpen: u.logsOpen,
@@ -2046,7 +2114,10 @@ export class AddClusterPanel {
       return {
         key: "uninstall",
         parts: uninstallPreviewScreen({
-          loading: this.uninstallLoading || (preview === undefined && this.uninstallNothing === undefined),
+          loading:
+            this.uninstallLoading ||
+            (preview === undefined && this.uninstallNothing === undefined && !this.uninstallUnreadable),
+          ...(this.uninstallUnreadable ? { unreadable: true } : {}),
           ...(this.uninstallNothing === undefined ? {} : { nothingHere: this.uninstallNothing }),
           rows: preview === undefined ? [] : removalRows(preview),
           sharedTools: preview === undefined ? [] : sharedToolRows(preview),
@@ -2076,7 +2147,7 @@ export class AddClusterPanel {
         failed !== undefined
           ? [failureView(failed, false)]
           : u.phase === "failed" && u.problem !== ""
-            ? [{ id: "", line: "The uninstall couldn't start.", next: sentence(u.problem) }]
+            ? [{ id: "", line: "The uninstall couldn't start.", next: "The log has the details." }]
             : [];
       return this.runInputFrom("uninstall", phase, steps, u.progress(), failures, this.uninstallRetryable());
     }
@@ -2092,7 +2163,7 @@ export class AddClusterPanel {
     else phase = "settling";
     const failures: FailureView[] =
       this.runError !== ""
-        ? [{ id: "", line: `The ${mode} couldn't start.`, next: sentence(this.runError) }]
+        ? [{ id: "", line: `The ${mode} couldn't start.`, next: "The log has the details." }]
         : s.failures.map((f, _i, all) => failureView(f, all.length > 1));
     const retryable = this.runError === "" && this.installRetryable();
     return this.runInputFrom(mode, phase, s.steps, s.progress(), failures, retryable);
@@ -2177,7 +2248,7 @@ export class AddClusterPanel {
     // what was lost and where to get another.
     if (this.state.recoveryKeyWouldBeLost) {
       void vscode.window.showWarningMessage(
-        "MemQL: the recovery key wasn't saved, and it can't be shown again. Rotate it in MemQL OS, under Users.",
+        `MemQL: the recovery key wasn't saved, and it can't be shown again. ${RECOVERY_KEY_REPLACEABLE}`,
       );
     }
     if (AddClusterPanel.open_ === this) AddClusterPanel.open_ = undefined;

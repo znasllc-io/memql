@@ -794,6 +794,9 @@ export interface DoneInput {
 
 const MASKED_KEY = "•••• •••• •••• •••• •••• ••••";
 
+/** What a person can do about a recovery key nobody holds: true, and names no screen that is not there. */
+export const RECOVERY_KEY_REPLACEABLE = "An owner can replace it later.";
+
 function recoveryKeyBlock(key: RecoveryKeyView | undefined): string {
   if (key === undefined) return "";
   switch (key.state) {
@@ -813,10 +816,14 @@ function recoveryKeyBlock(key: RecoveryKeyView | undefined): string {
     case "awaitingOwner":
       return `<p class="ac-quiet">Your recovery key is created after you first sign in.</p>`;
     case "revealLost":
+      // NO PLACE IS NAMED. MemQL OS has no recovery-key screen to send anyone
+      // to (the rotation is an owner's admin call, or `memql recovery-key
+      // claim --reclaim` inside the identity pod); a pointer to a page that
+      // does not exist is worse than none.
       return notice({
         tone: "warn",
         line: "Nobody holds this cluster's recovery key.",
-        next: "Rotate it in MemQL OS, under Users.",
+        next: RECOVERY_KEY_REPLACEABLE,
       });
     case "none":
       return "";
@@ -879,13 +886,19 @@ export function doneScreen(input: DoneInput): RegionParts {
     `<div class="ac-column">${facts(rows)}${recoveryKeyBlock(input.recoveryKey)}</div>` +
     (input.startedAt === undefined ? "" : logsDisclosure(input.logsOpen === true, input.logLines ?? []));
 
+  // BACK, as a quiet text act: to the landing, which looks at this computer
+  // again. Leaving is what the recovery key's confirmation guards, so the
+  // page offers it rather than leaving closing the tab as the only way off.
+  const back: Act = { act: "back", label: "Back" };
   let acts: Act[];
   if (input.notListed === true) {
-    acts = [{ act: "retryHandoff", label: "Add to clusters", tone: "primary" }];
+    acts = [back, { act: "retryHandoff", label: "Add to clusters", tone: "primary" }];
   } else {
-    acts = [];
+    acts = [back];
+    // One of the two at most: a cluster with an owner to enrol has nobody
+    // left to claim it.
     if (input.canEnrol && !input.signedIn) acts.push({ act: "enrolPasskey", label: "Set up a passkey" });
-    if (input.claim && !input.signedIn) acts.push({ act: "claimCluster", label: "Claim this cluster" });
+    else if (input.claim && !input.signedIn) acts.push({ act: "claimCluster", label: "Claim this cluster" });
     acts.push(
       input.signedIn
         ? { act: "openOs", label: "Open MemQL OS", tone: "primary" }
@@ -928,9 +941,13 @@ export function addedScreen(input: AddedInput): RegionParts {
     actions: actionBar({
       state: "In your clusters",
       tone: "live",
-      acts: input.hasToken
-        ? [{ act: "openOs", label: "Open MemQL OS", tone: "primary" }]
-        : [{ act: "signIn", label: "Sign in", tone: "primary" }],
+      acts: [
+        // Back to the landing, to add another.
+        { act: "back", label: "Back" },
+        input.hasToken
+          ? { act: "openOs", label: "Open MemQL OS", tone: "primary" }
+          : { act: "signIn", label: "Sign in", tone: "primary" },
+      ],
     }),
   };
 }
@@ -947,6 +964,12 @@ export interface UninstallPreviewInput {
   loading: boolean;
   /** No local cluster was found to uninstall. `removeFromList`: a list entry still points at it. */
   nothingHere?: { removeFromList: boolean };
+  /**
+   * What an uninstall would remove could not be worked out -- the install's
+   * record is unreadable, or the installer's own files are missing. Shown as
+   * the failure it is, never as an empty computer.
+   */
+  unreadable?: boolean;
   rows: readonly RemovalRow[];
   sharedTools: readonly SharedToolRow[];
   /** The shared removals switched on. */
@@ -985,6 +1008,25 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
       head: top,
       body: skeleton({ shape: "list", rows: 3, label: "Reading what is installed" }),
       actions: actionBar({ state: "Checking this computer", tone: "busy", acts: [{ act: "uninstallBack", label: "Cancel" }] }),
+    };
+  }
+  if (input.unreadable === true) {
+    return {
+      head: top,
+      body: notice({
+        tone: "error",
+        line: "Couldn't work out what would be removed.",
+        next: "The MemQL Install output has the details.",
+      }),
+      actions: actionBar({
+        state: "Nothing was removed",
+        tone: "warn",
+        acts: [
+          { act: "uninstallBack", label: "Back" },
+          { act: "openOutput", label: "Open in Output" },
+          { act: "uninstallReload", label: "Try again", tone: "primary" },
+        ],
+      }),
     };
   }
   if (input.nothingHere !== undefined) {
@@ -1070,11 +1112,13 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
   const dataOn = input.deleteData?.on === true;
   const acts: Act[] = [{ act: "uninstallBack", label: "Cancel" }];
   let state = "Ready to uninstall";
-  let confirm: string | undefined;
+  // NO CONFIRMATION SENTENCE OVER THE BAR. The list above already reads "The
+  // cluster · memql, and every database in it" under "Will be removed", and
+  // the switch says it can't be undone: a third telling above the button is
+  // the same fact again, not a further consent.
   if (dataOn) {
     if (confirmed) {
       acts.push({ act: "uninstallStart", label: "Uninstall and delete data", tone: "danger" });
-      confirm = `Deletes the cluster ${input.clusterName} and every database in it.`;
     } else {
       state = "Type the phrase to confirm";
     }
@@ -1086,7 +1130,7 @@ export function uninstallPreviewScreen(input: UninstallPreviewInput): RegionPart
   return {
     head: top,
     body,
-    actions: actionBar({ state, tone: "idle", acts, ...(confirm === undefined ? {} : { confirm }) }),
+    actions: actionBar({ state, tone: "idle", acts }),
   };
 }
 
@@ -1105,8 +1149,10 @@ function lowerFirst(text: string): string {
 export interface UninstalledInput {
   removed: number;
   kept: number;
-  /** The machine is clean but the editor's own records of it were not. */
+  /** The machine is clean but the editor's own records of it were not ("" when they were). */
   followUpProblem: string;
+  /** Of those records, the list entry is the one left behind: the person can remove it themselves. */
+  stillListed?: boolean;
   startedAt?: number;
   endedAt?: number;
   logsOpen: boolean;
@@ -1141,9 +1187,14 @@ export function uninstalledScreen(input: UninstalledInput): RegionParts {
       state: "done",
       ...(input.now === undefined ? {} : { now: input.now }),
     }) +
+    // THE PROBLEM'S OWN TEXT IS DETAIL (a file and an errno), and it is in the
+    // MemQL Install output; the notice says which record was left and what to
+    // do about it.
     (input.followUpProblem === ""
       ? ""
-      : notice({ tone: "warn", line: "It's uninstalled, but it's still in your clusters.", next: sentence(input.followUpProblem) })) +
+      : input.stillListed === true
+        ? notice({ tone: "warn", line: "It's uninstalled, but it's still in your clusters.", next: "Remove it from the list in the Clusters view." })
+        : notice({ tone: "warn", line: "It's uninstalled, but MemQL still has a record of it.", next: "The MemQL Install output has the details." })) +
     logsDisclosure(input.logsOpen, input.logLines ?? [], "Uninstall log");
   return {
     head: "",

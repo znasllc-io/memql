@@ -466,6 +466,27 @@ test("a local cluster that is installed and listed offers Sign in, Repair and Un
   }
 });
 
+test("a choice the landing does not offer is refused, even when the page posts it", async () => {
+  // THE CHANNEL FROM THE PAGE IS UNTRUSTED, and two of these choices WRITE:
+  // reconnect and adopt put a list entry in clusters.yaml with no form in
+  // front of them. On a cluster that is already listed, neither is offered,
+  // and neither may happen -- nor may an Install over the cluster that is here.
+  const h = await open({ verdict: "installed-healthy", registered: true });
+  try {
+    await until(() => /data-value="signIn"/.test(h.html()), "the landing");
+    for (const value of ["reconnect", "adopt", "install", "installGuided", "nonsense"]) {
+      h.post({ type: "choose", value });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(!fs.existsSync(h.clustersPath), "a choice the landing did not offer wrote a list entry");
+    assert.ok(!recorded.executed.includes("memql.clusters.select"), "and selected it");
+    assert.doesNotMatch(h.html(), /data-act="begin"/, "an install form over a cluster that is here");
+    assert.match(h.html(), /data-value="signIn"/, "still the landing");
+  } finally {
+    h.close();
+  }
+});
+
 test("Sign in on the landing runs the one sign-in command, for the listed cluster", async () => {
   const h = await open({
     verdict: "installed-healthy",
@@ -905,7 +926,13 @@ test("a failure while other steps finish offers nothing, then Retry once the run
     assert.deepEqual(barActs(h.html()), [], "no Retry while the run is still in flight");
     assert.match(h.html(), /Couldn't install tools/, "the status names the failed step in the negative");
     const before = h.runner.calls.length;
+    // THE WALL BEHIND THE ABSENT ACT: a Retry that arrives anyway (a stale
+    // page, a double click) is not taken. Taken, it reset the failure while
+    // the old run still held the lock, and the page ended on a run that
+    // never reported again.
     h.post({ type: "retry" });
+    assert.match(h.html(), /Finishing other steps/, "a Retry was taken while the run was still in flight");
+    assert.match(h.html(), /Couldn't install tools/, "and the failure it would have wiped is still on screen");
     gate.release();
     await until(() => /data-act="retry"/.test(h.html()), "Retry, once the run is over");
     assert.equal(h.runner.calls.length >= before, true);
@@ -1081,6 +1108,30 @@ test("the command comes from the panel's state, never from the message", async (
 // the password: asked once, and dismissing it is an answer
 // -----------------------------------------------------------------------------
 
+test("an install that cannot even be attempted says so, with the detail in the log, never stuck on Starting", async () => {
+  // THE DEFECT: the install record is read before the graph runs, and an
+  // unparseable one threw out of the run unhandled -- the page sat on
+  // "Starting" with a Cancel that had nothing to stop, for ever.
+  const h = await open({ receipt: "not a receipt" });
+  try {
+    beginInstall(h);
+    await until(() => /The install couldn&#39;t start|The install couldn't start/.test(h.html()), "the refusal");
+    const html = h.html();
+    assert.match(html, /The log has the details\./);
+    assert.deepEqual(barActs(html), ["leave"], "nothing to retry unchanged, and no Cancel of a run that is not running");
+    // The installer's own words are detail: in the log, not the notice.
+    const notice = html.slice(html.indexOf("mq-notice"), html.indexOf("run-logs"));
+    assert.doesNotMatch(notice, /receipt|ENOENT|\.json/);
+    h.post({ type: "ready" });
+    const sent = h.panel.posted.filter((m) => (m as { type?: string }).type === "log").at(-1) as
+      | { lines: { text: string; tone?: string; anchor?: boolean }[] }
+      | undefined;
+    assert.ok(sent !== undefined && sent.lines.some((l) => l.tone === "error" && l.anchor === true && /install-receipt\.json/.test(l.text)));
+  } finally {
+    h.close();
+  }
+});
+
 test("dismissing the password prompt starts nothing, and returns to the form", async () => {
   // THE DEFECT (high): a dismissed prompt started the run anyway.
   const h = await open({ sudoIsFree: async () => false });
@@ -1131,9 +1182,9 @@ test("a completed install registers the cluster, quietly, and offers one next ac
     const select = recorded.executed.indexOf("memql.clusters.select");
     assert.ok(select >= 0);
     assert.equal((recorded.executedArgs[select]![0] as { quiet?: boolean }).quiet, true);
-    // One button.
+    // One button, and Back as a quiet way off (the landing looks again).
     assert.equal(primaries(html), 1, "exactly one primary");
-    assert.deepEqual(barActs(html), ["signIn"]);
+    assert.deepEqual(barActs(html), ["back", "signIn"]);
     assert.match(html, /api\.memql\.localhost:443/);
     assert.match(html, /https:\/\/os\.memql\.localhost\//);
   } finally {
@@ -1156,7 +1207,7 @@ test("an owner account to enrol against adds Set up a passkey beside Sign in", a
   const h = await runToDoneWithOwner();
   try {
     const html = h.html();
-    assert.deepEqual(barActs(html), ["enrolPasskey", "signIn"]);
+    assert.deepEqual(barActs(html), ["back", "enrolPasskey", "signIn"]);
     assert.match(html, /class="mq-textbtn" data-act="enrolPasskey"/);
     assert.match(html, /class="mq-btn" data-tone="primary" data-act="signIn"/);
     h.post({ type: "enrolPasskey" });
@@ -1183,7 +1234,7 @@ test("signed in already, the done screen's one act is MemQL OS", async () => {
   try {
     beginInstall(h);
     await until(() => INSTALLED.test(h.html()), "the done screen");
-    assert.deepEqual(barActs(h.html()), ["openOs"]);
+    assert.deepEqual(barActs(h.html()), ["back", "openOs"]);
     h.post({ type: "openOs" });
     await until(() => recorded.executed.includes("memql.clusters.openConsole"), "MemQL OS");
   } finally {
@@ -1387,13 +1438,15 @@ test("a menu does not navigate away from an uncopied recovery key", async () => 
   }
 });
 
-test("closing the panel on an uncopied key says the key is gone, and where to get another", async () => {
+test("closing the panel on an uncopied key says the key is gone, and that it can be replaced", async () => {
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
   h.close();
   const warning = recorded.warnings.find((w) => /recovery key/i.test(w));
   assert.ok(warning !== undefined);
-  assert.match(warning, /Rotate it in MemQL OS/);
-  assert.doesNotMatch(warning, /portal|hash|wizard/);
+  assert.match(warning, /An owner can replace it later/);
+  // NO SCREEN THAT IS NOT THERE: MemQL OS has no recovery-key page, and the
+  // portal is retired. A pointer to either sends a person looking for nothing.
+  assert.doesNotMatch(warning, /portal|hash|wizard|MemQL OS|under Users/);
   assert.ok(!warning.includes(RECOVERY_KEY));
 });
 
@@ -1507,6 +1560,14 @@ test("a connected cluster stays on the page with Sign in, not a toast", async ()
     assert.match(fs.readFileSync(h.clustersPath, "utf8"), /name: staging/);
     h.post({ type: "signIn" });
     await until(() => recorded.executed.includes("memql.clusters.signIn"), "the sign in");
+    // Back, then Connect again: an empty form, not the one just saved (whose
+    // name is now taken).
+    assert.deepEqual(barActs(h.html()), ["back", "signIn"]);
+    h.post({ type: "back" });
+    await until(() => /data-value="connect"/.test(h.html()), "the landing");
+    h.post({ type: "choose", value: "connect" });
+    await until(() => /data-field="connectName"/.test(h.html()), "the form");
+    assert.doesNotMatch(h.html(), /value="staging"/, "the saved cluster's answers came back");
   } finally {
     h.close();
   }
@@ -1608,6 +1669,9 @@ test("mkcert cannot be chosen without the certificate authority it withdraws", a
     h.post({ type: "shared", id: "shared-removeToolMkcert", checked: true, value: "removeToolMkcert" });
     assert.doesNotMatch(h.html(), /id="shared-removeToolMkcert" checked/, "mkcert was switched on alone");
     h.post({ type: "shared", id: "shared-removeLocalCA", checked: true, value: "removeLocalCA" });
+    // The press while it was unavailable was REFUSED, not remembered: turning
+    // the authority on must not bring mkcert on with it, unasked.
+    assert.doesNotMatch(h.html(), /id="shared-removeToolMkcert" checked/, "a refused press came back on by itself");
     h.post({ type: "shared", id: "shared-removeToolMkcert", checked: true, value: "removeToolMkcert" });
     assert.match(h.html(), /id="shared-removeToolMkcert" checked/);
     // Turning the authority off takes mkcert with it.
@@ -1707,6 +1771,37 @@ test("a cluster with no install record (make up, or adopted) can be uninstalled 
     assert.equal(cluster.params["confirm"], "delete-memql-data", "the typed consent reached the script");
     assert.equal(cluster.params["pre-existing"], "true", "and the script still knows MemQL did not make it");
     assert.deepEqual(removed, ["memql"], "and the list entry goes with it");
+  } finally {
+    h.close();
+  }
+});
+
+test("an unreadable install record is a preview that failed, never 'nothing here'", async () => {
+  // THE DEFECT: the preview's read error landed on "No local cluster was
+  // found on this computer" with Remove from list -- an offer to drop the
+  // entry of a cluster that was still there, because a file could not be
+  // parsed. A failed read is shown as a failure.
+  const removed: string[] = [];
+  const h = await open({
+    verdict: "installed-healthy",
+    registered: true,
+    action: "uninstall",
+    receipt: "not a receipt",
+    // k3d answering nothing (Docker asleep) is exactly when a swallowed read
+    // error would have read as an empty computer.
+    listLocalClusters: async () => [],
+    removeRegistryEntry: async (name) => void removed.push(name),
+  });
+  try {
+    await until(() => /Couldn't work out what would be removed/.test(h.html()), "the failure");
+    const html = h.html();
+    assert.doesNotMatch(html, /No local cluster was found|data-act="removeFromList"|data-act="uninstallStart"/);
+    assert.deepEqual(barActs(html), ["uninstallBack", "openOutput", "uninstallReload"]);
+    // Fixed underneath, Try again reads it again.
+    fs.writeFileSync(h.receiptFile, JSON.stringify(fullReceipt()));
+    h.post({ type: "uninstallReload" });
+    await until(() => /Will be removed/.test(h.html()), "the preview, read again");
+    assert.deepEqual(removed, []);
   } finally {
     h.close();
   }
