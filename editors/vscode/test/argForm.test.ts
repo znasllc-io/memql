@@ -12,7 +12,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { RunnableArg } from "../src/constructs/runnable.js";
-import { buildFields, coerceArgs, orphanedValueNames } from "../src/state/argForm.js";
+import { buildFields, coerceArgs, jsonErrorText, orphanedValueNames } from "../src/state/argForm.js";
 
 const ARGS: RunnableArg[] = [
   { name: "spaceId", type: "string", required: true, description: "The space." },
@@ -207,4 +207,13 @@ test("coerceArgs -- an auto-injected field's value is still submitted", () => {
   const out = coerceArgs(args, { filename: "report.csv", ownerUserId: "u-1" });
   assert.equal(out.ok, true);
   assert.deepEqual(out.ok ? out.values : {}, { filename: "report.csv", ownerUserId: "u-1" });
+});
+
+test("a JSON error names the line the parser stopped on, not the parser's sentence", () => {
+  // Node reports a character POSITION; the line is worked out from it.
+  assert.equal(jsonErrorText('{\n  "a": 1,\n  "b": }', "Unexpected token '}', ... is not valid JSON at position 19"), "Invalid JSON (line 3)");
+  // A newer Node that already says the line is taken at its word.
+  assert.equal(jsonErrorText("{", "Expected property name at position 1 (line 1 column 2)"), "Invalid JSON (line 1)");
+  // And a message with neither is just "Invalid JSON".
+  assert.equal(jsonErrorText("x", "Unexpected end of input"), "Invalid JSON");
 });

@@ -32,7 +32,7 @@ import { ConceptPanel } from "../src/webview/conceptPanel.js";
 import { ConstructPanel } from "../src/webview/constructPanel.js";
 import { LanguageReferencePanel } from "../src/webview/languageReferencePanel.js";
 import { rowListHtml } from "../src/webview/rowListView.js";
-import { ResultPanel, type RunPanelHost } from "../src/webview/runPanel.js";
+import { ResultPanel, RunPanel, type RunPanelHost } from "../src/webview/runPanel.js";
 import { recorded, resetRecorded, type StubWebviewPanel } from "./support/vscodeStub.js";
 
 const CONTEXT = { subscriptions: [] as { dispose(): unknown }[] } as unknown as ExtensionContext;
@@ -364,3 +364,45 @@ test("a saved run with no file is resolved from the cluster's catalog", () => {
 
   assert.equal(savedRunCatalogTarget({ kind: "query", construct: "gone" }, catalog), undefined);
 });
+
+// ---------------------------------------------------------------------------
+// The run form
+// ---------------------------------------------------------------------------
+
+test("a required boolean is a switch, and one left off runs as false rather than 'Required'", async () => {
+  resetRecorded();
+  const sent: Record<string, unknown>[] = [];
+  RunPanel.open(
+    CONTEXT,
+    {
+      run: async (_target, values) => {
+        sent.push(values);
+        return { status: "declined", target: FORM_TARGET };
+      },
+      saveConfig: async () => undefined,
+      concepts: () => new Map(),
+      openRow: () => undefined,
+    },
+    FORM_TARGET,
+  );
+  const panel = recorded.webviews.find((p) => p.viewType === "memqlRun");
+  assert.ok(panel !== undefined);
+  assert.match(panel.html, /role="switch"[^>]*data-field="includeArchived"/);
+  // Typed into the text field, one input message per keystroke.
+  panel.send({ type: "input", field: "spaceId", value: "01J8Z2QK6N" });
+  panel.send({ type: "run" });
+  await settle();
+  assert.deepEqual(sent, [{ spaceId: "01J8Z2QK6N", includeArchived: false }]);
+  panel.close();
+  recorded.webviews.find((p) => p.viewType === "memqlRunResult")?.close();
+});
+
+const FORM_TARGET = {
+  uri: "file:///w/q.memql",
+  kind: "query" as const,
+  name: "spaceParticipants",
+  args: [
+    { name: "spaceId", type: "string" as const, required: true },
+    { name: "includeArchived", type: "boolean" as const, required: true },
+  ],
+};

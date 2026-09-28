@@ -45,6 +45,7 @@ import {
   RUN_PAGE_STYLES,
   resultParts,
   runFormParts,
+  withSwitchDefaults,
   type ResultInput,
   type RunFormNote,
 } from "./runScreens.js";
@@ -124,7 +125,7 @@ export class RunPanel {
     values: Record<string, unknown>,
     private readonly key: string,
   ) {
-    this.fields = buildFields(target.args, values);
+    this.fields = withSwitchDefaults(buildFields(target.args, values));
     this.orphans = orphanedValueNames(target.args, values);
     this.panel = vscode.window.createWebviewPanel(
       "memqlRun",
@@ -166,7 +167,7 @@ export class RunPanel {
     for (const [name, text] of Object.entries(this.currentText())) {
       if (text !== "") merged[name] = text;
     }
-    this.fields = buildFields(target.args, merged);
+    this.fields = withSwitchDefaults(buildFields(target.args, merged));
     this.orphans = orphanedValueNames(target.args, values);
     this.panel.title = `Run ${target.name}`;
     this.render();

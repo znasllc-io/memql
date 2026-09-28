@@ -139,7 +139,7 @@ function fieldHtml(f: ArgFieldModel, error: string | undefined): string {
   const id = fieldId(f.name);
   // A boolean the construct REQUIRES is a switch: it always holds an answer,
   // and "true" typed into a text box was the old way to give it one.
-  if (f.type === "boolean" && f.required && f.enumValues.length === 0) {
+  if (isSwitchField(f)) {
     const hint = hintFor(f);
     return (
       switchRow({
@@ -160,6 +160,20 @@ function fieldHtml(f: ArgFieldModel, error: string | undefined): string {
     hint: hintFor(f),
     error,
   });
+}
+
+/** Whether a field is drawn as a switch: a boolean the construct requires. */
+export function isSwitchField(f: ArgFieldModel): boolean {
+  return f.type === "boolean" && f.required && f.enumValues.length === 0;
+}
+
+/**
+ * A switch always holds an answer, so a required boolean with no value yet is
+ * `false` -- what the switch shows -- rather than an empty field the form would
+ * then refuse as "Required" beside a switch that says off.
+ */
+export function withSwitchDefaults(fields: readonly ArgFieldModel[]): ArgFieldModel[] {
+  return fields.map((f) => (isSwitchField(f) && f.text.trim() === "" ? { ...f, text: "false" } : f));
 }
 
 function formStateWord(input: RunFormInput): { state: string; tone: "idle" | "busy" | "warn" } {

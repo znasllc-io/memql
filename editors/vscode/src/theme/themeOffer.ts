@@ -45,13 +45,13 @@ export const THEME_OFFER_ANSWERED_KEY = "memql.themeOffer.answered";
 
 /** The notification body. Names what the operator GAINS, not what is wrong. */
 export const OFFER_MESSAGE =
-  "MemQL panels already follow your appearance setting. For the full MemQL look -- the sidebar, tree rows, tabs and status bar too -- switch to the MemQL Dark or MemQL Light colour theme.";
+  "MemQL: Use the MemQL Dark or MemQL Light colour theme for the whole editor, sidebar and tabs included?";
 
 /** The accept action. */
 export const OFFER_SWITCH = "Switch";
 
 /** The decline action. Recorded exactly like an accept: both are an answer. */
-export const OFFER_DISMISS = "Not now";
+export const OFFER_DISMISS = "Not Now";
 
 /** What the offer needs to know, all of it read by the caller from the editor. */
 export interface ThemeOfferInputs {
