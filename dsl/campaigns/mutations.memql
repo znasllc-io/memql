@@ -120,44 +120,52 @@ mutation recipient setRecipientSubscription {
   }
 }
 
-/// Create an email template owned by the caller. Lands as a draft; an operator marks it ready with
-/// updateTemplate once the copy is finished. Owned.
+/// Internal template creation after organization and revision checks in campaignSaveTemplate.
+/// actor.userId still stamps the writer, but caller scoping alone cannot serialize a
+/// creation retry or enforce the server-assigned revision; the capability owns those checks.
 @actor
+@serverOnly
 mutation template createTemplate {
   args {
-    templateId  string!
-    name        string!
-    subject     string!
-    textBody    string!
-    htmlBody    string
-    accountId   string
+    templateId string!
+    name string!
+    subject string!
+    textBody string!
+    htmlBody string
+    accountId string!
+    versionTime datetime!
   }
   insert {
     accept { name, subject, textBody, htmlBody, accountId }
     stamp {
       id: args.templateId
+      createdAt: args.versionTime
       ownerUserId: actor.userId
       status: "draft"
     }
   }
 }
 
-/// Edit a template's copy or move it along its lifecycle (draft -> ready -> archived). Owned.
+/// Internal template update. The capability locks and checks the read revision first.
+/// actor.userId scoping cannot prevent an authorized editor overwriting a concurrent
+/// edit or publishing bytes they did not review; campaignSaveTemplate checks both.
 @actor
+@serverOnly
 mutation template updateTemplate {
   args {
-    templateId  string!
-    name        string!
-    subject     string!
-    textBody    string!
-    htmlBody    string
-    status      string
-    accountId   string
+    templateId string!
+    name string!
+    subject string!
+    textBody string!
+    htmlBody string
+    status string!
+    versionTime datetime!
   }
   update {
-    accept { name, subject, textBody, htmlBody, status, accountId }
+    accept { name, subject, textBody, htmlBody, status }
     stamp {
       id: args.templateId
+      createdAt: args.versionTime
       ownerUserId: actor.userId
     }
   }
@@ -450,6 +458,7 @@ mutation delivery recordCampaignDelivery {
 /// all requires the engine's own operator identity.
 mutation sendJob enqueueCampaignSend {
   args {
+    templateSnapshot object
     campaignId           string!
     campaignOwnerUserId  string!
     campaignAccountId    string
@@ -459,7 +468,7 @@ mutation sendJob enqueueCampaignSend {
     scheduledAt          datetime
   }
   insert {
-    accept { campaignId, campaignOwnerUserId, campaignAccountId, audienceId, templateId, scheduledAt }
+    accept { campaignId, campaignOwnerUserId, campaignAccountId, audienceId, templateId, scheduledAt, templateSnapshot }
     stamp {
       id: args.campaignId
       status: args.status ?? "queued"

@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -91,6 +92,7 @@ func NewStore(engine Engine) *Store { return &Store{engine: engine} }
 
 // SendJob is one row of v1:campaigns:sendJob.
 type SendJob struct {
+	TemplateSnapshot    *Template
 	ID                  string
 	CampaignID          string
 	CampaignOwnerUserID string
@@ -201,12 +203,13 @@ func (s SenderIdentity) Disabled() bool { return s.Status == "disabled" }
 
 // Template is the authored content.
 type Template struct {
-	AccountID string
-	ID        string
-	Subject   string
-	TextBody  string
-	HTMLBody  string
-	Status    string
+	AccountID string `json:"accountId"`
+	ID        string `json:"id"`
+	Subject   string `json:"subject"`
+	TextBody  string `json:"textBody"`
+	HTMLBody  string `json:"htmlBody"`
+	Status    string `json:"status"`
+	Revision  string `json:"revision"`
 }
 
 // Recipient is one address in the audience roster.
@@ -431,6 +434,7 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 	}
 	r := rows[0]
 	return Template{
+		Revision:  templateTime(r["createdAt"]).Format(time.RFC3339Nano),
 		AccountID: bare(str(r, "accountId")),
 		ID:        bare(str(r, "id")),
 		Subject:   str(r, "subject"),
@@ -716,6 +720,14 @@ func (s *Store) EnqueueSend(ctx context.Context, job SendJob) error {
 		{"campaignOwnerUserId", job.CampaignOwnerUserID},
 		{"audienceId", job.AudienceID},
 		{"templateId", job.TemplateID},
+	}
+	if job.TemplateSnapshot != nil {
+		data, _ := json.Marshal(job.TemplateSnapshot)
+		var snapshot map[string]any
+		if err := json.Unmarshal(data, &snapshot); err != nil {
+			return err
+		}
+		args = append(args, arg{"templateSnapshot", snapshot})
 	}
 	if job.CampaignAccountID != "" {
 		args = append(args, arg{"campaignAccountId", job.CampaignAccountID})
@@ -1374,6 +1386,7 @@ func firstWords(q string) string {
 
 func sendJobFromRow(r map[string]any) SendJob {
 	return SendJob{
+		TemplateSnapshot:    templateSnapshot(r["templateSnapshot"]),
 		ID:                  bare(str(r, "id")),
 		CampaignID:          bare(str(r, "campaignId")),
 		CampaignOwnerUserID: bare(str(r, "campaignOwnerUserId")),
@@ -1666,4 +1679,21 @@ func (s *Store) RecordWarmupState(ctx context.Context, identity string, d warmup
 		arg{"stepEnteredAt", d.StepEnteredAt.UTC().Format(time.RFC3339)},
 		arg{"acceptedInStep", d.AcceptedInStep},
 	))
+}
+
+// A missing snapshot is a job queued before versioned authoring. New jobs
+// always capture the exact ready copy their preflight inspected.
+func templateSnapshot(value any) *Template {
+	if value == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return &Template{}
+	}
+	var snapshot Template
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return &Template{}
+	}
+	return &snapshot
 }

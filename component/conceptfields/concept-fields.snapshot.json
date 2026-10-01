@@ -984,6 +984,7 @@
         "startedAt",
         "status",
         "templateId",
+        "templateSnapshot",
         "throttledUntil"
       ],
       "required": [

@@ -26,9 +26,9 @@ file access follows VS Code's file-picker permissions. PDF content is rendered
 from supplied bytes with local fonts and workers; the viewer has no remote
 document loading or script execution from the PDF.
 
-This package is under development. Campaign publishing, discussion replies, and
+This package is under development. Discussion replies and
 human approval workflows are tracked in the repository's productivity plan;
-this README does not claim those unfinished capabilities are available.
+those unfinished capabilities are not available.
 
 For a checkout, build the SDK first, then `npm ci` and `npm run compile` in
 this directory. `npm test` exercises pure logic. The host suite uses
@@ -67,6 +67,23 @@ public email URLs. A missing approved image URL remains an editable placeholder.
 
 Email **Source**, **Preview**, and **Split** use the same document, including
 unsaved changes. Preview preserves presentation HTML, blocks active content and
-external loads, and shows the plain-text alternative. AI creation is connected;
+external loads, and shows the plain-text alternative. Expand **Sample values**
+to preview personalization fields used by the source; these values never change
+the stored template or enroll a recipient. AI creation is connected;
 ordinary template source editing and preview work offline. Creating the draft
 does not publish it to Campaigns or send mail.
+
+**Use in Campaigns** saves the current email as a draft or publishes the exact
+reviewed revision for the selected client organization. Publishing makes the
+template selectable; it never sends a message. Reopening a template from
+Campaigns gives a `memql-file:` document whose saves retain its organization and
+check the loaded revision. A content edit returns the template to draft. Compare
+with the latest revision to reconcile another person's changes before saving.
+Plain-text templates remain supported with an empty `htmlBody`.
+
+Campaigns keeps names, organization selection, lifecycle, schedules, and results.
+Its embedded email-body editor is removed. Browser VS Code remains the default;
+the Files editor preference can select installed VS Code or Cursor. A queued send
+captures the ready template content it reviewed, so later copy edits do not
+change an in-progress campaign. Existing jobs without a captured snapshot retain
+the older live-template behavior; pause and recreate those jobs to capture a copy.

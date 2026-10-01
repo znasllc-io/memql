@@ -183,3 +183,15 @@ builtin emailRuleFire {
   nodeId       string   @description("The triggering row's id, bound from the event payload by the automation's args block.")
   event        object   @description("The whole triggering event envelope, forwarded by the generated statement. Carries the row payload, which is where a row_address rule reads its recipient from -- reading the field off the EVENT rather than re-reading the row is what keeps the rule working on a concept whose rows the author's own envelope could not read back.")
 }
+
+@description("Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.")
+@sdk
+@executor("integration.campaigns.saveTemplate")
+builtin campaignSaveTemplate {
+  templateId string! @description("Stable caller-generated template ID; reuse on an uncertain creation response.")
+  accountId string! @description("Owning organization; immutable after creation.")
+  name string! @description("Template name.")
+  content object! @description("The reviewed email file: subject, textBody, htmlBody.")
+  expectedRevision string! @description("Exact createdAt from templateById; empty only when creating.")
+  action string @description("save (default), publish, or archive. Publishing is an explicit human action.")
+}

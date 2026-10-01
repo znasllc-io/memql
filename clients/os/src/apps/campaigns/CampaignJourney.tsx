@@ -29,7 +29,9 @@ import {
   templateProjection,
 } from "./CampaignsSection";
 import { SenderForm } from "./SendersSection";
-import { TemplateEditor } from "./TemplatesSection";
+import { NewTemplate } from "./TemplatesSection";
+import { editorTemplateURL } from "../../items/editorPreference";
+import { openHandoff } from "../../items/vscode";
 import type { CampaignWrites } from "./actions";
 import type { CampaignFeeds, Reading } from "./useCampaigns";
 import type { EmailReadiness } from "./rows";
@@ -53,7 +55,7 @@ export function CampaignJourney({
   trackByDefault: boolean;
   onDone: (id: string) => void;
 }) {
-  const { readiness } = useSession();
+  const { readiness, config } = useSession();
   const accounts = useAccountOptions();
   const defaultAccountId = useDefaultOrganization(accounts);
   const [pickedAccountId, setAccountId] = useState("");
@@ -70,7 +72,6 @@ export function CampaignJourney({
   const [editors, setEditors] = useState<Record<number, boolean>>({});
   const creating = editors[step] ?? false;
   const [reviewed, setReviewed] = useState(false);
-  const [contentDirty, setContentDirty] = useState(false);
   function setCreating(value: boolean) {
     setEditors((previous) => ({ ...previous, [step]: value }));
   }
@@ -93,7 +94,7 @@ export function CampaignJourney({
     !!configured,
     (accountId === "self" && senderId === "") || senders.some((s) => s.id === senderId),
     !!audience && roster.id === audience.id && roster.count !== null && roster.count > 0,
-    template?.status === "ready" && !contentDirty,
+    template?.status === "ready",
     false,
   ];
   // A missing provider must not trap a person who wants to prepare a draft.
@@ -323,16 +324,16 @@ export function CampaignJourney({
             </Field>
             {!templates.length && !editors[3] ? (
               <EmptyState icon={FileText} title="No templates yet">
-                Write a subject and message, then mark the finished copy ready.
+                Create a template, then review and publish its content in Productivity Tools.
               </EmptyState>
             ) : null}
             {editors[3] ? (
-              <TemplateEditor
+              <NewTemplate
                 initialAccountId={accountId}
-                audiences={audiences}
-                campaigns={[]}
                 writes={writes}
-                onDone={(id) => {
+                onCreated={(id, name, tab) => {
+                  const url = editorTemplateURL(config.domain, id, name);
+                  if (tab) tab.navigate(url); else openHandoff(url, () => {});
                   if (id) {
                     setTemplateId(id);
                     feeds.templates.reseed();
@@ -341,19 +342,10 @@ export function CampaignJourney({
                 }}
               />
             ) : (
-              <Button onClick={() => setCreating(true)}>Write a template</Button>
+              <Button onClick={() => setCreating(true)}>Create a template</Button>
             )}
             {template && !editors[3] ? (
-              <TemplateEditor
-                initialAccountId={accountId}
-                key={template.id}
-                template={template}
-                onDirtyChange={setContentDirty}
-                audiences={audiences}
-                campaigns={[]}
-                writes={writes}
-                onDone={() => feeds.templates.reseed()}
-              />
+              <Button onClick={() => openHandoff(editorTemplateURL(config.domain, template.id, template.name), () => {})}>Open template in editor</Button>
             ) : null}
           </Panel>
         </div>
@@ -388,13 +380,6 @@ export function CampaignJourney({
                 tone="warn"
                 sentence="The audience has no confirmed subscribed recipients."
                 next="Review the audience roster before sending. Suppression is checked again at send time."
-              />
-            ) : null}
-            {contentDirty ? (
-              <Notice
-                tone="warn"
-                sentence="Content has unsaved changes."
-                next="Return to Content and save the template. This draft will otherwise use the last saved version."
               />
             ) : null}
             <CampaignForm

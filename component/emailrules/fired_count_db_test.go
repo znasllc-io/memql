@@ -116,7 +116,7 @@ func seedFiringRule(t *testing.T, eng *memql.MemQLEngine) (context.Context, stri
 	q := langparser.QuoteString
 	execute(owner, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Fired count organization")`, q(account)))
 	execute(owner, fmt.Sprintf(`mutation createAudience(audienceId: %s, name: "Fired count audience", accountId: %s)`, q(audience), q(account)))
-	execute(owner, fmt.Sprintf(`mutation createTemplate(templateId: %s, name: "Fired count template", subject: "Hello", textBody: "Hello", accountId: %s)`, q(template), q(account)))
+	execute(auth.ContextWithInternalOrigin(owner), fmt.Sprintf(`mutation createTemplate(versionTime: "2026-10-01T00:00:00Z", templateId: %s, name: "Fired count template", subject: "Hello", textBody: "Hello", accountId: %s)`, q(template), q(account)))
 	execute(owner, fmt.Sprintf(`mutation createEmailRule(emailRuleId: %s, name: "Fired count rule", triggerConcept: "v1:todos:todo", eventKind: "updated", templateId: %s, recipientMode: "audience", audienceId: %s, accountId: %s)`,
 		q(rule), q(template), q(audience), q(account)))
 	execute(auth.ContextWithInternalOrigin(owner), fmt.Sprintf(`mutation recordEmailRuleGeneration(emailRuleId: %s, status: "active")`, q(rule)))

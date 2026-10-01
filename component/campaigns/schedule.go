@@ -147,7 +147,7 @@ func (w *Worker) promoteSchedule(ctx context.Context, systemCtx context.Context,
 		}
 	}
 
-	if reason, terminal := w.fireTimePreflight(ownerCtx, campaign); reason != "" {
+	if reason, terminal := w.fireTimePreflight(ownerCtx, campaign, job.TemplateSnapshot); reason != "" {
 		w.refuseScheduledSend(systemCtx, ownerCtx, job, campaign, reason, terminal)
 		return
 	}
@@ -200,7 +200,7 @@ func (w *Worker) queueScheduledJob(systemCtx context.Context, job SendJob, campa
 // The environment arm is where the boot race lands too: a node whose
 // integration registry has not populated yet has no sender, and a campaign
 // due in that window must not be destroyed by it.
-func (w *Worker) fireTimePreflight(ownerCtx context.Context, campaign Campaign) (string, bool) {
+func (w *Worker) fireTimePreflight(ownerCtx context.Context, campaign Campaign, snapshots ...*Template) (string, bool) {
 	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
 		return reason, false
 	}
@@ -225,6 +225,12 @@ func (w *Worker) fireTimePreflight(ownerCtx context.Context, campaign Campaign) 
 	}
 	if !found {
 		return fmt.Sprintf("template %q is no longer readable", campaign.TemplateID), true
+	}
+	if len(snapshots) > 0 && snapshots[0] != nil {
+		tmpl = *snapshots[0]
+		if tmpl.ID != campaign.TemplateID || tmpl.Subject == "" || tmpl.TextBody == "" {
+			return "queued template snapshot is invalid", true
+		}
 	}
 	if err := w.validateCampaignOrganization(ownerCtx, campaign, tmpl); err != nil {
 		return err.Error(), true

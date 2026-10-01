@@ -42,3 +42,27 @@ test("a file save uses its opened version and preserves edits on conflict", asyn
   assert.equal(requestedVersion, 3); assert.equal(doc.version, 3);
   assert.equal(new TextDecoder().decode(doc.content), "old");
 });
+
+test("campaign template saves use the opened client and exact revision", async () => {
+  const calls: {name:string;call:string}[] = [];
+  const lease = { domain:"client.example", name:"client", generation:3 };
+  let fail = false;
+  const api = { connect: async () => lease, execute: async (_lease: unknown,name:string,call:string) => {
+    calls.push({name,call});
+    if (name === "templateById") return [{ id:"template",name:"Welcome",accountId:"client-org",subject:"Hi",textBody:"Hello",htmlBody:"<p>Hello</p>",status:"ready",createdAt:"2026-10-01T12:00:00Z" }];
+    if (fail) throw new Error("template changed");
+    return [{ saved:true,revision:"2026-10-01T12:00:01Z" }];
+  } } as unknown as EditorConnectionAPI;
+  const documents = new Documents(api);
+  const opened = await documents.read("memql-file://client.example/templates/template/Welcome.email.json");
+  assert.equal(opened.template?.accountId,"client-org");
+  await documents.save(opened,new TextEncoder().encode(newTemplate()));
+  assert.equal(opened.revision,"2026-10-01T12:00:01Z");
+  assert.equal(opened.template?.status,"draft");
+  assert.match(calls[1].call,/accountId:\s*"client-org"/);
+  assert.match(calls[1].call,/expectedRevision:\s*"2026-10-01T12:00:00Z"/);
+  fail=true;
+  await assert.rejects(documents.save(opened,new TextEncoder().encode(newTemplate().replace("Thanks for subscribing","Changed"))),/template changed/);
+  assert.equal(readTemplate(new TextDecoder().decode(opened.content)).subject,"Thanks for subscribing");
+  assert.equal(opened.revision,"2026-10-01T12:00:01Z");
+});
