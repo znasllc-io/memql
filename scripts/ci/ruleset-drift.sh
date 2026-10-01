@@ -187,17 +187,18 @@ function main() {
 
     local want
     for want in "${EXPECTED[@]}"; do
-        if ! have "$want" "${actual[@]}"; then
+        if ! have "$want" ${actual[@]+"${actual[@]}"}; then
             missing+=("$want")
             rc=1
         fi
     done
 
     local entry name why
-    for entry in "${KNOWN_ABSENT[@]}"; do
+    # Bash 3.2 treats an empty array as unset under nounset.
+    for entry in ${KNOWN_ABSENT[@]+"${KNOWN_ABSENT[@]}"}; do
         name="${entry%%|*}"
         why="${entry#*|}"
-        if have "$name" "${actual[@]}"; then
+        if have "$name" ${actual[@]+"${actual[@]}"}; then
             # A known-absent rule that is now PRESENT is drift too: the baseline
             # is describing a repository that no longer exists, and left alone
             # it would keep excusing an absence that has been fixed.
