@@ -1146,7 +1146,11 @@ smoke("the presence probe answers in the host runtime, with no Docker and no han
   // serves. Port 1 is never listenable, so this is a local, immediate refusal
   // -- nothing leaves the machine, and no container runtime is consulted.
   const started = Date.now();
-  const answered = await defaultEndpointProbe("127.0.0.1:1", 1_000);
+  // The probe answers with a reason as well as a verdict (the reason is what
+  // the Connection output names when a cluster does not answer), so the
+  // verdict is read off the answer rather than compared as a whole.
+  const result = await defaultEndpointProbe("127.0.0.1:1", 1_000);
+  const answered = typeof result === "boolean" ? result : result.answered;
   const took = Date.now() - started;
 
   assert.equal(answered, false, "something answered on port 1, which cannot be a MemQL cluster");

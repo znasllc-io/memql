@@ -206,7 +206,7 @@
     if (error) {
       var item = document.createElement('li');
       item.setAttribute('data-check', 'fail');
-      item.textContent = 'the checks threw :: ' + String(error && error.stack || error);
+      item.textContent = 'the checks threw :: ' + String(error.stack || error);
       list.appendChild(item);
     }
     document.body.appendChild(list);
