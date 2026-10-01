@@ -35,33 +35,15 @@ export function releasedImages(releasedTag: string): string {
 }
 
 /**
- * The one sentence every released-lane verb says over a checkout-mode cluster.
- *
- * Names the INSTANCE rather than "the cluster", because the surfaces that say
- * it are looking at a named row, and says what it is running today, because
- * that is the fact the operator is about to lose.
+ * The one sentence every released-lane verb says over a checkout-mode cluster:
+ * the operator's own build, which is the fact they are about to lose, and what
+ * replaces it. The instance name is taken for the callers that have one and is
+ * not said: the surfaces that say this are already about that cluster.
  */
-export function returnsToReleasedImages(instanceName: string, releasedTag: string): string {
-  return `This returns ${instanceName} to ${releasedImages(
-    releasedTag,
-  )}; it runs a checkout build today.`;
+export function returnsToReleasedImages(_instanceName: string, releasedTag: string): string {
+  return `Your own build is replaced with ${releasedImages(releasedTag)}.`;
 }
 
-/**
- * What the operator is told when a rebuild lands.
- *
- * READ OFF THE ENVELOPE the step actually produced, never off what was asked
- * for: `k3d.dev` reports the nodes it built, the commit it built them from and
- * how many files were uncommitted at that moment, and those are facts about
- * what is now running. Restating the request would print nothing at all for the
- * ordinary case, where an empty list expands to nine node types.
- *
- * A FACT THE ENVELOPE DID NOT CARRY IS LEFT OUT, NEVER INVENTED -- and the
- * `dirtyCount` guard is `typeof`, not a coercion, deliberately. `Number(
- * undefined)` is NaN, which prints "NaN uncommitted files"; `Number(null)` is
- * 0, which prints "0 uncommitted files" and is far worse: it is a CLAIM that
- * the tree was clean, made from a field that was never reported.
- */
 /**
  * What the operator is told when an update-and-rebuild lands.
  *
@@ -91,33 +73,58 @@ export function updatedMessage(
     outcome === "upToDate"
       ? "Already up to date"
       : outcome === "merged"
-        ? "Combined the latest with your own commits"
+        ? "Merged the latest with your commits"
         : outcome === "fastForward"
-          ? `Brought your checkout up to date with ${count}`
+          ? `Pulled ${count}`
           : // An outcome the envelope did not carry is left unnamed rather than
             // guessed at -- the same discipline as the dirtyCount guard below.
-            "Updated your checkout";
+            "Pulled the latest";
   return `${lead}. ${rebuiltMessage(instanceName, rebuild)}`;
 }
 
+/**
+ * What the operator is told when a rebuild lands: which build is running now.
+ *
+ * READ OFF THE ENVELOPE the step actually produced, never off what was asked
+ * for: `k3d.dev` reports the commit it built from and how many files were
+ * uncommitted at that moment, and those are facts about what is now running.
+ *
+ * A FACT THE ENVELOPE DID NOT CARRY IS LEFT OUT, NEVER INVENTED -- and the
+ * `dirtyCount` guard is `typeof`, not a coercion, deliberately. `Number(
+ * undefined)` is NaN, which prints "NaN uncommitted files"; `Number(null)` is
+ * 0, a CLAIM that the tree was clean, made from a field never reported. A
+ * reported zero says nothing either: a clean tree is the ordinary case.
+ */
 export function rebuiltMessage(
   instanceName: string,
   result: Record<string, unknown> | undefined,
 ): string {
   const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
-  // The script reports the EXPANDED list, space-separated.
-  const built = str(result?.nodes)
-    .split(/\s+/)
-    .filter((node) => node !== "");
-  const nodes = built.length === 0 ? "the app nodes" : built.join(", ");
   const commit = str(result?.commit);
   const dirty = result?.dirtyCount;
   const parts = [
     ...(commit === "" ? [] : [commit.slice(0, 7)]),
-    ...(typeof dirty === "number" && Number.isFinite(dirty)
+    ...(typeof dirty === "number" && Number.isFinite(dirty) && dirty > 0
       ? [`${String(dirty)} uncommitted file${dirty === 1 ? "" : "s"}`]
       : []),
   ];
   const provenance = parts.length === 0 ? "" : ` (${parts.join(", ")})`;
-  return `Rebuilt ${nodes} -- ${instanceName} now runs your checkout${provenance}.`;
+  return `${instanceName} now runs your build${provenance}.`;
+}
+
+/**
+ * The node types a rebuild built, named only when it was a PART of them.
+ *
+ * The script reports the EXPANDED list, so an empty request comes back as all
+ * nine; listing nine names in a sentence tells the operator nothing they asked
+ * about. A partial rebuild ("bff, agent") is worth saying, because the rest of
+ * the cluster is still on the previous build.
+ */
+export function rebuiltNodes(
+  requested: string,
+  result: Record<string, unknown> | undefined,
+): string {
+  if (requested.trim() === "") return "";
+  const nodes = typeof result?.nodes === "string" ? result.nodes.trim().split(/\s+/).filter((n) => n !== "") : [];
+  return nodes.join(", ");
 }

@@ -315,8 +315,8 @@ test("a refused status read explains the owner/admin gate and says what still wo
     }),
   );
   assert.equal(result.status, null);
-  assert.match(result.message, /requires the owner or admin cluster role/);
-  assert.match(result.message, /Topology and deployment history above are ordinary concept rows/);
+  assert.equal(result.message, "Viewing deployment status needs the owner or admin role. History is still shown.");
+  assert.doesNotMatch(result.message, /concept rows|Topology/);
 });
 
 test("a status read failure never throws -- the panel must not fail to load", async () => {
@@ -349,5 +349,79 @@ test("a failed version preview degrades to a message, never a dead Cut button", 
     }),
   );
   assert.equal(result.suggestion, null);
-  assert.match(result.message, /version suggestion requires the owner or admin cluster role/);
+  assert.equal(result.message, "Your role can't read the version suggestion.");
+});
+
+// -----------------------------------------------------------------------------
+// the page's sentence, beside the log line
+// -----------------------------------------------------------------------------
+
+test("every outcome carries one plain sentence for the page, apart from its log line", async () => {
+  const ok = await runDeployAction(
+    port({ deploy: async () => ({ ok: true, message: "deploy kicked off (automation-driven)", auditEventId: "a1", correlationId: "", details: {} }) }),
+    { id: "deploy", deploymentId: "d1" },
+  );
+  // Accepted is not deployed: the history row carries it to the end.
+  assert.equal(ok.message, "Deployment started.");
+  assert.match(ok.line, /^SUCCESS: deploy/);
+  assert.doesNotMatch(ok.message, /SUCCESS|audit|automation|deploy pack/);
+
+  const cut = await runDeployAction(
+    port({ cutVersion: async () => ({ ok: true, message: "", auditEventId: "a2", correlationId: "", details: { version: "v0.9.3" } }) }),
+    { id: "cutVersion", bump: "patch", version: "" },
+  );
+  assert.equal(cut.message, "v0.9.3 is ready to deploy.");
+
+  const failed = await runDeployAction(
+    port({ deploy: async () => ({ ok: false, message: "overlay is dirty", auditEventId: "a3", correlationId: "", details: {} }) }),
+    { id: "deploy", deploymentId: "d1" },
+  );
+  assert.equal(failed.message, "Couldn't deploy.");
+});
+
+test("a refusal names the role in the page's sentence, and an expired session asks for a sign-in", async () => {
+  const refused = await runDeployAction(
+    port({
+      rollbackDeployment: async () => {
+        throw new DeployControlError("rollback_deployment", CODE_PERMISSION_DENIED, "no");
+      },
+    }),
+    { id: "rollback", toDeploymentId: "d0" },
+  );
+  assert.equal(refused.message, "You need the owner role to roll back.");
+  assert.equal(refused.needsSignIn, false);
+
+  const expired = await runDeployAction(
+    port({
+      deploy: async () => {
+        throw new DeployControlError("deploy", CODE_UNAUTHENTICATED, "no actor");
+      },
+    }),
+    { id: "deploy", deploymentId: "d1" },
+  );
+  assert.equal(expired.message, "Your session has expired.");
+  assert.equal(expired.needsSignIn, true);
+
+  const unsupported = await runDeployAction(
+    port({
+      deploy: async () => {
+        throw new DeployControlError("deploy", CODE_UNIMPLEMENTED, "");
+      },
+    }),
+    { id: "deploy", deploymentId: "d1" },
+  );
+  assert.equal(unsupported.message, "This cluster doesn't support deployments from the editor.");
+  assert.doesNotMatch(unsupported.message, /node|bff|deploy-control/);
+});
+
+test("promote and abort are said as what they did", async () => {
+  const rollout = async (subAction: string) =>
+    (
+      await runDeployAction(
+        port({ rolloutAction: async () => ({ ok: true, message: "", auditEventId: "", correlationId: "", details: {} }) }),
+        { id: "rolloutAction", rollout: "bff", subAction },
+      )
+    ).message;
+  assert.equal(await rollout("promote"), "Rollout promoted.");
+  assert.equal(await rollout("abort"), "Rollout aborted.");
 });

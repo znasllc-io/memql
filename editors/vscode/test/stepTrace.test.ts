@@ -191,17 +191,18 @@ test("describeRefusal -- PERMISSION_DENIED names the role it requires", () => {
     message: "operator run requires owner or admin",
     runId: "",
   });
-  assert.match(text, /CLUSTER OWNER/);
-  assert.match(text, /ADMIN/);
-  // The engine's own sentence is appended rather than replaced -- it carries
-  // the specifics.
-  assert.match(text, /operator run requires owner or admin/);
+  assert.match(text, /cluster owner/);
+  assert.match(text, /admin/);
+  // ONE SENTENCE of its own: the engine's words are shown beside it on the
+  // page, never spliced into the middle of it, and nothing shouts.
+  assert.doesNotMatch(text, /operator run requires/);
+  assert.doesNotMatch(text, /[A-Z]{4,}/);
 });
 
 test("describeRefusal -- UNAVAILABLE points at the mesh, which is what it means", () => {
   const text = describeRefusal({ code: 14, codeName: "UNAVAILABLE", message: "", runId: "" });
-  assert.match(text, /node type is not running/);
-  assert.match(text, /forwarded across the mesh/);
+  assert.match(text, /picked the run up/);
+  assert.match(text, /may not be running/);
 });
 
 // Without the language server's flag the two causes genuinely cannot be told
@@ -248,6 +249,6 @@ test("describeRefusal -- an absent disabled flag keeps both possibilities", () =
 test("describeRefusal -- an unrecognised code still says the run was refused", () => {
   const text = describeRefusal({ code: 13, codeName: "INTERNAL", message: "kaboom", runId: "" });
   assert.match(text, /refused/);
-  assert.match(text, /INTERNAL/);
-  assert.match(text, /kaboom/);
+  // The code and the engine's words live on the page beside the sentence.
+  assert.doesNotMatch(text, /INTERNAL|kaboom/);
 });

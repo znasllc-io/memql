@@ -141,6 +141,11 @@ const (
 	ElevationUserTrust Elevation = "user-trust"
 )
 
+// MaxLabelWords is the longest a step label may be. A label is a status line
+// ("Creating the cluster"), and a status line that needs a fifth word is a
+// sentence -- which is what Description is for.
+const MaxLabelWords = 4
+
 // PreExistingNone is the explicit declaration that an artifact cannot
 // pre-exist as a FOREIGN artifact -- it is delimited by our own marker, so
 // finding it means finding our own earlier work. Stated rather than omitted:
@@ -182,6 +187,12 @@ type Step struct {
 	// Go gates see the same document the executor runs; the TS loader owns
 	// validation (positive integer).
 	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
+	// Label is the step's SHORT name: sentence case, at most MaxLabelWords
+	// words ("Creating the cluster"). It is what a progress display says while
+	// the step runs and what the CLI prints as the step starts; Description
+	// is the longer sentence behind it. Required, so every surface that shows
+	// progress can name every step without inventing words of its own.
+	Label string `json:"label"`
 	// Description is the operator-facing sentence for this step.
 	Description string `json:"description"`
 	// Params are the graph-PINNED flags for the script: the values that are
@@ -442,6 +453,13 @@ func (g *Graph) validateStep(s *Step, source string) error {
 	}
 	if strings.TrimSpace(s.Description) == "" {
 		return fmt.Errorf("%s has no description -- an operator has to be told what is about to happen", where)
+	}
+	if strings.TrimSpace(s.Label) == "" {
+		return fmt.Errorf("%s has no label -- a progress display needs a short name for the step while it runs", where)
+	}
+	if n := len(strings.Fields(s.Label)); n > MaxLabelWords {
+		return fmt.Errorf("%s has a %d-word label %q -- a label is at most %d words; the sentence belongs in description",
+			where, n, s.Label, MaxLabelWords)
 	}
 
 	switch s.Elevation {

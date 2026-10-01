@@ -25,17 +25,23 @@
 
 import type { InstallStepView } from "@znasllc-io/memql-view-kit";
 
-import type { StepProgress } from "./addCluster.js";
+import type { StepProgress, StepState } from "./addCluster.js";
+import {
+  computeRunProgress,
+  stepWeight,
+  type ProgressStatus,
+  type ProgressStep,
+  type RunProgress,
+} from "./runProgress.js";
 
 /**
  * What a failure asks of the operator.
  *
- * `retryable` is not "may the button be shown" -- #3474 offers Retry and
- * Switch-to-Guided on EVERY failure, because the operator may have fixed the
- * cause in another window and we cannot know. It is whether retrying UNCHANGED
- * has any prospect of a different answer, which is what the wording turns on:
- * a bad parameter will fail identically forever, while an operation failure
- * may well have been a transient one.
+ * `retryable` is whether retrying UNCHANGED has any prospect of a different
+ * answer: a bad parameter or an unsupported platform will fail identically
+ * forever, while an operation failure may well have been a transient one. The
+ * run screens offer Retry only when it is true -- an act that cannot succeed
+ * is absent, not offered.
  */
 export interface FailureGuidance {
   /** The short sentence naming what kind of failure this is. */
@@ -44,6 +50,56 @@ export interface FailureGuidance {
   advice: string;
   /** Whether an unchanged retry could plausibly succeed. */
   retryable: boolean;
+}
+
+/**
+ * The one honest refuse when detect.sh rejects the OS/arch (memql#4294).
+ *
+ * Generic exit 3 is "the step refused to act" / artifact-protection. Detect's
+ * platform refuse is a different sentence: the wizard cannot run here, and
+ * retry will not help.
+ *
+ * THE SUPPORTED SET IS QUOTED, NEVER RESTATED. This used to say "The wizard
+ * targets linux/amd64 only. On macOS use make up" -- which stopped being true
+ * when darwin/arm64 became a supported, digest-pinned platform, and then told
+ * every Mac operator who tripped ANY platform refuse that their machine could
+ * not run the installer at all. detect.sh composes the list from
+ * scripts/lib/platform.sh's SUPPORTED_PLATFORMS, so its own sentence is the
+ * only one here that cannot go stale.
+ */
+export function refusedPlatformGuidance(detail = ""): FailureGuidance {
+  // The supported set as detect.sh composed it ("... targets linux/amd64,
+  // darwin/arm64"), never restated here.
+  const supported = /targets\s+(.+?)\.?$/i.exec(detail.trim())?.[1]?.trim() ?? "";
+  return {
+    headline: "This computer can't run a local MemQL cluster.",
+    advice: supported === "" ? "Retrying won't change that." : `It runs on ${supported}. Retrying won't change that.`,
+    retryable: false,
+  };
+}
+
+export function isUnsupportedPlatformRefuse(exitCode: number | null, detail = ""): boolean {
+  return exitCode === 3 && /unsupported platform/i.test(detail);
+}
+
+/** What `failureGuidance` needs beyond the code, when the caller has it. */
+export interface GuidanceContext {
+  /**
+   * How long the step was allowed, in seconds -- its own `timeoutSeconds`
+   * from the graph, or the run's default. A timeout names this rather than a
+   * figure written here: the cluster step is allowed thirty minutes and the
+   * image build forty-five, and "ten minutes" was wrong for exactly the steps
+   * most likely to time out.
+   */
+  timeoutSeconds?: number;
+}
+
+/** The run's per-step default ceiling, when a step declares none (see addClusterPanel.ts). */
+export const DEFAULT_STEP_TIMEOUT_SECONDS = 600;
+
+function minutes(seconds: number): string {
+  const n = Math.max(1, Math.round(seconds / 60));
+  return n === 1 ? "1 minute" : `${n} minutes`;
 }
 
 /**
@@ -71,190 +127,109 @@ export interface FailureGuidance {
  * operator MemQL "cannot say what it means" about the two cases it understands
  * best. That is the confident-wrong-advice failure this function exists to
  * prevent, inverted into confidently disclaiming knowledge the system has.
- */
-/**
- * The one honest refuse when detect.sh rejects the OS/arch (memql#4294).
  *
- * Generic exit 3 is "the step refused to act" / artifact-protection. Detect's
- * platform refuse is a different sentence: the wizard cannot run here, and
- * retry will not help.
- *
- * THE SUPPORTED SET IS QUOTED, NEVER RESTATED. This used to say "The wizard
- * targets linux/amd64 only. On macOS use make up" -- which stopped being true
- * when darwin/arm64 became a supported, digest-pinned platform, and then told
- * every Mac operator who tripped ANY platform refuse that their machine could
- * not run the installer at all. detect.sh composes the list from
- * scripts/lib/platform.sh's SUPPORTED_PLATFORMS, so its own sentence is the
- * only one here that cannot go stale.
+ * WRITTEN FOR THE PERSON WATCHING THE INSTALL, not for the contract. The page
+ * leads with what the step's own script said (`StepProgress.message`); this is
+ * what stands beside it, or alone when the script said nothing. So it names
+ * the kind of failure and the next move, and leaves the exit code, the verify
+ * detail and the output to the log.
  */
-export function refusedPlatformGuidance(detail = ""): FailureGuidance {
-  const named = detail.trim().replace(/\.$/, "");
-  return {
-    headline: "This machine is not a supported platform for the local cluster wizard.",
-    advice:
-      (named ? `${named}. ` : "") + "Repair, retry, or picking another tag will not change that.",
-    retryable: false,
-  };
-}
-
-export function isUnsupportedPlatformRefuse(exitCode: number | null, detail = ""): boolean {
-  return exitCode === 3 && /unsupported platform/i.test(detail);
-}
-
-export function failureGuidance(exitCode: number | null, remedy = "", detail = ""): FailureGuidance {
+export function failureGuidance(
+  exitCode: number | null,
+  remedy = "",
+  detail = "",
+  context: GuidanceContext = {},
+): FailureGuidance {
   if (isUnsupportedPlatformRefuse(exitCode, detail)) {
     return refusedPlatformGuidance(detail);
   }
-  // A REMEDY OUTRANKS THE CODE, on the one code that can carry it.
-  //
-  // "prerequisite missing" is the honest classification for a step that needs
-  // root: nothing is half-done and the thing it needs is not available to it.
-  // But the generic exit-4 advice -- "install the missing prerequisite named
-  // below" -- sends the operator looking for a package when what the step
-  // actually wants is a password, and the wizard is already showing them the
-  // exact command. Naming that changes nothing about the classification and
-  // everything about what they do next (memql#3560).
+  // A REMEDY OUTRANKS THE CODE, on the one code that can carry it: a step that
+  // needs root classifies as a missing prerequisite, and the wizard is holding
+  // the exact command (memql#3560). The password was asked once, up front;
+  // this is the case where it was declined or not enough, so the fix is the
+  // command, in the person's own terminal.
   if (exitCode === 4 && remedy !== "") {
     return {
-      headline: "This step needs to run with more privilege than the installer has.",
-      advice:
-        "It cannot ask for your password: an editor runs it as a background " +
-        "process with no terminal attached. Use the button below to open a " +
-        "terminal with the exact command, run it there, then retry -- the step " +
-        "will find its work already done. Nothing has been left half-finished.",
+      headline: "This step needs administrator access.",
+      advice: "Run the command in a terminal, then retry.",
       retryable: true,
     };
   }
   switch (exitCode) {
     case 0:
-      // THE NORMAL FAILURE SHAPE FOR THIS INSTALLER, and the one this function
-      // originally had no case for. `executor.ts` records a FAILED outcome
-      // carrying exit 0 whenever a script exits cleanly and its verify
-      // predicate does not hold -- "an exit code of 0 is a precondition and
-      // nothing more". All 13 install steps verify a `result.*` field, so this
-      // is the path most real failures take. `verify-frontdoor.sh
-      // --report-only` is the worked example: it warns, calls cap_ok, and
-      // returns exit 0 with `allPassed=false`.
+      // The script finished and its own check did not hold -- the commonest
+      // real failure here, usually something still starting.
       return {
-        headline: "The step ran without error, but the machine is not in the state it checks for.",
-        advice:
-          "The script itself succeeded -- what it was supposed to achieve did not " +
-          "hold when it checked. That is usually something taking longer than the " +
-          "step waits for, or a change that did not take effect. The output below " +
-          "says which check failed.",
+        headline: "The step finished, but its check didn't pass.",
+        advice: "Something may still be starting. Retry in a moment.",
         retryable: true,
       };
     case 1:
-      // `cap_fail` clamps any out-of-range code to 1, and capability.sh's EXIT
-      // trap emits a failure envelope for any non-zero abort -- so 1 is where
-      // both an unclassified failure and a `set -e` abort land. It is a real
-      // code with a real meaning, not an unknown one.
       return {
-        headline: "The step stopped without classifying what went wrong.",
-        advice:
-          "This is the catch-all: either the script failed in a way it does not " +
-          "have a specific code for, or it aborted partway. The output below is " +
-          "the only account of what happened, so read it before retrying.",
+        headline: "The step failed.",
+        advice: "The log has the details.",
         retryable: true,
       };
-    case 124:
-      // SYNTHESISED BY US, not by the script. runner.ts kills a step that
-      // outruns its timeout and reports 124 with SIGKILL. Leaving it to the
-      // default branch had MemQL say it "cannot say what it means" about a
-      // code MemQL assigned itself -- and to an operator whose install just
-      // stopped after ten minutes, that is the least useful moment to be
-      // vague.
+    case 124: {
+      // SYNTHESISED BY US: runner.ts kills a step that outruns its ceiling.
+      const allowed = context.timeoutSeconds ?? DEFAULT_STEP_TIMEOUT_SECONDS;
       return {
-        headline: "The step ran out of time and was stopped.",
-        advice:
-          "It exceeded the ten minutes any one step is allowed and was killed, " +
-          "so it did not finish what it was doing. A slow network is the usual " +
-          "cause on the download and clone steps; a wedged Docker daemon is the " +
-          "usual cause on the cluster step. Retry is safe -- every step checks " +
-          "first and skips what is already done.",
+        headline: `The step timed out after ${minutes(allowed)}.`,
+        advice: "Retry is safe. Steps that already finished are skipped.",
         retryable: true,
       };
+    }
     case 127:
-      // Also ours: runner.ts reports 127 when the script could not be started
-      // or run at all. That is an installer-side problem -- a missing or
-      // unexecutable capability script -- not something the operator's machine
-      // did wrong, and it is the signature of a broken package rather than a
-      // broken install.
+      // Also ours: the script behind the step could not be launched. A broken
+      // package, not a broken machine.
       return {
-        headline: "The installer could not start this step at all.",
-        advice:
-          "The script behind this step could not be launched -- missing, or not " +
-          "executable. That is a fault in this MemQL build rather than in your " +
-          "machine, and retrying will not change it. Please report it with the " +
-          "output below.",
+        headline: "This step couldn't start.",
+        advice: "Reinstall the MemQL extension, or report the problem.",
         retryable: false,
       };
     case 128:
-      // Also ours, and the one that stayed unexplained longest: runner.ts
-      // reports 128 when the child dies on a signal and reports no code of its
-      // own. It is NOT the timeout -- that path reports 124 and says so -- which
-      // is precisely what makes it worth its own sentence rather than a
-      // near-enough mapping onto one.
+      // Also ours: the child died on a signal nobody here sent.
       return {
-        headline: "Something outside MemQL stopped this step.",
-        advice:
-          "The step was killed by a signal MemQL did not send -- a Ctrl-C in the " +
-          "window behind this one, a system running out of memory, or a process " +
-          "supervisor. Nothing about the step itself failed. Retry is safe: every " +
-          "step checks first and skips what is already done.",
+        headline: "The step was interrupted.",
+        advice: "Retry is safe. Steps that already finished are skipped.",
         retryable: true,
       };
     case 2:
       return {
-        headline: "The installer passed this step something it would not accept.",
-        advice:
-          "This is a fault in MemQL rather than in your machine or your answers. " +
-          "Retrying unchanged will fail the same way; please report it with the output below.",
+        headline: "The installer passed this step something it won't accept.",
+        advice: "That's a fault in MemQL, not your computer. Please report it with the log.",
         retryable: false,
       };
     case 3:
       return {
-        headline: "The step refused to act.",
-        advice:
-          "A refusal is the script protecting something, not a crash -- most often " +
-          "an artifact it will not touch because it did not create it. The output " +
-          "below says what it declined to do.",
+        headline: "The step stopped to protect something already on this computer.",
+        advice: "The log says what it kept.",
         retryable: false,
       };
     case 4:
       return {
-        headline: "Something this step needs is not on this machine.",
-        advice:
-          "Install the missing prerequisite named below, then retry. Nothing has " +
-          "been left half-done -- a step that cannot start changes nothing.",
+        headline: "Something this step needs is missing.",
+        advice: "Install what the log names, then retry.",
         retryable: true,
       };
     case 5:
       return {
-        headline: "The step ran and did not succeed.",
-        advice:
-          "This one can be transient -- a slow pull, a port still in use. Retry is " +
-          "worth trying once; if it fails the same way, the output below is what to " +
-          "act on.",
+        headline: "The step failed.",
+        advice: "Retrying often helps. If it fails again, the log has the details.",
         retryable: true,
       };
     case null:
       return {
-        headline: "The step did not run to completion.",
-        advice:
-          "No exit code was recorded, which usually means it was stopped rather " +
-          "than that it failed. Retrying is safe.",
+        headline: "The step didn't finish.",
+        advice: "Retry is safe.",
         retryable: true,
       };
     default:
-      // An unrecognised code is reported AS unrecognised rather than mapped to
-      // the nearest known one. Guessing here would put confident wrong advice
-      // in front of an operator at the exact moment they are relying on it.
+      // A code nobody defined is reported as such rather than mapped to the
+      // nearest known one.
       return {
-        headline: `The step exited with code ${exitCode}.`,
-        advice:
-          "That is not one of the codes the capability-script contract defines, so " +
-          "MemQL cannot say what it means. The output below is the authority.",
+        headline: `The step failed with code ${exitCode}.`,
+        advice: "MemQL doesn't know what that code means. The log has the details.",
         retryable: true,
       };
   }
@@ -334,119 +309,60 @@ export function runIsSettled(steps: readonly StepProgress[]): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// the run's progress, as a number (memql#4454)
+// the run's progress, as a number
 // ---------------------------------------------------------------------------
 
-/**
- * How far along a run is.
- *
- * PURE, AND HERE RATHER THAN IN THE RENDERER, for the reason the rest of this
- * module exists: the panel that draws the bar imports `vscode`, so a
- * percentage computed inside a template literal is one no test can reach. The
- * bar is the most visible claim this wizard makes -- "you are two-thirds of the
- * way through a ten-minute operation" -- and it is worth being able to assert.
- */
-export interface RunProgress {
-  /** Steps that will not change state again. */
-  settled: number;
-  /** Every step the executor seeded, including the ones not started. */
-  total: number;
-  /** `settled / total` as a whole number; 0 when nothing has been seeded. */
-  percent: number;
-  /**
-   * The description of every step currently RUNNING, in graph order.
-   *
-   * A LIST BECAUSE A WAVE IS A LIST. The executor runs independent branches
-   * under `Promise.all`, so "the current step" is regularly three steps, and a
-   * narration that named one of them would be naming whichever the projection
-   * happened to reach first -- the same scheduling accident `failures` exists
-   * to avoid on the other side of the run.
-   *
-   * EMPTY IS ORDINARY: between waves, before the first step starts, and once
-   * the run is over. The caller decides what to say then; this reports.
-   */
-  currentDescriptions: readonly string[];
-}
+/** The executor's words for a step's state, from the wizard's. */
+const STATE_TO_STATUS: Readonly<Record<StepState, ProgressStatus>> = {
+  pending: "pending",
+  running: "running",
+  done: "ok",
+  skipped: "skipped",
+  preserved: "preserved",
+  failed: "failed",
+};
 
 /**
- * A step is SETTLED when it will not change state again.
+ * The wizard's step records as the progress model reads them.
  *
- * The same predicate `runIsSettled` applies to the whole list, deliberately:
- * two meanings of "settled" on one run is how a bar comes to disagree with the
- * Cancel button beside it. `skipped` and `preserved` count -- a step the run
- * verified it did not need is a step that is done with -- and so does `failed`,
- * which has finished in every sense except the one the operator cares about.
+ * THE LABEL FALLS BACK TO THE DESCRIPTION, then the id, only so a row whose
+ * first event has not landed is never blank; every graph step carries a label
+ * and it arrives with `runStarted`.
  */
-function isSettled(state: StepProgress["state"]): boolean {
-  return state !== "pending" && state !== "running";
+export function progressStepsOf(
+  steps: readonly StepProgress[],
+  weights?: Readonly<Record<string, number>>,
+): ProgressStep[] {
+  return steps.map((step) => {
+    const view: ProgressStep = {
+      id: step.id,
+      label: step.label !== "" ? step.label : step.description !== "" ? step.description : step.id,
+      weight: stepWeight(step.id, weights),
+      status: STATE_TO_STATUS[step.state] ?? "pending",
+    };
+    if (step.startedAt !== undefined) view.startedAt = step.startedAt;
+    if (step.finishedAt !== undefined) view.finishedAt = step.finishedAt;
+    if (step.phase !== undefined) view.phase = { ...step.phase };
+    return view;
+  });
 }
 
 /**
  * The run's progress, from the step list the executor seeded.
  *
- * THE BAR MAY MOVE BACKWARDS, and that is correct rather than a glitch to
- * smooth over. `AddClusterState.retry()` puts failed steps back to `pending`,
- * so a retry genuinely has more left to do than the moment before it -- and a
- * bar that only ever advanced would have to either freeze or lie about which
- * of the two it was.
+ * PURE, AND HERE RATHER THAN IN THE RENDERER, for the reason the rest of this
+ * module exists: the panels that draw the bar import `vscode`, so a percentage
+ * computed inside a template literal is one no test can reach.
  *
- * TOTAL IS THE SEEDED LIST, not a guess. `runStarted` upserts the steps ahead
- * precisely so "how much is left" is knowable; before that event the list is
- * empty, `total` is 0, and the caller renders an INDETERMINATE bar rather than
- * a 0% one -- "we do not know yet" and "nothing has happened yet" are different
- * claims and only one of them is true then.
+ * A state machine calls this through its own `progress(now)`, which carries the
+ * high-water mark from one render to the next; a caller with only a step list
+ * (a gallery page, a test) gets the same answer without one.
  */
-export function runProgress(steps: readonly StepProgress[]): RunProgress {
-  const total = steps.length;
-  const settled = steps.filter((step) => isSettled(step.state)).length;
-  return {
-    settled,
-    total,
-    percent: total === 0 ? 0 : Math.round((settled / total) * 100),
-    currentDescriptions: steps
-      .filter((step) => step.state === "running")
-      .map((step) => (step.description === "" ? step.id : step.description)),
-  };
-}
-
-/** The one line under the bar: what is happening, and where in the run it is. */
-export interface RunNarration {
-  /** The human sentence, or "" when there is nothing running to narrate. */
-  message: string;
-  /** "step 4 of 14", or "" while the total is still unknown. */
-  position: string;
-}
-
-/**
- * What to say beneath the progress bar.
- *
- * THE STEP'S OWN DESCRIPTION, NEVER ITS OUTPUT AND NEVER ITS SCRIPT. The graph
- * carries a written sentence per step for exactly this, and it is the single
- * source the CLI narrates from too -- which is what stops the wizard and the
- * terminal describing the same install differently. Raw output has one home on
- * this surface and it is behind the disclosure (memql#4455).
- *
- * A WAVE NAMES ITS FIRST STEP AND COUNTS THE REST. Listing three sentences on
- * one line is unreadable at the width a panel has, and picking one silently
- * would hide that anything else was in flight.
- *
- * POSITION IS `settled + 1`, CLAMPED. It is the step the operator is waiting
- * on, which is the one after everything that has finished; clamping stops the
- * last wave reporting "step 15 of 14" as it settles.
- */
-export function runNarration(progress: RunProgress): RunNarration {
-  const { currentDescriptions: current, settled, total } = progress;
-  const first = current[0];
-  const message =
-    first === undefined
-      ? ""
-      : current.length === 1
-        ? first
-        : // The stop is taken off the embedded sentence: "...over https. -- and 1
-          // more in progress" is what the naive join produces.
-          `${first.replace(/\.$/, "")} -- and ${current.length - 1} more in progress`;
-  return {
-    message,
-    position: total === 0 ? "" : `step ${Math.min(settled + 1, total)} of ${total}`,
-  };
+export function runProgressOf(
+  steps: readonly StepProgress[],
+  now: number,
+  prior?: { highWater: number },
+  weights?: Readonly<Record<string, number>>,
+): RunProgress {
+  return computeRunProgress(progressStepsOf(steps, weights), now, prior);
 }

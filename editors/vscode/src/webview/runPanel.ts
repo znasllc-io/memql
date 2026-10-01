@@ -1,62 +1,71 @@
 // The two run tabs: the argument form, and the result.
 //
 // Both are ADAPTERS. The form model and its coercion live in
-// state/argForm.ts, the result projection and banners in state/runResult.ts,
-// and the run itself in run/orchestrator.ts; this file owns the webview HTML,
-// the postMessage boundary, and nothing else.
+// state/argForm.ts, the result projection and its provenance in
+// state/runResult.ts, the markup in webview/runScreens.ts, and the run itself
+// in run/orchestrator.ts; this file owns the webview, the postMessage
+// boundary, and nothing else.
 //
 // Rendering goes through view-kit for the same reason the concept browser's
 // does: rows plus each concept's own @displayCard, no result-specific renderer
 // and no concept-specific code anywhere, so a concept declared five minutes
-// ago renders with no client change -- and the portal inherits the renderer
-// rather than rebuilding it.
+// ago renders with no client change.
+//
+// ON THE PAGE KIT (src/webview/ui). Each tab's document is assigned once per
+// screen and patched after that, so the form keeps the caret in the field
+// being typed in while its errors and its bar change, and the result keeps its
+// scroll and the JSON disclosure's state while it fills in. The form's values
+// arrive as the runtime's `input` messages, one per keystroke, and are held
+// here -- the page never repaints for them.
 //
 // The webview runs under a strict CSP with a per-load nonce. Result data is
 // untrusted (it is whatever the cluster returned) and view-kit escapes it, but
 // a CSP means an escaping bug cannot become script execution. The postMessage
-// channel is untrusted too, so the handler validates shape at runtime rather
-// than trusting the compile-time annotation.
+// channel is untrusted too, so every message is checked before it is acted on.
 //
-// THE PAT IS NEVER RENDERED HERE. Nothing in this file reads a ClusterConfig;
-// the orchestrator receives a RunCluster carrying only name, label and the
-// local flag, precisely so a credential cannot reach a webview by accident.
+// THE CREDENTIAL IS NEVER RENDERED HERE. Nothing in this file reads a
+// ClusterConfig; the orchestrator receives a RunCluster carrying only name,
+// label and the local flag, precisely so a credential cannot reach a webview
+// by accident.
 
 import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
 
-import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
-import {
-  escapeHtml,
-  renderRowList,
-  renderValueView,
-  renderToHtml,
-  viewKitStyles,
-  type ConceptLike,
-} from "@znasllc-io/memql-view-kit";
+import type { Concept } from "@znasllc-io/memql-sdk-core/client";
+import { viewKitStyles, type ConceptLike } from "@znasllc-io/memql-view-kit";
 
-import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
 import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 
 import type { RunTarget } from "../constructs/runnable.js";
 import type { RunOutcome } from "../run/orchestrator.js";
+import { buildFields, coerceArgs, orphanedValueNames, type ArgFieldModel } from "../state/argForm.js";
 import {
-  AUTO_INJECTED_FIELD_NOTE,
-  buildFields,
-  coerceArgs,
-  orphanedValueNames,
-  type ArgFieldModel,
-} from "../state/argForm.js";
-import { groupRowsByConcept, resultBannerFor } from "../state/runResult.js";
+  RESULT_ACTS,
+  RUN_FORM_ACTS,
+  RUN_PAGE_STYLES,
+  resultParts,
+  runFormParts,
+  withSwitchDefaults,
+  type ResultInput,
+  type RunFormNote,
+} from "./runScreens.js";
+import { pageDocument } from "./ui/document.js";
+import { LiveView } from "./ui/liveView.js";
+import { pageMessage } from "./ui/protocol.js";
 
 /** What the arg form asks the extension to do when the user acts. */
 export interface RunPanelHost {
-  /** Run the construct with these values. */
+  /**
+   * Run the construct with these values. The host opens the Result tab in its
+   * running state once the run really starts -- after any write confirmation --
+   * so a form that asked for a run shows the result it gets back.
+   */
   run(target: RunTarget, values: Record<string, unknown>): Promise<RunOutcome>;
-  /** Persist a named run configuration in the workspace. */
+  /** Persist a named saved run in the workspace. */
   saveConfig(target: RunTarget, name: string, values: Record<string, unknown>): Promise<void>;
   /** The concept descriptors for result rendering; empty before the first list load. */
   concepts(): ReadonlyMap<string, ConceptLike>;
-  /** Opens a row in the Concepts surface. */
+  /** Opens a row in the concept's page, selected. */
   openRow(conceptId: string, rowId: string): void;
 }
 
@@ -64,21 +73,36 @@ export function conceptMap(concepts: readonly Concept[]): Map<string, ConceptLik
   return new Map(concepts.map((c) => [c.id, c]));
 }
 
+/** The two ends of a live view over a panel's webview. */
+function liveTarget(panel: vscode.WebviewPanel): { setHtml(html: string): void; postMessage(msg: unknown): unknown } {
+  return {
+    setHtml: (html) => {
+      panel.webview.html = html;
+    },
+    postMessage: (message) => panel.webview.postMessage(message),
+  };
+}
+
+/** Both tabs' styles: view-kit's rows and value viewer, and the tabs' layout. */
+const STYLES = `${viewKitStyles}\n${RUN_PAGE_STYLES}`;
+
 // -----------------------------------------------------------------------------
 // The argument form
 // -----------------------------------------------------------------------------
 
 export class RunPanel {
-  // One panel per construct, keyed by uri+name: re-clicking Run with... on the
-  // same signature reveals the tab already holding your half-typed arguments
-  // rather than opening a second one that discards them.
+  // One panel per construct, keyed by uri+name: re-clicking Run... on the same
+  // signature reveals the tab already holding your half-typed arguments rather
+  // than opening a second one that discards them.
   private static readonly open_ = new Map<string, RunPanel>();
 
   private readonly panel: vscode.WebviewPanel;
+  private readonly live: LiveView;
   private readonly disposables: vscode.Disposable[] = [];
   private fields: ArgFieldModel[];
   private errors: Record<string, string> = {};
-  private notice = "";
+  private orphans: string[];
+  private note: RunFormNote | undefined;
   private busy = false;
   private disposed = false;
 
@@ -105,20 +129,36 @@ export class RunPanel {
     values: Record<string, unknown>,
     private readonly key: string,
   ) {
-    this.fields = buildFields(target.args, values);
-    this.notice = noticeFor(target, values);
+    this.fields = withSwitchDefaults(buildFields(target.args, values));
+    this.orphans = orphanedValueNames(target.args, values);
     this.panel = vscode.window.createWebviewPanel(
       "memqlRun",
-      `Run: ${target.name}`,
+      `Run ${target.name}`,
       vscode.ViewColumn.Active,
       { enableScripts: true },
     );
+    this.live = new LiveView(liveTarget(this.panel), (parts, screen) =>
+      pageDocument({
+        nonce: nonceValue(),
+        title: `Run ${this.target.name}`,
+        themeAttr: currentBodyThemeAttr(),
+        screen,
+        styles: STYLES,
+        ...parts,
+      }),
+    );
     this.disposables.push(
-      // The palette is a MemQL setting now, not the editor's theme, so an
-      // OPEN panel repaints when either input moves (memql#4419).
-      ...onAppearanceChange(() => this.render()),
+      // The palette is a MemQL setting, not the editor's theme, so an OPEN
+      // panel restyles when either input moves (memql#4419).
+      ...onAppearanceChange(() => {
+        this.live.invalidate();
+        this.render();
+      }),
       this.panel.onDidDispose(() => this.dispose()),
-      this.panel.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg)),
+      this.panel.webview.onDidReceiveMessage((msg: unknown) => {
+        if (this.live.handleMessage(msg)) return;
+        this.onMessage(msg);
+      }),
     );
     this.render();
   }
@@ -127,14 +167,13 @@ export class RunPanel {
   // edit) while keeping whatever the user has already typed.
   private adopt(target: RunTarget, values: Record<string, unknown>): void {
     this.target = target;
-    const current = this.currentText();
     const merged: Record<string, unknown> = { ...values };
-    for (const [name, text] of Object.entries(current)) {
+    for (const [name, text] of Object.entries(this.currentText())) {
       if (text !== "") merged[name] = text;
     }
-    this.fields = buildFields(target.args, merged);
-    this.notice = noticeFor(target, values);
-    this.panel.title = `Run: ${target.name}`;
+    this.fields = withSwitchDefaults(buildFields(target.args, merged));
+    this.orphans = orphanedValueNames(target.args, values);
+    this.panel.title = `Run ${target.name}`;
     this.render();
   }
 
@@ -144,61 +183,67 @@ export class RunPanel {
     return out;
   }
 
-  private onMessage(msg: unknown): void {
-    if (msg === null || typeof msg !== "object") return;
-    const { type, values, name } = msg as {
-      type?: unknown;
-      values?: unknown;
-      name?: unknown;
-    };
-    if (!isStringMap(values)) return;
-    // Keep what the user typed even when the action fails, so a validation
-    // error does not blank the form.
-    this.fields = buildFields(this.target.args, values as Record<string, unknown>);
-
-    if (type === "run") {
-      void this.doRun(values);
-    } else if (type === "save" && typeof name === "string") {
-      void this.doSave(name, values);
+  private onMessage(raw: unknown): void {
+    const message = pageMessage(raw);
+    if (message === undefined) return;
+    if (message.type === "input") {
+      // One keystroke. Held, never rendered: the page already shows it, and a
+      // repaint here would fight the caret.
+      const { field, value } = message as { field?: unknown; value?: unknown };
+      if (typeof field !== "string" || typeof value !== "string") return;
+      this.fields = this.fields.map((f) => (f.name === field ? { ...f, text: value } : f));
+      return;
+    }
+    if (message.type === RUN_FORM_ACTS.run) {
+      void this.doRun();
+    } else if (message.type === RUN_FORM_ACTS.saveAs) {
+      void this.doSave();
+    } else if (message.type === RUN_FORM_ACTS.openRuns) {
+      void vscode.commands.executeCommand("memql.runs.open");
     }
   }
 
-  private async doRun(raw: Record<string, string>): Promise<void> {
-    const coerced = coerceArgs(this.target.args, raw);
+  private async doRun(): Promise<void> {
+    if (this.busy) return;
+    const coerced = coerceArgs(this.target.args, this.currentText());
     if (!coerced.ok) {
       this.errors = coerced.errors;
       this.render();
       return;
     }
     this.errors = {};
+    this.note = undefined;
     this.busy = true;
     this.render();
     const outcome = await this.host.run(this.target, coerced.values);
     this.busy = false;
+    // A No to the write confirmation is answered HERE, where Run was pressed,
+    // exactly as the automation form answers it -- not by a Result tab opened
+    // to say that nothing happened.
+    if (outcome.status === "declined") this.note = { tone: "info", line: "Cancelled. Nothing ran." };
     this.render();
-    ResultPanel.show(this.context, this.host, outcome);
+    ResultPanel.show(this.context, this.host, outcome, coerced.values);
   }
 
-  private async doSave(name: string, raw: Record<string, string>): Promise<void> {
-    const trimmed = name.trim();
-    if (trimmed === "") {
-      this.errors = {};
-      this.notice = "ERROR: a run configuration needs a name.";
-      this.render();
-      return;
-    }
-    const coerced = coerceArgs(this.target.args, raw);
+  private async doSave(): Promise<void> {
+    const coerced = coerceArgs(this.target.args, this.currentText());
     if (!coerced.ok) {
       this.errors = coerced.errors;
       this.render();
       return;
     }
     this.errors = {};
+    // The name is asked for when it is needed, not kept on the page as a
+    // standing field beside a second button.
+    const name = (
+      await vscode.window.showInputBox({ prompt: "Name this saved run", placeHolder: this.target.name })
+    )?.trim();
+    if (name === undefined || name === "") return;
     try {
-      await this.host.saveConfig(this.target, trimmed, coerced.values);
-      this.notice = `Saved "${trimmed}" to .memql/runs.json. It is plain text -- open it to edit or commit it.`;
+      await this.host.saveConfig(this.target, name, coerced.values);
+      this.note = { tone: "info", line: `Saved as "${name}".`, openRuns: true };
     } catch (err) {
-      this.notice = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+      this.note = { tone: "error", line: err instanceof Error ? err.message : String(err) };
     }
     this.render();
   }
@@ -211,138 +256,28 @@ export class RunPanel {
   }
 
   private render(): void {
-    const nonce = nonceValue();
-    const fieldsHtml = this.fields.map((f) => this.fieldHtml(f)).join("\n");
-    const noticeHtml =
-      this.notice === "" ? "" : `<div class="notice">${escapeHtml(this.notice)}</div>`;
-
-    this.panel.webview.html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-<title>Run ${escapeHtml(this.target.name)}</title>
-<style nonce="${nonce}">
-${panelChrome()}
-  .field { margin: 12px 0; }
-  .field label { display: block; font-weight: 600; margin-bottom: 4px; }
-  .field .req { color: var(--vscode-errorForeground); margin-left: 4px; }
-  .field .type { color: var(--vscode-descriptionForeground); font-weight: 400; margin-left: 8px; }
-  .field .desc { color: var(--vscode-descriptionForeground); margin: 2px 0 6px; }
-  .field .auto { color: var(--vscode-descriptionForeground); font-style: italic; margin: 2px 0 6px; }
-  .field .autotag { color: var(--vscode-descriptionForeground); font-weight: 400; margin-left: 8px; }
-  .field .err { color: var(--vscode-errorForeground); margin-top: 4px; }
-  input, select, textarea { width: 100%; box-sizing: border-box; font-family: var(--vscode-editor-font-family);
-    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border, transparent); padding: 4px 6px; }
-  textarea { min-height: 5em; }
-  .actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
-  .actions input { width: auto; flex: 1 1 12em; }
-</style>
-</head>
-<body${currentBodyThemeAttr()}>
-<div class="toolbar">
-  ${brandMarkSvg(16)}
-  <strong class="data">${escapeHtml(this.target.kind)} ${escapeHtml(this.target.name)}</strong>
-  <span>${this.fields.length} argument${this.fields.length === 1 ? "" : "s"}</span>
-</div>
-${noticeHtml}
-<div class="pane">
-  <form id="form">
-${fieldsHtml === "" ? '<div class="placeholder">This construct takes no arguments.</div>' : fieldsHtml}
-    <div class="actions">
-      <button id="run" type="button"${this.busy ? " disabled" : ""}>${this.busy ? "Running..." : "Run"}</button>
-      <input id="config-name" type="text" placeholder="Name this run configuration">
-      <button id="save" type="button">Save configuration</button>
-    </div>
-  </form>
-</div>
-<script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
-  function values() {
-    const out = {};
-    for (const el of document.querySelectorAll('[data-arg]')) out[el.dataset.arg] = el.value;
-    return out;
+    if (this.disposed) return;
+    this.live.render(
+      "form",
+      runFormParts({
+        target: this.target,
+        fields: this.fields,
+        errors: this.errors,
+        orphans: this.orphans,
+        busy: this.busy,
+        note: this.note,
+      }),
+    );
   }
-  document.getElementById('run').addEventListener('click', () =>
-    vscode.postMessage({ type: 'run', values: values() }));
-  document.getElementById('save').addEventListener('click', () =>
-    vscode.postMessage({ type: 'save', name: document.getElementById('config-name').value, values: values() }));
-</script>
-</body>
-</html>`;
-  }
-
-  private fieldHtml(f: ArgFieldModel): string {
-    const id = `arg-${escapeHtml(f.name)}`;
-    const required = f.required ? '<span class="req" title="required">*</span>' : "";
-    const desc = f.description === "" ? "" : `<div class="desc">${escapeHtml(f.description)}</div>`;
-    // The @autoInjected marker sits on the FIELD, not on the form. The label
-    // gets the tag so it is visible without reading, and the caption below
-    // says what it means. The input stays editable and the value is still
-    // submitted -- the engine drops it, and pretending otherwise here would put
-    // the extension and the engine out of step (memql#3333).
-    const autoTag = f.autoInjected ? '<span class="autotag" title="@autoInjected">engine-supplied</span>' : "";
-    const autoNote = f.autoInjected
-      ? `<div class="auto">${escapeHtml(AUTO_INJECTED_FIELD_NOTE)}</div>`
-      : "";
-    const error = this.errors[f.name];
-    const errorHtml = error === undefined ? "" : `<div class="err">${escapeHtml(error)}</div>`;
-
-    let control: string;
-    if (f.enumValues.length > 0) {
-      // The DSL's own closed set becomes a dropdown. An optional enum keeps a
-      // blank entry, because "not supplied" is a distinct, reachable choice.
-      const blank = f.required ? "" : `<option value=""${f.text === "" ? " selected" : ""}></option>`;
-      const options = f.enumValues
-        .map(
-          (v) =>
-            `<option value="${escapeHtml(v)}"${v === f.text ? " selected" : ""}>${escapeHtml(v)}</option>`,
-        )
-        .join("");
-      control = `<select id="${id}" data-arg="${escapeHtml(f.name)}">${blank}${options}</select>`;
-    } else if (f.type === "object" || f.type === "array" || f.type === "any") {
-      control = `<textarea id="${id}" data-arg="${escapeHtml(f.name)}" spellcheck="false">${escapeHtml(f.text)}</textarea>`;
-    } else {
-      control = `<input id="${id}" data-arg="${escapeHtml(f.name)}" type="text" value="${escapeHtml(f.text)}">`;
-    }
-
-    return `<div class="field">
-  <label for="${id}">${escapeHtml(f.name)}${required}<span class="type">${escapeHtml(f.type)}</span>${autoTag}</label>
-  ${desc}
-  ${autoNote}
-  ${control}
-  ${errorHtml}
-</div>`;
-  }
-}
-
-function noticeFor(target: RunTarget, values: Record<string, unknown>): string {
-  const orphans = orphanedValueNames(target.args, values);
-  if (orphans.length === 0) return "";
-  // Silently dropping them would run something the saved configuration does
-  // not say; carrying them in a hidden field would be worse still.
-  return `This run configuration sets ${orphans.join(", ")}, which ${target.name} no longer declares. Those values are not shown and will not be sent.`;
 }
 
 // The separator is NUL because no component of a RunTarget can contain one, so
 // the joined key is unambiguous. It is written as an ESCAPE rather than as the
 // raw byte it used to be (memql#4422): a raw NUL makes the whole file "binary"
 // to the standard toolchain -- `file` reports "data", and `grep` skips it in
-// silence, with no message and a zero exit. That is not hypothetical here.
-// This file was invisible to the survey that produced this epic's design
-// record, which is why that record says "all six webview panels" when there
-// are seven, and it is why the brand-coverage gate reads panels with a decoder
-// that cannot fail rather than shelling out to grep. Same value, same key,
-// greppable.
+// silence, with no message and a zero exit. Same value, same key, greppable.
 function panelKey(target: RunTarget): string {
   return `${target.uri}\u0000${target.kind}\u0000${target.name}`;
-}
-
-function isStringMap(v: unknown): v is Record<string, string> {
-  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
-  return Object.values(v as Record<string, unknown>).every((x) => typeof x === "string");
 }
 
 // -----------------------------------------------------------------------------
@@ -356,60 +291,149 @@ export class ResultPanel {
   private static current: ResultPanel | undefined;
 
   private readonly panel: vscode.WebviewPanel;
+  private readonly live: LiveView;
   private readonly disposables: vscode.Disposable[] = [];
-  private outcome: RunOutcome;
-  private showRaw = false;
+  private shown: ResultInput;
+  private jsonOpen = false;
+  /** What the shown run was called with, for "Save as...". */
+  private values: Record<string, unknown> | undefined;
+  /** Bumped per run, so each run's result is a new screen (a fresh scroll). */
+  private run = 0;
   private disposed = false;
 
-  static show(context: vscode.ExtensionContext, host: RunPanelHost, outcome: RunOutcome): void {
+  /** Opens (or reuses) the tab in its running shape, as a run starts. */
+  static running(context: vscode.ExtensionContext, host: RunPanelHost, target: RunTarget): void {
+    ResultPanel.present(context, host, { state: "running", target });
+  }
+
+  /**
+   * `values` are what the run was called with, when the caller has them: they
+   * are what "Save as..." writes, so without them the page offers no save.
+   */
+  static show(
+    context: vscode.ExtensionContext,
+    host: RunPanelHost,
+    outcome: RunOutcome,
+    values?: Record<string, unknown>,
+  ): void {
     // A superseded run has nothing to show: a newer run is already in flight
-    // and will paint over this the moment it lands.
-    if (outcome.status === "superseded") return;
-    if (ResultPanel.current !== undefined && !ResultPanel.current.disposed) {
-      ResultPanel.current.outcome = outcome;
-      ResultPanel.current.showRaw = false;
-      ResultPanel.current.panel.title = resultTitle(outcome);
-      ResultPanel.current.render();
-      ResultPanel.current.panel.reveal(undefined, true);
+    // and will paint over this the moment it lands. A declined one never
+    // started, so it opened no tab and opens none now.
+    if (outcome.status === "superseded" || outcome.status === "declined") return;
+    ResultPanel.present(
+      context,
+      host,
+      { state: "settled", outcome, concepts: host.concepts(), jsonOpen: false, canSave: values !== undefined },
+      values,
+    );
+  }
+
+  private static present(
+    context: vscode.ExtensionContext,
+    host: RunPanelHost,
+    shown: ResultInput,
+    values?: Record<string, unknown>,
+  ): void {
+    const existing = ResultPanel.current;
+    if (existing !== undefined && !existing.disposed) {
+      if (shown.state === "running") existing.run += 1;
+      existing.shown = shown;
+      existing.values = values;
+      existing.jsonOpen = false;
+      existing.panel.title = titleOf(shown);
+      existing.render();
+      existing.panel.reveal(undefined, true);
       return;
     }
-    ResultPanel.current = new ResultPanel(context, host, outcome);
+    ResultPanel.current = new ResultPanel(context, host, shown);
+    ResultPanel.current.values = values;
   }
 
   private constructor(
     _context: vscode.ExtensionContext,
     private readonly host: RunPanelHost,
-    outcome: RunOutcome,
+    shown: ResultInput,
   ) {
-    this.outcome = outcome;
+    this.shown = shown;
     this.panel = vscode.window.createWebviewPanel(
       "memqlRunResult",
-      resultTitle(outcome),
+      titleOf(shown),
       { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
       { enableScripts: true },
     );
+    this.live = new LiveView(liveTarget(this.panel), (parts, screen) =>
+      pageDocument({
+        nonce: nonceValue(),
+        title: titleOf(this.shown),
+        themeAttr: currentBodyThemeAttr(),
+        screen,
+        styles: STYLES,
+        ...parts,
+      }),
+    );
     this.disposables.push(
-      // The palette is a MemQL setting now, not the editor's theme, so an
-      // OPEN panel repaints when either input moves (memql#4419).
-      ...onAppearanceChange(() => this.render()),
+      // The palette is a MemQL setting, not the editor's theme, so an OPEN
+      // panel restyles when either input moves (memql#4419).
+      ...onAppearanceChange(() => {
+        this.live.invalidate();
+        this.render();
+      }),
       this.panel.onDidDispose(() => this.dispose()),
-      this.panel.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg)),
+      this.panel.webview.onDidReceiveMessage((msg: unknown) => {
+        if (this.live.handleMessage(msg)) return;
+        this.onMessage(msg);
+      }),
     );
     this.render();
   }
 
-  private onMessage(msg: unknown): void {
-    if (msg === null || typeof msg !== "object") return;
-    const { type, conceptId, rowId } = msg as {
-      type?: unknown;
-      conceptId?: unknown;
-      rowId?: unknown;
-    };
-    if (type === "toggleRaw") {
-      this.showRaw = !this.showRaw;
-      this.render();
-    } else if (type === "openRow" && typeof conceptId === "string" && typeof rowId === "string") {
-      this.host.openRow(conceptId, rowId);
+  private onMessage(raw: unknown): void {
+    const message = pageMessage(raw);
+    if (message === undefined) return;
+    const { conceptId, value } = message as { conceptId?: unknown; value?: unknown };
+    switch (message.type) {
+      case RESULT_ACTS.openRow:
+        if (typeof conceptId === "string" && typeof value === "string") this.host.openRow(conceptId, value);
+        return;
+      case RESULT_ACTS.json:
+        this.jsonOpen = message.open === true;
+        return;
+      case RESULT_ACTS.saveAs:
+        void this.saveAs();
+        return;
+      case RESULT_ACTS.copyErrorId:
+        if (this.shown.state === "settled" && this.shown.outcome.status === "error") {
+          const id = this.shown.outcome.errorId;
+          void vscode.env.clipboard.writeText(id).then(() => {
+            void vscode.window.showInformationMessage(`MemQL: Copied ${id}.`);
+          });
+        }
+        return;
+      case RESULT_ACTS.showProblems:
+        void vscode.commands.executeCommand("workbench.actions.view.problems");
+        return;
+      case RESULT_ACTS.selectCluster:
+        void vscode.commands.executeCommand("memql.clusters.select");
+        return;
+    }
+  }
+
+  /** Saves the shown run, with the values it ran with, under a name asked for now. */
+  private async saveAs(): Promise<void> {
+    if (this.shown.state !== "settled" || this.shown.outcome.status !== "ok" || this.values === undefined) return;
+    const { target } = this.shown.outcome;
+    const values = this.values;
+    const name = (await vscode.window.showInputBox({ prompt: "Name this saved run", placeHolder: target.name }))?.trim();
+    if (name === undefined || name === "") return;
+    try {
+      await this.host.saveConfig(target, name, values);
+    } catch (err) {
+      void vscode.window.showErrorMessage(`MemQL: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    const open = "Edit saved runs";
+    if ((await vscode.window.showInformationMessage(`MemQL: Saved "${name}".`, open)) === open) {
+      await vscode.commands.executeCommand("memql.runs.open");
     }
   }
 
@@ -421,152 +445,17 @@ export class ResultPanel {
   }
 
   private render(): void {
-    const nonce = nonceValue();
-    const o = this.outcome;
-
-    let bodyHtml: string;
-    let bannerHtml = "";
-    // THE VALUE, not a stringified copy of it (memql#3754). The raw pane used
-    // to be `<pre>` of JSON.stringify -- which is the unreadable-value
-    // complaint the value viewer exists to answer, and the one surface still
-    // showing it. The viewer needs the value itself to collapse, badge and
-    // filter it, so what is carried here is the value and the rendering
-    // happens at the end.
-    let rawValue: unknown;
-
-    if (o.status === "ok") {
-      // Always present, on every run: a banner that only ever appears on the
-      // bad case is one the reader learns to skip.
-      bannerHtml = `<div class="${o.ranDeployedDefinition ? "warning" : "notice"}">${escapeHtml(resultBannerFor({ ...o, kind: o.target.kind }))}</div>`;
-      rawValue = o.toolContent ?? o.raw;
-      bodyHtml =
-        o.toolContent !== undefined ? toolContentHtml(o.toolContent) : this.rowsHtml(o.rows);
-    } else if (o.status === "invalid") {
-      bannerHtml = `<div class="warning">${escapeHtml(
-        `The bundle did not compile (${o.phase}). Nothing ran. The failures are in the Problems panel, at their position in your buffer.`,
-      )}</div>`;
-      bodyHtml = `<ul class="diagnostics">${o.diagnostics
-        .map(
-          (d) =>
-            `<li>${escapeHtml(d.message)}${d.fileLevel ? "" : ` <span class="muted">(${escapeHtml(d.path)}:${d.start.line + 1}:${d.start.character + 1})</span>`}</li>`,
-        )
-        .join("")}</ul>`;
-      rawValue = o.diagnostics;
-    } else if (o.status === "declined") {
-      bodyHtml = `<div class="placeholder">Cancelled. ${escapeHtml(o.target.name)} was not run.</div>`;
-    } else if (o.status === "superseded") {
-      // show() refuses a superseded outcome, so this is unreachable through
-      // the normal path -- but the union carries the case, and an unhandled
-      // one would fall into the error branch below and read the fields it does
-      // not have.
-      bodyHtml = '<div class="placeholder">Superseded by a newer run.</div>';
-    } else {
-      // The ERR- id is rendered SEPARATELY and selectably: it is the only
-      // handle the developer has on the server-side log entry, and burying it
-      // in prose is the difference between a support thread that resolves and
-      // one that does not.
-      const idHtml =
-        o.errorId === ""
-          ? ""
-          : `<p>Error id: <code id="error-id" class="selectable">${escapeHtml(o.errorId)}</code></p>`;
-      bodyHtml = `<div class="error">ERROR (${escapeHtml(o.phase)}): ${escapeHtml(o.message)}</div>${idHtml}`;
-      rawValue = { phase: o.phase, message: o.message, errorId: o.errorId };
-    }
-
-    this.panel.webview.html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-<title>${escapeHtml(resultTitle(this.outcome))}</title>
-<style nonce="${nonce}">
-${panelChrome()}
-${viewKitStyles}
-  .diagnostics { margin: 0; padding-left: 20px; }
-  .muted { color: var(--vscode-descriptionForeground); }
-  pre { white-space: pre-wrap; word-break: break-word; font-family: var(--vscode-editor-font-family); }
-  code.selectable { user-select: all; }
-  .group-title { font-weight: 600; margin: 12px 0 4px; }
-</style>
-</head>
-<body${currentBodyThemeAttr()}>
-<div class="toolbar">
-  ${brandMarkSvg(16)}
-  <strong>${escapeHtml(resultTitle(this.outcome))}</strong>
-  <button id="raw" type="button">${this.showRaw ? "Show rows" : "Show the raw result"}</button>
-</div>
-${bannerHtml}
-<div class="pane">
-${this.showRaw ? renderToHtml(renderValueView(rawValue, { copy: false })) : bodyHtml}
-</div>
-<script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
-  document.getElementById('raw').addEventListener('click', () => vscode.postMessage({ type: 'toggleRaw' }));
-  // One delegated listener: view-kit emits data attributes, never inline
-  // handlers, which is what lets the CSP forbid them outright.
-  document.querySelector('.pane').addEventListener('click', (e) => {
-    const row = e.target.closest('[data-row-id]');
-    if (!row) return;
-    const group = row.closest('[data-concept-id]');
-    vscode.postMessage({
-      type: 'openRow',
-      conceptId: group ? group.dataset.conceptId : '',
-      rowId: row.dataset.rowId,
-    });
-  });
-</script>
-</body>
-</html>`;
-  }
-
-  private rowsHtml(rows: readonly Row[]): string {
-    if (rows.length === 0) {
-      return '<div class="placeholder">The run succeeded and returned no rows.</div>';
-    }
-    const groups = groupRowsByConcept(rows, this.host.concepts());
-    return groups
-      .map((g) => {
-        const title = groups.length > 1 ? `<div class="group-title">${escapeHtml(g.concept.entity)}</div>` : "";
-        return `${title}<div data-concept-id="${escapeHtml(g.concept.id)}">${renderToHtml(
-          renderRowList(g.rows, g.concept),
-        )}</div>`;
-      })
-      .join("\n");
+    if (this.disposed) return;
+    const shown: ResultInput =
+      this.shown.state === "settled" ? { ...this.shown, jsonOpen: this.jsonOpen } : this.shown;
+    // The running shape and its result are ONE screen, so the result patches
+    // into the page the run opened; the next run is a new one.
+    this.live.render(`result:${this.run}`, resultParts(shown));
   }
 }
 
-function resultTitle(outcome: RunOutcome): string {
-  if (outcome.status === "superseded") return "Result";
-  return `Result: ${outcome.target.name}`;
-}
-
-function toolContentHtml(content: readonly { type: string; text: string }[]): string {
-  if (content.length === 0) {
-    return '<div class="placeholder">The tool returned no content.</div>';
-  }
-  return content
-    .map((c) => `<pre>${escapeHtml(c.text === "" ? `(${c.type} content)` : c.text)}</pre>`)
-    .join("\n");
-}
-
-// The chrome both panels share. Kept as one string rather than duplicated so
-// the two tabs cannot drift apart visually.
-function panelChrome(): string {
-  return `${brandStyleBlock()}
-  body { padding: 0; }
-  .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--memql-border);
-             display: flex; gap: 12px; align-items: center; }
-  .toolbar .memql-mark { color: var(--memql-accent); }
-  .pane { overflow: auto; padding: 8px 12px; }
-  .placeholder { color: var(--memql-muted); opacity: 0.7; padding: 8px 0; }
-  .error { color: var(--memql-danger); padding: 8px 0; }
-  .warning { color: var(--memql-data-string); padding: 8px 12px; }
-  .notice { color: var(--memql-muted); padding: 8px 12px; }
-  button { background: var(--memql-accent); color: var(--memql-on-accent);
-           border: none; padding: 4px 10px; cursor: pointer; border-radius: 3px; }
-  button:hover { background: var(--memql-accent-deep); color: var(--memql-on-accent-hover); }
-  button:disabled { opacity: 0.6; cursor: default; }`;
+function titleOf(shown: ResultInput): string {
+  return shown.state === "running" ? shown.target.name : shown.outcome.target.name;
 }
 
 // A CSP nonce is a security control, so it comes from a CSPRNG. Math.random()

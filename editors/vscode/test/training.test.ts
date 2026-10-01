@@ -159,12 +159,25 @@ test("each state gets its own label", () => {
     construct("trained", "c"),
     construct("seeded", "d"),
   ]);
-  assert.deepEqual(plans.map((p) => p.label), ["untrained", "drifted", "trained", "seeded"]);
+  // In words, not the wire enum.
+  assert.deepEqual(plans.map((p) => p.label), ["Not on cluster", "Differs from cluster", "Live", "Built in"]);
 });
 
 test("unknown produces NO plan at all -- not an empty one", () => {
   // The caller renders what it gets, so absence here is absence on screen.
   assert.deepEqual(trainingLensPlans([construct("unknown")]), []);
+});
+
+test("a construct defined for this session keeps its marker even when its state cannot be read", () => {
+  // The session lens used to be drawn whatever the state; folded into the one
+  // training lens, an `unknown` state would have taken the marker with it.
+  const plans = trainingLensPlans([construct("unknown")], { offerActions: true, sessionDefined: () => true });
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0]?.label, "This session");
+  assert.deepEqual(plans[0]?.actions, []);
+  assert.match(plans[0]?.detail ?? "", /until you disconnect/);
+  // And nothing at all when it is not session-defined.
+  assert.deepEqual(trainingLensPlans([construct("unknown")], { sessionDefined: () => false }), []);
 });
 
 test("a mixed file shows all three simultaneously, in document order", () => {
@@ -175,9 +188,9 @@ test("a mixed file shows all three simultaneously, in document order", () => {
     construct("drifted", "c"),
   ]);
   assert.deepEqual(plans.map((p) => `${p.construct.name}:${p.label}`), [
-    "a:trained",
-    "b:untrained",
-    "c:drifted",
+    "a:Live",
+    "b:Not on cluster",
+    "c:Differs from cluster",
   ]);
 });
 
@@ -194,15 +207,10 @@ test("with actions on, each state offers exactly what the design's table says", 
     trainingLensPlans([construct(state)], { offerActions: true })[0]?.actions.map((a) => a.title) ??
     [];
 
-  // The order is the ESCALATION: a session that ends, a private one that does
-  // not, and one everybody gets.
-  assert.deepEqual(of("untrained"), ["Dry-run", "Try in session", "Stage", "Promote"]);
-  assert.deepEqual(of("drifted"), [
-    "Dry-run",
-    "Try in session",
-    "Stage",
-    "Promote (updates the trained version)",
-  ]);
+  // The order is the ESCALATION: a check that changes nothing, a session that
+  // ends, a private copy that does not, and one everybody gets.
+  assert.deepEqual(of("untrained"), ["Dry run", "Try in this session", "Stage", "Promote"]);
+  assert.deepEqual(of("drifted"), ["Dry run", "Try in this session", "Stage", "Promote"]);
   assert.deepEqual(of("trained"), ["Demote"]);
   // Not a disabled control: absent. A seeded construct needs a rollout, which
   // is not something this editor can offer.
@@ -212,13 +220,16 @@ test("with actions on, each state offers exactly what the design's table says", 
   // against a cluster this editor cannot say is local. The two locality cases
   // are the next test.
   assert.deepEqual(of("edited"), []);
-  // Staged is the only state with a Train, and Train is COMMAND_PROMOTE under a
-  // title that names the consequence -- on the wire it IS a promote.
-  assert.deepEqual(of("staged"), [
-    "Re-stage",
-    "Train (make it live for everyone)",
-    "Demote",
-  ]);
+  // Making a staged construct live is COMMAND_PROMOTE, and it is called
+  // Promote: on the wire it IS a promote, and one act gets one name.
+  assert.deepEqual(of("staged"), ["Re-stage", "Promote", "Demote"]);
+  // Every act carries the line the quick pick shows under it.
+  for (const state of ["untrained", "drifted", "trained", "staged"] as const) {
+    for (const action of trainingLensPlans([construct(state)], { offerActions: true })[0]?.actions ?? []) {
+      assert.ok(action.description.length > 0, `${state}: ${action.title} has no description`);
+      assert.doesNotMatch(action.title, /\(/, `${state}: an explanation inside a title`);
+    }
+  }
 });
 
 test("edited offers Rebuild on a local cluster and only words on a remote one", () => {
@@ -236,19 +247,21 @@ test("staged trains through the promote command, not a command of its own", () =
   // command would be a second name for one operation, and the two would then
   // have to be kept doing the same thing.
   const [plan] = trainingLensPlans([construct("staged")], { offerActions: true });
-  const train = plan?.actions.find((a) => a.title.startsWith("Train"));
+  const train = plan?.actions.find((a) => a.title === "Promote");
   assert.equal(train?.command, COMMAND_PROMOTE);
+  assert.match(train?.description ?? "", /live for everyone/);
 });
 
 test("staged says who can call it, which is the whole of what makes it not trained", () => {
   const [plan] = trainingLensPlans([construct("staged")]);
-  assert.match(plan?.detail ?? "", /callable by you and by nobody else/);
-  assert.match(plan?.detail ?? "", /Train it/);
+  assert.match(plan?.detail ?? "", /only you can call it/);
+  assert.equal(plan?.label, "Staged · only you");
 });
 
 test("drifted names what promoting will do, because it is not the same act", () => {
   const [plan] = trainingLensPlans([construct("drifted")], { offerActions: true });
-  assert.match(plan?.actions.at(-1)?.title ?? "", /updates the trained version/);
+  // Said in the act's line, not inside its title.
+  assert.match(plan?.actions.at(-1)?.description ?? "", /Replaces the live version/);
 });
 
 test("seeded explains why there is nothing to do", () => {
@@ -256,12 +269,12 @@ test("seeded explains why there is nothing to do", () => {
   // the reason or the developer reads the gap as a bug.
   const [plan] = trainingLensPlans([construct("seeded")]);
   assert.match(plan?.detail ?? "", /rollout/);
-  assert.match(plan?.detail ?? "", /nothing here to demote/);
+  assert.match(plan?.detail ?? "", /not a promote/);
 });
 
 test("untrained says the thing this whole surface exists to say", () => {
   const [plan] = trainingLensPlans([construct("untrained")]);
-  assert.match(plan?.detail ?? "", /Saving the file does not change that/);
+  assert.match(plan?.detail ?? "", /Saving doesn't publish it/);
 });
 
 // -----------------------------------------------------------------------------
@@ -279,8 +292,9 @@ test("the status bar reports only what needs attention", () => {
     construct("staged", "g"),
   ]);
   assert.deepEqual(counts, { untrained: 3, drifted: 1, trained: 1, seeded: 1, edited: 0, staged: 1 });
-  // The design's example, exactly.
-  assert.equal(statusBarText(counts), "3 untrained · 1 drifted");
+  // One number, in words: what is not live. The breakdown is the tooltip's.
+  assert.equal(statusBarText(counts), "4 not live");
+  assert.match(statusBarTooltip(counts), /3 not on cluster, 1 differs from cluster/);
 });
 
 test("an edited construct needs attention, so the bar says so beside the other two", () => {
@@ -291,9 +305,10 @@ test("an edited construct needs attention, so the bar says so beside the other t
   // not in the bar would make the number disagree with the rows it clicks
   // through to.
   const counts = countStates([construct("edited", "a"), construct("edited", "b"), construct("drifted", "c")]);
-  assert.equal(statusBarText(counts), "1 drifted · 2 edited");
-  assert.match(statusBarTooltip(counts), /2 construct\(s\)/);
-  assert.equal(statusBarText(countStates([construct("edited", "a")])), "1 edited");
+  assert.equal(statusBarText(counts), "3 not live");
+  assert.match(statusBarTooltip(counts), /2 edited/);
+  assert.doesNotMatch(statusBarTooltip(counts), /\(s\)/);
+  assert.equal(statusBarText(countStates([construct("edited", "a")])), "1 not live");
 });
 
 test("an all-trained file says nothing", () => {
@@ -310,9 +325,10 @@ test("a staged construct needs no attention, so the status bar stays silent abou
   assert.equal(statusBarText(countStates([construct("staged")])), "");
 });
 
-test("a zero count is omitted rather than shown as `0 drifted`", () => {
-  assert.equal(statusBarText(countStates([construct("untrained")])), "1 untrained");
-  assert.equal(statusBarText(countStates([construct("drifted")])), "1 drifted");
+test("a zero count is omitted from the breakdown rather than shown as `0 differ`", () => {
+  const tip = statusBarTooltip(countStates([construct("untrained")]));
+  assert.match(tip, /1 not on cluster/);
+  assert.doesNotMatch(tip, /\b0 /);
 });
 
 test("unknown counts toward nothing", () => {
@@ -323,7 +339,7 @@ test("unknown counts toward nothing", () => {
 
 test("the tooltip is where saving-is-not-promoting is said in words", () => {
   const tip = statusBarTooltip(countStates([construct("untrained"), construct("drifted", "b")]));
-  assert.match(tip, /Saving this file does not promote anything/);
+  assert.match(tip, /Saving doesn't publish/);
 });
 
 test("no tooltip when there is nothing to report", () => {
@@ -476,7 +492,7 @@ test("the list carries exactly the constructs the status bar counts", () => {
   const entries = trainingListEntries(constructs);
 
   assert.equal(entries.length, counts.untrained + counts.drifted + counts.edited);
-  assert.equal(statusBarText(counts), "1 untrained · 1 drifted · 1 edited");
+  assert.equal(statusBarText(counts), "3 not live");
   assert.deepEqual(
     entries.map((e) => e.construct.name),
     ["b", "d", "f"],
@@ -501,8 +517,8 @@ test("the list is in document order, not grouped by state", () => {
 
 test("a row says the kind, the name, the state, and the lens's own sentence", () => {
   const [entry] = trainingListEntries([construct("drifted", "spaceParticipants")]);
-  assert.equal(entry?.label, "query spaceParticipants");
-  assert.equal(entry?.description, "drifted");
+  assert.equal(entry?.label, "spaceParticipants");
+  assert.equal(entry?.description, "query · Differs from cluster");
   // The SAME sentence the lens tooltip carries, not a second wording of it: two
   // phrasings for one state are two things to keep in step, and the second one
   // drifts.

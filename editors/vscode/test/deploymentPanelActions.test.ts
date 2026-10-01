@@ -18,6 +18,11 @@
 // dispatcher under test/support/deployDispatcher.ts answers for the ENGINE
 // instead, so the SDK's own argument checks run exactly as they do for an
 // operator.
+//
+// On the page every deploy control is a kit act, `data-act="deploy"
+// data-value="<key>"`, posting `{ type: "deploy", value: <key> }`. The page
+// says what happened in a sentence; the engine's log line goes to Output and
+// the audit id under Details.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -72,8 +77,10 @@ const SUGGESTION = {
 interface Harness {
   page: StubWebviewPanel;
   dispatcher: DeployDispatcher;
-  /** Every type-to-confirm prompt the panel raised, with its phrase. */
-  prompts: { prompt: string; phrase: string }[];
+  /** Every type-to-confirm prompt the panel raised, with its title and phrase. */
+  prompts: { title: string; prompt: string; phrase: string }[];
+  /** Every line the panel sent to the Output channel. */
+  logged: string[];
   /** Posts a deploy-control button's key, as a click would, and waits for the page to settle. */
   press(key: string): Promise<void>;
   close(): void;
@@ -96,7 +103,8 @@ async function open(
   const dispatcher =
     over.dispatcher ??
     new DeployDispatcher().answer("getDeploymentStatus", STATUS).answer("suggestNextVersion", SUGGESTION);
-  const prompts: { prompt: string; phrase: string }[] = [];
+  const prompts: { title: string; prompt: string; phrase: string }[] = [];
+  const logged: string[] = [];
   const client = dispatcher.client();
   const deps: DeploymentPanelDeps = {
     catalog: {
@@ -123,19 +131,21 @@ async function open(
     readDeployments: () => async () => ({ deployments: HISTORY, specs: [] }),
     deployPort: () => client,
     readRole: async () => roleVisibility("owner"),
-    confirm: async (prompt, phrase) => {
-      prompts.push({ prompt, phrase });
+    confirm: async ({ title, prompt, phrase }) => {
+      prompts.push({ title, prompt, phrase });
       return over.answer === undefined ? phrase : over.answer(phrase);
     },
+    logLine: (line) => logged.push(line),
   };
   DeploymentPanel.show(CONTEXT, deps, "staging");
   const page = recorded.webviews.at(-1);
   assert.ok(page !== undefined, "no webview was created");
-  await until(() => page.html.includes("data-deploy="), "the deploy controls to render");
+  await until(() => page.html.includes('data-act="deploy"'), "the deploy controls to render");
   return {
     page,
     dispatcher,
     prompts,
+    logged,
     async press(key: string): Promise<void> {
       const renders = page.renders;
       page.send({ type: "deploy", value: key });
@@ -175,15 +185,18 @@ async function settle(page: StubWebviewPanel): Promise<void> {
 test("promote names the rollout, and the request reaches the wire", async () => {
   const h = await open();
   try {
-    // One pair per rollout IN FLIGHT: memql-agent is Healthy, so it has none.
-    assert.match(h.page.html, /data-deploy="rolloutAction:promote:memql-bff"/);
-    assert.match(h.page.html, /data-deploy="rolloutAction:abort:memql-bff"/);
-    assert.doesNotMatch(h.page.html, /memql-agent"/);
+    // One pair per rollout IN FLIGHT, on that rollout's row: memql-agent is
+    // Healthy, so it has neither a row nor an act.
+    assert.match(h.page.html, /data-act="deploy" data-value="rolloutAction:promote:memql-bff"/);
+    assert.match(h.page.html, /data-act="deploy" data-value="rolloutAction:abort:memql-bff"/);
+    assert.match(h.page.html, /aria-label="Promote memql-bff"/);
+    assert.doesNotMatch(h.page.html, /memql-agent/);
 
     await h.press("rolloutAction:promote:memql-bff");
     assert.deepEqual(h.dispatcher.calls("rolloutAction"), [{ rollout: "memql-bff", action: "promote" }]);
     assert.deepEqual(h.prompts, [], "promote is immediate; it asked for a confirmation");
-    assert.match(h.page.html, /SUCCESS: rollout_action/);
+    assert.match(h.page.html, /Rollout promoted\./);
+    assert.ok(h.logged.some((line) => line.startsWith("SUCCESS: rollout_action")), "the engine's line did not reach Output");
   } finally {
     h.close();
   }
@@ -196,9 +209,12 @@ test("abort is offered, and confirmed against the rollout's name before it is se
     await h.press("rolloutAction:abort:memql-bff");
     assert.equal(h.prompts.length, 1);
     assert.equal(h.prompts[0].phrase, "memql-bff");
-    assert.match(h.prompts[0].prompt, /Abort memql-bff/);
+    assert.equal(h.prompts[0].title, "Abort memql-bff");
+    assert.match(h.prompts[0].prompt, /Abort the memql-bff rollout\?/);
     assert.deepEqual(h.dispatcher.calls("rolloutAction"), [{ rollout: "memql-bff", action: "abort" }]);
-    assert.match(h.page.html, /\(audit audit-abort\)/);
+    assert.match(h.page.html, /Rollout aborted\./);
+    // The audit id is kept for a support case, under Details.
+    assert.match(h.page.html, /<dt>Audit reference<\/dt><dd class="mq-mono">audit-abort<\/dd>/);
   } finally {
     h.close();
   }
@@ -209,7 +225,7 @@ test("an abort whose phrase does not match sends nothing", async () => {
   try {
     await h.press("rolloutAction:abort:memql-bff");
     assert.deepEqual(h.dispatcher.calls("rolloutAction"), []);
-    assert.match(h.page.html, /did not match memql-bff, so Abort memql-bff was not run/);
+    assert.match(h.page.html.replace(/&#39;/g, "'"), /That didn't match, so nothing changed\./);
   } finally {
     h.close();
   }
@@ -223,7 +239,7 @@ test("the old message -- the action with no rollout -- sends nothing", async () 
   try {
     await h.press("rolloutAction");
     assert.deepEqual(h.dispatcher.calls("rolloutAction"), []);
-    assert.match(h.page.html, /target is no longer current, so Rollout promote \/ abort was not run/);
+    assert.match(h.page.html.replace(/&#39;/g, "'"), /That's out of date, so nothing ran\./);
   } finally {
     h.close();
   }
@@ -238,8 +254,8 @@ test("with no rollout in flight the page says so instead of drawing a button", a
     .answer("suggestNextVersion", SUGGESTION);
   const h = await open({ dispatcher });
   try {
-    assert.doesNotMatch(h.page.html, /data-deploy="rolloutAction/);
-    assert.match(h.page.html, /No Argo Rollout is in flight, so there is nothing to promote or abort/);
+    assert.doesNotMatch(h.page.html, /data-value="rolloutAction/);
+    assert.match(h.page.html, /Rollouts<\/h2><div class="mq-empty"><p class="mq-empty-line">None in progress\.<\/p>/);
   } finally {
     h.close();
   }
@@ -253,9 +269,14 @@ test("the page reads the version preview and offers a cut per bump, naming each 
   const h = await open();
   try {
     assert.equal(h.dispatcher.calls("suggestNextVersion").length, 1, "previewNextVersion was never called");
-    assert.match(h.page.html, />Cut 1\.4\.3 \(patch\)</);
-    assert.match(h.page.html, />Cut 1\.5\.0 \(minor\)</);
-    assert.match(h.page.html, />Cut 2\.0\.0 \(major\)</);
+    // "Prepare" is the page's word for a cut; the bump is the quiet note beside it.
+    for (const [bump, version] of [["patch", "1.4.3"], ["minor", "1.5.0"], ["major", "2.0.0"]]) {
+      const v = version.replace(/\./g, "\\.");
+      assert.match(
+        h.page.html,
+        new RegExp(`data-act="deploy" data-value="cutVersion:${bump}:${v}"[^>]*><span class="dp-row-label">Prepare ${v}</span><span class="dp-row-desc">${bump}<`),
+      );
+    }
   } finally {
     h.close();
   }
@@ -266,7 +287,7 @@ test("Cut sends the bump and the version the pressed button named", async () => 
   try {
     await h.press("cutVersion:minor:1.5.0");
     assert.deepEqual(h.dispatcher.calls("cutVersion"), [{ bump: "minor", version: "1.5.0" }]);
-    assert.match(h.page.html, /SUCCESS: cut_version/);
+    assert.match(h.page.html, /1\.5\.0 is ready to deploy\./);
   } finally {
     h.close();
   }
@@ -278,8 +299,10 @@ test("a failed preview still offers every bump, and the engine computes the vers
     .answer("suggestNextVersion", { ok: false, errorCode: 14, errorMessage: "no identity peer" });
   const h = await open({ dispatcher });
   try {
-    assert.match(h.page.html, />Cut next major</);
-    assert.match(h.page.html, /The next versions could not be previewed/);
+    assert.match(h.page.html, /data-value="cutVersion:major"[^>]*><span class="dp-row-label">Prepare next major</);
+    assert.match(h.page.html.replace(/&#39;/g, "'"), /Couldn't read the next version numbers\./);
+    // The engine's own words are kept under Details.
+    assert.match(h.page.html, /<dt>Next version<\/dt><dd>[^<]*no identity peer/);
     await h.press("cutVersion:major");
     // No version: the SDK omits an empty one, and the engine bumps the
     // current version itself.
@@ -296,7 +319,10 @@ test("a failed preview still offers every bump, and the engine computes the vers
 test("Roll back returns to the release before the one running, never the running one", async () => {
   const h = await open();
   try {
-    assert.match(h.page.html, /Roll back returns to d1 \(1\.4\.1\)/);
+    // Named before anything is pressed: the act says the release, Details the record.
+    assert.match(h.page.html, /data-act="deploy" data-value="rollback:d1"[^>]*>Roll back to 1\.4\.1…</);
+    assert.match(h.page.html, /<dt>Roll back to<\/dt><dd class="mq-mono">d1<\/dd>/);
+    assert.doesNotMatch(h.page.html, /rollback:d2/);
     await h.press("rollback:d1");
     assert.equal(h.prompts.length, 1);
     assert.equal(h.prompts[0].phrase, "d1");

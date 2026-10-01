@@ -1,9 +1,12 @@
 // The concept browser tab: row list, keyset paging, and row detail.
 //
-// All rendering is delegated to view-kit, which emits an HTML string and knows
-// nothing about VS Code. That is deliberate -- the same renderer serves the
-// portal, so any VS Code-specific markup here would be markup the portal has
-// to rebuild.
+// The rows and the detail are rendered by view-kit, which emits an HTML string
+// and knows nothing about VS Code -- the same renderer MemQL OS uses. The page
+// around them is the kit's (webview/conceptScreens.ts): a head, the two panes,
+// and the loading, empty, failed and disconnected states each said once. It is
+// assigned once and patched after that (src/webview/ui/liveView.ts), so a live
+// update, a "Load more" or a selection no longer repaints the document and
+// takes the scroll position and the focused row with it.
 //
 // The webview runs under a strict CSP with a per-load nonce: row data is
 // untrusted, and view-kit escapes it, but a CSP means an escaping bug cannot
@@ -30,38 +33,35 @@ import { randomBytes } from "node:crypto";
 
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 import { browseConceptPage, getRowByConceptAndId } from "@znasllc-io/memql-sdk-core/client";
-import {
-  renderValueView,
-  renderRowList,
-  renderToHtml,
-  escapeHtml,
-  viewKitStyles,
-} from "@znasllc-io/memql-view-kit";
+import { viewKitStyles } from "@znasllc-io/memql-view-kit";
 
-import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
 import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 
 import type { ConnectionManager } from "../connection/manager.js";
+import { clusterViewState } from "../state/clusterViewState.js";
 import { ConceptPanelState } from "../state/conceptPanelState.js";
 import { flattenForList } from "../state/rowProjection.js";
+import { CONCEPT_ACTS, CONCEPT_PAGE_STYLES, conceptPageParts, type ConceptDetail } from "./conceptScreens.js";
+import { pageDocument } from "./ui/document.js";
+import { LiveView } from "./ui/liveView.js";
+import { pageMessage } from "./ui/protocol.js";
 
 const PAGE_SIZE = 200;
-const NOT_CONNECTED_MESSAGE = "Not connected. Select a cluster in the Clusters view.";
-// The persistent notice shown whenever there is no connection to carry CDC
-// events. Deliberately distinct from NOT_CONNECTED_MESSAGE, which is the
-// transient data-fetch error a later successful query clears: this one answers
-// "are live updates on?", and it must survive that success exactly as the
-// subscribe-failure notice does.
-const LIVE_UPDATES_OFFLINE_MESSAGE = "live updates unavailable: not connected";
+// The reason live updates are off when there is no connection to carry CDC
+// events. Recorded like a subscribe failure, so it survives an ordinary query
+// succeeding; the page shows it only while connected, where it is news.
+const LIVE_UPDATES_OFFLINE_MESSAGE = "not connected";
 
+/** The tab's title: the concept's own name, as the Data view lists it. */
 function titleFor(concept: Concept): string {
-  return `Concept: ${concept.entity}`;
+  return concept.entity;
 }
 
 export class ConceptPanel {
   private static readonly open_ = new Map<string, ConceptPanel>();
 
   private readonly panel: vscode.WebviewPanel;
+  private readonly live: LiveView;
   private readonly state = new ConceptPanelState<Row>();
   private readonly disposeConnectionListener: () => void;
   // The map key this panel registered itself under. Captured at construction
@@ -94,19 +94,28 @@ export class ConceptPanel {
   private readonly contextEntry: vscode.Disposable;
   private disposed = false;
 
+  /**
+   * Opens (or reveals) the concept's tab. With `rowId` the row is SELECTED, and
+   * its detail read, whether or not it is on the first page -- the detail read
+   * takes the id, not a position, so a run Result's row click lands on the row
+   * that was clicked rather than on page one with nothing chosen.
+   */
   static open(
     context: vscode.ExtensionContext,
     connections: ConnectionManager,
     concept: Concept,
+    rowId?: string,
   ): void {
     const existing = ConceptPanel.open_.get(concept.id);
     if (existing !== undefined) {
       existing.adopt(concept);
       existing.panel.reveal();
+      if (rowId !== undefined && rowId !== "") void existing.selectRow(rowId);
       return;
     }
     const panel = new ConceptPanel(context, connections, concept);
     ConceptPanel.open_.set(concept.id, panel);
+    if (rowId !== undefined && rowId !== "") void panel.selectRow(rowId);
   }
 
   // adopt takes a fresher descriptor for the concept this panel is already
@@ -138,14 +147,29 @@ export class ConceptPanel {
       titleFor(concept),
       vscode.ViewColumn.Active,
       // No retainContextWhenHidden. It keeps the hidden tab's whole webview
-      // process alive to preserve DOM state, and there is no DOM state here
-      // worth preserving: every render() replaces webview.html wholesale, so a
-      // revealed tab is repainted from ConceptPanelState (which lives in the
-      // extension host and survives regardless) rather than resumed. All it
-      // would buy is scroll position -- which the wholesale re-render already
-      // discards on any reload -- at the cost of a retained process per
-      // background concept tab.
+      // process alive, at the cost of a retained process per background
+      // concept tab. A revealed tab reloads its last document instead, says
+      // `ready`, and LiveView brings it up to date from ConceptPanelState
+      // (which lives in the extension host and survives regardless); what is
+      // lost is only the scroll position.
       { enableScripts: true },
+    );
+    this.live = new LiveView(
+      {
+        setHtml: (html) => {
+          this.panel.webview.html = html;
+        },
+        postMessage: (message) => this.panel.webview.postMessage(message),
+      },
+      (parts, screen) =>
+        pageDocument({
+          nonce: nonceValue(),
+          title: this.concept.entity,
+          themeAttr: currentBodyThemeAttr(),
+          screen,
+          styles: `${viewKitStyles}\n${CONCEPT_PAGE_STYLES}`,
+          ...parts,
+        }),
     );
 
     // One entry on context.subscriptions per panel, so a tab still open when
@@ -200,35 +224,66 @@ export class ConceptPanel {
     });
 
     this.disposables.push(
-      // The palette is a MemQL setting now, not the editor's theme, so an
-      // OPEN panel repaints when either input moves (memql#4419).
-      ...onAppearanceChange(() => this.render()),
+      // The palette is a MemQL setting, not the editor's theme, so an OPEN
+      // panel restyles when either input moves (memql#4419): a new document,
+      // because a theme change touches every rule.
+      ...onAppearanceChange(() => {
+        this.live.invalidate();
+        this.render();
+      }),
       this.panel.onDidDispose(() => this.dispose(true)),
-      this.panel.webview.onDidReceiveMessage(
-        // The webview posts plain JSON; treat it as untrusted input rather
-        // than trusting the compile-time annotation. `msg.type` on a
-        // null/non-object message would throw, and `rowId !== undefined`
-        // would admit any non-undefined value (a number, an object) straight
-        // into getRowByConceptAndId -- narrow both before use.
-        (msg: unknown) => {
-          if (msg === null || typeof msg !== "object") return;
-          const { type, rowId } = msg as { type?: unknown; rowId?: unknown };
-          if (type === "selectRow" && typeof rowId === "string") {
-            void this.selectRow(rowId);
-          } else if (type === "loadMore") {
-            void this.loadPage();
-          } else if (type === "reload") {
-            this.state.reset();
-            this.render();
-            void this.loadPage();
-          }
-        },
-      ),
+      // The webview posts plain JSON; it is untrusted input, so the shape is
+      // checked here rather than trusted from the compile-time annotation.
+      this.panel.webview.onDidReceiveMessage((raw: unknown) => {
+        if (this.live.handleMessage(raw)) return;
+        this.onMessage(raw);
+      }),
     );
 
     this.subscribeToChanges();
     this.render();
     void this.loadPage();
+  }
+
+  private onMessage(raw: unknown): void {
+    const message = pageMessage(raw);
+    if (message === undefined) return;
+    switch (message.type) {
+      case CONCEPT_ACTS.selectRow:
+        // `value` is the row id the page's row button carries; a non-string
+        // never reaches the detail read.
+        if (typeof message.value === "string" && message.value !== "") void this.selectRow(message.value);
+        return;
+      case CONCEPT_ACTS.retryRow:
+        if (this.state.selectedRowId !== undefined) void this.selectRow(this.state.selectedRowId);
+        return;
+      case CONCEPT_ACTS.loadMore:
+        void this.loadPage();
+        return;
+      case CONCEPT_ACTS.reload:
+        this.state.reset();
+        this.render();
+        void this.loadPage();
+        return;
+      // The acts that fix a missing session, each the one its state needs.
+      case CONCEPT_ACTS.selectCluster:
+        void vscode.commands.executeCommand("memql.clusters.select");
+        return;
+      case CONCEPT_ACTS.signIn:
+        // No argument, as the Constructs and Data welcomes send it: the
+        // command takes a cluster ROW (or nothing, and then asks), and a bare
+        // name is neither.
+        void vscode.commands.executeCommand("memql.clusters.signIn");
+        return;
+      case CONCEPT_ACTS.reconnect:
+        // The Data view's Retry: it dials the selected cluster again, and the
+        // connection change that follows reloads this page.
+        void vscode.commands.executeCommand("memql.data.refresh");
+        return;
+      case CONCEPT_ACTS.editCluster:
+        void vscode.commands.executeCommand("memql.clusters.edit");
+        return;
+    }
   }
 
   // dispose tears the panel down exactly once, from either direction: the user
@@ -317,15 +372,15 @@ export class ConceptPanel {
       // when a later subscribe attempt succeeds (see clearLiveUpdatesDegraded()
       // above).
       this.state.setLiveUpdatesDegraded(
-        `live updates unavailable: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err.message : String(err),
       );
     }
   }
 
   private async loadPage(): Promise<void> {
     const query = this.connections.query;
+    // No session, no read: the page says what the connection needs instead.
     if (query === undefined) {
-      this.state.setConnectionError(NOT_CONNECTED_MESSAGE);
       this.render();
       return;
     }
@@ -337,12 +392,15 @@ export class ConceptPanel {
     // double-fetched), so this snapshot is never read by two overlapping
     // fetches.
     const cursor = this.state.nextCursor;
-    const changed = await this.state.loadPage(() =>
+    const pending = this.state.loadPage(() =>
       browseConceptPage(query, this.concept.id, {
         pageSize: PAGE_SIZE,
         ...(cursor === "" ? {} : { cursor }),
       }),
     );
+    // "Load more" shows it is working while the page is in flight.
+    this.render();
+    const changed = await pending;
     // A false return means this settle lost the race (a concurrent
     // in-flight load, Reload, or a cluster switch) -- ConceptPanelState
     // already discarded it without writing state, so render() must not run
@@ -359,11 +417,7 @@ export class ConceptPanel {
     // end up superseded and never render again at all).
     this.render();
     const query = this.connections.query;
-    if (query === undefined) {
-      this.state.setConnectionError(NOT_CONNECTED_MESSAGE);
-      this.render();
-      return;
-    }
+    if (query === undefined) return;
     const changed = await this.state.resolveSelection(token, () =>
       getRowByConceptAndId(query, this.concept.id, rowId),
     );
@@ -375,116 +429,38 @@ export class ConceptPanel {
     if (changed) this.render();
   }
 
+  private detail(): ConceptDetail {
+    if (this.state.selectedRowId === undefined) return { state: "none" };
+    // "Row not found" (the read answered null -- deleted between the list
+    // load and the click) and "failed" (the read itself failed) are different
+    // situations, and each is said as itself.
+    if (!this.state.detailLoaded) return { state: "loading" };
+    if (this.state.detail !== null) return { state: "found", value: this.state.detail };
+    if (this.state.detailError !== "") return { state: "failed", message: this.state.detailError };
+    return { state: "missing" };
+  }
+
   private render(): void {
-    const nonce = nonceValue();
-    const listHtml = renderToHtml(
-      renderRowList(
-        this.state.nodes.map(flattenForList),
-        this.concept,
-        this.state.selectedRowId,
-      ),
+    if (this.disposed) return;
+    const connection = clusterViewState(this.connections.state);
+    this.live.render(
+      `concept:${this.concept.id}`,
+      conceptPageParts({
+        concept: this.concept,
+        connection,
+        rows: this.state.nodes.map(flattenForList),
+        settled: this.state.settled,
+        loading: this.state.loading,
+        listError: this.state.listError,
+        more: this.state.nextCursor !== "",
+        selectedRowId: this.state.selectedRowId,
+        detail: this.detail(),
+        // Persistent, independent of a data read's success -- see
+        // ConceptPanelState.liveUpdatesDegradedMessage. Shown only while
+        // connected: with no session, the page says THAT instead.
+        liveOff: this.state.liveUpdatesError,
+      }),
     );
-    // "Select a row." (nothing chosen yet) and "Row not found." (a row was
-    // chosen but getRowByConceptAndId came back null -- deleted between the
-    // list load and the click, or a bug) are different situations; folding
-    // them into the same "detail === null" placeholder made a genuine miss
-    // indistinguishable from never having clicked anything.
-    const detailHtml =
-      this.state.selectedRowId === undefined
-        ? '<div class="placeholder">Select a row.</div>'
-        : this.state.detail === null
-          ? this.state.error === ""
-            ? '<div class="placeholder">Row not found.</div>'
-            : '<div class="placeholder">Failed to load row.</div>'
-          : renderToHtml(renderValueView(this.state.detail));
-
-    const errorHtml =
-      this.state.error === ""
-        ? ""
-        : `<div class="error">ERROR: ${escapeHtml(this.state.error)}</div>`;
-
-    // Persistent, independent of errorHtml: a successful loadPage() clears
-    // state.error but must NOT clear this -- see the doc comment on
-    // ConceptPanelState.liveUpdatesDegradedMessage. It stays on screen until
-    // a later reconnect's subscribe attempt actually succeeds.
-    const liveUpdatesHtml =
-      this.state.liveUpdatesError === ""
-        ? ""
-        : `<div class="warning">WARNING: ${escapeHtml(this.state.liveUpdatesError)}</div>`;
-
-    const moreHtml =
-      this.state.nextCursor === ""
-        ? ""
-        : '<button id="more" type="button">Load more</button>';
-
-    this.panel.webview.html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-<title>${escapeHtml(this.concept.entity)}</title>
-<style nonce="${nonce}">
-  /* Theme view-kit by mapping ITS tokens onto VS Code's. This block is the
-     entire coupling between the two: view-kit never names a --vscode-*
-     variable, so the same renderer + stylesheet drop into the portal with a
-     different six-line mapping and nothing else. */
-${brandStyleBlock()}
-  /* view-kit's own stylesheet, shipped with the markup contract it styles.
-     Hand-authoring rules for vk- classes here is what this replaces: those
-     rules and view-kit's class names drifted the moment either side moved,
-     and the portal would have had to re-derive every one of them. */
-${viewKitStyles}
-
-  /* Page chrome below -- the panel's, not view-kit's. view-kit renders rows;
-     it has no view of this layout and must not style it. */
-  body { padding: 0; }
-  .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--memql-border);
-             display: flex; gap: 12px; align-items: center; }
-  .layout { display: grid; grid-template-columns: minmax(240px, 40%) 1fr; height: calc(100vh - 42px); }
-  .pane { overflow: auto; padding: 8px 12px; }
-  .pane + .pane { border-left: 1px solid var(--memql-border); }
-  /* This panel's OWN empty-state text. Deliberately not view-kit's .vk-empty:
-     that class means "this row set is empty" and belongs to the renderer that
-     emits it. Borrowing it for "Select a row." would put a second author on a
-     view-kit class -- the exact drift the shared stylesheet exists to stop. */
-  .placeholder { color: var(--memql-muted); opacity: 0.6; padding: 8px 0; }
-  .error { color: var(--memql-danger); padding: 8px 12px; }
-  .warning { color: var(--memql-data-string); padding: 8px 12px; }
-  button { background: var(--memql-accent); color: var(--memql-on-accent);
-           border: none; padding: 4px 10px; cursor: pointer; border-radius: 3px; }
-  button:hover { background: var(--memql-accent-deep); color: var(--memql-on-accent-hover); }
-</style>
-</head>
-<body${currentBodyThemeAttr()}>
-<div class="toolbar">
-  ${brandMarkSvg(16)}
-  <strong class="data">${escapeHtml(this.concept.id)}</strong>
-  <span><span class="data data-number">${this.state.nodes.length}</span> loaded</span>
-  <button id="reload" type="button">Reload</button>
-  ${moreHtml}
-</div>
-${liveUpdatesHtml}
-${errorHtml}
-<div class="layout">
-  <div class="pane" id="rows">${listHtml}</div>
-  <div class="pane" id="detail">${detailHtml}</div>
-</div>
-<script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
-  // One delegated listener: view-kit emits data attributes, never inline
-  // handlers, which is what lets the CSP forbid them outright.
-  document.getElementById('rows').addEventListener('click', (e) => {
-    const row = e.target.closest('[data-row-id]');
-    if (row) vscode.postMessage({ type: 'selectRow', rowId: row.dataset.rowId });
-  });
-  document.getElementById('reload').addEventListener('click', () =>
-    vscode.postMessage({ type: 'reload' }));
-  const more = document.getElementById('more');
-  if (more) more.addEventListener('click', () => vscode.postMessage({ type: 'loadMore' }));
-</script>
-</body>
-</html>`;
   }
 }
 

@@ -22,13 +22,20 @@ import { emptyReceipt, type Receipt, type ReceiptEntry } from "../src/install/re
 import { newLocalRun, type Run } from "../src/state/deployments.js";
 import {
   buildCatalog,
+  clusterState,
+  connectionWordFor,
+  deploymentsContextKeys,
+  formatWhen,
   instanceContextValue,
-  instanceRowStatus,
+  pollIntervalMs,
   relativeTime,
   runRowStatus,
   versionTransition,
+  POLL_ACTIVE_MS,
+  POLL_IDLE_MS,
   type CatalogInputs,
 } from "../src/state/deploymentsCatalog.js";
+import type { Instance } from "../src/state/deployments.js";
 
 const NOW = Date.parse("2026-08-14T12:00:00Z");
 
@@ -276,87 +283,152 @@ test("the connected remote's runs come from its deployment rows", async () => {
 // what a row says
 // -----------------------------------------------------------------------------
 
-test("an instance row always prints a version, and unknown is a word", async () => {
-  const healthy = instanceRowStatus({
-    name: "staging",
-    kind: "remote",
-    presence: "installed-healthy",
-    connected: true,
-  }, undefined);
-  assert.equal(healthy.description, "healthy - unknown");
-  assert.equal(healthy.icon, "healthy");
-
-  const versioned = instanceRowStatus({
-    name: "local",
-    kind: "local",
-    presence: "installed-healthy",
-    version: "v0.17.0",
-    connected: false,
-  }, undefined);
-  assert.equal(versioned.description, "healthy - v0.17.0");
+test("a branch install shows its branch and commit, never the word unknown", async () => {
+  const catalog = await buildCatalog(
+    baseInputs({
+      presence: presenceOf("installed-healthy"),
+      readReceiptFile: async () =>
+        receiptWith([{ result: { commit: "3f2a9c1e5b7d", refKind: "branch", ref: "main", dest: "/home/me/.memql/stack" } }]),
+      readClusters: clusters({ clusters: [{ name: "local", endpoint: "api.memql.localhost:443", local: true }] }),
+    }),
+  );
+  const local = catalog.instances[0];
+  assert.equal(local.version, undefined, "a branch install records no tag, and none is invented");
+  assert.equal(local.versionLabel, "main @ 3f2a9c1");
 });
 
-test("an unreachable instance says so and keeps its version", () => {
-  const status = instanceRowStatus({
-    name: "local",
-    kind: "local",
-    presence: "installed-unreachable",
-    version: "v0.16.1",
-    connected: false,
-  }, undefined);
-  assert.equal(status.icon, "unreachable");
-  assert.equal(status.description, "not answering - v0.16.1");
+test("a branch or commit install shows what it runs and compares nothing, even when the registry recorded a release", async () => {
+  // The registry holds what the cluster REPORTED -- the nearest release for a
+  // build of main -- and `version` is what an update is compared from, so
+  // borrowing it would offer a branch install an "update" to a tag.
+  const registry = clusters({ clusters: [{ name: "local", endpoint: "api.memql.localhost:443", local: true, version: "v0.23.5" }] });
+  const branch = await buildCatalog(
+    baseInputs({
+      presence: presenceOf("installed-healthy"),
+      readReceiptFile: async () =>
+        receiptWith([{ result: { commit: "3f2a9c1e5b7d", refKind: "branch", ref: "main", dest: "/home/me/.memql/stack" } }]),
+      readClusters: registry,
+    }),
+  );
+  assert.equal(branch.instances[0].version, undefined);
+  assert.equal(branch.instances[0].versionLabel, "main @ 3f2a9c1");
+
+  const commit = await buildCatalog(
+    baseInputs({
+      presence: presenceOf("installed-healthy"),
+      readReceiptFile: async () => receiptWith([{ result: { commit: "9e8d7c6b5a4f", refKind: "commit", dest: "/home/me/.memql/stack" } }]),
+      readClusters: registry,
+    }),
+  );
+  assert.equal(commit.instances[0].version, undefined);
+  assert.equal(commit.instances[0].versionLabel, "9e8d7c6", "a commit build is named by its commit, not the release it reported");
 });
 
-test("an absent instance says not installed rather than an unknown version", () => {
-  const status = instanceRowStatus({
-    name: "local",
-    kind: "local",
-    presence: "absent",
-    connected: false,
-  }, undefined);
-  assert.equal(status.icon, "absent");
-  assert.equal(status.description, "not installed");
+test("a cluster whose receipt names no release falls back to the release the registry recorded", async () => {
+  const catalog = await buildCatalog(
+    baseInputs({
+      presence: presenceOf("installed-healthy"),
+      readClusters: clusters({
+        clusters: [
+          { name: "local", endpoint: "api.memql.localhost:443", local: true, version: "v0.23.5" },
+          { name: "staging", endpoint: "a:443", version: "v0.22.0" },
+        ],
+      }),
+    }),
+  );
+  const byName = new Map(catalog.instances.map((i) => [i.name, i]));
+  assert.equal(byName.get("local")?.version, "v0.23.5");
+  assert.equal(byName.get("local")?.versionLabel, "v0.23.5");
+  // A remote this editor is not connected to still has the release it last saw.
+  assert.equal(byName.get("staging")?.versionLabel, "v0.22.0");
+});
+
+test("a local cluster registered in the list is marked so; one found only on disk is not", async () => {
+  const listed = await buildCatalog(
+    baseInputs({
+      presence: presenceOf("installed-healthy"),
+      readClusters: clusters({ clusters: [{ name: "local", endpoint: "a:443", local: true }] }),
+    }),
+  );
+  assert.equal(listed.instances[0].registered, true);
+  const unlisted = await buildCatalog(baseInputs({ presence: presenceOf("installed-healthy") }));
+  assert.equal(unlisted.instances[0].registered, false);
 });
 
 // -----------------------------------------------------------------------------
-// checkout mode (memql#4246)
+// where this editor stands: one vocabulary for the heading and the page
 // -----------------------------------------------------------------------------
 
-test("a checkout-mode instance's row names the checkout, not the recorded version", () => {
-  const status = instanceRowStatus({
-    name: "local",
-    kind: "local",
-    presence: "installed-healthy",
-    version: "v0.17.0",
-    connected: false,
-    imageSource: "checkout",
-    rebuild: {
-      commit: "abc1234def",
-      ref: "tag:v0.17.0",
-      dirtyCount: 4,
-      nodes: "bff agent",
-      recordedAt: "2026-08-21T10:00:00.000Z",
-    },
-  }, undefined);
-  assert.equal(status.description, "healthy - checkout abc1234 (4 uncommitted)");
-  assert.match(status.tooltip, /built from the checkout/);
-  assert.match(status.tooltip, /returns it to released images/);
+test("the connection word follows the manager, and an expired or refused credential is a sign-in", () => {
+  assert.equal(connectionWordFor({ status: "disconnected" }, "local"), "none");
+  assert.equal(connectionWordFor({ status: "connecting", clusterName: "local" }, "local"), "connecting");
+  assert.equal(connectionWordFor({ status: "connected", clusterName: "local", nodeId: "n" }, "local"), "connected");
+  // A state about a DIFFERENT cluster says nothing about this one.
+  assert.equal(connectionWordFor({ status: "connected", clusterName: "staging", nodeId: "n" }, "local"), "none");
+  for (const reason of ["missingCredential", "credentialExpired", "wrongTokenClass", "reauthenticationRequired"] as const) {
+    assert.equal(connectionWordFor({ status: "error", clusterName: "local", message: "", reason }, "local"), "signIn", reason);
+  }
+  assert.equal(connectionWordFor({ status: "error", clusterName: "local", message: "", reason: "notConfigured" }, "local"), "notConfigured");
+  assert.equal(connectionWordFor({ status: "error", clusterName: "local", message: "", reason: "lost" }, "local"), "unreachable");
 });
 
-test("released mode leaves the row exactly as it was before checkout mode existed", () => {
-  const status = instanceRowStatus({
-    name: "local",
-    kind: "local",
-    presence: "installed-healthy",
-    version: "v0.17.0",
-    connected: false,
-    imageSource: "released",
-  }, undefined);
-  assert.equal(status.description, "healthy - v0.17.0");
+const INSTALLED: Instance = { name: "local", kind: "local", presence: "installed-healthy", connected: false, registered: true };
+
+test("a signed-out cluster reads 'Not signed in', never 'not answering'", () => {
+  // The owner's case: a front door that answers and a credential that is gone.
+  // The old heading said "not answering", from a probe, and offered nothing.
+  const state = clusterState(INSTALLED, "signIn");
+  assert.equal(state.word, "Not signed in");
+  assert.equal(state.heading, "Sign in");
+  assert.equal(state.tone, "warn");
 });
 
-test("a run row names the verb, the transition, the status and when", () => {
+test("a dropped local cluster whose front door is silent is 'Not running'; one that answers is 'Can't reach'", () => {
+  assert.equal(clusterState({ ...INSTALLED, presence: "installed-unreachable" }, "unreachable").word, "Not running");
+  assert.equal(clusterState(INSTALLED, "unreachable").word, "Can't reach");
+  assert.equal(clusterState({ ...INSTALLED, kind: "remote", name: "staging" }, "unreachable").word, "Can't reach");
+});
+
+test("what is on the machine speaks only where the connection cannot", () => {
+  assert.equal(clusterState({ ...INSTALLED, presence: "absent" }, "none").word, "Not installed");
+  assert.equal(clusterState({ ...INSTALLED, registered: false }, "none").word, "Not in your list");
+  assert.equal(clusterState({ ...INSTALLED, presence: "present-unreceipted" }, "none").key, "unreceipted");
+  assert.equal(clusterState(INSTALLED, "connected").word, "Connected");
+  assert.equal(clusterState(INSTALLED, "none").word, "Not connected");
+});
+
+test("a cluster no install recorded is its own title-menu value, and is offered no lifecycle there", () => {
+  assert.equal(instanceContextValue({ ...INSTALLED, presence: "present-unreceipted" }), "memqlLocalInstanceUnreceipted");
+  assert.deepEqual(deploymentsContextKeys({ ...INSTALLED, presence: "present-unreceipted", checkout: "/c" }), {
+    "memql.deploymentsInstance": "memqlLocalInstanceUnreceipted",
+    "memql.deploymentsHasCheckout": false,
+    "memql.deploymentsHasBranch": false,
+  });
+});
+
+test("the title menu's checkout and branch keys gate Rebuild, Open checkout and Pull", () => {
+  assert.deepEqual(deploymentsContextKeys(INSTALLED), {
+    "memql.deploymentsInstance": "memqlLocalInstance",
+    "memql.deploymentsHasCheckout": false,
+    "memql.deploymentsHasBranch": false,
+  });
+  assert.deepEqual(deploymentsContextKeys({ ...INSTALLED, checkout: "/c", checkoutBranch: "main" }), {
+    "memql.deploymentsInstance": "memqlLocalInstance",
+    "memql.deploymentsHasCheckout": true,
+    "memql.deploymentsHasBranch": true,
+  });
+  assert.deepEqual(deploymentsContextKeys(undefined), {
+    "memql.deploymentsInstance": "",
+    "memql.deploymentsHasCheckout": false,
+    "memql.deploymentsHasBranch": false,
+  });
+});
+
+// -----------------------------------------------------------------------------
+// what a run row says
+// -----------------------------------------------------------------------------
+
+test("a run row says what happened as a verb, from where to where, and when", () => {
   const run: Run = {
     ...newLocalRun({
       id: "r1",
@@ -370,9 +442,68 @@ test("a run row names the verb, the transition, the status and when", () => {
     finishedAt: "2026-08-12T12:05:00Z",
   };
   const status = runRowStatus(run, NOW);
-  assert.equal(status.label, "upgrade");
-  assert.equal(status.description, "v0.16.1 -> v0.17.0  succeeded  1d ago");
+  assert.equal(status.label, "Updated");
+  // The dot already says it succeeded; the description does not say it again.
+  assert.equal(status.description, "v0.16.1 → v0.17.0 · 1d ago");
   assert.equal(status.icon, "succeeded");
+  assert.doesNotMatch(status.tooltip, /\d{4}-\d{2}-\d{2}T/, "an RFC3339 stamp reached the tooltip");
+  assert.match(status.tooltip, /^Started \d{1,2} Aug, \d{2}:\d{2} · took 5m 0s$/);
+});
+
+test("a move back to an older release is a version change, never an 'upgrade'", () => {
+  const back: Run = {
+    ...newLocalRun({ id: "r", instance: "local", kind: "upgrade", startedAt: "t", fromVersion: "v0.18.0", toVersion: "v0.17.0" }),
+    status: "succeeded",
+  };
+  assert.equal(runRowStatus(back, NOW).label, "Changed version");
+});
+
+test("an outcome that is not a success is said in the label, once", () => {
+  const base = newLocalRun({ id: "r", instance: "local", kind: "rebuild", startedAt: "2026-08-14T11:00:00Z" });
+  assert.equal(runRowStatus({ ...base, status: "failed" }, NOW).label, "Rebuild failed");
+  assert.equal(runRowStatus({ ...base, status: "cancelled" }, NOW).label, "Rebuild cancelled");
+  assert.equal(runRowStatus({ ...base, status: "interrupted" }, NOW).label, "Rebuild interrupted");
+  assert.match(runRowStatus({ ...base, status: "interrupted" }, NOW).tooltip, /stopped when the editor closed/);
+  assert.equal(runRowStatus({ ...base, status: "running" }, NOW).label, "Rebuilding");
+  for (const status of ["failed", "cancelled", "interrupted"] as const) {
+    assert.doesNotMatch(runRowStatus({ ...base, status }, NOW).description, new RegExp(status));
+  }
+});
+
+test("a failed run's tooltip carries the reason its failed step recorded, and not the log file", () => {
+  const run: Run = {
+    ...newLocalRun({ id: "r", instance: "local", kind: "upgrade", startedAt: "2026-08-14T11:00:00Z" }),
+    status: "failed",
+    items: [{ label: "clusterUp", status: "failed", detail: "Port 443 is already in use. · log=r.clusterUp.log" }],
+  };
+  assert.match(runRowStatus(run, NOW).tooltip, /Port 443 is already in use\./);
+  assert.doesNotMatch(runRowStatus(run, NOW).tooltip, /log=/);
+});
+
+test("a prepared remote record reads Prepared, not Deploying", () => {
+  const run: Run = {
+    ...newLocalRun({ id: "d", instance: "s", kind: "rollout", startedAt: "2026-08-14T11:00:00Z" }),
+    status: "running",
+    toVersion: "v0.9.3",
+  };
+  assert.equal(runRowStatus(run, NOW).label, "Deploying");
+  const prepared = runRowStatus(run, NOW, { prepared: true });
+  assert.equal(prepared.label, "Prepared");
+  assert.equal(prepared.tone, "idle");
+});
+
+test("a moment is written in this machine's words, with the year only when it is not this one", () => {
+  assert.match(formatWhen("2026-08-12T12:00:00Z", NOW), /^\d{1,2} Aug, \d{2}:\d{2}$/);
+  assert.match(formatWhen("2025-08-12T12:00:00Z", NOW), /^\d{1,2} Aug 2025, \d{2}:\d{2}$/);
+  assert.equal(formatWhen("", NOW), "");
+});
+
+test("a visible view re-reads briskly while something runs, slowly otherwise", () => {
+  const idle = newLocalRun({ id: "r", instance: "local", kind: "install", startedAt: "t" });
+  assert.equal(pollIntervalMs([]), POLL_IDLE_MS);
+  assert.equal(pollIntervalMs([{ ...idle, status: "succeeded" }]), POLL_IDLE_MS);
+  assert.equal(pollIntervalMs([idle]), POLL_ACTIVE_MS);
+  assert.ok(POLL_ACTIVE_MS < POLL_IDLE_MS);
 });
 
 test("an install has no predecessor, so it renders no arrow", () => {
@@ -387,6 +518,14 @@ test("a landed-then-replaced run is neither a success tick nor an error", () => 
     const run: Run = { ...newLocalRun({ id: "r", instance: "s", kind: "rollout", startedAt: "t" }), status };
     assert.equal(runRowStatus(run, NOW).icon, "replaced");
   }
+  const replaced: Run = {
+    ...newLocalRun({ id: "r", instance: "s", kind: "rollout", startedAt: "2026-08-10T12:00:00Z" }),
+    status: "superseded",
+    toVersion: "v0.9.1",
+  };
+  assert.equal(runRowStatus(replaced, NOW).label, "Deployed");
+  assert.match(runRowStatus(replaced, NOW).description, /replaced/);
+  assert.equal(runRowStatus({ ...replaced, status: "rolled_back" }, NOW).label, "Rolled back");
 });
 
 test("relative time is coarse, and never negative or NaN", () => {

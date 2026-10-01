@@ -131,7 +131,7 @@ test("a newer cluster raises a warning naming the release, with both actions", a
   await flush();
 
   const at = recorded.warnings.indexOf(
-    "This cluster's MemQL grammar is newer than this extension's. Update MemQL for Visual Studio Code and Cursor to 0.5.0 or newer so completion and diagnostics match the cluster.",
+    "MemQL: newer uses a newer MemQL language. Update this extension to 0.5.0 or newer.",
   );
   assert.ok(at >= 0, `the notice was not shown; saw: ${JSON.stringify(recorded.warnings)}`);
   assert.deepEqual(recorded.warningActions[at], ["Open in Extensions", "Show details"]);
@@ -156,7 +156,7 @@ test("with no id from the host, the notice draws no Open in Extensions button", 
   await flush();
 
   const at = recorded.warnings.indexOf(
-    "This cluster's MemQL grammar is newer than this extension's. Update MemQL for Visual Studio Code and Cursor to 0.6.0 or newer so completion and diagnostics match the cluster.",
+    "MemQL: no-id uses a newer MemQL language. Update this extension to 0.6.0 or newer.",
   );
   assert.ok(at >= 0, `the notice was not shown; saw: ${JSON.stringify(recorded.warnings)}`);
   assert.deepEqual(recorded.warningActions[at], ["Show details"]);
@@ -178,7 +178,7 @@ test("a cluster on a newer edition raises a warning naming both editions and the
   await flush();
 
   const at = recorded.warnings.indexOf(
-    "This cluster speaks MemQL edition 2027; this extension speaks edition 2026. Update MemQL for Visual Studio Code and Cursor to 0.9.0 or newer.",
+    "MemQL: next-edition uses MemQL edition 2027. Update this extension to 0.9.0 or newer.",
   );
   assert.ok(at >= 0, `the notice was not shown; saw: ${JSON.stringify(recorded.warnings)}`);
   assert.deepEqual(recorded.warningActions[at], ["Open in Extensions", "Show details"]);
@@ -200,7 +200,7 @@ test("an older cluster is an information notice whose one action reveals the det
   await flush();
 
   const at = recorded.infos.indexOf(
-    "This cluster runs an older MemQL grammar than this extension. Completion may offer forms it refuses until the cluster is updated.",
+    "MemQL: older uses an older MemQL language. Some completions may not work there until it's updated.",
   );
   assert.ok(at >= 0, `the notice was not shown; saw: ${JSON.stringify(recorded.infos)}`);
   assert.deepEqual(recorded.infoActions[at], ["Show details"]);

@@ -526,6 +526,19 @@ func TestRemoveArtifactCheckoutRefusesNonCheckouts(t *testing.T) {
 	if code != 3 {
 		t.Fatalf("exit %d, want 3 (refused: resolves to $HOME)\nstdout: %s", code, stdout)
 	}
+
+	// A symlinked HOME must protect the same physical directory on every OS.
+	alias := filepath.Join(t.TempDir(), "home-link")
+	if err := os.Symlink(home, alias); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _, code = raRun(t, append(w.env, "HOME="+alias), "--kind=checkout", "--path="+home)
+	if code != 3 {
+		t.Fatalf("exit %d, want 3 (refused: symlinked $HOME)\nstdout: %s", code, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".git")); err != nil {
+		t.Fatalf("home was modified despite refusing removal: %v", err)
+	}
 }
 
 func TestRemoveArtifactHostsEntries(t *testing.T) {

@@ -16,6 +16,8 @@ import assert from "node:assert/strict";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { DEPLOY_ACTIONS, type DeployActionSpec } from "../src/deploy/actions.js";
+import { deployControlByKey } from "../src/deploy/controls.js";
+import { remoteChoices, remoteOverviewBar, type RemoteBarInput } from "../src/deploy/instanceActions.js";
 import {
   currentDeploymentId,
   projectDeployments,
@@ -24,7 +26,7 @@ import {
 } from "../src/state/deploymentHistory.js";
 import type { Instance, Run } from "../src/state/deployments.js";
 import { buildCatalog } from "../src/state/deploymentsCatalog.js";
-import { renderRemoteInstance } from "../src/webview/deploymentScreens.js";
+import { remoteOverviewScreen } from "../src/webview/deploymentScreens.js";
 
 interface Fixture {
   id: string;
@@ -194,18 +196,26 @@ test("the catalog stamps the rollback target on the connected instance", async (
 
 const ROLLBACK = DEPLOY_ACTIONS.find((a) => a.id === "rollback") as DeployActionSpec;
 
-function page(instance: Instance, runs: readonly Run[] = []): string {
-  return renderRemoteInstance({
-    diagnosticsOpen: false,
+function page(instance: Instance, runs: readonly Run[] = [], actions: DeployActionSpec[] = [ROLLBACK]): string {
+  const input: RemoteBarInput = {
     instance,
-    runs,
-    pipeline: { kind: "present", title: "Deploy", detail: "", actions: [ROLLBACK], rollouts: [] },
-    nowMs: 0,
-    outcome: "",
-    error: "",
-    releases: undefined,
+    connection: "connected",
     upgrade: { kind: "none", reason: "not under test" },
+    pipeline: { kind: "present", line: "", engineMessage: "", actions, rollouts: [] },
+    runs,
+  };
+  const parts = remoteOverviewScreen({
+    instance,
+    bar: remoteOverviewBar(input),
+    choices: remoteChoices(input),
+    connection: "connected",
+    runs,
+    nowMs: 0,
+    pipeline: input.pipeline,
+    upgrade: input.upgrade,
+    detailsOpen: false,
   });
+  return parts.head + parts.body + parts.actions;
 }
 
 const REMOTE: Instance = { name: "staging", kind: "remote", presence: "installed-healthy", connected: true };
@@ -215,32 +225,24 @@ test("the page names the release Roll back returns to, before anything is presse
     { id: "d1", instance: "staging", kind: "rollout", startedAt: "2026-09-01T00:00:00Z", status: "succeeded", items: [], toVersion: "1.0.1" },
   ];
   const html = page({ ...REMOTE, rollbackTargetId: "d1" }, runs);
-  assert.match(html, /Roll back returns to d1 \(1\.0\.1\)/);
-  assert.match(html, /data-deploy="rollback:d1"/);
-  assert.match(html, />Roll back to 1\.0\.1</);
+  // The act names the release; Details names the record, for a support case.
+  assert.match(html, /data-act="deploy" data-value="rollback:d1"[^>]*>Roll back to 1\.0\.1…</);
+  assert.match(html, /<dt>Roll back to<\/dt><dd class="mq-mono">d1<\/dd>/);
 });
 
-test("with no target the page says so, and still draws the button", () => {
-  // The same arrangement as Deploy with nothing cut: the button stays where
-  // the operator expects it, the line says why it has nothing to do, and a
-  // click reports that rather than sending anything.
+test("with no target there is no Roll back to press, and its key sends nothing", () => {
+  // An act whose only outcome is a refusal is absent from the page. A key
+  // posted anyway resolves to the control's refusal, never to a request.
   const html = page(REMOTE);
-  assert.match(html, /Roll back has nothing to return to/);
-  assert.match(html, /data-deploy="rollback"/);
+  assert.doesNotMatch(html, /data-value="rollback/);
+  assert.doesNotMatch(html, /Roll back to/);
+  const control = deployControlByKey("rollback", { instance: REMOTE, runs: [], rollouts: [], preview: undefined });
+  assert.equal(control?.request, undefined);
+  assert.match(control?.refusal ?? "", /nothing to roll back to/);
 });
 
-test("the rollback line is drawn only where the Roll back action is", () => {
-  const html = renderRemoteInstance({
-    diagnosticsOpen: false,
-    instance: { ...REMOTE, rollbackTargetId: "d1" },
-    runs: [],
-    pipeline: { kind: "present", title: "Deploy", detail: "", actions: [], rollouts: [] },
-    nowMs: 0,
-    outcome: "",
-    error: "",
-    releases: undefined,
-    upgrade: { kind: "none", reason: "not under test" },
-  });
-  assert.doesNotMatch(html, /Roll back returns to/);
-  assert.doesNotMatch(html, /nothing to return to/);
+test("the rollback target is named only where the Roll back action is", () => {
+  const html = page({ ...REMOTE, rollbackTargetId: "d1" }, [], []);
+  assert.doesNotMatch(html, /data-value="rollback/);
+  assert.doesNotMatch(html, /Roll back to/);
 });

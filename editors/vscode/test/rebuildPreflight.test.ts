@@ -1,25 +1,23 @@
-// The "Before it runs" list for a rebuild, and the screens around it
-// (memql#4246).
+// What a rebuild from the checkout will build, what needs attention first, and
+// the screen that says so (memql#4246).
 //
-// The item that carries the epic is "Image source". A rebuild moves a cluster
-// off released images and onto ones built from a working tree, and NOTHING ELSE
-// on the machine announces that -- the row afterwards reads `checkout <commit>`
-// and the operator is left to work out why. Crossing a lane is stated BEFORE it
-// happens, in both directions: this screen says what a rebuild switches to, and
-// state/preflight.ts says what an install, upgrade or repair switches back.
+// THE SHAPE CHANGED. The old "Before it runs" list was seven rows, most of them
+// "OK" facts that asked nothing of anybody. The check is now FACTS (the folder,
+// the commit) and NOTICES only for what is not fine, and a notice that makes the
+// rebuild pointless is BLOCKING: the screen then offers no Rebuild at all --
+// absent, never disabled -- but the fix instead.
 //
-// `state` is preflight.ts's own vocabulary -- "ok" | "attention" -- so the two
-// checklists render through one `renderPreflight` and cannot diverge in how a
-// warning looks.
+// The notice that carries the epic is still the lane crossing: a rebuild moves
+// a cluster off released images, and nothing else on the machine says so.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { rebuildPreflightItems } from "../src/state/rebuildPreflight.js";
-import type { StepProgress } from "../src/state/addCluster.js";
-import { renderFailedScreen, renderRebuildScreen } from "../src/webview/installScreens.js";
+import { checkoutCommitFact, rebuildCheck, type RebuildPreflightInputs } from "../src/state/rebuildPreflight.js";
+import { rebuildScreen } from "../src/webview/deploymentScreens.js";
+import type { Instance } from "../src/state/deployments.js";
 
-const base = {
+const base: RebuildPreflightInputs = {
   dockerReachable: true,
   checkoutDir: "/home/me/.memql/src",
   checkoutIsMemql: true,
@@ -29,186 +27,96 @@ const base = {
     dirtyCount: 4,
     deployDirty: false,
   },
-  nodes: "",
-  imageSource: "released" as const,
+  imageSource: "released",
   releasedTag: "v0.17.0",
 };
 
-test("the checklist states every fact the design names, in order", () => {
-  const labels = rebuildPreflightItems(base).map((i) => i.label);
-  assert.deepEqual(labels, [
-    "Docker",
-    "Checkout",
-    "Git state",
-    "Nodes",
-    "Image source",
-    // memql#5076. LAST BEFORE "Duration", which is deliberate: it is the line
-    // an operator reads after they have satisfied themselves the build CAN
-    // run, and it answers a different question -- not "will this work" but
-    // "is the code driving this the code being built".
-    "Extension",
-    "Duration",
+const LOCAL: Instance = { name: "local", kind: "local", presence: "installed-healthy", connected: true, checkout: "/home/me/.memql/src" };
+
+test("the facts say what will be built: the folder, and the commit in it", () => {
+  assert.deepEqual(rebuildCheck(base).facts, [
+    { label: "Source", value: "/home/me/.memql/src", mono: true },
+    { label: "Commit", value: "v0.17.0 @ abc1234 · 4 uncommitted", mono: true },
   ]);
 });
 
-test("crossing from released images is stated, and staying in checkout mode is not", () => {
-  const crossing = rebuildPreflightItems(base).find((i) => i.label === "Image source")!;
-  assert.equal(crossing.state, "attention");
-  assert.match(crossing.detail, /switches local to images built from your checkout/);
-  assert.match(crossing.detail, /install, upgrade or repair returns it to released v0\.17\.0 images/);
-  const staying = rebuildPreflightItems({ ...base, imageSource: "checkout" }).find(
-    (i) => i.label === "Image source",
-  )!;
-  assert.equal(staying.state, "ok");
+test("the commit fact names the ref, the short commit and the count, and a clean tree says no count", () => {
+  assert.equal(checkoutCommitFact({ ...base.state!, ref: { kind: "branch", name: "main" }, dirtyCount: 0 }), "main @ abc1234");
+  assert.equal(checkoutCommitFact({ ...base.state!, ref: { kind: "detached", name: "" } }), "abc1234 · 4 uncommitted");
 });
 
-test("a dirty deploy/ tree is called out because manifests do not ride a rebuild", () => {
-  const git = rebuildPreflightItems({
-    ...base,
-    state: { ...base.state, deployDirty: true },
-  }).find((i) => i.label === "Git state")!;
-  assert.equal(git.state, "attention");
-  assert.match(git.detail, /deploy\/ has edits/);
-  assert.match(git.detail, /manifests do not ride a rebuild/);
+test("a clean, reachable first rebuild has one notice: the cluster switches to your own build", () => {
+  const check = rebuildCheck(base);
+  assert.equal(check.blocked, false);
+  assert.deepEqual(check.notices.map((n) => n.line), ["The cluster switches to your own build."]);
+  assert.equal(check.notices[0]!.tone, "info");
 });
 
-test("a missing checkout or an unreachable docker is a note naming the fix", () => {
-  assert.match(rebuildPreflightItems({ ...base, dockerReachable: false })[0]!.detail, /Docker/);
-  assert.equal(rebuildPreflightItems({ ...base, dockerReachable: false })[0]!.state, "attention");
-  assert.match(
-    rebuildPreflightItems({ ...base, checkoutIsMemql: false })[1]!.detail,
-    /not a MemQL checkout/,
-  );
+test("staying on your own build says nothing about the lane", () => {
+  assert.deepEqual(rebuildCheck({ ...base, imageSource: "checkout" }).notices, []);
 });
 
-test("the node line names the default honestly", () => {
-  assert.match(
-    rebuildPreflightItems(base).find((i) => i.label === "Nodes")!.detail,
-    /all app nodes/,
-  );
-  assert.match(
-    rebuildPreflightItems({ ...base, nodes: "bff,agent" }).find((i) => i.label === "Nodes")!.detail,
-    /bff, agent/,
-  );
+test("Docker not running blocks the rebuild, and offers Check again", () => {
+  const check = rebuildCheck({ ...base, dockerReachable: false });
+  assert.equal(check.blocked, true);
+  const docker = check.notices.find((n) => n.line === "Docker isn't running.")!;
+  assert.equal(docker.tone, "error");
+  assert.equal(docker.fix, "checkAgain");
 });
 
-test("the checklist words the same string the run will be given", () => {
-  // ONE NORMALISER, BOTH PATHS. The display side used to tidy the operator's
-  // typing for the sentence while the send side forwarded it raw, so the
-  // checklist blessed "bff, agent" and the script exited 2 on " agent".
-  const nodes = (raw: string): string =>
-    rebuildPreflightItems({ ...base, nodes: raw }).find((i) => i.label === "Nodes")!.detail;
-  assert.match(nodes("bff, agent"), /bff, agent\./);
-  assert.match(nodes(" bff ,agent,, "), /bff, agent\./);
-  // A list that is nothing but separators is not a list.
-  assert.match(nodes("  ,  , "), /all app nodes/);
+test("a folder that is not a MemQL checkout blocks it, and offers Repair", () => {
+  const check = rebuildCheck({ ...base, checkoutIsMemql: false });
+  assert.equal(check.blocked, true);
+  assert.equal(check.notices.find((n) => n.fix === "repair")?.line, "This folder isn't a MemQL checkout.");
+});
+
+test("edits under deploy/ are said, and do not block", () => {
+  const check = rebuildCheck({ ...base, state: { ...base.state!, deployDirty: true } });
+  assert.equal(check.blocked, false);
+  assert.ok(check.notices.some((n) => n.line === "Changes under deploy/ aren't applied. Only code is rebuilt."));
+});
+
+test("git that could not read the folder says so rather than reporting a clean tree", () => {
+  const check = rebuildCheck({ ...base, state: undefined });
+  assert.ok(check.notices.some((n) => n.line === "Couldn't read the folder's git status."));
+  assert.equal(check.facts.some((f) => f.label === "Commit"), false, "no commit invented");
+});
+
+test("an extension from a different commit than the checkout is said here, where the checkout's scripts run", () => {
+  const skewed = rebuildCheck({ ...base, extensionCommit: "fff0000" });
+  assert.ok(skewed.notices.some((n) => n.line === "This extension is from a different commit than your checkout."));
+  assert.equal(rebuildCheck({ ...base, extensionCommit: "abc1234def" }).notices.some((n) => /different commit/.test(n.line)), false);
 });
 
 // -----------------------------------------------------------------------------
-// the rebuild's own screens
+// the screen
 // -----------------------------------------------------------------------------
 
-test("a failed rebuild offers Retry and Back -- guided has nothing to offer it", () => {
-  // "Switch to guided" is a WIZARD concept: it re-runs one step with the
-  // operator driving the privileged part by hand. A rebuild is one unprivileged
-  // step, so the control is a second Retry wearing a name that promises
-  // something else.
-  const failure: StepProgress = {
-    id: "rebuildFromCheckout",
-    description: "Build the node images",
-    state: "failed",
-    exitCode: 5,
-    reason: "an image build failed",
-    log: "",
-    guided: false,
-    remedy: "",
-  };
-  const rebuild = renderFailedScreen({
-    logsOpen: false,
-    logsFollow: true,
-    steps: [failure],
-    mode: "rebuild",
-    running: false,
-    failures: [failure],
-  });
-  assert.match(rebuild, /data-act="retry"/);
-  assert.match(rebuild, /data-act="cancel"/);
-  assert.doesNotMatch(rebuild, /data-act="guided"/);
+function screen(check: ReturnType<typeof rebuildCheck> | undefined, nodes = ""): string {
+  const parts = rebuildScreen({ instance: LOCAL, check, nodes, home: "/home/me" });
+  // The kit escapes an apostrophe; the assertions read the words.
+  return (parts.head + parts.body + parts.actions).replace(/&#39;/g, "'");
+}
 
-  // Every other run keeps it: the wizard's graph has privileged steps, which is
-  // the whole case for the control.
-  assert.match(
-    renderFailedScreen({
-      steps: [failure],
-      mode: "deploy",
-      running: false,
-      failures: [failure],
-      logsOpen: false,
-      logsFollow: true,
-    }),
-    /data-act="guided"/,
-  );
+test("while the checks run, the facts are the shape of facts and the bar says Checking", () => {
+  const html = screen(undefined);
+  assert.match(html, /mq-skeleton/);
+  assert.match(html, /Checking/);
+  assert.doesNotMatch(html, /data-act="beginRebuild"/);
 });
 
-test("the rebuild screen names the checkout and asks one thing", () => {
-  const html = renderRebuildScreen({
-    checkoutDir: "/home/me/.memql/src",
-    nodes: "bff",
-    preflight: rebuildPreflightItems(base),
-  });
-  assert.match(html, /\/home\/me\/\.memql\/src/);
+test("ready, the screen names the folder as ~/..., asks one thing, and offers Rebuild", () => {
+  const html = screen(rebuildCheck(base), "bff");
+  assert.match(html, /~\/\.memql\/src/);
+  assert.doesNotMatch(html, /\/home\/me\//, "the home directory reached the page");
   assert.match(html, /data-field="nodes"/);
-  assert.match(html, /data-act="beginRebuild"/);
-  // Above the FIELD it qualifies, and in the first screenful -- re-expressed by
-  // memql#4453 exactly as preflight.test.ts's twin was, and for the same
-  // reason: Start moved to the top of the page, so "above Start" and "above the
-  // form" stopped being the same position. The checklist follows the button up.
-  assert.ok(
-    html.indexOf('data-act="beginRebuild"') < html.indexOf("Before it runs"),
-    "the actions row comes first on every screen (memql#4453)",
-  );
-  assert.ok(
-    html.indexOf("Before it runs") < html.indexOf('data-field="nodes"'),
-    "the checklist must render above the form whose answer it qualifies",
-  );
+  assert.match(html, /data-act="beginRebuild"[^>]*>Rebuild</);
 });
 
-test("git state that could not be read says so rather than reporting a clean tree", () => {
-  // The honest answer, and the one that matters: "clean at 0000000" in front of
-  // a build whose provenance nothing recorded is worse than saying nothing.
-  const items = rebuildPreflightItems({ ...base, state: undefined });
-  const git = items.find((i) => i.label === "Git state")!;
-  assert.equal(git.state, "attention");
-  assert.match(git.detail, /git could not read the checkout/);
-  // And the list is still the same seven lines: a fact that could not be read
-  // is still a line, because a missing row reads as a fact nobody thought
-  // about.
-  assert.equal(items.length, 7);
-});
-
-test("the git line names the ref, the short commit and the count", () => {
-  const git = rebuildPreflightItems(base).find((i) => i.label === "Git state")!;
-  assert.match(git.detail, /tag v0\.17\.0/);
-  assert.match(git.detail, /abc1234\b/);
-  assert.match(git.detail, /4 uncommitted files/);
-  assert.equal(git.state, "ok");
-  // One file is not "1 files".
-  const one = rebuildPreflightItems({
-    ...base,
-    state: { ...base.state, dirtyCount: 1 },
-  }).find((i) => i.label === "Git state")!;
-  assert.match(one.detail, /1 uncommitted file\./);
-  const clean = rebuildPreflightItems({
-    ...base,
-    state: { ...base.state, dirtyCount: 0 },
-  }).find((i) => i.label === "Git state")!;
-  assert.match(clean.detail, /clean/);
-});
-
-test("a detached checkout is named as detached rather than as an empty ref", () => {
-  const git = rebuildPreflightItems({
-    ...base,
-    state: { ...base.state, ref: { kind: "detached" as const, name: "" } },
-  }).find((i) => i.label === "Git state")!;
-  assert.match(git.detail, /detached HEAD/);
+test("blocked, there is no Rebuild -- only the fix, and a way back", () => {
+  const html = screen(rebuildCheck({ ...base, dockerReachable: false }));
+  assert.doesNotMatch(html, /data-act="beginRebuild"/);
+  assert.match(html, /data-act="checkAgain"/);
+  assert.match(html, /Can't rebuild yet/);
+  assert.doesNotMatch(html, /disabled/);
 });

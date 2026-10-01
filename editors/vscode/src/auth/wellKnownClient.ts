@@ -49,8 +49,7 @@
 import { CALLBACK_PATH, LOOPBACK_HOST } from "./loopback.js";
 
 /**
- * The client_id this extension authorizes with when the cluster names no
- * override.
+ * The client_id this extension authorizes with, on every cluster.
  *
  * MUST equal identity.BuiltinClientVSCode
  * (component/identity/builtin_clients.go). It is part of the wire contract
@@ -67,21 +66,40 @@ export const WELL_KNOWN_CLIENT_ID = "memql-vscode";
  */
 export const WELL_KNOWN_REDIRECT_URI = `http://${LOOPBACK_HOST}${CALLBACK_PATH}`;
 
+// -----------------------------------------------------------------------------
+// WHY THE REGISTRY'S client_id IS NOT THE EDITOR'S
+// -----------------------------------------------------------------------------
+//
+// `~/.memql/clusters.yaml` is SHARED: the MemQL Cockpit writes it too, and it
+// records its OWN client there (`client_id: cockpit`). This extension used to
+// read that value as an "operator override" and authorize as it. The Cockpit's
+// client is registered only for `/cockpit/callback`, so the editor's
+// `http://127.0.0.1:<port>/callback` was refused at /authorize, the browser
+// showed a bare "Bad Request", and the editor waited out its callback deadline.
+// It failed exactly when the Cockpit had touched the slot, which is why it
+// looked intermittent: a cluster the extension installed carried no client_id
+// and signed in fine.
+//
+// So the rule is: a client_id in the shared registry belongs to the tool that
+// wrote it. The editor always signs in AS ITSELF, and refreshes as the client a
+// refresh token was actually issued to -- which the store keeps beside the
+// token (auth/store.ts) rather than reading back out of a file another tool
+// owns.
+
+/** The client_id every sign-in from this editor authorizes as, loopback and device code alike. */
+export const EDITOR_CLIENT_ID = WELL_KNOWN_CLIENT_ID;
+
 /**
- * resolveClientId returns the client_id to authorize with.
+ * The client_id a refresh presents: the one the refresh token was ISSUED to,
+ * as recorded beside it, or the editor's own id when nothing was recorded (a
+ * token from before the record existed, or one pasted into the file by hand,
+ * which the editor then treats as its own).
  *
- * `clusters.yaml`'s `clientId` stays as an explicit OPERATOR OVERRIDE, which is
- * what keeps two cases working: an operator who configured a custom static
- * client in MEMQL_IDENTITY_REGISTERED_CLIENTS, and a cluster entry still
- * carrying an id minted by the old registration path -- that id is just a value
- * here, so those entries keep working with nothing migrated or rewritten.
- *
- * Synchronous, and that is the point: there is no network call, so the step
- * that used to be the first thing to fail cannot fail at all.
+ * Never the registry's `client_id`: that is another tool's.
  */
-export function resolveClientId(clientId: string | undefined): string {
-  const override = (clientId ?? "").trim();
-  return override === "" ? WELL_KNOWN_CLIENT_ID : override;
+export function refreshClientId(issuedTo: string | undefined): string {
+  const recorded = (issuedTo ?? "").trim();
+  return recorded === "" ? EDITOR_CLIENT_ID : recorded;
 }
 
 /** normalizeIssuer trims whitespace and any trailing slashes, matching identityBaseUrlFor. */

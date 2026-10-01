@@ -173,10 +173,10 @@ test("a well-formed domain is accepted, whoever owns it", () => {
 
 test("what cannot be a hostname is refused, and the refusal says why", () => {
   const cases: [string, string][] = [
-    ["https://memql.localhost", "URL"],
+    ["https://memql.localhost", "without https://"],
     ["memql.localhost:443", "port"],
     ["*.memql.localhost", "wildcard"],
-    ["localhost", "two labels"],
+    ["localhost", "two parts"],
     ["MEMQL.localhost", "lowercase"],
     ["memql.localhost.", "lowercase"],
   ];

@@ -106,11 +106,14 @@ a trusted workspace, since it reads credentials and opens a network connection.
 
 **Clusters is the home view** (memql#4195): the extension's mission is managing
 clusters -- many remote ones, and installing / repairing / uninstalling the
-local one -- so the list of them leads. Each row leads with its state (connected
-/ needs sign-in / unreachable) and recorded release; a cluster recorded behind
-the release this extension ships for says so in its tooltip. With zero clusters
-the view offers the two ways to get one -- install a local cluster, or add an
-existing one -- and install / repair are also in the view's title menu. The
+local one -- so the list of them leads. Each row says its state in a word --
+Connected, Sign in, Connecting, Not running (a local cluster), Can't reach, Not
+set up -- and shows a version only when it tells something (a newer release, or
+a cluster older than this extension expects). The cluster in use is marked.
+With no clusters the view offers the two ways to get one -- install a local
+cluster, or connect to one -- and when a local cluster is running on this
+computer but is not in the list, it offers to connect to that one instead.
+Repair is in the view's title menu when a local cluster is present. The
 install, repair and uninstall flows open with a "Before it runs" checklist
 (graph loaded, whether your password will be needed, where the provider key
 path comes from) before anything starts, show honest per-step progress during,
@@ -155,8 +158,8 @@ and under-replica alarms are cluster state, MemQL OS already draws them, and
 two surfaces answering one question diverge on the day the second one ships.
 That is the rule, not a preference about which UI is nicer -- so a pod grid
 proposed for this extension has its answer before anyone writes it. Every
-cluster's OS is one click away: **Open Console**, on the Clusters row and on
-the connection page.
+cluster's OS is one click away: **Open MemQL OS**, on the Clusters row and on
+the cluster page.
 
 Full rationale: [the Deployments surface design](https://github.com/znasllc-io/memql/blob/main/docs/superpowers/specs/2026-08-14-vscode-deployments-surface-design.md).
 
@@ -165,7 +168,7 @@ Full rationale: [the Deployments surface design](https://github.com/znasllc-io/m
 The **selected** cluster's deployment runs, newest first. One cluster, flat.
 
 ```
-DEPLOYMENTS   local · healthy · v0.19.1
+DEPLOYMENTS   memql.localhost · Connected · v0.19.1
 |- upgrade   v0.16.1 -> v0.17.0   succeeded   2d ago
 \- install                        succeeded   9d ago
 ```
@@ -177,16 +180,16 @@ the selection in **Clusters** switches this view with it. With nothing selected
 the view is empty and says so, with the two ways out of that state:
 
 ```
-Not connected. Select a cluster to see its deployments.
-Select Cluster
-Install a local cluster
+Not connected to a cluster.
+Install Local Cluster
+Connect to a Cluster
 ```
 
 There is no `local` wrapper row (memql#4426). It used to be there so that a
 machine with nothing installed had somewhere to start; that entry point now
 lives in three places instead -- the welcome above, the Clusters welcome, and
-**Create Deployment** in this view's title menu -- and the instance's own
-actions (Repair, Rebuild From Checkout, Uninstall, Open Local Checkout) moved to
+**Install Local Cluster...** in this view's title menu -- and the instance's own
+actions (Repair, Rebuild From Checkout, Uninstall, Open Checkout Folder) moved to
 the title menu with it. Nothing lost a route.
 
 **An instance** is a MemQL you operate. It is derived rather than declared:
@@ -356,13 +359,15 @@ perfectly well want registered now.
 ## Clusters
 
 Connections, and nothing else: which clusters this editor can reach, and as
-whom. Selecting a row opens the connection page -- the endpoint, the issuer,
-whether it answered, who you are signed in as, and when the access token expires
-(it renews itself; the countdown is not a countdown to being logged out).
+whom. Clicking a row uses that cluster: it connects, or, when it is already
+connected or needs a sign-in, opens the cluster's page -- its address, MemQL OS,
+who you are signed in as, and the acts that are legal in its state, with Sign in
+as the one button when a sign-in is needed. A row that needs a sign-in carries
+Sign in as its one inline act; a connected row carries Open MemQL OS.
 
-That page is the one to open when a cluster will not come up. Nothing on it
-overlaps MemQL OS, which knows nothing about `clusters.yaml` or VS Code's
-secret storage.
+The cluster in use is connected again when the window opens, whenever a stored
+session can do it, and a dropped connection is retried a few times over about
+two minutes before the row says it cannot reach the cluster.
 
 **Signing in needs nothing configured on either side.** Every identity node
 carries this editor as a built-in first-party OAuth client (`memql-vscode`), so
@@ -371,8 +376,12 @@ your browser and catches the callback on a loopback port; when this host cannot
 do that -- a machine with no browser, or any remote window (Remote-SSH, a dev
 container, WSL, Codespaces), where the callback port would be on the wrong
 machine -- it falls back automatically to a short code you approve on another
-device. Nothing is registered with the cluster at any point, and the `clientId`
-field in `clusters.yaml` is an override you will usually not set.
+device. Before the browser opens, the request is checked with the cluster, so a
+cluster that does not accept this editor says so in seconds; after 30 seconds
+without the browser coming back, the editor offers a code beside it, and the
+browser can still finish. Nothing is registered with the cluster at any point,
+and the editor always signs in as itself: a `client_id` in `clusters.yaml`
+belongs to whichever tool wrote it (the Cockpit writes its own) and is not used.
 
 **A local install must be driven from a local window.** "Install a local
 cluster" writes hosts entries, issues an mkcert certificate into *this
@@ -392,9 +401,8 @@ Operator-facing detail:
 **Remove takes the row, not the cluster.** It drops the entry from
 `~/.memql/clusters.yaml`, deletes the credential this editor stored, and closes
 the connection if it was the live one. **Nothing on the machine is touched**:
-the cluster keeps running and its data is untouched. For a local cluster the
-confirmation says so, and says where to go instead -- uninstalling is a
-Deployments action.
+the cluster keeps running and its data is untouched, and the confirmation says
+so.
 
 **And there is a way back with nothing to re-type.** When a local cluster is on
 the machine but not in the list, the **+** offers *Connect to the local cluster*:
@@ -488,7 +496,7 @@ A **concept** is a schema, so its detail page carries one more action nothing
 else does: **Browse rows in MemQL OS**, which opens that concept's rows at
 `?concept=<id>` in the cluster's MemQL OS. It is the return leg of the
 handoff: MemQL OS hands a definition to the editor, and the editor hands a
-concept's rows back. The address is resolved the same way **Open Console**
+concept's rows back. The address is resolved the same way **Open MemQL OS**
 resolves it -- from MemQL OS's own site row when there is a connection to read
 it over, composed from the cluster's domain when there is not. No other kind has
 rows, so no other kind draws the button; the absence is the statement, exactly

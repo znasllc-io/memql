@@ -1,7 +1,7 @@
 {
   "name": "memql",
   "displayName": "MemQL",
-  "description": "Language support for MemQL (.memql) in Visual Studio Code and Cursor: syntax highlighting, diagnostics, completion, hover, and signature help, powered by the offline memql-lsp language server.",
+  "description": "MemQL language support, plus installing, connecting to and working with MemQL clusters.",
   "version": "0.6.1",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
@@ -30,7 +30,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Language features (highlighting, diagnostics, completion, hover, signature help) work in untrusted workspaces. Connecting to a cluster, browsing its data, and running a construct against it require trust: those read credentials from ~/.memql/clusters.yaml, open a network connection, and execute code against a live cluster, which a malicious workspace must not be able to trigger. Run configurations live in the workspace so a repository can ship one, and nothing ever runs automatically -- a CodeLens renders an affordance and there is no run-on-save.",
+      "description": "Language features work in Restricted Mode. Clusters, data and runs need a trusted workspace.",
       "restrictedConfigurations": [
         "memql.lsp.serverPath"
       ]
@@ -86,18 +86,18 @@
             "dark"
           ],
           "enumDescriptions": [
-            "Follow the editor's colour theme.",
-            "Always use the MemQL light palette, whatever the editor is set to.",
-            "Always use the MemQL dark palette, whatever the editor is set to."
+            "Match the editor's colour theme.",
+            "Always use the MemQL light colours.",
+            "Always use the MemQL dark colours."
           ],
           "default": "system",
-          "description": "Which palette the MemQL panels (Clusters, Concepts, Constructs, Deployments, Runs and the connection page) use. 'system' means follow the EDITOR's colour theme -- in Visual Studio Code and Cursor the editor is the ambient theme, and it is what tracks your operating system if you have asked it to. 'light' and 'dark' pin the MemQL palette regardless of the editor. A high-contrast editor theme always wins: the panels then defer entirely to the editor's own colours and this setting is ignored. Tree rows, the activity bar and the status bar are drawn by the editor and cannot be styled by an extension -- to brand those too, pick the 'MemQL Dark' or 'MemQL Light' colour theme in the theme picker."
+          "description": "Colours for MemQL pages. System matches the editor's colour theme, and a high-contrast theme always wins."
         },
         "memql.lsp.serverPath": {
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "Absolute path to the memql-lsp binary. When empty, the extension uses the bundled platform binary if present, otherwise 'memql-lsp' on PATH. Read from your USER settings only: a value in workspace settings (.vscode/settings.json) is refused and a warning says so, because a workspace-supplied path would let an opened folder point the extension at any executable on your machine. When no binary resolves, only language features are lost -- the Clusters, Concepts and Runs views do not use the language server."
+          "description": "Path to a memql-lsp binary; leave empty to use the bundled one or memql-lsp on your PATH. Read from user settings only, so a folder you open can't choose what runs."
         },
         "memql.lsp.trace.server": {
           "type": "string",
@@ -107,7 +107,7 @@
             "verbose"
           ],
           "default": "off",
-          "description": "Trace the communication between the editor and the memql-lsp server."
+          "description": "Log messages between the editor and memql-lsp to the Output panel, for troubleshooting."
         }
       }
     },
@@ -183,203 +183,357 @@
     "viewsWelcome": [
       {
         "view": "memqlClusters",
-        "contents": "No clusters yet. MemQL runs as a cluster this editor installs, repairs and connects to; managing what runs inside one is its portal's job.\n[Install a local cluster](command:memql.deployments.createDeployment)\n[Add an existing cluster](command:memql.clusters.add)"
+        "contents": "No clusters yet.\n[Install Local Cluster](command:memql.deployments.createDeployment)\n[Connect to a Cluster](command:memql.clusters.add)",
+        "when": "!memql.localClusterPresent"
+      },
+      {
+        "view": "memqlClusters",
+        "contents": "A local cluster is running on this computer.\n[Connect](command:memql.clusters.connectLocal)\n[Add Another Cluster](command:memql.clusters.add)",
+        "when": "memql.localClusterPresent"
       },
       {
         "view": "memqlDeployments",
-        "contents": "Not connected. Select a cluster to see its deployments.\n[Select Cluster](command:memql.clusters.select)\n[Install a local cluster](command:memql.deployments.createDeployment)",
+        "contents": "Not connected to a cluster.\n[Show Local Cluster](command:memql.deployments.open)\n[Connect to a Cluster](command:memql.clusters.select)",
+        "when": "!memql.clusterSelected && memql.localClusterPresent"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "Not connected to a cluster.\n[Install Local Cluster](command:memql.deployments.createDeployment)\n[Connect to a Cluster](command:memql.clusters.select)",
+        "when": "!memql.clusterSelected && !memql.localClusterPresent"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "Sign in to see this cluster's history.\n[Sign In](command:memql.deployments.signIn)",
+        "when": "memql.clusterSelected && memql.connectionState == signIn"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "No history yet.",
+        "when": "memql.clusterSelected && memql.connectionState == connected"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "Connecting.",
+        "when": "memql.clusterSelected && memql.connectionState == connecting"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "Can't reach this cluster.\n[Show Details](command:memql.deployments.openCluster)",
+        "when": "memql.clusterSelected && memql.connectionState == unreachable"
+      },
+      {
+        "view": "memqlDeployments",
+        "contents": "This cluster has no address.\n[Edit Cluster](command:memql.clusters.edit)",
+        "when": "memql.clusterSelected && memql.connectionState == notConfigured"
+      },
+      {
+        "view": "memqlConstructs",
+        "contents": "Not connected to a cluster.\n[Connect to a Cluster](command:memql.clusters.select)\n[Add Cluster](command:memql.clusters.add)",
         "when": "!memql.clusterSelected"
       },
       {
         "view": "memqlConstructs",
-        "contents": "Not connected. Select a cluster to browse its constructs.\n[Select Cluster](command:memql.clusters.select)",
+        "contents": "Sign in to see constructs.\n[Sign In](command:memql.clusters.signIn)",
+        "when": "memql.connectionState == signIn"
+      },
+      {
+        "view": "memqlConstructs",
+        "contents": "The cluster isn't answering.\n[Retry](command:memql.constructs.refresh)",
+        "when": "memql.connectionState == unreachable"
+      },
+      {
+        "view": "memqlConstructs",
+        "contents": "This cluster has no address.\n[Edit Cluster](command:memql.clusters.edit)",
+        "when": "memql.connectionState == notConfigured"
+      },
+      {
+        "view": "memqlData",
+        "contents": "Not connected to a cluster.\n[Connect to a Cluster](command:memql.clusters.select)\n[Add Cluster](command:memql.clusters.add)",
         "when": "!memql.clusterSelected"
       },
       {
         "view": "memqlData",
-        "contents": "Not connected. Select a cluster to browse its data.\n[Select Cluster](command:memql.clusters.select)",
-        "when": "!memql.clusterSelected"
+        "contents": "Sign in to see data.\n[Sign In](command:memql.clusters.signIn)",
+        "when": "memql.connectionState == signIn"
+      },
+      {
+        "view": "memqlData",
+        "contents": "The cluster isn't answering.\n[Retry](command:memql.data.refresh)",
+        "when": "memql.connectionState == unreachable"
+      },
+      {
+        "view": "memqlData",
+        "contents": "This cluster has no address.\n[Edit Cluster](command:memql.clusters.edit)",
+        "when": "memql.connectionState == notConfigured"
+      },
+      {
+        "view": "memqlRuns",
+        "contents": "Runs you save from a Run form appear here.\n[Edit Saved Runs](command:memql.runs.open)",
+        "when": "workbenchState != empty"
+      },
+      {
+        "view": "memqlRuns",
+        "contents": "Open a folder to save runs.\n[Open Folder](command:vscode.openFolder)",
+        "when": "workbenchState == empty"
       }
     ],
     "commands": [
       {
         "command": "memql.clusters.refresh",
-        "title": "MemQL: Refresh Clusters",
+        "title": "Refresh Clusters",
+        "category": "MemQL",
         "icon": "$(refresh)"
       },
       {
         "command": "memql.clusters.select",
-        "title": "MemQL: Select Cluster"
+        "title": "Connect to Cluster...",
+        "category": "MemQL"
       },
       {
         "command": "memql.clusters.add",
-        "title": "MemQL: Add Cluster",
+        "title": "Add Cluster",
+        "category": "MemQL",
         "icon": "$(add)"
       },
       {
+        "command": "memql.clusters.connectLocal",
+        "title": "Connect to Local Cluster",
+        "category": "MemQL"
+      },
+      {
         "command": "memql.clusters.edit",
-        "title": "MemQL: Edit Cluster",
+        "title": "Edit Cluster",
+        "category": "MemQL",
         "icon": "$(edit)"
       },
       {
         "command": "memql.clusters.remove",
-        "title": "MemQL: Remove Cluster From List",
+        "title": "Remove Cluster From List",
+        "category": "MemQL",
         "icon": "$(trash)"
       },
       {
         "command": "memql.clusters.uninstall",
-        "title": "MemQL: Uninstall Local Cluster..."
+        "title": "Uninstall Local Cluster...",
+        "category": "MemQL"
       },
       {
         "command": "memql.constructs.refresh",
-        "title": "MemQL: Refresh Constructs",
+        "title": "Refresh Constructs",
+        "category": "MemQL",
         "icon": "$(refresh)"
       },
       {
         "command": "memql.constructs.open",
-        "title": "MemQL: Open Construct"
+        "title": "Open Construct",
+        "category": "MemQL"
       },
       {
         "command": "memql.constructs.showDetails",
-        "title": "MemQL: Show Construct Details"
+        "title": "Show Construct Details",
+        "category": "MemQL"
+      },
+      {
+        "command": "memql.constructs.run",
+        "title": "Run",
+        "category": "MemQL",
+        "icon": "$(play)"
       },
       {
         "command": "memql.deployments.refresh",
-        "title": "MemQL: Refresh Deployments",
+        "title": "Refresh Deployments",
+        "category": "MemQL",
         "icon": "$(refresh)"
       },
       {
         "command": "memql.deployments.createDeployment",
-        "title": "MemQL: Create Deployment...",
+        "title": "Install Local Cluster...",
+        "category": "MemQL",
         "icon": "$(add)"
       },
       {
         "command": "memql.deployments.open",
-        "title": "MemQL: Open Local Deployment",
+        "title": "Show Local Cluster Deployments",
+        "category": "MemQL",
         "icon": "$(server)"
       },
       {
         "command": "memql.deployments.openRun",
-        "title": "MemQL: Open Deployment"
+        "title": "Show Deployment",
+        "category": "MemQL"
       },
       {
         "command": "memql.deployments.openCheckout",
-        "title": "MemQL: Open Local Checkout",
+        "title": "Open Checkout Folder",
+        "category": "MemQL",
         "icon": "$(folder-opened)"
       },
       {
         "command": "memql.deployments.rebuildFromCheckout",
-        "title": "MemQL: Rebuild Local Cluster From Checkout",
+        "title": "Rebuild From Checkout...",
+        "category": "MemQL",
         "icon": "$(tools)"
       },
       {
+        "command": "memql.deployments.openCluster",
+        "title": "Show Deployments",
+        "category": "MemQL",
+        "icon": "$(info)"
+      },
+      {
+        "command": "memql.deployments.signIn",
+        "title": "Sign In",
+        "category": "MemQL",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "memql.deployments.changeVersion",
+        "title": "Change Version...",
+        "category": "MemQL"
+      },
+      {
+        "command": "memql.deployments.updateAndRebuild",
+        "title": "Pull and Rebuild...",
+        "category": "MemQL"
+      },
+      {
         "command": "memql.clusters.repair",
-        "title": "MemQL: Repair Local Cluster"
+        "title": "Repair Local Cluster",
+        "category": "MemQL"
       },
       {
         "command": "memql.clusters.takeOwnership",
-        "title": "MemQL: Take Ownership (enrol a passkey)",
+        "title": "Create Owner Passkey",
+        "category": "MemQL",
         "icon": "$(key)"
       },
       {
         "command": "memql.clusters.signIn",
-        "title": "MemQL: Sign In",
+        "title": "Sign In",
+        "category": "MemQL",
         "icon": "$(sign-in)"
       },
       {
         "command": "memql.clusters.signOut",
-        "title": "MemQL: Sign Out"
+        "title": "Sign Out",
+        "category": "MemQL"
       },
       {
         "command": "memql.clusters.disconnect",
-        "title": "MemQL: Disconnect"
+        "title": "Disconnect",
+        "category": "MemQL"
       },
       {
         "command": "memql.clusters.signInWithCode",
-        "title": "MemQL: Sign In With a Device Code"
+        "title": "Sign In With a Code",
+        "category": "MemQL"
       },
       {
         "command": "memql.clusters.connection",
-        "title": "MemQL: Open Cluster Connection",
+        "title": "Show Cluster Details",
+        "category": "MemQL",
         "icon": "$(plug)"
       },
       {
         "command": "memql.clusters.openConsole",
-        "title": "MemQL: Open Console",
+        "title": "Open MemQL OS",
+        "category": "MemQL",
         "icon": "$(link-external)"
       },
       {
         "command": "memql.data.refresh",
-        "title": "MemQL: Refresh Data",
+        "title": "Refresh Data",
+        "category": "MemQL",
         "icon": "$(refresh)"
       },
       {
         "command": "memql.data.open",
-        "title": "MemQL: Browse Concept Rows"
+        "title": "Open Concept",
+        "category": "MemQL"
       },
       {
         "command": "memql.runs.refresh",
-        "title": "MemQL: Refresh Runs",
+        "title": "Refresh Runs",
+        "category": "MemQL",
         "icon": "$(refresh)"
       },
       {
         "command": "memql.runs.open",
-        "title": "MemQL: Open Run Configurations File",
+        "title": "Edit Saved Runs",
+        "category": "MemQL",
         "icon": "$(json)"
       },
       {
         "command": "memql.runs.execute",
-        "title": "MemQL: Run Configuration",
+        "title": "Run",
+        "category": "MemQL",
         "icon": "$(play)"
       },
       {
         "command": "memql.runs.delete",
-        "title": "MemQL: Delete Run Configuration",
+        "title": "Delete Saved Run...",
+        "category": "MemQL",
         "icon": "$(trash)"
       },
       {
         "command": "memql.run.construct",
-        "title": "MemQL: Run Construct"
+        "title": "Run",
+        "category": "MemQL"
       },
       {
         "command": "memql.run.constructWith",
-        "title": "MemQL: Run Construct With Arguments"
+        "title": "Run With Arguments...",
+        "category": "MemQL"
       },
       {
         "command": "memql.run.automation",
-        "title": "MemQL: Run Automation"
+        "title": "Run Automation...",
+        "category": "MemQL"
       },
       {
         "command": "memql.training.dryRun",
-        "title": "MemQL: Dry-run Construct Against The Cluster"
+        "title": "Dry Run Construct",
+        "category": "MemQL"
       },
       {
         "command": "memql.training.tryInSession",
-        "title": "MemQL: Try Construct In This Session"
+        "title": "Try Construct in This Session...",
+        "category": "MemQL"
       },
       {
         "command": "memql.training.stage",
-        "title": "MemQL: Stage Construct For Yourself"
+        "title": "Stage Construct...",
+        "category": "MemQL"
       },
       {
         "command": "memql.training.promote",
-        "title": "MemQL: Promote Construct To The Cluster"
+        "title": "Promote Construct...",
+        "category": "MemQL"
       },
       {
         "command": "memql.training.demote",
-        "title": "MemQL: Demote Construct From The Cluster"
+        "title": "Demote Construct...",
+        "category": "MemQL"
+      },
+      {
+        "command": "memql.training.choose",
+        "title": "Choose Training Action...",
+        "category": "MemQL"
       },
       {
         "command": "memql.training.showList",
-        "title": "MemQL: Show Untrained And Drifted Constructs"
+        "title": "Show Constructs Not Live on Cluster",
+        "category": "MemQL"
       },
       {
         "command": "memql.clusters.refreshReleases",
-        "title": "MemQL: Check For New Releases"
+        "title": "Check for Updates",
+        "category": "MemQL"
       },
       {
         "command": "memql.language.showReference",
-        "title": "MemQL: Show Language Reference"
+        "title": "Show Language Reference",
+        "category": "MemQL"
       }
     ],
     "menus": {
@@ -409,6 +563,10 @@
           "when": "false"
         },
         {
+          "command": "memql.constructs.run",
+          "when": "false"
+        },
+        {
           "command": "memql.deployments.refresh",
           "when": "isWorkspaceTrusted"
         },
@@ -433,8 +591,28 @@
           "when": "isWorkspaceTrusted"
         },
         {
+          "command": "memql.deployments.openCluster",
+          "when": "isWorkspaceTrusted && memql.clusterSelected"
+        },
+        {
+          "command": "memql.deployments.signIn",
+          "when": "false"
+        },
+        {
+          "command": "memql.deployments.changeVersion",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.deployments.updateAndRebuild",
+          "when": "isWorkspaceTrusted"
+        },
+        {
           "command": "memql.clusters.add",
           "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.connectLocal",
+          "when": "isWorkspaceTrusted && memql.localClusterPresent"
         },
         {
           "command": "memql.clusters.edit",
@@ -537,45 +715,59 @@
           "when": "false"
         },
         {
+          "command": "memql.training.choose",
+          "when": "false"
+        },
+        {
           "command": "memql.training.showList",
           "when": "isWorkspaceTrusted"
         }
       ],
       "view/title": [
         {
-          "command": "memql.deployments.open",
-          "when": "view == memqlDeployments && memql.clusterSelected",
+          "command": "memql.deployments.signIn",
+          "when": "view == memqlDeployments && memql.connectionState == signIn",
           "group": "navigation@0"
         },
         {
-          "command": "memql.deployments.openCheckout",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
-          "group": "navigation@2"
+          "command": "memql.deployments.openCluster",
+          "when": "view == memqlDeployments && memql.clusterSelected",
+          "group": "navigation@1"
         },
         {
           "command": "memql.deployments.createDeployment",
           "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstanceAbsent",
-          "group": "1_instance@1"
+          "group": "1_install@1"
+        },
+        {
+          "command": "memql.deployments.changeVersion",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
+          "group": "2_version@1"
         },
         {
           "command": "memql.deployments.rebuildFromCheckout",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
-          "group": "2_lifecycle@0"
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasCheckout",
+          "group": "2_version@2"
+        },
+        {
+          "command": "memql.deployments.updateAndRebuild",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasBranch",
+          "group": "2_version@3"
+        },
+        {
+          "command": "memql.deployments.openCheckout",
+          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasCheckout",
+          "group": "3_open@1"
         },
         {
           "command": "memql.clusters.repair",
           "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
-          "group": "2_lifecycle@1"
+          "group": "4_repair@1"
         },
         {
           "command": "memql.clusters.uninstall",
           "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
-          "group": "2_lifecycle@2"
-        },
-        {
-          "command": "memql.deployments.refresh",
-          "when": "view == memqlDeployments",
-          "group": "navigation@1"
+          "group": "9_danger@1"
         },
         {
           "command": "memql.clusters.add",
@@ -583,24 +775,24 @@
           "group": "navigation@1"
         },
         {
-          "command": "memql.clusters.refresh",
-          "when": "view == memqlClusters",
-          "group": "navigation@2"
-        },
-        {
           "command": "memql.deployments.createDeployment",
-          "when": "view == memqlClusters",
-          "group": "1_manage@1"
+          "when": "view == memqlClusters && !memql.localClusterPresent",
+          "group": "1_local@1"
         },
         {
           "command": "memql.clusters.repair",
-          "when": "view == memqlClusters",
-          "group": "1_manage@2"
+          "when": "view == memqlClusters && memql.localClusterPresent",
+          "group": "1_local@2"
         },
         {
           "command": "memql.constructs.refresh",
           "when": "view == memqlConstructs",
           "group": "navigation@1"
+        },
+        {
+          "command": "memql.language.showReference",
+          "when": "view == memqlConstructs",
+          "group": "9_reference@1"
         },
         {
           "command": "memql.data.refresh",
@@ -609,60 +801,85 @@
         },
         {
           "command": "memql.runs.open",
-          "when": "view == memqlRuns",
+          "when": "view == memqlRuns && workbenchState != empty",
           "group": "navigation@1"
-        },
-        {
-          "command": "memql.runs.refresh",
-          "when": "view == memqlRuns",
-          "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
-          "command": "memql.clusters.connection",
-          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
+          "command": "memql.clusters.signIn",
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;signIn(;|$)/",
           "group": "inline@1"
         },
         {
           "command": "memql.clusters.openConsole",
-          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
-          "group": "inline@2"
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;connected(;.*)?;os(;|$)/",
+          "group": "inline@1"
         },
         {
-          "command": "memql.clusters.edit",
-          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
-          "group": "inline@3"
+          "command": "memql.clusters.connection",
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;/",
+          "group": "1_open@1"
         },
         {
-          "command": "memql.clusters.remove",
-          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
-          "group": "inline@4"
+          "command": "memql.clusters.openConsole",
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;.*;os(;|$)/",
+          "group": "1_open@2"
         },
         {
           "command": "memql.clusters.signIn",
-          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
-          "group": "auth@1"
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;signIn(;|$)/",
+          "group": "2_session@1"
+        },
+        {
+          "command": "memql.clusters.signInWithCode",
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;signIn(;|$)/",
+          "group": "2_session@2"
         },
         {
           "command": "memql.clusters.takeOwnership",
-          "when": "view == memqlClusters && viewItem == memqlLocalCluster",
-          "group": "auth@2"
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;.*;ownerSetup(;|$)/",
+          "group": "2_session@3"
+        },
+        {
+          "command": "memql.clusters.disconnect",
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;(connected|connecting)(;|$)/",
+          "group": "2_session@4"
         },
         {
           "command": "memql.clusters.signOut",
-          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
-          "group": "auth@3"
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;.*;signedIn(;|$)/",
+          "group": "2_session@5"
+        },
+        {
+          "command": "memql.clusters.edit",
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;/",
+          "group": "3_edit@1"
+        },
+        {
+          "command": "memql.clusters.remove",
+          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;/",
+          "group": "9_remove@1"
         },
         {
           "command": "memql.runs.execute",
-          "when": "view == memqlRuns && viewItem == memqlRun",
+          "when": "view == memqlRuns && viewItem == memqlRun && memql.connected",
           "group": "inline@1"
+        },
+        {
+          "command": "memql.runs.execute",
+          "when": "view == memqlRuns && viewItem == memqlRun && memql.connected",
+          "group": "1_run@1"
         },
         {
           "command": "memql.runs.delete",
           "when": "view == memqlRuns && viewItem == memqlRun",
-          "group": "inline@2"
+          "group": "9_delete@1"
+        },
+        {
+          "command": "memql.constructs.run",
+          "when": "view == memqlConstructs && viewItem == memqlRunnableConstruct && memql.connected",
+          "group": "inline@1"
         }
       ]
     }
@@ -674,7 +891,10 @@
     "build:install-cli": "esbuild src/install/cli.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist-install/cli.js",
     "install-cli": "npm run build:install-cli && node dist-install/cli.js",
     "test": "tsc -p tsconfig.test.json && node esbuild.test.js && node --test dist-test/test/*.js",
-    "test:host": "npm run compile && tsc -p tsconfig.host.json && node esbuild.host.js && node test-host/runner.js"
+    "test:host": "npm run compile && tsc -p tsconfig.host.json && node esbuild.host.js && node test-host/runner.js",
+    "gallery": "node gallery/build.mjs",
+    "gallery:shoot": "node gallery/shoot.mjs",
+    "gallery:check": "node gallery/check.mjs"
   },
   "dependencies": {
     "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",

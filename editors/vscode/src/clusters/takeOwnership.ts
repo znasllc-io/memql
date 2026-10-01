@@ -26,7 +26,7 @@
 // -- the host capabilities arrive injected, exactly as `install/enrolment.ts`
 // takes them.
 
-import type { ClusterConfig } from "./model.js";
+import { displayLabel, type ClusterConfig } from "./model.js";
 import { receiptNamesAnotherCluster } from "./ownershipRoute.js";
 import { capabilityScriptPath, type CapabilityEnvelope, type ScriptOutcome } from "../install/runner.js";
 
@@ -108,16 +108,14 @@ export async function mintOwnershipLink(
   if (inputs.cluster.local !== true) {
     throw new OwnershipError(
       "notLocal",
-      `"${inputs.cluster.name}" is not a cluster on this machine, so an enrolment link cannot be minted here. ` +
-        "Ask an owner or admin of that cluster to send you one.",
+      `${displayLabel(inputs.cluster)} isn't a cluster on this computer. Ask one of its owners for a setup link.`,
     );
   }
   const email = inputs.ownerEmail.trim();
   if (email === "") {
     throw new OwnershipError(
       "noOwner",
-      "No owner email is recorded for this cluster, so there is no account to enrol. " +
-        "Re-run the installer, which records the owner it bootstraps.",
+      `This computer's install recorded no owner for ${displayLabel(inputs.cluster)}. Sign in instead.`,
     );
   }
   // THE RECEIPT IS ONE FILE AND THE CLUSTER LIST IS MANY (memql#3906).
@@ -140,8 +138,7 @@ export async function mintOwnershipLink(
   if (receiptNamesAnotherCluster(inputs.cluster.domain ?? "", inputs.receiptDomain)) {
     throw new OwnershipError(
       "otherCluster",
-      `The install receipt on this machine records an owner for a different cluster, so it cannot name the account to enrol on "${inputs.cluster.name}". ` +
-        "Repair this cluster from the wizard, which re-records the owner it bootstraps.",
+      `This computer's install record is for a different cluster. Repair ${displayLabel(inputs.cluster)} to fix it.`,
     );
   }
 
@@ -163,7 +160,7 @@ export async function mintOwnershipLink(
   const envelope: CapabilityEnvelope | null = outcome.envelope;
   if (outcome.exitCode !== 0 || envelope === null || envelope.ok !== true) {
     const detail = envelope?.error?.message ?? `the mint exited ${outcome.exitCode}`;
-    throw new OwnershipError("mintFailed", `An enrolment link could not be minted: ${detail}`);
+    throw new OwnershipError("mintFailed", `Couldn't start passkey setup: ${detail}`);
   }
 
   const url = envelope.result[ENROLMENT_RESULT_FIELD];
@@ -184,8 +181,8 @@ export async function mintOwnershipLink(
     throw new OwnershipError(
       "noLink",
       state === "awaitingFirstSignIn"
-        ? "This cluster reports no owner account, so there is nothing to enrol against. An install seeds the owner at identity boot, so a cluster answering this was brought up without those values -- claim it through the ownership wizard, which mints the first owner."
-        : "The mint reported success and produced no link.",
+        ? `${displayLabel(inputs.cluster)} has no owner yet. Claim it in your browser first.`
+        : "Couldn't start passkey setup.",
     );
   }
   return url.trim();

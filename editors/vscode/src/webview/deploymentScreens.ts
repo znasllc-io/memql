@@ -1,11 +1,24 @@
-// The instance page's own screens: the overview, choosing a target version, and
-// one deployment in detail.
+// The cluster page's screens, built from the page kit: the overview (local and
+// remote), changing version, the two builds from the checkout, a run as it
+// happens, and one run from the history.
 //
-// The run screens it shares with the add-cluster wizard are in
-// installScreens.ts; these are the Deployments page's alone. Same three
-// constraints govern them -- no DOM, no inline event handlers (the webview CSP
-// forbids them, so interactivity is `data-act` attributes plus one delegated
-// listener in the panel), and every value through `escapeHtml`.
+// EVERY SCREEN IS THE KIT'S THREE PARTS. A head (the cluster's name and its
+// version), a body (a short list of facts, then the history as a quiet list),
+// and the action bar on the floor (the state in words and at most three acts,
+// the one button last). Each function returns those three regions as HTML for
+// LiveView, which assigns a document once per screen and patches it after --
+// so nothing here builds a document, and the panel wraps them in one.
+//
+// NOTHING HERE DECIDES WHICH ACTS EXIST. deploy/instanceActions.ts computes the
+// bar (state, acts, and what goes behind More) and a remote page's per-item
+// acts (a rollout's Promote and Abort, the versions to prepare), and this only
+// draws them; what a deploy act sends is deploy/controls.ts's; the words a row
+// or a state carries are state/deploymentsCatalog.ts's. A screen
+// that composed its own acts would be a second authority, and the first thing
+// a second authority does is offer an act the first one withheld.
+//
+// LOADING IS THE SHAPE OF THE CONTENT (the kit's skeleton), never a sentence;
+// a read that failed says so; an empty history is a real empty state.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 //
@@ -13,184 +26,325 @@
 
 import { escapeHtml } from "@znasllc-io/memql-view-kit";
 
-import { renderDisclosure, renderScreen } from "./screenLayout.js";
+import {
+  actionBar,
+  button,
+  codeBlock,
+  disclosure,
+  emptyState,
+  facts,
+  field,
+  head,
+  logPane,
+  notice,
+  progress,
+  skeleton,
+  subhead,
+  switchRow,
+  textInput,
+  type Act,
+  type FactRow,
+  type LogPaneInput,
+} from "./ui/kit.js";
+import type { RegionParts } from "./ui/liveView.js";
+import type { LogLine, ProgressUpdate } from "./ui/protocol.js";
 
-import type { VersionPreview } from "../deploy/controller.js";
-import {
-  deployControls,
-  rolloutsInFlight,
-  versionOf,
-  type DeployControl,
-  type DeployControlFacts,
-} from "../deploy/controls.js";
-import type { InstanceAction } from "../deploy/instanceActions.js";
+import { actionOfKey } from "../deploy/controls.js";
+import type { PageAct, PageBar, RemoteChoices } from "../deploy/instanceActions.js";
+import type { RunFailure, RunWords } from "../deploy/localRun.js";
+import type { PipelineState } from "../deploy/pipelineState.js";
 import type { UpgradeVerdict } from "../deploy/upgrade.js";
-import { displayVersion, type Instance, type Run, type RunItem } from "../state/deployments.js";
+import { instanceLabel, type Instance, type Run } from "../state/deployments.js";
 import {
-  checkoutVersionText,
-  instanceRowStatus,
+  formatWhen,
+  itemReason,
+  relativeTime,
+  runNoun,
+  parseItemDetail,
   runDuration,
   runRowStatus,
-  versionTransition,
+  stepGroups,
+  type ConnectionWord,
+  type StepGroup,
 } from "../state/deploymentsCatalog.js";
-import type { PipelineState } from "../deploy/pipelineState.js";
-import type { TagListing } from "../install/tags.js";
-import { releasedImages, returnsToReleasedImages } from "../state/imageLane.js";
+import type { CheckNotice, RebuildCheck } from "../state/rebuildPreflight.js";
 import type { PlannedStepView } from "../state/upgradePlan.js";
-import { renderPreflight } from "./installScreens.js";
-import { checkoutSkew, checkoutSkewFactValue } from "../version/checkoutSkew.js";
-import { latestRelease, type ReleaseListing } from "../version/releaseCache.js";
+import { checkoutSkew, shortCommit } from "../version/checkoutSkew.js";
+import { describeVersion } from "../version/describe.js";
+import type { ReleaseListing } from "../version/releaseCache.js";
 
 /**
- * The `latest` fact, beside the instance's own `version` (memql#3996).
- *
- * UNCONDITIONAL, including when nothing has been fetched, and that is the same
- * call the page already makes about `version`: an operator opened this page to
- * ask what this cluster is, so a fact that vanished when the answer was
- * "we do not know" would read as "there is nothing newer" -- which is the one
- * reading this epic exists to prevent. `not fetched` says which of the two it
- * is, and the reason sits in the lede above, where the version sentence names
- * the fetch failure.
- *
- * The row's availability clause is NOT repeated here. It is already in the
- * lede, and a page that said "v0.19.0 available" twice would be arguing with
- * itself about which one the operator should read.
+ * The page's own layout: the run and step lists, which the kit has no piece
+ * for. LAYOUT ONLY -- every colour is a kit token (the dots are the kit's own
+ * `mq-dot`), so a theme change restyles these with everything else.
  */
-function latestFact(releases: ReleaseListing | undefined): string {
-  const latest = latestRelease(releases);
-  return `<div class="fact"><span class="fact-key">latest</span><span class="fact-value">${escapeHtml(
-    latest ?? "not fetched",
-  )}</span></div>`;
+export const DEPLOYMENT_STYLES = `
+  .dp-list { list-style: none; margin: 0; padding: 0; max-width: 80ch; }
+  .dp-row { display: flex; align-items: center; gap: 10px; box-sizing: border-box; width: calc(100% + 16px);
+            min-height: calc(var(--memql-control-h) + 6px); margin: 0 -8px; padding: 3px 8px; font: inherit;
+            color: inherit; text-align: left; background: none; border: 0; border-radius: var(--memql-radius); }
+  button.dp-row { cursor: pointer; }
+  button.dp-row:hover { background: var(--memql-raised); }
+  button.dp-row:focus-visible { outline: 1px solid var(--memql-focus); outline-offset: -1px; }
+  .dp-row-label { flex: none; }
+  .dp-row-desc { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                 color: var(--memql-muted); font-variant-numeric: tabular-nums; }
+  .dp-row-reason { flex-basis: 100%; margin: -2px 0 4px 18px; color: var(--memql-muted); }
+  .dp-row-acts { flex: none; display: flex; gap: 8px; margin-left: auto; }
+  .dp-row-acts > .mq-textbtn:last-child { margin-right: -6px; }
+  .dp-note { margin: 6px 0 0; color: var(--memql-muted); }
+  .dp-lede { margin: 0 0 14px; max-width: 80ch; color: var(--memql-muted); }
+  .dp-select { appearance: auto; padding: 0 6px; }
+  .dp-fact-act { margin-left: 4px; }
+  .dp-fact-act > .mq-textbtn { height: auto; vertical-align: baseline; }
+  .dp-log { margin: 0 0 6px 18px; }
+  .dp-log .mq-disclosure { margin: 2px 0 0; }
+  .dp-bullets { margin: 0; padding-left: 18px; max-width: 80ch; line-height: 1.9; }
+  .dp-bullets li::marker { color: var(--memql-subtle); }
+  .mq-facts + :is(.mq-field, .mq-skeleton, .mq-switch) { margin-top: 18px; }
+  .mq-notice + .mq-field { margin-top: 16px; }
+`;
+
+/** A page act as the kit draws it. */
+function kitAct(a: PageAct): Act {
+  return {
+    act: a.id,
+    label: a.label,
+    ...(a.value === undefined ? {} : { value: a.value }),
+    ...(a.tone === undefined ? {} : { tone: a.tone }),
+    ...(a.title === undefined ? {} : { title: a.title }),
+    ...(a.ariaLabel === undefined ? {} : { ariaLabel: a.ariaLabel }),
+  };
+}
+
+/** The action bar a `PageBar` describes. */
+export function barHtml(b: PageBar, extra: readonly Act[] = []): string {
+  return actionBar({
+    state: b.state,
+    ...(b.detail === undefined ? {} : { detail: b.detail }),
+    tone: b.tone,
+    acts: [...extra, ...b.acts.map(kitAct)],
+  });
+}
+
+/** A page-produced sentence: an act that was refused, a confirmation that did not match. */
+export interface PageNotice {
+  tone: "info" | "warn" | "error";
+  line: string;
+  next?: string;
+  acts?: readonly Act[];
+}
+
+function pageNotice(n: PageNotice | undefined): string {
+  if (n === undefined) return "";
+  return notice({ tone: n.tone, line: n.line, ...(n.next === undefined ? {} : { next: n.next }), ...(n.acts === undefined ? {} : { acts: n.acts }) });
+}
+
+/** A path as the page shows it: under the home directory it reads `~/...`. */
+function masked(path: string, home: string): string {
+  const trimmed = home.replace(/[\\/]+$/, "");
+  return trimmed.length < 2 ? path : path.split(trimmed).join("~");
+}
+
+/** Where MemQL OS answers for a domain, as shown and as opened. */
+export function memqlOsAddress(domain: string | undefined): { shown: string; url: string } | undefined {
+  const d = (domain ?? "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  if (d === "") return undefined;
+  return { shown: `os.${d}`, url: `https://os.${d}/` };
+}
+
+/** A fact whose value carries one quiet act beside it (Open). */
+function factWithAct(value: string, act: Act, mono = true): string {
+  const text = mono ? `<span class="mq-mono">${escapeHtml(value)}</span>` : escapeHtml(value);
+  return `${text}<span class="dp-fact-act">${button({ ...act, tone: "text" })}</span>`;
+}
+
+// ---------------------------------------------------------------------------
+// the history
+// ---------------------------------------------------------------------------
+
+/**
+ * The history, newest first, as a quiet list: a dot, what happened, and from
+ * where to where and when. Each row opens the run.
+ */
+export function runList(runs: readonly Run[], nowMs: number, preparedId = ""): string {
+  if (runs.length === 0) return emptyState({ line: "No history yet." });
+  const rows = runs
+    .map((run) => {
+      const row = runRowStatus(run, nowMs, { prepared: preparedId !== "" && run.id === preparedId });
+      return (
+        `<li><button type="button" class="dp-row" data-act="openRun" data-value="${escapeHtml(run.id)}"` +
+        ` title="${escapeHtml(row.tooltip)}"><span class="mq-dot" data-tone="${row.tone}" aria-hidden="true"></span>` +
+        `<span class="dp-row-label">${escapeHtml(row.label)}</span>` +
+        `<span class="dp-row-desc">${escapeHtml(row.description)}</span></button></li>`
+      );
+    })
+    .join("");
+  return `<ul class="dp-list" aria-label="History">${rows}</ul>`;
 }
 
 /**
- * The one button that moves this cluster to the newest release (memql#3997).
+ * A SAVED log, drawn with the kit's log pane but NOT as a live log region.
  *
- * DRAWN FOR A REFUSED VERDICT TOO, and that is deliberate. Hiding it would
- * leave an operator looking at a row that says `v0.19.0 available` beside a
- * page that offers nothing, with no way to find out why. Pressing it produces
- * the refusal and the runbook, which is the answer they came for. The refusal
- * arrives as this page's own error line -- nothing was sent, so there is no
- * engine outcome and no audit id.
- *
- * `data-act`, not `data-choose`: the instance actions validate their id against
- * instanceActions(), and this is not one of them.
- *
- * IT NO LONGER CARRIES ITS OWN ACTIONS ROW (memql#4453). It used to sit in a
- * row of its own, between the facts and the instance's buttons -- which under
- * the actions-first doctrine would put two action rows on one page, in
- * different places, one of them below the fold. It is a button now, and the
- * screen puts it in the single row at the top.
+ * The page runtime writes every `log` message into every `data-region="log"`
+ * on the page, and LiveView re-sends its buffer -- with a reset -- whenever a
+ * new document says `ready`. A run's page that had been watching a run would
+ * therefore empty a recorded step's log, or fill it with the last run's
+ * lines, the moment the run's own page came up. A saved log is a record, not
+ * a stream, so it is not addressable by the stream.
  */
-function upgradeButton(verdict: UpgradeVerdict): string {
-  if (verdict.kind === "none") return "";
-  const detail =
-    verdict.kind === "offer"
-      ? verdict.confirmation
-      : "This move is not a retag. Press to see what it changes and where the procedure is.";
-  return `<button class="primary" type="button" data-act="upgrade" title="${escapeHtml(
-    detail,
-  )}">${escapeHtml(verdict.label)}</button>`;
+export function savedLogPane(i: LogPaneInput): string {
+  return logPane(i).replace(' data-region="log"', "");
 }
 
-/**
- * The troubleshooting tier, demoted rather than deleted (memql#4456).
- *
- * WHAT THIS IS FOR. These pages had accreted a second audience: beside the
- * facts an operator opened the page to read -- what is this cluster, what
- * version, is there a newer one -- sat receipt-derived paths, image-lane
- * bookkeeping, raw RFC3339 stamps and node-by-node digests. Each is genuinely
- * useful about once a quarter, when something is wrong, and the cost of
- * having them inline the rest of the time is that the page reads as a
- * diagnostic dump rather than as a product.
- *
- * NOTHING IS DELETED. The support case still has every one of them; they are
- * one click away instead of first. That distinction is the whole decision --
- * removing them would trade one bad failure mode for a worse one, because the
- * quarter they are wanted is the quarter nobody can get at them.
- *
- * THE SAME COMPONENT AS THE RUN LOG (memql#4455), on purpose. "Material worth
- * keeping and not worth leading with" is one idea, and a second implementation
- * of it would be a second answer to what collapsed looks like here.
- */
-function renderDiagnostics(open: boolean, body: string): string {
-  if (body.trim() === "") return "";
-  return renderDisclosure({
-    act: "toggleDiagnostics",
-    summary: "Show diagnostics",
-    summaryOpen: "Hide diagnostics",
+/** A Details disclosure over facts, or "" when there are none. */
+function details(open: boolean, rows: readonly FactRow[], extraHtml = ""): string {
+  const present = rows.filter((row) => (row.value ?? "") !== "" || row.valueHtml !== undefined);
+  if (present.length === 0 && extraHtml === "") return "";
+  return disclosure({
+    act: "toggleDetails",
+    id: "dp-details",
+    label: "Details",
     open,
+    bodyHtml: (present.length === 0 ? "" : facts(present)) + extraHtml,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// loading and unavailable
+// ---------------------------------------------------------------------------
+
+/** Before the first read lands: the shape of the page, and no words on it. */
+export function loadingScreen(): RegionParts {
+  return { head: "", body: skeleton({ shape: "page", rows: 4, label: "Loading cluster" }), actions: "" };
+}
+
+export interface UnavailableInput {
+  title: string;
+  line: string;
+  next?: string;
+  /** The fix, when the page can do it (open the file the fault is in). */
+  noticeActs?: readonly Act[];
+  bar: { state: string; acts: readonly Act[] };
+}
+
+/**
+ * The page could not be built: the cluster list would not read, or the cluster
+ * it was opened for is no longer in it. Said, with the way out -- never the
+ * skeleton forever.
+ */
+export function unavailableScreen(i: UnavailableInput): RegionParts {
+  return {
+    head: head({ title: i.title }),
+    body: notice({
+      tone: "error",
+      line: i.line,
+      ...(i.next === undefined ? {} : { next: i.next }),
+      ...(i.noticeActs === undefined || i.noticeActs.length === 0 ? {} : { acts: i.noticeActs }),
+    }),
+    actions: actionBar({ state: i.bar.state, tone: "error", acts: i.bar.acts }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// the local cluster
+// ---------------------------------------------------------------------------
+
+export interface LocalOverviewInput {
+  instance: Instance;
+  bar: PageBar;
+  runs: readonly Run[];
+  nowMs: number;
+  upgrade: UpgradeVerdict;
+  releases: ReleaseListing | undefined;
+  /** A page-produced sentence, at the top of the body. */
+  notice?: PageNotice;
+  detailsOpen: boolean;
+  /** For showing paths as `~/...`. */
+  home: string;
+}
+
+/** Whether the local page says anything about the machine beyond "absent". */
+function isInstalled(instance: Instance): boolean {
+  return instance.presence === "installed-healthy" || instance.presence === "installed-unreachable";
+}
+
+/**
+ * The local cluster: its name and version, a short list of facts, its history.
+ *
+ * THE FACTS ARE ONLY THE KNOWN ONES. No "not fetched", no "not recorded": a
+ * fact that is not known is not a row. The update fact appears only when it
+ * says something the bar does not -- up to date, or a newer release that needs
+ * manual steps (with the guide beside it); an update that can be taken is the
+ * bar's primary act, and saying it twice is saying it once too many.
+ */
+export function localOverviewScreen(i: LocalOverviewInput): RegionParts {
+  const { instance } = i;
+  const installed = isInstalled(instance);
+  const title = installed ? instanceLabel(instance) : "Local cluster";
+  const meta = installed ? (instance.versionLabel ?? "") : "";
+
+  let body = pageNotice(i.notice);
+  if (instance.presence === "absent") {
+    body += `<p class="dp-lede">Install a local cluster to run MemQL on this computer.</p>`;
+  } else if (instance.presence === "present-unreceipted") {
+    body += `<p class="dp-lede">This computer has a MemQL cluster that this editor didn't install.</p>`;
+  }
+
+  if (installed) {
+    const rows: FactRow[] = [];
+    const os = memqlOsAddress(instance.domain);
+    if (os !== undefined) rows.push({ label: "MemQL OS", valueHtml: factWithAct(os.shown, { act: "openOs", label: "Open" }) });
+    if (instance.imageSource === "checkout" && instance.rebuild !== undefined) {
+      const when = relativeTime(instance.rebuild.recordedAt, i.nowMs);
+      const dirty = instance.rebuild.dirtyCount;
+      rows.push({
+        label: "Built",
+        value: [when, dirty !== undefined && dirty > 0 ? `${dirty} uncommitted ${dirty === 1 ? "file" : "files"}` : ""]
+          .filter((part) => part !== "")
+          .join(" · "),
+      });
+    } else {
+      const update = updateFact(instance, i.upgrade, i.releases);
+      if (update !== undefined) rows.push(update);
+    }
+    if (skewDiverged(instance)) rows.push({ label: "Extension", value: "From a different commit than your checkout" });
+    if (rows.length > 0) body += facts(rows);
+  }
+
+  if (i.runs.length > 0 || installed) {
+    body += subhead("History") + runList(i.runs, i.nowMs);
+  }
+
+  if (installed) {
+    body += details(i.detailsOpen, localDetailRows(instance, i.home));
+  }
+
+  return {
+    head: head({ title, ...(meta === "" ? {} : { meta }) }),
     body,
-  });
+    actions: barHtml(i.bar),
+  };
 }
 
-/** Fact rows for the Diagnostics pane, or "" when every one of them is empty. */
-function diagnosticFacts(rows: readonly string[]): string {
-  const present = rows.filter((row) => row !== "");
-  if (present.length === 0) return "";
-  return `<div class="facts">${present.join("\n  ")}</div>`;
+/** The update fact, when it says something the bar does not. */
+function updateFact(instance: Instance, upgrade: UpgradeVerdict, releases: ReleaseListing | undefined): FactRow | undefined {
+  if (upgrade.kind === "refused") {
+    return {
+      label: "Update",
+      valueHtml:
+        `${escapeHtml(upgrade.message)}` +
+        (upgrade.docHref === ""
+          ? ""
+          : `<span class="dp-fact-act">${button({ act: "openGuide", label: "How to update", value: upgrade.docHref, tone: "text" })}</span>`),
+    };
+  }
+  if (upgrade.kind === "offer") return undefined;
+  const described = describeVersion({ recorded: instance.version, listing: releases });
+  return described.state === "current" ? { label: "Update", value: "Up to date" } : undefined;
 }
 
-/** One `fact` row, or "" when there is nothing to state. */
-function fact(key: string, value: string): string {
-  if (value === "") return "";
-  return `<div class="fact"><span class="fact-key">${escapeHtml(
-    key,
-  )}</span><span class="fact-value">${escapeHtml(value)}</span></div>`;
-}
-
-/**
- * A LOCAL instance's receipt-derived facts.
- *
- * Every one of these comes off the same install receipt the product facts come
- * off; what separates them is who is asking. "Which directory did the install
- * clone into" is a question with exactly one audience, and it is not the
- * audience opening a cluster page to see whether it is healthy.
- */
-function localDiagnosticFacts(instance: Instance): string {
-  return diagnosticFacts([
-    fact("kind", instance.kind),
-    fact("checkout", instance.checkout ?? ""),
-    fact("image source", instance.imageSource ?? ""),
-    fact("rebuild commit", instance.rebuild?.commit ?? ""),
-    fact("rebuilt at", instance.rebuild?.recordedAt ?? ""),
-    fact("rebuilt nodes", instance.rebuild?.nodes ?? ""),
-    // Only when it is NOT already in the primary tier -- a fact printed twice
-    // on one page reads as two different facts.
-    extensionBuildIsProminent(instance) ? "" : fact("extension", extensionBuildFactValue(instance)),
-  ]);
-}
-
-/**
- * The extension's own commit against the checkout it drives (memql#5076).
- *
- * A FACT, NOT AN ALERT, and the placement is the decision. A checkout weeks
- * ahead of the extension is the NORMAL state for a from-source install, so a
- * warning here would fire on the ordinary case and be learned as noise -- which
- * is what rebuildPreflight.ts says about its own lane line, and it is the same
- * rule. The ALARM belongs where the consequence lands, and that is the
- * preflight of the actions that build from the checkout.
- *
- * A PRODUCT FACT when they DIVERGE, a DIAGNOSTIC one when they agree. Two
- * matching commits are a stamp, and this page's own tiering (memql#4456) puts
- * raw stamps behind the disclosure; two DIFFERENT commits are the thing that
- * explains a whole class of "the product is broken" reports, and burying it
- * would leave the skew as invisible as it was.
- *
- * "" when there is no checkout: a remote instance has none by construction, and
- * a row saying so on every one of them is the noise the rule above forbids.
- */
-function extensionBuildFactValue(instance: Instance): string {
-  if ((instance.checkout ?? "") === "") return "";
-  return checkoutSkewFactValue({
-    extensionCommit: instance.extensionCommit,
-    extensionDirty: instance.extensionDirty,
-    checkoutCommit: instance.checkoutCommit,
-  });
-}
-
-/** Whether the build fact belongs in the primary tier -- see above. */
-function extensionBuildIsProminent(instance: Instance): boolean {
+function skewDiverged(instance: Instance): boolean {
   if ((instance.checkout ?? "") === "") return false;
   return (
     checkoutSkew({
@@ -201,696 +355,682 @@ function extensionBuildIsProminent(instance: Instance): boolean {
   );
 }
 
-export interface OverviewInput {
-  instance: Instance;
-  runs: readonly Run[];
-  actions: readonly InstanceAction[];
-  nowMs: number;
-  /** A failure this page produced, as opposed to one a step reported. */
-  error: string;
-  /** The release listing, or undefined when nothing has been fetched. */
-  releases: ReleaseListing | undefined;
-  /** Whether this instance is offered a move to the newest release. */
-  upgrade: UpgradeVerdict;
-  /**
-   * Whether the Diagnostics section is disclosed (memql#4456).
-   *
-   * REQUIRED rather than defaulted: the flag lives in the panel, and a default
-   * would let a caller forget to thread it and ship a section that can never
-   * open -- silently, because a closed disclosure looks exactly the same
-   * whether or not anything is listening to its toggle.
-   */
-  diagnosticsOpen: boolean;
+/**
+ * What a support case needs about a local cluster, one click away: where the
+ * checkout is (with a way to open it), which images it runs, the last rebuild,
+ * and which build of this extension is driving it.
+ */
+function localDetailRows(instance: Instance, home: string): FactRow[] {
+  const rows: FactRow[] = [];
+  const checkout = instance.checkout ?? "";
+  if (checkout !== "") rows.push({ label: "Source folder", valueHtml: factWithAct(masked(checkout, home), { act: "openCheckout", label: "Open" }) });
+  if (instance.checkoutBranch !== undefined && instance.checkoutBranch !== "") rows.push({ label: "Branch", value: instance.checkoutBranch, mono: true });
+  if (instance.checkoutCommit !== undefined && instance.checkoutCommit !== "") rows.push({ label: "Commit", value: shortCommit(instance.checkoutCommit), mono: true });
+  if (instance.imageSource !== undefined) {
+    rows.push({ label: "Images", value: instance.imageSource === "checkout" ? "Built from your checkout" : "Released" });
+  }
+  if (instance.rebuild !== undefined) {
+    rows.push({ label: "Last build", value: shortCommit(instance.rebuild.commit), mono: true });
+    if (instance.rebuild.nodes !== "") rows.push({ label: "Services built", value: instance.rebuild.nodes, mono: true });
+  }
+  const skew = checkoutSkew({
+    extensionCommit: instance.extensionCommit,
+    extensionDirty: instance.extensionDirty,
+    checkoutCommit: instance.checkoutCommit,
+  });
+  if (skew.state === "same") rows.push({ label: "Extension build", value: "Same commit as your checkout" });
+  if (skew.state === "diverged") rows.push({ label: "Extension build", value: skew.terse });
+  if (instance.domain !== undefined) rows.push({ label: "Domain", value: instance.domain, mono: true });
+  return rows;
 }
 
-export function renderInstanceOverview(input: OverviewInput): string {
-  const { instance } = input;
-  const status = instanceRowStatus(instance, input.releases);
+// ---------------------------------------------------------------------------
+// a remote cluster
+// ---------------------------------------------------------------------------
 
-  const actions = input.actions
+/** What the last deploy-control act came to. */
+export interface ActOutcome {
+  tone: "info" | "error";
+  line: string;
+  /** The act's audit event, for Details. */
+  auditId: string;
+  /** The fix is a sign-in. */
+  signIn: boolean;
+}
+
+export interface RemoteOverviewInput {
+  instance: Instance;
+  bar: PageBar;
+  /** The per-item acts: rollout rows and versions to prepare (deploy/instanceActions.remoteChoices). */
+  choices: RemoteChoices;
+  connection: ConnectionWord;
+  runs: readonly Run[];
+  nowMs: number;
+  pipeline: PipelineState | undefined;
+  upgrade: UpgradeVerdict;
+  outcome?: ActOutcome;
+  notice?: PageNotice;
+  detailsOpen: boolean;
+}
+
+/**
+ * A remote cluster: what it runs, its deployment history, and the acts the
+ * caller's role and its pipeline allow. The cluster's own acts -- Deploy, the
+ * update, Roll back -- are on the bar; an act about one item sits on that
+ * item: a rollout part-way through is a row under "Rollouts" carrying its
+ * Promote and Abort, and the versions the cluster can be prepared at are a
+ * short list under "Next version", each naming the version it prepares.
+ *
+ * NOT CONNECTED IS NOT "NO PIPELINE". The old page headed an editor that was
+ * merely signed out "No deploy pipeline is configured for this cluster"; the
+ * history now says what it needs ("Sign in to see history.") and the bar
+ * offers exactly that act.
+ */
+export function remoteOverviewScreen(i: RemoteOverviewInput): RegionParts {
+  const { instance } = i;
+  let body = pageNotice(i.notice);
+  if (i.outcome !== undefined) {
+    // The fix beside the sentence: a sign-in when that is what failed;
+    // otherwise the engine's own words, which are in the Output channel.
+    const acts: Act[] = i.outcome.signIn
+      ? [{ act: "signIn", label: "Sign in" }]
+      : i.outcome.tone === "error"
+        ? [{ act: "openOutput", label: "Show details" }]
+        : [];
+    body += notice({ tone: i.outcome.tone, line: i.outcome.line, ...(acts.length === 0 ? {} : { acts }) });
+  }
+  if (i.connection === "connected" && i.pipeline !== undefined && i.pipeline.line !== "") {
+    body += notice({ tone: "info", line: i.pipeline.line });
+  }
+  if (i.upgrade.kind === "refused" && i.connection === "connected") {
+    body += notice({
+      tone: "info",
+      line: i.upgrade.message,
+      ...(i.upgrade.docHref === "" ? {} : { acts: [{ act: "openGuide", label: "How to update", value: i.upgrade.docHref }] }),
+    });
+  }
+
+  const rows: FactRow[] = [];
+  const os = memqlOsAddress(instance.domain);
+  if (os !== undefined) rows.push({ label: "MemQL OS", valueHtml: factWithAct(os.shown, { act: "openOs", label: "Open" }) });
+  if (rows.length > 0) body += facts(rows);
+
+  body += rolloutRows(i.choices);
+  body += versionChoices(i.choices);
+
+  body += subhead("History");
+  switch (i.connection) {
+    case "connected":
+      body += runList(i.runs, i.nowMs, instance.pendingDeploymentId ?? "");
+      break;
+    case "connecting":
+      body += skeleton({ shape: "list", rows: 3, label: "Loading history" });
+      break;
+    case "signIn":
+      body += emptyState({ line: "Sign in to see history." });
+      break;
+    default:
+      body += emptyState({ line: "Connect to see history." });
+  }
+
+  const detailRows: FactRow[] = [
+    { label: "Audit reference", value: i.outcome?.auditId ?? "", mono: true },
+    { label: "Running", value: instance.currentDeploymentId ?? "", mono: true },
+    { label: "Prepared", value: instance.pendingDeploymentId ?? "", mono: true },
+    // The record Roll back returns to, named only where Roll back is offered
+    // (its label names the version; this is the record, for a support case).
+    { label: "Roll back to", value: offersRollback(i.bar) ? (instance.rollbackTargetId ?? "") : "", mono: true },
+    { label: "Status", value: i.pipeline?.engineMessage ?? "" },
+    { label: "Next version", value: i.choices.previewMessage },
+  ];
+  body += details(i.detailsOpen, detailRows);
+
+  return {
+    head: head({ title: instanceLabel(instance), ...((instance.versionLabel ?? "") === "" ? {} : { meta: instance.versionLabel }) }),
+    body,
+    actions: barHtml(i.bar),
+  };
+}
+
+/** Whether a bar offers Roll back: a deploy act whose key is a rollback's. */
+function offersRollback(b: PageBar): boolean {
+  return [...b.acts, ...b.more].some((act) => act.id === "deploy" && actionOfKey(act.value ?? "") === "rollback");
+}
+
+/** A rollout's dot: waiting on a person, or moving. */
+function rolloutTone(phase: string): "warn" | "busy" {
+  return phase.trim().toLowerCase() === "paused" ? "warn" : "busy";
+}
+
+/**
+ * The rollouts part-way through, one row each with its own Promote and Abort.
+ * Nothing when the group is not offered; "None in progress" when the cluster
+ * runs rollouts and none is part-way through, so an absent Promote reads as
+ * nothing to promote rather than as an act withheld.
+ */
+function rolloutRows(choices: RemoteChoices): string {
+  if (choices.rollouts === undefined) return "";
+  if (choices.rollouts.length === 0) return subhead("Rollouts") + emptyState({ line: "None in progress." });
+  const rows = choices.rollouts
     .map(
-      (action) =>
-        `<button class="${action.id === "uninstall" ? "secondary destructive" : "primary"}" type="button" data-choose="${escapeHtml(
-          action.id,
-        )}" title="${escapeHtml(action.detail)}">${escapeHtml(action.label)}</button>`,
+      (row) =>
+        `<li class="dp-row"><span class="mq-dot" data-tone="${rolloutTone(row.phase)}" aria-hidden="true"></span>` +
+        `<span class="dp-row-label mq-mono">${escapeHtml(row.name)}</span><span class="dp-row-desc">${escapeHtml(row.phase)}</span>` +
+        `<span class="dp-row-acts">${row.acts.map((act) => button({ ...kitAct(act), tone: "text" })).join("")}</span></li>`,
     )
     .join("");
-
-  // AN INSTANCE WITH NO RUNS IS NOT AN EMPTY STATE, and this is the sentence
-  // that says so rather than a placeholder implying something is missing.
-  // "Installed, never upgraded" is the normal case.
-  const runs =
-    input.runs.length === 0
-      ? `<p class="lede">No deployments have been recorded for this instance yet.</p>`
-      : `<ul class="runs">${input.runs
-          .map((run) => {
-            const row = runRowStatus(run, input.nowMs);
-            return `<li class="run" data-status="${escapeHtml(run.status)}">
-  <span class="run-kind">${escapeHtml(row.label)}</span>
-  <span class="run-detail">${escapeHtml(row.description)}</span>
-</li>`;
-          })
-          .join("")}</ul>`;
-
-  const error =
-    input.error === "" ? "" : `<p class="error">${escapeHtml(input.error)}</p>`;
-
-  // ONE ACTIONS ROW, AT THE TOP (memql#4453). The move-to-newest button and the
-  // instance's own actions used to render in two separate rows in two separate
-  // places, both below the facts; they are one row now, and it is the first
-  // thing under the heading. WHICH buttons appear is still entirely
-  // `instanceActions`' and `upgradeButton`'s decision -- this only decides where.
-  return renderScreen({
-    title: instance.name,
-    actions: `${upgradeButton(input.upgrade)}${actions}`,
-    status: `<p class="lede">${escapeHtml(status.tooltip)}</p>
-${error}`,
-    details: `<div class="facts">
-  <div class="fact"><span class="fact-key">version</span><span class="fact-value">${escapeHtml(
-    displayVersion(instance.version),
-  )}</span></div>
-  ${latestFact(input.releases)}
-  <div class="fact"><span class="fact-key">domain</span><span class="fact-value">${escapeHtml(
-    instance.domain ?? "not recorded",
-  )}</span></div>
-  ${extensionBuildIsProminent(instance) ? fact("extension", extensionBuildFactValue(instance)) : ""}
-</div>
-<h2>Deployments</h2>
-${runs}`,
-    logs: renderDiagnostics(input.diagnosticsOpen, localDiagnosticFacts(instance)),
-  });
+  return subhead("Rollouts") + `<ul class="dp-list" aria-label="Rollouts">${rows}</ul>`;
 }
 
-export interface ChooseTagInput {
+/**
+ * The versions the cluster can be prepared at, one choice each, naming the
+ * version with its bump as a quiet note. Without a preview the choices name
+ * the bump alone, and a line says the numbers could not be read.
+ *
+ * EACH CHOICE IS A WHOLE ROW, as each run in the history is: a list of three
+ * things to pick from reads as a list, where three text acts in a column read
+ * as three sentences. The row posts what the kit's act would (`data-act`,
+ * `data-value`: the control's key).
+ */
+function versionChoices(choices: RemoteChoices): string {
+  if (choices.versions.length === 0) return "";
+  const rows = choices.versions
+    .map(({ act, note }) => {
+      const title = act.title === undefined ? "" : ` title="${escapeHtml(act.title)}"`;
+      return (
+        `<li><button type="button" class="dp-row" data-act="${escapeHtml(act.id)}" data-value="${escapeHtml(act.value ?? "")}"${title}>` +
+        `<span class="dp-row-label">${escapeHtml(act.label)}</span>` +
+        `${note === "" ? "" : `<span class="dp-row-desc">${escapeHtml(note)}</span>`}</button></li>`
+      );
+    })
+    .join("");
+  const note = choices.previewMessage === "" ? "" : `<p class="dp-note">Couldn't read the next version numbers.</p>`;
+  return subhead("Next version") + `<ul class="dp-list" aria-label="Next version">${rows}</ul>${note}`;
+}
+
+// ---------------------------------------------------------------------------
+// change version
+// ---------------------------------------------------------------------------
+
+/** The select's value for "type a version instead". */
+export const OTHER_VERSION = "__other__";
+
+export interface ChooseVersionInput {
   instance: Instance;
-  listing: TagListing;
-  /** What the operator has picked or typed. Empty until they do. */
+  /** Undefined while the list is loading. */
+  listing: ReleaseListing | undefined;
+  /** The select's value: a tag, OTHER_VERSION, or "" before a choice. */
+  choice: string;
+  /** What was typed, when typing. */
+  typed: string;
+  /** A problem with what was typed, or "". */
+  typedError: string;
+  /** The version the run would move to, once one is chosen and valid; else "". */
   target: string;
-  /** A problem with what they typed, or "" while there is none. */
-  tagError: string;
-  /** The projection, once a target is chosen. Empty before that. */
   plan: readonly PlannedStepView[];
   summary: string;
   sameVersion: boolean;
 }
 
 /**
- * Choosing where to move the cluster to.
+ * Changing version: one question, and what answering it will change.
  *
- * THE LIST NEVER PRE-SELECTS. Its first option is an empty one, so the field
- * starts on "no choice made" rather than on the newest release: a version the
- * page picked silently is not a version the operator can be held to, which is
- * the same argument stackPin.ts makes about the default pin.
+ * ONE CONTROL. A select of the published versions, newest marked Latest and
+ * this cluster's marked Current, with Other... for a version the list does not
+ * have; when the list could not be loaded, the text field is the only control
+ * and the page says why in one line. The list NEVER pre-selects: a version the
+ * page chose silently is not one the operator can be held to.
  *
- * AND THERE IS ALWAYS A TEXT BOX. It is the only control when the listing
- * failed -- no git, no network, a checkout that is not a repository -- and the
- * reason is printed beside it, so an operator knows they are typing because the
- * network is down and not because the project has no releases.
+ * THE ACT APPEARS WHEN IT IS LEGAL. "Change to v0.22.0" is on the bar once a
+ * valid version is chosen; before that the bar says "Choose a version". It
+ * used to be a disabled Start at the top of the page.
  */
-export function renderChooseTag(input: ChooseTagInput): string {
-  const current = displayVersion(input.instance.version);
+export function chooseVersionScreen(i: ChooseVersionInput): RegionParts {
+  const { instance } = i;
+  const current = (instance.version ?? "").trim();
+  let body = "";
+  const label = instance.versionLabel ?? "";
+  if (label !== "") body += facts([{ label: "Current", value: label }]);
 
-  // MARKED, NOT SELECTED (memql#3996). The list arrives newest-first
-  // (install/tags.ts), so the newest is simply the first -- and saying which
-  // one it is costs nothing, while selecting it would make the field arrive
-  // already answered. The empty first option stays first and stays the
-  // selected one until the operator picks: a version the page chose silently
-  // is not a version they can be held to.
-  const newest = input.listing.tags[0];
-  const options = [`<option value=""${input.target === "" ? " selected" : ""}></option>`]
-    .concat(
-      input.listing.tags.map(
-        (tag) =>
-          `<option value="${escapeHtml(tag)}"${
-            tag === input.target ? " selected" : ""
-          }>${escapeHtml(tag)}${tag === newest ? " (newest)" : ""}</option>`,
-      ),
-    )
-    .join("");
+  if (i.listing === undefined) {
+    body += skeleton({ shape: "form", rows: 1, label: "Loading versions" });
+  } else {
+    const tags = i.listing.tags;
+    const typing = tags.length === 0 || i.choice === OTHER_VERSION;
+    if (tags.length > 0) {
+      const options = [`<option value=""${i.choice === "" ? " selected" : ""}>Choose a version</option>`]
+        .concat(
+          tags.map((tag, n) => {
+            const marks = [n === 0 ? "Latest" : "", tag === current ? "Current" : ""].filter((m) => m !== "");
+            return `<option value="${escapeHtml(tag)}"${tag === i.choice ? " selected" : ""}>${escapeHtml(
+              marks.length === 0 ? tag : `${tag} · ${marks.join(" · ")}`,
+            )}</option>`;
+          }),
+        )
+        .concat(`<option value="${OTHER_VERSION}"${i.choice === OTHER_VERSION ? " selected" : ""}>Other…</option>`)
+        .join("");
+      body += field({
+        id: "dp-version",
+        label: "Version",
+        controlHtml: `<select class="mq-input dp-select" id="dp-version" data-field="version">${options}</select>`,
+      });
+    }
+    if (typing) {
+      body += field({
+        id: "dp-version-typed",
+        label: tags.length === 0 ? "Version" : "Version tag",
+        ...(tags.length === 0 ? { hint: "Couldn't load the list of versions." } : {}),
+        ...(i.typedError === "" ? {} : { error: i.typedError }),
+        controlHtml: textInput({
+          id: "dp-version-typed",
+          field: "typed",
+          value: i.typed,
+          placeholder: "v0.24.0",
+          invalid: i.typedError !== "",
+          describedBy: i.typedError !== "" ? "dp-version-typed-error" : tags.length === 0 ? "dp-version-typed-hint" : undefined,
+          enterAct: "beginChange",
+        }),
+      });
+    }
+  }
 
-  const picker =
-    input.listing.tags.length === 0
-      ? ""
-      : `<div class="field">
-  <label for="tag-pick">Release tag</label>
-  <select id="tag-pick" data-act="pickTag">${options}</select>
-</div>`;
+  if (i.target !== "") {
+    if (i.sameVersion) {
+      body += notice({ tone: "info", line: `Already on ${i.target}.`, next: "This re-applies it, the same as Repair." });
+    }
+    if (instance.imageSource === "checkout") {
+      body += notice({ tone: "warn", line: `Your own build is replaced with released ${i.target} images.` });
+    }
+    const changing = i.plan.filter((step) => step.effect === "runs");
+    if (changing.length > 0) {
+      body +=
+        subhead("What changes") +
+        `<ul class="dp-bullets">${changing.map((step) => `<li>${escapeHtml(step.detail)}</li>`).join("")}</ul>` +
+        (i.summary === "" ? "" : `<p class="dp-note">${escapeHtml(i.summary)}</p>`);
+    }
+  }
 
-  const listingNote =
-    input.listing.error === ""
-      ? ""
-      : input.listing.refusedPlatform === true
-        ? `<p class="lede">${escapeHtml(input.listing.error)}</p>`
-        : `<p class="notice">${escapeHtml(input.listing.error)} Type the tag below.</p>`;
+  const cancel: Act = { act: "back", label: "Cancel" };
+  const actions =
+    i.target === ""
+      ? actionBar({ state: "Choose a version", tone: "idle", acts: [cancel] })
+      : actionBar({
+          state: "Ready",
+          tone: "idle",
+          acts: [cancel, { act: "beginChange", label: `Change to ${i.target}`, value: i.target, tone: "primary" }],
+        });
 
-  if (input.listing.refusedPlatform === true) {
-    return renderScreen({
-      title: "Create deployment",
-      actions: `<button class="secondary" type="button" data-act="back">Back</button>`,
-      status: listingNote,
+  return {
+    head: head({ title: "Change version", back: { act: "back", label: instanceLabel(instance) } }),
+    body,
+    actions,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// building from the checkout
+// ---------------------------------------------------------------------------
+
+/** One check notice, with its fix as an act when the page can do it. */
+function checkNotice(n: CheckNotice): string {
+  const acts: Act[] =
+    n.fix === "checkAgain"
+      ? [{ act: "checkAgain", label: "Check again" }]
+      : n.fix === "repair"
+        ? [{ act: "repair", label: "Repair" }]
+        : [];
+  return notice({ tone: n.tone, line: n.line, ...(n.next === undefined ? {} : { next: n.next }), ...(acts.length === 0 ? {} : { acts }) });
+}
+
+function checkBody(check: RebuildCheck | undefined, home: string): string {
+  if (check === undefined) return skeleton({ shape: "facts", rows: 2, label: "Checking the source" });
+  return (
+    facts(check.facts.map((f) => ({ label: f.label, value: f.mono === true ? masked(f.value, home) : f.value, ...(f.mono === true ? { mono: true } : {}) }))) +
+    check.notices.map(checkNotice).join("")
+  );
+}
+
+function servicesField(nodes: string): string {
+  return field({
+    id: "dp-nodes",
+    label: "Services",
+    hint: "Leave empty to rebuild all of them, or name some: bff, agent.",
+    controlHtml: textInput({ id: "dp-nodes", field: "nodes", value: nodes, placeholder: "All", describedBy: "dp-nodes-hint" }),
+  });
+}
+
+function checkBar(check: RebuildCheck | undefined, blockedState: string, act: Act): string {
+  const cancel: Act = { act: "back", label: "Cancel" };
+  if (check === undefined) return actionBar({ state: "Checking", tone: "busy", acts: [cancel] });
+  if (check.blocked) return actionBar({ state: blockedState, tone: "warn", acts: [cancel] });
+  return actionBar({ state: "Ready", tone: "idle", acts: [cancel, act] });
+}
+
+export interface RebuildScreenInput {
+  instance: Instance;
+  /** Undefined while the checks run. */
+  check: RebuildCheck | undefined;
+  nodes: string;
+  home: string;
+}
+
+/** Rebuild from checkout: what will be built, what needs attention, and which services. */
+export function rebuildScreen(i: RebuildScreenInput): RegionParts {
+  return {
+    head: head({ title: "Rebuild from checkout", back: { act: "back", label: instanceLabel(i.instance) } }),
+    body: checkBody(i.check, i.home) + servicesField(i.nodes),
+    actions: checkBar(i.check, "Can't rebuild yet", { act: "beginRebuild", label: "Rebuild", tone: "primary" }),
+  };
+}
+
+export interface PullRebuildScreenInput extends RebuildScreenInput {
+  merge: boolean;
+  /** Whether to offer the merge switch at all: only when the checkout may have commits of its own. */
+  offerMerge: boolean;
+}
+
+/** Pull and rebuild: the rebuild, with the latest code pulled first. */
+export function pullRebuildScreen(i: PullRebuildScreenInput): RegionParts {
+  const merge = i.offerMerge
+    ? switchRow({
+        id: "dp-merge",
+        label: "Merge with my commits",
+        note: i.merge ? "Needs everything committed first." : "Off: the pull stops if your commits aren't on the branch.",
+        checked: i.merge,
+        data: { field: "merge" },
+      })
+    : "";
+  return {
+    head: head({ title: "Pull and rebuild", back: { act: "back", label: instanceLabel(i.instance) } }),
+    body: checkBody(i.check, i.home) + servicesField(i.nodes) + (i.check === undefined ? "" : merge),
+    actions: checkBar(i.check, "Can't pull yet", { act: "beginPullRebuild", label: "Pull and rebuild", tone: "primary" }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// a run, as it happens
+// ---------------------------------------------------------------------------
+
+export interface RunScreenInput {
+  words: RunWords;
+  status: "running" | "stopping" | "failed" | "done" | "stopped";
+  progress: ProgressUpdate;
+  failure: RunFailure | undefined;
+  cancellable: boolean;
+  logsOpen: boolean;
+  /**
+   * Lines to render in the log. The panel passes none and streams them with
+   * LiveView.log; the gallery passes some, to show a log with lines in it.
+   */
+  lines?: readonly LogLine[];
+  /** The render's clock (tests and the gallery). */
+  now?: number;
+}
+
+/**
+ * One run, in the one progress screen every long operation uses: the mark,
+ * the title in the act's own words, the bar, one status line, "Step 6 of 16 ·
+ * 3:12", and "Show logs". Only the status of the run changes the regions; the
+ * bar, the status line and the log arrive as LiveView.progress/log messages.
+ */
+export function runScreen(i: RunScreenInput): RegionParts {
+  const p = i.progress;
+  let body = progress({
+    title: p.title ?? i.words.title,
+    ...(p.percent === undefined ? {} : { percent: p.percent }),
+    status: p.status,
+    ...(p.stepText === undefined ? {} : { stepText: p.stepText }),
+    ...(p.startedAt === undefined ? {} : { startedAt: p.startedAt }),
+    ...(p.endedAt === undefined ? {} : { endedAt: p.endedAt }),
+    state: p.state,
+    ...(i.now === undefined ? {} : { now: i.now }),
+  });
+  if (i.status === "failed" && i.failure !== undefined) {
+    body += notice({
+      tone: "error",
+      line: i.failure.reason,
+      ...(i.failure.remedy === ""
+        ? {}
+        : { codeHtml: codeBlock({ text: i.failure.remedy, act: { act: "runRemedy", label: "Run in terminal" } }) }),
     });
   }
-
-  const typed = `<div class="field" data-invalid="${input.tagError !== ""}">
-  <label for="tag-type">${escapeHtml(
-    input.listing.tags.length === 0 ? "Release tag" : "...or type one",
-  )}</label>
-  <input id="tag-type" data-field="tag" value="${escapeHtml(input.target)}">
-  ${
-    input.tagError === ""
-      ? ""
-      : `<div class="error">${escapeHtml(input.tagError)}</div>`
-  }
-</div>`;
-
-  const sameNote = input.sameVersion
-    ? `<p class="notice">This cluster is already on ${escapeHtml(
-        input.target,
-      )}. Deploying it again reconciles the overlay, which is what a repair does.</p>`
-    : "";
-
-  const plan =
-    input.plan.length === 0
-      ? ""
-      : `<h2>Will run</h2>
-<p class="lede">${escapeHtml(input.summary)}</p>
-<ul class="plan">${input.plan
-          .map(
-            (step) => `<li class="plan-step" data-effect="${escapeHtml(step.effect)}">
-  <span class="plan-mark">${step.effect === "runs" ? "-&gt;" : "ok"}</span>
-  <span class="plan-id">${escapeHtml(step.id)}</span>
-  <span class="plan-detail">${escapeHtml(step.detail)}</span>
-</li>`,
-          )
-          .join("")}</ul>`;
-
-  // THE LANE CROSSING, ON THE PATH THAT WOULD OTHERWISE MAKE IT SILENTLY
-  // (memql#4246). This screen is reached from the same row as Rebuild from
-  // checkout, it re-runs `clusterUp` -- which rewrites the Application's image
-  // overrides back to released ones -- and unlike Repair and Upgrade it asks
-  // for no confirmation. So it is the likeliest place a developer's own build
-  // stops running without anything having said so.
-  //
-  // Rendered through `renderPreflight` with a one-item list rather than as a
-  // bespoke paragraph, so it looks like every other thing this extension states
-  // before a run, and worded by the shared helper, so it cannot drift from what
-  // the other three surfaces say.
-  const laneNote =
-    input.instance.imageSource === "checkout"
-      ? renderPreflight([
-          {
-            label: "Image source",
-            state: "attention",
-            detail: returnsToReleasedImages(input.instance.name, input.target),
-          },
-        ])
-      : "";
-
-  // Start is DISABLED until a target is chosen rather than absent, which is the
-  // one thing actions-first changes about this screen: a button that appears
-  // only once the form is complete is a button an operator cannot plan around,
-  // and at the top of the page its absence would read as "this screen does
-  // nothing". Disabled says "choose below, then press this".
-  return renderScreen({
-    title: "Create deployment",
-    actions: `<button class="primary" type="button" data-act="beginDeploy"${
-      input.target === "" || input.tagError !== "" ? " disabled" : ""
-    }>Start</button>
-  <button class="secondary" type="button" data-act="back">Back</button>`,
-    // THE LANE CROSSING RIDES WITH THE BUTTON (memql#4453 over memql#4246). It
-    // is the one thing on this screen that says a developer's own build is
-    // about to stop running, and this is the path that would otherwise make
-    // that change silently -- so it goes where Start is, not at the end of the
-    // form Start acts on. Above the fold now, where it was previously last.
-    status: `<p class="lede">This cluster is on ${escapeHtml(
-      current,
-    )}. Pick the release to move it to; nothing runs until you start it.</p>
-${listingNote}
-${laneNote}`,
-    details: `${picker}
-${typed}
-${sameNote}
-${plan}`,
+  body += disclosure({
+    act: "toggleLogs",
+    id: "run-logs",
+    label: "Show logs",
+    openLabel: "Hide logs",
+    open: i.logsOpen,
+    bodyHtml: logPane({
+      id: "run-log",
+      ariaLabel: `${i.words.title} log`,
+      lines: i.lines ?? [],
+      empty: "No output yet",
+      acts: [
+        { act: "copyLog", label: "Copy" },
+        { act: "openOutput", label: "Open in Output" },
+      ],
+    }),
   });
-}
 
-// ---------------------------------------------------------------------------
-// the remote instance
-// ---------------------------------------------------------------------------
-
-/**
- * WHICH record "Deploy" ships, named on the page (memql#4017).
- *
- * The button used to ship `runs[0]` -- the newest record in the catalog the
- * page last read -- re-derived at the CLICK. The id is now resolved when the
- * page is BUILT (`Instance.pendingDeploymentId`), so what ships is the record
- * the operator was looking at; printing it is the other half, and it is why
- * there is no modal. A confirmation naming the target tells them after they
- * have decided; a line above the button tells them before.
- *
- * DRAWN ONLY WHERE THE DEPLOY ACTION IS. A reader sees the deployment history
- * and none of the actions (deploy/actions.ts, `visibleActions`); telling them
- * nothing is cut would answer a question their page never raised.
- *
- * The version is a courtesy, not the identity: it comes off the run list this
- * page already rendered, and is simply omitted when the record is not in it.
- * The ID is what the ship names and what an audit line will carry.
- */
-function shipTargetLine(input: RemoteOverviewInput): string {
-  if (!input.pipeline.actions.some((action) => action.id === "deploy")) return "";
-  const target = (input.instance.pendingDeploymentId ?? "").trim();
-  if (target === "") {
-    return `<p class="notice">Nothing is cut, so Deploy has no record to ship. Cut a version first.</p>`;
+  const back: Act = { act: "back", label: "Back" };
+  let actions: string;
+  switch (i.status) {
+    case "running":
+      actions = actionBar({
+        state: i.words.busy,
+        tone: "busy",
+        ...(i.cancellable ? {} : { detail: "Can't be stopped partway" }),
+        acts: i.cancellable ? [{ act: "cancel", label: "Cancel" }] : [],
+      });
+      break;
+    case "stopping":
+      actions = actionBar({ state: "Stopping", tone: "busy", acts: [] });
+      break;
+    case "stopped":
+      actions = actionBar({ state: "Stopped", tone: "idle", acts: [back, { act: "retry", label: "Start again", tone: "primary" }] });
+      break;
+    case "failed":
+      actions = actionBar({
+        state: i.words.failed,
+        tone: "error",
+        acts: i.failure?.retryable === false ? [back] : [back, { act: "retry", label: "Retry", tone: "primary" }],
+      });
+      break;
+    case "done":
+      actions = actionBar({ state: i.words.done, tone: "live", acts: [{ act: "back", label: "Done", tone: "primary" }] });
+      break;
   }
-  const version = versionOf(input.runs, target);
-  return `<p class="notice">Deploy ships ${escapeHtml(target)}${
-    version === "" ? "" : ` (${escapeHtml(version)})`
-  }.</p>`;
-}
-
-/**
- * WHICH record "Roll back" returns to, named on the page, for the reason the
- * ship line gives: a line above the button tells the operator before they
- * decide, where the type-to-confirm prompt tells them after.
- *
- * The rule for WHICH record is `deploymentHistory.rollbackTargetId`'s; this only
- * says the answer, or that there is none.
- */
-function rollbackTargetLine(input: RemoteOverviewInput): string {
-  if (!input.pipeline.actions.some((action) => action.id === "rollback")) return "";
-  const target = (input.instance.rollbackTargetId ?? "").trim();
-  if (target === "") {
-    return `<p class="notice">No earlier succeeded release is in this cluster's history, so Roll back has nothing to return to.</p>`;
-  }
-  const version = versionOf(input.runs, target);
-  return `<p class="notice">Roll back returns to ${escapeHtml(target)}${
-    version === "" ? "" : ` (${escapeHtml(version)})`
-  }.</p>`;
-}
-
-/**
- * Why the Rollout action draws no buttons, when it draws none.
- *
- * Its buttons are one promote and one abort per rollout IN FLIGHT
- * (deploy/controls.ts), so a cluster whose rollouts are all settled draws
- * nothing for it -- and an action that silently vanished would read as one the
- * role had hidden.
- */
-function rolloutLine(input: RemoteOverviewInput): string {
-  if (!input.pipeline.actions.some((action) => action.id === "rolloutAction")) return "";
-  if (rolloutsInFlight(input.pipeline.rollouts).length > 0) return "";
-  return `<p class="notice">No Argo Rollout is in flight, so there is nothing to promote or abort.</p>`;
-}
-
-/**
- * Why the Cut buttons name a bump rather than a version, when they do: the
- * preview read failed, and the engine will compute the version at the cut.
- * The engine's own words, as every other failed read on this page carries them.
- */
-function cutPreviewLine(input: RemoteOverviewInput): string {
-  if (!input.pipeline.actions.some((action) => action.id === "cutVersion")) return "";
-  const message = input.versionPreview?.message ?? "";
-  if (message === "") return "";
-  return `<p class="notice">The next versions could not be previewed, so Cut names only the bump: ${escapeHtml(
-    message,
-  )}</p>`;
-}
-
-/**
- * One deploy-control button.
- *
- * `data-deploy` carries the control's KEY, which the panel matches against a
- * fresh expansion of its own facts (deploy/controls.ts) -- so the button says
- * nothing the panel then trusts beyond which of its own controls was pressed.
- */
-function deployControlButton(control: DeployControl, label = control.label): string {
-  return `<button class="${
-    control.destructive ? "secondary destructive" : "primary"
-  }" type="button" data-deploy="${escapeHtml(control.key)}" title="${escapeHtml(
-    control.detail,
-  )}">${escapeHtml(label)}</button>`;
-}
-
-export interface RemoteOverviewInput {
-  instance: Instance;
-  runs: readonly Run[];
-  pipeline: PipelineState;
-  /**
-   * The next-version proposals the Cut buttons name, or undefined before
-   * they have been read -- in which case the buttons name the bump alone.
-   */
-  versionPreview?: VersionPreview;
-  nowMs: number;
-  /** The outcome line of the last action taken, or "" before any. */
-  outcome: string;
-  /** A failure this page produced, as opposed to one the engine reported. */
-  error: string;
-  /** The release listing, or undefined when nothing has been fetched. */
-  releases: ReleaseListing | undefined;
-  /** Whether this instance is offered a move to the newest release. */
-  upgrade: UpgradeVerdict;
-  /** Whether the Diagnostics section is disclosed. See `OverviewInput`. */
-  diagnosticsOpen: boolean;
-}
-
-/**
- * A remote instance: what it runs, what deployed it, and what can be done.
- *
- * THE ITEMS ARE LABELLED "NODE TYPES", NEVER "STEPS". A local run's items are
- * capability-script executions and a remote run's are per-tier
- * `deploymentNodeSpec` rows -- a declaration of version, replicas and digest,
- * not an account of something that ran. The label is what stops one being read
- * as the other, and it is the only place the asymmetry between the two kinds of
- * run is visible to an operator.
- */
-export function renderRemoteInstance(input: RemoteOverviewInput): string {
-  const { instance, pipeline } = input;
-  const status = instanceRowStatus(instance, input.releases);
-
-  const actions = deployControls(
-    pipeline.actions.map((action) => action.id),
-    {
-      instance,
-      runs: input.runs,
-      rollouts: pipeline.rollouts,
-      preview: input.versionPreview,
-    },
-  )
-    .map((control) => deployControlButton(control))
-    .join("");
-
-  // THE RUN ROWS KEEP THEIR HEADLINE; THE PER-TIER BREAKDOWN DOES NOT
-  // (memql#4456). What a deployment DID -- kind, when, how it ended -- is what
-  // this list is for. Which node types it declared, at how many replicas, at
-  // which digest, is a different question with a different audience, and
-  // rendering it inline for every historical run turned a five-row history into
-  // fifty rows of digests.
-  const runs =
-    input.runs.length === 0
-      ? `<p class="lede">No deployments have been recorded for this cluster${
-          instance.connected ? "" : ", and this editor is not connected to it"
-        }.</p>`
-      : input.runs
-          .map((run) => {
-            const row = runRowStatus(run, input.nowMs);
-            return `<div class="run-block" data-status="${escapeHtml(run.status)}">
-  <div class="run">
-    <span class="run-kind">${escapeHtml(row.label)}</span>
-    <span class="run-detail">${escapeHtml(row.description)}</span>
-  </div>
-</div>`;
-          })
-          .join("");
-
-  // THE ITEMS ARE LABELLED "NODE TYPES", NEVER "STEPS", wherever they render.
-  // A local run's items are capability-script executions and a remote run's are
-  // per-tier `deploymentNodeSpec` rows -- a declaration of version, replicas and
-  // digest, not an account of something that ran. The label is what stops one
-  // being read as the other, and demoting them into Diagnostics does not make
-  // that distinction less load-bearing; it makes it easier to miss, so the
-  // label travels with them.
-  const nodeTypes = input.runs
-    .filter((run) => run.items.length > 0)
-    .map((run) => {
-      const row = runRowStatus(run, input.nowMs);
-      return `<div class="run-block">
-  <div class="items-label">Node types -- ${escapeHtml(row.label)}</div>
-  <ul class="runs">${run.items
-    .map(
-      (item) => `<li class="run">
-  <span class="run-kind">${escapeHtml(item.label)}</span>
-  <span class="run-detail">${escapeHtml(item.detail ?? "")}</span>
-</li>`,
-    )
-    .join("")}</ul>
-</div>`;
-    })
-    .join("");
-
-  const outcome =
-    input.outcome === ""
-      ? ""
-      : `<p class="${
-          input.outcome.startsWith("ERROR") ? "error" : "notice"
-        }">${escapeHtml(input.outcome)}</p>`;
-  const error = input.error === "" ? "" : `<p class="error">${escapeHtml(input.error)}</p>`;
-
-  return renderScreen({
-    title: instance.name,
-    actions: `${upgradeButton(input.upgrade)}${actions}`,
-    status: `<p class="lede">${escapeHtml(status.tooltip)}</p>
-${error}
-${outcome}
-<h2>${escapeHtml(pipeline.title)}</h2>
-<p class="lede">${escapeHtml(pipeline.detail)}</p>
-${shipTargetLine(input)}
-${cutPreviewLine(input)}
-${rolloutLine(input)}
-${rollbackTargetLine(input)}`,
-    details: `<div class="facts">
-  <div class="fact"><span class="fact-key">version</span><span class="fact-value">${escapeHtml(
-    displayVersion(instance.version),
-  )}</span></div>
-  ${latestFact(input.releases)}
-  <div class="fact"><span class="fact-key">domain</span><span class="fact-value">${escapeHtml(
-    instance.domain ?? "not recorded",
-  )}</span></div>
-</div>
-<h2>Deployments</h2>
-${runs}`,
-    logs: renderDiagnostics(
-      input.diagnosticsOpen,
-      `${diagnosticFacts([fact("kind", "remote")])}
-${nodeTypes}`,
-    ),
-  });
+  return { head: "", body, actions };
 }
 
 // ---------------------------------------------------------------------------
-// one deployment, in detail (memql#4427)
+// one run from the history
 // ---------------------------------------------------------------------------
 
-/**
- * WHY THIS SCREEN EXISTS. Deployment rows carried no `command` at all, so
- * clicking one did nothing -- the most direct way there is to teach an operator
- * that a view is decorative. Everything it shows was already recorded and had
- * nowhere to be read: the per-step outcomes an install writes after every wave,
- * the per-tier specs a remote rollout declares, the reason a run failed.
- *
- * WHAT IT REFUSES TO INVENT. Three facts are printed only when the record
- * carries them, and are OMITTED rather than defaulted otherwise -- a duration
- * for a run still in flight, a finish time for one that was interrupted, a
- * version transition for a run that recorded none. Each of those defaults would
- * be a claim about the run rather than about the read, which is the distinction
- * `displayVersion` was written for and the one this page is most exposed to.
- */
 export interface RunDetailInput {
-  /** The instance the run belongs to, for its lane and its action set. */
   instance: Instance;
   run: Run;
-  /** From `runDetailActions` -- the instance's own set, reordered. */
-  actions: readonly InstanceAction[];
-  /**
-   * What the deploy-control actions among `actions` are resolved from --
-   * the same facts the remote overview expands them with, so a button here
-   * names and sends what the same button there does. Absent, they resolve
-   * from the instance alone: no rollouts, no version preview.
-   */
-  deployFacts?: DeployControlFacts;
+  bar: PageBar;
   nowMs: number;
-  /**
-   * The outcome line of the last action taken from this page, or "" before any.
-   *
-   * CARRIED HERE AS WELL AS ON THE REMOTE OVERVIEW, because the remote action
-   * buttons now exist on both screens and `runDeploy` reports through this one
-   * field. Without it, pressing Deploy from a run's detail page would show the
-   * operator nothing at all -- the engine's line, audit id included, would land
-   * in a screen that does not draw it, which is indistinguishable from an
-   * action that never ran.
-   */
-  outcome: string;
-  /** A failure this page produced, as opposed to one a step reported. */
-  error: string;
-  /** Whether the Diagnostics section is disclosed. See `OverviewInput`. */
-  diagnosticsOpen: boolean;
+  /** Step id -> its short label, from the graph documents. */
+  labels: ReadonlyMap<string, string>;
+  /** A failed step's saved output, by file name; absent while it is read. */
+  logs: ReadonlyMap<string, string>;
+  /** Which failed steps' logs are open, by file name. */
+  openLogs: ReadonlySet<string>;
+  detailsOpen: boolean;
 }
 
 /**
- * The version fact, which is not always a version.
+ * One run: what happened, when, why it failed, and what each step came to.
  *
- * A REBUILD HAS NO TRANSITION TO PRINT, and that is a property of the data
- * rather than a gap: `RunRecorder.begin` is called for a rebuild with neither
- * `fromVersion` nor `toVersion`, because the run does not move the cluster
- * between releases -- it moves it between LANES, from released images to images
- * built from the checkout on this machine. The wording comes from
- * state/imageLane.ts so this page cannot drift from what the four surfaces that
- * warn about the crossing already say.
- *
- * AND THE COMMIT IS NOT ATTRIBUTED TO THIS RUN. `Run` carries no commit --
- * `instance.rebuild` does, and it describes the LAST rebuild, which is this one
- * only if no other has happened since. So the commit appears as a separate fact
- * about the instance, labelled as such, and never inside the sentence about
- * what this run did.
+ * THE STEPS ARE NAMED IN WORDS ("Creating the cluster"), not by id, and the
+ * ones that found their work already done are one line ("9 already in
+ * place"), because a repair skips most of an install and fifteen rows of
+ * "skipped" bury the one that did something. A failed step says why, and its
+ * saved output opens beneath it. Ids, raw results, exit codes and stamps are
+ * under Details, for a support case.
  */
-function runVersionFact(instance: Instance, run: Run): string {
-  const transition = versionTransition(run);
-  if (transition !== "") return transition;
-  if (run.kind === "rebuild") return "built from the checkout";
-  return "";
-}
+export function runDetailScreen(i: RunDetailInput): RegionParts {
+  const { run, instance } = i;
+  const meta = transitionMeta(run);
 
-/**
- * WHY A FAILED RUN NAMES A STEP.
- *
- * `Run` has no `reason` field, and adding one would be inventing a second place
- * for something already recorded: the reason a run failed is the `detail` of
- * whichever item failed, written by the executor as it happened. Reading it off
- * the items is what makes the sentence true by construction -- there is nothing
- * for it to disagree with.
- *
- * More than one item can have failed (a wave fails as a unit), so they are all
- * named. A failed run with no failed item is possible -- an abort writes the
- * status directly -- and it says only that, rather than inventing a culprit.
- */
-function failureReason(run: Run): string {
-  if (run.status !== "failed") return "";
-  const failed = run.items.filter((item) => item.status === "failed");
-  if (failed.length === 0) return "";
-  return failed
-    .map((item) => (item.detail === undefined || item.detail === "" ? item.label : `${item.label}: ${item.detail}`))
-    .join("; ");
-}
+  const factRows: FactRow[] = [];
+  const when = formatWhen(run.startedAt, i.nowMs);
+  if (when !== "") factRows.push({ label: "Started", value: when });
+  const took = runDuration(run.startedAt, run.finishedAt);
+  if (took !== "") factRows.push({ label: "Took", value: took });
+  let body = factRows.length === 0 ? "" : facts(factRows);
 
-/**
- * The items, under the label that says what KIND of item they are.
- *
- * "Steps" for a local run and "Node types" for a remote one, never one word for
- * both. A local run's items are capability-script executions -- things that ran
- * -- and a remote run's are `deploymentNodeSpec` rows, which are DECLARATIONS
- * of version, replicas and digest. The rule is state/deployments.ts's (property
- * 2 in its header) and renderRemoteInstance already obeys it; a single label
- * here would be the place the asymmetry finally got hidden.
- *
- * NO ITEMS IS NOT AN EMPTY STATE, and the sentence says which of the two
- * no-items cases this is. A remote run this editor read no specs for and a
- * local run that never got to record a step look identical as an empty list and
- * are completely different facts.
- */
-function runItems(instance: Instance, run: Run): string {
-  const label = instance.kind === "remote" ? "Node types" : "Steps";
-  if (run.items.length === 0) {
-    return `<h2>${label}</h2>
-<p class="lede">${escapeHtml(
-      instance.kind === "remote"
-        ? "No per-tier specs were read for this deployment."
-        : "This run recorded no steps.",
-    )}</p>`;
+  if (run.status === "failed") {
+    const failed = run.items.find((item) => item.status === "failed");
+    const reason = failed === undefined ? "" : itemReason(failed);
+    if (reason !== "") body += notice({ tone: "error", line: reason });
+  } else if (run.status === "interrupted") {
+    body += notice({ tone: "warn", line: "This run stopped when the editor closed." });
   }
-  return `<h2>${label}</h2>
-<ul class="runs">${run.items.map(itemRow).join("")}</ul>`;
-}
 
-function itemRow(item: RunItem): string {
-  // The status travels as a data attribute as well as text so the stylesheet
-  // can mark a failure without this fragment choosing a colour -- the same
-  // arrangement `data-status` already has on the run blocks.
-  return `<li class="run" data-status="${escapeHtml(item.status)}">
-  <span class="run-kind">${escapeHtml(item.label)}</span>
-  <span class="run-detail">${escapeHtml(
-    [item.status, item.detail ?? ""].filter((part) => part !== "").join("  "),
-  )}</span>
-</li>`;
-}
+  body += instance.kind === "remote" ? servicesList(run) : stepsList(run, i);
 
-export function renderRunDetail(input: RunDetailInput): string {
-  const { instance, run } = input;
-  const row = runRowStatus(run, input.nowMs);
-  // TWO ROUTES, ONE SET. A local action is a `data-choose` the panel narrows
-  // against `instanceActions`; a deploy-control action is a `data-deploy` the
-  // panel runs through the deploy controller -- exactly the two the instance
-  // pages already post. The BUTTONS come from one place either way, which is
-  // what keeps this page from becoming a second authority on what an instance
-  // offers; only the wire differs, and it differs because the machinery does.
-  //
-  // A deploy-control action EXPANDS here exactly as it does on the overview
-  // (deploy/controls.ts): a Cut per bump, a promote and an abort per rollout in
-  // flight. Deploy keeps the instance's own label, "Create deployment", which
-  // is the one verb instanceActions names differently from the catalog.
-  const facts: DeployControlFacts = input.deployFacts ?? {
-    instance,
-    runs: [run],
-    rollouts: [],
-    preview: undefined,
+  const raw = run.items
+    .map((item) => `${item.label}  ${item.status}${(item.detail ?? "") === "" ? "" : `  ${item.detail}`}`)
+    .join("\n");
+  body += details(
+    i.detailsOpen,
+    [
+      { label: "Run", value: run.id, mono: true },
+      { label: "Started at", value: run.startedAt, mono: true },
+      { label: "Finished at", value: run.finishedAt ?? "", mono: true },
+    ],
+    raw === "" ? "" : savedLogPane({ id: "dp-raw", ariaLabel: "Recorded steps", lines: raw.split("\n").map((text) => ({ text })) }),
+  );
+
+  return {
+    head: head({ title: runNoun(run), ...(meta === "" ? {} : { meta }), back: { act: "back", label: instanceLabel(instance) } }),
+    body,
+    actions: barHtml(i.bar),
   };
-  const actions = input.actions
-    .flatMap((action) => {
-      if (action.deployAction !== undefined) {
-        return deployControls([action.deployAction], facts).map((control) =>
-          deployControlButton(control, control.action === "deploy" ? action.label : control.label),
-        );
+}
+
+/** The head's meta for a run: its version move, or its build. */
+function transitionMeta(run: Run): string {
+  const to = (run.toVersion ?? "").trim();
+  const from = (run.fromVersion ?? "").trim();
+  if (from !== "" && to !== "") return `${from} → ${to}`;
+  return to;
+}
+
+/** A dot's tone for a step's status. */
+function stepTone(status: StepGroup["status"]): "idle" | "live" | "busy" | "warn" | "error" {
+  switch (status) {
+    case "ok":
+    case "preserved":
+      return "live";
+    case "failed":
+      return "error";
+    case "running":
+      return "busy";
+    default:
+      return "idle";
+  }
+}
+
+function stepsList(run: Run, i: RunDetailInput): string {
+  if (run.items.length === 0) return subhead("Steps") + emptyState({ line: "No steps were recorded." });
+  const groups = stepGroups(run.items, i.labels);
+  const shown = groups.filter((g) => g.status !== "skipped" && !(g.status === "pending" && run.status !== "running"));
+  const skipped = groups.filter((g) => g.status === "skipped").reduce((n, g) => n + g.items.length, 0);
+  const notRun = run.status === "running" ? 0 : groups.filter((g) => g.status === "pending").reduce((n, g) => n + g.items.length, 0);
+  const rows = shown
+    .map((g) => {
+      const failedItem = g.items.find((item) => item.status === "failed");
+      const kept = g.status === "preserved" ? `<span class="dp-row-desc">Kept: you had it before MemQL</span>` : "";
+      let html =
+        `<li class="dp-row"><span class="mq-dot" data-tone="${stepTone(g.status)}" aria-hidden="true"></span>` +
+        `<span class="dp-row-label">${escapeHtml(g.label)}</span>${kept}</li>`;
+      if (failedItem !== undefined) {
+        const logFile = parseItemDetail(failedItem.detail).logFile;
+        if (logFile !== "") {
+          const text = i.logs.get(logFile);
+          html += `<li class="dp-log">${disclosure({
+            act: "toggleStepLog",
+            id: stepLogDisclosureId(logFile),
+            label: "Show log",
+            openLabel: "Hide log",
+            open: i.openLogs.has(logFile),
+            bodyHtml:
+              text === undefined
+                ? skeleton({ shape: "list", rows: 2, label: "Loading the log" })
+                : savedLogPane({
+                    id: `dp-steplog-pane-${failedItem.label}`,
+                    ariaLabel: `${g.label} log`,
+                    lines: text === "" ? [] : text.replace(/\n+$/, "").split("\n").map((line) => ({ text: line })),
+                    empty: "The log is empty",
+                  }),
+          })}</li>`;
+        }
       }
-      const destructive = action.id === "uninstall" || action.typeToConfirm === true;
-      return [
-        `<button class="${
-          destructive ? "secondary destructive" : "primary"
-        }" type="button" data-choose="${escapeHtml(action.id)}" title="${escapeHtml(
-          action.detail,
-        )}">${escapeHtml(action.label)}</button>`,
-      ];
+      return html;
     })
     .join("");
-
-  // The lane fact, for a cluster running a developer's own build. Named from
-  // the INSTANCE and labelled as the instance's, never folded into the run's
-  // sentence -- see runVersionFact. It stays in the PRODUCT tier: which images
-  // a cluster is running is the difference between a developer's build and a
-  // release, which is a fact about what the cluster IS.
-  const lane =
-    instance.imageSource === "checkout"
-      ? fact("image source", checkoutVersionText(instance))
-      : instance.kind === "local" && run.kind === "rebuild"
-        ? // A rebuild whose cluster has since gone back to released images. Said
-          // plainly, because the page would otherwise describe a checkout build
-          // beside a cluster that is not running one.
-          fact("image source", `${releasedImages(displayVersion(instance.version))} today`)
-        : "";
-
-  const outcome =
-    input.outcome === ""
-      ? ""
-      : `<p class="${
-          input.outcome.startsWith("ERROR") ? "error" : "notice"
-        }">${escapeHtml(input.outcome)}</p>`;
-
-  // WHAT MOVES INTO DIAGNOSTICS HERE IS THE RAW STAMPS, AND ONLY THOSE
-  // (memql#4456). `duration` stays -- "4m 12s" is a fact an operator reads --
-  // while `2026-08-14T10:00:00Z` twice over is a machine-readable rendering of
-  // the same thing, and the run's own id is a support-case handle. The ITEMS
-  // stay too: this is the run detail page, and what the run did is the reason
-  // it exists (#4427 owns that content; this epic owns the layout around it).
-  const diagnostics = diagnosticFacts([
-    fact("run id", run.id),
-    fact("started", run.startedAt),
-    fact("finished", run.finishedAt ?? ""),
-  ]);
-
-  return renderScreen({
-    title: row.label,
-    actions: `${actions}
-  <button class="secondary" type="button" data-act="back">Back</button>`,
-    status: `<p class="lede">${escapeHtml(row.tooltip)}</p>
-${input.error === "" ? "" : `<p class="error">${escapeHtml(input.error)}</p>`}
-${outcome}`,
-    details: `<div class="facts">
-  ${fact("cluster", instance.name)}
-  ${fact("kind", run.kind)}
-  ${fact("versions", runVersionFact(instance, run))}
-  ${lane}
-  ${fact("status", run.status)}
-  ${fact("reason", failureReason(run))}
-  ${fact("duration", runDuration(run.startedAt, run.finishedAt))}
-</div>
-${runItems(instance, run)}`,
-    logs: renderDiagnostics(input.diagnosticsOpen, diagnostics),
-  });
+  const notes = [
+    skipped > 0 ? `${skipped} already in place` : "",
+    notRun > 0 ? `${notRun} didn't run` : "",
+  ].filter((n) => n !== "");
+  return (
+    subhead("Steps") +
+    (rows === "" ? "" : `<ul class="dp-list">${rows}</ul>`) +
+    (notes.length === 0 ? "" : `<p class="dp-note">${escapeHtml(notes.join(" · "))}</p>`)
+  );
 }
+
+/**
+ * The disclosure over a failed step's saved log, keyed by the log's file name
+ * so the page's toggle names the file the host should read.
+ */
+export function stepLogDisclosureId(logFile: string): string {
+  return `dp-log-${logFile}`;
+}
+
+/** The log file a step-log disclosure is about, or "" for any other id. */
+export function stepLogFileOf(disclosureId: string): string {
+  return disclosureId.startsWith("dp-log-") ? disclosureId.slice("dp-log-".length) : "";
+}
+
+/** A remote run's services: name, version and replicas; the digest is in Details. */
+function servicesList(run: Run): string {
+  if (run.items.length === 0) return subhead("Services") + emptyState({ line: "No service details for this deployment." });
+  const rows = run.items
+    .map((item) => {
+      const detail = (item.detail ?? "").split(" · ").filter((part) => !part.startsWith("digest ")).join(" · ");
+      return (
+        `<li class="dp-row"><span class="mq-dot" data-tone="${stepTone(item.status)}" aria-hidden="true"></span>` +
+        `<span class="dp-row-label">${escapeHtml(item.label)}</span><span class="dp-row-desc">${escapeHtml(detail)}</span></li>`
+      );
+    })
+    .join("");
+  return subhead("Services") + `<ul class="dp-list">${rows}</ul>`;
+}
+
+/**
+ * A run that is no longer in the record: said, with the way back.
+ *
+ * WHERE IT WENT DEPENDS ON WHOSE RECORD IT WAS. This machine keeps its latest
+ * RUN_LOG_KEEP runs and prunes the rest; a remote cluster's history is the
+ * cluster's own rows, which this editor neither keeps nor prunes.
+ */
+export function missingRunScreen(instance: Instance, keep: number): RegionParts {
+  return {
+    head: head({ title: instance.kind === "remote" ? "Deployment" : "Run", back: { act: "back", label: instanceLabel(instance) } }),
+    body: emptyState({
+      line:
+        instance.kind === "remote"
+          ? "This deployment is no longer in the cluster's history."
+          : `This run is no longer in the history. Only the latest ${keep} are kept.`,
+    }),
+    // The way back is the head's link; the bar says where the run stands.
+    actions: actionBar({ state: "Not in the history", tone: "idle", acts: [] }),
+  };
+}
+
+export { masked as maskHome };

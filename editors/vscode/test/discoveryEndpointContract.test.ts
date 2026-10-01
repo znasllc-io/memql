@@ -4,8 +4,8 @@
 // This extension is one of the clients that reads it, and webSocketUrlFor is
 // where that value becomes a connection. Nothing in the build links the two, so
 // the live cluster spent the whole life of memql#3399 publishing
-// "https://bff.memql.localhost" -- a form this parser refuses by design -- while
-// both sides' own tests stayed green.
+// "https://bff.memql.localhost" -- a host with no ingress -- while both sides'
+// own tests stayed green.
 //
 // So both sides are asserted against ONE file. The Go half is
 // component/identity/discovery_endpoint_contract_test.go, and it reads the same
@@ -74,11 +74,40 @@ for (const c of contract.cases) {
   });
 }
 
+// THE DOCUMENT MUST NEVER PUBLISH THESE; A CLIENT MUST STILL SURVIVE MEETING
+// ONE. The Go half proves the discovery handler cannot emit a rejected spelling.
+// This half used to prove the parser refused them outright -- and that is what
+// left a signed-in editor unable to dial the owner's local cluster, because the
+// Cockpit writes the same front door as `https://api.memql.localhost` into the
+// shared cluster list. So a web-URL spelling now dials EXACTLY the bridge its
+// host:port form dials (same host, same port, the socket twin of its scheme),
+// and any other scheme is still refused.
+function hostPortForm(spelling: string): string | undefined {
+  const m = /^(https?):\/\/([^/]+)\/?$/i.exec(spelling);
+  if (m === null) return undefined;
+  const authority = m[2];
+  const hasPort = /:\d+$/.test(authority);
+  const port = m[1].toLowerCase() === "https" ? "443" : "80";
+  return hasPort ? authority : `${authority}:${port}`;
+}
+
 for (const spelling of contract.rejected) {
-  test(`rejected form stays rejected: ${spelling}`, () => {
-    assert.throws(
-      () => webSocketUrlFor({ name: "contract", endpoint: spelling }),
-      `"${spelling}" must not be accepted -- the discovery document is forbidden from publishing it`,
-    );
+  const equivalent = hostPortForm(spelling);
+  if (equivalent === undefined) {
+    test(`rejected form stays rejected: ${spelling}`, () => {
+      assert.throws(
+        () => webSocketUrlFor({ name: "contract", endpoint: spelling }),
+        `"${spelling}" must not be accepted -- the discovery document is forbidden from publishing it`,
+      );
+    });
+    continue;
+  }
+  test(`a web-URL spelling dials the front door its host:port form names: ${spelling}`, () => {
+    const dialed = webSocketUrlFor({ name: "contract", endpoint: spelling });
+    const viaHostPort = new URL(webSocketUrlFor({ name: "contract", endpoint: equivalent }));
+    const url = new URL(dialed);
+    assert.equal(url.hostname, viaHostPort.hostname);
+    assert.equal(url.pathname, "/memql/ws");
+    assert.equal(url.protocol, spelling.toLowerCase().startsWith("https") ? "wss:" : "ws:");
   });
 }

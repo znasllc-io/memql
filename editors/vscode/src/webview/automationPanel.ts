@@ -1,10 +1,13 @@
 // The two automation tabs: the trigger-event form, and the step trace.
 //
-// Both are ADAPTERS, like their B2 counterparts in webview/runPanel.ts. The
+// Both are ADAPTERS, like their counterparts in webview/runPanel.ts. The
 // form's mode decision and payload validation live in state/automationForm.ts,
-// the trace's ordering and refusal vocabulary in state/stepTrace.ts, and the
-// run itself in run/automationRun.ts; this file owns webview HTML, the
-// postMessage boundary, and nothing else.
+// the trace's ordering and refusal vocabulary in state/stepTrace.ts, the
+// markup in webview/automationScreens.ts, and the run itself in
+// run/automationRun.ts; this file owns the webview, the postMessage boundary,
+// and nothing else. Both are on the page kit: assigned once per screen and
+// patched after that, so a half-typed payload keeps its caret while the page
+// changes around it, and the trace fills in without repainting.
 //
 // TWO THINGS MAKE THESE TABS DIFFERENT FROM B2's, and both are deliberate:
 //
@@ -13,7 +16,8 @@
 //     real row of the trigger concept, or by pasting JSON. The row picker is
 //     the CONCEPTS BROWSER B1 ALREADY BUILT, reused piece for piece: the same
 //     paged fetch through the host, the same ConceptPanelState guarding it,
-//     the same flattenForList projection and the same view-kit renderRowList.
+//     the same flattenForList projection and the same keyboard-reachable row
+//     list (webview/rowListView.ts).
 //     A second row browser would have been a second thing to keep correct
 //     about paging, staleness and display cards.
 //
@@ -22,7 +26,7 @@
 //     order, how long each took, which one broke. So StepTracePanel renders a
 //     rail of ordered step markers and does not touch view-kit's row renderer
 //     at all. It fills LIVE: the panel is opened on the accepted frame, before
-//     any step exists, and repainted as each one lands.
+//     any step exists, and patched as each one lands.
 //
 // The webview runs under a strict CSP with a per-load nonce. Row data and step
 // output are untrusted (whatever the cluster returned) and are escaped, but a
@@ -35,38 +39,28 @@ import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import {
-  escapeHtml,
-  renderRowList,
-  renderToHtml,
-  viewKitStyles,
-  type ConceptLike,
-  renderValueView,
-} from "@znasllc-io/memql-view-kit";
+import { viewKitStyles, type ConceptLike } from "@znasllc-io/memql-view-kit";
 
-import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
 import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 
 import type { AutomationTarget } from "../constructs/runnable.js";
-import type {
-  AutomationRunOutcome,
-  AutomationRunRequest,
-} from "../run/automationRun.js";
-import {
-  TARGET_NODE_TYPE_NOTICE,
-  automationFormPlan,
-  definitionBanner,
-  parsePayloadText,
-  payloadTextForRow,
-  type AutomationFormMode,
-} from "../state/automationForm.js";
+import type { AutomationRunOutcome, AutomationRunRequest } from "../run/automationRun.js";
+import { automationFormPlan, parsePayloadText, payloadTextForRow } from "../state/automationForm.js";
 import { ConceptPanelState } from "../state/conceptPanelState.js";
 import { flattenForList } from "../state/rowProjection.js";
+import { StepTraceModel } from "../state/stepTrace.js";
 import {
-  StepTraceModel,
-  describeRefusal,
-  formatDuration,
-} from "../state/stepTrace.js";
+  AUTOMATION_ACTS,
+  AUTOMATION_FIELDS,
+  AUTOMATION_PAGE_STYLES,
+  TRACE_ACTS,
+  automationFormParts,
+  conceptEntity,
+  traceParts,
+} from "./automationScreens.js";
+import { pageDocument } from "./ui/document.js";
+import { LiveView } from "./ui/liveView.js";
+import { pageMessage } from "./ui/protocol.js";
 
 /** What the automation form asks the extension to do when the user acts. */
 export interface AutomationPanelHost {
@@ -77,13 +71,26 @@ export interface AutomationPanelHost {
     trace: StepTraceModel,
     onProgress: () => void,
   ): Promise<AutomationRunOutcome>;
-  /** Persists a named run configuration in the workspace. */
+  /** Persists a named saved run in the workspace. */
   saveConfig(target: AutomationTarget, name: string, request: AutomationRunRequest): Promise<void>;
   /** One page of the trigger concept's rows. Rejects when not connected. */
   browseRows(conceptId: string, cursor: string): Promise<{ rows: Row[]; nextCursor: string }>;
   /** The concept descriptor, so the picker renders the concept's own display card. Undefined before the first list load. */
   concept(conceptId: string): ConceptLike | undefined;
 }
+
+/** The two ends of a live view over a panel's webview. */
+function liveTarget(panel: vscode.WebviewPanel): { setHtml(html: string): void; postMessage(msg: unknown): unknown } {
+  return {
+    setHtml: (html) => {
+      panel.webview.html = html;
+    },
+    postMessage: (message) => panel.webview.postMessage(message),
+  };
+}
+
+/** Both tabs' styles: view-kit's rows and value viewer, and the tabs' layout. */
+const STYLES = `${viewKitStyles}\n${AUTOMATION_PAGE_STYLES}`;
 
 // -----------------------------------------------------------------------------
 // The trigger-event form
@@ -96,18 +103,20 @@ export class AutomationRunPanel {
   private static readonly open_ = new Map<string, AutomationRunPanel>();
 
   private readonly panel: vscode.WebviewPanel;
+  private readonly live: LiveView;
   private readonly disposables: vscode.Disposable[] = [];
-  // The picker's row list, guarded exactly as the Concepts tab's is: a Reload
+  // The picker's row list, guarded exactly as the concept page's is: a Reload
   // or a second "Load more" click landing before the first response must not
   // append the same page twice or paint a stale one.
   private readonly rows = new ConceptPanelState<Row>();
 
-  private mode: AutomationFormMode;
+  private pickerOpen: boolean;
+  private optionsOpen = false;
   private payloadText = "";
   private targetNodeType = "";
   private includeStepOutput = false;
   private payloadError = "";
-  private notice = "";
+  private note: { tone: "info" | "error"; line: string; openRuns?: boolean } | undefined;
   private busy = false;
   private disposed = false;
 
@@ -124,10 +133,7 @@ export class AutomationRunPanel {
       existing.panel.reveal();
       return;
     }
-    AutomationRunPanel.open_.set(
-      key,
-      new AutomationRunPanel(context, host, target, key, initial),
-    );
+    AutomationRunPanel.open_.set(key, new AutomationRunPanel(context, host, target, key, initial));
   }
 
   private constructor(
@@ -137,35 +143,48 @@ export class AutomationRunPanel {
     private readonly key: string,
     initial: AutomationRunRequest | undefined,
   ) {
-    const plan = automationFormPlan(target.name, target.trigger);
-    this.mode = plan.defaultMode;
+    // The picker starts open when the trigger names a concept: a real row one
+    // click away is what makes an automation genuinely testable.
+    this.pickerOpen = this.plan.defaultMode === "row";
     if (initial !== undefined) this.applyRequest(initial);
     this.panel = vscode.window.createWebviewPanel(
       "memqlAutomationRun",
-      `Run automation: ${target.name}`,
+      `Run ${target.name}`,
       vscode.ViewColumn.Active,
       { enableScripts: true },
     );
+    this.live = new LiveView(liveTarget(this.panel), (parts, screen) =>
+      pageDocument({
+        nonce: nonceValue(),
+        title: `Run ${this.target.name}`,
+        themeAttr: currentBodyThemeAttr(),
+        screen,
+        styles: STYLES,
+        ...parts,
+      }),
+    );
     this.disposables.push(
-      // The palette is a MemQL setting now, not the editor's theme, so an
-      // OPEN panel repaints when either input moves (memql#4419).
-      ...onAppearanceChange(() => this.render()),
+      // The palette is a MemQL setting, not the editor's theme, so an OPEN
+      // panel restyles when either input moves (memql#4419).
+      ...onAppearanceChange(() => {
+        this.live.invalidate();
+        this.render();
+      }),
       this.panel.onDidDispose(() => this.dispose()),
-      this.panel.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg)),
+      this.panel.webview.onDidReceiveMessage((msg: unknown) => {
+        if (this.live.handleMessage(msg)) return;
+        this.onMessage(msg);
+      }),
     );
     this.render();
-    // The picker's first page is fetched on open rather than on a click: the
-    // whole point of row mode is that a real row is one click away, and a
-    // picker that starts empty until you ask it to load is a picker nobody
-    // uses.
-    if (this.mode === "row") void this.loadPage();
+    if (this.pickerOpen) void this.loadPage();
   }
 
   private get plan() {
     return automationFormPlan(this.target.name, this.target.trigger);
   }
 
-  // adopt refills the form from a saved run configuration.
+  // adopt refills the form from a saved run.
   private adopt(request: AutomationRunRequest): void {
     this.applyRequest(request);
     this.render();
@@ -174,56 +193,58 @@ export class AutomationRunPanel {
   private applyRequest(request: AutomationRunRequest): void {
     if (request.payload !== undefined) {
       this.payloadText = payloadTextForRow(request.payload);
-      // A saved configuration carries the payload, not how it was built, so
-      // the form opens on the mode that shows the payload as text -- which is
-      // also the mode in which every character of it is editable.
-      if (this.plan.modes.includes("json")) this.mode = "json";
+      // A saved run carries the payload, not how it was built, so the picker
+      // starts closed: the box is the whole form, and every character of it is
+      // editable.
+      this.pickerOpen = false;
     }
     this.targetNodeType = request.targetNodeType ?? "";
     this.includeStepOutput = request.includeStepOutput === true;
+    if (this.targetNodeType !== "" || this.includeStepOutput) this.optionsOpen = true;
   }
 
-  private onMessage(msg: unknown): void {
-    if (msg === null || typeof msg !== "object") return;
-    const m = msg as Record<string, unknown>;
-    const type = m.type;
-
-    // Every message carries the current field values, because render()
-    // replaces the webview HTML wholesale and the DOM is therefore not where
-    // form state lives. Absorb them first so an action never discards
-    // something the user typed.
-    if (typeof m.payloadText === "string") this.payloadText = m.payloadText;
-    if (typeof m.targetNodeType === "string") this.targetNodeType = m.targetNodeType.trim();
-    if (typeof m.includeStepOutput === "boolean") this.includeStepOutput = m.includeStepOutput;
-
-    if (type === "run") {
-      void this.doRun();
+  private onMessage(raw: unknown): void {
+    const message = pageMessage(raw);
+    if (message === undefined) return;
+    if (message.type === "input") {
+      // One keystroke, or one switch flip. Held, never rendered: the page
+      // already shows it.
+      const { field, value } = message as { field?: unknown; value?: unknown };
+      if (typeof field !== "string" || typeof value !== "string") return;
+      if (field === AUTOMATION_FIELDS.payload) this.payloadText = value;
+      else if (field === AUTOMATION_FIELDS.targetNodeType) this.targetNodeType = value.trim();
+      else if (field === AUTOMATION_FIELDS.includeStepOutput) this.includeStepOutput = value === "true";
       return;
     }
-    if (type === "save" && typeof m.name === "string") {
-      void this.doSave(m.name);
-      return;
-    }
-    if (type === "mode" && typeof m.mode === "string") {
-      const mode = m.mode as AutomationFormMode;
-      if (!this.plan.modes.includes(mode)) return;
-      this.mode = mode;
-      this.render();
-      if (mode === "row" && this.rows.nodes.length === 0) void this.loadPage();
-      return;
-    }
-    if (type === "selectRow" && typeof m.rowId === "string") {
-      this.selectRow(m.rowId);
-      return;
-    }
-    if (type === "loadMore") {
-      void this.loadPage();
-      return;
-    }
-    if (type === "reload") {
-      this.rows.reset();
-      this.render();
-      void this.loadPage();
+    switch (message.type) {
+      case AUTOMATION_ACTS.run:
+        void this.doRun();
+        return;
+      case AUTOMATION_ACTS.saveAs:
+        void this.doSave();
+        return;
+      case AUTOMATION_ACTS.openRuns:
+        void vscode.commands.executeCommand("memql.runs.open");
+        return;
+      case AUTOMATION_ACTS.picker:
+        this.pickerOpen = message.open === true;
+        // The first page is fetched when the picker is first opened.
+        if (this.pickerOpen && !this.rows.settled && !this.rows.loading) void this.loadPage();
+        return;
+      case AUTOMATION_ACTS.options:
+        this.optionsOpen = message.open === true;
+        return;
+      case AUTOMATION_ACTS.selectRow:
+        if (typeof message.value === "string") this.selectRow(message.value);
+        return;
+      case AUTOMATION_ACTS.loadMore:
+        void this.loadPage();
+        return;
+      case AUTOMATION_ACTS.reload:
+        this.rows.reset();
+        this.render();
+        void this.loadPage();
+        return;
     }
   }
 
@@ -231,21 +252,22 @@ export class AutomationRunPanel {
   // hidden reference to it. What is on screen is then exactly what will be
   // sent, and "pick a row and change one field" needs no extra affordance.
   private selectRow(rowId: string): void {
-    // beginSelection() marks the row so it highlights in the list. Its token is
-    // deliberately dropped: the Concepts tab hands it back to
-    // resolveSelection() after a detail round-trip, and this picker has no such
-    // round-trip -- the loaded page already holds the whole row, which is the
-    // only thing the payload needs.
-    this.rows.beginSelection(rowId);
     const picked = this.rows.nodes.find((row) => String(row.id ?? "") === rowId);
     if (picked === undefined) {
-      this.notice = `Row ${rowId} is no longer in the loaded page. Reload the picker and try again.`;
+      // Gone from the loaded page (a reload raced the click): the list is
+      // re-read rather than the click answered with a sentence to act on.
+      this.rows.reset();
       this.render();
+      void this.loadPage();
       return;
     }
+    // beginSelection() marks the row so it highlights in the list. Its token is
+    // deliberately dropped: the loaded page already holds the whole row, which
+    // is the only thing the payload needs.
+    this.rows.beginSelection(rowId);
     this.payloadText = payloadTextForRow(picked);
     this.payloadError = "";
-    this.notice = "";
+    this.note = undefined;
     this.render();
   }
 
@@ -253,57 +275,55 @@ export class AutomationRunPanel {
     const conceptId = this.plan.conceptId;
     if (conceptId === "") return;
     const cursor = this.rows.nextCursor;
-    const changed = await this.rows.loadPage(() => this.host.browseRows(conceptId, cursor));
-    if (changed) this.render();
+    const pending = this.rows.loadPage(() => this.host.browseRows(conceptId, cursor));
+    this.render();
+    if (await pending) this.render();
   }
 
   private async doRun(): Promise<void> {
+    if (this.busy) return;
     const request = this.buildRequest();
     if (request === undefined) {
       this.render();
       return;
     }
     this.payloadError = "";
-    this.notice = "";
+    this.note = undefined;
     this.busy = true;
     this.render();
 
     const trace = new StepTraceModel();
-    // The trace panel is opened BEFORE the run resolves and repainted on every
+    // The trace panel is opened BEFORE the run resolves and patched on every
     // frame. That is the whole point of the streaming surface: `onAccepted`
-    // fires ahead of any step, so the banner and header are on screen while
-    // the automation is still running, and each step lands as it completes
-    // rather than all at once at the end.
+    // fires ahead of any step, so the header is on screen while the
+    // automation is still running, and each step lands as it completes.
     const outcome = await this.host.run(this.target, request, trace, () => {
       StepTracePanel.show(this.context, this.target, trace);
     });
     this.busy = false;
-    if (outcome.status === "declined") {
-      this.notice = `Cancelled. ${this.target.name} was not run.`;
-    }
+    if (outcome.status === "declined") this.note = { tone: "info", line: "Cancelled. Nothing ran." };
     this.render();
     if (outcome.status !== "superseded" && outcome.status !== "declined") {
       StepTracePanel.show(this.context, this.target, trace);
     }
   }
 
-  private async doSave(rawName: string): Promise<void> {
-    const name = rawName.trim();
-    if (name === "") {
-      this.notice = "ERROR: a run configuration needs a name.";
-      this.render();
-      return;
-    }
+  private async doSave(): Promise<void> {
     const request = this.buildRequest();
     if (request === undefined) {
       this.render();
       return;
     }
+    // Asked for when it is needed, not kept on the page as a standing field.
+    const name = (
+      await vscode.window.showInputBox({ prompt: "Name this saved run", placeHolder: this.target.name })
+    )?.trim();
+    if (name === undefined || name === "") return;
     try {
       await this.host.saveConfig(this.target, name, request);
-      this.notice = `Saved "${name}" to .memql/runs.json. It is plain text -- open it to edit or commit it.`;
+      this.note = { tone: "info", line: `Saved as "${name}".`, openRuns: true };
     } catch (err) {
-      this.notice = `ERROR: ${err instanceof Error ? err.message : String(err)}`;
+      this.note = { tone: "error", line: err instanceof Error ? err.message : String(err) };
     }
     this.render();
   }
@@ -314,13 +334,13 @@ export class AutomationRunPanel {
   // not a failed run.
   private buildRequest(): AutomationRunRequest | undefined {
     const request: AutomationRunRequest = {};
-
-    if (this.mode !== "schedule") {
+    if (!this.plan.modes.includes("schedule")) {
       const parsed = parsePayloadText(this.payloadText);
       if (!parsed.ok) {
         this.payloadError = parsed.error;
         return undefined;
       }
+      this.payloadError = "";
       if (parsed.payload !== undefined) request.payload = parsed.payload;
       // The concept is sent alongside the payload so the engine can make a
       // glob trigger pattern concrete. Harmless when the pattern is already
@@ -341,191 +361,36 @@ export class AutomationRunPanel {
   }
 
   private render(): void {
-    const nonce = nonceValue();
+    if (this.disposed) return;
     const plan = this.plan;
-
-    const modeTabs =
-      plan.modes.length < 2
-        ? ""
-        : `<div class="modes">${plan.modes
-            .map(
-              (m) =>
-                `<button type="button" data-mode="${m}" class="mode${m === this.mode ? " active" : ""}">${escapeHtml(modeLabel(m))}</button>`,
-            )
-            .join("")}</div>`;
-
-    const pickerHtml = this.mode === "row" ? this.pickerHtml(plan.conceptId) : "";
-    const payloadHtml =
-      this.mode === "schedule"
-        ? `<div class="placeholder">This automation fires with an EMPTY event, exactly as its schedule would deliver it. There is nothing to fill in.</div>`
-        : `<div class="field">
-  <label for="payload">Trigger event payload<span class="type">JSON object</span></label>
-  <div class="desc">Leave empty to fire with an empty event. This is what the automation body reads as <code>args.payload.&lt;field&gt;</code>.</div>
-  <textarea id="payload" spellcheck="false">${escapeHtml(this.payloadText)}</textarea>
-  ${this.payloadError === "" ? "" : `<div class="err">${escapeHtml(this.payloadError)}</div>`}
-</div>`;
-
-    const noticeHtml = this.notice === "" ? "" : `<div class="notice">${escapeHtml(this.notice)}</div>`;
-
-    this.panel.webview.html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-<title>Run automation ${escapeHtml(this.target.name)}</title>
-<style nonce="${nonce}">
-${panelChrome()}
-${viewKitStyles}
-  .field { margin: 12px 0; }
-  .field label { display: block; font-weight: 600; margin-bottom: 4px; }
-  .field .type { color: var(--memql-muted); font-weight: 400; margin-left: 8px; }
-  .field .desc { color: var(--memql-muted); margin: 2px 0 6px; }
-  .field .err { color: var(--memql-danger); margin-top: 4px; }
-  input[type="text"], textarea { width: 100%; box-sizing: border-box; font-family: var(--vscode-editor-font-family);
-    background: var(--memql-surface); color: var(--memql-fg);
-    border: 1px solid var(--vscode-input-border, transparent); padding: 4px 6px; }
-  textarea { min-height: 9em; }
-  .modes { display: flex; gap: 4px; margin: 12px 0 4px; }
-  .modes .mode { background: transparent; color: var(--vscode-foreground);
-    border: 1px solid var(--memql-border); }
-  .modes .mode.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-    border-color: transparent; }
-  .picker { border: 1px solid var(--memql-border); max-height: 40vh; overflow: auto; padding: 4px 8px; }
-  .picker-bar { display: flex; gap: 8px; align-items: center; margin: 8px 0 4px; }
-  .actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
-  .actions input { width: auto; flex: 1 1 12em; }
-  .check { display: flex; gap: 6px; align-items: center; margin: 12px 0; }
-  .check input { width: auto; }
-</style>
-</head>
-<body${currentBodyThemeAttr()}>
-<div class="toolbar">
-  ${brandMarkSvg(16)}
-  <strong class="data">automation ${escapeHtml(this.target.name)}</strong>
-  <span>${escapeHtml(triggerSummary(this.target))}</span>
-</div>
-<div class="warning">${escapeHtml(DEPLOYED_FORM_WARNING)}</div>
-<div class="notice">${escapeHtml(plan.explanation)}</div>
-${noticeHtml}
-<div class="pane">
-${modeTabs}
-${pickerHtml}
-${payloadHtml}
-  <div class="field">
-    <label for="node-type">Run on node type<span class="type">optional</span></label>
-    <div class="desc">${escapeHtml(TARGET_NODE_TYPE_NOTICE)}</div>
-    <input id="node-type" type="text" value="${escapeHtml(this.targetNodeType)}" placeholder="(the node that receives the request)">
-  </div>
-  <div class="check">
-    <input id="step-output" type="checkbox"${this.includeStepOutput ? " checked" : ""}>
-    <label for="step-output">Include each step's output in the trace (can be large)</label>
-  </div>
-  <div class="actions">
-    <button id="run" type="button"${this.busy ? " disabled" : ""}>${this.busy ? "Running..." : "Run automation"}</button>
-    <input id="config-name" type="text" placeholder="Name this run configuration">
-    <button id="save" type="button">Save configuration</button>
-  </div>
-</div>
-<script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
-  function fields() {
-    const payload = document.getElementById('payload');
-    return {
-      payloadText: payload ? payload.value : '',
-      targetNodeType: document.getElementById('node-type').value,
-      includeStepOutput: document.getElementById('step-output').checked,
-    };
+    const concept: ConceptLike =
+      this.host.concept(plan.conceptId) ?? { id: plan.conceptId, entity: conceptEntity(plan.conceptId) };
+    this.live.render(
+      "form",
+      automationFormParts({
+        name: this.target.name,
+        trigger: this.target.trigger,
+        plan,
+        picker: {
+          open: this.pickerOpen,
+          settled: this.rows.settled,
+          loading: this.rows.loading,
+          rows: this.rows.nodes.map(flattenForList),
+          concept,
+          selectedRowId: this.rows.selectedRowId,
+          more: this.rows.nextCursor !== "",
+          error: this.rows.listError,
+        },
+        payloadText: this.payloadText,
+        payloadError: this.payloadError,
+        targetNodeType: this.targetNodeType,
+        includeStepOutput: this.includeStepOutput,
+        optionsOpen: this.optionsOpen,
+        busy: this.busy,
+        note: this.note,
+      }),
+    );
   }
-  document.getElementById('run').addEventListener('click', () =>
-    vscode.postMessage({ type: 'run', ...fields() }));
-  document.getElementById('save').addEventListener('click', () =>
-    vscode.postMessage({ type: 'save', name: document.getElementById('config-name').value, ...fields() }));
-  for (const el of document.querySelectorAll('[data-mode]')) {
-    el.addEventListener('click', () => vscode.postMessage({ type: 'mode', mode: el.dataset.mode, ...fields() }));
-  }
-  const picker = document.getElementById('picker');
-  if (picker) {
-    // One delegated listener: view-kit emits data attributes, never inline
-    // handlers, which is what lets the CSP forbid them outright.
-    picker.addEventListener('click', (e) => {
-      const row = e.target.closest('[data-row-id]');
-      if (row) vscode.postMessage({ type: 'selectRow', rowId: row.dataset.rowId, ...fields() });
-    });
-  }
-  const more = document.getElementById('picker-more');
-  if (more) more.addEventListener('click', () => vscode.postMessage({ type: 'loadMore', ...fields() }));
-  const reload = document.getElementById('picker-reload');
-  if (reload) reload.addEventListener('click', () => vscode.postMessage({ type: 'reload', ...fields() }));
-</script>
-</body>
-</html>`;
-  }
-
-  private pickerHtml(conceptId: string): string {
-    const concept: ConceptLike = this.host.concept(conceptId) ?? { id: conceptId, entity: conceptId };
-    const errorHtml =
-      this.rows.error === ""
-        ? ""
-        : `<div class="error">ERROR: ${escapeHtml(this.rows.error)}</div>`;
-    const body =
-      this.rows.nodes.length === 0 && this.rows.error === ""
-        ? '<div class="placeholder">Loading rows...</div>'
-        : renderToHtml(
-            renderRowList(
-              this.rows.nodes.map(flattenForList),
-              concept,
-              this.rows.selectedRowId,
-            ),
-          );
-    const more =
-      this.rows.nextCursor === ""
-        ? ""
-        : '<button id="picker-more" type="button">Load more</button>';
-    return `<div class="picker-bar">
-  <strong>${escapeHtml(conceptId)}</strong>
-  <span>${this.rows.nodes.length} loaded</span>
-  <button id="picker-reload" type="button">Reload</button>
-  ${more}
-</div>
-${errorHtml}
-<div class="picker" id="picker">${body}</div>`;
-  }
-}
-
-/**
- * DEPLOYED_FORM_WARNING is the form's half of "the UI states that the deployed
- * definition ran".
- *
- * The trace renders the ENGINE's own note, which is the authority. This one is
- * on the form, before the click, for the same reason the tool lens carries its
- * caveat in the tooltip: by the time a banner is on the results surface the
- * developer has already run the thing.
- */
-export const DEPLOYED_FORM_WARNING =
-  "This runs the DEPLOYED automation on the selected cluster, NOT this buffer. Automations are dispatched by bus subscription rather than resolved by name, so they cannot be session-defined -- edits in your editor have no effect on what runs. Redeploy to run your edits.";
-
-function modeLabel(mode: AutomationFormMode): string {
-  switch (mode) {
-    case "row":
-      return "Pick an existing row";
-    case "json":
-      return "Paste JSON";
-    default:
-      return "Fire now";
-  }
-}
-
-function triggerSummary(target: AutomationTarget): string {
-  const t = target.trigger;
-  if (t === undefined) return "no trigger reported";
-  if (t.schedule !== undefined && t.schedule !== "" && (t.event ?? "") === "") {
-    return `@trigger(schedule="${t.schedule}")`;
-  }
-  const parts: string[] = [];
-  if (t.event !== undefined && t.event !== "") parts.push(`event="${t.event}"`);
-  if (t.concept !== undefined && t.concept !== "") parts.push(`concept="${t.concept}"`);
-  return parts.length === 0 ? "no trigger reported" : `@trigger(${parts.join(", ")})`;
 }
 
 // -----------------------------------------------------------------------------
@@ -539,27 +404,28 @@ export class StepTracePanel {
   private static current: StepTracePanel | undefined;
 
   private readonly panel: vscode.WebviewPanel;
+  private readonly live: LiveView;
   private readonly disposables: vscode.Disposable[] = [];
   private target: AutomationTarget;
   private trace: StepTraceModel;
-  private showRaw = false;
+  /** Bumped per trace, so each run is a new screen (a fresh scroll). */
+  private run = 0;
+  private detailsOpen = false;
+  private jsonOpen = false;
   private disposed = false;
 
-  static show(
-    context: vscode.ExtensionContext,
-    target: AutomationTarget,
-    trace: StepTraceModel,
-  ): void {
+  static show(context: vscode.ExtensionContext, target: AutomationTarget, trace: StepTraceModel): void {
     const existing = StepTracePanel.current;
     if (existing !== undefined && !existing.disposed) {
       existing.target = target;
       // Re-showing the SAME trace object is the live-update path: the run
-      // fills it frame by frame and calls back here to repaint. Only a
-      // different trace resets the raw toggle, so toggling raw mid-run is not
-      // undone by the next step landing.
+      // fills it frame by frame and calls back here to patch the page. Only a
+      // different trace starts a new screen.
       if (existing.trace !== trace) {
         existing.trace = trace;
-        existing.showRaw = false;
+        existing.run += 1;
+        existing.detailsOpen = false;
+        existing.jsonOpen = false;
       }
       existing.panel.title = traceTitle(target);
       existing.render();
@@ -571,11 +437,7 @@ export class StepTracePanel {
     StepTracePanel.current = new StepTracePanel(context, target, trace);
   }
 
-  private constructor(
-    _context: vscode.ExtensionContext,
-    target: AutomationTarget,
-    trace: StepTraceModel,
-  ) {
+  private constructor(_context: vscode.ExtensionContext, target: AutomationTarget, trace: StepTraceModel) {
     this.target = target;
     this.trace = trace;
     this.panel = vscode.window.createWebviewPanel(
@@ -584,22 +446,32 @@ export class StepTracePanel {
       { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
       { enableScripts: true },
     );
+    this.live = new LiveView(liveTarget(this.panel), (parts, screen) =>
+      pageDocument({
+        nonce: nonceValue(),
+        title: traceTitle(this.target),
+        themeAttr: currentBodyThemeAttr(),
+        screen,
+        styles: STYLES,
+        ...parts,
+      }),
+    );
     this.disposables.push(
-      // The palette is a MemQL setting now, not the editor's theme, so an
-      // OPEN panel repaints when either input moves (memql#4419).
-      ...onAppearanceChange(() => this.render()),
+      // The palette is a MemQL setting, not the editor's theme, so an OPEN
+      // panel restyles when either input moves (memql#4419).
+      ...onAppearanceChange(() => {
+        this.live.invalidate();
+        this.render();
+      }),
       this.panel.onDidDispose(() => this.dispose()),
-      this.panel.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg)),
+      this.panel.webview.onDidReceiveMessage((msg: unknown) => {
+        if (this.live.handleMessage(msg)) return;
+        const message = pageMessage(msg);
+        if (message?.type === TRACE_ACTS.details) this.detailsOpen = message.open === true;
+        else if (message?.type === TRACE_ACTS.json) this.jsonOpen = message.open === true;
+      }),
     );
     this.render();
-  }
-
-  private onMessage(msg: unknown): void {
-    if (msg === null || typeof msg !== "object") return;
-    if ((msg as { type?: unknown }).type === "toggleRaw") {
-      this.showRaw = !this.showRaw;
-      this.render();
-    }
   }
 
   private dispose(): void {
@@ -610,223 +482,16 @@ export class StepTracePanel {
   }
 
   private render(): void {
-    const nonce = nonceValue();
-    const trace = this.trace;
-    const accepted = trace.accepted;
-
-    // The banner is the acceptance criterion made visible, and it is the
-    // ENGINE's sentence (accepted.definitionNote), gated on its own
-    // ranDeployedDefinition flag -- not a string this client decided on.
-    const banner = accepted === undefined ? "" : definitionBanner(accepted);
-    const bannerHtml = banner === "" ? "" : `<div class="warning">${escapeHtml(banner)}</div>`;
-
-    const whereHtml = accepted === undefined ? "" : this.whereHtml();
-
-    let outcomeHtml = "";
-    if (trace.status === "refused") {
-      const refusal = trace.refusal;
-      // A REFUSAL IS NOT A FAILED RUN, and the panel says so in as many words:
-      // an operator who reads "failed" concludes their automation is broken,
-      // when in fact it never started.
-      outcomeHtml = `<div class="error"><strong>REFUSED (${escapeHtml(refusal?.codeName ?? "")})</strong> -- the run never started, so there is no step trace.</div>
-<p>${escapeHtml(refusal === undefined ? "" : describeRefusal(refusal))}</p>`;
-    } else if (trace.status === "error") {
-      outcomeHtml = `<div class="error">ERROR: ${escapeHtml(trace.error)}</div>`;
-    } else if (trace.status === "failed") {
-      const message = trace.complete?.error ?? "";
-      outcomeHtml = `<div class="error"><strong>FAILED</strong> -- the automation ran and broke. The steps below are what it managed.${message === "" ? "" : ` ${escapeHtml(message)}`}</div>`;
-    } else if (trace.status === "cancelled") {
-      outcomeHtml = `<div class="warning">CANCELLED after ${escapeHtml(formatDuration(trace.complete?.durationMs ?? 0))}.</div>`;
-    }
-
-    const runIdHtml =
-      trace.runId === ""
-        ? ""
-        : `<p>Run id: <code class="selectable">${escapeHtml(trace.runId)}</code></p>`;
-
-    this.panel.webview.html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-<title>${escapeHtml(traceTitle(this.target))}</title>
-<style nonce="${nonce}">
-${panelChrome()}
-  code.selectable { user-select: all; }
-  pre { white-space: pre-wrap; word-break: break-word; font-family: var(--vscode-editor-font-family);
-        margin: 4px 0 0; }
-  /* The TIMELINE. Deliberately not a table and emphatically not view-kit's row
-     list: an automation returns no rows, and the shape a developer needs to
-     read here is a sequence with a spine, not a grid of records. */
-  .timeline { list-style: none; margin: 0; padding: 0 0 0 20px; border-left: 2px solid var(--memql-border); }
-  .timeline li { position: relative; padding: 0 0 16px 12px; }
-  .timeline li::before { content: ""; position: absolute; left: -27px; top: 4px;
-    width: 10px; height: 10px; border-radius: 50%; background: var(--memql-border); }
-  .timeline li.success::before { background: var(--memql-accent); }
-  .timeline li.failed::before { background: var(--memql-danger); }
-  .timeline li.skipped::before { background: var(--memql-muted); }
-  .step-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
-  .step-seq { color: var(--memql-muted); font-variant-numeric: tabular-nums; min-width: 2em; }
-  .step-id { font-weight: 600; font-family: var(--vscode-editor-font-family); }
-  .step-status { text-transform: uppercase; font-size: 0.85em; letter-spacing: 0.04em; }
-  .step-status.failed { color: var(--memql-danger); }
-  .step-status.skipped { color: var(--memql-muted); }
-  .step-duration { color: var(--memql-muted); font-variant-numeric: tabular-nums; }
-  .step-error { color: var(--memql-danger); margin-top: 4px; }
-  .where { color: var(--memql-muted); padding: 4px 12px 8px; display: flex; gap: 16px; flex-wrap: wrap; }
-  .summary { padding: 8px 12px; border-top: 1px solid var(--memql-border); color: var(--memql-muted); }
-</style>
-</head>
-<body${currentBodyThemeAttr()}>
-<div class="toolbar">
-  ${brandMarkSvg(16)}
-  <strong class="data">${escapeHtml(this.target.name)}</strong>
-  <span>${escapeHtml(statusLabel(this.trace))}</span>
-  <button id="raw" type="button">${this.showRaw ? "Show trace" : "Show raw JSON"}</button>
-</div>
-${bannerHtml}
-${whereHtml}
-${outcomeHtml}
-<div class="pane">
-${this.showRaw ? renderToHtml(renderValueView(this.rawValue(), { copy: false })) : this.timelineHtml()}
-${runIdHtml}
-</div>
-<div class="summary">${escapeHtml(this.summaryLine())}</div>
-<script nonce="${nonce}">
-  const vscode = acquireVsCodeApi();
-  document.getElementById('raw').addEventListener('click', () => vscode.postMessage({ type: 'toggleRaw' }));
-</script>
-</body>
-</html>`;
-  }
-
-  // whereHtml names the nodes. In a mesh this is not decoration: an automation
-  // whose steps reach node-scoped integrations behaves differently depending on
-  // where it ran, and "requested on X, executed on Y" is the fact that explains
-  // an otherwise baffling NOT_FOUND.
-  private whereHtml(): string {
-    const a = this.trace.accepted;
-    const c = this.trace.complete;
-    if (a === undefined) return "";
-    const parts = [
-      `requested on ${a.requestedOnNodeId || "?"} (${a.requestedOnNodeType || "?"})`,
-      a.targetNodeType === "" ? "target: the receiving node" : `target: ${a.targetNodeType}`,
-    ];
-    if (c !== undefined && c.executedOnNodeId !== "") {
-      parts.push(`executed on ${c.executedOnNodeId} (${c.executedOnNodeType})`);
-    }
-    if (a.triggerTopic !== "") parts.push(`topic: ${a.triggerTopic}`);
-    else if (a.triggerKind !== "") parts.push(`${a.triggerKind} run, empty event`);
-    return `<div class="where">${parts.map((p) => `<span>${escapeHtml(p)}</span>`).join("")}</div>`;
-  }
-
-  private timelineHtml(): string {
-    const steps = this.trace.steps;
-    if (steps.length === 0) {
-      if (this.trace.status === "refused") return "";
-      return this.trace.settled
-        ? '<div class="placeholder">The automation ran and recorded no steps.</div>'
-        : '<div class="placeholder">Waiting for the first step...</div>';
-    }
-    // ORDER IS `sequence`, never arrival -- StepTraceModel.steps sorts, and
-    // this renderer does not re-order it. See state/stepTrace.ts.
-    return `<ol class="timeline">${steps
-      .map((step) => {
-        const cls = ["success", "failed", "skipped"].includes(step.status) ? step.status : "";
-        const error =
-          step.error === "" ? "" : `<div class="step-error">${escapeHtml(step.error)}</div>`;
-        const output =
-          step.output === undefined
-            ? ""
-            // THE SAME RENDERER as every other value surface (memql#3754). A
-            // step's output is the one place in a trace a developer reads a
-            // structured value, and it was the last `<pre>` of stringified
-            // JSON left in the extension.
-            : renderToHtml(renderValueView(step.output, { copy: false, expandDepth: 1 }));
-        return `<li class="${cls}">
-  <div class="step-head">
-    <span class="step-seq">${step.sequence}</span>
-    <span class="step-id">${escapeHtml(step.stepId === "" ? "(unnamed step)" : step.stepId)}</span>
-    <span class="step-status ${cls}">${escapeHtml(step.status === "" ? "unknown" : step.status)}</span>
-    <span class="step-duration">${escapeHtml(formatDuration(step.durationMs))}</span>
-  </div>
-  ${error}
-  ${output}
-</li>`;
-      })
-      .join("")}</ol>`;
-  }
-
-  private summaryLine(): string {
-    const t = this.trace;
-    const counts = t.counts;
-    const parts = [`${t.steps.length} step${t.steps.length === 1 ? "" : "s"}`];
-    if (counts.success > 0) parts.push(`${counts.success} ok`);
-    if (counts.failed > 0) parts.push(`${counts.failed} failed`);
-    if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`);
-    const complete = t.complete;
-    if (complete !== undefined) parts.push(`total ${formatDuration(complete.durationMs)}`);
-    else if (!t.settled) parts.push("running...");
-    return parts.join(" | ");
-  }
-
-  /**
-   * The whole trace as a value, for the raw pane.
-   *
-   * Returns the VALUE rather than a stringified copy (memql#3754): the value
-   * viewer collapses, badges and bounds it, and it can only do that with the
-   * thing itself.
-   */
-  private rawValue(): unknown {
-    return {
-      runId: this.trace.runId,
-      status: this.trace.status,
-      accepted: this.trace.accepted ?? null,
-      steps: this.trace.steps,
-      complete: this.trace.complete ?? null,
-      refusal: this.trace.refusal ?? null,
-      error: this.trace.error,
-    };
+    if (this.disposed) return;
+    this.live.render(
+      `trace:${this.run}`,
+      traceParts({ name: this.target.name, trace: this.trace, detailsOpen: this.detailsOpen, jsonOpen: this.jsonOpen }),
+    );
   }
 }
 
 function traceTitle(target: AutomationTarget): string {
-  return `Trace: ${target.name}`;
-}
-
-function statusLabel(trace: StepTraceModel): string {
-  switch (trace.status) {
-    case "running":
-      return "running...";
-    case "refused":
-      return `refused (${trace.refusal?.codeName ?? ""})`;
-    case "error":
-      return "not run";
-    default:
-      return trace.status;
-  }
-}
-
-// The chrome both automation tabs share, mirroring webview/runPanel.ts's so
-// the four run-surface tabs read as one surface. Kept local rather than
-// imported across the two files: runPanel.ts's copy is private to it, and
-// exporting it would make a shared style token out of what is currently two
-// independent adapters.
-function panelChrome(): string {
-  return `${brandStyleBlock()}
-  body { padding: 0; }
-  .toolbar { padding: 8px 12px; border-bottom: 1px solid var(--memql-border);
-             display: flex; gap: 12px; align-items: center; }
-  .pane { overflow: auto; padding: 8px 12px; }
-  .placeholder { color: var(--memql-muted); opacity: 0.6; padding: 8px 0; }
-  .error { color: var(--memql-danger); padding: 8px 12px; }
-  .warning { color: var(--memql-data-string); padding: 8px 12px; }
-  .notice { color: var(--memql-muted); padding: 8px 12px; }
-  button { background: var(--memql-accent); color: var(--memql-on-accent);
-           border: none; padding: 4px 10px; cursor: pointer; border-radius: 3px; }
-  button:hover { background: var(--memql-accent-deep); color: var(--memql-on-accent-hover); }
-  button:disabled { opacity: 0.6; cursor: default; }`;
+  return `Trace ${target.name}`;
 }
 
 // A CSP nonce is a security control, so it comes from a CSPRNG. Math.random()

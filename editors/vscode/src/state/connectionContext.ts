@@ -53,12 +53,39 @@ import type { ConnectionState } from "../connection/manager.js";
  */
 export const CLUSTER_SELECTED_KEY = "memql.clusterSelected";
 export const CONNECTED_KEY = "memql.connected";
+/**
+ * The connection in one word, for a `when` clause that has to tell a sign-in
+ * problem from an outage -- a welcome that offers Sign in rather than
+ * Reconnect, a menu entry legal in one and not the other.
+ */
+export const CONNECTION_STATE_KEY = "memql.connectionState";
+/** Whether a MemQL local cluster exists on this machine, listed or not (published by extension.ts). */
+export const LOCAL_CLUSTER_PRESENT_KEY = "memql.localClusterPresent";
+
+/**
+ * The values of `memql.connectionState`:
+ *
+ *   none           no cluster in hand
+ *   connecting     a dial is in flight, or a dropped connection is retrying
+ *   connected      the transport is up
+ *   signIn         the credential is missing, expired or refused
+ *   unreachable    the cluster did not answer, or the connection dropped and
+ *                  the retries stopped
+ *   notConfigured  the cluster has no address to dial
+ */
+export type ConnectionStateWord = "none" | "connecting" | "connected" | "signIn" | "unreachable" | "notConfigured";
 
 export interface ConnectionContextKeys {
   /** A cluster is in hand: dialing, held, or tried and refused. */
   clusterSelected: boolean;
   /** That cluster's transport is up right now. */
   connected: boolean;
+}
+
+/** Every key the manager publishes: the two booleans, and the state in one word. */
+export interface ConnectionContextState extends ConnectionContextKeys {
+  /** CONNECTION_STATE_KEY. */
+  connectionState: ConnectionStateWord;
 }
 
 /**
@@ -86,11 +113,31 @@ export type ConnectionContextSource = () => ConnectionContextKeys;
  * job -- putting the distinction in a context key would have every `when`
  * clause in the manifest re-deciding it.
  */
-export function connectionContextKeys(state: ConnectionState): ConnectionContextKeys {
+export function connectionContextKeys(state: ConnectionState): ConnectionContextState {
   return {
     clusterSelected: state.status !== "disconnected",
     connected: state.status === "connected",
+    connectionState: connectionStateWord(state),
   };
+}
+
+/** The reasons a sign-in fixes, as `memql.connectionState` counts them. */
+const SIGN_IN_REASONS = new Set(["missingCredential", "credentialExpired", "reauthenticationRequired", "wrongTokenClass"]);
+
+/** The manager's state in one word; see ConnectionStateWord. */
+export function connectionStateWord(state: ConnectionState): ConnectionStateWord {
+  switch (state.status) {
+    case "disconnected":
+      return "none";
+    case "connecting":
+      return "connecting";
+    case "connected":
+      return "connected";
+    case "error":
+      if (SIGN_IN_REASONS.has(state.reason)) return "signIn";
+      if (state.reason === "notConfigured") return "notConfigured";
+      return state.retrying === true ? "connecting" : "unreachable";
+  }
 }
 
 /**
@@ -101,4 +148,4 @@ export function connectionContextKeys(state: ConnectionState): ConnectionContext
  * welcomes open with it -- and two copies of a refusal are two refusals an
  * operator has to learn are the same one.
  */
-export const NOT_CONNECTED_REFUSAL = "Not connected. Select a cluster first.";
+export const NOT_CONNECTED_REFUSAL = "Not connected to a cluster.";

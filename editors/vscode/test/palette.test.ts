@@ -10,9 +10,17 @@ const roles: Partial<Record<PaletteKey, string>> = {
   bg: "bg", surface: "surface", raised: "surface-raised", border: "border",
   "border-strong": "border-strong", fg: "fg", muted: "fg-muted", subtle: "fg-subtle",
   accent: "accent", "accent-deep": "accent-deep", "on-accent": "accent-fg",
-  danger: "danger", "data-number": "data-number", "data-string": "data-string",
+  "accent-subtle": "accent-subtle", ok: "ok", warn: "warn", "warn-subtle": "warn-subtle",
+  danger: "danger", "danger-subtle": "danger-subtle",
+  "data-number": "data-number", "data-string": "data-string",
 };
-const lifted = new Set(["bg", "surface", "raised", "border", "border-strong"]);
+// The dark surfaces are lifted for long editing sessions, and the status washes
+// that sit on them are lifted with them (palette.ts), so neither is compared
+// with the canonical dark value.
+const lifted = new Set([
+  "bg", "surface", "raised", "border", "border-strong",
+  "accent-subtle", "warn-subtle", "danger-subtle",
+]);
 for (const [variant, palette, column] of [["light", LIGHT, 1], ["dark", DARK, 2]] as const) {
   test(`${variant}: canonical brand roles stay in sync`, () => {
     for (const [key, role] of Object.entries(roles)) {
@@ -23,6 +31,14 @@ for (const [variant, palette, column] of [["light", LIGHT, 1], ["dark", DARK, 2]
     }
   });
 }
+
+test("the focus ring is the accent in both palettes", () => {
+  // brand/tokens.css has no focus role of its own; the extension names one so
+  // high contrast can map it onto VS Code's focusBorder, and in the two MemQL
+  // palettes it is simply the accent.
+  assert.equal(LIGHT.focus, LIGHT.accent);
+  assert.equal(DARK.focus, DARK.accent);
+});
 
 test("both palettes carry exactly the same keys, in the same order", () => {
   // A key present in one palette and absent from the other is a token that

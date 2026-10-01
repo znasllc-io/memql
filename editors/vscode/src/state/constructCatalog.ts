@@ -77,22 +77,68 @@ export const KIND_ORDER: readonly string[] = [
   "seed",
 ];
 
-/** The plural label a kind group carries. */
+/**
+ * The label a kind group carries: the plural, in sentence case, because it is a
+ * heading a person reads rather than the wire word it came from.
+ */
 export const KIND_LABELS: Readonly<Record<string, string>> = {
-  query: "queries",
-  mutation: "mutations",
-  logic: "logic",
-  tool: "tools",
-  automation: "automations",
-  concept: "concepts",
-  shape: "shapes",
-  spec: "specs",
-  trait: "traits",
-  prompt: "prompts",
-  provider: "providers",
-  builtin: "builtins",
-  policy: "policies",
-  seed: "seeds",
+  query: "Queries",
+  mutation: "Mutations",
+  logic: "Logic",
+  tool: "Tools",
+  automation: "Automations",
+  concept: "Concepts",
+  shape: "Shapes",
+  spec: "Specs",
+  trait: "Traits",
+  prompt: "Prompts",
+  provider: "Providers",
+  builtin: "Builtins",
+  policy: "Policies",
+  seed: "Seeds",
+};
+
+/**
+ * One construct's kind as a word in a sentence or a meta line ("Query").
+ *
+ * The singular of the group label, for the page head and the tooltip. A kind
+ * the vocabulary does not know is shown as the engine sent it, capitalised,
+ * rather than dropped.
+ */
+export function kindWord(kind: string): string {
+  const known: Readonly<Record<string, string>> = {
+    query: "Query",
+    mutation: "Mutation",
+    logic: "Logic",
+    tool: "Tool",
+    automation: "Automation",
+    concept: "Concept",
+    shape: "Shape",
+    spec: "Spec",
+    trait: "Trait",
+    prompt: "Prompt",
+    provider: "Provider",
+    builtin: "Builtin",
+    policy: "Policy",
+    seed: "Seed",
+  };
+  if (known[kind] !== undefined) return known[kind];
+  return kind === "" ? "" : kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+/**
+ * Where a construct came from, in the words the tree, the tooltip and the page
+ * all use. ONE TABLE, so the three cannot disagree about what `bundle` is
+ * called.
+ *
+ * `staged` carries its audience because that is the whole of what separates it
+ * from `promoted`: the same place, and only its author can call it.
+ */
+export const ORIGIN_LABELS: Readonly<Record<Construct["origin"], string>> = {
+  core: "Built in",
+  bundle: "Bundle",
+  promoted: "Promoted",
+  staged: "Staged, only you",
 };
 
 /**
@@ -270,7 +316,7 @@ export function groupByNamespace(constructs: readonly CatalogConstruct[]): Names
 }
 
 /** What a construct with no authored domain groups under. */
-export const PROMOTED_NAMESPACE = "(no namespace)";
+export const PROMOTED_NAMESPACE = "Cluster only";
 
 // ---------------------------------------------------------------------------
 // the states this view can be in
@@ -314,9 +360,9 @@ export function classifyCatalogFailure(err: unknown): CatalogState {
   if (message.includes(VERSION_MISMATCH_PHRASE)) {
     return {
       kind: "versionMismatch",
-      message:
-        "This cluster does not answer ListConstructs, so its constructs cannot be listed. " +
-        "It is running an engine from before that message existed.",
+      // The remedy, not the RPC: the cluster runs a release from before the
+      // catalog could be listed, and updating it is the one way forward.
+      message: "Update the cluster to browse its constructs.",
     };
   }
   return { kind: "failed", message };

@@ -368,6 +368,16 @@ export interface StubWebviewPanel {
    * typing into is still the page they started typing into (memql#3538).
    */
   renders: number;
+  /**
+   * Every message the extension posted TO the page, oldest first.
+   *
+   * A panel on the page kit (src/webview/ui/liveView.ts) assigns `html` once
+   * per screen and, after the page says `ready` (`send({ type: "ready" })`),
+   * delivers everything else here: region patches, progress, log lines. So
+   * this is the other half of what the page shows; `html` alone is only the
+   * half a page shows before it is ready.
+   */
+  posted: unknown[];
   /** Posts a message from the PAGE to the extension, as a click would. */
   send(message: unknown): void;
   /** How many times the extension asked to bring this panel forward. */
@@ -377,8 +387,10 @@ export interface StubWebviewPanel {
   close(): void;
 }
 
-/** The object handed to the extension. Its `html` writes land on the stub. */
+/** The object handed to the extension. Its `html` and `title` writes land on the stub. */
 interface WebviewPanelSurface {
+  /** The tab's label; a panel whose flow changes renames its tab. */
+  title: string;
   webview: {
     html: string;
     onDidReceiveMessage(handler: (message: unknown) => void): StubDisposable;
@@ -401,6 +413,7 @@ function createStubWebviewPanel(viewType: string, title: string): {
     title,
     html: '',
     renders: 0,
+    posted: [],
     revealCount: 0,
     disposed: false,
     send(message: unknown): void {
@@ -412,6 +425,12 @@ function createStubWebviewPanel(viewType: string, title: string): {
   };
 
   const surface: WebviewPanelSurface = {
+    get title(): string {
+      return handle.title;
+    },
+    set title(value: string) {
+      handle.title = value;
+    },
     webview: {
       // The extension assigns `panel.webview.html`; the assignment is the whole
       // render, so it is captured on the handle rather than kept here.
@@ -431,9 +450,11 @@ function createStubWebviewPanel(viewType: string, title: string): {
           },
         };
       },
-      postMessage(_message: unknown): Promise<boolean> {
-        // Nothing in the extension reads a reply to this, and modelling one
-        // would invent a channel the panel does not use.
+      postMessage(message: unknown): Promise<boolean> {
+        // Recorded for the test to read. Nothing in the extension reads a
+        // reply to this, and modelling one would invent a channel the panel
+        // does not use.
+        handle.posted.push(message);
         return Promise.resolve(true);
       },
     },

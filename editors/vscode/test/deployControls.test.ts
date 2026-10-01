@@ -159,6 +159,8 @@ test("only Paused and Progressing rollouts are in flight", () => {
   const inFlight = rolloutsInFlight([
     rollout("paused", "Paused"),
     rollout("progressing", "Progressing"),
+    // Argo's string, relayed: compared without regard to case or space.
+    rollout("lower", " paused "),
     rollout("healthy", "Healthy"),
     rollout("degraded", "Degraded"),
     rollout("unknown", ""),
@@ -166,7 +168,7 @@ test("only Paused and Progressing rollouts are in flight", () => {
   ]);
   assert.deepEqual(
     inFlight.map((r) => r.name),
-    ["paused", "progressing"],
+    ["paused", "progressing", "lower"],
   );
 });
 
@@ -182,13 +184,14 @@ test("with no rollout in flight the action draws no button at all", () => {
 // -----------------------------------------------------------------------------
 
 test("Cut offers every bump, and each names and sends the version the preview gave", () => {
+  // "Prepare" is the page's word for a cut; the bump is the quiet note beside it.
   const controls = deployControls(["cutVersion"], facts());
   assert.deepEqual(
-    controls.map((control) => [control.key, control.label]),
+    controls.map((control) => [control.key, control.label, control.note]),
     [
-      ["cutVersion:patch:1.4.3", "Cut 1.4.3 (patch)"],
-      ["cutVersion:minor:1.5.0", "Cut 1.5.0 (minor)"],
-      ["cutVersion:major:2.0.0", "Cut 2.0.0 (major)"],
+      ["cutVersion:patch:1.4.3", "Prepare 1.4.3", "patch"],
+      ["cutVersion:minor:1.5.0", "Prepare 1.5.0", "minor"],
+      ["cutVersion:major:2.0.0", "Prepare 2.0.0", "major"],
     ],
   );
   // The VERSION is sent, not only the bump: the button promised 1.5.0, and a
@@ -206,9 +209,9 @@ test("without a preview, Cut is not blocked -- it names the bump and the engine 
     assert.deepEqual(
       controls.map((control) => [control.key, control.label]),
       [
-        ["cutVersion:patch", "Cut next patch"],
-        ["cutVersion:minor", "Cut next minor"],
-        ["cutVersion:major", "Cut next major"],
+        ["cutVersion:patch", "Prepare next patch"],
+        ["cutVersion:minor", "Prepare next minor"],
+        ["cutVersion:major", "Prepare next major"],
       ],
     );
     assert.deepEqual(only(controls, "cutVersion:major").request, { id: "cutVersion", bump: "major", version: "" });
@@ -269,7 +272,7 @@ test("Deploy ships the pending record, or refuses in the sentence it always has"
   });
   const none = only(deployControls(["deploy"], facts({ instance: {} })), "deploy");
   assert.equal(none.request, undefined);
-  assert.equal(none.refusal, "nothing is cut, so there is no pending deployment record to ship.");
+  assert.equal(none.refusal, "Nothing is prepared, so there is nothing to deploy.");
 });
 
 test("a key the page never built resolves to nothing", () => {

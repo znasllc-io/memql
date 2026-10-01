@@ -53,7 +53,7 @@ import {
   type Receipt,
   type ReceiptEntry,
 } from "../src/install/receipt.js";
-import { versionChoiceList } from "../src/webview/installScreens.js";
+import { versionChoiceList } from "../src/webview/addClusterScreens.js";
 import { isReleaseTag } from "../src/install/tags.js";
 import type { Step } from "../src/install/graph.js";
 
@@ -71,6 +71,7 @@ function options(over: Partial<SessionOptions> = {}): SessionOptions {
 const STEP = (id: string, script: string): Step => ({
   id,
   script,
+  label: "Working",
   description: "",
   elevation: "none",
   retained: false,
@@ -551,8 +552,10 @@ test("main is offered last, apart from the release tags, and labelled as a LANE"
   const main = list[list.length - 1]!;
   assert.equal(main.value, "main");
   assert.notEqual(main.label, "main", "a bare 'main' reads as just another tag in a list of tags");
-  assert.match(main.label, /build from source/);
-  assert.match(main.label, /developers/);
+  assert.match(main.label, /Build from source/);
+  // The label carries the COST, which is what a person choosing needs: it
+  // builds the images here, and that takes longer.
+  assert.match(main.label, /slower/);
 });
 
 test("the main label no longer states a skew, because there is no longer a skew", () => {

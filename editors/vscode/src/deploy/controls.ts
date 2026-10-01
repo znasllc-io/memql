@@ -17,13 +17,17 @@
 //     one the cluster is running.
 //
 // So the argument is decided HERE, when the page is built, from facts the page
-// has already read, and every button is one fully-resolved request. The page
-// prints what each button names before anything is pressed -- the arrangement
-// Deploy has had since memql#4017 -- and the click sends exactly that.
+// has already read, and every button is one fully-resolved request. Each
+// button's label names its target before anything is pressed ("Prepare 1.5.0",
+// "Roll back to 1.4.1", a Promote on the rollout's own row) and the click sends
+// exactly that. WHERE a control is drawn -- the action bar, a rollout's row,
+// the list of versions to prepare -- is deploy/instanceActions.ts's to decide;
+// WHAT it sends is only ever decided here.
 //
 // THE KEY IS THE WHOLE CONTRACT WITH THE WEBVIEW. A button posts its `key`;
 // the panel re-expands the controls from its own current facts and runs the one
-// whose key matches, byte for byte. Nothing the page posts reaches a request
+// whose key matches, byte for byte. (On the page a control is a kit act,
+// `data-act="deploy" data-value="<key>"`, posting `{ type: "deploy", value }`.) Nothing the page posts reaches a request
 // except the choice of a control this module built, which is what the
 // untrusted postMessage channel should be allowed to decide. A key carries its
 // target (`cutVersion:minor:1.5.0`, `rollback:<id>`), so a click on a button
@@ -60,8 +64,15 @@ export interface DeployControl {
   /** What the button posts, and the only thing the panel matches on. */
   key: string;
   action: DeployActionId;
+  /** The words on the button, naming its target ("Prepare 1.5.0"). */
   label: string;
+  /** What it does, in a sentence: the button's tooltip. */
   detail: string;
+  /**
+   * A quiet word drawn beside the label, when the label alone leaves a choice
+   * unexplained: the bump a cut takes ("minor"). Absent otherwise.
+   */
+  note?: string;
   /** Drawn as the destructive style: the action makes someone type it back. */
   destructive: boolean;
   /**
@@ -85,7 +96,8 @@ export const CUT_BUMPS = ["patch", "minor", "major"] as const;
 export type CutBump = (typeof CUT_BUMPS)[number];
 
 /**
- * The Argo Rollouts phases a promote or abort acts on.
+ * The Argo Rollouts phases a promote or abort acts on, compared without regard
+ * to case or surrounding space (the engine relays Argo's own string).
  *
  * `Paused` is a rollout waiting for exactly this -- a blue-green preview
  * awaiting promotion, a canary at a pause step -- and `Progressing` is one
@@ -95,11 +107,13 @@ export type CutBump = (typeof CUT_BUMPS)[number];
  * `retry`, a verb this surface does not have. Drawing either would draw a
  * button whose best outcome is nothing happening.
  */
-const IN_FLIGHT_PHASES = new Set(["Progressing", "Paused"]);
+const IN_FLIGHT_PHASES = new Set(["progressing", "paused"]);
 
 /** The rollouts a promote or abort can act on, as the status read reported them. */
 export function rolloutsInFlight(rollouts: readonly RolloutStatus[]): RolloutStatus[] {
-  return rollouts.filter((rollout) => rollout.name !== "" && IN_FLIGHT_PHASES.has(rollout.phase));
+  return rollouts.filter(
+    (rollout) => rollout.name.trim() !== "" && IN_FLIGHT_PHASES.has(rollout.phase.trim().toLowerCase()),
+  );
 }
 
 /**
@@ -164,15 +178,26 @@ function deployControl(facts: DeployControlFacts): DeployControl {
   const target = (facts.instance.pendingDeploymentId ?? "").trim();
   const base = { key: spec.id, action: spec.id, label: spec.label, detail: spec.description, destructive: false, confirm: "" };
   if (target === "") {
-    return { ...base, refusal: "nothing is cut, so there is no pending deployment record to ship." };
+    return { ...base, refusal: "Nothing is prepared, so there is nothing to deploy." };
   }
-  return { ...base, request: { id: "deploy", deploymentId: target } };
+  const version = versionOf(facts.runs, target);
+  return {
+    ...base,
+    label: version === "" ? spec.label : `Deploy ${version}`,
+    detail: version === "" ? spec.description : `Deploy ${version}, the version prepared last.`,
+    request: { id: "deploy", deploymentId: target },
+  };
 }
 
 /**
- * One cut per bump, naming the version it cuts when the preview gave one.
+ * One cut per bump, naming the version it prepares when the preview gave one.
  *
- * THE VERSION IS SENT, NOT ONLY THE BUMP. The button says `Cut 1.5.0`, and a
+ * "PREPARE" IS THE USER'S WORD FOR A CUT: it creates the record Deploy then
+ * ships. The label names the version ("Prepare 1.5.0") and the bump is its
+ * quiet note, so the three read as a choice between versions, not between
+ * semver terms.
+ *
+ * THE VERSION IS SENT, NOT ONLY THE BUMP. The button says `Prepare 1.5.0`, and a
  * bump alone asks the engine to compute the version again at the click -- from
  * a current version that may have moved since the page was read. Naming it is
  * the upgrade path's rule (runRemoteUpgrade): the operator chose a specific
@@ -193,8 +218,8 @@ function cutControls(preview: VersionPreview | undefined): DeployControl[] {
       return {
         ...base,
         key: `cutVersion:${bump}`,
-        label: `Cut next ${bump}`,
-        detail: `Create a pending deployment record at the next ${bump} version, as the engine computes it.`,
+        label: `Prepare next ${bump}`,
+        detail: `Prepare the next ${bump} version for deployment. The cluster works out the number.`,
         request: { id: "cutVersion", bump, version: "" },
       };
     }
@@ -202,10 +227,9 @@ function cutControls(preview: VersionPreview | undefined): DeployControl[] {
     return {
       ...base,
       key: `cutVersion:${bump}:${next}`,
-      label: `Cut ${next} (${bump})`,
-      detail: `Create a pending deployment record at ${next}, the next ${bump} version${
-        current === "" ? "" : ` after ${current}`
-      }.`,
+      label: `Prepare ${next}`,
+      note: bump,
+      detail: `Prepare ${next}, the next ${bump} version${current === "" ? "" : ` after ${current}`}, for deployment.`,
       request: { id: "cutVersion", bump, version: next },
     };
   });
@@ -236,7 +260,7 @@ function rollbackControl(facts: DeployControlFacts): DeployControl {
       detail: spec.description,
       destructive: true,
       confirm: "",
-      refusal: "no earlier succeeded release is in this cluster's history, so there is nothing to roll back to.",
+      refusal: "No earlier release is in this cluster's history, so there is nothing to roll back to.",
     };
   }
   const version = versionOf(facts.runs, target);
@@ -244,7 +268,7 @@ function rollbackControl(facts: DeployControlFacts): DeployControl {
     key: `${spec.id}:${target}`,
     action: spec.id,
     label: version === "" ? spec.label : `Roll back to ${version}`,
-    detail: `Redeploy ${target}${version === "" ? "" : ` (${version})`} as a new deployment record.`,
+    detail: `Deploy ${version === "" ? "the earlier release" : version} again (${target}).`,
     destructive: true,
     confirm: confirmationPhrase(spec.id, target),
     request: { id: "rollback", toDeploymentId: target },
@@ -270,9 +294,10 @@ function rolloutControls(rollouts: readonly RolloutStatus[]): DeployControl[] {
         key: `rolloutAction:${subAction}:${rollout.name}`,
         action: "rolloutAction",
         label: `${subAction === "promote" ? "Promote" : "Abort"} ${rollout.name}`,
-        detail: `${
-          subAction === "promote" ? "Advance" : "Abort"
-        } the in-flight Argo Rollout ${rollout.name} (${rollout.phase}).`,
+        detail:
+          subAction === "promote"
+            ? `Let the ${rollout.name} rollout continue.`
+            : `Stop the ${rollout.name} rollout and keep the release it was replacing.`,
         destructive: confirm !== "",
         confirm,
         request: { id: "rolloutAction", rollout: rollout.name, subAction },

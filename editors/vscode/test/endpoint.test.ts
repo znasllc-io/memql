@@ -69,10 +69,34 @@ test("throws on an empty endpoint rather than dialing nowhere", () => {
   assert.throws(() => webSocketUrlFor({ name: "l", endpoint: "" }), /endpoint is empty/);
 });
 
-test("rejects a non-websocket scheme with a clear message rather than mangling it", () => {
+test("an https:// address dials the bridge on the same origin over wss", () => {
+  // The Cockpit writes the local cluster as https://api.memql.localhost, and
+  // refusing it left a signed-in editor unable to dial an answering cluster.
+  assert.equal(
+    webSocketUrlFor({ name: "local", endpoint: "https://api.memql.localhost" }),
+    "wss://api.memql.localhost/memql/ws",
+  );
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "https://api.example.com/" }),
+    "wss://api.example.com/memql/ws",
+  );
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "HTTPS://api.example.com:8443" }),
+    "wss://api.example.com:8443/memql/ws",
+  );
+});
+
+test("an http:// address dials the bridge over ws", () => {
+  assert.equal(
+    webSocketUrlFor({ name: "l", endpoint: "http://localhost:8080" }),
+    "ws://localhost:8080/memql/ws",
+  );
+});
+
+test("an address with any other scheme is refused in plain words", () => {
   assert.throws(
-    () => webSocketUrlFor({ name: "l", endpoint: "https://api.example.com" }),
-    /endpoint scheme must be ws:\/\/ or wss:\/\//,
+    () => webSocketUrlFor({ name: "l", endpoint: "ftp://api.example.com" }),
+    /use an address like https:\/\/api\.example\.com/,
   );
 });
 

@@ -74,13 +74,10 @@ test("the default deadline is ten minutes -- the magic-link scale", () => {
   assert.equal(DEFAULT_CALLBACK_TIMEOUT_MS, 600_000);
 });
 
-test("serves the callback once and hands back its query parameters", async () => {
+test("hands back the callback's query parameters, and answers the browser only on finish", async () => {
   await withListener({}, async (listener) => {
     const waiting = listener.waitForCallback();
-    const reply = await get(`${listener.redirectUri}?code=AUTHCODE&state=STATE123`);
-
-    assert.equal(reply.status, 200);
-    assert.match(reply.body, /close this tab/i);
+    const reply = get(`${listener.redirectUri}?code=AUTHCODE&state=STATE123`);
 
     assert.deepEqual(await waiting, {
       code: "AUTHCODE",
@@ -88,6 +85,48 @@ test("serves the callback once and hands back its query parameters", async () =>
       error: undefined,
       errorDescription: undefined,
     });
+    // HELD: the page says how the exchange went, so nothing is written until
+    // the flow knows. It used to say "Signed in" before the code was redeemed.
+    assert.ok(await pending(reply), "the browser was answered before the exchange settled");
+
+    listener.finish?.("success");
+    const page = await reply;
+    assert.equal(page.status, 200);
+    assert.match(page.body, /You're signed in/);
+    assert.match(page.body, /close this tab/i);
+    assert.match(page.body, /<svg class="memql-mark"/, "the page carries the MemQL mark");
+  });
+});
+
+test("a failed exchange tells the browser the sign-in did not finish", async () => {
+  await withListener({}, async (listener) => {
+    const waiting = listener.waitForCallback();
+    const reply = get(`${listener.redirectUri}?code=AUTHCODE&state=S`);
+    await waiting;
+    listener.finish?.("failure");
+    const page = await reply;
+    assert.match(page.body, /Sign-in didn't finish/);
+    assert.doesNotMatch(page.body, /signed in/i);
+  });
+});
+
+test("closing with a callback still held answers it with the failure page", async () => {
+  const listener = await startLoopbackListener({});
+  const waiting = listener.waitForCallback();
+  const reply = get(`${listener.redirectUri}?code=AUTHCODE&state=S`);
+  await waiting;
+  listener.close();
+  assert.match((await reply).body, /Sign-in didn't finish/);
+});
+
+test("finish is idempotent and the first verdict stands", async () => {
+  await withListener({}, async (listener) => {
+    const waiting = listener.waitForCallback();
+    const reply = get(`${listener.redirectUri}?code=AUTHCODE&state=S`);
+    await waiting;
+    listener.finish?.("success");
+    listener.finish?.("failure");
+    assert.match((await reply).body, /You're signed in/);
   });
 });
 
@@ -105,16 +144,20 @@ test("a request to any other path gets a 404 and does NOT resolve the flow", asy
     assert.ok(await pending(waiting), "the flow resolved on a request that was not the callback");
 
     // The listener is still live and still willing to serve the real callback.
-    await get(`${listener.redirectUri}?code=REAL&state=STATE`);
+    const reply = get(`${listener.redirectUri}?code=REAL&state=STATE`);
     assert.equal((await waiting).code, "REAL");
+    listener.finish?.("success");
+    await reply;
   });
 });
 
 test("only the FIRST callback is served -- the listener is one-shot", async () => {
   await withListener({}, async (listener) => {
     const waiting = listener.waitForCallback();
-    await get(`${listener.redirectUri}?code=FIRST&state=S`);
+    const first = get(`${listener.redirectUri}?code=FIRST&state=S`);
     assert.equal((await waiting).code, "FIRST");
+    listener.finish?.("success");
+    await first;
 
     // The port is released, so a replay of the same URL has nothing to hit.
     await assert.rejects(() => get(`${listener.redirectUri}?code=SECOND&state=S`));
@@ -124,10 +167,12 @@ test("only the FIRST callback is served -- the listener is one-shot", async () =
 test("an OAuth error envelope is handed through, not swallowed", async () => {
   await withListener({}, async (listener) => {
     const waiting = listener.waitForCallback();
-    await get(
+    const reply = get(
       `${listener.redirectUri}?error=access_denied&error_description=${encodeURIComponent("user said no")}&state=S`,
     );
     const params = await waiting;
+    listener.finish?.("failure");
+    await reply;
     assert.equal(params.error, "access_denied");
     assert.equal(params.errorDescription, "user said no");
     assert.equal(params.code, undefined);
@@ -203,7 +248,9 @@ test("a custom path is the only path that resolves", async () => {
     const waiting = listener.waitForCallback();
     assert.equal((await get(`http://127.0.0.1:${listener.port}${CALLBACK_PATH}?code=X`)).status, 404);
     assert.ok(await pending(waiting));
-    await get(`${listener.redirectUri}?code=Y&state=S`);
+    const reply = get(`${listener.redirectUri}?code=Y&state=S`);
     assert.equal((await waiting).code, "Y");
+    listener.finish?.("success");
+    await reply;
   });
 });

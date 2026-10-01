@@ -38,8 +38,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { AddClusterState, DEFAULT_INPUTS, requiredFields } from "../src/state/addCluster.js";
-import { renderCollectScreen } from "../src/webview/installScreens.js";
-import type { CollectScreenInput } from "../src/webview/installScreens.js";
+import { collectScreen, type CollectInput } from "../src/webview/addClusterScreens.js";
 import { installPlan } from "../src/install/session.js";
 import type { SessionOptions } from "../src/install/session.js";
 import { executeGraph } from "../src/install/executor.js";
@@ -188,6 +187,7 @@ function step(id: string, script = "install.verifyProviderKey"): Step {
   return {
     id,
     script,
+    label: "Working",
     description: "",
     elevation: "none",
     retained: false,
@@ -392,13 +392,18 @@ test("every step that depends on providerFederation is one the skip must not blo
 // the collect screen
 // ---------------------------------------------------------------------------
 
-function collect(over: Partial<CollectScreenInput> = {}): string {
-  return renderCollectScreen({
+function collect(over: Partial<CollectInput> = {}): string {
+  // Every region, with More options open, so nothing the form can hold is
+  // hidden from the assertion.
+  const parts = collectScreen({
     action: "install",
     values: { ...DEFAULT_INPUTS },
     errors: [],
+    versionChoices: [],
+    moreOpen: true,
     ...over,
   });
+  return parts.head + parts.body + parts.actions;
 }
 
 test("the form offers no AI credential control at all", () => {
@@ -409,7 +414,7 @@ test("the form offers no AI credential control at all", () => {
   // independently: a `<details class="optional-section">` left behind with
   // nothing in it renders an empty expander, and a `data-field` left behind
   // renders a box the state machine cannot store.
-  for (const action of ["install", "installGuided", "repair"] as const) {
+  for (const action of ["install", "repair"] as const) {
     const html = collect({ action });
     assert.doesNotMatch(html, /<details class="optional-section"/, `${action} kept the disclosure`);
     assert.doesNotMatch(html, /data-field="provider/, `${action} kept a vendor field`);
@@ -418,62 +423,45 @@ test("the form offers no AI credential control at all", () => {
   }
 });
 
-test("the form says where a local cluster's models come from instead", () => {
-  // A DELETION THAT SAYS NOTHING IS ITS OWN DEFECT. An operator who installs a
-  // cluster and finds its agents cannot think is owed the reason, and the
-  // reason is not "you forgot to enter a key" -- it is that this cluster cannot
-  // hold one. The sentence replaces the disclosure's, in the same place.
+test("the form carries no standing paragraph about AI credentials", () => {
+  // THE SENTENCE THAT REPLACED THE DISCLOSURE IS GONE TOO (memql#5118 audit).
+  // "No AI credential is collected... a fleet machine... a model running
+  // locally" was doctrine on a form whose job is an owner's name and an email:
+  // it helped no decision on the screen, and the done screen repeated it. What
+  // stays true is the half above -- there is no credential control to fill.
   const html = collect();
-  assert.match(html, /No AI credential is collected/);
-  assert.match(html, /makes no call to any AI vendor/);
-  assert.match(html, /fleet machine/);
-  assert.match(html, /model running locally/);
-  // The reachable positive for the two doesNotMatch assertions above: this
-  // renderer does produce text in that slot, so their silence is evidence.
-  assert.match(html, /class="hint"/);
+  assert.doesNotMatch(html, /AI credential|AI vendor|fleet machine|model running locally/);
+  // The reachable positive: the form does render its fields.
+  assert.match(html, /data-field="ownerEmail"/);
 });
 
 // ---------------------------------------------------------------------------
 // the extraction, as a countable invariant
 // ---------------------------------------------------------------------------
 
-test("exactly ONE producer of a field's markup", async () => {
+test("exactly ONE producer of a field's markup: the kit's", async () => {
   // WHY A SOURCE-LEVEL COUNT RATHER THAN A RENDER ASSERTION. What can go wrong
   // here is not a wrong page -- it is a SECOND implementation that renders the
   // same thing, after which the two drift and only one of them gets the next
   // fix. That is invisible to every behavioural test, because both copies work
   // on the day they are written.
   //
-  // The extraction (renderField) exists precisely to prevent that, and
-  // memql#4440's own rebase is how it nearly came back: memql#4430 rewrote the
-  // same function from the other end, and a merge that took both sides verbatim
-  // would have produced two field renderers that compile, pass, and disagree
-  // six months later.
-  //
-  // IT SURVIVES THE DISCLOSURE IT WAS WRITTEN FOR (epic memql#5088). The second
-  // caller `renderField` was extracted for is gone, so there is one caller
-  // again -- which is precisely when a future edit is most likely to inline it
-  // back and re-open the seam.
-  //
-  // `data-invalid=` is the marker because it opens a field's wrapper element
-  // and appears nowhere else in the module -- so counting it counts producers.
-  //
-  // If a legitimate second renderer is ever added, this test should be UPDATED
-  // with the reason rather than deleted; the count is the point, not the 1.
-  const source = await fs.readFile(
-    path.join(REPO_ROOT, "editors", "vscode", "src", "webview", "installScreens.ts"),
+  // THE PRODUCER MOVED (memql#5118 audit). The install form was installScreens'
+  // `renderField`; it is the page kit's `field()` now, shared with every other
+  // panel, and the Add a cluster screens build every box through it. So the
+  // screens module must emit no field wrapper of its own.
+  const screens = await fs.readFile(
+    path.join(REPO_ROOT, "editors", "vscode", "src", "webview", "addClusterScreens.ts"),
     "utf8",
   );
-  const producers = source.split("data-invalid=").length - 1;
   assert.equal(
-    producers,
-    1,
-    `installScreens.ts has ${producers} places emitting a field wrapper; there must be exactly one ` +
-      "(renderField). A second one is how two callers start disagreeing about what a field " +
-      "looks like.",
+    screens.split('class="mq-field').length - 1,
+    0,
+    "addClusterScreens.ts writes a field wrapper itself; build it with the kit's field()",
   );
+  assert.ok(screens.includes("field({"), "the screens stopped building fields with the kit");
 
-  // The reachable positive: the marker is actually present, so a rename that
-  // made this count zero cannot pass as "no duplicates".
-  assert.ok(source.includes("function renderField("), "renderField has been renamed or removed");
+  // The reachable positive: the kit has exactly one.
+  const kit = await fs.readFile(path.join(REPO_ROOT, "editors", "vscode", "src", "webview", "ui", "kit.ts"), "utf8");
+  assert.ok(kit.includes("export function field("), "the kit's field() has been renamed or removed");
 });

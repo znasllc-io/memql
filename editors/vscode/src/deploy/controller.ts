@@ -35,7 +35,7 @@ import {
   DeployControlError,
 } from "@znasllc-io/memql-sdk-core/deploy";
 
-import { actionById, tierDescription, type DeployActionId } from "./actions.js";
+import { actionById, tierDescription } from "./actions.js";
 
 /**
  * The subset of the SDK client this surface drives.
@@ -65,8 +65,22 @@ export type DeployActionRequest =
 
 export interface DeployOutcome {
   kind: "success" | "error";
-  /** The single line to show. Always starts SUCCESS: or ERROR:. */
+  /**
+   * The LOG line, for the Output channel and a support thread: always starts
+   * SUCCESS: or ERROR:, carries the engine's own words and the audit id.
+   */
   line: string;
+  /**
+   * The sentence a PAGE says: plain, short, no RPC verbs and no audit id (that
+   * goes under Details, from `auditEventId`). "Deployment started." / "You
+   * need the owner role to roll back."
+   */
+  message: string;
+  /**
+   * The request was refused for want of a signed-in actor. The fix is a
+   * sign-in, and the page offers it beside the sentence.
+   */
+  needsSignIn: boolean;
   /**
    * The v1:identity:auditEvent this action wrote -- on a REFUSAL too
    * (memql#3334), because the gate audits a denial before returning it.
@@ -126,6 +140,8 @@ export async function runDeployAction(
       return {
         kind: "success",
         line: auditSuffix(`SUCCESS: ${spec.verb}${detailSuffix(result.message)}`, result.auditEventId),
+        message: successMessage(request, result.details ?? {}),
+        needsSignIn: false,
         auditEventId: result.auditEventId,
         permissionDenied: false,
         details: result.details ?? {},
@@ -140,12 +156,53 @@ export async function runDeployAction(
         `ERROR: ${result.message === "" ? `${spec.verb} failed` : result.message}`,
         result.auditEventId,
       ),
+      message: `Couldn't ${verbFor(request)}.`,
+      needsSignIn: false,
       auditEventId: result.auditEventId,
       permissionDenied: false,
       details: result.details ?? {},
     };
   } catch (err) {
-    return errorOutcome(request.id, err);
+    return errorOutcome(request, err);
+  }
+}
+
+/**
+ * What an action does, as the object of "Couldn't ...": the base form a
+ * sentence needs, from the request (a rollout's sub-action decides its verb).
+ */
+function verbFor(request: DeployActionRequest): string {
+  switch (request.id) {
+    case "cutVersion":
+      return "prepare the next version";
+    case "deploy":
+      return "deploy";
+    case "rollback":
+      return "roll back";
+    case "rolloutAction":
+      return request.subAction === "abort" ? "abort the rollout" : "promote the rollout";
+  }
+}
+
+/**
+ * The page's sentence for an action that went through.
+ *
+ * A DEPLOY IS ACCEPTED, NOT DONE: the engine kicks it off and the deploy pack
+ * drives it to a terminal status (component/deploycontrol/deploy.go), so the
+ * sentence says "started" and the history row carries it to the end.
+ */
+function successMessage(request: DeployActionRequest, details: Record<string, string>): string {
+  switch (request.id) {
+    case "cutVersion": {
+      const version = (details.version ?? "").trim() || request.version.trim();
+      return version === "" ? "The next version is ready to deploy." : `${version} is ready to deploy.`;
+    }
+    case "deploy":
+      return "Deployment started.";
+    case "rollback":
+      return "Rollback started.";
+    case "rolloutAction":
+      return request.subAction === "abort" ? "Rollout aborted." : "Rollout promoted.";
   }
 }
 
@@ -245,8 +302,9 @@ function invoke(port: DeployControlPort, request: DeployActionRequest): Promise<
   }
 }
 
-function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
-  const spec = actionById(id);
+function errorOutcome(request: DeployActionRequest, err: unknown): DeployOutcome {
+  const spec = actionById(request.id);
+  const verb = verbFor(request);
   if (err instanceof DeployControlError) {
     if (err.isPermissionDenied) {
       // NAMING THE ROLE is the requirement. The engine's message is appended
@@ -260,20 +318,15 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
       return {
         kind: "error",
         // The audit id of the BLOCKED attempt, appended in the same
-        // `(audit <id>)` shape a success carries (memql#3334).
-        //
-        // This line used to end at the role requirement, with a comment
-        // explaining that the id existed server-side but was not carried back:
-        // the gate returned a bare status error and DeployControlResult
-        // populated `action` only when the call was permitted. Saying nothing
-        // was right then -- inventing a placeholder would have been worse than
-        // the gap -- and #3334 closed the gap at the source rather than here,
-        // so the panel now has a real id to print. auditSuffix still renders
-        // nothing when it is empty, which is what an older engine returns.
+        // `(audit <id>)` shape a success carries (memql#3334): the gate audits
+        // a denial before returning it. auditSuffix renders nothing when it is
+        // empty, which is what an older engine returns.
         line: auditSuffix(
           `ERROR: ${spec.label} requires the ${tierDescription(spec.tier)} cluster role${detailSuffix(err.engineMessage)}`,
           err.auditEventId,
         ),
+        message: `You need the ${tierDescription(spec.tier)} role to ${verb}.`,
+        needsSignIn: false,
         auditEventId: err.auditEventId,
         permissionDenied: true,
         // A refusal produced no action result, so there is nothing to carry.
@@ -283,22 +336,24 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
     if (err.code === CODE_UNIMPLEMENTED) {
       return unreachable(
         `ERROR: ${spec.label} is unavailable -- this node does not host the deploy-control service. Connect to a cluster whose bff runs it.`,
+        "This cluster doesn't support deployments from the editor.",
       );
     }
     if (err.code === CODE_UNAUTHENTICATED) {
       // Also a GATE refusal, and also audited (the "no authenticated actor"
       // branch of authorizeWith writes a blocked event with an empty actor).
-      // So the id is threaded here for the same reason as above, even though
-      // this outcome is not `permissionDenied` -- the operator's next move is
-      // to fix their token, but the attempt is still on the record.
-      return unreachable(
-        `ERROR: ${spec.label} was rejected as unauthenticated -- the connection carries no resolvable actor. Check the cluster's access token (an expired one renews on reconnect; a PAT never authenticates here).`,
-        err.auditEventId,
-      );
+      // The fix is a sign-in, which the page offers beside the sentence.
+      return {
+        ...unreachable(
+          `ERROR: ${spec.label} was rejected as unauthenticated -- the connection carries no resolvable actor. Check the cluster's access token (an expired one renews on reconnect; a PAT never authenticates here).`,
+          "Your session has expired.",
+          err.auditEventId,
+        ),
+        needsSignIn: true,
+      };
     }
-    // The catch-all for a code with no tailored sentence. It names the action
-    // and the code itself, so the SDK's log-shaped `message` would restate
-    // both -- engineMessage is the part that is not already on the line.
+    // The catch-all for a code with no tailored sentence. The log line names
+    // the action and the code; the page says what did not happen.
     //
     // err.auditEventId is passed rather than "" because it is self-correcting:
     // the SDK sets it only when the engine attached one, so a code that was
@@ -306,18 +361,22 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
     // renders nothing.
     return unreachable(
       `ERROR: ${spec.label} failed (${err.codeName})${detailSuffix(err.engineMessage)}`,
+      `Couldn't ${verb}.`,
       err.auditEventId,
     );
   }
-  return unreachable(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
+  const detail = err instanceof Error ? err.message : String(err);
+  return unreachable(`ERROR: ${detail}`, `Couldn't ${verb}: ${detail}.`);
 }
 
-function unreachable(line: string, auditEventId = ""): DeployOutcome {
+function unreachable(line: string, message: string, auditEventId = ""): DeployOutcome {
   // No details: nothing that produced a result ran. An empty map is the honest
   // answer, not a placeholder.
   return {
     kind: "error",
     line: auditSuffix(line, auditEventId),
+    message,
+    needsSignIn: false,
     auditEventId,
     permissionDenied: false,
     details: {},
@@ -330,7 +389,9 @@ function describeReadFailure(what: string, err: unknown): string {
     // Spelled out because it is the designed split an operator meets first
     // (memql#3332): the read gate is owner/admin, so a developer sees topology
     // and history and is refused this one section. Nothing is broken.
-    return `${what} requires the owner or admin cluster role. Topology and deployment history above are ordinary concept rows and are unaffected.`;
+    return what === "deployment status"
+      ? "Viewing deployment status needs the owner or admin role. History is still shown."
+      : `Your role can't read the ${what}.`;
   }
   if (err instanceof DeployControlError && err.code === CODE_UNIMPLEMENTED) {
     return `${what} is unavailable: this node does not host the deploy-control service.`;

@@ -29,13 +29,14 @@
 
 import { actionById, satisfiesTier, type RoleTier, type RoleVisibility } from "./actions.js";
 import { moveFlowFor, type InstanceActionFlow } from "./instanceActions.js";
-import type { Instance } from "../state/deployments.js";
+import { instanceLabel, type Instance } from "../state/deployments.js";
 import { barriersCrossed, type UpgradeBarrier } from "../version/barriers.js";
 import { returnsToReleasedImages } from "../state/imageLane.js";
 import type { VersionDescription } from "../version/describe.js";
 
 /** Which machinery a move reaches, and between which two versions. */
 export interface UpgradeTarget {
+  /** The cluster as the confirmation names it (instanceLabel), never its key. */
   instanceName: string;
   /**
    * What the cluster records today.
@@ -57,6 +58,9 @@ export type UpgradeVerdict =
       kind: "offer";
       target: UpgradeTarget;
       label: string;
+      /** The confirmation's title: "Update local". */
+      title: string;
+      /** The one question the operator answers, and the lane warning when it applies. */
       confirmation: string;
       /** What the operator re-types. The target version, never the word "yes". */
       phrase: string;
@@ -141,7 +145,7 @@ export function upgradeVerdict(input: UpgradeVerdictInput): UpgradeVerdict {
   const from = (instance.version ?? "").trim();
   const to = version.latest;
   const target: UpgradeTarget = {
-    instanceName: instance.name,
+    instanceName: instanceLabel(instance),
     from,
     to,
     flow: moveFlowFor(instance),
@@ -175,9 +179,7 @@ export function upgradeVerdict(input: UpgradeVerdictInput): UpgradeVerdict {
       kind: "refused",
       target,
       label: upgradeLabel(to),
-      message:
-        `Whether moving ${instance.name} from ${displayFrom(from)} to ${to} crosses an upgrade ` +
-        `barrier could not be determined, so it was not run.`,
+      message: `${to} can't be applied automatically.`,
       barriers: [],
       docHref: "",
     };
@@ -187,6 +189,7 @@ export function upgradeVerdict(input: UpgradeVerdictInput): UpgradeVerdict {
     kind: "offer",
     target,
     label: upgradeLabel(to),
+    title: `Update ${instanceLabel(instance)}`,
     confirmation: confirmationMessage(instance, target),
     // The TARGET, never the word "yes": re-typing the version forces the
     // operator to look at what they are moving to. Same call the deploy
@@ -203,72 +206,41 @@ function mayDriveRemote(visibility: RoleVisibility | undefined): boolean {
 }
 
 function upgradeLabel(to: string): string {
-  return `Upgrade to ${to}`;
-}
-
-/** What a cluster with no recorded version is called in a sentence. */
-function displayFrom(from: string): string {
-  return from === "" ? "an unrecorded version" : from;
+  return `Update to ${to}`;
 }
 
 /**
- * The one confirmation, naming the instance, `current -> target`, and WHICH
- * MACHINERY RUNS.
+ * The one question the confirmation asks.
  *
- * The third part is the one people leave out, and it is the one that decides
- * whether an operator lets the run proceed: a local move re-runs fifteen
- * install steps, of which two do anything, and someone watching that without
- * having been told reads it as a reinstall of their machine
- * (state/upgradePlan.ts made the same argument for the forecast page).
+ * SHORT, because it sits in a one-line input box above "Type v0.24.0 to
+ * confirm". What matters to the decision is WHERE the cluster moves and, for a
+ * remote one, that it deploys at once; how the move is carried out is the
+ * run's business and shows on its progress screen.
  */
 function confirmationMessage(instance: Instance, target: UpgradeTarget): string {
-  const head = `Move ${target.instanceName} from ${displayFrom(target.from)} to ${target.to}.`;
-  const body =
+  const from = target.from === "" ? "" : ` from ${target.from}`;
+  const head =
     target.flow === "upgradeToTag"
-      ? `${head} This re-runs the install graph at the new tag on this machine: it moves the ` +
-        `pinned checkout and reconciles the local overlay. Every other step verifies first and ` +
-        `skips.`
-      : `${head} This cuts a deployment record at ${target.to} on the cluster and ships it. ` +
-        `The cluster decides whether you may; a refusal comes back naming the role required.`;
+      ? `Update ${target.instanceName}${from} to ${target.to}?`
+      : `Update ${target.instanceName} to ${target.to}? It deploys now.`;
   // THE LANE CROSSING, IN THE CONFIRMATION AN OPERATOR ACTUALLY READS
-  // (memql#4246). A move over a cluster running checkout-built images returns
-  // it to released ones -- `clusterUp` rewrites the Application's image
-  // overrides -- and nothing else on this path would say so. The Deployments
-  // row afterwards simply stops naming a commit, which is not a notice.
-  //
-  // APPENDED rather than woven in, so the sentence about WHICH MACHINERY RUNS
-  // keeps its place: that is the part people leave out, and it is the one that
-  // decides whether the run is let through at all.
-  //
-  // The tag is NOT named here, deliberately: `target.to` is already the second
-  // sentence of `head`, and repeating it would read as a different release.
-  return instance.imageSource === "checkout"
-    ? `${body} ${returnsToReleasedImages(instance.name, "")}`
-    : body;
+  // (memql#4246): a move over a cluster running checkout-built images returns
+  // it to released ones, and nothing else on this path would say so.
+  return instance.imageSource === "checkout" ? `${head} ${returnsToReleasedImages(instanceLabel(instance), "")}` : head;
 }
 
 /**
  * The refusal, which has to leave the operator able to act.
  *
- * A refusal that says only "no" is a dead end, so it names what the crossing
- * changes and where the procedure is. The barrier's own summary is quoted
- * rather than paraphrased -- it is the sentence a reviewer approved when the
- * barrier was added.
+ * One sentence; the page offers the runbook beside it (`docHref`) rather than
+ * quoting a repository path into the sentence.
  */
 function refusalMessage(
   target: UpgradeTarget,
-  barriers: readonly UpgradeBarrier[],
+  _barriers: readonly UpgradeBarrier[],
   direction: "forward" | "backward",
 ): string {
-  const crossing = barriers
-    .map((barrier) => `Past ${barrier.afterVersion}: ${barrier.summary}`)
-    .join(" ");
-  const move =
-    direction === "backward"
-      ? `Moving ${target.instanceName} back from ${displayFrom(target.from)} to ${target.to}`
-      : `Moving ${target.instanceName} from ${displayFrom(target.from)} to ${target.to}`;
-  return (
-    `${move} is not a retag, so it was not run. ${crossing} ` +
-    `The procedure is in ${barriers[0]?.docHref ?? "the upgrade-barriers runbook"}.`
-  );
+  return direction === "backward"
+    ? `${target.instanceName} can't be moved back to ${target.to} automatically.`
+    : `${target.to} needs manual upgrade steps.`;
 }

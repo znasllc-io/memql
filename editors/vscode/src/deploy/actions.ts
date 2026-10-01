@@ -71,12 +71,11 @@ export interface DeployActionSpec {
 export const DEPLOY_ACTIONS: readonly DeployActionSpec[] = [
   {
     id: "cutVersion",
-    label: "Cut version",
+    label: "Prepare next version",
     verb: "cut_version",
     tier: "developer",
     typeToConfirm: false,
-    description:
-      "Create a new pending deployment record at the next version, ready to deploy.",
+    description: "Prepare the next version for deployment.",
   },
   {
     id: "deploy",
@@ -84,8 +83,7 @@ export const DEPLOY_ACTIONS: readonly DeployActionSpec[] = [
     verb: "deploy",
     tier: "developer",
     typeToConfirm: false,
-    description:
-      "Ship the selected pending deployment record. Asynchronous: success means accepted and kicked off, not deployed.",
+    description: "Deploy the prepared version.",
   },
   {
     id: "rollback",
@@ -93,17 +91,15 @@ export const DEPLOY_ACTIONS: readonly DeployActionSpec[] = [
     verb: "rollback_deployment",
     tier: "owner",
     typeToConfirm: true,
-    description:
-      "Redeploy the selected succeeded deployment's stored image digest as a new deployment record.",
+    description: "Deploy an earlier version again.",
   },
   {
     id: "rolloutAction",
-    label: "Rollout promote / abort",
+    label: "Promote or abort",
     verb: "rollout_action",
     tier: "admin",
     typeToConfirm: false,
-    description:
-      "Promote or abort an in-flight Argo Rollout. Abort requires a typed confirmation.",
+    description: "Advance or stop a rollout that is part-way through.",
   },
 ] as const;
 
@@ -183,7 +179,7 @@ export function roleVisibility(role: Role | undefined, reason = ""): RoleVisibil
       reason:
         reason !== ""
           ? reason
-          : "Your cluster role could not be read. Actions are offered, but the engine decides -- a refusal will name the role required.",
+          : "Your cluster role could not be read.",
     };
   }
   return { kind: "resolved", role };

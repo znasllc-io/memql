@@ -20,9 +20,10 @@
 //                   while still seeing history -- which is ordinary concept
 //                   rows and never went near that gate.
 //
-// THE ENGINE'S OWN WORDS ARE CARRIED, NOT PARAPHRASED. A refusal names a
-// reason, sometimes a role; a paraphrase is one more thing that can be wrong,
-// and the operator may need to match it against a log line.
+// THE ENGINE'S OWN WORDS ARE CARRIED, NOT PARAPHRASED -- and not SHOWN on the
+// page either. A refusal names a reason, sometimes a role, in words written
+// for a log; the page says one short line and keeps the engine's sentence for
+// the tooltip and Details, where somebody matching it against a log finds it.
 //
 // AND THIS IS NEVER A GATE. `deploy/actions.ts` states the doctrine and this
 // extends it: hiding an action a role cannot use is a courtesy. The engine
@@ -42,27 +43,28 @@ export type PipelineStateKind = "present" | "notConfigured" | "notVisible";
 
 export interface PipelineState {
   kind: PipelineStateKind;
-  /** The heading for the section. */
-  title: string;
   /**
-   * What to say beneath it. For the two failure states this is the ENGINE's
-   * sentence, prefixed by nothing and reworded by nothing.
+   * The one line a page says about it, or "" when there is nothing to say
+   * (`present`). Short on purpose: the reason behind it is `engineMessage`,
+   * which belongs in a tooltip or Details, not on the page.
    */
-  detail: string;
+  line: string;
+  /** The ENGINE's own sentence for a failed read, verbatim; "" for `present`. */
+  engineMessage: string;
   /**
-   * The actions to render. Empty for both failure states, because an action
-   * whose own status read was refused is an action the engine will refuse too
-   * -- and one that reported no pipeline has nothing to act on.
+   * The actions the caller's role admits. Empty for both failure states: an
+   * action whose own status read was refused, or that found no pipeline, has
+   * nothing to act on.
    */
   actions: DeployActionSpec[];
   /**
-   * The Argo Rollouts the status read reported, which are what the Rollout
-   * action promotes and aborts (deploy/controls.ts narrows them to the ones in
-   * flight). Empty for both failure states, which read nothing.
+   * The Argo Rollouts the status read reported, which are what promote and
+   * abort act on (deploy/controls.ts narrows them to the ones part-way
+   * through). Empty for both failure states, which read nothing.
    *
    * CARRIED, where the rest of the status is dropped, because the RPC acts on
-   * a rollout BY NAME and this read is the only place the panel learns one.
-   * Without it the button could only send an empty name, which the SDK refuses
+   * a rollout BY NAME and this read is the only place the page learns one.
+   * Without it the act could only send an empty name, which the SDK refuses
    * before anything leaves the editor.
    */
   rollouts: RolloutStatus[];
@@ -80,8 +82,8 @@ export function pipelineState(read: StatusRead, visibility: RoleVisibility): Pip
   if (read.reason === "permissionDenied") {
     return {
       kind: "notVisible",
-      title: "Deployment status is not visible at your role",
-      detail: read.message,
+      line: "Your role can't view deployment status.",
+      engineMessage: read.message,
       actions: [],
       rollouts: [],
     };
@@ -89,21 +91,16 @@ export function pipelineState(read: StatusRead, visibility: RoleVisibility): Pip
   if (read.reason === "unavailable" || read.status === null) {
     return {
       kind: "notConfigured",
-      title: "No deploy pipeline is configured for this cluster",
-      detail:
-        read.message === ""
-          ? "The cluster did not answer the deployment-status read."
-          : read.message,
+      line: "Deployments aren't set up for this cluster.",
+      engineMessage: read.message,
       actions: [],
       rollouts: [],
     };
   }
   return {
     kind: "present",
-    title: "Deploy",
-    detail:
-      "The engine decides every one of these. What is hidden here is hidden as a courtesy; " +
-      "a refusal will name the role required.",
+    line: "",
+    engineMessage: "",
     actions: visibleActions(visibility),
     // The SDK always sets the list; `?? []` is for a status built by hand,
     // which a caller outside the SDK is free to do.

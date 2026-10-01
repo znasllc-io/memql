@@ -209,7 +209,7 @@ export function artifactDelivery(meta: ArtifactMeta): ArtifactDelivery {
   if (size !== undefined && size > ARTIFACT_BUFFER_LIMIT_BYTES) {
     return {
       kind: "saveToDisk",
-      reason: `it is ${formatByteSize(size)}, past the ${formatByteSize(ARTIFACT_BUFFER_LIMIT_BYTES)} an editor buffer takes`,
+      reason: `it is ${formatByteSize(size)}, more than the ${formatByteSize(ARTIFACT_BUFFER_LIMIT_BYTES)} the editor opens`,
     };
   }
   return { kind: "editor" };

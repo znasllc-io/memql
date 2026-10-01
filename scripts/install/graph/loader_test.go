@@ -31,6 +31,7 @@ const minimalInstall = `{
     {
       "id": "probe",
       "script": "install.detect",
+      "label": "Probing",
       "description": "read-only probe",
       "readOnly": true,
       "elevation": "none",
@@ -39,6 +40,7 @@ const minimalInstall = `{
     {
       "id": "place",
       "script": "install.binary",
+      "label": "Placing a tool",
       "description": "mutating placement",
       "dependsOn": ["probe"],
       "elevation": "none",
@@ -117,6 +119,35 @@ func TestLoadRefusesAStepWithNoVerify(t *testing.T) {
 	}
 	if !strings.Contains(msg, "place") {
 		t.Errorf("error does not name the offending step: %s", msg)
+	}
+}
+
+// A step with no label is a step a progress display cannot name. The editor's
+// run screen and the CLI both read the label as the step's short name, and a
+// missing one would push each surface back to inventing its own words.
+func TestLoadRefusesAStepWithNoLabel(t *testing.T) {
+	msg := loadErr(t, func(m map[string]any) { delete(step(m, 1), "label") })
+	if !strings.Contains(msg, "no label") || !strings.Contains(msg, "place") {
+		t.Errorf("error does not name the missing label and the step: %s", msg)
+	}
+	msg = loadErr(t, func(m map[string]any) { step(m, 1)["label"] = "   " })
+	if !strings.Contains(msg, "no label") {
+		t.Errorf("a blank label must be refused like a missing one: %s", msg)
+	}
+}
+
+// A label is a status line. Five words is a sentence, and the sentence already
+// has a home: description.
+func TestLoadRefusesAnOverlongLabel(t *testing.T) {
+	msg := loadErr(t, func(m map[string]any) {
+		step(m, 1)["label"] = "Placing the tool on disk"
+	})
+	if !strings.Contains(msg, "5-word label") || !strings.Contains(msg, "at most 4 words") {
+		t.Errorf("error does not explain the word limit: %s", msg)
+	}
+	g := mustLoad(t, strings.Replace(minimalInstall, `"label": "Placing a tool"`, `"label": "Placing the tool here"`, 1))
+	if got := g.Step("place").Label; got != "Placing the tool here" {
+		t.Errorf("a four-word label must load intact, got %q", got)
 	}
 }
 
@@ -345,10 +376,10 @@ func TestTopoOrderReturnsWaves(t *testing.T) {
 	src := `{
 	  "name": "t", "kind": "install", "description": "d",
 	  "steps": [
-	    {"id":"a","script":"install.detect","description":"d","readOnly":true,"elevation":"none","verify":{"kind":"scriptOk"}},
-	    {"id":"b","script":"install.detect","description":"d","dependsOn":["a"],"readOnly":true,"elevation":"none","verify":{"kind":"scriptOk"}},
-	    {"id":"c","script":"install.detect","description":"d","dependsOn":["a"],"readOnly":true,"elevation":"none","verify":{"kind":"scriptOk"}},
-	    {"id":"d","script":"install.detect","description":"d","dependsOn":["b","c"],"readOnly":true,"elevation":"none","verify":{"kind":"scriptOk"}}
+	    {"id":"a","script":"install.detect","label":"Checking","description":"d","readOnly":true,"elevation":"none","verify":{"kind":"scriptOk"}},
+	    {"id":"b","script":"install.detect","label":"Checking","description":"d","dependsOn":["a"],"readOnly":true,"elevation":"none","verify":{"kind":"scriptOk"}},
+	    {"id":"c","script":"install.detect","label":"Checking","description":"d","dependsOn":["a"],"readOnly":true,"elevation":"none","verify":{"kind":"scriptOk"}},
+	    {"id":"d","script":"install.detect","label":"Checking","description":"d","dependsOn":["b","c"],"readOnly":true,"elevation":"none","verify":{"kind":"scriptOk"}}
 	  ]
 	}`
 	g := mustLoad(t, src)

@@ -18,7 +18,9 @@ import assert from "node:assert/strict";
 import type { Construct, ConstructArg } from "@znasllc-io/memql-sdk-core/constructs";
 
 import {
+  ORIGIN_LABELS,
   PROMOTED_NAMESPACE,
+  kindWord,
   catalogFrom,
   classifyCatalogFailure,
   groupByKind,
@@ -148,7 +150,7 @@ test("groups are ordered runnable-first, and counted", () => {
   );
   assert.deepEqual(groups.map((g) => g.kind), ["query", "mutation", "concept"]);
   assert.deepEqual(groups.map((g) => g.count), [2, 1, 1]);
-  assert.deepEqual(groups.map((g) => g.label), ["queries", "mutations", "concepts"]);
+  assert.deepEqual(groups.map((g) => g.label), ["Queries", "Mutations", "Concepts"]);
   assert.deepEqual(groups.map((g) => g.runnable), [true, true, false]);
 });
 
@@ -188,6 +190,16 @@ test("a promoted construct has no namespace, and groups under a named heading", 
   assert.equal(groups[0].namespaces[0].namespace, PROMOTED_NAMESPACE);
 });
 
+test("every origin has one label, shared by the tree and the page", () => {
+  for (const origin of ["core", "bundle", "promoted", "staged"] as const) {
+    assert.ok(ORIGIN_LABELS[origin].length > 0, `${origin} has no label`);
+  }
+  assert.equal(ORIGIN_LABELS.core, "Built in");
+  assert.equal(kindWord("query"), "Query");
+  // A kind the vocabulary does not know is shown as sent, capitalised.
+  assert.equal(kindWord("ritual"), "Ritual");
+});
+
 test("all three origins survive to the model", () => {
   for (const origin of ["core", "bundle", "promoted"] as const) {
     assert.equal(toCatalogConstruct(construct({ origin })).origin, origin);
@@ -217,7 +229,9 @@ test("a cluster predating the message is a stated version mismatch", () => {
   const state = classifyCatalogFailure(new Error("listConstructs: unexpected reply envelope"));
   assert.equal(state.kind, "versionMismatch");
   assert.ok(state.kind === "versionMismatch");
-  assert.match(state.message, /ListConstructs/);
+  // The remedy, in the person's words -- never the RPC's name.
+  assert.equal(state.message, "Update the cluster to browse its constructs.");
+  assert.doesNotMatch(state.message, /ListConstructs/);
 });
 
 test("any other failure keeps the engine's own words", () => {

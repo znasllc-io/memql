@@ -6,6 +6,7 @@
     {
       "id": "detect",
       "script": "install.detect",
+      "label": "Checking this computer",
       "description": "Taking stock of this machine before anything is installed: what system it is, which supporting tools are already here, whether Docker is answering, whether the ports a cluster needs are free, and how much disk is left. Only a system MemQL cannot support stops the install here; the rest is reported for you to read.",
       "readOnly": true,
       "elevation": "none",
@@ -17,6 +18,7 @@
     {
       "id": "dockerAccess",
       "script": "install.dockerAccess",
+      "label": "Checking Docker",
       "description": "Checking that Docker can run containers for you, before anything is installed.",
       "readOnly": true,
       "dependsOn": [
@@ -31,6 +33,7 @@
     {
       "id": "toolK3d",
       "script": "install.binary",
+      "label": "Installing tools",
       "description": "Installing k3d, which runs the cluster, and checking the download is the expected one.",
       "params": {
         "tool": "k3d"
@@ -51,6 +54,7 @@
     {
       "id": "toolKubectl",
       "script": "install.binary",
+      "label": "Installing tools",
       "description": "Installing kubectl, which talks to the cluster, and checking the download is the expected one.",
       "params": {
         "tool": "kubectl"
@@ -71,6 +75,7 @@
     {
       "id": "toolMkcert",
       "script": "install.binary",
+      "label": "Installing tools",
       "description": "Installing mkcert, which issues this machine's local certificates, and checking the download is the expected one.",
       "params": {
         "tool": "mkcert"
@@ -91,6 +96,7 @@
     {
       "id": "hostsBlock",
       "script": "install.hostsEntries",
+      "label": "Adding local addresses",
       "description": "Pointing the cluster's web addresses at this machine, inside a marked section of the system hosts file.",
       "params": {
         "action": "add",
@@ -112,6 +118,7 @@
     {
       "id": "browserTrust",
       "script": "install.nssTools",
+      "label": "Setting up browser trust",
       "description": "Setting up the tools your browsers need to trust this machine's local certificates.",
       "params": {
         "confirm": "install-nss-tools"
@@ -132,6 +139,7 @@
     {
       "id": "localCA",
       "script": "install.mkcert",
+      "label": "Creating certificates",
       "description": "Issuing the certificate that lets this cluster answer over https.",
       "params": {
         "confirm": "install-memql-ca"
@@ -151,6 +159,7 @@
     {
       "id": "stackCheckout",
       "script": "install.cloneStack",
+      "label": "Downloading MemQL",
       "description": "Downloading the MemQL release you chose.",
       "dependsOn": [
         "detect",
@@ -168,6 +177,7 @@
     {
       "id": "providerFederation",
       "script": "install.verifyProviderKey",
+      "label": "Checking AI access",
       "description": "Checking that this cluster's AI provider credential is accepted, before the cluster is built around it. Skipped when no federation ids were supplied: installing spends no AI credit, and providers are set up afterwards in MemQL OS.",
       "dependsOn": [
         "detect"
@@ -183,6 +193,7 @@
       "id": "clusterUp",
       "script": "k3d.up",
       "timeoutSeconds": 1800,
+      "label": "Creating the cluster",
       "description": "Creating the cluster and starting MemQL's services in it.",
       "dependsOn": [
         "toolK3d",
@@ -204,6 +215,7 @@
     {
       "id": "seedBootstrap",
       "script": "install.seedBootstrap",
+      "label": "Creating your account",
       "description": "Creating your owner account and applying the settings you gave, then restarting the services that read them.",
       "dependsOn": [
         "clusterUp"
@@ -218,6 +230,7 @@
     {
       "id": "frontDoor",
       "script": "install.verifyFrontDoor",
+      "label": "Checking secure access",
       "description": "Checking the cluster answers over https at every one of its addresses.",
       "dependsOn": [
         "seedBootstrap"
@@ -232,6 +245,7 @@
     {
       "id": "magicLink",
       "script": "install.magicLink",
+      "label": "Preparing sign-in",
       "description": "Looking for a sign-in link for the owner account, as a second way in. A cluster that has not been asked for one carries none, which is reported rather than treated as a failure.",
       "params": {
         "local": "1"
@@ -249,6 +263,7 @@
     {
       "id": "enrolmentLink",
       "script": "install.enrolmentLink",
+      "label": "Preparing sign-in",
       "description": "Creating a single-use link for setting up a passkey on the owner account. This install names that owner as the cluster starts, so the link is normally ready here; a cluster started without owner details has nobody to enrol yet, and that is reported instead.",
       "params": {
         "local": "1"
@@ -266,6 +281,7 @@
     {
       "id": "recoveryKey",
       "script": "install.recoveryKey",
+      "label": "Creating your recovery key",
       "description": "Claiming this cluster's recovery key and showing it once, so you finish with a way back in if every other is ever lost. The key is minted for the owner as the cluster starts, so a first install normally ends holding one; a cluster started without owner details has nobody to mint one for, and a key an earlier run already claimed is left alone, because only its fingerprint was kept and re-showing it is impossible.",
       "params": {
         "local": "1"

@@ -37,6 +37,7 @@
 // these. Tested under bare `node --test`.
 
 import type { RunnableTrigger } from "../constructs/runnable.js";
+import { jsonErrorText } from "./argForm.js";
 
 /** How the event payload is built. */
 export type AutomationFormMode = "schedule" | "row" | "json";
@@ -54,7 +55,7 @@ export interface AutomationFormPlan {
   conceptId: string;
   /** "schedule" | "event" | "manual" -- what the engine will call this run. */
   triggerKind: string;
-  /** One sentence explaining what this automation's run will fire. */
+  /** One short line on what the run will fire with, for the form. */
   explanation: string;
 }
 
@@ -86,7 +87,7 @@ export function automationFormPlan(
       defaultMode: "schedule",
       conceptId: "",
       triggerKind: "schedule",
-      explanation: `${name} is time-driven (@trigger(schedule="${schedule}")). Running it fires it NOW with an empty event, exactly as a cron firing would.`,
+      explanation: "Runs now with an empty event.",
     };
   }
 
@@ -97,7 +98,7 @@ export function automationFormPlan(
         defaultMode: "row",
         conceptId: concept,
         triggerKind: "event",
-        explanation: `${name} triggers on ${event} for ${concept}. Pick a real row of that concept, or paste a payload for a row that does not exist.`,
+        explanation: "Pick a row, or paste a payload.",
       };
     }
     return {
@@ -105,7 +106,7 @@ export function automationFormPlan(
       defaultMode: "json",
       conceptId: "",
       triggerKind: "event",
-      explanation: `${name} triggers on ${event}, which names no concept, so there is no row set to pick from. Paste the payload the event would have carried.`,
+      explanation: "Paste the payload the event would carry.",
     };
   }
 
@@ -117,7 +118,7 @@ export function automationFormPlan(
     defaultMode: "json",
     conceptId: "",
     triggerKind: "manual",
-    explanation: `${name} declares no trigger this build can read. The run is dispatched manually -- leave the payload empty to fire with an empty event.`,
+    explanation: "Leave the payload empty to fire with an empty event.",
   };
 }
 
@@ -149,12 +150,12 @@ export function parsePayloadText(text: string): PayloadParse {
   try {
     parsed = JSON.parse(trimmed);
   } catch (err) {
-    return { ok: false, error: `not valid JSON: ${err instanceof Error ? err.message : String(err)}` };
+    return { ok: false, error: jsonErrorText(trimmed, err instanceof Error ? err.message : String(err)) };
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return {
       ok: false,
-      error: "the trigger event's payload must be a JSON object -- an array or a bare value cannot be carried as an event payload",
+      error: "Enter a JSON object. An event payload can't be a list or a single value.",
     };
   }
   return { ok: true, payload: parsed as Record<string, unknown> };
@@ -191,7 +192,7 @@ export function payloadTextForRow(row: Readonly<Record<string, unknown>>): strin
  * be told this one means more.
  */
 export function automationConfirmationMessage(name: string, clusterLabel: string): string {
-  return `Run the automation "${name}" against ${clusterLabel}? That cluster is not marked local in clusters.yaml. An automation run executes its whole action chain -- writes, LLM calls, and any downstream automations those writes trigger -- against real data.`;
+  return `Run "${name}" on ${clusterLabel}? It isn't a local cluster, so its whole action chain runs for real: writes, model calls and the automations they trigger.`;
 }
 
 /**
@@ -204,8 +205,7 @@ export function automationConfirmationMessage(name: string, clusterLabel: string
  * criterion, not a nicety, so it must not disappear because a frame arrived
  * without its text.
  */
-export const DEPLOYED_DEFINITION_FALLBACK =
-  "Automations are not session-definable: the DEPLOYED definition on the cluster ran, not your editor buffer. Redeploy to run your edits.";
+export const DEPLOYED_DEFINITION_FALLBACK = "The deployed version ran. Edits in your editor apply once they are deployed.";
 
 /** definitionBanner picks the engine's note, falling back to the constant above. */
 export function definitionBanner(accepted: { ranDeployedDefinition: boolean; definitionNote: string }): string {
@@ -227,4 +227,4 @@ export function definitionBanner(accepted: { ranDeployedDefinition: boolean; def
  * that works and an UNAVAILABLE refusal that reads like an outage.
  */
 export const TARGET_NODE_TYPE_NOTICE =
-  "Leave blank to run on the node that receives the request. Name a node type (cognition, agent, planner, ...) when the automation's steps reach integrations compiled into that node type only -- the run then travels the mesh and the trace comes back the same way.";
+  "Leave empty for any node. Name a node type, such as cognition or agent, when a step needs something only that type has.";
