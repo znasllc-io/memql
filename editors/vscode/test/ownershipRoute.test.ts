@@ -82,4 +82,3 @@ test("a MISSING domain is a gap, not a contradiction", () => {
   assert.equal(receiptNamesAnotherCluster("memql.localhost", ""), false);
   assert.equal(receiptNamesAnotherCluster("", ""), false);
 });
-
