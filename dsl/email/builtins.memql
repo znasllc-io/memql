@@ -1,0 +1,4 @@
+@sdk
+@executor("integration.email.inbox")
+@description("Read the last 100 captured test messages from the last seven days. Owner or developer only; capture must be explicitly configured. This is a sensitive test inbox, not evidence of Internet delivery.")
+builtin emailInbox {}

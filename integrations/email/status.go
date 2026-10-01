@@ -269,6 +269,9 @@ func (d *describer) resolve(ctx context.Context) resolvedConfig {
 // badge from -- which needs the two combined, since a configured integration
 // whose probe failed is neither of the two words on its own.
 func (i *Integration) emailReport(ctx context.Context, probe bool) IntegrationReport {
+	if _, ok := captureSender(i.sender, ctx); ok {
+		return IntegrationReport{Name: "email", Registered: true, Capabilities: capabilityNames(i.Capabilities()), Mode: "capture", Configured: AnswerYes, Health: HealthHealthy, State: "configured", Detail: "Messages are captured for testing in the Email app. They are not delivered externally.", Settings: []Setting{}, Credentials: []Credential{}, Reasons: []ConfigReason{}}
+	}
 	d := newDescriber(i.sender)
 	cfg := d.resolve(ctx)
 

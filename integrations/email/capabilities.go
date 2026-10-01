@@ -47,6 +47,7 @@ func (i *Integration) IntegrationName() string { return "email" }
 // Capabilities returns DSL-callable email operations.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "inbox", Description: "Read the restricted captured test inbox.", Handler: i.handleInbox, ArgsSchema: map[string]string{}},
 		{
 			Name:        "sendEmail",
 			Description: "Deliver a transactional email. Caller supplies the rendered subject / text / html body.",

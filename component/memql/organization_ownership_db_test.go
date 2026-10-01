@@ -128,15 +128,15 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 			t.Fatalf("named %s attribution failed: %v", concept, p)
 		}
 	}
-	if err := organizationInsert(t, engine, rankActorCtx(operator, auth.RoleOwner), "v1:campaigns:audience", "operator-audience-"+suffix, map[string]any{"name": "Default", "ownerUserId": operator}); err != nil {
-		t.Fatal(err)
+	if err := organizationInsert(t, engine, rankActorCtx(operator, auth.RoleOwner), "v1:campaigns:audience", "operator-audience-"+suffix, map[string]any{"name": "Default", "ownerUserId": operator}); err == nil || !strings.Contains(err.Error(), "organization_required") {
+		t.Fatalf("operator omitted organization: %v", err)
 	}
 	var own []memorynodes.MemoryNode
 	if err := db.NewSelect().Model(&own).Where("concept = ?", "v1:campaigns:audience").Where("id = ?", "v1:campaigns:audience:operator-audience-"+suffix).OrderExpr(`"createdAt" DESC`).Limit(1).Scan(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(own) != 1 || BareShortId(stringFromAny(accountRowPayload(own[0])["accountId"])) != "self" {
-		t.Fatal("operator default not persisted as self")
+	if len(own) != 0 {
+		t.Fatal("organization-less operator record was persisted")
 	}
 	if err := organizationInsert(t, engine, rankActorCtx(multi, auth.RoleWriter), "v1:campaigns:audience", "ambiguous-"+suffix, map[string]any{"name": "Ambiguous"}); err == nil {
 		t.Fatal("multiple memberships silently defaulted")

@@ -1,13 +1,13 @@
 import { useSessionIfPresent } from "../../chrome/access";
 import type { ProfileAccess } from "../../modules/profile/access";
-import { accountIsArchived, SELF_ACCOUNT_ID, type AccountRow } from "./rows";
+import { accountIsArchived, type AccountRow } from "./rows";
 
 /** Default only from the server's resolved scope. A multi-organization member
  * chooses explicitly; list order and a role's display name carry no authority. */
 export function defaultOrganization(accounts: readonly AccountRow[], access: ProfileAccess | null): string {
   const active = accounts.filter((account) => !accountIsArchived(account));
   if (access?.everyAccount === true) {
-    return active.some((account) => account.id === SELF_ACCOUNT_ID) ? SELF_ACCOUNT_ID : "";
+    return active.length === 1 ? active[0]!.id : "";
   }
   const allowed = new Set(access?.accountIds ?? access?.groups?.map((group) => group.accountId) ?? []);
   const choices = active.filter((account) => allowed.has(account.id));

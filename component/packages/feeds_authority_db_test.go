@@ -32,7 +32,7 @@ func TestRepositoryPollMaintenanceActorDiscoversOwnedPackages(t *testing.T) {
 	})
 	for n, id := range ids {
 		mustExecute(t, eng, owners[n], fmt.Sprintf(
-			`mutation createPackage(packageId: %s, name: "feed authorization test", sourceKind: "repo", repoUrl: %s)`,
+			`mutation createPackage(accountId: "self", packageId: %s, name: "feed authorization test", sourceKind: "repo", repoUrl: %s)`,
 			langparser.QuoteString(id), langparser.QuoteString(repoURL)))
 	}
 

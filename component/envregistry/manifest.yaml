@@ -245,6 +245,13 @@ variables:
     scope: global
     description: "Azure AD application ID for the email integration's Microsoft Graph sender. (Legacy name `AZURE_CLIENT_ID` still accepted.)"
 
+  - name: MEMQL_EMAIL_TRANSPORT
+    component: email
+    scope: node
+    default: "auto"
+    optional: true
+    description: "Email transport selection: auto resolves configured delivery; capture stores encrypted test messages in the restricted Email app without external delivery. Explicit installation configuration, not a hostname heuristic."
+
   - name: MEMQL_EMAIL_SENDER
     component: email
     scope: global

@@ -30,7 +30,7 @@ func organizationOperator(ctx context.Context) bool {
 // never from the requested account. Multiple memberships require a choice.
 func organizationDefaultAccount(operator bool, scope *accountScope) (string, error) {
 	if operator {
-		return "self", nil
+		return "", fmt.Errorf("organization_required: select the organization this record belongs to")
 	}
 	choices := map[string]bool{}
 	if scope != nil {

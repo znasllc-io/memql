@@ -239,6 +239,7 @@ readonly DB_GATED_TREES=(
 	"integrations/planner"
 	"integrations/procedure"
 	"integrations/shopify"
+	"integrations/email"
 	"integrations/sitepreview"
 	"integrations/work"
 	"examples/referencepack"

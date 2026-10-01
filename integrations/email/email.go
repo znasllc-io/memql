@@ -52,6 +52,9 @@ type Sender interface {
 // somebody else's tenant, and the honest check is the provider's 403 landing
 // on the campaign's lastError (design D7).
 type SendAs struct {
+	// AccountID carries the organization authorized by the caller's stored
+	// campaign/identity. It is routing authority, never a user-supplied header.
+	AccountID string
 	// Address is the mailbox UPN to send as -- the value that becomes both
 	// the Graph `/users/{address}/sendMail` path segment and the address
 	// half of the From header.
@@ -420,6 +423,11 @@ func DefaultEnvKeys() EnvKeys {
 // Prefix is optional (e.g. "MEMQL_"). Pass "" for no prefix.
 func NewSenderFromEnv(prefix string, logger *slog.Logger) (Sender, error) {
 	reader := env.NewEnvReader(strings.TrimRight(prefix, "_"))
+	if mode, _ := reader.String(TransportEnv); mode == "capture" {
+		return &CaptureSender{}, nil
+	} else if mode != "" && mode != "auto" {
+		return nil, fmt.Errorf("email: unsupported transport %q", mode)
+	}
 
 	// ONE walk over the declared manifest (memql#4825). Which lanes exist,
 	// which slots each needs, which are secret and which legacy names are

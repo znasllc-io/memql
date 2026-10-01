@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { Button, Field, Input, Panel } from "../../kit";
 import { AccountPicker } from "../accounts/AccountPicker";
+import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import type { AccountRow } from "../accounts/rows";
 import type { UsersActions } from "./actions";
 import { RefusalLine } from "./PersonPage";
@@ -10,7 +11,7 @@ import { RefusalLine } from "./PersonPage";
 //
 // A rail is for a composition whose answers depend on each other -- the Invite
 // rail's address decides its groups, which decide its roles. A group is a name,
-// a description and an optional client, in any order, and drawing three
+// a description and an organization, in any order, and drawing three
 // independent fields as a numbered journey would be ceremony pretending to be
 // guidance.
 
@@ -29,6 +30,9 @@ export function NewGroupForm({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [accountId, setAccountId] = useState("");
+  const defaultAccountId = useDefaultOrganization(accounts);
+  const selectedAccountId = accountId || defaultAccountId;
+  const ready = name.trim() !== "" && organizationChosen(accounts, selectedAccountId);
 
   const busy = actions.busyKey === `group:new:${name}`;
 
@@ -48,19 +52,16 @@ export function NewGroupForm({
           placeholder="Optional"
         />
       </Field>
-      <Field label="Client">
+      <Field label="Organization">
         <AccountPicker
-          value={accountId}
+          value={selectedAccountId}
           onChange={setAccountId}
           accounts={[...accounts]}
           id="group-account"
-          label="The client this group grants"
+          label="Organization this group belongs to"
+          required
         />
       </Field>
-      <p className="os-caption">
-        A group tied to a client is what lets its members reach that client's work. A group tied to
-        nobody grants nothing and exists to organize.
-      </p>
 
       <RefusalLine actions={actions} />
 
@@ -70,9 +71,10 @@ export function NewGroupForm({
           tone="primary"
           busy={busy}
           busyLabel="Creating..."
+          disabled={!ready}
           onClick={() => {
-            if (name.trim() === "") return;
-            void actions.groupCreate(name.trim(), description.trim(), accountId).then((groupId) => {
+            if (!ready) return;
+            void actions.groupCreate(name.trim(), description.trim(), selectedAccountId).then((groupId) => {
               // NOTHING IS INSERTED LOCALLY. The row arrives on its own
               // broadcast with the arrival cue, which is what makes the new
               // group appear the same way it appears in everybody else's

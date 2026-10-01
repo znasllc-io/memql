@@ -65,6 +65,7 @@ func TestConnectBeginWritesTheStateAgainstARealEngine(t *testing.T) {
 	})
 	seedWith := func(ctx context.Context, concept, id string, payload map[string]any) {
 		t.Helper()
+		attributeOrganizationFixture(ctx, concept, payload)
 		body, err := json.Marshal(payload)
 		if err != nil {
 			t.Fatal(err)

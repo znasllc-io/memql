@@ -8,9 +8,10 @@ const accounts = ["self", "acme", "other"].map((id) => accountFromRow({ id, name
 const access = (scope: Partial<ProfileAccess>): ProfileAccess => ({ userId: "me", primaryEmail: "me@example.test", role: "owner", roleName: "Owner", rank: 999, ...scope });
 
 describe("organization defaults from verified access", () => {
-  it("defaults an operator to the existing self account regardless of list order", () => {
-    expect(defaultOrganization([...accounts].reverse(), access({ everyAccount: true }))).toBe("self");
+  it("requires operators to choose when more than one organization is available", () => {
+    expect(defaultOrganization([...accounts].reverse(), access({ everyAccount: true }))).toBe("");
     expect(defaultOrganization(accounts.slice(1), access({ everyAccount: true }))).toBe("");
+    expect(defaultOrganization(accounts.slice(1, 2), access({ everyAccount: true }))).toBe("acme");
   });
   it("defaults a client employee only to their sole authorized organization", () => {
     expect(defaultOrganization(accounts, access({ everyAccount: false, accountIds: ["acme"] }))).toBe("acme");

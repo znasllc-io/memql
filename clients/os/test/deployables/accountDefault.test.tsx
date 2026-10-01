@@ -32,10 +32,12 @@ async function select(name: string) {
 }
 
 describe("compose account default", () => {
-  it("selects canonical self for an operator regardless of account row order", async () => {
+  it("requires an operator managing several organizations to choose explicitly", async () => {
     await open(fakeConnection({ accounts: [ACME, BETA, SELF] }));
-    await waitFor(() => expect(selection()).toContain("Operator organization"));
-    expect(screen.getByText(cue)).toBeTruthy();
+    await waitFor(() => expect(selection()).toContain("Choose an account"));
+    expect(screen.queryByText(cue)).toBeNull();
+    await select("Acme");
+    expect(selection()).toContain("Acme");
   });
 
   it("defaults a restricted scope to its sole authorized active account, not role or row order", async () => {
@@ -59,8 +61,9 @@ describe("compose account default", () => {
     expect(screen.getByText("Loading accounts")).toBeTruthy();
     expect(screen.queryByText(cue)).toBeNull();
     await act(async () => answer(rowsResult([BETA, SELF])));
-    await waitFor(() => expect(selection()).toContain("Operator organization"));
-    expect(screen.getByText(cue)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Loading accounts")).toBeNull());
+    expect(selection()).toContain("Choose an account");
+    expect(screen.queryByText(cue)).toBeNull();
   });
 
   it("keeps an already selected default when a later feed update changes the available choices", async () => {
@@ -86,7 +89,7 @@ describe("compose account default", () => {
   });
 
   it("removes the default cue even when the person explicitly chooses self again", async () => {
-    await open(fakeConnection({ accounts: [SELF, ACME] }));
+    await open(fakeConnection({ accounts: [SELF] }));
     expect(screen.getByText(cue)).toBeTruthy();
     await select("Operator organization");
     expect(selection()).toContain("Operator organization");

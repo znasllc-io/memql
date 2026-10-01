@@ -1,0 +1,7 @@
+/// Restricted encrypted storage projection, consumed by the capture integration.
+@row
+shape capturedMessage capturedEmailStored {
+  row.id
+  row.createdAt
+  encryptedValue
+}

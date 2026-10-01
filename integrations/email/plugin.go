@@ -26,6 +26,9 @@ func init() {
 			return nil, err
 		}
 		lazySender := NewLazySender(envSender, pctx.ResolveSystemVariable, pctx.ResolveSystemSecret, pctx.Logger)
+		if capture, ok := envSender.(*CaptureSender); ok {
+			capture.store = NewConfigWriter(pctx.Engine)
+		}
 		// The engine is attached for the `configure` capability (memql#4825).
 		// pctx.Engine is the same surface every other plug-in writes through,
 		// so nothing new is trusted here -- what makes the write safe is the

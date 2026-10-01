@@ -94,6 +94,10 @@ type RoutingExclusion struct {
 func RoutingExclusions() []RoutingExclusion {
 	return []RoutingExclusion{
 		{
+			Pattern: "graph.node.*.v1:email:capturedMessage",
+			Reason:  "Captured test mail can contain authentication links. Bodies are encrypted in shared storage and read only through the owner/developer inbox capability, refreshed on focus or request. No live surface needs the ciphertext broadcast.",
+		},
+		{
 			Pattern: "graph.node.updated.v1:identity:user",
 			Reason: "The user row churns on every token refresh -- lastSeenAt moves on " +
 				"an ordinary request -- so forwarding its updates turns every " +

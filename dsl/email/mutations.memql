@@ -1,0 +1,14 @@
+/// Record one encrypted test message. The transport supplies an opaque unique id.
+/// actor.userId scoping cannot express this write: identity services send before
+/// a recipient has an account. The internal capture service actor alone writes
+/// the body, after validation and encryption, rather than accepting browser data.
+@serverOnly
+mutation capturedMessage recordCapturedEmail {
+  args {
+    id string!
+    encryptedValue string!
+  }
+  insert {
+    accept { id, encryptedValue }
+  }
+}
