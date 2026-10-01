@@ -45,7 +45,7 @@ type nssWorld struct {
 // SYMLINKED into the stub directory so PATH can be that directory and nothing
 // else -- see newNssWorld.
 var nssEssentials = []string{
-	"bash", "env", "dirname", "basename", "uname", "id", "mktemp",
+	"bash", "env", "dirname", "basename", "id", "mktemp",
 	"chmod", "rm", "cat", "sed", "tr", "wc", "cut", "head", "printf",
 }
 
@@ -74,6 +74,9 @@ func newNssWorld(t *testing.T) *nssWorld {
 			t.Fatalf("symlink %s: %v", tool, err)
 		}
 	}
+	// These package-manager fixtures model a Linux desktop, including its
+	// zenity-based elevation. Do not inherit the host's macOS dialog choice.
+	w.stub(t, "uname", "printf 'Linux\\n'")
 	return w
 }
 
