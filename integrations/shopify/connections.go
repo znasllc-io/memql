@@ -22,9 +22,11 @@ const managedInstallURL = "SHOPIFY_CONNECT_INSTALL_URL"
 
 // Shared storefront connections need commerce access, not the complete mirror's
 // finance, staff, payment-method and historical-order permissions.
+// Product-content delivery writes product metafields; write_products includes
+// catalog reads and is the only Admin write scope this connection requests.
 func managedConnectScopes() []string {
 	scopes := append([]string(nil), StorefrontScopes...)
-	return append(scopes, "read_products", "read_inventory", "read_locations", "read_orders")
+	return append(scopes, "write_products", "read_inventory", "read_locations", "read_orders")
 }
 
 // Operator configuration is never an ordinary-user form. Both values are

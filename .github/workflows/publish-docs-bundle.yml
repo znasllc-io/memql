@@ -1,13 +1,17 @@
 name: publish-docs-bundle
 
-# Attaches `docs-<X.Y.Z>.tgz` -- the documentation bundle memql.io consumes --
-# to a GitHub Release. Docs version == engine release (VERSIONING.md,
-# docs/DOCS_STANDARD.md section 5).
+# Attaches `docs-<X.Y.Z>.tgz` -- the documentation set memql.io serves -- to a
+# GitHub Release. One set per release, as a Release asset; the site serves the
+# newest release's set only (docs/DOCS_STANDARD.md section 5, VERSIONING.md).
 #
-# The bundle is built AT THE RELEASE TAG by scripts/docs/build-docs-bundle.sh:
-# docs/public/** whose front-matter is `audience: public`, plus the generated
-# reference (cmd/docs-gen) and a manifest.json nav tree. The website's
-# scripts/fetch-docs-bundle.mjs downloads this asset by name.
+# The bundle is built AT THE RELEASE TAG by scripts/docs/build-docs-bundle.sh,
+# a capability script over `cmd/docs-gen bundle` (bundle contract v2,
+# memql#5717): the public, stable, exposure-engine pages of docs/public with
+# their links rewritten to site routes, the generated concept catalog,
+# manifest.json (schema 2), memql-docs-version, llms.txt, llms-full.txt and
+# sitemap-docs.xml. The boundary check runs first and fails the lane on any
+# link out of the public set, so a release cannot ship a violation the
+# pull-request gate (docs_public_boundary_test.go) would have refused.
 #
 # Why this is a workflow: the asset used to be attached by
 # scripts/release/publish-releases.sh (#1172), which was removed along with the
@@ -16,9 +20,12 @@ name: publish-docs-bundle
 # the source of truth for release artifacts, not an operator machine, so it
 # belongs here rather than in a hand-run script.
 #
-# workflow_dispatch backfills a release cut before this workflow existed, or
-# re-uploads after a docs fix. NOTE: the bundle always reflects the docs AS OF
-# THAT TAG -- backfilling an old tag will not pick up later docs fixes.
+# workflow_dispatch rebuilds and re-uploads one release's set, by either tag
+# spelling. NOTE: the bundle always reflects the docs AS OF THAT TAG, built by
+# that tag's own scripts/docs/build-docs-bundle.sh -- a rebuild picks up no
+# later docs fix, and a tag cut before contract v2 carries the old builder,
+# which knows no --check and fails the check step. Nothing needs those rebuilt:
+# the site serves the newest release's set only.
 on:
   release:
     types: [published]
@@ -55,6 +62,8 @@ jobs:
         env:
           # On a release event this is the tag; on workflow_dispatch it is the input.
           TAG: ${{ github.event.inputs.version || github.event.release.tag_name }}
+          # Reads whether a tag exists; the job's contents: write covers it.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ -z "${TAG:-}" ]; then
@@ -69,9 +78,9 @@ jobs:
           #   ref     -- the real git ref / release tag (v0.15.0). Feeds checkout
           #              and `gh release upload`, which address the tag as named.
           #   version -- the bare X.Y.Z (0.15.0). Feeds the bundle version and
-          #              therefore the asset name, because the site resolves
-          #              `docs-<bare>.tgz` and unpacks into src/content/docs/<bare>/.
-          #              Emitting docs-v0.15.0.tgz would be invisible to it.
+          #              therefore the asset name, because the site's sync
+          #              fetches `docs-<bare>.tgz`. Emitting docs-v0.15.0.tgz
+          #              would be invisible to it.
           #
           # v0.15.0 was skipped by the original bare-only check: the workflow ran,
           # went green in 12s, and attached nothing. A prefix change must not be
@@ -98,10 +107,42 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Rebuild the ref from the VALIDATED version rather than echoing $TAG
-          # back out, so both outputs are provably one of X.Y.Z / vX.Y.Z and the
-          # whole-string guarantee above still covers everything downstream.
-          if [ "$TAG" = "$VERSION" ]; then REF="$VERSION"; else REF="v$VERSION"; fi
+          # Ask which spelling exists as a tag, rather than assuming the input
+          # used the right one. A bare `version: 0.23.5` for the v0.23.5 release
+          # used to check out a ref named 0.23.5, which does not exist, and the
+          # run failed at checkout (run 36422391123). The spelling given is
+          # tried first. Both candidates are rebuilt from the VALIDATED version
+          # rather than echoing $TAG back out, so every output is provably one
+          # of X.Y.Z / vX.Y.Z and the whole-string guarantee above still covers
+          # everything downstream.
+          if [ "$TAG" = "$VERSION" ]; then
+            CANDIDATES="$VERSION v$VERSION"
+          else
+            CANDIDATES="v$VERSION $VERSION"
+          fi
+          #
+          # Only a 404 means "not this spelling". Any other failure -- auth,
+          # rate limit, network -- is reported as itself and fails the run,
+          # rather than being read as a missing tag and misdiagnosed below.
+          REF=""
+          for name in $CANDIDATES; do
+            if out=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$name" --silent 2>&1); then
+              REF="$name"
+              break
+            fi
+            case "$out" in
+              *"HTTP 404"*) ;;
+              *)
+                echo "ERROR: could not ask whether $name is a tag in $GITHUB_REPOSITORY:" >&2
+                echo "$out" >&2
+                exit 1
+                ;;
+            esac
+          done
+          if [ -z "$REF" ]; then
+            echo "ERROR: neither $VERSION nor v$VERSION is a tag in $GITHUB_REPOSITORY; a docs bundle is built at its release tag, so there is nothing to build" >&2
+            exit 1
+          fi
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "INFO: building docs bundle $VERSION from tag $REF"
@@ -111,18 +152,31 @@ jobs:
         with:
           ref: ${{ steps.target.outputs.ref }}
           persist-credentials: false
+          # Full history: every page's lastUpdated (and the sitemap's lastmod)
+          # is its last commit, and at depth 1 every page would date to the
+          # tag. The build refuses a shallow clone rather than publish that.
+          fetch-depth: 0
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: steps.target.outputs.skip != 'true'
         with:
           go-version: '1.27.1'
 
+      - name: check the public boundary
+        if: steps.target.outputs.skip != 'true'
+        # The same check docs_public_boundary_test.go runs on every pull
+        # request: a link out of the published set fails the lane here, before
+        # anything is built. The script's envelope (stdout) carries the
+        # violations; its log (stderr) lists them.
+        env:
+          VERSION: ${{ steps.target.outputs.version }}
+        run: bash scripts/docs/build-docs-bundle.sh --version="$VERSION" --check
+
       - name: build bundle
         if: steps.target.outputs.skip != 'true'
         # Through `env:` rather than interpolated into the run body, matching
         # every other step here. An `${{ }}` expansion is substituted into the
         # script BEFORE bash sees it, so the value is code; via env it is data.
-        # This was the one step that did it the other way.
         env:
           VERSION: ${{ steps.target.outputs.version }}
         run: bash scripts/docs/build-docs-bundle.sh --version="$VERSION"
@@ -135,11 +189,24 @@ jobs:
           set -euo pipefail
           tarball="docs-${VERSION}.tgz"
           [ -f "$tarball" ] || { echo "ERROR: $tarball was not produced" >&2; exit 1; }
+          # The listing goes to a file first, and grep reads the file. Piping
+          # `tar -tzf | grep -q` failed this step on every release from v0.20.22
+          # to v0.23.5: grep -q exits on the first match, tar takes EPIPE on its
+          # next write, and pipefail turns that into the "no manifest.json"
+          # branch for a bundle that has one. scripts/release's
+          # TestNoWorkflowQuietGrepsATarPipe refuses the pattern in any workflow.
+          listing="$RUNNER_TEMP/docs-bundle-listing.txt"
+          tar -tzf "$tarball" > "$listing"
           # A bundle with no manifest is unusable to the site; fail loudly rather
           # than attaching a broken asset.
-          tar -tzf "$tarball" | grep -qx './manifest.json' \
+          grep -qx './manifest.json' "$listing" \
             || { echo "ERROR: $tarball has no manifest.json" >&2; exit 1; }
-          echo "INFO: $tarball contains $(tar -tzf "$tarball" | grep -c '\.md$') markdown files"
+          # The root files the site reads beside the manifest (contract v2).
+          for f in memql-docs-version llms.txt llms-full.txt sitemap-docs.xml; do
+            grep -qx "./$f" "$listing" \
+              || { echo "ERROR: $tarball has no $f" >&2; exit 1; }
+          done
+          echo "INFO: $tarball contains $(grep -c '\.md$' "$listing") markdown files"
 
       - name: attach to release
         if: steps.target.outputs.skip != 'true'
@@ -150,3 +217,12 @@ jobs:
           REF: ${{ steps.target.outputs.ref }}
           VERSION: ${{ steps.target.outputs.version }}
         run: gh release upload "$REF" "docs-${VERSION}.tgz" --clobber
+
+      # No repository_dispatch step yet (design D13, owner decision 19). An
+      # `engine-docs-released` dispatch to the instance repository would let its
+      # docs sync run the moment the asset lands, but the dispatch needs a
+      # token that can write to that repository, and GITHUB_TOKEN cannot. It
+      # goes HERE, after the upload, using the GitHub App installation token,
+      # once the docs-current housekeeping task confirms the App's permissions
+      # cover dispatch. Until then the asset waits for the instance's scheduled
+      # docs sync (memql#5716) to poll for it.

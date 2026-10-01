@@ -32,8 +32,6 @@ proposed Settings/Logs layouts still await approval.
 
 Related: [identity](auth/identity-service.md), [access](auth/access-model.md),
 [environment parity](environment-parity.md), [front door](front-door.md).
-The former portal's migration history remains in
-[the retirement record](../../superpowers/specs/2026-09-06-portal-removal-design.md).
 
 ---
 
@@ -99,17 +97,17 @@ appears in a URL.**
 
 (*) `GET /runtime-config.json` is answered by `component/edge/runtimeconfig.go`
 for EVERY hosted site alike, never a branch for this one
-(`TestPortalHasNoSpecialCaseInTheServingPath` -- named for the site that first
-proved the rule). The cluster-wide fields (`identityUrl`, `identityApiBaseUrl`,
+(`TestPlatformSiteHasNoSpecialCaseInTheServingPath`,
+`component/edge/dogfood_test.go`). The cluster-wide fields (`identityUrl`, `identityApiBaseUrl`,
 `authEnabled`) come from the domain-derived env
 `component/envregistry/domain.go` sets at boot, and the one per-site field
 (`oauthClientId`) is looked up by matching the requesting site's own hostname
 against `MEMQL_IDENTITY_REGISTERED_CLIENTS` -- an unregistered site still gets
 a 200, just with an empty client id.
 
-**The OAuth client id is `os`.** It was `portal`, carrying both hostnames'
-redirect URIs, until memql#4984; renaming it was safe precisely because no
-bundle hardcodes it -- each reads its own out of the document above.
+**The OAuth client id is `os`.** It was renamed in memql#4984, which was safe
+precisely because no bundle hardcodes it -- each reads its own out of the
+document above.
 
 `domain` is the fifth field and the one exception to "derived": it is
 `MEMQL_DOMAIN` itself, the value every other derivation starts from, published
@@ -290,8 +288,11 @@ issued. Existing credentials do not silently acquire a new lifetime.
 
 ### What is deliberately NOT here
 
-- **Deploy control.** Cutting a release and rolling a deployment stay with the
-  [Cockpit](release-cutting.md) and `DeployControlService`.
+- **Deploy control.** Cutting a version, deploying and rolling back live in
+  the VS Code extension's Deployments panel (`editors/vscode/src/deploy`),
+  over `DeployControlService` -- see the
+  [deployment console](deployment-console.md). Cutting an engine release is
+  [release cutting](release-cutting.md).
 - **Your own account.** Passkeys, sessions, personal access tokens, data export
   and the sign-in-policy switch are identity's own pages, at
   `identity.<domain>/me/{settings,devices,tokens,export}`. They are where the

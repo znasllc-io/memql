@@ -14,9 +14,10 @@ import (
 // shopperRecordingExecutor records every call, so "nothing was executed" is an
 // assertion rather than an inference.
 type shopperRecordingExecutor struct {
-	calls []string
-	actor []string
-	err   error
+	calls  []string
+	actor  []string
+	err    error
+	result any
 	// errForCall fails ONE call rather than all of them, which is what an
 	// extension's partial-write test needs: the pack's construct succeeds
 	// and the client's does not (design record 2026-09-21, D5).
@@ -37,6 +38,9 @@ func (e *shopperRecordingExecutor) Execute(ctx context.Context, query string) (a
 	}
 	if e.err != nil {
 		return nil, e.err
+	}
+	if e.result != nil {
+		return e.result, nil
 	}
 	return map[string]any{"ok": true}, nil
 }

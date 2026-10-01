@@ -20,7 +20,10 @@ import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/
 
 export function bundleResult(rows: Row[], cursor = ""): Result {
   return new Result({
-    bundle: { nodes: rows },
+    bundle: {
+      nodes: rows,
+      rootIds: rows.map((row) => row["id"]).filter((id): id is string => typeof id === "string"),
+    },
     ...(cursor === "" ? {} : { meta: { cursor } }),
   } as never);
 }
@@ -139,8 +142,8 @@ export function conceptOf(over: Partial<Concept> & { id: string }): Concept {
 }
 
 /** A raw browse node: intrinsics at the top, payload nested. */
-export function nodeOf(id: string, payload: Record<string, unknown>): Row {
-  return { id, concept: "v1:test:thing", createdAt: "2026-09-01T00:00:00Z", payload };
+export function nodeOf(id: string, payload: Record<string, unknown>, concept = "v1:test:thing"): Row {
+  return { id, concept, createdAt: "2026-09-01T00:00:00Z", payload };
 }
 
 export function withSession(

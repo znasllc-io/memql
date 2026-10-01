@@ -70,9 +70,23 @@ export async function browseConceptPage(
   const result = await query.executeNamed("conceptBrowse", call, callOpts);
 
   return {
-    rows: result.rawNodes(),
+    // A bundle includes relationship neighbors as well as the requested page.
+    // Only roots of this concept belong in its row count and schema sample.
+    // Match the concept too: different concepts may share the same bare id.
+    rows: conceptRoots(result.rawNodes(), result.raw()?.bundle?.rootIds ?? [], conceptId),
     nextCursor: result.meta()?.cursor ?? "",
   };
+}
+
+function conceptRoots(nodes: Row[], rootIds: string[], conceptId: string): Row[] {
+  const matching = nodes.filter((row) => row["concept"] === conceptId);
+  const byId = new Map(matching.map((row) => [row["id"], row]));
+  // Graph expansion may encounter a later root as an earlier root's neighbor.
+  // The root list, rather than node insertion order, preserves keyset ordering.
+  return rootIds.flatMap((id) => {
+    const row = byId.get(id);
+    return row === undefined ? [] : [row];
+  });
 }
 
 export async function getRowByConceptAndId(

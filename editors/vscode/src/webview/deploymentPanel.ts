@@ -44,22 +44,27 @@ import { LOG_PANE_SCRIPT, renderScreen } from "./screenLayout.js";
 import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 
 import {
-  DEPLOY_ACTIONS,
+  actionById,
   confirmationMatches,
-  confirmationPhrase,
   roleVisibility,
-  rolloutRequiresConfirmation,
-  type DeployActionId,
+  visibleActions,
   type RoleVisibility,
 } from "../deploy/actions.js";
 import {
+  previewNextVersion,
   readDeploymentStatus,
   runDeployAction,
-  type DeployActionRequest,
   type DeployControlPort,
   type DeployOutcome,
   type StatusRead,
+  type VersionPreview,
 } from "../deploy/controller.js";
+import {
+  actionOfKey,
+  deployControlByKey,
+  type DeployControl,
+  type DeployControlFacts,
+} from "../deploy/controls.js";
 import { instanceActions, runDetailActions, type InstanceActionId } from "../deploy/instanceActions.js";
 import { upgradeVerdict, type UpgradeTarget, type UpgradeVerdict } from "../deploy/upgrade.js";
 import { describeVersion } from "../version/describe.js";
@@ -252,6 +257,12 @@ export class DeploymentPanel {
   private instanceName = "";
   private instance: Instance | undefined;
   private pipeline: PipelineState | undefined;
+  /**
+   * The next-version proposals the Cut buttons name, read beside the status on
+   * every load. Undefined until then, and for a caller whose role is not
+   * offered Cut at all.
+   */
+  private versionPreview: VersionPreview | undefined;
   private outcome = "";
   private runs: readonly Run[] = [];
   private listing: TagListing = { tags: [], error: "" };
@@ -412,6 +423,7 @@ export class DeploymentPanel {
       this.instanceName = instanceName;
       this.screen = "overview";
       this.pipeline = undefined;
+      this.versionPreview = undefined;
       this.outcome = "";
       this.error = "";
     }
@@ -498,12 +510,22 @@ export class DeploymentPanel {
         reason: "unavailable",
       };
       this.pipeline = pipelineState(read, visibility);
+      this.versionPreview = undefined;
       this.render();
       return;
     }
-    const read = await readDeploymentStatus(port);
+    // THE PREVIEW IS READ BESIDE THE STATUS, not after it, so the Cut buttons
+    // paint once with their versions rather than first as bare bumps. Asked
+    // only when the role is offered Cut: the read is gated where CutVersion is,
+    // and asking a reader would only collect a refusal to discard.
+    const wantsPreview = visibleActions(visibility).some((action) => action.id === "cutVersion");
+    const [read, preview] = await Promise.all([
+      readDeploymentStatus(port),
+      wantsPreview ? previewNextVersion(port) : Promise.resolve(undefined),
+    ]);
     if (this.disposed) return;
     this.pipeline = pipelineState(read, visibility);
+    this.versionPreview = preview;
     this.render();
   }
 
@@ -1193,28 +1215,49 @@ export class DeploymentPanel {
   }
 
   /**
-   * Run one deploy-control action against the connected cluster.
+   * Run one deploy-control control against the connected cluster.
    *
-   * THE GATE IS NEVER THIS METHOD. The id is narrowed against the catalog
-   * because the postMessage channel is untrusted and an unrecognised id must be
-   * dropped rather than reaching `actionById` and throwing -- but whether the
-   * caller MAY run it is the engine's decision, taken again on the far side of
-   * the same gate the unary path runs. What comes back on a refusal names the
-   * role required, and it is rendered verbatim.
+   * THE GATE IS NEVER THIS METHOD. The key is resolved against controls this
+   * page builds from its own facts (deploy/controls.ts) because the postMessage
+   * channel is untrusted: what the page posts chooses among requests this
+   * extension built, and never supplies one. An unrecognised key is dropped
+   * rather than reaching `actionById` and throwing. Whether the caller MAY run
+   * the request is the engine's decision, taken again on the far side of the
+   * same gate the unary path runs. What comes back on a refusal names the role
+   * required, and it is rendered verbatim.
    */
-  private async runDeploy(rawId: string): Promise<void> {
-    const spec = DEPLOY_ACTIONS.find((a) => a.id === rawId);
-    if (spec === undefined || this.instance === undefined) return;
+  private async runDeploy(key: string): Promise<void> {
+    const actionId = actionOfKey(key);
+    if (actionId === undefined || this.instance === undefined) return;
     const port = this.deps.deployPort?.();
     if (port === undefined) {
       this.outcome = "ERROR: not connected to this cluster.";
       this.render();
       return;
     }
-    const request = await this.deployRequest(spec.id);
-    if (request === undefined) return;
+    const control = deployControlByKey(key, this.controlFacts());
+    if (control === undefined) {
+      // A key that no longer resolves: its target moved between the paint and
+      // the click (a reload landed, a rollout settled, the next version
+      // changed). Running whatever the action names NOW would send something
+      // other than what the button said, so nothing is sent.
+      this.outcome = `ERROR: that button's target is no longer current, so ${actionById(actionId).label} was not run. The page now shows what it names.`;
+      this.render();
+      return;
+    }
+    if (control.request === undefined) {
+      // No record to name -- nothing cut, nothing to roll back to. REFUSED
+      // rather than falling back to another record, for the reason the remote
+      // upgrade path gives about a missing id: a pending record nobody shipped
+      // is visible, inert and easy to act on by hand, while the wrong record
+      // acted on is none of those things.
+      this.outcome = `ERROR: ${control.refusal ?? `${control.label} has nothing to act on.`}`;
+      this.render();
+      return;
+    }
+    if (control.confirm !== "" && !(await this.confirmed(control))) return;
 
-    const outcome = await runDeployAction(port, request);
+    const outcome = await runDeployAction(port, control.request);
     if (this.disposed) return;
     // The engine's own line, including the audit id and -- on a refusal -- the
     // role that would have worked. Surfaced rather than reworded: a paraphrase
@@ -1222,6 +1265,16 @@ export class DeploymentPanel {
     // it against a log line.
     this.outcome = outcome.line;
     await this.load();
+  }
+
+  /** The facts the deploy-control buttons are resolved from -- one builder for the paint and the click. */
+  private controlFacts(): DeployControlFacts {
+    return {
+      instance: this.instance ?? {},
+      runs: this.runs,
+      rollouts: this.pipeline?.rollouts ?? [],
+      preview: this.versionPreview,
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -1378,89 +1431,21 @@ export class DeploymentPanel {
   }
 
   /**
-   * The parameters an action needs, and the confirmation the destructive ones
-   * demand.
+   * The type-to-confirm a destructive control demands.
    *
    * THE PHRASE IS THE TARGET, never the word "yes": re-typing the deployment
-   * being rolled back to forces the operator to look at what they selected.
-   * Undefined means "do not run" -- a cancelled prompt and a mismatched phrase
-   * are the same answer.
+   * being rolled back to, or the rollout being aborted, forces the operator to
+   * look at what they selected. The control carries it (confirmationPhrase),
+   * and a cancelled prompt and a mismatched phrase are the same answer: do not
+   * run.
    */
-  private async deployRequest(
-    id: DeployActionId,
-  ): Promise<DeployActionRequest | undefined> {
+  private async confirmed(control: DeployControl): Promise<boolean> {
     const ask = this.deps.confirm ?? (async () => undefined);
-    switch (id) {
-      case "cutVersion":
-        return { id, bump: "patch", version: "" };
-      case "deploy": {
-        // THE RECORD THIS PAGE RENDERED, BY ID (memql#4017). `load()` resolves
-        // it (state/deploymentHistory.pendingDeploymentId) and the overview
-        // prints it above this button, so the ship names the row the operator
-        // was looking at.
-        //
-        // This took `runs[0]` -- the newest record in the catalog the page last
-        // read, re-derived at the click -- and it was wrong twice over. It was
-        // not the PENDING record, and `deploy` transitions whatever it is given
-        // pending -> in_progress without checking what it is transitioning from
-        // (component/deploycontrol/deploy.go), so a cluster whose newest record
-        // had landed re-shipped a succeeded deployment. And it was resolved at
-        // the CLICK, so two cuts against one cluster inside the reload window
-        // and the ship named the other operator's record -- the same shape
-        // #4015 removed from the upgrade path by carrying the id the cut
-        // returned. There is no cut to return one here, so the id is fixed when
-        // the page is built instead.
-        const target = this.instance?.pendingDeploymentId ?? "";
-        if (target === "") {
-          // REFUSE rather than fall back to another record, for the reason the
-          // remote upgrade path gives about a missing id: a pending record
-          // nobody shipped is visible, inert and easy to ship by hand, while
-          // the wrong record shipped is none of those things.
-          this.outcome =
-            "ERROR: nothing is cut, so there is no pending deployment record to ship.";
-          this.render();
-          return undefined;
-        }
-        return { id, deploymentId: target };
-      }
-      case "rollback": {
-        // The newest run that actually LANDED, which is what a rollback target
-        // has to be -- rolling back to a record that failed would redeploy a
-        // digest that never worked.
-        const landed = this.runs.find((r) => r.status === "succeeded");
-        const target = landed?.id ?? "";
-        if (!(await this.confirmed(ask, id, target))) return undefined;
-        return { id, toDeploymentId: target };
-      }
-      case "rolloutAction": {
-        const subAction = "promote";
-        if (rolloutRequiresConfirmation(subAction) && !(await this.confirmed(ask, id, this.instance?.name ?? ""))) {
-          return undefined;
-        }
-        return { id, rollout: "", subAction };
-      }
-      default:
-        return undefined;
-    }
-  }
-
-  private async confirmed(
-    ask: (prompt: string, phrase: string) => Promise<string | undefined>,
-    id: DeployActionId,
-    target: string,
-  ): Promise<boolean> {
-    const phrase = confirmationPhrase(id, target);
-    if (phrase === "") {
-      // An action with nothing identifiable to re-type must not proceed
-      // unchallenged -- see confirmationPhrase.
-      this.outcome = `ERROR: nothing to confirm against, so ${id} was not run.`;
-      this.render();
-      return false;
-    }
-    const typed = await ask(`Type ${phrase} to confirm.`, phrase);
+    const phrase = control.confirm;
+    const typed = await ask(`${control.label}. Type ${phrase} to confirm.`, phrase);
     if (typed === undefined) return false;
     if (!confirmationMatches(phrase, typed)) {
-      this.outcome = `ERROR: that did not match ${phrase}, so ${id} was not run.`;
+      this.outcome = `ERROR: that did not match ${phrase}, so ${control.label} was not run.`;
       this.render();
       return false;
     }
@@ -1512,6 +1497,7 @@ export class DeploymentPanel {
               ? {}
               : { pipelineOffers: this.pipeline.actions.map((action) => action.id) }),
           }),
+          deployFacts: this.controlFacts(),
           nowMs: Date.now(),
           outcome: this.outcome,
           error: this.error,
@@ -1577,7 +1563,9 @@ export class DeploymentPanel {
               title: "Deploy",
               detail: "Reading this cluster's deployment status...",
               actions: [],
+              rollouts: [],
             },
+            ...(this.versionPreview === undefined ? {} : { versionPreview: this.versionPreview }),
             nowMs: Date.now(),
             outcome: this.outcome,
             error: this.error,

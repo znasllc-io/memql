@@ -572,7 +572,7 @@ func TestEveryMiddlewareRegistrationIsAccountedFor(t *testing.T) {
 	accounted := map[string]middlewareNote{
 		"PanicRecoveryMiddleware":            {why: "wraps the chain; serves no path of its own"},
 		"SecurityHeadersMiddleware":          {why: "sets response headers; serves no path of its own"},
-		"authMiddleware":                     {why: "the verifier; gates paths, claims none"},
+		"identityHTTPMiddleware":             {why: "defers verifier construction until packs are anchored; gates paths, claims none"},
 		"NewSessionRevocationHTTPMiddleware": {why: "inspects the token on every request; claims no path"},
 		"Middleware":                         {why: "the gRPC gateway -- CLAIMS POST /memql/query via memqlgrpc.InterceptedPaths()", claimsPaths: true},
 	}

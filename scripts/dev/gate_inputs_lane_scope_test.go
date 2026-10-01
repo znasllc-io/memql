@@ -133,6 +133,20 @@ var gateInputs = []struct {
 	// It is routed via the `go` bucket to db-tests instead -- the lane that
 	// actually runs it. A row here would assert the wrong lane.
 	{"arch.yaml", "component/architecture", "TestArchitectureModelIsNotStale"},
+	// The platform graph (memql#5727). Its gate lives in the ROOT package and
+	// regenerates through cmd/platformgraph, which reads the deploy base, the
+	// engine-bff component, the generated cloud front door, the OS navigation
+	// contract, arch.yaml's roles and ENGINE_NODE_TYPES -- all non-Go, so a PR
+	// touching only one of them reaches this lane and nothing else. One row
+	// per kind of input, each naming the root package that must stay in the
+	// step for the gate to run.
+	{"component/architecture/embedded/platform.graph.json", ".", "TestPlatformGraphIsNotStale"},
+	{"deploy/k8s/base/agent.yaml", ".", "TestPlatformGraphIsNotStale"},
+	{"deploy/k8s/components/engine-bff/bff.yaml", ".", "TestPlatformGraphIsNotStale"},
+	{"deploy/k8s/overlays/cloud/front-door.generated.yaml", ".", "TestPlatformGraphIsNotStale"},
+	{"component/memql/os_navigation.json", ".", "TestPlatformGraphIsNotStale"},
+	{"arch.yaml", ".", "TestPlatformGraphIsNotStale"},
+	{"scripts/lib/engine_build_args.sh", ".", "TestPlatformGraphIsNotStale"},
 	// The three paths that were EXEMPTED as "no gate reads it" until
 	// memql#3451 made an exemption's reason checkable against the tree
 	// (scripts/ci/gate_corpus_test.go). Each is read by a Go test under

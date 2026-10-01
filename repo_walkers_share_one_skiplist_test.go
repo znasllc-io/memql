@@ -33,6 +33,7 @@ var walkerExemptions = map[string]string{
 	"component/language/dslspec/grammar_corpus_test.go": "walks dsl/ skipping every dot-prefixed directory, and the 2026 corpus, a narrow subtree that is not an ancestor of .claude; component/language is its own module, so repowalk would be a cross-module import",
 	"component/memql/sense/imports_test.go":             "walks corpusRoot, the DSL corpus",
 	"component/memql/sense/runnable_test.go":            "walks corpusRoot, the DSL corpus",
+	"docs_bundle_build_test.go":                         "walks the t.TempDir() the docs bundle was just written into, and must count EVERY page in it against pageCount",
 	"docs_construct_names_test.go":                      "walks dsl/, and skips every dot-prefixed directory",
 	"scripts/ci/spa_image_wiring_test.go":               "walks clients/os/src, the shell stylesheet tree -- a narrow subtree that is not an ancestor of .claude",
 	"scripts/cidb/dbgate_test.go":                       "skips every dot-prefixed directory",

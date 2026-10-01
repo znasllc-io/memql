@@ -183,7 +183,7 @@ const SCREENS: readonly { name: string; html: string }[] = [
     html: renderRemoteInstance({
       instance: REMOTE,
       runs: [],
-      pipeline: { kind: "present", title: "Deploy", detail: "", actions: [] },
+      pipeline: { kind: "present", title: "Deploy", detail: "", actions: [], rollouts: [] },
       nowMs: 0,
       outcome: "",
       error: "",

@@ -64,7 +64,7 @@ admits targets** -- an unconfigured deployment never egresses. Set the
 | Var | Default | Meaning |
 |---|---|---|
 | `MEMQL_OUTBOUND_ENABLED` | `true` | worker on/off |
-| `MEMQL_OUTBOUND_EMAIL_ALLOWLIST` | empty (disabled) | recipient domain suffixes, comma-separated; subdomains admitted |
+| `MEMQL_OUTBOUND_EMAIL_ALLOWLIST` | empty (disabled) | exact recipient addresses or domain suffixes, comma-separated; domain entries admit subdomains |
 | `MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST` | empty (disabled) | URL prefixes, comma-separated; https required unless the prefix itself is `http://` (cluster-internal opt-in) |
 | `MEMQL_OUTBOUND_POLL_SECONDS` | `15` | safety-net drain interval |
 | `MEMQL_OUTBOUND_STARTUP_DELAY_SECONDS` | `20` | first-drain delay after boot |
@@ -79,6 +79,14 @@ sender) -- the same source the identity magic-link sender uses. A row
 whose target misses an allowlist a node is configured for, or whose body
 exceeds the cap, fails **fast and loud** (`status="failed"` with an
 explicit `lastError`) on that node.
+
+An entry such as `desk@example.com` permits only that mailbox, ignoring
+ASCII letter case while preserving all non-ASCII bytes. It does not permit
+`other@example.com`, `desk+tag@example.com`, or `desk@sub.example.com`. Existing domain entries
+such as `example.com` continue to permit every mailbox at that domain and
+its subdomains. Targets and exact-address entries must be single bare
+mailboxes; malformed addresses, display names, lists, and comments are
+refused before the transport is called.
 
 ### The medium must be configured on some node
 

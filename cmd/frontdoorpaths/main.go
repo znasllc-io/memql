@@ -290,6 +290,10 @@ var servedButNotExternallyRouted = map[string]declaration{
 		"Publishing an unauthenticated schema feed nobody dials is cost " +
 		"without benefit; route it the day an HTTP caller exists.",
 		server.ConceptAPIPaths},
+	"ShopperSelfAuthenticatedPaths": {"Exact pack-declared shopper routes use the handler's " +
+		"site/owner/store authorization. They must stay edge-only just like ShopperSurfacePaths; " +
+		"self-authentication does not permit a direct api.<domain> ingress.",
+		server.ShopperSelfAuthenticatedPaths},
 	"ShopperSurfacePaths": {"POST /forms/{pack}/{name} and GET /reads/{pack}/{name} -- a pack's " +
 		"declared shopper surface (epic memql#5532, issue memql#5551). The bff serves them and " +
 		"they are in HandlerAuthorizedPaths(), so this is the inverted pricing exactly: adding a " +

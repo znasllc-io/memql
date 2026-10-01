@@ -135,6 +135,22 @@ func loadedTreeRegistry(t *testing.T) *FunctionRegistry {
 // tier ALREADY decides the whole row set; if the answer needs a paragraph about
 // what a particular caller sees, the answer is no.
 var tierDecidesTheRead = map[string]string{
+	// Shopify propagation hydrates an outbox row reference under the named
+	// connector actor. The concepts' @mirroredTo("shopify") declaration is
+	// its authority (memql#4378), not cluster ownership. The connector row
+	// gate admits that actor and removes only the INJECTED tier predicate;
+	// an authored actor.isClusterOwner conjunct would still deny it. These
+	// four server-only reads deliberately let the existing admission rules
+	// decide: Shopify reads its source, another connector reads nothing, and
+	// ordinary internal callers remain subject to the clusterOwner tier.
+	// TestPropagationReadDeclarationsKeepTheirAdmissionContract pins each
+	// binding and declaration; TestPropagationReadsAdmitOnlyTheirDeclaredAuthority
+	// proves the positive and negative answers against a real database.
+	"productContentForPropagation":      "memql#5757. Server-only row-reference hydration under the concept's declared Shopify connector; connector admission and the ordinary clusterOwner tier decide every row. An authored owner conjunct would deny the connector the concept admits.",
+	"customerNoteForPropagation":        "memql#5757, as productContentForPropagation, over the Shopify-mirrored customer note.",
+	"companyLocationNoteForPropagation": "memql#5757, as productContentForPropagation, over the Shopify-mirrored company location note.",
+	"creditLimitForPropagation":         "memql#5757, as productContentForPropagation, over the Shopify-mirrored credit limit.",
+
 	"clientAccountsAll": "epic memql#5166. @requiresRank(\"admin\") bounds the callers to admin " +
 		"and above, for whom the deleted requiresDeveloperOrAbove arm was always true -- so the " +
 		"disjunction was a pass-through and the concept's tier already decided the row set. " +

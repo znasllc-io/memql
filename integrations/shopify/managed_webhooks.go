@@ -83,14 +83,30 @@ func (c *Connector) managedComplianceStore(ctx context.Context, req memqlsync.In
 // secret is the managed app's. Connect Shopify seals a COPY of the app client
 // secret as the webhook secret of every store it installs (connect_write.go),
 // so that store's per-store source and the app-level source verify the same
-// signature. Deliberately keyed on the client id alone, unlike
-// managedAppSigning: the question is whether the STORE was installed by the
-// managed app, and that stays true -- the sealed copy keeps verifying -- when
-// the app's own secret row is later missing.
-func (c *Connector) storeSignsWithManagedSecret(ctx context.Context, store Store) bool {
+// signature.
+//
+// KEYED ON THE CLIENT ID ALONE, and it reads nothing else. The question is
+// whether the STORE was installed by the managed app, and the sealed copy
+// keeps verifying the per-store URL whatever has happened to the app's own
+// secret since -- its row deleted, its sealed value blank, or sealed under a
+// master key this node no longer holds. So this reads the client-id variable
+// and never the secret (memql#5707 residual): it used to go through
+// managedApp, which also unseals the secret, and an unsealable one came back
+// as an error that read as "not managed" -- accepting exactly the per-store
+// privacy delivery this exists to refuse.
+//
+// No client id on the cluster is "not managed": nothing identifies the store
+// as one of this app's installs, and its per-store source is verified by the
+// store's own sealed secret. A client id that cannot be READ is neither
+// answer, so it is returned as an error rather than guessed in either
+// direction.
+func (c *Connector) storeSignsWithManagedSecret(ctx context.Context, store Store) (bool, error) {
 	if store.AppClientID == "" {
-		return false
+		return false, nil
 	}
-	client, _, err := c.managedApp(ctx)
-	return err == nil && client != "" && store.AppClientID == client
+	client, err := c.namedRowValue(ctx, conceptGlobalVariable, managedClientID, "value")
+	if err != nil {
+		return false, err
+	}
+	return client != "" && store.AppClientID == client, nil
 }

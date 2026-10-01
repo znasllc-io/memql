@@ -147,16 +147,15 @@ function newestWhere(
   let best: DeploymentRecord | undefined;
   for (const record of records) {
     if (!admits(record)) continue;
-    if (best === undefined) {
-      best = record;
-      continue;
-    }
-    const byCreated = compareDesc(record.createdAt, best.createdAt);
-    const newer =
-      byCreated !== 0 ? byCreated < 0 : record.deploymentId.localeCompare(best.deploymentId) < 0;
-    if (newer) best = record;
+    if (best === undefined || isNewer(record, best)) best = record;
   }
   return best;
+}
+
+/** Whether `a` sorts ahead of `b` in projectDeployments' total order. */
+function isNewer(a: DeploymentRecord, b: DeploymentRecord): boolean {
+  const byCreated = compareDesc(a.createdAt, b.createdAt);
+  return byCreated !== 0 ? byCreated < 0 : a.deploymentId.localeCompare(b.deploymentId) < 0;
 }
 
 /**
@@ -170,8 +169,75 @@ function newestWhere(
  * the cluster an orphan on the strength of a failed read would be worse than
  * saying nothing.
  */
-export function currentDeploymentId(records: DeploymentRecord[]): string {
-  return newestWhere(records, (record) => LANDED_STATUSES.has(record.status))?.deploymentId ?? "";
+export function currentDeploymentId(records: readonly DeploymentRecord[]): string {
+  return currentRecord(records)?.deploymentId ?? "";
+}
+
+function currentRecord(records: readonly DeploymentRecord[]): DeploymentRecord | undefined {
+  return newestWhere(records, (record) => LANDED_STATUSES.has(record.status));
+}
+
+/**
+ * The deployment Roll back returns to: the newest `succeeded` record cut
+ * BEFORE the release the cluster is running, carrying a DIFFERENT release.
+ *
+ * This took the newest `succeeded` record, and that is routinely the release
+ * the cluster is running -- every forward deploy lands `succeeded` and becomes
+ * current -- so the button's commonest outcome was a new deployment record
+ * redeploying what was already there. Each clause below closes one way of
+ * naming the running release, or of moving FORWARD under a button that says
+ * back:
+ *
+ *   - THE ANCHOR IS WHAT RUNS, NOT THE NEWEST ROW. A rollback lands its own
+ *     record at `rolled_back`, carrying the release it returned to on
+ *     `previousDeploymentId` (component/deploycontrol/deploy.go). Anchored on
+ *     that record's cut time, the release rolled away from -- cut AFTER the one
+ *     now running -- would be the answer, and rolling back twice would put the
+ *     release the operator just fled back on the cluster. When the release it
+ *     returned to is not in the history read, there is no anchor to measure
+ *     from, and the answer is none rather than a guess.
+ *   - CUT BEFORE THE ANCHOR, so the target is always behind what runs.
+ *   - A DIFFERENT RELEASE. A repair (memql#4209) lands a `succeeded` record
+ *     stamped with the version it re-synced, so the record behind it is the
+ *     same release under an older id.
+ *   - SOMETHING TO REDEPLOY. The engine refuses a target with neither a
+ *     version nor a digest, so offering one is offering a refusal.
+ *
+ * `succeeded` alone, never `rolled_back`: the engine refuses any other status
+ * as a rollback target ("rollback target must be succeeded").
+ *
+ * Empty when nothing qualifies -- a cluster on its first release, or one
+ * already rolled back to its oldest. The page says so, and nothing is sent.
+ */
+export function rollbackTargetId(records: readonly DeploymentRecord[]): string {
+  const current = currentRecord(records);
+  if (current === undefined) return "";
+  const anchor =
+    current.status === "rolled_back"
+      ? records.find((record) => record.deploymentId === current.previousDeploymentId)
+      : current;
+  if (anchor === undefined) return "";
+  return (
+    newestWhere(
+      records,
+      (record) =>
+        record.status === "succeeded" &&
+        isNewer(anchor, record) &&
+        (record.version !== "" || record.imageDigest !== "") &&
+        !sameRelease(record, anchor),
+    )?.deploymentId ?? ""
+  );
+}
+
+/**
+ * Whether two records carry the same release: the same version when both name
+ * one, else the same digest when both carry one. Two records that share
+ * neither are different as far as the rows can say.
+ */
+function sameRelease(a: DeploymentRecord, b: DeploymentRecord): boolean {
+  if (a.version !== "" && b.version !== "") return a.version === b.version;
+  if (a.imageDigest !== "" && b.imageDigest !== "") return a.imageDigest === b.imageDigest;
+  return false;
 }
 
 /**

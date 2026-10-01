@@ -356,6 +356,15 @@ func (i *Integration) handleStoreHealth(ctx context.Context, args map[string]any
 			"driftLast":          drift,
 			"domains":            domains,
 		}
+		// Privacy deliveries refused on this store's per-store URL, read off
+		// the audit trail (privacy_refusal.go). Each one is a legal request
+		// Shopify will not resend, so a failed read fails the report rather
+		// than rendering as "none refused".
+		privacy, err := c.privacyDeliveries(ctx, store)
+		if err != nil {
+			return nil, err
+		}
+		entry["privacyDeliveries"] = privacy
 		if bucket, ok := c.admin.Bucket(store.ID); ok {
 			entry["costBucket"] = map[string]any{
 				"currentlyAvailable": bucket.CurrentlyAvailable,

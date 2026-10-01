@@ -117,6 +117,11 @@ func connectorCallSites() []struct {
 		// capabilities.go -- the runtime's health read, which the Stores
 		// page renders through this connector.
 		{"syncStatesAll", map[string]any{"connector": "shopify"}},
+		// propagate.go -- current source rows under the connector actor.
+		{"productContentForPropagation", map[string]any{"rowId": "pc1"}},
+		{"customerNoteForPropagation", map[string]any{"rowId": "cn1"}},
+		{"companyLocationNoteForPropagation", map[string]any{"rowId": "cln1"}},
+		{"creditLimitForPropagation", map[string]any{"rowId": "cl1"}},
 		{"setProductContentStatus", map[string]any{"contentId": "pc1", "status": "live"}},
 		{"createAuditEvent", map[string]any{
 			"eventId": "aud1", "occurredAt": "2026-08-23T12:00:00Z", "category": "data",
@@ -124,6 +129,16 @@ func connectorCallSites() []struct {
 			"targetType": "shopifyStore", "targetId": "acme",
 			"detail": map[string]any{"topic": "customers/redact"}, "outcome": "success",
 		}},
+		// apply.go -- a privacy delivery refused on a managed store's per-store
+		// URL is audited as blocked, and storeHealth counts those events.
+		{"createAuditEvent", map[string]any{
+			"eventId": "aud2", "occurredAt": "2026-08-23T12:00:00Z", "category": "data",
+			"action": privacyRefusalAction, "actorUserId": "system:connector:shopify",
+			"targetType": "shopifyStore", "targetId": "acme",
+			"detail":  map[string]any{"topic": "customers/redact", "source": "shopify-acme"},
+			"outcome": "blocked", "failureReason": privacyRefusalReason,
+		}},
+		{"auditEventsByTarget", map[string]any{"targetId": "acme"}},
 		{"createGeneratedOutput", map[string]any{
 			"outputId": "shpdr1", "title": "export.json", "summary": "s",
 			"body": `{"rows":{}}`, "format": "text", "mimeType": "application/json", "source": "derived",
@@ -212,6 +227,16 @@ func TestGeneratedCallsResolveAgainstTheRealTree(t *testing.T) {
 	for _, site := range connectorCallSites() {
 		stmt := renderCall(site.fn, site.args)
 		checked++
+		// Parse has client origin. Server-only queries must resolve far
+		// enough to refuse that origin; their internal execution and row
+		// admission are covered by the real-database propagation test.
+		fn, _ := eng.Functions().Get(site.fn)
+		if fn != nil && fn.FunctionKind == "query" && fn.ServerOnly {
+			if _, err := eng.Parse(stmt); err == nil || !strings.Contains(err.Error(), "server-only") {
+				t.Errorf("%s: expected a server-only query refusal, got %v", site.fn, err)
+			}
+			continue
+		}
 		if _, err := eng.Parse(stmt); err != nil {
 			t.Errorf("%s: the engine refused the rendered call:\n  %s\n  --> %v", site.fn, truncate(stmt, 400), err)
 		}

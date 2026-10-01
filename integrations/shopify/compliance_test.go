@@ -272,3 +272,33 @@ func TestAReplayedPrivacyBodyUnderAnotherTopicQueuesNothing(t *testing.T) {
 		}
 	}
 }
+
+// customers/redact is bound to its shape by what it CARRIES (a customer) and
+// what it does NOT (a data_request), not by orders_to_redact (memql#5707
+// residual). Shopify documents that key as always present, but it is the one
+// part of the shape that separates nothing: the customer already separates it
+// from shop/redact and the absent data_request from customers/data_request. So
+// a body that omits it is still the redaction it says it is and is queued --
+// refusing it would turn a legal request into a failed row -- while the replay
+// matrix holds with the key gone: the same body under either other topic
+// queues nothing.
+func TestARedactBodyWithoutOrdersToRedactIsStillARedaction(t *testing.T) {
+	const shop = "acme-widgets.myshopify.com"
+	body := map[string]any{"shop_domain": shop, "customer": map[string]any{"id": 991}}
+	for _, topic := range []string{TopicRedact, TopicDataRequest, TopicShopRedact} {
+		t.Run("delivered as "+topic, func(t *testing.T) {
+			h := newHarness(t)
+			_, err := h.conn.Apply(context.Background(), complianceDelivery(topic, body))
+			queued := h.engine.callsTo("queueComplianceJob")
+			if topic == TopicRedact {
+				if err != nil || len(queued) != 1 || !strings.Contains(queued[0], `customerGid: "gid://shopify/Customer/991"`) {
+					t.Fatalf("a customers/redact with no orders_to_redact: err=%v, jobs=%v; want it queued for the customer", err, queued)
+				}
+				return
+			}
+			if err == nil || len(queued) != 0 {
+				t.Fatalf("the redact body replayed as %s queued %d jobs (err=%v)", topic, len(queued), err)
+			}
+		})
+	}
+}

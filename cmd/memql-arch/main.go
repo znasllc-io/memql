@@ -1,10 +1,9 @@
 // memql-arch walks a Go workspace and emits a topology.model.json
-// describing its architecture: cluster, services, packages, types,
-// and the relationships between them. The output is consumed by
-// MemQL Cockpit to render the Topology tab and by anything else that
-// wants to talk about the system in software-architecture terms
-// (docs exporters, observability overlays, CI gates on import
-// cycles, etc.).
+// describing its architecture: cluster, services (the module and each node
+// role arch.yaml declares), packages, types, and the relationships between
+// them. The committed copy is embedded by component/architecture/embedded for
+// anything that wants to talk about the system in software-architecture terms
+// (docs generators, observability overlays, CI gates on import cycles, etc.).
 //
 // Usage:
 //
@@ -18,9 +17,10 @@
 //
 // The checked-in component/architecture/embedded/topology.model.json is
 // produced by `make arch-model`, which pins the flag set. Do not regenerate it
-// by hand: the flags are load-bearing (the artifact includes the call graph,
-// which the defaults do not) and `make arch-model-check` compares against
-// exactly that command.
+// by hand: the flags are load-bearing (--automations, --reproducible and
+// --cluster change the artifact) and `make arch-model-check` compares against
+// exactly that command. The committed artifact carries NO call graph
+// (memql#5727); --calls is how the drift gate builds one on demand.
 //
 // Exit codes: 0 success, 1 hard failure (workspace not found, etc.).
 // Per-package errors are printed as warnings and do not change the

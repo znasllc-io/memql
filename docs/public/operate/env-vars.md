@@ -10,7 +10,6 @@ owner: znas
 # Environment Variables -- MemQL
 
 **Audience:** engineers running MemQL locally or operating it in lab/prod.
-**Last updated:** 2026-04-25 (post env-var refactor; Phase 8 complete)
 **Companion doc:** the product frontend repo's env-vars doc covers the frontend side.
 
 ---
@@ -610,7 +609,7 @@ site, still carries runtime settings and still records traffic. Full context:
 | `MEMQL_REGION`       | `local` (cascades from `MEMQL_ENVIRONMENT`) | Region label for events / metadata.                            |
 | `K_REVISION`         | `os.Hostname()`           | Cloud Run injects this; falls back to hostname when running off-Cloud-Run.       |
 | `MEMQL_GEOIP_DB_PATH`| none                      | Path to a GeoIP database; absent = no GeoIP enrichment.                          |
-| `VERSION`            | `dev`                     | Falls back to reading the `VERSION` file, then to literal `"dev"`.               |
+| `VERSION`            | not read                  | Ignored since memql#3998: the release is the link-time stamp in `core/buildinfo`, and neither this variable nor the `VERSION` file changes it. |
 
 #### WebSocket tuning (rarely overridden)
 
