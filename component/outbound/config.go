@@ -7,6 +7,7 @@
 package outbound
 
 import (
+	"net/mail"
 	"strings"
 	"time"
 
@@ -50,14 +51,14 @@ const (
 
 // Config is the worker's tunable policy, resolved from env once at
 // construction (MEMQL_OUTBOUND_*). Deny-by-default: a medium without a
-// non-empty allowlist is disabled, and rows targeting it fail fast with
-// an explicit error rather than waiting silently (ADR 4.3).
+// non-empty allowlist is disabled on this node, which leaves its rows
+// pending for a configured peer (memql#2540).
 type Config struct {
 	Enabled          bool
 	Poll             time.Duration
 	StartupDelay     time.Duration
 	MaxAttempts      int
-	EmailAllowlist   []string // recipient domain suffixes, lowercased
+	EmailAllowlist   []string // exact mailboxes (ASCII case folded) or lowercased domain suffixes
 	WebhookAllowlist []string // URL prefixes; https required unless the prefix itself is http://
 	MaxPayloadBytes  int
 	HTTPTimeout      time.Duration
@@ -130,8 +131,9 @@ func normalizeWebhookPrefixes(prefixes []string) []string {
 }
 
 // splitAllowlist parses a comma-separated allowlist env value. Entries
-// are trimmed; empties dropped; domain lists lowercased (targets are
-// compared case-insensitively, URL prefixes are not).
+// are trimmed; empties dropped; domain lists lowercased. Exact mailbox
+// entries fold ASCII case only, preserving distinct SMTPUTF8 addresses.
+// URL prefixes remain case-sensitive.
 func splitAllowlist(raw string, lower bool) []string {
 	var out []string
 	for _, part := range strings.Split(raw, ",") {
@@ -140,29 +142,58 @@ func splitAllowlist(raw string, lower bool) []string {
 			continue
 		}
 		if lower {
-			part = strings.ToLower(part)
+			if strings.Contains(part, "@") {
+				part = lowerASCII(part)
+			} else {
+				part = strings.ToLower(part)
+			}
 		}
 		out = append(out, part)
 	}
 	return out
 }
 
-// emailAllowed reports whether a recipient address matches the domain
-// suffix allowlist. The match is on the domain part only, case
-// insensitive; "example.com" also admits subdomains ("a.example.com").
-// An empty allowlist admits nothing (medium disabled).
-func emailAllowed(target string, domains []string) bool {
-	at := strings.LastIndex(target, "@")
-	if at <= 0 || at == len(target)-1 {
+// emailAllowed accepts a single bare mailbox. Entries containing @ name
+// exactly one address, ignoring ASCII case, without alias or subdomain
+// expansion. Domain entries retain suffix matching: example.com also
+// admits a.example.com. Malformed addresses and an empty list admit nothing.
+func emailAllowed(target string, entries []string) bool {
+	if !bareMailbox(target) {
 		return false
 	}
+	at := strings.LastIndex(target, "@")
 	domain := strings.ToLower(target[at+1:])
-	for _, d := range domains {
-		if domain == d || strings.HasSuffix(domain, "."+d) {
+	for _, entry := range entries {
+		if strings.Contains(entry, "@") {
+			if bareMailbox(entry) && lowerASCII(target) == lowerASCII(entry) {
+				return true
+			}
+			continue
+		}
+		if domain == entry || strings.HasSuffix(domain, "."+entry) {
 			return true
 		}
 	}
 	return false
+}
+
+// A display name, address list, comment, or surrounding whitespace must
+// not let the policy inspect a different spelling from the transport.
+func bareMailbox(raw string) bool {
+	address, err := mail.ParseAddress(raw)
+	return err == nil && address.Name == "" && address.Address == raw
+}
+
+// Unicode case folding would equate distinct SMTPUTF8 mailboxes, such as
+// long-s with ASCII s. Preserve every non-ASCII byte in configured addresses.
+func lowerASCII(raw string) string {
+	out := []byte(raw)
+	for i, b := range out {
+		if b >= 'A' && b <= 'Z' {
+			out[i] = b + ('a' - 'A')
+		}
+	}
+	return string(out)
 }
 
 // matchWebhookPrefix returns the allowlist prefix the target matches
