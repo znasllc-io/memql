@@ -204,7 +204,7 @@ func newConnectHarness(t *testing.T) *connectHarness {
 // site makes siteById answer one row the developer owns.
 func (h *connectHarness) site(id, kind string) {
 	h.engine.setRows("siteById", []map[string]any{{
-		"id": id, "kind": kind, "status": "draft", "ownerUserId": connectDev,
+		"id": id, "accountId": "self", "kind": kind, "status": "draft", "ownerUserId": connectDev,
 		"packageId": "v1:platform:package:p1", "packageDeployableName": "storefront",
 	}})
 }

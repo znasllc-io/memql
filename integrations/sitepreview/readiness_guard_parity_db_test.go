@@ -171,7 +171,7 @@ func TestReadinessAndTheGuardGiveTheSameGoLiveRefusal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			siteId := "v1:platform:site:parity-" + fmt.Sprintf("%d", time.Now().UnixNano())
 			ids = append(ids, siteId)
-			q := fmt.Sprintf(`mutation createSite(siteId: %s, hostname: %s, kind: "shopify_storefront", bundleRef: %s`,
+			q := fmt.Sprintf(`mutation createSite(accountId: "self", siteId: %s, hostname: %s, kind: "shopify_storefront", bundleRef: %s`,
 				langparser.QuoteString(siteId),
 				langparser.QuoteString(strings.ReplaceAll(memql.BareShortId(siteId), ":", "-")+".parity.example"),
 				langparser.QuoteString("blob://sites/"+memql.BareShortId(siteId)+"/v1/"))

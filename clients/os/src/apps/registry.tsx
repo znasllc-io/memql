@@ -26,6 +26,7 @@ import { ACCOUNTS_SECTIONS } from "./accounts/settings";
 import { BinApp } from "./bin/BinApp";
 import { BIN_APP_ID, BIN_SECTIONS } from "./bin/concepts";
 import { CampaignsApp } from "./campaigns/CampaignsApp";
+import { EmailApp } from "./email/EmailApp";
 import { ClusterApp } from "./cluster/ClusterApp";
 import { CLUSTER_SECTIONS } from "./cluster/settings";
 import { ConceptsApp } from "./concepts/ConceptsApp";
@@ -572,6 +573,18 @@ const campaigns: OsAppManifest = {
   component: CampaignsApp,
 };
 
+const email: OsAppManifest = {
+  id: "email",
+  name: "Email",
+  icon: Send,
+  requires: "app:email",
+  sections: [{ id: "inbox", name: "Inbox" }, { id: "logs", name: "Logs", requires: "app:email/logs" }, { id: "settings", name: "Settings" }],
+  settingsSection: "settings",
+  logsSection: "logs",
+  attentionChanges: [{ id: "email:test-inbox", revision: "capture-1", sectionId: "inbox", label: "Inspect captured test email" }],
+  component: EmailApp,
+};
+
 // The Bin, in full (memql#4784). ALWAYS DOCKED, which is the whole distinction
 // its sibling manifests point at: `dockFixture` puts it in the dock in every
 // session and keeps it out of the pin list, so it cannot be unpinned, dragged
@@ -779,6 +792,7 @@ export const OS_REGISTRY: OsRegistry = {
     identity,
     accounts,
     campaigns,
+    email,
     cluster,
     concepts,
     files,

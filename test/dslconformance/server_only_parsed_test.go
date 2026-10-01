@@ -173,6 +173,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Capture belongs to the installation's restricted test inbox, not
+		// actor.userId: identity mail can precede a recipient account. Only
+		// the capture service writes encrypted bodies; the public read capability
+		// checks a signed-in owner/developer before borrowing that service actor.
+		{Path: "email/mutations.memql", Name: "recordCapturedEmail"}: true,
+		{Path: "email/queries.memql", Name: "capturedEmails"}:        true,
 		// Shopify's outbox delivers rows under its connector actor, which has
 		// no actor.userId. These row-id reads keep the concept's mirroredTo
 		// admission: Shopify may read its source, another connector may not,

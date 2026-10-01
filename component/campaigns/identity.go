@@ -124,7 +124,7 @@ func (w *Worker) resolveSendIdentity(ownerCtx context.Context, campaign Campaign
 			return resolvedIdentity{}, identityRefusal{Reason: "choose a sending identity belonging to this organization", Terminal: true}
 		}
 		return resolvedIdentity{
-			SendAs: email.SendAs{FromName: strings.TrimSpace(campaign.FromName)},
+			SendAs: email.SendAs{AccountID: campaign.AccountID, FromName: strings.TrimSpace(campaign.FromName)},
 			Label:  w.cfg.SendingIdentityFor(""),
 		}, identityRefusal{}
 	}
@@ -174,7 +174,7 @@ func (w *Worker) resolveSendIdentity(ownerCtx context.Context, campaign Campaign
 		fromName = strings.TrimSpace(identity.FromName)
 	}
 	return resolvedIdentity{
-		SendAs:  email.SendAs{Address: strings.TrimSpace(identity.Address), FromName: fromName},
+		SendAs:  email.SendAs{AccountID: campaign.AccountID, Address: strings.TrimSpace(identity.Address), FromName: fromName},
 		Label:   w.cfg.SendingIdentityFor(identity.Address),
 		ReplyTo: strings.TrimSpace(identity.ReplyTo),
 	}, identityRefusal{}

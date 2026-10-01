@@ -80,7 +80,7 @@ func TestDeveloperSiteSurvivesThePipelineAndGoesLive_DB(t *testing.T) {
 
 	// 1. EnsureSite
 	_, err = eng.Execute(devCtx, fmt.Sprintf(
-		`mutation createSite(siteId: %s, hostname: %s, kind: "static", bundleRef: "", status: "draft")`,
+		`mutation createSite(accountId: "self", siteId: %s, hostname: %s, kind: "static", bundleRef: "", status: "draft")`,
 		langparser.QuoteString(siteId), langparser.QuoteString(hostname)))
 	require.NoError(t, err, "createSite as the developer")
 	if got, _ := owner(); got != developer {

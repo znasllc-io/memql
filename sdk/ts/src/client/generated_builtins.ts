@@ -892,6 +892,25 @@ QueryClient.prototype.effectiveCapabilitiesForActor = function (this: QueryClien
   return this.executeNamed("effectiveCapabilitiesForActor", buildEffectiveCapabilitiesForActor(args), opts);
 };
 
+/** Read the last 100 captured test messages from the last seven days. Owner or developer only; capture must be explicitly configured. This is a sensitive test inbox, not evidence of Internet delivery. */
+export interface EmailInboxArgs {
+}
+
+export function buildEmailInbox(args: EmailInboxArgs): string {
+  void args;
+  return "builtin emailInbox()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailInbox(args?: EmailInboxArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailInbox = function (this: QueryClient, args: EmailInboxArgs = {} as EmailInboxArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailInbox", buildEmailInbox(args), opts);
+};
+
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */
 export interface FleetModelProbeArgs {
   /** v1:worker:registration.id of the machine to measure on. It must be one of the caller's own; another user's id answers exactly as a made-up one does. */
