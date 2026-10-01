@@ -11,6 +11,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // capabilities.go -- the DSL-callable surface.
@@ -46,6 +47,7 @@ func (w *Worker) IntegrationName() string { return "campaigns" }
 // Capabilities returns the DSL-callable operations.
 func (w *Worker) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "sendingReadiness", Description: "Check the selected organization's sender and unsubscribe setup without sending mail.", Handler: w.handleSendingReadiness},
 		{Name: "saveTemplate", Description: "Save or publish the reviewed revision of an organization email template.", Handler: w.handleSaveTemplate},
 		{
 			Name:        "startSend",
@@ -368,8 +370,12 @@ func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (i
 	// where an unreadable identity waits -- because a caller pressing the
 	// button is owed an answer now rather than a queued job that may or may
 	// not resolve later.
-	if _, refusal := w.resolveSendIdentity(ctx, campaign); refusal.refused() {
+	identity, refusal := w.resolveSendIdentity(ctx, campaign)
+	if refusal.refused() {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: %s", op, refusal.Reason)
+	}
+	if err := email.CheckSender(ctx, w.resolveSender(), identity.SendAs); err != nil {
+		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
 	}
 
 	tmpl, found, err := w.store.TemplateByID(ctx, campaign.TemplateID)

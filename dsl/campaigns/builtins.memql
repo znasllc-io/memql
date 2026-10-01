@@ -1,3 +1,12 @@
+@sdk
+@executor("integration.campaigns.sendingReadiness")
+@description("Check current organization sending permission, the selected sender and unsubscribe setup without sending mail. A campaignId reads that campaign's saved organization and sender. Otherwise select accountId and senderIdentityId explicitly. Readiness is not evidence of delivery and is rechecked when sending.")
+builtin campaignSendingReadiness {
+  campaignId string
+  accountId string
+  senderIdentityId string
+}
+
 // campaigns domain -- the Go-backed sending surface (memql#3348).
 //
 // WHY THESE ARE BUILTINS AND NOT MUTATIONS. Everything else an operator

@@ -1,7 +1,7 @@
 import { AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
 import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
-import { campaignSendingConfigured } from "./readiness";
+import { useSendingReadiness } from "./useCampaigns";
 import { useCallback, useState } from "react";
 import { Mail, Users, FileText } from "lucide-react";
 import { useSession } from "../../chrome/access";
@@ -33,8 +33,7 @@ import { NewTemplate } from "./TemplatesSection";
 import { editorTemplateURL } from "../../items/editorPreference";
 import { openHandoff } from "../../items/vscode";
 import type { CampaignWrites } from "./actions";
-import type { CampaignFeeds, Reading } from "./useCampaigns";
-import type { EmailReadiness } from "./rows";
+import type { CampaignFeeds } from "./useCampaigns";
 
 const STEPS = ["Sending setup", "Sender", "Audience", "Content", "Review"];
 
@@ -44,14 +43,12 @@ export function CampaignJourney({
   feeds,
   writes,
   uploads,
-  email,
   trackByDefault,
   onDone,
 }: {
   feeds: CampaignFeeds;
   writes: CampaignWrites;
   uploads: UploadProvider;
-  email: Reading<EmailReadiness>;
   trackByDefault: boolean;
   onDone: (id: string) => void;
 }) {
@@ -86,10 +83,8 @@ export function CampaignJourney({
   );
   const audience = audiences.find((a) => a.id === audienceId);
   const template = templates.find((t) => t.id === templateId);
-  const configured =
-    campaignSendingConfigured(readiness) &&
-    email.state === "ready" &&
-    !email.value.needsConfiguration;
+  const sending = useSendingReadiness(accountId, senderId);
+  const configured = sending.ready;
   const complete = [
     !!configured,
     (accountId === "self" && senderId === "") || senders.some((s) => s.id === senderId),
@@ -155,8 +150,8 @@ export function CampaignJourney({
             <Panel label="Sending service">
               <Subhead>Sending service</Subhead>
               <Caption>
-                Campaigns uses this cluster’s email service. A sender mailbox and a working
-                unsubscribe address are required before sending.
+                Campaigns sends through the selected organization’s email connection.
+                Choose its sender and check setup before sending.
               </Caption>
               {configured ? (
                 <Notice
@@ -168,20 +163,20 @@ export function CampaignJourney({
                 <Notice
                   tone="warn"
                   sentence={
-                    email.value.needsConfiguration
+                    sending.state === "ready"
                       ? "Email sending needs setup."
                       : "Sending readiness is not confirmed."
                   }
                   next="An operator must finish the settings below. You can continue preparing a draft."
-                  detail={email.error || email.value.detail}
+                  detail={sending.reason}
                 />
               )}
               <Button
                 onClick={() => {
-                  email.reload();
+                  sending.reload();
                   readiness?.reseed();
                 }}
-                busy={email.state === "loading"}
+                busy={sending.state === "loading"}
                 busyLabel="Checking"
               >
                 Check sending service
@@ -189,16 +184,16 @@ export function CampaignJourney({
             </Panel>
             <SetupGroup
               app="Campaigns"
-              requires={["email", "campaigns"]}
+              requires={["campaigns"]}
               wants={[]}
               readiness={readiness}
             />
             <Panel label="Provider and domain">
               <Subhead>Provider and domain</Subhead>
               <Caption>
-                Configure the email provider in Settings → Integrations. Authorize your sending
-                mailbox with that provider and complete its domain verification, including any SPF
-                or DKIM records it supplies. Website domain verification does not authorize email.
+                An owner or developer can connect the organization’s Azure email domain in
+                Campaigns → Senders → Connect email domain. Complete the DNS verification there,
+                then choose the verified sender here.
               </Caption>
               <Caption>
                 The unsubscribe address and signing secret are configured by your cluster operator.
@@ -218,7 +213,7 @@ export function CampaignJourney({
                 value={senderId}
                 onChange={setSenderId}
               >
-                <option value="">This cluster’s default mailbox</option>
+                <option value="">{accountId === "self" ? "Operator organization’s default mailbox" : "Choose this organization’s sender"}</option>
                 {senders.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.fromName} — {s.address}

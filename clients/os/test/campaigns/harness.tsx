@@ -94,6 +94,7 @@ export interface FakeSeed {
    *  because the "needs configuration" banner is the surprising state and a
    *  harness whose default produced it would put a warning on every test. */
   integrationStatus?: Row[] | Error;
+  sendingReadiness?: Row[] | Error;
   concepts?: { id: string; domain: string; entity: string }[];
 }
 
@@ -131,6 +132,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
       campaignStats: reader(seed.campaignStats),
       campaignsForAccount: reader(seed.campaignsForAccount),
       integrationStatus: reader(seed.integrationStatus ?? [HEALTHY_EMAIL]),
+      campaignSendingReadiness: reader(seed.sendingReadiness ?? [{ ready: true, reason: "" }]),
       clusterSettingsCurrent: reader(seed.clusterSettings ?? [RUNNING_AUTOMATIONS]),
       listConcepts: vi.fn(async () =>
         (seed.concepts ?? []).map((c) => ({

@@ -3,9 +3,46 @@ package email
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
+
+func TestOrganizationSenderNeverFallsBackAndCaptureNeverSendsOutside(t *testing.T) {
+	envSender := &stubSender{}
+	lazy := NewLazySender(envSender, nil, nil, nil)
+	lookups := 0
+	connected := &stubSender{}
+	lazy.organization = func(_ context.Context, account string) (Sender, error) {
+		lookups++
+		if account == "client" {
+			return connected, nil
+		}
+		return nil, nil
+	}
+	msg := Message{To: "reader@example.test", Subject: "Test", TextBody: "Hello"}
+	if err := lazy.Send(context.Background(), msg, SendAs{AccountID: "other-client"}); !IsPermanent(err) {
+		t.Fatal("missing client connection fell back", err)
+	}
+	if err := CheckSender(context.Background(), lazy, SendAs{AccountID: "other-client"}); !IsPermanent(err) {
+		t.Fatal("unconfigured client passed preflight", err)
+	}
+	if err := lazy.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil {
+		t.Fatal(err)
+	}
+	if envSender.count.Load() != 0 || connected.count.Load() != 1 {
+		t.Fatal("client send reached operator transport")
+	}
+	t.Setenv("MEMQL_MASTER_KEY", strings.Repeat("ab", 32))
+	lazy.envResolved = &CaptureSender{store: &captureStore{}}
+	before := lookups
+	if err := lazy.Send(context.Background(), msg, SendAs{AccountID: "client"}); err != nil {
+		t.Fatal(err)
+	}
+	if lookups != before || connected.count.Load() != 1 {
+		t.Fatal("capture consulted external transport")
+	}
+}
 
 // stubSender records the messages Send was called with, useful for
 // asserting that the lazy resolver picked the right concrete Sender.

@@ -570,7 +570,7 @@ const campaigns: OsAppManifest = {
   wants: CAMPAIGNS_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
-  attentionChanges: [{ id: "campaigns:organization", revision: "organization-1", sectionId: "campaigns", label: "Choose the organization for every campaign" }, { id: "campaigns:template-editor", revision: "editor-1", sectionId: "templates", label: "Edit and publish email templates in Productivity Tools" }],
+  attentionChanges: [{ id: "campaigns:organization", revision: "organization-1", sectionId: "campaigns", label: "Choose the organization for every campaign" }, { id: "campaigns:template-editor", revision: "editor-1", sectionId: "templates", label: "Edit and publish email templates in Productivity Tools" }, { id: "campaigns:azure-email", revision: "azure-1", sectionId: "senders", label: "Connect an organization’s email domain to Microsoft Azure" }],
   component: CampaignsApp,
 };
 

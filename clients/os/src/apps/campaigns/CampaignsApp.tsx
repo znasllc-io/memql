@@ -1,4 +1,3 @@
-import { NeedsConfiguration } from "./NeedsConfiguration";
 import { CampaignsOverview } from "./CampaignsOverview";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
@@ -21,7 +20,7 @@ import {
   LocalCampaignsSettingsStore,
   type CampaignsSettings,
   type CampaignsSettingsStore, CAMPAIGNS_REQUIRES, CAMPAIGNS_WANTS } from "./settings";
-import { useCampaignFeeds, useEmailReadiness } from "./useCampaigns";
+import { useCampaignFeeds } from "./useCampaigns";
 import { useSession } from "../../chrome/access";
 
 // Campaigns: writing mail, sending it, and knowing what happened (epic
@@ -84,7 +83,6 @@ export function CampaignsApp({
 
   const feeds = useCampaignFeeds();
   const writes = useCampaignWrites();
-  const email = useEmailReadiness();
 
   function updateSettings(patch: Partial<CampaignsSettings>) {
     const next = { ...settings, ...patch, version: 1 as const };
@@ -130,7 +128,6 @@ export function CampaignsApp({
 
   return (
     <>
-      {sectionId !== "campaigns" ? <NeedsConfiguration email={email} /> : null}
       {sectionId === "audiences" ? (
         <AudiencesSection
           feeds={feeds}
@@ -163,8 +160,7 @@ export function CampaignsApp({
           showFiled={settings.showFiled}
           trackByDefault={settings.trackByDefault}
           uploads={uploadProvider}
-          email={email}
-        />
+          />
       )}
     </>
   );

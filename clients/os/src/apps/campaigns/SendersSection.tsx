@@ -1,3 +1,4 @@
+import { AzureEmailConnections } from "../../modules/connections/AzureEmailConnections";
 import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { useMemo, useState } from "react";
@@ -66,6 +67,7 @@ export function SendersSection({
 }) {
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
+  const [connecting, setConnecting] = useState(false);
 
   const source = useLiveView<Row, SenderIdentityRow>(
     feeds.senders.source,
@@ -80,6 +82,8 @@ export function SendersSection({
     () => source?.snapshot.rows.find((s) => s.id === openId) ?? null,
     [source, source?.snapshot, openId],
   );
+
+  if (connecting) return <AzureEmailConnections onBack={() => setConnecting(false)} />;
 
   if (adding)
     return (
@@ -117,6 +121,7 @@ export function SendersSection({
       <Head title="Senders" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="Add a mailbox" />
       </Head>
+      <Button onClick={() => setConnecting(true)}>Connect email domain</Button>
 
       {feeds.senders.snapshot.error ? (
         <Notice
@@ -134,11 +139,10 @@ export function SendersSection({
         rowId={(s) => s.id}
         fingerprint={senderFingerprint}
         label="Mailboxes this cluster can send as"
-        emptyText="No mailboxes declared. Campaigns will use this cluster's configured default -- add one here to send as a specific address."
+        emptyText="No sending addresses yet. Connect the organization’s email domain to add a verified sender."
         emptyContent={
           <EmptyState icon={AtSign} title="No mailboxes declared">
-            Add a mailbox your provider permits this cluster to send from, or use its configured
-            default.
+            Connect your organization’s email domain, then choose the address your clients will see.
           </EmptyState>
         }
         renderRow={(sender, tick) => (

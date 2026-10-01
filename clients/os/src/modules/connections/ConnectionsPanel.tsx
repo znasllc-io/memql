@@ -11,10 +11,11 @@ import { githubAccountsFor } from "../../apps/deployables/sources/accountSetup";
 import { returnPathFor, type ConnectReturn } from "../../apps/deployables/sources/connectReturn";
 import { usePackages } from "../../apps/deployables/packages/usePackages";
 import { packageFromRow } from "../../apps/deployables/packages/rows";
+import { AzureEmailConnections } from "./AzureEmailConnections";
 import { ShopifyConnections } from "./ShopifyConnections";
 
-export type ConnectionProvider = "github" | "shopify";
-const PROVIDERS = [["github", "GitHub"], ["shopify", "Shopify"]] as const;
+export type ConnectionProvider = "github" | "shopify" | "email";
+const PROVIDERS = [["github", "GitHub"], ["shopify", "Shopify"], ["email", "Email"]] as const;
 /** Same records, controls and navigation in every app that needs connections. */
 export function ConnectionsPanel({ appId, initialProvider = "github", connectResult = null, intent, consumeIntent }: {
   appId: "settings" | "deployables"; initialProvider?: ConnectionProvider; connectResult?: ConnectReturn | null;
@@ -31,6 +32,7 @@ export function ConnectionsPanel({ appId, initialProvider = "github", connectRes
   useEffect(() => setResult(connectResult), [connectResult]);
   useEffect(() => {
     if (!intent) return;
+    if (intent.payload.provider === "email") setProvider("email");
     if (intent.payload.provider === "shopify") setProvider("shopify");
     const shopify = intent.payload.shopify as { reason?: string } | undefined;
     if (shopify) { setProvider("shopify"); setShopifyResult(shopify.reason); }
@@ -47,5 +49,5 @@ export function ConnectionsPanel({ appId, initialProvider = "github", connectRes
     packages={packages.snapshot.rows.map(packageFromRow)}
     feed={{ state: credentials.snapshot.state, error: credentials.snapshot.error, retry: credentials.reseed }}
     header={header} returnPath={returnPathFor(section, appId)} connectResult={result} />
-    : <ShopifyConnections header={header} appId={appId} result={shopifyResult} />;
+    : provider === "email" ? <AzureEmailConnections header={header} /> : <ShopifyConnections header={header} appId={appId} result={shopifyResult} />;
 }

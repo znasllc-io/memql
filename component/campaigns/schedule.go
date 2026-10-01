@@ -3,6 +3,7 @@ package campaigns
 import (
 	"context"
 	"fmt"
+	"github.com/znasllc-io/memql/integrations/email"
 	"time"
 )
 
@@ -215,8 +216,12 @@ func (w *Worker) fireTimePreflight(ownerCtx context.Context, campaign Campaign, 
 	// split lines up exactly with this function's -- a missing or disabled
 	// row is AUTHORING and terminal, a failed read is ENVIRONMENT and waits
 	// -- so the classification is carried through rather than re-decided.
-	if _, refusal := w.resolveSendIdentity(ownerCtx, campaign); refusal.refused() {
+	identity, refusal := w.resolveSendIdentity(ownerCtx, campaign)
+	if refusal.refused() {
 		return refusal.Reason, refusal.Terminal
+	}
+	if err := email.CheckSender(ownerCtx, w.resolveSender(), identity.SendAs); err != nil {
+		return err.Error(), email.IsPermanent(err)
 	}
 
 	tmpl, found, err := w.store.TemplateByID(ownerCtx, campaign.TemplateID)

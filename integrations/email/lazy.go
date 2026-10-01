@@ -48,6 +48,7 @@ type LazySender struct {
 	envResolved   Sender // the Sender returned by NewSenderFromEnv
 	resolveVar    VariableResolver
 	resolveSecret SecretResolver
+	organization  func(context.Context, string) (Sender, error)
 
 	// mu guards the resolution below. It was a sync.Once until memql#4825,
 	// and the Once was exactly right while configuration could only arrive
@@ -86,6 +87,23 @@ func NewLazySender(envResolved Sender, resolveVar VariableResolver, resolveSecre
 func (l *LazySender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if l == nil {
 		return fmt.Errorf("email: lazy sender not initialized")
+	}
+	// Explicit capture always wins, including when Azure credentials exist.
+	if _, capture := l.envResolved.(*CaptureSender); !capture && l.organization != nil {
+		account := strings.TrimSpace(as.AccountID)
+		if account == "" {
+			account = "self"
+		}
+		sender, err := l.organization(ctx, account)
+		if err != nil {
+			return err
+		}
+		if sender != nil {
+			return sender.Send(ctx, msg, as)
+		}
+		if account != "self" {
+			return permanentSendRefusal("this organization has no email connection")
+		}
 	}
 	return l.Resolve(ctx).Send(ctx, msg, as)
 }

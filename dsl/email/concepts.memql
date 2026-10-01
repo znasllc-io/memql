@@ -6,3 +6,11 @@
 concept capturedMessage {
   encryptedValue string! @description("Encrypted message, including recipient and authentication links. Never broadcast as plaintext.")
 }
+
+/// Encrypted Azure sign-in or organization transport state. Read through the
+/// gated email capabilities only; plaintext credentials never enter the feed.
+// @no-displayCard: Private encrypted connection state has no human-facing identity; the gated setup capability supplies its display fields.
+@rowAuthz(clusterOwner)
+concept connectionState {
+  encryptedValue string!
+}

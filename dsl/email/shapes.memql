@@ -5,3 +5,10 @@ shape capturedMessage capturedEmailStored {
   row.createdAt
   encryptedValue
 }
+
+@row
+shape connectionState emailConnectionStateStored {
+  row.id
+  row.createdAt
+  encryptedValue
+}

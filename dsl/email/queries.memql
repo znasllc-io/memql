@@ -12,3 +12,15 @@ query capturedMessage capturedEmails {
   paginate 100
   shape capturedEmailStored
 }
+
+/// Internal encrypted state lookup after operator or delivery authorization.
+/// actor.userId scoping cannot represent a transport shared by an organization's
+/// workers; the integration validates the requesting actor before unsealing.
+@actor
+@serverOnly
+@cache(0)
+query connectionState emailConnectionStateById {
+  args { stateId string! }
+  filter row => row.id == args.stateId && actor.isClusterOwner == true
+  shape emailConnectionStateStored
+}

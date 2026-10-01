@@ -179,6 +179,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// checks a signed-in owner/developer before borrowing that service actor.
 		{Path: "email/mutations.memql", Name: "recordCapturedEmail"}: true,
 		{Path: "email/queries.memql", Name: "capturedEmails"}:        true,
+		// Azure sessions and transport credentials are sealed after explicit
+		// operator/organization authorization. Per-user row scoping cannot
+		// model one organization's connection consumed by multiple workers.
+		{Path: "email/mutations.memql", Name: "storeEmailConnectionState"}: true,
+		{Path: "email/queries.memql", Name: "emailConnectionStateById"}:   true,
 		// Shopify's outbox delivers rows under its connector actor, which has
 		// no actor.userId. These row-id reads keep the concept's mirroredTo
 		// admission: Shopify may read its source, another connector may not,
