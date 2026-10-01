@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import {
-  buildAccounts, buildLibraryFilesForOwner, buildComposeMaterialize, buildCompositionById,
+  buildClientAccountsAll, buildLibraryFilesForOwner, buildComposeMaterialize, buildCompositionById,
   buildComposeCancel, buildLibraryArtifactBySourceConceptRef, buildCreateComposeRecipe,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
@@ -15,7 +15,7 @@ export class TemplateExamples {
   async start(): Promise<void> {
     const lease = this.api.current();
     if (!lease) throw new Error("Connect and sign in using the MemQL extension before creating from examples.");
-    const accounts = await this.api.execute(lease, "accounts", buildAccounts({ status: "active" }));
+    const accounts = await this.api.execute(lease, "clientAccountsAll", buildClientAccountsAll({}));
     const organization = await vscode.window.showQuickPick(accounts.map(row => ({ label: value(row, "name") || value(row, "id"), id: value(row, "id") })),
       { title: "Create email · Organization", placeHolder: "Choose the client this template belongs to", ignoreFocusOut: true });
     if (!organization) return;

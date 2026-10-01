@@ -247,3 +247,30 @@ func TestMaterializeDB_AcceptThenAdoptOnAnotherEngine(t *testing.T) {
 		})
 	}
 }
+
+// Client organizations and identity billing accounts are different concepts.
+// A fake account row cannot catch accidentally querying the billing registry.
+func TestEmailMaterializeDBUsesClientOrganizationRegistry(t *testing.T) {
+	e := materializeDBEngine(t)
+	i := New(e, e.Logger)
+	i.SetGoalOpener(&directMaterializeGoal{})
+	suffix := fmt.Sprintf("email-org-%d", time.Now().UnixNano())
+	owner, account := suffix+"-owner", suffix+"-client"
+	ctx := auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: owner, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: owner})
+	if _, err := e.Execute(ctx, "mutation "+call("createClientAccount", map[string]any{"accountId": account, "name": "Email client"})); err != nil {
+		t.Fatal(err)
+	}
+	// No identity.account with this id exists. The business organization is
+	// sufficient; creating a billing account must never be a hidden prerequisite.
+	a := materializeArgs{Name: "Client welcome", Statement: "Compose a welcome email", Format: pure.FormatJSON, OutputKind: "email_template", AccountIds: []string{account}}
+	result, err := i.materialize(ctx, owner, "", a)
+	if err != nil || result["compositionId"] == "" {
+		t.Fatalf("client organization refused: %v %v", result, err)
+	}
+	if _, err := e.Execute(ctx, "mutation "+call("archiveClientAccount", map[string]any{"accountId": account})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := i.materialize(ctx, owner, "", a); err == nil {
+		t.Fatal("archived organization accepted an email composition")
+	}
+}

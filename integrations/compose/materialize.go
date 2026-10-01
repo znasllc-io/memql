@@ -135,7 +135,7 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 		if len(a.AccountIds) != 1 || strings.TrimSpace(a.AccountIds[0]) == "" {
 			return nil, errors.New("compose: choose one organization for this email template")
 		}
-		account, err := one(i.store().query(ctx, "query "+call("accountById", map[string]any{"accountId": a.AccountIds[0]})))
+		account, err := one(i.store().query(ctx, "query "+call("clientAccountById", map[string]any{"accountId": a.AccountIds[0]})))
 		if err != nil {
 			return nil, err
 		}

@@ -89,7 +89,7 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 		row = e.files[stringOf(args["fileId"])]
 	case "sourceRows":
 		row = e.source
-	case "accountById":
+	case "clientAccountById":
 		row = e.account
 	case "cancelGoal":
 		return memql.NewResultWithOutput(map[string]any{"runsAsked": 1}), nil
