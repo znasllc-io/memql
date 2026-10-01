@@ -100,30 +100,21 @@ const EDITABLE: ReadonlyVerdict = { readonly: false };
  * `resources/app/out/vs/workbench/api/node/extensionHostProcess.js`, 1.134.0.)
  * The words this used to return -- "core" and "remote" -- were four and six.
  *
- * So the badge is a MARK, and the tooltip is the sentence. `C` and `R` here,
- * `L` for the not-this-checkout hint the marker adds; three letters that differ
- * at a glance, each explained on hover.
+ * So the badge is a MARK, and the tooltip is the sentence. ONE mark for one
+ * fact: `RO`, read-only, whichever reason -- the same mark a cluster document
+ * carries. It used to be `C`, `R` and `L` (the checkout hint), three letters
+ * that meant nothing until hovered; the reason is the hover's to say.
  */
-export function reasonBadge(reason: ReadonlyReason): string {
-  return reason === "coreSealed" ? "C" : "R";
+export function reasonBadge(_reason: ReadonlyReason): string {
+  return "RO";
 }
 
 /** What the hover says. The badge is a hint; this is the sentence. */
 export function reasonTooltip(reason: ReadonlyReason, clusterName: string): string {
   if (reason === "coreSealed") {
-    return (
-      "Core engine DSL -- read-only. The engine's core-first invariant seals these " +
-      `constructs against promotion, and ${clusterName} does not build its core tree ` +
-      "from this folder -- so an edit here changes nothing it runs. Training a new " +
-      "construct means a new file, not an edit to this one."
-    );
+    return `Read-only: built-in MemQL source ${clusterName} runs. Put a new construct in a new file.`;
   }
-  return (
-    `This is a product bundle, and ${clusterName} is not local -- read-only. ` +
-    "A remote cluster loads its bundle from its own image, so editing this checkout " +
-    "changes nothing there. Select the local cluster to edit it, and work in the " +
-    "checkout that cluster rebuilds from for the edit to reach it."
-  );
+  return `Read-only: ${clusterName} loads this bundle from its own image. Select a local cluster, in its checkout, to edit it.`;
 }
 
 export interface ReadonlyInput {
@@ -308,7 +299,7 @@ export function showsCheckoutHint(input: ReadonlyInput): boolean {
  * it merely happens to have open.
  */
 export function checkoutHint(clusterName: string, checkout: string): string {
-  return `This folder is not the checkout ${clusterName} rebuilds from (${checkout}). Edits here do not reach ${clusterName}; open that checkout to change what it runs.`;
+  return `${clusterName} is built from ${checkout}, not this folder: edits here don't reach it.`;
 }
 
 /**

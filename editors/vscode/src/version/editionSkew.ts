@@ -38,11 +38,14 @@
 // release to look for. That is describe.ts's discipline one layer over:
 // "cannot tell" is never "current", and it is never "newer" either.
 //
-// THE NOTICE SAYS WHAT RESOLVES IT. Plain, active sentences that name both
-// sides or the release, and the next step -- update this extension, update
-// the cluster, or use the release built for the cluster's grammar -- never an
-// apology, and never a claim the facts cannot carry, the rule skewHint.ts
-// states for its own sentence.
+// THE NOTICE NAMES THE CLUSTER AND WHAT RESOLVES IT. A reconnect or a switch
+// can raise it at any moment, so it says which cluster it is about -- by the
+// name the Clusters view shows -- and the next step: update this extension,
+// update the cluster, or use the extension release built for the cluster's
+// language. Short, active, never an apology, and never a claim the facts
+// cannot carry (the rule skewHint.ts states for its own sentence). Both
+// editions, both grammars and the release are in the details, which go to the
+// output channel behind Show details.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go):
 // src/extension.ts shows the notice, runs its one action and writes the
@@ -135,9 +138,15 @@ function detailLines(c: ClusterSide, e: ExtensionSide): string[] {
  * How the cluster's language relates to this extension's.
  *
  * `cluster` is what the handshake stated; `extension` is this build's
- * package.json. Whitespace around a value is not a difference.
+ * package.json. Whitespace around a value is not a difference. `clusterLabel`
+ * is what the headline calls the cluster: its display name, when the caller
+ * knows it.
  */
-export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts): LanguageSkew {
+export function compareLanguage(
+  cluster: LanguageFacts,
+  extension: LanguageFacts,
+  clusterLabel = "This cluster",
+): LanguageSkew {
   const c: ClusterSide = {
     edition: clean(cluster.edition),
     grammar: clean(cluster.grammarVersion),
@@ -154,22 +163,25 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
   // and a build with no pin has no side of its own.
   if (c.edition === "" || e.edition === "") return { state: "unknown", headline: "", details };
 
+  const x = clusterLabel.trim() === "" ? "This cluster" : clusterLabel.trim();
+  const olderTail = "Some completions may not work there until it's updated.";
+  const differsTail = "Use the extension release built for it.";
+
   if (c.edition !== e.edition) {
     const order = compareEditions(c.edition, e.edition);
     if (order !== undefined && order > 0) {
-      const both = `This cluster speaks MemQL edition ${c.edition}; this extension speaks edition ${e.edition}.`;
       // The release comes from the cluster. One that did not name it leaves
       // the notice naming the edition to get rather than inventing a version.
       if (c.release === "") {
         return {
           state: "clusterNewer",
-          headline: `${both} Update MemQL for Visual Studio Code and Cursor to a release that speaks edition ${c.edition}.`,
+          headline: `MemQL: ${x} uses MemQL edition ${c.edition}. Update this extension to a release for that edition.`,
           details,
         };
       }
       return {
         state: "clusterNewer",
-        headline: `${both} Update MemQL for Visual Studio Code and Cursor to ${c.release} or newer.`,
+        headline: `MemQL: ${x} uses MemQL edition ${c.edition}. Update this extension to ${c.release} or newer.`,
         details,
         releaseToInstall: c.release,
       };
@@ -179,16 +191,15 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
       // the cluster's update.
       return {
         state: "clusterOlder",
-        headline: `This cluster speaks MemQL edition ${c.edition}, older than this extension's edition ${e.edition}. Completion may offer forms it refuses until the cluster is updated.`,
+        headline: `MemQL: ${x} uses the older MemQL edition ${c.edition}. ${olderTail}`,
         details,
       };
     }
     // Neither side can be shown to be newer, so the notice claims no order and
-    // points at the release that matches the cluster; the details name it
-    // when the cluster sent one.
+    // points at the release that matches the cluster; the details name both.
     return {
       state: "differs",
-      headline: `This cluster speaks MemQL edition ${c.edition}; this extension was built for edition ${e.edition}. Use the MemQL for Visual Studio Code and Cursor release built for this cluster's edition (Show details has both).`,
+      headline: `MemQL: ${x} uses MemQL edition ${c.edition}, and this extension is for ${e.edition}. ${differsTail}`,
       details,
     };
   }
@@ -203,25 +214,24 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
     case "behind":
       return {
         state: "clusterNewer",
-        headline: `This cluster's MemQL grammar is newer than this extension's. Update MemQL for Visual Studio Code and Cursor to ${c.release} or newer so completion and diagnostics match the cluster.`,
+        headline: `MemQL: ${x} uses a newer MemQL language. Update this extension to ${c.release} or newer.`,
         details,
         releaseToInstall: c.release,
       };
     case "ahead":
       return {
         state: "clusterOlder",
-        headline:
-          "This cluster runs an older MemQL grammar than this extension. Completion may offer forms it refuses until the cluster is updated.",
+        headline: `MemQL: ${x} uses an older MemQL language. ${olderTail}`,
         details,
       };
     default:
       // "current" -- the cluster's grammar first shipped in this very release
       // number, yet the grammars differ: a locally built extension -- or a
-      // release that does not parse. Either way, no order: name both labels
-      // and the release to look for.
+      // release that does not parse. Either way, no order: the details name
+      // both labels and the release to look for.
       return {
         state: "differs",
-        headline: `This cluster runs MemQL grammar ${c.grammar}; this extension was built for ${e.grammar}. Use the MemQL for Visual Studio Code and Cursor release built for this cluster's grammar (Show details has both).`,
+        headline: `MemQL: ${x} uses a different MemQL language from this extension. ${differsTail}`,
         details,
       };
   }
@@ -326,12 +336,15 @@ export interface LanguageSource {
  *
  * `readExtension` is read at each connect rather than once at wiring, so the
  * answer is always this build's manifest as the editor currently reports it.
+ * `labelFor` turns the connection's registry key into the name the headline
+ * says; the key is what the memory is keyed on.
  */
 export function watchLanguageSkew(
   source: LanguageSource,
   readExtension: () => LanguageFacts,
   present: (notice: LanguageSkewNotice, clusterName: string) => void,
   memory: LanguageSkewMemory = new LanguageSkewMemory(),
+  labelFor: (clusterName: string) => string = (clusterName) => clusterName,
 ): () => void {
   return source.onDidChangeState((state) => {
     if (state.status !== "connected") return;
@@ -340,7 +353,7 @@ export function watchLanguageSkew(
       grammarVersion: source.grammarVersion,
       editorRelease: source.editorRelease,
     };
-    const notice = languageSkewNotice(compareLanguage(cluster, readExtension()));
+    const notice = languageSkewNotice(compareLanguage(cluster, readExtension(), labelFor(state.clusterName)));
     if (notice === undefined) return;
     if (!memory.firstTime(state.clusterName, cluster)) return;
     present(notice, state.clusterName);

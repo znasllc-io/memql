@@ -46,6 +46,7 @@ function readOnlyStep(over: Record<string, unknown> = {}): Record<string, unknow
   return {
     id: "a",
     script: "install.detect",
+    label: "Working",
     description: "d",
     readOnly: true,
     elevation: "none",
@@ -194,6 +195,35 @@ test("refuses an unknown field rather than ignoring it", () => {
     JSON.stringify({ name: "x", kind: "install", description: "d", steps: [readOnlyStep()], parallel: true }),
     "unknown field",
   );
+});
+
+test("refuses a step with no label, a blank one, and one over four words", () => {
+  const unlabelled = readOnlyStep();
+  delete unlabelled.label;
+  refuses(doc("install", [unlabelled]), "no label");
+  refuses(doc("install", [readOnlyStep({ label: "   " })]), "no label");
+  refuses(doc("install", [readOnlyStep({ label: "Placing the tool on disk" })]), "5-word label");
+  const g = loadGraph(doc("install", [readOnlyStep({ label: "Placing the tool here" })]), "test.json");
+  assert.equal(g.steps[0]?.label, "Placing the tool here", "four words load intact");
+});
+
+test("every shipped step carries its short label into the loaded graph", async () => {
+  // The run screen and the CLI both name a step by its label. The same step id
+  // reads the same way in every document, so one install never looks like two.
+  const seen = new Map<string, string>();
+  const dir = path.join(REPO_ROOT, "scripts", "install", "graph");
+  for (const name of (await fs.readdir(dir)).filter((n) => n.endsWith(".json"))) {
+    const g = await loadGraphFile(path.join(dir, name));
+    for (const s of g.steps) {
+      assert.notEqual(s.label.trim(), "", `${name}: ${s.id} has no label`);
+      const before = seen.get(s.id);
+      if (before !== undefined) assert.equal(s.label, before, `${name}: ${s.id} is labelled differently elsewhere`);
+      seen.set(s.id, s.label);
+    }
+  }
+  assert.equal(seen.get("clusterUp"), "Creating the cluster");
+  assert.equal(seen.get("rebuildFromCheckout"), "Rebuilding MemQL");
+  assert.equal(seen.get("updateCheckout"), "Downloading updates");
 });
 
 test("refuses a step with no verify", () => {
@@ -486,6 +516,7 @@ test("shared belongs to an uninstall graph and retained to an install one", () =
       {
         id: "a",
         script: "install.removeArtifact",
+        label: "Working",
         description: "d",
         reverses: "toolK3d",
         elevation: "none",
@@ -591,6 +622,7 @@ test("a step budget of zero is refused -- a step may not opt out of dying", asyn
             {
               id: "a",
               script: "install.detect",
+              label: "Working",
               description: "d",
               readOnly: true,
               elevation: "none",
@@ -620,6 +652,7 @@ test("a step budget must be a number, not a numeric string", async () => {
             {
               id: "a",
               script: "install.detect",
+              label: "Working",
               description: "d",
               readOnly: true,
               elevation: "none",

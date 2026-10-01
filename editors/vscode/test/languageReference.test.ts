@@ -39,8 +39,8 @@ import {
   type VocabularyArtifact,
 } from "../src/state/languageReference.js";
 import {
+  identityMeta,
   renderLanguageReferencePage,
-  languageReferenceScript,
   type LanguageReferenceInput,
 } from "../src/webview/languageReferenceScreens.js";
 
@@ -163,17 +163,11 @@ test("the vocabulary renders grouped by the kinds the cluster named", () => {
     assert.ok(html.includes(`>${kind} <`), `no ${kind} group`);
   }
   assert.ok(html.includes("3 entries"), "the vocabulary's own count is not on the page");
-  // Each group carries its OWN total, so the script can rewrite it to "n of m"
-  // under a filter: left at the total it sits beside one visible entry reading
-  // "22", which a reader takes for the number of matches.
-  assert.equal(
-    (html.match(/data-group-count data-total="1"/g) ?? []).length,
-    3,
-    "each kind group states its own total",
-  );
   assert.ok(html.includes("Lowercases a string."), "a description did not render");
-  // The tier keeps the letter the cluster sent and says what it means.
-  assert.ok(html.includes("P -- lowers to SQL"), "a catalog function's tier did not render");
+  // The tier is a word, with its meaning in the tooltip -- not "P -- lowers
+  // to SQL" in a badge.
+  assert.ok(html.includes('title="Lowers to SQL in the database">SQL<'), "a catalog function's tier did not render");
+  assert.doesNotMatch(html, /P -- lowers/);
 });
 
 test("a kind the cluster did not name in `kinds` is still rendered", () => {
@@ -191,14 +185,16 @@ test("a kind the cluster did not name in `kinds` is still rendered", () => {
   assert.ok(page({ vocabulary: artifact }).includes("whatsit"));
 });
 
-test("both copy actions are offered, and they are the only two", () => {
+test("both copy acts are offered, as the head's quiet acts, and say they copy all of it", () => {
   const html = page();
-  assert.ok(html.includes('data-act="copyGrammar"'), "no grammar copy button");
-  assert.ok(html.includes('data-act="copyVocabulary"'), "no vocabulary copy button");
-  // Copy takes the WHOLE artifact and the page has to say so: a model handed
-  // three productions out of a hundred and fifty writes MemQL shaped like the
-  // fragment it was shown.
-  assert.match(html, /Copy takes the whole artifact/);
+  assert.ok(html.includes('data-act="copyGrammar"'), "no grammar copy act");
+  assert.ok(html.includes('data-act="copyVocabulary"'), "no vocabulary copy act");
+  // Copy takes the WHOLE artifact, and the act's tooltip says so -- not a
+  // standing paragraph over the lists.
+  assert.match(html, /title="Copies the whole grammar, whatever the search shows"/);
+  assert.doesNotMatch(html, /Copy takes the whole artifact/);
+  // An artifact that is not on the page has no copy act: absent, not refused.
+  assert.equal(page({ grammar: undefined }).includes('data-act="copyGrammar"'), false);
 });
 
 test("the copied vocabulary names the language it describes, and separates on tabs", () => {
@@ -219,8 +215,8 @@ test("the copied vocabulary names the language it describes, and separates on ta
 // -----------------------------------------------------------------------------
 
 test("only a production is counted against a count that says productions", () => {
-  // THE DEFECT THIS FAILS AGAINST: the counter counted every `data-search`
-  // item, and the grammar's own comment blocks are searchable without being
+  // THE DEFECT THIS FAILS AGAINST: the counter counted every searchable item,
+  // and the grammar's own comment blocks are searchable without being
   // productions -- so a term matching only the header read "1 of 126
   // productions" with no production on the screen at all.
   const html = page();
@@ -230,16 +226,10 @@ test("only a production is counted against a count that says productions", () =>
     7,
     "the grammar's header comment is being counted as a production",
   );
-
-  const script = languageReferenceScript();
-  assert.ok(
-    script.includes("hasAttribute('data-tally')"),
-    "the counter counts every filterable item again, comments included",
-  );
-  // The no-match line keys on what is VISIBLE rather than on what is counted:
-  // a term matching only the comment leaves something on screen, and "nothing
-  // matches" printed above it would be the page arguing with itself.
-  assert.ok(script.includes("none.hidden = shown !== 0"), "the no-match line follows the tally");
+  // A term matching ONLY the header comment shows it and counts no production.
+  const header = page({ search: "GENERATED from the parser" });
+  assert.match(header, /0 of 4 productions/);
+  assert.doesNotMatch(header, /Nothing in the grammar matches/, "the page says nothing matches over a visible match");
 });
 
 /**
@@ -279,8 +269,7 @@ test("every item carries the text a search matches it by", () => {
 });
 
 test("a search filters, and an empty one shows everything", () => {
-  // The rule the page runs, over the indexes the page emitted. The script's
-  // half is `index.includes(term)` and nothing else -- pinned below.
+  // The rule, over the indexes the page emitted.
   const all = indexes(page());
   const hits = (term: string): number => all.filter((index) => matchesSearch(index, term)).length;
 
@@ -295,48 +284,36 @@ test("a search filters, and an empty one shows everything", () => {
   assert.equal(hits("no-such-thing-anywhere"), 0, "a nonsense term must match nothing");
 });
 
-test("the no-match case says what a term is matched against", () => {
-  // "No results" alone leaves a reader unable to tell a misspelling from a
-  // search that was never going to look where they meant.
-  const html = page();
-  assert.match(html, /Nothing in the grammar matches/);
-  assert.match(
-    html,
-    /A term is matched against a production&#39;s name and every line of its right-hand side\./,
-  );
+test("the page the host draws for a term hides exactly what the rule rejects", () => {
+  // THE HOST DRAWS THE SEARCH now (patched in place, so the box keeps its
+  // caret), with the same rule the cases above exercise -- so the two cannot
+  // disagree about what a term shows.
+  const html = page({ search: "expr-5" });
+  const visible = [...html.matchAll(/data-search="([^"]*)"(?: data-tally)?(\s+hidden)?>/g)].filter((m) => m[2] === undefined);
+  assert.equal(visible.length, 1, "the page shows a different set from the rule");
+  assert.match(html, /1 of 4 productions/);
+  assert.match(html, /0 of 3 entries/);
+  // A group with nothing left in it is hidden with its heading.
+  assert.match(html, /<section class="lr-group" hidden><h3 class="lr-group-head">A file<\/h3>/);
+  // Every group's own count follows the search too.
+  assert.match(html, />construct <span class="mq-head-meta">0 of 1</);
+});
+
+test("a term that matches nothing says so, naming the term, as text", () => {
+  const html = page({ search: '<nope> "x"' });
+  assert.match(html, /Nothing in the grammar matches &quot;&lt;nope&gt; &quot;x&quot;&quot;\./);
   assert.match(html, /Nothing in the vocabulary matches/);
-  assert.match(
-    html,
-    /A term is matched against an entry&#39;s name, how it is written, what it means, and its kind\./,
-  );
-  // Rendered HIDDEN, so it costs no space until it applies -- and so its
-  // appearance cannot push the controls out from under the cursor.
-  assert.match(html, /class="lr-empty" data-empty hidden/);
+  // And without a term there is no such line at all.
+  assert.doesNotMatch(page(), /Nothing in the/);
 });
 
-test("the page's script decides nothing but the substring", () => {
-  // The one rule that cannot live in a module: a webview script imports
-  // nothing under this CSP. Keeping it to `includes` is what makes the tests
-  // above the real coverage of what search does.
-  const script = languageReferenceScript();
-  assert.ok(
-    script.includes("item.dataset.search.includes(term)"),
-    "the page's filter is no longer the substring rule the tests exercise",
-  );
-  assert.ok(script.includes("acquireVsCodeApi"), "the page has no message channel");
-});
-
-test("the controls sit above both lists and do not move when the lists change", () => {
-  const html = page();
-  const controls = html.indexOf('class="lr-controls"');
+test("the search box sits above both lists, and keeps its term across a repaint", () => {
+  const html = page({ search: "query" });
+  const search = html.indexOf('id="lr-search"');
   const grammar = html.indexOf('data-scope="grammar"');
   const vocabulary = html.indexOf('data-scope="vocabulary"');
-  assert.ok(controls > -1 && controls < grammar && grammar < vocabulary, "the page order moved");
-  // The counter lives INSIDE the scope whose items it counts: the script
-  // rewrites it per scope, and one outside would be a number about a list it
-  // cannot see.
-  const grammarScope = html.slice(grammar, vocabulary);
-  assert.ok(grammarScope.includes("data-count"), "the grammar's counter is outside its scope");
+  assert.ok(search > -1 && search < grammar && grammar < vocabulary, "the page order moved");
+  assert.match(html, /data-field="search" value="query"/);
 });
 
 // -----------------------------------------------------------------------------
@@ -409,29 +386,19 @@ test("the grammar's angle brackets survive as text", () => {
 // Which language, and on whose authority
 // -----------------------------------------------------------------------------
 
-test("the page names the edition, its status and the grammar version", () => {
+test("the page names the edition, its status and the grammar version, in one line", () => {
   const html = page();
-  assert.ok(html.includes("2026"), "no edition");
-  assert.ok(html.includes("frozen"), "no status");
-  assert.ok(html.includes("2026.09-example-0123abcd"), "no grammar version");
-  assert.match(html, /Read from the cluster local/);
+  assert.equal(
+    identityMeta(languageIdentity({ pin: PIN, cluster: clusterLanguage("local", { edition: "2026", grammarVersion: PIN.grammarVersion }) })),
+    "Edition 2026 · Frozen · Grammar 2026.09-example-0123abcd · from local",
+  );
+  assert.ok(html.includes("Edition 2026 · Frozen · Grammar 2026.09-example-0123abcd · from local"));
+  // No notes beside every fact.
+  assert.doesNotMatch(html, /Read from the cluster|Recorded by this extension/);
 });
 
-test("only a frozen edition gets the badge that reads as good news", () => {
-  // THE DEFECT THIS FAILS AGAINST: any non-empty status went into the
-  // accent-coloured badge, so a future `draft` would have been printed in the
-  // colour this page uses for "the forms you are writing keep loading" -- which
-  // is precisely what a draft edition does not promise.
-  const frozen = page();
-  assert.ok(frozen.includes(`<span class="badge ok">frozen</span>`), "frozen lost its badge");
-
-  const draft = page({ identity: languageIdentity({ pin: { ...PIN, status: "draft" } }) });
-  assert.ok(draft.includes(`<span class="badge">draft</span>`), "draft did not render plainly");
-  assert.equal(
-    draft.includes(`<span class="badge ok">draft</span>`),
-    false,
-    "a draft edition is being printed as good news",
-  );
+test("with no cluster the line says the language is the editor's own", () => {
+  assert.equal(identityMeta(languageIdentity({ pin: PIN })), "Edition 2026 · Frozen · Grammar 2026.09-example-0123abcd · built in");
 });
 
 test("the status is WITHHELD for an edition this extension does not record", () => {
@@ -445,17 +412,18 @@ test("the status is WITHHELD for an edition this extension does not record", () 
   assert.match(identity.statusNote, /records the status of edition 2026 only/);
   assert.match(identity.statusNote, /this cluster speaks edition 2027/);
 
-  const html = page({ identity });
-  assert.ok(html.includes("not stated"), "an unstated status did not say so");
-  assert.ok(html.includes("2027"), "the cluster's own edition is not on the page");
+  const html = page({ identity, pin: PIN });
+  assert.ok(html.includes("Edition 2027 · Grammar 2027.01-next-89abcdef · from prod"), "the status was not withheld");
+  // The difference is said once, when there is one.
+  assert.match(html, /prod speaks edition 2027; this editor speaks 2026\./);
+  assert.doesNotMatch(page({ pin: PIN }), /speaks edition/);
 });
 
-test("a pin with no status says so rather than leaving a blank row", () => {
-  // An unstated status and a draft edition look identical as an absence.
+test("a pin with no status leaves it out of the line rather than printing a blank", () => {
   const identity = languageIdentity({ pin: { ...PIN, status: "" } });
   assert.equal(identity.status, "");
   assert.match(identity.statusNote, /records no status for edition 2026/);
-  assert.ok(page({ identity, grammar: undefined, vocabulary: undefined }).includes("not stated"));
+  assert.equal(identityMeta(identity), "Edition 2026 · Grammar 2026.09-example-0123abcd · built in");
 });
 
 test("the artifacts' own edition wins over the handshake's", () => {
@@ -474,7 +442,7 @@ test("the artifacts' own edition wins over the handshake's", () => {
 // No cluster
 // -----------------------------------------------------------------------------
 
-test("with no connection the page says so, and shows what the extension knows", () => {
+test("with no connection the page says so in one line, and offers the act", () => {
   const identity = languageIdentity({ pin: PIN });
   const html = renderLanguageReferencePage({
     identity,
@@ -484,26 +452,20 @@ test("with no connection the page says so, and shows what the extension knows", 
     offerSelectCluster: true,
   });
 
-  // The two artifacts are absent and the page says why, in those words.
-  assert.match(html, /No cluster is connected/);
-  assert.match(html, /a cluster generates both from its own parser/);
-
-  // What the extension DOES know is on the page: the edition, its status and
-  // the grammar version its own bundled server is running.
-  assert.ok(html.includes("2026"), "the pinned edition is missing");
-  assert.ok(html.includes("frozen"), "the pinned status is missing");
-  assert.ok(html.includes("2026.09-example-0123abcd"), "the pinned grammar version is missing");
-  assert.match(html, /This extension&#39;s own pin \(MemQL for Visual Studio Code and Cursor 0\.6\.0\)/);
-
+  assert.match(html, /Connect to a cluster to see its grammar and vocabulary\./);
+  // No doctrine paragraphs.
+  assert.doesNotMatch(html, /generates both from its own parser/);
+  // What the extension DOES know is in the head's line.
+  assert.ok(html.includes("Edition 2026 · Frozen · Grammar 2026.09-example-0123abcd · built in"));
   // And a way out -- not a spinner, and not an empty pane.
   assert.ok(html.includes('data-act="selectCluster"'), "no way to connect from here");
-  assert.equal(html.includes("lr-controls"), false, "a search box over nothing");
+  assert.equal(html.includes("lr-search"), false, "a search box over nothing");
   assert.equal(html.includes("data-search"), false, "searchable items with no artifacts");
 });
 
-test("an untrusted window is told why there is no Select Cluster button", () => {
+test("an untrusted window is offered workspace trust instead of a button that cannot work", () => {
   // The command is contributed but never registered in a restricted folder, so
-  // the button would promise a click that fails with "command not found".
+  // Select a cluster would promise a click that fails with "command not found".
   const html = renderLanguageReferencePage({
     identity: languageIdentity({ pin: PIN }),
     loading: false,
@@ -512,51 +474,52 @@ test("an untrusted window is told why there is no Select Cluster button", () => 
     offerSelectCluster: false,
   });
   assert.equal(html.includes('data-act="selectCluster"'), false, "a button that cannot work");
-  assert.match(html, /This window is not trusted/);
+  assert.match(html, /Trust this workspace to connect to a cluster\./);
+  assert.ok(html.includes('data-act="manageTrust"'));
 });
 
-test("a failed read shows the failure, names the language, and offers the retry", () => {
+test("reading is the shape of the content, never a sentence", () => {
+  const html = page({ grammar: undefined, vocabulary: undefined, loading: true });
+  assert.match(html, /mq-skeleton/);
+  const visible = html.replace(/<span class="mq-sr">[^<]*<\/span>/g, "");
+  assert.doesNotMatch(visible, /Reading/);
+});
+
+test("a failed read says what did not come back, why, and offers the retry", () => {
   const html = page({
     grammar: undefined,
     vocabulary: undefined,
-    error: "memqlGrammar() could not be read: stream closed",
+    error: "It didn't answer within 20s.",
     loading: false,
-  });
-  assert.match(html, /memqlGrammar\(\) could not be read: stream closed/);
-  // Not a spinner: the header still says which cluster and which language, and
-  // the body says what came back. "Neither came back" rather than "answered
-  // with neither", because a timed-out read lands here too and a cluster that
-  // never answered has not answered with anything.
-  assert.match(html, /Neither artifact came back from local/);
-  assert.ok(html.includes("2026.09-example-0123abcd"));
-  // A dropped socket is a failure the next attempt succeeds at; without this
-  // the only retry is closing the tab.
-  assert.equal(html.match(/data-act="reload"/g)?.length, 1, "exactly one Try again");
-});
-
-test("a cluster that answered with nothing still leaves the reader the extension's own language", () => {
-  // The identity block is describing the CLUSTER here, correctly -- it is what
-  // was asked. Without this line the reader is left with a failure and nothing
-  // about the language their editor is giving them completion in right now,
-  // which is the one thing still true when a read times out or is refused.
-  const html = page({
-    grammar: undefined,
-    vocabulary: undefined,
     pin: PIN,
-    error: "memqlGrammar() did not answer within 20s, so the read was given up.",
-    loading: false,
   });
-  assert.match(
-    html,
-    /built against edition 2026 \(frozen\), grammar 2026\.09-example-0123abcd/,
-  );
-  // And not on a page that has the artifacts: there it would be noise beside
-  // the cluster's own answer.
-  assert.equal(
-    page({ pin: PIN }).includes("What this extension knows on its own is unchanged"),
-    false,
-    "the fallback is printed over a page that got its artifacts",
-  );
+  assert.match(html, /local didn&#39;t return a grammar or a vocabulary\./);
+  assert.match(html, /It didn&#39;t answer within 20s\./);
+  assert.equal(html.match(/data-act="reload"/g)?.length, 1, "exactly one Try again");
+  // The head's meta already names this language, and the editor speaks the
+  // same one: a second line saying so is the same fact twice.
+  assert.equal(html.includes("This editor speaks"), false, "the editor's language is said twice");
+  // And not on a page that has the artifacts: there it would be noise.
+  assert.equal(page({ pin: PIN }).includes("This editor speaks"), false);
+});
+
+test("a failed read names the editor's language only when it is not the cluster's", () => {
+  const failed = { grammar: undefined, vocabulary: undefined, error: "It didn't answer within 20s.", pin: PIN };
+  // Same edition, another grammar: the one difference the meta cannot show.
+  const otherGrammar = page({
+    ...failed,
+    identity: languageIdentity({
+      pin: PIN,
+      cluster: clusterLanguage("local", { edition: "2026", grammarVersion: "2026.10-other-89abcdef" }),
+    }),
+  });
+  assert.match(otherGrammar, /This editor speaks edition 2026 \(frozen\), grammar 2026\.09-example-0123abcd\./);
+  // A cluster that stated no edition: the editor's is all there is to go on.
+  const unstated = page({
+    ...failed,
+    identity: languageIdentity({ pin: PIN, cluster: clusterLanguage("local", { edition: "", grammarVersion: "" }) }),
+  });
+  assert.match(unstated, /This editor speaks edition 2026/);
 });
 
 test("a successful read offers no retry, and a disconnected page offers none either", () => {
@@ -575,8 +538,9 @@ test("a successful read offers no retry, and a disconnected page offers none eit
 });
 
 test("one artifact arriving without the other is reported, not hidden", () => {
-  const html = page({ vocabulary: undefined });
-  assert.match(html, /did not answer with a vocabulary/);
+  const html = page({ vocabulary: undefined, error: "unknown builtin" });
+  assert.match(html, /local didn&#39;t return a vocabulary\./);
+  assert.match(html, /unknown builtin/);
   assert.ok(html.includes("4 productions"), "the grammar that DID arrive is not rendered");
 });
 

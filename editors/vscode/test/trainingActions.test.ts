@@ -56,9 +56,9 @@ import {
   type TrainingWorkspace,
 } from "../src/training/closure.js";
 import { outcomeReport } from "../src/training/outcomeReport.js";
-import { sessionLensPlans } from "../src/training/session.js";
+import { trainingLensPlans } from "../src/state/training.js";
 import { DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
-import type { TrainingCluster, TrainingPrompt } from "../src/training/report.js";
+import { demotePrompt, type TrainingCluster, type TrainingPrompt } from "../src/training/report.js";
 
 // -----------------------------------------------------------------------------
 // Harness
@@ -451,9 +451,11 @@ test("try in session validates BEFORE defining, and says it is temporary", async
   const prompt = h.confirms[0]?.prompt;
   assert.ok(prompt !== undefined);
   assert.ok(
-    prompt.detail.includes("TEMPORARY"),
+    prompt.detail.includes("only until you disconnect"),
     "the confirmation is where temporariness is said, and it must say it",
   );
+  // Said in words, not shouted.
+  assert.doesNotMatch(prompt.detail, /[A-Z]{5,}/);
   assert.ok(prompt.detail.includes("local"), "and it names the cluster");
   assert.ok(prompt.confirmLabel.toLowerCase().includes("session"));
 });
@@ -475,19 +477,17 @@ test("a session-defined construct is live for the session and GONE after a recon
   await h.actions.tryInSession(REQUEST);
 
   assert.equal(h.actions.sessionDefinitions.isDefined("local", "spaceParticipants"), true);
-  const live = sessionLensPlans([construct("spaceParticipants", "untrained")], (name) =>
-    h.actions.sessionDefinitions.isDefined("local", name),
-  );
-  assert.equal(live.length, 1);
-  assert.ok(live[0]?.title.includes("session"));
+  // The claim rides the construct's one training lens now.
+  const lens = (): string =>
+    trainingLensPlans([construct("spaceParticipants", "untrained")], {
+      sessionDefined: (name) => h.actions.sessionDefinitions.isDefined("local", name),
+    })[0]?.label ?? "";
+  assert.equal(lens(), "Not on cluster · this session");
 
   h.actions.noteStreamReset();
 
   assert.equal(h.actions.sessionDefinitions.isDefined("local", "spaceParticipants"), false);
-  const afterReconnect = sessionLensPlans([construct("spaceParticipants", "untrained")], (name) =>
-    h.actions.sessionDefinitions.isDefined("local", name),
-  );
-  assert.deepEqual(afterReconnect, [], "no lens may claim a definition on a stream that ended");
+  assert.equal(lens(), "Not on cluster", "no lens may claim a definition on a stream that ended");
 });
 
 test("a session-define that fails on the transport claims nothing", async () => {
@@ -584,7 +584,7 @@ test("a promote shows the closure BEFORE anything is submitted", async () => {
     false,
     "a dependency the cluster already has is not in what is being committed",
   );
-  assert.ok(first.prompt.detail.includes("dependency file(s) the cluster does not have"));
+  assert.ok(first.prompt.detail.includes("dependency file the cluster doesn't have"));
 });
 
 test("a promote validates before promoting, and refreshes the catalog after", async () => {
@@ -604,8 +604,12 @@ test("a promote against a non-local cluster says so in the confirmation", async 
   const h = harness();
   h.setCluster(STAGING);
   await h.actions.promote(REQUEST);
-  assert.ok(h.confirms[0]?.prompt.detail.includes("not marked local"));
+  assert.ok(h.confirms[0]?.prompt.detail.includes("isn't a local cluster"));
   assert.ok(h.confirms[0]?.prompt.message.includes("staging"));
+  // The consequence, never the file that records it; and the button names
+  // the act and the cluster.
+  assert.doesNotMatch(h.confirms[0]?.prompt.detail ?? "", /clusters\.yaml/);
+  assert.equal(h.confirms[0]?.prompt.confirmLabel, "Promote to staging");
 });
 
 test("declining a promote promotes nothing", async () => {
@@ -707,7 +711,7 @@ test("an unknown row count is never rendered as zero", async () => {
   };
 
   const report = outcomeReport(await h.actions.promote(REQUEST));
-  assert.ok(report!.body.includes("not counted"));
+  assert.ok(report!.body.includes("rows affected: unknown"));
   assert.equal(report!.body.includes("rows affected: 0"), false);
 });
 
@@ -818,7 +822,7 @@ test("the override prompt names the field it breaks and says the engine audits i
   const prompt = h.overrides[0];
   assert.ok(prompt !== undefined);
   assert.ok(prompt.confirmLabel.includes("colour"), "the button names the consequence");
-  assert.ok(prompt.detail.includes("audits"), "and the modal says the override is recorded");
+  assert.ok(prompt.detail.includes("audits the override"), "and the modal says the override is recorded");
 });
 
 test("a successful override is reported as one", async () => {
@@ -846,7 +850,7 @@ test("a successful override is reported as one", async () => {
 
   assert.equal(report?.severity, "warning", "a promote that broke something is not routine");
   assert.ok(report!.headline.includes("override"));
-  assert.ok(report!.body.includes("auditEvent"));
+  assert.ok(report!.body.includes("audited"), "the report says the override was recorded");
 });
 
 // -----------------------------------------------------------------------------
@@ -886,8 +890,8 @@ test("the stage confirmation says who can call it, which is the whole distinctio
     const h = harness();
     await h.actions.stage(REQUEST);
     const detail = h.confirms[0]?.prompt.detail ?? "";
-    assert.match(detail, /callable BY YOU AND BY NOBODY ELSE/);
-    assert.match(detail, /concept cannot be staged/);
+    assert.match(detail, /only you can call it/);
+    assert.match(detail, /concept can't be staged/);
     assert.equal(
       /owner-only/.test(detail),
       false,
@@ -959,8 +963,12 @@ test("a demote confirmation states the retire-or-remove rule without predicting 
   const h = harness();
   await h.actions.demote(REQUEST);
   const detail = h.confirms[0]?.prompt.detail ?? "";
-  assert.ok(detail.includes("RETIRED"));
-  assert.ok(detail.includes("Only this construct"));
+  assert.ok(detail.includes("Anything it depends on stays promoted"));
+  // The concept rule is said for a concept, where it is true -- and not for a
+  // query, where it would be a paragraph about something else.
+  assert.equal(detail.includes("retired"), false, "a query's demote talks about concept rows");
+  const concept = demotePrompt({ name: "local", label: "local", local: true } as TrainingCluster, "concept", "widget");
+  assert.ok(concept.detail.includes("retired instead of removed"));
 });
 
 test("a retired concept is reported with the row count that decided it", async () => {
@@ -1074,5 +1082,61 @@ test("a construct the buffer no longer declares reports the rename rather than c
   const h = harness();
   const outcome = await h.actions.demote({ uri: REQUEST.uri, name: "renamedSince" });
   assert.equal(outcome.status, "error");
-  assert.ok(outcome.status === "error" && outcome.message.includes("no longer declares"));
+  assert.ok(outcome.status === "error" && outcome.message.includes("isn't in this file any more"));
+});
+
+test("a failed act's toast names its error ID once", () => {
+  // The id is extracted FROM the message, so "failed (ERR-x): ... ERR-x" said
+  // it twice on one line.
+  const report = outcomeReport({
+    status: "error",
+    action: "promote",
+    request: REQUEST,
+    message: "promote: engine unavailable (ERR-a1b2c3)",
+    errorId: "ERR-a1b2c3",
+  });
+  assert.ok(report !== undefined);
+  assert.equal(report.headline.split("ERR-a1b2c3").length - 1, 1, report.headline);
+  // The full record still carries it, for the log search.
+  assert.ok(report.body.includes("Error ID: ERR-a1b2c3"));
+});
+
+// -----------------------------------------------------------------------------
+// When an act counts as started
+// -----------------------------------------------------------------------------
+//
+// `started` is where the window's progress begins. It used to wrap the whole
+// act, so "Promoting spaceParticipants" ran behind the modal asking whether to
+// promote it, and a No had shown progress for something that never happened.
+
+test("each confirmed act starts after its confirmation, and a declined one never does", async () => {
+  for (const act of ["tryInSession", "stage", "promote", "demote"] as const) {
+    const h = harness();
+    const seen: number[] = [];
+    await h.actions[act](REQUEST, () => seen.push(h.confirms.length));
+    assert.deepEqual(seen, [1], `${act} started before (or without) its confirmation`);
+
+    const declined = harness();
+    declined.answerConfirm(false);
+    let started = 0;
+    const outcome = await declined.actions[act](REQUEST, () => {
+      started += 1;
+    });
+    assert.equal(outcome.status, "declined");
+    assert.equal(started, 0, `${act} showed progress for a No`);
+  }
+});
+
+test("a dry run starts at once, and one refused before it began never starts", async () => {
+  const h = harness();
+  let started = 0;
+  await h.actions.dryRun(REQUEST, () => {
+    started += 1;
+  });
+  assert.equal(started, 1);
+  h.setConnected(false);
+  await h.actions.dryRun(REQUEST, () => {
+    started += 1;
+  });
+  assert.equal(started, 1, "a dry run with no connection showed progress");
 });

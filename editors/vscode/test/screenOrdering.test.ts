@@ -11,8 +11,10 @@
 // halves, because the screens live on two sides of a line this lane cannot
 // cross:
 //
-//   1. RENDERED. The pure screens -- installScreens.ts and
-//      deploymentScreens.ts -- are rendered here and their output inspected.
+//   1. RENDERED. The pure screens in installScreens.ts are rendered here and
+//      their output inspected. (deploymentScreens.ts moved to the page kit,
+//      whose action bar is the floor of the page and is asserted by the kit's
+//      own tests and test/deploymentPanel.test.ts.)
 //   2. SCANNED. The wizard's landing / connect / uninstall / done screens are
 //      methods on a panel that imports `vscode`, which
 //      cmd/memql-lsp/vscodeimportrule_test.go keeps out of this lane by
@@ -35,19 +37,11 @@ import * as path from "node:path";
 
 import { PLATFORM_DETECT_STEP } from "../src/install/platform.js";
 import type { StepProgress } from "../src/state/addCluster.js";
-import { newLocalRun, type Instance, type Run } from "../src/state/deployments.js";
 import {
-  renderCollectScreen,
   renderFailedScreen,
   renderRebuildScreen,
   renderRunningScreen,
 } from "../src/webview/installScreens.js";
-import {
-  renderChooseTag,
-  renderInstanceOverview,
-  renderRemoteInstance,
-  renderRunDetail,
-} from "../src/webview/deploymentScreens.js";
 import { DEFAULT_INPUTS } from "../src/state/addCluster.js";
 
 // dist-test/test/<name>.js -> the package root, then the repository.
@@ -57,6 +51,7 @@ const REPO = path.resolve(PKG, "..", "..");
 function step(over: Partial<StepProgress> = {}): StepProgress {
   return {
     id: "toolK3d",
+    label: "",
     description: "Installing k3d",
     state: "pending",
     reason: "",
@@ -67,23 +62,6 @@ function step(over: Partial<StepProgress> = {}): StepProgress {
     ...over,
   };
 }
-
-const LOCAL: Instance = {
-  name: "local",
-  kind: "local",
-  presence: "installed-healthy",
-  connected: true,
-  version: "v0.19.1",
-};
-
-const REMOTE: Instance = { ...LOCAL, name: "staging", kind: "remote", version: "v0.9.2" };
-
-const RUN: Run = newLocalRun({
-  id: "run-1",
-  instance: "local",
-  kind: "upgrade",
-  startedAt: "2026-08-14T10:00:00Z",
-});
 
 /**
  * The doctrine, as an assertion.
@@ -127,10 +105,6 @@ function assertLogsLast(name: string, html: string): void {
 // without needing to know that.
 const SCREENS: readonly { name: string; html: string }[] = [
   {
-    name: "collect",
-    html: renderCollectScreen({ action: "install", values: DEFAULT_INPUTS, errors: [] }),
-  },
-  {
     name: "rebuild",
     html: renderRebuildScreen({ checkoutDir: "/home/me/src", nodes: "" }),
   },
@@ -165,57 +139,6 @@ const SCREENS: readonly { name: string; html: string }[] = [
       logsFollow: true,
     }),
   },
-  {
-    name: "instance overview",
-    html: renderInstanceOverview({
-      instance: LOCAL,
-      runs: [],
-      actions: [{ id: "repair", label: "Repair", detail: "", flow: "repairGraph" }],
-      nowMs: 0,
-      error: "",
-      releases: undefined,
-      upgrade: { kind: "none", reason: "not under test" },
-      diagnosticsOpen: false,
-    }),
-  },
-  {
-    name: "remote instance",
-    html: renderRemoteInstance({
-      instance: REMOTE,
-      runs: [],
-      pipeline: { kind: "present", title: "Deploy", detail: "", actions: [], rollouts: [] },
-      nowMs: 0,
-      outcome: "",
-      error: "",
-      releases: undefined,
-      upgrade: { kind: "none", reason: "not under test" },
-      diagnosticsOpen: false,
-    }),
-  },
-  {
-    name: "choose tag",
-    html: renderChooseTag({
-      instance: LOCAL,
-      listing: { tags: ["v0.19.1"], error: "" },
-      target: "",
-      tagError: "",
-      plan: [],
-      summary: "",
-      sameVersion: false,
-    }),
-  },
-  {
-    name: "run detail",
-    html: renderRunDetail({
-      instance: LOCAL,
-      run: RUN,
-      actions: [],
-      nowMs: 0,
-      outcome: "",
-      error: "",
-      diagnosticsOpen: false,
-    }),
-  },
 ];
 
 test("every rendered screen puts its actions row first", () => {
@@ -243,24 +166,6 @@ test("the failure screen is not an exception -- Retry is at the top", () => {
     html.indexOf(`data-act="retry"`) < html.indexOf("the port was busy"),
     "Retry must precede the failure summary",
   );
-});
-
-test("the ordering never changes WHICH actions a screen offers", () => {
-  // The doctrine moves buttons; `instanceActions` decides which exist. A reader
-  // -- no actions offered -- must still see no actions, which is the property
-  // that would break if the layout ever synthesised a default row.
-  const html = renderInstanceOverview({
-    instance: LOCAL,
-    runs: [],
-    actions: [],
-    nowMs: 0,
-    error: "",
-    releases: undefined,
-    upgrade: { kind: "none", reason: "not under test" },
-    diagnosticsOpen: false,
-  });
-  assert.doesNotMatch(html, /<div class="actions">/);
-  assert.doesNotMatch(html, /data-choose=/);
 });
 
 test("no screen builds its own heading-led page -- renderScreen is the only producer", () => {
@@ -293,13 +198,19 @@ test("the detect step's second copy still says what the install document says", 
   // voice, on precisely the path an operator hits when something is wrong.
   const doc = JSON.parse(
     fs.readFileSync(path.join(REPO, "scripts", "install", "graph", "install.json"), "utf8"),
-  ) as { steps: { id: string; description: string }[] };
+  ) as { steps: { id: string; label: string; description: string }[] };
   const detect = doc.steps.find((s) => s.id === "detect");
   assert.notEqual(detect, undefined, "install.json still has a detect step");
   assert.equal(
     PLATFORM_DETECT_STEP.description,
     detect?.description,
     "src/install/platform.ts holds a second copy of the detect step's sentence; " +
+      "it must say what scripts/install/graph/install.json says",
+  );
+  assert.equal(
+    PLATFORM_DETECT_STEP.label,
+    detect?.label,
+    "src/install/platform.ts holds a second copy of the detect step's label; " +
       "it must say what scripts/install/graph/install.json says",
   );
 });

@@ -415,6 +415,7 @@ function main() {
     cap_result_set commitBefore "$before"
     cap_result_set_raw detached "$DETACHED"
 
+    cap_progress "Downloading updates"
     deepen_if_shallow "$remote"
     fetch_tip "$remote" "$BRANCH"
     cap_result_set_raw unshallowed "$UNSHALLOWED"

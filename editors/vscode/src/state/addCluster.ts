@@ -16,7 +16,7 @@
 
 import type { ExecEvent } from "../install/executor.js";
 import type { RecoveryKeyState } from "../install/recoveryKey.js";
-import type { AddClusterAction } from "../clusters/presence.js";
+import type { AddClusterAction, PresenceVerdict } from "../clusters/presence.js";
 import type { ClustersFile } from "../clusters/model.js";
 import {
   composeEndpointFromDomain,
@@ -26,6 +26,17 @@ import {
 } from "../connection/endpoint.js";
 import type { HandoffResult } from "../install/handoff.js";
 import { installDomainProblem, DEFAULT_LOCAL_DOMAIN, DEFAULT_STACK_TAG } from "../install/stackPin.js";
+import { runProgressOf } from "./installProgress.js";
+import type { ProgressPhase, RunProgress } from "./runProgress.js";
+import {
+  appendLog,
+  copyStep,
+  markFinished,
+  markPhase,
+  markStarted,
+  recordsForAttempt,
+  upsertStep,
+} from "./stepRecords.js";
 
 /** Where the operator is. */
 export type Screen =
@@ -57,6 +68,8 @@ export type StepState = "pending" | "running" | "done" | "skipped" | "preserved"
 
 export interface StepProgress {
   id: string;
+  /** The graph's short label ("Creating the cluster"); "" until the plan arrives. */
+  label: string;
   description: string;
   state: StepState;
   /** The sentence a non-ok status carried. */
@@ -80,6 +93,33 @@ export interface StepProgress {
    * Empty when the failure has no single command that fixes it.
    */
   remedy: string;
+  /** When this attempt started the step, in epoch milliseconds. */
+  startedAt?: number;
+  /** When this attempt settled the step, in epoch milliseconds. */
+  finishedAt?: number;
+  /** What the running step last reported about itself (`cap_progress`). */
+  phase?: ProgressPhase;
+  /**
+   * What the step's own script said about a failure, in its own words: the
+   * envelope's `error.message`, or `result.reason` when it named one.
+   *
+   * SEPARATE FROM `reason`, which the executor builds for the run record and
+   * the log -- "exit 4: ..." and "the script exited 0 but its verify did not
+   * hold: result.x ..." are an account for the record, not a sentence for a
+   * person. The page shows this one; empty means the script said nothing and
+   * the exit code's plain-words guidance stands alone.
+   */
+  message?: string;
+  /** The step's own ceiling from the graph, when it declares one (seconds). */
+  timeoutSeconds?: number;
+  /**
+   * What the step came to on the PREVIOUS attempt, kept for display only.
+   *
+   * Every attempt starts every step from `pending` so the bar never runs
+   * backwards within it; this is the one thing the new attempt keeps from the
+   * last, so a screen can still say a step passed before.
+   */
+  previousState?: StepState;
 }
 
 /**
@@ -286,10 +326,7 @@ export function connectDomainProblem(domain: string): string | undefined {
   const isLoopbackV6 = bare === "::1" || bare === "0:0:0:0:0:0:0:1";
 
   if (isLocalhostName || isLoopbackV4 || isLoopbackV6) {
-    return (
-      "That is a local install's domain -- use \"Install a local cluster\" instead. " +
-      "This form registers a cluster reachable over the network."
-    );
+    return "That's this computer. Go back and choose the local cluster instead.";
   }
 
   // A FRONT-DOOR HOST PASTED INTO THE DOMAIN BOX (memql#4624).
@@ -313,12 +350,7 @@ export function connectDomainProblem(domain: string): string | undefined {
   const firstLabel = bare.split(".")[0] ?? "";
   if (bare.includes(".") && frontDoorLabels.includes(firstLabel)) {
     const suggested = bare.slice(firstLabel.length + 1);
-    return (
-      `That looks like the cluster's ${firstLabel} host, not its domain. ` +
-      `MemQL composes every host from the domain -- the endpoint is \`api.<domain>\` ` +
-      `and sign-in is \`identity.<domain>\` -- so enter \`${suggested}\` here. ` +
-      `If \`${bare}\` really is the domain, set the endpoint by hand under Advanced.`
-    );
+    return `Enter the domain without "${firstLabel}.", for example ${suggested}.`;
   }
   return undefined;
 }
@@ -354,9 +386,7 @@ export const DERIVATION_PLACEHOLDER = "%DOMAIN%";
  */
 export function derivationLine(domain: string): string {
   const endpoint = composeEndpointFromDomain(domain);
-  return endpoint === ""
-    ? "MemQL will connect to api.<domain>:443."
-    : `Will connect to ${endpoint}.`;
+  return endpoint === "" ? "" : `Connects to ${endpoint}`;
 }
 
 /**
@@ -446,7 +476,7 @@ export function duplicateNameMessage(name: string): string {
  * free to accept something the dialer later rejects, and the operator would
  * find out at connect time with the form long since closed.
  *
- * Its message names the cluster ("cluster \"x\": endpoint scheme must be...")
+ * Its message names the cluster ("cluster \"x\": use an address like ...")
  * because its usual caller has no field to attach the sentence to. This one
  * does, and the label above the box already says which value is wrong, so the
  * prefix is stripped -- by exact match against the name we passed in, not by a
@@ -484,21 +514,6 @@ function endpointProblem(name: string, endpoint: string): string | undefined {
  * and a capability script exits 2 on an undeclared flag -- so the fields are
  * not merely unneeded, they are unpassable.
  */
-/**
- * The remedy a capability declared, or "" (memql#3551).
- *
- * DEFENSIVE ABOUT ITS OWN INPUT. The envelope is JSON a script produced, so
- * `result` can be anything at all; anything that is not a non-empty string is
- * no remedy. It is about to be offered to an operator as a command to run with
- * root, so "probably a string" is not the standard.
- */
-function remedyFrom(envelope: { result?: unknown } | null | undefined): string {
-  const result = envelope?.result;
-  if (result === null || typeof result !== "object") return "";
-  const value = (result as Record<string, unknown>).remedy;
-  return typeof value === "string" ? value.trim() : "";
-}
-
 export function requiredFields(action: AddClusterAction): InputField[] {
   switch (action) {
     case "install":
@@ -567,11 +582,11 @@ export function requiredFields(action: AddClusterAction): InputField[] {
 // pieces of machinery describing a feature that no longer exists.
 
 const LABELS: Record<InputField, string> = {
-  domain: "domain",
-  ownerFirstName: "first name",
-  ownerLastName: "last name",
-  ownerEmail: "email address",
-  version: "version",
+  domain: "a domain",
+  ownerFirstName: "your first name",
+  ownerLastName: "your last name",
+  ownerEmail: "your email address",
+  version: "a version",
 };
 
 /** The screen each action needs first. */
@@ -599,9 +614,23 @@ export class AddClusterState {
   /** Whether `version` carries an operator's answer rather than a default. */
   private versionTouched = false;
   private fieldErrors: FieldError[] = [];
-  private progress: StepProgress[] = [];
+  private records: StepProgress[] = [];
+  // THE PROGRESS BAR'S MEMORY. `progress(now)` never reports less than it did
+  // last time within one attempt, and this is where "last time" lives; a new
+  // attempt's `runStarted` sets it back to zero.
+  private highWater = 0;
+  // Per-step expected seconds measured on this machine (runProgress.ts
+  // `historicalWeights`). Empty means the defaults, which is a fine bar.
+  private weights: Readonly<Record<string, number>> = {};
+  private readonly clock: () => number;
   private failedId: string | undefined;
   private wasCancelled = false;
+  // CANCEL WAS PRESSED AND THE RUN HAS NOT COME TO REST (memql#5118 audit).
+  // The executor stops at the next wave boundary, which during the cluster
+  // step can be many minutes away; the page says "Stopping after the current
+  // step" for exactly as long as this is true, rather than claiming the run is
+  // cancelled while it is still working.
+  private stopRequested = false;
   private didSucceed = false;
   private connectValues: ConnectInputs = { ...EMPTY_CONNECT };
   private connectProbeStatus: ConnectProbeState = { state: "none" };
@@ -679,6 +708,14 @@ export class AddClusterState {
   // what is happening NOW; there is nothing above the tail worth landing on.
   private logsFollowTail = true;
 
+  /**
+   * `now` is the clock step timings are read from, in epoch milliseconds --
+   * injectable so a test can say exactly how long a step has been running.
+   */
+  constructor(options: { now?: () => number } = {}) {
+    this.clock = options.now ?? ((): number => Date.now());
+  }
+
   get screen(): Screen {
     return this.currentScreen;
   }
@@ -711,11 +748,31 @@ export class AddClusterState {
     return [...this.fieldErrors];
   }
   get steps(): StepProgress[] {
-    return this.progress.map((p) => ({ ...p }));
+    return this.records.map(copyStep);
   }
   get failed(): StepProgress | undefined {
-    const found = this.progress.find((p) => p.id === this.failedId);
-    return found === undefined ? undefined : { ...found };
+    const found = this.records.find((p) => p.id === this.failedId);
+    return found === undefined ? undefined : copyStep(found);
+  }
+
+  /**
+   * How far the run has got at `now`: the weighted percent, the status line
+   * and "Step n of m" (state/runProgress.ts).
+   *
+   * NOT A PURE READ, deliberately: it remembers the percent it returns, so the
+   * next call within this attempt can never report less. That is what keeps
+   * the bar from running backwards when a step's own count restarts below the
+   * time-based estimate it replaces.
+   */
+  progress(now: number = this.clock()): RunProgress {
+    const result = runProgressOf(this.records, now, { highWater: this.highWater }, this.weights);
+    this.highWater = result.highWater;
+    return result;
+  }
+
+  /** Expected seconds per step id, measured on this machine. See `weights`. */
+  setStepWeights(weights: Readonly<Record<string, number>>): void {
+    this.weights = { ...weights };
   }
   /**
    * EVERY failed step, in graph order.
@@ -727,7 +784,7 @@ export class AddClusterState {
    * confident advice about a step they may not even be looking at.
    */
   get failures(): StepProgress[] {
-    return this.progress.filter((p) => p.state === "failed").map((p) => ({ ...p }));
+    return this.records.filter((p) => p.state === "failed").map(copyStep);
   }
   get connectInputs(): ConnectInputs {
     return { ...this.connectValues };
@@ -738,6 +795,18 @@ export class AddClusterState {
   /** What the WRITE refused, when the form itself had nothing wrong with it. */
   get connectFailure(): string {
     return this.connectFailureMessage;
+  }
+
+  /**
+   * Whether the registration form holds nothing typed.
+   *
+   * What Escape asks before it leaves the form: a pristine form has nothing to
+   * lose, and a half-filled one is a draft a stray key must not wipe (the old
+   * Escape discarded every field, memql#5118 audit). Cancel still discards,
+   * because clicking it is a decision.
+   */
+  get connectIsPristine(): boolean {
+    return Object.values(this.connectValues).every((value) => value.trim() === "");
   }
   get cancelled(): boolean {
     return this.wasCancelled;
@@ -757,6 +826,9 @@ export class AddClusterState {
 
   setHandoff(result: HandoffResult): void {
     this.handoffResult = result;
+    // A hand-off follows a run that went through, or a reconnect that ran
+    // nothing: either way the page is not showing a stopped run any more.
+    this.wasCancelled = false;
     this.currentScreen = "done";
   }
 
@@ -874,6 +946,47 @@ export class AddClusterState {
   /** Whether the run's output is disclosed. */
   get logsOpen(): boolean {
     return this.logsShown;
+  }
+
+  /**
+   * The disclosure was opened or closed ON THE PAGE, which has already done
+   * it; this records which way, so the next document the page is given (a
+   * reload, a theme change) draws it the same.
+   */
+  setLogsOpen(open: boolean): void {
+    this.logsShown = open;
+    if (open) this.logsFollowTail = true;
+  }
+
+  /** Cancel was pressed and the run is still coming to rest. */
+  get stopping(): boolean {
+    return this.stopRequested;
+  }
+
+  /**
+   * Cancel was pressed while a run is in flight.
+   *
+   * THE SCREEN DOES NOT MOVE. The executor stops at the next wave boundary,
+   * not at the click, so the run is still working; `finish` is what settles it
+   * once the report arrives. The deployment page's older `cancel()` below
+   * still moves to `done` at once and is kept for it.
+   */
+  requestStop(): void {
+    this.stopRequested = true;
+  }
+
+  /**
+   * The run never started: the password prompt was dismissed or refused.
+   *
+   * Back to the form the operator was on, with everything they typed, and
+   * nothing about the run that did not happen.
+   */
+  returnToCollect(): void {
+    this.currentScreen = this.chosen === undefined ? "landing" : "collect";
+    this.records = [];
+    this.highWater = 0;
+    this.failedId = undefined;
+    this.stopRequested = false;
   }
 
   /** Whether the pane should still be pinned to the tail on the next render. */
@@ -1084,7 +1197,7 @@ export class AddClusterState {
     for (const field of requiredFields(action)) {
       const value = this.values[field];
       const problem =
-        value.trim() === "" ? `A ${LABELS[field]} is required.` : this.problemWith(field, value);
+        value.trim() === "" ? `Enter ${LABELS[field]}.` : this.problemWith(field, value);
       if (problem !== undefined) errors.push({ field, message: problem });
     }
     return errors;
@@ -1095,7 +1208,7 @@ export class AddClusterState {
     const trimmed = value.trim();
     if (trimmed === "") return undefined;
     if (field === "ownerEmail" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-      return "That does not look like an email address.";
+      return "Enter a valid email address.";
     }
     if (field === "domain" && /\s/.test(trimmed)) {
       return "A domain cannot contain spaces.";
@@ -1138,6 +1251,7 @@ export class AddClusterState {
     this.failedId = undefined;
     this.wasCancelled = false;
     this.didSucceed = false;
+    this.stopRequested = false;
     // A second run must not show the first run's outcome while it is going.
     this.handoffResult = undefined;
     // Nor the first run's finding about the owner account: a repair that has
@@ -1167,6 +1281,13 @@ export class AddClusterState {
     // run's output while this one has produced none.
     this.logsShown = false;
     this.logsFollowTail = true;
+    // AND WITHOUT THE LAST RUN'S ROWS. The run screen is painted before this
+    // run's plan arrives (the platform check and the password prompt sit in
+    // between), and the last run's rows there would show its finished bar and
+    // closing sentence for a run that has not started. The plan replaces them
+    // when it lands; a Retry keeps them, through `retry`.
+    this.records = [];
+    this.highWater = 0;
     return true;
   }
 
@@ -1311,7 +1432,7 @@ export class AddClusterState {
     const domain = normalizeDomain(values.domain);
 
     if (name === "") {
-      errors.push({ field: "name", message: "A cluster name is required." });
+      errors.push({ field: "name", message: "Enter a name for this cluster." });
     } else if (this.registry?.clusters.some((c) => c.name === name) === true) {
       errors.push({ field: "name", message: duplicateNameMessage(name) });
     }
@@ -1324,18 +1445,11 @@ export class AddClusterState {
     // happening to be spelled `api.<domain>`. Two answers, and everything else
     // follows from them.
     if (domain === "") {
-      errors.push({
-        field: "domain",
-        message:
-          "A domain is required: MemQL composes the cluster's endpoint, sign-in host and portal URL from it.",
-      });
+      errors.push({ field: "domain", message: "Enter the cluster's domain." });
     } else if (/\s/.test(domain)) {
       errors.push({ field: "domain", message: "A domain cannot contain spaces." });
     } else if (domain.includes("://")) {
-      errors.push({
-        field: "domain",
-        message: "A domain is a hostname, not a URL -- drop the scheme.",
-      });
+      errors.push({ field: "domain", message: "Enter a domain like example.com, without https://." });
     } else {
       const local = connectDomainProblem(domain);
       if (local !== undefined) errors.push({ field: "domain", message: local });
@@ -1347,11 +1461,7 @@ export class AddClusterState {
     // rather than copied.
     const endpoint = values.endpoint.trim() || composeEndpointFromDomain(domain);
     if (endpoint === "") {
-      errors.push({
-        field: "endpoint",
-        message:
-          "An endpoint is required: the cluster's gRPC host:port, or a domain above to compose it from.",
-      });
+      errors.push({ field: "endpoint", message: "Enter an endpoint, or a domain to compose one from." });
     } else {
       const problem = endpointProblem(name === "" ? "this cluster" : name, endpoint);
       if (problem !== undefined) errors.push({ field: "endpoint", message: problem });
@@ -1361,15 +1471,10 @@ export class AddClusterState {
     if (token.startsWith("mql_pat_")) {
       errors.push({
         field: "token",
-        message:
-          "That is a Personal Access Token, and the mesh cannot verify one: it checks bearers against the identity service's JWKS feed, so a PAT fails before any lookup. Paste the `access_token` from POST <identity>/oauth/token, or leave this empty and run \"MemQL: Sign In\".",
+        message: "A personal access token can't be used here. Leave this empty and sign in.",
       });
     } else if (/\s/.test(token)) {
-      errors.push({
-        field: "token",
-        message:
-          "An access token contains no whitespace -- this one looks like it picked up a line break on the way in.",
-      });
+      errors.push({ field: "token", message: "Remove the spaces or line breaks from the token." });
     }
 
     return errors;
@@ -1460,33 +1565,38 @@ export class AddClusterState {
         // a step first appears when it STARTS, so the checklist grows from
         // empty and never says how much is left.
         //
-        // upsert, so a RE-RUN (Retry, or a repair) keeps what the previous
-        // attempt established. The steps that already passed re-report as
-        // skipped; showing them blank again in between would be a display of
-        // this event rather than of the machine.
-        for (const step of event.steps) this.upsert(step.id, step.description);
+        // A NEW ATTEMPT STARTS EVERY STEP FROM PENDING (Retry, a repair, or
+        // the next run on the same page), with a fresh high-water mark. The
+        // steps that already passed re-report as skipped within a second;
+        // counting them done in between would put the bar ahead of the run and
+        // then pull it back. stepRecords.recordsForAttempt keeps what each came
+        // to last time as `previousState`.
+        this.records = recordsForAttempt(this.records, event.steps);
+        this.highWater = 0;
         return;
       }
       case "stepStarted": {
-        const entry = this.upsert(event.step.id, event.step.description);
-        entry.state = "running";
+        const entry = this.upsert(event.step.id, event.step.label, event.step.description);
+        markStarted(entry, this.clock(), event.step.timeoutSeconds);
+        return;
+      }
+      case "stepPhase": {
+        const entry = this.upsert(event.step.id, event.step.label, event.step.description);
+        markPhase(entry, event.label, event.done, event.total, this.clock());
         return;
       }
       case "stepLog": {
-        const entry = this.upsert(event.step.id, event.step.description);
-        entry.log = entry.log === "" ? event.line : `${entry.log}\n${event.line}`;
+        const entry = this.upsert(event.step.id, event.step.label, event.step.description);
+        appendLog(entry, event.line);
         return;
       }
       case "stepFinished": {
-        const entry = this.upsert(event.step.id, event.step.description);
-        entry.state = STATUS_TO_STATE[event.outcome.status] ?? "done";
-        entry.reason = event.outcome.reason ?? "";
-        entry.exitCode = event.outcome.exitCode;
-        // Off the ENVELOPE, not parsed out of the human sentence: the capability
+        const entry = this.upsert(event.step.id, event.step.label, event.step.description);
+        // The remedy rides the ENVELOPE, not the human sentence: the capability
         // contract puts structured facts in `result`, and a remedy recovered by
         // pattern-matching prose would break the first time a message was
-        // reworded (memql#3551).
-        entry.remedy = remedyFrom(event.outcome.envelope);
+        // reworded (memql#3551). markFinished reads it, for both machines.
+        markFinished(entry, event.outcome, this.clock());
         if (entry.state === "failed") {
           // THE FIRST FAILURE IS KEPT, not the last to resolve. A wave runs
           // under Promise.all and independent branches are deliberately allowed
@@ -1516,24 +1626,8 @@ export class AddClusterState {
     }
   }
 
-  private upsert(id: string, description: string): StepProgress {
-    const existing = this.progress.find((p) => p.id === id);
-    if (existing !== undefined) {
-      if (description !== "" && existing.description === "") existing.description = description;
-      return existing;
-    }
-    const fresh: StepProgress = {
-      id,
-      description,
-      state: "pending",
-      reason: "",
-      exitCode: null,
-      log: "",
-      guided: false,
-      remedy: "",
-    };
-    this.progress.push(fresh);
-    return fresh;
+  private upsert(id: string, label: string, description: string): StepProgress {
+    return upsertStep(this.records, id, label, description);
   }
 
   // ---------------------------------------------------------------------------
@@ -1549,11 +1643,9 @@ export class AddClusterState {
     // the same property that makes repair an install re-run -- so leaving the
     // other failures marked `failed` would show the operator a stale verdict
     // about a step that is being attempted again in front of them.
-    const failed = this.progress.filter((p) => p.state === "failed");
+    const failed = this.records.filter((p) => p.state === "failed");
     if (failed.length === 0) return;
-    for (const entry of failed) this.resetForAnotherAttempt(entry);
-    this.failedId = undefined;
-    this.currentScreen = "running";
+    this.startAnotherAttempt();
   }
 
   /**
@@ -1564,29 +1656,59 @@ export class AddClusterState {
    * for the other eleven.
    */
   switchToGuided(): void {
-    const failed = this.progress.filter((p) => p.state === "failed");
+    const failed = this.records.filter((p) => p.state === "failed");
     if (failed.length === 0) return;
-    for (const entry of failed) {
-      entry.guided = true;
-      this.resetForAnotherAttempt(entry);
-    }
-    this.failedId = undefined;
-    this.currentScreen = "running";
+    for (const entry of failed) entry.guided = true;
+    this.startAnotherAttempt();
   }
 
   /**
-   * Drops every trace of the attempt that just failed.
+   * Forgets the previous run entirely, before a DIFFERENT run starts on the
+   * same page.
+   *
+   * The deployment page holds one machine for its lifetime and runs rebuilds,
+   * updates and moves through it. Its next run's plan replaces the rows the
+   * moment it arrives, but the page paints the run screen before that -- and
+   * painting the last run's rows there would show a finished bar, the last
+   * run's closing sentence and a Back button for a run that has not started.
+   * A Retry is not this: it keeps the rows (and a step switched to guided keeps
+   * that choice), through `retry` / `switchToGuided`.
+   */
+  resetRun(): void {
+    this.records = [];
+    this.failedId = undefined;
+    this.wasCancelled = false;
+    this.stopRequested = false;
+    this.didSucceed = false;
+    this.logsShown = false;
+    this.logsFollowTail = true;
+    this.highWater = 0;
+  }
+
+  /**
+   * The screen for the attempt the operator just asked for, before its plan
+   * arrives.
+   *
+   * EVERY STEP GOES BACK TO PENDING, not only the failed ones, and the bar
+   * starts from zero -- which is exactly what the new attempt's `runStarted`
+   * will do (stepRecords.recordsForAttempt). Doing it here as well means the
+   * screen painted between the press and that event (a password prompt can
+   * sit in between) already shows the attempt that is coming, rather than the
+   * last one's finished bar followed by a jump back to the start.
    *
    * THE LOG GOES WITH THE REST. `apply()` APPENDS each `stepLog` line, so an
    * attempt that kept the previous output would render both runs concatenated
    * inside one disclosure with no boundary -- and the failure being read would
-   * be the one that is no longer happening.
+   * be the one that is no longer happening. What each step came to last time
+   * survives as `previousState`, and a guided choice survives as itself.
    */
-  private resetForAnotherAttempt(entry: StepProgress): void {
-    entry.state = "pending";
-    entry.reason = "";
-    entry.exitCode = null;
-    entry.log = "";
+  private startAnotherAttempt(): void {
+    this.records = recordsForAttempt(this.records, this.records);
+    this.highWater = 0;
+    this.failedId = undefined;
+    this.wasCancelled = false;
+    this.stopRequested = false;
+    this.currentScreen = "running";
   }
 
   /**
@@ -1606,13 +1728,181 @@ export class AddClusterState {
   finish(report: { ok: boolean; cancelled?: boolean }): void {
     this.wasCancelled = report.cancelled === true;
     this.didSucceed = report.ok && report.cancelled !== true;
+    this.stopRequested = false;
     this.currentScreen = "done";
   }
 }
 
-const STATUS_TO_STATE: Record<string, StepState> = {
-  ok: "done",
-  failed: "failed",
-  skipped: "skipped",
-  preserved: "preserved",
+// -----------------------------------------------------------------------------
+// the landing: what this computer has, and only the choices that apply
+// -----------------------------------------------------------------------------
+
+/** One act the landing can offer. */
+export type LandingAct =
+  | "install"
+  | "connect"
+  | "signIn"
+  | "openOs"
+  | "repair"
+  | "uninstall"
+  | "reconnect"
+  | "adopt";
+
+export interface LandingChoice {
+  act: LandingAct;
+  label: string;
+  /** One quiet line: what choosing it does. */
+  note: string;
+  /** `danger` for the one choice that takes things away. */
+  tone?: "danger";
+}
+
+/** What detection found, as the landing needs it. */
+export interface LandingFacts {
+  verdict: PresenceVerdict;
+  /** A `local: true` entry is in the cluster list. */
+  registered: boolean;
+  /** An install receipt records at least one artifact. */
+  hasReceipt: boolean;
+  /**
+   * Whether this computer can run the installer, from detect's platform
+   * check. Asked only when nothing local exists -- the one verdict that
+   * offers Install -- so `unknown` elsewhere means "not asked", not "unsure".
+   */
+  platform: "supported" | "unsupported" | "unknown";
+  /** The editor holds a live session with the listed local cluster. */
+  signedIn: boolean;
+}
+
+export interface LandingView {
+  /** The state in words, for the action bar. */
+  state: string;
+  tone: "idle" | "live" | "warn";
+  /** One sentence above the choices, only when the choices need it. */
+  line?: string;
+  choices: LandingChoice[];
+}
+
+const CONNECT_ELSEWHERE: LandingChoice = {
+  act: "connect",
+  label: "Connect to a cluster",
+  note: "Add a cluster that runs somewhere else.",
 };
+
+const UNINSTALL: LandingChoice = {
+  act: "uninstall",
+  label: "Uninstall",
+  note: "Removes MemQL from this computer.",
+  tone: "danger",
+};
+
+const CONNECT_ANOTHER: LandingChoice = { ...CONNECT_ELSEWHERE, label: "Connect to another cluster" };
+
+/**
+ * The landing's choices for what detection found, and nothing else.
+ *
+ * NEVER A VERDICT DETECTION DID NOT REACH. The page draws a skeleton until
+ * this has facts to work from; there is no default verdict to fall back on,
+ * because the old default -- "installed but not answering" -- was a claim made
+ * about machines that had nothing installed at all.
+ *
+ * THE RULES, and why each choice is where it is:
+ *
+ *  - Nothing local: Install, and Connect to a cluster. Only here is Install
+ *    offered: every other verdict means something is already on this
+ *    computer, and installing over it adopts its database.
+ *  - A local cluster that is installed and in the list: Sign in (or Open
+ *    MemQL OS when the editor is already signed in to it), Repair, Uninstall.
+ *    Repair needs the install's own record to replay, so a cluster built with
+ *    `make up` and listed by hand is not offered it.
+ *  - One that is present and NOT in the list -- removed from it, or built with
+ *    `make up`: Connect to it, which adds it and signs in, and Uninstall.
+ *  - A computer the installer does not support: one sentence, and Connect.
+ *
+ * Connecting to a cluster elsewhere is always the last choice: a local
+ * cluster existing is no reason to lose the way to add a remote one.
+ */
+export function landingView(facts: LandingFacts): LandingView {
+  switch (facts.verdict) {
+    case "absent":
+      if (facts.platform === "unsupported") {
+        return {
+          state: "No local cluster",
+          tone: "idle",
+          line: "This computer can't run a local MemQL cluster.",
+          choices: [CONNECT_ELSEWHERE],
+        };
+      }
+      return {
+        state: "No local cluster",
+        tone: "idle",
+        choices: [
+          { act: "install", label: "Install MemQL on this computer", note: "Runs a local cluster in Docker." },
+          CONNECT_ELSEWHERE,
+        ],
+      };
+    case "installed-healthy":
+    case "installed-unreachable": {
+      const healthy = facts.verdict === "installed-healthy";
+      const repairChoice: LandingChoice = {
+        act: "repair",
+        label: "Repair",
+        note: "Runs the install again and fixes what is missing.",
+      };
+      if (!facts.registered) {
+        // AN INSTALL THAT IS NOT ANSWERING IS REPAIRED FIRST, listed or not.
+        // Its record is here to replay, and a repair's hand-off puts it back
+        // in the list anyway; "Connect to it" alone would sign in to a cluster
+        // that is not answering, and Repair from a menu would dead-end here.
+        return {
+          // Not answering is the fact that decides what to do first; "not in
+          // your list" is said by "Connect to it", which adds it.
+          state: healthy ? "Local cluster not in your list" : "Local cluster not responding",
+          tone: healthy ? "idle" : "warn",
+          choices: [
+            ...(!healthy && facts.hasReceipt ? [repairChoice] : []),
+            { act: "reconnect", label: "Connect to it", note: "Adds it to your clusters, then signs in." },
+            UNINSTALL,
+            CONNECT_ANOTHER,
+          ],
+        };
+      }
+      const enter: LandingChoice = facts.signedIn
+        ? { act: "openOs", label: "Open MemQL OS", note: "You're signed in to this cluster." }
+        : { act: "signIn", label: "Sign in", note: "Opens your browser to sign in." };
+      const repair: LandingChoice[] = facts.hasReceipt ? [repairChoice] : [];
+      return {
+        state: healthy ? "Local cluster running" : "Local cluster not responding",
+        tone: healthy ? "live" : "warn",
+        // A cluster that is not answering is repaired before it is signed in
+        // to; one that is answering is used before it is repaired.
+        choices: healthy
+          ? [enter, ...repair, UNINSTALL, CONNECT_ANOTHER]
+          : [...repair, enter, UNINSTALL, CONNECT_ANOTHER],
+      };
+    }
+    case "present-unreceipted":
+      return {
+        state: "Local cluster not in your list",
+        tone: "idle",
+        choices: [
+          { act: "adopt", label: "Connect to it", note: "Adds the cluster named memql to your list, then signs in." },
+          { ...UNINSTALL, note: "Deletes the cluster and its data, once you confirm." },
+          CONNECT_ANOTHER,
+        ],
+      };
+  }
+}
+
+/**
+ * Whether a command's named act is one the landing offers for these facts.
+ *
+ * "Repair Local Cluster" and "Uninstall Local Cluster" arrive from menus and
+ * the palette, which do not know what is on this computer. An act the landing
+ * would not offer lands on the landing instead of on a form for a cluster that
+ * is not there (memql#5118 audit: Repair on an empty machine ran a full
+ * install under repair wording).
+ */
+export function landingOffers(facts: LandingFacts, act: LandingAct): boolean {
+  return landingView(facts).choices.some((choice) => choice.act === act);
+}

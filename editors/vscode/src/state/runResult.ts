@@ -73,63 +73,41 @@ function fallbackConcept(conceptId: string): ConceptLike {
   return { id: conceptId, entity: conceptId };
 }
 
-/**
- * TOOL_RESULT_BANNER is required on every tool result.
- *
- * A `tool` is a declaration bound to a Go-backed handler, so it cannot be
- * session-defined and Run necessarily invokes the DEPLOYED definition. The
- * button is the same one that runs a query straight out of the buffer, so
- * without this the developer has every reason to read a tool result as their
- * edits' output. Same button, different semantics -- the UI has to say so
- * rather than let the assumption stand.
- */
-export const TOOL_RESULT_BANNER =
-  "This ran the DEPLOYED tool, not this buffer. A tool is a declaration bound to a Go-backed handler, so it cannot be defined from an editor session -- edits to its declaration here have no effect on what just ran.";
+// PROVENANCE, IN THE RESULT'S META LINE. Every result says what ran -- the
+// code in the editor, or the cluster's deployed definition -- because the same
+// Run button means both, and a result read as the other would mislead. It used
+// to be a paragraph on every run, which a reader learns to skip; it is now a
+// few words beside the row count, where it is read with the result.
 
 /**
- * BUFFER_RESULT_BANNER is the counterpart for a construct that DID run from
- * the buffer, shown when this run injected it.
- *
- * Stating the good case as well as the bad one is what makes the bad one
- * legible: a banner that only ever appears on tools is one the developer
- * learns to skip.
+ * A `tool` is bound to a handler in the engine and cannot be defined from an
+ * editor session, so Run necessarily invokes the DEPLOYED tool. Said on every
+ * tool result, because the same button runs a query straight out of the buffer.
  */
-export const BUFFER_RESULT_BANNER =
-  "This ran the construct as written in the editor, session-defined for this connection only. Nothing was saved or deployed.";
+export const TOOL_RESULT_BANNER = "Deployed tool · edits here don't apply";
 
 /**
- * REUSED_INJECTION_BANNER covers the third case: the buffer was already
- * injected on this stream and had not changed, so no new session-define was
- * needed and the run still executed the buffer.
+ * A construct that ran from the editor: session-defined for this connection,
+ * nothing saved or deployed. Said on the good case too, which is what makes the
+ * other cases legible.
  */
-/**
- * CATALOG_RESULT_BANNER covers the fourth case, which arrived with the
- * Constructs view (memql#3753): the construct was run from the CATALOG, so
- * there was no local source to assemble, nothing was session-defined, and what
- * executed is the definition the cluster has loaded.
- *
- * It exists because the three banners above were each false for it. The one it
- * would otherwise have been given -- REUSED_INJECTION_BANNER -- says "as
- * previously session-defined from this buffer", and a catalog run has no
- * buffer, was never session-defined, and for a PROMOTED construct has no file
- * anywhere on the machine. A result view exists to say what executed; a
- * confidently wrong sentence there is worse than none.
- */
-// ONE CALM LINE, ON PURPOSE (memql#4083). This banner used to explain, in the
-// buffer context's defensive register, that "nothing in your editor affected
-// what ran" -- which for a CATALOG click is the only possible semantics, not a
-// surprise. Rendered beside a legitimately empty result (a fresh cluster has
-// no plans, no actions, no spaces), the explanation read as the failure it was
-// adjacent to; the operator's words were "it looks like something failed.
-// There's no need for this." The four-way provenance distinction above is
-// still load-bearing -- each of the other three sentences is FALSE for a
-// catalog run -- but the register belongs to the surprise, and a catalog run
-// has none. Provenance in one line; the surprise-flagging prose stays on the
-// banners whose cases actually surprise.
-export const CATALOG_RESULT_BANNER = "Ran the definition deployed on this cluster.";
+export const BUFFER_RESULT_BANNER = "From this editor · not saved";
 
-export const REUSED_INJECTION_BANNER =
-  "This ran the construct as previously session-defined from this buffer on the current connection. The buffer had not changed since, so it was not re-injected.";
+/**
+ * The buffer was already defined on this connection and had not changed, so it
+ * was not sent again -- and what ran is STILL the editor's code. The same words
+ * as a fresh definition: whether it was re-sent is the run path's business, and
+ * "not re-sent" must not read as "not your code".
+ */
+export const REUSED_INJECTION_BANNER = BUFFER_RESULT_BANNER;
+
+/**
+ * A construct run from the CATALOG (memql#3753): no local source, nothing
+ * session-defined, and what executed is the definition the cluster has loaded.
+ * Provenance in two words, not a disclaimer -- beside a legitimately empty
+ * result, an explanation read as a failure (memql#4083).
+ */
+export const CATALOG_RESULT_BANNER = "Deployed version";
 
 export function resultBannerFor(outcome: {
   ranDeployedDefinition: boolean;

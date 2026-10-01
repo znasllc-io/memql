@@ -301,9 +301,9 @@ export async function writeRunConfigs(
 ): Promise<void> {
   const current = await readRunConfigs(file);
   if (!current.ok) {
-    throw new Error(
-      `${current.error} -- refusing to overwrite it. Fix the file by hand, then try again.`,
-    );
+    // The parser's words are on the Runs view's error row; this sentence is
+    // what a save says, on the page and in a toast.
+    throw new Error("runs.json has an error, so nothing was saved. Fix it, then save again.");
   }
   const next = mutate(current.file);
   await fs.mkdir(path.dirname(file), { recursive: true });

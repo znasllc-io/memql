@@ -101,6 +101,7 @@ import {
   ClusterCredentialStore,
   type SecretStore,
 } from "../auth/store.js";
+import { refreshClientId } from "../auth/wellKnownClient.js";
 import type { ClusterConfig } from "../clusters/model.js";
 import { identityBaseUrlFor } from "./endpoint.js";
 
@@ -164,6 +165,13 @@ export interface HttpRequestInit {
    * body -- an empty string included -- so this cannot be modelled as "" .
    */
   body?: string;
+  /**
+   * `manual` for a probe whose answer is the status itself (the sign-in
+   * pre-validation): a redirect is then reported, not followed.
+   */
+  redirect?: "follow" | "manual" | "error";
+  /** Bounds a probe; the real fetch honours it, test doubles may ignore it. */
+  signal?: AbortSignal;
 }
 
 export interface HttpResponseLike {
@@ -240,10 +248,12 @@ export interface CredentialDeps {
 // -----------------------------------------------------------------------------
 // Messages
 //
-// Exported so the Clusters tree can say the same thing at rest that the
-// connection attempt says on failure. An operator who reads two different
-// explanations of one condition learns less than one who reads the same
-// sentence twice.
+// These are the RECORD of a refusal: a failed connect's message goes to the
+// MemQL Connection output, where the person who opens "Show details" reads it.
+// The row, the page and the toast say the state in a few words of their own
+// (clusters/status.ts) and offer the fix as a button, so nothing here is shown
+// cut to fit a toast any more. They still end with the fix, and never with an
+// instruction to hand-edit clusters.yaml, which Sign in replaced.
 // -----------------------------------------------------------------------------
 
 export function wrongTokenClassMessage(clusterName: string, tokenClass: TokenClass): string {
@@ -255,32 +265,20 @@ export function wrongTokenClassMessage(clusterName: string, tokenClass: TokenCla
     `The credential stored for cluster "${clusterName}" is ${what}, which cannot authenticate against a bff. ` +
     "Mesh nodes verify bearers against the identity service's JWKS feed and have no lookup path for these tokens, " +
     "so they are rejected before any check on the value itself. " +
-    "Store an identity-issued JWT access token in the `token` field of clusters.yaml instead."
+    "Sign in to replace it with an identity-issued JWT access token."
   );
 }
 
 export function missingCredentialMessage(clusterName: string): string {
-  return (
-    `Cluster "${clusterName}" has no credential. Run "MemQL: Sign In" to get one -- it writes both ` +
-    "`token` and `refresh_token` for you, so the extension can renew as it expires. " +
-    "Sign-in from an editor needs the developer role or above on the cluster, and is refused with a " +
-    "message naming your role if you have less. " +
-    "Hand-editing `token` with an identity-issued JWT access token still works for an unattended setup."
-  );
+  return `Cluster "${clusterName}" has no stored sign-in, so there was nothing to connect with. Sign in to connect.`;
 }
 
 export function notConfiguredMessage(clusterName: string): string {
-  return (
-    `Cluster "${clusterName}" is not configured. Set an endpoint, and a \`token\` holding an ` +
-    "identity-issued JWT access token."
-  );
+  return `Cluster "${clusterName}" has no address to connect to. Edit it to add its domain.`;
 }
 
 function expiredMessage(clusterName: string, detail: string): string {
-  return (
-    `The access token for cluster "${clusterName}" has expired and could not be renewed: ${detail} ` +
-    "Store a fresh `token` (and `refresh_token`) in clusters.yaml."
-  );
+  return `The session for cluster "${clusterName}" expired and could not be renewed: ${detail} Sign in again.`;
 }
 
 // The refresh token itself was refused, so nothing stored can be renewed and
@@ -439,12 +437,17 @@ export class CredentialResolver implements CredentialSource {
       };
     }
 
+    // THE CLIENT THE TOKEN WAS ISSUED TO, as recorded beside it -- never the
+    // registry's `client_id`. That field belongs to whichever tool wrote the
+    // entry (the Cockpit writes `cockpit`), and presenting it refreshed an
+    // editor token as another tool's client; identity accepts that today only
+    // because it checks registration and not issuance (wellKnownClient.ts).
+    const clientId = refreshClientId(await this.store.readClientId(cluster.name));
     const body: Record<string, string> = {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
+      client_id: clientId,
     };
-    const clientId = (cluster.clientId ?? "").trim();
-    if (clientId !== "") body.client_id = clientId;
 
     let response: HttpResponseLike;
     try {
@@ -493,6 +496,10 @@ export class CredentialResolver implements CredentialSource {
     // A SecretStorage that refuses a write must not cost us the connection; it
     // only means the plaintext copy stays where it is (custodyTaken === false).
     const custodyTaken = await this.store.writeRefreshToken(cluster.name, rotated);
+    // The rotated token belongs to the client that just presented it, so the
+    // record travels with it -- including for a token taken in from the file,
+    // which had none until now.
+    if (custodyTaken) await this.store.writeClientId(cluster.name, clientId);
 
     // The lifetime the server just reported, kept beside the refresh token so
     // an access token that is not a readable JWT can still be renewed before it

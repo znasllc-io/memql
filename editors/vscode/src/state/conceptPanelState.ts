@@ -62,6 +62,23 @@ export class ConceptPanelState<T> {
   // loadPage(), not resolveSelection() -- writes it.
   private liveUpdatesDegradedMessage = "";
 
+  // Whether the CURRENT generation's first page has settled (loaded or failed).
+  // Until it has, the list is LOADING, not empty: a panel that drew "No rows"
+  // before its first read answered told a person the concept was empty when it
+  // had not yet been asked. reset() clears it, so a reload and a reconnect draw
+  // the loading shape again rather than the last cluster's verdict.
+  private listSettled = false;
+
+  // Whether the selected row's detail has answered for the current selection.
+  private detailSettled = false;
+
+  // The last PAGE read's failure, apart from a detail read's. `errorMessage`
+  // is shared by both, and a page that says "couldn't load rows" because a
+  // single row's detail failed would be wrong about the list.
+  private listErrorMessage = "";
+  // And the selected row's detail read's failure, for the same reason.
+  private detailErrorMessage = "";
+
   // Invalidated only by reset() (an external invalidating event: reload, or
   // the connection changing). loadPage() captures the current token with
   // `.current` -- NOT `.begin()`, since one page load does not supersede
@@ -110,6 +127,31 @@ export class ConceptPanelState<T> {
     return this.liveUpdatesDegradedMessage;
   }
 
+  /** The last page read's failure, or "". */
+  get listError(): string {
+    return this.listErrorMessage;
+  }
+
+  /** The selected row's detail read's failure, or "". */
+  get detailError(): string {
+    return this.detailErrorMessage;
+  }
+
+  /** The current generation's first page has answered, with rows or with an error. */
+  get settled(): boolean {
+    return this.listSettled;
+  }
+
+  /** A page load is running for the current generation (the first page, or "Load more"). */
+  get loading(): boolean {
+    return this.loadInFlight !== undefined && this.listLatest.isCurrent(this.loadInFlight);
+  }
+
+  /** The selected row's detail has answered (found, missing, or failed). */
+  get detailLoaded(): boolean {
+    return this.detailSettled;
+  }
+
   // reset clears the row list, cursor, selection, detail, and error, and
   // invalidates both guards. Call on an explicit reload and on every
   // connection state change -- a fresh cluster (or a reconnect to the same
@@ -132,6 +174,10 @@ export class ConceptPanelState<T> {
     this.selection = undefined;
     this.rowDetail = null;
     this.errorMessage = "";
+    this.listSettled = false;
+    this.detailSettled = false;
+    this.listErrorMessage = "";
+    this.detailErrorMessage = "";
   }
 
   // setLiveUpdatesDegraded / clearLiveUpdatesDegraded record whether the CDC
@@ -177,10 +223,14 @@ export class ConceptPanelState<T> {
       this.rows = this.rows.concat(page.rows);
       this.cursor = page.nextCursor;
       this.errorMessage = "";
+      this.listErrorMessage = "";
+      this.listSettled = true;
       return true;
     } catch (err) {
       if (!this.listLatest.isCurrent(token)) return false;
       this.errorMessage = err instanceof Error ? err.message : String(err);
+      this.listErrorMessage = this.errorMessage;
+      this.listSettled = true;
       return true;
     } finally {
       // Only clear the marker if it still belongs to THIS call. A reset()
@@ -199,6 +249,8 @@ export class ConceptPanelState<T> {
   // is no longer current once this one begins a new generation.
   beginSelection(rowId: string): SelectionToken {
     this.selection = rowId;
+    this.detailSettled = false;
+    this.detailErrorMessage = "";
     return this.selectionLatest.begin();
   }
 
@@ -216,11 +268,15 @@ export class ConceptPanelState<T> {
       if (!this.selectionLatest.isCurrent(token)) return false;
       this.rowDetail = detail;
       this.errorMessage = "";
+      this.detailErrorMessage = "";
+      this.detailSettled = true;
       return true;
     } catch (err) {
       if (!this.selectionLatest.isCurrent(token)) return false;
       this.errorMessage = err instanceof Error ? err.message : String(err);
+      this.detailErrorMessage = this.errorMessage;
       this.rowDetail = null;
+      this.detailSettled = true;
       return true;
     }
   }

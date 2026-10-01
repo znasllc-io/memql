@@ -296,22 +296,22 @@ error page or an empty one:
 | What renders | Where it comes from | Who can see it |
 |--------------|---------------------|----------------|
 | Deployment history | `v1:cluster:deployment` rows | any role |
-| Per-tier composition of a deployment (under Diagnostics, as "Node types") | `v1:cluster:deploymentNodeSpec` rows | any role |
-| The Deploy section, its actions, and the Rollouts they act on | `GetDeploymentStatus` | owner, admin |
-| The versions the Cut buttons name | `SuggestNextVersion` | developer, admin, owner |
+| Per-tier composition of a deployment (on its own page, as "Services") | `v1:cluster:deploymentNodeSpec` rows | any role |
+| The deploy actions, and the Rollouts they act on | `GetDeploymentStatus` | owner, admin |
+| The versions the Prepare choices name | `SuggestNextVersion` | developer, admin, owner |
 
 Concept rows go through the normal query surface and never touch the
-deploy-control gate; the Deploy section does. So a
+deploy-control gate; the deploy actions do. So a
 developer opening the VS Code Deployments panel gets history and per-tier
-composition as usual, and in place of the Deploy section the heading
-"Deployment status is not visible at your role" over the engine's own
-refusal, which names the role required. That is the designed behaviour of
-the surface, not a failure of it -- nothing is broken, and re-reading will
-not fix it.
+composition as usual, and in place of the deploy actions the line
+"Your role can't view deployment status." -- the engine's own refusal,
+which names the role required, is under Details. That is the designed
+behaviour of the surface, not a failure of it -- nothing is broken, and
+re-reading will not fix it.
 
-The Deploy section draws its actions only when the status read answers
+The panel draws the deploy actions only when the status read answers
 (`editors/vscode/src/deploy/pipelineState.ts`), so it offers a developer
-none -- not even Cut version and Deploy, which the service admits at the
+none -- not even Prepare and Deploy, which the service admits at the
 developer floor. The upgrade button is the exception: it is gated on the
 role alone (`editors/vscode/src/deploy/upgrade.ts`), so a developer offered
 a newer release can cut and ship it in one confirmed step. Otherwise a
@@ -328,31 +328,34 @@ with its own console.
 
 For a remote cluster it shows (`editors/vscode/src/webview/deploymentScreens.ts`):
 
-- **What it runs** -- the version, the newest published release, and the
-  domain.
+- **What it runs** -- the version, beside the cluster's name, and where
+  MemQL OS answers.
 - **The pipeline state**, one of three and none of them an error
   (`editors/vscode/src/deploy/pipelineState.ts`):
-  - **Deploy** -- the status read answered. The actions your role admits
-    are drawn, each as the buttons it needs (see
-    [Performing actions](#performing-actions)), with lines naming the
-    pending record Deploy would ship and the deployment Roll back would
-    return to, or saying there is none.
-  - **No deploy pipeline is configured for this cluster** -- the read
-    failed for a reason other than the role gate, most often because the
-    cluster has no deploy pipeline at all. The engine's message is printed
-    as sent.
-  - **Deployment status is not visible at your role** -- the role gate
-    refused the read. The engine's refusal is printed as sent.
-- **Deployments** -- the history, one row per `v1:cluster:deployment`
-  record: what kind of run, when, and how it ended. A row opens that
-  deployment's detail page.
-- **Diagnostics** (collapsed) -- each deployment's per-tier
-  `v1:cluster:deploymentNodeSpec` rows, labelled "Node types" because they
-  declare a version, replica count and digest rather than record a step
-  that ran.
+  - **Present** -- the status read answered. The actions your role admits
+    are drawn, each naming what it acts on before you press it (see
+    [Performing actions](#performing-actions)): Deploy and Roll back on the
+    action bar, a Promote and an Abort on the row of each Rollout part-way
+    through (under **Rollouts**), and the versions the cluster can be
+    prepared at (under **Next version**). An action with nothing to act on
+    is not drawn.
+  - **Deployments aren't set up for this cluster** -- the read failed for
+    a reason other than the role gate, most often because the cluster has
+    no deploy pipeline at all. The engine's message is under Details, as
+    sent.
+  - **Your role can't view deployment status** -- the role gate refused the
+    read. The engine's refusal is under Details, as sent.
+- **History** -- one row per `v1:cluster:deployment` record: what kind of
+  run, when, and how it ended. A row opens that deployment's page, which
+  lists its per-tier `v1:cluster:deploymentNodeSpec` rows as "Services":
+  each declares a version, replica count and digest rather than records a
+  step that ran.
+- **Details** (collapsed) -- the records behind the page (the release
+  running, the one prepared, the one Roll back returns to), the last
+  action's audit id, and the engine's own words for a read that failed.
 
 The panel uses the status read to decide the pipeline state, and takes one
-thing from it: the name and phase of each Rollout, which the Rollout buttons
+thing from it: the name and phase of each Rollout, which Promote and Abort
 act on. It draws nothing else the RPC returns, and an SDK caller reads all of
 it (`getDeploymentStatus()` in
 `@znasllc-io/memql-sdk-core/deploy`, `GetDeploymentStatus` in `sdk/go`):
@@ -383,19 +386,20 @@ of them bypass Git or the reconciler:
 
 | Action | RPC | What it does | In the panel |
 |--------|-----|--------------|--------------|
-| **Cut a version** | `CutVersion` | Creates a `pending` `v1:cluster:deployment` record at the chosen next version. | One **Cut** button per bump, each naming the version `SuggestNextVersion` proposes and sending that version: `Cut 1.4.3 (patch)`, `Cut 1.5.0 (minor)`, `Cut 2.0.0 (major)`. When the proposals cannot be read, the buttons name only the bump (`Cut next minor`), the page prints why, and the engine computes the version. The upgrade button, when it offers a newer release, cuts that exact version and ships the record the cut returned. |
-| **Deploy** | `Deploy` | Transitions a cut record to `in_progress` and returns an async ack; the deploy-pack automation observes ArgoCD and owns the terminal transition. | **Deploy** ships the pending record the page names. |
-| **Roll back to a prior deployment** | `RollbackDeployment` | Creates a new `in_progress` deployment record carrying a prior `succeeded` deployment's version and digest (and `previousDeploymentId`); the deploy-pack automation observes ArgoCD and lands it in `rolled_back` once ArgoCD reports it reconciled. | **Roll back** returns to the newest `succeeded` deployment cut before the release the cluster runs -- after a rollback, before the release it returned to -- skipping any that carry the running release. The page names it before you press (`Roll back returns to <id> (<version>)`), or says there is none, in which case a press sends nothing. **Type-to-confirm** (re-enter that deployment's id). Owner only. |
+| **Cut a version** | `CutVersion` | Creates a `pending` `v1:cluster:deployment` record at the chosen next version. | Called **Prepare**. Under **Next version**, one choice per bump, each naming the version `SuggestNextVersion` proposes, with the bump beside it, and sending that version: `Prepare 1.4.3` (patch), `Prepare 1.5.0` (minor), `Prepare 2.0.0` (major). When the proposals cannot be read, the choices name only the bump (`Prepare next minor`), the page says the numbers could not be read, and the engine computes the version. The update button, when it offers a newer release, prepares that exact version and ships the record the cut returned. |
+| **Deploy** | `Deploy` | Transitions a cut record to `in_progress` and returns an async ack; the deploy-pack automation observes ArgoCD and owns the terminal transition. | **Deploy** (`Deploy 1.5.0`) ships the prepared record the page was built with, and is drawn only when one exists; Details names its id. |
+| **Roll back to a prior deployment** | `RollbackDeployment` | Creates a new `in_progress` deployment record carrying a prior `succeeded` deployment's version and digest (and `previousDeploymentId`); the deploy-pack automation observes ArgoCD and lands it in `rolled_back` once ArgoCD reports it reconciled. | **Roll back** returns to the newest `succeeded` deployment cut before the release the cluster runs -- after a rollback, before the release it returned to -- skipping any that carry the running release. It names that release before you press (`Roll back to 1.4.1…`, with its id under Details), and is on the cluster's page and on that deployment's own page. With no such deployment it is not drawn. **Type-to-confirm** (re-enter that deployment's id). Owner only. |
 | **Revert an overlay commit** | `Rollback` | `git revert --no-edit` of the overlay commit in a deploy checkout. An identity pod has no checkout and no `git`, so in a cluster it refuses with `no_overlay_checkout`. | none |
-| **Rollout promote / abort** | `RolloutAction` | `kubectl argo rollouts promote\|abort` for an engine Rollout. This is the ARGO verb -- advance or cancel an in-flight progressive rollout -- and is unrelated to any deploy promotion. It is a kubectl plugin verb with no single API call, so on an identity pod it refuses with `no_rollout_plugin` and runs only where the plugin is installed. | A **Promote** and an **Abort** button for each Rollout the status read reports as `Paused` or `Progressing`, each naming it (`Promote memql-bff`, `Abort memql-bff`). A Rollout in any other phase gets none, and with none in flight the page says so. **Abort** is type-to-confirm (re-enter the Rollout's name); promote is immediate. Where the engine has no argo-rollouts plugin, which includes every identity pod, the `no_rollout_plugin` refusal is shown as sent; use the break-glass verb below. |
+| **Rollout promote / abort** | `RolloutAction` | `kubectl argo rollouts promote\|abort` for an engine Rollout. This is the ARGO verb -- advance or cancel an in-flight progressive rollout -- and is unrelated to any deploy promotion. It is a kubectl plugin verb with no single API call, so on an identity pod it refuses with `no_rollout_plugin` and runs only where the plugin is installed. Under **Rollouts**, one row for each Rollout the status read reports as `Paused` or `Progressing`, carrying its own **Promote** and **Abort**. A Rollout in any other phase gets no row, and with none in flight the group says "None in progress." **Abort** is type-to-confirm (re-enter the Rollout's name); promote is immediate. Where the engine has no argo-rollouts plugin, which includes every identity pod, the `no_rollout_plugin` refusal is shown as sent; use the break-glass verb below. |
 | **Repair** | `Repair` | Asks ArgoCD to hard-refresh and re-sync this installation's Application from the committed overlay (prune included) and watches it until it is synced and healthy; records the repair on the deployment timeline. Nothing changes version. Owner only. See [Repair](#repair-memql4209). | none. The panel's own **Repair**, offered for a local cluster, re-runs the install graph and is not this RPC. |
 
 The panel's four deploy-control actions are catalogued in
 `editors/vscode/src/deploy/actions.ts`, and
-`editors/vscode/src/deploy/controls.ts` turns each into the buttons it draws,
-deciding every argument a request carries when the page is built. A press
-sends exactly what its button named; a button whose target has moved since
-the page was read sends nothing and says so.
+`editors/vscode/src/deploy/controls.ts` turns each into the controls it draws,
+deciding every argument a request carries when the page is built; where each
+is drawn is `editors/vscode/src/deploy/instanceActions.ts`'s. A press sends
+exactly what its control named; one whose target has moved since the page was
+read sends nothing and says so.
 `Rollback` and `Repair` have no panel control: call them through
 `DeployControlClient` -- `Rollback` / `Repair` in `sdk/go`, `rollback()` /
 `repair()` in `@znasllc-io/memql-sdk-core/deploy`.
@@ -419,7 +423,9 @@ Notes:
   digest / rollout, and outcome). The console surfaces the audit-event
   id back to you on success (`SUCCESS: <action> (audit <id>)`); failures
   show `ERROR: <message>`, and a **refusal** shows the id of the blocked
-  attempt alongside it -- see
+  attempt alongside it. The VS Code panel says what happened in a sentence,
+  writes that line to the MemQL output channel, and keeps the audit id under
+  Details -- see
   [A refusal gives you its audit id](#a-refusal-gives-you-its-audit-id-memql3334).
   No emojis.
 - **Nothing here pushes.** Deploy and Roll back write deployment records

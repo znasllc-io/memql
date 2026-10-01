@@ -57,6 +57,7 @@
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
+import { composeConsoleUrl } from "../clusters/consoleUrl.js";
 import type { ClusterConfig } from "../clusters/model.js";
 import {
   defaultFetch,
@@ -73,7 +74,7 @@ import {
   type LoopbackOptions,
 } from "./loopback.js";
 import { generatePkcePair, generateState } from "./pkce.js";
-import { resolveClientId } from "./wellKnownClient.js";
+import { EDITOR_CLIENT_ID } from "./wellKnownClient.js";
 
 /** Binds to `vscode.env.asExternalUri`. Takes and returns an absolute URL string. */
 export type ExternalUriResolver = (url: string) => string | Promise<string>;
@@ -98,6 +99,19 @@ export type ExternalOpener = (url: string) => boolean | void | PromiseLike<boole
 /** Injected so a test can drive the listener without binding a real socket. */
 export type LoopbackStarter = (options: LoopbackOptions) => Promise<LoopbackListener>;
 
+/**
+ * Where a browser sign-in stands, for the one progress line that narrates it:
+ * "Opening your browser" -> "Waiting for you in the browser" -> "Finishing
+ * sign-in". (The caller adds "Connecting" once it dials.)
+ */
+export type SignInPhase = "opening" | "waiting" | "finishing";
+
+/** The media type identity answers its native (MemQL OS) representation in. */
+export const IDENTITY_NATIVE_MEDIA_TYPE = "application/vnd.memql.identity+json";
+
+/** How long the pre-validation may take before it is abandoned (and the flow goes on). */
+export const PRE_VALIDATE_TIMEOUT_MS = 5_000;
+
 export interface AuthFlowDeps {
   /** vscode.env.asExternalUri. Required -- see the header on remote hosts. */
   resolveExternalUri: ExternalUriResolver;
@@ -121,6 +135,8 @@ export interface AuthFlowDeps {
    * the local case and is what every existing caller and test supplies.
    */
   remoteName?: string;
+  /** Told as the flow moves between phases, for the progress line. */
+  onPhase?: (phase: SignInPhase) => void;
 }
 
 export interface AuthFlowTokens {
@@ -135,9 +151,9 @@ export interface AuthFlowTokens {
   /** The scope string the server returned, when it returned one. */
   scope?: string;
   /**
-   * The client_id this flow authorized with: the cluster's override, or the
-   * well-known first-party id. Reported so a caller can log or display it;
-   * nothing persists it, because there is nothing minted to keep.
+   * The client_id this flow authorized with -- always the editor's own. The
+   * store keeps it beside the refresh token, so a refresh presents the client
+   * the token was issued to (auth/store.ts).
    */
   clientId: string;
 }
@@ -189,10 +205,13 @@ export async function runAuthorizationFlow(
   const now = deps.now ?? (() => Date.now());
   const startListener = deps.startListener ?? startLoopbackListener;
 
-  // A local constant lookup, not a network call: identity carries this client
-  // compiled in (wellKnownClient.ts). The step that used to be the first thing
-  // to fail -- POST /register against a cluster with DCR off -- is gone.
-  const clientId = resolveClientId(cluster.clientId);
+  // ALWAYS THE EDITOR'S OWN CLIENT, whatever the registry says. The
+  // `client_id` in clusters.yaml belongs to whichever tool wrote it -- the
+  // Cockpit writes `cockpit`, which identity registers for a different
+  // callback path -- so honouring it sent this flow to a refusal
+  // (wellKnownClient.ts). A constant, not a network call: identity carries
+  // this client compiled in.
+  const clientId = EDITOR_CLIENT_ID;
 
   // THE PRE-FLIGHT (memql#4624). One round trip, before a browser is opened
   // and before anything parks on a 600-second deadline.
@@ -245,6 +264,11 @@ export async function runAuthorizationFlow(
   const state = generateState();
 
   const listener = await startListener({ timeoutMs: deps.timeoutMs, signal: deps.signal });
+  // The browser is answered only once the exchange has settled (loopback.ts):
+  // "You're signed in" on success, and "Sign-in didn't finish" otherwise --
+  // which the `finally` below covers by closing, since close() answers a held
+  // response with the failure page.
+  let exchanged = false;
   try {
     const authorizeUrl = buildAuthorizeUrl({
       issuer: resolvedIssuer,
@@ -256,9 +280,26 @@ export async function runAuthorizationFlow(
       codeChallengeMethod: pkce.method,
     });
 
+    deps.onPhase?.("opening");
+
+    // FAIL FAST ON A REFUSED CLIENT, before any browser opens. See
+    // preValidateAuthorize: only a definite refusal stops the flow; any other
+    // answer -- or none -- carries on exactly as before.
+    const verdict = await preValidateAuthorize(authorizeUrl, cluster, doFetch, deps.signal);
+    if (verdict.verdict === "refused") {
+      throw new AuthFlowError(
+        "clientRefused",
+        `${resolvedIssuer} refused this editor's sign-in request before a browser was opened` +
+          (verdict.reason === "" ? "." : `: ${verdict.reason}`),
+        { serverMessage: verdict.reason },
+      );
+    }
+
     await openInBrowser(authorizeUrl, deps);
+    deps.onPhase?.("waiting");
 
     const callback = await listener.waitForCallback();
+    deps.onPhase?.("finishing");
 
     if (callback.error !== undefined && callback.error !== "") {
       const detail = callback.errorDescription ?? "";
@@ -267,6 +308,7 @@ export async function runAuthorizationFlow(
         detail === ""
           ? `The identity service refused the sign-in: ${callback.error}.`
           : `The identity service refused the sign-in: ${callback.error} -- ${detail}`,
+        { serverMessage: detail },
       );
     }
     // Compared BEFORE the code is looked at, let alone sent. See the header.
@@ -293,6 +335,7 @@ export async function runAuthorizationFlow(
       codeVerifier: pkce.verifier,
       fetch: doFetch,
     });
+    exchanged = true;
 
     const nowSeconds = Math.floor(now() / 1000);
     return {
@@ -302,9 +345,85 @@ export async function runAuthorizationFlow(
       clientId,
     };
   } finally {
-    // Idempotent: on the success path the wait has already settled and this is
-    // a no-op, but a throw anywhere above must not leave a port bound.
+    // Tell the browser how it went, then release the port. Idempotent: a throw
+    // anywhere above must not leave a port bound or a browser tab loading, and
+    // close() answers any response still held with the failure page.
+    listener.finish?.(exchanged ? "success" : "failure");
     listener.close();
+  }
+}
+
+/** What the pre-validation learned about the authorization request. */
+export type PreValidation =
+  | { verdict: "accepted" }
+  | { verdict: "refused"; reason: string }
+  /** Nothing definite: unreachable, timed out, an unexpected status. The flow carries on. */
+  | { verdict: "unknown" };
+
+/**
+ * GET the authorization URL the browser is about to open, as MemQL OS would,
+ * and report whether identity REFUSES it.
+ *
+ * WHAT IT CATCHES. identity validates the client and the redirect URI first
+ * and answers 400 -- never a redirect -- when either is not registered
+ * (component/identity/web/authorize.go). In a browser that 400 is rendered by
+ * MemQL OS as a dead page, the callback never comes, and the editor waited out
+ * its whole deadline. Asking first turns that into a sentence in seconds.
+ *
+ * WHY THE NATIVE ACCEPT AND AN OS ORIGIN. A plain GET is answered with a 303
+ * to MemQL OS, which says nothing; the native representation answers with the
+ * verdict itself (200 for a login page, 400 for a refusal). identity serves it
+ * only to its own OS origin, `https://os.<domain>`, so the probe presents that.
+ *
+ * FAILS OPEN. Only a 400 is a refusal. A cluster without the native
+ * representation, a 403 for an origin it does not recognise, a timeout, a TLS
+ * failure -- all answer `unknown`, and the flow goes on to the browser exactly
+ * as it did before this existed. A probe that could block a sign-in that works
+ * would be worse than no probe.
+ *
+ * Nothing is created by it: /authorize renders a page and stores nothing.
+ */
+export async function preValidateAuthorize(
+  authorizeUrl: string,
+  cluster: ClusterConfig,
+  fetchImpl: FetchLike,
+  cancel?: AbortSignal,
+): Promise<PreValidation> {
+  const os = composeConsoleUrl(cluster);
+  if (os === "") return { verdict: "unknown" };
+  let origin: string;
+  try {
+    origin = new URL(os).origin;
+  } catch {
+    return { verdict: "unknown" };
+  }
+  const deadline = AbortSignal.timeout(PRE_VALIDATE_TIMEOUT_MS);
+  const signal = cancel === undefined ? deadline : AbortSignal.any([deadline, cancel]);
+  let response: HttpResponseLike;
+  try {
+    response = await fetchImpl(authorizeUrl, {
+      method: "GET",
+      headers: { accept: IDENTITY_NATIVE_MEDIA_TYPE, origin },
+      redirect: "manual",
+      signal,
+    });
+  } catch {
+    return { verdict: "unknown" };
+  }
+  if (response.status === 400) {
+    const raw = await response.text().catch(() => "");
+    return { verdict: "refused", reason: refusalReason(raw) };
+  }
+  return response.status === 200 ? { verdict: "accepted" } : { verdict: "unknown" };
+}
+
+/** The refusal's own words from a native error body, or "" when it carries none. */
+function refusalReason(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as { error?: unknown };
+    return typeof parsed.error === "string" ? parsed.error.trim() : "";
+  } catch {
+    return "";
   }
 }
 

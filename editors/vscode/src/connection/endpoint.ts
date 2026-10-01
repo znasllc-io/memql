@@ -31,6 +31,9 @@ const BRACKETED_IPV6_RE = /^\[([^\]]+)\](?::(\d+))?$/;
 // per-environment value -- so it is a constant here rather than a parameter.
 const FRONT_DOOR_PORT = "443";
 
+/** A web scheme and the socket scheme the same origin serves the bridge on. */
+const WEB_TO_SOCKET: Readonly<Record<string, string>> = { https: "wss", http: "ws" };
+
 /**
  * The domain as the rest of this module means it: no surrounding whitespace,
  * no leading or trailing dots.
@@ -194,14 +197,22 @@ export function webSocketUrlFor(cluster: ClusterConfig): string {
   const schemeMatch = raw.match(SCHEME_RE);
   if (schemeMatch) {
     const scheme = schemeMatch[1].toLowerCase();
-    if (scheme !== "ws" && scheme !== "wss") {
+    // AN https:// ADDRESS NAMES THE SAME FRONT DOOR. It is how a cluster's
+    // address is written everywhere else -- the Cockpit stores the local
+    // cluster as `https://api.memql.localhost`, and it is what a person copies
+    // out of a browser -- and the bridge is served on that same origin. So the
+    // web scheme maps to its socket twin (https -> wss, http -> ws) rather than
+    // being refused: refusing it left a signed-in editor unable to dial a
+    // cluster that was answering.
+    const socketScheme = WEB_TO_SOCKET[scheme] ?? scheme;
+    if (socketScheme !== "ws" && socketScheme !== "wss") {
       throw new Error(
-        `cluster "${cluster.name}": endpoint scheme must be ws:// or wss://, got "${scheme}://" -- store the gRPC host:port (or an explicit ws(s):// bridge URL), not a general-purpose URL`,
+        `cluster "${cluster.name}": use an address like https://api.example.com or api.example.com:443, not ${scheme}://`,
       );
     }
     // An operator may store a full URL. Honor it, adding the bridge path when
     // it carries none.
-    const url = new URL(raw);
+    const url = new URL(`${socketScheme}://${raw.slice(schemeMatch[0].length)}`);
     if (url.pathname === "" || url.pathname === "/") {
       url.pathname = BRIDGE_PATH;
     }

@@ -25,7 +25,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { Latest, type LatestToken } from "../async/latest.js";
 import {
   connectionContextKeys,
-  type ConnectionContextKeys,
+  type ConnectionContextState,
 } from "../state/connectionContext.js";
 import { runAuthenticated, type AuthenticatedRunResult, type CredentialStoreDeps } from "../auth/store.js";
 import type { ClusterConfig } from "../clusters/model.js";
@@ -57,7 +57,55 @@ export type ConnectionState =
   | { status: "disconnected" }
   | { status: "connecting"; clusterName: string }
   | { status: "connected"; clusterName: string; nodeId: string }
-  | { status: "error"; clusterName: string; message: string; reason: ConnectionErrorReason };
+  | {
+      status: "error";
+      clusterName: string;
+      message: string;
+      reason: ConnectionErrorReason;
+      /**
+       * A dropped connection is being retried: another attempt is scheduled.
+       * Absent once the retries stopped (or for a failure nothing retries),
+       * which is when a surface offers Reconnect.
+       */
+      retrying?: boolean;
+      /**
+       * This failure ENDED a run of retries after a drop: the last try did not
+       * answer, or a try was refused on a credential. Set on exactly the one
+       * publish that ends them, so a listener can announce it once. Needed
+       * because each try publishes "connecting" before it dials, so the state
+       * before this one is not the retrying error and cannot say it.
+       */
+      retriesEnded?: boolean;
+    };
+
+/**
+ * How a DROPPED connection is retried (see `watchForTermination`).
+ *
+ * WHY. A dropped socket used to publish "Connection to X was lost. Select the
+ * cluster again to reconnect." and never retry, so a laptop that slept, a VPN
+ * that reconnected or a cluster that restarted a pod left every view saying
+ * "Not connected" until someone clicked the row. Now a handful of tries over
+ * about two minutes; then it stops, and the surfaces offer Reconnect.
+ *
+ * NEVER AGAINST A CREDENTIAL. A retry that ends in a credential refusal stops
+ * at once: the same bearer will be refused the same way, and a loop against a
+ * refusal is how an identity service gets hammered with a dead token.
+ */
+export interface ReconnectPolicy {
+  /** The delay before each try; its length is the number of tries. */
+  delaysMs: readonly number[];
+  /**
+   * Re-reads the cluster before each try, so an entry edited or re-signed-in
+   * meanwhile is honoured. Undefined means it is gone from the list: stop.
+   */
+  reload?: (clusterName: string) => Promise<ClusterConfig | undefined>;
+  /** Injected so a test drives time. Default: setTimeout / clearTimeout. */
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  clearTimer?: (handle: unknown) => void;
+}
+
+/** Six tries: 2 s, 5 s, 10 s, 20 s, 30 s and 45 s after the drop -- about two minutes in all. */
+export const DEFAULT_RECONNECT_DELAYS_MS: readonly number[] = [2_000, 5_000, 10_000, 20_000, 30_000, 45_000];
 
 export type StateListener = (state: ConnectionState) => void;
 
@@ -76,7 +124,7 @@ export type StateListener = (state: ConnectionState) => void;
  * one the manager holds, and two publishers of one key race: the last write
  * wins, and which one that is depends on listener registration order.
  */
-export type ContextKeySink = (keys: ConnectionContextKeys) => void;
+export type ContextKeySink = (keys: ConnectionContextState) => void;
 
 // The shape of `Connection.dial`. Constructor-injectable (defaults to
 // `defaultDial` below) purely for test determinism: ConnectionManager's own
@@ -111,6 +159,11 @@ export class ConnectionManager {
   // ConceptsCache and ConceptPanelState use, so "which async paths are
   // guarded" is a grep rather than a per-module question.
   private readonly latest = new Latest<"connection">();
+  // The pending retry of a dropped connection, if any. See ReconnectPolicy.
+  private retryTimer: unknown;
+  private retryCluster: string | undefined;
+  // The config the live connection was dialled with, for a retry with no reload.
+  private lastDialed: ClusterConfig | undefined;
 
   constructor(
     private readonly dial: DialFn = defaultDial,
@@ -131,6 +184,10 @@ export class ConnectionManager {
     // stripped construction in this file's own suite -- still connects and
     // still publishes state; it simply has no editor to tell.
     private readonly contextKeys: ContextKeySink = () => {},
+    // How a dropped connection is retried. Absent -- every unit test that
+    // does not ask for it -- means a drop is reported and not retried, which
+    // is what the tests of the drop itself need to observe.
+    private readonly reconnect: ReconnectPolicy | undefined = undefined,
   ) {
     // ON ACTIVATION, and this is the call that makes it so. A key VS Code has
     // never been told about is UNSET, and an unset key is falsy in a `when`
@@ -274,7 +331,23 @@ export class ConnectionManager {
     for (const l of this.listeners) l(state);
   }
 
+  /** Whether a dropped connection to this cluster is being retried right now. */
+  isRetrying(clusterName: string): boolean {
+    return this.retryCluster === clusterName;
+  }
+
   async connect(cluster: ClusterConfig): Promise<void> {
+    // A person (or activation) asked for THIS connection: any retry of an
+    // earlier drop is superseded, whichever cluster it was for.
+    this.cancelRetry();
+    await this.dialCluster(cluster, undefined);
+  }
+
+  // The body of a connect. `retry` is set when this dial is one of the tries
+  // after a drop: `more` says whether another try follows a transport failure,
+  // so the error it publishes can say so in the same publish (no flicker
+  // through "not answering" between tries).
+  private async dialCluster(cluster: ClusterConfig, retry: { more: boolean } | undefined): Promise<void> {
     // begin(), not current(): starting a connect IS what makes every earlier
     // one stale, so this call supersedes them as it takes its token.
     const token = this.latest.begin();
@@ -382,6 +455,9 @@ export class ConnectionManager {
             ? err.message
             : String(err),
         reason: expired ? "credentialExpired" : "unreachable",
+        // A transport failure during the retries keeps retrying; a credential
+        // one never does, and either one that does not continue ends them.
+        ...(retry === undefined ? {} : retry.more && !expired ? { retrying: true } : { retriesEnded: true }),
       });
       return;
     }
@@ -397,12 +473,16 @@ export class ConnectionManager {
         clusterName: cluster.name,
         message: outcome.message,
         reason: outcome.reason,
+        // Refused before or after the dial on a credential (or no address):
+        // never retried, so during the retries it is the one that ends them.
+        ...(retry !== undefined ? { retriesEnded: true } : {}),
       });
       return;
     }
 
     const conn = outcome.value;
     this.conn = conn;
+    this.lastDialed = cluster;
     this.authoringClient = undefined;
     // The bearer the handshake was accepted with, recorded BEFORE the state is
     // published: a listener that reacts to "connected" by making an HTTP call
@@ -414,6 +494,7 @@ export class ConnectionManager {
   }
 
   async disconnect(): Promise<void> {
+    this.cancelRetry();
     // invalidate(), not begin(): a disconnect supersedes every outstanding
     // token but starts no operation of its own, so there is no token to mint.
     this.latest.invalidate();
@@ -457,12 +538,71 @@ export class ConnectionManager {
     this.conn = undefined;
     this.authoringClient = undefined;
     this.currentBearer = undefined;
+    const willRetry = this.reconnect !== undefined && this.reconnect.delaysMs.length > 0;
     this.publish({
       status: "error",
       clusterName,
-      message: `Connection to ${clusterName} was lost. Select the cluster again to reconnect.`,
+      message: `Connection to ${clusterName} was lost.`,
       reason: "lost",
+      ...(willRetry ? { retrying: true } : {}),
     });
+    if (willRetry) this.scheduleRetry(clusterName, 0);
+  }
+
+  // One try after a drop. `attempt` indexes ReconnectPolicy.delaysMs.
+  private scheduleRetry(clusterName: string, attempt: number): void {
+    const policy = this.reconnect;
+    if (policy === undefined || attempt >= policy.delaysMs.length) return;
+    const setTimer = policy.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+    this.retryCluster = clusterName;
+    // The token current at scheduling time: a connect or disconnect in the
+    // meantime supersedes it, and the try then does nothing.
+    const scheduledFor = this.latest.current;
+    this.retryTimer = setTimer(() => {
+      this.retryTimer = undefined;
+      void this.retry(clusterName, attempt, scheduledFor);
+    }, policy.delaysMs[attempt]!);
+  }
+
+  private async retry(clusterName: string, attempt: number, scheduledFor: LatestToken<"connection">): Promise<void> {
+    const policy = this.reconnect;
+    if (policy === undefined || !this.latest.isCurrent(scheduledFor) || this.retryCluster !== clusterName) return;
+    const cluster = policy.reload === undefined ? this.lastDialed : await policy.reload(clusterName).catch(() => undefined);
+    if (!this.latest.isCurrent(scheduledFor) || this.retryCluster !== clusterName) return;
+    if (cluster === undefined || cluster.name !== clusterName) {
+      // Gone from the list (or never known): nothing to reconnect to.
+      this.stopRetrying(clusterName);
+      return;
+    }
+    const more = attempt + 1 < policy.delaysMs.length;
+    await this.dialCluster(cluster, { more });
+    if (this.retryCluster !== clusterName) return;
+    const state = this.current;
+    if (state.status === "error" && state.clusterName === clusterName && state.retrying === true) {
+      this.scheduleRetry(clusterName, attempt + 1);
+      return;
+    }
+    // Connected, refused on a credential, or out of tries: the retries are over.
+    this.retryCluster = undefined;
+  }
+
+  // Ends a retry sequence that cannot continue, saying so in the state.
+  private stopRetrying(clusterName: string): void {
+    this.retryCluster = undefined;
+    const state = this.current;
+    if (state.status === "error" && state.clusterName === clusterName && state.retrying === true) {
+      const { retrying: _retrying, ...rest } = state;
+      this.publish(rest);
+    }
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer !== undefined) {
+      const clearTimer = this.reconnect?.clearTimer ?? ((h: unknown) => clearTimeout(h as NodeJS.Timeout));
+      clearTimer(this.retryTimer);
+      this.retryTimer = undefined;
+    }
+    this.retryCluster = undefined;
   }
 
   private async closeCurrent(): Promise<void> {

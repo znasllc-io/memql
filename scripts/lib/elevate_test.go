@@ -56,6 +56,8 @@ func newElevateWorld(t *testing.T) *elevateWorld {
 	if err := os.MkdirAll(w.bin, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
+	// Never let a macOS helper reach the real desktop dialog.
+	w.stub(t, "osascript", "echo unexpected-dialog >&2; exit 1")
 	return w
 }
 
@@ -67,6 +69,14 @@ func (w *elevateWorld) stub(t *testing.T, name, body string) {
 	if err := os.WriteFile(filepath.Join(w.bin, name), []byte(script), 0o755); err != nil {
 		t.Fatalf("write stub %s: %v", name, err)
 	}
+}
+
+// stubDialog supplies both supported desktop paths so the same test exercises
+// the native choice without ever reaching a real password dialog.
+func (w *elevateWorld) stubDialog(t *testing.T, body string) {
+	t.Helper()
+	w.stub(t, "zenity", body)
+	w.stub(t, "osascript", body)
 }
 
 // eval sources elevate.sh and runs a snippet against it. PATH is the world's
@@ -126,7 +136,7 @@ func TestElevateMethodIsNoneWithoutADisplay(t *testing.T) {
 	}
 	w := newElevateWorld(t)
 	w.stub(t, "sudo", sudoNeedsAPassword)
-	w.stub(t, "zenity", "exit 0")
+	w.stubDialog(t, "exit 0")
 
 	// The one that is easy to get wrong: a dialog program being INSTALLED is
 	// not a screen to show it on. zenity is on plenty of servers nobody is
@@ -141,7 +151,7 @@ func TestElevateMethodIsNoneWithoutADisplay(t *testing.T) {
 func TestElevateMethodIsDialogOnADesktop(t *testing.T) {
 	w := newElevateWorld(t)
 	w.stub(t, "sudo", sudoNeedsAPassword)
-	w.stub(t, "zenity", "exit 0")
+	w.stubDialog(t, "exit 0")
 	w.env = append(w.env, "DISPLAY=:0")
 
 	out, _ := w.eval(t, `elevate_method`)
@@ -186,7 +196,7 @@ func TestElevateMethodIsNoneWithoutSudo(t *testing.T) {
 func TestElevateDrawsNoDialogWhenTheCallerOwnsTheAsking(t *testing.T) {
 	w := newElevateWorld(t)
 	w.stub(t, "sudo", sudoNeedsAPassword)
-	w.stub(t, "zenity", "exit 0")
+	w.stubDialog(t, "exit 0")
 	// A machine that COULD draw a dialog -- a desktop with zenity installed --
 	// which is the only configuration where the marker changes anything.
 	w.env = append(w.env, "DISPLAY=:0", "MEMQL_ELEVATE_DIALOG=never")
@@ -201,7 +211,7 @@ func TestElevateDrawsNoDialogWhenTheCallerOwnsTheAsking(t *testing.T) {
 	if _, code := w.eval(t, `elevate_begin "update the hosts file" && echo "begin succeeded"`); code == 0 {
 		t.Errorf("elevate_begin built a helper anyway, so a dialog would open")
 	}
-	if strings.Contains(w.calls(t), "zenity") {
+	if strings.Contains(w.calls(t), "zenity") || strings.Contains(w.calls(t), "osascript") {
 		t.Errorf("a dialog program was invoked despite the caller owning the asking:\n%s", w.calls(t))
 	}
 }
@@ -212,7 +222,7 @@ func TestElevateDrawsNoDialogWhenTheCallerOwnsTheAsking(t *testing.T) {
 func TestElevateStillDrawsADialogForAHumanRunningItByHand(t *testing.T) {
 	w := newElevateWorld(t)
 	w.stub(t, "sudo", sudoNeedsAPassword)
-	w.stub(t, "zenity", "exit 0")
+	w.stubDialog(t, "exit 0")
 	w.env = append(w.env, "DISPLAY=:0")
 
 	out, _ := w.eval(t, `elevate_method`)
@@ -262,7 +272,7 @@ func TestElevateMarkerDoesNotDisturbAFreeSudo(t *testing.T) {
 func TestElevateExplainsWhyItCannotAskWhenTheCallerOwnsTheAsking(t *testing.T) {
 	w := newElevateWorld(t)
 	w.stub(t, "sudo", sudoNeedsAPassword)
-	w.stub(t, "zenity", "exit 0")
+	w.stubDialog(t, "exit 0")
 	w.env = append(w.env, "DISPLAY=:0", "MEMQL_ELEVATE_DIALOG=never")
 
 	out, code := w.eval(t, `elevate_no_ask_reason`)
@@ -301,7 +311,7 @@ func TestElevateBlamesTheMachineWhenTheMachineIsTheReason(t *testing.T) {
 func TestElevateBeginExportsAnAskpassHelperThatAsksGraphically(t *testing.T) {
 	w := newElevateWorld(t)
 	w.stub(t, "sudo", sudoNeedsAPassword)
-	w.stub(t, "zenity", "printf 'hunter2\\n'")
+	w.stubDialog(t, "printf 'hunter2\\n'")
 	w.env = append(w.env, "DISPLAY=:0")
 
 	// The helper's OWN OUTPUT is what sudo reads as the password, so run it and
@@ -324,7 +334,7 @@ exit 0
 		t.Errorf("the helper did not produce the dialog's answer on stdout, which is the only\n"+
 			"thing sudo reads from it: %s", out)
 	}
-	if !strings.Contains(w.calls(t), "zenity") {
+	if !strings.Contains(w.calls(t), "zenity") && !strings.Contains(w.calls(t), "osascript") {
 		t.Errorf("the dialog program was never invoked:\n%s", w.calls(t))
 	}
 }
@@ -335,7 +345,7 @@ exit 0
 func TestElevateHelperNamesWhatThePasswordIsFor(t *testing.T) {
 	w := newElevateWorld(t)
 	w.stub(t, "sudo", sudoNeedsAPassword)
-	w.stub(t, "zenity", "exit 0")
+	w.stubDialog(t, "exit 0")
 	w.env = append(w.env, "DISPLAY=:0")
 
 	// Asserted on what the DIALOG PROGRAM RECEIVES rather than on the helper's

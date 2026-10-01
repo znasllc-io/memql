@@ -135,17 +135,18 @@ The extension's registry lives at `~/.memql/clusters.yaml`.
 | `endpoint` | The gRPC front door. Defaults to `api.<domain>:443` | you, only for a non-standard front door |
 | `token` | The identity-issued JWT access token | **sign-in** |
 | `refresh_token` | Renews the access token as it expires | **sign-in** |
-| `clientId` | An OAuth client id to use **instead of** `memql-vscode` | you, and only if you mean it |
+| `client_id` | Another tool's OAuth client (the Cockpit writes `cockpit`). The editor does not use it | the tool that owns it |
 
 In the normal path you set a name and a domain, run **MemQL: Sign In**, and
 touch nothing else. `token` and `refresh_token` are things sign-in writes; hand-
 editing them is for an unattended setup, not for a person at a keyboard.
 
-**`clientId` is an override, and it is usually wrong to set one.** It exists for
-two cases: an operator who configured a custom static client in
-`MEMQL_IDENTITY_REGISTERED_CLIENTS`, and an entry left over from before this
-feature that still carries an id minted by the old registration path. Both keep
-working -- the value is simply read -- and nothing migrates or rewrites the file.
+**The editor always signs in as `memql-vscode`.** `clusters.yaml` is shared with
+the MemQL Cockpit, which records its own client there (`client_id: cockpit`,
+registered for the Cockpit's own callback path). A `client_id` in the file
+belongs to the tool that wrote it, so the editor never signs in or refreshes
+with it. It keeps the client each refresh token was issued to beside that token
+in its own secret storage, and presents it on refresh.
 
 ---
 
@@ -163,12 +164,22 @@ answer.
 Update the engine and the extension. If you cannot yet, use the
 [interim workaround](#interim-workaround-for-clusters-that-predate-this-feature).
 
+### "This cluster doesn't accept sign-in from VS Code."
+
+Before it opens a browser, the editor asks the identity service whether it
+accepts the sign-in request, the way MemQL OS does. This message is its answer
+when identity refused the client or its redirect URI. The cluster does not carry
+`memql-vscode` (the engine predates the built-in client), or a shadowing
+`MEMQL_IDENTITY_REGISTERED_CLIENTS` entry lost the portless redirect URI (see
+below). Identity logs each refusal at INFO as `authorize refused`, with the
+client id and redirect URI, and MemQL OS now shows the refusal's own heading
+("Invalid redirect URI", "Unknown client") rather than "Bad Request".
+
 ### `Unknown client` on the consent page, or `invalid_client` from `/device/code`
 
-The cluster does not carry `memql-vscode`. Either the engine predates the
-built-in client, or a `clientId` in `clusters.yaml` is naming something this
-cluster does not have. Check that field first -- an override left behind by an
-old sign-in is the common cause.
+The cluster does not carry `memql-vscode`: the engine predates the built-in
+client. Update the engine, or use the
+[interim workaround](#interim-workaround-for-clusters-that-predate-this-feature).
 
 ### `Invalid redirect URI`
 
@@ -215,8 +226,9 @@ clusters:
     clientId: memql-vscode
 ```
 
-`clientId` here makes an extension that still self-registers skip `/register`
-entirely.
+`clientId` here makes an extension old enough to self-register skip `/register`
+entirely. A current extension ignores it and signs in as `memql-vscode`
+regardless.
 
 **Two caveats.** This is a full replacement of the client rather than a
 pre-seeding of it, so `MEMQL_IDENTITY_REGISTERED_CLIENTS` must list every other

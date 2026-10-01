@@ -44,8 +44,7 @@ import { THEME_NAMES } from "./editorThemes.js";
 export const THEME_OFFER_ANSWERED_KEY = "memql.themeOffer.answered";
 
 /** The notification body. Names what the operator GAINS, not what is wrong. */
-export const OFFER_MESSAGE =
-  "MemQL panels already follow your appearance setting. For the full MemQL look -- the sidebar, tree rows, tabs and status bar too -- switch to the MemQL Dark or MemQL Light colour theme.";
+export const OFFER_MESSAGE = "MemQL: Switch the whole editor, sidebar included, to the MemQL Dark or MemQL Light theme?";
 
 /** The accept action. */
 export const OFFER_SWITCH = "Switch";

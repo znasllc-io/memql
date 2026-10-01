@@ -95,26 +95,19 @@ export async function revokeRefreshToken(
  * What to tell the person, given the outcome.
  *
  * Returned as a sentence rather than shown here, for the module's no-`vscode`
- * rule -- and because the caller composes it with the cluster's name.
+ * rule -- and because the caller composes it with the cluster's label.
  *
- * The unrevoked wording names the portal's Devices page, which is where a
- * session can actually be ended when this could not do it. A message that says
- * only "revocation failed" leaves the person with a live credential and no
- * next step.
+ * The unrevoked wording names where the session can still be ended -- the
+ * Devices page in MemQL OS -- and the caller puts Open MemQL OS beside it. A
+ * message that says only "revocation failed" leaves the person with a live
+ * credential and no next step. The success wording is one short line: the row
+ * turning to "Sign in" already says the rest.
  */
-export function signOutMessage(clusterName: string, outcome: RevocationOutcome): string {
-  const quoted = `"${clusterName}"`;
-  if (outcome.attempted && outcome.revoked) {
-    return `MemQL: signed out of ${quoted} and ended the session on the cluster.`;
-  }
+export function signOutMessage(clusterLabel: string, outcome: RevocationOutcome): string {
   if (outcome.attempted && !outcome.revoked) {
-    return (
-      `MemQL: forgot the credentials for ${quoted} on this machine, but could not end the ` +
-      `session on the cluster (${outcome.reason}). The refresh token stays valid until it ` +
-      `expires -- end it from the portal's Devices page if that matters.`
-    );
+    return `MemQL: Signed out here, but ${clusterLabel} couldn't end the session. End it from Devices in MemQL OS.`;
   }
-  return `MemQL: signed out of ${quoted}. Run "MemQL: Sign In" to authenticate again.`;
+  return `MemQL: Signed out of ${clusterLabel}.`;
 }
 
 function errorText(err: unknown): string {

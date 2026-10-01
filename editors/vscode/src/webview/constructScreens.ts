@@ -1,230 +1,246 @@
-// The construct detail page's markup.
+// The construct page, built from the kit: a head, the construct's facts and
+// arguments, and an action bar only when there is something to run.
 //
-// Same three constraints as every other view-kit consumer here: no DOM, no
-// inline event handlers (the webview CSP forbids them, so interactivity is
-// `data-act` attributes plus one delegated listener), and every value through
-// `escapeHtml`.
+//   spaceParticipants                                    Open source
+//   Query · cognition · Built in
+//   Get the people in a space.
 //
-// THE ARGUMENT TABLE RENDERS THROUGH THE VALUE VIEWER'S VOCABULARY but is not
-// the value viewer: an argument is a DECLARATION -- name, type, required,
-// enum, description -- rather than a value, so it is a table. The viewer is
-// what renders a RUN's result, and that path is `state/runResult.ts`,
-// unchanged.
+//   Bound concept   v1:cognition:participant
+//   Arguments                                            2
+//   spaceId   string · Required
+//   limit     number
+//   > Details
+//   ------------------------------------------------------------------
+//   o Loaded on local                     Run with arguments   [ Run ]
+//
+// SAY IT ONCE. The kind and the namespace are the head's meta; where the
+// construct came from is the meta for a built-in or bundled one and the bar's
+// state for a promoted or staged one, because that is the one where it
+// matters (it has no file). The file path and the source hash are details a
+// reader rarely needs, so they sit behind a disclosure.
+//
+// ONE ACT FOR ONE INTENT. "Open source" is the only way to the source: the host
+// already knows whether the file is in this workspace or has to be read from
+// the cluster, so the page no longer offers two buttons for one intent. A
+// promoted construct has no file at all; its source is on the page.
+//
+// ACTS FOLLOW THE KIND. A view-only kind gets no bar -- not a disabled Run. A
+// concept's rows are one click away in the editor, and in MemQL OS.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 //
-// Refs: #3752 #3747
+// Refs: #4248 #3752 #3747
 
 import { escapeHtml } from "@znasllc-io/memql-view-kit";
 
-import type { CatalogConstruct } from "../state/constructCatalog.js";
+import { ORIGIN_LABELS, kindWord, type CatalogConstruct } from "../state/constructCatalog.js";
+import {
+  actionBar,
+  button,
+  disclosure,
+  facts,
+  head,
+  notice,
+  skeleton,
+  subhead,
+  type Act,
+  type FactRow,
+} from "./ui/kit.js";
+import type { RegionParts } from "./ui/liveView.js";
+
+/** Where the construct's source can be opened from, as far as this page knows. */
+export type ConstructSource =
+  /** The workspace lookup has not finished; the act appears when it does. */
+  | "checking"
+  /** The file is in this workspace. */
+  | "workspace"
+  /** The file is not here, and the cluster that loaded it can serve it. */
+  | "cluster"
+  /** There is no file: a promoted or staged construct, whose source is on the page. */
+  | "none";
 
 export interface ConstructPageInput {
   construct: CatalogConstruct;
   /**
-   * Whether the construct's file is reachable in this workspace. False when it
-   * is not open-able from here, which is stated rather than silently offering
-   * a button that does nothing.
+   * The cluster the record was read from, as the page names it -- its display
+   * name, never the registry key -- or "" when the opener could not say.
    */
-  fileInWorkspace: boolean;
-  /**
-   * Emit the run affordances. OFF by default, and not because running is
-   * optional: it is #3753's, which wires the command and builds the RunTarget.
-   * A Run button rendered before that exists would post a message nothing
-   * handles -- and a click that does nothing teaches an operator the page is
-   * broken. #3753 turns this on in the same change that makes it work.
-   */
-  offerRun?: boolean;
-  /**
-   * Route the run through the AUTOMATION form rather than the argument form.
-   *
-   * The two are different commands taking different targets, so the page has to
-   * say which it means. Decided by the caller (`isAutomationRun`) rather than
-   * re-derived from `kind` here, so one module owns the branch.
-   */
-  automationRun?: boolean;
-  /**
-   * Whether this host can offer to read the source from the CLUSTER instead
-   * (memql#4248).
-   *
-   * The catalog reports a path relative to the cluster's own tree, which is
-   * usually not this checkout -- so "not in this workspace" used to be the end
-   * of the road. It is not: the cluster that loaded the construct also serves
-   * the file, over the pack browser. Decided by the caller, which is the only
-   * side that can see the workspace at all, and REQUIRED rather than optional
-   * so that a new caller has to answer it instead of defaulting quietly back
-   * to the dead end.
-   */
-  offerClusterSource: boolean;
+  cluster: string;
+  source: ConstructSource;
+  /** Whether the Details disclosure is open (remembered by the host). */
+  detailsOpen?: boolean;
   /** A failure this page produced, or "". */
-  error: string;
+  error?: string;
 }
+
+/** The messages the page posts. Spelled once; the panel switches on them. */
+export const CONSTRUCT_ACTS = {
+  run: "run",
+  runWith: "runWith",
+  openSource: "openSource",
+  browseRows: "browseRows",
+  openInOs: "openInOs",
+  details: "details",
+  retry: "retry",
+} as const;
 
 /**
- * What the origin badge says, and what it means for opening the source.
+ * Whether this page offers Run, and which kind of run.
  *
- * The four are genuinely different situations rather than four labels:
- * `core` came from the embedded tree, `bundle` from a product's DSL mounted at
- * MEMQL_DSL_PATH, and `promoted` has NO FILE AT ALL -- it lives in the
- * cluster's database, which is where a developer first meets the
- * seeded-versus-trained distinction.
- *
- * `staged` (memql#3928) is the same place as `promoted` with a different
- * audience, and the note says so in those terms: what a reader needs to know
- * about a staged construct is not where it lives but that nobody else can call
- * it yet.
+ * Decided from the construct the CATALOG described, and the same two facts
+ * the run path is built from: a server-runnable kind this editor can target.
  */
-export function originNote(construct: CatalogConstruct): string {
-  switch (construct.origin) {
-    case "core":
-      return "from the engine's embedded DSL tree";
-    case "bundle":
-      return "from the DSL bundle this cluster mounts";
-    case "promoted":
-      return "promoted -- it lives in this cluster's database and has no file";
-    case "staged":
-      return "staged -- it lives in this cluster's database, and only you can call it until it is trained";
-  }
+function runKind(construct: CatalogConstruct): "args" | "automation" | undefined {
+  if (construct.runnableKind === undefined) return undefined;
+  return construct.runnableKind === "automation" ? "automation" : "args";
 }
 
-export function renderConstructPage(input: ConstructPageInput): string {
+/** The head's quiet line: kind, namespace, and where it came from when that is ordinary. */
+export function constructMeta(construct: CatalogConstruct): string {
+  const parts = [kindWord(construct.kind), construct.namespace];
+  if (construct.origin === "core" || construct.origin === "bundle") parts.push(ORIGIN_LABELS[construct.origin]);
+  return parts.filter((part) => part !== "").join(" · ");
+}
+
+/** The page, whole. */
+export function constructPageParts(input: ConstructPageInput): RegionParts {
   const { construct } = input;
+  const asideActs: Act[] = [];
+  if (input.source === "workspace" || input.source === "cluster") {
+    asideActs.push({
+      act: CONSTRUCT_ACTS.openSource,
+      label: "Open source",
+      title: input.source === "cluster" ? "Opens the file this cluster loaded, read-only" : undefined,
+    });
+  }
+  const headHtml = head({ title: construct.name, meta: constructMeta(construct), asideActs });
 
-  const facts: [string, string][] = [
-    ["kind", construct.kind],
-    ["namespace", construct.namespace === "" ? "none" : construct.namespace],
-    ["origin", `${construct.origin} -- ${originNote(construct)}`],
-  ];
-  if (construct.boundConcept !== "") facts.push(["bound concept", construct.boundConcept]);
-  if (construct.originPath !== "") facts.push(["file", construct.originPath]);
-  // EMPTY MEANS "NOT AVAILABLE", never "hashes to nothing", so it is not shown
-  // as a value that could be compared against another empty one.
-  if (construct.sourceHash !== "") facts.push(["source hash", construct.sourceHash]);
+  let body = "";
+  if (construct.description !== "") body += `<p class="construct-desc">${escapeHtml(construct.description)}</p>`;
+  if (input.error !== undefined && input.error !== "") body += notice({ tone: "error", line: input.error });
 
-  const factsHtml = facts
-    .map(
-      ([key, value]) => `<div class="fact">
-  <span class="fact-key">${escapeHtml(key)}</span>
-  <span class="fact-value">${escapeHtml(value)}</span>
-</div>`,
-    )
-    .join("");
+  const rows: FactRow[] = [];
+  if (construct.boundConcept !== "") rows.push({ label: "Bound concept", value: construct.boundConcept, mono: true });
+  if (rows.length > 0) body += facts(rows);
 
-  const error = input.error === "" ? "" : `<p class="error">${escapeHtml(input.error)}</p>`;
+  body += argumentsHtml(construct);
 
-  return `<h1>${escapeHtml(construct.name)}</h1>
-<p class="lede">${escapeHtml(construct.description === "" ? "No description." : construct.description)}</p>
-${error}
-<div class="facts">${factsHtml}</div>
-${actionsHtml(input)}
-${argsHtml(construct)}
-${sourceHtml(construct)}`;
+  if (construct.kind === "concept") {
+    body +=
+      subhead("Rows") +
+      `<div class="mq-acts">${button({ act: CONSTRUCT_ACTS.browseRows, label: "Browse rows", tone: "secondary" })}` +
+      `${button({ act: CONSTRUCT_ACTS.openInOs, label: "Open in MemQL OS" })}</div>`;
+  }
+
+  // A promoted or staged construct has no file: its source is here, and this is
+  // the one place it can be read.
+  if (construct.source !== "") {
+    body += subhead("Source") + `<pre class="construct-source"><code>${escapeHtml(construct.source)}</code></pre>`;
+  }
+
+  const details: FactRow[] = [];
+  if (construct.originPath !== "") details.push({ label: "File", value: construct.originPath, mono: true });
+  // EMPTY MEANS "NOT AVAILABLE", never "hashes to nothing", so it is not shown.
+  if (construct.sourceHash !== "") details.push({ label: "Source hash", value: construct.sourceHash, mono: true });
+  if (details.length > 0) {
+    body += disclosure({
+      act: CONSTRUCT_ACTS.details,
+      label: "Details",
+      open: input.detailsOpen === true,
+      id: "construct-details",
+      bodyHtml: facts(details),
+    });
+  }
+
+  return { head: headHtml, body, actions: barHtml(input) };
 }
 
-/**
- * The actions.
- *
- * A VIEW-ONLY KIND GETS NO RUN BUTTON -- not a disabled one. The absence is
- * the statement, exactly as in the tree.
- *
- * "Open the .memql file" is offered only when there IS a file and it is
- * reachable. For a promoted construct the source is shown below instead, and
- * saying so beats a button that opens nothing.
- *
- * "Browse rows" is CONCEPTS ONLY (memql#4252, re-pointed by epic memql#5009)
- * -- rows are cluster state, which the console draws, so this hands off
- * rather than a second rows browser growing in the extension. No other kind
- * has rows, so no other kind draws the button; the absence is the statement,
- * same as the run button above.
- *
- * It said "in portal" and opened `<root>/concepts/<id>`. Epic memql#4984
- * retired the portal and the button was REMOVED rather than left pointing at
- * a route nothing answered; this is its return, at MemQL OS's Concepts app.
- */
-function actionsHtml(input: ConstructPageInput): string {
-  const buttons: string[] = [];
-  if (input.offerRun === true && input.construct.runnableKind !== undefined) {
-    // An automation's button says what clicking it opens. Its run is a FORM --
-    // pick a row or paste a payload, then fire a real event -- rather than the
-    // immediate invocation "Run" means for the other four, and the label is the
-    // only warning before a click that has consequences on a real cluster.
-    const label = input.automationRun === true ? "Run automation..." : "Run";
-    buttons.push(`<button class="primary" type="button" data-act="run">${label}</button>`);
-    // Never for an automation: its `args` is always empty (there is no declared
-    // payload schema), so the argument form has nothing to draw and the
-    // automation form is where its inputs live.
-    if (input.automationRun !== true && input.construct.args.length > 0) {
-      buttons.push(
-        `<button class="secondary" type="button" data-act="runWith">Run with arguments</button>`,
+function argumentsHtml(construct: CatalogConstruct): string {
+  // An automation's inputs are its trigger event, which its own form builds;
+  // it declares no arguments, and saying "None" about it would mislead.
+  if (construct.runnableKind === "automation") return "";
+  // "None" is news only about something that could take arguments: a query
+  // that takes none. A concept or a spec never does, and a section saying so
+  // would be a line about nothing.
+  if (construct.args.length === 0) return construct.runnableKind === undefined ? "" : subhead("Arguments", "None");
+  const items = construct.args
+    .map((arg) => {
+      const flags: string[] = [arg.type];
+      if (arg.required) flags.push("Required");
+      // Marked and still submitted: the engine stamps it and discards what was
+      // sent, so hiding it would be an invisible divergence (memql#3333).
+      if (arg.autoInjected === true) flags.push("Set by the cluster");
+      if (arg.enum !== undefined && arg.enum.length > 0) flags.push(arg.enum.join(" | "));
+      const description =
+        arg.description === undefined || arg.description === ""
+          ? ""
+          : `<p class="mq-field-hint">${escapeHtml(arg.description)}</p>`;
+      return (
+        `<li class="construct-arg"><span class="construct-arg-head"><code class="construct-arg-name">${escapeHtml(arg.name)}</code>` +
+        `<span class="construct-arg-flags mq-head-meta">${escapeHtml(flags.join(" · "))}</span></span>${description}</li>`
       );
-    }
-  }
-  if (input.construct.originPath !== "" && input.fileInWorkspace) {
-    buttons.push(`<button class="secondary" type="button" data-act="openFile">Open the .memql file</button>`);
-  }
-  // The other side of that branch, and only when there IS a file: a promoted
-  // construct's source is already rendered below, so a fetch would ask the
-  // cluster for something the catalog has already said does not exist.
-  if (input.construct.originPath !== "" && !input.fileInWorkspace && input.offerClusterSource) {
-    buttons.push(
-      `<button class="secondary" type="button" data-act="viewSourceFromCluster">View source from cluster</button>`,
-    );
-  }
-  // Concepts only: no other kind has rows to browse.
-  if (input.construct.kind === "concept") {
-    buttons.push(`<button class="secondary" type="button" data-act="browseRows">Browse rows</button>`);
-  }
-  if (buttons.length === 0) return "";
-  return `<div class="actions">${buttons.join("")}</div>`;
-}
-
-function argsHtml(construct: CatalogConstruct): string {
-  if (construct.args.length === 0) {
-    // Said rather than omitted: "this takes no arguments" and "the argument
-    // list did not load" look identical as an absent section.
-    return `<h2>Arguments</h2>
-<p class="lede">This construct takes no arguments.</p>`;
-  }
-  const rows = construct.args
-    .map(
-      (arg) => `<div class="arg" data-required="${arg.required}">
-  <span class="arg-name">${escapeHtml(arg.name)}</span>
-  <span class="arg-type">${escapeHtml(arg.type)}</span>
-  <span class="arg-flags">${escapeHtml(argFlags(arg))}</span>
-  <span class="arg-description">${escapeHtml(arg.description ?? "")}</span>
-</div>`,
-    )
+    })
     .join("");
-  return `<h2>Arguments</h2>
-<div class="args">${rows}</div>`;
-}
-
-function argFlags(arg: CatalogConstruct["args"][number]): string {
-  const flags: string[] = [];
-  if (arg.required) flags.push("required");
-  if (arg.autoInjected === true) {
-    // Marked and still submitted: the engine stamps it and discards what was
-    // sent, so hiding it would be an invisible divergence from what dispatch
-    // does (memql#3333).
-    flags.push("auto-injected");
-  }
-  if (arg.enum !== undefined && arg.enum.length > 0) {
-    flags.push(`one of: ${arg.enum.join(", ")}`);
-  }
-  return flags.join(" - ");
+  return subhead("Arguments", String(construct.args.length)) + `<ul class="construct-args">${items}</ul>`;
 }
 
 /**
- * The source, for the one case that has nowhere else to show it.
+ * The bar: where the construct lives, and Run when it can be run.
  *
- * A file-backed construct's source is deliberately NOT shipped by the catalog
- * -- the pack browser already serves that file and the editor opens it at the
- * signature, which is a better path than a detached copy. So this section
- * appears only for a promoted construct, and says why.
+ * ABSENT for a kind with nothing to run. The bar is where state-changing acts
+ * live, and browsing a concept's rows changes nothing.
  */
-function sourceHtml(construct: CatalogConstruct): string {
-  if (construct.source === "") return "";
-  return `<h2>Source</h2>
-<p class="lede">This construct has no file. What follows is what the cluster holds.</p>
-<pre class="source">${escapeHtml(construct.source)}</pre>`;
+function barHtml(input: ConstructPageInput): string {
+  const { construct } = input;
+  const kind = runKind(construct);
+  if (kind === undefined) return "";
+  const where = input.cluster === "" ? "" : ` on ${input.cluster}`;
+  const state =
+    construct.origin === "promoted"
+      ? `Promoted${where}`
+      : construct.origin === "staged"
+        ? `Staged${where}`
+        : `Loaded${where}`;
+  const acts: Act[] = [];
+  if (kind === "automation") {
+    // An automation's run is a FORM -- a trigger event to build -- so the
+    // label says what the click opens.
+    acts.push({ act: CONSTRUCT_ACTS.run, label: "Run...", tone: "primary" });
+  } else {
+    if (construct.args.length > 0) acts.push({ act: CONSTRUCT_ACTS.runWith, label: "Run with arguments" });
+    acts.push({ act: CONSTRUCT_ACTS.run, label: "Run", tone: "primary" });
+  }
+  return actionBar({
+    state,
+    detail: construct.origin === "staged" ? "Only you can call it" : undefined,
+    tone: "live",
+    acts,
+  });
 }
+
+/** While the construct is being read from the cluster. */
+export function constructLoadingParts(): RegionParts {
+  return { head: "", body: skeleton({ shape: "page", rows: 5, label: "Loading construct" }), actions: "" };
+}
+
+/** The read failed: say so, and offer it again. */
+export function constructFailedParts(name: string, message: string): RegionParts {
+  return {
+    head: head({ title: name }),
+    body: notice({ tone: "error", line: message, acts: [{ act: CONSTRUCT_ACTS.retry, label: "Try again" }] }),
+    actions: "",
+  };
+}
+
+/** Panel-local layout for the page. Layout only; the kit and the tokens own colour. */
+export const CONSTRUCT_PAGE_STYLES = `
+  .construct-desc { margin: -12px 0 20px; max-width: 72ch; }
+  .construct-args { list-style: none; margin: 0; padding: 0; max-width: 80ch; }
+  .construct-arg { padding: 5px 0; }
+  .construct-arg-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; }
+  .construct-arg-name { font-weight: 600; padding: 0; background: none; }
+  .construct-arg .mq-field-hint { margin-top: 2px; }
+  .construct-source { margin: 0; max-width: 100%; overflow-x: auto; background: var(--memql-raised);
+                      border-radius: var(--memql-radius); }
+  .construct-source > code { display: block; padding: 10px 12px; white-space: pre; }
+`;

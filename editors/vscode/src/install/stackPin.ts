@@ -369,14 +369,24 @@ const DOMAIN_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z
 export function localInstallRemoteProblem(remoteName: string | undefined): string | undefined {
   const remote = (remoteName ?? "").trim();
   if (remote === "") return undefined;
-  return (
-    `A local cluster cannot be installed from a ${remote} window. Everything the install ` +
-    `writes -- hosts entries, the mkcert certificate, the cluster itself -- lands on the ` +
-    `remote host, while your browser is on this one, so the cluster would come up and none ` +
-    `of its sign-in links would open. Open a local window to install, then register the ` +
-    `cluster from anywhere with "Connect to an existing cluster".`
-  );
+  // ONE SENTENCE AND THE WAY THROUGH (the reasons above are for the reader of
+  // this file). The window kind is named because it is what is different
+  // about this window -- in the words VS Code's own status bar uses, not the
+  // `remoteName` id ("a ssh-remote window") -- and the way through is the
+  // local window.
+  const kind = REMOTE_KINDS[remote] ?? remote;
+  return `This window is connected through ${kind}. Open a local VS Code window to install MemQL on your computer.`;
 }
+
+/** What each remote kind is called where a person reads it; an unknown one is named as VS Code reports it. */
+const REMOTE_KINDS: Readonly<Record<string, string>> = {
+  "ssh-remote": "Remote SSH",
+  "dev-container": "a dev container",
+  "attached-container": "a container",
+  wsl: "WSL",
+  codespaces: "Codespaces",
+  tunnel: "a tunnel",
+};
 
 export function installDomainProblem(domain: string): string | undefined {
   const trimmed = domain.trim();
@@ -384,16 +394,16 @@ export function installDomainProblem(domain: string): string | undefined {
   if (DOMAIN_PATTERN.test(trimmed)) return undefined;
 
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
-    return "Enter a domain, not a URL: MemQL adds the scheme and the front-door hostnames itself, so `memql.localhost` rather than `https://memql.localhost`.";
+    return `Enter a domain like ${DEFAULT_LOCAL_DOMAIN}, without https://.`;
   }
   if (trimmed.includes(":")) {
-    return "Enter a domain with no port. The front door is on 443 and MemQL puts the cluster there itself.";
+    return "Enter a domain with no port.";
   }
   if (trimmed.startsWith("*.")) {
-    return "Enter the domain itself, not a wildcard. MemQL derives `api.` and `identity.` from it, and the certificate covers the wildcard for you.";
+    return "Enter the domain itself, not a wildcard.";
   }
   if (!trimmed.includes(".")) {
-    return `Enter a domain with at least two labels, such as ${DEFAULT_LOCAL_DOMAIN}. A single label cannot carry the front-door subdomains MemQL needs.`;
+    return `Enter a domain with at least two parts, such as ${DEFAULT_LOCAL_DOMAIN}.`;
   }
-  return `That is not a domain MemQL can serve. Use lowercase letters, digits and hyphens, with at least two labels -- for example ${DEFAULT_LOCAL_DOMAIN}.`;
+  return `Use lowercase letters, digits and hyphens, such as ${DEFAULT_LOCAL_DOMAIN}.`;
 }

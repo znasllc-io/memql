@@ -129,12 +129,13 @@ test("every function the sign-in UI adapter exports is imported by something", (
 // named here to go green, which is exactly the moment to ask whether it should
 // have been wired instead.
 const STORE_TEST_ONLY_EXPORTS = new Set<string>([
-  // The two SecretStorage key-derivation helpers. They exist so a test can
+  // The three SecretStorage key-derivation helpers. They exist so a test can
   // assert the exact key a credential lands under -- which is the thing #3404's
   // index has to agree with, and the one detail no behavioural test can show.
   // Nothing outside this module should be composing these keys itself.
   "refreshTokenSecretKey",
   "accessTokenExpirySecretKey",
+  "issuedClientSecretKey",
 
   // The two halves of runAuthenticated's decision, exported so they can be
   // driven directly rather than through a dial.

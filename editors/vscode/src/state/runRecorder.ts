@@ -63,6 +63,11 @@ export interface RunRecorderOptions {
 export class RunRecorder {
   private run: Run;
   private lastError_ = "";
+  // When each step STARTED, by step id. `recordRunItem` replaces an item
+  // wholesale, so the start written by `stepStarted` would otherwise be lost
+  // the moment the finish lands -- and with it the only exact duration the
+  // record could hold.
+  private readonly startedAt = new Map<string, string>();
 
   private constructor(
     private readonly dir: string,
@@ -108,10 +113,12 @@ export class RunRecorder {
    * its turn. Growing the list from the steps that happen to start would leave
    * an abandoned run indistinguishable from a short one.
    *
-   * `stepLog` and `waveStarted` are deliberately not recorded. A log line is
-   * the panel's business while the run is on screen, and a wave index is the
-   * executor's schedule rather than anything about the install -- neither is a
-   * fact a history should have to carry.
+   * `stepLog`, `stepPhase` and `waveStarted` are deliberately not recorded. A
+   * log line and a phase are the panel's business while the run is on screen,
+   * and a wave index is the executor's schedule rather than anything about the
+   * install -- none is a fact a history should have to carry. What the history
+   * does keep is each step's start beside its finish, which is what the next
+   * run's progress bar is weighed by.
    */
   async apply(event: ExecEvent): Promise<void> {
     switch (event.type) {
@@ -128,10 +135,12 @@ export class RunRecorder {
         return;
       case "stepStarted":
         await this.guard(async () => {
+          const at = this.clock();
+          this.startedAt.set(event.step.id, at);
           this.run = await recordRunItem(
             this.dir,
             this.run,
-            { label: event.step.id, status: "running", at: this.clock() },
+            { label: event.step.id, status: "running", at, startedAt: at },
             // The step's own invocation flags, redacted on the way in by
             // recordRunItem -- a provider key given where a path belonged must
             // not reach a file nothing ever rewrites.
@@ -146,6 +155,14 @@ export class RunRecorder {
             status: event.outcome.status as RunItemStatus,
             at: event.outcome.finishedAt !== "" ? event.outcome.finishedAt : this.clock(),
           };
+          // THE START, KEPT BESIDE THE FINISH. The outcome's own timestamp
+          // first, because it is the executor's clock like `finishedAt` is;
+          // the moment `stepStarted` was recorded when the outcome has none.
+          // A step that never started (skipped before it ran) has neither and
+          // records none.
+          const startedAt =
+            event.outcome.startedAt !== "" ? event.outcome.startedAt : this.startedAt.get(event.step.id);
+          if (startedAt !== undefined) item.startedAt = startedAt;
           // WHAT THE STEP ACTUALLY DID, not just whether it failed (memql#3886).
           //
           // This used to record a detail ONLY on a failure with a reason, and

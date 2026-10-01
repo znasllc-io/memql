@@ -111,10 +111,9 @@ test("no token and no issuer are not attempts", async () => {
 // what the person is told
 // ---------------------------------------------------------------------------
 
-test("a revoked session is described as ended on the cluster", () => {
+test("a revoked session is one short line naming the cluster", () => {
   const msg = signOutMessage("prod", { attempted: true, revoked: true });
-  assert.match(msg, /prod/);
-  assert.match(msg, /cluster/i);
+  assert.equal(msg, "MemQL: Signed out of prod.");
 });
 
 // The message that was wrong before: "signed out" over a token that is still
@@ -126,23 +125,16 @@ test("an unrevoked session says so, and names where to end it", () => {
     reason: "https://identity.example.com could not be reached (offline)",
   };
   const msg = signOutMessage("prod", outcome);
-  assert.match(
-    msg,
-    /this machine/i,
-    "the message claims the session ended when only this machine forgot it",
-  );
-  assert.match(msg, /Devices/, "the person is left with a live credential and no next step");
-  assert.ok(
-    !/^MemQL: signed out of "prod"\.$/.test(msg),
-    "the unrevoked case still reads as a clean sign-out",
-  );
+  assert.match(msg, /Signed out here, but prod couldn't end the session/, "only this machine forgot it");
+  assert.match(msg, /Devices in MemQL OS/, "the person is left with a live credential and no next step");
+  assert.doesNotMatch(msg, /portal|refresh token/i, "no retired surface and no internal term");
 });
 
 test("nothing to revoke keeps the ordinary wording", () => {
   const msg = signOutMessage("local", { attempted: false });
-  assert.match(msg, /signed out of "local"/);
+  assert.equal(msg, "MemQL: Signed out of local.");
   assert.ok(
-    !/could not/.test(msg),
+    !/couldn't/.test(msg),
     "a cluster with no server-side session should not be told revocation failed",
   );
 });

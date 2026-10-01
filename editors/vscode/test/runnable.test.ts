@@ -200,18 +200,27 @@ test("usesArgForm -- every kind but automation generates its form from `args`", 
 // lensPlansFor
 // -----------------------------------------------------------------------------
 
-test("lensPlansFor -- a runnable construct gets Run and Run with...", () => {
-  const constructs = parseRunnableConstructs({ constructs: [wireConstruct()] });
-  const plans = lensPlansFor("file:///q.memql", constructs);
-  assert.equal(plans.length, 2);
-  assert.equal(plans[0]?.title, "Run");
-  assert.equal(plans[0]?.command, COMMAND_RUN);
-  assert.equal(plans[1]?.title, "Run with...");
-  assert.equal(plans[1]?.command, COMMAND_RUN_WITH);
-  // Both anchor to the SIGNATURE, not the body -- that is what "appears on
+test("lensPlansFor -- a construct gets ONE Run lens: Run with no arguments, Run... (the form) with any", () => {
+  // It used to be two lenses, "Run" and "Run with...", on every signature.
+  const bare = lensPlansFor("file:///q.memql", parseRunnableConstructs({ constructs: [wireConstruct()] }));
+  assert.equal(bare.length, 1);
+  assert.equal(bare[0]?.title, "Run");
+  assert.equal(bare[0]?.command, COMMAND_RUN);
+  // Anchored to the SIGNATURE, not the body -- that is what "appears on
   // runnable signatures" means concretely.
-  assert.deepEqual(plans[0]?.range, RANGE);
-  assert.deepEqual(plans[1]?.range, RANGE);
+  assert.deepEqual(bare[0]?.range, RANGE);
+
+  const withArgs = lensPlansFor(
+    "file:///q.memql",
+    parseRunnableConstructs({
+      constructs: [wireConstruct({ args: [{ name: "limit", type: "number", required: false }] })],
+    }),
+  );
+  assert.equal(withArgs.length, 1);
+  assert.equal(withArgs[0]?.title, "Run...");
+  // The form: where the arguments are filled in, the call can be saved, and
+  // Run is one more click with the optional ones left empty.
+  assert.equal(withArgs[0]?.command, COMMAND_RUN_WITH);
 });
 
 test("lensPlansFor -- the target carries the uri, kind, name and declared args", () => {
@@ -256,12 +265,17 @@ test("lensPlansFor -- an automation gets ONE lens, on the automation command", (
     name: "autoJoinSI",
     trigger: { event: "node.created", concept: "v1:cognition:participant" },
   });
-  // Said BEFORE the click, as the tool lens says it: by the time a banner is
-  // on the results surface the developer has already run the thing.
-  assert.match(plans[0]?.tooltip ?? "", /DEPLOYED/);
+  // Said BEFORE the click, as the tool lens says it: by the time a result is
+  // on screen the developer has already run the thing. In one sentence, and
+  // without shouting.
+  assert.equal(plans[0]?.title, "Run...");
+  assert.match(plans[0]?.tooltip ?? "", /deployed automation/);
+  assert.doesNotMatch(plans[0]?.tooltip ?? "", /DEPLOYED|session-defined/);
 });
 
-test("lensPlansFor -- a scheduled automation's tooltip says it fires now with an empty event", () => {
+test("lensPlansFor -- a scheduled automation's lens opens the same form", () => {
+  // What it fires with -- an empty event, now -- is said on the form, where
+  // the run happens, rather than in a paragraph of tooltip.
   const constructs = parseRunnableConstructs({
     constructs: [
       wireConstruct({
@@ -272,7 +286,8 @@ test("lensPlansFor -- a scheduled automation's tooltip says it fires now with an
     ],
   });
   const plans = lensPlansFor("file:///a.memql", constructs);
-  assert.match(plans[0]?.tooltip ?? "", /empty event/);
+  assert.equal(plans[0]?.command, COMMAND_RUN_AUTOMATION);
+  assert.deepEqual(plans[0]?.automationTarget?.trigger, { schedule: "0 */10 * * * *" });
 });
 
 test("lensPlansFor -- no constructs means no lenses", () => {
@@ -287,7 +302,8 @@ test("lensPlansFor -- a tool's Run tooltip says the deployed definition runs", (
     constructs: [wireConstruct({ kind: "tool", name: "searchUsers" })],
   });
   const plans = lensPlansFor("file:///t.memql", constructs);
-  assert.match(plans[0]?.tooltip ?? "", /DEPLOYED/);
+  assert.match(plans[0]?.tooltip ?? "", /deployed tool/);
+  assert.match(plans[0]?.tooltip ?? "", /don't apply/);
 });
 
 // -----------------------------------------------------------------------------
@@ -356,13 +372,13 @@ test("lensPlansFor -- a disabled construct is labelled rather than dropped", () 
   const plans = lensPlansFor("file:///w/q.memql", [
     { kind: "query", name: "disabledLookup", signatureRange: RANGE, args: [], disabled: true },
   ]);
-  assert.equal(plans.length, 2);
-  assert.equal(plans[0]?.title, "Run (@disabled)");
-  assert.match(plans[0]?.tooltip ?? "", /@disabled/);
-  assert.match(plans[0]?.tooltip ?? "", /can only be refused/);
-  // A query is session-defined from the buffer, so removing the annotation
-  // here is enough -- no redeploy needed.
-  assert.match(plans[0]?.tooltip ?? "", /this buffer/);
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0]?.title, "Run (disabled)");
+  assert.match(plans[0]?.tooltip ?? "", /remove @disabled/);
+  // A query runs from the file, so removing the annotation here is enough --
+  // no deploy needed.
+  assert.match(plans[0]?.tooltip ?? "", /here to run it/);
+  assert.doesNotMatch(plans[0]?.tooltip ?? "", /deploy/);
 });
 
 // A tool runs the DEPLOYED definition, so the remedy differs: the buffer
@@ -371,7 +387,7 @@ test("lensPlansFor -- a disabled tool's tooltip names redeploy, not the buffer",
   const plans = lensPlansFor("file:///w/t.memql", [
     { kind: "tool", name: "retiredSearch", signatureRange: RANGE, args: [], disabled: true },
   ]);
-  assert.match(plans[0]?.tooltip ?? "", /redeployed/);
+  assert.match(plans[0]?.tooltip ?? "", /deploy it/);
 });
 
 test("lensPlansFor -- a disabled automation carries the flag onto its target", () => {
@@ -386,7 +402,7 @@ test("lensPlansFor -- a disabled automation carries the flag onto its target", (
     },
   ]);
   assert.equal(plans.length, 1);
-  assert.equal(plans[0]?.title, "Run automation (@disabled)...");
+  assert.equal(plans[0]?.title, "Run (disabled)...");
   assert.equal(plans[0]?.automationTarget?.disabled, true);
 });
 

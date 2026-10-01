@@ -39,6 +39,14 @@
 //     a second costs a menu item, whereas blocking the button costs the
 //     feature.
 //
+//     BUT ONE MISS IS NOT A VERDICT. The first TLS handshake from the editor's
+//     extension host can be slow (proxy and certificate patching), and a
+//     1.5-second budget reported a cluster that answers in 42 ms from a shell
+//     as "not answering". So the budget is about four seconds, a miss is tried
+//     once more before it counts, and the reason it missed is logged
+//     (`onProbeFailure`, the MemQL Connection output) -- a verdict nobody can
+//     explain is one nobody can fix.
+//
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 //
 // Refs: #3412 #3401
@@ -46,7 +54,7 @@
 import { WebSocket as NodeWebSocket } from "ws";
 
 import { composeEndpointFromDomain, webSocketUrlFor } from "../connection/endpoint.js";
-import { defaultReceiptPath, readReceipt, type Receipt } from "../install/receipt.js";
+import { defaultReceiptPath, readReceipt, recordedStackTag, type Receipt } from "../install/receipt.js";
 import { offersReconnect } from "./reconnect.js";
 import { readClustersFileSafe } from "./file.js";
 import type { ClusterConfig } from "./model.js";
@@ -101,6 +109,19 @@ export interface PresenceResult {
   endpoint: string;
   /** The registry name of the local cluster, when one is registered. */
   clusterName?: string;
+  /**
+   * The local cluster's recorded release: the install receipt's, else the
+   * `version` clusters.yaml records for the registered entry. A cluster built
+   * with `make up` has no receipt, and its version is still known.
+   */
+  version?: string;
+}
+
+/** What one probe learned: whether something answered, and why not when nothing did. */
+export interface ProbeAnswer {
+  answered: boolean;
+  /** Why nothing answered: a timeout, a refused connection, a DNS failure. */
+  reason?: string;
 }
 
 /**
@@ -112,17 +133,21 @@ export interface PresenceResult {
  * cluster is down" from "your token needs renewing". The latter is the
  * connection layer's story to tell (src/clusters/status.ts), not this one's.
  */
-export type EndpointProbe = (endpoint: string, timeoutMs: number) => Promise<boolean>;
+export type EndpointProbe = (endpoint: string, timeoutMs: number) => Promise<boolean | ProbeAnswer>;
 
 /**
- * The dial deadline.
+ * The dial deadline, per try.
  *
- * Short on purpose: this runs on the click of a toolbar button, and the cost
- * of being wrong is one extra menu item. A local cluster on loopback answers
- * in single-digit milliseconds; anything that takes longer than this is not a
- * cluster an operator would call healthy either.
+ * A local cluster on loopback answers in milliseconds from a shell, but the
+ * FIRST TLS handshake from the editor's extension host can take far longer --
+ * VS Code's proxy and certificate patching sit in front of it -- and the old
+ * 1.5-second budget called a healthy cluster "not answering". Four seconds,
+ * and a miss is tried once more (PROBE_TRIES) before it counts.
  */
-export const PROBE_TIMEOUT_MS = 1_500;
+export const PROBE_TIMEOUT_MS = 4_000;
+
+/** A miss is tried this many times in all before the cluster is "not answering". */
+export const PROBE_TRIES = 2;
 
 /**
  * How long a verdict is reused.
@@ -289,6 +314,8 @@ export interface PresenceOptions {
   now?: () => number;
   readReceiptFile?: (file: string) => Promise<Receipt | null>;
   readClusters?: (file: string) => ReturnType<typeof readClustersFileSafe>;
+  /** Told why the probe got no answer, after the last try (the MemQL Connection output). */
+  onProbeFailure?: (endpoint: string, reason: string) => void;
   /**
    * The k3d cluster names on this machine, for the fourth signal.
    *
@@ -343,12 +370,20 @@ export async function detectPresence(opts: PresenceOptions): Promise<PresenceRes
   }
 
   const endpoint = probeEndpointFor(local, fromReceipt.receipt);
-  const answered = await withDeadline(() => probe(endpoint, timeoutMs), timeoutMs);
+  let answer: ProbeAnswer = { answered: false };
+  for (let attempt = 0; attempt < PROBE_TRIES && !answer.answered; attempt += 1) {
+    answer = await withDeadline(() => probe(endpoint, timeoutMs), timeoutMs);
+  }
+  if (!answer.answered) {
+    opts.onProbeFailure?.(endpoint, answer.reason ?? `no answer within ${timeoutMs} ms, ${PROBE_TRIES} tries`);
+  }
+  const version = recordedStackTag(fromReceipt.receipt) || (local?.version ?? "").trim();
   return {
-    verdict: verdictFor(evidence, answered),
+    verdict: verdictFor(evidence, answer.answered),
     evidence,
     endpoint,
     clusterName: local?.name,
+    ...(version !== "" ? { version } : {}),
   };
 }
 
@@ -367,15 +402,19 @@ export async function detectPresence(opts: PresenceOptions): Promise<PresenceRes
  * how a probe with nothing else pending resolves as "the event loop drained"
  * rather than as a verdict.
  */
-async function withDeadline(work: () => Promise<boolean>, timeoutMs: number): Promise<boolean> {
+async function withDeadline(work: () => Promise<boolean | ProbeAnswer>, timeoutMs: number): Promise<ProbeAnswer> {
   let timer: NodeJS.Timeout | undefined;
-  const expiry = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => resolve(false), timeoutMs);
+  const expiry = new Promise<ProbeAnswer>((resolve) => {
+    timer = setTimeout(() => resolve({ answered: false, reason: `no answer within ${timeoutMs} ms` }), timeoutMs);
   });
+  const attempt = work().then(
+    (result): ProbeAnswer => (typeof result === "boolean" ? { answered: result } : result),
+    (err: unknown): ProbeAnswer => ({ answered: false, reason: err instanceof Error ? err.message : String(err) }),
+  );
   try {
-    return await Promise.race([work().catch(() => false), expiry]);
+    return await Promise.race([attempt, expiry]);
   } catch {
-    return false;
+    return { answered: false };
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
@@ -428,19 +467,19 @@ function isCertificateFailure(err: unknown): boolean {
  *   - the socket is torn down the moment the question is answered.
  */
 export const defaultEndpointProbe: EndpointProbe = (endpoint, timeoutMs) =>
-  new Promise<boolean>((resolve) => {
+  new Promise<ProbeAnswer>((resolve) => {
     let url: string;
     try {
       url = webSocketUrlFor({ name: PROBE_CLUSTER_NAME, endpoint });
-    } catch {
+    } catch (err) {
       // An endpoint that cannot even be lifted to a URL answers nothing.
-      resolve(false);
+      resolve({ answered: false, reason: `not a dialable address (${err instanceof Error ? err.message : String(err)})` });
       return;
     }
 
     let settled = false;
     const socket = new NodeWebSocket(url, { handshakeTimeout: timeoutMs });
-    const finish = (answered: boolean): void => {
+    const finish = (answer: ProbeAnswer): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -449,18 +488,31 @@ export const defaultEndpointProbe: EndpointProbe = (endpoint, timeoutMs) =>
       } catch {
         // A socket that is already gone needs no tearing down.
       }
-      resolve(answered);
+      resolve(answer);
     };
     // Cleared by finish(), which every exit path goes through.
-    const timer = setTimeout(() => finish(false), timeoutMs);
+    const timer = setTimeout(
+      () => finish({ answered: false, reason: `${url} did not answer within ${timeoutMs} ms` }),
+      timeoutMs,
+    );
 
-    socket.on("open", () => finish(true));
+    socket.on("open", () => finish({ answered: true }));
     // ws only emits this when a listener exists; without one the HTTP response
     // arrives as a plain error and a live-but-unauthenticated server would read
     // as unreachable.
-    socket.on("unexpected-response", () => finish(true));
-    socket.on("error", (err) => finish(isCertificateFailure(err)));
+    socket.on("unexpected-response", () => finish({ answered: true }));
+    socket.on("error", (err) =>
+      finish(isCertificateFailure(err) ? { answered: true } : { answered: false, reason: probeErrorText(url, err) }),
+    );
   });
+
+/** A probe error in one line: the code when there is one, and the message. */
+function probeErrorText(url: string, err: unknown): string {
+  const e = err as { code?: unknown; message?: unknown };
+  const code = typeof e?.code === "string" ? e.code : "";
+  const message = typeof e?.message === "string" ? e.message : String(err);
+  return code !== "" && !message.includes(code) ? `${url}: ${code} ${message}` : `${url}: ${message}`;
+}
 
 /**
  * The memoized front door: what the "+" command asks.

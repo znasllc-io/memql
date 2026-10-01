@@ -1,72 +1,41 @@
 // What an operator needs NEXT from a cluster they cannot get into (memql#3906).
 //
-// memql#3885 asked one question at the entry point -- "has anyone claimed this
-// cluster?" -- and answered it with `GET <issuer>/setup`. That question is
-// right and its answer is sound. It is just not the whole state space, and the
-// state it leaves out is the one every installer-built cluster is actually in.
+// # Two routes and one offer
 //
-// # Three states, not two
+//   nobody owns it       -> claim: /setup, which mints the first owner
+//   anything else        -> sign in
 //
-//   nobody owns it          -> /setup, which mints the first owner
-//   owner exists, no
-//     credential on this
-//     machine               -> an enrolment link, which mints the first passkey
-//   credential in hand      -> sign in
+// and, beside the route rather than instead of it:
 //
-// `/setup` distinguishes the first from the other two. Nothing unauthenticated
-// distinguishes the second from the third, and nothing should: an anonymous way
-// to ask "does this account have a passkey" is an enumeration oracle
-// (memql#3902 makes the same point from the other side).
+//   the owner this machine's install recorded has never signed in here
+//                        -> "Create the owner passkey" is OFFERED
 //
-// # Why the probe cannot be asked first
+// # Why "claimed" always means Sign in
 //
-// TWO reasons, and the second was found by running it rather than reading it.
+// This module used to have a third route, `enrol`, and it was chosen for ANY
+// local cluster with no credential stored in clusters.yaml -- including after
+// the /setup probe had answered "claimed". On the owner's own machine (a
+// cluster built with `make up`, so no install receipt, and a passkey enrolled
+// long ago) that sent every row click to a modal claiming "One step left:
+// create this cluster's owner passkey", whose button dead-ended in "Re-run the
+// installer". A cluster that has an owner is one to sign in to. The passkey is
+// the install hand-off's step, and elsewhere it is only an OFFER, made when
+// the evidence for it is real: this machine's install receipt names the owner
+// of THIS cluster, and no sign-in has completed here since.
 //
-//  1. `seedBootstrap` creates the owner from the values the installer seeds, so
-//     a cluster this extension installed HAS an owner before an operator opens
-//     a browser. `/setup` is gated on `Store.HasOwnerUser` and is therefore
-//     sealed -- verified, `GET https://identity.<domain>/setup` -> 404 on a
-//     freshly installed cluster. Offering the wizard there is offering a 404.
+// # Why the probe is asked at all
 //
-//  2. `probeClaimState` binds to `globalThis.fetch`, and Node's fetch verifies
-//     against its OWN bundled roots rather than the OS/NSS store the installer
-//     puts the local mkcert CA into. So the probe does not merely answer wrong
-//     for a local cluster, it cannot answer at all:
-//
-//         fetch('https://identity.memql.localhost/setup')
-//           -> TypeError: fetch failed
-//              cause: UNABLE_TO_VERIFY_LEAF_SIGNATURE
-//
-//     which `probeClaimState` correctly reports as `unknown`. Every local
-//     cluster answers `unknown`, `unknown` maps to sign-in, and sign-in is the
-//     one thing that cannot work. The probe was blind on precisely the clusters
-//     the feature is for.
-//
-// # So the local evidence is asked first
-//
-// The install receipt records the owner `seedBootstrap` was given
-// (`recordedOwner`, memql#3904). That is a stronger signal than the probe and a
-// cheaper one: it is on this disk, it needs no network, no TLS and no timeout,
-// and it is the same value the mint will name. When it is present and no
-// credential is stored, the answer is `enrol` and nothing is dialled.
-//
-// Only when local evidence cannot answer -- a remote cluster, or a local one
-// with no receipt -- is the probe consulted, and then #3885's mapping applies
-// unchanged. `claim` therefore becomes reachable ONLY on a real 200, which is
-// the property that was missing: the wizard is offered when the wizard renders,
-// and never on a guess.
+// `GET <issuer>/setup` answers 200 only while the ownership wizard renders --
+// the one state in which there is no account to sign in to. `unknown` (an
+// unreachable host, a TLS failure) and `claimed` both route to sign in, which
+// is what an operator asked for; the wizard is offered only on a real 200.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
 import type { ClaimState } from "./claimState.js";
 
-/**
- * What the entry point should offer.
- *
- * The same three words the state table uses, so a reader can hold one model
- * rather than translating between a probe's vocabulary and a UI's.
- */
-export type OwnershipRoute = "enrol" | "claim" | "signIn";
+/** What the sign-in entry point does: open the ownership wizard, or sign in. */
+export type OwnershipRoute = "claim" | "signIn";
 
 /**
  * What this machine knows about the cluster without asking it anything.
@@ -81,23 +50,25 @@ export interface LocalEvidence {
   /**
    * The install receipt records the owner `seedBootstrap` bootstrapped, AND
    * that receipt is about this cluster (`receiptCoversCluster`).
-   *
-   * Presence is the claim being made: an owner ACCOUNT exists. It says nothing
-   * about credentials, which is exactly the distinction that matters here.
    */
   ownerRecorded: boolean;
-  /** No token or refresh token for this cluster is stored on this machine. */
-  credentialMissing: boolean;
+  /**
+   * The owner has been in: a sign-in has completed for this cluster on this
+   * machine, or a credential for it is stored here.
+   */
+  enrolled: boolean;
 }
 
 /**
- * Whether local evidence settles the question on its own.
+ * Whether "Create the owner passkey" may be offered.
  *
- * Exported because "was the network dialled" is the behaviour worth asserting,
- * and a caller that wants to decide without holding a probe can ask directly.
+ * All three, because each alone is not evidence of a first run: a remote
+ * cluster has no pod to mint in, a cluster with no recorded owner has no
+ * account to name (the mint refuses it as `noOwner`), and an owner who has
+ * signed in here already holds a credential.
  */
-export function evidenceSettlesIt(evidence: LocalEvidence): boolean {
-  return evidence.local && evidence.ownerRecorded && evidence.credentialMissing;
+export function ownerSetupPending(evidence: LocalEvidence): boolean {
+  return evidence.local && evidence.ownerRecorded && !evidence.enrolled;
 }
 
 /**
@@ -139,77 +110,21 @@ export function receiptNamesAnotherCluster(clusterDomain: string, receiptDomain:
 }
 
 /**
- * The route, consulting the cluster only when this machine cannot answer.
+ * The route: the ownership wizard only when the cluster says it has no owner,
+ * sign in otherwise.
  *
- * `probe` is a thunk rather than a value so that NOT CALLING IT is observable.
- * That is the load-bearing behaviour: on the cluster this issue is about the
- * probe cannot succeed, and a version that dialled anyway would spend a TLS
- * failure on every sign-in to learn nothing.
- *
- * THE LAST CLAUSE IS NOT A TIE-BREAK, it is the blind-probe case. A LOCAL
- * cluster holding no credential is one this machine can act on, and the probe
- * has just told us nothing about it -- so falling through to a bare sign-in
- * would reproduce memql#3885's original complaint on the one cluster kind that
- * cannot escape it: the browser flow times out and the device code cannot
- * complete. Offering ownership instead costs a dialog whose other button is
- * still "Sign in", and if there turns out to be nothing to enrol against, the
- * mint says which of the two things is missing -- `noOwner` or `otherCluster`
- * -- both of which name a next step. A sign-in timeout names none.
+ * `probe` is a thunk so a caller that already knows can skip the round trip,
+ * and so a test can see it was consulted.
  */
-export async function resolveOwnershipRoute(
-  evidence: LocalEvidence,
-  probe: () => Promise<ClaimState>,
-): Promise<OwnershipRoute> {
-  if (evidenceSettlesIt(evidence)) return "enrol";
-  const probed = routeForClaimState(await probe());
-  if (probed === "claim") return "claim";
-  return evidence.local && evidence.credentialMissing ? "enrol" : "signIn";
+export async function resolveOwnershipRoute(probe: () => Promise<ClaimState>): Promise<OwnershipRoute> {
+  return routeForClaimState(await probe());
 }
 
 /**
- * memql#3885's mapping, unchanged, for the clusters local evidence cannot
- * speak for.
- *
- * `unknown` still means sign-in. It is the previous behaviour, and a cluster
- * whose `/setup` is hidden behind a proxy must not lose a sign-in that works.
+ * memql#3885's mapping. `unknown` means sign-in: a cluster whose `/setup` is
+ * hidden behind a proxy, or unreachable from this process, must not lose a
+ * sign-in that works.
  */
 export function routeForClaimState(state: ClaimState): OwnershipRoute {
   return state === "unclaimed" ? "claim" : "signIn";
-}
-
-/**
- * Whether a failed dial is really "this cluster has no FIRST credential yet"
- * (memql#3909).
- *
- * A SUCCESSFUL INSTALL USED TO END IN A RED ERROR. `completeInstallHandoff`
- * finishes by selecting the cluster it just registered, and the selection
- * command dials -- while `runAuthenticated` resolves credentials BEFORE
- * touching the network. So a cluster built thirty seconds ago, whose owner
- * account by design holds nothing a person can sign in with, resolved as
- * `missingCredential` without a dial ever being attempted. Guaranteed, on every
- * clean install.
- *
- * What the operator was told was to hand-edit `clusters.yaml` with a JWT minted
- * by curling `/oauth/token` -- the exact terminal round-trip memql#3906 exists
- * to remove -- and the button offered was Sign in, which cannot succeed against
- * an account with no passkey and no magic-link identity. The original dead end,
- * reached from a new direction.
- *
- * So: when the reason is a missing credential and this machine can mint the
- * first one, that is not a fault to report. It is the next step, and the editor
- * has the action for it.
- *
- * NARROW ON PURPOSE, both halves. Only `missingCredential` -- an expired,
- * revoked, wrong-class or unreachable failure is a real problem and must keep
- * reading as one, because "create this cluster's owner passkey" would be a
- * confidently wrong remedy for every one of them. And only `enrol`, which already carries the
- * checks that there is a pod here to mint in and an owner account to mint
- * against; without it this would offer an action whose only outcome is a
- * refusal.
- */
-export function isFirstCredentialPending(
-  reason: string,
-  route: OwnershipRoute,
-): boolean {
-  return reason === "missingCredential" && route === "enrol";
 }

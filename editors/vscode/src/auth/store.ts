@@ -28,6 +28,13 @@
 //                     is inside it; it exists so an OPAQUE access token can
 //                     still be renewed proactively rather than only after it
 //                     has already failed a dial.
+//   CLIENT ID      -- SecretStorage, beside the refresh token: the client the
+//                     token was ISSUED to, which a refresh presents. Not a
+//                     secret, but it describes that secret and lives and dies
+//                     with it. It is deliberately NOT clusters.yaml's
+//                     `client_id`, which belongs to whichever tool wrote the
+//                     entry -- the Cockpit writes its own there
+//                     (auth/wellKnownClient.ts).
 //
 // -----------------------------------------------------------------------------
 // WHY THERE IS AN INDEX
@@ -81,6 +88,11 @@ export function accessTokenExpirySecretKey(clusterName: string): string {
   return `memql.cluster.tokenExpiry:${clusterName}`;
 }
 
+/** issuedClientSecretKey holds the client_id the stored refresh token was issued to. */
+export function issuedClientSecretKey(clusterName: string): string {
+  return `memql.cluster.clientId:${clusterName}`;
+}
+
 /** credentialIndexKey holds the JSON array of cluster names this store has written for. */
 export const credentialIndexKey = "memql.cluster.credentialIndex";
 
@@ -106,6 +118,7 @@ export interface SignInTokens {
   refreshToken: string;
   /** Absolute expiry in epoch seconds. 0 when the server reported no lifetime. */
   expiresAtEpochSeconds: number;
+  /** The client the tokens were issued to; kept beside the refresh token. */
   clientId: string;
 }
 
@@ -184,11 +197,25 @@ export class ClusterCredentialStore {
     if (stored) await this.index(clusterName);
   }
 
+  /** readClientId returns the client the stored refresh token was issued to, when recorded. */
+  async readClientId(clusterName: string): Promise<string | undefined> {
+    const value = await this.read(issuedClientSecretKey(clusterName));
+    return value === "" ? undefined : value;
+  }
+
+  /** writeClientId records the client a refresh token was issued to. An empty id writes nothing. */
+  async writeClientId(clusterName: string, clientId: string): Promise<void> {
+    if (this.secrets === undefined || clientId.trim() === "") return;
+    const stored = await this.write(issuedClientSecretKey(clusterName), clientId.trim());
+    if (stored) await this.index(clusterName);
+  }
+
   /** clear removes every secret held for one cluster, and de-indexes it. */
   async clear(clusterName: string): Promise<void> {
     if (this.secrets === undefined) return;
     await this.remove(refreshTokenSecretKey(clusterName));
     await this.remove(accessTokenExpirySecretKey(clusterName));
+    await this.remove(issuedClientSecretKey(clusterName));
     await this.deindex(clusterName);
   }
 
@@ -205,8 +232,10 @@ export class ClusterCredentialStore {
     if (previousName === newName) return;
     const refreshToken = await this.readRefreshToken(previousName);
     const expiry = await this.readExpiry(previousName);
+    const clientId = await this.readClientId(previousName);
     if (refreshToken !== undefined) await this.writeRefreshToken(newName, refreshToken);
     if (expiry !== undefined) await this.writeExpiry(newName, expiry);
+    if (clientId !== undefined) await this.writeClientId(newName, clientId);
     await this.clear(previousName);
   }
 
@@ -226,6 +255,7 @@ export class ClusterCredentialStore {
     for (const name of orphans) {
       await this.remove(refreshTokenSecretKey(name));
       await this.remove(accessTokenExpirySecretKey(name));
+      await this.remove(issuedClientSecretKey(name));
     }
     if (orphans.length > 0) {
       await this.writeIndex(indexed.filter((name) => live.has(name)));
@@ -310,12 +340,11 @@ export class ClusterCredentialStore {
  * and a sign-in that silently discarded the thirty-day credential would leave
  * the operator re-authorizing through a browser every fifteen minutes.
  *
- * `client_id` is written unconditionally rather than only when the flow
- * registered a fresh one. It is not a secret (it is a public OAuth client
- * identifier), the write is already happening for the access token, and
- * re-writing the same value is a no-op -- whereas skipping it leaves a cluster
- * whose registration this extension performed but never recorded, which
- * re-registers on every sign-in.
+ * THE CLIENT ID IS KEPT BESIDE THE REFRESH TOKEN, NEVER IN THE FILE. It is the
+ * client the token was issued to, which is what a refresh must present. The
+ * file's `client_id` belongs to whichever tool wrote the entry -- the Cockpit
+ * writes its own -- and writing the editor's there would either clobber the
+ * Cockpit's or be clobbered by it (wellKnownClient.ts).
  */
 export async function persistSignIn(
   deps: CredentialStoreDeps,
@@ -326,6 +355,7 @@ export async function persistSignIn(
   const refreshToken = tokens.refreshToken.trim();
   const custodyTaken = await store.writeRefreshToken(clusterName, refreshToken);
   await store.writeExpiry(clusterName, tokens.expiresAtEpochSeconds);
+  if (custodyTaken) await store.writeClientId(clusterName, tokens.clientId);
 
   await deps.writeCluster({
     name: clusterName,
@@ -334,7 +364,6 @@ export async function persistSignIn(
     // when there is no refresh token at all -- otherwise the file is the only
     // copy and clearing it would destroy it.
     refreshToken: custodyTaken || refreshToken === "" ? "" : refreshToken,
-    ...(tokens.clientId.trim() === "" ? {} : { clientId: tokens.clientId.trim() }),
   });
 }
 

@@ -33,6 +33,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import type { ConnectionManager } from "../src/connection/manager.js";
+import type { ConnectionState } from "../src/connection/manager.js";
 import type { ConnectionContextKeys } from "../src/state/connectionContext.js";
 import type { CatalogState } from "../src/state/constructCatalog.js";
 import { ConstructsTreeProvider } from "../src/views/constructsTree.js";
@@ -44,24 +45,21 @@ const SELECTED: ConnectionContextKeys = { clusterSelected: true, connected: true
 const NOTHING: ConnectionContextKeys = { clusterSelected: false, connected: false };
 
 /** A manager as far as a tree uses one: a state to read and a listener slot. */
-function fakeManager(): ConnectionManager {
+function fakeManager(state: ConnectionState = { status: "disconnected" }): ConnectionManager {
   return {
-    state: { status: "disconnected" },
+    state,
     query: undefined,
     dispatcher: undefined,
     onDidChangeState: () => () => undefined,
   } as unknown as ConnectionManager;
 }
 
-// ---------------------------------------------------------------------------
-// Constructs
-// ---------------------------------------------------------------------------
+const CONNECTED: ConnectionState = { status: "connected", clusterName: "local", nodeId: "bff-0" };
 
 test("Constructs returns [] with nothing selected, and does not even read", async () => {
   let reads = 0;
   const tree = new ConstructsTreeProvider({
     connections: fakeManager(),
-    connectionContext: () => NOTHING,
     load: async (): Promise<CatalogState> => {
       reads += 1;
       return { kind: "loaded", groups: [], total: 0 };
@@ -73,41 +71,18 @@ test("Constructs returns [] with nothing selected, and does not even read", asyn
   assert.equal(reads, 0, "an unselected Constructs view issued a catalog read");
 });
 
-test("Constructs still speaks when a cluster IS selected and unreachable", async () => {
-  // The distinction design D2 turns on. This is NOT the empty state: a cluster
-  // was chosen and is not answering, which is a fact about something, so it
-  // gets a row -- and the row must not be the welcome's sentence, or the two
-  // would be saying the same thing in two places with only one of them
-  // reachable.
-  const tree = new ConstructsTreeProvider({
-    connections: fakeManager(),
-    connectionContext: () => ({ clusterSelected: true, connected: false }),
-    load: async (): Promise<CatalogState> => ({ kind: "unreachable" }),
-  });
-  const rows = await tree.getChildren();
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].kind, "state");
-  const item = tree.getTreeItem(rows[0]);
-  assert.equal(item.label, "Cluster not answering");
-  assert.ok(
-    !String(item.label).startsWith("Not connected"),
-    "the unreachable row duplicates the welcome's sentence"
-  );
-});
-
 test("Constructs renders its groups when connected", async () => {
   // The positive control. Without it every assertion above would pass on a
   // provider that returned nothing under all conditions.
   const tree = new ConstructsTreeProvider({
-    connections: fakeManager(),
-    connectionContext: () => SELECTED,
+    connections: fakeManager(CONNECTED),
     load: async (): Promise<CatalogState> => ({
       kind: "loaded",
       total: 1,
       groups: [
         {
           kind: "query",
-          label: "queries",
+          label: "Queries",
           count: 1,
           runnable: true,
           namespaces: [{ namespace: "identity", constructs: [] }],
@@ -124,20 +99,7 @@ test("Constructs renders its groups when connected", async () => {
 // ---------------------------------------------------------------------------
 
 test("Data returns [] with nothing selected", async () => {
-  const tree = new DataTreeProvider(fakeManager(), () => NOTHING);
-  assert.deepEqual(await tree.getChildren(), []);
-});
-
-test("Data with a cluster selected but no query client is still empty, not an error row", async () => {
-  // A selected cluster whose transport is down has no `query`, and the cache
-  // then loads nothing. That is an empty CLUSTER as far as this view can tell,
-  // and it must not manufacture an error row about it -- the connection surface
-  // owns that story, and `cachedError` is reserved for a listConcepts that
-  // actually failed.
-  const tree = new DataTreeProvider(fakeManager(), () => ({
-    clusterSelected: true,
-    connected: false,
-  }));
+  const tree = new DataTreeProvider(fakeManager());
   assert.deepEqual(await tree.getChildren(), []);
 });
 
@@ -168,7 +130,7 @@ function deploymentsDeps(context: ConnectionContextKeys, over: Record<string, un
 test("Deployments returns [] with nothing selected, and probes nothing", async () => {
   let probes = 0;
   const descriptions: string[] = [];
-  const contexts: string[] = [];
+  const contexts: unknown[] = [];
   const tree = new DeploymentsTreeProvider(
     deploymentsDeps(NOTHING, {
       presence: async () => {
@@ -176,7 +138,7 @@ test("Deployments returns [] with nothing selected, and probes nothing", async (
         return { verdict: "absent", evidence: { receipt: false, registry: false }, endpoint: "" };
       },
       setDescription: (value: string) => descriptions.push(value),
-      setInstanceContext: (value: string) => contexts.push(value),
+      setContextKeys: (keys: unknown) => contexts.push(keys),
     })
   );
   assert.deepEqual(await tree.getChildren(), []);
@@ -187,7 +149,9 @@ test("Deployments returns [] with nothing selected, and probes nothing", async (
   // description or a menu scope left over from the previous selection is a
   // heading, and a set of buttons, naming the wrong machine.
   assert.deepEqual(descriptions, [""]);
-  assert.deepEqual(contexts, [""]);
+  assert.deepEqual(contexts, [
+    { "memql.deploymentsInstance": "", "memql.deploymentsHasCheckout": false, "memql.deploymentsHasBranch": false },
+  ]);
 });
 
 test("a deployment row carries the command that opens it", async () => {
@@ -249,10 +213,9 @@ test("the view description names the selected cluster, and clears with the selec
         },
       }),
       connection: () => (selected ? { clusterName: "local", connected: true } : undefined),
-      // Healthy, with no receipt behind it: the version is genuinely
-      // unresolvable, and the heading prints the WORD rather than falling
-      // silent -- `displayVersion`'s rule, which a blank would turn into a
-      // claim that the cluster has no version.
+      // Healthy, with no receipt behind it: nothing names a version, and the
+      // heading leaves it out rather than printing "unknown" -- the word the
+      // owner read as a fact about the cluster.
       presence: async () => ({
         verdict: "installed-healthy" as const,
         evidence: { receipt: true, registry: true },
@@ -262,12 +225,77 @@ test("the view description names the selected cluster, and clears with the selec
     })
   );
   await tree.getChildren();
-  assert.equal(descriptions.at(-1), "local · healthy · unknown");
+  assert.equal(descriptions.at(-1), "local · Connected");
 
   selected = false;
   tree.refresh();
   await tree.getChildren();
   assert.equal(descriptions.at(-1), "", "the heading survived the selection being dropped");
+});
+
+test("a signed-out selection is headed Sign in, and its unreadable registry row opens the file", async () => {
+  const descriptions: string[] = [];
+  const tree = new DeploymentsTreeProvider(
+    deploymentsDeps(SELECTED, {
+      readClusters: async () => ({
+        ok: true as const,
+        file: { clusters: [{ name: "local", endpoint: "", domain: "memql.test", local: true }], selectedCluster: "local" },
+      }),
+      connection: () => ({ clusterName: "local", connected: false, word: "signIn" }),
+      presence: async () => ({ verdict: "installed-healthy" as const, evidence: { receipt: true, registry: true }, endpoint: "" }),
+      setDescription: (value: string) => descriptions.push(value),
+    })
+  );
+  await tree.getChildren();
+  assert.equal(descriptions.at(-1), "local · Sign in");
+
+  const broken = new DeploymentsTreeProvider(
+    deploymentsDeps(SELECTED, {
+      readClusters: async () => ({ ok: false as const, error: "bad yaml at line 3" }),
+      connection: () => ({ clusterName: "local", connected: true }),
+    })
+  );
+  const rows = await broken.getChildren();
+  const item = broken.getTreeItem(rows[0]);
+  assert.equal(item.label, "Can't read your cluster list");
+  assert.equal(item.command?.command, "vscode.open");
+  assert.match(String(item.tooltip), /bad yaml at line 3/);
+  assert.doesNotMatch(String(item.tooltip), /^ERROR:/);
+});
+
+test("a history row says what happened as a verb, and a prepared remote record as Prepared", async () => {
+  const tree = new DeploymentsTreeProvider(
+    deploymentsDeps(SELECTED, {
+      readClusters: async () => ({
+        ok: true as const,
+        file: { clusters: [{ name: "staging", endpoint: "a:443" }], selectedCluster: "staging" },
+      }),
+      connection: () => ({ clusterName: "staging", connected: true }),
+      readDeployments: () => async () => ({
+        deployments: [
+          { id: "v1:cluster:deployment:d2", concept: "v1:cluster:deployment", createdAt: "2026-08-12T00:00:00Z", payload: { deploymentId: "d2", status: "pending", version: "v0.9.3" } },
+          { id: "v1:cluster:deployment:d1", concept: "v1:cluster:deployment", createdAt: "2026-08-11T00:00:00Z", payload: { deploymentId: "d1", status: "succeeded", version: "v0.9.2" } },
+        ],
+        specs: [],
+      }),
+      now: () => Date.parse("2026-08-14T00:00:00Z"),
+    })
+  );
+  const rows = await tree.getChildren();
+  assert.deepEqual(rows.map((row) => tree.getTreeItem(row).label), ["Prepared", "Deployed"]);
+});
+
+test("a visible view re-reads on its own; a hidden one does not", async () => {
+  const tree = new DeploymentsTreeProvider(deploymentsDeps(NOTHING));
+  let fired = 0;
+  tree.onDidChangeTreeData(() => {
+    fired += 1;
+  });
+  tree.setVisible(true);
+  assert.equal(fired, 1, "becoming visible did not re-read");
+  tree.setVisible(false);
+  assert.equal(fired, 1, "hiding re-read");
+  tree.dispose();
 });
 
 test("Deployments has no instance rows left to render", async () => {

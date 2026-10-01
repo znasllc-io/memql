@@ -27,22 +27,23 @@ import { randomBytes } from "node:crypto";
 
 import * as vscode from "vscode";
 
-import { escapeHtml } from "@znasllc-io/memql-view-kit";
-
-import { brandStrip, brandStyleBlock } from "./brandTokens.js";
 import { currentBodyThemeAttr, onAppearanceChange } from "./theme.js";
 import {
   COPY_GRAMMAR,
   COPY_VOCABULARY,
+  LANGUAGE_REFERENCE_STYLES,
+  MANAGE_TRUST,
   RELOAD,
-  SEARCH_MESSAGE,
+  SEARCH_FIELD,
   SELECT_CLUSTER,
-  languageReferenceScript,
-  languageReferenceStyles,
-  renderLanguageReferencePage,
+  languageReferenceParts,
 } from "./languageReferenceScreens.js";
+import { pageDocument } from "./ui/document.js";
+import { LiveView } from "./ui/liveView.js";
+import { pageMessage } from "./ui/protocol.js";
 
 import { Latest } from "../async/latest.js";
+import { briefMessage } from "../state/diagnostics.js";
 import {
   GRAMMAR_CALL,
   GRAMMAR_NAME,
@@ -63,7 +64,7 @@ import {
 export const COMMAND_LANGUAGE_REFERENCE = "memql.language.showReference";
 
 /** The panel's title, and the tab label. */
-const TITLE = "MemQL language reference";
+const TITLE = "Language reference";
 
 /**
  * How long the two reads are given before the page gives up on them.
@@ -154,6 +155,7 @@ export class LanguageReferencePanel {
   private static open_: LanguageReferencePanel | undefined;
 
   private readonly panel: vscode.WebviewPanel;
+  private readonly live: LiveView;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly latest = new Latest<"languageReference">();
 
@@ -163,12 +165,9 @@ export class LanguageReferencePanel {
   private loading = false;
   private error = "";
   /**
-   * The search term the page currently holds.
-   *
-   * Kept ONLY so a repaint can seed the box again -- a theme flip or a
-   * reconnect replaces the whole document, and losing what somebody was
-   * halfway through typing is the kind of small rudeness that makes a surface
-   * feel broken. Nothing re-renders because this changed.
+   * The search term the page holds. Each keystroke arrives as the runtime's
+   * `input` message and the lists are narrowed by the host, patched in place,
+   * so the box keeps its focus and caret while they change under it.
    */
   private search = "";
   /** Unsubscribe for the connection listener, replaced whenever it is re-bound. */
@@ -227,10 +226,30 @@ export class LanguageReferencePanel {
       vscode.ViewColumn.Beside,
       { enableScripts: true, retainContextWhenHidden: true },
     );
+    this.live = new LiveView(
+      {
+        setHtml: (html) => {
+          this.panel.webview.html = html;
+        },
+        postMessage: (message) => this.panel.webview.postMessage(message),
+      },
+      (parts, screen) =>
+        pageDocument({
+          nonce: nonceValue(),
+          title: TITLE,
+          themeAttr: currentBodyThemeAttr(),
+          screen,
+          styles: LANGUAGE_REFERENCE_STYLES,
+          ...parts,
+        }),
+    );
     this.disposables.push(
       // The palette is a MemQL setting, not the editor's theme, so an OPEN
-      // panel repaints when either input moves (memql#4419).
-      ...onAppearanceChange(() => this.render()),
+      // panel restyles when either input moves (memql#4419).
+      ...onAppearanceChange(() => {
+        this.live.invalidate();
+        this.render();
+      }),
       this.panel.onDidDispose(() => {
         this.disposed = true;
         this.latest.invalidate();
@@ -240,6 +259,7 @@ export class LanguageReferencePanel {
         for (const d of this.disposables.splice(0)) d.dispose();
       }),
       this.panel.webview.onDidReceiveMessage((message: unknown) => {
+        if (this.live.handleMessage(message)) return;
         void this.onMessage(message);
       }),
     );
@@ -334,119 +354,87 @@ export class LanguageReferencePanel {
     this.render();
   }
 
-  private async onMessage(message: unknown): Promise<void> {
-    if (message === null || typeof message !== "object") return;
-    const { type, term } = message as { type?: unknown; term?: unknown };
-    if (type === SEARCH_MESSAGE) {
-      // Remembered, never acted on: see the field's comment.
-      if (typeof term === "string") this.search = term;
+  private async onMessage(raw: unknown): Promise<void> {
+    const message = pageMessage(raw);
+    if (message === undefined) return;
+    if (message.type === "input") {
+      const { field, value } = message as { field?: unknown; value?: unknown };
+      if (field !== SEARCH_FIELD || typeof value !== "string") return;
+      this.search = value;
+      this.render();
       return;
     }
-    if (type === COPY_GRAMMAR) {
-      await this.copy(
-        this.grammar?.content,
-        "The grammar is on the clipboard.",
-        "There is no grammar to copy: no cluster has answered with one.",
-      );
+    if (message.type === COPY_GRAMMAR) {
+      await this.copy(this.grammar?.content, "Grammar copied.");
       return;
     }
-    if (type === COPY_VOCABULARY) {
-      await this.copy(
-        this.vocabulary === undefined ? undefined : vocabularyText(this.vocabulary),
-        "The vocabulary is on the clipboard.",
-        "There is no vocabulary to copy: no cluster has answered with one.",
-      );
+    if (message.type === COPY_VOCABULARY) {
+      await this.copy(this.vocabulary === undefined ? undefined : vocabularyText(this.vocabulary), "Vocabulary copied.");
       return;
     }
-    if (type === SELECT_CLUSTER) {
+    if (message.type === SELECT_CLUSTER) {
       await vscode.commands.executeCommand("memql.clusters.select");
       return;
     }
-    if (type === RELOAD) {
+    if (message.type === MANAGE_TRUST) {
+      await vscode.commands.executeCommand("workbench.trust.manage");
+      return;
+    }
+    if (message.type === RELOAD) {
       await this.load();
     }
   }
 
   /**
-   * Put an artifact on the clipboard, or say why there is nothing to put
-   * there.
+   * Put an artifact on the clipboard.
    *
-   * The refusal is a MESSAGE rather than a silent no-op. The buttons are drawn
-   * whenever either artifact is on the page, so pressing the other one is an
-   * ordinary thing to do, and a copy that quietly does nothing is
-   * indistinguishable from one that worked -- with the difference discovered
-   * at the paste.
+   * The acts are drawn only for an artifact that is on the page, so an empty
+   * value here is a message the page never drew an act for, and nothing is
+   * copied or said.
    */
-  private async copy(value: string | undefined, done: string, missing: string): Promise<void> {
-    if (value === undefined || value === "") {
-      void vscode.window.showWarningMessage(`MemQL: ${missing}`);
-      return;
-    }
+  private async copy(value: string | undefined, done: string): Promise<void> {
+    if (value === undefined || value === "") return;
     await vscode.env.clipboard.writeText(value);
     void vscode.window.showInformationMessage(`MemQL: ${done}`);
   }
 
   private render(): void {
     if (this.disposed) return;
-    const nonce = nonceValue();
-    const body = renderLanguageReferencePage({
-      identity: languageIdentity({ pin: this.deps.pin, cluster: this.cluster }),
-      // Handed over for the one case it is read in: a cluster was asked and
-      // answered with neither artifact, where the identity block above is
-      // describing the cluster and the reader would otherwise learn nothing
-      // about the language their editor is giving them right now.
-      pin: this.deps.pin,
-      grammar: this.grammar,
-      vocabulary: this.vocabulary,
-      loading: this.loading,
-      error: this.error,
-      search: this.search,
-      offerSelectCluster: this.deps.canSelectCluster(),
-    });
-    this.panel.webview.html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-<title>${escapeHtml(TITLE)}</title>
-<style nonce="${nonce}">
-${brandStyleBlock()}
-${languageReferenceStyles()}
-</style>
-</head>
-<body${currentBodyThemeAttr()}>
-${brandStrip("MemQL for Visual Studio Code and Cursor")}
-${body}
-<script nonce="${nonce}">${languageReferenceScript()}</script>
-</body>
-</html>`;
+    this.live.render(
+      "reference",
+      languageReferenceParts({
+        identity: languageIdentity({ pin: this.deps.pin, cluster: this.cluster }),
+        // Read in the one case where the cluster answered with neither
+        // artifact, and when the two speak different editions.
+        pin: this.deps.pin,
+        grammar: this.grammar,
+        vocabulary: this.vocabulary,
+        loading: this.loading,
+        error: this.error,
+        search: this.search,
+        offerSelectCluster: this.deps.canSelectCluster(),
+      }),
+    );
   }
 }
 
 /**
- * One call's failure, as the sentence the page prints.
- *
- * It names the BUILTIN, because the two are separate calls with separate
- * reasons to fail -- a cluster too old to carry one of them refuses it by name,
- * and "the language reference failed" would leave a reader with no way to tell
- * that from a dropped connection.
+ * One call's failure, as the reason the page shows beside "didn't return".
+ * Brief: the engine's own words, first line only.
  */
-function failure(name: string, err: unknown): string {
-  return `${name}() could not be read: ${err instanceof Error ? err.message : String(err)}`;
+function failure(_name: string, err: unknown): string {
+  return briefMessage(err instanceof Error ? err.message : String(err), 160);
 }
 
 /**
- * The deadline's own sentence.
- *
- * SEPARATE FROM `failure` because the SDK's abort rejection says only
- * "aborted", which reads as something the reader did. This says what actually
- * happened: the cluster took the call and did not answer inside the time it was
- * given. The page then shows what the extension knows and offers Try again,
- * which is the whole reason the deadline exists.
+ * The deadline's own sentence. SEPARATE FROM `failure` because the SDK's abort
+ * rejection says only "aborted", which reads as something the reader did. This
+ * says what happened: the cluster took the call and did not answer inside the
+ * time it was given. The page then offers Try again, which is the whole reason
+ * the deadline exists.
  */
-function timedOut(name: string, deadlineMs: number): string {
-  return `${name}() did not answer within ${deadlineText(deadlineMs)}, so the read was given up. The cluster may still be working on it.`;
+function timedOut(_name: string, deadlineMs: number): string {
+  return `It didn't answer within ${deadlineText(deadlineMs)}.`;
 }
 
 function deadlineText(deadlineMs: number): string {
@@ -455,22 +443,13 @@ function deadlineText(deadlineMs: number): string {
 }
 
 /**
- * The two reads' failures as ONE sentence.
- *
- * Joining the per-call sentences says "the cluster may still be working on it"
- * twice when both deadlines expire, which reads as two separate pieces of news
- * about one event. Both expired is the common case -- they share a deadline --
- * so it gets its own sentence naming both calls.
+ * The two reads' failures as ONE reason. Both share a deadline, so both
+ * expiring is one piece of news and is said once; two different reasons are
+ * both said.
  */
-function readFailure(grammar: unknown, vocabulary: unknown, deadlineMs: number): string {
-  const both = [grammar, vocabulary].every((v) => typeof v === "string");
-  const expiry = timedOut(GRAMMAR_NAME, deadlineMs);
-  if (both && grammar === expiry && vocabulary === timedOut(VOCABULARY_NAME, deadlineMs)) {
-    return `Neither ${GRAMMAR_NAME}() nor ${VOCABULARY_NAME}() answered within ${deadlineText(
-      deadlineMs,
-    )}, so the read was given up. The cluster may still be working on them.`;
-  }
-  return [grammar, vocabulary].filter((v): v is string => typeof v === "string").join(" ");
+function readFailure(grammar: unknown, vocabulary: unknown, _deadlineMs: number): string {
+  const reasons = [grammar, vocabulary].filter((v): v is string => typeof v === "string");
+  return [...new Set(reasons)].join(" ");
 }
 
 /** A CSP nonce, from a CSPRNG: a predictable one is one an injection can carry. */

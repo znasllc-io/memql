@@ -229,7 +229,9 @@ test("a credential-less OIDC cluster reports a MISSING CREDENTIAL, without diali
   const state = manager.state as { message: string; reason: string };
   assert.equal(state.reason, "missingCredential");
   assert.doesNotMatch(state.message, /Cockpit/);
-  assert.match(state.message, /JWT access token/);
+  // The record ends with the fix, and never with hand-editing the file.
+  assert.match(state.message, /Sign in/);
+  assert.doesNotMatch(state.message, /clusters\.yaml|refresh_token/);
 });
 
 test("a PAT is refused by name, without dialing", async () => {
@@ -376,7 +378,7 @@ test("an unconfigured cluster (no endpoint) produces the generic not-configured 
   const state = manager.state as { status: string; message: string; reason: string };
   assert.equal(state.status, "error");
   assert.equal(state.reason, "notConfigured");
-  assert.match(state.message, /not configured/);
+  assert.match(state.message, /no address/);
 });
 
 test("disconnect() closes the live connection and publishes disconnected", async () => {
@@ -422,7 +424,7 @@ test("a server-side drop publishes a non-connected state", async () => {
   assert.deepEqual(manager.state, {
     status: "error",
     clusterName: "a",
-    message: "Connection to a was lost. Select the cluster again to reconnect.",
+    message: "Connection to a was lost.",
     reason: "lost",
   });
   assert.equal(seen.at(-1)?.status, "error", "the drop must be published to listeners");
@@ -615,7 +617,7 @@ test("a credential-less cluster with no endpoint reports 'not configured', not a
   assert.equal(dialed, false);
   const state = manager.state as { message: string; reason: string };
   assert.equal(state.reason, "notConfigured");
-  assert.match(state.message, /not configured/);
+  assert.match(state.message, /no address/);
 });
 
 // --- The reactive 401: the cluster refused a bearer we believed was good -----
@@ -788,16 +790,16 @@ test("the keys are published on activation, before anything has connected", asyn
   // `when` clause -- so the welcomes would render on a fresh window by
   // accident. Stating both up front means the keys describe the extension from
   // its first frame.
-  const keys: Array<{ clusterSelected: boolean; connected: boolean }> = [];
+  const keys: Array<{ clusterSelected: boolean; connected: boolean; connectionState: string }> = [];
   new ConnectionManager(() => Promise.resolve(fakeConn("n1")), undefined, undefined, (k) =>
     keys.push(k),
   );
-  assert.deepEqual(keys, [{ clusterSelected: false, connected: false }]);
+  assert.deepEqual(keys, [{ clusterSelected: false, connected: false, connectionState: "none" }]);
 });
 
 test("the keys follow a connect, a drop and a disconnect", async () => {
   const conn = fakeConn("n1");
-  const keys: Array<{ clusterSelected: boolean; connected: boolean }> = [];
+  const keys: Array<{ clusterSelected: boolean; connected: boolean; connectionState: string }> = [];
   const manager = new ConnectionManager(
     () => Promise.resolve(conn),
     undefined,
@@ -809,7 +811,7 @@ test("the keys follow a connect, a drop and a disconnect", async () => {
   await flush();
   assert.deepEqual(
     keys.at(-1),
-    { clusterSelected: true, connected: true },
+    { clusterSelected: true, connected: true, connectionState: "connected" },
     "a held connection did not publish connected",
   );
   // "connecting" passed through on the way, and it is selected-but-not-yet-up:
@@ -827,14 +829,14 @@ test("the keys follow a connect, a drop and a disconnect", async () => {
   await flush();
   assert.deepEqual(
     keys.at(-1),
-    { clusterSelected: true, connected: false },
+    { clusterSelected: true, connected: false, connectionState: "unreachable" },
     "a lost connection left memql.connected true",
   );
 
   await manager.disconnect();
   assert.deepEqual(
     keys.at(-1),
-    { clusterSelected: false, connected: false },
+    { clusterSelected: false, connected: false, connectionState: "none" },
     "a disconnect did not empty the cluster-backed views",
   );
 });
@@ -845,7 +847,7 @@ test("a refused dial leaves the cluster SELECTED and not connected", async () =>
   // by each view's own row and description affordances. Publishing
   // `clusterSelected: false` here would replace a cluster that is down with a
   // screen saying nothing is chosen.
-  const keys: Array<{ clusterSelected: boolean; connected: boolean }> = [];
+  const keys: Array<{ clusterSelected: boolean; connected: boolean; connectionState: string }> = [];
   const manager = new ConnectionManager(
     () => Promise.reject(new Error("no route to host")),
     undefined,
@@ -855,7 +857,7 @@ test("a refused dial leaves the cluster SELECTED and not connected", async () =>
   await manager.connect(cluster("staging"));
   await flush();
   assert.equal(manager.state.status, "error");
-  assert.deepEqual(keys.at(-1), { clusterSelected: true, connected: false });
+  assert.deepEqual(keys.at(-1), { clusterSelected: true, connected: false, connectionState: "unreachable" });
 });
 
 test("a manager built with no sink still connects", async () => {
@@ -864,4 +866,320 @@ test("a manager built with no sink still connects", async () => {
   const manager = new ConnectionManager(() => Promise.resolve(fakeConn("n1")));
   await manager.connect(cluster("local"));
   assert.equal(manager.state.status, "connected");
+});
+
+// -----------------------------------------------------------------------------
+// A dropped connection is retried, a bounded number of times
+// -----------------------------------------------------------------------------
+//
+// THE FIELD FAILURE: a dropped socket published "Select the cluster again to
+// reconnect." and never retried, so a laptop that slept left every view "Not
+// connected" until the row was clicked. The policy retries a handful of times,
+// never against a credential refusal, and stops on any action of the person's.
+
+interface FakeTimers {
+  setTimer: (fn: () => void, ms: number) => unknown;
+  clearTimer: (handle: unknown) => void;
+  delays: number[];
+  /** Runs the next pending timer. */
+  fire(): Promise<void>;
+  pending(): number;
+}
+
+function fakeTimers(): FakeTimers {
+  const queue: Array<{ id: number; fn: () => void }> = [];
+  const delays: number[] = [];
+  let next = 1;
+  return {
+    delays,
+    setTimer: (fn, ms) => {
+      delays.push(ms);
+      const id = next++;
+      queue.push({ id, fn });
+      return id;
+    },
+    clearTimer: (handle) => {
+      const at = queue.findIndex((t) => t.id === handle);
+      if (at >= 0) queue.splice(at, 1);
+    },
+    fire: async () => {
+      const t = queue.shift();
+      t?.fn();
+      await flush(20);
+    },
+    pending: () => queue.length,
+  };
+}
+
+test("a drop is retried, and a successful retry is connected again", async () => {
+  const first = fakeConn("n1");
+  const second = fakeConn("n2");
+  const conns = [first, second];
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => Promise.resolve(conns.shift()!),
+    undefined,
+    undefined,
+    undefined,
+    { delaysMs: [10, 20], setTimer: timers.setTimer, clearTimer: timers.clearTimer },
+  );
+  await manager.connect(cluster("a"));
+  first.terminate();
+  await flush();
+  assert.equal(manager.state.status, "error");
+  assert.equal((manager.state as { retrying?: boolean }).retrying, true, "the row reads Connecting, not an outage");
+  assert.equal(manager.isRetrying("a"), true);
+
+  await timers.fire();
+  assert.deepEqual(manager.state, { status: "connected", clusterName: "a", nodeId: "n2" });
+  assert.equal(manager.isRetrying("a"), false);
+  assert.equal(timers.pending(), 0);
+});
+
+test("the retries stop after the policy's tries, and then say so", async () => {
+  const conn = fakeConn("n1");
+  let dials = 0;
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return dials === 1 ? Promise.resolve(conn) : Promise.reject(new Error("ECONNREFUSED"));
+    },
+    undefined,
+    undefined,
+    undefined,
+    { delaysMs: [10, 20, 30], setTimer: timers.setTimer, clearTimer: timers.clearTimer },
+  );
+  await manager.connect(cluster("a"));
+  conn.terminate();
+  await flush();
+  await timers.fire();
+  await timers.fire();
+  assert.equal((manager.state as { retrying?: boolean }).retrying, true);
+  await timers.fire();
+  assert.equal(manager.state.status, "error");
+  assert.equal((manager.state as { retrying?: boolean }).retrying, undefined, "the last try stops the retries");
+  assert.equal(timers.pending(), 0);
+  assert.deepEqual(timers.delays, [10, 20, 30]);
+  assert.equal(dials, 4);
+});
+
+test("a retry refused on a credential stops at once: never a loop against a refusal", async () => {
+  const conn = fakeConn("n1");
+  let dials = 0;
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return Promise.resolve(conn);
+    },
+    undefined,
+    undefined,
+    undefined,
+    {
+      delaysMs: [10, 20, 30],
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+      // The entry lost its credential meanwhile (signed out elsewhere).
+      reload: async (name) => cluster(name, { token: undefined }),
+    },
+  );
+  await manager.connect(cluster("a"));
+  conn.terminate();
+  await flush();
+  await timers.fire();
+  assert.equal(manager.state.status, "error");
+  assert.equal((manager.state as { reason?: string }).reason, "missingCredential");
+  assert.equal(timers.pending(), 0, "no further try is scheduled");
+  assert.equal(dials, 1, "the retry never dialled with nothing to present");
+});
+
+test("a person's own connect or disconnect cancels a pending retry", async () => {
+  const conn = fakeConn("n1");
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => Promise.resolve(conn),
+    undefined,
+    undefined,
+    undefined,
+    { delaysMs: [10], setTimer: timers.setTimer, clearTimer: timers.clearTimer },
+  );
+  await manager.connect(cluster("a"));
+  conn.terminate();
+  await flush();
+  assert.equal(timers.pending(), 1);
+  await manager.disconnect();
+  assert.equal(timers.pending(), 0);
+  assert.equal(manager.isRetrying("a"), false);
+});
+
+test("a cluster removed from the list is not redialled", async () => {
+  const conn = fakeConn("n1");
+  let dials = 0;
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return Promise.resolve(conn);
+    },
+    undefined,
+    undefined,
+    undefined,
+    { delaysMs: [10, 20], setTimer: timers.setTimer, clearTimer: timers.clearTimer, reload: async () => undefined },
+  );
+  await manager.connect(cluster("a"));
+  conn.terminate();
+  await flush();
+  await timers.fire();
+  assert.equal(dials, 1);
+  assert.equal((manager.state as { retrying?: boolean }).retrying, undefined);
+});
+
+test("with no policy a drop is reported and not retried", async () => {
+  const conn = fakeConn("n1");
+  const manager = new ConnectionManager(() => Promise.resolve(conn));
+  await manager.connect(cluster("a"));
+  conn.terminate();
+  await flush();
+  assert.equal((manager.state as { retrying?: boolean }).retrying, undefined);
+});
+
+// THE END OF THE RETRIES, AS THE EXTENSION SEES IT. The Reconnect toast is
+// decided from the stream of published states (extension.ts feeds each one to
+// retriesEndedNotice). Every try publishes "connecting" before it dials, so
+// the state before the final failure is "connecting", not the retrying error
+// -- a decision that compared neighbouring states never saw the retries end,
+// and the toast never came. Driven through the real manager so the stream is
+// the one the editor gets.
+test("the end of the retries is announced once, through the connecting each try publishes", async () => {
+  const { retriesEndedNotice } = await import("../src/clusters/status.js");
+  const conn = fakeConn("n1");
+  let dials = 0;
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return dials === 1 ? Promise.resolve(conn) : Promise.reject(new Error("ECONNREFUSED"));
+    },
+    undefined,
+    undefined,
+    undefined,
+    { delaysMs: [10, 20], setTimer: timers.setTimer, clearTimer: timers.clearTimer },
+  );
+  await manager.connect(cluster("a"));
+  const notices: string[] = [];
+  const statuses: string[] = [];
+  manager.onDidChangeState((state) => {
+    statuses.push(state.status);
+    const notice = retriesEndedNotice(state);
+    if (notice !== undefined) notices.push(notice);
+  });
+  conn.terminate();
+  await flush();
+  await timers.fire();
+  await timers.fire();
+  assert.ok(statuses.includes("connecting"), "each try announces itself");
+  assert.deepEqual(notices, ["reconnect"], "the retries ending is said exactly once, with Reconnect");
+});
+
+test("a retry refused on a credential ends the retries with Sign in", async () => {
+  const { retriesEndedNotice } = await import("../src/clusters/status.js");
+  const conn = fakeConn("n1");
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => Promise.resolve(conn),
+    undefined,
+    undefined,
+    undefined,
+    {
+      delaysMs: [10, 20],
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+      reload: async (name) => cluster(name, { token: undefined }),
+    },
+  );
+  await manager.connect(cluster("a"));
+  const notices: string[] = [];
+  manager.onDidChangeState((state) => {
+    const notice = retriesEndedNotice(state);
+    if (notice !== undefined) notices.push(notice);
+  });
+  conn.terminate();
+  await flush();
+  await timers.fire();
+  assert.deepEqual(notices, ["signIn"]);
+});
+
+test("a person's own connect during the retries is not announced as the retries ending", async () => {
+  const { retriesEndedNotice } = await import("../src/clusters/status.js");
+  const conn = fakeConn("n1");
+  let dials = 0;
+  const timers = fakeTimers();
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return dials === 1 ? Promise.resolve(conn) : Promise.reject(new Error("ECONNREFUSED"));
+    },
+    undefined,
+    undefined,
+    undefined,
+    { delaysMs: [10, 20], setTimer: timers.setTimer, clearTimer: timers.clearTimer },
+  );
+  await manager.connect(cluster("a"));
+  const notices: string[] = [];
+  manager.onDidChangeState((state) => {
+    const notice = retriesEndedNotice(state);
+    if (notice !== undefined) notices.push(notice);
+  });
+  conn.terminate();
+  await flush();
+  // The click's own failure is reported by the click (memql.clusters.select),
+  // so a second toast here would say one thing twice.
+  await manager.connect(cluster("a"));
+  await flush();
+  assert.deepEqual(notices, []);
+  assert.equal(timers.pending(), 0);
+});
+
+// WHAT THE WINDOW SAYS ON OPENING about a cluster in use that needs a sign-in.
+// Activation hands the selected cluster to connect() whatever it holds
+// (extension.ts, "RECONNECT WITHOUT A CLICK"), because this is what connect()
+// does with nothing to present: refuse before any dial and publish the
+// refusal -- so memql.connectionState reads "signIn" from the first frame, not
+// "none" (no cluster) under a row that asks to sign in.
+test("connecting a cluster with nothing stored publishes signIn, without a dial or a 'connecting'", async () => {
+  let dials = 0;
+  const keys: Array<{ clusterSelected: boolean; connected: boolean; connectionState: string }> = [];
+  const seen: string[] = [];
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return Promise.resolve(fakeConn("x"));
+    },
+    undefined,
+    undefined,
+    (k) => keys.push(k),
+  );
+  manager.onDidChangeState((s) => seen.push(s.status));
+  await manager.connect(cluster("local", { token: undefined }));
+  assert.equal(dials, 0);
+  assert.deepEqual(seen, ["error"], "never flashed as connecting");
+  assert.deepEqual(keys.at(-1), { clusterSelected: true, connected: false, connectionState: "signIn" });
+});
+
+test("connecting a cluster with no address publishes notConfigured, without a dial", async () => {
+  let dials = 0;
+  const keys: Array<{ connectionState: string }> = [];
+  const manager = new ConnectionManager(
+    () => {
+      dials += 1;
+      return Promise.resolve(fakeConn("x"));
+    },
+    undefined,
+    undefined,
+    (k) => keys.push(k),
+  );
+  await manager.connect(cluster("draft", { endpoint: "", token: undefined }));
+  assert.equal(dials, 0);
+  assert.equal(keys.at(-1)?.connectionState, "notConfigured");
 });

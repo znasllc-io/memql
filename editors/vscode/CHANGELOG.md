@@ -34,13 +34,13 @@
   second copy (`query_clause_duplicate`) and says to merge the two.
 - **The Deployments panel's buttons send what they name.** Rollout promote /
   abort could never run: it sent `promote` with no rollout, which the SDK
-  refused before sending, and it offered no abort. It is now a Promote and an
-  Abort per Argo Rollout in flight, each naming it, with Abort confirmed
-  against the rollout's name. Cut version, which always cut a patch, is one
-  button per bump naming the version it cuts (`Cut 1.5.0 (minor)`). Roll back,
-  which targeted the newest succeeded deployment and so usually the one
-  running, returns to the release before the one the cluster runs, and the
-  page names it before you press.
+  refused before sending, and it offered no abort. Each rollout in flight is
+  now a row under Rollouts with its own Promote and Abort, with Abort
+  confirmed against the rollout's name. Preparing the next version, which
+  always took a patch, is one choice per bump naming the version it prepares
+  (`Prepare 1.5.0`, minor). Roll back, which targeted the newest succeeded
+  deployment and so usually the one running, returns to the release before
+  the one the cluster runs, and says which before you press.
 
 ## 0.6.0
 
