@@ -34,7 +34,7 @@ export class BrowserRegistry {
       token: await this.secrets.get(accessKey(domain)) };
   }
   readonly write: ClusterWriter = async update => {
-    const domain = validateEditorDomain(update.name);
+    validateEditorDomain(update.name);
     if (update.refreshToken) throw new Error("VS Code could not store your sign-in securely. Check browser storage permissions and sign in again.");
     if (update.token) throw new Error("Credentials must be stored through MemQL's credential store.");
     // Empty token keys clear legacy disk fields on desktop. This profile has
