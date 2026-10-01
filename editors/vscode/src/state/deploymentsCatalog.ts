@@ -59,6 +59,7 @@ import {
   pendingDeploymentId,
   projectDeployments,
   projectNodeSpecs,
+  rollbackTargetId,
 } from "./deploymentHistory.js";
 import { defaultRunsDir, listRuns, sortRunsNewestFirst } from "./runLog.js";
 
@@ -172,6 +173,7 @@ export async function buildCatalog(inputs: CatalogInputs): Promise<Catalog> {
             deployments: remote.records,
             currentDeploymentId: remote.currentId,
             pendingDeploymentId: remote.pendingId,
+            rollbackTargetId: remote.rollbackId,
           }
         : {}),
     });
@@ -226,6 +228,7 @@ async function resolveRemote(
       specs: ReturnType<typeof projectNodeSpecs>;
       currentId: string;
       pendingId: string;
+      rollbackId: string;
     }
   | undefined
 > {
@@ -241,6 +244,7 @@ async function resolveRemote(
       // reason the one-pass comment above gives: two reads of the same rows let
       // the two answers disagree about the same cluster in the same frame.
       pendingId: pendingDeploymentId(records),
+      rollbackId: rollbackTargetId(records),
     };
   } catch {
     // A cluster that stopped answering mid-read still has an instance row; it

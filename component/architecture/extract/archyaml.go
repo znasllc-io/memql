@@ -31,6 +31,10 @@ const ArchYAMLFilename = "arch.yaml"
 //	entrypoints:
 //	  - func: "main.main"   # used by the sequence-diagram extractor (later milestone)
 //	    label: "boot"
+//	roles:
+//	  - name: agent         # one service per node role the module builds
+//	    mesh: true
+//	    description: "Task execution."
 //
 // The schema is forgiving on extra fields so future extractors can
 // add their own keys without breaking older versions; the YAML
@@ -43,6 +47,23 @@ type ArchYAML struct {
 	Excludes    []string     `yaml:"excludes,omitempty"`
 	DependsOn   []string     `yaml:"depends_on,omitempty"`
 	Entrypoints []Entrypoint `yaml:"entrypoints,omitempty"`
+	Roles       []ArchRole   `yaml:"roles,omitempty"`
+}
+
+// ArchRole is one node role a module builds: a binary compiled from the
+// module under its own build tag. Each becomes a Service node of its own
+// (service:<name>) under the cluster, depending on the module's service,
+// so a live node type can name its code-side identity (the
+// v1:cluster:nodeType.codeReference join) and the platform graph's role
+// nodes share their ids with the architecture model (memql#5727).
+//
+// This package cannot know the role set -- it is base tier and imports
+// nothing above it -- so the module declares it here. MemQL's own list is
+// held to component/node/roles.go by that package's roles_test.go.
+type ArchRole struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description,omitempty"`
+	Mesh        bool   `yaml:"mesh"`
 }
 
 // Entrypoint identifies a function the sequence-diagram extractor

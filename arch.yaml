@@ -2,8 +2,8 @@
 # `memql-arch` (cmd/memql-arch) when it walks the workspace. Adoption
 # is opt-in: every field below has a default, so a missing or empty
 # file would still produce a usable model. Filling fields in promotes
-# the labels and metadata that show up in the cockpit's Topology
-# drill-down navigator.
+# the labels and metadata the committed model
+# (component/architecture/embedded/topology.model.json) carries.
 #
 # Authoritative schema:  component/architecture/extract/archyaml.go
 
@@ -11,8 +11,8 @@ service: memql
 display_name: "MemQL Core"
 description: |
   The core MemQL service. Owns the MemQL engine, the DSL loaders,
-  the gRPC + WebSocket surfaces, and every node-type binary (bff /
-  voice / cognition / agent / planner) compiled out of this tree.
+  the gRPC + WebSocket surfaces, and every node-role binary compiled
+  out of this tree (the roles below).
 
 # MUST be the module-path pattern, not the default `./...` (memql#3240).
 #
@@ -49,3 +49,35 @@ depends_on: []
 entrypoints:
   - func: "main.main"
     label: "boot (bff / default build)"
+
+# The node roles this module builds: one binary per role, each compiled from
+# this module under its own build tag. Every entry becomes a service of its
+# own in the model (service:<name>), which is the id
+# v1:cluster:nodeType.codeReference and the platform graph's role nodes join on
+# (memql#5727).
+#
+# THE LIST IS NOT DECIDED HERE. component/node/roles.go is the role set, and
+# component/node/roles_test.go holds this block to it -- name, mesh and
+# description, in the same order. Change a role there and copy it here.
+roles:
+  - name: identity
+    mesh: false
+    description: "The identity service: sign-in, the OAuth token endpoints, the JWKS feed and the node-token issuer."
+  - name: bff
+    mesh: true
+    description: "The client edge: the gRPC and WebSocket surface every client dials, and the mesh root."
+  - name: mcp
+    mesh: true
+    description: "The Model Context Protocol head that exposes the deployment's tool surface to external MCP hosts."
+  - name: agent
+    mesh: true
+    description: "Task execution, AI work and tool calling, and the gateway workers connect to."
+  - name: planner
+    mesh: true
+    description: "Task planning and orchestration."
+  - name: workbench
+    mesh: true
+    description: "The sandboxed per-plan working environment agents run commands and write files in."
+  - name: edge
+    mesh: false
+    description: "Serves the cluster's hosted sites, resolving a request host to a site row."

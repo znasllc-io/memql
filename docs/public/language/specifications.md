@@ -9,8 +9,6 @@ owner: znas
 
 # MemQL Specifications
 
-> Last Updated: 2026-06-11
-
 ## What Specs Are
 
 Specs are atomic, named boolean predicates. A spec **binds exactly one

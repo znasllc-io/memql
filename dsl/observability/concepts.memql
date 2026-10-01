@@ -13,10 +13,9 @@ use identity.concepts.{ user }
 /// codeProfile row when someone wanted to set a non-default level on it (incident response, hot
 /// path under investigation, etc.). Resolution at call time is codeProfile -> MEMQL_OBSERVE_LEVEL
 /// default -> off. Keyed by codeReference, which matches the model.Node.ID for the Method or Func
-/// node in topology.model.json (e.g.
-/// 'method:github.com/znasllc-io/memql/component/auth.(*Handler).Login'). Cockpit writes these from
-/// the drill-down 'bump verbosity for this method' control; the observe runtime reads them through
-/// a CDC-driven cache.
+/// node in the architecture model (component/architecture/embedded/topology.model.json, e.g.
+/// 'method:github.com/znasllc-io/memql/component/auth.(*Handler).Login'). The observe runtime reads
+/// them through a CDC-driven cache.
 @displayCard(primary="codeReference", secondary="reason", tertiary="setBy", status="level")
 concept codeProfile {
   codeReference  string!  @description("Fully-qualified node id from the architecture model. Format documented in component/architecture/model/ids.go. The single join key shared by static topology, live profile, raw invocations, and aggregate metrics.")
@@ -53,7 +52,7 @@ concept invocation {
 
 /// Aggregate observability rollups for a code reference over a time window. Backed by TimescaleDB
 /// continuous aggregates over the code_invocation hypertable -- callCount, p50/p95/p99 durations,
-/// errorRate -- so the cockpit's drill-down sparkline can query the metric for any (codeReference,
+/// errorRate -- so a drill-down sparkline can query the metric for any (codeReference,
 /// kind, window) in O(few rows) regardless of how many raw invocations the function had. Aggregates
 /// outlive raw rows: when codeProfile.retentionDays evicts the underlying invocation chunk, the
 /// matching codeMetric rows for that chunk are preserved by the policy so the trendline stays

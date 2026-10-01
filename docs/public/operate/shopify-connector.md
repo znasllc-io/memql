@@ -425,8 +425,9 @@ Four MemQL-origin concepts project today:
 | `v1:commerce:creditLimit` | `memql.creditLimit`, `.creditLimitStatus` | Company location | private |
 
 A row change appends a `v1:platform:outboxEntry` in the write's own
-transaction; the runtime's drain worker hands it to the connector, which maps
-it to `metafieldsSet` (or, above 250 metafields, a staged
+transaction; the runtime's drain worker hands its row reference to the connector.
+The connector reads the current source row under its own identity on every
+attempt, including retries, and maps it to `metafieldsSet` (or, above 250 metafields, a staged
 `bulkOperationRunMutation`).
 
 **A Shopify `userError` dead-letters. It does not retry.** A validation
@@ -434,8 +435,14 @@ failure arrives inside a 200 response and will fail identically forever;
 retrying it is how a queue stops draining while every individual attempt
 looks transient -- so the connector returns it as `sync.Permanent` and the
 drain dead-letters it immediately rather than spending its attempt budget.
-Dead-lettered entries are in `outboxDeadLetters(connector: "shopify")` and on
+Dead-lettered entries are in `outboxDeadLetters(target: "shopify")` and on
 the MemQL OS Cluster app's Data origins section.
+
+Use the outbox entry's delivery outcome and the actual Shopify metafields as
+delivery evidence. The current drain does not update `productContent.status`,
+so a row may still say `draft` after delivery. For public product copy, also
+verify that the Storefront API returns the new `memql` metafields; a successful
+Admin write alone does not establish storefront visibility.
 
 Accepting a quote is the other write: `draftOrderCreate` with the company as
 `purchasingEntity`, the company's payment terms, a PO number, and
@@ -634,7 +641,9 @@ a real one. It is the end-to-end proof, in the order things can break:
    and it is invisible from inside the cluster.
 6. **Metafield push.** Write a `productContent` row for that product and wait
    for the drain. The metafield should appear on the product in the Shopify
-   admin under the `memql` namespace, and the row's status should be `live`.
+   admin under the `memql` namespace, and its outbox entry should be `delivered`.
+   Check the same value through the Storefront API before calling public copy
+   live; `productContent.status` is not delivery evidence.
 7. **Storefront.** Work the first section of
    [the storefront checklist](shopify-storefront-checklist.md): the Headless
    channel's tokens, a product query, a cart, and the hand-off to

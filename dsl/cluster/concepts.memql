@@ -134,12 +134,12 @@ concept node {
 /// Definition of a node type and its expected capabilities.
 @displayCard(primary="name", secondary="description", tertiary="image")
 concept nodeType {
-  name          string! @description("Node type identifier: bff, agent, planner, workbench.")
+  name          string! @description("Node type identifier: one of the roles in component/node/roles.go (e.g. agent).")
   description   string  @description("Human-readable description of this node type's purpose.")
   image         string  @description("Container image reference for this node type (e.g. gcr.io/project/memql-agent:latest).")
   capabilities  []string  @description("Expected capability FQNs that nodes of this type should expose.")
   defaultLabels object  @description("Default labels applied to spawned instances of this type.")
-  codeReference string  @description("Optional architecture-model node id (model.Node.ID, e.g. 'service:memql') linking this node type to its code-side identity. Cockpit's Topology view uses this to bridge the live cluster grid and the architecture-model drill-down: selecting a live node finds the matching code-side service and jumps the navigator to that drill point.")
+  codeReference string  @description("Optional architecture-model node id (model.Node.ID) linking this node type to its code-side identity: the role's service, 'service:<type>' (e.g. 'service:agent'), which both the architecture model and the platform graph in component/architecture/embedded carry. The join from a live node type to the static graphs.")
 }
 
 /// Lifecycle event recording node state transitions (started, stopped, failed). Used for audit
@@ -147,7 +147,7 @@ concept nodeType {
 @displayCard(primary="action", secondary="nodeId", tertiary="reason", status="action")
 concept spawnEvent {
   nodeId        string! @description("ID of the node this event pertains to.")
-  nodeType      string! @description("Type of the node: bff, agent, planner, workbench.")
+  nodeType      string! @description("Type of the node: one of the roles in component/node/roles.go (e.g. agent).")
   action        enum("spawned", "stopped", "failed")! @description("What happened to the node.")
   initiatorId   string  @description("ID of the node that triggered this event.")
   reason        string  @description("Human-readable reason for the event (e.g. shutdown signal, health check failure).")

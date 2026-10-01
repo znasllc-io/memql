@@ -691,11 +691,12 @@ to sign in and revoke from the profile page. Refresh rotations never send
 it; only a genuinely new session does. Audited
 `sign_in_notification_sent`.
 
-## Cockpit Settings: My Access
+## My Access
 
-The Cockpit's Settings tab includes a **MY ACCESS** panel showing the
-caller's own identity: user id, primary email, cluster-wide role, and the
-current session id. The data comes from a dedicated gRPC message
+The caller's own identity -- user id, primary email, cluster-wide role, and
+the current session id -- is one read: MemQL OS's shell makes it when it
+connects (`query.getMyAccess()`), and the Cockpit's `memql access [<cluster>]` prints
+it. The data comes from a dedicated gRPC message
 (`MyAccessMsg` / `MyAccessResult`, `component/grpc/my_access_handler.go`).
 There is no per-partition grant list to show any more -- the proto's
 `partitions` field is `reserved` (`component/grpc/memql.proto`), and a role

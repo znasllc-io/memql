@@ -120,6 +120,7 @@ func ExtractPackages(m *model.Model, plans []ServicePlan, workspaceRoot string) 
 		return service, bestLen >= 0
 	}
 
+	roleOwners := make(map[string]string) // role name -> declaring service
 	for _, plan := range plans {
 		svcID := model.ServiceID(plan.Arch.Service)
 		m.Nodes = append(m.Nodes, model.Node{
@@ -132,6 +133,9 @@ func ExtractPackages(m *model.Model, plans []ServicePlan, workspaceRoot string) 
 				"module_path":  plan.ModulePath,
 			}),
 		})
+		if err := extractRoles(m, plan, roleOwners); err != nil {
+			return err
+		}
 
 		cfg := &packages.Config{
 			Mode: packages.NeedName |
@@ -246,6 +250,51 @@ func ExtractPackages(m *model.Model, plans []ServicePlan, workspaceRoot string) 
 				},
 			})
 		}
+	}
+	return nil
+}
+
+// extractRoles emits one Service node per node role the plan's arch.yaml
+// declares (memql#5727), each depending on the module's own service: a role is
+// a binary built from that module under its own tag, so the module is what it
+// is made of. ExtractCluster parents them to the cluster like any service.
+//
+// A role is a SERVICE rather than a new Kind so that everything which already
+// joins on service ids -- v1:cluster:nodeType.codeReference, the observe
+// runtime's FQN keys, a renderer's L2 view -- reaches it without a new case.
+// Its packages are not re-parented: they belong to the module, and which of
+// them each role's binary links is the platform graph's fact, not this one's.
+func extractRoles(m *model.Model, plan ServicePlan, owners map[string]string) error {
+	svcID := model.ServiceID(plan.Arch.Service)
+	for _, r := range plan.Arch.Roles {
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			return fmt.Errorf("arch.yaml of %s declares a role with no name", plan.Arch.Service)
+		}
+		if name == plan.Arch.Service {
+			return fmt.Errorf("arch.yaml of %s declares a role named after the module's own service", plan.Arch.Service)
+		}
+		if prev, dup := owners[name]; dup {
+			return fmt.Errorf("role %q is declared twice (by %s and %s)", name, prev, plan.Arch.Service)
+		}
+		owners[name] = plan.Arch.Service
+		roleID := model.ServiceID(name)
+		m.Nodes = append(m.Nodes, model.Node{
+			ID:   roleID,
+			Kind: model.KindService,
+			Name: name,
+			Doc:  r.Description,
+			Attrs: map[string]string{
+				"node_role": "true",
+				"mesh":      fmt.Sprintf("%t", r.Mesh),
+			},
+		})
+		m.Edges = append(m.Edges, model.Edge{
+			From:  roleID,
+			To:    svcID,
+			Kind:  model.EdgeDependsOn,
+			Attrs: map[string]string{"built_from": "module"},
+		})
 	}
 	return nil
 }
