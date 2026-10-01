@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	languageparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 	"github.com/znasllc-io/memql/integrations/shopify"
@@ -62,18 +63,18 @@ func TestProductContentDrainsToShopifyWithSourceAuthority(t *testing.T) {
 	owner := auth.ContextWithClaims(context.Background(), claims)
 	owner = auth.ContextWithToken(owner, auth.BuildTokenInfo(claims))
 	owner = auth.ContextWithAccess(owner, &auth.AccessContext{UserId: "dbtest-owner", Role: auth.RoleOwner})
-	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createStore(storeId: %q, domain: "propagation-test.myshopify.com", adminTokenRef: "test-admin", apiVersion: "2026-07")`, storeID)); err != nil {
+	if _, err := eng.Execute(owner, fmt.Sprintf(`mutation createStore(storeId: %s, domain: "propagation-test.myshopify.com", adminTokenRef: "test-admin", apiVersion: "2026-07")`, languageparser.QuoteString(storeID))); err != nil {
 		t.Fatalf("write test store: %v", err)
 	}
 	writeContent := func(summary string) {
 		t.Helper()
-		call := fmt.Sprintf(`mutation upsertProductContent(contentId: %q, storeId: %q, productGid: "gid://shopify/Product/1", summary: %q, description: "A product description", keywords: ["dental care"], blocks: {tagline: "Source authority"})`, rowID, storeID, summary)
+		call := fmt.Sprintf(`mutation upsertProductContent(contentId: %s, storeId: %s, productGid: "gid://shopify/Product/1", summary: %s, description: "A product description", keywords: ["dental care"], blocks: {tagline: "Source authority"})`, languageparser.QuoteString(rowID), languageparser.QuoteString(storeID), languageparser.QuoteString(summary))
 		if _, err := eng.Execute(owner, call); err != nil {
 			t.Fatalf("write product content and queue delivery: %v", err)
 		}
 	}
 	writeContent("Earlier copy before an edit")
-	read := fmt.Sprintf(`query productContentForPropagation(rowId: %q)`, rowID)
+	read := fmt.Sprintf(`query productContentForPropagation(rowId: %s)`, languageparser.QuoteString(rowID))
 	connector := auth.ContextWithInternalOrigin(auth.ContextWithConnectorActor(context.Background(), "shopify"))
 	res, err := eng.Execute(connector, read)
 	if err != nil || len(memql.MaterializeRows(res)) != 1 {
