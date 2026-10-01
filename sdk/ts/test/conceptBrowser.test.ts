@@ -56,12 +56,16 @@ function client(d: MockDispatcher): QueryClient {
   return new QueryClient(d as unknown as Dispatcher);
 }
 
-function bundleReply(nodes: unknown[], cursor?: string): Record<string, unknown> {
+function bundleReply(
+  nodes: Record<string, unknown>[],
+  cursor?: string,
+  rootIds = nodes.map((node) => node["id"]).filter((id): id is string => typeof id === "string"),
+): Record<string, unknown> {
   return {
     queryResult: {
       requestId: "r",
       result: {
-        bundle: { nodes },
+        bundle: { nodes, rootIds },
         ...(cursor === undefined ? {} : { meta: { cursor } }),
       },
     },
@@ -164,4 +168,44 @@ test("getRowByConceptAndId rejects a missing row id", async () => {
     () => getRowByConceptAndId(client(d), "v1:agents:agent", ""),
     /rowId is required/,
   );
+});
+
+
+test("browses only concept roots, excluding graph neighbors even when bare ids match", async () => {
+  const d = new MockDispatcher();
+  const detailConcept = "v1:fylo:applicationDetail";
+  const detail = { id: "submission", concept: detailConcept, payload: { businessType: "Dental Practice" } };
+  const base = { id: "submission", concept: "v1:wholesale:application", payload: { companyName: "Practice" } };
+  const neighbor = { id: "other-detail", concept: detailConcept, payload: { businessType: "Other" } };
+  d.setReply(bundleReply([base, detail, neighbor], "next-page", ["submission"]));
+
+  const page = await browseConceptPage(client(d), detailConcept);
+  assert.deepEqual(page.rows, [detail]);
+  assert.equal(page.nextCursor, "next-page");
+});
+
+test("keeps root ordering when expansion encountered a later root first", async () => {
+  const d = new MockDispatcher();
+  const concept = "v1:test:thing";
+  const first = { id: "first", concept, payload: { title: "First root" } };
+  const second = { id: "second", concept, payload: { title: "Second root" } };
+  const third = { id: "third", concept, payload: { title: "Third root" } };
+  d.setReply(bundleReply([first, third, second], undefined, ["first", "second", "third"]));
+  const page = await browseConceptPage(client(d), concept);
+  assert.deepEqual(page.rows, [first, second, third]);
+});
+
+test("an explicit empty root set yields no rows even if the bundle contains neighbors", async () => {
+  const d = new MockDispatcher();
+  d.setReply(bundleReply([{ id: "neighbor", concept: "v1:test:thing" }], undefined, []));
+  const page = await browseConceptPage(client(d), "v1:test:thing");
+  assert.deepEqual(page.rows, []);
+});
+
+
+test("a bundle without root ids cannot make graph neighbors into concept rows", async () => {
+  const d = new MockDispatcher();
+  d.setReply({ queryResult: { result: { bundle: { nodes: [{ id: "neighbor", concept: "v1:test:thing" }] } } } });
+  const page = await browseConceptPage(client(d), "v1:test:thing");
+  assert.deepEqual(page.rows, []);
 });

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // serverPkgDir is where the exhaustiveness gate scans. Relative to this
@@ -458,5 +460,19 @@ func TestCollectKeepsABareTrailingSlashPathWithoutABase(t *testing.T) {
 	if !haveInbound {
 		t.Errorf("/inbound/ was dropped; the trailing-slash collapse must only fire when the "+
 			"base form is ALSO present. got=%v", got)
+	}
+}
+
+func TestDeclaredShopperRoutesRemainWithheldFromIngress(t *testing.T) {
+	memql.ResetShopperSurfaceForTest()
+	t.Cleanup(memql.ResetShopperSurfaceForTest)
+	memql.RegisterShopperRead(memql.ShopperRead{
+		Pack: "reviews", Name: "published", Construct: "reviewsPublishedForProduct", Kind: memql.ShopperReadKindBuiltin,
+		Fields: []memql.ShopperField{{Name: "productHandle", Required: true}},
+	})
+	for _, path := range collect() {
+		if strings.HasPrefix(path, "/forms/") || strings.HasPrefix(path, "/reads/") {
+			t.Fatalf("shopper route exposed at API ingress: %s", path)
+		}
 	}
 }

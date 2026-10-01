@@ -487,7 +487,7 @@ variables:
     component: outbound
     scope: node
     optional: true
-    description: "Comma-separated recipient domain suffixes the outbound worker may email (e.g. `example.com,ops.example.org`; subdomains admitted). Empty = email medium disabled; rows targeting it fail fast."
+    description: "Comma-separated exact recipient addresses or domain suffixes the outbound worker may email (e.g. `desk@example.com,ops.example.org`). Exact addresses admit no aliases or subdomains; domain entries admit subdomains. Empty = email medium disabled on this node; rows remain pending for a configured peer."
 
   - name: MEMQL_OUTBOUND_WEBHOOK_ALLOWLIST
     component: outbound

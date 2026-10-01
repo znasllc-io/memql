@@ -1,3 +1,4 @@
+import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -150,7 +151,7 @@ describe("one concept", () => {
 describe("a concept's rows", () => {
   it("distinguishes 'that is all of them' from 'there are more'", async () => {
     const connection = fakeConnection({
-      pages: [{ rows: [nodeOf("a", { total: 1 })], cursor: "" }],
+      pages: [{ rows: [nodeOf("a", { total: 1 }, ORDER.id)], cursor: "" }],
     });
     mount(connection);
     await snapshot(connection);
@@ -161,7 +162,7 @@ describe("a concept's rows", () => {
 
   it("offers Load more while the walk has a cursor", async () => {
     const connection = fakeConnection({
-      pages: [{ rows: [nodeOf("a", { total: 1 })], cursor: "next" }],
+      pages: [{ rows: [nodeOf("a", { total: 1 }, ORDER.id)], cursor: "next" }],
     });
     mount(connection);
     await snapshot(connection);
@@ -188,7 +189,7 @@ describe("a concept's rows", () => {
     // rows it does not belong between, and the next page would fetch it
     // again.
     const connection = fakeConnection({
-      pages: [{ rows: [nodeOf("a", { total: 1 })], cursor: "next" }],
+      pages: [{ rows: [nodeOf("a", { total: 1 }, ORDER.id)], cursor: "next" }],
     });
     mount(connection);
     await snapshot(connection);
@@ -233,7 +234,7 @@ describe("the walk starts once", () => {
   // the mechanism is. One mount of one concept is ONE browse.
   it("issues exactly one browse per concept, however the effects settle", async () => {
     const connection = fakeConnection({
-      pages: [{ rows: [nodeOf("a", { total: 1 }), nodeOf("b", { total: 2 })], cursor: "" }],
+      pages: [{ rows: [nodeOf("a", { total: 1 }, ORDER.id), nodeOf("b", { total: 2 }, ORDER.id)], cursor: "" }],
     });
     mount(connection, "v1:shopify:order");
     await snapshot(connection);
@@ -260,4 +261,32 @@ it("counts the filtered registry only after a followed snapshot arrives", async 
   expect(screen.getByText("artifact", { selector: ".os-row-name" }).closest(".os-record-row")?.tagName).toBe("BUTTON");
   await act(async () => connection.pushDelta({ generation: 2, added: [], removed: [ARTIFACT.id], reset: false }));
   expect(count()).toBe("0");
+});
+
+
+it("counts and profiles only the selected concept's roots, not its related application", async () => {
+  const detail = conceptOf({
+    id: "v1:fylo:applicationDetail",
+    fields: [{ name: "businessType", kind: "string", required: true, enumValues: [], description: "" }],
+  });
+  const connection = fakeConnection();
+  connection.query.executeNamed.mockResolvedValue(new Result({
+    bundle: {
+      rootIds: ["submission"],
+      nodes: [
+        nodeOf("submission", { businessType: "Dental Practice" }, detail.id),
+        nodeOf("submission", { companyName: "Neighbor company", applicantEmail: "private@example.com" }, "v1:wholesale:application"),
+      ],
+    },
+  }));
+  mount(connection, detail.id);
+  await act(async () => {
+    connection.pushDelta({ generation: 1, added: [detail], removed: [], reset: true });
+  });
+
+  expect(await screen.findByText(/All 1 readable rows loaded/)).toBeTruthy();
+  expect(screen.queryByText("companyName")).toBeNull();
+  expect(screen.queryByText("applicantEmail")).toBeNull();
+  expect(screen.queryByText(/cannot be written again/)).toBeNull();
+  expect(screen.getByText("businessType")).toBeTruthy();
 });
