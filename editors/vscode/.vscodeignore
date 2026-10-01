@@ -20,3 +20,5 @@ esbuild.host.js
 node_modules/**
 
 site/**
+
+out/*-meta.json

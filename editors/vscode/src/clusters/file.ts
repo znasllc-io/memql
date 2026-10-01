@@ -6,14 +6,16 @@
 // newer cockpit writes that this version does not model -- silent data loss on
 // something as routine as selecting a cluster.
 //
-// Writes are read-modify-write against the file as it is on disk at write
-// time, never against a cached parse, so a concurrent cockpit edit is merged
-// rather than clobbered.
+// Writes compare the exact bytes read under the same kernel lock Cockpit
+// uses, then atomically replace the file. Conflicts repeat the edit on the
+// latest document; no client can silently overwrite another client's edit.
 
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Document, parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
+
+import { writeRegistry } from "./atomicWrite.js";
 
 import { maskHomePath } from "../install/secrets.js";
 import type { ClusterConfig, ClustersFile } from "./model.js";
@@ -65,11 +67,8 @@ const FIELD_MAP: ReadonlyArray<readonly [StringFieldKey, string]> = [
   ["endpoint", "endpoint"],
   ["issuer", "issuer"],
   ["clientId", "client_id"],
-  // `token`, not `pat`: the credential this extension dials with is an
-  // identity-issued JWT access token, and the old spelling advertised a class
-  // the bff structurally rejects (memql#3383). CONTRACT NOTE: the MemQL
-  // Cockpit writes this same file, so its ClusterConfig carries the same
-  // rename.
+  // Legacy editor JWT fields are read for migration and cleared after custody
+  // in SecretStorage. Cockpit's PAT and OAuth credential store are independent.
   ["token", "token"],
   ["refreshToken", "refresh_token"],
   // The recorded release (memql#3990). A STRING field on purpose, so it takes
@@ -78,12 +77,13 @@ const FIELD_MAP: ReadonlyArray<readonly [StringFieldKey, string]> = [
   // undefined that meant "clear it" would let a failed refresh erase a version
   // an earlier, more trustworthy source had established. CONTRACT NOTE: the
   // MemQL Cockpit writes this same file, so its ClusterConfig carries the
-  // matching `Version string` with `yaml:"version,omitempty"` (memql#3994) --
-  // the same coordination the `token` rename above went through.
+  // matching `Version string` with `yaml:"version,omitempty"` (memql#3994).
   ["version", "version"],
 ];
 
 const BOOLEAN_FIELD_MAP: ReadonlyArray<readonly [BooleanFieldKey, string]> = [["local", "local"]];
+
+const sourceBytes = new WeakMap<Document, string | null>();
 
 async function loadDocument(file: string): Promise<Document> {
   let raw: string;
@@ -91,12 +91,16 @@ async function loadDocument(file: string): Promise<Document> {
     raw = await fs.readFile(file, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return new Document({ clusters: [] });
+      const doc = new Document({ clusters: [] });
+      sourceBytes.set(doc, null);
+      return doc;
     }
     throw err;
   }
   if (raw.trim() === "") {
-    return new Document({ clusters: [] });
+    const doc = new Document({ clusters: [] });
+    sourceBytes.set(doc, raw);
+    return doc;
   }
   const doc = parseDocument(raw);
   if (doc.errors.length > 0) {
@@ -104,6 +108,7 @@ async function loadDocument(file: string): Promise<Document> {
       `clusters.yaml at ${file} is malformed: ${doc.errors[0]?.message ?? "parse error"}`,
     );
   }
+  sourceBytes.set(doc, raw);
   return doc;
 }
 
@@ -185,21 +190,17 @@ export async function readClustersFileSafe(file: string): Promise<ReadClustersRe
   }
 }
 
-async function saveDocument(file: string, doc: Document): Promise<void> {
-  await fs.mkdir(path.dirname(file), { recursive: true });
-  // 0600 (memql#4194, audit row 72): the file carries the plaintext access
-  // token the Cockpit shares, so it is owner-only on create AND re-asserted on
-  // every rewrite -- writeFile's mode applies only to creation, and this file
-  // predates the tightening on most machines. Best-effort: a filesystem that
-  // refuses chmod (some mounts) still gets the write.
-  await fs.writeFile(file, doc.toString(), { encoding: "utf8", mode: 0o600 });
-  await fs.chmod(file, 0o600).catch(() => {});
+async function updateDocument<T>(file: string, edit: (doc: Document) => T): Promise<T> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const doc = await loadDocument(file);
+    const result = edit(doc);
+    if (await writeRegistry(file, sourceBytes.get(doc) ?? null, doc.toString())) return result;
+  }
+  throw new Error("Cluster settings are changing in another application. Try again.");
 }
 
 export async function setSelectedCluster(file: string, name: string): Promise<void> {
-  const doc = await loadDocument(file);
-  doc.set("selected_cluster", name);
-  await saveDocument(file, doc);
+  await updateDocument(file, doc => { doc.set("selected_cluster", name); });
 }
 
 function findByName(seq: YAMLSeq, name: string): YAMLMap | undefined {
@@ -247,17 +248,16 @@ function findByName(seq: YAMLSeq, name: string): YAMLMap | undefined {
  */
 export type ClusterUpdate = Partial<ClusterConfig> & { name: string };
 
-export async function upsertCluster(
-  file: string,
+function updateClusterDocument(
+  doc: Document,
   cluster: ClusterUpdate,
   originalName?: string,
-): Promise<void> {
+): void {
   if (cluster[IDENTITY_FIELD] === "") {
     throw new Error(
       "a cluster name is required: an empty name would orphan the node's endpoint and token behind an entry nothing can resolve",
     );
   }
-  const doc = await loadDocument(file);
   let seq = doc.get("clusters", true) as YAMLSeq | undefined;
   if (seq === undefined || !Array.isArray(seq.items)) {
     doc.set("clusters", []);
@@ -315,7 +315,10 @@ export async function upsertCluster(
     seq.add(fresh);
   }
 
-  await saveDocument(file, doc);
+}
+
+export async function upsertCluster(file: string, cluster: ClusterUpdate, originalName?: string): Promise<void> {
+  await updateDocument(file, doc => updateClusterDocument(doc, cluster, originalName));
 }
 
 // addCluster is upsertCluster's ADD-only front door: it refuses a name that
@@ -334,44 +337,16 @@ export async function upsertCluster(
 // is exactly how the destructive case arose. The message points at the edit
 // flow, which is where the user can see and change every field.
 //
-// The existence check re-reads the file, which upsertCluster then reads again.
-// That is the file's model, not an oversight: every write here is
-// read-modify-write against the bytes on disk at write time (the cockpit
-// writes this file too), so no read is authoritative for longer than the call
-// that made it, and caching one would not make the check any less racy.
-//
-// AN ADD SELECTS WHAT IT ADDED (memql#4621), and the omission is what made a
-// successful sign-in read as a failure. `runSignInToCluster` reconnects ONLY the
-// SELECTED cluster -- deliberately, since exactly one connection exists at a
-// time and dialling a cluster the operator merely signed into would switch what
-// every other view is showing. A cluster registered through the connect form was
-// never selected, so `selectedCluster === cluster.name` was false, nothing
-// dialled, and the operator was told "signed in" by an editor that was not
-// talking to the cluster. The install path has always done this
-// (`HandoffEffects.select`); this is the same rule for the registration path.
-//
-// SAFE FOR EVERY CALLER, because the write and the DIAL are separate acts.
-// `selected_cluster` is a pointer in a file the cockpit shares; nothing here
-// opens a connection, and `memql.clusters.select` remains the only thing that
-// dials. So the worst this can do is point the selection at the entry the
-// operator just asked to be added, which is the entry they were about to pick.
-//
-// It is a SECOND write rather than a key folded into upsertCluster's node,
-// because `selected_cluster` is a top-level document key and not a field of the
-// entry -- and because upsertCluster is also the EDIT path, which must not
-// re-point the selection at whatever row was edited.
+// The duplicate check, insertion, and selection commit as one transaction.
 export async function addCluster(file: string, cluster: ClusterUpdate): Promise<void> {
-  const existing = await readClustersFile(file);
-  if (existing.clusters.some((c) => c.name === cluster.name)) {
-    throw new Error(
-      `a cluster named "${cluster.name}" already exists; edit it instead of adding it again`,
-    );
-  }
-  await upsertCluster(file, cluster);
-  // AFTER the upsert, never before: upsertCluster refuses an empty name, and a
-  // selection written first would survive that refusal as a pointer at a
-  // cluster the file does not contain.
-  await setSelectedCluster(file, cluster.name);
+  await updateDocument(file, doc => {
+    const seq = doc.get("clusters", true) as YAMLSeq | undefined;
+    if (seq && findByName(seq, cluster.name)) {
+      throw new Error(`a cluster named "${cluster.name}" already exists; edit it instead of adding it again`);
+    }
+    updateClusterDocument(doc, cluster);
+    doc.set("selected_cluster", cluster.name);
+  });
 }
 
 // removeCluster deletes one entry and returns what it deleted.
@@ -400,7 +375,7 @@ export async function addCluster(file: string, cluster: ClusterUpdate): Promise<
 // Leaving it behind points the selection at a cluster that no longer exists,
 // which is the same orphaning upsertCluster's rename branch guards against.
 export async function removeCluster(file: string, name: string): Promise<ClusterConfig> {
-  const doc = await loadDocument(file);
+  return updateDocument(file, doc => {
   const seq = doc.get("clusters", true) as YAMLSeq | undefined;
   const items = Array.isArray(seq?.items) ? seq.items : [];
 
@@ -426,6 +401,6 @@ export async function removeCluster(file: string, name: string): Promise<Cluster
     doc.delete("selected_cluster");
   }
 
-  await saveDocument(file, doc);
   return removed;
+  });
 }

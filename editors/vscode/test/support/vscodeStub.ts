@@ -1054,3 +1054,5 @@ export const languages = {
     return { dispose: () => undefined };
   },
 };
+
+export enum ExtensionMode { Production = 1, Development = 2, Test = 3 }

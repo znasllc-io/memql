@@ -1,7 +1,6 @@
 package library
 
 import (
-	"context"
 	"testing"
 )
 
@@ -53,7 +52,7 @@ func seededFileBackedArtifact(archived bool) map[string]any {
 // the end of a successful edit.
 func editTheDocument(t *testing.T, i *Integration) {
 	t.Helper()
-	if _, err := i.handleEditDocument(context.Background(), map[string]any{
+	if _, err := i.handleEditDocument(editTestContext(), map[string]any{
 		"documentId": "doc-1",
 		"content":    "edited once",
 		"authorKind": "user",
@@ -75,7 +74,7 @@ func TestTouchArtifact_CarriesArchivedForward(t *testing.T) {
 	eng.seedArtifact(artifact)
 	artifactId := artifact["id"].(string)
 
-	editTheDocument(t, NewIntegration(eng))
+	editTheDocument(t, newEditTestIntegration(eng))
 
 	row, ok := eng.artifacts[artifactId]
 	if !ok {
@@ -111,7 +110,7 @@ func TestTouchArtifact_DoesNotSpuriouslyArchive(t *testing.T) {
 	eng.seedArtifact(artifact)
 	artifactId := artifact["id"].(string)
 
-	editTheDocument(t, NewIntegration(eng))
+	editTheDocument(t, newEditTestIntegration(eng))
 
 	if got := boolField(eng.artifacts[artifactId], "archived"); got {
 		t.Fatalf("archived = true after editing a document whose artifact was NOT archived -- "+
@@ -136,7 +135,7 @@ func TestTouchArtifact_CarriesFolderIdForward(t *testing.T) {
 	eng.seedArtifact(artifact)
 	artifactId := artifact["id"].(string)
 
-	editTheDocument(t, NewIntegration(eng))
+	editTheDocument(t, newEditTestIntegration(eng))
 
 	row, ok := eng.artifacts[artifactId]
 	if !ok {
@@ -165,7 +164,7 @@ func TestTouchArtifact_CarryForwardSurvivesAnUnpromotedRow(t *testing.T) {
 	eng.seedDocument(seededDoc())
 	// No seedArtifact: the document has never been promoted.
 
-	editTheDocument(t, NewIntegration(eng))
+	editTheDocument(t, newEditTestIntegration(eng))
 
 	if n := countCalls(eng, "createArtifact"); n != 1 {
 		t.Fatalf("createArtifact called %d times for an unpromoted document, want 1 -- "+

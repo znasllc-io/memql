@@ -220,103 +220,6 @@ func AdvanceRequestBuild(args AdvanceRequestArgs) string {
 	return b.String()
 }
 
-// AppendDocumentVersion -- Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is stamped from actor.userId (the handlers run the append under the backing document's owner), versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
-//
-// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["appendDocumentVersion"] in generated_concepts.go).
-type AppendDocumentVersionArgs struct {
-	VersionId     string
-	DocumentId    string
-	VersionNumber int
-	Content       string
-	AttachmentId  string
-	// Enum: user | assistant | system
-	AuthorKind      string
-	AuthorId        string
-	Note            string
-	ParentVersionId string
-	ProducedByRunId string
-	PartitionId     string
-}
-
-// AppendDocumentVersion calls the engine mutation appendDocumentVersion.
-func (qc *QueryClient) AppendDocumentVersion(ctx context.Context, args AppendDocumentVersionArgs) (*Result, error) {
-	call := AppendDocumentVersionBuild(args)
-	return qc.executeNamed(ctx, "appendDocumentVersion", call)
-}
-
-func AppendDocumentVersionBuild(args AppendDocumentVersionArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation appendDocumentVersion(")
-	b.WriteString("versionId: ")
-	b.WriteString(quoteMemQL(args.VersionId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("documentId: ")
-	b.WriteString(quoteMemQL(args.DocumentId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("versionNumber: ")
-	b.WriteString(fmt.Sprintf("%v", args.VersionNumber))
-	if args.Content != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("content: ")
-		b.WriteString(quoteMemQL(args.Content))
-	}
-	if args.AttachmentId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("attachmentId: ")
-		b.WriteString(quoteMemQL(args.AttachmentId))
-	}
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("authorKind: ")
-	b.WriteString(quoteMemQL(args.AuthorKind))
-	if args.AuthorId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("authorId: ")
-		b.WriteString(quoteMemQL(args.AuthorId))
-	}
-	if args.Note != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("note: ")
-		b.WriteString(quoteMemQL(args.Note))
-	}
-	if args.ParentVersionId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("parentVersionId: ")
-		b.WriteString(quoteMemQL(args.ParentVersionId))
-	}
-	if args.ProducedByRunId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("producedByRunId: ")
-		b.WriteString(quoteMemQL(args.ProducedByRunId))
-	}
-	if args.PartitionId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("partitionId: ")
-		b.WriteString(quoteMemQL(args.PartitionId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // AppendLibraryFileTrainedDomain -- Record that a Library file has been trained into a knowledge domain (design D7 -- upload and train are two acts, and this is where the second one is written down). Takes the FULL merged list rather than a single id: MemQL has no array append, and a caller sending only the new member would clobber whatever another agent added concurrently -- the same reason the artifact label capabilities merge in Go and write back. libraryTrainFile reads the current list, adds the domain if it is not already there, and calls this; adding a domain twice writes nothing new.
 //
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["appendLibraryFileTrainedDomain"] in generated_concepts.go).
@@ -3280,6 +3183,7 @@ type CreateComposeRecipeArgs struct {
 	SourceSelectors []map[string]any
 	TemplateId      string
 	Format          string
+	OutputKind      string
 	FolderId        string
 	AccountIds      []string
 }
@@ -3326,6 +3230,13 @@ func CreateComposeRecipeBuild(args CreateComposeRecipeArgs) string {
 	}
 	b.WriteString("format: ")
 	b.WriteString(quoteMemQL(args.Format))
+	if args.OutputKind != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("outputKind: ")
+		b.WriteString(quoteMemQL(args.OutputKind))
+	}
 	if args.FolderId != "" {
 		if b.Len() > 29 {
 			b.WriteString(", ")
@@ -13706,6 +13617,7 @@ type UpdateComposeRecipeArgs struct {
 	SourceSelectors []map[string]any
 	TemplateId      string
 	Format          string
+	OutputKind      string
 	FolderId        string
 	AccountIds      []string
 }
@@ -13755,6 +13667,13 @@ func UpdateComposeRecipeBuild(args UpdateComposeRecipeArgs) string {
 		}
 		b.WriteString("format: ")
 		b.WriteString(quoteMemQL(args.Format))
+	}
+	if args.OutputKind != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("outputKind: ")
+		b.WriteString(quoteMemQL(args.OutputKind))
 	}
 	if args.FolderId != "" {
 		if b.Len() > 29 {
@@ -14028,106 +13947,6 @@ func UpdateEmailRuleBuild(args UpdateEmailRuleArgs) string {
 		}
 		b.WriteString("senderIdentityId: ")
 		b.WriteString(quoteMemQL(args.SenderIdentityId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// UpdateGeneratedOutputContent -- Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is stamped from actor.userId, and both handlers run the write under the existing row's owner.
-//
-// Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["updateGeneratedOutputContent"] in generated_concepts.go).
-type UpdateGeneratedOutputContentArgs struct {
-	OutputId     string
-	Title        string
-	Summary      string
-	Body         string
-	AttachmentId string
-	// Enum: markdown | document | pdf | spreadsheet | image | text | other
-	Format   string
-	MimeType string
-	// Enum: workbench_generated | computer_use | agent_generated | derived | user_created
-	Source            string
-	PartitionId       string
-	ProducedByRunId   string
-	ProducedByAgentId string
-}
-
-// UpdateGeneratedOutputContent calls the engine mutation updateGeneratedOutputContent.
-func (qc *QueryClient) UpdateGeneratedOutputContent(ctx context.Context, args UpdateGeneratedOutputContentArgs) (*Result, error) {
-	call := UpdateGeneratedOutputContentBuild(args)
-	return qc.executeNamed(ctx, "updateGeneratedOutputContent", call)
-}
-
-func UpdateGeneratedOutputContentBuild(args UpdateGeneratedOutputContentArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation updateGeneratedOutputContent(")
-	b.WriteString("outputId: ")
-	b.WriteString(quoteMemQL(args.OutputId))
-	if b.Len() > 38 {
-		b.WriteString(", ")
-	}
-	b.WriteString("title: ")
-	b.WriteString(quoteMemQL(args.Title))
-	if args.Summary != "" {
-		if b.Len() > 38 {
-			b.WriteString(", ")
-		}
-		b.WriteString("summary: ")
-		b.WriteString(quoteMemQL(args.Summary))
-	}
-	if args.Body != "" {
-		if b.Len() > 38 {
-			b.WriteString(", ")
-		}
-		b.WriteString("body: ")
-		b.WriteString(quoteMemQL(args.Body))
-	}
-	if args.AttachmentId != "" {
-		if b.Len() > 38 {
-			b.WriteString(", ")
-		}
-		b.WriteString("attachmentId: ")
-		b.WriteString(quoteMemQL(args.AttachmentId))
-	}
-	if args.Format != "" {
-		if b.Len() > 38 {
-			b.WriteString(", ")
-		}
-		b.WriteString("format: ")
-		b.WriteString(quoteMemQL(args.Format))
-	}
-	if args.MimeType != "" {
-		if b.Len() > 38 {
-			b.WriteString(", ")
-		}
-		b.WriteString("mimeType: ")
-		b.WriteString(quoteMemQL(args.MimeType))
-	}
-	if b.Len() > 38 {
-		b.WriteString(", ")
-	}
-	b.WriteString("source: ")
-	b.WriteString(quoteMemQL(args.Source))
-	if args.PartitionId != "" {
-		if b.Len() > 38 {
-			b.WriteString(", ")
-		}
-		b.WriteString("partitionId: ")
-		b.WriteString(quoteMemQL(args.PartitionId))
-	}
-	if args.ProducedByRunId != "" {
-		if b.Len() > 38 {
-			b.WriteString(", ")
-		}
-		b.WriteString("producedByRunId: ")
-		b.WriteString(quoteMemQL(args.ProducedByRunId))
-	}
-	if args.ProducedByAgentId != "" {
-		if b.Len() > 38 {
-			b.WriteString(", ")
-		}
-		b.WriteString("producedByAgentId: ")
-		b.WriteString(quoteMemQL(args.ProducedByAgentId))
 	}
 	b.WriteString(")")
 	return b.String()

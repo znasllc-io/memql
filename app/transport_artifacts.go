@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"strings"
 
@@ -88,11 +89,16 @@ func (a *App) mountLibraryArtifactEndpoints(uploader server.FileUploader, contai
 		Bucket:     container,
 		Uploader:   uploader,
 		Downloader: downloader,
-		Store:      server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: a.engine}),
-		Analyzer:   a.newLibraryAnalyzer(uploader),
-		Sessions:   uploadsession.NewStore(&AttachmentEngineAdapter{Engine: a.engine}),
-		Blocks:     blocks,
-		Streamer:   streamer,
+		Store: server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: a.engine}, func() *sql.DB {
+			if a.db == nil || a.db.BunDB() == nil {
+				return nil
+			}
+			return a.db.BunDB().DB
+		}),
+		Analyzer: a.newLibraryAnalyzer(uploader),
+		Sessions: uploadsession.NewStore(&AttachmentEngineAdapter{Engine: a.engine}),
+		Blocks:   blocks,
+		Streamer: streamer,
 	})
 
 	// BOTH spellings, both verbs -- and PUT (memql#4782). server.ArtifactPaths()

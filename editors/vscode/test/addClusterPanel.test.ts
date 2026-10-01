@@ -1356,6 +1356,7 @@ test("the reveal is DISPLAY, not storage: the receipt and the run log still with
     assert.ok(!receipt.includes(RECOVERY_KEY));
     assert.ok(receipt.includes("[withheld: single-use credential]"));
     const runsDir = path.join(path.dirname(h.receiptFile), "runs");
+    await until(() => {
     let sawWithheldKey = false;
     for (const dirent of fs.readdirSync(runsDir, { recursive: true, withFileTypes: true })) {
       if (!dirent.isFile()) continue;
@@ -1363,7 +1364,8 @@ test("the reveal is DISPLAY, not storage: the receipt and the run log still with
       assert.ok(!content.includes(RECOVERY_KEY));
       if (content.includes("recoveryKey=[withheld: single-use credential]")) sawWithheldKey = true;
     }
-    assert.ok(sawWithheldKey);
+    return sawWithheldKey;
+    }, "the redacted run log to flush");
   } finally {
     h.close();
   }

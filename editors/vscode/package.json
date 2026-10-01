@@ -34,6 +34,9 @@
       "restrictedConfigurations": [
         "memql.lsp.serverPath"
       ]
+    },
+    "virtualWorkspaces": {
+      "supported": true
     }
   },
   "main": "./out/extension.js",
@@ -161,22 +164,22 @@
         {
           "id": "memqlDeployments",
           "name": "Deployments",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && isWorkspaceTrusted"
         },
         {
           "id": "memqlConstructs",
           "name": "Constructs",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && isWorkspaceTrusted"
         },
         {
           "id": "memqlData",
           "name": "Data",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && isWorkspaceTrusted"
         },
         {
           "id": "memqlRuns",
           "name": "Runs",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && isWorkspaceTrusted"
         }
       ]
     },
@@ -184,7 +187,7 @@
       {
         "view": "memqlClusters",
         "contents": "No clusters yet.\n[Install Local Cluster](command:memql.deployments.createDeployment)\n[Connect to a Cluster](command:memql.clusters.add)",
-        "when": "!memql.localClusterPresent"
+        "when": "!isWeb && (!memql.localClusterPresent)"
       },
       {
         "view": "memqlClusters",
@@ -199,7 +202,7 @@
       {
         "view": "memqlDeployments",
         "contents": "Not connected to a cluster.\n[Install Local Cluster](command:memql.deployments.createDeployment)\n[Connect to a Cluster](command:memql.clusters.select)",
-        "when": "!memql.clusterSelected && !memql.localClusterPresent"
+        "when": "!isWeb && (!memql.clusterSelected && !memql.localClusterPresent)"
       },
       {
         "view": "memqlDeployments",
@@ -275,6 +278,11 @@
         "view": "memqlRuns",
         "contents": "Open a folder to save runs.\n[Open Folder](command:vscode.openFolder)",
         "when": "workbenchState == empty"
+      },
+      {
+        "view": "memqlClusters",
+        "contents": "[Connect to a Cluster](command:memql.clusters.add)",
+        "when": "isWeb && !memql.clusterSelected"
       }
     ],
     "commands": [
@@ -540,7 +548,7 @@
       "commandPalette": [
         {
           "command": "memql.clusters.refreshReleases",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.clusters.refresh",
@@ -552,7 +560,7 @@
         },
         {
           "command": "memql.constructs.refresh",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.constructs.open",
@@ -568,15 +576,15 @@
         },
         {
           "command": "memql.deployments.refresh",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.deployments.createDeployment",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.deployments.open",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.deployments.openRun",
@@ -584,15 +592,15 @@
         },
         {
           "command": "memql.deployments.openCheckout",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.deployments.rebuildFromCheckout",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.deployments.openCluster",
-          "when": "isWorkspaceTrusted && memql.clusterSelected"
+          "when": "!isWeb && (isWorkspaceTrusted && memql.clusterSelected)"
         },
         {
           "command": "memql.deployments.signIn",
@@ -600,11 +608,11 @@
         },
         {
           "command": "memql.deployments.changeVersion",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.deployments.updateAndRebuild",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.clusters.add",
@@ -612,11 +620,11 @@
         },
         {
           "command": "memql.clusters.connectLocal",
-          "when": "isWorkspaceTrusted && memql.localClusterPresent"
+          "when": "!isWeb && (isWorkspaceTrusted && memql.localClusterPresent)"
         },
         {
           "command": "memql.clusters.edit",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.clusters.remove",
@@ -624,15 +632,15 @@
         },
         {
           "command": "memql.clusters.uninstall",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.clusters.repair",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.clusters.takeOwnership",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.clusters.signIn",
@@ -660,7 +668,7 @@
         },
         {
           "command": "memql.data.refresh",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.data.open",
@@ -668,11 +676,11 @@
         },
         {
           "command": "memql.runs.refresh",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.runs.open",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         },
         {
           "command": "memql.runs.execute",
@@ -720,53 +728,53 @@
         },
         {
           "command": "memql.training.showList",
-          "when": "isWorkspaceTrusted"
+          "when": "!isWeb && (isWorkspaceTrusted)"
         }
       ],
       "view/title": [
         {
           "command": "memql.deployments.signIn",
-          "when": "view == memqlDeployments && memql.connectionState == signIn",
+          "when": "!isWeb && (view == memqlDeployments && memql.connectionState == signIn)",
           "group": "navigation@0"
         },
         {
           "command": "memql.deployments.openCluster",
-          "when": "view == memqlDeployments && memql.clusterSelected",
+          "when": "!isWeb && (view == memqlDeployments && memql.clusterSelected)",
           "group": "navigation@1"
         },
         {
           "command": "memql.deployments.createDeployment",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstanceAbsent",
+          "when": "!isWeb && (view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstanceAbsent)",
           "group": "1_install@1"
         },
         {
           "command": "memql.deployments.changeVersion",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
+          "when": "!isWeb && (view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance)",
           "group": "2_version@1"
         },
         {
           "command": "memql.deployments.rebuildFromCheckout",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasCheckout",
+          "when": "!isWeb && (view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasCheckout)",
           "group": "2_version@2"
         },
         {
           "command": "memql.deployments.updateAndRebuild",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasBranch",
+          "when": "!isWeb && (view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasBranch)",
           "group": "2_version@3"
         },
         {
           "command": "memql.deployments.openCheckout",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasCheckout",
+          "when": "!isWeb && (view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance && memql.deploymentsHasCheckout)",
           "group": "3_open@1"
         },
         {
           "command": "memql.clusters.repair",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
+          "when": "!isWeb && (view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance)",
           "group": "4_repair@1"
         },
         {
           "command": "memql.clusters.uninstall",
-          "when": "view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance",
+          "when": "!isWeb && (view == memqlDeployments && memql.deploymentsInstance == memqlLocalInstance)",
           "group": "9_danger@1"
         },
         {
@@ -776,32 +784,32 @@
         },
         {
           "command": "memql.deployments.createDeployment",
-          "when": "view == memqlClusters && !memql.localClusterPresent",
+          "when": "!isWeb && (view == memqlClusters && !memql.localClusterPresent)",
           "group": "1_local@1"
         },
         {
           "command": "memql.clusters.repair",
-          "when": "view == memqlClusters && memql.localClusterPresent",
+          "when": "!isWeb && (view == memqlClusters && memql.localClusterPresent)",
           "group": "1_local@2"
         },
         {
           "command": "memql.constructs.refresh",
-          "when": "view == memqlConstructs",
+          "when": "!isWeb && (view == memqlConstructs)",
           "group": "navigation@1"
         },
         {
           "command": "memql.language.showReference",
-          "when": "view == memqlConstructs",
+          "when": "!isWeb && (view == memqlConstructs)",
           "group": "9_reference@1"
         },
         {
           "command": "memql.data.refresh",
-          "when": "view == memqlData",
+          "when": "!isWeb && (view == memqlData)",
           "group": "navigation@1"
         },
         {
           "command": "memql.runs.open",
-          "when": "view == memqlRuns && workbenchState != empty",
+          "when": "!isWeb && (view == memqlRuns && workbenchState != empty)",
           "group": "navigation@1"
         }
       ],
@@ -838,7 +846,7 @@
         },
         {
           "command": "memql.clusters.takeOwnership",
-          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;.*;ownerSetup(;|$)/",
+          "when": "!isWeb && (view == memqlClusters && viewItem =~ /^memqlCluster;.*;ownerSetup(;|$)/)",
           "group": "2_session@3"
         },
         {
@@ -853,7 +861,7 @@
         },
         {
           "command": "memql.clusters.edit",
-          "when": "view == memqlClusters && viewItem =~ /^memqlCluster;/",
+          "when": "!isWeb && (view == memqlClusters && viewItem =~ /^memqlCluster;/)",
           "group": "3_edit@1"
         },
         {
@@ -863,22 +871,22 @@
         },
         {
           "command": "memql.runs.execute",
-          "when": "view == memqlRuns && viewItem == memqlRun && memql.connected",
+          "when": "!isWeb && (view == memqlRuns && viewItem == memqlRun && memql.connected)",
           "group": "inline@1"
         },
         {
           "command": "memql.runs.execute",
-          "when": "view == memqlRuns && viewItem == memqlRun && memql.connected",
+          "when": "!isWeb && (view == memqlRuns && viewItem == memqlRun && memql.connected)",
           "group": "1_run@1"
         },
         {
           "command": "memql.runs.delete",
-          "when": "view == memqlRuns && viewItem == memqlRun",
+          "when": "!isWeb && (view == memqlRuns && viewItem == memqlRun)",
           "group": "9_delete@1"
         },
         {
           "command": "memql.constructs.run",
-          "when": "view == memqlConstructs && viewItem == memqlRunnableConstruct && memql.connected",
+          "when": "!isWeb && (view == memqlConstructs && viewItem == memqlRunnableConstruct && memql.connected)",
           "group": "inline@1"
         }
       ]
@@ -908,6 +916,7 @@
     "@types/vscode": "~1.91.0",
     "@types/ws": "^8.5.13",
     "@vscode/test-electron": "^2.5.2",
+    "@vscode/test-web": "^0.0.80",
     "esbuild": "^0.28.1",
     "typescript": "^5.4.0"
   },
@@ -922,5 +931,6 @@
   "bugs": {
     "url": "https://github.com/znasllc-io/memql/issues"
   },
-  "homepage": "https://github.com/znasllc-io/memql/tree/main/editors/vscode#readme"
+  "homepage": "https://github.com/znasllc-io/memql/tree/main/editors/vscode#readme",
+  "browser": "./out/webExtension.js"
 }

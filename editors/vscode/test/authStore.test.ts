@@ -28,6 +28,7 @@ import {
   persistSignIn,
   reconcileClusterCredentials,
   refreshTokenSecretKey,
+  accessTokenSecretKey,
   renameClusterCredentials,
   runAuthenticated,
   signOut,
@@ -88,18 +89,15 @@ function tokens(overrides: Partial<Parameters<typeof persistSignIn>[2]> = {}) {
 // persistSignIn -- the split
 // -----------------------------------------------------------------------------
 
-test("a sign-in puts the refresh token in SecretStorage and the access token in the file", async () => {
-  // The divergence from the issue's literal wording, asserted so it cannot be
-  // undone by accident: the ACCESS token stays in clusters.yaml because that
-  // file is shared with the MemQL Cockpit, which must see a credential. Only
-  // the thirty-day refresh token is a secret this extension keeps to itself.
+test("a sign-in stores both credentials privately and clears only legacy editor keys", async () => {
   const secrets = new FakeSecrets();
   const written: ClusterUpdate[] = [];
 
   await persistSignIn({ secrets, writeCluster: writer(written) }, "local", tokens());
 
   assert.equal(secrets.values.get(refreshTokenSecretKey("local")), "REFRESH");
-  assert.deepEqual(written, [{ name: "local", token: "ACCESS", refreshToken: "" }]);
+  assert.equal(secrets.values.get(accessTokenSecretKey("local")), "ACCESS");
+  assert.deepEqual(written, [{ name: "local", token: "", refreshToken: "" }]);
 });
 
 test("the issuing client is kept beside the refresh token and never written to the shared file", async () => {
@@ -132,24 +130,20 @@ test("the expiry is stored, so a credential carrying none of its own can still b
   );
 });
 
-test("with no SecretStorage the refresh token is written to the file instead of discarded", async () => {
-  // A sign-in that silently dropped the thirty-day credential would send the
-  // operator back through a browser every fifteen minutes. The file is the
-  // ingest path the resolver already reads.
+test("without secret storage sign-in refuses before writing credentials to YAML", async () => {
   const written: ClusterUpdate[] = [];
-  await persistSignIn({ writeCluster: writer(written) }, "local", tokens());
-
-  assert.equal(written[0]?.refreshToken, "REFRESH");
+  await assert.rejects(persistSignIn({ writeCluster: writer(written) }, "local", tokens()), /store your sign-in securely/);
+  assert.deepEqual(written, []);
 });
 
-test("a keyring that refuses the write leaves the plaintext copy in place", async () => {
-  const secrets = new FakeSecrets();
-  secrets.refuse.add(refreshTokenSecretKey("local"));
-  const written: ClusterUpdate[] = [];
-
-  await persistSignIn({ secrets, writeCluster: writer(written) }, "local", tokens());
-
-  assert.equal(written[0]?.refreshToken, "REFRESH", "custody was not taken, so nothing is cleared");
+test("a locked keyring never falls back to plaintext credentials", async () => {
+  for (const key of [refreshTokenSecretKey("local"), accessTokenSecretKey("local")]) {
+    const secrets = new FakeSecrets();
+    secrets.refuse.add(key);
+    const written: ClusterUpdate[] = [];
+    await assert.rejects(persistSignIn({ secrets, writeCluster: writer(written) }, "local", tokens()), /store your sign-in securely/);
+    assert.deepEqual(written, []);
+  }
 });
 
 test("a sign-in that issued no refresh token clears the file's stale one", async () => {

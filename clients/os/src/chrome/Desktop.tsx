@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 
-import { newShortId } from "@znasllc-io/memql-sdk-core/client";
+import { newShortId, rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
 
 import { TREE_PATH_SEP, uploadDroppedTree } from "../apps/files/uploadTree";
 import { entriesOf, hasDirectory, walkEntries } from "../items/folderDrop";
-import { browserHandoffPorts, openInVsCode, VSCODE_NO_ANSWER_MESSAGE, type HandoffPorts } from "../items/vscode";
+import { browserHandoffPorts, VSCODE_NO_ANSWER_MESSAGE, type HandoffPorts } from "../items/vscode";
+import { editorFilename } from "../items/editorPreference";
+import { openCheckedArtifact } from "../items/openFile";
+import { downloadArtifact } from "../apps/files/actions/download";
+import { useAuthSource } from "../auth/context";
 import { FileIcon } from "../items/FileIcon";
 import { FolderIcon } from "../items/FolderIcon";
 import type { UploadProvider } from "../items/upload";
@@ -71,6 +75,7 @@ export function Desktop({
   const { state, actions, registry, actorRole, grid } = useOs();
   const { config } = useSession();
   const connection = useOsConnection();
+  const authSource = useAuthSource();
   const [menu, setMenu] = useState<DeskMenu | null>(null);
   // The item whose name is being edited, driven from the context menu (epic
   // memql#4842, #4847) -- the old rename-on-title-double-click collided with
@@ -93,27 +98,29 @@ export function Desktop({
   useEffect(() => () => cancelHandoff.current?.(), []);
 
   // ---- opening files: the VS Code handoff (spec D3) ----
-  const openArtifact = useCallback(
-    (artifactId: string, anchorId: string) => {
-      if (!artifactId) return;
-      cancelHandoff.current?.();
-      setNoAnswerFor(null);
-      cancelHandoff.current = openInVsCode(
-        config.domain,
-        artifactId,
-        () => setNoAnswerFor(anchorId),
-        handoffPorts,
-      );
-    },
-    [config.domain, handoffPorts],
-  );
-
   const openFile = useCallback(
     (item: Extract<DesktopItem, { kind: "file" }>) => {
       if (!item.artifactId || item.uploadState) return;
-      openArtifact(item.artifactId, item.id);
+      cancelHandoff.current?.();
+      setNoAnswerFor(null);
+      void openCheckedArtifact({
+        domain: config.domain, artifactId: item.artifactId, title: item.title,
+        ports: handoffPorts, onNoAnswer: () => setNoAnswerFor(item.id),
+        load: async () => {
+          if (!connection) throw new Error("Connect to the cluster before opening this file.");
+          const artifact = (await connection.query.libraryArtifactById({ artifactId: item.artifactId! })).rows()[0];
+          if (!artifact) throw new Error("This file is no longer available.");
+          if (rowString(artifact, "kind") !== "file") return { name: editorFilename({ title: rowString(artifact, "title") || item.title, format: rowString(artifact, "format"), mimeType: rowString(artifact, "mimeType") }), mimeType: rowString(artifact, "mimeType"), fileId: "", sizeBytes: 0 };
+          const file = (await connection.query.libraryFileById({ fileId: rowString(artifact, "sourceConceptRef") })).rows()[0];
+          if (!file) throw new Error("This file is no longer available.");
+          return { name: rowString(file, "name") || item.title, mimeType: rowString(file, "mimeType"), fileId: rowString(file, "id"), sizeBytes: rowNumber(file, "size") };
+        },
+        download: file => downloadArtifact({ artifactId: item.artifactId!, name: file.name, fileId: file.fileId,
+          readFile: async () => file, bearer: () => authSource.bearer() }),
+      }).then(cancel => { cancelHandoff.current = cancel; })
+        .catch((error: unknown) => setDeskError(error instanceof Error ? error.message : "The file could not be opened."));
     },
-    [openArtifact],
+    [config.domain, connection, handoffPorts, authSource],
   );
 
   useEffect(() => {

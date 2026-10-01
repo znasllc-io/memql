@@ -1608,6 +1608,7 @@
         "modelsUsed",
         "name",
         "outputFileId",
+        "outputKind",
         "ownerUserId",
         "provenanceEmbedded",
         "provenanceNote",
@@ -1676,6 +1677,7 @@
         "format",
         "lastRunAt",
         "name",
+        "outputKind",
         "ownerUserId",
         "runCount",
         "sourceSelectors",
@@ -2849,6 +2851,30 @@
       }
     },
     {
+      "concept": "v1:library:documentComment",
+      "file": "library/concepts.memql",
+      "fields": [
+        "anchor",
+        "artifactId",
+        "authorUserId",
+        "body",
+        "ownerUserId",
+        "requestId",
+        "revision",
+        "versionNumber"
+      ],
+      "required": [
+        "anchor",
+        "artifactId",
+        "authorUserId",
+        "body",
+        "ownerUserId",
+        "requestId",
+        "revision",
+        "versionNumber"
+      ]
+    },
+    {
       "concept": "v1:library:documentVersion",
       "file": "library/concepts.memql",
       "fields": [
@@ -2883,6 +2909,8 @@
       "file": "library/concepts.memql",
       "fields": [
         "archived",
+        "backupPath",
+        "backupWorkerId",
         "blobUrl",
         "embeddingStatus",
         "failureReason",
@@ -3109,6 +3137,7 @@
       "fields": [
         "blobPath",
         "chunkSize",
+        "expectedVersion",
         "fileId",
         "folderId",
         "labels",

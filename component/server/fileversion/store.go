@@ -81,6 +81,10 @@ type Snapshot struct {
 // replaces it names nothing. The mutation writes the blanks explicitly, so a
 // read-merge cannot leave the laptop's name on bytes that came from a browser.
 type Head struct {
+	BackupWorkerId         string
+	BackupPath             string
+	LinkState              string
+	VersionAt              string
 	FileId                 string
 	VersionNumber          int
 	Name                   string
@@ -189,6 +193,9 @@ func headArgs(h Head) map[string]any {
 		"size":          h.Size,
 		"blobUrl":       h.BlobUrl,
 	}
+	if h.VersionAt != "" {
+		args["versionAt"] = h.VersionAt
+	}
 	// sha256 and the three provenance fields ARE sent when blank, unlike the
 	// snapshot's. This is an UPDATE, and update{} is a read-merge: an omitted
 	// argument leaves the PREVIOUS version's value in place, which for sha256
@@ -199,6 +206,13 @@ func headArgs(h Head) map[string]any {
 	args["uploadedFromWorkerId"] = strings.TrimSpace(h.UploadedFromWorkerId)
 	args["uploadedFromWorkerName"] = strings.TrimSpace(h.UploadedFromWorkerName)
 	args["uploadedFromPath"] = strings.TrimSpace(h.UploadedFromPath)
+	if h.BackupWorkerId != "" {
+		args["backupWorkerId"] = h.BackupWorkerId
+		args["backupPath"] = h.BackupPath
+	}
+	if h.LinkState != "" {
+		args["linkState"] = h.LinkState
+	}
 	if v := strings.TrimSpace(h.Format); v != "" {
 		args["format"] = v
 	}

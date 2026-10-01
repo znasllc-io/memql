@@ -26,6 +26,7 @@ import {
   accessTokenExpirySecretKey,
   issuedClientSecretKey,
   refreshTokenSecretKey,
+  accessTokenSecretKey,
   type SecretStore,
 } from "../src/auth/store.js";
 import { WELL_KNOWN_CLIENT_ID } from "../src/auth/wellKnownClient.js";
@@ -283,13 +284,15 @@ test("a token comfortably inside its lifetime is NOT refreshed", async () => {
 
 test("the refreshed access token is persisted so the NEXT connect starts fresh", async () => {
   const persisted: Persisted[] = [];
-  await resolver({ http: okHttp(), persisted, secrets: new FakeSecrets() }).resolve(
+  const secrets = new FakeSecrets();
+  await resolver({ http: okHttp(), persisted, secrets }).resolve(
     cluster({ token: jwtExpiringIn(-60), refreshToken: "RT-1" }),
   );
 
   assert.equal(persisted.length, 1);
   assert.equal(persisted[0]?.clusterName, "local");
-  assert.equal(persisted[0]?.token, "REFRESHED");
+  assert.equal(persisted[0]?.token, "");
+  assert.equal(secrets.values.get(accessTokenSecretKey("local")), "REFRESHED");
 });
 
 test("a REFUSED refresh token asks for a fresh sign-in, naming the rejection", async () => {
@@ -458,7 +461,7 @@ test("with NO SecretStorage the plaintext refresh token is used but never cleare
   );
 
   assert.deepEqual(result, { ok: true, bearer: "REFRESHED" });
-  assert.equal(persisted[0]?.clearStoredRefreshToken, false);
+  assert.deepEqual(persisted, [], "no new secret may go to the plaintext registry");
 });
 
 test("secret keys are per cluster, so two clusters cannot share a refresh token", () => {

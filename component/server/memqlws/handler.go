@@ -138,6 +138,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Allow any authenticated user (role check removed to support frontend client apps)
 
 	originPatterns := h.originPatterns
+	// Editor workers authenticate through the existing bearer subprotocol.
+	// This admission adds no cookie or query-token fallback.
+	if origin := r.Header.Get("Origin"); auth.IsWebEditorOrigin(origin) {
+		originPatterns = append(append([]string(nil), originPatterns...), origin)
+	}
 	if len(originPatterns) == 0 {
 		// No allow-list configured. Fall back to wildcard for backwards
 		// compatibility, but log so the operator knows the upgrade is

@@ -6,6 +6,7 @@ import { useSession } from "../../chrome/access";
 import { useOs } from "../../chrome/state";
 import { canOpen } from "../../system/registry";
 import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
+import { editorFilename, isZipArtifact } from "../../items/editorPreference";
 import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
 import { Button, Chip, CopyValue, Fact, Facts, Notice, ProvenanceDot, Subhead, formatBytes, formatMoment } from "../../kit";
@@ -176,8 +177,8 @@ export function Inspector({
   const openVsCode = useCallback(() => {
     cancelHandoff.current?.();
     setVsNoAnswer(false);
-    cancelHandoff.current = openInVsCode(config.domain, row.id, () => setVsNoAnswer(true));
-  }, [config.domain, row.id]);
+    cancelHandoff.current = openInVsCode(config.domain, row.id, () => setVsNoAnswer(true), undefined, editorFilename(row));
+  }, [config.domain, row.id, row.title]);
 
   const sendToDesk = useCallback(() => {
     const outcome = actions.sendFileToDesk({
@@ -518,16 +519,16 @@ export function Inspector({
             label lengths. The grid below is either one column or two, and
             every cell is the same size -- predictable at any panel width. */}
         <div className="os-files-actions">
-          <Button tone="primary" onClick={openVsCode}>
-            Open in VS Code
+          <Button tone="primary" onClick={isZipArtifact(row) ? () => void download() : openVsCode} busy={isZipArtifact(row) && downloadBusy}>
+            {isZipArtifact(row) ? "Download ZIP" : "Open in editor"}
           </Button>
           <div className="os-files-actions-more">
             <Button onClick={sendToDesk}>
               <CornerUpRight size={13} aria-hidden /> Send to desktop
             </Button>
-            <Button onClick={() => void download()} busy={downloadBusy} busyLabel="Downloading">
+            {!isZipArtifact(row) && <Button onClick={() => void download()} busy={downloadBusy} busyLabel="Downloading">
               <Download size={13} aria-hidden /> Download
-            </Button>
+            </Button>}
             {/* NEW VERSION, beside Download and only for files. The person
                 NAMES the file this replaces by acting from its own inspector,
                 which is the whole identity story: a browser upload carries no

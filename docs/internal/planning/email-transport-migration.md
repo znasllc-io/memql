@@ -41,7 +41,7 @@ resources is currently possible but subject to change. Verify eligibility
 while provisioning; do not promise new client subscriptions can enroll after
 the cutoff. The inspected subscription had no Communication Services or
 Email Services resources on October 1.
-([Microsoft retirement guide](https://learn.microsoft.com/en-us/%20azure/communication-services/acs-retirement-and-breaking-changes-guide))
+([Microsoft retirement guide](https://learn.microsoft.com/en-us/azure/communication-services/acs-retirement-and-breaking-changes-guide))
 
 ACS is the outbound bridge. It does not give MemQL an incoming mailbox service.
 For the interim, replies go to a real mailbox the client already uses. The
@@ -148,6 +148,41 @@ SMTP exemption. The commercial answer remains unresolved until Microsoft
 provides terms.
 ([MCA purchasing information](https://www.microsoft.com/en-us/licensing/how-to-buy/microsoft-customer-agreement),
 [Azure support FAQ](https://azure.microsoft.com/en-us/support/legal/faq/))
+
+### Support response and follow-up (October 1, 2026)
+
+The owner received a response from Azure Billing and Subscription Management.
+That team classified subscription eligibility, SMTP enablement, and commercial
+terms as outside its scope and referred the commercial questions to
+[Azure Sales](https://azure.microsoft.com/en-us/contact/). This is a routing
+response, not an eligibility determination, an SMTP exemption, or a price quote.
+The account's eligibility and any minimum commitment remain unconfirmed.
+
+Keep the follow-up in two parts. The drafts below are prepared for review;
+they have not been sent to Sales or submitted as a new technical case:
+
+- **Commercial / Azure Sales:** We want the lowest-cost way to operate our own
+  outbound SMTP transport in Azure. Does our existing agreement qualify as
+  MCA-E for the published TCP 25 policy? If not, please quote the least expensive
+  eligible agreement for this account and itemize any upfront or recurring fee,
+  minimum spend, term, mandatory support, and resource-migration requirement.
+  Can our existing subscription and resources remain in place? We are requesting
+  information only; this is not authorization to purchase or change an agreement.
+- **Technical / existing case routing:** Please route the SMTP eligibility and
+  connectivity portion to the appropriate Virtual Network or VM networking team,
+  or identify the exact diagnostic/support category. From an existing AKS node's
+  workload, DNS resolves Gmail, Outlook, and Yahoo MX hosts, but all three TCP 25
+  connections time out; HTTPS 443 and authenticated SMTP 587 connect. Please
+  confirm whether Azure applies a subscription-level SMTP block to this
+  subscription and whether its current offer is eligible for exemption. The
+  separately requested commercial quote is being directed to Sales.
+
+Do not treat a support-plan purchase as an SMTP exemption. Technical cases may
+require a paid support plan; investigate the existing free diagnostic and Sales
+path first, and obtain the owner's approval before any purchase. The published
+[SMTP policy](https://learn.microsoft.com/en-us/troubleshoot/azure/virtual-network/troubleshoot-outbound-smtp-connectivity)
+continues to distinguish standard EA/MCA-E, qualified Enterprise Dev/Test, and
+other offers. ACS remains the interim transport while this is unresolved.
 
 ## 4. Ownership and the user experience
 

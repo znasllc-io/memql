@@ -377,3 +377,19 @@ test("the version list comes from the published releases, not from wherever the 
   assert.equal(calls[0]?.repo, DEFAULT_STACK_REPO);
   assert.notEqual(calls[0]?.repo, "origin");
 });
+
+test("unawaited event callbacks cannot overwrite finished steps with pending ones", async () => {
+  const dir = await tmpdir();
+  const recorder = await RunRecorder.begin({ dir, instance: "local", kind: "install", now: () => "t0", entropy: "event-order" });
+  const steps = Array.from({ length: 12 }, (_, i) => step(`step${i}`));
+  void recorder.apply({ type: "runStarted", steps });
+  for (const s of steps) {
+    void recorder.apply({ type: "stepStarted", step: { id: s.id } as never, params: {} });
+    void recorder.apply(finished(s.id, "ok"));
+  }
+  await recorder.finish();
+  const saved = await readRun(runFilePath(dir, recorder.current.id));
+  assert.equal(saved?.status, "succeeded");
+  assert.equal(saved?.items.length, steps.length);
+  assert.ok(saved?.items.every(item => item.status === "ok"));
+});

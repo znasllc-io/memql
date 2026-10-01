@@ -38,35 +38,10 @@
 // the same place, so a LIVE stream re-auths without reconnecting at all.
 //
 // -----------------------------------------------------------------------------
-// WHERE THE SECRETS LIVE, and why the two halves differ
-// -----------------------------------------------------------------------------
-//
-// clusters.yaml is plaintext and SHARED with the MemQL Cockpit, which owns the
-// file. That ownership is exactly why the extension cannot simply move all
-// credentials into VS Code's SecretStorage: the Cockpit would then read a
-// cluster entry with no credential at all, and a registry two tools disagree
-// about is worse than one they share. So the split follows the blast radius of
-// each secret:
-//
-//   ACCESS TOKEN (`token:`)  -- stays in the shared file. It is a 15-minute
-//     credential, it is what the Cockpit needs to see, and the file is where
-//     an operator seeds it. A refreshed one is written straight back so the
-//     Cockpit and the extension keep agreeing.
-//
-//   REFRESH TOKEN -- SecretStorage, keyed per cluster. This is a THIRTY-DAY
-//     credential (DefaultRefreshTokenTTLSeconds = 2_592_000) that mints access
-//     tokens on demand, which is precisely the thing the issue flagged as
-//     unacceptable to leave lying in plaintext. `refresh_token:` in the file is
-//     an INGEST path only: the resolver presents it once, and on the first
-//     successful exchange it stores the ROTATED token in SecretStorage and
-//     DELETES the plaintext key. If SecretStorage is unavailable the plaintext
-//     copy is used and left alone -- clearing the only copy of a credential we
-//     have nowhere to put would be worse than the exposure.
-//
-// The storage mechanics themselves -- the keys, the index that makes an
-// un-enumerable SecretStorage sweepable, sign-in and sign-out -- live in
-// src/auth/store.ts. This module only resolves and renews.
-//
+// The editor owns its SecretStorage credentials. Cockpit owns a separate OAuth
+// client and credential store. Both share cluster metadata; neither refreshes
+// or revokes the other's session. Legacy registry tokens can be read once and
+// are cleared after SecretStorage takes custody. New tokens never go to YAML.
 // -----------------------------------------------------------------------------
 // memql#3404 -- NOT SPINNING
 // -----------------------------------------------------------------------------
@@ -145,9 +120,7 @@ export function jwtExpirySeconds(token: string): number | undefined {
   const payload = parts[1];
   if (payload === undefined || payload === "") return undefined;
   try {
-    const decoded = Buffer.from(payload, "base64url").toString("utf8");
-    // Buffer.from is lenient about non-base64 input (it skips what it cannot
-    // decode), so the JSON parse below is the real gate.
+    const decoded = new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0)));
     const claims = JSON.parse(decoded) as Record<string, unknown>;
     const exp = claims.exp;
     return typeof exp === "number" && Number.isFinite(exp) ? exp : undefined;
@@ -330,7 +303,7 @@ export class CredentialResolver implements CredentialSource {
       return { ok: false, reason: "notConfigured", message: notConfiguredMessage(cluster.name) };
     }
 
-    const token = (cluster.token ?? "").trim();
+    const token = (await this.store.readAccessToken(cluster.name) ?? cluster.token ?? "").trim();
     const tokenClass = classifyToken(token);
     if (tokenClass === "pat" || tokenClass === "workerToken") {
       // Refused BEFORE the dial. Letting this through buys a handshake failure
@@ -512,10 +485,11 @@ export class CredentialResolver implements CredentialSource {
       await this.store.writeExpiry(cluster.name, Math.floor(this.now() / 1000) + expiresIn);
     }
 
-    if (this.persist !== undefined) {
+    const accessStored = await this.store.writeAccessToken(cluster.name, accessToken);
+    if (this.persist !== undefined && accessStored) {
       try {
         await this.persist(cluster.name, {
-          token: accessToken,
+          token: "",
           clearStoredRefreshToken: custodyTaken,
         });
       } catch {
@@ -608,7 +582,7 @@ export const staticCredentials: CredentialSource = new CredentialResolver();
  * not be able to miss the other.
  */
 export function defaultFetch(url: string, init: HttpRequestInit): Promise<HttpResponseLike> {
-  return fetch(url, init) as unknown as Promise<HttpResponseLike>;
+  return fetch(url, { ...init, credentials: "omit", redirect: "error" }) as unknown as Promise<HttpResponseLike>;
 }
 
 // oauthError turns a failure body into the sentence an operator can act on.

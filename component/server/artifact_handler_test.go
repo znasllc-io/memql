@@ -161,6 +161,20 @@ func (f *fakeLibraryStore) SupersedeFile(_ context.Context, snap LibraryVersionS
 		row.Name, row.MimeType, row.Size = head.Name, head.MimeType, int(head.Size)
 		row.BlobUrl, row.Sha256, row.Format = head.BlobUrl, head.Sha256, head.Format
 		row.VersionNumber = head.VersionNumber
+		if row.BackupWorkerId == "" {
+			row.BackupWorkerId, row.BackupPath = row.UploadedFromWorkerId, row.UploadedFromPath
+		}
+		if row.BackupWorkerId != "" && row.BackupPath != "" {
+			row.LinkState = "stale"
+			if head.UploadedFromWorkerId == row.BackupWorkerId && head.UploadedFromPath == row.BackupPath {
+				row.LinkState = "synced"
+			}
+			if f.linkStates == nil {
+				f.linkStates = map[string]string{}
+			}
+			f.linkStates[head.FileId] = row.LinkState
+		}
+		row.UploadedFromWorkerId, row.UploadedFromPath = head.UploadedFromWorkerId, head.UploadedFromPath
 		row.Status = "analyzing"
 	}
 	return nil
@@ -1207,12 +1221,16 @@ type recordingExecutor struct {
 	t          *testing.T
 	engine     *memqlengine.MemQLEngine
 	statements []string
+	file       map[string]any
 }
 
 func (r *recordingExecutor) Execute(_ context.Context, query string) (any, error) {
 	r.statements = append(r.statements, query)
 	if _, err := r.engine.Parse(query); err != nil {
 		return nil, fmt.Errorf("the engine refused %s: %w", query, err)
+	}
+	if strings.Contains(query, "libraryFileById(") && r.file != nil {
+		return []map[string]any{r.file}, nil
 	}
 	// Parse succeeded; return an empty result, which every caller treats as
 	// "no such row". The point of this test is the front end, not the store.
@@ -1251,12 +1269,16 @@ func TestLibraryStoreCallSitesResolveThroughTheRealEngine(t *testing.T) {
 	eng := newLibraryDSLEngine(t)
 	rec := &recordingExecutor{t: t, engine: eng}
 	store := NewEngineLibraryStore(rec)
+	// This test only resolves rendered calls; real cross-replica locking is tested separately.
+	store.versionGate = func(context.Context, string) (func(), error) { return func() {}, nil }
 	ctx := context.Background()
 
 	// Awkward strings on purpose: an apostrophe, embedded quotes, a
 	// backslash, a newline and a non-ASCII letter all have to survive the
 	// rendering intact rather than breaking out of their literal.
 	awkward := "O'Brien \"the\" <file> & co \\ line\nbreak é.md"
+
+	rec.file = map[string]any{"id": "file-1", "versionNumber": 1, "blobUrl": "library/u-1/file-1/" + awkward}
 
 	calls := []struct {
 		name string
@@ -1364,9 +1386,9 @@ func TestLibraryStoreCallSitesResolveThroughTheRealEngine(t *testing.T) {
 
 	// A loop that rendered nothing would pass every assertion above. Two
 	// call sites render more than one statement -- StorageFootprint runs its
-	// THREE quota queries, and SupersedeFile runs both halves of the pair --
-	// hence the +3.
-	if want := len(calls) + 3; len(rec.statements) != want {
+	// THREE quota queries, and SupersedeFile re-reads the head then writes both halves --
+	// hence the +4.
+	if want := len(calls) + 4; len(rec.statements) != want {
 		t.Fatalf("rendered %d statements for %d call sites (want %d); the store is not calling the engine",
 			len(rec.statements), len(calls), want)
 	}

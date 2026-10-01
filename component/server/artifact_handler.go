@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -276,12 +277,15 @@ type LibraryArtifactRow struct {
 // its name, its bytes, its hash, its provenance and the moment it arrived. A
 // second read could see a different head.
 type LibraryFileRow struct {
-	ID       string
-	Name     string
-	MimeType string
-	Size     int
-	BlobUrl  string
-	Status   string
+	BackupWorkerId string
+	BackupPath     string
+	CreatedAt      time.Time
+	ID             string
+	Name           string
+	MimeType       string
+	Size           int
+	BlobUrl        string
+	Status         string
 	// Sha256 is blank when nothing has measured it yet (a chunked upload
 	// whose analysis pass has not streamed the blob). Never "no hash exists".
 	Sha256  string
@@ -446,6 +450,10 @@ type LibraryVersionSnapshot struct {
 
 // LibraryHeadMove is the new bytes a superseded file's head moves onto.
 type LibraryHeadMove struct {
+	BackupWorkerId         string
+	BackupPath             string
+	LinkState              string
+	VersionAt              string
 	FileId                 string
 	VersionNumber          int
 	Name                   string
@@ -513,6 +521,8 @@ type LibraryAnalyzer interface {
 // that named a target can say "Version 3 uploaded" without a second read.
 // Always present rather than omitempty: a missing field would read as "this
 // build does not do versions", and every upload this build takes has one.
+var ErrFileVersionConflict = errors.New("the file changed; reload its latest version before saving")
+
 type ArtifactUploadResponse struct {
 	ArtifactId    string `json:"artifactId"`
 	FileId        string `json:"fileId"`
@@ -754,6 +764,18 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if expected := strings.TrimSpace(r.FormValue("expectedVersion")); expected != "" {
+		version, err := strconv.Atoi(expected)
+		if err != nil || version < 1 || head == nil {
+			http.Error(w, "expectedVersion requires a valid existing file version", http.StatusBadRequest)
+			return
+		}
+		if head.VersionNumber != version {
+			http.Error(w, ErrFileVersionConflict.Error(), http.StatusConflict)
+			return
+		}
+	}
+
 	// --- provenance, verified BEFORE any byte is stored (memql#4781, D5) ---
 	//
 	// A claim that fails verification refuses the WHOLE upload: dropping the
@@ -893,6 +915,10 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 				UploadedFromWorkerName: workerName,
 				UploadedFromPath:       fromPath,
 			}); err != nil {
+			if errors.Is(err, ErrFileVersionConflict) {
+				http.Error(w, err.Error(), http.StatusConflict)
+				return
+			}
 			h.logger.Error("supersede library file", "error", err, "fileId", fileId,
 				"artifactId", targetArtifact.ID, "version", newVersion)
 			http.Error(w, fmt.Sprintf("failed to record the new version: %v", err), http.StatusInternalServerError)
@@ -926,12 +952,12 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// at the moment those exact bytes arrived, so "synced" here is a fact
 	// rather than an assumption -- and it is what makes the Files app's link
 	// states work before any watcher exists to report on them. Re-stamped on
-	// a supersede too: a re-push is what clears a "stale".
+	// a supersede is atomic inside SupersedeFile, which preserves the stable link.
 	//
 	// BEST EFFORT, like RestampFileArtifact. The upload succeeded; a file that
 	// is stored and unlabelled is a smaller problem than a 500 telling
 	// somebody their bytes did not land when they did.
-	if workerId != "" && fromPath != "" {
+	if head == nil && storageErr == "" && workerId != "" && fromPath != "" {
 		if err := h.store.SetFileLinkState(ctx, fileId, libraryLinkStateSynced); err != nil {
 			h.logger.Warn("stamp library file link state", "error", err, "fileId", fileId)
 		}
@@ -1692,14 +1718,20 @@ func isRequestTooLarge(err error) bool {
 // download path can treat an empty result as 404 without a separate ownership
 // probe: an empty result IS the refusal.
 type EngineLibraryStore struct {
-	engine MemQLExecutor
+	engine      MemQLExecutor
+	versionGate func(context.Context, string) (func(), error)
 }
 
 var _ LibraryStore = (*EngineLibraryStore)(nil)
 
 // NewEngineLibraryStore creates a LibraryStore backed by a MemQL engine.
-func NewEngineLibraryStore(engine MemQLExecutor) *EngineLibraryStore {
-	return &EngineLibraryStore{engine: engine}
+func NewEngineLibraryStore(engine MemQLExecutor, database ...func() *sql.DB) *EngineLibraryStore {
+	return &EngineLibraryStore{engine: engine, versionGate: func(ctx context.Context, key string) (func(), error) {
+		if len(database) == 0 || database[0] == nil {
+			return nil, fmt.Errorf("file version coordination is unavailable")
+		}
+		return memql.AcquireWriteGate(ctx, database[0](), "library-file:"+memql.BareShortId(key))
+	}}
 }
 
 func (s *EngineLibraryStore) exec(ctx context.Context, fn string, args map[string]any) (any, error) {
@@ -1995,16 +2027,21 @@ func (s *EngineLibraryStore) FileByUploadedFrom(ctx context.Context, workerId, p
 // version-target resolve and the (machine, path) resolve differ in how they
 // FIND the row and not at all in what it is.
 func libraryFileRowFrom(r map[string]any) *LibraryFileRow {
+	createdAt, _ := time.Parse(time.RFC3339Nano, rowString(r, "createdAt"))
+	if t, ok := r["createdAt"].(time.Time); ok {
+		createdAt = t
+	}
 	return &LibraryFileRow{
-		ID:       rowString(r, "id"),
-		Name:     rowString(r, "name"),
-		MimeType: rowString(r, "mimeType"),
-		Size:     rowInt(r, "size"),
-		BlobUrl:  rowString(r, "blobUrl"),
-		Status:   rowString(r, "status"),
-		Sha256:   rowString(r, "sha256"),
-		Format:   rowString(r, "format"),
-		Summary:  rowString(r, "summary"),
+		CreatedAt: createdAt,
+		ID:        rowString(r, "id"),
+		Name:      rowString(r, "name"),
+		MimeType:  rowString(r, "mimeType"),
+		Size:      rowInt(r, "size"),
+		BlobUrl:   rowString(r, "blobUrl"),
+		Status:    rowString(r, "status"),
+		Sha256:    rowString(r, "sha256"),
+		Format:    rowString(r, "format"),
+		Summary:   rowString(r, "summary"),
 		// ABSENT IS 1 (epic memql#4806): every file uploaded before the
 		// field existed has no member at all, and a supersede that read
 		// that as 0 would freeze the outgoing head as "version 0" and
@@ -2015,6 +2052,8 @@ func libraryFileRowFrom(r map[string]any) *LibraryFileRow {
 		UploadedFromWorkerName: rowString(r, "uploadedFromWorkerName"),
 		UploadedFromPath:       rowString(r, "uploadedFromPath"),
 		LinkState:              rowString(r, "linkState"),
+		BackupWorkerId:         rowString(r, "backupWorkerId"),
+		BackupPath:             rowString(r, "backupPath"),
 		LinkCheckedAt:          rowString(r, "linkCheckedAt"),
 		// ABSENT IS NOT ARCHIVED: every file stored before memql#4340 has no
 		// member at all, which is why the query spells the filter `!= true`.
@@ -2097,8 +2136,44 @@ func (s *EngineLibraryStore) SupersedeFile(ctx context.Context, snap LibraryVers
 	if s == nil || s.engine == nil {
 		return fmt.Errorf("engine not configured")
 	}
-	return fileversion.NewStore(s.engine).Supersede(ctx,
-		fileversion.Snapshot(snap), fileversion.Head(head))
+	release, err := s.versionGate(ctx, snap.FileId)
+	if err != nil {
+		return err
+	}
+	defer release()
+	ctx = memql.ContextWithFreshRead(ctx)
+	current, err := s.File(ctx, LibraryFileConceptRef(snap.FileId))
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("file not found")
+	}
+	if current.VersionNumber != snap.VersionNumber || current.BlobUrl != snap.BlobUrl {
+		return ErrFileVersionConflict
+	}
+	stamped := fileversion.Head(head)
+	// A version has its own provenance, but remote editing cannot detach the
+	// logical watched file. Only verified upload facts can establish this key.
+	stamped.BackupWorkerId, stamped.BackupPath = current.BackupWorkerId, current.BackupPath
+	if stamped.BackupWorkerId == "" || stamped.BackupPath == "" {
+		stamped.BackupWorkerId, stamped.BackupPath = current.UploadedFromWorkerId, current.UploadedFromPath
+	}
+	if stamped.BackupWorkerId == "" || stamped.BackupPath == "" {
+		stamped.BackupWorkerId, stamped.BackupPath = head.UploadedFromWorkerId, head.UploadedFromPath
+	}
+	if stamped.BackupWorkerId != "" && stamped.BackupPath != "" {
+		stamped.LinkState = "stale"
+		if memql.BareShortId(head.UploadedFromWorkerId) == memql.BareShortId(stamped.BackupWorkerId) && head.UploadedFromPath == stamped.BackupPath {
+			stamped.LinkState = "synced"
+		}
+	}
+	stamped.VersionAt = memql.VersionTimeAfter(current.CreatedAt, time.Now()).Format(time.RFC3339Nano)
+	snapshot := fileversion.Snapshot(snap)
+	if snapshot.UploadedAt == "" {
+		snapshot.UploadedAt = current.CreatedAt.Format(time.RFC3339Nano)
+	}
+	return fileversion.NewStore(s.engine).Supersede(ctx, snapshot, stamped)
 }
 
 // RestampFileArtifact re-versions the artifact index row from its backing

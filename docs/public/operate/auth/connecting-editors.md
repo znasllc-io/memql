@@ -37,6 +37,13 @@ Both flows end the same way: an OAuth authorization code, redeemed at
 `POST /oauth/token` for an access token and a refresh token, which the extension
 stores for you.
 
+VS Code for the Web uses device approval with PKCE; a browser extension cannot
+bind a native loopback listener. Enter the cluster domain in **MemQL: Add
+Cluster**, then sign in. The web extension keeps its cluster list in the editor
+profile and credentials in VS Code SecretStorage. Native local-cluster
+installation remains a desktop operation. Desktop and web support macOS and
+Linux; Windows is outside the supported platform matrix.
+
 ---
 
 ## The built-in client: `memql-vscode`
@@ -126,20 +133,24 @@ default nobody reviewed.
 
 ## The `clusters.yaml` fields that matter
 
-The extension's registry lives at `~/.memql/clusters.yaml`.
+The desktop registry lives at `~/.memql/clusters.yaml`. MemQL and Cockpit share
+cluster definitions, with a cross-process lock and atomic writes that preserve
+unknown fields. Selecting an editor connection does not redirect a Cockpit
+worker or change its enrollment.
 
 | Field | What it is | Who writes it |
 |---|---|---|
 | `domain` | The cluster's domain. Everything else derives from it | you |
 | `issuer` | The identity service URL. Defaults to `https://identity.<domain>` | you, only for a non-standard front door |
 | `endpoint` | The gRPC front door. Defaults to `api.<domain>:443` | you, only for a non-standard front door |
-| `token` | The identity-issued JWT access token | **sign-in** |
-| `refresh_token` | Renews the access token as it expires | **sign-in** |
+| `token` / `refresh_token` | Credentials belonging to another registry client, when present | The client that owns them; editor sign-in uses SecretStorage |
 | `client_id` | Another tool's OAuth client (the Cockpit writes `cockpit`). The editor does not use it | the tool that owns it |
 
-In the normal path you set a name and a domain, run **MemQL: Sign In**, and
-touch nothing else. `token` and `refresh_token` are things sign-in writes; hand-
-editing them is for an unattended setup, not for a person at a keyboard.
+Set a name and a domain, then run **MemQL: Sign In**. Editor access and refresh
+tokens stay in VS Code SecretStorage; a locked or unavailable secret store
+produces an actionable error instead of falling back to a plaintext file.
+Signing out of the editor clears its credentials, leaving Cockpit's session
+and worker connection alone.
 
 **The editor always signs in as `memql-vscode`.** `clusters.yaml` is shared with
 the MemQL Cockpit, which records its own client there (`client_id: cockpit`,
@@ -147,6 +158,12 @@ registered for the Cockpit's own callback path). A `client_id` in the file
 belongs to the tool that wrote it, so the editor never signs in or refreshes
 with it. It keeps the client each refresh token was issued to beside that token
 in its own secret storage, and presents it on refresh.
+
+**MemQL Productivity Tools** consumes the core extension's versioned connection
+API. It has no separate sign-in, cluster registry, or credential store. An open
+document retains the cluster and connection it came from; switching clusters
+cannot retarget its save. A reconnect requires comparing the latest revision
+before a stale edit can be saved. See [productivity tools](../../language/vscode.md#productivity-tools).
 
 ---
 

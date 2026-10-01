@@ -367,7 +367,17 @@ function package_vsix() {
     # archive it produced before this flag existed.
     [[ -n "$TARGET" ]] && args+=(--target "$TARGET")
     [[ -n "$OUT" ]] && args+=(--out "$OUT")
-    ( cd "$EXT_DIR" && npx --yes "$VSCE_VERSION" "${args[@]}" )
+    if [[ "$TARGET" == "web" ]]; then
+        local ignore
+        ignore="$(mktemp)"
+        cp "$EXT_DIR/.vscodeignore" "$ignore"
+        printf '\nbin/**\nstaged/**\n' >> "$ignore"
+        args+=(--ignoreFile "$ignore")
+        ( cd "$EXT_DIR" && npx --yes "$VSCE_VERSION" "${args[@]}" )
+        rm -f "$ignore"
+    else
+        ( cd "$EXT_DIR" && npx --yes "$VSCE_VERSION" "${args[@]}" )
+    fi
 }
 
 # vsix_output_path prints where package_vsix put the archive. vsce resolves a
@@ -459,7 +469,8 @@ function file_mode() {
 function main() {
     parse_arguments "$@"
     check_prerequisites
-    build_binary
+    case "$GOOS_TARGET" in darwin|linux) ;; *) echo "ERROR: desktop packages support macOS and Linux only" >&2; exit 2 ;; esac
+    if [[ "$TARGET" != "web" ]]; then build_binary; fi
     stage_install_tree
     # AFTER stage_install_tree, which rm -rf's the staged tree. Before it, this
     # file would be deleted by the step that follows it -- silently, and the
@@ -470,7 +481,7 @@ function main() {
     build_workspace_deps
     build_extension
     package_vsix
-    verify_vsix_executable_bits
+    if [[ "$TARGET" != "web" ]]; then verify_vsix_executable_bits; fi
     echo "SUCCESS: VSIX packaged"
 }
 
