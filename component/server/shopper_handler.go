@@ -192,7 +192,8 @@ func (h *ShopperHandler) resolveSite(ctx context.Context, stamp shopperStamp) *S
 	// present none. Both directions, because "empty passes" would let a
 	// storefront's rows be written with no scope at all and "any value
 	// passes" would let them be written under somebody else's store.
-	if stamp.storeID != site.StoreID && stamp.storeID != site.PreviewStoreID {
+	bound := site.StoreID != "" || site.PreviewStoreID != ""
+	if (bound && stamp.storeID == "") || (stamp.storeID != site.StoreID && stamp.storeID != site.PreviewStoreID) {
 		h.logger.Warn("shopper surface: refusing a store this site is not bound to",
 			"component", "server", "site", site.ID)
 		return nil

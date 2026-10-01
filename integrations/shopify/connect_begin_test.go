@@ -84,6 +84,14 @@ func TestBeginWritesAShopifyStateAndAnswersTheAuthorizeURL(t *testing.T) {
 	if got := u.Query().Get("scope"); got != strings.Join(ConnectScopes(), ",") {
 		t.Fatalf("scope decodes to %q", got)
 	}
+	for _, scope := range strings.Split(u.Query().Get("scope"), ",") {
+		if strings.HasPrefix(scope, "write_") && scope != "write_products" {
+			t.Fatalf("product-content delivery requested unrelated Admin write scope %q", scope)
+		}
+	}
+	if !strings.Contains(","+u.Query().Get("scope")+",", ",write_products,") {
+		t.Fatal("authorization URL cannot grant product-metafield delivery")
+	}
 
 	writes := h.engine.callsNamed("createGithubConnectState")
 	if len(writes) != 1 {
