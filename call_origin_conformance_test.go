@@ -546,7 +546,9 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// read runs unstamped through component/server's own store, under
 		// the caller's actor -- which is the strongest form of the third
 		// property its sibling asserts.
-		"component/server/fileversion": "library file-version supersede store -- REQUEST-DERIVED; preconditions (stamp is required by @serverOnly, dies inside one call, no write names an owner, and the package holds no reads) asserted by component/server/fileversion/store_internal_origin_test.go, memql#4806",
+		"component/server/fileversion":      "library file-version supersede store -- REQUEST-DERIVED; preconditions (stamp is required by @serverOnly, dies inside one call, no write names an owner, and the package holds no reads) asserted by component/server/fileversion/store_internal_origin_test.go, memql#4806",
+		"integrations/library/reviewstore":  "document feedback store -- REQUEST-DERIVED; library first admits the current artifact AND backing document under the original caller. Only comment reads and appends borrow that verified document owner; revision and author are checked under the same shared lock as editing. Cross-replica and access-denial tests in integrations/library/review_replica_test.go",
+		"integrations/library/versionstore": "document version store -- REQUEST-DERIVED; original caller ownership reads stay outside the package, the two writes are serverOnly and accept no owner; preconditions in integrations/library/versionstore/store_test.go",
 		// The first two are boot-time and server-initiated. The third,
 		// readiness_write.go, is REQUEST-DERIVED on one path -- readinessRecompute
 		// is reachable by a cluster owner -- and is earned by two preconditions

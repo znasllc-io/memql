@@ -202,6 +202,7 @@ const files: OsAppManifest = {
   wants: FILES_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
+  attentionChanges: [{ id: "files:editor", revision: "browser-1", sectionId: "settings", label: "Choose browser VS Code or your installed editor" }],
   component: FilesApp,
 };
 

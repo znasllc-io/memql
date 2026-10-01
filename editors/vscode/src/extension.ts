@@ -1,3 +1,5 @@
+import { configureRegistryWriter, nativeRegistryWriter } from "./clusters/atomicWrite.js";
+import { EditorConnection, type EditorConnectionAPI } from "./connection/api.js";
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -11,6 +13,7 @@ import {
   env,
   EventEmitter,
   ExtensionContext,
+  ExtensionMode,
   languages,
   OutputChannel,
   Position,
@@ -294,6 +297,7 @@ import { languagePin } from './state/languageReference.js';
 
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
+let editorConnection: EditorConnection | undefined;
 
 /**
  * What the console handoff needs that only registerRuntimeSurface builds.
@@ -492,6 +496,31 @@ let rememberSignIn: (cluster: ClusterConfig) => Promise<void> = async () => {};
 // Neither half may short-circuit the other. startLanguageClient reports its own
 // failure and returns.
 export function activate(context: ExtensionContext): MemqlExtensionApi {
+  const registryHelper = resolveServerPath(context, false);
+  if (registryHelper) configureRegistryWriter(nativeRegistryWriter(registryHelper));
+  editorConnection = new EditorConnection({
+    session: () => {
+      if (!workspace.isTrusted || connections?.state.status !== 'connected' || !connections.query || !connections.bearer) return undefined;
+      const cluster = clusterCache.get(connections.state.clusterName);
+      return cluster ? { cluster, query: connections.query, bearer: connections.bearer } : undefined;
+    },
+    connect: async domain => {
+      if (!workspace.isTrusted || !handoffSurface) throw new Error('Trust this workspace before connecting MemQL.');
+      const surface = handoffSurface;
+      const registry = await readClustersFileSafe(surface.clustersPath);
+      if (!registry.ok) throw new Error('The MemQL cluster list could not be read.');
+      let cluster = registry.file.clusters.find(c => c.domain?.toLowerCase() === domain);
+      const accepted = await window.showInformationMessage(`Connect MemQL to ${domain}?`, { modal: true }, 'Connect');
+      if (accepted !== 'Connect') return;
+      if (!cluster) {
+        cluster = await promptForCluster({ name: domain, domain, endpoint: composeEndpointFromDomain(domain) });
+        if (!cluster || cluster.domain?.toLowerCase() !== domain) return;
+        await writeCluster(surface.clustersTree, () => addCluster(surface.clustersPath, cluster!));
+      }
+      await commands.executeCommand('memql.clusters.select', { cluster, selected: false });
+      if (connections?.state.status !== 'connected') await commands.executeCommand('memql.clusters.signIn', { cluster, selected: false });
+    },
+  });
   installOutput = window.createOutputChannel('MemQL Install');
   connectionOutput = window.createOutputChannel('MemQL Connection');
   context.subscriptions.push(installOutput, connectionOutput);
@@ -553,7 +582,7 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   // resolves with whatever this returns, which is the only way a test running
   // inside a real editor can drive a uri without asking the operator to click
   // VS Code's own "allow this extension to open the URI" prompt.
-  return { handleOpenUri };
+  return { handleOpenUri, connection: editorConnection };
 }
 
 /**
@@ -751,6 +780,7 @@ function startLanguageClient(context: ExtensionContext): void {
 
 /** What `activate()` hands back, so the host smoke lane can drive a link. */
 export interface MemqlExtensionApi {
+  connection: EditorConnectionAPI;
   handleOpenUri(uri: Uri): Promise<HandoffOutcome>;
 }
 
@@ -1432,7 +1462,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     return;
   }
 
-  const clustersPath = defaultClustersPath();
+  // Host integration tests use an explicit private registry, never the user's
+  // live sessions. Ordinary operation always uses the shared registry.
+  const testState = context.extensionMode === ExtensionMode.Test ? process.env.MEMQL_EDITOR_TEST_STATE_DIR : undefined;
+  const clustersPath = testState && path.isAbsolute(testState) ? path.join(testState, 'clusters.yaml') : defaultClustersPath();
 
   // The sign-in persistence seam (memql#3403 / memql#3404).
   //
@@ -1462,10 +1495,9 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   //   - context.secrets  -- VS Code's SecretStorage, where the LONG-LIVED
   //     refresh token is kept. clusters.yaml is plaintext and owned by the
   //     MemQL Cockpit, so the 30-day credential must not live there; the
-  //     15-minute access token still does, because the Cockpit reads it too.
+  //     access token also stays in SecretStorage. Cockpit authenticates independently.
   //     See src/connection/credentials.ts for the full split.
-  //   - a write-back into clusters.yaml, so a refreshed access token is there
-  //     for the next connect (and for the Cockpit) instead of being re-earned.
+  //   - a write-back that clears legacy token keys after secret custody.
   //   - the global fetch, for the /oauth/token exchange.
   connections = new ConnectionManager(
     undefined,
@@ -1515,6 +1547,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       },
     }
   );
+
+  context.subscriptions.push({ dispose: connections.onDidChangeState(() => editorConnection?.changed()) });
 
   // THE ONE PLACE a dial failure's raw text is recorded (memql#4194). Every
   // surface that mentions the failure afterwards -- tree tooltip, toast,
@@ -5368,9 +5402,9 @@ export function deactivate(): Thenable<void> | undefined {
 // the user can read back in their own settings UI is its own trap: the setting
 // is visibly set, the extension visibly does not use it, and nothing on screen
 // explains the gap. reportIgnoredWorkspaceServerPath closes that.
-function resolveServerPath(context: ExtensionContext): string | undefined {
+function resolveServerPath(context: ExtensionContext, reportIgnored = true): string | undefined {
   const inspected = workspace.getConfiguration('memql.lsp').inspect<string>('serverPath');
-  reportIgnoredWorkspaceServerPath(inspected);
+  if (reportIgnored) reportIgnoredWorkspaceServerPath(inspected);
 
   const configured = inspected?.globalValue;
   if (typeof configured === 'string' && configured.trim() !== '') {

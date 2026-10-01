@@ -1,3 +1,4 @@
+import { CALLBACK_PATH, LOOPBACK_HOST } from "./loopbackAddress.js";
 // The one-shot loopback listener that catches the OAuth callback.
 //
 // -----------------------------------------------------------------------------
@@ -54,10 +55,10 @@ import { loopbackPage, type CallbackOutcome } from "./loopbackPage.js";
 export type { CallbackOutcome } from "./loopbackPage.js";
 
 /** The only interface this listener is ever allowed to bind. */
-export const LOOPBACK_HOST = "127.0.0.1";
+
 
 /** The path the callback arrives on. Must match the registered redirect URI. */
-export const CALLBACK_PATH = "/callback";
+
 
 /**
  * How long the listener waits for the callback before giving up.
@@ -352,3 +353,5 @@ function listen(server: Server): Promise<{ host: string; port: number }> {
     });
   });
 }
+
+export { CALLBACK_PATH, LOOPBACK_HOST } from "./loopbackAddress.js";

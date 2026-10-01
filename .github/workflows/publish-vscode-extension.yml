@@ -135,3 +135,34 @@ jobs:
         run: |
           echo "DRY RUN: packaged ${{ matrix.target }} (version ${{ needs.version.outputs.version }}) and published nothing."
           echo "The archive is on this run as an artifact. Re-run with dryRun unchecked to publish."
+
+  publish-web:
+    name: publish web
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: package web without native executables
+        run: bash scripts/vscode/package.sh --target=web --out="$RUNNER_TEMP/memql-web.vsix"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: memql-web.vsix
+          path: ${{ runner.temp }}/memql-web.vsix
+          if-no-files-found: error
+      - name: publish to the VS Code Marketplace
+        if: ${{ inputs.dryRun != true }}
+        run: npx --yes @vscode/vsce@latest publish --packagePath "$RUNNER_TEMP/memql-web.vsix"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      - name: publish to Open VSX
+        if: ${{ inputs.dryRun != true }}
+        run: npx --yes ovsx@latest publish "$RUNNER_TEMP/memql-web.vsix"
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}

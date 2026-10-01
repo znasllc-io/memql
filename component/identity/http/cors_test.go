@@ -657,3 +657,43 @@ func TestGrantedOriginReadCarriesADeadline(t *testing.T) {
 			grantedOriginReadTimeout)
 	}
 }
+
+func TestWebEditorCORSUsesDeviceGrantWithoutCookies(t *testing.T) {
+	s := &Server{}
+	for _, origin := range []string{"https://vscode.dev", "https://v--0agu67usn2p2belftkh65259a1tfjqn1ktaorveglts8k968brdf.vscode-cdn.net"} {
+		for _, path := range []string{"/device/code", "/oauth/token", "/auth/logout"} {
+			called := false
+			handler := s.cors(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				if r.Header.Get("Cookie") != "" {
+					t.Error("editor borrowed identity cookies")
+				}
+				w.WriteHeader(http.StatusUnauthorized)
+			})
+			request := httptest.NewRequest("POST", path, strings.NewReader("{}"))
+			request.Header.Set("Origin", origin)
+			request.Header.Set("Cookie", "refresh_token=secret")
+			rec := httptest.NewRecorder()
+			handler(rec, request)
+			if !called || rec.Code != http.StatusUnauthorized || rec.Header().Get("Access-Control-Allow-Origin") != origin || rec.Header().Get("Access-Control-Allow-Credentials") != "" {
+				t.Fatalf("grant bypass or credentialed CORS: %s %v", path, rec.Result())
+			}
+			request.Method = "OPTIONS"
+			called = false
+			rec = httptest.NewRecorder()
+			handler(rec, request)
+			if called || rec.Code != http.StatusNoContent {
+				t.Fatal("preflight reached token handler")
+			}
+		}
+	}
+	for _, path := range []string{"/login", "/auth/refresh", "/register"} {
+		req := httptest.NewRequest("POST", path, nil)
+		req.Header.Set("Origin", "https://vscode.dev")
+		rec := httptest.NewRecorder()
+		s.cors(func(w http.ResponseWriter, r *http.Request) {})(rec, req)
+		if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Fatalf("editor granted cookie route %s", path)
+		}
+	}
+}

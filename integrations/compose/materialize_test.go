@@ -24,6 +24,7 @@ type materializeEngine struct {
 	files         map[string]map[string]any
 	calls         []string
 	source        map[string]any
+	account       map[string]any
 	failReady     bool
 	failFileReady bool
 	afterFile     func()
@@ -88,6 +89,8 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 		row = e.files[stringOf(args["fileId"])]
 	case "sourceRows":
 		row = e.source
+	case "accountById":
+		row = e.account
 	case "cancelGoal":
 		return memql.NewResultWithOutput(map[string]any{"runsAsked": 1}), nil
 	case "createGoal":

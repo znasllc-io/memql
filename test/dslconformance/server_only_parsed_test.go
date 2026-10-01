@@ -1065,6 +1065,19 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "library/mutations.memql", Name: "createLibraryFileVersion"}: true,
 		{Path: "library/mutations.memql", Name: "supersedeLibraryFileHead"}: true,
 
+		// Document history is authored only after a shared write lock, a fresh
+		// owned-row read and a revision comparison. Even the document's owner
+		// must not bypass those checks to forge version numbers or timestamps.
+		{Path: "library/mutations.memql", Name: "appendDocumentVersion"}:        true,
+		{Path: "library/mutations.memql", Name: "updateGeneratedOutputContent"}: true,
+
+		// Feedback attests the source revision and actor after current artifact
+		// authorization; direct writes could forge that attestation. These
+		// reads borrow the backing owner only after the same current read gate.
+		{Path: "library/mutations.memql", Name: "appendDocumentComment"}:     true,
+		{Path: "library/queries.memql", Name: "documentCommentsForArtifact"}: true,
+		{Path: "library/queries.memql", Name: "documentCommentById"}:         true,
+
 		// The provenance stamps (epic memql#5391, design D9). Caller-scoping is
 		// not the fix here and the reason is unusual enough to be worth the
 		// line: the party who would write a FALSE stamp is the row's own owner.

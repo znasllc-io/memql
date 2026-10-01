@@ -159,8 +159,10 @@ mutation memory createMemory {
 /// versionNumber + versionId are computed server-side from the current
 /// latest. Append-only: every call inserts a new immutable row; nothing is overwritten.
 @actor
+@serverOnly
 mutation documentVersion appendDocumentVersion {
   args {
+    versionAt datetime!
     versionId        string!
     documentId       string!
     versionNumber    int!
@@ -188,7 +190,7 @@ mutation documentVersion appendDocumentVersion {
     args.partitionId
     // createdAt is the hypertable time dimension and the history's ordering
     // key, stamped from `now` rather than taken from a caller.
-    createdAt: now
+    createdAt: args.versionAt
   }
 }
 
@@ -198,8 +200,10 @@ mutation documentVersion appendDocumentVersion {
 /// integration.library.editDocument / restoreDocumentVersion; ownerUserId is stamped from
 /// actor.userId, and both handlers run the write under the existing row's owner.
 @actor
+@serverOnly
 mutation generatedOutput updateGeneratedOutputContent {
   args {
+    versionAt datetime!
     outputId      string!
     title         string!
     summary       string
@@ -215,6 +219,7 @@ mutation generatedOutput updateGeneratedOutputContent {
   insert {
     accept { title, summary, body, attachmentId, mimeType, source, partitionId, producedByRunId, producedByAgentId }
     stamp {
+      createdAt: args.versionAt
       id: args.outputId
       ownerUserId: actor.userId
       format: args.format ?? "markdown"
@@ -676,9 +681,10 @@ mutation uploadSession createUploadSession {
     fileId    string!
     chunkSize int!
     targetArtifactId  string
+    expectedVersion int
   }
   insert {
-    accept { name, size, mimeType, folderId, labels, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, blobPath, fileId, chunkSize, targetArtifactId }
+    accept { name, size, mimeType, folderId, labels, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, blobPath, fileId, chunkSize, targetArtifactId, expectedVersion }
     stamp {
       id: args.uploadId
       ownerUserId: actor.userId
@@ -800,6 +806,7 @@ mutation fileVersion createLibraryFileVersion {
 @serverOnly
 mutation file supersedeLibraryFileHead {
   args {
+    versionAt      datetime
     fileId         string!
     versionNumber  int!
     name           string!
@@ -811,8 +818,12 @@ mutation file supersedeLibraryFileHead {
     uploadedFromWorkerId    string
     uploadedFromWorkerName  string
     uploadedFromPath        string
+    backupWorkerId string
+    backupPath string
+    linkState enum("synced", "stale", "origin_gone")
   }
   update {
+    createdAt: args.versionAt ?? now
     id: args.fileId
     args.name
     args.mimeType
@@ -833,7 +844,10 @@ mutation file supersedeLibraryFileHead {
     uploadedFromWorkerId: args.uploadedFromWorkerId ?? ""
     uploadedFromWorkerName: args.uploadedFromWorkerName ?? ""
     uploadedFromPath: args.uploadedFromPath ?? ""
-    versionUploadedAt: now
+    backupWorkerId: args.backupWorkerId ?? ""
+    backupPath: args.backupPath ?? ""
+    linkState: args.linkState
+    versionUploadedAt: args.versionAt ?? now
   }
 }
 
@@ -1035,5 +1049,27 @@ mutation file stampLibraryFileProvenance {
   update {
     id: args.fileId
     producedBy: args.producedBy
+  }
+}
+
+/// Only the review capability may attest the current revision, author, and owner.
+/// Scoping to actor.userId would still let an owner forge revision and author claims;
+/// the capability validates those against the saved document before appending.
+@serverOnly
+@actor
+mutation documentComment appendDocumentComment {
+  args {
+    commentId string!
+    artifactId string!
+    authorUserId string!
+    revision string!
+    versionNumber int!
+    anchor object!
+    body string!
+    requestId string!
+  }
+  insert {
+    accept { artifactId, authorUserId, revision, versionNumber, anchor, body, requestId }
+    stamp { id: args.commentId, ownerUserId: actor.userId }
   }
 }

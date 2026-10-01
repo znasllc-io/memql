@@ -141,49 +141,6 @@ QueryClient.prototype.advanceRequest = function (this: QueryClient, args: Advanc
   return this.executeNamed("advanceRequest", buildAdvanceRequest(args), opts);
 };
 
-/** Append an immutable document-version snapshot to a logical document's history. Handler-invoked (integration.library.editDocument / restoreDocumentVersion) -- ownerUserId is stamped from actor.userId (the handlers run the append under the backing document's owner), versionNumber + versionId are computed server-side from the current latest. Append-only: every call inserts a new immutable row; nothing is overwritten. */
-// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["appendDocumentVersion"] in generated_concepts.ts).
-export interface AppendDocumentVersionArgs {
-  versionId: string;
-  documentId: string;
-  versionNumber: number;
-  content?: string;
-  attachmentId?: string;
-  // Enum: user | assistant | system
-  authorKind: string;
-  authorId?: string;
-  note?: string;
-  parentVersionId?: string;
-  producedByRunId?: string;
-  partitionId?: string;
-}
-
-export function buildAppendDocumentVersion(args: AppendDocumentVersionArgs): string {
-  const parts: string[] = [];
-  parts.push("versionId: " + renderMemQLValue(args.versionId));
-  parts.push("documentId: " + renderMemQLValue(args.documentId));
-  parts.push("versionNumber: " + renderMemQLValue(args.versionNumber));
-  if (args.content !== undefined) parts.push("content: " + renderMemQLValue(args.content));
-  if (args.attachmentId !== undefined) parts.push("attachmentId: " + renderMemQLValue(args.attachmentId));
-  parts.push("authorKind: " + renderMemQLValue(args.authorKind));
-  if (args.authorId !== undefined) parts.push("authorId: " + renderMemQLValue(args.authorId));
-  if (args.note !== undefined) parts.push("note: " + renderMemQLValue(args.note));
-  if (args.parentVersionId !== undefined) parts.push("parentVersionId: " + renderMemQLValue(args.parentVersionId));
-  if (args.producedByRunId !== undefined) parts.push("producedByRunId: " + renderMemQLValue(args.producedByRunId));
-  if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  return "mutation appendDocumentVersion(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    appendDocumentVersion(args: AppendDocumentVersionArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.appendDocumentVersion = function (this: QueryClient, args: AppendDocumentVersionArgs = {} as AppendDocumentVersionArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("appendDocumentVersion", buildAppendDocumentVersion(args), opts);
-};
-
 /** Record that a Library file has been trained into a knowledge domain (design D7 -- upload and train are two acts, and this is where the second one is written down). Takes the FULL merged list rather than a single id: MemQL has no array append, and a caller sending only the new member would clobber whatever another agent added concurrently -- the same reason the artifact label capabilities merge in Go and write back. libraryTrainFile reads the current list, adds the domain if it is not already there, and calls this; adding a domain twice writes nothing new. */
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["appendLibraryFileTrainedDomain"] in generated_concepts.ts).
 export interface AppendLibraryFileTrainedDomainArgs {
@@ -1915,6 +1872,7 @@ export interface CreateComposeRecipeArgs {
   sourceSelectors?: Record<string, unknown>[];
   templateId?: string;
   format: string;
+  outputKind?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -1927,6 +1885,7 @@ export function buildCreateComposeRecipe(args: CreateComposeRecipeArgs): string 
   if (args.sourceSelectors !== undefined) parts.push("sourceSelectors: " + renderMemQLValue(args.sourceSelectors));
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   parts.push("format: " + renderMemQLValue(args.format));
+  if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation createComposeRecipe(" + parts.join(", ") + ")";
@@ -7956,6 +7915,7 @@ export interface UpdateComposeRecipeArgs {
   sourceSelectors?: Record<string, unknown>[];
   templateId?: string;
   format?: string;
+  outputKind?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -7968,6 +7928,7 @@ export function buildUpdateComposeRecipe(args: UpdateComposeRecipeArgs): string 
   if (args.sourceSelectors !== undefined) parts.push("sourceSelectors: " + renderMemQLValue(args.sourceSelectors));
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
+  if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation updateComposeRecipe(" + parts.join(", ") + ")";
@@ -8116,50 +8077,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateEmailRule = function (this: QueryClient, args: UpdateEmailRuleArgs = {} as UpdateEmailRuleArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateEmailRule", buildUpdateEmailRule(args), opts);
-};
-
-/** Re-insert a generatedOutput row (same id, new version) carrying the latest edited content so the Library viewer + artifact index reflect the most recent document version. Append-only by (id, createdAt): a new node version, reads return the latest. Handler-invoked by integration.library.editDocument / restoreDocumentVersion; ownerUserId is stamped from actor.userId, and both handlers run the write under the existing row's owner. */
-// Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["updateGeneratedOutputContent"] in generated_concepts.ts).
-export interface UpdateGeneratedOutputContentArgs {
-  outputId: string;
-  title: string;
-  summary?: string;
-  body?: string;
-  attachmentId?: string;
-  // Enum: markdown | document | pdf | spreadsheet | image | text | other
-  format?: string;
-  mimeType?: string;
-  // Enum: workbench_generated | computer_use | agent_generated | derived | user_created
-  source: string;
-  partitionId?: string;
-  producedByRunId?: string;
-  producedByAgentId?: string;
-}
-
-export function buildUpdateGeneratedOutputContent(args: UpdateGeneratedOutputContentArgs): string {
-  const parts: string[] = [];
-  parts.push("outputId: " + renderMemQLValue(args.outputId));
-  parts.push("title: " + renderMemQLValue(args.title));
-  if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
-  if (args.body !== undefined) parts.push("body: " + renderMemQLValue(args.body));
-  if (args.attachmentId !== undefined) parts.push("attachmentId: " + renderMemQLValue(args.attachmentId));
-  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
-  if (args.mimeType !== undefined) parts.push("mimeType: " + renderMemQLValue(args.mimeType));
-  parts.push("source: " + renderMemQLValue(args.source));
-  if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
-  if (args.producedByRunId !== undefined) parts.push("producedByRunId: " + renderMemQLValue(args.producedByRunId));
-  if (args.producedByAgentId !== undefined) parts.push("producedByAgentId: " + renderMemQLValue(args.producedByAgentId));
-  return "mutation updateGeneratedOutputContent(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    updateGeneratedOutputContent(args: UpdateGeneratedOutputContentArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.updateGeneratedOutputContent = function (this: QueryClient, args: UpdateGeneratedOutputContentArgs = {} as UpdateGeneratedOutputContentArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("updateGeneratedOutputContent", buildUpdateGeneratedOutputContent(args), opts);
 };
 
 /** Update an identity record. Read-merges the existing row (update()): only the fields in `payload` change; every omitted field (identityType discriminator, credentials, label, active, usableByAgents) inherits from the persisted row instead of being wiped (memql#1628 class). The row must already exist (use createIdentity to create). */

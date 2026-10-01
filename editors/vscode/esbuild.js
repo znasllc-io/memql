@@ -27,8 +27,7 @@ const fs = require("fs");
 // exactly the kind of stray content finding 4 asked to prune.
 fs.rmSync("out", { recursive: true, force: true });
 
-esbuild
-  .build({
+Promise.all([esbuild.build({
     entryPoints: ["src/extension.ts"],
     bundle: true,
     outfile: "out/extension.js",
@@ -38,7 +37,11 @@ esbuild
     external: ["vscode"],
     sourcemap: true,
     logLevel: "info",
-  })
+  }), esbuild.build({
+    entryPoints: ["src/webExtension.ts"], bundle: true, outfile: "out/webExtension.js",
+    platform: "browser", format: "cjs", target: "es2022", external: ["vscode"],
+    sourcemap: true, logLevel: "info", metafile: true,
+  }).then(result => fs.writeFileSync("out/web-meta.json", JSON.stringify(result.metafile)))])
   .catch((err) => {
     console.error(err);
     process.exit(1);

@@ -194,7 +194,7 @@ test("the training lens offers the four actions, and each one is contributed AND
     activation?.text.includes("registerCommand(COMMAND_REBUILD") === true,
     "memql.deployments.rebuildFromCheckout is contributed but never registered in extension.ts",
   );
-  assert.equal(palette.get("memql.deployments.rebuildFromCheckout"), "isWorkspaceTrusted");
+  assert.equal(palette.get("memql.deployments.rebuildFromCheckout"), "!isWeb && (isWorkspaceTrusted)");
 
   // The fifth is the status bar's click-through (design §4). It IS in the
   // palette, and the difference is exactly why it can be: it navigates and
@@ -204,7 +204,7 @@ test("the training lens offers the four actions, and each one is contributed AND
     activation?.text.includes("registerCommand(COMMAND_SHOW_LIST") === true,
     "the click-through is contributed but never registered in extension.ts",
   );
-  assert.equal(palette.get("memql.training.showList"), "isWorkspaceTrusted");
+  assert.equal(palette.get("memql.training.showList"), "!isWeb && (isWorkspaceTrusted)");
 });
 
 test("the status-bar item posts the click-through, and the list is not a second read", () => {

@@ -61,7 +61,7 @@ const welcomes = manifest.contributes.viewsWelcome;
 const GATED = ["memqlConstructs", "memqlData"] as const;
 
 function welcomeFor(view: string): WelcomeEntry[] {
-  return welcomes.filter((entry) => entry.view === view);
+  return welcomes.filter((entry) => entry.view === view && !(entry.when ?? "").startsWith("isWeb")).map(entry => ({ ...entry, when: entry.when?.replace(/^!isWeb && \((.*)\)$/, "$1") }));
 }
 
 /** The command ids a welcome's markdown links reach. */
@@ -253,4 +253,12 @@ test("every welcome names a view that exists and a command that is contributed",
       assert.ok(commands.has(command), `${entry.view}'s welcome links uncontributed ${command}`);
     }
   }
+});
+
+
+test("browser welcome connects without offering a native installation", () => {
+  const browser = welcomes.filter(entry => entry.view === "memqlClusters" && entry.when?.startsWith("isWeb"));
+  assert.equal(browser.length, 1);
+  assert.deepEqual(linkedCommands(browser[0].contents), ["memql.clusters.add"]);
+  for (const entry of welcomes.filter(entry => entry.contents.includes("Install Local Cluster"))) assert.match(entry.when ?? "", /!isWeb/);
 });

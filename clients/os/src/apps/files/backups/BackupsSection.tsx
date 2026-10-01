@@ -74,8 +74,8 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
       files.map((raw) => {
         const row = flatten(raw);
         return {
-          uploadedFromWorkerId: rowString(row, "uploadedFromWorkerId"),
-          uploadedFromPath: rowString(row, "uploadedFromPath"),
+          uploadedFromWorkerId: rowString(row, "backupWorkerId") || rowString(row, "uploadedFromWorkerId"),
+          uploadedFromPath: rowString(row, "backupPath") || rowString(row, "uploadedFromPath"),
           state: linkStateOf(raw),
         };
       }),

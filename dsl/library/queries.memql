@@ -396,8 +396,8 @@ query file libraryFileByUploadedFrom {
     path      string!
   }
   filter  row => row.ownerUserId == actor.userId
-              && (args.workerId == nil || row.uploadedFromWorkerId == args.workerId)
-              && (args.path == nil || row.uploadedFromPath == args.path)
+              && (args.workerId == nil || (row.backupWorkerId == args.workerId || ((row.backupWorkerId == nil || row.backupWorkerId == "") && row.uploadedFromWorkerId == args.workerId)))
+              && (args.path == nil || (row.backupPath == args.path || ((row.backupPath == nil || row.backupPath == "") && row.uploadedFromPath == args.path)))
               && row.archived != true
   shape   libraryFileFull
 }
@@ -694,4 +694,29 @@ query watchedFolder libraryWatchedFolders {
               && (args.workerId == nil || row.workerId == args.workerId)
               && row.archived != true
   shape   watchedFolderFull
+}
+
+/// The review capability checks current artifact access before reading comments.
+/// An actor.userId filter alone cannot recheck the backing document's current access;
+/// the capability must authorize that document before entering this store read.
+@serverOnly
+@actor
+query documentComment documentCommentsForArtifact {
+  args { artifactId string! }
+  filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true) && row.artifactId == args.artifactId
+  shape documentCommentFull
+  sort "row.createdAt", "desc"
+  paginate 501
+}
+
+/// Exact receipt lookup for an idempotent feedback submission.
+/// Scoping to actor.userId alone does not recheck current access to the backing
+/// document. The review capability verifies it before looking up the receipt.
+@serverOnly
+@unbounded("exact comment receipt by id, after artifact authorization")
+@actor
+query documentComment documentCommentById {
+  args { commentId string! }
+  filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true) && row.id == args.commentId
+  shape documentCommentFull
 }

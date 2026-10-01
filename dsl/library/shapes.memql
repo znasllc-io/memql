@@ -136,6 +136,8 @@ shape file libraryFileFull {
   versionNumber
   versionUploadedAt
   row.createdAt
+  backupWorkerId
+  backupPath
 }
 
 /// Full projection of one superseded version of a Library file (epic memql#4806). Backs
@@ -210,6 +212,7 @@ shape uploadSession uploadSessionFull {
   targetArtifactId
   status
   row.createdAt
+  expectedVersion
 }
 
 /// The quota projection of an upload session: the declared size, and nothing a sum does not need.
@@ -264,5 +267,20 @@ shape watchedFolder watchedFolderFull {
   lastSweepError
   filesSeen
   bytesSeen
+  row.createdAt
+}
+
+/// Document feedback with its immutable source revision and author.
+@row
+shape documentComment documentCommentFull {
+  row.id
+  ownerUserId
+  artifactId
+  authorUserId
+  revision
+  versionNumber
+  anchor
+  body
+  requestId
   row.createdAt
 }

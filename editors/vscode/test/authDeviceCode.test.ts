@@ -33,6 +33,7 @@ import {
   issuedClientSecretKey,
   persistSignIn,
   refreshTokenSecretKey,
+  accessTokenSecretKey,
   type SecretStore,
 } from "../src/auth/store.js";
 import { WELL_KNOWN_CLIENT_ID } from "../src/auth/wellKnownClient.js";
@@ -598,7 +599,8 @@ test("device tokens go into the same store the loopback path uses", async () => 
   );
 
   assert.equal(secrets.get(refreshTokenSecretKey("local")), "REFRESH");
-  assert.equal(writes[0]?.token, "ACCESS");
+  assert.equal(writes[0]?.token, "");
+  assert.equal(secrets.get(accessTokenSecretKey("local")), "ACCESS");
   assert.equal(writes[0]?.refreshToken, "", "the plaintext copy is cleared once custody is taken");
   assert.equal("clientId" in (writes[0] ?? {}), false, "the shared file's client_id belongs to another tool");
   assert.equal(secrets.get(issuedClientSecretKey("local")), WELL_KNOWN_CLIENT_ID);

@@ -43,6 +43,7 @@ type materializeArgs struct {
 	Name           string
 	Statement      string
 	Format         pure.Format
+	OutputKind     string
 	Sources        []SourceRef
 	Draft          string
 	TemplateId     string
@@ -78,6 +79,7 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 		FolderId:       strings.TrimSpace(stringOf(args["folderId"])),
 		DeployableKind: strings.TrimSpace(stringOf(args["deployableKind"])),
 		RecipeId:       strings.TrimSpace(stringOf(args["recipeId"])),
+		OutputKind:     strings.TrimSpace(stringOf(args["outputKind"])),
 		AccountIds:     stringList(args["accountIds"]),
 	}
 	if out.Name == "" {
@@ -88,6 +90,12 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 		return out, err
 	}
 	out.Format = format
+	if out.OutputKind != "" && out.OutputKind != "email_template" {
+		return out, errors.New("compose: unsupported outputKind")
+	}
+	if out.OutputKind == "email_template" && (format != pure.FormatJSON || out.DeployableKind != "") {
+		return out, errors.New("compose: email templates require format json and no deployable kind")
+	}
 	if out.DeployableKind != "" {
 		if _, err := pure.ParseDeployableKind(out.DeployableKind); err != nil {
 			return out, err
@@ -119,6 +127,22 @@ func stableMaterializeID(parts ...string) string {
 }
 
 func (i *Integration) materialize(ctx context.Context, userId, userEmail string, a materializeArgs) (map[string]any, error) {
+	ctx = memql.ContextWithFreshRead(ctx)
+	if a.OutputKind != "" && (a.OutputKind != "email_template" || a.Format != pure.FormatJSON || a.DeployableKind != "") {
+		return nil, errors.New("compose: email_template requires json format and no deployable kind")
+	}
+	if a.OutputKind == "email_template" {
+		if len(a.AccountIds) != 1 || strings.TrimSpace(a.AccountIds[0]) == "" {
+			return nil, errors.New("compose: choose one organization for this email template")
+		}
+		account, err := one(i.store().query(ctx, "query "+call("accountById", map[string]any{"accountId": a.AccountIds[0]})))
+		if err != nil {
+			return nil, err
+		}
+		if account == nil || stringOf(account["status"]) != "active" {
+			return nil, errors.New("compose: this organization is not active or accessible to you")
+		}
+	}
 	rc, nested := common.RunFromContext(ctx)
 	nested = nested && rc.RunId != "" && rc.GoalId != ""
 	compositionId := id.NewShortId()
@@ -152,6 +176,9 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	if err != nil {
 		return nil, fmt.Errorf("compose: the sources could not be read: %w", err)
 	}
+	if err := i.captureSourceContents(ctx, resolved); err != nil {
+		return nil, err
+	}
 	request := executionRequest{Args: a, Resolved: resolved, Started: i.clock().UTC()}
 	raw, err := json.Marshal(request)
 	if err != nil {
@@ -176,6 +203,7 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	if err := i.store().createComposition(ctx, map[string]any{
 		"compositionId": compositionId, "name": a.Name, "statement": a.Statement,
 		"format": string(a.Format), "sources": rowSources(resolved),
+		"outputKind": a.OutputKind,
 		"templateId": a.TemplateId, "folderId": a.FolderId, "accountIds": stringsOrNil(a.AccountIds),
 		"goalId": goalId, "runId": runId, "recipeId": a.RecipeId, "deployableKind": a.DeployableKind,
 	}); err != nil {
@@ -427,6 +455,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 		reply, cerr := composer.Compose(ctx, ComposeRequest{
 			Statement:    a.Statement,
 			Format:       a.Format,
+			OutputKind:   a.OutputKind,
 			Sources:      i.narrowed(resolved),
 			TemplateName: templateName,
 			TemplateBody: templateBody,
@@ -457,7 +486,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 	// from prose, and a composer that returned none is not an error --
 	// it means the draft's body was the interesting part and the rows
 	// are the sources'.
-	if (a.Format == pure.FormatCSV || a.Format == pure.FormatJSON) && len(draft.Rows) == 0 {
+	if a.OutputKind == "" && (a.Format == pure.FormatCSV || a.Format == pure.FormatJSON) && len(draft.Rows) == 0 {
 		draft.Header, draft.Rows = tabularRows(resolved)
 	}
 
@@ -487,7 +516,9 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 	}
 
 	var rendered pure.Result
-	if a.DeployableKind != "" {
+	if a.OutputKind == "email_template" {
+		rendered, err = pure.RenderEmailTemplate(draft.Body)
+	} else if a.DeployableKind != "" {
 		rendered, err = i.renderDeployable(a, draft, prov)
 	} else {
 		rendered, err = pure.Render(a.Format, draft, prov)
@@ -503,6 +534,9 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 	// --- step 5: file ---
 	fileId := stableMaterializeID("materialized-file", compositionId)
 	fileName := outputFileName(a.Name, a.Format, a.DeployableKind)
+	if a.OutputKind == "email_template" {
+		fileName = strings.TrimSuffix(fileName, ".json") + ".email.json"
+	}
 	mimeType := a.Format.MimeType()
 	if a.DeployableKind != "" {
 		mimeType = "application/zip"

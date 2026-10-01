@@ -621,7 +621,9 @@ type ComposeMaterializeArgs struct {
 	Statement string
 	// markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.
 	Format string
-	// What to compose from: a list of {kind, ref, label} where kind is concept_row | library_file | query. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.
+	// email_template produces a validated .email.json with subject, editable HTML, and plain-text alternative; requires format json. Empty creates an ordinary document. The result is a draft, never published or sent automatically.
+	OutputKind string
+	// What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.
 	Sources []map[string]any
 	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly.
 	Draft string
@@ -662,6 +664,13 @@ func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
 	}
 	b.WriteString("format: ")
 	b.WriteString(quoteMemQL(args.Format))
+	if args.OutputKind != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("outputKind: ")
+		b.WriteString(quoteMemQL(args.OutputKind))
+	}
 	if args.Sources != nil {
 		if b.Len() > 27 {
 			b.WriteString(", ")
@@ -1058,7 +1067,7 @@ func DecideApprovalBuild(args DecideApprovalArgs) string {
 	return b.String()
 }
 
-// EditDocument -- Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).
+// EditDocument -- Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. The caller retains their own authority for reads and writes. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231).
 type EditDocumentArgs struct {
 	DocumentId   string
 	Content      string
@@ -1067,6 +1076,7 @@ type EditDocumentArgs struct {
 	// Enum: user | assistant | system
 	AuthorKind       string
 	AuthorId         string
+	ExpectedRevision string
 	ExpectedVersion  int
 	ProducedByPlanId string
 	PartitionId      string
@@ -1117,6 +1127,13 @@ func EditDocumentBuild(args EditDocumentArgs) string {
 		}
 		b.WriteString("authorId: ")
 		b.WriteString(quoteMemQL(args.AuthorId))
+	}
+	if args.ExpectedRevision != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
 	}
 	if args.ExpectedVersion != 0 {
 		if b.Len() > 21 {
@@ -1905,6 +1922,76 @@ func LibraryAddArtifactLabelBuild(args LibraryAddArtifactLabelArgs) string {
 	}
 	b.WriteString("label: ")
 	b.WriteString(quoteMemQL(args.Label))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryAddDocumentComment -- Save feedback against the exact saved revision. A repeated requestId returns the original receipt; changed content under that requestId is refused.
+type LibraryAddDocumentCommentArgs struct {
+	ArtifactId       string
+	ExpectedVersion  int
+	ExpectedRevision string
+	Anchor           map[string]any
+	Body             string
+	RequestId        string
+}
+
+// LibraryAddDocumentComment calls the engine builtin libraryAddDocumentComment.
+func (qc *QueryClient) LibraryAddDocumentComment(ctx context.Context, args LibraryAddDocumentCommentArgs) (*Result, error) {
+	call := LibraryAddDocumentCommentBuild(args)
+	return qc.executeNamed(ctx, "libraryAddDocumentComment", call)
+}
+
+func LibraryAddDocumentCommentBuild(args LibraryAddDocumentCommentArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryAddDocumentComment(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedVersion: ")
+	b.WriteString(fmt.Sprintf("%v", args.ExpectedVersion))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("anchor: ")
+	b.WriteString(renderMemQLValue(args.Anchor))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("body: ")
+	b.WriteString(quoteMemQL(args.Body))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryDocumentReview -- Read revision-bound feedback after checking current access to the artifact.
+type LibraryDocumentReviewArgs struct {
+	ArtifactId string
+}
+
+// LibraryDocumentReview calls the engine builtin libraryDocumentReview.
+func (qc *QueryClient) LibraryDocumentReview(ctx context.Context, args LibraryDocumentReviewArgs) (*Result, error) {
+	call := LibraryDocumentReviewBuild(args)
+	return qc.executeNamed(ctx, "libraryDocumentReview", call)
+}
+
+func LibraryDocumentReviewBuild(args LibraryDocumentReviewArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryDocumentReview(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
 	b.WriteString(")")
 	return b.String()
 }

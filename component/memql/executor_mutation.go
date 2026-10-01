@@ -760,6 +760,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 	}
 
+	// Review authorship and revision are server attestations. Named mutation
+	// annotations alone do not cover raw insert/update calls.
+	if conceptMeta.Name == "v1:library:documentComment" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("document feedback requires internal origin from the revision-checked review capability")
+	}
+
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {
 		return nil, meta, fmt.Errorf("mutation payload is required")

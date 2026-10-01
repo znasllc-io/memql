@@ -91,6 +91,9 @@ func (a *App) wireComposeIntegration(uploader server.FileUploader, container str
 	// so "where materialized bytes live" and "where uploaded bytes live"
 	// cannot drift apart.
 	if uploader != nil && strings.TrimSpace(container) != "" {
+		if reader, ok := uploader.(composeint.SourceDownloader); ok {
+			integ.SetSourceDownloader(reader)
+		}
 		if up, ok := uploader.(composeint.Uploader); ok {
 			integ.SetUploader(up, container)
 		} else {

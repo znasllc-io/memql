@@ -622,6 +622,8 @@ jobs:
               # Editor palette tests compare against the authoritative brand.
               - 'brand/tokens.css'
               - 'editors/vscode/**'
+              - 'editors/productivity/**'
+              - 'editors/README.md'
               - 'cmd/memql-lsp/**'
               - 'scripts/vscode/**'
               - 'sdk/ts/**'
@@ -2154,6 +2156,64 @@ jobs:
           MEMQL_VSCODE_VERSION: ${{ matrix.vscode }}
         run: bash scripts/vscode/host-test.sh --skip-deps
 
+  productivity-extension-host:
+    name: productivity-extension-host (${{ matrix.os }}, ${{ matrix.host }}, ${{ matrix.version }})
+    timeout-minutes: 25
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.vscode == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, host: web, version: stable }
+          - { os: macos-latest, host: web, version: stable }
+          - { os: ubuntu-latest, host: desktop, version: stable }
+          - { os: macos-latest, host: desktop, version: stable }
+          - { os: ubuntu-latest, host: desktop, version: '1.91.0' }
+          - { os: macos-latest, host: desktop, version: '1.91.0' }
+    env:
+      MEMQL_VSCODE_VERSION: ${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            editors/vscode/package-lock.json
+            editors/productivity/package-lock.json
+      - name: build shared SDKs
+        run: bash scripts/vscode/deps.sh
+      - name: build and test both extensions
+        run: |
+          npm ci --no-audit --no-fund --prefix editors/vscode
+          npm ci --no-audit --no-fund --prefix editors/productivity
+          npm --prefix editors/vscode run compile
+          npm --prefix editors/productivity run compile
+          npm --prefix editors/productivity test
+      - name: browser runtime dependencies
+        if: matrix.host == 'web'
+        working-directory: editors/vscode
+        run: npx playwright install --with-deps chromium
+      - name: desktop runtime dependencies
+        if: runner.os == 'Linux' && matrix.host == 'desktop'
+        run: |
+          scripts/ci/retry.sh -- timeout 120 sudo apt-get update
+          scripts/ci/retry.sh -- timeout 300 sudo apt-get install -y xvfb libnss3 libgbm1 libxkbfile1 libsecret-1-0 libasound2t64
+      - name: browser host
+        if: matrix.host == 'web'
+        run: node editors/productivity/test/runner.cjs
+      - name: Linux desktop host
+        if: runner.os == 'Linux' && matrix.host == 'desktop'
+        run: xvfb-run -a node editors/productivity/test/runner.cjs --desktop
+      - name: macOS desktop host
+        if: runner.os == 'macOS' && matrix.host == 'desktop'
+        run: node editors/productivity/test/runner.cjs --desktop
+      - name: package Productivity Tools with desktop and web entry points
+        if: matrix.host == 'web' && runner.os == 'Linux'
+        run: npm --prefix editors/productivity run package
+
   # THE lane that makes the module boundary real (memql#3240, design D3).
   #
   # A `go.work` does NOT enforce the boundary. Under workspace mode a module
@@ -2406,6 +2466,7 @@ jobs:
       - proving
       - vscode-extension
       - vscode-extension-host
+      - productivity-extension-host
       - module-boundaries
       - bash32-smoke
     runs-on: ubuntu-latest

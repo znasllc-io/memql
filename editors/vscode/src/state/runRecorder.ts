@@ -15,7 +15,7 @@
 // and the run log is where that fact has to still be true when somebody reads
 // the history a week later.
 //
-// EVENTS ARE FOLDED, NOT QUEUED. Each one rewrites the whole document through
+// EVENTS ARE SERIALIZED IN EMISSION ORDER. Each one rewrites the whole document through
 // runLog's atomic write, so a run killed at any point leaves a record naming
 // exactly the steps that completed. That is the property the file format exists
 // for, and it only holds if the write happens per event rather than at the end.
@@ -63,6 +63,7 @@ export interface RunRecorderOptions {
 export class RunRecorder {
   private run: Run;
   private lastError_ = "";
+  private pending: Promise<void> = Promise.resolve();
   // When each step STARTED, by step id. `recordRunItem` replaces an item
   // wholesale, so the start written by `stepStarted` would otherwise be lost
   // the moment the finish lands -- and with it the only exact duration the
@@ -264,12 +265,11 @@ export class RunRecorder {
     return this.run;
   }
 
-  private async guard(work: () => Promise<void>): Promise<void> {
-    try {
-      await work();
-    } catch (err) {
+  private guard(work: () => Promise<void>): Promise<void> {
+    this.pending = this.pending.then(work).catch((err: unknown) => {
       this.lastError_ = err instanceof Error ? err.message : String(err);
-    }
+    });
+    return this.pending;
   }
 }
 

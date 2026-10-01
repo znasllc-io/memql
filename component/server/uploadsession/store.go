@@ -59,6 +59,7 @@ type CreateParams struct {
 	// than creates, and FileId above is that artifact's EXISTING file id.
 	// Blank is the ordinary fresh upload.
 	TargetArtifactId string
+	ExpectedVersion  int
 }
 
 // Row is the projection the chunk / inventory / complete handlers decide on.
@@ -77,6 +78,7 @@ type Row struct {
 	FileId                 string
 	ChunkSize              int64
 	TargetArtifactId       string
+	ExpectedVersion        int
 	Status                 string
 }
 
@@ -123,6 +125,7 @@ func (s *Store) Create(ctx context.Context, p CreateParams) error {
 	}
 	if v := strings.TrimSpace(p.TargetArtifactId); v != "" {
 		args["targetArtifactId"] = v
+		args["expectedVersion"] = p.ExpectedVersion
 	}
 	return s.executeServerOnly(ctx, "createUploadSession", args)
 }
@@ -173,6 +176,7 @@ func (s *Store) ByID(ctx context.Context, uploadId string) (*Row, error) {
 		ChunkSize:              fieldInt64(r, "chunkSize"),
 		TargetArtifactId:       fieldString(r, "targetArtifactId"),
 		Status:                 fieldString(r, "status"),
+		ExpectedVersion:        num.ClampInt64(fieldInt64(r, "expectedVersion")),
 	}, nil
 }
 

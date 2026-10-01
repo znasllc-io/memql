@@ -710,3 +710,23 @@ test("a version that is not release-shaped is still recorded verbatim", async ()
   const parsed = await readClustersFile(f);
   assert.equal(parsed.clusters[0]?.version, "0.15.0-1737072000");
 });
+
+test("concurrent registry additions retain every entry and its unknown fields", async () => {
+  const file = await tempFile("editor_setting: keep\nclusters: []\n");
+  await Promise.all(Array.from({ length: 8 }, (_, i) => addCluster(file, { name: `client${i}`, endpoint: `https://api.client${i}.example` })));
+  const result = await readClustersFile(file);
+  assert.equal(result.clusters.length, 8);
+  assert.equal(new Set(result.clusters.map(c => c.name)).size, 8);
+  assert.match(await fs.readFile(file, "utf8"), /editor_setting: keep/);
+  assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+});
+
+test("two simultaneous adds of one name never replace the winner", async () => {
+  const file = await tempFile("clusters: []\n");
+  const outcomes = await Promise.allSettled([
+    addCluster(file, { name: "client", endpoint: "https://api.first.example" }),
+    addCluster(file, { name: "client", endpoint: "https://api.second.example" }),
+  ]);
+  assert.equal(outcomes.filter(o => o.status === "fulfilled").length, 1);
+  assert.equal((await readClustersFile(file)).clusters.length, 1);
+});

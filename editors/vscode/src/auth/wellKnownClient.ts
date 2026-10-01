@@ -46,7 +46,7 @@
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
-import { CALLBACK_PATH, LOOPBACK_HOST } from "./loopback.js";
+import { CALLBACK_PATH, LOOPBACK_HOST } from "./loopbackAddress.js";
 
 /**
  * The client_id this extension authorizes with, on every cluster.

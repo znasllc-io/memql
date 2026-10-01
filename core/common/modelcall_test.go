@@ -52,6 +52,7 @@ func TestHashIgnoresToolOrder(t *testing.T) {
 func TestEveryRequestFieldChangesTheHash(t *testing.T) {
 	base := baseRequest().Hash()
 	cases := map[string]func(*ModelRequest){
+		"image content":   func(r *ModelRequest) { r.Images = []VisionContent{{MimeType: "image/png", Data: []byte("reference")}} },
 		"provider":        func(r *ModelRequest) { r.Provider = "chat54Pro" },
 		"model":           func(r *ModelRequest) { r.Model = "gpt-5.4" },
 		"a setting value": func(r *ModelRequest) { r.Settings["temperature"] = 0.9 },

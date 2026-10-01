@@ -502,7 +502,9 @@ export interface ComposeMaterializeArgs {
   statement?: string;
   /** markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of. */
   format: string;
-  /** What to compose from: a list of {kind, ref, label} where kind is concept_row | library_file | query. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each. */
+  /** email_template produces a validated .email.json with subject, editable HTML, and plain-text alternative; requires format json. Empty creates an ordinary document. The result is a draft, never published or sent automatically. */
+  outputKind?: string;
+  /** What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each. */
   sources?: Record<string, unknown>[];
   /** A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly. */
   draft?: string;
@@ -525,6 +527,7 @@ export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
   parts.push("name: " + renderMemQLValue(args.name));
   if (args.statement !== undefined) parts.push("statement: " + renderMemQLValue(args.statement));
   parts.push("format: " + renderMemQLValue(args.format));
+  if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
   if (args.sources !== undefined) parts.push("sources: " + renderMemQLValue(args.sources));
   if (args.draft !== undefined) parts.push("draft: " + renderMemQLValue(args.draft));
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
@@ -835,7 +838,7 @@ QueryClient.prototype.decideApproval = function (this: QueryClient, args: Decide
   return this.executeNamed("decideApproval", buildDecideApproval(args), opts);
 };
 
-/** Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. ownerUserId is threaded from the document row, never the caller. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231). */
+/** Append a new version of a Library document with new content. Reads the current latest version, computes the next versionNumber + parentVersionId, appends an immutable v1:library:documentVersion snapshot (authorKind=user|assistant) and re-inserts the backing generatedOutput so the Library viewer reflects the edit. Optimistic concurrency via expectedVersion. The caller retains their own authority for reads and writes. Backs both the user edit (memql#1229) and the assistant editDocument tool (memql#1231). */
 export interface EditDocumentArgs {
   documentId: string;
   content?: string;
@@ -844,6 +847,7 @@ export interface EditDocumentArgs {
   // Enum: user | assistant | system
   authorKind?: string;
   authorId?: string;
+  expectedRevision?: string;
   expectedVersion?: number;
   producedByPlanId?: string;
   partitionId?: string;
@@ -857,6 +861,7 @@ export function buildEditDocument(args: EditDocumentArgs): string {
   if (args.note !== undefined) parts.push("note: " + renderMemQLValue(args.note));
   if (args.authorKind !== undefined) parts.push("authorKind: " + renderMemQLValue(args.authorKind));
   if (args.authorId !== undefined) parts.push("authorId: " + renderMemQLValue(args.authorId));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
   if (args.expectedVersion !== undefined) parts.push("expectedVersion: " + renderMemQLValue(args.expectedVersion));
   if (args.producedByPlanId !== undefined) parts.push("producedByPlanId: " + renderMemQLValue(args.producedByPlanId));
   if (args.partitionId !== undefined) parts.push("partitionId: " + renderMemQLValue(args.partitionId));
@@ -1561,6 +1566,58 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryAddArtifactLabel = function (this: QueryClient, args: LibraryAddArtifactLabelArgs = {} as LibraryAddArtifactLabelArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryAddArtifactLabel", buildLibraryAddArtifactLabel(args), opts);
+};
+
+/** Save feedback against the exact saved revision. A repeated requestId returns the original receipt; changed content under that requestId is refused. */
+export interface LibraryAddDocumentCommentArgs {
+  artifactId: string;
+  expectedVersion: number;
+  expectedRevision: string;
+  anchor: Record<string, unknown>;
+  body: string;
+  requestId: string;
+}
+
+export function buildLibraryAddDocumentComment(args: LibraryAddDocumentCommentArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("expectedVersion: " + renderMemQLValue(args.expectedVersion));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  parts.push("anchor: " + renderMemQLValue(args.anchor));
+  parts.push("body: " + renderMemQLValue(args.body));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin libraryAddDocumentComment(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryAddDocumentComment(args: LibraryAddDocumentCommentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryAddDocumentComment = function (this: QueryClient, args: LibraryAddDocumentCommentArgs = {} as LibraryAddDocumentCommentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryAddDocumentComment", buildLibraryAddDocumentComment(args), opts);
+};
+
+/** Read revision-bound feedback after checking current access to the artifact. */
+export interface LibraryDocumentReviewArgs {
+  artifactId: string;
+}
+
+export function buildLibraryDocumentReview(args: LibraryDocumentReviewArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "builtin libraryDocumentReview(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryDocumentReview(args: LibraryDocumentReviewArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryDocumentReview = function (this: QueryClient, args: LibraryDocumentReviewArgs = {} as LibraryDocumentReviewArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryDocumentReview", buildLibraryDocumentReview(args), opts);
 };
 
 /** Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel. */

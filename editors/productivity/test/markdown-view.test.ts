@@ -1,0 +1,30 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { JSDOM } from "jsdom";
+import { renderMarkdown } from "../src/markdown.js";
+
+test("rendered passage selection sends a revision-bound comment and comments render as text", () => {
+  const dom = new JSDOM('<section id="content"></section><section id="comments"></section><div id="status"></div><textarea id="feedback"></textarea><button id="add"></button><button id="source"></button><button id="split"></button><button id="refresh"></button><blockquote id="selected"></blockquote>', {runScripts: "outside-only"});
+  const messages: Record<string, unknown>[] = [];
+  Object.assign(dom.window, { acquireVsCodeApi: () => ({postMessage: (message: Record<string,unknown>) => messages.push(message), getState: () => undefined, setState: () => {}}) });
+  dom.window.eval(readFileSync("dist-test/markdown-view.js", "utf8"));
+  const send = (data: unknown) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", {data}));
+  send({type:"document", html:renderMarkdown("# A title\n\nReview **this section**.\n"),version:17,connected:true,status:""});
+  const doc=dom.window.document;
+  const range=doc.createRange(); range.selectNodeContents(doc.querySelector("strong")!);
+  dom.window.getSelection()!.removeAllRanges(); dom.window.getSelection()!.addRange(range);
+  doc.dispatchEvent(new dom.window.Event("selectionchange"));
+  (doc.getElementById("feedback") as HTMLTextAreaElement).value="Clarify this section.";
+  doc.getElementById("add")!.click();
+  const comment=messages.find(m=>m.type==="comment");
+  assert.equal(comment?.version,17);
+  assert.deepEqual(JSON.parse(JSON.stringify(comment?.selection)),{startBlock:1,endBlock:1,startTextOffset:7,endTextOffset:19,startLine:2,endLine:3,quote:"this section"});
+  assert.equal(comment?.body,"Clarify this section.");
+  send({type:"comments",rows:[{authorUserId:"person",anchor:{quote:"<img src=x>"},body:"<script>steal()</script>",outdated:true}]});
+  assert.equal(doc.querySelectorAll("script,img").length,0);
+  assert.match(doc.getElementById("comments")!.textContent!,/Earlier revision/);
+  send({type:"document",html:renderMarkdown("Unsaved"),version:18,connected:false,status:"Save first"});
+  assert.equal((doc.getElementById("add") as HTMLButtonElement).disabled,true);
+  dom.window.close();
+});
