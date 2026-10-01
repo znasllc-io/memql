@@ -41,7 +41,15 @@ export function editorArtifactURI(domain: string, artifactId: string, name = "do
 }
 
 export function editorArtifactURL(domain: string, artifactId: string, name = "document", preference = readEditorPreference()): string {
-  const resource = editorArtifactURI(domain, artifactId, name);
+  return editorResourceURL(editorArtifactURI(domain, artifactId, name), preference);
+}
+
+export function editorTemplateURL(domain: string, templateId: string, name: string, preference = readEditorPreference()): string {
+  const filename = name.replace(/[\\/\u0000-\u001f\u007f]/g, "_").slice(0, 160) + ".email.json";
+  return editorResourceURL(`memql-file://${encodeURIComponent(domain)}/templates/${encodeURIComponent(templateId)}/${encodeURIComponent(filename)}`, preference);
+}
+
+function editorResourceURL(resource: string, preference: EditorPreference): string {
   if (preference === "browser") {
     // VS Code's web workbench consumes openFile from the startup payload.
     // Only a resource reference travels here. Its file provider authenticates

@@ -224,6 +224,7 @@ func (a *App) engineAndBus() {
 		clusterGuard,
 		a.campaignEmailSender,
 		a.Logger,
+		a.semanticCacheDBGetter(),
 	)
 	a.Dependencies = append(a.Dependencies, campaignWorker)
 	if err := a.engine.RegisterIntegration(campaignWorker); err != nil {

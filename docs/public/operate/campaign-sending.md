@@ -47,6 +47,40 @@ Rule-triggered deliveries name their email rule; they do not invent a campaign
 relationship. Historical records are attributed only when an existing parent
 proves which organization owns them.
 
+## Templates in Productivity Tools
+
+Create a named template in **Campaigns → Templates**, choose its organization,
+then open it in the editor. File content lives in MemQL Productivity Tools:
+**Source**, **Preview**, and **Split** use the same editable document. The OS
+keeps the template list, organization, status, and archive controls. Files
+settings select browser VS Code (the default), desktop VS Code, or Cursor.
+
+**Create from examples** starts a Materializer draft from an image, individual
+files, or an explicitly selected ZIP of resources plus your brief. MemQL reads
+the authorized bytes and produces editable HTML, plain text, and a subject in
+an `.email.json` file. A resource ZIP is inspected only for that explicit
+composition; opening a ZIP in Files still downloads it intact. Private images
+currently inform the design; this flow does not publish private image URLs or
+attach those images to outgoing mail. Review placeholders before publishing.
+
+Use **Use in Campaigns** to save a draft or publish the reviewed template for
+its organization. Publishing makes it available to send; it does not send
+mail. Editing a published template returns it to draft. Concurrent edits fail
+with a comparison prompt, and publishing requires the exact saved revision.
+An existing template cannot be moved to another organization by editing its
+file. Create a separate copy instead.
+
+Newly queued and scheduled sends keep a frozen copy of the ready template
+reviewed at preflight. Later edits do not change those messages. The worker
+still rechecks the caller's authority and the source template's readability.
+Jobs queued before this change have no captured copy and retain their previous
+behavior; pause and recreate those jobs before editing their shared template.
+
+The client write surface is `campaignSaveTemplate`, with `templateId`,
+`accountId`, `name`, `content`, `expectedRevision`, and `action` (`save`,
+`publish`, or `archive`). Its receipt includes the saved revision and status.
+Raw template writes and the underlying create/update mutations are internal.
+
 ## Local test inbox
 
 The local k3d overlay selects the capture email transport automatically. Open

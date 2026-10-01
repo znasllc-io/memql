@@ -61,7 +61,7 @@ func TestRuleDeliveryPersistsOrganizationAndOwnerWithoutFalseCampaign(t *testing
 	execute(owner, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Rule organization")`, langparser.QuoteString(account)))
 	execute(owner, fmt.Sprintf(`mutation createAudience(audienceId: %s, name: "Rule audience", accountId: %s)`, langparser.QuoteString(audience), langparser.QuoteString(account)))
 	execute(owner, fmt.Sprintf(`mutation addRecipient(recipientId: %s, audienceId: %s, email: "recipient@example.test", accountId: %s)`, langparser.QuoteString(recipient), langparser.QuoteString(audience), langparser.QuoteString(account)))
-	execute(owner, fmt.Sprintf(`mutation createTemplate(templateId: %s, name: "Rule template", subject: "Hello", htmlBody: "Hello", textBody: "Hello", accountId: %s)`, langparser.QuoteString(template), langparser.QuoteString(account)))
+	execute(auth.ContextWithInternalOrigin(owner), fmt.Sprintf(`mutation createTemplate(versionTime: "2026-10-01T00:00:00Z", templateId: %s, name: "Rule template", subject: "Hello", htmlBody: "Hello", textBody: "Hello", accountId: %s)`, langparser.QuoteString(template), langparser.QuoteString(account)))
 	execute(owner, fmt.Sprintf(`mutation createEmailRule(emailRuleId: %s, name: "Rule", triggerConcept: "v1:campaigns:recipient", eventKind: "created", templateId: %s, recipientMode: "audience", audienceId: %s, accountId: %s)`, langparser.QuoteString(rule), langparser.QuoteString(template), langparser.QuoteString(audience), langparser.QuoteString(account)))
 	worker := &Worker{store: NewStore(deliveryDBEngine{eng}), logger: quietLogger()}
 	for i := 0; i < 2; i++ {

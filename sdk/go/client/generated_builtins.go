@@ -262,6 +262,64 @@ func CampaignRetireEmailRuleBuild(args CampaignRetireEmailRuleArgs) string {
 	return b.String()
 }
 
+// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.
+type CampaignSaveTemplateArgs struct {
+	// Stable caller-generated template ID; reuse on an uncertain creation response.
+	TemplateId string
+	// Owning organization; immutable after creation.
+	AccountId string
+	// Template name.
+	Name string
+	// The reviewed email file: subject, textBody, htmlBody.
+	Content map[string]any
+	// Exact createdAt from templateById; empty only when creating.
+	ExpectedRevision string
+	// save (default), publish, or archive. Publishing is an explicit human action.
+	Action string
+}
+
+// CampaignSaveTemplate calls the engine builtin campaignSaveTemplate.
+func (qc *QueryClient) CampaignSaveTemplate(ctx context.Context, args CampaignSaveTemplateArgs) (*Result, error) {
+	call := CampaignSaveTemplateBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveTemplate", call)
+}
+
+func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveTemplate(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("content: ")
+	b.WriteString(renderMemQLValue(args.Content))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if args.Action != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("action: ")
+		b.WriteString(quoteMemQL(args.Action))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignScheduleSend -- Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Requires the same organization update permission as starting one by hand.
 type CampaignScheduleSendArgs struct {
 	// The campaign to schedule. The caller needs update permission in its organization.

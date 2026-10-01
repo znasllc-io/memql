@@ -223,6 +223,43 @@ QueryClient.prototype.campaignRetireEmailRule = function (this: QueryClient, arg
   return this.executeNamed("campaignRetireEmailRule", buildCampaignRetireEmailRule(args), opts);
 };
 
+/** Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail. */
+export interface CampaignSaveTemplateArgs {
+  /** Stable caller-generated template ID; reuse on an uncertain creation response. */
+  templateId: string;
+  /** Owning organization; immutable after creation. */
+  accountId: string;
+  /** Template name. */
+  name: string;
+  /** The reviewed email file: subject, textBody, htmlBody. */
+  content: Record<string, unknown>;
+  /** Exact createdAt from templateById; empty only when creating. */
+  expectedRevision: string;
+  /** save (default), publish, or archive. Publishing is an explicit human action. */
+  action?: string;
+}
+
+export function buildCampaignSaveTemplate(args: CampaignSaveTemplateArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("content: " + renderMemQLValue(args.content));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
+  return "builtin campaignSaveTemplate(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSaveTemplate(args: CampaignSaveTemplateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSaveTemplate = function (this: QueryClient, args: CampaignSaveTemplateArgs = {} as CampaignSaveTemplateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSaveTemplate", buildCampaignSaveTemplate(args), opts);
+};
+
 /** Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Requires the same organization update permission as starting one by hand. */
 export interface CampaignScheduleSendArgs {
   /** The campaign to schedule. The caller needs update permission in its organization. */

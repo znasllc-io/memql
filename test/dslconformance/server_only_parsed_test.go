@@ -376,6 +376,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// owner-stamped and a caller can only reach their own rows); what is
 		// missing is that a caller may not perform these transitions AT ALL,
 		// which is what @serverOnly says and a tier cannot.
+		// Template content and readiness share a cross-replica revision gate.
+		// Caller scoping admits authorized writers but cannot enforce that gate;
+		// direct writes could overwrite a concurrent edit or publish stale copy.
+		// campaignSaveTemplate retains the actor and checks organization rights.
+		{Path: "campaigns/mutations.memql", Name: "createTemplate"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "updateTemplate"}:         true,
 		{Path: "campaigns/mutations.memql", Name: "startCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "pauseCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "resumeCampaign"}:         true,

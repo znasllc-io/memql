@@ -1,6 +1,6 @@
 import {
   buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
-  buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment,
+  buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
@@ -22,6 +22,7 @@ export function isZip(name: string, mime = "", bytes?: Uint8Array): boolean {
 export interface OpenDocument {
   resource: Resource; lease: ConnectionLease; content: Uint8Array; mime: string;
   sourceId: string; kind: string; version: number; revision?: string;
+  template?: { name: string; accountId: string; status: string };
 }
 const text = (row: Record<string, unknown>, field: string) => typeof row[field] === "string" ? row[field] as string : "";
 
@@ -30,7 +31,15 @@ export class Documents {
   async read(uri: string): Promise<OpenDocument> {
     const resource = resourceFrom(uri);
     const lease = await this.api.connect(resource.domain);
-    if (resource.kind !== "artifacts") throw new Error("This template link requires the campaign template editor capability.");
+    if (resource.kind === "templates") {
+      const row = (await this.api.execute(lease, "templateById", buildTemplateById({ templateId: resource.id })))[0];
+      if (!row) throw new Error("Template not found or unavailable to your organization.");
+      const revision = text(row, "createdAt");
+      if (!revision) throw new Error("The cluster did not return the template revision.");
+      const content = new TextEncoder().encode(JSON.stringify({ subject: text(row,"subject"), textBody: text(row,"textBody"), htmlBody: text(row,"htmlBody") }, null, 2) + "\n");
+      return { resource, lease, content, mime: "application/json", sourceId: resource.id, kind: "campaign_template", version: 0, revision,
+        template: { name: text(row,"name"), accountId: text(row,"accountId"), status: text(row,"status") } };
+    }
     const artifact = (await this.api.execute(lease, "libraryArtifactById", buildLibraryArtifactById({ artifactId: resource.id })))[0];
     if (!artifact || artifact.archived) throw new Error("File not found or unavailable to your account.");
     const sourceId = text(artifact, "sourceConceptRef");
@@ -74,7 +83,15 @@ export class Documents {
   }
   async save(document: OpenDocument, content: Uint8Array): Promise<void> {
     if (isZip(document.resource.name, document.mime, document.content)) throw new Error("ZIP files are downloads; they cannot be edited or extracted here.");
-    if (document.kind === "file") {
+    if (document.kind === "campaign_template" && document.template) {
+      const result = (await this.api.execute(document.lease, "campaignSaveTemplate", buildCampaignSaveTemplate({
+        templateId: document.sourceId, accountId: document.template.accountId, name: document.template.name,
+        content: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(content)), expectedRevision: document.revision || "", action: "save",
+      })))[0];
+      if (!result?.saved || typeof result.revision !== "string") throw new Error("The cluster did not confirm the saved template revision.");
+      document.revision = result.revision;
+      document.template.status = "draft";
+    } else if (document.kind === "file") {
       document.version = await this.api.uploadVersion(document.lease, document.resource.id, document.resource.name,
         document.mime || "application/octet-stream", content, document.version);
       document.revision = `file:${document.version}`;

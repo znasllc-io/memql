@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/integrations/email"
 )
@@ -102,14 +104,15 @@ type ExecutionClaimer interface {
 
 // Worker drains v1:campaigns:sendJob rows.
 type Worker struct {
-	store    *Store
-	claimer  ExecutionClaimer
-	resolve  func() email.Sender
-	logger   *slog.Logger
-	cfg      Config
-	limiter  *rateLimiter
-	now      func() time.Time
-	sendHook func(ctx context.Context, sender email.Sender, msg email.Message, as email.SendAs) error
+	templateGate func(context.Context, string) (func(), error)
+	store        *Store
+	claimer      ExecutionClaimer
+	resolve      func() email.Sender
+	logger       *slog.Logger
+	cfg          Config
+	limiter      *rateLimiter
+	now          func() time.Time
+	sendHook     func(ctx context.Context, sender email.Sender, msg email.Message, as email.SendAs) error
 
 	// shopifyConfigured is the #4140 "catalog in play" half. Tests inject
 	// it; production leaves it nil and asks whether a v1:shopify:store row
@@ -165,12 +168,19 @@ type Worker struct {
 // time rather than at construction, mirroring the outbound email
 // transport: on a booting node the plug-in registry may not be populated
 // yet, and a sender captured at wiring time would be nil forever.
-func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() email.Sender, logger *slog.Logger) *Worker {
+func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() email.Sender, logger *slog.Logger, database ...func() *sql.DB) *Worker {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	cfg := LoadConfig()
 	return &Worker{
+		templateGate: func(ctx context.Context, key string) (func(), error) {
+			var db *sql.DB
+			if len(database) > 0 && database[0] != nil {
+				db = database[0]()
+			}
+			return memql.AcquireWriteGate(ctx, db, "campaign-template:"+key)
+		},
 		store:      NewStore(engine),
 		claimer:    claimer,
 		resolve:    resolveSender,
@@ -430,6 +440,13 @@ func (w *Worker) processJob(ctx context.Context, systemCtx context.Context, job 
 		return
 	}
 
+	if job.TemplateSnapshot != nil {
+		if job.TemplateSnapshot.ID != job.TemplateID || job.TemplateSnapshot.Status != "ready" || job.TemplateSnapshot.Subject == "" || job.TemplateSnapshot.TextBody == "" {
+			w.failJob(systemCtx, job, "queued template snapshot is invalid; refusing to send")
+			return
+		}
+		tmpl = *job.TemplateSnapshot
+	}
 	if err := w.validateCampaignOrganization(ownerCtx, campaign, tmpl); err != nil {
 		w.failJob(systemCtx, job, err.Error())
 		return

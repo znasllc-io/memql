@@ -122,7 +122,7 @@ func TestReadableOrganizationCannotSendWithoutCurrentWriteAuthority(t *testing.T
 			case "single-recipient":
 				_, err = w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0)
 			case "preflight":
-				_, err = w.preflight(importCtx(), "startSend", Campaign{AccountID: "client-a"})
+				_, _, err = w.preflight(importCtx(), "startSend", Campaign{AccountID: "client-a"})
 			case "queued-recipient":
 				var stop bool
 				stop, err = w.processRecipient(context.Background(), context.Background(), importCtx(), &SendJob{}, Campaign{AccountID: "client-a"}, Template{AccountID: "client-a"}, resolvedIdentity{}, batchItem{recipient: Recipient{AccountID: "client-a", Email: "test@example.test"}})

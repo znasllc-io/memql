@@ -103,9 +103,9 @@ This is the owner-approved responsibility boundary, recorded October 1, 2026.
 The existing `vscode/` extension is implemented. Productivity Tools and the
 browser-first file workflow are being implemented; this document does not
 claim that they are installed, published, or ready for use yet. The new artifact handoff opens a versioned file through Productivity Tools.
-Markdown supports source, reading, and split modes with revision-bound feedback. Campaigns
-still contains its previous inline template editor until the replacement is
-working and that editor is removed in the same delivery.
+Markdown supports source, reading, and split modes with revision-bound feedback. Campaigns now hands template content to Productivity Tools and no longer contains
+its previous inline body editor. Template publication is a separate, revision-checked
+action in the editor; creating an AI draft never sends mail.
 
 The implementation and acceptance requirements are recorded in
 [Productivity and campaign workflows](../docs/internal/planning/productivity-and-campaigns.md).

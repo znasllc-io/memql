@@ -1,7 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import { safeEmailHTML } from "../src/templatePreview.js";
+import { safeEmailHTML, sampleFields, sampleTemplate } from "../src/templatePreview.js";
+
+test("personalization samples are literal, HTML escaped, and never change the source", () => {
+  const template = {subject:"Hi {{displayName}}",textBody:"{{email}} {{fields.company}} {{unknown}}",
+    htmlBody:'<p>{{displayName}} · {{fields.company}}</p><a title="{{fields.company}}">More</a>'};
+  assert.deepEqual(sampleFields(template),["displayName","email","fields.company"]);
+  const preview = sampleTemplate(template,{displayName:"{{email}}",email:"alex@example.test","fields.company":'<img src=x onerror="bad">'});
+  assert.equal(preview.subject,"Hi {{email}}","replacement values cannot recursively name another field");
+  assert.match(preview.textBody,/<img src=x onerror="bad">/);
+  assert.match(preview.textBody,/\{\{unknown\}\}/);
+  assert.ok(!preview.htmlBody.includes("<img"));
+  assert.match(preview.htmlBody,/&lt;img src=x onerror=&quot;bad&quot;&gt;/);
+  assert.equal(template.subject,"Hi {{displayName}}");
+});
 
 test("email preview retains layout but removes executable content, links, and remote loads", () => {
   const window = new JSDOM("").window;

@@ -766,6 +766,10 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("document feedback requires internal origin from the revision-checked review capability")
 	}
 
+	if conceptMeta.Name == "v1:campaigns:template" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("template writes require campaignSaveTemplate and a saved revision")
+	}
+
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {
 		return nil, meta, fmt.Errorf("mutation payload is required")

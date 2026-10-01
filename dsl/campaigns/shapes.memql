@@ -118,6 +118,7 @@ shape delivery deliveryLedgerEntry {
 /// including the owner it must impersonate and the provider throttle deadline it must respect.
 @row
 shape sendJob sendJobFull {
+  templateSnapshot
   row.id
   campaignId
   campaignOwnerUserId
