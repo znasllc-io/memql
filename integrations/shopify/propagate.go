@@ -12,6 +12,7 @@ import (
 	stdsync "sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
@@ -117,6 +118,16 @@ var projections = map[string][]metafieldProjection{
 	},
 }
 
+// These reads keep row admission on the source concept. The operator-facing
+// reads also require actor.isClusterOwner, which a connector intentionally is
+// not: it may read only concepts whose origin or mirroredTo names it.
+var propagationReads = map[string]string{
+	"v1:commerce:productContent":      "productContentForPropagation",
+	"v1:commerce:customerNote":        "customerNoteForPropagation",
+	"v1:commerce:companyLocationNote": "companyLocationNoteForPropagation",
+	"v1:commerce:creditLimit":         "creditLimitForPropagation",
+}
+
 // metafieldInput is one entry of metafieldsSet's input.
 type metafieldInput struct {
 	OwnerID   string `json:"ownerId"`
@@ -159,6 +170,14 @@ func (c *Connector) Propagate(ctx context.Context, entry memqlsync.OutboxEntry) 
 	if !known {
 		return memqlsync.PropagateResult{}, memqlsync.Permanentf("no projection is defined for %s", entry.Concept)
 	}
+	// The drain carries a row reference, never a payload snapshot. Read on
+	// every attempt so a retry cannot overwrite a later edit with old copy.
+	// Ignore even a supplied Payload: the admitted source row is authoritative.
+	payload, err := c.propagationRow(ctx, entry)
+	if err != nil {
+		return memqlsync.PropagateResult{}, err
+	}
+	entry.Payload = payload
 	storeID, _ := entry.Payload["storeId"].(string)
 	store, ok := c.stores.ByID(ctx, storeID)
 	if !ok {
@@ -198,6 +217,29 @@ func (c *Connector) Propagate(ctx context.Context, entry memqlsync.OutboxEntry) 
 		return c.propagateBulk(ctx, store, inputs)
 	}
 	return c.propagateDirect(ctx, store, inputs)
+}
+
+func (c *Connector) propagationRow(ctx context.Context, entry memqlsync.OutboxEntry) (map[string]any, error) {
+	read := propagationReads[entry.Concept]
+	if read == "" || strings.TrimSpace(entry.RowId) == "" {
+		return nil, memqlsync.Permanentf("no source row is identified for %s", entry.Concept)
+	}
+	if c.engine == nil {
+		return nil, fmt.Errorf("shopify: source reader is unavailable")
+	}
+	ctx = memql.ContextWithFreshRead(connectorContext(ctx))
+	res, err := c.engine.Execute(ctx, "query "+renderCall(read, map[string]any{"rowId": entry.RowId}))
+	if err != nil {
+		return nil, fmt.Errorf("shopify: read %s for propagation: %w", entry.Concept, err)
+	}
+	rows := memql.MaterializeRows(res)
+	if len(rows) != 1 {
+		return nil, memqlsync.Permanentf("source row %s %q is unavailable for propagation", entry.Concept, entry.RowId)
+	}
+	if payload, ok := rows[0]["payload"].(map[string]any); ok {
+		return payload, nil
+	}
+	return rows[0], nil
 }
 
 // propagateRetire clears a row's projected metafields.

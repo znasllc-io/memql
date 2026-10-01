@@ -465,11 +465,9 @@ func writeFile(t *testing.T, dir, name, content string) {
 // serves. So a `Vary: Host` would restate the cache key rather than
 // constrain it.
 //
-// Nothing varies on a request header a cache would NOT key on: no
-// content negotiation, no Accept-Encoding branch (compression is the
-// proxy's), no cookie-dependent body. runtime-config.json is the closest
-// thing to a per-host document and it is `no-store`, so no cache holds it
-// at all.
+// Public text bundle files negotiate gzip and vary on Accept-Encoding.
+// Runtime configuration stays outside compression and is no-store. No other
+// request header warrants a blanket Vary on all edge responses.
 //
 // The cost of getting this wrong in the other direction is why it is a
 // test: a blanket `Vary: *` or `Vary: Accept-Encoding, User-Agent` added
@@ -484,8 +482,12 @@ func TestEdgeResponsesCarryNoBlanketVary(t *testing.T) {
 
 	for _, path := range []string{"/", "/assets/app.abc123.js", "/runtime-config.json"} {
 		rec := get(t, h, path, nil)
-		if got := rec.Header().Get("Vary"); got != "" {
-			t.Errorf("%s carries Vary: %q. Host and scheme are already cache-key components (RFC 9111), so a Vary here restates the key and fragments every CDN entry that would otherwise be shared.", path, got)
+		want := "Accept-Encoding"
+		if path == runtimeConfigPath {
+			want = ""
+		}
+		if got := rec.Header().Get("Vary"); got != want {
+			t.Errorf("%s carries Vary: %q, want only negotiated representation headers %q", path, got, want)
 		}
 	}
 

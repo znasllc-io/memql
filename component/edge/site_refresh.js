@@ -14,7 +14,9 @@
   var navigating = false;
   var candidate = "";
   var confirmation;
-  var lastCheck = 0;
+  // The current HTML already carries the version; an immediate probe only
+  // duplicates page startup work and is often cancelled by the next click.
+  var lastCheck = Date.now();
   var lastReload = 0;
   var current = new URL(location.href);
   function reloadTime(value) {
@@ -111,14 +113,18 @@
   }, true);
   document.addEventListener("submit", function () { dirty = true; }, true);
   document.addEventListener("visibilitychange", check);
-  window.addEventListener("pageshow", check);
+  window.addEventListener("pageshow", function (event) {
+    navigating = false;
+    if (event.persisted) void check();
+  });
+  window.addEventListener("pagehide", function () {
+    navigating = true;
+    clearTimeout(confirmation);
+  });
   window.addEventListener("focus", check);
   window.addEventListener("online", check);
   window.addEventListener("popstate", routeChanged);
   window.addEventListener("hashchange", routeChanged);
-  document.addEventListener("click", function (event) {
-    if (event.target && event.target.closest && event.target.closest("a[href]")) void check();
-  }, true);
   ["pushState", "replaceState"].forEach(function (method) {
     var original = history[method];
     history[method] = function () {
@@ -128,5 +134,4 @@
     };
   });
   setInterval(check, interval);
-  void check();
 })();
