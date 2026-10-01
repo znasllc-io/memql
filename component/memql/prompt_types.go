@@ -43,6 +43,18 @@ func promptSchemaType(typeName string) string {
 	return "string"
 }
 
+// promptArrayItems is the items schema for a `[]elem` field. `array` written
+// without the shorthand names no element and keeps generic object items.
+func promptArrayItems(elem string) map[string]any {
+	switch {
+	case elem == "":
+		return map[string]any{"type": "object"}
+	case strings.HasPrefix(elem, "[]"):
+		return map[string]any{"type": "array", "items": promptArrayItems(strings.TrimPrefix(elem, "[]"))}
+	}
+	return map[string]any{"type": promptSchemaType(elem)}
+}
+
 // promptDecl is the unified loader's internal representation of a
 // `prompt NAME { ... }` block.
 type promptDecl struct {
@@ -109,10 +121,10 @@ func (d *promptDecl) toInputSchema() (map[string]any, error) {
 		prop["type"] = promptSchemaType(f.typeName)
 		if prop["type"] == "array" {
 			// OpenAI requires array schemas to specify "items" with a
-			// "type" field. Default to generic object items when no
-			// nested schema is defined (matches what parsePromptMemQL
-			// emitted).
-			prop["items"] = map[string]any{"type": "object"}
+			// "type" field. The `[]T` shorthand publishes items of T;
+			// publishing objects for every element made `[]string`
+			// refuse its own strings.
+			prop["items"] = promptArrayItems(f.elementType)
 		}
 
 		if f.description != "" {
