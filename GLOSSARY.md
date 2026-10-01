@@ -122,6 +122,7 @@ path, or use this detailed reference index. Layout + rules:
 
 - **`design/`** — ADRs / point-in-time design rationale (`status: historical`), kept for the "why": engine audits, DSL syntax/operator standardization, deployment-v2, authored-automations, the auth threat model, the auto-generated architecture model.
 - **`planning/`** — active multi-phase plans (`status: draft`); deleted when shipped. Includes [roadmap.md](docs/internal/planning/roadmap.md).
+- [Organization email transport: ACS bridge and early Postfix migration](docs/internal/planning/email-transport-migration.md) — ownership, Azure eligibility evidence, guided setup, transport/receive boundaries, cost estimates and migration gates; planned capabilities are distinguished from the current implementation.
 - **`ops/`** — internal runbooks: [DR runbook](docs/internal/ops/dr-runbook.md), [merge queue](docs/internal/ops/merge-queue.md), [ruleset baseline](docs/internal/ops/ruleset-baseline.md) (what `main`'s protection rulesets should be, and what asserts it), tier-4 build graph, safety rollout, blob provisioning, workbench production, the incident records ([the 2026-09-13 hypertable SkipScan outage](docs/internal/ops/2026-09-13-skipscan-connection-exhaustion.md)), the visual-QA records ([views and layouts](docs/internal/ops/2026-08-26-views-layouts-visual-qa.md), [the Build stop's readings](docs/internal/ops/2026-09-03-deployables-build-visual-qa.md)), and [migrations/](docs/internal/ops/migrations/README.md).
 
 ---
