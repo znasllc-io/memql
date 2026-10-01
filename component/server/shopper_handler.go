@@ -443,7 +443,14 @@ func (h *ShopperHandler) serveRead(w http.ResponseWriter, r *http.Request) {
 	// no visitor identity in the first place.
 	w.Header().Set("Cache-Control", "public, max-age=60")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_ = json.NewEncoder(w).Encode(map[string]any{"data": result})
+	// ExecuteResult keeps its output private: encoding the wrapper would
+	// expose engine bookkeeping and omit the actual rows. Materialize the
+	// selected query output or builtin node set, retaining node payloads.
+	rows := memql.MaterializeRows(result)
+	if rows == nil {
+		rows = []map[string]any{}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"data": rows})
 }
 
 // shopperArgs validates the declared fields against a value source and

@@ -796,7 +796,13 @@ test("a wave with several failures explains each of them, not one at random", as
   try {
     beginInstall(h);
     await until(() => /data-act="retry"/.test(h.html()), "the failed-step screen");
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The first refusal renders Retry while independent tool checks still run.
+    // Wait for the whole fake failure wave before inspecting its summary.
+    await until(
+      () => ["toolK3d", "toolKubectl", "toolMkcert", "hostsBlock"].every((step) =>
+        h.html().includes(`data-step-id="${step}" data-state="failed"`)),
+      "all four failures to reach the screen",
+    );
 
     const html = h.html();
     assert.match(html, /steps failed/, "the heading counts them rather than naming one");
