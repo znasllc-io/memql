@@ -18,7 +18,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { runTests } = require("@vscode/test-electron");
+const { downloadAndUnzipVSCode, runTests } = require("@vscode/test-electron");
 
 const EXT_ROOT = path.resolve(__dirname, "..");
 const TESTS_ENTRY = path.join(EXT_ROOT, "dist-host", "test-host", "index.js");
@@ -133,8 +133,23 @@ async function main() {
   }
 
   try {
+    const version = process.env.MEMQL_VSCODE_VERSION || "stable";
+    let vscodeExecutablePath = await downloadAndUnzipVSCode({
+      version,
+      extensionDevelopmentPath: EXT_ROOT,
+    });
+    // Recent macOS releases name the executable Code; the test-electron
+    // version we use still returns Electron. The bundle declares its name.
+    if (process.platform === "darwin" && !fs.existsSync(vscodeExecutablePath)) {
+      const contents = path.dirname(path.dirname(vscodeExecutablePath));
+      const executable = cp.execFileSync("/usr/libexec/PlistBuddy", [
+        "-c", "Print CFBundleExecutable", path.join(contents, "Info.plist"),
+      ], { encoding: "utf8" }).trim();
+      vscodeExecutablePath = path.join(contents, "MacOS", executable);
+    }
     await runTests({
-      version: process.env.MEMQL_VSCODE_VERSION || "stable",
+      version,
+      vscodeExecutablePath,
       extensionDevelopmentPath: EXT_ROOT,
       extensionTestsPath: TESTS_ENTRY,
       launchArgs: [

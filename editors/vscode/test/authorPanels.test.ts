@@ -89,7 +89,11 @@ function connectionsWith(fake: FakeQuery): ConnectionManager {
       if (name === "conceptBrowse") {
         await fake.pendingPage;
         const page = fake.pages.shift() ?? { rows: [] };
-        return { rawNodes: () => page.rows, meta: () => ({ cursor: "" }) };
+        return {
+          rawNodes: () => page.rows,
+          raw: () => ({ bundle: { rootIds: page.rows.map((row) => row.id) } }),
+          meta: () => ({ cursor: "" }),
+        };
       }
       const id = /id==(\S+)$/.exec(call)?.[1] ?? "";
       const row = fake.rows[id];
@@ -145,7 +149,7 @@ test("the concept page is the shape of its rows until the first page answers -- 
 test("the concept page's rows are buttons a keyboard can reach", async () => {
   resetRecorded();
   const fake: FakeQuery = {
-    pages: [{ rows: [{ id: "A", concept: SPACE.id, payload: { name: "Design review" } }] }],
+    pages: [{ rows: [{ id: "A", concept: "v1:cognition:keys", payload: { name: "Design review" } }] }],
     rows: {},
   };
   ConceptPanel.open(CONTEXT, connectionsWith(fake), { ...SPACE, id: "v1:cognition:keys" } as Concept);
