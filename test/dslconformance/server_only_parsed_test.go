@@ -173,6 +173,15 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Shopify's outbox delivers rows under its connector actor, which has
+		// no actor.userId. These row-id reads keep the concept's mirroredTo
+		// admission: Shopify may read its source, another connector may not,
+		// and serverOnly refuses even an owner arriving through the client
+		// wire. An owner conjunct would leave every delivery source invisible.
+		{Path: "commerce/queries.memql", Name: "productContentForPropagation"}:      true,
+		{Path: "commerce/queries.memql", Name: "customerNoteForPropagation"}:        true,
+		{Path: "commerce/queries.memql", Name: "companyLocationNoteForPropagation"}: true,
+		{Path: "commerce/queries.memql", Name: "creditLimitForPropagation"}:         true,
 		// Ownership alone cannot prevent forged assistant replies/action evidence.
 		{"os/ask.memql", "saveAskConversation"}: true,
 		// epic memql#4800. The accounts seed's existence probe. It runs from

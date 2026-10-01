@@ -4,6 +4,10 @@ use common.traits.{ isActiveRecord }
 // current source under its own actor; the concept's mirroredTo declaration
 // admits exactly that connector. Keep the operator reads' separate owner
 // conjuncts below, and do not lend owner authority to delivery workers.
+/// Product copy for the Shopify outbox worker, which has no actor.userId.
+/// Caller scoping would hide the source from that connector; the concept
+/// admits only its named mirroredTo connector, while serverOnly keeps this
+/// delivery read off the client wire. Operators use the owner-scoped read.
 @serverOnly
 @actor
 query productContent productContentForPropagation {
@@ -13,6 +17,10 @@ query productContent productContentForPropagation {
   shape productContentFull
 }
 
+/// Customer notes for the Shopify outbox worker, which has no actor.userId.
+/// Caller scoping would hide the source from that connector; the concept
+/// admits only its named mirroredTo connector, while serverOnly keeps this
+/// delivery read off the client wire. Operators use the owner-scoped read.
 @serverOnly
 @actor
 query customerNote customerNoteForPropagation {
@@ -22,6 +30,10 @@ query customerNote customerNoteForPropagation {
   shape customerNoteFull
 }
 
+/// Company-location notes for the Shopify outbox worker, which has no actor.userId.
+/// Caller scoping would hide the source from that connector; the concept
+/// admits only its named mirroredTo connector, while serverOnly keeps this
+/// delivery read off the client wire. Operators use the owner-scoped read.
 @serverOnly
 @actor
 query companyLocationNote companyLocationNoteForPropagation {
@@ -31,6 +43,10 @@ query companyLocationNote companyLocationNoteForPropagation {
   shape companyLocationNoteFull
 }
 
+/// Credit limits for the Shopify outbox worker, which has no actor.userId.
+/// Caller scoping would hide the source from that connector; the concept
+/// admits only its named mirroredTo connector, while serverOnly keeps this
+/// delivery read off the client wire. Operators use the owner-scoped read.
 @serverOnly
 @actor
 query creditLimit creditLimitForPropagation {
