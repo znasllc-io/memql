@@ -399,6 +399,10 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Only its handler derives organization/digest and writes engine state;
 		// actor scoping would either exclude mail clients or admit forged claims.
 		{Path: "campaigns/mutations.memql", Name: "recordOrganizationSuppression"}: true,
+		// An actor may request a send, but only the provider adapter can attest
+		// that an attempt began. The receipt and its replay read are private.
+		{Path: "campaigns/mutations.memql", Name: "recordCampaignSingleSend"}: true,
+		{Path: "campaigns/queries.memql", Name: "campaignSingleSendById"}:     true,
 		// memql#4829. The engine's own account of what it made of an event-email
 		// rule -- which bundle and construct it generated, whether activation
 		// succeeded, and how many times the rule has fired. The value of these

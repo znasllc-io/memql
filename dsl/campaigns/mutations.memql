@@ -1036,3 +1036,22 @@ mutation emailRule setEmailRuleStatus {
     }
   }
 }
+
+/// Internal transport attestation. actor.userId scopes the receipt but cannot
+/// prove whether a provider call began; only the locked sending capability can.
+@actor
+@serverOnly
+mutation singleSendReceipt recordCampaignSingleSend {
+  args {
+    receiptId string!
+    accountId string!
+    fingerprint string!
+    status enum("attempting", "complete")!
+    result object!
+    versionTime datetime!
+  }
+  insert {
+    accept { accountId, fingerprint, status, result }
+    stamp { id: args.receiptId, ownerUserId: actor.userId, createdAt: args.versionTime }
+  }
+}

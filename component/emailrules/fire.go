@@ -36,11 +36,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // maxFanout bounds one firing.
@@ -148,9 +150,9 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 	case ModeClusterRoles:
 		err = f.fireOperational(ctx, rule, nodeID, event, &out)
 	case ModeAudience:
-		err = f.fireAudience(ctx, rule, &out)
+		err = f.fireAudience(ctx, rule, nodeID, event, &out)
 	case ModeRowAddress:
-		err = f.fireRowAddress(ctx, rule, event, &out)
+		err = f.fireRowAddress(ctx, rule, nodeID, event, &out)
 	default:
 		err = fmt.Errorf("emailrules: rule %q has recipient mode %q, which this engine does not know", ruleID, rule.RecipientMode)
 	}
@@ -308,7 +310,7 @@ func roleWanted(role string, wanted []string) bool {
 }
 
 // fireAudience mails an existing audience through the campaign machinery.
-func (f *Firer) fireAudience(ctx context.Context, rule Rule, out *FireOutcome) error {
+func (f *Firer) fireAudience(ctx context.Context, rule Rule, nodeID string, event map[string]any, out *FireOutcome) error {
 	recipients, err := f.store.RecipientsForAudience(ctx, rule.AudienceID)
 	if err != nil {
 		return err
@@ -319,11 +321,7 @@ func (f *Firer) fireAudience(ctx context.Context, rule Rule, out *FireOutcome) e
 			out.Refusals = append(out.Refusals, fmt.Sprintf("stopped at %d recipients; an audience this size is a campaign, and a campaign has the pacing, the ledger and the warm-up a rule does not", maxFanout))
 			break
 		}
-		if err := f.store.SendToRecipient(ctx, rule.TemplateID, str(r, "id"), rule.SenderIdentity, rule.ID); err != nil {
-			out.Refusals = append(out.Refusals, err.Error())
-			continue
-		}
-		out.Sent++
+		f.sendMarketing(ctx, rule, nodeID, str(r, "id"), event, out)
 	}
 	return nil
 }
@@ -335,7 +333,7 @@ func (f *Firer) fireAudience(ctx context.Context, rule Rule, out *FireOutcome) e
 // minted from (owner, recipient, campaign) -- an address with no recipient row
 // has no way to opt out, and marketing mail nobody can unsubscribe from is the
 // one thing this engine will not send.
-func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, event map[string]any, out *FireOutcome) error {
+func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, event map[string]any, out *FireOutcome) error {
 	address := strings.TrimSpace(payloadField(event, rule.RecipientField))
 	if address == "" {
 		out.Refusals = append(out.Refusals, fmt.Sprintf("the triggering row carries no %q, so there is nobody to mail", rule.RecipientField))
@@ -367,12 +365,53 @@ func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, event map[string]
 		}
 	}
 	out.Recipients++
-	if err := f.store.SendToRecipient(ctx, rule.TemplateID, target, rule.SenderIdentity, rule.ID); err != nil {
-		out.Refusals = append(out.Refusals, err.Error())
-		return nil
-	}
-	out.Sent++
+	f.sendMarketing(ctx, rule, nodeID, target, event, out)
 	return nil
+}
+
+// Stable across replicas and checkpoint replay. A created rule names one row's
+// welcome; an updated rule names one occurrence, retaining fractional seconds.
+// Never manufacture a clock value when the triggering event has none.
+func marketingRequestID(rule Rule, nodeID, recipientID string, event map[string]any) (string, error) {
+	if strings.TrimSpace(nodeID) == "" {
+		return "", fmt.Errorf("emailrules: the triggering row identifier is missing")
+	}
+	occurrence := "created"
+	if rule.EventKind != "created" {
+		stamp, err := time.Parse(time.RFC3339Nano, str(event, "timestamp"))
+		if err != nil || stamp.IsZero() {
+			return "", fmt.Errorf("emailrules: the triggering event time is missing or invalid; refusing an unidentifiable send")
+		}
+		payload, err := json.Marshal(event["payload"])
+		if err != nil {
+			return "", fmt.Errorf("emailrules: the triggering event cannot be identified")
+		}
+		occurrence = dedupeKey(stamp.UTC().Format(time.RFC3339Nano), string(payload))
+	}
+	return "rule_" + dedupeKey(memql.BareShortId(rule.ID), memql.BareShortId(nodeID), memql.BareShortId(recipientID), occurrence), nil
+}
+
+func (f *Firer) sendMarketing(ctx context.Context, rule Rule, nodeID, recipientID string, event map[string]any, out *FireOutcome) {
+	requestID, err := marketingRequestID(rule, nodeID, recipientID, event)
+	if err != nil {
+		out.Refusals = append(out.Refusals, err.Error())
+		return
+	}
+	result, err := f.store.SendToRecipient(ctx, rule.TemplateID, recipientID, rule.SenderIdentity, rule.ID, requestID)
+	if err != nil {
+		out.Refusals = append(out.Refusals, err.Error())
+		return
+	}
+	switch {
+	case result["uncertain"] == true:
+		out.Refusals = append(out.Refusals, "a previous send has an uncertain provider outcome; it was not submitted again")
+	case result["skipped"] == true || (result["sent"] == true && result["replayed"] == true):
+		out.Skipped++
+	case result["sent"] == true:
+		out.Sent++
+	default:
+		out.Refusals = append(out.Refusals, "campaign send returned no recognized outcome")
+	}
 }
 
 // payloadField reads a dotted path out of the event envelope's payload.
