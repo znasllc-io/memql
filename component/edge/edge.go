@@ -283,18 +283,19 @@ func siteFromRow(r map[string]any) *Site {
 		Kind:     rowString(r, "kind"),
 		// Absent on every row written before memql#5535, which is the
 		// default and means Kind decides -- see Site.ResolutionTail.
-		ResolutionTail: rowString(r, "resolutionTail"),
-		BundleRef:      rowString(r, "bundleRef"),
-		Status:         rowString(r, "status"),
-		Title:          rowString(r, "title"),
-		APIProxy:       rowBool(r, "apiProxy"),
-		ShopperForms:   rowBool(r, "shopperForms"),
-		OwnerUserID:    rowString(r, "ownerUserId"),
-		SystemOwned:    rowBool(r, "systemOwned"),
-		Binding:        rowObject(r, "binding"),
-		CandidateRef:   rowString(r, "candidateRef"),
-		PreviewBinding: rowObject(r, "previewBinding"),
-		Settings:       rowStringMap(r, "settings"),
+		ResolutionTail:       rowString(r, "resolutionTail"),
+		BundleRef:            rowString(r, "bundleRef"),
+		Status:               rowString(r, "status"),
+		Title:                rowString(r, "title"),
+		APIProxy:             rowBool(r, "apiProxy"),
+		ExtensionRuntimePath: rowString(r, "extensionRuntimePath"),
+		ShopperForms:         rowBool(r, "shopperForms"),
+		OwnerUserID:          rowString(r, "ownerUserId"),
+		SystemOwned:          rowBool(r, "systemOwned"),
+		Binding:              rowObject(r, "binding"),
+		CandidateRef:         rowString(r, "candidateRef"),
+		PreviewBinding:       rowObject(r, "previewBinding"),
+		Settings:             rowStringMap(r, "settings"),
 	}
 }
 

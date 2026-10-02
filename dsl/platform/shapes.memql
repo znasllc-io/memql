@@ -82,6 +82,7 @@ shape inboundRequest inboundRequestFull {
 /// portal's site list renders.
 @row
 shape site siteFull {
+  extensionRuntimePath
   row.id
   ownerUserId
   hostname

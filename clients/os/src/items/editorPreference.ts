@@ -51,10 +51,10 @@ export function editorTemplateURL(domain: string, templateId: string, name: stri
 
 function editorResourceURL(resource: string, preference: EditorPreference): string {
   if (preference === "browser") {
-    // VS Code's web workbench consumes openFile from the startup payload.
+    // The cluster-hosted editor includes both MemQL extensions.
     // Only a resource reference travels here. Its file provider authenticates
     // through the MemQL extension; no file bytes or credential enter the URL.
-    return `https://vscode.dev/?payload=${encodeURIComponent(JSON.stringify([["openFile", resource]]))}`;
+    return `https://vscode.${new URL(resource).hostname}/editor/?resource=${encodeURIComponent(resource)}`;
   }
   return `${preference}://znasllc.memql-productivity-tools/open?resource=${encodeURIComponent(resource)}`;
 }

@@ -101,6 +101,11 @@
         "command": "memql.productivity.resumeEmailComposition",
         "title": "Open Last Email Composition",
         "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.checkTools",
+        "title": "Check Editor Tools",
+        "category": "MemQL"
       }
     ],
     "customEditors": [

@@ -441,7 +441,7 @@ db-failover-litmus:
 # ---------------------------------------------------------------------------
 
 ##@ Test & SDK
-.PHONY: test test-v test-cover sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-site-build vscode-test-host os-install os-typecheck os-test os-build os-clean
+.PHONY: test test-v test-cover sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-site-build browser-editor-build vscode-test-host os-install os-typecheck os-test os-build os-clean
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -744,6 +744,10 @@ vscode-deps:
 ## import `vscode`; the API layer is exercised by the host lane below.
 vscode-test: vscode-deps
 	cd editors/vscode && npm ci --no-audit --no-fund && npm test
+
+## Build the hosted browser editor with both MemQL extensions included.
+browser-editor-build:
+	node editors/browser/build.mjs
 
 ## Build the VS Code landing page into editors/vscode/site/dist and check it.
 ## Same commands the image's spa-build stage runs (memql#5518): the page is a
