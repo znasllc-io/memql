@@ -17,7 +17,7 @@ import (
 //
 // The passkey ceremony is the THIRD way the code flow reaches an auth code, and
 // the one it would be easiest to forget: it does not go anywhere near the
-// magic-link verifier. Forgetting it would mean a reader refused through the
+// magic-link verifier. Forgetting it would mean a roleless user refused through the
 // emailed link simply presents a passkey instead and is admitted -- so the
 // floor sits on the MINT rather than on one factor.
 //
@@ -52,8 +52,8 @@ func floorServer(role string, err error) *Server {
 	return &Server{Store: &identity.Store{Engine: &userLookupEngine{role: role, err: err}}}
 }
 
-func TestPasskeyRoleFloor_AdmitsDeveloperAndAbove(t *testing.T) {
-	for _, role := range []string{"owner", "admin", "developer"} {
+func TestPasskeyRoleFloor_AdmitsProductivityRoles(t *testing.T) {
+	for _, role := range []string{"owner", "admin", "developer", "writer", "reader"} {
 		s := floorServer(role, nil)
 		if r := s.passkeyRoleFloorRefusal(context.Background(),
 			identity.BuiltinClientVSCode, "v1:identity:user:u1"); r != nil {
@@ -62,8 +62,8 @@ func TestPasskeyRoleFloor_AdmitsDeveloperAndAbove(t *testing.T) {
 	}
 }
 
-func TestPasskeyRoleFloor_RefusesBelowDeveloper(t *testing.T) {
-	for _, role := range []string{"writer", "reader", ""} {
+func TestPasskeyRoleFloor_RefusesMissingAndUnknownRoles(t *testing.T) {
+	for _, role := range []string{"unknown", ""} {
 		s := floorServer(role, nil)
 		r := s.passkeyRoleFloorRefusal(context.Background(),
 			identity.BuiltinClientVSCode, "v1:identity:user:u1")
