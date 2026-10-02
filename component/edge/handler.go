@@ -305,7 +305,7 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 	// Exact-path identity JSON, ahead of the bundle / SPA fallback.
 	// A miss here is how a Mac browser's coalesced POST /oauth/token
 	// used to get index.html 200 (memql#4154).
-	if isIdentityXHRPath(r.URL.Path) {
+	if isIdentityXHRPath(r.URL.Path) || isIdentityUIRequest(r) || isIdentityPasskeyRequest(r) {
 		h.serveIdentityXHR(w, r, site)
 		return pathClassProxy
 	}
