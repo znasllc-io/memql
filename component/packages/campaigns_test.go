@@ -84,6 +84,8 @@ func TestCampaignPackageExportPreservesAppsAndImportBindsExplicitly(t *testing.T
 	}
 	cfg := *m.Campaigns
 	cfg.Domains = append([]emailconfig.Domain(nil), cfg.Domains...)
+	// The account display name can differ from the package's portable label.
+	cfg.Domains[0].Organization = "Example LLC"
 	cfg.Domains[0].DNS[0].Value = "fresh-proof"
 	raw, _ := json.Marshal(cfg)
 	var config map[string]any
@@ -101,8 +103,8 @@ func TestCampaignPackageExportPreservesAppsAndImportBindsExplicitly(t *testing.T
 	}
 	before, _ := json.Marshal(m.Deployables)
 	after, _ := json.Marshal(saved.Deployables)
-	if string(before) != string(after) || saved.Campaigns.Domains[0].DNS[0].Value != "fresh-proof" {
-		t.Fatal("export lost apps or fresh DNS")
+	if string(before) != string(after) || len(saved.Campaigns.Domains) != 1 || saved.Campaigns.Domains[0].Organization != "example.com" || saved.Campaigns.Domains[0].DNS[0].Value != "fresh-proof" {
+		t.Fatal("export lost apps, the portable binding, or fresh DNS")
 	}
 	calls := len(e.queries)
 	for _, args := range []map[string]any{
@@ -129,6 +131,29 @@ func TestCampaignPackageExportPreservesAppsAndImportBindsExplicitly(t *testing.T
 		if _, err := i.handleCampaigns(ctx, map[string]any{"action": "inspect", "manifest": output}, 0); err == nil {
 			t.Fatal("unauthorized package access")
 		}
+	}
+}
+
+func TestCampaignPackageExportRefusesAmbiguousBinding(t *testing.T) {
+	m, err := ParseManifest([]byte(campaignManifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := *m.Campaigns
+	cfg.Domains = append([]emailconfig.Domain(nil), cfg.Domains...)
+	cfg.Domains[0].Organization = "Example LLC"
+	m.Campaigns.Domains = append(m.Campaigns.Domains, emailconfig.Domain{
+		Organization: "Example LLC", Domain: "other.example.com", EmailService: "other-email", CommunicationService: "other-delivery",
+	})
+	source, err := yaml.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &recordingEngine{rows: map[string][]map[string]any{"builtin emailAzureSetup": {{"status": "exported", "configuration": cfg}}}}
+	i := NewIntegration(e, nil)
+	_, err = i.handleCampaigns(campaignActor(), map[string]any{"action": "export", "manifest": string(source), "accountId": "client"}, 0)
+	if err == nil || !strings.Contains(err.Error(), "different organization and domain bindings") {
+		t.Fatalf("ambiguous binding was not refused: %v", err)
 	}
 }
 
