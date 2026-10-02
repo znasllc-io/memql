@@ -2,7 +2,7 @@
   "name": "memql-productivity-tools",
   "displayName": "MemQL Productivity Tools",
   "description": "Documents, campaign templates, PDFs and human-reviewed suggestions connected to MemQL.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {

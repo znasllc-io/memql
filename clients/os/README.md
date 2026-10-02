@@ -2614,3 +2614,11 @@ actual detail page, including arrival while a different tab is selected.
 A navigation event holds a quiet window/tab glow long enough to be seen. Only
 an explicitly bound action control receives a control cue; reads and unrelated
 tool completions must not move focus or erase a navigation cue. No fake cursor.
+
+### Email app availability
+
+`MEMQL_EMAIL_APP_ENABLED=false` on Edge removes the operator test inbox from
+the OS registry, including the launcher, restored windows and attention markers.
+It defaults to enabled and is independent of `MEMQL_EMAIL_TRANSPORT`; Campaigns
+and transactional mail continue using their configured providers. Set this value
+in the installation overlay, never by branching on its domain or environment.

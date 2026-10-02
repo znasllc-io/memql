@@ -245,6 +245,13 @@ variables:
     scope: global
     description: "Azure AD application ID for the email integration's Microsoft Graph sender. (Legacy name `AZURE_CLIENT_ID` still accepted.)"
 
+  - name: MEMQL_EMAIL_APP_ENABLED
+    component: edge
+    scope: node
+    default: "true"
+    optional: true
+    description: "Expose the operator test inbox in MemQL OS. Set false to remove Email from the app roster, restored windows and attention markers. Independent of outbound email transport and Campaigns."
+
   - name: MEMQL_EMAIL_TRANSPORT
     component: email
     scope: node

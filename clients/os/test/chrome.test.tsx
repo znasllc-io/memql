@@ -31,10 +31,12 @@ function memStorage(): Pick<Storage, "getItem" | "setItem"> {
 }
 
 function renderShell({
+  config = CONFIG,
   access = OWNER,
   layout = "desktop" as const,
   storage = memStorage(),
 }: {
+  config?: OsRuntimeConfig;
   access?: typeof OWNER;
   layout?: "desktop" | "ipad" | "phone";
   storage?: Pick<Storage, "getItem" | "setItem">;
@@ -48,7 +50,7 @@ function renderShell({
       layout={layout}
       onSignOut={vi.fn()}
       access={access}
-      config={CONFIG}
+      config={config}
       ports={{ store: new LocalDesktopStore(storage), disableConnection: true, askTransport: new StubAskTransport(), askVoice: null }}
     />,
   );
@@ -399,4 +401,14 @@ it('the Fleet window search focuses machine search without a duplicate app trigg
  fireEvent.click(fleet.getByRole('button',{name:'Search Fleet'}));
  expect(await fleet.findByPlaceholderText('Search machines')).toBe(document.activeElement);
  expect(fleet.queryByRole('dialog',{name:'Search Fleet destinations'})).toBeNull();
+});
+
+
+describe("installation Email app availability", () => {
+  it("removes the test inbox while keeping Campaigns available", async () => {
+    renderShell({ config: { ...CONFIG, emailAppEnabled: false } });
+    fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
+    expect(screen.queryByRole("button", { name: appTileName("Email") })).toBeNull();
+    expect(screen.getByRole("button", { name: appTileName("Campaigns") })).toBeTruthy();
+  });
 });
