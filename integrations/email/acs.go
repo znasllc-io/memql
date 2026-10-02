@@ -190,7 +190,12 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 	if err != nil {
 		return err
 	}
-	defer release()
+	locked := true
+	defer func() {
+		if locked {
+			release()
+		}
+	}()
 	op, prior, found, err := s.operations.read(ctx, key)
 	if err != nil {
 		return err
@@ -214,6 +219,10 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 	if err != nil {
 		return err
 	} // No POST before its durable receipt.
+	// The persisted submitting state is the at-most-once claim. Do not keep a
+	// caller-cancelled transaction as the lock for the later recovery write.
+	release()
+	locked = false
 	sendErr := s.post(ctx, op.ID, body)
 	op.CheckedAt = s.now().UTC()
 	if sendErr == nil {
@@ -231,6 +240,20 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 	}
 	persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
+	finish, err := s.operations.lock(persist, key)
+	if err != nil {
+		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
+	}
+	defer finish()
+	current, revision, exists, err := s.operations.read(persist, key)
+	if err != nil || !exists || current.ID != op.ID {
+		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
+	}
+	// A background GET may already know more than this delayed POST response.
+	if current.Status != "submitting" && current.Status != "unknown" {
+		return operationSendOutcome(current)
+	}
+	prior = revision
 	if _, err = s.operations.write(persist, key, op, prior); err != nil {
 		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
 	}

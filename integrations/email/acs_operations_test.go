@@ -109,3 +109,31 @@ func TestACSDoesNotPostWithoutDurableReceipt(t *testing.T) {
 		t.Fatal("missing write accepted")
 	}
 }
+
+func TestACSDelayedPOSTDoesNotOverwriteAReconciledOperation(t *testing.T) {
+	s := acsFixture(t)
+	store := &memoryACSOperations{}
+	s.operations = store
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) {
+		// The submission context expires and another worker reconciles the
+		// persisted operation before the original network call returns.
+		cancel()
+		release, _ := store.lock(context.Background(), "")
+		defer release()
+		for key, op := range store.rows {
+			op.Status = "succeeded"
+			store.rows[key] = op
+		}
+		return nil, fmt.Errorf("late lost POST response")
+	})
+	if err := s.Send(ctx, Message{IntentID: "late-post", To: "reader@example.test", Subject: "Hello", TextBody: "Hello"}, SendAs{AccountID: "client"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range store.rows {
+		if op.Status != "succeeded" {
+			t.Fatal("late POST regressed reconciled status")
+		}
+	}
+}
