@@ -29,6 +29,45 @@ var identityXHRPaths = map[string]struct{}{
 	"/auth/shopify/complete": {},
 }
 
+// Native identity pages keep their existing paths and representation. Proxying
+// their JSON on the OS origin keeps host-only CSRF/session cookies first-party
+// in browsers that refuse sibling-host credentialed requests (notably Safari).
+// HTML navigations and arbitrary paths still belong to the site's own bundle.
+var identityUIPaths = map[string]struct{}{
+	"/login": {}, "/authorize": {}, "/setup": {}, "/check-email": {},
+	"/error": {}, "/logout-complete": {}, "/enroll": {}, "/recover": {},
+	"/invitation": {}, "/invitation/accept": {}, "/device": {},
+	"/legal/tos": {}, "/legal/privacy": {},
+	"/auth/complete": {}, "/auth/landing": {}, "/auth/magic-link/status": {},
+	"/auth/magic-link/finish": {}, "/auth/setup/state": {},
+	"/auth/setup/passkey": {}, "/auth/setup/resume": {},
+	"/me/": {}, "/me/profile": {}, "/me/devices": {}, "/me/settings": {},
+	"/me/tokens": {}, "/me/tokens/revoke": {},
+	"/me/devices/passkeys/revoke": {}, "/me/devices/passkeys/rename": {},
+	"/me/devices/sessions/revoke": {}, "/me/devices/revoke-all": {},
+	"/me/settings/sign-in-policy": {}, "/me/settings/shared-mailbox": {},
+}
+
+func isIdentityUIRequest(r *http.Request) bool {
+	if !strings.Contains(r.Header.Get("Accept"), "application/vnd.memql.identity+json") {
+		return false
+	}
+	_, ok := identityUIPaths[r.URL.Path]
+	return ok && (r.Method == http.MethodGet || r.Method == http.MethodPost)
+}
+
+func isIdentityPasskeyRequest(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	switch r.URL.Path {
+	case "/auth/webauthn/login/begin", "/auth/webauthn/login/finish",
+		"/auth/webauthn/register/begin", "/auth/webauthn/register/finish":
+		return true
+	}
+	return false
+}
+
 func isIdentityXHRPath(p string) bool {
 	_, ok := identityXHRPaths[p]
 	return ok
@@ -55,6 +94,12 @@ func (h *Handler) serveIdentityXHR(w http.ResponseWriter, r *http.Request, site 
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
 			pr.SetXForwarded()
+			// Fetch omits Origin on same-origin GET. Supply the actual browser
+			// host for this safe read only; identity still checks its configured
+			// OS origin. Never synthesize an Origin for a write or replace one.
+			if isIdentityUIRequest(pr.In) && pr.In.Method == http.MethodGet && pr.In.Header.Get("Origin") == "" {
+				pr.Out.Header.Set("Origin", "https://"+pr.In.Host)
+			}
 			// Keep the path identity mounted: /oauth/token stays /oauth/token.
 			pr.Out.Host = target.Host
 		},

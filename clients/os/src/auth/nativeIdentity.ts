@@ -12,6 +12,7 @@ export interface IdentityPage {
   csrf?: string;
   redirect?: string;
   error?: string;
+  code?: string;
   state?: "claimed" | "unclaimed";
 }
 
@@ -28,13 +29,17 @@ export function identityEntry(): string | null {
   } catch { return "/error"; }
 }
 
+export class IdentityRequestError extends Error {
+  constructor(message: string, readonly code?: string) { super(message); }
+}
+
 export async function nativeIdentity(
   config: OsRuntimeConfig, path: string,
   options: { form?: Record<string, string>; csrf?: string; bearer?: string; signal?: AbortSignal } = {},
 ): Promise<IdentityPage> {
   // A backend redirect may name an external OAuth client. Only the navigation
   // layer follows it; this function never sends identity headers to that host.
-  const base = config.identityApiBaseUrl || config.identityUrl;
+  const base = config.identityApiBaseUrl || window.location.origin;
   const target = new URL(path, base);
   if (target.origin !== new URL(base).origin) throw new Error("Identity request origin refused");
   const response = await fetch(target, {
@@ -48,7 +53,7 @@ export async function nativeIdentity(
     body: options.form ? new URLSearchParams(options.form) : undefined,
   });
   const result = await response.json() as IdentityPage;
-  if (!response.ok && !result.page) throw new Error(result.error || "Identity is temporarily unavailable");
+  if (!response.ok && !result.page) throw new IdentityRequestError(result.error || "Identity is temporarily unavailable", result.code);
   return result;
 }
 

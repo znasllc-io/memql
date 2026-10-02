@@ -246,6 +246,11 @@ func rejectCSRF(w http.ResponseWriter, r *http.Request, logger *slog.Logger, rea
 	// 403 + a one-line message. We don't surface the reason to
 	// the client; a stale form is the common case and we don't
 	// want to leak the discriminator.
+	if nativeRequest(r) {
+		w.WriteHeader(http.StatusForbidden)
+		writeNative(w, map[string]string{"error": "This page needs to be refreshed before you can continue.", "code": "csrf_expired"})
+		return
+	}
 	http.Error(w, "Forbidden: CSRF token missing or invalid. Reload the page and try again.", http.StatusForbidden)
 }
 

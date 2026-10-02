@@ -3,7 +3,7 @@ import type { OsRuntimeConfig } from "../cluster/config";
 // The RP ID is supplied by identity and kept stable across the UI move.
 // Related Origin Requests let OS use credentials issued at identity's host.
 async function post(config: OsRuntimeConfig, path: string, body: unknown, authorization?: string) {
-  const response = await fetch(new URL(path, config.identityApiBaseUrl || config.identityUrl), {
+  const response = await fetch(new URL(path, config.identityApiBaseUrl || window.location.origin), {
     method: "POST", credentials: "include", headers: { "Content-Type": "application/json", ...(authorization ? { Authorization: authorization } : {}) },
     body: JSON.stringify(body), signal: AbortSignal.timeout(30000),
   });
