@@ -417,6 +417,7 @@ mutation inboundRequest updateInboundRequestStatus {
 mutation site createSite {
   args {
     siteId       string!
+    extensionRuntimePath string @maxLength(160) @pattern("^(/[a-z0-9][a-z0-9/_-]*/)?$")
     accountId    string
     hostname     string!  @maxLength(253) @pattern("^[a-z0-9][a-z0-9.-]*[a-z0-9]$")
     kind         enum("spa", "static", "shopify_storefront")
@@ -435,7 +436,7 @@ mutation site createSite {
     binding      object
   }
   insert {
-    accept { hostname, bundleRef, artifactId, binding, resolutionTail, accountId }
+    accept { hostname, bundleRef, artifactId, binding, resolutionTail, accountId, extensionRuntimePath }
     stamp {
       id:          args.siteId
       ownerUserId: actor.userId

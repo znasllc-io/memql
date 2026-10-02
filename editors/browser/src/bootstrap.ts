@@ -26,7 +26,15 @@ retry.addEventListener('click', retryTools);
 if (basic) status.textContent = "Starting the basic editor…";
 try {
   const { start } = await import('./main');
-  await start(() => basic, () => { setup.hidden = true; });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      start(() => basic, () => { setup.hidden = true; }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('The editor did not finish starting. Retry, or continue without MemQL tools.')), 45000);
+      }),
+    ]);
+  } finally { clearTimeout(timer); }
   if (basic) continueBasic();
 } catch (error) {
   status.textContent = error instanceof Error ? error.message : String(error);

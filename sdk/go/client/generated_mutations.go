@@ -5891,9 +5891,10 @@ func CreateSenderIdentityBuild(args CreateSenderIdentityArgs) string {
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.go).
 type CreateSiteArgs struct {
-	SiteId    string
-	AccountId string
-	Hostname  string
+	SiteId               string
+	ExtensionRuntimePath string
+	AccountId            string
+	Hostname             string
 	// Enum: spa | static | shopify_storefront
 	Kind string
 	// What the edge answers for a path that matches no file. Omitted means the kind decides, which is what every site row created before memql#5535 carries and what they must keep resolving as. It sits in accept{} rather than stamp{} for updateSiteBundle's artifactId reason: an omitted arg is dropped from the payload, so a `?? ""` here would write an explicit empty string and there would be no way to express "let the kind decide".
@@ -5922,6 +5923,13 @@ func CreateSiteBuild(args CreateSiteArgs) string {
 	b.WriteString("mutation createSite(")
 	b.WriteString("siteId: ")
 	b.WriteString(quoteMemQL(args.SiteId))
+	if args.ExtensionRuntimePath != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("extensionRuntimePath: ")
+		b.WriteString(quoteMemQL(args.ExtensionRuntimePath))
+	}
 	if args.AccountId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
