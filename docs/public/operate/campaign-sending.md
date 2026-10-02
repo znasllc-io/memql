@@ -25,6 +25,30 @@ campaigns deliberately do not use — see below)
 
 ---
 
+## Installation defaults
+
+Installation generates a shared unsubscribe signing key once and keeps it on
+subsequent runs. Local installs store it in `memql-secrets`; cloud installation
+uses `memql-campaigns-unsubscribe-secret` in the instance's Key Vault, delivered
+by the separate `memql-secrets-campaigns` ExternalSecret. Every replica uses the
+same key. Never put it in a package manifest or product repository.
+
+The unsubscribe base URL defaults to `https://api.<MEMQL_DOMAIN>` on every
+target. An explicit `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` overrides that default.
+The public API origin must be reachable by recipients for external delivery;
+a local hostname is for local testing and capture only.
+
+For an existing installation, rerun its secret seeder before restarting the
+nodes with the updated engine. The seeder preserves an existing signing key.
+For cloud installs, seed the instance vault before applying its ExternalSecret;
+this separate object prevents a missing campaign key from stopping identity or
+database credential reconciliation. Signing-key rotation remains an explicit
+operation, described below, because previously issued links must keep working.
+
+These defaults belong to the engine. Client domains, sender names and Azure
+resource choices belong to the instance or product repository and its saved
+cluster configuration; they are never engine defaults.
+
 ## Organization permissions
 
 Select an organization when creating campaign work or a group. Operators who

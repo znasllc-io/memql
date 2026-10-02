@@ -167,7 +167,7 @@ export function CampaignJourney({
                       ? "Email sending needs setup."
                       : "Sending readiness is not confirmed."
                   }
-                  next="An operator must finish the settings below. You can continue preparing a draft."
+                  next="Check the organization’s sending domain in Campaigns settings. You can continue preparing a draft."
                   detail={sending.reason}
                 />
               )}
@@ -192,13 +192,12 @@ export function CampaignJourney({
               <Subhead>Provider and domain</Subhead>
               <Caption>
                 An owner or developer can connect the organization’s Azure email domain in
-                Campaigns → Senders → Connect email domain. Complete the DNS verification there,
+                Campaigns → Settings. Complete the DNS verification there,
                 then choose the verified sender here.
               </Caption>
               <Caption>
-                The unsubscribe address and signing secret are configured by your cluster operator.
-                Use the DNS records provided by your email service. Adding a mailbox here does not
-                verify it.
+                Installation prepares the unsubscribe link automatically. Each organization uses its own
+                verified domain and sender.
               </Caption>
             </Panel>
           </>
