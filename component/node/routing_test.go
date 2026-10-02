@@ -432,3 +432,13 @@ func TestStoreWritesReachEveryEdgeReplica(t *testing.T) {
 		t.Error("graph.node.updated.v1:shopify:product forwards; a catalog sync would flush every edge cache row by row")
 	}
 }
+
+func TestRecurringCampaignUpdatesReachOtherReplicas(t *testing.T) {
+	for _, verb := range []string{"created", "updated"} {
+		topic := "graph.node." + verb + ".v1:campaigns:campaignSeries"
+		result := evaluateRouting(defaultRoutingRules(), topic)
+		if !result.Forward || !result.Broadcast || result.TargetType != "" {
+			t.Fatalf("%s must broadcast: %+v", topic, result)
+		}
+	}
+}

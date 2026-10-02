@@ -558,3 +558,28 @@ concept singleSendReceipt {
   result object!
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
+
+/// A repeating instruction, distinct from each occurrence's campaign and delivery ledger.
+/// Configuration is captured when an authorized person saves; every occurrence rechecks
+/// that person's current authority and snapshots the then-published template.
+@displayCard(primary="name", secondary="nextAt", tertiary="sourceCampaignId", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept campaignSeries {
+  ownerUserId string! @description("The creator of this series. Ownership is preserved across organization members editing it.")
+  authorizedByUserId string! @description("The person who most recently authorized the active configuration. The worker rechecks their current permissions.")
+  accountId string! @description("The client organization. A series cannot move between organizations.")
+  sourceCampaignId string! @description("The campaign used as a blueprint. Editing it does not change this captured configuration until the series is saved again.")
+  name string! @description("Name used for generated occurrences.")
+  definition object! @description("Server-captured audience, template, sender and tracking choices. Never accepted directly from a client.")
+  intervalWeeks int! @description("Repeat every 1 through 52 calendar weeks in timeZone.")
+  timeZone string! @description("IANA timezone preserving the local day and time across daylight-saving changes.")
+  anchorAt datetime! @description("The first scheduled occurrence, anchoring the calendar cadence.")
+  nextAt datetime! @description("Next unprocessed occurrence. Downtime produces at most one catch-up occurrence, then advances beyond the present.")
+  status enum("active", "paused", "blocked")! @description("Paused stops future occurrences; blocked requires review and an explicit resume. Already queued campaigns keep their own lifecycle.")
+  lastCampaignId string @description("Most recent occurrence campaign, with its own immutable delivery history.")
+  lastOccurrenceAt datetime @description("Scheduled time of the most recent committed occurrence.")
+  lastError string @description("Reason for a blocked series. No credentials or message bodies.")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="sourceCampaignId", target=campaign, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+}

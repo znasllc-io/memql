@@ -887,3 +887,10 @@ export function useCampaignWrites() {
 }
 
 export type CampaignWrites = ReturnType<typeof useCampaignWrites>;
+
+export function useConfigureSeries() {
+  return useWrite(async (query, args: Parameters<Connection["query"]["campaignConfigureSeries"]>[0]) => {
+    await query.campaignConfigureSeries(args);
+    return true;
+  }, false);
+}

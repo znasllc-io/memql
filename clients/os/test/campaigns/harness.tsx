@@ -71,6 +71,7 @@ function fakeSubscriptions(): FakeSubscriptions {
 
 export interface FakeSeed {
   campaigns?: Row[];
+  campaignSeries?: Row[];
   accounts?: Row[];
   audiences?: Row[];
   templates?: Row[];
@@ -120,6 +121,8 @@ export function fakeConnection(seed: FakeSeed = {}) {
     query: {
       // The five live seeds.
       campaigns: reader(seed.campaigns),
+      campaignSeriesForCampaign: reader(seed.campaignSeries),
+      campaignConfigureSeries: reader([]),
       audiences: reader(seed.audiences),
       templates: reader(seed.templates),
       senderIdentities: reader(seed.senderIdentities),

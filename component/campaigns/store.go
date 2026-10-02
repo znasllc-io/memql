@@ -738,7 +738,15 @@ func (s *Store) EnqueueSend(ctx context.Context, job SendJob) error {
 	if !job.ScheduledAt.IsZero() {
 		args = append(args, arg{"scheduledAt", job.ScheduledAt.UTC().Format(time.RFC3339)})
 	}
-	return s.exec(ctx, call("mutation", "enqueueCampaignSend", args...))
+	values := map[string]any{}
+	for _, a := range args {
+		values[a.name] = a.value
+	}
+	rendered, err := langparser.RenderCall("enqueueCampaignSend", values)
+	if err != nil {
+		return err
+	}
+	return s.exec(ctx, "mutation "+rendered)
 }
 
 // SendJobPatch is the set of send-job fields a caller means to change.

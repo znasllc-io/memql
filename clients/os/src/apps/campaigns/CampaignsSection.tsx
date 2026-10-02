@@ -39,6 +39,7 @@ import {
 import { useLiveView } from "../../live/liveView";
 import type { CampaignWrites, TestSendState } from "./actions";
 import { SendBar } from "./SendBar";
+import { RecurrencePanel } from "./RecurrencePanel";
 import {
   audienceFromRow,
   campaignFingerprint,
@@ -363,6 +364,7 @@ function CampaignDetail({
       </Panel>
 
       <SendControls campaign={campaign} writes={writes} />
+      <RecurrencePanel campaignId={campaign.id} />
 
       <TestSendPanel campaignId={campaign.id} testSend={writes.testSend} />
 

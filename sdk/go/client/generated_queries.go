@@ -1846,6 +1846,28 @@ func CampaignEngagementRefsBuild(args CampaignEngagementRefsArgs) string {
 	return b.String()
 }
 
+// CampaignSeriesForCampaign -- Current repeating instruction for this blueprint; organization authorization applies.
+//
+// Bound concept: v1:campaigns:campaignSeries (machine-readable: BoundConcepts["campaignSeriesForCampaign"] in generated_concepts.go).
+type CampaignSeriesForCampaignArgs struct {
+	CampaignId string
+}
+
+// CampaignSeriesForCampaign calls the engine query campaignSeriesForCampaign.
+func (qc *QueryClient) CampaignSeriesForCampaign(ctx context.Context, args CampaignSeriesForCampaignArgs) (*Result, error) {
+	call := CampaignSeriesForCampaignBuild(args)
+	return qc.executeNamed(ctx, "campaignSeriesForCampaign", call)
+}
+
+func CampaignSeriesForCampaignBuild(args CampaignSeriesForCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignSeriesForCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignSkipCountByReason -- How many of this campaign's skipped deliveries carry one of the named skip reasons. A list rather than one reason per call because the skipped bucket is reported in three groups and three counts beat seven round trips.
 //
 // Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignSkipCountByReason"] in generated_concepts.go).
