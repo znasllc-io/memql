@@ -47,6 +47,8 @@ func (w *Worker) IntegrationName() string { return "campaigns" }
 // Capabilities returns the DSL-callable operations.
 func (w *Worker) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "configureTestAudience", Description: "Configure the organization testing audience.", Handler: w.handleConfigureTestAudience},
+		{Name: "testAudienceSend", Description: "Queue a test through the normal campaign worker.", Handler: w.handleTestAudienceSend},
 		{Name: "sendingReadiness", Description: "Check the selected organization's sender and unsubscribe setup without sending mail.", Handler: w.handleSendingReadiness},
 		{Name: "configureNewsletter", Description: "Bind a deployable to its organization's audience and reviewed welcome template.", Handler: w.handleConfigureNewsletter},
 		{Name: "subscribe", Description: "Record an explicit storefront opt-in and queue one welcome.", Handler: w.handleSubscribe},

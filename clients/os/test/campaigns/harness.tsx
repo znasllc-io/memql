@@ -71,6 +71,8 @@ function fakeSubscriptions(): FakeSubscriptions {
 
 export interface FakeSeed {
   campaigns?: Row[];
+  testSettings?: Row[];
+  testRuns?: Row[];
   campaignSeries?: Row[];
   newsletters?: Row[];
   welcomes?: Row[];
@@ -130,6 +132,10 @@ export function fakeConnection(seed: FakeSeed = {}) {
       campaignRetryNewsletterWelcome: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ queued: true }])),
       // The five live seeds.
       campaigns: reader(seed.campaigns),
+      campaignTestSettings: reader(seed.testSettings),
+      campaignTestRuns: reader(seed.testRuns),
+      campaignConfigureTestAudience: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ saved: true }])),
+      campaignTestAudienceSend: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ testRunId: "test-run" }])),
       campaignSeriesForCampaign: reader(seed.campaignSeries),
       campaignConfigureSeries: reader([]),
       audiences: reader(seed.audiences),

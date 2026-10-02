@@ -194,6 +194,31 @@ QueryClient.prototype.campaignConfigureSeries = function (this: QueryClient, arg
   return this.executeNamed("campaignConfigureSeries", buildCampaignConfigureSeries(args), opts);
 };
 
+/** Save the organization's shared testing audience. Must name an active audience in that organization; an empty audienceId disconnects it. Changes require the current revision. */
+export interface CampaignConfigureTestAudienceArgs {
+  accountId: string;
+  audienceId: string;
+  expectedRevision?: string;
+}
+
+export function buildCampaignConfigureTestAudience(args: CampaignConfigureTestAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignConfigureTestAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignConfigureTestAudience(args: CampaignConfigureTestAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignConfigureTestAudience = function (this: QueryClient, args: CampaignConfigureTestAudienceArgs = {} as CampaignConfigureTestAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignConfigureTestAudience", buildCampaignConfigureTestAudience(args), opts);
+};
+
 /** Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'. */
 export interface CampaignImportRecipientsArgs {
   /** The audience to import into. The caller must be able to read it. */
@@ -440,6 +465,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignStats = function (this: QueryClient, args: CampaignStatsArgs = {} as CampaignStatsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignStats", buildCampaignStats(args), opts);
+};
+
+/** Queue a separate test run through the ordinary campaign worker, using this organization's configured testing audience. Works in every source lifecycle, including an active series, whose saved instruction is used without advancing its schedule. Requires the same published template and sending readiness as a live run. Replaying requestId returns the original run without resending. */
+export interface CampaignTestAudienceSendArgs {
+  campaignId: string;
+  requestId: string;
+  /** The testing audience reviewed by the caller. Must still match the organization's saved setting; never replaces the saved setting. */
+  audienceId: string;
+}
+
+export function buildCampaignTestAudienceSend(args: CampaignTestAudienceSendArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "builtin campaignTestAudienceSend(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignTestAudienceSend(args: CampaignTestAudienceSendArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignTestAudienceSend = function (this: QueryClient, args: CampaignTestAudienceSendArgs = {} as CampaignTestAudienceSendArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignTestAudienceSend", buildCampaignTestAudienceSend(args), opts);
 };
 
 /** Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer carries an obviously-inert token. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of. */

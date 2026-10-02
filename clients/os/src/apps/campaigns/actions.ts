@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { newShortId, type Connection, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../live/connection";
@@ -247,75 +247,35 @@ export function useSendControls(): SendControlState {
 }
 
 export interface TestSendState extends WriteState {
-  /** Merge tags the render could not resolve. Empty after a clean test. */
-  unresolved: string[];
-  /** True once a test has come back, so the panel can say "Test sent". */
-  sent: boolean;
-  send: (campaignId: string, to: string) => Promise<boolean>;
+  runId: string;
+  send: (campaignId: string, audienceId: string) => Promise<boolean>;
 }
 
-/**
- * Send one test copy, and report the merge tags it could not resolve.
- *
- * THE UNRESOLVED LIST IS THE POINT, not a side note. It is the check that
- * catches a typo'd `{{fields.compnay}}` before the whole audience gets it, and
- * it is the only check that can: a spelling mistake inside a tag renders as
- * its own literal text into somebody's inbox, and nothing about the message
- * looks wrong from this side.
- */
+/** Retain the request id after an uncertain response. Retrying must recover
+ * the same persisted run, even when another replica answers the request. */
 export function useTestSend(): TestSendState {
   const connection = useOsConnection();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [unresolved, setUnresolved] = useState<string[]>([]);
-  const [sent, setSent] = useState(false);
-
-  const send = useCallback(
-    async (campaignId: string, to: string): Promise<boolean> => {
-      const query = connection?.query ?? null;
-      if (query === null) {
-        setError("Not connected to the cluster, so nothing was sent.");
-        return false;
-      }
-      const address = to.trim();
-      if (address === "") {
-        // The one rule a browser can answer. `to` is required and never
-        // defaults to the caller's own address -- deliberately, on the
-        // builtin's side -- so an empty box is a question, not a default.
-        setError("Say where the test should go.");
-        return false;
-      }
-      setBusy(true);
-      setError("");
-      setSent(false);
-      setUnresolved([]);
-      try {
-        const result = await query.campaignTestSend({ campaignId, to: address });
-        setUnresolved(unresolvedTagsFrom(result.rows()[0] ?? null));
-        setSent(true);
-        return true;
-      } catch (err: unknown) {
-        setError(describe(err));
-        return false;
-      } finally {
-        setBusy(false);
-      }
-    },
-    [connection],
-  );
-
-  return {
-    busy,
-    error,
-    unresolved,
-    sent,
-    send,
-    reset: () => {
-      setError("");
-      setUnresolved([]);
-      setSent(false);
-    },
-  };
+  const [runId, setRunId] = useState("");
+  const request = useRef<{ scope: string; id: string } | null>(null);
+  const pending = useRef(false);
+  const send = useCallback(async (campaignId: string, audienceId: string) => {
+    if (pending.current) return false;
+    if (!connection || !audienceId) { setError("Choose a testing audience in Settings."); return false; }
+    const scope = `${campaignId}:${audienceId}`;
+    if (request.current?.scope !== scope) request.current = { scope, id: crypto.randomUUID() };
+    pending.current = true; setBusy(true); setError("");
+    try {
+      const result = await connection.query.campaignTestAudienceSend({ campaignId, audienceId, requestId: request.current.id });
+      const row = flatten(result.rows()[0] ?? {});
+      if (typeof row.testRunId !== "string" || !row.testRunId) throw new Error("The cluster did not confirm the test run. Try again to recover its result.");
+      setRunId(row.testRunId); request.current = null;
+      return true;
+    } catch (err) { setError(describe(err)); return false; }
+    finally { pending.current = false; setBusy(false); }
+  }, [connection]);
+  return { busy, error, runId, send, reset: () => { setError(""); setRunId(""); request.current = null; } };
 }
 
 /**
@@ -847,7 +807,6 @@ export function useCampaignWrites() {
   const createCampaign = useCreateCampaign();
   const updateCampaign = useUpdateCampaign();
   const sendControls = useSendControls();
-  const testSend = useTestSend();
   const createAudience = useCreateAudience();
   const archiveAudience = useArchiveAudience();
   const addRecipient = useAddRecipient();
@@ -870,7 +829,6 @@ export function useCampaignWrites() {
     createCampaign,
     updateCampaign,
     sendControls,
-    testSend,
     createAudience,
     archiveAudience,
     addRecipient,

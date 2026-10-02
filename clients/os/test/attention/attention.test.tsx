@@ -82,7 +82,7 @@ describe("shared attention", () => {
     await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
     expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "files:editor"');
   });
-  it.each([["campaigns:template-editor", "templates"], ["campaigns:azure-email", "senders"]])("acknowledges %s only at its visible destination", async (changeId, sectionId) => {
+  it.each([["campaigns:testing-audience", "settings"], ["campaigns:template-editor", "templates"], ["campaigns:azure-email", "senders"]])("acknowledges %s only at its visible destination", async (changeId, sectionId) => {
     const fake = setup();
     const campaigns = OS_REGISTRY.apps.find(app => app.id === "campaigns")!;
     const feature = campaigns.attentionChanges!.find(change => change.id === changeId)!;

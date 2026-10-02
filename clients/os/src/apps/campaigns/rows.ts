@@ -36,6 +36,7 @@ export const DELIVERY_CONCEPT = "v1:campaigns:delivery";
 // ---------------------------------------------------------------------------
 
 export interface CampaignRow {
+  testSourceCampaignId: string;
   id: string;
   ownerUserId: string;
   name: string;
@@ -93,6 +94,7 @@ function boolOrTrue(row: Row, key: string): boolean {
 export function campaignFromRow(row: Row): CampaignRow {
   const flat = flatten(row);
   return {
+    testSourceCampaignId: rowString(flat, "testSourceCampaignId"),
     id: rowString(flat, "id"),
     ownerUserId: rowString(flat, "ownerUserId"),
     name: rowString(flat, "name"),

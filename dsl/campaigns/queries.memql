@@ -21,6 +21,7 @@ query campaign campaigns {
     status  string
   }
   filter    row => true
+                && (row.testSourceCampaignId == nil || row.testSourceCampaignId == "")
                 && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  50
@@ -653,4 +654,24 @@ query consentEvent newsletterConsentById {
   args { eventId string! }
   filter row => row.id == args.eventId
   shape consentEventFull
+}
+
+/// Shared testing audience for the selected organization.
+@actor
+query testSettings campaignTestSettings {
+  args { accountId string! }
+  filter row => row.accountId == args.accountId
+  sort "row.createdAt", "desc"
+  paginate 1
+  shape campaignTestSettingsFull
+}
+
+/// Recent test runs for this campaign; counters and deliveries belong to these runs alone.
+@actor
+query campaign campaignTestRuns {
+  args { campaignId string! }
+  filter row => row.testSourceCampaignId == args.campaignId
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape campaignFull
 }

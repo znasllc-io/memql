@@ -276,6 +276,40 @@ func CampaignConfigureSeriesBuild(args CampaignConfigureSeriesArgs) string {
 	return b.String()
 }
 
+// CampaignConfigureTestAudience -- Save the organization's shared testing audience. Must name an active audience in that organization; an empty audienceId disconnects it. Changes require the current revision.
+type CampaignConfigureTestAudienceArgs struct {
+	AccountId        string
+	AudienceId       string
+	ExpectedRevision string
+}
+
+// CampaignConfigureTestAudience calls the engine builtin campaignConfigureTestAudience.
+func (qc *QueryClient) CampaignConfigureTestAudience(ctx context.Context, args CampaignConfigureTestAudienceArgs) (*Result, error) {
+	call := CampaignConfigureTestAudienceBuild(args)
+	return qc.executeNamed(ctx, "campaignConfigureTestAudience", call)
+}
+
+func CampaignConfigureTestAudienceBuild(args CampaignConfigureTestAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignConfigureTestAudience(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 38 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if args.ExpectedRevision != "" {
+		if b.Len() > 38 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignImportRecipients -- Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'.
 type CampaignImportRecipientsArgs struct {
 	// The audience to import into. The caller must be able to read it.
@@ -565,6 +599,39 @@ func CampaignStatsBuild(args CampaignStatsArgs) string {
 	b.WriteString("builtin campaignStats(")
 	b.WriteString("campaignId: ")
 	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignTestAudienceSend -- Queue a separate test run through the ordinary campaign worker, using this organization's configured testing audience. Works in every source lifecycle, including an active series, whose saved instruction is used without advancing its schedule. Requires the same published template and sending readiness as a live run. Replaying requestId returns the original run without resending.
+type CampaignTestAudienceSendArgs struct {
+	CampaignId string
+	RequestId  string
+	// The testing audience reviewed by the caller. Must still match the organization's saved setting; never replaces the saved setting.
+	AudienceId string
+}
+
+// CampaignTestAudienceSend calls the engine builtin campaignTestAudienceSend.
+func (qc *QueryClient) CampaignTestAudienceSend(ctx context.Context, args CampaignTestAudienceSendArgs) (*Result, error) {
+	call := CampaignTestAudienceSendBuild(args)
+	return qc.executeNamed(ctx, "campaignTestAudienceSend", call)
+}
+
+func CampaignTestAudienceSendBuild(args CampaignTestAudienceSendArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignTestAudienceSend(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
 	b.WriteString(")")
 	return b.String()
 }

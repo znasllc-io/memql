@@ -1896,6 +1896,50 @@ func CampaignSkipCountByReasonBuild(args CampaignSkipCountByReasonArgs) string {
 	return b.String()
 }
 
+// CampaignTestRuns -- Recent test runs for this campaign; counters and deliveries belong to these runs alone.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignTestRuns"] in generated_concepts.go).
+type CampaignTestRunsArgs struct {
+	CampaignId string
+}
+
+// CampaignTestRuns calls the engine query campaignTestRuns.
+func (qc *QueryClient) CampaignTestRuns(ctx context.Context, args CampaignTestRunsArgs) (*Result, error) {
+	call := CampaignTestRunsBuild(args)
+	return qc.executeNamed(ctx, "campaignTestRuns", call)
+}
+
+func CampaignTestRunsBuild(args CampaignTestRunsArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignTestRuns(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignTestSettings -- Shared testing audience for the selected organization.
+//
+// Bound concept: v1:campaigns:testSettings (machine-readable: BoundConcepts["campaignTestSettings"] in generated_concepts.go).
+type CampaignTestSettingsArgs struct {
+	AccountId string
+}
+
+// CampaignTestSettings calls the engine query campaignTestSettings.
+func (qc *QueryClient) CampaignTestSettings(ctx context.Context, args CampaignTestSettingsArgs) (*Result, error) {
+	call := CampaignTestSettingsBuild(args)
+	return qc.executeNamed(ctx, "campaignTestSettings", call)
+}
+
+func CampaignTestSettingsBuild(args CampaignTestSettingsArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignTestSettings(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // Campaigns -- The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` server-side for legacy untied rows; organization-owned rows follow current membership and app permissions. Optional status filter narrows to one lifecycle bucket; omit it to see everything.
 //
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaigns"] in generated_concepts.go).

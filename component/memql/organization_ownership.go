@@ -15,7 +15,7 @@ import (
 
 func organizationOwnedConcept(concept string) bool {
 	switch concept {
-	case "v1:campaigns:newsletterBinding", "v1:campaigns:newsletterSignup", "v1:campaigns:campaignSeries", "v1:campaigns:audience", "v1:campaigns:recipient", "v1:campaigns:template", "v1:campaigns:senderIdentity", "v1:campaigns:campaign", "v1:campaigns:delivery", "v1:campaigns:engagementEvent", "v1:campaigns:consentEvent", "v1:campaigns:emailRule", "v1:platform:site", "v1:platform:package", "v1:platform:packageDeployment", "v1:identity:group", "v1:identity:groupMembership":
+	case "v1:campaigns:testSettings", "v1:campaigns:newsletterBinding", "v1:campaigns:newsletterSignup", "v1:campaigns:campaignSeries", "v1:campaigns:audience", "v1:campaigns:recipient", "v1:campaigns:template", "v1:campaigns:senderIdentity", "v1:campaigns:campaign", "v1:campaigns:delivery", "v1:campaigns:engagementEvent", "v1:campaigns:consentEvent", "v1:campaigns:emailRule", "v1:platform:site", "v1:platform:package", "v1:platform:packageDeployment", "v1:identity:group", "v1:identity:groupMembership":
 		return true
 	}
 	return false
@@ -122,6 +122,8 @@ func organizationReferences(concept string) map[string]string {
 	switch concept {
 	case "v1:campaigns:campaign", "v1:campaigns:emailRule":
 		return map[string]string{"audienceId": "v1:campaigns:audience", "templateId": "v1:campaigns:template", "senderIdentityId": "v1:campaigns:senderIdentity"}
+	case "v1:campaigns:testSettings":
+		return map[string]string{"audienceId": "v1:campaigns:audience"}
 	case "v1:campaigns:newsletterBinding":
 		return map[string]string{"siteId": "v1:platform:site", "audienceId": "v1:campaigns:audience", "templateId": "v1:campaigns:template", "senderIdentityId": "v1:campaigns:senderIdentity"}
 	case "v1:campaigns:newsletterSignup":

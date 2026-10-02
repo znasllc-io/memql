@@ -104,6 +104,7 @@ type ExecutionClaimer interface {
 
 // Worker drains v1:campaigns:sendJob rows.
 type Worker struct {
+	testGate       func(context.Context, string) (func(), error)
 	templateGate   func(context.Context, string) (func(), error)
 	singleSendGate func(context.Context, string) (func(), error)
 	seriesGate     func(context.Context, string) (func(), error)
@@ -171,6 +172,13 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 	}
 	cfg := LoadConfig()
 	return &Worker{
+		testGate: func(ctx context.Context, key string) (func(), error) {
+			var db *sql.DB
+			if len(database) > 0 && database[0] != nil {
+				db = database[0]()
+			}
+			return memql.AcquireWriteGate(ctx, db, "campaign-test:"+key)
+		},
 		newsletterGate: func(ctx context.Context, key string) (func(), error) {
 			var db *sql.DB
 			if len(database) > 0 && database[0] != nil {

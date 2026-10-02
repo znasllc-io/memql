@@ -1916,6 +1916,50 @@ QueryClient.prototype.campaignSkipCountByReason = function (this: QueryClient, a
   return this.executeNamed("campaignSkipCountByReason", buildCampaignSkipCountByReason(args), opts);
 };
 
+/** Recent test runs for this campaign; counters and deliveries belong to these runs alone. */
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignTestRuns"] in generated_concepts.ts).
+export interface CampaignTestRunsArgs {
+  campaignId: string;
+}
+
+export function buildCampaignTestRuns(args: CampaignTestRunsArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  return "query campaignTestRuns(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignTestRuns(args: CampaignTestRunsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignTestRuns = function (this: QueryClient, args: CampaignTestRunsArgs = {} as CampaignTestRunsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignTestRuns", buildCampaignTestRuns(args), opts);
+};
+
+/** Shared testing audience for the selected organization. */
+// Bound concept: v1:campaigns:testSettings (machine-readable: BoundConcepts["campaignTestSettings"] in generated_concepts.ts).
+export interface CampaignTestSettingsArgs {
+  accountId: string;
+}
+
+export function buildCampaignTestSettings(args: CampaignTestSettingsArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query campaignTestSettings(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignTestSettings(args: CampaignTestSettingsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignTestSettings = function (this: QueryClient, args: CampaignTestSettingsArgs = {} as CampaignTestSettingsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignTestSettings", buildCampaignTestSettings(args), opts);
+};
+
 /** The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` server-side for legacy untied rows; organization-owned rows follow current membership and app permissions. Optional status filter narrows to one lifecycle bucket; omit it to see everything. */
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaigns"] in generated_concepts.ts).
 export interface CampaignsArgs {
