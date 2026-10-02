@@ -147,10 +147,29 @@ func TestRecurringCampaignsAcrossReplicas(t *testing.T) {
 		}
 		w.processJob(ctx, sys, job)
 	}
+	// Editing the source after enqueue must not change that occurrence. A
+	// later occurrence uses the newly reviewed publication, not a stale copy.
+	published, ok, err := workers[0].store.TemplateByID(memql.ContextWithFreshRead(owner), template)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	templateArgs["action"], templateArgs["expectedRevision"] = "save", published.Revision
+	templateArgs["content"] = map[string]any{"subject": "Next edition", "textBody": "New newsletter", "htmlBody": "<p>New newsletter</p>"}
+	edited, err := workers[0].handleSaveTemplate(owner, templateArgs, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	deliver(workers[0], firstID)
 	deliver(workers[1], firstID)
 	if sender.count() != 1 {
 		t.Fatalf("first occurrence sent %d messages", sender.count())
+	}
+	if sender.sent[0].Subject != "Welcome" {
+		t.Fatal("queued occurrence lost its reviewed template")
+	}
+	templateArgs["action"], templateArgs["expectedRevision"] = "publish", decodeResult(t, edited)["revision"]
+	if _, err = workers[0].handleSaveTemplate(owner, templateArgs, 0); err != nil {
+		t.Fatal(err)
 	}
 	// Lose the series advance after its occurrence is committed. A sibling must
 	// keep the already-created job and its ledger, then advance the series once.
@@ -170,6 +189,9 @@ func TestRecurringCampaignsAcrossReplicas(t *testing.T) {
 	deliver(workers[1], secondID)
 	if sender.count() != 2 {
 		t.Fatalf("separate occurrences or recovery lost ledger: %d", sender.count())
+	}
+	if sender.sent[1].Subject != "Next edition" {
+		t.Fatal("next occurrence ignored the current published template")
 	}
 	row = read(workers[1])
 	// Downtime produces one overdue occurrence, then advances strictly beyond now.
