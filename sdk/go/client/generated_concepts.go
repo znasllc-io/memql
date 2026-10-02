@@ -971,6 +971,7 @@ var BoundConcepts = map[string]string{
 	"submitAppSessionResult":                           "v1:worker:appSession",
 	"supersededDeployments":                            "v1:cluster:deployment",
 	"suppressionByDigest":                              "v1:campaigns:suppression",
+	"suppressionForOrganization":                       "v1:campaigns:suppression",
 	"surfacesForOwner":                                 "v1:actions:surface",
 	"syncStateFor":                                     "v1:platform:syncState",
 	"syncStatesAll":                                    "v1:platform:syncState",

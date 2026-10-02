@@ -44,7 +44,7 @@ func TestTheUnsubscribeEndpointAppendsAWithdrawEvent(t *testing.T) {
 	cfg := Config{UnsubscribeSecret: trackSecretA, UnsubscribeBaseURL: "https://api.example.test"}
 	h := NewUnsubscribeHandler(engine, cfg, quietLogger())
 
-	token, err := MintUnsubscribeToken(trackSecretA, testOwner, "r-1", testCampaign)
+	token, err := MintUnsubscribeToken(trackSecretA, UnsubscribePayload{OwnerUserID: testOwner, RecipientID: "r-1", CampaignID: testCampaign})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestTheUnsubscribeEndpointResolvesTheAddressWithoutTheCampaign(t *testing.T
 	cfg := Config{UnsubscribeSecret: trackSecretA, UnsubscribeBaseURL: "https://api.example.test"}
 	h := NewUnsubscribeHandler(engine, cfg, quietLogger())
 
-	token, err := MintUnsubscribeToken(trackSecretA, testOwner, "r-1", "rule-1")
+	token, err := MintUnsubscribeToken(trackSecretA, UnsubscribePayload{OwnerUserID: testOwner, RecipientID: "r-1", CampaignID: "rule-1"})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}

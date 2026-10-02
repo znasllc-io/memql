@@ -400,6 +400,10 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// it derives a single argument. @serverOnly is the second wall: even
 		// holding a valid token, nothing client-reachable can write this row.
 		{Path: "campaigns/mutations.memql", Name: "recordEngagementEvent"}: true,
+		// The public opt-out has a verified HMAC, not an actor.userId session.
+		// Only its handler derives organization/digest and writes engine state;
+		// actor scoping would either exclude mail clients or admit forged claims.
+		{Path: "campaigns/mutations.memql", Name: "recordOrganizationSuppression"}: true,
 		// memql#4829. The engine's own account of what it made of an event-email
 		// rule -- which bundle and construct it generated, whether activation
 		// succeeded, and how many times the rule has fired. The value of these

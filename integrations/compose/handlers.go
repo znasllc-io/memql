@@ -52,6 +52,9 @@ func (i *Integration) handleRunRecipe(ctx context.Context, args map[string]any, 
 	if err != nil {
 		return nil, err
 	}
+	if len(refs) == 0 && strings.TrimSpace(stringOf(row["description"])) == "" {
+		return nil, fmt.Errorf("compose: this recipe needs a brief or reference sources")
+	}
 
 	name := strings.TrimSpace(stringOf(args["name"]))
 	if name == "" {
@@ -104,7 +107,9 @@ func selectorsToSources(raw any) ([]SourceRef, error) {
 				items = append(items, m)
 			}
 		} else if raw == nil {
-			return nil, fmt.Errorf("compose: that recipe names no sources, so running it would compose from nothing")
+			// A brief-only composition is a valid recipe. The caller checks
+			// that it still has a brief before opening any work.
+			return nil, nil
 		} else {
 			return nil, fmt.Errorf("compose: the recipe's sourceSelectors are not a list")
 		}

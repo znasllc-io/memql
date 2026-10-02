@@ -15,6 +15,13 @@ extension API. It must not keep a competing cluster selection, duplicate
 credentials, install clusters, or become a second MemQL language extension.
 Both extensions use the same MemQL icon and have distinct names and packages.
 
+The shared editor sign-in admits readers and writers, as well as management
+roles and assignable custom roles. Connecting never elevates a role: document
+reads, saves, comments, DSL authoring, and deployment operations remain guarded
+by backend capabilities and row access. Readers may view authorized documents;
+writers may edit and comment where granted access. Productivity Tools does not
+require making its users developers.
+
 ## Cockpit owns the machine
 
 [MemQL Cockpit](https://github.com/znasllc-io/memql-cockpit) is the fleet

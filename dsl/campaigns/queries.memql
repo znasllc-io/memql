@@ -219,6 +219,17 @@ query suppression suppressionByDigest {
   shape   suppressionFull
 }
 
+/// ENGINE: lookup an organization-scoped suppression by its server-derived composite key.
+@actor
+query suppression suppressionForOrganization {
+  args {
+    suppressionId string!
+    accountId string!
+  }
+  filter row => row.id == args.suppressionId && row.accountId == args.accountId && actor.isClusterOwner == true
+  shape suppressionFull
+}
+
 /// ENGINE (owner-scoped): ONE PAGE of the audience a send is working through, oldest first --
 /// including suppressed ones, because a `skipped` delivery row is an outcome the operator is owed
 /// rather than a silence. Owned, and read under the campaign owner's actor. @pii projection.

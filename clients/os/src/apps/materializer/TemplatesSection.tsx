@@ -1,3 +1,9 @@
+import { AddButton } from "../../kit/AddButton";
+import { InlineSkeleton } from "../../kit/ContentSkeleton";
+import { useTemplateFiles } from "./useCompose";
+import { artifactFromRow } from "../files/rows";
+import { AccountPicker } from "../accounts/AccountPicker";
+import { accountIsArchived, type AccountRow } from "../accounts/rows";
 import { useState } from "react";
 
 import { Button, Caption, Field, Head, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead, formatMoment } from "../../kit";
@@ -29,10 +35,11 @@ import { FORMATS, RECIPES_EMPTY, TEMPLATES_EMPTY, formatWord } from "./words";
 
 export interface TemplatesSectionProps {
   templates: TemplateRow[];
+  accounts: AccountRow[];
   recipes: RecipeRow[];
   busy: boolean;
   error: string;
-  onCreateTemplate: (facts: NewTemplateFacts) => void;
+  onCreateTemplate: (facts: NewTemplateFacts) => Promise<string>;
   onArchiveTemplate: (templateId: string) => void;
   onRestoreTemplate: (templateId: string) => void;
   onRunRecipe: (recipeId: string) => void;
@@ -44,6 +51,7 @@ export interface TemplatesSectionProps {
 }
 
 export function TemplatesSection({
+  accounts,
   templates,
   recipes,
   busy,
@@ -65,19 +73,19 @@ export function TemplatesSection({
   return (
     <div className="os-mz-templates">
       <Head title="Templates" meta={templatesAvailable ? visibleTemplates.length : undefined}>
-        <Button tone="primary" onClick={() => setAdding((v) => !v)}>
-          {adding ? "Cancel" : "Bind a file"}
-        </Button>
+        {adding ? <Button tone="quiet" onClick={() => setAdding(false)}>Cancel</Button>
+          : <AddButton label="Bind a file" onClick={() => setAdding(true)} />}
       </Head>
 
       {error ? <Notice tone="error" sentence={error} /> : null}
 
       {adding ? (
         <NewTemplateForm
+          accounts={accounts}
           busy={busy}
-          onCreate={(facts) => {
-            onCreateTemplate(facts);
-            setAdding(false);
+          onCreate={async (facts) => {
+            const id = await onCreateTemplate(facts);
+            if (id) setAdding(false);
           }}
         />
       ) : null}
@@ -185,19 +193,30 @@ export function TemplatesSection({
 }
 
 function NewTemplateForm({
+  accounts,
   busy,
   onCreate,
 }: {
   busy: boolean;
   onCreate: (facts: NewTemplateFacts) => void;
+  accounts: AccountRow[];
 }) {
   const [name, setName] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [description, setDescription] = useState("");
   const [fileId, setFileId] = useState("");
   const [format, setFormat] = useState("docx");
+  const feed = useTemplateFiles();
+  const files = feed.snapshot.rows.map(artifactFromRow).filter(file =>
+    file.kind === "file" && !file.archived && file.sourceConceptRef &&
+    !/\.zip$/i.test(file.title) && !/zip/i.test(file.mimeType));
+  const selectedFile = files.find(file => file.sourceConceptRef === fileId);
 
   return (
     <Panel label="Bind a Library file as a template">
+      <Field label="Organization">
+        <AccountPicker id="mz-template-organization" label="Organization" required value={accountId} onChange={setAccountId} accounts={accounts} />
+      </Field>
       <Field label="Name">
         <Input id="mz-tpl-name" value={name} onChange={setName} label="Name" placeholder="Acme quarterly" />
       </Field>
@@ -211,13 +230,12 @@ function NewTemplateForm({
         />
       </Field>
       <Field label="Library file">
-        <Input
-          id="mz-tpl-file"
-          value={fileId}
-          onChange={setFileId}
-          label="Library file"
-          placeholder="The file's id, from Files"
-        />
+        <Select id="mz-tpl-file" value={selectedFile ? fileId : ""} onChange={setFileId} label="Library file">
+          <option value="" disabled>Choose a file</option>
+          {files.map(file => <option key={file.id} value={file.sourceConceptRef}>{file.title || "Untitled file"}</option>)}
+        </Select>
+        {feed.snapshot.error ? <Notice tone="error" sentence={feed.snapshot.error} /> : null}
+        {feed.snapshot.state === "seeding" && files.length === 0 ? <InlineSkeleton label="Loading files" /> : null}
       </Field>
       <Field label="What it produces">
         <Select id="mz-tpl-format" value={format} onChange={setFormat} label="What it produces">
@@ -232,13 +250,13 @@ function NewTemplateForm({
         Upload the file in Files first — a template is a binding to a file your Library already
         holds, so it keeps that file's versions and archives with it.
       </Caption>
-      <Button
+      <div className="os-panel-actions">{accounts.some(account => account.id === accountId && !accountIsArchived(account)) && name.trim() && selectedFile ? <Button
         tone="primary"
         busy={busy}
-        onClick={() => onCreate({ name, description, fileId, format })}
+        onClick={() => onCreate({ name, description, fileId, format, accountId })}
       >
         Bind it
-      </Button>
+      </Button> : null}</div>
     </Panel>
   );
 }

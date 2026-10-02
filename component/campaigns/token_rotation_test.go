@@ -47,17 +47,17 @@ func rotatedConfig() Config {
 // criterion. The link was minted before the rotation and is sitting in a
 // mailbox; it has to keep working afterwards.
 func TestTokenSignedWithThePreviousSecretStillVerifies(t *testing.T) {
-	tok, err := MintUnsubscribeToken(retiredSecret, testOwner, "r-1", testCampaign)
+	tok, err := MintUnsubscribeToken(retiredSecret, UnsubscribePayload{OwnerUserID: testOwner, RecipientID: "r-1", CampaignID: testCampaign})
 	if err != nil {
 		t.Fatalf("mint under the pre-rotation secret: %v", err)
 	}
 
-	owner, recipient, campaign, err := ParseUnsubscribeToken(rotatedConfig().UnsubscribeKeys(), tok)
+	payload, err := ParseUnsubscribeToken(rotatedConfig().UnsubscribeKeys(), tok)
 	if err != nil {
 		t.Fatalf("a link minted before the rotation stopped verifying after it: %v", err)
 	}
-	if owner != testOwner || recipient != "r-1" || campaign != testCampaign {
-		t.Fatalf("round trip across the rotation lost a field: %q %q %q", owner, recipient, campaign)
+	if payload.OwnerUserID != testOwner || payload.RecipientID != "r-1" || payload.CampaignID != testCampaign {
+		t.Fatalf("round trip across the rotation lost a field: %q %q %q", payload.OwnerUserID, payload.RecipientID, payload.CampaignID)
 	}
 }
 
@@ -69,7 +69,7 @@ func TestPreviousSecretUnsubscribesEndToEnd(t *testing.T) {
 	h := handlerFor(engine)
 	h.cfg = rotatedConfig()
 
-	tok, err := MintUnsubscribeToken(retiredSecret, testOwner, "r-1", testCampaign)
+	tok, err := MintUnsubscribeToken(retiredSecret, UnsubscribePayload{OwnerUserID: testOwner, RecipientID: "r-1", CampaignID: testCampaign})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -89,12 +89,12 @@ func TestPreviousSecretUnsubscribesEndToEnd(t *testing.T) {
 // the one case that cannot be recovered. It must land on the existing
 // "not valid" page, not a 500, and it must write nothing.
 func TestTokenNamingAnUnknownKeyIsRefusedNotCrashed(t *testing.T) {
-	tok, err := MintUnsubscribeToken("a-secret-nobody-holds-any-more", testOwner, "r-1", testCampaign)
+	tok, err := MintUnsubscribeToken("a-secret-nobody-holds-any-more", UnsubscribePayload{OwnerUserID: testOwner, RecipientID: "r-1", CampaignID: testCampaign})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
 
-	if _, _, _, err := ParseUnsubscribeToken(rotatedConfig().UnsubscribeKeys(), tok); err == nil {
+	if _, err := ParseUnsubscribeToken(rotatedConfig().UnsubscribeKeys(), tok); err == nil {
 		t.Fatal("a token signed with a secret this node does not hold verified anyway")
 	}
 
@@ -119,7 +119,7 @@ func TestTokenNamingAnUnknownKeyIsRefusedNotCrashed(t *testing.T) {
 // prober sends. It is refused for the same reason a bad tag is, and by
 // the same page.
 func TestMalformedKeyIdIsRefused(t *testing.T) {
-	good, err := MintUnsubscribeToken(currentSecret, testOwner, "r-1", testCampaign)
+	good, err := MintUnsubscribeToken(currentSecret, UnsubscribePayload{OwnerUserID: testOwner, RecipientID: "r-1", CampaignID: testCampaign})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestMalformedKeyIdIsRefused(t *testing.T) {
 	for _, forgedKeyID := range []string{"", "deadbeef", "zzzz", strings.Repeat("a", 64)} {
 		swapped := append([]string{}, parts...)
 		swapped[1] = forgedKeyID
-		if _, _, _, err := ParseUnsubscribeToken(rotatedConfig().UnsubscribeKeys(), strings.Join(swapped, ".")); err == nil {
+		if _, err := ParseUnsubscribeToken(rotatedConfig().UnsubscribeKeys(), strings.Join(swapped, ".")); err == nil {
 			t.Errorf("key id %q verified", forgedKeyID)
 		}
 	}
@@ -138,7 +138,7 @@ func TestMalformedKeyIdIsRefused(t *testing.T) {
 // operator is retiring, which is the opposite of a rotation.
 func TestOnlyTheCurrentSecretSigns(t *testing.T) {
 	cfg := rotatedConfig()
-	tok, err := MintUnsubscribeToken(cfg.UnsubscribeSecret, testOwner, "r-1", testCampaign)
+	tok, err := MintUnsubscribeToken(cfg.UnsubscribeSecret, UnsubscribePayload{OwnerUserID: testOwner, RecipientID: "r-1", CampaignID: testCampaign})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestOnlyTheCurrentSecretSigns(t *testing.T) {
 	}
 	// A node that has finished the rotation (previous dropped) still
 	// verifies what it just minted.
-	if _, _, _, err := ParseUnsubscribeToken([]string{currentSecret}, tok); err != nil {
+	if _, err := ParseUnsubscribeToken([]string{currentSecret}, tok); err != nil {
 		t.Errorf("a freshly minted token did not verify under the current secret alone: %v", err)
 	}
 }
@@ -212,11 +212,11 @@ func TestUnsubscribeKeysAreCurrentFirstAndDeduplicated(t *testing.T) {
 // mint side (campaignStartSend refuses), and it must not become a panic
 // on the endpoint that a mail client reaches unauthenticated.
 func TestNoKeysConfiguredRefusesEveryToken(t *testing.T) {
-	tok, err := MintUnsubscribeToken(currentSecret, testOwner, "r-1", testCampaign)
+	tok, err := MintUnsubscribeToken(currentSecret, UnsubscribePayload{OwnerUserID: testOwner, RecipientID: "r-1", CampaignID: testCampaign})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	if _, _, _, err := ParseUnsubscribeToken(nil, tok); err == nil {
+	if _, err := ParseUnsubscribeToken(nil, tok); err == nil {
 		t.Error("a token verified against an empty key ring")
 	}
 }

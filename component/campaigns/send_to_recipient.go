@@ -146,7 +146,7 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 	if digest == "" {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: recipient %q has no usable address", recipientID)
 	}
-	if sup, suppressed, err := w.store.SuppressionByDigest(w.systemActorContext(ctx), digest); err != nil {
+	if sup, suppressed, err := w.store.SuppressionForSend(w.systemActorContext(ctx), campaign.AccountID, digest); err != nil {
 		// A failed lookup must NOT read as "not suppressed". Refusing is the
 		// only safe answer: a delayed message is recoverable, one sent to
 		// somebody who opted out is not.
@@ -171,7 +171,9 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 		})
 	}
 
-	token, err := MintUnsubscribeToken(w.cfg.UnsubscribeSecret, ownerUserID, recipient.ID, campaign.ID)
+	// A rule is not a persisted campaign. Keep its ID out of the unsubscribe
+	// campaign relationship; the signed organization and digest identify the opt-out.
+	token, err := MintUnsubscribeToken(w.cfg.UnsubscribeSecret, UnsubscribePayload{OwnerUserID: ownerUserID, RecipientID: recipient.ID, AccountID: campaign.AccountID, EmailDigest: digest})
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: cannot mint an unsubscribe token: %w", err)
 	}

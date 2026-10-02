@@ -140,6 +140,11 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 		return rowsEnvelope(e.ledgerFor(idListOf(q, "recipientIds"))), nil
 	case strings.HasPrefix(q, "query deliveryLedgerForCampaign"):
 		return rowsEnvelope(e.ledger), nil
+	case strings.HasPrefix(q, "query suppressionForOrganization"):
+		if row, ok := e.suppression[argOf(q, "suppressionId")]; ok && bare(str(row, "accountId")) == bare(argOf(q, "accountId")) {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query suppressionByDigest"):
 		digest := argOf(q, "emailDigest")
 		if row, ok := e.suppression[digest]; ok {

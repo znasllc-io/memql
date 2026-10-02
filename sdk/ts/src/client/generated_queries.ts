@@ -11028,6 +11028,30 @@ QueryClient.prototype.suppressionByDigest = function (this: QueryClient, args: S
   return this.executeNamed("suppressionByDigest", buildSuppressionByDigest(args), opts);
 };
 
+/** ENGINE: lookup an organization-scoped suppression by its server-derived composite key. */
+// Bound concept: v1:campaigns:suppression (machine-readable: BoundConcepts["suppressionForOrganization"] in generated_concepts.ts).
+export interface SuppressionForOrganizationArgs {
+  suppressionId: string;
+  accountId: string;
+}
+
+export function buildSuppressionForOrganization(args: SuppressionForOrganizationArgs): string {
+  const parts: string[] = [];
+  parts.push("suppressionId: " + renderMemQLValue(args.suppressionId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  return "query suppressionForOrganization(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    suppressionForOrganization(args: SuppressionForOrganizationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.suppressionForOrganization = function (this: QueryClient, args: SuppressionForOrganizationArgs = {} as SuppressionForOrganizationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("suppressionForOrganization", buildSuppressionForOrganization(args), opts);
+};
+
 /** List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier. */
 // Bound concept: v1:actions:surface (machine-readable: BoundConcepts["surfacesForOwner"] in generated_concepts.ts).
 export interface SurfacesForOwnerArgs {
