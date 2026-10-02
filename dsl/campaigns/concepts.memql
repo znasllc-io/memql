@@ -642,6 +642,7 @@ concept newsletterSignup {
 }
 
 /// The shared testing audience for one organization. Only the governed configuration action writes it.
+// @no-displayCard: internal organization configuration; its audience reference has the human-facing name.
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept testSettings {
   ownerUserId string!
