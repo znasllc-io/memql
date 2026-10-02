@@ -45,6 +45,10 @@ one never silently uploads it or starts another Cockpit backup process.
 The reading view uses an HTML-disabled Markdown renderer and does not fetch
 remote images. Links open only after a deliberate click. Shared comments require
 a connected MemQL file; local review drafts are not presented as synchronized.
+Before accepting a new comment, the cluster verifies the selected source lines
+against the saved UTF-8 document (up to 2 MiB), under the same version lock as
+saves. Stale or fabricated passages are refused. Retrying a saved comment after
+a lost response returns its receipt, even if the document has since changed.
 The current comment list shows the newest 500 records and reports when more are
 stored. Applying feedback automatically is not enabled by adding a comment.
 
