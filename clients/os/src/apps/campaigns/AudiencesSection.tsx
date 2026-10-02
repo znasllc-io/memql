@@ -47,16 +47,8 @@ import { useAudienceRecipients, type CampaignFeeds } from "./useCampaigns";
 
 // Audiences: who a campaign goes to, and how they got there.
 //
-// The list is LIVE. The ROSTER is not, and that is a recorded exclusion rather
-// than an omission: hand-editing an audience is human-paced and would be
-// affordable to broadcast, but a CSV import is the same concept and is not --
-// a 20,000-address file is a 20,000-event burst proportional to a FILE rather
-// than to anything a person did.
-//
-// So the roster prints when it was read and offers to look again, and it says
-// what that costs: an address somebody adds in another window does not appear
-// here, and an unsubscribe does not flip a row under you. A stale list that
-// looks current is the failure this copy exists to prevent.
+// The audience list subscribes to operator changes. The roster refreshes
+// automatically while visible: CSV-sized recipient bursts stay out of broadcasts.
 
 export function AudiencesSection({
   feeds,
@@ -557,9 +549,6 @@ function RosterPanel({
     <Panel label="Who is on this list">
       <div className="os-campaign-detail-head">
         <Subhead meta={roster.state === "ready" && !roster.error ? `${recipients.length} read` : undefined}>Who is on this list</Subhead>
-        <Button busy={roster.state === "loading"} onClick={roster.reload}>
-          Read again
-        </Button>
       </div>
 
       {roster.state === "error" ? (
@@ -613,14 +602,7 @@ function RosterPanel({
         />
       )}
 
-      {roster.readAt === "" ? null : (
-        <Caption>
-          Read at {new Date(roster.readAt).toLocaleTimeString()}, and not updated since. An audience
-          can be a whole imported file, so it is read when you ask rather than streamed -- an
-          address added in another window, or an unsubscribe that arrived a minute ago, shows up
-          when you read again. {subscriptionNote(recipients)}
-        </Caption>
-      )}
+      <Caption>Updates automatically. {subscriptionNote(recipients)}</Caption>
     </Panel>
   );
 }

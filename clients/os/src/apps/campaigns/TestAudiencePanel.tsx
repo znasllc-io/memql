@@ -8,8 +8,10 @@ import { AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
 import { useDefaultOrganization } from "../accounts/organization";
 import { audienceFromRow, campaignFromRow, deliveryFromRow, type AudienceRow, type CampaignRow } from "./rows";
-import { useCampaignDeliveries, useReading, useSendingReadiness } from "./useCampaigns";
+import { CAMPAIGN_REFRESH_MS, useCampaignDeliveries, useReading, useSendingReadiness } from "./useCampaigns";
 import { useTestSend } from "./actions";
+import { SendBar } from "./SendBar";
+import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 
 const concept = "v1:campaigns:testSettings";
 const noRows: Row[] = [];
@@ -65,7 +67,7 @@ function TestAudienceChoice({ accountId, audiences }: { accountId: string; audie
     </Select></Field>
     <Button busy={busy} disabled={blocked || selected === saved} onClick={() => void save()}>Save testing audience</Button>
     <Caption>Saved in the cluster and shared with this organization. Use a separate audience from the campaign’s live subscribers.</Caption>
-    {blocked ? <Notice tone="warn" sentence="Testing settings are not confirmed."><Button onClick={() => { feed.reseed(); audiences.reseed(); }}>Refresh</Button></Notice> : null}
+    {blocked ? <Notice tone="warn" sentence="Testing settings are not confirmed." next="Waiting for the connection to recover." /> : null}
     {error ? <Notice tone="error" sentence="Testing audience was not saved." detail={error} /> : null}
   </>;
 }
@@ -79,37 +81,39 @@ export function TestSendPanel({ campaign, audiences }: { campaign: CampaignRow; 
   const audience = audiences.find(a => a.id === audienceId && a.accountId === campaign.accountId && a.status === "active");
   const sending = useSendingReadiness("", "", campaign.id);
   const read = useMemo(() => connection ? async (signal: AbortSignal) => (await connection.query.campaignTestRuns({ campaignId: campaign.id }, { signal })).rows() : null, [connection, campaign.id]);
-  const history = useReading<Row[]>(noRows, read, [read]);
+  const history = useReading<Row[]>(noRows, read, [read], CAMPAIGN_REFRESH_MS);
   const [expanded, setExpanded] = useState("");
   const ready = sending.ready && !unavailable(settings) && !!audience && audienceId !== campaign.audienceId;
   const send = async () => { if (ready && await testSend.send(campaign.id, audienceId)) history.reload(); };
   const runs = history.value.map(campaignFromRow);
-  return <Panel label="Send a test"><Subhead>Send a test</Subhead>
+  return <Panel label="Send a test"><Subhead>Test results</Subhead>
     <Caption>{audience ? `Testing audience: ${audience.name}` : "Choose a testing audience for this organization in Settings."}</Caption>
     {audienceId === campaign.audienceId ? <Notice tone="warn" sentence="Choose a separate testing audience in Settings." /> : null}
-    {unavailable(settings) ? <Notice tone="warn" sentence="Testing audience is not confirmed."><Button onClick={settings.reseed}>Refresh settings</Button></Notice> : null}
+    {unavailable(settings) ? <Notice tone="warn" sentence="Testing audience is not confirmed." next="Waiting for the connection to recover." /> : null}
     {!sending.ready ? <Notice tone="warn" sentence="Finish sending setup before sending a test." detail={sending.reason}><Button onClick={sending.reload}>Check again</Button></Notice> : null}
     {sending.capture ? <Caption>View the test in the Email app. No email will reach the recipient’s inbox.</Caption> : null}
+    {runs[0] ? <div aria-label="Latest test results"><Subhead meta={formatMoment(runs[0].startedAt || runs[0].createdAt)}>Latest test</Subhead><SendBar campaign={runs[0]} stats={null} showEngagement={false} /></div> : null}
     <Button busy={testSend.busy} busyLabel="Queuing test" disabled={!ready} onClick={() => void send()}>Send test</Button>
     <Caption>Uses the normal sending process and a published template. Repeating campaigns use their saved settings. Results belong to the test; the live campaign and schedule stay unchanged.</Caption>
     {testSend.error ? <Notice tone="error" sentence="The test could not be confirmed." next="Retry to recover the same run without sending it twice." detail={testSend.error} /> : null}
-    {testSend.runId ? <Notice tone="info" sentence="Test run queued. Check its delivery results below." /> : null}
-    <div className="os-campaign-detail-head"><Subhead>Recent tests</Subhead><Button busy={history.state === "loading"} onClick={history.reload}>Refresh tests</Button></div>
+    {testSend.runId && !runs.some(run => run.id === testSend.runId) ? <Notice tone="info" sentence="Test run queued. Check its delivery results below." /> : null}
+    <Subhead>Recent tests</Subhead>
+    {history.state === "loading" && !runs.length ? <RecordListSkeleton rows={2} label="Recent tests" /> : null}
     {history.error ? <Notice tone="error" sentence="Test results could not be read." detail={history.error} /> : null}
     <RecordList>{runs.map(run => <RecordRow key={run.id} name={formatMoment(run.startedAt || run.createdAt)} state={run.status} secondary={`${run.sentCount} accepted · ${run.skippedCount} skipped · ${run.failedCount} failed`} open={expanded === run.id} onOpen={() => setExpanded(expanded === run.id ? "" : run.id)}>
       {expanded === run.id ? <TestDeliveries run={run} /> : null}
     </RecordRow>)}</RecordList>
     {history.state === "ready" && !runs.length ? <Caption>No tests yet.</Caption> : null}
-    {history.readAt ? <Caption>Latest 50 · Read {formatMoment(history.readAt)}. Accepted means the sending service accepted the message, not that it reached the inbox.</Caption> : null}
+    {history.readAt ? <Caption>Latest 50 · Updates automatically. Accepted means the sending service accepted the message, not that it reached the inbox.</Caption> : null}
   </Panel>;
 }
 function TestDeliveries({ run }: { run: CampaignRow }) {
   const deliveries = useCampaignDeliveries(run.id);
   return <>
     {run.lastError ? <Notice tone="warn" sentence="This test needs attention." detail={run.lastError} /> : null}
-    <Button busy={deliveries.state === "loading"} onClick={deliveries.reload}>Refresh deliveries</Button>
+    {deliveries.state === "loading" && !deliveries.value.length ? <RecordListSkeleton rows={2} label="Test deliveries" /> : null}
     {deliveries.error ? <Notice tone="error" sentence="Deliveries could not be read." detail={deliveries.error} /> : null}
     <RecordList>{deliveries.value.map(deliveryFromRow).map(delivery => <RecordRow key={delivery.id} name={delivery.email} state={delivery.status} secondary={delivery.lastError || delivery.skipReason} />)}</RecordList>
-    <Caption>Read {formatMoment(deliveries.readAt)}</Caption>
+    <Caption>Updates automatically</Caption>
   </>;
 }

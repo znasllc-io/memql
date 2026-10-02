@@ -312,7 +312,7 @@ and borrowed site-owner authority. Campaigns is core and declares the
 and welcome progress use shared PostgreSQL locks, fresh reads, stable IDs and
 monotonic revisions. Private mutations cannot be called or forged by clients.
 Newsletter configuration changes broadcast to other replicas; high-volume signup
-outcomes are read on demand. Configuration uses `campaignConfigureNewsletter`;
+outcomes update automatically while the audience is open. Configuration uses `campaignConfigureNewsletter`;
 rechecking uses `campaignRetryNewsletterWelcome`, both with saved revisions.
 
 Use the same audience in multiple campaigns, with independent templates and
@@ -1016,7 +1016,13 @@ campaign’s and the series’ live audiences. It never falls back to live subsc
 Each test has its own campaign occurrence, job and delivery ledger. Source counters,
 status and schedule stay unchanged. Tests are excluded from the regular campaign
 list and the organization’s campaign rollup. **Recent tests** shows the latest 50
-runs; refresh it for current counts and expand a run for per-address results.
+runs and a **Latest test** progress bar; expand a run for per-address results.
+These results, campaign statistics, delivery records and audience rosters update
+automatically while open, with background reads every five seconds. Returning to
+the browser tab reads the current state immediately. **Campaign results** describes
+the original send only: if it sent one message and a later test skips an opted-out
+tester, the campaign remains Sent 1 / Skipped 0 and the latest test shows Sent 0 /
+Skipped 1. Test outcomes are never added to campaign totals.
 “Accepted” means the transport accepted the message, not proof of inbox delivery.
 Suppressed or unsubscribed testers are skipped, as they would be in a live run.
 Unsubscribe links are real: clicking one changes that test recipient’s consent and

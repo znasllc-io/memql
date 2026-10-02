@@ -280,13 +280,50 @@ describe("one campaign", () => {
     expect(screen.getByText(/that is silence, not an empty send/)).toBeTruthy();
   });
 
-  it("PRINTS WHEN THE LEDGER WAS READ, because it is not live", async () => {
+  it("updates the ledger automatically without a refresh button", async () => {
     const conn = fakeConnection({
-      campaigns: [campaignRow({ id: "v1:campaigns:campaign:c1" })],
+      campaigns: [campaignRow({ id: "v1:campaigns:campaign:c1", recipientCount: 10, sentCount: 10 })],
       deliveriesForCampaign: [deliveryRow({ id: "v1:campaigns:delivery:d1" })],
+      campaignStats: [{ opens: { unique: 1, total: 1 } }],
     });
     await openCampaign(conn);
-    expect(await screen.findByText(/Delivery records are not broadcast/)).toBeTruthy();
+    expect(await screen.findByText("Latest 100 · Updates automatically")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /read again|re-read|refresh tests|refresh deliveries/i })).toBeNull();
+    expect(await screen.findByText("10%")).toBeTruthy();
+    vi.useFakeTimers();
+    try {
+      await act(async () => window.dispatchEvent(new Event("focus")));
+      conn.query.deliveriesForCampaign.mockResolvedValue(rowsResult([deliveryRow({ id: "d2", email: "new-result@example.test", status: "skipped" })]));
+      conn.query.campaignStats.mockResolvedValue(rowsResult([{ opens: { unique: 2, total: 2 } }]));
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(screen.getByText("new-result@example.test")).toBeTruthy();
+      expect(screen.getByText("20%")).toBeTruthy();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("automatically shows the latest test skip without changing the original campaign counters", async () => {
+    const first = campaignRow({ id: "test-one", name: "Review run", testSourceCampaignId: "c1", status: "sent", recipientCount: 1, sentCount: 1 });
+    const conn = fakeConnection({
+      campaigns: [campaignRow({ id: "c1", status: "sent", recipientCount: 1, sentCount: 1 })],
+      testRuns: [first],
+    });
+    mount(conn, "campaigns", fakeUploads(), { showFiled: true });
+    fireEvent.click(await screen.findByText("August update"));
+    const latest = await screen.findByLabelText("Latest test results");
+    expect(within(latest).getByRole("img").getAttribute("aria-label")).toContain("1 sent, 0 skipped");
+    vi.useFakeTimers();
+    try {
+      // Results change on the server, without an event on this browser's node.
+      conn.query.campaignTestRuns.mockResolvedValue(rowsResult([{ ...first, id: "test-two", sentCount: 0, skippedCount: 1 }, first]));
+      await act(async () => window.dispatchEvent(new Event("focus")));
+      expect(within(latest).getByRole("img").getAttribute("aria-label")).toContain("0 sent, 1 skipped");
+      const original = screen.getByRole("region", { name: "August update progress" });
+      expect(within(original).getByRole("img").getAttribute("aria-label")).toContain("1 sent, 0 skipped");
+      conn.query.campaignTestRuns.mockResolvedValue(rowsResult([{ ...first, id: "test-three", status: "sending", sentCount: 0, skippedCount: 0 }]));
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(within(latest).getByRole("img").getAttribute("aria-label")).toContain("0 sent, 0 skipped");
+      expect(screen.queryByRole("button", { name: /read again|re-read|refresh tests|refresh deliveries/i })).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 
   it("asks an in-surface confirm that NAMES the audience size before sending", async () => {
@@ -524,14 +561,23 @@ describe("audiences", () => {
     expect(screen.getByText(/1 of these cannot be mailed/)).toBeTruthy();
   });
 
-  it("says the roster is NOT LIVE and what that costs", async () => {
+  it("updates the roster automatically when another session adds or unsubscribes a recipient", async () => {
     const conn = fakeConnection({
       audiences: [audienceRow({ id: "v1:campaigns:audience:a1", name: "Newsletter" })],
       recipientsForAudience: [recipientRow({ id: "r1" })],
     });
     mount(conn, "audiences");
     fireEvent.click(await screen.findByText("Newsletter"));
-    expect(await screen.findByText(/an address added in another window/)).toBeTruthy();
+    await screen.findByText(/Updates automatically/);
+    vi.useFakeTimers();
+    try {
+      await act(async () => window.dispatchEvent(new Event("focus")));
+      conn.query.recipientsForAudience.mockResolvedValue(rowsResult([recipientRow({ id: "r2", email: "reviewer@example.test", subscriptionStatus: "unsubscribed" })]));
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(screen.getByText("reviewer@example.test")).toBeTruthy();
+      expect(screen.getByText("unsubscribed")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Read again" })).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 
   it("imports through the SHELL'S ONE UPLOAD PATH and keeps the report on screen", async () => {
