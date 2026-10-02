@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
@@ -220,7 +221,7 @@ func (w warnings) WithAttrs([]slog.Attr) slog.Handler { return w }
 func (w warnings) WithGroup(string) slog.Handler      { return w }
 
 func TestProcedureLifecycleDB_RecordedToTrustedAndBackToShadow(t *testing.T) {
-	e := workTemplateDBEngine(t)
+	e, db := workTemplateDBEngineAndDB(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	var (
 		warnMu sync.Mutex
@@ -310,11 +311,12 @@ func TestProcedureLifecycleDB_RecordedToTrustedAndBackToShadow(t *testing.T) {
 	// --- 4. The owner approves it through integrations/work's REAL decide
 	// handler, and the promotion decision moves shadow to canary.
 	decided := false
-	for _, c := range workspine.New(e, logger).Capabilities() {
+	for _, c := range workspine.New(e, logger, func() *bun.DB { return db }).Capabilities() {
 		if c.Name != "decideApproval" {
 			continue
 		}
-		if _, err := c.Handler(ownerCtx, map[string]any{"approvalId": approvalId, "decision": "approved"}, 0); err != nil {
+		person := auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: owner, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: owner})
+		if _, err := c.Handler(person, map[string]any{"approvalId": approvalId, "decision": "approved"}, 0); err != nil {
 			t.Fatalf("decideApproval: %v", err)
 		}
 		decided = true
