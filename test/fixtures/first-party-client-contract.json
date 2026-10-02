@@ -23,12 +23,13 @@
     "",
     "Read by component/identity/first_party_client_contract_test.go (Go) and",
     "editors/vscode/test/firstPartyClientContract.test.ts (TypeScript). Changing a value",
-    "here obliges both -- and strands every already-released editor, so treat it as frozen."
+    "here obliges both. Client identity and callback changes can strand released editors.",
+    "The reader admission floor permits Productivity Tools without elevating backend permissions."
   ],
   "clientId": "memql-vscode",
   "clientName": "MemQL for Visual Studio Code and Cursor",
   "redirectURI": "http://127.0.0.1/callback",
-  "minRole": "developer",
+  "minRole": "reader",
   "acceptedCallbacks": [
     "http://127.0.0.1:54321/callback",
     "http://127.0.0.1:1/callback",
