@@ -275,8 +275,8 @@ func (f *Firer) fireOperational(ctx context.Context, rule Rule, nodeID string, e
 		// twice: the rule, the triggering row and the recipient identify "this
 		// notice, about this row, to this person". A CHANGED rule's notice is
 		// about one change, so its key also names the triggering write (the
-		// event's own time, to the second: changes inside one second are one
-		// notice) -- without it every change after a row's first re-staged the
+		// event's own time, including fractional seconds) -- without it every
+		// change after a row's first re-staged the
 		// same outbound request, which keeps the status the worker gave it,
 		// and the owner heard about one change per row, ever.
 		key := dedupeKey(rule.ID, nodeID, email)
