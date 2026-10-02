@@ -102,7 +102,7 @@ func (a *azureSetup) importPackage(ctx context.Context, account string, options 
 	err = a.store.change(ctx, azureClusterKey, &cluster, func(found bool) error {
 		selected := plan
 		selected.Domain, selected.EmailService, selected.CommunicationService = "", "", ""
-		if found && cluster.Status != "disconnected" && cluster.Plan.SubscriptionID != "" && !emailconfig.SameResources(publicAzure(cluster), scope) {
+		if found && (cluster.Status == "connected" || cluster.Status == "reauthorize") && !emailconfig.SameResources(publicAzure(cluster), scope) {
 			return fmt.Errorf("this package uses different Azure settings; disconnect the cluster explicitly before changing them")
 		}
 		if cluster.Status == "connected" || cluster.Status == "reauthorize" {

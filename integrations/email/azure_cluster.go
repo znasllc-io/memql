@@ -113,7 +113,7 @@ func (a *azureSetup) saveCluster(ctx context.Context, session azureSession, opti
 		if cluster.Revision != session.ClusterRevision {
 			return fmt.Errorf("the cluster's Azure configuration changed; start Microsoft sign-in again")
 		}
-		if found && cluster.Plan != plan && cluster.Status != "disconnected" {
+		if found && cluster.Plan != plan && (cluster.Status == "connected" || cluster.Status == "reauthorize") {
 			return fmt.Errorf("disconnect the cluster's Azure connection before changing its subscription or resource settings")
 		}
 		if cluster.ID == "" || cluster.Plan != plan {

@@ -147,7 +147,7 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
       if (state?.status === "planned") acts.push({ label: "Create Azure resources", onAct: () => perform("provision", { confirmed: true }) });
       else if (provisioning) {
         if (error || provisionPaused) acts.push({ label: "Continue setup", onAct: () => { setProvisionChecks(0); setStartedAt(Date.now()); perform("provision", { confirmed: true }); } });
-      } else if (domain && emailService && communicationService) acts.push({ label: "Review domain", onAct: () => { void call("prepare", { domain, emailService, communicationService }).then(apply); } });
+      } else if (domain && emailService && communicationService) acts.push({ label: "Review domain", onAct: () => { void call("prepare", { domain, emailService, communicationService, username, displayName, replyTo }).then(apply); } });
     }
     else if (phase === "dns") acts.push({ label: "Check domain records", onAct: () => perform("verify") });
     else if (phase === "sender" && username.trim() && displayName.trim()) acts.push({ label: "Save sender", onAct: () => perform("sender", { username, displayName, replyTo }) });

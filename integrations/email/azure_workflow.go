@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/core/emailconfig"
 	"net/http"
 	"net/url"
 	"strings"
@@ -66,6 +67,14 @@ func (a *azureSetup) connectionAction(ctx context.Context, account, action strin
 		}
 		if found && connection.Plan == plan && connection.Status != "disconnected" && connection.Status != "draft" {
 			return nil
+		}
+		if _, provided := options["username"]; provided {
+			requested := &emailconfig.Sender{Username: argString(options, "username"), DisplayName: argString(options, "displayName"), ReplyTo: argString(options, "replyTo")}
+			checked := emailconfig.Campaigns{Azure: emailconfig.Azure{SubscriptionID: plan.SubscriptionID, ResourceGroup: plan.ResourceGroup, CreateResourceGroup: plan.CreateResourceGroup, ResourceGroupLocation: plan.ResourceGroupLocation, DataLocation: plan.DataLocation}, Domains: []emailconfig.Domain{{Organization: account, Domain: plan.Domain, EmailService: plan.EmailService, CommunicationService: plan.CommunicationService, Sender: requested}}}
+			if err := checked.Validate(); err != nil {
+				return err
+			}
+			connection.RequestedSender = requested
 		}
 		connection = azureConnection{Status: "planned", AccountID: account, Plan: plan, RequestedSender: connection.RequestedSender, RequestedDNS: connection.RequestedDNS}
 		return nil
