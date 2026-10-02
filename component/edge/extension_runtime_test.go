@@ -40,10 +40,13 @@ func TestExtensionRuntimePolicyIsScoped(t *testing.T) {
 
 func TestIsolatedExtensionOriginsServeOnlyAssets(t *testing.T) {
 	site := extensionSite()
+	// Even a parent with SPA fallback must never expose its app document on
+	// the renderer origin when an extension asset is missing.
+	site.Kind = "spa"
 	site.ResourceParentHost, site.Hostname = site.Hostname, resourceHost
 	files := mapOpener{"index.html": "private app", "editor/assets/fake.html": "<html></html>", "editor/extensions/core.js": "extension code"}
 	handler := NewHandler(Options{Resolver: staticResolver{site}, Opener: files})
-	for _, target := range []string{"/", "/editor/", "/_memql/runtime-config", "/_memql/ws", "/_memql/preview/enter", "/editor/extensions/core.js", "/editor/assets/../../index.html"} {
+	for _, target := range []string{"/", "/editor/", "/_memql/runtime-config", "/_memql/ws", "/_memql/preview/enter", "/editor/extensions/core.js", "/editor/assets/../../index.html", "/editor/assets/missing", "/editor/assets/missing/"} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
 		if response.Code != http.StatusNotFound {

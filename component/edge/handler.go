@@ -344,7 +344,7 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 	}
 
 	// The last rung of D11's order, and the only place the tail is decided.
-	if fallsBackToIndex(site) && !staticAssetName(r.URL.Path) && !strings.HasPrefix(r.URL.Path, "/_astro/") {
+	if site.ResourceParentHost == "" && fallsBackToIndex(site) && !staticAssetName(r.URL.Path) && !strings.HasPrefix(r.URL.Path, "/_astro/") {
 		if _, err := fs.Stat(fsys, "index.html"); err == nil {
 			// The fallback serves a DOCUMENT, so it needs its hashes exactly
 			// as the root does. Without this every client-side route breaks
