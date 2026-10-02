@@ -25,6 +25,12 @@ import (
 
 func workTemplateDBEngine(t *testing.T) *memql.MemQLEngine {
 	t.Helper()
+	engine, _ := workTemplateDBEngineAndDB(t)
+	return engine
+}
+
+func workTemplateDBEngineAndDB(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
+	t.Helper()
 	dsn := dbtest.DSN()
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -45,7 +51,7 @@ func workTemplateDBEngine(t *testing.T) *memql.MemQLEngine {
 		t.Fatal(err)
 	}
 	e.SetLogicRunner(automations.NewLogicRunner(e, steps.NewRegistry(), e.Logger))
-	return e
+	return e, db
 }
 
 func templateMutation(t *testing.T, e *memql.MemQLEngine, ctx context.Context, name string, args map[string]any) {

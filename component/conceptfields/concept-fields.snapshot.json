@@ -8139,6 +8139,7 @@
         "input",
         "origin",
         "ownerUserId",
+        "requestFingerprint",
         "requestedVia",
         "responsibilityId",
         "statement",

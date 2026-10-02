@@ -2562,6 +2562,28 @@ QueryClient.prototype.compositionsForRecipe = function (this: QueryClient, args:
   return this.executeNamed("compositionsForRecipe", buildCompositionsForRecipe(args), opts);
 };
 
+/** Owned output receipts for one executing run, used by document revision review. */
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionsForRun"] in generated_concepts.ts).
+export interface CompositionsForRunArgs {
+  runId: string;
+}
+
+export function buildCompositionsForRun(args: CompositionsForRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query compositionsForRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    compositionsForRun(args: CompositionsForRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.compositionsForRun = function (this: QueryClient, args: CompositionsForRunArgs = {} as CompositionsForRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("compositionsForRun", buildCompositionsForRun(args), opts);
+};
+
 /** Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. The concept tier and organization boundary authorize every returned row. */
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["consentEventsBySubscriber"] in generated_concepts.ts).
 export interface ConsentEventsBySubscriberArgs {
@@ -11628,6 +11650,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.warmupStateForIdentity = function (this: QueryClient, args: WarmupStateForIdentityArgs = {} as WarmupStateForIdentityArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("warmupStateForIdentity", buildWarmupStateForIdentity(args), opts);
+};
+
+/** Exact caller-owned approval receipt, including decided approvals for recovery. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalForOwner"] in generated_concepts.ts).
+export interface WorkApprovalForOwnerArgs {
+  approvalId: string;
+}
+
+export function buildWorkApprovalForOwner(args: WorkApprovalForOwnerArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "query workApprovalForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workApprovalForOwner(args: WorkApprovalForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workApprovalForOwner = function (this: QueryClient, args: WorkApprovalForOwnerArgs = {} as WorkApprovalForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workApprovalForOwner", buildWorkApprovalForOwner(args), opts);
 };
 
 /** The caller's pending approvals, newest first. Owned. `row.decision == ""` is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent. */

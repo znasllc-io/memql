@@ -22,6 +22,7 @@ package work
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -51,8 +52,10 @@ const resultConcept = "v1:work:result"
 
 // Integration exposes the work capabilities.
 type Integration struct {
-	engine Engine
-	logger *slog.Logger
+	engine           Engine
+	decisionGate     func(context.Context, string) (func(), error)
+	reviewValidators map[string]func(context.Context, map[string]any) error
+	logger           *slog.Logger
 
 	// bunDB is the raw handle the two sweeps need. Both ask questions the
 	// work namespace has no query for -- "every run in flight, whoever owns
@@ -138,11 +141,23 @@ type CompileRequest struct {
 }
 
 // New constructs the integration. Tests call this with a stub engine.
-func New(engine Engine, logger *slog.Logger) *Integration {
+func New(engine Engine, logger *slog.Logger, database ...func() *bun.DB) *Integration {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	i := &Integration{engine: engine, logger: logger, now: time.Now}
+	if len(database) > 0 {
+		i.bunDB = database[0]
+	}
+	i.decisionGate = func(ctx context.Context, key string) (func(), error) {
+		var db *sql.DB
+		if i.bunDB != nil {
+			if handle := i.bunDB(); handle != nil {
+				db = handle.DB
+			}
+		}
+		return memql.AcquireWriteGate(ctx, db, "work-approval-decision:"+memql.BareShortId(key))
+	}
 	i.rowsInFlight = i.runsInFlight
 	return i
 }

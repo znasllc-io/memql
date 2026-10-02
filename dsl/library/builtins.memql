@@ -170,3 +170,31 @@ builtin libraryAddDocumentComment {
   body string!
   requestId string!
 }
+
+/// Capture selected current feedback and open a Nexus run waiting for approval.
+@sdk
+@executor("integration.library.requestDocumentRevision")
+@args(profile="object")
+builtin libraryRequestDocumentRevision {
+ artifactId string!
+ expectedVersion int!
+ expectedRevision string!
+ commentIds []string!
+ instruction string!
+ requestId string!
+}
+
+/// Read the exact owned proposal, approval, run and output draft.
+@sdk
+@executor("integration.library.documentRevisionStatus")
+@args(profile="object")
+builtin libraryDocumentRevisionStatus {
+ requestId string!
+}
+
+/// Only its approved, server-owned run may execute this revision.
+@executor("integration.library.executeDocumentRevision")
+@args(profile="object")
+builtin libraryExecuteDocumentRevision {
+ requestId string!
+}
