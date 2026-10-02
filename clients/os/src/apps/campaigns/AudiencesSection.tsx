@@ -473,7 +473,7 @@ function AddOnePanel({
 
   async function submit() {
     if (email.trim() === "") return;
-    const ok = await add.add(audience.id, email, name);
+    const ok = await add.add(audience, email, name);
     if (ok) {
       setEmail("");
       setName("");

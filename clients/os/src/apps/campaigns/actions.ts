@@ -3,7 +3,7 @@ import { newShortId, type Connection, type Row } from "@znasllc-io/memql-sdk-cor
 
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
-import { engineSentence, type RecipientMode } from "./rows";
+import { engineSentence, type AudienceRow, type RecipientMode } from "./rows";
 
 // Every write the Campaigns app makes, and the busy/error pair each one owns.
 //
@@ -375,15 +375,16 @@ export function useArchiveAudience(): ArchiveAudienceState {
 }
 
 export interface AddRecipientState extends WriteState {
-  add: (audienceId: string, email: string, displayName: string) => Promise<boolean>;
+  add: (audience: Pick<AudienceRow, "id" | "accountId">, email: string, displayName: string) => Promise<boolean>;
 }
 
 export function useAddRecipient(): AddRecipientState {
   const { busy, error, reset, call } = useWrite(
-    async (query, audienceId: string, email: string, displayName: string) => {
+    async (query, audience: Pick<AudienceRow, "id" | "accountId">, email: string, displayName: string) => {
       await query.addRecipient({
         recipientId: newShortId(),
-        audienceId,
+        audienceId: audience.id,
+        accountId: audience.accountId,
         email: email.trim(),
         displayName: omitBlank(displayName),
         source: "manual",
