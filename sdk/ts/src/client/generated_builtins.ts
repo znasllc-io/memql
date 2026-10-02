@@ -129,6 +129,71 @@ QueryClient.prototype.campaignActivateEmailRule = function (this: QueryClient, a
   return this.executeNamed("campaignActivateEmailRule", buildCampaignActivateEmailRule(args), opts);
 };
 
+/** Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter. */
+export interface CampaignConfigureNewsletterArgs {
+  siteId: string;
+  audienceId: string;
+  templateId: string;
+  senderIdentityId: string;
+  consentText: string;
+  enabled: boolean;
+  expectedRevision?: string;
+}
+
+export function buildCampaignConfigureNewsletter(args: CampaignConfigureNewsletterArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  parts.push("consentText: " + renderMemQLValue(args.consentText));
+  parts.push("enabled: " + renderMemQLValue(args.enabled));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignConfigureNewsletter(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignConfigureNewsletter(args: CampaignConfigureNewsletterArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignConfigureNewsletter = function (this: QueryClient, args: CampaignConfigureNewsletterArgs = {} as CampaignConfigureNewsletterArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignConfigureNewsletter", buildCampaignConfigureNewsletter(args), opts);
+};
+
+/** Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series. */
+export interface CampaignConfigureSeriesArgs {
+  campaignId: string;
+  // Enum: save | pause | resume
+  action: string;
+  intervalWeeks?: number;
+  firstSendAt?: string;
+  timeZone?: string;
+  expectedRevision?: string;
+}
+
+export function buildCampaignConfigureSeries(args: CampaignConfigureSeriesArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.intervalWeeks !== undefined) parts.push("intervalWeeks: " + renderMemQLValue(args.intervalWeeks));
+  if (args.firstSendAt !== undefined) parts.push("firstSendAt: " + renderMemQLValue(args.firstSendAt));
+  if (args.timeZone !== undefined) parts.push("timeZone: " + renderMemQLValue(args.timeZone));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignConfigureSeries(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignConfigureSeries(args: CampaignConfigureSeriesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignConfigureSeries = function (this: QueryClient, args: CampaignConfigureSeriesArgs = {} as CampaignConfigureSeriesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignConfigureSeries", buildCampaignConfigureSeries(args), opts);
+};
+
 /** Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'. */
 export interface CampaignImportRecipientsArgs {
   /** The audience to import into. The caller must be able to read it. */
@@ -221,6 +286,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignRetireEmailRule = function (this: QueryClient, args: CampaignRetireEmailRuleArgs = {} as CampaignRetireEmailRuleArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignRetireEmailRule", buildCampaignRetireEmailRule(args), opts);
+};
+
+/** Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain. */
+export interface CampaignRetryNewsletterWelcomeArgs {
+  signupId: string;
+  expectedRevision: string;
+}
+
+export function buildCampaignRetryNewsletterWelcome(args: CampaignRetryNewsletterWelcomeArgs): string {
+  const parts: string[] = [];
+  parts.push("signupId: " + renderMemQLValue(args.signupId));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignRetryNewsletterWelcome(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignRetryNewsletterWelcome(args: CampaignRetryNewsletterWelcomeArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignRetryNewsletterWelcome = function (this: QueryClient, args: CampaignRetryNewsletterWelcomeArgs = {} as CampaignRetryNewsletterWelcomeArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignRetryNewsletterWelcome", buildCampaignRetryNewsletterWelcome(args), opts);
 };
 
 /** Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail. */

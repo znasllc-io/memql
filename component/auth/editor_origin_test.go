@@ -14,3 +14,15 @@ func TestWebEditorOrigin(t *testing.T) {
 		}
 	}
 }
+
+func TestHostedEditorOnlyUsesBearerRoutes(t *testing.T) {
+	t.Setenv("MEMQL_DOMAIN", "cluster.example")
+	if !IsWebEditorOrigin("https://vscode.cluster.example") {
+		t.Fatal("hosted editor denied")
+	}
+	for _, origin := range []string{"http://vscode.cluster.example", "https://vscode.other.example", "https://vscode.cluster.example.evil", "https://vscode--assets--012345678901234567890123.cluster.example"} {
+		if IsWebEditorOrigin(origin) {
+			t.Fatal(origin)
+		}
+	}
+}

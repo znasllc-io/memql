@@ -48,6 +48,10 @@ func (w *Worker) IntegrationName() string { return "campaigns" }
 func (w *Worker) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{Name: "sendingReadiness", Description: "Check the selected organization's sender and unsubscribe setup without sending mail.", Handler: w.handleSendingReadiness},
+		{Name: "configureNewsletter", Description: "Bind a deployable to its organization's audience and reviewed welcome template.", Handler: w.handleConfigureNewsletter},
+		{Name: "subscribe", Description: "Record an explicit storefront opt-in and queue one welcome.", Handler: w.handleSubscribe},
+		{Name: "retryNewsletterWelcome", Description: "Recheck a blocked welcome without repeating an uncertain delivery attempt.", Handler: w.handleRetryNewsletterWelcome},
+		{Name: "configureSeries", Description: "Save, pause or resume a recurring campaign under current organization authority.", Handler: w.handleConfigureSeries},
 		{Name: "saveTemplate", Description: "Save or publish the reviewed revision of an organization email template.", Handler: w.handleSaveTemplate},
 		{
 			Name:        "startSend",
@@ -350,6 +354,10 @@ func sendableStatus(op, status string) error {
 //
 // Returns the recipient count the send will work through.
 func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (int, Template, error) {
+	return w.preflightAudience(ctx, op, campaign, false)
+}
+
+func (w *Worker) preflightAudience(ctx context.Context, op string, campaign Campaign, allowEmpty bool) (int, Template, error) {
 	if err := w.requireSendAuthority(ctx, campaign.AccountID); err != nil {
 		return 0, Template{}, err
 	}
@@ -405,7 +413,7 @@ func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (i
 	if err != nil {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
 	}
-	if size == 0 {
+	if size == 0 && !allowEmpty {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: audience %q has no recipients", op, campaign.AudienceID)
 	}
 	if size > w.cfg.MaxAudience {

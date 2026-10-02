@@ -1,6 +1,9 @@
 import { CampaignsSettingsSection } from "../src/apps/campaigns/CampaignsSettingsSection";
 import { DEFAULT_CAMPAIGNS_SETTINGS } from "../src/apps/campaigns/settings";
 import { fakeConnection as campaignConnection, rowsResult, withSession as campaignSession } from "../test/campaigns/harness";
+import { NewsletterPanel } from "../src/apps/campaigns/NewsletterPanel";
+import { useCampaignFeeds } from "../src/apps/campaigns/useCampaigns";
+import { RecurrencePanel } from "../src/apps/campaigns/RecurrencePanel";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
 import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
@@ -524,6 +527,27 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
 // `syncStatesAll`. Two fixture harnesses rather than one widened one, for the
 // reason the README gives about the fake in general: each is the SUITE's, so a
 // screenshot cannot disagree with what those tests assert.
+const recurrenceQaRow = { id: "qa-series", sourceCampaignId: "qa-campaign", intervalWeeks: 3, timeZone: "America/Phoenix", status: "active", anchorAt: "2026-10-09T16:00:00Z", nextAt: "2026-10-30T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" };
+function RecurrenceQa() {
+  const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
+  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><RecurrencePanel campaignId="qa-campaign" /></div>;
+}
+
+const newsletterQaSite = { id: "qa-shop", accountId: "qa-client", title: "Client storefront", status: "live" };
+const newsletterQaBinding = { id: "qa-newsletter", siteId: "qa-shop", accountId: "qa-client", audienceId: "qa-audience", templateId: "qa-welcome", senderIdentityId: "qa-sender", enabled: true, consentText: "Send me product news and offers by email.", createdAt: "2026-10-01T12:00:00Z" };
+function newsletterQaConnection(populated: boolean) {
+  return campaignConnection({ sites: [newsletterQaSite], newsletters: populated ? [newsletterQaBinding] : [],
+    templates: [{ id: "qa-welcome", accountId: "qa-client", name: "Thanks for subscribing", status: "ready" }],
+    senderIdentities: [{ id: "qa-sender", accountId: "qa-client", address: "hello@client.example", status: "active" }],
+    welcomes: populated ? [{ id: "qa-sent", email: "alex@example.test", displayName: "Alex", requestedAt: "2026-10-01T13:00:00Z", status: "sent" }, { id: "qa-blocked", email: "jordan@example.test", displayName: "Jordan", requestedAt: "2026-10-01T13:02:00Z", status: "blocked", lastError: "This sender is disabled. Review the sending identity before continuing." }] : [],
+  });
+}
+function NewsletterQa() {
+  const resources = useCampaignFeeds();
+  const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
+  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><NewsletterPanel audienceId="qa-audience" accountId="qa-client" resources={resources} /></div>;
+}
+
 const VIEWS: Record<
   string,
   {
@@ -537,6 +561,23 @@ const VIEWS: Record<
 > = {
   "campaigns-settings": campaignSettingsView(false),
   "campaigns-settings-connected": campaignSettingsView(true),
+  "campaign-newsletter-empty": { connect: () => newsletterQaConnection(false), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
+  "campaign-newsletter-active": { connect: () => newsletterQaConnection(true), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
+  "campaign-repeat-empty": {
+    connect: () => campaignConnection(),
+    wrap: el => campaignSession(el),
+    render: () => <RecurrenceQa />,
+  },
+  "campaign-repeat-active": {
+    connect: () => campaignConnection({ campaignSeries: [recurrenceQaRow] }),
+    wrap: el => campaignSession(el),
+    render: () => <RecurrenceQa />,
+  },
+  "campaign-repeat-blocked": {
+    connect: () => campaignConnection({ campaignSeries: [{ ...recurrenceQaRow, status: "blocked", lastError: "Publish the template before resuming this schedule." }] }),
+    wrap: el => campaignSession(el),
+    render: () => <RecurrenceQa />,
+  },
   // NEXUS (epic memql#5414): what an automation is for. The procedure's page
   // in the three readings its Reuse panel has -- the evidence deciding, a
   // person's own label over evidence that disagrees, and nothing counted yet

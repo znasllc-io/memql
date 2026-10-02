@@ -887,3 +887,23 @@ export function useCampaignWrites() {
 }
 
 export type CampaignWrites = ReturnType<typeof useCampaignWrites>;
+
+export function useConfigureSeries() {
+  return useWrite(async (query, args: Parameters<Connection["query"]["campaignConfigureSeries"]>[0]) => {
+    await query.campaignConfigureSeries(args);
+    return true;
+  }, false);
+}
+
+
+export function useConfigureNewsletter() {
+  return useWrite(async (query, args: Parameters<Connection["query"]["campaignConfigureNewsletter"]>[0]) => {
+    await query.campaignConfigureNewsletter(args); return true;
+  }, false);
+}
+
+export function useRetryNewsletterWelcome() {
+  return useWrite(async (query, args: Parameters<Connection["query"]["campaignRetryNewsletterWelcome"]>[0]) => {
+    await query.campaignRetryNewsletterWelcome(args); return true;
+  }, false);
+}

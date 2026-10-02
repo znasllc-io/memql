@@ -205,3 +205,49 @@ builtin campaignSaveTemplate {
   expectedRevision string! @description("Exact createdAt from templateById; empty only when creating.")
   action string @description("save (default), publish, or archive. Publishing is an explicit human action.")
 }
+
+@description("Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.")
+@sdk
+@executor("integration.campaigns.configureSeries")
+builtin campaignConfigureSeries {
+  campaignId string!
+  action enum("save", "pause", "resume")!
+  intervalWeeks int
+  firstSendAt datetime
+  timeZone string
+  expectedRevision string
+}
+
+
+@sdk
+@description("Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter.")
+@executor("integration.campaigns.configureNewsletter")
+builtin campaignConfigureNewsletter {
+  siteId string!
+  audienceId string!
+  templateId string!
+  senderIdentityId string!
+  consentText string!
+  enabled bool!
+  expectedRevision string
+}
+
+@description("Accept an affirmative opt-in through the declared storefront form. Site, store, owner and submission provenance come from the existing public-form carrier; audience and sender come only from the saved site binding.")
+@executor("integration.campaigns.subscribe")
+builtin campaignSubscribe {
+  siteId string!
+  storeId string!
+  submissionId string!
+  email string!
+  displayName string
+  consent string!
+  consentRevision string!
+}
+
+@sdk
+@description("Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain.")
+@executor("integration.campaigns.retryNewsletterWelcome")
+builtin campaignRetryNewsletterWelcome {
+  signupId string!
+  expectedRevision string!
+}

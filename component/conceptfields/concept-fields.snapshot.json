@@ -764,6 +764,46 @@
       }
     },
     {
+      "concept": "v1:campaigns:campaignSeries",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "anchorAt",
+        "authorizedByUserId",
+        "definition",
+        "intervalWeeks",
+        "lastCampaignId",
+        "lastError",
+        "lastOccurrenceAt",
+        "name",
+        "nextAt",
+        "ownerUserId",
+        "sourceCampaignId",
+        "status",
+        "timeZone"
+      ],
+      "required": [
+        "accountId",
+        "anchorAt",
+        "authorizedByUserId",
+        "definition",
+        "intervalWeeks",
+        "name",
+        "nextAt",
+        "ownerUserId",
+        "sourceCampaignId",
+        "status",
+        "timeZone"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "blocked",
+          "paused"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:consentEvent",
       "file": "campaigns/concepts.memql",
       "fields": [
@@ -908,6 +948,85 @@
         "kind": [
           "click",
           "open"
+        ]
+      }
+    },
+    {
+      "concept": "v1:campaigns:newsletterBinding",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "audienceId",
+        "consentText",
+        "enabled",
+        "ownerUserId",
+        "senderIdentityId",
+        "siteId",
+        "storeId",
+        "templateId"
+      ],
+      "required": [
+        "accountId",
+        "audienceId",
+        "consentText",
+        "enabled",
+        "ownerUserId",
+        "senderIdentityId",
+        "siteId",
+        "storeId",
+        "templateId"
+      ]
+    },
+    {
+      "concept": "v1:campaigns:newsletterSignup",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "audienceId",
+        "consentRevision",
+        "consentText",
+        "displayName",
+        "email",
+        "emailDigest",
+        "lastError",
+        "newsletterId",
+        "ownerUserId",
+        "recipientId",
+        "requestedAt",
+        "senderIdentityId",
+        "siteId",
+        "status",
+        "storeId",
+        "submissionId",
+        "templateId",
+        "templateSnapshot"
+      ],
+      "required": [
+        "accountId",
+        "audienceId",
+        "consentRevision",
+        "consentText",
+        "email",
+        "emailDigest",
+        "newsletterId",
+        "ownerUserId",
+        "recipientId",
+        "requestedAt",
+        "senderIdentityId",
+        "siteId",
+        "status",
+        "storeId",
+        "submissionId",
+        "templateId",
+        "templateSnapshot"
+      ],
+      "enums": {
+        "status": [
+          "blocked",
+          "pending",
+          "sent",
+          "suppressed",
+          "uncertain"
         ]
       }
     },
@@ -4405,6 +4524,7 @@
         "bundleRef",
         "candidateRef",
         "deleted",
+        "extensionRuntimePath",
         "hostname",
         "kind",
         "notes",

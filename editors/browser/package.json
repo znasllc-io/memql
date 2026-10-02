@@ -1,0 +1,46 @@
+{
+  "name": "@memql/browser-editor",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "build": "node build-extensions.mjs && vite build",
+    "dev": "vite --host 127.0.0.1",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codingame/monaco-vscode-api": "37.3.0",
+    "@codingame/monaco-vscode-configuration-service-override": "37.3.0",
+    "@codingame/monaco-vscode-css-default-extension": "37.3.0",
+    "@codingame/monaco-vscode-dialogs-service-override": "37.3.0",
+    "@codingame/monaco-vscode-explorer-service-override": "37.3.0",
+    "@codingame/monaco-vscode-extension-gallery-service-override": "37.3.0",
+    "@codingame/monaco-vscode-extensions-service-override": "37.3.0",
+    "@codingame/monaco-vscode-html-default-extension": "37.3.0",
+    "@codingame/monaco-vscode-json-default-extension": "37.3.0",
+    "@codingame/monaco-vscode-languages-service-override": "37.3.0",
+    "@codingame/monaco-vscode-lifecycle-service-override": "37.3.0",
+    "@codingame/monaco-vscode-markdown-basics-default-extension": "37.3.0",
+    "@codingame/monaco-vscode-model-service-override": "37.3.0",
+    "@codingame/monaco-vscode-notifications-service-override": "37.3.0",
+    "@codingame/monaco-vscode-output-service-override": "37.3.0",
+    "@codingame/monaco-vscode-preferences-service-override": "37.3.0",
+    "@codingame/monaco-vscode-secret-storage-service-override": "37.3.0",
+    "@codingame/monaco-vscode-storage-service-override": "37.3.0",
+    "@codingame/monaco-vscode-textmate-service-override": "37.3.0",
+    "@codingame/monaco-vscode-theme-defaults-default-extension": "37.3.0",
+    "@codingame/monaco-vscode-theme-service-override": "37.3.0",
+    "@codingame/monaco-vscode-typescript-basics-default-extension": "37.3.0",
+    "@codingame/monaco-vscode-workbench-service-override": "37.3.0",
+    "@codingame/monaco-vscode-working-copy-service-override": "37.3.0",
+    "@codingame/monaco-vscode-workspace-trust-service-override": "37.3.0",
+    "monaco-editor": "npm:@codingame/monaco-vscode-editor-api@37.3.0",
+    "vscode": "npm:@codingame/monaco-vscode-extension-api@37.3.0"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.5",
+    "typescript": "~5.9.3",
+    "vite": "6.4.3"
+  }
+}

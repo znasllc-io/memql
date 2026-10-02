@@ -313,11 +313,14 @@ func TestPIIBearingConceptPopulation(t *testing.T) {
 	// here, instead of falling silently through to a gate that no longer
 	// covers it.
 	want := map[string]bool{
-		piiConcept:               true,
-		"v1:identity:account":    true,
-		"v1:campaigns:recipient": true,
-		"v1:campaigns:delivery":  true,
-		"v1:calendar:booking":    true,
+		// The declared account boundary scopes newsletter outcomes, including
+		// captured mailbox/name, to this organization's authorized operators.
+		"v1:campaigns:newsletterSignup": true,
+		piiConcept:                      true,
+		"v1:identity:account":           true,
+		"v1:campaigns:recipient":        true,
+		"v1:campaigns:delivery":         true,
+		"v1:calendar:booking":           true,
 	}
 
 	got := map[string][]string{}

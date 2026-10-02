@@ -23,6 +23,10 @@ type Site struct {
 	Status    string // "draft" | "live" | "disabled" | "archived" | "archived"
 	Title     string
 	APIProxy  bool
+	// ExtensionRuntimePath opts a bundle subtree into browser extension hosting.
+	// ResourceParentHost is set only on isolated, asset-only sibling origins.
+	ExtensionRuntimePath string
+	ResourceParentHost   string
 
 	// OwnerUserID is the site row's owner, or EMPTY for a cluster-owned
 	// site (the platform's own surfaces).
@@ -303,6 +307,16 @@ func normalizeHost(h string) string {
 
 func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) {
 	key := normalizeHost(hostname)
+	if parent := extensionResourceParent(key); parent != "" {
+		site, err := r.Resolve(ctx, parent)
+		if err != nil || site == nil || site.ResourceParentHost != "" || site.Hostname != parent || extensionRuntimePath(site) == "" {
+			return nil, err
+		}
+		copy := *site
+		copy.Hostname, copy.ResourceParentHost = key, parent
+		copy.APIProxy, copy.ShopperForms = false, false
+		return &copy, nil
+	}
 
 	r.mu.RLock()
 	e, ok := r.cache[key]

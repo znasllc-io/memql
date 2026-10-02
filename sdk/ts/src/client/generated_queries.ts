@@ -1870,6 +1870,28 @@ QueryClient.prototype.campaignEngagementRefs = function (this: QueryClient, args
   return this.executeNamed("campaignEngagementRefs", buildCampaignEngagementRefs(args), opts);
 };
 
+/** Current repeating instruction for this blueprint; organization authorization applies. */
+// Bound concept: v1:campaigns:campaignSeries (machine-readable: BoundConcepts["campaignSeriesForCampaign"] in generated_concepts.ts).
+export interface CampaignSeriesForCampaignArgs {
+  campaignId: string;
+}
+
+export function buildCampaignSeriesForCampaign(args: CampaignSeriesForCampaignArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  return "query campaignSeriesForCampaign(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSeriesForCampaign(args: CampaignSeriesForCampaignArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSeriesForCampaign = function (this: QueryClient, args: CampaignSeriesForCampaignArgs = {} as CampaignSeriesForCampaignArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSeriesForCampaign", buildCampaignSeriesForCampaign(args), opts);
+};
+
 /** How many of this campaign's skipped deliveries carry one of the named skip reasons. A list rather than one reason per call because the skipped bucket is reported in three groups and three counts beat seven round trips. */
 // Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignSkipCountByReason"] in generated_concepts.ts).
 export interface CampaignSkipCountByReasonArgs {
@@ -5157,6 +5179,116 @@ declare module "./query.js" {
 
 QueryClient.prototype.neverSold = function (this: QueryClient, args: NeverSoldArgs = {} as NeverSoldArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("neverSold", buildNeverSold(args), opts);
+};
+
+/** Read one prior grant so a retried public submission cannot restamp its date. */
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["newsletterConsentById"] in generated_concepts.ts).
+export interface NewsletterConsentByIdArgs {
+  eventId: string;
+}
+
+export function buildNewsletterConsentById(args: NewsletterConsentByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("eventId: " + renderMemQLValue(args.eventId));
+  return "query newsletterConsentById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    newsletterConsentById(args: NewsletterConsentByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.newsletterConsentById = function (this: QueryClient, args: NewsletterConsentByIdArgs = {} as NewsletterConsentByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("newsletterConsentById", buildNewsletterConsentById(args), opts);
+};
+
+/** Organization-authorized newsletter configuration for one deployable. */
+// Bound concept: v1:campaigns:newsletterBinding (machine-readable: BoundConcepts["newsletterForSite"] in generated_concepts.ts).
+export interface NewsletterForSiteArgs {
+  siteId: string;
+}
+
+export function buildNewsletterForSite(args: NewsletterForSiteArgs): string {
+  const parts: string[] = [];
+  parts.push("siteId: " + renderMemQLValue(args.siteId));
+  return "query newsletterForSite(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    newsletterForSite(args: NewsletterForSiteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.newsletterForSite = function (this: QueryClient, args: NewsletterForSiteArgs = {} as NewsletterForSiteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("newsletterForSite", buildNewsletterForSite(args), opts);
+};
+
+/** Current durable signup and captured address, authorized by its organization. */
+// Bound concept: v1:campaigns:newsletterSignup (machine-readable: BoundConcepts["newsletterSignupById"] in generated_concepts.ts).
+export interface NewsletterSignupByIdArgs {
+  signupId: string;
+}
+
+export function buildNewsletterSignupById(args: NewsletterSignupByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("signupId: " + renderMemQLValue(args.signupId));
+  return "query newsletterSignupById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    newsletterSignupById(args: NewsletterSignupByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.newsletterSignupById = function (this: QueryClient, args: NewsletterSignupByIdArgs = {} as NewsletterSignupByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("newsletterSignupById", buildNewsletterSignupById(args), opts);
+};
+
+/** Latest welcome outcomes; on-demand because signup volume is shopper-driven. */
+// Bound concept: v1:campaigns:newsletterSignup (machine-readable: BoundConcepts["newsletterWelcomesForAudience"] in generated_concepts.ts).
+export interface NewsletterWelcomesForAudienceArgs {
+  audienceId: string;
+}
+
+export function buildNewsletterWelcomesForAudience(args: NewsletterWelcomesForAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "query newsletterWelcomesForAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    newsletterWelcomesForAudience(args: NewsletterWelcomesForAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.newsletterWelcomesForAudience = function (this: QueryClient, args: NewsletterWelcomesForAudienceArgs = {} as NewsletterWelcomesForAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("newsletterWelcomesForAudience", buildNewsletterWelcomesForAudience(args), opts);
+};
+
+/** Organization-authorized deployable bindings for an audience. */
+// Bound concept: v1:campaigns:newsletterBinding (machine-readable: BoundConcepts["newslettersForAudience"] in generated_concepts.ts).
+export interface NewslettersForAudienceArgs {
+  audienceId: string;
+}
+
+export function buildNewslettersForAudience(args: NewslettersForAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "query newslettersForAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    newslettersForAudience(args: NewslettersForAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.newslettersForAudience = function (this: QueryClient, args: NewslettersForAudienceArgs = {} as NewslettersForAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("newslettersForAudience", buildNewslettersForAudience(args), opts);
 };
 
 /** Latest-per-(deploymentId, nodeType) deploymentNodeSpec rows for one deploymentId -- the deployment's current per-node-type spec set (version / replicas / imageDigest). asOf latest collapses the append-only spec stream to current state per node type. Engine-as-spine resolution of an empty version is the consumer's job. Epic 2 / #2094. */

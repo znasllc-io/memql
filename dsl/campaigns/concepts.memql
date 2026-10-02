@@ -71,7 +71,7 @@
 use accounts.concepts.{ account }
 use authoring.concepts.{ bundle }
 use identity.concepts.{ user }
-use platform.concepts.{ outboundRequest }
+use platform.concepts.{ outboundRequest, site }
 
 /// A named set of email recipients -- the WHO of a campaign. Audiences are authored in the portal
 /// and referenced by campaigns; membership lives on v1:campaigns:recipient rows pointing back here
@@ -557,4 +557,85 @@ concept singleSendReceipt {
   status enum("attempting", "complete")!
   result object!
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// A repeating instruction, distinct from each occurrence's campaign and delivery ledger.
+/// Configuration is captured when an authorized person saves; every occurrence rechecks
+/// that person's current authority and snapshots the then-published template.
+@displayCard(primary="name", secondary="nextAt", tertiary="sourceCampaignId", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept campaignSeries {
+  ownerUserId string! @description("The creator of this series. Ownership is preserved across organization members editing it.")
+  authorizedByUserId string! @description("The person who most recently authorized the active configuration. The worker rechecks their current permissions.")
+  accountId string! @description("The client organization. A series cannot move between organizations.")
+  sourceCampaignId string! @description("The campaign used as a blueprint. Editing it does not change this captured configuration until the series is saved again.")
+  name string! @description("Name used for generated occurrences.")
+  definition object! @description("Server-captured audience, template, sender and tracking choices. Never accepted directly from a client.")
+  intervalWeeks int! @description("Repeat every 1 through 52 calendar weeks in timeZone.")
+  timeZone string! @description("IANA timezone preserving the local day and time across daylight-saving changes.")
+  anchorAt datetime! @description("The first scheduled occurrence, anchoring the calendar cadence.")
+  nextAt datetime! @description("Next unprocessed occurrence. Downtime produces at most one catch-up occurrence, then advances beyond the present.")
+  status enum("active", "paused", "blocked")! @description("Paused stops future occurrences; blocked requires review and an explicit resume. Already queued campaigns keep their own lifecycle.")
+  lastCampaignId string @description("Most recent occurrence campaign, with its own immutable delivery history.")
+  lastOccurrenceAt datetime @description("Scheduled time of the most recent committed occurrence.")
+  lastError string @description("Reason for a blocked series. No credentials or message bodies.")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="sourceCampaignId", target=campaign, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+}
+
+
+/// Explicit per-deployable newsletter configuration. Campaigns remains core;
+/// its form uses the same opt-in public-form carrier as storefront packs.
+@displayCard(primary="siteId", secondary="audienceId", status="enabled")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept newsletterBinding {
+  ownerUserId string! @description("The authenticated creator; preserved across edits.")
+  accountId string! @description("The client organization shared by all resources.")
+  siteId string! @description("The deployable whose form accepts signups. One binding per site.")
+  storeId string! @description("The live Shopify store captured from the deployable, or empty for an ordinary site. Preview bindings cannot enroll a live audience.")
+  audienceId string! @description("The organization's audience receiving subscribers.")
+  templateId string! @description("Published welcome template, captured as immutable bytes at signup.")
+  senderIdentityId string! @description("The organization's sending identity. No default mailbox fallback.")
+  consentText string! @description("The consent sentence displayed by the form and recorded for each signup.")
+  enabled bool! @description("Whether this site accepts new opt-ins and dispatches pending welcomes.")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="references", field="siteId", target=site, direction="outgoing")
+  @relationship(type="references", field="audienceId", target=audience, direction="outgoing")
+  @relationship(type="references", field="templateId", target=template, direction="outgoing")
+  @relationship(type="references", field="senderIdentityId", target=senderIdentity, direction="outgoing")
+}
+
+/// Durable intent for one welcome per audience/address. Only the signup
+/// capability may create it; the worker uses the original site owner's current authority.
+@displayCard(primary="recipientId", secondary="requestedAt", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept newsletterSignup {
+  ownerUserId string! @description("Site owner captured at signup. Never replaced when another operator retries.")
+  accountId string! @description("The client organization captured from the site binding.")
+  newsletterId string! @description("The configured source of this signup.")
+  siteId string! @description("The deployable the form was submitted on.")
+  storeId string! @description("The live store binding through which the signup arrived.")
+  audienceId string! @description("Audience captured at acceptance.")
+  recipientId string! @description("The normalized address's recipient in this audience.")
+  emailDigest string! @description("SHA-256 of the normalized mailbox, used with the audience for deduplication and checked again at send time.")
+  email string! @pii @description("The address that consented, preserved for the operator outcome list even if the recipient is later edited.")
+  displayName string @pii @description("Name supplied on the signup form, never an authenticated identity.")
+  submissionId string! @description("Server-minted form submission provenance.")
+  consentText string! @description("Exact configured consent sentence at acceptance.")
+  consentRevision datetime! @description("The saved newsletter configuration revision agreed to by the visitor.")
+  requestedAt datetime! @description("When the affirmative opt-in was first recorded.")
+  templateId string! @description("The readable template from which the welcome was captured.")
+  templateSnapshot object! @description("Immutable published template bytes and revision captured at acceptance.")
+  senderIdentityId string! @description("Client sending identity captured at acceptance.")
+  status enum("pending", "sent", "suppressed", "uncertain", "blocked")! @description("Welcome submission outcome. Uncertain attempts are never resubmitted. Blocked is rechecked only by an authorized operator.")
+  lastError string @description("Reason for a refusal or uncertain outcome, without the recipient address.")
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="references", field="newsletterId", target=newsletterBinding, direction="outgoing")
+  @relationship(type="references", field="recipientId", target=recipient, direction="outgoing")
+  @relationship(type="references", field="audienceId", target=audience, direction="outgoing")
+  @relationship(type="references", field="templateId", target=template, direction="outgoing")
+  @relationship(type="references", field="senderIdentityId", target=senderIdentity, direction="outgoing")
 }

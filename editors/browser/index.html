@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MemQL Editor</title></head>
+<body>
+  <div id="basic-banner" hidden>Basic mode · MemQL files and versioned saves are unavailable. <button id="enable-tools">Enable MemQL tools</button></div>
+  <main id="workbench" aria-label="MemQL Editor"></main>
+  <section id="setup" aria-labelledby="setup-title">
+    <h1 id="setup-title">Opening your editor</h1>
+    <p id="setup-status" role="status">Starting MemQL and Productivity Tools…</p>
+    <p id="setup-detail">Both tools are included. Saving a MemQL file creates a new version.</p>
+    <div><button id="retry" hidden>Try again</button><button id="basic">Continue without MemQL tools</button></div>
+  </section>
+  <script type="module" src="./src/bootstrap.ts"></script>
+</body>
+</html>

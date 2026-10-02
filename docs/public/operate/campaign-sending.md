@@ -64,9 +64,10 @@ settings select browser VS Code (the default), desktop VS Code, or Cursor.
 files, or an explicitly selected ZIP of resources plus your brief. MemQL reads
 the authorized bytes and produces editable HTML, plain text, and a subject in
 an `.email.json` file. A resource ZIP is inspected only for that explicit
-composition; opening a ZIP in Files still downloads it intact. Private images
-currently inform the design; this flow does not publish private image URLs or
-attach those images to outgoing mail. Review placeholders before publishing.
+composition; opening a ZIP in Files still downloads it intact. Choose which images are visual inspiration and which should appear in the
+email. Included PNG, JPEG and GIF bytes stay with the editable template and
+are sent as inline attachments; the flow does not publish private file URLs.
+Review the generated layout and links before publishing.
 
 Use **Use in Campaigns** to save a draft or publish the reviewed template for
 its organization. Publishing makes it available to send; it does not send
@@ -150,6 +151,100 @@ code protocol and the existing MemQL stream; it adds no OAuth callback endpoint.
 See Microsoft's [device authorization flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code),
 [email domain setup](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/add-custom-verified-domains),
 and [email sending API](https://learn.microsoft.com/en-us/rest/api/communication/email/email/send?view=rest-communication-email-2025-09-01).
+## Storefront newsletter signups
+
+In **Campaigns → Audiences**, open the client's audience and choose **Storefront
+signups → Connect a signup form**. Select its deployable, a published welcome
+template, and the client's sender. Write the sentence the visitor will agree to,
+then enable the connection. All resources must belong to the same organization.
+An audience is a marketing list, not a group granting access to MemQL.
+
+**Get form → Copy form** provides plain HTML to add to the storefront in VS Code.
+Include `/newsletter/thank-you` and `/newsletter/problem` pages in that site's
+bundle. A form posts to `/_memql/forms/campaigns/subscribe` on the deployable's
+own origin. It carries the email, optional name, affirmative consent checkbox,
+and saved consent revision. Replace the copied form after changing the connection;
+an old revision is refused rather than recording consent to new wording. This
+does not subscribe an arbitrary externally hosted Shopify site: the storefront
+must be a MemQL deployable with the public-form carrier available.
+
+Enabling the connection also enables that deployable's public forms. Turning the
+newsletter off stops enrollment and blocks pending welcomes; it leaves other
+declared forms alone. Current organization write authority and access to the
+deployable are required. A draft or archived welcome and a disabled sender may
+remain selected while turning an existing connection off.
+
+The server derives the organization, audience, sender and live store binding.
+Form fields cannot override them. Storefront previews with a different store
+binding are refused. The current implementation uses **single opt-in**: checking
+the box records consent and enrolls the address; it does not prove control of
+the mailbox with a confirmation link. Previously unsubscribed, bounced,
+complained-about or suppressed addresses are not silently resubscribed.
+
+Repeated submissions converge on one signup and one intended welcome per
+normalized address and audience, even across deployables and worker replicas.
+Consent is stored before a new recipient becomes sendable. The accepted record
+captures the storefront, original mailbox, consent wording and revision, and
+published welcome content. Editing the template later does not rewrite that
+welcome. Changing the recipient's mailbox blocks the queued welcome instead of
+redirecting it to an address that did not consent. Current authority, sender
+availability and suppression are checked again before sending.
+
+**Recent welcomes** shows the latest 50 outcomes, read when the audience opens
+or **Refresh** is selected. A rate limit leaves mail pending for a later worker
+pass. A blocked welcome shows its reason; after resolving it, **Check again**
+rechecks that exact saved outcome. An attempt with a lost provider response is
+`uncertain` and is never automatically submitted again. `sent` means the
+transport accepted the message, not proof of inbox delivery. Local capture sends
+appear in the [Email inbox](#local-test-inbox).
+
+This uses the existing declared shopper-form carrier, its size and rate limits,
+and borrowed site-owner authority. Campaigns is core and declares the
+`campaigns/subscribe` form itself; installing a pack is not required. Enrollment
+and welcome progress use shared PostgreSQL locks, fresh reads, stable IDs and
+monotonic revisions. Private mutations cannot be called or forged by clients.
+Newsletter configuration changes broadcast to other replicas; high-volume signup
+outcomes are read on demand. Configuration uses `campaignConfigureNewsletter`;
+rechecking uses `campaignRetryNewsletterWelcome`, both with saved revisions.
+
+Use the same audience in multiple campaigns, with independent templates and
+schedules. The automatic welcome is separate from those campaigns.
+
+## Repeating campaigns
+
+Open a campaign and choose **Repeat → Set up repeating sends**. Select the first
+send and a weekly interval, such as every two or three weeks. The timezone is
+shown beside the date. Cadence follows its local calendar time across daylight
+saving changes. A recurring schedule can be created before its audience has
+subscribers; an empty occurrence completes without sending mail.
+
+The original campaign is a blueprint. Saving the schedule captures its audience,
+sender, organization and tracking settings. Save the schedule again after editing
+those campaign details. Each occurrence reads the then-published template and
+freezes that copy in a separate campaign/send job. Later edits cannot change an
+already queued occurrence. The audience is resolved when that occurrence runs,
+and consent and suppression are checked before delivery.
+
+Each occurrence appears in Campaigns with its scheduled date in the name and its
+own delivery history. The original draft can still be sent as a one-off; that is
+an additional campaign, independent of its repeating schedule.
+
+**Pause future sends** stops new occurrences. Already queued occurrences keep
+their own pause/cancel controls. **Resume future sends** skips missed dates. After
+an unexpected outage, an active schedule queues at most one overdue occurrence,
+then advances to its next future date, preventing a burst of missed newsletters.
+A configuration or authority refusal blocks the schedule with a visible reason;
+review and resume it after resolving the problem.
+
+`campaignConfigureSeries` accepts a campaign ID, `save`, `pause` or `resume`,
+and the exact saved series revision for changes. Saving also takes
+`intervalWeeks` (1–52), `firstSendAt` and an IANA `timeZone`. The cluster captures
+its definition from the readable campaign, never caller-supplied organization,
+audience or sender overrides. The person authorizing it must retain current
+organization write access. Shared PostgreSQL coordination, fresh reads and
+stable occurrence IDs make retries across replicas converge on the same job,
+including a crash after queueing but before advancing the schedule. A finished
+occurrence's job and delivery records are never reset.
 
 ## Retrying event emails
 

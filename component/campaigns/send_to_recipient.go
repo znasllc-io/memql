@@ -51,7 +51,9 @@ import (
 // answer campaignById gives. The audience was never a check; it was a search
 // key, and there is nothing left on this path that needs the audience itself.
 
-func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, receipt *singleSendReceipt) ([]memorynodes.MemoryNode, error) {
+var errCampaignRateLimited = errors.New("campaigns.sendToRecipient: the send-rate limit is exhausted; try again shortly")
+
+func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, receipt *singleSendReceipt, snapshot *Template, expectedEmailDigest string) ([]memorynodes.MemoryNode, error) {
 	templateID := memql.BareShortId(strings.TrimSpace(argString(args, "templateId")))
 	recipientID := memql.BareShortId(strings.TrimSpace(argString(args, "recipientId")))
 	senderIdentityID := memql.BareShortId(strings.TrimSpace(argString(args, "senderIdentityId")))
@@ -80,6 +82,12 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	if !found {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: template %q is not readable", templateID)
 	}
+	if snapshot != nil {
+		if bare(snapshot.ID) != bare(tmpl.ID) || !sameOrganization(snapshot.AccountID, tmpl.AccountID) || snapshot.Status != "ready" {
+			return nil, errors.New("campaigns.sendToRecipient: reviewed welcome snapshot does not match its template")
+		}
+		tmpl = *snapshot
+	}
 	if tmpl.Status != "ready" {
 		return nil, errors.New("campaigns.sendToRecipient: publish the reviewed template before sending")
 	}
@@ -95,6 +103,10 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		// would be an existence oracle over every operator's recipients,
 		// reachable by anybody who can call the builtin.
 		return nil, fmt.Errorf("campaigns.sendToRecipient: recipient %q is not readable", recipientID)
+	}
+
+	if expectedEmailDigest != "" && EmailDigest(recipient.Email) != expectedEmailDigest {
+		return nil, errors.New("campaigns.sendToRecipient: the recipient address changed after signup; the original consent does not cover the new address")
 	}
 
 	if err := w.requireSendAuthority(ctx, recipient.AccountID); err != nil {
@@ -193,7 +205,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	}
 
 	if !w.allowSend() {
-		return nil, errors.New("campaigns.sendToRecipient: the send-rate limit is exhausted; try again shortly")
+		return nil, errCampaignRateLimited
 	}
 	// Record the attempt before contacting the transport. After this point a
 	// timeout or a node loss is uncertain, and replay must never send it again.

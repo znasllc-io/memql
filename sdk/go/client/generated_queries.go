@@ -1846,6 +1846,28 @@ func CampaignEngagementRefsBuild(args CampaignEngagementRefsArgs) string {
 	return b.String()
 }
 
+// CampaignSeriesForCampaign -- Current repeating instruction for this blueprint; organization authorization applies.
+//
+// Bound concept: v1:campaigns:campaignSeries (machine-readable: BoundConcepts["campaignSeriesForCampaign"] in generated_concepts.go).
+type CampaignSeriesForCampaignArgs struct {
+	CampaignId string
+}
+
+// CampaignSeriesForCampaign calls the engine query campaignSeriesForCampaign.
+func (qc *QueryClient) CampaignSeriesForCampaign(ctx context.Context, args CampaignSeriesForCampaignArgs) (*Result, error) {
+	call := CampaignSeriesForCampaignBuild(args)
+	return qc.executeNamed(ctx, "campaignSeriesForCampaign", call)
+}
+
+func CampaignSeriesForCampaignBuild(args CampaignSeriesForCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignSeriesForCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignSkipCountByReason -- How many of this campaign's skipped deliveries carry one of the named skip reasons. A list rather than one reason per call because the skipped bucket is reported in three groups and three counts beat seven round trips.
 //
 // Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignSkipCountByReason"] in generated_concepts.go).
@@ -5186,6 +5208,116 @@ func NeverSoldBuild(args NeverSoldArgs) string {
 	b.WriteString("query neverSold(")
 	b.WriteString("storeId: ")
 	b.WriteString(quoteMemQL(args.StoreId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// NewsletterConsentById -- Read one prior grant so a retried public submission cannot restamp its date.
+//
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["newsletterConsentById"] in generated_concepts.go).
+type NewsletterConsentByIdArgs struct {
+	EventId string
+}
+
+// NewsletterConsentById calls the engine query newsletterConsentById.
+func (qc *QueryClient) NewsletterConsentById(ctx context.Context, args NewsletterConsentByIdArgs) (*Result, error) {
+	call := NewsletterConsentByIdBuild(args)
+	return qc.executeNamed(ctx, "newsletterConsentById", call)
+}
+
+func NewsletterConsentByIdBuild(args NewsletterConsentByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query newsletterConsentById(")
+	b.WriteString("eventId: ")
+	b.WriteString(quoteMemQL(args.EventId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// NewsletterForSite -- Organization-authorized newsletter configuration for one deployable.
+//
+// Bound concept: v1:campaigns:newsletterBinding (machine-readable: BoundConcepts["newsletterForSite"] in generated_concepts.go).
+type NewsletterForSiteArgs struct {
+	SiteId string
+}
+
+// NewsletterForSite calls the engine query newsletterForSite.
+func (qc *QueryClient) NewsletterForSite(ctx context.Context, args NewsletterForSiteArgs) (*Result, error) {
+	call := NewsletterForSiteBuild(args)
+	return qc.executeNamed(ctx, "newsletterForSite", call)
+}
+
+func NewsletterForSiteBuild(args NewsletterForSiteArgs) string {
+	var b strings.Builder
+	b.WriteString("query newsletterForSite(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// NewsletterSignupById -- Current durable signup and captured address, authorized by its organization.
+//
+// Bound concept: v1:campaigns:newsletterSignup (machine-readable: BoundConcepts["newsletterSignupById"] in generated_concepts.go).
+type NewsletterSignupByIdArgs struct {
+	SignupId string
+}
+
+// NewsletterSignupById calls the engine query newsletterSignupById.
+func (qc *QueryClient) NewsletterSignupById(ctx context.Context, args NewsletterSignupByIdArgs) (*Result, error) {
+	call := NewsletterSignupByIdBuild(args)
+	return qc.executeNamed(ctx, "newsletterSignupById", call)
+}
+
+func NewsletterSignupByIdBuild(args NewsletterSignupByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query newsletterSignupById(")
+	b.WriteString("signupId: ")
+	b.WriteString(quoteMemQL(args.SignupId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// NewsletterWelcomesForAudience -- Latest welcome outcomes; on-demand because signup volume is shopper-driven.
+//
+// Bound concept: v1:campaigns:newsletterSignup (machine-readable: BoundConcepts["newsletterWelcomesForAudience"] in generated_concepts.go).
+type NewsletterWelcomesForAudienceArgs struct {
+	AudienceId string
+}
+
+// NewsletterWelcomesForAudience calls the engine query newsletterWelcomesForAudience.
+func (qc *QueryClient) NewsletterWelcomesForAudience(ctx context.Context, args NewsletterWelcomesForAudienceArgs) (*Result, error) {
+	call := NewsletterWelcomesForAudienceBuild(args)
+	return qc.executeNamed(ctx, "newsletterWelcomesForAudience", call)
+}
+
+func NewsletterWelcomesForAudienceBuild(args NewsletterWelcomesForAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("query newsletterWelcomesForAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// NewslettersForAudience -- Organization-authorized deployable bindings for an audience.
+//
+// Bound concept: v1:campaigns:newsletterBinding (machine-readable: BoundConcepts["newslettersForAudience"] in generated_concepts.go).
+type NewslettersForAudienceArgs struct {
+	AudienceId string
+}
+
+// NewslettersForAudience calls the engine query newslettersForAudience.
+func (qc *QueryClient) NewslettersForAudience(ctx context.Context, args NewslettersForAudienceArgs) (*Result, error) {
+	call := NewslettersForAudienceBuild(args)
+	return qc.executeNamed(ctx, "newslettersForAudience", call)
+}
+
+func NewslettersForAudienceBuild(args NewslettersForAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("query newslettersForAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
 	b.WriteString(")")
 	return b.String()
 }

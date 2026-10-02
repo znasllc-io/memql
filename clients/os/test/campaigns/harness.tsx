@@ -71,6 +71,10 @@ function fakeSubscriptions(): FakeSubscriptions {
 
 export interface FakeSeed {
   campaigns?: Row[];
+  campaignSeries?: Row[];
+  newsletters?: Row[];
+  welcomes?: Row[];
+  sites?: Row[];
   accounts?: Row[];
   audiences?: Row[];
   templates?: Row[];
@@ -119,8 +123,15 @@ const RUNNING_AUTOMATIONS: Row = { id: "cluster", authoredAutomationsEnabled: tr
 export function fakeConnection(seed: FakeSeed = {}) {
   return {
     query: {
+      sitesAll: reader(seed.sites),
+      newslettersForAudience: reader(seed.newsletters),
+      newsletterWelcomesForAudience: reader(seed.welcomes),
+      campaignConfigureNewsletter: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ saved: true }])),
+      campaignRetryNewsletterWelcome: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ queued: true }])),
       // The five live seeds.
       campaigns: reader(seed.campaigns),
+      campaignSeriesForCampaign: reader(seed.campaignSeries),
+      campaignConfigureSeries: reader([]),
       audiences: reader(seed.audiences),
       templates: reader(seed.templates),
       senderIdentities: reader(seed.senderIdentities),
