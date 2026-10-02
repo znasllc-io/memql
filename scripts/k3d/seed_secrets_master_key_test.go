@@ -76,6 +76,9 @@ esac
 
 # Value reads.
 case "$args" in
+  *"get secret memql-secrets"*jsonpath*MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET*)
+    [ -n "$FAKE_CAMPAIGN_READ_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
+    printf '%s' "$FAKE_CAMPAIGN_KEY_B64"; exit 0 ;;
   *"get secret memql-secrets"*jsonpath*MEMQL_MASTER_KEY*)
     [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
     printf '%s' "$FAKE_MASTER_KEY_B64"; exit 0 ;;
@@ -132,12 +135,14 @@ type seedResult struct {
 
 // scenario configures one run of the script against the fake cluster.
 type scenario struct {
-	envMasterKey   string // exported only when non-empty
-	envSigningKey  string // MEMQL_IDENTITY_SIGNING_KEY_B64; exported only when non-empty
-	secretState    string // "absent" (default) | "present" | "error"
-	clusterKey     string // plaintext; encoded into the fake when secretState=present
-	clusterSigning string // plaintext signing seed the "cluster" holds
-	jsonpathFails  bool
+	clusterCampaignKey string
+	campaignReadFails  bool
+	envMasterKey       string // exported only when non-empty
+	envSigningKey      string // MEMQL_IDENTITY_SIGNING_KEY_B64; exported only when non-empty
+	secretState        string // "absent" (default) | "present" | "error"
+	clusterKey         string // plaintext; encoded into the fake when secretState=present
+	clusterSigning     string // plaintext signing seed the "cluster" holds
+	jsonpathFails      bool
 
 	// memql#3784.
 	envBootstrapToken       string // MEMQL_NODE_BOOTSTRAP_TOKEN; exported only when non-empty
@@ -250,6 +255,10 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		bootstrapReadFails = "1"
 	}
 
+	campaignReadFails := ""
+	if sc.campaignReadFails {
+		campaignReadFails = "1"
+	}
 	cmd := exec.Command("bash", script, "--mkcert="+stubMkcert)
 	cmd.Dir = root
 	env := []string{
@@ -257,6 +266,8 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		"HOME=" + tmp,
 		"FAKE_KUBECTL_LOG=" + logPath,
 		"FAKE_SECRET_STATE=" + state,
+		"FAKE_CAMPAIGN_KEY_B64=" + enc(sc.clusterCampaignKey),
+		"FAKE_CAMPAIGN_READ_FAILS=" + campaignReadFails,
 		"FAKE_MASTER_KEY_B64=" + enc(sc.clusterKey),
 		"FAKE_SIGNING_KEY_B64=" + enc(sc.clusterSigning),
 		"FAKE_NODE_BOOTSTRAP_TOKEN_B64=" + enc(sc.clusterBootstrapToken),
