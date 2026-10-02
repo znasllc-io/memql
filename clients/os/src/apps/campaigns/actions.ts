@@ -894,3 +894,16 @@ export function useConfigureSeries() {
     return true;
   }, false);
 }
+
+
+export function useConfigureNewsletter() {
+  return useWrite(async (query, args: Parameters<Connection["query"]["campaignConfigureNewsletter"]>[0]) => {
+    await query.campaignConfigureNewsletter(args); return true;
+  }, false);
+}
+
+export function useRetryNewsletterWelcome() {
+  return useWrite(async (query, args: Parameters<Connection["query"]["campaignRetryNewsletterWelcome"]>[0]) => {
+    await query.campaignRetryNewsletterWelcome(args); return true;
+  }, false);
+}

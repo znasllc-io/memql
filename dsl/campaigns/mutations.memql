@@ -1101,3 +1101,74 @@ mutation campaignSeries advanceCampaignSeries {
     stamp { id: args.seriesId, createdAt: args.versionTime }
   }
 }
+
+
+/// Revision-checked configuration, serialized by the campaign capability.
+/// actor.userId alone cannot attest that all resources were preflighted.
+@actor
+@serverOnly
+mutation newsletterBinding configureNewsletter {
+  args {
+    newsletterId string!
+    accountId string!
+    siteId string!
+    storeId string!
+    audienceId string!
+    templateId string!
+    senderIdentityId string!
+    consentText string!
+    enabled bool!
+    versionTime datetime!
+  }
+  insert {
+    accept { accountId, siteId, storeId, audienceId, templateId, senderIdentityId, consentText, enabled }
+    stamp { id: args.newsletterId, ownerUserId: actor.userId, createdAt: args.versionTime }
+  }
+}
+
+/// This receipt proves that explicit consent and recipient enrollment completed.
+/// actor.userId alone cannot attest those writes or the reviewed snapshot.
+@actor
+@serverOnly
+mutation newsletterSignup recordNewsletterSignup {
+  args {
+    signupId string!
+    accountId string!
+    newsletterId string!
+    siteId string!
+    storeId string!
+    audienceId string!
+    recipientId string!
+    email string!
+    displayName string
+    emailDigest string!
+    submissionId string!
+    consentText string!
+    consentRevision datetime!
+    requestedAt datetime!
+    templateId string!
+    templateSnapshot object!
+    senderIdentityId string!
+  }
+  insert {
+    accept { accountId, newsletterId, siteId, storeId, audienceId, recipientId, email, displayName, emailDigest, submissionId, consentText, consentRevision, requestedAt, templateId, templateSnapshot, senderIdentityId }
+    stamp { id: args.signupId, ownerUserId: actor.userId, status: "pending", lastError: "" }
+  }
+}
+
+/// Worker progress or a revision-checked recheck, under a shared lock.
+/// actor.userId cannot attest the transport outcome or lost-response receipt.
+@actor
+@serverOnly
+mutation newsletterSignup updateNewsletterWelcome {
+  args {
+    signupId string!
+    status enum("pending", "sent", "suppressed", "uncertain", "blocked")!
+    lastError string!
+    versionTime datetime!
+  }
+  update {
+    accept { status, lastError }
+    stamp { id: args.signupId, createdAt: args.versionTime }
+  }
+}

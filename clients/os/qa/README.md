@@ -231,3 +231,5 @@ nodes, lines, canvas or animation. The palette and numeral remain the theme's.
 Recurring campaigns use `campaign-repeat-empty`, `campaign-repeat-active`, and
 `campaign-repeat-blocked`. Add `width=narrow` for the constrained panel. Open
 **Set up repeating sends** on the empty view to inspect the date/cadence form.
+
+Newsletter signup fixtures: `campaign-newsletter-empty` and `campaign-newsletter-active`. Open the plus control to review setup; use `width=narrow` for the compact layout.

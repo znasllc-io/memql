@@ -82,6 +82,65 @@ The client write surface is `campaignSaveTemplate`, with `templateId`,
 `publish`, or `archive`). Its receipt includes the saved revision and status.
 Raw template writes and the underlying create/update mutations are internal.
 
+## Storefront newsletter signups
+
+In **Campaigns → Audiences**, open the client's audience and choose **Storefront
+signups → Connect a signup form**. Select its deployable, a published welcome
+template, and the client's sender. Write the sentence the visitor will agree to,
+then enable the connection. All resources must belong to the same organization.
+An audience is a marketing list, not a group granting access to MemQL.
+
+**Get form → Copy form** provides plain HTML to add to the storefront in VS Code.
+Include `/newsletter/thank-you` and `/newsletter/problem` pages in that site's
+bundle. A form posts to `/_memql/forms/campaigns/subscribe` on the deployable's
+own origin. It carries the email, optional name, affirmative consent checkbox,
+and saved consent revision. Replace the copied form after changing the connection;
+an old revision is refused rather than recording consent to new wording. This
+does not subscribe an arbitrary externally hosted Shopify site: the storefront
+must be a MemQL deployable with the public-form carrier available.
+
+Enabling the connection also enables that deployable's public forms. Turning the
+newsletter off stops enrollment and blocks pending welcomes; it leaves other
+declared forms alone. Current organization write authority and access to the
+deployable are required. A draft or archived welcome and a disabled sender may
+remain selected while turning an existing connection off.
+
+The server derives the organization, audience, sender and live store binding.
+Form fields cannot override them. Storefront previews with a different store
+binding are refused. The current implementation uses **single opt-in**: checking
+the box records consent and enrolls the address; it does not prove control of
+the mailbox with a confirmation link. Previously unsubscribed, bounced,
+complained-about or suppressed addresses are not silently resubscribed.
+
+Repeated submissions converge on one signup and one intended welcome per
+normalized address and audience, even across deployables and worker replicas.
+Consent is stored before a new recipient becomes sendable. The accepted record
+captures the storefront, original mailbox, consent wording and revision, and
+published welcome content. Editing the template later does not rewrite that
+welcome. Changing the recipient's mailbox blocks the queued welcome instead of
+redirecting it to an address that did not consent. Current authority, sender
+availability and suppression are checked again before sending.
+
+**Recent welcomes** shows the latest 50 outcomes, read when the audience opens
+or **Refresh** is selected. A rate limit leaves mail pending for a later worker
+pass. A blocked welcome shows its reason; after resolving it, **Check again**
+rechecks that exact saved outcome. An attempt with a lost provider response is
+`uncertain` and is never automatically submitted again. `sent` means the
+transport accepted the message, not proof of inbox delivery. Local capture sends
+appear in the [Email inbox](#local-test-inbox).
+
+This uses the existing declared shopper-form carrier, its size and rate limits,
+and borrowed site-owner authority. Campaigns is core and declares the
+`campaigns/subscribe` form itself; installing a pack is not required. Enrollment
+and welcome progress use shared PostgreSQL locks, fresh reads, stable IDs and
+monotonic revisions. Private mutations cannot be called or forged by clients.
+Newsletter configuration changes broadcast to other replicas; high-volume signup
+outcomes are read on demand. Configuration uses `campaignConfigureNewsletter`;
+rechecking uses `campaignRetryNewsletterWelcome`, both with saved revisions.
+
+Use the same audience in multiple campaigns, with independent templates and
+schedules. The automatic welcome is separate from those campaigns.
+
 ## Repeating campaigns
 
 Open a campaign and choose **Repeat → Set up repeating sends**. Select the first

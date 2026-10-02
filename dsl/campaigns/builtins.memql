@@ -208,3 +208,37 @@ builtin campaignConfigureSeries {
   timeZone string
   expectedRevision string
 }
+
+
+@sdk
+@description("Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter.")
+@executor("integration.campaigns.configureNewsletter")
+builtin campaignConfigureNewsletter {
+  siteId string!
+  audienceId string!
+  templateId string!
+  senderIdentityId string!
+  consentText string!
+  enabled bool!
+  expectedRevision string
+}
+
+@description("Accept an affirmative opt-in through the declared storefront form. Site, store, owner and submission provenance come from the existing public-form carrier; audience and sender come only from the saved site binding.")
+@executor("integration.campaigns.subscribe")
+builtin campaignSubscribe {
+  siteId string!
+  storeId string!
+  submissionId string!
+  email string!
+  displayName string
+  consent string!
+  consentRevision string!
+}
+
+@sdk
+@description("Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain.")
+@executor("integration.campaigns.retryNewsletterWelcome")
+builtin campaignRetryNewsletterWelcome {
+  signupId string!
+  expectedRevision string!
+}

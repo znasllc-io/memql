@@ -1,4 +1,4 @@
-use common.traits.{ statusIsActive }
+use common.traits.{ statusIsActive, statusIsPending }
 
 // campaigns domain -- caller-scoped reads.
 //
@@ -595,4 +595,62 @@ query campaignSeries dueCampaignSeries {
   sort "row.createdAt", "asc"
   paginate 100
   shape campaignSeriesFull
+}
+
+
+/// Organization-authorized newsletter configuration for one deployable.
+@actor
+query newsletterBinding newsletterForSite {
+  args { siteId string! }
+  filter row => row.siteId == args.siteId
+  sort "row.createdAt", "desc"
+  paginate 1
+  shape newsletterBindingFull
+}
+
+/// Organization-authorized deployable bindings for an audience.
+@actor
+query newsletterBinding newslettersForAudience {
+  args { audienceId string! }
+  filter row => row.audienceId == args.audienceId
+  sort "row.createdAt", "desc"
+  paginate 100
+  shape newsletterBindingFull
+}
+
+/// Current durable signup and captured address, authorized by its organization.
+@actor
+query newsletterSignup newsletterSignupById {
+  args { signupId string! }
+  filter row => row.id == args.signupId
+  shape newsletterSignupFull
+}
+
+/// Latest welcome outcomes; on-demand because signup volume is shopper-driven.
+@actor
+query newsletterSignup newsletterWelcomesForAudience {
+  args { audienceId string! }
+  filter row => row.audienceId == args.audienceId
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape newsletterSignupFull
+}
+
+/// Internal cross-organization scan. actor.userId does not identify the
+/// recipients; each result is reread under its recorded person's current authority.
+@actor
+@serverOnly
+query newsletterSignup pendingNewsletterWelcomes {
+  filter row => actor.isClusterOwner == true && statusIsPending(row)
+  sort "row.createdAt", "asc"
+  paginate 100
+  shape newsletterSignupFull
+}
+
+/// Read one prior grant so a retried public submission cannot restamp its date.
+@actor
+query consentEvent newsletterConsentById {
+  args { eventId string! }
+  filter row => row.id == args.eventId
+  shape consentEventFull
 }

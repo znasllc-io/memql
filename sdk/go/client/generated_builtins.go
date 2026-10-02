@@ -161,6 +161,64 @@ func CampaignActivateEmailRuleBuild(args CampaignActivateEmailRuleArgs) string {
 	return b.String()
 }
 
+// CampaignConfigureNewsletter -- Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter.
+type CampaignConfigureNewsletterArgs struct {
+	SiteId           string
+	AudienceId       string
+	TemplateId       string
+	SenderIdentityId string
+	ConsentText      string
+	Enabled          bool
+	ExpectedRevision string
+}
+
+// CampaignConfigureNewsletter calls the engine builtin campaignConfigureNewsletter.
+func (qc *QueryClient) CampaignConfigureNewsletter(ctx context.Context, args CampaignConfigureNewsletterArgs) (*Result, error) {
+	call := CampaignConfigureNewsletterBuild(args)
+	return qc.executeNamed(ctx, "campaignConfigureNewsletter", call)
+}
+
+func CampaignConfigureNewsletterBuild(args CampaignConfigureNewsletterArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignConfigureNewsletter(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("senderIdentityId: ")
+	b.WriteString(quoteMemQL(args.SenderIdentityId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("consentText: ")
+	b.WriteString(quoteMemQL(args.ConsentText))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
+	if args.ExpectedRevision != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignConfigureSeries -- Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.
 type CampaignConfigureSeriesArgs struct {
 	CampaignId string
@@ -315,6 +373,32 @@ func CampaignRetireEmailRuleBuild(args CampaignRetireEmailRuleArgs) string {
 	b.WriteString("builtin campaignRetireEmailRule(")
 	b.WriteString("emailRuleId: ")
 	b.WriteString(quoteMemQL(args.EmailRuleId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignRetryNewsletterWelcome -- Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain.
+type CampaignRetryNewsletterWelcomeArgs struct {
+	SignupId         string
+	ExpectedRevision string
+}
+
+// CampaignRetryNewsletterWelcome calls the engine builtin campaignRetryNewsletterWelcome.
+func (qc *QueryClient) CampaignRetryNewsletterWelcome(ctx context.Context, args CampaignRetryNewsletterWelcomeArgs) (*Result, error) {
+	call := CampaignRetryNewsletterWelcomeBuild(args)
+	return qc.executeNamed(ctx, "campaignRetryNewsletterWelcome", call)
+}
+
+func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignRetryNewsletterWelcome(")
+	b.WriteString("signupId: ")
+	b.WriteString(quoteMemQL(args.SignupId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
 	b.WriteString(")")
 	return b.String()
 }
