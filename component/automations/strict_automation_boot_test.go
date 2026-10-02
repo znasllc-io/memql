@@ -189,7 +189,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // sections a succeeded goal run worked out live, so the next goal asking for
 // the same section is served it instead of planning it again (D24). One
 // added, none removed; measured by the strict loader on this tree.
-const shippedAutomationCount = 74
+// reviseLibraryDocument adds the human-approved document revision template.
+const shippedAutomationCount = 75
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

@@ -1,12 +1,14 @@
 import * as vscode from "vscode";
+import { RevisionReview } from "./revisionReview.js";
 import { Documents, type OpenDocument } from "./documents.js";
 import { anchorStillMatches, escapeHTML, markdownAnchor, renderMarkdown, type MarkdownAnchor } from "./markdown.js";
 
 export class MarkdownEditor implements vscode.CustomTextEditorProvider {
   private active?: { document: vscode.TextDocument; panel: vscode.WebviewPanel };
   private readonly rendered = new Map<string, { version: number; text: string }>();
+  private readonly revisions: RevisionReview;
   constructor(private readonly context: vscode.ExtensionContext, private readonly files: Documents,
-    private readonly load: (uri: vscode.Uri) => Promise<OpenDocument>) {}
+    private readonly load: (uri: vscode.Uri) => Promise<OpenDocument>) { this.revisions = new RevisionReview(context, files, load); }
   async whenRendered(uri: vscode.Uri, version?: number): Promise<string> {
     const end = Date.now() + 15000;
     while (Date.now() < end) {
@@ -66,6 +68,10 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
         if (review.hasMore) await error(new Error("Showing the first 500 comments. Older feedback remains stored in MemQL."));
       } catch (e) { if (!disposed && generation === ticket) await error(e); }
     };
+    const refreshRevision = async () => {
+      const status = await this.revisions.status(document);
+      if (!disposed) await panel.webview.postMessage({ type: "revision", status });
+    };
     const render = async () => {
       try {
         await panel.webview.postMessage({ type: "document", html: renderMarkdown(document.getText()), version: document.version,
@@ -73,6 +79,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           status: document.uri.scheme !== "memql-file" ? "Local document. Open its MemQL copy to share feedback."
             : document.isDirty ? "Unsaved changes. Save before adding revision-bound feedback." : "Feedback is saved to MemQL." });
         await refreshComments();
+        await refreshRevision();
       } catch (e) { await error(e); }
     };
     const subscriptions = [
@@ -86,7 +93,24 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
           else if (message.type === "rendered" && message.version === document.version && typeof message.text === "string") {
             this.rendered.set(document.uri.toString(), { version: message.version, text: message.text });
           } else if (message.type === "source" || message.type === "split") await this.show(message.type, document.uri);
-          else if (message.type === "refresh") await refreshComments();
+          else if (message.type === "refresh") { await refreshComments(); await refreshRevision(); }
+          else if (["prepareRevision", "resumePreparation", "decideRevision", "compareRevision", "applyRevision"].includes(message.type) && !saving) {
+            saving = true;
+            try {
+              if (message.type === "prepareRevision") {
+                if (message.version !== document.version || !Array.isArray(message.commentIds) || !message.commentIds.every((id: unknown) => typeof id === "string") || typeof message.instruction !== "string") throw new Error("Select current comments and describe the change.");
+                await this.revisions.prepare(document, message.commentIds, message.instruction);
+              } else if (message.type === "resumePreparation") await this.revisions.resumePreparation(document);
+              else if (message.type === "decideRevision") {
+                if (typeof message.approvalId !== "string" || !["approved", "rejected"].includes(message.decision)) return;
+                await this.revisions.decide(document, message.approvalId, message.decision);
+              } else if (message.type === "compareRevision") {
+                await this.revisions.compare(document);
+                await panel.webview.postMessage({ type: "revisionCompared" });
+              } else { await this.revisions.apply(document); await panel.webview.postMessage({ type: "revisionApplied" }); }
+              await refreshRevision();
+            } finally { saving = false; await panel.webview.postMessage({ type: "revisionIdle" }); }
+          }
           else if (message.type === "external" && typeof message.href === "string" && /^https?:\/\//i.test(message.href)) {
             await vscode.env.openExternal(vscode.Uri.parse(message.href));
           } else if (message.type === "comment" && !saving) {
@@ -120,6 +144,6 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
       button,textarea{font:inherit;color:inherit;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:4px;padding:5px 10px}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}
       main{max-width:1180px;margin:0 auto;padding:28px;display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:36px}#content{overflow-wrap:anywhere}h1,h2,h3{line-height:1.3}pre{padding:16px;overflow:auto;background:var(--vscode-textCodeBlock-background)}code{font-family:var(--vscode-editor-font-family)}table{border-collapse:collapse}td,th{border:1px solid var(--vscode-panel-border);padding:6px 12px}blockquote{margin:12px 0;padding-left:14px;border-left:3px solid var(--vscode-textBlockQuote-border);color:var(--vscode-descriptionForeground)}a{color:var(--vscode-textLink-foreground)}
       aside{border-left:1px solid var(--vscode-panel-border);padding-left:20px}aside h2{margin-top:0}@media(max-width:800px){main{display:block}aside{border-left:0;border-top:1px solid var(--vscode-panel-border);margin-top:36px;padding:20px 0}}textarea{display:block;box-sizing:border-box;width:100%;min-height:90px;margin:10px 0}#status,small{color:var(--vscode-descriptionForeground)}article{border-top:1px solid var(--vscode-panel-border);padding:16px 0}#selected{max-height:120px;overflow:auto}#refresh{margin-left:auto}.image-alt{font-style:italic}
-      </style></head><body><nav aria-label="Markdown view"><button id="source">Source</button><span aria-current="page">Reading</span><button id="split">Split</button><button id="refresh">Refresh comments</button></nav><main><section id="content" aria-label="Rendered Markdown"></section><aside aria-label="Document feedback"><h2>Feedback</h2><div id="status" role="status"></div><blockquote id="selected">Select a passage to comment.</blockquote><textarea id="feedback" aria-label="Comment" placeholder="Add feedback on this passage"></textarea><button id="add" disabled>Add comment</button><section id="comments" aria-label="Comments"></section></aside></main><script nonce="${nonce}" src="${script}"></script></body></html>`;
+      </style></head><body><nav aria-label="Markdown view"><button id="source">Source</button><span aria-current="page">Reading</span><button id="split">Split</button><button id="refresh">Refresh comments</button></nav><main><section id="content" aria-label="Rendered Markdown"></section><aside aria-label="Document feedback"><h2>Feedback</h2><div id="status" role="status"></div><blockquote id="selected">Select a passage to comment.</blockquote><textarea id="feedback" aria-label="Comment" placeholder="Add feedback on this passage"></textarea><button id="add" disabled>Add comment</button><section id="comments" aria-label="Comments"></section><textarea id="revision-instruction" aria-label="Requested change" placeholder="Describe the change for the selected comments"></textarea><button id="prepare-revision" disabled>Review change request</button><section id="revision" aria-label="Revision request"></section></aside></main><script nonce="${nonce}" src="${script}"></script></body></html>`;
   }
 }

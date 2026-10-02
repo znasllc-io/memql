@@ -258,3 +258,27 @@ old record must not silently unsuppress an address.
   single durable work run.
 - No embedded OS file-content editor, duplicate credential store, or new
   email SaaS vendor remains in the delivered workflow.
+
+
+## Implemented Markdown revision review
+
+Productivity's reading view can select current comments and prepare a captured
+revision proposal. The proposal and source bytes live in the existing private
+Nexus goal input and approval subject, with stable goal/run/approval identities
+and a request fingerprint. A request never publishes a running job before its
+human decision. The server rechecks the current readable backing source, exact
+revision, bytes and write authority at approval and immediately before execution.
+A comment does not grant access to its document. Review work identities reject
+raw client insert/update calls, and a running job cannot approve itself.
+
+The fixed `reviseLibraryDocument` template uses the existing Materializer,
+model routing and a one-call ceiling. It writes a separate Markdown draft;
+Productivity compares captured source and draft in read-only editors. Applying
+that reviewed content uses the original versioned save contract. Request retries
+recover partial bootstrap; decision retries recover the fixed-template resume
+without replaying unrelated approval effects. No worker, model connection,
+credential store, publication action or email send is added to the extension.
+Limits are 20 selected comments, 64 KiB combined feedback, an 8 KiB instruction
+and a 128 KiB UTF-8 Markdown source. This does not yet implement reply threads or
+feedback-driven PDF/email-template revision. The latter formats retain their
+existing editing, preview and explicit publication flows.

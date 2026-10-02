@@ -2111,6 +2111,26 @@ func LibraryDocumentReviewBuild(args LibraryDocumentReviewArgs) string {
 	return b.String()
 }
 
+// LibraryDocumentRevisionStatus -- Read the exact owned proposal, approval, run and output draft.
+type LibraryDocumentRevisionStatusArgs struct {
+	RequestId string
+}
+
+// LibraryDocumentRevisionStatus calls the engine builtin libraryDocumentRevisionStatus.
+func (qc *QueryClient) LibraryDocumentRevisionStatus(ctx context.Context, args LibraryDocumentRevisionStatusArgs) (*Result, error) {
+	call := LibraryDocumentRevisionStatusBuild(args)
+	return qc.executeNamed(ctx, "libraryDocumentRevisionStatus", call)
+}
+
+func LibraryDocumentRevisionStatusBuild(args LibraryDocumentRevisionStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryDocumentRevisionStatus(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryRemoveArtifactLabel -- Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel.
 type LibraryRemoveArtifactLabelArgs struct {
 	ArtifactId string
@@ -2133,6 +2153,56 @@ func LibraryRemoveArtifactLabelBuild(args LibraryRemoveArtifactLabelArgs) string
 	}
 	b.WriteString("label: ")
 	b.WriteString(quoteMemQL(args.Label))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryRequestDocumentRevision -- Capture selected current feedback and open a Nexus run waiting for approval.
+type LibraryRequestDocumentRevisionArgs struct {
+	ArtifactId       string
+	ExpectedVersion  int
+	ExpectedRevision string
+	CommentIds       []string
+	Instruction      string
+	RequestId        string
+}
+
+// LibraryRequestDocumentRevision calls the engine builtin libraryRequestDocumentRevision.
+func (qc *QueryClient) LibraryRequestDocumentRevision(ctx context.Context, args LibraryRequestDocumentRevisionArgs) (*Result, error) {
+	call := LibraryRequestDocumentRevisionBuild(args)
+	return qc.executeNamed(ctx, "libraryRequestDocumentRevision", call)
+}
+
+func LibraryRequestDocumentRevisionBuild(args LibraryRequestDocumentRevisionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryRequestDocumentRevision(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedVersion: ")
+	b.WriteString(fmt.Sprintf("%v", args.ExpectedVersion))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("commentIds: ")
+	b.WriteString(renderMemQLValue(args.CommentIds))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("instruction: ")
+	b.WriteString(quoteMemQL(args.Instruction))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
 	b.WriteString(")")
 	return b.String()
 }

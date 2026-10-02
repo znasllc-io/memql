@@ -269,14 +269,15 @@ func (s *store) currentProcedureHash(ctx context.Context, subject map[string]any
 // nothing else.
 func (s *store) createGoalRow(ctx context.Context, g goalSeed) error {
 	return s.writeInternal(ctx, "mutation "+call("createWorkGoal", map[string]any{
-		"goalId":           g.GoalId,
-		"statement":        g.Statement,
-		"origin":           g.Origin,
-		"responsibilityId": g.ResponsibilityId,
-		"accountIds":       optStrings(g.AccountIds),
-		"input":            optMap(g.Input),
-		"ceilings":         optMap(g.Ceilings),
-		"requestedVia":     g.RequestedVia,
+		"goalId":             g.GoalId,
+		"statement":          g.Statement,
+		"origin":             g.Origin,
+		"responsibilityId":   g.ResponsibilityId,
+		"accountIds":         optStrings(g.AccountIds),
+		"input":              optMap(g.Input),
+		"ceilings":           optMap(g.Ceilings),
+		"requestedVia":       g.RequestedVia,
+		"requestFingerprint": g.RequestFingerprint,
 	}))
 }
 
@@ -305,6 +306,7 @@ func (s *store) createRunRow(ctx context.Context, r runSeed) error {
 		"startedAt":           rfc(r.StartedAt),
 		"head":                optMap(r.Head),
 		"rerun":               optMap(r.Rerun),
+		"waitingOn":           optMap(r.WaitingOn),
 	}
 	// Named only when there is one, so every run opened without a signature
 	// renders exactly the call it always did.
@@ -337,13 +339,18 @@ func (s *store) closeGoalRow(ctx context.Context, goalId, status string, at time
 }
 
 // decideApprovalRow records a decision on v1:work:approval.
-func (s *store) decideApprovalRow(ctx context.Context, approvalId, decision, decidedBy string, at time.Time, answer map[string]any) error {
+func (s *store) decideApprovalRow(ctx context.Context, approvalId, decision, decidedBy string, at time.Time, answer map[string]any, versionTime ...time.Time) error {
+	version := at
+	if len(versionTime) > 0 {
+		version = versionTime[0]
+	}
 	return s.writeInternal(ctx, "mutation "+call("decideWorkApproval", map[string]any{
-		"approvalId": approvalId,
-		"decision":   decision,
-		"decidedBy":  decidedBy,
-		"decidedAt":  rfc(at),
-		"answer":     optMap(answer),
+		"approvalId":  approvalId,
+		"decision":    decision,
+		"decidedBy":   decidedBy,
+		"decidedAt":   rfc(at),
+		"versionTime": rfc(version),
+		"answer":      optMap(answer),
 	}))
 }
 
@@ -369,17 +376,19 @@ func (s *store) createApprovalRow(ctx context.Context, a approvalSeed) error {
 // ---------------------------------------------------------------------------
 
 type goalSeed struct {
-	GoalId           string
-	Statement        string
-	Origin           string
-	ResponsibilityId string
-	AccountIds       []string
-	Input            map[string]any
-	Ceilings         map[string]any
-	RequestedVia     string
+	RequestFingerprint string
+	GoalId             string
+	Statement          string
+	Origin             string
+	ResponsibilityId   string
+	AccountIds         []string
+	Input              map[string]any
+	Ceilings           map[string]any
+	RequestedVia       string
 }
 
 type runSeed struct {
+	WaitingOn           map[string]any
 	ExecutionAuthority  map[string]any
 	RunId               string
 	GoalId              string

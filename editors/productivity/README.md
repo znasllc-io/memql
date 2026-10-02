@@ -26,9 +26,8 @@ file access follows VS Code's file-picker permissions. PDF content is rendered
 from supplied bytes with local fonts and workers; the viewer has no remote
 document loading or script execution from the PDF.
 
-This package is under development. Discussion replies and
-human approval workflows are tracked in the repository's productivity plan;
-those unfinished capabilities are not available.
+Discussion replies and threaded resolution are not available yet. Comments
+and explicitly approved Markdown revision jobs are supported.
 
 For a checkout, build the SDK first, then `npm ci` and `npm run compile` in
 this directory. `npm test` exercises pure logic. The host suite uses
@@ -100,3 +99,21 @@ the Files editor preference can select installed VS Code or Cursor. A queued sen
 captures the ready template content it reviewed, so later copy edits do not
 change an in-progress campaign. Existing jobs without a captured snapshot retain
 the older live-template behavior; pause and recreate those jobs to capture a copy.
+
+For an AI-assisted Markdown revision, select up to 20 current comments, describe
+what should change, and choose **Review change request**. The cluster captures
+the exact saved source (up to 128 KiB), selected feedback and instruction before
+opening a Nexus job that waits for human approval. Inspect the captured source
+and feedback, then choose **Approve draft job** or **Decline**. Approval can also
+be handled in the existing Nexus inbox. Refresh the reading view to see progress.
+
+The approved job uses Materializer and MemQL's model router with a one-model-call
+ceiling. It saves a separate draft in Files. **Compare draft** opens a read-only
+diff; return to the reading view and choose **Apply compared draft** when ready.
+The original is saved as a new version only after that action. Source changes or
+revoked write access before approval/execution stop the job; an intervening save
+before applying the draft refuses the save and keeps the local edits. Request
+and decision retries recover the same work identities, including an interrupted
+bootstrap or resume. Opening a file, adding a comment, or preparing a request
+does not itself start AI work. Feedback-driven revision currently supports
+Markdown; email example generation and publishing use their separate controls.

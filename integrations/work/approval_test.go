@@ -1,7 +1,10 @@
 package work
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/core/common"
 	"strings"
 	"testing"
 
@@ -366,3 +369,19 @@ var errRefused = &refusalError{}
 type refusalError struct{}
 
 func (*refusalError) Error() string { return "refused" }
+
+func TestAJobCannotApproveItsOwnWork(t *testing.T) {
+	for _, ctx := range []context.Context{
+		auth.ContextWithUserActor(context.Background(), "u-alice"),
+		auth.ContextWithAccess(context.Background(), auth.SystemActor("approval-test")),
+		common.ContextWithRun(callerContext("u-alice"), common.RunContext{RunId: "running-job", OwnerUserId: "u-alice"}),
+	} {
+		i, engine := newTestIntegration(t)
+		if _, err := i.handleDecideApproval(ctx, map[string]any{"approvalId": "approval", "decision": "approved"}, 0); err == nil {
+			t.Fatal("non-interactive authority decided a human approval")
+		}
+		if len(engine.calls) != 0 {
+			t.Fatal("refused approval reached storage")
+		}
+	}
+}
