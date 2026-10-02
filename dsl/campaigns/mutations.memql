@@ -537,6 +537,8 @@ mutation suppression recordSuppression {
 
 /// ENGINE: append an organization opt-out. The capability derives both the composite identity
 /// and organization; external callers cannot forge a suppression for another client.
+/// actor.userId cannot scope this write: a mail client has no signed-in actor. The
+/// unsubscribe handler verifies the HMAC and borrows only its engine-owned write authority.
 @serverOnly
 mutation suppression recordOrganizationSuppression {
   args {
