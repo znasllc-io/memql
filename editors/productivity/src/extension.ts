@@ -80,6 +80,9 @@ export async function activate(context: vscode.ExtensionContext) {
   const snapshots = new Map<string, string>();
   let snapshotNumber = 0;
   context.subscriptions.push(provider.changed,
+    vscode.commands.registerCommand("memql.productivity.checkTools", () => ({
+      coreActive: core.isActive, productivityActive: context.extension.isActive, connectionVersion: connection.version,
+    })),
     vscode.workspace.onDidCloseTextDocument(document => {
       const key = document.uri.toString();
       if (document.uri.scheme === "memql-file" && !pdf.hasOpen(document.uri)) provider.close(document.uri);

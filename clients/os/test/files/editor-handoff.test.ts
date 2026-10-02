@@ -15,7 +15,9 @@ it("reserves the browser tab before reading current metadata and opens that file
   input.load.mockImplementation(async () => { expect(input.ports.reserve).toHaveBeenCalledOnce(); return file; });
   await openCheckedArtifact(input);
   const url = new URL(tab.navigate.mock.calls[0]![0]);
-  expect(JSON.parse(url.searchParams.get("payload")!)).toEqual([["openFile", "memql-file://memql.localhost/artifacts/artifact/review.md"]]);
+  expect(url.origin).toBe("https://vscode.memql.localhost");
+  expect(url.pathname).toBe("/editor/");
+  expect(url.searchParams.get("resource")).toBe("memql-file://memql.localhost/artifacts/artifact/review.md");
   expect(input.ports.schedule).not.toHaveBeenCalled();
 });
 it("downloads a renamed ZIP using fresh MIME metadata and closes its reserved tab", async () => {

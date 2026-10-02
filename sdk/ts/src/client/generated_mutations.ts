@@ -3200,6 +3200,7 @@ HOSTNAME. The args field carries the SHAPE half (@maxLength + a lowercase-DNS @p
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.ts).
 export interface CreateSiteArgs {
   siteId: string;
+  extensionRuntimePath?: string;
   accountId?: string;
   hostname: string;
   // Enum: spa | static | shopify_storefront
@@ -3220,6 +3221,7 @@ export interface CreateSiteArgs {
 export function buildCreateSite(args: CreateSiteArgs): string {
   const parts: string[] = [];
   parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.extensionRuntimePath !== undefined) parts.push("extensionRuntimePath: " + renderMemQLValue(args.extensionRuntimePath));
   if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
   parts.push("hostname: " + renderMemQLValue(args.hostname));
   if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));

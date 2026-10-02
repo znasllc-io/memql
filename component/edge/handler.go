@@ -151,6 +151,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // returns the path class of what it did -- the one fact the record needs that
 // cannot be read off the response.
 func (h *Handler) serve(w http.ResponseWriter, r *http.Request, site *Site) string {
+	// Isolated renderer origins serve public bundle assets only. They never
+	// expose sessions, runtime config, previews, uploads or API proxies.
+	if site.ResourceParentHost != "" {
+		root := extensionRuntimePath(site)
+		if site.Status != "live" || root == "" || path.Clean(r.URL.Path) != r.URL.Path || !strings.HasPrefix(r.URL.Path, root+"assets/") || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+			http.NotFound(w, r)
+			return pathClassUnserved
+		}
+		r = r.Clone(r.Context())
+		r.Header.Del("Cookie")
+		r.Header.Del("Authorization")
+		return h.serveResolved(w, r, site)
+	}
 	// THE PREVIEW ENTRY POINTS, AHEAD OF EVERYTHING (epic memql#5531). They are
 	// answered by the edge ITSELF rather than proxied, and they sit above the
 	// status switch, so a link to a DRAFT deployable's preview is redeemable --
@@ -326,19 +339,19 @@ func (h *Handler) serveResolved(w http.ResponseWriter, r *http.Request, site *Si
 		// twice per request.
 		etag, hasETag := assetETagFor(fsys, name, site.BundleRef)
 		h.setContentSecurityPolicy(w, r, site, fsys, name, etag, hasETag)
-		h.serveFile(w, r, fsys, name, etag, hasETag, filePolicy{assetPrefix: assetPrefixFor(site)})
+		h.serveFile(w, r, fsys, name, etag, hasETag, filePolicy{assetPrefix: assetPrefixFor(site), suppressRefresh: extensionRuntimePath(site) != "" && strings.HasPrefix(r.URL.Path, extensionRuntimePath(site))})
 		return classifyServed(name, false)
 	}
 
 	// The last rung of D11's order, and the only place the tail is decided.
-	if fallsBackToIndex(site) && !staticAssetName(r.URL.Path) && !strings.HasPrefix(r.URL.Path, "/_astro/") {
+	if site.ResourceParentHost == "" && fallsBackToIndex(site) && !staticAssetName(r.URL.Path) && !strings.HasPrefix(r.URL.Path, "/_astro/") {
 		if _, err := fs.Stat(fsys, "index.html"); err == nil {
 			// The fallback serves a DOCUMENT, so it needs its hashes exactly
 			// as the root does. Without this every client-side route breaks
 			// on a hard reload while the root keeps working.
 			etag, hasETag := assetETagFor(fsys, "index.html", site.BundleRef)
 			h.setContentSecurityPolicy(w, r, site, fsys, "index.html", etag, hasETag)
-			h.serveFile(w, r, fsys, "index.html", etag, hasETag, filePolicy{assetPrefix: assetPrefixFor(site)})
+			h.serveFile(w, r, fsys, "index.html", etag, hasETag, filePolicy{assetPrefix: assetPrefixFor(site), suppressRefresh: extensionRuntimePath(site) != "" && strings.HasPrefix(r.URL.Path, extensionRuntimePath(site))})
 			return pathClassFallback
 		}
 	}
@@ -468,7 +481,7 @@ func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, fsys fs.FS, 
 		}
 	}
 	version := w.Header().Get(deploymentVersionHeader)
-	refreshDocument := isHTMLDocument(name) && version != ""
+	refreshDocument := isHTMLDocument(name) && version != "" && !policy.suppressRefresh
 	if refreshDocument && hasETag {
 		etag = strongETag(etag, "site-refresh-v2", version, policy.assetPrefix)
 	}

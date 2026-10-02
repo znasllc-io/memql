@@ -4435,6 +4435,7 @@
         "bundleRef",
         "candidateRef",
         "deleted",
+        "extensionRuntimePath",
         "hostname",
         "kind",
         "notes",

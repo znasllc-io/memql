@@ -1,0 +1,7 @@
+node_modules/
+!package.json
+!package-lock.json
+dist/
+public/extensions/
+src/bundled-extensions.json
+public/licenses/

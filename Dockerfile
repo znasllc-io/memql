@@ -286,10 +286,8 @@ WORKDIR /src
 # the shell at all -- a `file:` dep is a linked source tree, not a registry
 # tarball.
 #
-# sdk/ts-viewkit is NOT copied. It was, for the portal, which consumed it as a
-# second `file:` dependency; the OS does not (clients/os/package.json), and it
-# still exists for the VS Code extension. Copying it here would be a source
-# input this stage does not read, which is a cache key that busts for nothing.
+# The OS and hosted editor share the TypeScript SDK. The editor also needs
+# ts-viewkit; its source is copied with the extension build inputs below.
 COPY clients/os/package.json clients/os/package-lock.json ./clients/os/
 COPY sdk/ts/package.json ./sdk/ts/
 
@@ -316,8 +314,11 @@ COPY scripts/os ./scripts/os
 # scripts/ci/spa_image_wiring_test.go asserts for both sites): the editor
 # themes it generates the code-colour CSS from, the research-desk example it
 # renders and offers for download, and brand/, copied above.
-COPY editors/vscode/themes ./editors/vscode/themes
-COPY editors/vscode/site ./editors/vscode/site
+COPY LICENSE ./LICENSE
+COPY sdk/ts-viewkit ./sdk/ts-viewkit
+COPY editors/vscode ./editors/vscode
+COPY editors/productivity ./editors/productivity
+COPY editors/browser ./editors/browser
 COPY examples/research-desk ./examples/research-desk
 
 # The SAME commands `make os-build` and `make vscode-site-build` run, so the
@@ -327,6 +328,7 @@ COPY examples/research-desk ./examples/research-desk
 # path each -- the runtime's COPY cannot branch on which stage it resolved to.
 RUN bash scripts/os/build.sh build && mv clients/os/dist /os-dist
 RUN node editors/vscode/site/build.mjs && mv editors/vscode/site/dist /vscode-site-dist
+RUN node editors/browser/build.mjs && mv editors/browser/dist /vscode-site-dist/editor
 
 # spa-skip is the empty alternative the SPA_DIST_STAGE selector resolves to by
 # default. Derived FROM builder purely because that stage is already built --

@@ -461,9 +461,9 @@ describe("the template editor handoff", () => {
     expect(screen.queryByLabelText("Message")).toBeNull();
     expect(document.querySelector("textarea")).toBeNull();
     fireEvent.click(screen.getByRole("button",{name:"Open in editor"}));
-    expect(opened).toHaveBeenCalledWith(expect.stringContaining("https://vscode.dev/?payload="),"_blank","noopener,noreferrer");
+    expect(opened).toHaveBeenCalledWith(expect.stringContaining("https://vscode.memql.example.com/editor/?resource="),"_blank","noopener,noreferrer");
     const url = new URL(String(opened.mock.calls[0]![0]));
-    expect(JSON.parse(url.searchParams.get("payload")!)[0]).toEqual(["openFile","memql-file://memql.example.com/templates/t1/August%20copy.email.json"]);
+    expect(url.searchParams.get("resource")).toBe("memql-file://memql.example.com/templates/t1/August%20copy.email.json");
     expect(conn.query.campaignSaveTemplate).not.toHaveBeenCalled();
     opened.mockRestore();
   });
