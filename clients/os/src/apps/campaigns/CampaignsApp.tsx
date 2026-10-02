@@ -5,7 +5,6 @@ import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 import { useAuthSource } from "../../auth/context";
 import { EdgeUploadProvider } from "../../items/edgeUpload";
 import type { UploadProvider } from "../../items/upload";
-import { Check, Head, Panel, SetupGroup } from "../../kit";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
 import { AudiencesSection } from "./AudiencesSection";
@@ -16,12 +15,11 @@ import { TemplatesSection } from "./TemplatesSection";
 import { useCampaignWrites } from "./actions";
 import {
   CAMPAIGNS_SECTIONS,
-  DEFAULT_CAMPAIGNS_SETTINGS,
   LocalCampaignsSettingsStore,
   type CampaignsSettings,
-  type CampaignsSettingsStore, CAMPAIGNS_REQUIRES, CAMPAIGNS_WANTS } from "./settings";
+  type CampaignsSettingsStore } from "./settings";
 import { useCampaignFeeds } from "./useCampaigns";
-import { useSession } from "../../chrome/access";
+import { CampaignsSettingsSection } from "./CampaignsSettingsSection";
 
 // Campaigns: writing mail, sending it, and knowing what happened (epic
 // memql#4827 / #4828 / #4830).
@@ -163,86 +161,5 @@ export function CampaignsApp({
           />
       )}
     </>
-  );
-}
-
-function CampaignsSettingsSection({
-  settings,
-  update,
-}: {
-  settings: CampaignsSettings;
-  update: (patch: Partial<CampaignsSettings>) => void;
-}) {
-  const { readiness } = useSession();
-  return (
-    <div className="os-settings">
-      <Head title="Campaigns settings" />
-      {/* THE SET UP GROUP sits above the preferences on purpose: it is the
-          reason a person was sent here from an unconfigured surface, and the
-          first thing they need is what to configure and where. Rule 4 puts
-          micro-preferences in Settings; it never said they come first. */}
-      <SetupGroup
-        app="Campaigns"
-        requires={CAMPAIGNS_REQUIRES}
-        wants={CAMPAIGNS_WANTS}
-        readiness={readiness}
-      />
-      <Panel label="Campaigns settings">
-        <fieldset className="os-field-group">
-          <legend>Open Campaigns on</legend>
-          <div className="os-choice-row" role="radiogroup" aria-label="Default section">
-            {CAMPAIGNS_SECTIONS.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                role="radio"
-                aria-checked={settings.defaultSection === section.id}
-                className="os-choice"
-                onClick={() => update({ defaultSection: section.id })}
-              >
-                {section.name}
-              </button>
-            ))}
-          </div>
-          <p className="os-caption">
-            Applies the next time a Campaigns window opens. It does not move the window you are
-            looking at.
-          </p>
-        </fieldset>
-
-        <fieldset className="os-field-group">
-          <legend>Finished and filed-away things</legend>
-          <Check checked={settings.showFiled} onChange={(showFiled) => update({ showFiled })}>
-            List finished campaigns, archived audiences and templates, and retired mailboxes
-          </Check>
-          <p className="os-caption">
-            Off by default. The standing question these lists answer is what you are working with
-            now; a list padded with last quarter&apos;s sends makes the current ones harder to find.
-            Nothing is ever deleted -- past sends keep naming what they used.
-          </p>
-        </fieldset>
-
-        <fieldset className="os-field-group">
-          <legend>New campaigns</legend>
-          <Check
-            checked={settings.trackByDefault}
-            onChange={(trackByDefault) => update({ trackByDefault })}
-          >
-            Start with open and click tracking switched on
-          </Check>
-          <p className="os-caption">
-            This decides what the boxes are set to on the new-campaign form and nothing else. Each
-            campaign keeps its own answer from the moment it is created, so changing this never
-            reaches one that already exists.
-          </p>
-        </fieldset>
-
-        <p className="os-caption">
-          These are kept in this browser, separately from your desktop, so an app learning a checkbox
-          can never cost you your desks. The defaults are{" "}
-          {DEFAULT_CAMPAIGNS_SETTINGS.defaultSection} with finished things hidden and tracking on.
-        </p>
-      </Panel>
-    </div>
   );
 }

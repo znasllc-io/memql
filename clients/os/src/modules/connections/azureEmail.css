@@ -1,0 +1,6 @@
+.azure-email-connections { min-width: 0; }
+.azure-email-organization { width: 100%; max-width: 24rem; }
+.azure-email-organization .os-select-wrap { width: 100%; }
+.azure-email-connections > section > .os-head { margin-bottom: 0; }
+
+.azure-email-connections:has(> .os-wizard, > .os-action-pane) { height: 100%; min-height: 0; }

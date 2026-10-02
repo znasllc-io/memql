@@ -1,3 +1,6 @@
+import { CampaignsSettingsSection } from "../src/apps/campaigns/CampaignsSettingsSection";
+import { DEFAULT_CAMPAIGNS_SETTINGS } from "../src/apps/campaigns/settings";
+import { fakeConnection as campaignConnection, rowsResult, withSession as campaignSession } from "../test/campaigns/harness";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
 import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
@@ -532,6 +535,8 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  "campaigns-settings": campaignSettingsView(false),
+  "campaigns-settings-connected": campaignSettingsView(true),
   // NEXUS (epic memql#5414): what an automation is for. The procedure's page
   // in the three readings its Reuse panel has -- the evidence deciding, a
   // person's own label over evidence that disagrees, and nothing counted yet
@@ -893,6 +898,25 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
       <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
     </div>
   );
+}
+
+function campaignSettingsView(connected: boolean) {
+  return {
+    connect: () => {
+      const conn = campaignConnection({ accounts: [accountRow({ id: "studio", name: "Our Studio" })] });
+      Object.assign(conn.query, { emailAzureSetup: async ({ action }: { action: string }) => rowsResult([
+        action === "begin" ? { status: "waiting", sessionId: "qa", userCode: "WXYZ-1234", verificationUri: "https://microsoft.com/devicelogin" } :
+        connected ? { status: "ready", sender: "news@studio.example", replyTo: "hello@studio.example", plan: { domain: "studio.example" } } : { status: "unconfigured" },
+      ]) });
+      return conn;
+    },
+    wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
+    render: () => <CampaignSettingsPane />,
+  };
+}
+function CampaignSettingsPane() {
+  const [settings, setSettings] = useState(DEFAULT_CAMPAIGNS_SETTINGS);
+  return <WindowBody fallback="Campaigns"><CampaignsSettingsSection settings={settings} update={patch => setSettings(old => ({ ...old, ...patch }))}/></WindowBody>;
 }
 
 function AccountsPane() {

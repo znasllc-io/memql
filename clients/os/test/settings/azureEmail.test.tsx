@@ -94,11 +94,26 @@ describe("organization Azure email setup", () => {
         });
         render(withSession(<AzureEmailConnections />));
         chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
-        await screen.findByText("Setup is saved. Continue when you're ready.");
-        await click("Connect email");
+        await click("Manage email for Our company");
+        await click("Continue setup");
         await click("Sign in with Microsoft");
         expect(await screen.findByText("verification-proof")).toBeTruthy();
         expect(call.mock.calls.filter(([args]) => args.action === "prepare" || args.action === "provision")).toHaveLength(0);
+    });
+    it("does not offer connection setup until the status is known", async () => {
+        query(() => new Promise(() => {}));
+        render(withSession(<AzureEmailConnections />));
+        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
+        expect(screen.queryByRole("button", { name: "Connect email" })).toBeNull();
+        expect(screen.queryByText("No email connection")).toBeNull();
+    });
+    it("offers retry on a failed status read instead of treating it as unconfigured", async () => {
+        query(() => { throw Error("Connection unavailable"); });
+        render(withSession(<AzureEmailConnections />));
+        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
+        expect(await screen.findByText("Email connection could not be read.")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Connect email" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     });
     it("keeps connection configuration with owners and developers", async () => {
         const call = query(() => ({ status: "ready" }));

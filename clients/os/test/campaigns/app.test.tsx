@@ -963,9 +963,10 @@ describe("the app's settings", () => {
   it("offers exactly the sections the manifest declares", async () => {
     const conn = fakeConnection({});
     mount(conn, "settings");
-    const group = await screen.findByLabelText("Default section");
+    const group = await screen.findByRole("combobox", { name: "Opening page" });
+    openSelect(group);
     for (const name of ["Campaigns", "Audiences", "Templates", "Senders", "Rules", "Settings"]) {
-      expect(within(group).getByText(name)).toBeTruthy();
+      expect(screen.getByRole("option", { name })).toBeTruthy();
     }
   });
 
@@ -973,7 +974,7 @@ describe("the app's settings", () => {
     const conn = fakeConnection({});
     mount(conn, "settings");
     expect(
-      await screen.findByText(/changing this never reaches one that already exists/),
+      await screen.findByText(/Existing campaigns stay unchanged/),
     ).toBeTruthy();
   });
 });

@@ -5,7 +5,9 @@ import { useOsConnection } from "../../live/connection";
 import { AccountPicker } from "../../apps/accounts/AccountPicker";
 import { useAccountOptions } from "../../apps/accounts/tie";
 import { useDefaultOrganization } from "../../apps/accounts/organization";
-import { Field, Head, Input, Notice, Panel, RecordListSkeleton, Select } from "../../kit";
+import { Button, EmptyState, Fact, Facts, Field, Head, Input, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, Select, Subhead } from "../../kit";
+import { AddButton } from "../../kit/AddButton";
+import "./azureEmail.css";
 import { Wizard } from "../../kit/Wizard";
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import { flatten } from "../../kit/rows";
@@ -47,34 +49,42 @@ interface Reply {
 const LOCATIONS = ["Africa", "Asia Pacific", "Australia", "Brazil", "Canada", "Europe", "France", "Germany", "India", "Japan", "Korea", "Norway", "Switzerland", "United Arab Emirates", "United Kingdom", "United States"];
 /** Shared by Campaigns and Settings; this configures the organization's one
  * backend connection. Neither app keeps provider credentials or a sender copy. */
-export function AzureEmailConnections({ header, onBack }: {
+type ConnectionView = "list" | "detail" | "setup";
+export function AzureEmailConnections({ header, onBack, backLabel = "Email connections", children }: {
     header?: ReactNode;
     onBack?: () => void;
+    backLabel?: string;
+    children?: ReactNode;
 }) {
     const formID = useId();
     const accounts = useAccountOptions();
     const initial = useDefaultOrganization(accounts);
     const [accountId, setAccountId] = useState("");
-    const [editing, setEditing] = useState(false);
+    const [view, setView] = useState<ConnectionView>("list");
     const { access, config } = useSession();
-    useEffect(() => { if (!accountId && initial)
-        setAccountId(initial); }, [accountId, initial]);
+    useEffect(() => { if (!accountId && initial) setAccountId(initial); }, [accountId, initial]);
     const allowed = roleAdmits(access?.role || "", { any: ["owner", "developer"] });
     const name = accounts.find(row => row.id === accountId)?.name || accountId;
-    const top = header ?? <Head title="Email connection" back={onBack ? { label: "Senders", onSelect: onBack } : undefined}/>;
-    if (!allowed)
-        return <div className="os-app-stack">{top}<Notice sentence="An owner or developer can connect your organization's email domain."/></div>;
-    return <div className="os-app-stack">
-    {!editing ? <>{top}<AccountPicker id={`${formID}-email-organization`} label="Organization" required accounts={accounts} value={accountId} onChange={setAccountId}/></> : null}
-    {accountId ? <OrganizationEmail key={`${config.domain}:${access?.userId}:${accountId}`} accountId={accountId} name={name} editing={editing} edit={setEditing}/> : null}
-  </div>;
+    const top = header ?? <Head title="Email connections" back={onBack ? { label: "Senders", onSelect: onBack } : undefined}/>;
+    const picker = <div className="azure-email-organization"><Field label="Organization"><AccountPicker id={`${formID}-email-organization`} label="Organization" required accounts={accounts} value={accountId} onChange={setAccountId}/></Field></div>;
+    if (!allowed) return <div className="os-app-stack">{top}<Notice sentence="An owner or developer can connect your organization's email domain."/>{children}</div>;
+    return <div className="os-app-stack azure-email-connections">
+      {view === "list" ? top : null}
+      {accountId ? <OrganizationEmail key={`${config.domain}:${access?.userId}:${accountId}`} accountId={accountId} name={name} view={view} setView={setView} picker={picker} backLabel={backLabel}/> :
+        <section className="os-app-stack" aria-label="Email connections"><Subhead>Email connections</Subhead>{picker}<p className="os-caption">Choose an organization to connect its email domain with Microsoft Azure.</p></section>}
+      {view === "list" ? children : null}
+    </div>;
 }
-function OrganizationEmail({ accountId, name, editing, edit }: {
+function OrganizationEmail({ accountId, name, view, setView, picker, backLabel }: {
     accountId: string;
     name: string;
-    editing: boolean;
-    edit: (value: boolean) => void;
+    view: ConnectionView;
+    setView: (value: ConnectionView) => void;
+    picker: ReactNode;
+    backLabel: string;
 }) {
+    const editing = view === "setup";
+    const edit = (value: boolean) => setView(value ? "setup" : "list");
     const formID = useId();
     const connection = useOsConnection();
     const { access, config } = useSession();
@@ -215,27 +225,35 @@ function OrganizationEmail({ accountId, name, editing, edit }: {
         edit(false);
         setGrant(null);
     } };
-    if (!editing)
-        return <section className="os-action-pane">
-    <div className="os-action-body os-app-stack">
+    if (view === "list") return <section className="os-app-stack" aria-label="Email connections">
+      <div className="os-head"><Subhead>Email connections</Subhead><div className="os-head-actions">
+        {state && ["unconfigured", "disconnected"].includes(state.status) && !error ? <AddButton label="Connect email" onClick={() => edit(true)}/> : null}
+      </div></div>
+      {picker}
       {!state && !error ? <RecordListSkeleton label="Reading email connection"/> : null}
-      {state ? <Panel label="Email connection"><p>{state.status === "ready" ? state.sender : "Connect this organization's sending domain to Microsoft Azure."}</p>
-        <p className="os-caption">{state.status === "ready" ? `Replies: ${state.replyTo || "no separate reply mailbox configured"}` : state.status === "unconfigured" || state.status === "disconnected" ? "Choose the domain and sender your clients will see." : "Setup is saved. Continue when you're ready."}</p>
-      </Panel> : null}
-      {disconnect ? <Notice tone="warn" sentence="Disconnect this organization's email?" detail="New sends will stop. Azure resources and DNS records will remain."/> : null}
-      {error ? <Notice tone="error" sentence={error}/> : null}
-    </div>
-    <ActionBar state={busy ? "Working" : state?.status === "ready" ? "Connected" : "Setup needed"} tone={busy ? "busy" : state?.status === "ready" ? "live" : "paused"} acts={disconnect ? [
-                { label: "Cancel", text: true, busy, onAct: () => setDisconnect(false) },
-                { label: "Disconnect", tone: "danger", busy, onAct: () => { void call("disconnect").then(result => { if (result) {
-                        setState(result);
-                        setDisconnect(false);
-                    } }); } },
-            ] : [
-                ...(state?.status === "ready" ? [{ label: "Disconnect", text: true, onAct: () => setDisconnect(true) }] : []),
-                { label: state?.status === "ready" ? "Manage senders" : "Connect email", busy, onAct: () => { edit(true); } },
-            ]}/>
-  </section>;
+      {error ? <Notice tone="error" sentence="Email connection could not be read." detail={error}><Button onClick={() => { void call("status").then(result => { if (result) setState(result); }); }}>Try again</Button></Notice> : null}
+      {state && !error ? ["unconfigured", "disconnected"].includes(state.status) ?
+        <EmptyState icon={Mail} title="No email connection">Use the plus button to sign in with Microsoft and connect your sending domain.</EmptyState> :
+        <RecordList label="Email connections"><RecordRow icon={<Mail size={18} aria-hidden/>} name={state.plan?.domain || name} secondary={state.sender || "Microsoft Azure"} state={state.status === "ready" ? "Connected" : "Setup incomplete"} tone={state.status === "ready" ? "accent" : "warn"} current onOpen={() => setView("detail")} label={`Manage email for ${name}`}/></RecordList> : null}
+    </section>;
+    if (!editing) return <section className="os-action-pane">
+      <Head title={state?.plan?.domain || "Email connection"} back={{ label: backLabel, onSelect: () => setView("list") }}/>
+      <div className="os-action-body os-app-stack">
+        <Panel label="Email connection"><Subhead>Microsoft Azure</Subhead><Facts>
+          <Fact label="Organization" value={name}/><Fact label="Sender" value={state?.sender || "Not configured"}/>
+          <Fact label="Replies to" value={state?.replyTo || "No reply mailbox configured"}/>
+        </Facts></Panel>
+        {disconnect ? <Notice tone="warn" sentence="Disconnect this organization's email?" detail="New sends will stop. Azure resources and DNS records will remain."/> : null}
+        {error ? <Notice tone="error" sentence={error}/> : null}
+      </div>
+      <ActionBar state={busy ? "Working" : state?.status === "ready" ? "Connected" : "Setup incomplete"} tone={busy ? "busy" : state?.status === "ready" ? "live" : "paused"} acts={disconnect ? [
+        { label: "Cancel", text: true, busy, onAct: () => setDisconnect(false) },
+        { label: "Disconnect", tone: "danger", busy, onAct: () => { void call("disconnect").then(result => { if (result) { setState(result); setDisconnect(false); setView("list"); } }); } },
+      ] : [
+        ...(state?.status === "ready" ? [{ label: "Disconnect", text: true, onAct: () => setDisconnect(true) }] : []),
+        { label: state?.status === "ready" ? "Manage senders" : "Continue setup", busy, onAct: () => edit(true) },
+      ]}/>
+    </section>;
     const phase = !signedIn ? "signin" : state?.status === "verified" || state?.status === "ready" ? "sender" : state?.status === "dns" ? "dns" : "resources";
     const acts: Act[] = [{ label: "Back", text: true, busy, onAct: () => edit(false) }];
     if (!busy) {
@@ -253,7 +271,7 @@ function OrganizationEmail({ accountId, name, editing, edit }: {
             acts.push({ label: "Save sender", onAct: () => { void call("sender", { username, displayName, replyTo }).then(apply); } });
     }
     const order = ["signin", "resources", "dns", "sender"];
-    return <Wizard icon={<Mail size={20}/>} title={`Email · ${name}`} label="Connect email" open={phase} onOpen={() => { }} back={{ label: "Email connections", onSelect: () => edit(false) }} status={{ word: busy ? "Working" : phase === "signin" && session ? "Waiting for Microsoft" : phase === "dns" ? "Waiting for DNS" : "Your turn", tone: busy ? "busy" : "paused" }} acts={acts} notices={error ? <Notice tone="error" sentence={error}/> : undefined} steps={[
+    return <Wizard icon={<Mail size={20}/>} title={`Email · ${name}`} label="Connect email" open={phase} onOpen={() => { }} back={{ label: backLabel, onSelect: () => edit(false) }} status={{ word: busy ? "Working" : phase === "signin" && session ? "Waiting for Microsoft" : phase === "dns" ? "Waiting for DNS" : "Your turn", tone: busy ? "busy" : "paused" }} acts={acts} notices={error ? <Notice tone="error" sentence={error}/> : undefined} steps={[
             { id: "signin", name: "Microsoft", body: <div className="os-app-stack"><p className="os-caption">Use an Azure account that can manage this organization's email resources.</p>{grant?.verificationUri && grant.userCode ? <><p className="os-mono">{grant.userCode}</p><a href={grant.verificationUri} target="_blank" rel="noopener noreferrer">Enter this code at Microsoft</a></> : null}</div> },
             { id: "resources", name: "Domain and resources", body: <div className="os-app-stack">
         {state?.status === "planned" || state?.status === "provisioning" ? <><p>{plan.domain}</p><p className="os-caption">Create or resume {plan.emailService} and {plan.communicationService} in {plan.resourceGroup}. Data location: {plan.dataLocation}.</p><p className="os-caption">Azure email usage is billed to the selected subscription. This does not send mail or change your subscription.</p></> : <>
