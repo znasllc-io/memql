@@ -73,7 +73,7 @@ export async function start(isBasic: () => boolean, ready: () => void) {
   await checkTools((command: string) => api.commands.executeCommand(command));
   if (isBasic()) { ready(); return; }
   api.commands.registerCommand('memql.editor.showTools', () => api.commands.executeCommand('workbench.extensions.search', '@builtin memql'));
-  const toolsStatus = api.window.createStatusBarItem(api.StatusBarAlignment.Left, 100);
+  const toolsStatus = api.window.createStatusBarItem('memql.editor.tools', api.StatusBarAlignment.Left, 100);
   toolsStatus.text = '$(check) MemQL tools active';
   toolsStatus.tooltip = 'MemQL and MemQL Productivity Tools are included and active. Click to see both extensions.';
   toolsStatus.command = 'memql.editor.showTools';

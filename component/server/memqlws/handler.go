@@ -141,7 +141,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Editor workers authenticate through the existing bearer subprotocol.
 	// This admission adds no cookie or query-token fallback.
 	if origin := r.Header.Get("Origin"); auth.IsWebEditorOrigin(origin) {
-		originPatterns = append(append([]string(nil), originPatterns...), origin)
+		// IsWebEditorOrigin validates the entire HTTPS origin first. The
+		// WebSocket library matches hosts, not URLs, in OriginPatterns.
+		originPatterns = append(append([]string(nil), originPatterns...), strings.TrimPrefix(origin, "https://"))
 	}
 	if len(originPatterns) == 0 {
 		// No allow-list configured. Fall back to wildcard for backwards

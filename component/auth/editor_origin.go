@@ -1,11 +1,12 @@
 package auth
 
 import (
-	"github.com/znasllc-io/memql/component/frontdoor"
 	"net/url"
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
 // VS Code for the Web runs its extension worker on an isolated Microsoft CDN

@@ -29,7 +29,7 @@ try {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
-      start(() => basic, () => { setup.hidden = true; }),
+      start(() => basic, () => { clearTimeout(timer); setup.hidden = true; }),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('The editor did not finish starting. Retry, or continue without MemQL tools.')), 45000);
       }),
