@@ -1,5 +1,5 @@
 import { Fingerprint } from "lucide-react";
-import { Mark } from "../chrome/Mark";
+import { IdentityFrame } from "./IdentityFrame";
 import { Button, Field } from "../kit/controls";
 import { value, type IdentityData } from "./nativeIdentity";
 
@@ -50,13 +50,7 @@ export function SignInPage({ data, clientId, fields, busy, passkeyPending, probl
       autoComplete={name === "email" ? "email" : name === "name" ? "name" : "off"}
       value={fields[name] || ""} disabled={busy} onChange={event => onField(name, event.target.value)} />
   </Field>;
-  return <main className="os-signin" aria-labelledby="os-signin-title">
-    <section className="os-signin-content">
-      <span className="os-wizard-mark os-signin-mark"><Mark size={34} /></span>
-      <header className="os-signin-heading">
-        <h1 id="os-signin-title">{title}</h1>
-        <p>{local ? "Use your passkey to continue on this device." : stage === "waitlist_signup" ? "Tell us a little about yourself to request access." : stage === "needs_invite" ? "Enter the invitation you received to continue." : "Use your email or a passkey to continue."}</p>
-      </header>
+  return <IdentityFrame title={title} lead={local ? "Use your passkey to continue on this device." : stage === "waitlist_signup" ? "Tell us a little about yourself to request access." : stage === "needs_invite" ? "Enter the invitation you received to continue." : "Use your email or a passkey to continue."}>
       {data.AuthorizeMode === true && !isOsDestination(data, clientId) ? <div className="os-signin-destination">
         <p>Sign in to continue to <strong>{value(data, "ClientName") || "the requesting app"}</strong>.</p>
         <p>Destination: <span className="os-mono">{value(data, "RedirectURI")}</span></p>
@@ -77,6 +71,5 @@ export function SignInPage({ data, clientId, fields, busy, passkeyPending, probl
       </Button> : null}
       {passkeyPending ? <p className="os-signin-pending" role="status">Follow your browser’s prompt to use your passkey.</p> : null}
       <p className="os-signin-legal">By continuing, you agree to the <button type="button" className="os-link" disabled={busy} onClick={() => onLegal("/legal/tos")}>Terms of Service</button> and <button type="button" className="os-link" disabled={busy} onClick={() => onLegal("/legal/privacy")}>Privacy Notice</button>.</p>
-    </section>
-  </main>;
+  </IdentityFrame>;
 }

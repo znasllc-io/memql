@@ -2,14 +2,17 @@ import { ContentSkeleton } from "../kit/ContentSkeleton";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Fingerprint } from "lucide-react";
 import { useAuth } from "./AuthProvider";
-import { nativeIdentity, oauthFields, value, type IdentityData, type IdentityPage } from "./nativeIdentity";
+import { nativeIdentity, oauthFields, value, IdentityRequestError, type IdentityPage } from "./nativeIdentity";
 import { Wizard } from "../kit/Wizard";
 import { OwnershipWizard } from "./OwnershipWizard";
 import { loginWithPasskey, registerPasskey } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
 import { IdentityAccount } from "../apps/identity/IdentityAccount";
 import { SignInPage, signInProblem, type SignInProblem } from "./SignInPage";
-import "./identity.css";
+import { IdentityFrame } from "./IdentityFrame";
+import { DeviceApproval, deviceTitle } from "./DeviceApproval";
+import { Mark } from "../chrome/Mark";
+import ReactMarkdown from "react-markdown";
 
 export function IdentityScreen({ initialPath, embedded = false }: { initialPath: string; embedded?: boolean }) {
   const { config, authSource, status } = useAuth();
@@ -17,6 +20,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   const [path, setPath] = useState(initialPath);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [refreshNeeded, setRefreshNeeded] = useState(false);
   const [loginProblem, setLoginProblem] = useState<SignInProblem>();
   const [passkeyPending, setPasskeyPending] = useState(false);
   const actionPending = useRef(false);
@@ -26,7 +30,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
 
   const load = useCallback(async (next: string, form?: Record<string, string>) => {
     const revision = ++generation.current;
-    setBusy(true); setError(""); setLoginProblem(undefined);
+    setBusy(true); setError(""); setRefreshNeeded(false); setLoginProblem(undefined);
     try {
       const bearer = status === "signed-in" ? await authSource.bearer() : null;
       let result = await nativeIdentity(config, next, { form, csrf: csrf.current, bearer: bearer || undefined });
@@ -46,7 +50,10 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       setPath(next); setPage(result);
       setFields({ email: value(result.data || {}, "PrefillEmail"), user_code: value(result.data || {}, "PrefillCode") });
     } catch (err) {
-      if (revision === generation.current) setError(err instanceof Error ? err.message : "Identity is unavailable");
+      if (revision === generation.current) {
+        setError(err instanceof Error ? err.message : "Identity is unavailable");
+        setRefreshNeeded(err instanceof IdentityRequestError && err.code === "csrf_expired");
+      }
     } finally { if (revision === generation.current) setBusy(false); }
   }, [config, authSource, status]);
 
@@ -56,7 +63,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   const run = async (action: () => Promise<void>, signingIn = false) => {
     if (actionPending.current || busy) return;
     actionPending.current = true;
-    setBusy(true); setError(""); setLoginProblem(undefined); setPasskeyPending(signingIn);
+    setBusy(true); setError(""); setRefreshNeeded(false); setLoginProblem(undefined); setPasskeyPending(signingIn);
     try { await action(); } catch (err) {
       if (signingIn) setLoginProblem(signInProblem(err));
       else setError(err instanceof Error ? err.message : "Identity operation failed");
@@ -64,7 +71,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   };
   const field = (name: string, label: string, type = "text") => <Field label={label}><input className="os-input" aria-label={label}
     type={type} value={fields[name] || ""} onChange={e => setFields(f => ({ ...f, [name]: e.target.value }))} /></Field>;
-  const act = (label: string, onClick: () => void) => <Button disabled={busy} onClick={onClick}>{label}</Button>;
+  const act = (label: string, onClick: () => void) => <Button tone="primary" disabled={busy} onClick={onClick}>{label}</Button>;
 
   // Poll only for the lifetime reported by identity; an outage is an error,
   // never evidence that an email was approved or ownership was acquired.
@@ -100,7 +107,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       if (!destination) throw new Error("Setup is still incomplete. Retry this step.");
       window.location.assign(destination);
     });
-    return <div className="os-identity-gate"><Wizard icon={<Fingerprint />} title="Finish ownership setup"
+    return <div className="os-identity-gate"><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Finish ownership setup"
       lead={data.Local === true ? "Your passkey is required. No email verification is used on this local installation." : "Email verified. Register a passkey before you can enter MemQL OS."}
       label="Ownership setup" open="passkey" onOpen={() => {}}
       steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <><p>Create a passkey with your device or security key. Your browser will ask you to confirm.</p><p>Canceling leaves setup incomplete. You can retry this step.</p></> }))}
@@ -113,7 +120,13 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     busy={busy} passkeyPending={passkeyPending} problem={loginProblem ?? (error ? signInProblem(error) : undefined)}
     onField={(name, text) => setFields(held => ({ ...held, [name]: text }))}
     onSubmit={() => submit("/login", { ...oauthFields(data), ...fields, form: data.Stage === "waitlist_signup" ? "waitlist" : data.Stage === "needs_invite" ? "invite" : "email" })}
-    onPasskey={() => void run(async () => window.location.assign(await loginWithPasskey(config, oauthFields(data))), true)}
+    onPasskey={() => void run(async () => {
+      const destination = await loginWithPasskey(config, oauthFields(data));
+      // A protected identity entry (such as a device request) remains the
+      // destination after first-party sign-in; do not lose it at the OS home.
+      if (!value(data, "ClientID") && initialPath !== "/login" && initialPath !== "/authorize") window.location.reload();
+      else window.location.assign(destination);
+    }, true)}
     onLegal={next => void load(next)} />;
 
   let title = data.Layout?.Title || "Identity";
@@ -150,18 +163,21 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
         <p>{value(data, "NextStep") || `Role: ${value(data, "Role") || "Cluster default"}. Expires in ${value(data, "ExpiresIn")}.`}</p>
         {data.StepUp === true && <p>We’ll verify your email before you receive this privileged role.</p>}
         {!data.Rejection && act("Accept invitation", () => submit("/invitation/accept", { code: value(data, "Code") }))}</>; break;
-    case "device": {
-      const pending = data.Pending as IdentityData | null;
-      body = data.Done ? <p>{data.DoneApproved ? "Device approved. Return to your device." : "Device request denied."}</p>
-        : pending ? <><p>Approve only a device you are signing in on.</p><p>{value(pending, "ClientName")} · {value(pending, "ClientId")}</p>
-          {pending.ClientSelfRegistered === true && <p>The client name has not been verified.</p>}
-          <p>Code: {value(pending, "UserCode")}</p><p>Source: {value(pending, "SourceIP")}</p><p>{value(pending, "UserAgent")}</p>
-          <p>Requested {value(pending, "RequestedAt")} · Expires {value(pending, "ExpiresAt")}</p>
-          {act("Deny", () => submit("/device", { action: "deny", user_code: value(pending, "UserCode") }))}
-          {act("Approve device", () => submit("/device", { action: "approve", user_code: value(pending, "UserCode") }))}</>
-          : <>{field("user_code", "Device code")}{act("Review device", () => submit("/device", { action: "lookup", user_code: fields.user_code || "" }))}</>;
+    case "device":
+      title = deviceTitle(data);
+      body = <DeviceApproval data={data} code={fields.user_code || ""} busy={busy} blocked={refreshNeeded}
+        onCode={code => setFields(f => ({ ...f, user_code: code }))} submit={form => submit("/device", form)} />;
       break;
-    }
+    case "logout_complete":
+      title = "You’re signed out";
+      body = <><p>Your session on this device has ended.</p>{act("Sign in again", () => void load("/login"))}
+        {value(data, "ReturnTo") && <a className="os-link" href={value(data, "ReturnTo")}>Return to {value(data, "ReturnToLabel") || "the app"}</a>}</>;
+      break;
+    case "error":
+      title = value(data, "Heading") || "Unable to continue";
+      body = <><p>{value(data, "Message") || "Try signing in again."}</p>{act("Back to sign in", () => void load("/login"))}
+        {value(data, "ErrorID") && <details className="os-identity-details"><summary>Reference</summary><p>{value(data, "ErrorID")}</p></details>}</>;
+      break;
     case "me/profile":
       body = <dl>{Object.entries((data.Profile || {}) as Record<string, string>).map(([label, text]) => <div key={label}><dt>{label}</dt><dd>{text || "Not set"}</dd></div>)}</dl>; break;
     case "me/devices": case "me/settings": case "me/tokens": case "me/dashboard":
@@ -169,14 +185,17 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
         const bearer = await authSource.bearer(); if (!bearer) throw new Error("Sign in again to add a passkey");
         await registerPasskey(config, `Bearer ${bearer}`, "My passkey"); await load("/me/devices");
       })} />; break;
-    case "legal_view": body = <pre className="os-identity-legal">{value(data, "Body")}</pre>; break;
+    case "legal_view": body = <><Button onClick={() => void load(initialPath)}>Back</Button><div className="os-identity-legal"><ReactMarkdown>{value(data, "Body")}</ReactMarkdown></div></>; break;
     default: body = page ? <p>{value(data, "Message") || "You can continue to MemQL OS."}</p> : busy ? <ContentSkeleton kind="form" label="Opening identity" /> : <p>Identity could not be opened.</p>;
   }
-  return <div className={embedded ? "os-identity-panel" : "os-identity-gate"}><div className="os-identity-page">
-    <Head title={title} />{!embedded && <Fingerprint size={32} aria-hidden="true" />}
-    {data.Flash && <p role="status">{data.Flash.Message}</p>}{error && <p role="alert">{error}</p>}
-    <div className="os-identity-fields">{body}</div>
-    {!embedded && <p><a href="/">Return to MemQL OS</a></p>}
+  const content = <>
+    {data.Flash && <p className="os-identity-notice" data-tone={data.Flash.Kind} role={data.Flash.Kind === "error" ? "alert" : "status"}>{data.Flash.Message}</p>}
+    {error && <div className="os-signin-problem" role="alert"><p>{error}</p>
+      {refreshNeeded && <Button disabled={busy} onClick={() => void load(path)}>Refresh page</Button>}</div>}
+    <div className="os-identity-fields" aria-busy={busy}>{body}</div>
     {!page && !busy && act("Retry", () => void load(initialPath))}
-  </div></div>;
+  </>;
+  if (embedded) return <div className="os-identity-panel"><div className="os-identity-page"><Head title={title} />{content}</div></div>;
+  return <IdentityFrame title={page ? title : error ? "Unable to connect" : "MemQL account"} wide={page?.page === "legal_view"}
+    footer={<a className="os-link" href="/">Return to MemQL OS</a>}>{content}</IdentityFrame>;
 }

@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -437,5 +438,54 @@ func TestDeviceAuthenticatedAttemptsStillSpendTheGuessBudget(t *testing.T) {
 	if rec := deviceGet(s, token, ""); rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("status = %d, want 429. Moving the limiter after the session check must not "+
 			"remove it: the page is a code oracle for anyone signed in", rec.Code)
+	}
+}
+
+func TestNativeDeviceApprovalAcrossReplicas(t *testing.T) {
+	first, store, firstBearer := newDeviceWebServer(t)
+	second, _, secondBearer := newDeviceWebServer(t)
+	second.deviceFlow.Adapter = store
+	readMux, writeMux := http.NewServeMux(), http.NewServeMux()
+	first.Mount(readMux)
+	second.Mount(writeMux)
+	// CSRF is established on one replica; approval authenticates and writes
+	// on another, which has none of the first replica's request-local state.
+	read := httptest.NewRequest("GET", "/device?user_code="+deviceTestUserCode, nil)
+	read.Header.Set("Accept", NativeMediaType)
+	read.Header.Set("Origin", first.nativeOrigin(read))
+	read.Header.Set("Authorization", "Bearer "+firstBearer)
+	page := httptest.NewRecorder()
+	readMux.ServeHTTP(page, read)
+	var payload struct {
+		CSRF string `json:"csrf"`
+		Page string `json:"page"`
+	}
+	if err := json.Unmarshal(page.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err, page.Body.String())
+	}
+	if payload.Page != "device" || payload.CSRF == "" {
+		t.Fatal(page.Body.String())
+	}
+	for _, validCookie := range []bool{false, true} {
+		post := httptest.NewRequest("POST", "/device", strings.NewReader("action=approve&user_code="+deviceTestUserCode))
+		post.Header.Set("Accept", NativeMediaType)
+		post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		post.Header.Set("Origin", second.nativeOrigin(post))
+		post.Header.Set("Authorization", "Bearer "+secondBearer)
+		post.Header.Set("X-CSRF-Token", payload.CSRF)
+		if validCookie {
+			for _, cookie := range page.Result().Cookies() {
+				post.AddCookie(cookie)
+			}
+		}
+		response := httptest.NewRecorder()
+		writeMux.ServeHTTP(response, post)
+		if !validCookie {
+			if response.Code != 403 || !strings.Contains(response.Body.String(), "csrf_expired") || store.approvedId != "" {
+				t.Fatal(response.Code, response.Body.String())
+			}
+		} else if response.Code != 200 || store.actorAt != deviceTestUser || store.approvedId == "" || !strings.Contains(response.Body.String(), `"DoneApproved":true`) {
+			t.Fatal(response.Code, response.Body.String(), store.actorAt, store.approvedId)
+		}
 	}
 }

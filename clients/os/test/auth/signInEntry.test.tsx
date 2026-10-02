@@ -13,7 +13,7 @@ describe("signed-out entry", () => {
     const start = vi.fn(async () => {});
     render(<StrictMode><SignIn status="signed-out" onSignIn={start} /></StrictMode>);
     expect(start).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("status").textContent).toBe("Opening sign-in…");
+    expect(screen.getByRole("status").textContent).toBe("Opening sign-in");
     expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
   });
   it("keeps an unavailable identity service retryable without an authorization loop", () => {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { canCoordinateIdentityRefresh } from "../auth/identityClient";
-import { Mark } from "./Mark";
+import { IdentityFrame } from "../auth/IdentityFrame";
+import { ContentSkeleton } from "../kit/ContentSkeleton";
 import { Button } from "../kit/controls";
 
 export function SignIn({
@@ -19,13 +20,10 @@ export function SignIn({
     void onSignIn().catch(() => setFailed(true));
   }, [status, supportedBrowser, onSignIn]);
 
-  if (supportedBrowser && status === "signed-out" && !failed) return <div className="os-boot" role="status">Opening sign-in…</div>;
+  if (supportedBrowser && status === "signed-out" && !failed) return <IdentityFrame title="Sign in to MemQL OS"><ContentSkeleton kind="form" label="Opening sign-in" /></IdentityFrame>;
 
   return (
-    <main className="os-signin" aria-labelledby="os-signin-unavailable" data-status={status}>
-      <section className="os-signin-content">
-        <span className="os-wizard-mark os-signin-mark"><Mark size={34} /></span>
-        <header className="os-signin-heading"><h1 id="os-signin-unavailable">Sign-in is unavailable</h1></header>
+    <IdentityFrame title="Sign-in is unavailable">
         <p role="alert">
           {!supportedBrowser
             ? "Update your browser to keep sign-in in sync across tabs. MemQL OS requires Web Locks support."
@@ -34,7 +32,6 @@ export function SignIn({
             : "Identity or ownership status is unavailable. Reconnect and try again."}
         </p>
         {supportedBrowser && <Button tone="primary" onClick={() => window.location.reload()}>Retry</Button>}
-      </section>
-    </main>
+    </IdentityFrame>
   );
 }
