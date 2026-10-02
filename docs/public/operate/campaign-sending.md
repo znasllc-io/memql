@@ -206,35 +206,31 @@ The four engine concepts (`sendJob`, `suppression`, `reputationWindow`,
 `warmupState`) stay `clusterOwner`-tier and are not readable by an ordinary
 operator at all.
 
-### Suppression is cluster-wide, not per-account
+### Client opt-outs belong to the organization
 
-An unsubscribe is a statement by a person to *the operator of this
-deployment*. Every campaign leaves through the same authenticated mailbox,
-under the same `From` address, signed by the same SPF and DKIM records. A
-per-operator list would let one operator mail an address that unsubscribed
-from another, in a message the recipient cannot tell apart — and the complaint
-lands on the one shared domain reputation. Legally the obligation attaches to
-the sender, and there is one sender.
+An unsubscribe blocks marketing mail from the organization that sent it,
+across that organization's audiences, campaigns, and sending identities.
+It does not remove the same address from an unrelated client's list.
+Both queued campaigns and event-triggered sends check this at send time,
+even if a CSV import has recreated a subscribed membership.
 
-**It costs nobody an address.** `v1:campaigns:suppression` stores no mailbox:
-the row id is the SHA-256 digest of the normalized address, and the only
-human-readable field is the *domain*. So "which domains are bouncing?" is
-answerable to a deliverability review and "who unsubscribed?" is not. A caller
-can ask about an address only if it already holds it.
+The engine-owned `v1:campaigns:suppression` rows store an organization ID and
+an email digest, never a plaintext mailbox. The composite row ID includes
+both, preventing clients from overwriting each other's opt-outs. Reads bypass
+per-node caches so a click handled by one replica is visible to another sender.
 
-The list is `clusterOwner`-tier. Writing it requires admin or the cluster
-owner (`campaignSuppress`, `campaignRecordFeedback`), or is done by the engine
-itself from a verified unsubscribe. An ordinary operator's view of who left is
-their own recipient rows' `subscriptionStatus`, which the next send converges
-onto the list's verdict.
+Existing rows without an organization remain cluster-wide safety blocks.
+They are not silently narrowed or removed. `campaignSuppress` and provider
+hard-bounce/complaint feedback continue to create these administrator-level
+blocks. A matching block in either scope prevents delivery.
 
 ### Suppression is enforced at the point of send
 
-Not at audience-build time. The worker checks the cluster list for every
+Not at audience-build time. The worker checks both suppression scopes for every
 recipient immediately before mailing, **before** it looks at the recipient
 row's own `subscriptionStatus`. That ordering is what "outranks every
 audience" means: a re-imported CSV produces a recipient row saying
-`subscribed`, and the cluster list still refuses it. An audience assembled
+`subscribed`, and the applicable suppression still refuses it. An audience assembled
 last month cannot know about last week's unsubscribe.
 
 A suppressed recipient gets a `skipped` delivery row with the reason, not a
@@ -349,7 +345,13 @@ the opt-out. **A GET never unsubscribes anyone** — mail clients, link scanners
 and security appliances prefetch URLs found in messages, which is precisely
 why RFC 8058 specifies a POST.
 
-The token is an HMAC over (owner, recipient, campaign). It is not stored:
+New tokens bind owner, recipient, campaign, organization, and the original
+normalized email digest with an HMAC. Moving, renaming, or deleting a recipient
+cannot redirect the opt-out. Already-mailed `u2` links remain valid and derive
+the organization from the recipient they originally named. An authoritative
+suppression-write failure returns a retryable 503, never a success page.
+
+The token is not stored:
 storing one would mean a row per recipient per campaign, minted at send time
 and never prunable, because a link in somebody's inbox has to keep working for
 years. It does not expire, for the same reason — a stale unsubscribe link is a
@@ -366,7 +368,7 @@ two — `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` and the optional
 `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS`. Only the first ever signs.
 
 ```
-u2.<keyId>.<owner>.<recipient>.<campaign>.<tag>
+u3.<keyId>.<owner>.<recipient>.<campaign>.<organization>.<emailDigest>.<tag>
    ^^^^^^^ first 4 bytes of HMAC-SHA256(secret, "memql/campaigns/unsubscribe/key-id"), hex
 ```
 
@@ -546,19 +548,17 @@ normalized address, so `reputationWindowsSince` and `warmupStateForIdentity`
 break down per mailbox with no change on their side. They were built for
 plurality and simply start receiving it.
 
-Suppression stays cluster-wide across every identity. Several mailboxes inside
-one operator's tenant are still one legal sender, and an unsubscribe is a
-statement to this deployment's operator — so an address that left one client's
-list is not mailable from another's.
+Organization opt-outs apply across that organization's sending identities.
+Cluster-wide safety blocks still apply across all identities.
 
-### The account tie is a record, never a scope
+### Organization controls access and sending
 
-`accountId` on a campaign, audience, template or identity says *who this work
-is for*. **No query in this tree narrows a read because of it.** An operator
-sees their own rows whatever account they name, and a cluster owner sees
-everyone's. The tie exists so a rollup can answer "what have we sent for this
-client", and so the identity picker can prefill — not so that a campaign can
-be hidden.
+New campaigns, audiences, templates, and sender identities select an
+organization. Read and write access follows the cluster's organization
+authorization rules; the worker checks current send permission, and the
+campaign, audience, template, recipient, and sender must agree on organization.
+A client campaign cannot fall back to the operator's sender identity.
+
 
 ### Adding a sending identity
 

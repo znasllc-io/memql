@@ -30,6 +30,7 @@ shape audience audienceFull {
 shape recipient recipientFull {
   row.id
   ownerUserId
+  accountId
   audienceId
   email
   displayName
@@ -89,6 +90,7 @@ shape campaign campaignFull {
 shape delivery deliveryFull {
   row.id
   ownerUserId
+  accountId
   campaignId
   recipientId
   email
@@ -145,6 +147,8 @@ shape sendJob sendJobFull {
 @row
 shape suppression suppressionFull {
   row.id
+  accountId
+  emailDigest
   reason
   domain
   suppressedAt
@@ -190,6 +194,7 @@ shape warmupState warmupStateFull {
 shape consentEvent consentEventFull {
   row.id
   ownerUserId
+  accountId
   emailDigest
   kind
   source
@@ -221,6 +226,7 @@ shape senderIdentity senderIdentityFull {
 shape engagementEvent engagementEventFull {
   row.id
   ownerUserId
+  accountId
   campaignId
   deliveryId
   kind

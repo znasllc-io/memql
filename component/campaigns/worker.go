@@ -625,7 +625,7 @@ func (w *Worker) processRecipient(
 	// ordering IS the "outranks every audience" rule: an address
 	// re-imported after a bounce has a recipient row saying `subscribed`,
 	// and the cluster list is what still refuses it.
-	if sup, found, err := w.store.SuppressionByDigest(systemCtx, digest); err == nil && found {
+	if sup, found, err := w.store.SuppressionForSend(systemCtx, campaign.AccountID, digest); err == nil && found {
 		w.recordSkipped(ownerCtx, job, campaign, r, sup.Reason)
 		// Converge this operator's own row onto the cluster verdict, so
 		// the audience view stops showing the address as sendable. Done
@@ -656,7 +656,7 @@ func (w *Worker) processRecipient(
 		return false, nil
 	}
 
-	token, err := MintUnsubscribeToken(w.cfg.UnsubscribeSecret, job.CampaignOwnerUserID, r.ID, campaign.ID)
+	token, err := MintUnsubscribeToken(w.cfg.UnsubscribeSecret, UnsubscribePayload{OwnerUserID: job.CampaignOwnerUserID, RecipientID: r.ID, CampaignID: campaign.ID, AccountID: campaign.AccountID, EmailDigest: digest})
 	if err != nil {
 		w.failJob(systemCtx, *job, "cannot mint an unsubscribe token: "+err.Error())
 		return true, err
