@@ -24,6 +24,7 @@ const {
   deliveryRow,
   fakeConnection,
   recipientRow,
+  rowsResult,
   ruleRow,
   senderRow,
   templateRow,
@@ -375,6 +376,50 @@ describe("a cluster that cannot send mail", () => {
 // ---------------------------------------------------------------------------
 
 describe("audiences", () => {
+  it.each(["acme", "other"])("keeps the selected organization %s when adding the first member", async (accountId) => {
+    const conn = fakeConnection({
+      accounts: [
+        { id: "self", name: "Operator organization", status: "active" },
+        { id: "acme", name: "Acme", status: "active" },
+        { id: "other", name: "Other client", status: "active" },
+      ],
+    });
+    conn.query.createAudience.mockImplementation(async (args) => {
+      conn.subscriptions.emit("v1:campaigns:audience", audienceRow({
+        id: String(args.audienceId), name: String(args.name), accountId: String(args.accountId),
+      }), "NODE_CREATED");
+      return rowsResult([]);
+    });
+    conn.query.addRecipient.mockImplementation(async (args) => {
+      // The engine requires an explicit organization from operators and
+      // rejects references to an audience belonging to a different one.
+      if (!args.accountId) throw new Error("organization_required: select the organization this record belongs to");
+      if (args.accountId !== accountId) throw new Error("organization_mismatch");
+      const row = recipientRow({ id: String(args.recipientId), ...args });
+      conn.query.recipientsForAudience.mockResolvedValue(rowsResult([row]));
+      return rowsResult([row]);
+    });
+    mount(conn, "audiences");
+    fireEvent.click(await screen.findByRole("button", { name: "New audience" }));
+    await waitFor(() => expect(conn.query.clientAccountsAll).toHaveBeenCalled());
+    chooseOption(screen.getByLabelText("Organization this audience is for"), accountId === "acme" ? "Acme" : "Other client");
+    fireEvent.change(screen.getByLabelText("Audience name"), { target: { value: "Client newsletter" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create audience" }));
+    fireEvent.change(await screen.findByLabelText("Address to add"), { target: { value: " subscriber@example.test " } });
+    fireEvent.change(screen.getByLabelText("Their name"), { target: { value: " Subscriber " } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByText("subscriber@example.test")).toBeTruthy();
+    const created = conn.query.createAudience.mock.calls[0]![0];
+    expect(created.accountId).toBe(accountId);
+    expect(conn.query.addRecipient).toHaveBeenCalledWith(expect.objectContaining({
+      audienceId: created.audienceId, accountId, email: "subscriber@example.test", displayName: "Subscriber", source: "manual",
+    }));
+    expect(conn.query.addRecipient.mock.calls[0]![0]).not.toHaveProperty("ownerUserId");
+    expect((screen.getByLabelText("Address to add") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByText("That address was not added.")).toBeNull();
+  });
+
   it("shows the roster and the difference a send would actually reach", async () => {
     const conn = fakeConnection({
       audiences: [audienceRow({ id: "v1:campaigns:audience:a1", name: "Newsletter" })],
