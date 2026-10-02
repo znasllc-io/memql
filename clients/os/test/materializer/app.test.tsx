@@ -62,13 +62,27 @@ describe("the composer", () => {
     fireEvent.change(screen.getByLabelText(label), { target: { value: "   " } });
     expect(screen.queryByRole("button", { name: "Materialize" })).toBeNull();
     fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     const args = conn.query.composeMaterialize.mock.calls[0]?.[0] ?? {};
-    expect(args).toMatchObject({ name: "Inventory", [field]: value });
+    expect(args).toMatchObject({ name: "Inventory", [field]: value, accountIds: ["client-a"] });
     expect(args).not.toHaveProperty("sources");
     expect(args).not.toHaveProperty("draft");
     expect(screen.queryByLabelText("Draft")).toBeNull();
+  });
+
+  it("requires an explicit organization before composing, even when there is only one", async () => {
+    const conn = fakeConnection();
+    mount(conn);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Welcome" } });
+    fireEvent.change(screen.getByLabelText("What do you want made?"), { target: { value: "Use our reference image." } });
+    expect(screen.queryByRole("button", { name: "Materialize" })).toBeNull();
+    expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
+    expect(screen.getByRole("button", { name: "Materialize" })).toBeTruthy();
   });
 
   it("offers the marked concepts first and says which are not marked", async () => {
@@ -129,6 +143,8 @@ describe("the composer", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /invoice/ }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Q3 report" } });
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
 
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalled());
@@ -154,6 +170,8 @@ describe("the composer", () => {
     });
     mount(conn);
     fireEvent.click(await screen.findByRole("button", { name: /invoice/ }));
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
 
     expect(await screen.findByText(/Give it a name first/)).toBeTruthy();
@@ -171,6 +189,8 @@ describe("the composer", () => {
     mount(conn);
     fireEvent.click(await screen.findByRole("button", { name: /invoice/ }));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Q3" } });
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
 
     expect(await screen.findByText(/not readable by you/)).toBeTruthy();
@@ -613,5 +633,62 @@ describe("record list count and action boundaries", () => {
     await screen.findByText("Readable recipe");
     expect(view.container.querySelector(".os-head .os-head-meta")).toBeNull();
     expect(view.container.querySelector(".os-subhead-meta")?.textContent).toBe("1");
+  });
+});
+
+
+describe("organization and reference metadata", () => {
+  it("saves an email recipe without dropping its reference bundle or client", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({id: "email-result", accountIds: ["client-a"], outputKind: "email_template", format: "json", sources: [
+      {kind: "library_file", ref: "bundle", label: "brand.zip", content: true, includeImages: true},
+      {kind: "library_file", ref: "example", label: "reference.png", content: true, includeImages: false},
+    ]})] });
+    h.connection = conn;
+    render(withSession(<MaterializerApp sectionId="composer" navigate={vi.fn()} askContext={() => {}}
+      intent={{id: "open-email", payload: {compositionId: "email-result"}}} store={memoryStore()} />));
+    fireEvent.click(await screen.findByRole("button", {name: "Save as recipe"}));
+    await waitFor(() => expect(conn.query.createComposeRecipe).toHaveBeenCalledOnce());
+    expect(conn.query.createComposeRecipe.mock.calls[0]?.[0]).toMatchObject({accountIds: ["client-a"], outputKind: "email_template", format: "json", sourceSelectors: [
+      {kind: "library_file", selector: "bundle", label: "brand.zip", content: true, includeImages: true},
+      {kind: "library_file", selector: "example", label: "reference.png", content: true, includeImages: false},
+    ]});
+  });
+
+  it("keeps template form entries when the cluster refuses the binding", async () => {
+    const conn = fakeConnection({writeError: new Error("File access changed"), files: [
+      {id: "artifact-shell", kind: "file", sourceConceptRef: "brand-file", title: "Brand shell.docx"},
+    ]});
+    mount(conn, "templates");
+    fireEvent.click(screen.getByRole("button", {name: "Bind a file"}));
+    fireEvent.change(screen.getByLabelText("Name"), {target: {value: "Brand shell"}});
+    fireEvent.click(screen.getByLabelText("Library file"));
+    fireEvent.click(await screen.findByRole("option", {name: "Brand shell.docx"}));
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", {name: "Client A"}));
+    fireEvent.click(screen.getByRole("button", {name: "Bind it"}));
+    await screen.findByText("File access changed");
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Brand shell");
+    expect(screen.getByLabelText("Library file").textContent).toContain("Brand shell.docx");
+  });
+
+  it("selects a named file and stores the organization when binding a template", async () => {
+    const conn = fakeConnection({files: [
+      {id: "artifact-shell", kind: "file", sourceConceptRef: "brand-file", title: "Brand shell.docx"},
+      {id: "artifact-zip", kind: "file", sourceConceptRef: "bundle", title: "assets.zip"},
+      {id: "artifact-old", kind: "file", sourceConceptRef: "old", title: "Old shell.docx", archived: true},
+    ]});
+    mount(conn, "templates");
+    fireEvent.click(screen.getByRole("button", {name: "Bind a file"}));
+    fireEvent.change(screen.getByLabelText("Name"), {target: {value: "Brand shell"}});
+    fireEvent.click(screen.getByLabelText("Library file"));
+    fireEvent.click(await screen.findByRole("option", {name: "Brand shell.docx"}));
+    expect(screen.queryByRole("option", {name: "assets.zip"})).toBeNull();
+    expect(screen.queryByRole("option", {name: "Old shell.docx"})).toBeNull();
+    expect(screen.queryByRole("button", {name: "Bind it"})).toBeNull();
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", {name: "Client A"}));
+    fireEvent.click(screen.getByRole("button", {name: "Bind it"}));
+    await waitFor(() => expect(conn.query.createComposeTemplate).toHaveBeenCalledOnce());
+    expect(conn.query.createComposeTemplate.mock.calls[0]?.[0]).toMatchObject({accountIds: ["client-a"], fileId: "brand-file"});
   });
 });

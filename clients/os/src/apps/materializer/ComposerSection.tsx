@@ -1,3 +1,5 @@
+import { AccountPicker } from "../accounts/AccountPicker";
+import { accountIsArchived, type AccountRow } from "../accounts/rows";
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { useMemo, useState } from "react";
 
@@ -25,6 +27,7 @@ import {
 
 export interface ComposerSectionProps {
   templates: TemplateRow[];
+  accounts: AccountRow[];
   /** The composition the composer is looking at, once one exists. */
   composition: CompositionRow | null;
   compositionSources: SourceRow[];
@@ -35,6 +38,7 @@ export interface ComposerSectionProps {
   busy: boolean;
   error: string;
   onMaterialize: (facts: {
+    accountIds: string[];
     name: string;
     statement: string;
     format: string;
@@ -55,6 +59,7 @@ interface PickedSource {
 
 export function ComposerSection({
   templates,
+  accounts,
   composition,
   compositionSources,
   compositionAvailable = false,
@@ -68,6 +73,7 @@ export function ComposerSection({
   onNewComposition,
 }: ComposerSectionProps) {
   const [name, setName] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [statement, setStatement] = useState("");
   const [format, setFormat] = useState(defaultFormat);
   const [templateId, setTemplateId] = useState("");
@@ -82,6 +88,7 @@ export function ComposerSection({
     sourceCount: picked.length,
     hasContent: statement.trim() !== "",
     hasFormat: format !== "",
+    hasOrganization: accounts.some(account => account.id === accountId && !accountIsArchived(account)),
     submitting: busy,
   };
   const acts = actsFor(open, draftState);
@@ -150,6 +157,9 @@ export function ComposerSection({
           onName={setName}
           statement={statement}
           onStatement={setStatement}
+          accounts={accounts}
+          accountId={accountId}
+          onAccount={setAccountId}
         />
 
         <TargetColumn
@@ -190,6 +200,7 @@ export function ComposerSection({
               onMaterialize({
                 name,
                 statement,
+                accountIds: [accountId],
                 format,
                 sources: picked,
                 templateId,
@@ -372,6 +383,7 @@ function matches(c: ComposableConcept, query: string): boolean {
 // ---------------------------------------------------------------------------
 
 function BriefColumn({
+  accounts, accountId, onAccount,
   open,
   name,
   onName,
@@ -383,6 +395,9 @@ function BriefColumn({
   onName: (v: string) => void;
   statement: string;
   onStatement: (v: string) => void;
+  accounts: AccountRow[];
+  accountId: string;
+  onAccount: (value: string) => void;
 }) {
   if (open !== null) {
     return (
@@ -407,6 +422,9 @@ function BriefColumn({
 
   return (
     <section className="os-mz-col os-mz-col-brief" aria-label="Composition brief">
+      <Field label="Organization">
+        <AccountPicker id="mz-organization" label="Organization" required value={accountId} onChange={onAccount} accounts={accounts} />
+      </Field>
       <Field label="Name">
         <Input id="mz-name" value={name} onChange={onName} label="Name" placeholder="Q3 report" />
       </Field>
