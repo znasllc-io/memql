@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -20,6 +22,7 @@ import (
 type reviewDocument struct {
 	artifact, source, kind, owner, revision string
 	version                                 int
+	backing                                 map[string]any
 }
 
 // Both reads retain the caller. An index label alone cannot grant access to
@@ -77,6 +80,7 @@ func (i *Integration) reviewDocument(ctx context.Context, artifactID string) (re
 		return doc, fmt.Errorf("document is unavailable")
 	}
 	doc.owner = stringField(backing, "ownerUserId")
+	doc.backing = backing
 	if doc.owner == "" || doc.revision == "" {
 		return doc, fmt.Errorf("document revision is unavailable")
 	}
@@ -165,6 +169,9 @@ func (i *Integration) handleAddDocumentComment(ctx context.Context, args map[str
 	if !valid || expected != doc.version || revision != doc.revision {
 		return nil, fmt.Errorf("the document changed; reopen its current revision before adding feedback")
 	}
+	if err = i.verifyReviewPassage(ctx, doc, anchor); err != nil {
+		return nil, err
+	}
 	_, err = reviewstore.Append(ctx, i.engine, doc.owner, map[string]any{
 		"commentId": commentID, "artifactId": doc.artifact, "authorUserId": author,
 		"revision": doc.revision, "versionNumber": doc.version, "anchor": anchor, "body": body, "requestId": requestID,
@@ -189,7 +196,7 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 	start, startOK := intArg(anchor["startLine"])
 	end, endOK := intArg(anchor["endLine"])
 	quote, source := asString(anchor["quote"]), asString(anchor["sourceQuote"])
-	if !startOK || !endOK || start < 0 || end <= start || end > 2000000 || quote == "" || len(quote) > 8000 || source == "" || len(source) > 16000 {
+	if !startOK || !endOK || anchor["startLine"] != float64(start) || anchor["endLine"] != float64(end) || start < 0 || end <= start || end > 2000000 || quote == "" || len(quote) > 8000 || source == "" || len(source) > 16000 {
 		return nil, fmt.Errorf("select a shorter passage")
 	}
 	result := map[string]any{"kind": "markdown", "startLine": float64(start), "endLine": float64(end), "quote": quote, "sourceQuote": source}
@@ -203,6 +210,41 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 		}
 	}
 	return result, nil
+}
+
+// Check saved bytes while holding the same cross-replica version lock as file
+// saves. A client-supplied revision alone cannot attest a passage. Blob URLs
+// come only from the authorized backing row and use the configured store.
+func (i *Integration) verifyReviewPassage(ctx context.Context, doc reviewDocument, anchor map[string]any) error {
+	const maxBytes = 2 * 1024 * 1024
+	var content []byte
+	if doc.kind == "file" {
+		if i.blobFetcher == nil {
+			return fmt.Errorf("document storage is unavailable on this node")
+		}
+		stream, err := i.blobFetcher.DownloadStreamURL(ctx, stringField(doc.backing, "blobUrl"))
+		if err != nil {
+			return fmt.Errorf("could not read the saved document; try again")
+		}
+		defer stream.Close()
+		content, err = io.ReadAll(io.LimitReader(stream, maxBytes+1))
+		if err != nil {
+			return fmt.Errorf("could not read the saved document; try again")
+		}
+	} else {
+		content = []byte(stringField(doc.backing, "body"))
+	}
+	if len(content) > maxBytes || !utf8.Valid(content) {
+		return fmt.Errorf("passage feedback requires a UTF-8 document up to 2 MiB")
+	}
+	// Match the editor's CRLF-aware source ranges, preserving lone CR bytes.
+	lines := strings.Split(strings.ReplaceAll(string(content), "\r\n", "\n"), "\n")
+	start, _ := intArg(anchor["startLine"])
+	end, _ := intArg(anchor["endLine"])
+	if start < 0 || end <= start || end > len(lines) || strings.Join(lines[start:end], "\n") != anchor["sourceQuote"] {
+		return fmt.Errorf("the selected passage does not match the saved document; select it again")
+	}
+	return nil
 }
 func reviewResult(value map[string]any) ([]memorynodes.MemoryNode, error) {
 	payload, err := json.Marshal(value)

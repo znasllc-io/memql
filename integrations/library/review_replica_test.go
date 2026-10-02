@@ -69,6 +69,15 @@ func TestReviewCommentsAcrossReplicasAndDocumentRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := map[string]any{"artifactId": artifactID, "expectedVersion": 0, "expectedRevision": base.revision, "body": "Please clarify this paragraph.", "requestId": "same-review-request", "anchor": map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "sourceQuote": "A paragraph.", "quote": "paragraph"}}
+	forged := map[string]any{}
+	for key, value := range args {
+		forged[key] = value
+	}
+	forged["requestId"] = "forged-passage-request"
+	forged["anchor"] = map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "sourceQuote": "Never in this document.", "quote": "Never"}
+	if _, err = second.handleAddDocumentComment(ctx, forged, 0); err == nil || !strings.Contains(err.Error(), "passage") {
+		t.Fatalf("fabricated source passage accepted: %v", err)
+	}
 	// Two processes have separate caches and one shared DB lock. Retrying the
 	// same submission on another replica must write exactly one comment.
 	var wait sync.WaitGroup
@@ -144,5 +153,33 @@ func TestReviewCommentsAcrossReplicasAndDocumentRevisions(t *testing.T) {
 		if _, err = engine.Execute(ctx, call); err == nil || !strings.Contains(strings.ToLower(err.Error()), "server") {
 			t.Fatalf("direct review store call accepted: %v", err)
 		}
+	}
+
+	// Uploaded Markdown takes the blob path on whichever replica receives the
+	// call. No blob is read until both the index and backing row admit the user.
+	fileID := documentID + "-file"
+	call, _ := langparser.RenderCall("createLibraryFile", map[string]any{"fileId": fileID, "name": "review.md", "mimeType": "text/markdown", "size": 13, "blobUrl": "https://store.example/review.md", "source": "uploaded", "format": "markdown"})
+	if _, err = engine.Execute(ctx, "mutation "+call); err != nil {
+		t.Fatal(err)
+	}
+	call, _ = langparser.RenderCall("createArtifact", map[string]any{"sourceConceptRef": fileID, "ownerUserId": owner, "lens": "artifact", "kind": "file", "source": "uploaded", "title": "review.md", "format": "markdown"})
+	raw, err = engine.Execute(ctx, "mutation "+call)
+	if err != nil || len(extractRows(raw)) != 1 {
+		t.Fatalf("file artifact seed: %v", err)
+	}
+	fileArtifact := stringField(extractRows(raw)[0], "id")
+	fileArgs := map[string]any{"artifactId": fileArtifact, "expectedVersion": 1, "expectedRevision": "file:1", "body": "Saved file feedback", "requestId": "file-passage-request", "anchor": map[string]any{"kind": "markdown", "startLine": 0, "endLine": 1, "sourceQuote": "File passage.", "quote": "passage"}}
+	fetcher := &fakeBlobStreamer{data: []byte("File passage.")}
+	second.SetBlobFetcher(fetcher)
+	if _, err = second.handleAddDocumentComment(actor(documentID+"-other", auth.RoleWriter), fileArgs, 0); err == nil || fetcher.streams != 0 {
+		t.Fatalf("unauthorized blob read: err=%v reads=%d", err, fetcher.streams)
+	}
+	if _, err = second.handleAddDocumentComment(ctx, fileArgs, 0); err != nil || fetcher.streams != 1 {
+		t.Fatalf("authorized file feedback: err=%v reads=%d", err, fetcher.streams)
+	}
+	// A committed receipt does not need the file fetched again, even on a
+	// different replica without storage access after the original response was lost.
+	if _, err = first.handleAddDocumentComment(ctx, fileArgs, 0); err != nil {
+		t.Fatalf("file feedback receipt retry: %v", err)
 	}
 }
