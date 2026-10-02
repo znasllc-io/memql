@@ -545,3 +545,16 @@ concept emailRule {
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
   @relationship(type="references", as="generatedInto", field="bundleId", target=bundle, direction="outgoing")
 }
+
+/// Private receipt for one caller's intended event email. A durable attempting
+/// record prevents a lost response or another replica from mailing it again.
+// @no-displayCard: internal receipt; the delivery and email rule name the send.
+@rowAuthz(owner="ownerUserId")
+concept singleSendReceipt {
+  ownerUserId string! @serverSet
+  accountId string!
+  fingerprint string!
+  status enum("attempting", "complete")!
+  result object!
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}

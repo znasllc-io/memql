@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/znasllc-io/memql/component/events"
 )
 
@@ -103,5 +105,23 @@ func TestEvaluator_EventActorInCondition(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("event.actor != nil must be false when the emitter stamped none")
+	}
+}
+
+// The mesh carries nanoseconds. Preserve them when binding the forwarded
+// event, so two changes in one second remain distinct to idempotent effects.
+func TestForwardedEventEnvelopePreservesOccurrencePrecision(t *testing.T) {
+	stamp := time.Date(2026, 10, 1, 1, 2, 3, 123456789, time.UTC)
+	first := events.Event{Topic: "graph.node.updated.v1:todos:todo", Timestamp: stamp}
+	forwarded := first
+	forwarded.Timestamp = timestamppb.New(first.Timestamp).AsTime()
+	before := buildEventEnvelope(&first, "", "")
+	after := buildEventEnvelope(&forwarded, "", "")
+	if before["timestamp"] != after["timestamp"] || after["timestamp"] != "2026-10-01T01:02:03.123456789Z" {
+		t.Fatalf("occurrence changed through the mesh binding: before=%v after=%v", before, after)
+	}
+	forwarded.Timestamp = forwarded.Timestamp.Add(time.Nanosecond)
+	if buildEventEnvelope(&forwarded, "", "")["timestamp"] == after["timestamp"] {
+		t.Fatal("distinct occurrences collapsed")
 	}
 }

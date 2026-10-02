@@ -156,9 +156,10 @@ builtin campaignStats {
 @description("Send ONE message to ONE recipient through the campaign machinery -- the marketing lane's primitive for event-triggered email (memql#4829, program P5). Suppression is checked at the point of send, the RFC 8058 unsubscribe pair is attached, the resolved sending identity is applied, and the outcome is ledgered exactly as a campaign send is. It exists because the two event-email lanes are the only sanctioned shapes for automated mail: operational recipients ride the transactional outbox (allowlist enforced, no unsubscribe, no suppression) and marketing recipients ride this. There is deliberately NO free-form sendEmail builtin, and this is not one: it takes a template and an audience recipient, not a subject and a body.")
 @executor("integration.campaigns.sendToRecipient")
 builtin campaignSendToRecipient {
+  requestId         string   @description("Stable identifier for one intended event email. Replays never submit it twice; an uncertain provider outcome remains uncertain and is not automatically resent.")
   templateId        string!  @description("v1:campaigns:template.id supplying the subject and bodies.")
   recipientId       string!  @description("v1:campaigns:recipient.id to send to. Its subscription state and the cluster suppression list are both consulted before anything leaves.")
-  senderIdentityId  string   @description("Optional v1:campaigns:senderIdentity.id to send as. Empty resolves to the env-configured default, exactly as a campaign's does.")
+  senderIdentityId  string   @description("v1:campaigns:senderIdentity.id belonging to the recipient's organization. Required for organization-owned recipients; only legacy unattributed sends may omit it.")
   emailRuleId       string   @description("Optional v1:campaigns:emailRule.id this send came from, stamped on the ledger row so 'which rule mailed this person' is answerable.")
 }
 

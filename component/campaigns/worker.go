@@ -104,15 +104,16 @@ type ExecutionClaimer interface {
 
 // Worker drains v1:campaigns:sendJob rows.
 type Worker struct {
-	templateGate func(context.Context, string) (func(), error)
-	store        *Store
-	claimer      ExecutionClaimer
-	resolve      func() email.Sender
-	logger       *slog.Logger
-	cfg          Config
-	limiter      *rateLimiter
-	now          func() time.Time
-	sendHook     func(ctx context.Context, sender email.Sender, msg email.Message, as email.SendAs) error
+	templateGate   func(context.Context, string) (func(), error)
+	singleSendGate func(context.Context, string) (func(), error)
+	store          *Store
+	claimer        ExecutionClaimer
+	resolve        func() email.Sender
+	logger         *slog.Logger
+	cfg            Config
+	limiter        *rateLimiter
+	now            func() time.Time
+	sendHook       func(ctx context.Context, sender email.Sender, msg email.Message, as email.SendAs) error
 
 	// shopifyConfigured is the #4140 "catalog in play" half. Tests inject
 	// it; production leaves it nil and asks whether a v1:shopify:store row
@@ -174,6 +175,13 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 	}
 	cfg := LoadConfig()
 	return &Worker{
+		singleSendGate: func(ctx context.Context, key string) (func(), error) {
+			var db *sql.DB
+			if len(database) > 0 && database[0] != nil {
+				db = database[0]()
+			}
+			return memql.AcquireWriteGate(ctx, db, "campaign-single-send:"+key)
+		},
 		templateGate: func(ctx context.Context, key string) (func(), error) {
 			var db *sql.DB
 			if len(database) > 0 && database[0] != nil {
