@@ -265,3 +265,11 @@ floor applies, and the `clientId` override, so the default is what runs.
 - [Sign-in Paths](sign-in-paths.md) -- the five ways to obtain a credential
 - [Identity Service](identity-service.md) -- operator env vars, and the DCR decision
 - [Access Model](access-model.md) -- the role spectrum the floor reads
+
+
+Materializer's Compose and template-binding forms require an organization.
+Saving a completed email composition as a recipe retains that organization,
+the email output type, and the selected reference files. Explicit content and
+image-inclusion choices are preserved: an inspiration image does not silently
+become an image to embed. Query sources resolve again when the recipe runs;
+reference files are read through the runner's current cluster permissions.

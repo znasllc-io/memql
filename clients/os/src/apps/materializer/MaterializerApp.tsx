@@ -1,3 +1,5 @@
+import { useAccountOptions } from "../accounts/tie";
+import { recipeFacts } from "./actions";
 import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
 import { useAuthSource } from "../../auth/context";
 import { useOsConnection } from "../../live/connection";
@@ -86,6 +88,7 @@ export function MaterializerApp({
   const compositions = useCompositions();
   const templates = useTemplates();
   const recipes = useRecipes();
+  const accounts = useAccountOptions();
 
   const materialize = useMaterialize();
   const compositionActs = useCompositionActs();
@@ -221,6 +224,7 @@ export function MaterializerApp({
   if (sectionId === "templates") {
     return (
       <TemplatesSection
+        accounts={accounts}
         templates={templateRows}
         recipes={recipeRows}
         templatesAvailable={listCount(templates.snapshot) !== undefined}
@@ -228,7 +232,7 @@ export function MaterializerApp({
         busy={templateActs.busy || recipeActs.busy}
         error={templateActs.error || recipeActs.error}
         showArchived={settings.showArchived}
-        onCreateTemplate={(facts) => void templateActs.create(facts)}
+        onCreateTemplate={(facts) => templateActs.create(facts)}
         onArchiveTemplate={(id) => void templateActs.archive(id)}
         onRestoreTemplate={(id) => void templateActs.restore(id)}
         onRunRecipe={(id) => {
@@ -255,6 +259,7 @@ export function MaterializerApp({
 
   return (
     <ComposerSection
+      accounts={accounts}
       templates={templateRows}
       composition={open}
       compositionSources={openSources}
@@ -267,7 +272,7 @@ export function MaterializerApp({
       onNewComposition={() => setOpenCompositionId("")}
       onMaterialize={(facts) => {
         void materialize
-          .materialize({ ...facts, folderId: "", accountIds: [] })
+          .materialize({ ...facts, folderId: "" })
           .then((id) => {
             if (id) setOpenCompositionId(id);
           });
@@ -306,21 +311,7 @@ export function MaterializerApp({
             setOpenCompositionId("");
             break;
           case "saveRecipe":
-            void compositionActs.saveRecipe({
-              name: open.name,
-              description: open.statement,
-              format: open.format,
-              templateId: open.templateId,
-              folderId: open.folderId,
-              // THE SELECTORS ARE THE SOURCES THAT WERE QUERIES. A
-              // concept_row source names one row that existed at that
-              // instant, and carrying it into a recipe would make "run it
-              // again" mean "make another copy of that same row" -- which
-              // is the opposite of what a recipe is for.
-              sourceSelectors: openSources
-                .filter((s) => s.kind === "query")
-                .map((s) => ({ kind: "concept_query", selector: s.ref, label: s.label })),
-            });
+            void compositionActs.saveRecipe(recipeFacts(open, openSources));
             break;
         }
       }}

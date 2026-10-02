@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
 
+import type { CompositionRow, SourceRow, SelectorRow } from "./rows";
+
 import { useOsConnection } from "../../live/connection";
 
 // Every write the Materializer makes, and the busy/error pair each one
@@ -90,6 +92,10 @@ export function useMaterialize(): MaterializeState {
         setError("Give it a name first — it becomes the file's name too.");
         return "";
       }
+      if (facts.accountIds.length !== 1 || !facts.accountIds[0]?.trim()) {
+        setError("Choose an organization for this file.");
+        return "";
+      }
       setBusy(true);
       setError("");
       setCompositionId("");
@@ -138,7 +144,24 @@ export interface NewRecipeFacts {
   format: string;
   templateId: string;
   folderId: string;
-  sourceSelectors: { kind: string; selector: string; label: string }[];
+  sourceSelectors: SelectorRow[];
+  accountIds: string[];
+  outputKind: string;
+}
+
+/** Preserve reference files and their explicit content/image choices when an
+ * email composition is saved as a recipe. Queries resolve again on each run. */
+export function recipeFacts(composition: CompositionRow, sources: SourceRow[]): NewRecipeFacts {
+  return {
+    name: composition.name, description: composition.statement, format: composition.format,
+    templateId: composition.templateId, folderId: composition.folderId,
+    accountIds: composition.accountIds, outputKind: composition.outputKind,
+    sourceSelectors: sources.filter(source => source.kind === "query" || source.kind === "library_file").map(source => ({
+      kind: source.kind === "query" ? "concept_query" : source.kind, selector: source.ref, label: source.label,
+      ...(source.content !== undefined ? { content: source.content } : {}),
+      ...(source.includeImages !== undefined ? { includeImages: source.includeImages } : {}),
+    })),
+  };
 }
 
 export function useCompositionActs(): CompositionActsState {
@@ -197,10 +220,12 @@ export function useCompositionActs(): CompositionActsState {
           recipeId,
           name: facts.name.trim(),
           format: facts.format,
+          accountIds: facts.accountIds,
+          ...(facts.outputKind ? { outputKind: facts.outputKind } : {}),
           ...(facts.description.trim() ? { description: facts.description.trim() } : {}),
           ...(facts.templateId ? { templateId: facts.templateId } : {}),
           ...(facts.folderId ? { folderId: facts.folderId } : {}),
-          ...(facts.sourceSelectors.length > 0 ? { sourceSelectors: facts.sourceSelectors } : {}),
+          ...(facts.sourceSelectors.length > 0 ? { sourceSelectors: facts.sourceSelectors.map(source => ({ ...source })) } : {}),
         });
         return recipeId;
       }, ""),
@@ -218,6 +243,7 @@ export interface TemplateActsState extends WriteState {
 }
 
 export interface NewTemplateFacts {
+  accountId: string;
   name: string;
   description: string;
   fileId: string;
@@ -236,6 +262,10 @@ export function useTemplateActs(): TemplateActsState {
         setError(NOT_CONNECTED);
         return "";
       }
+      if (facts.accountId.trim() === "") {
+        setError("Choose an organization for this template.");
+        return "";
+      }
       if (facts.name.trim() === "" || facts.fileId.trim() === "") {
         setError("A template needs a name and a file from your Library.");
         return "";
@@ -248,6 +278,7 @@ export function useTemplateActs(): TemplateActsState {
           templateId,
           name: facts.name.trim(),
           fileId: facts.fileId.trim(),
+          accountIds: [facts.accountId],
           format: facts.format,
           ...(facts.description.trim() ? { description: facts.description.trim() } : {}),
         });

@@ -40,6 +40,7 @@ export interface DraftState {
   hasContent: boolean;
   /** Whether a format has been chosen. */
   hasFormat: boolean;
+  hasOrganization: boolean;
   /** Whether a materialize call is in flight from this window. */
   submitting: boolean;
 }
@@ -57,7 +58,7 @@ export function actsFor(c: CompositionRow | null, draft: DraftState): ActSpec[] 
   // run it. It is ABSENT rather than disabled while there is nothing to
   // compose from, so the bar's state line is what explains the wait.
   if (c === null) {
-    if ((draft.sourceCount === 0 && !draft.hasContent) || !draft.hasFormat) return [];
+    if ((draft.sourceCount === 0 && !draft.hasContent) || !draft.hasFormat || !draft.hasOrganization) return [];
     return [{ id: "materialize", label: "Materialize", tone: "primary" }];
   }
 
@@ -132,6 +133,7 @@ export function stateLine(c: CompositionRow | null, draft: DraftState): string {
   if (c === null) {
     if (draft.sourceCount === 0 && !draft.hasContent) return "Describe what to make or pick a source";
     if (!draft.hasFormat) return "Choose what kind of file to make";
+    if (!draft.hasOrganization) return "Choose an organization";
     if (draft.sourceCount === 0) return "Ready to compose your file";
     return `Ready to compose from ${draft.sourceCount} ${draft.sourceCount === 1 ? "source" : "sources"}`;
   }
