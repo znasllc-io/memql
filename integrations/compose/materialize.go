@@ -517,7 +517,11 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 
 	var rendered pure.Result
 	if a.OutputKind == "email_template" {
-		rendered, err = pure.RenderEmailTemplate(draft.Body)
+		var embedded string
+		embedded, err = EmbedEmailAssets(draft.Body, resolved)
+		if err == nil {
+			rendered, err = pure.RenderEmailTemplate(embedded)
+		}
 	} else if a.DeployableKind != "" {
 		rendered, err = i.renderDeployable(a, draft, prov)
 	} else {

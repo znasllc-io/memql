@@ -273,3 +273,24 @@ the email output type, and the selected reference files. Explicit content and
 image-inclusion choices are preserved: an inspiration image does not silently
 become an image to embed. Query sources resolve again when the recipe runs;
 reference files are read through the runner's current cluster permissions.
+
+### Include images in a generated email
+
+In **Create Email from Examples**, first choose the organization and references.
+In **Images to include**, select logos or photos that should appear in the email;
+leave screenshots of example layouts unselected. Selecting a ZIP here makes its
+supported image members eligible for inclusion. Ordinary ZIP opening still
+only downloads it intact.
+
+MemQL reads and freezes the selected bytes before AI work starts. The resulting
+editable HTML carries included images, so preview and scheduled sends do not
+need permission-bearing Library URLs or a separate image host. Source, Preview,
+and Split continue to share the same draft. The human still saves or publishes
+the reviewed Campaigns revision; generation never sends a message.
+
+Included PNG/JPEG/GIF images are bounded to eight images and 1 MiB total; the
+complete email template remains bounded to 2 MiB. Larger example images can
+remain design references. SMTP/Graph sending converts embedded images to inline attachments. The interim
+ACS adapter is being completed separately. Microsoft currently labels ACS inline attachments a preview feature; validate
+rendering with your recipient clients before enabling production sending.
+See [Microsoft's inline attachment documentation](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/send-email-advanced/send-email-with-inline-attachments).

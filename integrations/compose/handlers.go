@@ -134,11 +134,19 @@ func selectorsToSources(raw any) ([]SourceRef, error) {
 		if selector == "" {
 			return nil, fmt.Errorf("compose: sourceSelectors[%d] (%s) names nothing", idx, kind)
 		}
+		includeImages := false
+		if raw, exists := m["includeImages"]; exists {
+			var valid bool
+			includeImages, valid = raw.(bool)
+			if !valid || (includeImages && (!content || kind != "library_file")) {
+				return nil, fmt.Errorf("compose: image assets require an explicit library_file reference")
+			}
+		}
 		switch kind {
 		case "concept_query", "query":
 			out = append(out, SourceRef{Kind: KindQuery, Ref: selector, Label: label})
 		case "library_file":
-			out = append(out, SourceRef{Kind: KindLibraryFile, Ref: selector, Label: label, Content: content})
+			out = append(out, SourceRef{Kind: KindLibraryFile, Ref: selector, Label: label, Content: content, IncludeImages: includeImages})
 		case "library_folder":
 			return nil, fmt.Errorf("compose: sourceSelectors[%d] names a folder, and there is no Library read that answers %q -- a file's folderId is its initial filing only, so a folder selector would silently omit every file since moved. Name a concept_query over the artifact index instead", idx, selector)
 		default:
