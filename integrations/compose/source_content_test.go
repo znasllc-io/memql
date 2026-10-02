@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
@@ -155,7 +157,7 @@ func TestEmailReferencesSurviveDispatchToAnotherReplica(t *testing.T) {
 	e.files["reference"] = map[string]any{"name": "example.png", "blobUrl": "stored-object", "sha256": (pure.Result{Bytes: png}).SHA256()}
 	opener := &directMaterializeGoal{}
 	i.SetGoalOpener(opener)
-	args := materializeArgs{Name: "Client welcome", Statement: "Use our supplied example", OutputKind: "email_template", Format: pure.FormatJSON, AccountIds: []string{"client"}, Sources: []SourceRef{{Kind: KindLibraryFile, Ref: "reference", Label: "Visual example", Content: true}}}
+	args := materializeArgs{Name: "Client welcome", Statement: "Use our supplied example", OutputKind: "email_template", Format: pure.FormatJSON, AccountIds: []string{"client"}, Sources: []SourceRef{{Kind: KindLibraryFile, Ref: "reference", Label: "Visual example", Content: true, IncludeImages: true}}}
 	result, err := i.materialize(materializeContext(), "u-alice", "", args)
 	if err != nil {
 		t.Fatal(err)
@@ -165,10 +167,11 @@ func TestEmailReferencesSurviveDispatchToAnotherReplica(t *testing.T) {
 	worker := New(e, nil)
 	worker.SetUploader(u, "files")
 	worker.SetComposer(materializeComposerFunc(func(_ context.Context, req ComposeRequest) (ComposeReply, error) {
-		if req.OutputKind != "email_template" || len(req.Sources) != 1 || len(req.Sources[0].Files) != 1 || !bytes.Equal(req.Sources[0].Files[0].Image, png) {
+		if req.OutputKind != "email_template" || len(req.Sources) != 1 || !req.Sources[0].Ref.IncludeImages || len(req.Sources[0].Files) != 1 || !bytes.Equal(req.Sources[0].Files[0].Image, png) {
 			t.Fatal("replica did not receive the original reference snapshot")
 		}
-		return ComposeReply{Draft: pure.Draft{Body: `{"subject":"Welcome","textBody":"Hello","htmlBody":"<table><tr><td>Hello</td></tr></table>"}`}}, nil
+		body, _ := json.Marshal(pure.EmailTemplate{Subject: "Welcome", TextBody: "Hello", HTMLBody: `<p>Hello</p><img src="memql-asset:` + (pure.Result{Bytes: png}).SHA256() + `" alt="Logo">`})
+		return ComposeReply{Draft: pure.Draft{Body: string(body)}}, nil
 	}))
 	ctx := common.ContextWithRun(materializeContext(), common.RunContext{RunId: "v1:work:run:direct", GoalId: "v1:work:goal:direct", StepKey: "compose", OwnerUserId: "u-alice"})
 	if _, err := worker.handleExecute(ctx, opener.goal.Input, 0); err != nil {
@@ -181,6 +184,9 @@ func TestEmailReferencesSurviveDispatchToAnotherReplica(t *testing.T) {
 	}
 	if _, err := pure.RenderEmailTemplate(string(u.bytes)); err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(u.bytes), base64.StdEncoding.EncodeToString(png)) {
+		t.Fatal("included image bytes did not reach output across replica hop")
 	}
 	if reader.calls != 1 {
 		t.Fatal("references were read again on another replica")
