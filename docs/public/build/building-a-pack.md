@@ -284,6 +284,13 @@ and the reads a shopper may make, in Go, at registration time
 (`component/memql/shopper_surface.go`). Everything the pack did not name is
 exactly as unreachable as it was.
 
+Core domains can also declare a bounded form on this carrier. Campaigns declares
+`campaigns/subscribe` for [organization newsletter signups](../operate/campaign-sending.md#storefront-newsletter-signups).
+It remains core; a pack must not shadow it. The `{pack}` segment is the existing
+declaration namespace, not a requirement to install a pack for this core form.
+The deployable switch, rate and size limits, and site-owner authority below
+apply to both.
+
 ```go
 memql.RegisterShopperForm(memql.ShopperForm{
     Pack: Domain, Name: "review", Construct: "submitReview",

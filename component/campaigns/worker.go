@@ -107,6 +107,7 @@ type Worker struct {
 	templateGate   func(context.Context, string) (func(), error)
 	singleSendGate func(context.Context, string) (func(), error)
 	seriesGate     func(context.Context, string) (func(), error)
+	newsletterGate func(context.Context, string) (func(), error)
 	store          *Store
 	claimer        ExecutionClaimer
 	resolve        func() email.Sender
@@ -176,6 +177,13 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 	}
 	cfg := LoadConfig()
 	return &Worker{
+		newsletterGate: func(ctx context.Context, key string) (func(), error) {
+			var db *sql.DB
+			if len(database) > 0 && database[0] != nil {
+				db = database[0]()
+			}
+			return memql.AcquireWriteGate(ctx, db, "campaign-newsletter:"+key)
+		},
 		seriesGate: func(ctx context.Context, key string) (func(), error) {
 			var db *sql.DB
 			if len(database) > 0 && database[0] != nil {
@@ -358,6 +366,7 @@ func (w *Worker) DrainOnce(ctx context.Context) {
 	// in the SAME pass rather than waiting a further poll interval to start
 	// (memql#3459).
 	w.promoteDueSeries(ctx, systemCtx)
+	w.drainNewsletterWelcomes(ctx, systemCtx)
 	w.promoteDueSchedules(ctx, systemCtx)
 	// The ramp reads the evidence and sets the pace BEFORE any batch, so a
 	// step change takes effect on this pass rather than the next

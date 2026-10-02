@@ -218,12 +218,15 @@ that grants access to MemQL. Subscribing never creates an administrative
 membership or gives a shopper application permissions.
 
 Record the address, normalization, source storefront, consent text/version,
-and the subscription state. Repeated form submissions are idempotent. When
-confirmation is required, an unconfirmed address receives confirmation only
-and is not yet eligible for marketing. Completing the subscription can
-trigger one welcome/thank-you email through that organization's transport
-and template. Repeated delivery of the same subscription event must not send
-multiple welcome messages. An unsubscribe is respected at the point of send.
+and the subscription state. Repeated form submissions are idempotent. The
+implemented flow uses explicit single opt-in and a versioned consent sentence;
+it does not yet verify mailbox ownership through double opt-in. A future
+confirmation policy must keep unconfirmed addresses ineligible for marketing.
+Accepted enrollment queues a frozen welcome through that organization's
+transport and template. The durable attempt receipt prevents a duplicate
+provider submission after a lost result, with uncertainty visible to the
+operator. An unsubscribe is respected at the point of send. See the shipped
+[signup workflow](../../public/operate/campaign-sending.md#storefront-newsletter-signups).
 
 The same organization can own multiple independent campaigns. Support one-time
 sends and recurring cadences, including every two or three weeks. Each

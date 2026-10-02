@@ -448,3 +448,13 @@ export function useAuthoredAutomations(): Reading<AuthoredAutomationsState> {
   }, [query]);
   return useReading<AuthoredAutomationsState>("unknown", read, [query]);
 }
+
+
+/** Signup receipts are shopper-volume data; read recent outcomes on demand. */
+export function useNewsletterWelcomes(audienceId: string): Reading<Row[]> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => query === null ? null : async (signal: AbortSignal) =>
+    (await query.newsletterWelcomesForAudience({ audienceId }, { signal })).rows(), [query, audienceId]);
+  return useReading<Row[]>(NO_ROWS, read, [query, audienceId]);
+}

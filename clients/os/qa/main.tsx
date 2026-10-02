@@ -1,3 +1,5 @@
+import { NewsletterPanel } from "../src/apps/campaigns/NewsletterPanel";
+import { useCampaignFeeds } from "../src/apps/campaigns/useCampaigns";
 import { RecurrencePanel } from "../src/apps/campaigns/RecurrencePanel";
 import { fakeConnection as campaignConnection, withSession as campaignSession } from "../test/campaigns/harness";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
@@ -529,6 +531,21 @@ function RecurrenceQa() {
   return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><RecurrencePanel campaignId="qa-campaign" /></div>;
 }
 
+const newsletterQaSite = { id: "qa-shop", accountId: "qa-client", title: "Client storefront", status: "live" };
+const newsletterQaBinding = { id: "qa-newsletter", siteId: "qa-shop", accountId: "qa-client", audienceId: "qa-audience", templateId: "qa-welcome", senderIdentityId: "qa-sender", enabled: true, consentText: "Send me product news and offers by email.", createdAt: "2026-10-01T12:00:00Z" };
+function newsletterQaConnection(populated: boolean) {
+  return campaignConnection({ sites: [newsletterQaSite], newsletters: populated ? [newsletterQaBinding] : [],
+    templates: [{ id: "qa-welcome", accountId: "qa-client", name: "Thanks for subscribing", status: "ready" }],
+    senderIdentities: [{ id: "qa-sender", accountId: "qa-client", address: "hello@client.example", status: "active" }],
+    welcomes: populated ? [{ id: "qa-sent", email: "alex@example.test", displayName: "Alex", requestedAt: "2026-10-01T13:00:00Z", status: "sent" }, { id: "qa-blocked", email: "jordan@example.test", displayName: "Jordan", requestedAt: "2026-10-01T13:02:00Z", status: "blocked", lastError: "This sender is disabled. Review the sending identity before continuing." }] : [],
+  });
+}
+function NewsletterQa() {
+  const resources = useCampaignFeeds();
+  const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
+  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><NewsletterPanel audienceId="qa-audience" accountId="qa-client" resources={resources} /></div>;
+}
+
 const VIEWS: Record<
   string,
   {
@@ -540,6 +557,8 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  "campaign-newsletter-empty": { connect: () => newsletterQaConnection(false), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
+  "campaign-newsletter-active": { connect: () => newsletterQaConnection(true), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
   "campaign-repeat-empty": {
     connect: () => campaignConnection(),
     wrap: el => campaignSession(el),

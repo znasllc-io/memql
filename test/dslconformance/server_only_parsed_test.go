@@ -402,6 +402,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// An actor may request a send, but only the provider adapter can attest
 		// that an attempt began. The receipt and its replay read are private.
 		// Ownership cannot attest locked scheduling or a committed occurrence.
+		// Newsletter configuration requires multi-resource preflight; signup receipts
+		// attest consent, enrollment and a reviewed snapshot; progress attests delivery.
+		// The queue scan spans owners and rechecks each captured actor before sending.
+		{Path: "campaigns/mutations.memql", Name: "configureNewsletter"}:     true,
+		{Path: "campaigns/mutations.memql", Name: "recordNewsletterSignup"}:  true,
+		{Path: "campaigns/mutations.memql", Name: "updateNewsletterWelcome"}: true,
+		{Path: "campaigns/queries.memql", Name: "pendingNewsletterWelcomes"}: true,
+
 		{Path: "campaigns/mutations.memql", Name: "configureCampaignSeries"}:  true,
 		{Path: "campaigns/mutations.memql", Name: "advanceCampaignSeries"}:    true,
 		{Path: "campaigns/queries.memql", Name: "dueCampaignSeries"}:          true,

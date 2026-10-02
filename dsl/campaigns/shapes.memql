@@ -301,3 +301,47 @@ shape campaignSeries campaignSeriesFull {
   lastOccurrenceAt
   lastError
 }
+
+
+/// Complete organization-authorized newsletterBinding projection.
+@row
+shape newsletterBinding newsletterBindingFull {
+  row.id
+  ownerUserId
+  accountId
+  siteId
+  storeId
+  audienceId
+  templateId
+  senderIdentityId
+  consentText
+  enabled
+  row.createdAt
+}
+
+
+/// Complete organization-authorized newsletterSignup projection.
+@row
+shape newsletterSignup newsletterSignupFull {
+  row.id
+  ownerUserId
+  accountId
+  newsletterId
+  siteId
+  storeId
+  audienceId
+  recipientId
+  emailDigest
+  email
+  displayName
+  submissionId
+  consentText
+  consentRevision
+  requestedAt
+  templateId
+  templateSnapshot
+  senderIdentityId
+  status
+  lastError
+  row.createdAt
+}
