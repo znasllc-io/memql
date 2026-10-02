@@ -47,7 +47,6 @@ export interface MaterializeFacts {
   statement: string;
   format: string;
   sources: { kind: string; ref: string; label: string }[];
-  draft: string;
   templateId: string;
   folderId: string;
   accountIds: string[];
@@ -100,7 +99,6 @@ export function useMaterialize(): MaterializeState {
           format: facts.format,
           ...(facts.statement.trim() ? { statement: facts.statement.trim() } : {}),
           ...(facts.sources.length > 0 ? { sources: facts.sources } : {}),
-          ...(facts.draft.trim() ? { draft: facts.draft } : {}),
           ...(facts.templateId ? { templateId: facts.templateId } : {}),
           ...(facts.folderId ? { folderId: facts.folderId } : {}),
           ...(facts.accountIds.length > 0 ? { accountIds: facts.accountIds } : {}),

@@ -253,7 +253,7 @@ export function useResolvedSources(sources: { kind: string; ref: string; label: 
   });
 
   // The KEY is the rendered source list. Without it this effect re-runs on
-  // every render of the composer, which is every keystroke in the draft --
+  // every render of the composer, which is every keystroke in the brief --
   // the registration-effect trap this shell has hit before.
   const key = JSON.stringify(sources);
 

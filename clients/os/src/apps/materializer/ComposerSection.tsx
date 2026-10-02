@@ -20,32 +20,8 @@ import {
   formatWord,
 } from "./words";
 
-// ComposerSection -- the three columns, and why there are three.
-//
-// ===========================================================================
-// THE COLUMNS ARE THE COMPOSITION'S OWN STRUCTURE, NOT A LAYOUT
-// ===========================================================================
-// What goes in, what it is, what comes out. Three columns is a shape this
-// shell has not used before and it earns it here because the subject
-// genuinely has three parts a person moves between -- not because three
-// panels looked balanced.
-//
-// THE DRAFT LEADS (design D5, the owner's decision). The conversation is
-// a column beside the draft rather than the middle of the app, because
-// the FILE is the deliverable and a surface where the deliverable is
-// never on screen cannot answer "which version am I about to send". It is
-// also DESIGN.md rule 11 read forward: a list and its detail never share
-// a scroll column, and a transcript and its draft are that pair.
-//
-// ===========================================================================
-// REAL ESTATE BELONGS TO CONTENT (rule 9)
-// ===========================================================================
-// The draft column takes what is left after two narrow ones. The two
-// narrow columns are fixed-measure because they hold controls, and the
-// draft is fluid because it holds prose -- which is also why the draft is
-// the only text in this app set at `--os-text-md` with a longer
-// line-height. It is being READ, and everything around it is being
-// scanned.
+// Materializer collects the brief, sources, and output settings. File content
+// is read and edited in Productivity Tools after the result is ready.
 
 export interface ComposerSectionProps {
   templates: TemplateRow[];
@@ -63,7 +39,6 @@ export interface ComposerSectionProps {
     statement: string;
     format: string;
     sources: { kind: string; ref: string; label: string }[];
-    draft: string;
     templateId: string;
     deployableKind: string;
   }) => void;
@@ -94,7 +69,6 @@ export function ComposerSection({
 }: ComposerSectionProps) {
   const [name, setName] = useState("");
   const [statement, setStatement] = useState("");
-  const [draft, setDraft] = useState("");
   const [format, setFormat] = useState(defaultFormat);
   const [templateId, setTemplateId] = useState("");
   const [deployableKind, setDeployableKind] = useState("");
@@ -106,7 +80,7 @@ export function ComposerSection({
   const open = composition;
   const draftState = {
     sourceCount: picked.length,
-    hasContent: statement.trim() !== "" || draft.trim() !== "",
+    hasContent: statement.trim() !== "",
     hasFormat: format !== "",
     submitting: busy,
   };
@@ -170,14 +144,12 @@ export function ComposerSection({
           onRemove={removeSource}
         />
 
-        <DraftColumn
+        <BriefColumn
           open={open}
           name={name}
           onName={setName}
           statement={statement}
           onStatement={setStatement}
-          draft={draft}
-          onDraft={setDraft}
         />
 
         <TargetColumn
@@ -211,7 +183,7 @@ export function ComposerSection({
         acts={acts.map((a) => ({
           label: a.label,
           tone: a.tone === "primary" ? "primary" : a.tone === "danger" ? "danger" : "quiet",
-          ariaLabel: a.id === "openFile" ? `Open ${open?.name ?? "the file"} in Files` : undefined,
+          ariaLabel: a.id === "openFile" ? `Open ${open?.name ?? "the file"}` : undefined,
           busy: busy && a.id === "materialize",
           onAct: () => {
             if (a.id === "materialize") {
@@ -220,7 +192,6 @@ export function ComposerSection({
                 statement,
                 format,
                 sources: picked,
-                draft,
                 templateId,
                 deployableKind,
               });
@@ -397,29 +368,25 @@ function matches(c: ComposableConcept, query: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// The draft -- what it is. The page.
+// The brief -- what the person wants made.
 // ---------------------------------------------------------------------------
 
-function DraftColumn({
+function BriefColumn({
   open,
   name,
   onName,
   statement,
   onStatement,
-  draft,
-  onDraft,
 }: {
   open: CompositionRow | null;
   name: string;
   onName: (v: string) => void;
   statement: string;
   onStatement: (v: string) => void;
-  draft: string;
-  onDraft: (v: string) => void;
 }) {
   if (open !== null) {
     return (
-      <section className="os-mz-col os-mz-col-draft" aria-label="What was made">
+      <section className="os-mz-col os-mz-col-brief" aria-label="What was made">
         <Subhead>What was asked for</Subhead>
         <p className="os-mz-statement">{open.statement || "No statement was recorded."}</p>
         {open.failureReason ? (
@@ -439,7 +406,7 @@ function DraftColumn({
   }
 
   return (
-    <section className="os-mz-col os-mz-col-draft" aria-label="The draft">
+    <section className="os-mz-col os-mz-col-brief" aria-label="Composition brief">
       <Field label="Name">
         <Input id="mz-name" value={name} onChange={onName} label="Name" placeholder="Q3 report" />
       </Field>
@@ -452,15 +419,7 @@ function DraftColumn({
           placeholder="Draft the Q3 report for Acme from the open invoices"
         />
       </Field>
-      <Subhead>Draft</Subhead>
-      <textarea
-        className="os-mz-draft"
-        value={draft}
-        onChange={(e) => onDraft(e.target.value)}
-        aria-label="Draft"
-        placeholder="Leave this empty and the model writes it from your sources. Anything you type here is what it starts from."
-        spellCheck
-      />
+      <p className="os-caption">Open the finished file in your editor to review and make changes.</p>
     </section>
   );
 }

@@ -19,6 +19,10 @@ recognising.
 
 ---
 
+Materializer collects the brief, sources, and output settings. Its finished
+files open directly in the chosen editor for review and editing. ZIP outputs
+use the regular authenticated download path and remain intact.
+
 ## The two flows, and when each engages
 
 | Flow | What happens | When it runs |

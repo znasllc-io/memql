@@ -1,3 +1,9 @@
+import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
+import { useAuthSource } from "../../auth/context";
+import { useOsConnection } from "../../live/connection";
+import { openCheckedArtifact } from "../../items/openFile";
+import { browserHandoffPorts, VSCODE_NO_ANSWER_MESSAGE, type HandoffPorts } from "../../items/vscode";
+import { downloadArtifact } from "../files/actions/download";
 import { listCount } from "../../kit/RecordRow";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -70,7 +76,8 @@ export function MaterializerApp({
   intent,
   consumeIntent,
   store,
-}: OsAppProps & { store?: MaterializerSettingsStore }) {
+  handoffPorts = browserHandoffPorts,
+}: OsAppProps & { store?: MaterializerSettingsStore; handoffPorts?: HandoffPorts }) {
   // Injectable for tests, which is the whole reason the parameter exists
   // -- nothing in the shell passes one.
   const settingsStore = useMemo(() => store ?? new LocalMaterializerSettingsStore(), [store]);
@@ -85,11 +92,40 @@ export function MaterializerApp({
   const templateActs = useTemplateActs();
   const recipeActs = useRecipeActs();
   // THE SHELL, OR NULL. The only thing this app asks the shell for is
-  // handing off to another one -- Files for the output, Nexus for the
-  // goal -- and both happen on a click. Reaching for `useOs` here would
+  // handing off to another app for a goal or deployable. Output files
+  // open in the selected editor; ZIPs use the existing download path. Reaching for `useOs` here would
   // make the whole app unmountable without a desktop, which costs every
   // one of its tests a shell it does not otherwise need.
   const os = useOsIfPresent();
+  const { config } = useSession();
+  const connection = useOsConnection();
+  const authSource = useAuthSource();
+  const [openError, setOpenError] = useState("");
+  const cancelHandoff = useRef<(() => void) | null>(null);
+  useEffect(() => () => cancelHandoff.current?.(), []);
+
+  const openFile = (fileId: string, title: string) => {
+    cancelHandoff.current?.();
+    setOpenError("");
+    void openCheckedArtifact({
+      domain: config.domain, title, ports: handoffPorts,
+      onNoAnswer: () => setOpenError(VSCODE_NO_ANSWER_MESSAGE),
+      load: async () => {
+        if (!connection) throw new Error("Connect to the cluster before opening this file.");
+        const [artifactResult, fileResult] = await Promise.all([
+          connection.query.libraryArtifactBySourceConceptRef({ sourceConceptRef: fileId }),
+          connection.query.libraryFileById({ fileId }),
+        ]);
+        const artifact = artifactResult.rows()[0], file = fileResult.rows()[0];
+        if (!artifact || !file) throw new Error("This file is not available in your Library yet. Try opening it again.");
+        return { artifactId: rowString(artifact, "id"), name: rowString(file, "name") || title,
+          mimeType: rowString(file, "mimeType"), fileId, sizeBytes: rowNumber(file, "size") };
+      },
+      download: file => downloadArtifact({ artifactId: file.artifactId!, name: file.name, fileId,
+        readFile: async () => file, bearer: () => authSource.bearer() }),
+    }).then(cancel => { cancelHandoff.current = cancel; })
+      .catch((error: unknown) => setOpenError(error instanceof Error ? error.message : "The file could not be opened."));
+  };
 
   const [openCompositionId, setOpenCompositionId] = useState("");
 
@@ -227,7 +263,7 @@ export function MaterializerApp({
       showUnmarkedConcepts={settings.showUnmarkedConcepts}
       defaultFormat={settings.defaultFormat}
       busy={materialize.busy || compositionActs.busy}
-      error={materialize.error || compositionActs.error}
+      error={openError || materialize.error || compositionActs.error}
       onNewComposition={() => setOpenCompositionId("")}
       onMaterialize={(facts) => {
         void materialize
@@ -249,10 +285,7 @@ export function MaterializerApp({
             void compositionActs.restore(open.id);
             break;
           case "openFile":
-            // THE FILE OPENS IN FILES, which is where a file lives. This
-            // app never grows a file tree of its own -- that is the seam
-            // agreed with the Files-places epic, and it runs one way.
-            os?.actions.openApp("files", "browse", { fileId: open.outputFileId });
+            openFile(open.outputFileId, open.name);
             break;
           case "openGoal":
             os?.actions.openApp(GOAL_APP_ID, GOAL_APP_SECTION, goalIntent(open.goalId));

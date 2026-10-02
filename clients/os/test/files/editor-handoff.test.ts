@@ -56,3 +56,11 @@ it("gives generated Markdown titles an editor suffix without renaming uploaded f
   expect(editorFilename({title: "README",kind: "file",format: "markdown"})).toBe("README");
   expect(editorFilename({title: "Client.pdf",format: "pdf"})).toBe("Client.pdf");
 });
+
+it("does not open or download an unresolved artifact reference", async () => {
+  const { tab, input } = setup();
+  await expect(openCheckedArtifact({ ...input, artifactId: undefined })).rejects.toThrow("no editor reference");
+  expect(tab.close).toHaveBeenCalledOnce();
+  expect(tab.navigate).not.toHaveBeenCalled();
+  expect(input.download).not.toHaveBeenCalled();
+});
