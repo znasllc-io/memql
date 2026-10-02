@@ -5891,9 +5891,10 @@ func CreateSenderIdentityBuild(args CreateSenderIdentityArgs) string {
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.go).
 type CreateSiteArgs struct {
-	SiteId    string
-	AccountId string
-	Hostname  string
+	SiteId               string
+	ExtensionRuntimePath string
+	AccountId            string
+	Hostname             string
 	// Enum: spa | static | shopify_storefront
 	Kind string
 	// What the edge answers for a path that matches no file. Omitted means the kind decides, which is what every site row created before memql#5535 carries and what they must keep resolving as. It sits in accept{} rather than stamp{} for updateSiteBundle's artifactId reason: an omitted arg is dropped from the payload, so a `?? ""` here would write an explicit empty string and there would be no way to express "let the kind decide".
@@ -5922,6 +5923,13 @@ func CreateSiteBuild(args CreateSiteArgs) string {
 	b.WriteString("mutation createSite(")
 	b.WriteString("siteId: ")
 	b.WriteString(quoteMemQL(args.SiteId))
+	if args.ExtensionRuntimePath != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("extensionRuntimePath: ")
+		b.WriteString(quoteMemQL(args.ExtensionRuntimePath))
+	}
 	if args.AccountId != "" {
 		if b.Len() > 20 {
 			b.WriteString(", ")
@@ -6425,62 +6433,6 @@ func CreateStoreBuild(args CreateStoreArgs) string {
 		}
 		b.WriteString("developmentOfStoreId: ")
 		b.WriteString(quoteMemQL(args.DevelopmentOfStoreId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// CreateTemplate -- Create an email template owned by the caller. Lands as a draft; an operator marks it ready with updateTemplate once the copy is finished. Owned.
-//
-// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["createTemplate"] in generated_concepts.go).
-type CreateTemplateArgs struct {
-	TemplateId string
-	Name       string
-	Subject    string
-	TextBody   string
-	HtmlBody   string
-	AccountId  string
-}
-
-// CreateTemplate calls the engine mutation createTemplate.
-func (qc *QueryClient) CreateTemplate(ctx context.Context, args CreateTemplateArgs) (*Result, error) {
-	call := CreateTemplateBuild(args)
-	return qc.executeNamed(ctx, "createTemplate", call)
-}
-
-func CreateTemplateBuild(args CreateTemplateArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createTemplate(")
-	b.WriteString("templateId: ")
-	b.WriteString(quoteMemQL(args.TemplateId))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("name: ")
-	b.WriteString(quoteMemQL(args.Name))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("subject: ")
-	b.WriteString(quoteMemQL(args.Subject))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("textBody: ")
-	b.WriteString(quoteMemQL(args.TextBody))
-	if args.HtmlBody != "" {
-		if b.Len() > 24 {
-			b.WriteString(", ")
-		}
-		b.WriteString("htmlBody: ")
-		b.WriteString(quoteMemQL(args.HtmlBody))
-	}
-	if args.AccountId != "" {
-		if b.Len() > 24 {
-			b.WriteString(", ")
-		}
-		b.WriteString("accountId: ")
-		b.WriteString(quoteMemQL(args.AccountId))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -7452,6 +7404,7 @@ func EnablePackageDeployablesBuild(args EnablePackageDeployablesArgs) string {
 //
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["enqueueCampaignSend"] in generated_concepts.go).
 type EnqueueCampaignSendArgs struct {
+	TemplateSnapshot    map[string]any
 	CampaignId          string
 	CampaignOwnerUserId string
 	CampaignAccountId   string
@@ -7470,6 +7423,13 @@ func (qc *QueryClient) EnqueueCampaignSend(ctx context.Context, args EnqueueCamp
 func EnqueueCampaignSendBuild(args EnqueueCampaignSendArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation enqueueCampaignSend(")
+	if args.TemplateSnapshot != nil {
+		b.WriteString("templateSnapshot: ")
+		b.WriteString(renderMemQLValue(args.TemplateSnapshot))
+	}
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
 	b.WriteString("campaignId: ")
 	b.WriteString(quoteMemQL(args.CampaignId))
 	if b.Len() > 29 {
@@ -15227,70 +15187,6 @@ func UpdateStoreBuild(args UpdateStoreArgs) string {
 		}
 		b.WriteString("developmentOfStoreId: ")
 		b.WriteString(quoteMemQL(args.DevelopmentOfStoreId))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// UpdateTemplate -- Edit a template's copy or move it along its lifecycle (draft -> ready -> archived). Owned.
-//
-// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["updateTemplate"] in generated_concepts.go).
-type UpdateTemplateArgs struct {
-	TemplateId string
-	Name       string
-	Subject    string
-	TextBody   string
-	HtmlBody   string
-	Status     string
-	AccountId  string
-}
-
-// UpdateTemplate calls the engine mutation updateTemplate.
-func (qc *QueryClient) UpdateTemplate(ctx context.Context, args UpdateTemplateArgs) (*Result, error) {
-	call := UpdateTemplateBuild(args)
-	return qc.executeNamed(ctx, "updateTemplate", call)
-}
-
-func UpdateTemplateBuild(args UpdateTemplateArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation updateTemplate(")
-	b.WriteString("templateId: ")
-	b.WriteString(quoteMemQL(args.TemplateId))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("name: ")
-	b.WriteString(quoteMemQL(args.Name))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("subject: ")
-	b.WriteString(quoteMemQL(args.Subject))
-	if b.Len() > 24 {
-		b.WriteString(", ")
-	}
-	b.WriteString("textBody: ")
-	b.WriteString(quoteMemQL(args.TextBody))
-	if args.HtmlBody != "" {
-		if b.Len() > 24 {
-			b.WriteString(", ")
-		}
-		b.WriteString("htmlBody: ")
-		b.WriteString(quoteMemQL(args.HtmlBody))
-	}
-	if args.Status != "" {
-		if b.Len() > 24 {
-			b.WriteString(", ")
-		}
-		b.WriteString("status: ")
-		b.WriteString(quoteMemQL(args.Status))
-	}
-	if args.AccountId != "" {
-		if b.Len() > 24 {
-			b.WriteString(", ")
-		}
-		b.WriteString("accountId: ")
-		b.WriteString(quoteMemQL(args.AccountId))
 	}
 	b.WriteString(")")
 	return b.String()

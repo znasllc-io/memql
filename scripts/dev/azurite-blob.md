@@ -8,6 +8,29 @@ The local k3d cluster runs [Azurite](https://learn.microsoft.com/azure/storage/c
 
 The local overlay adds an `azurite` Deployment + Service running the `mcr.microsoft.com/azure-storage/azurite` image in blob-only mode (`azurite-blob --blobHost 0.0.0.0 --blobPort 10000`). It is reachable in-cluster at `http://azurite:10000` and on the host via the k3d port-forward (`localhost:10000`).
 
+Azurite stores both its metadata and blob extents at `/data`, mounted from the
+`azurite-data` persistent volume claim. Its single replica uses `Recreate` so
+two processes never write the same store. Files and database backup objects
+survive a pod restart or image rollout. Deleting the k3d cluster still deletes
+its local storage; export anything needed before `make down` or `make up-refresh`.
+
+### Existing clusters upgrading from ephemeral storage
+
+Before the first rollout that adds this claim, pause local uploads and export
+every existing container with the Azure Blob API (`az storage container list`,
+`az storage blob list --include m`, and `az storage blob download-batch`). Record
+each blob's name, metadata, content settings, and content checksum. Use a
+temporary operator port-forward to the `azurite` service and the emulator
+connection string below; application clients continue through the normal front
+door. Keep the export outside the repository.
+
+After ArgoCD reconciles the updated overlay and the claim is bound, restore
+the objects through the same Blob API, including their original names,
+metadata and content settings. Verify every checksum, replace the Azurite pod,
+and verify them again before resuming uploads. The first persistent store is
+empty: mounting a claim cannot copy the old container's writable layer.
+Metadata in Postgres cannot recover bytes already lost in an earlier restart.
+
 ### Connection string wiring (`scripts/k3d/seed-secrets.sh`)
 
 `make up` (via `seed-secrets.sh`) seeds `AZURE_BLOB_CONNECTION_STRING` into the `memql-secrets` k8s Secret using the well-known Azurite dev constants. Three pieces make it reach the uploader (memql#4843 restored the first): the boot-time legacy-alias shim maps that seeded key onto `MEMQL_AZURE_STORAGE_CONNECTION_STRING` (the only name the Go reader knows), and the local overlay's `patches/blob-storage-local.yaml` sets `MEMQL_AZURE_BLOB_CONTAINER=memql` plus `MEMQL_AZURE_BLOB_AUTOCREATE=true` on the bff and agent — the two values the secret cannot carry. The constants:

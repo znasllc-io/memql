@@ -134,7 +134,7 @@ func TestTamperedTrackingTokenIsRefused(t *testing.T) {
 // TestAnUnsubscribeTokenNeverVerifiesAsTracking and its twin are the whole
 // reason for the separate key-id label and the context string in the body.
 func TestAnUnsubscribeTokenNeverVerifiesAsTracking(t *testing.T) {
-	unsub, err := MintUnsubscribeToken(trackSecretA, "u-1", "r-1", "camp-1")
+	unsub, err := MintUnsubscribeToken(trackSecretA, UnsubscribePayload{OwnerUserID: "u-1", RecipientID: "r-1", CampaignID: "camp-1"})
 	if err != nil {
 		t.Fatalf("mint unsubscribe: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestATrackingTokenNeverVerifiesAsUnsubscribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	if _, _, _, err := ParseUnsubscribeToken([]string{trackSecretA}, token); err == nil {
+	if _, err := ParseUnsubscribeToken([]string{trackSecretA}, token); err == nil {
 		t.Fatal("a TRACKING token verified as an unsubscribe token. That is an opt-out anybody can " +
 			"trigger by loading an image in a message we sent them")
 	}

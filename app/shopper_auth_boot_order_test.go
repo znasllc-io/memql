@@ -34,13 +34,23 @@ func TestShopperAuthDeclarationsAreCapturedAfterPackAnchoring(t *testing.T) {
 		return
 	}
 	t.Setenv("MEMQL_SERVER_PUBLIC_PATH", "")
-	if len(memql.ShopperSurface()) != 0 {
+	// Core Campaigns declares its signup at package initialization. Packs
+	// must still be absent until their later bootstrap phase.
+	hasReviewPack := func() bool {
+		for _, entry := range memql.ShopperSurface() {
+			if entry.Pack == "reviews" {
+				return true
+			}
+		}
+		return false
+	}
+	if hasReviewPack() {
 		t.Fatal("test must start before packs are anchored")
 	}
 	app := &App{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), identityVerifier: &verifier.Verifier{}}
 	middleware := app.identityHTTPMiddleware()
 	app.anchorStorefrontPacks()
-	if len(memql.ShopperSurface()) == 0 {
+	if !hasReviewPack() {
 		t.Fatal("packs declared no shopper routes")
 	}
 	reached := false
@@ -49,6 +59,12 @@ func TestShopperAuthDeclarationsAreCapturedAfterPackAnchoring(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reads/reviews/published", nil))
 	if !reached || rec.Code != http.StatusNoContent {
 		t.Fatalf("snapshot preceded pack anchoring: status=%d", rec.Code)
+	}
+	reached = false
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/forms/campaigns/subscribe", nil))
+	if !reached || rec.Code != http.StatusNoContent {
+		t.Fatalf("core signup declaration escaped the shared carrier: status=%d", rec.Code)
 	}
 	reached = false
 	rec = httptest.NewRecorder()

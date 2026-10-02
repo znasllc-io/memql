@@ -13,6 +13,7 @@ require (
 
 require (
 	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
+	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
 	github.com/znasllc-io/memql/core v0.0.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )
@@ -20,3 +21,5 @@ require (
 replace github.com/znasllc-io/memql/component/auth => ../auth
 
 replace github.com/znasllc-io/memql/core => ../../core
+
+replace github.com/znasllc-io/memql/component/frontdoor => ../frontdoor

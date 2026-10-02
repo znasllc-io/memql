@@ -73,13 +73,10 @@ type BuiltinClient struct {
 	// MinRole is the lowest cluster-wide role allowed to complete sign-in
 	// through this client, or "" for no floor.
 	//
-	// This is deliberately NOT an env var. The floor is a statement about the
-	// application -- the editor is a management surface, so people who do not
-	// manage the cluster have no business connecting one to it -- and a
-	// per-cluster knob would turn that statement into a configuration
-	// accident. An operator who genuinely needs different policy shadows the
-	// client id in MEMQL_IDENTITY_REGISTERED_CLIENTS, which carries no floor;
-	// that is an explicit, visible act rather than a default nobody reviewed.
+	// Admission never grants the application's capabilities. The editor also
+	// connects Productivity Tools, so a reader may sign in to view a document
+	// without acquiring write, authoring, deployment, or administration powers.
+	// Those remain backend checks against the signed-in person's authority.
 	MinRole auth.Role
 }
 
@@ -93,16 +90,10 @@ var builtinClients = []BuiltinClient{
 			RedirectURIs: []string{builtinRedirectVSCode},
 			Name:         "MemQL for Visual Studio Code and Cursor",
 		},
-		// Developer and above: owner, admin and developer complete sign-in;
-		// writer and reader are refused.
-		//
-		// INCLUDING ADMIN IS DELIBERATE. An admin operates the portal's admin
-		// console (component/identity/adminops gates at owner/admin), so
-		// admitting them there and refusing them the editor would be
-		// incoherent. "Developer and above" is also the deploy gate
-		// (auth.AtLeastDeveloper, memql#1876), which is the same authority the
-		// editor exercises.
-		MinRole: auth.RoleDeveloper,
+		// One connection for development and productivity. The reader floor
+		// admits registered roles (including assignable custom roles), while
+		// refusing missing or unknown roles. No role is elevated at sign-in.
+		MinRole: auth.RoleReader,
 	},
 }
 
@@ -187,9 +178,9 @@ func (r RoleFloorRefusal) Description() string {
 	if name == "" {
 		name = r.ClientId
 	}
-	return name + " manages this cluster. Your role on it is " +
-		roleLabel(r.Actual) + ", and signing in from an editor needs " +
-		roleLabel(r.Required) + " or above. Ask a cluster owner or admin to raise your role."
+	return name + " could not connect. Your role on this cluster is " +
+		roleLabel(r.Actual) + ", and this application requires " +
+		roleLabel(r.Required) + " access or above. Ask a cluster owner or admin to check your access."
 }
 
 // Error makes the refusal usable as an error value on the paths that carry one.

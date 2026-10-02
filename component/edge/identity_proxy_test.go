@@ -1,6 +1,8 @@
 package edge
 
 import (
+	"encoding/json"
+	identityweb "github.com/znasllc-io/memql/component/identity/web"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -239,5 +241,102 @@ func TestShopifyCompletionProxiesSessionAndSignedQuery(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("completion returned %d, want identity redirect", rec.Code)
+	}
+}
+
+// A browser that refuses third-party cookies must never need one here: the
+// native GET and POST stay on the OS host. Exercise the real proxy hop and
+// identity's CSRF middleware, including the rejection cases.
+func TestNativeIdentityKeepsCookiePairThroughProxy(t *testing.T) {
+	var writes int
+	secure := false
+	check := identityweb.CSRFMiddleware(identityweb.CSRFOptions{Secure: &secure})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			writes++
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"csrf": identityweb.CSRFTokenFromRequest(r)})
+	}))
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "os.example.com" {
+			t.Errorf("lost public identity authority: %s", r.Host)
+		}
+		if r.Header.Get("Origin") != "https://os.example.com" {
+			http.Error(w, "origin refused", 403)
+			return
+		}
+		check.ServeHTTP(w, r)
+	}))
+	defer upstream.Close()
+	h := NewHandler(Options{Resolver: staticResolver{site: spaSite()}, Opener: mapOpener(map[string]string{"index.html": "SPA"}), IdentityTarget: upstream.URL})
+	read := httptest.NewRequest("GET", "https://os.example.com/device?user_code=ABCD-2345", nil)
+	read.Header.Set("Accept", identityweb.NativeMediaType)
+	page := httptest.NewRecorder()
+	h.ServeHTTP(page, read)
+	if page.Code != 200 {
+		t.Fatal(page.Code, page.Body.String())
+	}
+	cookies := page.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Domain != "" || !cookies[0].HttpOnly {
+		t.Fatal("expected a host-only HttpOnly CSRF cookie")
+	}
+	var body map[string]string
+	if err := json.Unmarshal(page.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, origin, token string
+		cookie              bool
+		status              int
+	}{
+		{"approved", "https://os.example.com", body["csrf"], true, 200},
+		{"missing cookie", "https://os.example.com", body["csrf"], false, 403},
+		{"stale page", "https://os.example.com", "wrong", true, 403},
+		{"foreign origin", "https://evil.test", body["csrf"], true, 403},
+		{"missing origin", "", body["csrf"], true, 403},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "https://os.example.com/device", strings.NewReader("action=approve&user_code=ABCD-2345"))
+			req.Header.Set("Accept", identityweb.NativeMediaType)
+			req.Header.Set("Origin", tc.origin)
+			req.Header.Set("X-CSRF-Token", tc.token)
+			if tc.cookie {
+				req.AddCookie(cookies[0])
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != tc.status {
+				t.Fatal(rec.Code, rec.Body.String())
+			}
+		})
+	}
+	if writes != 1 {
+		t.Fatalf("%d writes, want exactly one authorized action", writes)
+	}
+}
+
+func TestNativeIdentityRoutingIsExactAndRepresentationScoped(t *testing.T) {
+	for _, tc := range []struct {
+		path, accept string
+		want         bool
+	}{
+		{"/device", identityweb.NativeMediaType, true}, {"/auth/setup/state", identityweb.NativeMediaType, true},
+		{"/device", "text/html", false}, {"/identity/device", identityweb.NativeMediaType, false},
+		{"/auth/callback", identityweb.NativeMediaType, false}, {"/device/extra", identityweb.NativeMediaType, false},
+		{"/admin/", identityweb.NativeMediaType, false},
+	} {
+		req := httptest.NewRequest("GET", tc.path, nil)
+		req.Header.Set("Accept", tc.accept)
+		if got := isIdentityUIRequest(req); got != tc.want {
+			t.Errorf("%s %s: %v", tc.path, tc.accept, got)
+		}
+	}
+	req := httptest.NewRequest("POST", "/auth/webauthn/login/finish", nil)
+	if !isIdentityPasskeyRequest(req) {
+		t.Fatal("passkey finish must retain the first-party cookie")
+	}
+	req.Method = "GET"
+	if isIdentityPasskeyRequest(req) {
+		t.Fatal("must not capture a page navigation")
 	}
 }

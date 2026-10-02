@@ -1,3 +1,23 @@
+import type { EmailTemplate } from "./templates.js";
+
+const tags = /\{\{([^{}\r\n]{1,120}?)\}\}/g;
+const supported = (key: string) => ["displayName", "email", "campaignName", "accountName"].includes(key) || key.startsWith("fields.") && key.length > 7;
+export function sampleFields(template: EmailTemplate): string[] {
+  return [...new Set([template.subject, template.textBody, template.htmlBody].flatMap(body =>
+    [...body.matchAll(tags)].map(match => match[1]).filter(supported)))].sort().slice(0, 64);
+}
+
+// Sample values stay in this preview. They are never written into the template
+// or treated as a recipient record, and replacement is literal and single-pass.
+export function sampleTemplate(template: EmailTemplate, values: Record<string, string>): EmailTemplate {
+  const escape = (value: string) => value.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+  const render = (body: string, html: boolean) => body.replace(tags, (tag, key: string) => {
+    if (!supported(key) || !Object.hasOwn(values,key)) return tag;
+    return html ? escape(values[key]) : values[key];
+  });
+  return {subject:render(template.subject,false),textBody:render(template.textBody,false),htmlBody:render(template.htmlBody,true)};
+}
+
 // Render in an inert document first, then keep only email presentation elements.
 // A reference or generated template cannot make the preview fetch remote assets,
 // submit a form, navigate, or execute code. Original source remains editable.

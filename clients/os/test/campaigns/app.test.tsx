@@ -452,50 +452,27 @@ describe("audiences", () => {
 // Templates and the merge tags
 // ---------------------------------------------------------------------------
 
-describe("the template editor", () => {
-  it("offers the base merge tags and inserts one at the cursor", async () => {
-    const conn = fakeConnection({
-      templates: [templateRow({ id: "v1:campaigns:template:t1", name: "August copy" })],
-      audiences: [],
-    });
-    mount(conn, "templates");
+describe("the template editor handoff", () => {
+  it("opens content in browser VS Code without an embedded editor", async () => {
+    const opened = vi.spyOn(window,"open").mockReturnValue(null);
+    const conn = fakeConnection({ templates: [templateRow({id:"t1",name:"August copy"})] });
+    mount(conn,"templates");
     fireEvent.click(await screen.findByText("August copy"));
-
-    const body = (await screen.findByLabelText("Message")) as HTMLTextAreaElement;
-    fireEvent.change(body, { target: { value: "Hello ," } });
-    body.setSelectionRange(6, 6);
-    fireEvent.click(screen.getByTitle("Insert {{displayName}}"));
-    await waitFor(() => expect(body.value).toBe("Hello {{displayName}},"));
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    expect(document.querySelector("textarea")).toBeNull();
+    fireEvent.click(screen.getByRole("button",{name:"Open in editor"}));
+    expect(opened).toHaveBeenCalledWith(expect.stringContaining("https://vscode.memql.example.com/editor/?resource="),"_blank","noopener,noreferrer");
+    const url = new URL(String(opened.mock.calls[0]![0]));
+    expect(url.searchParams.get("resource")).toBe("memql-file://memql.example.com/templates/t1/August%20copy.email.json");
+    expect(conn.query.campaignSaveTemplate).not.toHaveBeenCalled();
+    opened.mockRestore();
   });
-
-  it("DISCOVERS fields.* from a sampled recipient -- nothing else can", async () => {
-    const conn = fakeConnection({
-      templates: [templateRow({ id: "v1:campaigns:template:t1", name: "August copy" })],
-      audiences: [audienceRow({ id: "v1:campaigns:audience:a1", name: "Newsletter" })],
-      recipientsForAudience: [
-        recipientRow({ id: "r1", fields: { company: "Acme Corp" } }),
-      ],
-    });
-    mount(conn, "templates");
+  it("archives only the revision displayed for the owning organization", async () => {
+    const conn = fakeConnection({ templates: [templateRow({id:"t1",name:"August copy"})] });
+    mount(conn,"templates");
     fireEvent.click(await screen.findByText("August copy"));
-
-    // Nothing sampled: no fields.* tag anywhere.
-    expect(screen.queryByText("{{fields.company}}")).toBeNull();
-
-    chooseOption(screen.getByLabelText("Audience to sample a recipient from"), "Newsletter");
-    expect(await screen.findByText("{{fields.company}}")).toBeTruthy();
-    // ...and it says what it renders to, which is what makes it documentation.
-    expect(screen.getByText("Acme Corp")).toBeTruthy();
-  });
-
-  it("says why there is no test send rather than showing a dead control", async () => {
-    const conn = fakeConnection({
-      templates: [templateRow({ id: "v1:campaigns:template:t1", name: "August copy" })],
-      campaigns: [],
-    });
-    mount(conn, "templates");
-    fireEvent.click(await screen.findByText("August copy"));
-    expect(await screen.findByText(/No campaign uses this template yet/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button",{name:"Archive"}));
+    await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledWith(expect.objectContaining({templateId:"t1",accountId:"self",expectedRevision:"2026-08-01T00:00:00Z",action:"archive"})));
   });
 });
 
@@ -1000,7 +977,7 @@ describe("the app's settings", () => {
 });
 
 describe("guided campaign preparation", () => {
-  it("keeps review fields and content edits across steps, and only saves a draft", async () => {
+  it("keeps review fields and template selection across steps, and only saves a draft", async () => {
     const conn = fakeConnection({
       audiences: [audienceRow({ id: "a1" })],
       templates: [templateRow({ id: "t1" })],
@@ -1015,12 +992,13 @@ describe("guided campaign preparation", () => {
     chooseOption(screen.getByLabelText("Campaign audience"), "Newsletter");
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     chooseOption(screen.getByLabelText("Campaign content"), "August copy (ready)");
-    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Keep my unsaved message" } });
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    expect(screen.getByRole("button", {name: "Open template in editor"})).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     fireEvent.change(screen.getByLabelText("Campaign name"), { target: { value: "September newsletter" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "Count who opens it" }));
     fireEvent.click(screen.getByRole("button", { name: /Content/ }));
-    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("Keep my unsaved message");
+    expect(screen.getByRole("button", {name: "Open template in editor"})).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("September newsletter");
     expect((screen.getByRole("checkbox", { name: "Count who opens it" }) as HTMLInputElement).checked).toBe(false);
@@ -1031,7 +1009,7 @@ describe("guided campaign preparation", () => {
     expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
     expect(conn.query.campaignScheduleSend).not.toHaveBeenCalled();
     expect(conn.query.campaignTestSend).not.toHaveBeenCalled();
-    expect(conn.query.updateTemplate).not.toHaveBeenCalled();
+    expect(conn.query.campaignSaveTemplate).not.toHaveBeenCalled();
   });
 
   it("does not confirm setup when the email status read fails", async () => {

@@ -161,6 +161,121 @@ func CampaignActivateEmailRuleBuild(args CampaignActivateEmailRuleArgs) string {
 	return b.String()
 }
 
+// CampaignConfigureNewsletter -- Configure this deployable's organization newsletter. Enabling also enables its existing shopper-form carrier; disabling affects only this newsletter.
+type CampaignConfigureNewsletterArgs struct {
+	SiteId           string
+	AudienceId       string
+	TemplateId       string
+	SenderIdentityId string
+	ConsentText      string
+	Enabled          bool
+	ExpectedRevision string
+}
+
+// CampaignConfigureNewsletter calls the engine builtin campaignConfigureNewsletter.
+func (qc *QueryClient) CampaignConfigureNewsletter(ctx context.Context, args CampaignConfigureNewsletterArgs) (*Result, error) {
+	call := CampaignConfigureNewsletterBuild(args)
+	return qc.executeNamed(ctx, "campaignConfigureNewsletter", call)
+}
+
+func CampaignConfigureNewsletterBuild(args CampaignConfigureNewsletterArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignConfigureNewsletter(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("senderIdentityId: ")
+	b.WriteString(quoteMemQL(args.SenderIdentityId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("consentText: ")
+	b.WriteString(quoteMemQL(args.ConsentText))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("enabled: ")
+	b.WriteString(fmt.Sprintf("%v", args.Enabled))
+	if args.ExpectedRevision != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignConfigureSeries -- Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.
+type CampaignConfigureSeriesArgs struct {
+	CampaignId string
+	// Enum: save | pause | resume
+	Action           string
+	IntervalWeeks    int
+	FirstSendAt      string
+	TimeZone         string
+	ExpectedRevision string
+}
+
+// CampaignConfigureSeries calls the engine builtin campaignConfigureSeries.
+func (qc *QueryClient) CampaignConfigureSeries(ctx context.Context, args CampaignConfigureSeriesArgs) (*Result, error) {
+	call := CampaignConfigureSeriesBuild(args)
+	return qc.executeNamed(ctx, "campaignConfigureSeries", call)
+}
+
+func CampaignConfigureSeriesBuild(args CampaignConfigureSeriesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignConfigureSeries(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.IntervalWeeks != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("intervalWeeks: ")
+		b.WriteString(fmt.Sprintf("%v", args.IntervalWeeks))
+	}
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("firstSendAt: ")
+	b.WriteString(quoteMemQL(args.FirstSendAt))
+	if args.TimeZone != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("timeZone: ")
+		b.WriteString(quoteMemQL(args.TimeZone))
+	}
+	if args.ExpectedRevision != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignImportRecipients -- Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'.
 type CampaignImportRecipientsArgs struct {
 	// The audience to import into. The caller must be able to read it.
@@ -258,6 +373,90 @@ func CampaignRetireEmailRuleBuild(args CampaignRetireEmailRuleArgs) string {
 	b.WriteString("builtin campaignRetireEmailRule(")
 	b.WriteString("emailRuleId: ")
 	b.WriteString(quoteMemQL(args.EmailRuleId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignRetryNewsletterWelcome -- Recheck a blocked welcome under its original owner's current authority. A saved delivery attempt prevents resubmission even when its outcome is uncertain.
+type CampaignRetryNewsletterWelcomeArgs struct {
+	SignupId         string
+	ExpectedRevision string
+}
+
+// CampaignRetryNewsletterWelcome calls the engine builtin campaignRetryNewsletterWelcome.
+func (qc *QueryClient) CampaignRetryNewsletterWelcome(ctx context.Context, args CampaignRetryNewsletterWelcomeArgs) (*Result, error) {
+	call := CampaignRetryNewsletterWelcomeBuild(args)
+	return qc.executeNamed(ctx, "campaignRetryNewsletterWelcome", call)
+}
+
+func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignRetryNewsletterWelcome(")
+	b.WriteString("signupId: ")
+	b.WriteString(quoteMemQL(args.SignupId))
+	if b.Len() > 39 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.
+type CampaignSaveTemplateArgs struct {
+	// Stable caller-generated template ID; reuse on an uncertain creation response.
+	TemplateId string
+	// Owning organization; immutable after creation.
+	AccountId string
+	// Template name.
+	Name string
+	// The reviewed email file: subject, textBody, htmlBody.
+	Content map[string]any
+	// Exact createdAt from templateById; empty only when creating.
+	ExpectedRevision string
+	// save (default), publish, or archive. Publishing is an explicit human action.
+	Action string
+}
+
+// CampaignSaveTemplate calls the engine builtin campaignSaveTemplate.
+func (qc *QueryClient) CampaignSaveTemplate(ctx context.Context, args CampaignSaveTemplateArgs) (*Result, error) {
+	call := CampaignSaveTemplateBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveTemplate", call)
+}
+
+func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveTemplate(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("content: ")
+	b.WriteString(renderMemQLValue(args.Content))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if args.Action != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("action: ")
+		b.WriteString(quoteMemQL(args.Action))
+	}
 	b.WriteString(")")
 	return b.String()
 }

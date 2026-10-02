@@ -97,8 +97,11 @@ import (
 // Every caller sits AFTER resolveAsset and BEFORE serveFile -- see the
 // paragraph at that call site for why both halves matter.
 func (h *Handler) setContentSecurityPolicy(w http.ResponseWriter, r *http.Request, site *Site, fsys fs.FS, name, etag string, hasETag bool) {
-	w.Header().Set("Content-Security-Policy",
-		policyForSite(r, site, os.Getenv, h.scriptHashesFor(fsys, name, site, r.URL.Path, etag, hasETag)))
+	policy := policyForSite(r, site, os.Getenv, h.scriptHashesFor(fsys, name, site, r.URL.Path, etag, hasETag))
+	if extensionPolicy, ok := extensionRuntimePolicy(w, r, site, policy); ok {
+		policy = extensionPolicy
+	}
+	w.Header().Set("Content-Security-Policy", policy)
 }
 
 // cspHashMaxBytesEnv caps the SIZE of the hash list a policy may carry.

@@ -3,6 +3,7 @@ import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 import { Documents, isZip, resourceFrom, type OpenDocument } from "./documents.js";
 import { newTemplate } from "./templates.js";
 import { TemplateEditor } from "./templateEditor.js";
+import { TemplatePublisher } from "./templatePublish.js";
 import { TemplateExamples } from "./templateExamples.js";
 import { MarkdownEditor } from "./markdownEditor.js";
 import { PDFEditor } from "./pdfEditor.js";
@@ -38,8 +39,8 @@ class MemQLFiles implements vscode.FileSystemProvider {
   }
   async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
     const doc = await this.load(uri);
-    return { type: vscode.FileType.File, ctime: 0, mtime: doc.version, size: doc.content.length,
-      permissions: ["file", "generated_output"].includes(doc.kind) ? undefined : vscode.FilePermission.Readonly };
+    return { type: vscode.FileType.File, ctime: 0, mtime: Date.parse(doc.revision || "") || doc.version, size: doc.content.length,
+      permissions: ["file", "generated_output", "campaign_template"].includes(doc.kind) ? undefined : vscode.FilePermission.Readonly };
   }
   async readFile(uri: vscode.Uri): Promise<Uint8Array> { return new Uint8Array((await this.load(uri)).content); }
   async writeFile(uri: vscode.Uri, content: Uint8Array): Promise<void> {
@@ -72,12 +73,16 @@ export async function activate(context: vscode.ExtensionContext) {
     refresh: async uri => { provider.useBase(uri, await provider.latest(uri)); },
     release: uri => { if (!vscode.workspace.textDocuments.some(doc => doc.uri.toString() === uri.toString())) provider.close(uri); },
   });
-  const templates = new TemplateEditor(context);
+  const publisher = new TemplatePublisher(connection, context, uri => provider.load(uri));
+  const templates = new TemplateEditor(context, document => publisher.publish(document));
   const examples = new TemplateExamples(connection, context);
   const comparisons = new Map<string, { snapshot: vscode.Uri; document: OpenDocument }>();
   const snapshots = new Map<string, string>();
   let snapshotNumber = 0;
   context.subscriptions.push(provider.changed,
+    vscode.commands.registerCommand("memql.productivity.checkTools", () => ({
+      coreActive: core.isActive, productivityActive: context.extension.isActive, connectionVersion: connection.version,
+    })),
     vscode.workspace.onDidCloseTextDocument(document => {
       const key = document.uri.toString();
       if (document.uri.scheme === "memql-file" && !pdf.hasOpen(document.uri)) provider.close(document.uri);

@@ -1,10 +1,12 @@
 .os-identity-gate { height: 100dvh; overflow: auto; background: var(--os-ground); color: var(--os-ink); display: grid; }
 .os-identity-gate > .os-wizard { min-height: 100dvh; }
 .os-identity-page { padding: clamp(1.25rem, 4vw, 3rem); overflow: auto; }
-.os-identity-fields { max-width: 36rem; display: grid; gap: 1rem; }
+.os-identity-fields { min-width: 0; display: grid; gap: 1rem; }
 .os-identity-fields p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
 .os-identity-actions { display: flex; gap: .75rem; flex-wrap: wrap; }
-.os-identity-legal { white-space: pre-wrap; font: inherit; }
+.os-identity-legal { font: inherit; line-height: 1.65; overflow-wrap: anywhere; }
+.os-identity-legal a { color: var(--os-accent); }
+.os-identity-legal pre { white-space: pre-wrap; }
 .os-identity-record { border-bottom: 1px solid var(--os-line); padding-block: 1rem; display: grid; gap: .5rem; }
 
 .os-identity-panel { height: 100%; min-height: 0; overflow: auto; }
@@ -18,11 +20,40 @@
 /* Native sign-in uses the same mark, controls and tokens as the OS setup flow.
    Flex auto margins center short content and leave tall/zoomed content scrollable.
    vh is the fallback for browsers without dynamic viewport units. */
-.os-signin { height: 100vh; height: 100dvh; overflow: auto; display: flex; padding: clamp(24px, 6vw, 72px); background: var(--os-ground); color: var(--os-ink); }
-.os-signin-content { width: 100%; max-width: 28rem; margin: auto; display: flex; flex-direction: column; gap: 24px; }
+.os-signin { height: 100vh; height: 100dvh; overflow: auto; display: flex; padding: clamp(16px, 4vw, 48px); background: var(--os-ground); color: var(--os-ink); }
+.os-signin-content { width: 100%; max-width: 30rem; min-width: 0; margin: auto; padding: clamp(24px, 5vw, 40px); display: flex; flex-direction: column; gap: 24px; background: var(--os-plate); border: 1px solid var(--os-line); border-radius: var(--os-radius); }
+.os-signin-content[data-wide] { max-width: 48rem; }
+.os-identity-brand { display: flex; align-items: center; justify-content: center; gap: 12px; font-weight: 600; font-size: var(--os-text-lg); }
+.os-identity-brand svg { color: var(--os-accent); flex: none; }
+.os-signin-heading { text-align: center; }
+.os-signin-content > p { margin: 0; line-height: 1.6; }
+.os-identity-footer { text-align: center; font-size: var(--os-text-sm); }
+.os-identity-footer a { text-decoration: none; }
+.os-identity-footer a:hover { text-decoration: underline; }
+.os-identity-actions { justify-content: flex-end; }
+.os-signin .os-identity-actions > .os-button { flex: 1; min-height: 42px; justify-content: center; }
+.os-identity-notice { margin: 0; padding: 12px 16px; border-radius: var(--os-radius-xs); background: var(--os-accent-soft); line-height: 1.55; }
+.os-identity-notice[data-tone="error"] { border-left: 2px solid var(--os-error); background: var(--os-wash); }
+.os-identity-details { font-size: var(--os-text-sm); min-width: 0; }
+.os-identity-details summary { cursor: pointer; color: var(--os-muted); padding-block: 6px; }
+.os-identity-details dl { margin-top: 14px; gap: 12px; }
+.os-identity-details dd { overflow-wrap: anywhere; }
+.os-identity-warning { color: var(--os-error); }
+.os-device-app { text-align: center; overflow-wrap: anywhere; }
+.os-device-app strong { font-weight: 600; }
+.os-device-app p { color: var(--os-muted); font-size: var(--os-text-sm); margin-top: 8px; }
+.os-device-app .os-identity-warning { color: var(--os-error); }
+.os-device-code { display: grid; gap: 10px; text-align: center; background: var(--os-ground); border-radius: var(--os-radius-sm); padding: 20px 12px; }
+.os-device-code span { color: var(--os-muted); font-size: var(--os-text-sm); }
+.os-device-code strong { font: 500 clamp(22px, 5vw, 28px) var(--os-font-mono); letter-spacing: .08em; }
+.os-identity-hint { text-align: center; color: var(--os-muted); font-size: var(--os-text-sm); }
+.os-signin-problem .os-button { margin-top: 12px; }
+.os-signin .os-input { width: 100%; min-width: 0; }
+@media (max-width: 400px) { .os-signin-content { padding: 24px 20px; } }
+
 .os-signin .os-signin-mark { width: 56px; height: 56px; margin-bottom: 8px; }
 .os-signin .os-signin-mark > svg { width: 34px; height: 34px; }
-.os-signin-heading h1 { margin: 0; font-size: clamp(24px, 3vw, 30px); font-weight: 600; line-height: 1.2; letter-spacing: -.025em; }
+.os-signin-heading h1 { margin: 0; font-size: clamp(22px, 3vw, 26px); font-weight: 600; line-height: 1.2; letter-spacing: -.025em; }
 .os-signin-heading p { margin: 12px 0 0; color: var(--os-muted); line-height: 1.6; }
 .os-signin-content > .os-button, .os-signin-form > .os-button { min-height: 48px; height: auto; padding: 12px 16px; justify-content: center; }
 .os-signin-form { display: grid; gap: 18px; }

@@ -623,6 +623,7 @@ jobs:
               - 'brand/tokens.css'
               - 'editors/vscode/**'
               - 'editors/productivity/**'
+              - 'editors/browser/**'
               - 'editors/README.md'
               - 'cmd/memql-lsp/**'
               - 'scripts/vscode/**'
@@ -2041,6 +2042,11 @@ jobs:
       # and a red test is red the first time.
       - name: extension unit tests
         run: make vscode-test
+      - name: hosted browser editor build and checks
+        run: |
+          node editors/browser/build.mjs
+          npm --prefix editors/browser run typecheck
+          npm --prefix editors/browser test
       # DELIBERATELY NOT PASSING --skip-deps, even though the step above has
       # already built the workspace deps (memql#3340). This step used to pass
       # ONLY because of that: package.sh built no `file:` dependency of its own,

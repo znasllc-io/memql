@@ -1,3 +1,4 @@
+import { NewsletterPanel } from "./NewsletterPanel";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { RecordList, listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
@@ -118,6 +119,7 @@ export function AudiencesSection({
         <AudienceDetail
           key={open.id}
           audience={open}
+          resources={feeds}
           writes={writes}
           uploads={uploads}
           onArchived={() => setOpenId("")}
@@ -205,8 +207,10 @@ export function AudienceDetail({
   uploads,
   onArchived,
   onReadiness,
+  resources,
 }: {
   audience: AudienceRow;
+  resources?: CampaignFeeds;
   writes: CampaignWrites;
   uploads: UploadProvider;
   onArchived: () => void;
@@ -251,6 +255,8 @@ export function AudienceDetail({
           </Caption>
         ) : null}
       </Panel>
+
+      {resources ? <NewsletterPanel audienceId={audience.id} accountId={audience.accountId} resources={resources} /> : null}
 
       <ImportPanel
         audience={audience}

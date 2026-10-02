@@ -64,7 +64,15 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	for _, tc := range cases {
 		id := strings.ReplaceAll(tc.concept, ":", "-") + "-" + suffix
 		tc.payload["ownerUserId"] = "forged-other-user"
-		if err := organizationInsert(t, engine, actor, tc.concept, id, tc.payload); err != nil {
+		if tc.concept == "v1:campaigns:template" {
+			if err := organizationInsert(t, engine, actor, tc.concept, id, tc.payload); err == nil {
+				t.Fatal("raw template write bypassed the revision-checked capability")
+			}
+			// The capability's internal write still stamps the original actor.
+			if _, err := engine.Execute(auth.ContextWithInternalOrigin(actor), fmt.Sprintf(`mutation createTemplate(templateId: %s, accountId: %s, name: "Template", subject: "Subject", textBody: "Hello", versionTime: "2029-01-01T00:00:00Z")`, langparser.QuoteString(id), langparser.QuoteString(acme))); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := organizationInsert(t, engine, actor, tc.concept, id, tc.payload); err != nil {
 			t.Fatalf("%s: %v", tc.concept, err)
 		}
 		var rows []memorynodes.MemoryNode
@@ -181,7 +189,7 @@ func TestOrganizationPersistedAttributionAndCrossReplicaMembership(t *testing.T)
 	// its owner. Test both a named actor-stamping mutation and a raw upsert;
 	// createdBy still attributes this new version to its actual writer.
 	peer := rankActorCtx(multi, auth.RoleWriter)
-	if _, err := receiver.Execute(peer, fmt.Sprintf(`mutation updateTemplate(templateId: %s, name: "Peer edit", subject: "Edited", textBody: "Edited")`, langparser.QuoteString(template))); err != nil {
+	if _, err := receiver.Execute(auth.ContextWithInternalOrigin(peer), fmt.Sprintf(`mutation updateTemplate(status: "draft", versionTime: "2030-01-01T00:00:00Z", templateId: %s, name: "Peer edit", subject: "Edited", textBody: "Edited")`, langparser.QuoteString(template))); err != nil {
 		t.Fatal(err)
 	}
 	if err := organizationInsert(t, receiver, peer, "v1:campaigns:audience", audience, map[string]any{"name": "Peer raw edit", "ownerUserId": multi}); err != nil {

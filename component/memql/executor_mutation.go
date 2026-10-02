@@ -766,6 +766,19 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		return nil, meta, fmt.Errorf("document feedback requires internal origin from the revision-checked review capability")
 	}
 
+	if conceptMeta.Name == "v1:campaigns:template" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("template writes require campaignSaveTemplate and a saved revision")
+	}
+	if (conceptMeta.Name == "v1:campaigns:newsletterBinding" || conceptMeta.Name == "v1:campaigns:newsletterSignup") && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("newsletter writes require their configuration, signup or progress capability")
+	}
+	if conceptMeta.Name == "v1:campaigns:campaignSeries" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("recurring campaigns require campaignConfigureSeries and a saved revision")
+	}
+	if conceptMeta.Name == "v1:campaigns:singleSendReceipt" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("single-send receipts require internal origin from the sending capability")
+	}
+
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {
 		return nil, meta, fmt.Errorf("mutation payload is required")

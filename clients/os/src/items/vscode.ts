@@ -47,7 +47,7 @@ export const browserHandoffPorts: HandoffPorts = {
     return { navigate: url => tab.location.replace(url), close: () => tab.close() };
   },
   navigate: (url) => {
-    if (url.startsWith("https://vscode.dev/")) {
+    if (url.startsWith("https://")) {
       window.open(url, "_blank", "noopener,noreferrer");
     } else {
       window.location.href = url;

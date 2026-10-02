@@ -16,7 +16,7 @@ import (
 )
 
 const TransportEnv = "MEMQL_EMAIL_TRANSPORT"
-const maxCaptureBytes = 1024 * 1024
+const maxCaptureBytes = 2 * 1024 * 1024
 
 // CaptureSender stores test mail through the shared engine. It never dials a
 // recipient or falls through to another transport. The installation chooses
@@ -49,7 +49,7 @@ func (s *CaptureSender) Send(ctx context.Context, msg Message, as SendAs) error 
 		return fmt.Errorf("email: capture storage is unavailable")
 	}
 	if len(msg.TextBody)+len(msg.HTMLBody) > maxCaptureBytes {
-		return fmt.Errorf("email: captured message exceeds 1 MiB")
+		return fmt.Errorf("email: captured message exceeds 2 MiB")
 	}
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {

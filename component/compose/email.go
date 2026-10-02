@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"unicode"
 )
 
 // EmailTemplate is an editable authoring file, not a published campaign or an
@@ -15,27 +16,41 @@ type EmailTemplate struct {
 	HTMLBody string `json:"htmlBody"`
 }
 
-// RenderEmailTemplate preserves email HTML exactly, without the document HTML
-// renderer's Markdown conversion or page chrome. Its preview is sandboxed by the
-// editor; delivery still uses Campaigns' renderer and organization checks.
-func RenderEmailTemplate(source string) (Result, error) {
+// ParseEmailTemplate validates the editable file. Campaigns also supports
+// plain-text messages with an empty HTML alternative.
+func ParseEmailTemplate(source string) (EmailTemplate, error) {
 	if len(source) > 2<<20 {
-		return Result{}, errors.New("email template exceeds 2 MiB")
+		return EmailTemplate{}, errors.New("email template exceeds 2 MiB")
 	}
 	decoder := json.NewDecoder(strings.NewReader(source))
 	decoder.DisallowUnknownFields()
 	var email EmailTemplate
 	if err := decoder.Decode(&email); err != nil {
-		return Result{}, err
+		return EmailTemplate{}, err
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
-		return Result{}, errors.New("email template contains trailing content")
+		return EmailTemplate{}, errors.New("email template contains trailing content")
 	}
-	if strings.TrimSpace(email.Subject) == "" || strings.ContainsAny(email.Subject, "\r\n") || len(email.Subject) > 998 {
-		return Result{}, errors.New("email subject must be a nonempty single line under 999 bytes")
+	if strings.TrimSpace(email.Subject) == "" || strings.IndexFunc(email.Subject, unicode.IsControl) >= 0 || len(email.Subject) > 998 {
+		return EmailTemplate{}, errors.New("email subject must be a nonempty single line under 999 bytes")
 	}
-	if strings.TrimSpace(email.TextBody) == "" || strings.TrimSpace(email.HTMLBody) == "" {
-		return Result{}, errors.New("email template needs both editable HTML and a plain-text alternative")
+	if strings.TrimSpace(email.TextBody) == "" {
+		return EmailTemplate{}, errors.New("email template needs a plain-text body")
+	}
+	return email, nil
+}
+
+// RenderEmailTemplate requires the editable HTML promised by an AI email draft.
+func RenderEmailTemplate(source string) (Result, error) {
+	email, err := ParseEmailTemplate(source)
+	if err != nil {
+		return Result{}, err
+	}
+	if strings.TrimSpace(email.HTMLBody) == "" {
+		return Result{}, errors.New("generated email template needs editable HTML")
+	}
+	if _, _, err := ExtractEmailImages(email.HTMLBody); err != nil {
+		return Result{}, err
 	}
 	data, err := json.MarshalIndent(email, "", "  ")
 	if err != nil {

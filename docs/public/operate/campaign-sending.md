@@ -47,6 +47,160 @@ Rule-triggered deliveries name their email rule; they do not invent a campaign
 relationship. Historical records are attributed only when an existing parent
 proves which organization owns them.
 
+## Templates in Productivity Tools
+
+Create a named template in **Campaigns → Templates**, choose its organization,
+then open it in the editor. File content lives in MemQL Productivity Tools:
+**Source**, **Preview**, and **Split** use the same editable document. The OS
+keeps the template list, organization, status, and archive controls. Files
+settings select browser VS Code (the default), desktop VS Code, or Cursor.
+
+**Create from examples** starts a Materializer draft from an image, individual
+files, or an explicitly selected ZIP of resources plus your brief. MemQL reads
+the authorized bytes and produces editable HTML, plain text, and a subject in
+an `.email.json` file. A resource ZIP is inspected only for that explicit
+composition; opening a ZIP in Files still downloads it intact. Choose which images are visual inspiration and which should appear in the
+email. Included PNG, JPEG and GIF bytes stay with the editable template and
+are sent as inline attachments; the flow does not publish private file URLs.
+Review the generated layout and links before publishing.
+
+Use **Use in Campaigns** to save a draft or publish the reviewed template for
+its organization. Publishing makes it available to send; it does not send
+mail. Editing a published template returns it to draft. Concurrent edits fail
+with a comparison prompt, and publishing requires the exact saved revision.
+An existing template cannot be moved to another organization by editing its
+file. Create a separate copy instead.
+
+Newly queued and scheduled sends keep a frozen copy of the ready template
+reviewed at preflight. Later edits do not change those messages. The worker
+still rechecks the caller's authority and the source template's readability.
+Jobs queued before this change have no captured copy and retain their previous
+behavior; pause and recreate those jobs before editing their shared template.
+
+The client write surface is `campaignSaveTemplate`, with `templateId`,
+`accountId`, `name`, `content`, `expectedRevision`, and `action` (`save`,
+`publish`, or `archive`). Its receipt includes the saved revision and status.
+Raw template writes and the underlying create/update mutations are internal.
+
+## Storefront newsletter signups
+
+In **Campaigns → Audiences**, open the client's audience and choose **Storefront
+signups → Connect a signup form**. Select its deployable, a published welcome
+template, and the client's sender. Write the sentence the visitor will agree to,
+then enable the connection. All resources must belong to the same organization.
+An audience is a marketing list, not a group granting access to MemQL.
+
+**Get form → Copy form** provides plain HTML to add to the storefront in VS Code.
+Include `/newsletter/thank-you` and `/newsletter/problem` pages in that site's
+bundle. A form posts to `/_memql/forms/campaigns/subscribe` on the deployable's
+own origin. It carries the email, optional name, affirmative consent checkbox,
+and saved consent revision. Replace the copied form after changing the connection;
+an old revision is refused rather than recording consent to new wording. This
+does not subscribe an arbitrary externally hosted Shopify site: the storefront
+must be a MemQL deployable with the public-form carrier available.
+
+Enabling the connection also enables that deployable's public forms. Turning the
+newsletter off stops enrollment and blocks pending welcomes; it leaves other
+declared forms alone. Current organization write authority and access to the
+deployable are required. A draft or archived welcome and a disabled sender may
+remain selected while turning an existing connection off.
+
+The server derives the organization, audience, sender and live store binding.
+Form fields cannot override them. Storefront previews with a different store
+binding are refused. The current implementation uses **single opt-in**: checking
+the box records consent and enrolls the address; it does not prove control of
+the mailbox with a confirmation link. Previously unsubscribed, bounced,
+complained-about or suppressed addresses are not silently resubscribed.
+
+Repeated submissions converge on one signup and one intended welcome per
+normalized address and audience, even across deployables and worker replicas.
+Consent is stored before a new recipient becomes sendable. The accepted record
+captures the storefront, original mailbox, consent wording and revision, and
+published welcome content. Editing the template later does not rewrite that
+welcome. Changing the recipient's mailbox blocks the queued welcome instead of
+redirecting it to an address that did not consent. Current authority, sender
+availability and suppression are checked again before sending.
+
+**Recent welcomes** shows the latest 50 outcomes, read when the audience opens
+or **Refresh** is selected. A rate limit leaves mail pending for a later worker
+pass. A blocked welcome shows its reason; after resolving it, **Check again**
+rechecks that exact saved outcome. An attempt with a lost provider response is
+`uncertain` and is never automatically submitted again. `sent` means the
+transport accepted the message, not proof of inbox delivery. Local capture sends
+appear in the [Email inbox](#local-test-inbox).
+
+This uses the existing declared shopper-form carrier, its size and rate limits,
+and borrowed site-owner authority. Campaigns is core and declares the
+`campaigns/subscribe` form itself; installing a pack is not required. Enrollment
+and welcome progress use shared PostgreSQL locks, fresh reads, stable IDs and
+monotonic revisions. Private mutations cannot be called or forged by clients.
+Newsletter configuration changes broadcast to other replicas; high-volume signup
+outcomes are read on demand. Configuration uses `campaignConfigureNewsletter`;
+rechecking uses `campaignRetryNewsletterWelcome`, both with saved revisions.
+
+Use the same audience in multiple campaigns, with independent templates and
+schedules. The automatic welcome is separate from those campaigns.
+
+## Repeating campaigns
+
+Open a campaign and choose **Repeat → Set up repeating sends**. Select the first
+send and a weekly interval, such as every two or three weeks. The timezone is
+shown beside the date. Cadence follows its local calendar time across daylight
+saving changes. A recurring schedule can be created before its audience has
+subscribers; an empty occurrence completes without sending mail.
+
+The original campaign is a blueprint. Saving the schedule captures its audience,
+sender, organization and tracking settings. Save the schedule again after editing
+those campaign details. Each occurrence reads the then-published template and
+freezes that copy in a separate campaign/send job. Later edits cannot change an
+already queued occurrence. The audience is resolved when that occurrence runs,
+and consent and suppression are checked before delivery.
+
+Each occurrence appears in Campaigns with its scheduled date in the name and its
+own delivery history. The original draft can still be sent as a one-off; that is
+an additional campaign, independent of its repeating schedule.
+
+**Pause future sends** stops new occurrences. Already queued occurrences keep
+their own pause/cancel controls. **Resume future sends** skips missed dates. After
+an unexpected outage, an active schedule queues at most one overdue occurrence,
+then advances to its next future date, preventing a burst of missed newsletters.
+A configuration or authority refusal blocks the schedule with a visible reason;
+review and resume it after resolving the problem.
+
+`campaignConfigureSeries` accepts a campaign ID, `save`, `pause` or `resume`,
+and the exact saved series revision for changes. Saving also takes
+`intervalWeeks` (1–52), `firstSendAt` and an IANA `timeZone`. The cluster captures
+its definition from the readable campaign, never caller-supplied organization,
+audience or sender overrides. The person authorizing it must retain current
+organization write access. Shared PostgreSQL coordination, fresh reads and
+stable occurrence IDs make retries across replicas converge on the same job,
+including a crash after queueing but before advancing the schedule. A finished
+occurrence's job and delivery records are never reset.
+
+## Retrying event emails
+
+Email rules supply a stable identifier automatically for each event and recipient.
+Their firing reports count suppressed and replayed sends as skipped, and show
+uncertain outcomes as refusals.
+
+Other automations that call `campaignSendToRecipient` should supply a stable
+`requestId` for each intended message, such as one signup event's welcome.
+Keep that identifier unchanged when retrying the same event. The recipient,
+template, rule and sender must also remain unchanged; reusing the identifier
+with different inputs is refused. The template must be published before sending.
+
+The cluster records an attempt before contacting the provider. A retry on any
+replica returns the saved result without submitting another message. If the
+provider response was lost, or the process stopped after the attempt began,
+the retry returns `uncertain: true` and does not resend. Inspect the provider
+and delivery records before deciding whether another message is warranted.
+This prevents duplicate submissions; it does not guarantee mailbox delivery.
+Requests that omit `requestId` retain the existing per-invocation behavior.
+
+Suppression and preflight refusals make no external send attempt and remain
+retryable. Receipt reads still require current send authority in the recorded
+organization. The internal receipt cannot be forged through client mutations.
+
 ## Local test inbox
 
 The local k3d overlay selects the capture email transport automatically. Open
@@ -172,35 +326,31 @@ The four engine concepts (`sendJob`, `suppression`, `reputationWindow`,
 `warmupState`) stay `clusterOwner`-tier and are not readable by an ordinary
 operator at all.
 
-### Suppression is cluster-wide, not per-account
+### Client opt-outs belong to the organization
 
-An unsubscribe is a statement by a person to *the operator of this
-deployment*. Every campaign leaves through the same authenticated mailbox,
-under the same `From` address, signed by the same SPF and DKIM records. A
-per-operator list would let one operator mail an address that unsubscribed
-from another, in a message the recipient cannot tell apart — and the complaint
-lands on the one shared domain reputation. Legally the obligation attaches to
-the sender, and there is one sender.
+An unsubscribe blocks marketing mail from the organization that sent it,
+across that organization's audiences, campaigns, and sending identities.
+It does not remove the same address from an unrelated client's list.
+Both queued campaigns and event-triggered sends check this at send time,
+even if a CSV import has recreated a subscribed membership.
 
-**It costs nobody an address.** `v1:campaigns:suppression` stores no mailbox:
-the row id is the SHA-256 digest of the normalized address, and the only
-human-readable field is the *domain*. So "which domains are bouncing?" is
-answerable to a deliverability review and "who unsubscribed?" is not. A caller
-can ask about an address only if it already holds it.
+The engine-owned `v1:campaigns:suppression` rows store an organization ID and
+an email digest, never a plaintext mailbox. The composite row ID includes
+both, preventing clients from overwriting each other's opt-outs. Reads bypass
+per-node caches so a click handled by one replica is visible to another sender.
 
-The list is `clusterOwner`-tier. Writing it requires admin or the cluster
-owner (`campaignSuppress`, `campaignRecordFeedback`), or is done by the engine
-itself from a verified unsubscribe. An ordinary operator's view of who left is
-their own recipient rows' `subscriptionStatus`, which the next send converges
-onto the list's verdict.
+Existing rows without an organization remain cluster-wide safety blocks.
+They are not silently narrowed or removed. `campaignSuppress` and provider
+hard-bounce/complaint feedback continue to create these administrator-level
+blocks. A matching block in either scope prevents delivery.
 
 ### Suppression is enforced at the point of send
 
-Not at audience-build time. The worker checks the cluster list for every
+Not at audience-build time. The worker checks both suppression scopes for every
 recipient immediately before mailing, **before** it looks at the recipient
 row's own `subscriptionStatus`. That ordering is what "outranks every
 audience" means: a re-imported CSV produces a recipient row saying
-`subscribed`, and the cluster list still refuses it. An audience assembled
+`subscribed`, and the applicable suppression still refuses it. An audience assembled
 last month cannot know about last week's unsubscribe.
 
 A suppressed recipient gets a `skipped` delivery row with the reason, not a
@@ -315,7 +465,13 @@ the opt-out. **A GET never unsubscribes anyone** — mail clients, link scanners
 and security appliances prefetch URLs found in messages, which is precisely
 why RFC 8058 specifies a POST.
 
-The token is an HMAC over (owner, recipient, campaign). It is not stored:
+New tokens bind owner, recipient, campaign, organization, and the original
+normalized email digest with an HMAC. Moving, renaming, or deleting a recipient
+cannot redirect the opt-out. Already-mailed `u2` links remain valid and derive
+the organization from the recipient they originally named. An authoritative
+suppression-write failure returns a retryable 503, never a success page.
+
+The token is not stored:
 storing one would mean a row per recipient per campaign, minted at send time
 and never prunable, because a link in somebody's inbox has to keep working for
 years. It does not expire, for the same reason — a stale unsubscribe link is a
@@ -332,7 +488,7 @@ two — `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` and the optional
 `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS`. Only the first ever signs.
 
 ```
-u2.<keyId>.<owner>.<recipient>.<campaign>.<tag>
+u3.<keyId>.<owner>.<recipient>.<campaign>.<organization>.<emailDigest>.<tag>
    ^^^^^^^ first 4 bytes of HMAC-SHA256(secret, "memql/campaigns/unsubscribe/key-id"), hex
 ```
 
@@ -512,19 +668,17 @@ normalized address, so `reputationWindowsSince` and `warmupStateForIdentity`
 break down per mailbox with no change on their side. They were built for
 plurality and simply start receiving it.
 
-Suppression stays cluster-wide across every identity. Several mailboxes inside
-one operator's tenant are still one legal sender, and an unsubscribe is a
-statement to this deployment's operator — so an address that left one client's
-list is not mailable from another's.
+Organization opt-outs apply across that organization's sending identities.
+Cluster-wide safety blocks still apply across all identities.
 
-### The account tie is a record, never a scope
+### Organization controls access and sending
 
-`accountId` on a campaign, audience, template or identity says *who this work
-is for*. **No query in this tree narrows a read because of it.** An operator
-sees their own rows whatever account they name, and a cluster owner sees
-everyone's. The tie exists so a rollup can answer "what have we sent for this
-client", and so the identity picker can prefill — not so that a campaign can
-be hidden.
+New campaigns, audiences, templates, and sender identities select an
+organization. Read and write access follows the cluster's organization
+authorization rules; the worker checks current send permission, and the
+campaign, audience, template, recipient, and sender must agree on organization.
+A client campaign cannot fall back to the operator's sender identity.
+
 
 ### Adding a sending identity
 

@@ -15,6 +15,13 @@ extension API. It must not keep a competing cluster selection, duplicate
 credentials, install clusters, or become a second MemQL language extension.
 Both extensions use the same MemQL icon and have distinct names and packages.
 
+The shared editor sign-in admits readers and writers, as well as management
+roles and assignable custom roles. Connecting never elevates a role: document
+reads, saves, comments, DSL authoring, and deployment operations remain guarded
+by backend capabilities and row access. Readers may view authorized documents;
+writers may edit and comment where granted access. Productivity Tools does not
+require making its users developers.
+
 ## Cockpit owns the machine
 
 [MemQL Cockpit](https://github.com/znasllc-io/memql-cockpit) is the fleet
@@ -91,7 +98,10 @@ editor; they do not own embedded document, PDF, or email-body editors.
 Names, organization selectors, filters, and other record settings remain
 ordinary OS controls.
 
-The requested default is **VS Code in a separate browser tab**. A setting can
+The default is the [MemQL-hosted browser editor](browser/README.md) in a separate
+tab, with both extensions included and checked before opening a MemQL file. Its
+status bar shows **MemQL tools active** and opens the bundled extensions list.
+A setting can
 select installed VS Code or Cursor instead. A ZIP is downloaded intact to the
 user's machine: opening it never extracts it or loads it as an editor folder.
 PDFs belong to Productivity Tools' viewing and editing surface, including
@@ -103,9 +113,9 @@ This is the owner-approved responsibility boundary, recorded October 1, 2026.
 The existing `vscode/` extension is implemented. Productivity Tools and the
 browser-first file workflow are being implemented; this document does not
 claim that they are installed, published, or ready for use yet. The new artifact handoff opens a versioned file through Productivity Tools.
-Markdown supports source, reading, and split modes with revision-bound feedback. Campaigns
-still contains its previous inline template editor until the replacement is
-working and that editor is removed in the same delivery.
+Markdown supports source, reading, and split modes with revision-bound feedback. Campaigns now hands template content to Productivity Tools and no longer contains
+its previous inline body editor. Template publication is a separate, revision-checked
+action in the editor; creating an AI draft never sends mail.
 
 The implementation and acceptance requirements are recorded in
 [Productivity and campaign workflows](../docs/internal/planning/productivity-and-campaigns.md).

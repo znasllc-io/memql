@@ -19,6 +19,10 @@ recognising.
 
 ---
 
+Materializer collects the brief, sources, and output settings. Its finished
+files open directly in the chosen editor for review and editing. ZIP outputs
+use the regular authenticated download path and remain intact.
+
 ## The two flows, and when each engages
 
 | Flow | What happens | When it runs |
@@ -59,7 +63,7 @@ installed, and `MEMQL_IDENTITY_OAUTH_DCR_ENABLED` has nothing to do with it.
 | Redirect URI | `http://127.0.0.1/callback` | Loopback only, and **portless** -- see below |
 | Client type | Public (no secret) | The extension ships to every user's machine, so a baked-in secret would be a secret in name only |
 | PKCE | Required (S256) | What actually binds the authorization code to the process that asked for it |
-| Role floor | developer and above | The editor is a management surface -- see [Who may connect](#who-may-connect) |
+| Sign-in access | A recognized cluster role | Productivity and development share one connection; individual operations keep their own permissions |
 
 **The portless redirect URI is load-bearing.** The loopback listener takes
 whatever ephemeral port the kernel hands it, so the URI the browser returns to
@@ -87,29 +91,26 @@ hinders editor sign-in.
 
 ## Who may connect
 
-Sign-in from an editor requires the **developer role or above** on the cluster:
+The MemQL extension connects both development tools and Productivity Tools.
+Readers and writers can sign in without being made developers.
 
-| Role | May connect an editor |
-|---|---|
-| owner | yes |
-| admin | yes |
-| developer | yes |
-| writer | no |
-| reader | no |
-| (no cluster-wide role) | no |
+| Role | May connect an editor | Typical authority after connecting |
+|---|---|---|
+| owner | yes | Cluster ownership and authorized document work |
+| admin | yes | Administration and authorized document work; no DSL authoring by default |
+| developer | yes | Development and authorized document work |
+| writer | yes | View, edit, and comment on authorized documents |
+| reader | yes | View authorized documents |
+| assignable custom role | yes | Only the capabilities granted to that role |
+| missing or unrecognized role | no | Ask an owner or admin to check account access |
 
-The editor manages the cluster -- it edits DSL, runs constructs and drives
-deploy controls -- so the floor is a property of what the editor **is**, not a
-general OAuth setting. There is no environment variable for it. Admin is
-included deliberately: an admin operates the console's admin surfaces, and
-refusing them the editor while admitting them there would be incoherent.
-
-**A refused person sees a sentence naming their role**, in the editor, in both
-flows:
-
-> MemQL for Visual Studio Code and Cursor manages this cluster. Your role on it is reader, and signing
-> in from an editor needs developer or above. Ask a cluster owner or admin to
-> raise your role.
+**Signing in does not change a role or grant additional capabilities.** Backend
+checks still govern each operation and each document. A reader cannot save a
+file or add feedback merely because the editor connected. A writer cannot
+manage a cluster or author DSL merely because Productivity Tools shares the
+core extension's connection. Organization and row access remain in force.
+Native cluster installation is available only on supported desktop hosts; it
+is a separate user action, not a side effect of connecting to another cluster.
 
 Every refusal writes an audit event (`editor_signin_refused_role`, category
 `identity`) carrying the client id, the role required and the role held.
@@ -208,7 +209,8 @@ The registered redirect URI has stopped being portless, which breaks the RFC
 ### Sign-in was refused and named my role
 
 That is the [role floor](#who-may-connect). Ask a cluster owner or admin to
-raise your role to developer or above.
+check that your account has a recognized cluster role. Readers and writers can
+connect; changing a role to developer is not necessary for document work.
 
 ### `dial ... failed (missingCredential)` after signing in
 
@@ -263,3 +265,32 @@ floor applies, and the `clientId` override, so the default is what runs.
 - [Sign-in Paths](sign-in-paths.md) -- the five ways to obtain a credential
 - [Identity Service](identity-service.md) -- operator env vars, and the DCR decision
 - [Access Model](access-model.md) -- the role spectrum the floor reads
+
+
+Materializer's Compose and template-binding forms require an organization.
+Saving a completed email composition as a recipe retains that organization,
+the email output type, and the selected reference files. Explicit content and
+image-inclusion choices are preserved: an inspiration image does not silently
+become an image to embed. Query sources resolve again when the recipe runs;
+reference files are read through the runner's current cluster permissions.
+
+### Include images in a generated email
+
+In **Create Email from Examples**, first choose the organization and references.
+In **Images to include**, select logos or photos that should appear in the email;
+leave screenshots of example layouts unselected. Selecting a ZIP here makes its
+supported image members eligible for inclusion. Ordinary ZIP opening still
+only downloads it intact.
+
+MemQL reads and freezes the selected bytes before AI work starts. The resulting
+editable HTML carries included images, so preview and scheduled sends do not
+need permission-bearing Library URLs or a separate image host. Source, Preview,
+and Split continue to share the same draft. The human still saves or publishes
+the reviewed Campaigns revision; generation never sends a message.
+
+Included PNG/JPEG/GIF images are bounded to eight images and 1 MiB total; the
+complete email template remains bounded to 2 MiB. Larger example images can
+remain design references. SMTP/Graph sending converts embedded images to inline attachments. The interim
+ACS adapter is being completed separately. Microsoft currently labels ACS inline attachments a preview feature; validate
+rendering with your recipient clients before enabling production sending.
+See [Microsoft's inline attachment documentation](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/send-email-advanced/send-email-with-inline-attachments).

@@ -3200,6 +3200,7 @@ HOSTNAME. The args field carries the SHAPE half (@maxLength + a lowercase-DNS @p
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.ts).
 export interface CreateSiteArgs {
   siteId: string;
+  extensionRuntimePath?: string;
   accountId?: string;
   hostname: string;
   // Enum: spa | static | shopify_storefront
@@ -3220,6 +3221,7 @@ export interface CreateSiteArgs {
 export function buildCreateSite(args: CreateSiteArgs): string {
   const parts: string[] = [];
   parts.push("siteId: " + renderMemQLValue(args.siteId));
+  if (args.extensionRuntimePath !== undefined) parts.push("extensionRuntimePath: " + renderMemQLValue(args.extensionRuntimePath));
   if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
   parts.push("hostname: " + renderMemQLValue(args.hostname));
   if (args.kind !== undefined) parts.push("kind: " + renderMemQLValue(args.kind));
@@ -3420,38 +3422,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.createStore = function (this: QueryClient, args: CreateStoreArgs = {} as CreateStoreArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createStore", buildCreateStore(args), opts);
-};
-
-/** Create an email template owned by the caller. Lands as a draft; an operator marks it ready with updateTemplate once the copy is finished. Owned. */
-// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["createTemplate"] in generated_concepts.ts).
-export interface CreateTemplateArgs {
-  templateId: string;
-  name: string;
-  subject: string;
-  textBody: string;
-  htmlBody?: string;
-  accountId?: string;
-}
-
-export function buildCreateTemplate(args: CreateTemplateArgs): string {
-  const parts: string[] = [];
-  parts.push("templateId: " + renderMemQLValue(args.templateId));
-  parts.push("name: " + renderMemQLValue(args.name));
-  parts.push("subject: " + renderMemQLValue(args.subject));
-  parts.push("textBody: " + renderMemQLValue(args.textBody));
-  if (args.htmlBody !== undefined) parts.push("htmlBody: " + renderMemQLValue(args.htmlBody));
-  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
-  return "mutation createTemplate(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createTemplate(args: CreateTemplateArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createTemplate = function (this: QueryClient, args: CreateTemplateArgs = {} as CreateTemplateArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createTemplate", buildCreateTemplate(args), opts);
 };
 
 /** Create a to-do for the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own to-dos. sourceResponsibilityId is optional -- responsibilities pass it to attribute app-generated tasks; user-created to-dos leave it empty. */
@@ -4038,6 +4008,7 @@ campaignOwnerUserId is the field that decides whose authority the worker borrows
 clusterOwner tier, so no actor and no owner stamp: these rows have no owner, and reaching them at all requires the engine's own operator identity. */
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["enqueueCampaignSend"] in generated_concepts.ts).
 export interface EnqueueCampaignSendArgs {
+  templateSnapshot?: Record<string, unknown>;
   campaignId: string;
   campaignOwnerUserId: string;
   campaignAccountId?: string;
@@ -4049,6 +4020,7 @@ export interface EnqueueCampaignSendArgs {
 
 export function buildEnqueueCampaignSend(args: EnqueueCampaignSendArgs): string {
   const parts: string[] = [];
+  if (args.templateSnapshot !== undefined) parts.push("templateSnapshot: " + renderMemQLValue(args.templateSnapshot));
   parts.push("campaignId: " + renderMemQLValue(args.campaignId));
   parts.push("campaignOwnerUserId: " + renderMemQLValue(args.campaignOwnerUserId));
   if (args.campaignAccountId !== undefined) parts.push("campaignAccountId: " + renderMemQLValue(args.campaignAccountId));
@@ -8835,40 +8807,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.updateStore = function (this: QueryClient, args: UpdateStoreArgs = {} as UpdateStoreArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("updateStore", buildUpdateStore(args), opts);
-};
-
-/** Edit a template's copy or move it along its lifecycle (draft -> ready -> archived). Owned. */
-// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["updateTemplate"] in generated_concepts.ts).
-export interface UpdateTemplateArgs {
-  templateId: string;
-  name: string;
-  subject: string;
-  textBody: string;
-  htmlBody?: string;
-  status?: string;
-  accountId?: string;
-}
-
-export function buildUpdateTemplate(args: UpdateTemplateArgs): string {
-  const parts: string[] = [];
-  parts.push("templateId: " + renderMemQLValue(args.templateId));
-  parts.push("name: " + renderMemQLValue(args.name));
-  parts.push("subject: " + renderMemQLValue(args.subject));
-  parts.push("textBody: " + renderMemQLValue(args.textBody));
-  if (args.htmlBody !== undefined) parts.push("htmlBody: " + renderMemQLValue(args.htmlBody));
-  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
-  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
-  return "mutation updateTemplate(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    updateTemplate(args: UpdateTemplateArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.updateTemplate = function (this: QueryClient, args: UpdateTemplateArgs = {} as UpdateTemplateArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("updateTemplate", buildUpdateTemplate(args), opts);
 };
 
 /** Update a to-do (title / dueAt / priority) by inserting a new version with the supplied payload. Owned: ownerUserId is re-stamped from actor.userId so a caller can never reassign ownership. The caller threads the full merged payload; the update tool builds it from the current row plus the changed fields. */

@@ -30,6 +30,7 @@ shape audience audienceFull {
 shape recipient recipientFull {
   row.id
   ownerUserId
+  accountId
   audienceId
   email
   displayName
@@ -89,6 +90,7 @@ shape campaign campaignFull {
 shape delivery deliveryFull {
   row.id
   ownerUserId
+  accountId
   campaignId
   recipientId
   email
@@ -118,6 +120,7 @@ shape delivery deliveryLedgerEntry {
 /// including the owner it must impersonate and the provider throttle deadline it must respect.
 @row
 shape sendJob sendJobFull {
+  templateSnapshot
   row.id
   campaignId
   campaignOwnerUserId
@@ -144,6 +147,8 @@ shape sendJob sendJobFull {
 @row
 shape suppression suppressionFull {
   row.id
+  accountId
+  emailDigest
   reason
   domain
   suppressedAt
@@ -189,6 +194,7 @@ shape warmupState warmupStateFull {
 shape consentEvent consentEventFull {
   row.id
   ownerUserId
+  accountId
   emailDigest
   kind
   source
@@ -220,6 +226,7 @@ shape senderIdentity senderIdentityFull {
 shape engagementEvent engagementEventFull {
   row.id
   ownerUserId
+  accountId
   campaignId
   deliveryId
   kind
@@ -262,5 +269,79 @@ shape emailRule emailRuleFull {
   lastError
   lastFiredAt
   firedCount
+  row.createdAt
+}
+
+@row
+shape singleSendReceipt campaignSingleSendFull {
+  row.id
+  accountId
+  fingerprint
+  status
+  result
+  row.createdAt
+}
+
+@row
+shape campaignSeries campaignSeriesFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  authorizedByUserId
+  accountId
+  sourceCampaignId
+  name
+  definition
+  intervalWeeks
+  timeZone
+  anchorAt
+  nextAt
+  status
+  lastCampaignId
+  lastOccurrenceAt
+  lastError
+}
+
+
+/// Complete organization-authorized newsletterBinding projection.
+@row
+shape newsletterBinding newsletterBindingFull {
+  row.id
+  ownerUserId
+  accountId
+  siteId
+  storeId
+  audienceId
+  templateId
+  senderIdentityId
+  consentText
+  enabled
+  row.createdAt
+}
+
+
+/// Complete organization-authorized newsletterSignup projection.
+@row
+shape newsletterSignup newsletterSignupFull {
+  row.id
+  ownerUserId
+  accountId
+  newsletterId
+  siteId
+  storeId
+  audienceId
+  recipientId
+  emailDigest
+  email
+  displayName
+  submissionId
+  consentText
+  consentRevision
+  requestedAt
+  templateId
+  templateSnapshot
+  senderIdentityId
+  status
+  lastError
   row.createdAt
 }

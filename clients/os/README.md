@@ -36,8 +36,11 @@ external OAuth consent also render in OS. Old identity page URLs hand off to
 `/identity/...`, carrying their parameters in the fragment rather than OS access
 logs. Identity remains the authority: its structured representation requires the
 exact configured OS origin (or a verified account front door), credentialed
-requests, and CSRF on mutations. Cookies retain their identity-host paths;
-OAuth/PKCE and device-bound email verification keep their existing protocol.
+requests, and CSRF on mutations. OS fetches the existing native identity and passkey routes through Edge on its
+own origin, so its host-only security/session cookies work with third-party
+cookies blocked. HTML identity URLs still hand off to OS; native routes are
+exact-path and representation-gated, and unsafe requests still require their
+original Origin and CSRF pair. OAuth/PKCE and device-bound email verification keep their existing protocol.
 
 Passkeys keep their existing RP IDs. The identity host publishes
 `/.well-known/webauthn` for WebAuthn Related Origin Requests from OS. Passkey

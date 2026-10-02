@@ -376,6 +376,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// owner-stamped and a caller can only reach their own rows); what is
 		// missing is that a caller may not perform these transitions AT ALL,
 		// which is what @serverOnly says and a tier cannot.
+		// Template content and readiness share a cross-replica revision gate.
+		// Caller scoping admits authorized writers but cannot enforce that gate;
+		// direct writes could overwrite a concurrent edit or publish stale copy.
+		// campaignSaveTemplate retains the actor and checks organization rights.
+		{Path: "campaigns/mutations.memql", Name: "createTemplate"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "updateTemplate"}:         true,
 		{Path: "campaigns/mutations.memql", Name: "startCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "pauseCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "resumeCampaign"}:         true,
@@ -389,6 +395,26 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// it derives a single argument. @serverOnly is the second wall: even
 		// holding a valid token, nothing client-reachable can write this row.
 		{Path: "campaigns/mutations.memql", Name: "recordEngagementEvent"}: true,
+		// The public opt-out has a verified HMAC, not an actor.userId session.
+		// Only its handler derives organization/digest and writes engine state;
+		// actor scoping would either exclude mail clients or admit forged claims.
+		{Path: "campaigns/mutations.memql", Name: "recordOrganizationSuppression"}: true,
+		// An actor may request a send, but only the provider adapter can attest
+		// that an attempt began. The receipt and its replay read are private.
+		// Ownership cannot attest locked scheduling or a committed occurrence.
+		// Newsletter configuration requires multi-resource preflight; signup receipts
+		// attest consent, enrollment and a reviewed snapshot; progress attests delivery.
+		// The queue scan spans owners and rechecks each captured actor before sending.
+		{Path: "campaigns/mutations.memql", Name: "configureNewsletter"}:     true,
+		{Path: "campaigns/mutations.memql", Name: "recordNewsletterSignup"}:  true,
+		{Path: "campaigns/mutations.memql", Name: "updateNewsletterWelcome"}: true,
+		{Path: "campaigns/queries.memql", Name: "pendingNewsletterWelcomes"}: true,
+
+		{Path: "campaigns/mutations.memql", Name: "configureCampaignSeries"}:  true,
+		{Path: "campaigns/mutations.memql", Name: "advanceCampaignSeries"}:    true,
+		{Path: "campaigns/queries.memql", Name: "dueCampaignSeries"}:          true,
+		{Path: "campaigns/mutations.memql", Name: "recordCampaignSingleSend"}: true,
+		{Path: "campaigns/queries.memql", Name: "campaignSingleSendById"}:     true,
 		// memql#4829. The engine's own account of what it made of an event-email
 		// rule -- which bundle and construct it generated, whether activation
 		// succeeded, and how many times the rule has fired. The value of these

@@ -140,6 +140,11 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 		return rowsEnvelope(e.ledgerFor(idListOf(q, "recipientIds"))), nil
 	case strings.HasPrefix(q, "query deliveryLedgerForCampaign"):
 		return rowsEnvelope(e.ledger), nil
+	case strings.HasPrefix(q, "query suppressionForOrganization"):
+		if row, ok := e.suppression[argOf(q, "suppressionId")]; ok && bare(str(row, "accountId")) == bare(argOf(q, "accountId")) {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query suppressionByDigest"):
 		digest := argOf(q, "emailDigest")
 		if row, ok := e.suppression[digest]; ok {
@@ -1077,4 +1082,23 @@ func cursorOf(ctx context.Context) string { return memql.CursorFromContext(ctx) 
 func (e *fakeEngine) OrganizationCapable(ctx context.Context, account, verb, resource string) bool {
 	subject, ok := auth.SubjectFromContext(ctx)
 	return ok && auth.CapableFor(ctx, subject, verb, resource)
+}
+
+func TestQueuedSendKeepsReviewedTemplateAfterAnEditorChange(t *testing.T) {
+	job := jobRow()
+	job["templateSnapshot"] = map[string]any{"id": testTemplate, "subject": "Reviewed copy", "textBody": "Approved message", "htmlBody": "<p>Approved message</p>", "status": "ready"}
+	edited := templateRow()
+	edited["subject"] = "Unfinished changes"
+	edited["textBody"] = "Do not send"
+	edited["status"] = "draft"
+	engine := &fakeEngine{jobs: []map[string]any{job}, campaign: campaignRow(), template: edited, roster: []map[string]any{recipientRow("r-1", "recipient@example.test", "subscribed")}}
+	sender := &recordingSender{}
+	worker := newTestWorker(t, engine, sender)
+	worker.DrainOnce(context.Background())
+	if sender.count() != 1 {
+		t.Fatalf("sent %d, expected frozen reviewed copy", sender.count())
+	}
+	if sender.sent[0].Subject != "Reviewed copy" || !strings.Contains(sender.sent[0].TextBody, "Approved message") {
+		t.Fatalf("sent mutable template: %+v", sender.sent[0])
+	}
 }

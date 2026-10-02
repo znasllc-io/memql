@@ -569,6 +569,7 @@ export interface TemplateFacts {
   htmlBody: string;
   status: string;
   accountId: string;
+  expectedRevision?: string;
 }
 
 export interface CreateTemplateState extends WriteState {
@@ -578,14 +579,9 @@ export interface CreateTemplateState extends WriteState {
 export function useCreateTemplate(): CreateTemplateState {
   const { busy, error, reset, call } = useWrite(async (query, facts: TemplateFacts) => {
     const templateId = newShortId();
-    await query.createTemplate({
-      templateId,
-      name: facts.name.trim(),
-      subject: facts.subject.trim(),
-      textBody: facts.textBody,
-      htmlBody: omitBlank(facts.htmlBody),
-      accountId: facts.accountId.trim(),
-    });
+    const result = await query.campaignSaveTemplate({ templateId, name: facts.name.trim(), accountId: facts.accountId.trim(), expectedRevision: "",
+      content: { subject: facts.subject, textBody: facts.textBody, htmlBody: facts.htmlBody }, action: "save" });
+    if (!result.rows().map(flatten).some(row => row.saved === true && typeof row.revision === "string" && row.revision !== "")) throw new Error("The cluster did not confirm the saved template.");
     return templateId;
   }, "");
   return { busy, error, reset, create: call };
@@ -598,18 +594,10 @@ export interface UpdateTemplateState extends WriteState {
 export function useUpdateTemplate(): UpdateTemplateState {
   const { busy, error, reset, call } = useWrite(
     async (query, templateId: string, facts: TemplateFacts) => {
-      await query.updateTemplate({
-        templateId,
-        name: facts.name.trim(),
-        subject: facts.subject.trim(),
-        // THE BODIES ARE SENT AS TYPED, blank included. `textBody` is required
-        // on the mutation and a body somebody deliberately emptied is a value,
-        // not an omission -- this is the one place `omitBlank` would be wrong.
-        textBody: facts.textBody,
-        htmlBody: omitBlank(facts.htmlBody),
-        status: omitBlank(facts.status),
-        accountId: facts.accountId.trim(),
-      });
+      const result = await query.campaignSaveTemplate({ templateId, name: facts.name.trim(), accountId: facts.accountId.trim(), expectedRevision: facts.expectedRevision || "",
+        content: { subject: facts.subject, textBody: facts.textBody, htmlBody: facts.htmlBody },
+        action: facts.status === "ready" ? "publish" : facts.status === "archived" ? "archive" : "save" });
+      if (!result.rows().map(flatten).some(row => row.saved === true && typeof row.revision === "string" && row.revision !== "")) throw new Error("The cluster did not confirm the template change.");
       return true;
     },
     false,
@@ -899,3 +887,23 @@ export function useCampaignWrites() {
 }
 
 export type CampaignWrites = ReturnType<typeof useCampaignWrites>;
+
+export function useConfigureSeries() {
+  return useWrite(async (query, args: Parameters<Connection["query"]["campaignConfigureSeries"]>[0]) => {
+    await query.campaignConfigureSeries(args);
+    return true;
+  }, false);
+}
+
+
+export function useConfigureNewsletter() {
+  return useWrite(async (query, args: Parameters<Connection["query"]["campaignConfigureNewsletter"]>[0]) => {
+    await query.campaignConfigureNewsletter(args); return true;
+  }, false);
+}
+
+export function useRetryNewsletterWelcome() {
+  return useWrite(async (query, args: Parameters<Connection["query"]["campaignRetryNewsletterWelcome"]>[0]) => {
+    await query.campaignRetryNewsletterWelcome(args); return true;
+  }, false);
+}

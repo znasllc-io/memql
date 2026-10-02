@@ -120,44 +120,52 @@ mutation recipient setRecipientSubscription {
   }
 }
 
-/// Create an email template owned by the caller. Lands as a draft; an operator marks it ready with
-/// updateTemplate once the copy is finished. Owned.
+/// Internal template creation after organization and revision checks in campaignSaveTemplate.
+/// actor.userId still stamps the writer, but caller scoping alone cannot serialize a
+/// creation retry or enforce the server-assigned revision; the capability owns those checks.
 @actor
+@serverOnly
 mutation template createTemplate {
   args {
-    templateId  string!
-    name        string!
-    subject     string!
-    textBody    string!
-    htmlBody    string
-    accountId   string
+    templateId string!
+    name string!
+    subject string!
+    textBody string!
+    htmlBody string
+    accountId string!
+    versionTime datetime!
   }
   insert {
     accept { name, subject, textBody, htmlBody, accountId }
     stamp {
       id: args.templateId
+      createdAt: args.versionTime
       ownerUserId: actor.userId
       status: "draft"
     }
   }
 }
 
-/// Edit a template's copy or move it along its lifecycle (draft -> ready -> archived). Owned.
+/// Internal template update. The capability locks and checks the read revision first.
+/// actor.userId scoping cannot prevent an authorized editor overwriting a concurrent
+/// edit or publishing bytes they did not review; campaignSaveTemplate checks both.
 @actor
+@serverOnly
 mutation template updateTemplate {
   args {
-    templateId  string!
-    name        string!
-    subject     string!
-    textBody    string!
-    htmlBody    string
-    status      string
-    accountId   string
+    templateId string!
+    name string!
+    subject string!
+    textBody string!
+    htmlBody string
+    status string!
+    versionTime datetime!
   }
   update {
-    accept { name, subject, textBody, htmlBody, status, accountId }
+    accept { name, subject, textBody, htmlBody, status }
     stamp {
       id: args.templateId
+      createdAt: args.versionTime
       ownerUserId: actor.userId
     }
   }
@@ -450,6 +458,7 @@ mutation delivery recordCampaignDelivery {
 /// all requires the engine's own operator identity.
 mutation sendJob enqueueCampaignSend {
   args {
+    templateSnapshot object
     campaignId           string!
     campaignOwnerUserId  string!
     campaignAccountId    string
@@ -459,7 +468,7 @@ mutation sendJob enqueueCampaignSend {
     scheduledAt          datetime
   }
   insert {
-    accept { campaignId, campaignOwnerUserId, campaignAccountId, audienceId, templateId, scheduledAt }
+    accept { campaignId, campaignOwnerUserId, campaignAccountId, audienceId, templateId, scheduledAt, templateSnapshot }
     stamp {
       id: args.campaignId
       status: args.status ?? "queued"
@@ -521,6 +530,30 @@ mutation suppression recordSuppression {
     accept { reason, domain, sourceCampaignId, note }
     stamp {
       id: args.emailDigest
+      suppressedAt: now
+    }
+  }
+}
+
+/// ENGINE: append an organization opt-out. The capability derives both the composite identity
+/// and organization; external callers cannot forge a suppression for another client.
+/// actor.userId cannot scope this write: a mail client has no signed-in actor. The
+/// unsubscribe handler verifies the HMAC and borrows only its engine-owned write authority.
+@serverOnly
+mutation suppression recordOrganizationSuppression {
+  args {
+    suppressionId string!
+    accountId string!
+    emailDigest string!
+    reason enum("unsubscribed", "hard_bounce", "complaint", "manual")!
+    domain string
+    sourceCampaignId string
+    note string
+  }
+  insert {
+    accept { accountId, emailDigest, reason, domain, sourceCampaignId, note }
+    stamp {
+      id: args.suppressionId
       suppressedAt: now
     }
   }
@@ -1001,5 +1034,141 @@ mutation emailRule setEmailRuleStatus {
       id: args.emailRuleId
       ownerUserId: actor.userId
     }
+  }
+}
+
+/// Internal transport attestation. actor.userId scopes the receipt but cannot
+/// prove whether a provider call began; only the locked sending capability can.
+@actor
+@serverOnly
+mutation singleSendReceipt recordCampaignSingleSend {
+  args {
+    receiptId string!
+    accountId string!
+    fingerprint string!
+    status enum("attempting", "complete")!
+    result object!
+    versionTime datetime!
+  }
+  insert {
+    accept { accountId, fingerprint, status, result }
+    stamp { id: args.receiptId, ownerUserId: actor.userId, createdAt: args.versionTime }
+  }
+}
+
+/// Scoping to actor.userId cannot attest that the captured configuration passed preflight.
+/// Only campaignConfigureSeries writes this under a shared lock with a revision check.
+@actor
+@serverOnly
+mutation campaignSeries configureCampaignSeries {
+  args {
+    seriesId string!
+    accountId string!
+    sourceCampaignId string!
+    name string!
+    definition object!
+    intervalWeeks int!
+    timeZone string!
+    anchorAt datetime!
+    nextAt datetime!
+    status enum("active", "paused", "blocked")!
+    lastCampaignId string
+    lastOccurrenceAt datetime
+    versionTime datetime!
+  }
+  insert {
+    accept { accountId, sourceCampaignId, name, definition, intervalWeeks, timeZone, anchorAt, nextAt, status, lastCampaignId, lastOccurrenceAt }
+    stamp { id: args.seriesId, ownerUserId: actor.userId, authorizedByUserId: actor.userId, createdAt: args.versionTime, lastError: "" }
+  }
+}
+
+/// Internal scheduler progress; actor.userId cannot prove that an occurrence was queued.
+/// Preserve the person who authorized the series when a system replica advances it.
+@actor
+@serverOnly
+mutation campaignSeries advanceCampaignSeries {
+  args {
+    seriesId string!
+    nextAt datetime!
+    status enum("active", "paused", "blocked")!
+    lastCampaignId string
+    lastOccurrenceAt datetime
+    lastError string!
+    versionTime datetime!
+  }
+  update {
+    accept { nextAt, status, lastCampaignId, lastOccurrenceAt, lastError }
+    stamp { id: args.seriesId, createdAt: args.versionTime }
+  }
+}
+
+
+/// Revision-checked configuration, serialized by the campaign capability.
+/// actor.userId alone cannot attest that all resources were preflighted.
+@actor
+@serverOnly
+mutation newsletterBinding configureNewsletter {
+  args {
+    newsletterId string!
+    accountId string!
+    siteId string!
+    storeId string!
+    audienceId string!
+    templateId string!
+    senderIdentityId string!
+    consentText string!
+    enabled bool!
+    versionTime datetime!
+  }
+  insert {
+    accept { accountId, siteId, storeId, audienceId, templateId, senderIdentityId, consentText, enabled }
+    stamp { id: args.newsletterId, ownerUserId: actor.userId, createdAt: args.versionTime }
+  }
+}
+
+/// This receipt proves that explicit consent and recipient enrollment completed.
+/// actor.userId alone cannot attest those writes or the reviewed snapshot.
+@actor
+@serverOnly
+mutation newsletterSignup recordNewsletterSignup {
+  args {
+    signupId string!
+    accountId string!
+    newsletterId string!
+    siteId string!
+    storeId string!
+    audienceId string!
+    recipientId string!
+    email string!
+    displayName string
+    emailDigest string!
+    submissionId string!
+    consentText string!
+    consentRevision datetime!
+    requestedAt datetime!
+    templateId string!
+    templateSnapshot object!
+    senderIdentityId string!
+  }
+  insert {
+    accept { accountId, newsletterId, siteId, storeId, audienceId, recipientId, email, displayName, emailDigest, submissionId, consentText, consentRevision, requestedAt, templateId, templateSnapshot, senderIdentityId }
+    stamp { id: args.signupId, ownerUserId: actor.userId, status: "pending", lastError: "" }
+  }
+}
+
+/// Worker progress or a revision-checked recheck, under a shared lock.
+/// actor.userId cannot attest the transport outcome or lost-response receipt.
+@actor
+@serverOnly
+mutation newsletterSignup updateNewsletterWelcome {
+  args {
+    signupId string!
+    status enum("pending", "sent", "suppressed", "uncertain", "blocked")!
+    lastError string!
+    versionTime datetime!
+  }
+  update {
+    accept { status, lastError }
+    stamp { id: args.signupId, createdAt: args.versionTime }
   }
 }

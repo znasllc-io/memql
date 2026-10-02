@@ -194,6 +194,18 @@ merge-field values and safely isolates generated HTML. Publishing explicitly
 checks the client's organization and creates a Campaigns template revision;
 sending and scheduling remain Campaigns responsibilities.
 
+The implemented inclusion contract uses `includeImages` on an explicit
+`library_file` content source and preserves it in recipes and execution inputs.
+Only included sources receive model-visible asset handles. Storage URLs are
+removed from the model's captured-file context. Handles resolve to the captured
+image bytes; an unselected, changed, or invented image is refused. The draft
+stores bounded raster data in HTML, and transports convert it to CID attachments.
+This preserves the existing immutable template and scheduled-send snapshots
+without exposing an image bucket. Limits: eight included images, 1 MiB combined
+image data, 2 MiB for the whole template. No automatic image optimization is
+currently performed. ACS inline attachments are a provider preview feature;
+SMTP uses standard MIME and the local test inbox makes no external delivery.
+
 ## A client's storefront subscription journey
 
 Each deployable belongs to an organization. A storefront's subscription form
@@ -206,12 +218,15 @@ that grants access to MemQL. Subscribing never creates an administrative
 membership or gives a shopper application permissions.
 
 Record the address, normalization, source storefront, consent text/version,
-and the subscription state. Repeated form submissions are idempotent. When
-confirmation is required, an unconfirmed address receives confirmation only
-and is not yet eligible for marketing. Completing the subscription can
-trigger one welcome/thank-you email through that organization's transport
-and template. Repeated delivery of the same subscription event must not send
-multiple welcome messages. An unsubscribe is respected at the point of send.
+and the subscription state. Repeated form submissions are idempotent. The
+implemented flow uses explicit single opt-in and a versioned consent sentence;
+it does not yet verify mailbox ownership through double opt-in. A future
+confirmation policy must keep unconfirmed addresses ineligible for marketing.
+Accepted enrollment queues a frozen welcome through that organization's
+transport and template. The durable attempt receipt prevents a duplicate
+provider submission after a lost result, with uncertainty visible to the
+operator. An unsubscribe is respected at the point of send. See the shipped
+[signup workflow](../../public/operate/campaign-sending.md#storefront-newsletter-signups).
 
 The same organization can own multiple independent campaigns. Support one-time
 sends and recurring cadences, including every two or three weeks. Each

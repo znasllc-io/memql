@@ -128,7 +128,7 @@ func TestTestSendCarriesAnInertUnsubscribeToken(t *testing.T) {
 	}
 	// It must NOT verify. Anything else is an opt-out a curious click
 	// performs against a campaign that has not been sent.
-	if _, _, _, err := ParseUnsubscribeToken(w.cfg.UnsubscribeKeys(), inertUnsubscribeToken); err == nil {
+	if _, err := ParseUnsubscribeToken(w.cfg.UnsubscribeKeys(), inertUnsubscribeToken); err == nil {
 		t.Error("the test send's unsubscribe token VERIFIES")
 	}
 	if !strings.Contains(msg.TextBody, "Unsubscribe:") {
