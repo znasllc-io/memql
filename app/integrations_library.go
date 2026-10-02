@@ -15,6 +15,9 @@ func (a *App) wireLibraryIntegration(uploader server.FileUploader) {
 	if !ok {
 		return
 	}
+	if work := a.lookupWorkIntegration(); work != nil {
+		integ.SetReviewGoals(work)
+	}
 	if reader, ok := uploader.(library.BlobFetcher); ok {
 		integ.SetBlobFetcher(reader)
 	}

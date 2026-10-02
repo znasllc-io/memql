@@ -760,6 +760,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 	}
 
+	// Fixed-template review identities are server attestations. Protect both
+	// inserts and updates, including raw writes that bypass @serverOnly names.
+	if !auth.OriginFromContext(ctx).IsInternal() &&
+		(conceptMeta.Name == "v1:work:goal" || conceptMeta.Name == "v1:work:run" || conceptMeta.Name == "v1:work:approval") &&
+		strings.HasPrefix(BareShortId(mutation.ID), "review-") {
+		return nil, meta, fmt.Errorf("review work records require internal origin from the approval workflow")
+	}
+
 	// Review authorship and revision are server attestations. Named mutation
 	// annotations alone do not cover raw insert/update calls.
 	if conceptMeta.Name == "v1:library:documentComment" && !auth.OriginFromContext(ctx).IsInternal() {

@@ -1797,6 +1797,27 @@ QueryClient.prototype.libraryDocumentReview = function (this: QueryClient, args:
   return this.executeNamed("libraryDocumentReview", buildLibraryDocumentReview(args), opts);
 };
 
+/** Read the exact owned proposal, approval, run and output draft. */
+export interface LibraryDocumentRevisionStatusArgs {
+  requestId: string;
+}
+
+export function buildLibraryDocumentRevisionStatus(args: LibraryDocumentRevisionStatusArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin libraryDocumentRevisionStatus(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryDocumentRevisionStatus(args: LibraryDocumentRevisionStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryDocumentRevisionStatus = function (this: QueryClient, args: LibraryDocumentRevisionStatusArgs = {} as LibraryDocumentRevisionStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryDocumentRevisionStatus", buildLibraryDocumentRevisionStatus(args), opts);
+};
+
 /** Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel. */
 export interface LibraryRemoveArtifactLabelArgs {
   artifactId: string;
@@ -1818,6 +1839,37 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryRemoveArtifactLabel = function (this: QueryClient, args: LibraryRemoveArtifactLabelArgs = {} as LibraryRemoveArtifactLabelArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryRemoveArtifactLabel", buildLibraryRemoveArtifactLabel(args), opts);
+};
+
+/** Capture selected current feedback and open a Nexus run waiting for approval. */
+export interface LibraryRequestDocumentRevisionArgs {
+  artifactId: string;
+  expectedVersion: number;
+  expectedRevision: string;
+  commentIds: string[];
+  instruction: string;
+  requestId: string;
+}
+
+export function buildLibraryRequestDocumentRevision(args: LibraryRequestDocumentRevisionArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("expectedVersion: " + renderMemQLValue(args.expectedVersion));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  parts.push("commentIds: " + renderMemQLValue(args.commentIds));
+  parts.push("instruction: " + renderMemQLValue(args.instruction));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin libraryRequestDocumentRevision(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryRequestDocumentRevision(args: LibraryRequestDocumentRevisionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryRequestDocumentRevision = function (this: QueryClient, args: LibraryRequestDocumentRevisionArgs = {} as LibraryRequestDocumentRevisionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision(args), opts);
 };
 
 /** Search the caller's Library by meaning and get whole artifacts back, best match first. */

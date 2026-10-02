@@ -68,6 +68,7 @@ const resultConcept = "integration:library:result"
 // handle so it can re-enter Execute for the read-then-write dance.
 type Integration struct {
 	engine          memql.IntegrationEngineAccess
+	reviewGoals     ReviewGoalOpener
 	versionGate     func(context.Context, string) (func(), error)
 	fileVersionGate func(context.Context, string) (func(), error)
 
@@ -124,6 +125,9 @@ func (i *Integration) IntegrationName() string { return "library" }
 // Capabilities implements memql.IntegrationProvider.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "requestDocumentRevision", Description: "Prepare a revision request awaiting human approval.", Handler: i.handleRequestDocumentRevision},
+		{Name: "documentRevisionStatus", Description: "Read an owned revision request and its saved draft.", Handler: i.handleDocumentRevisionStatus},
+		{Name: "executeDocumentRevision", Description: "Execute an exact approved revision in its owning Nexus run.", Handler: i.handleExecuteDocumentRevision},
 		{Name: "documentReview", Description: "Read comments on an accessible document.", Handler: i.handleDocumentReview},
 		{Name: "addDocumentComment", Description: "Add feedback bound to a saved document revision.", Handler: i.handleAddDocumentComment},
 		{

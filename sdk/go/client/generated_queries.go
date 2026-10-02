@@ -2563,6 +2563,28 @@ func CompositionsForRecipeBuild(args CompositionsForRecipeArgs) string {
 	return b.String()
 }
 
+// CompositionsForRun -- Owned output receipts for one executing run, used by document revision review.
+//
+// Bound concept: v1:compose:composition (machine-readable: BoundConcepts["compositionsForRun"] in generated_concepts.go).
+type CompositionsForRunArgs struct {
+	RunId string
+}
+
+// CompositionsForRun calls the engine query compositionsForRun.
+func (qc *QueryClient) CompositionsForRun(ctx context.Context, args CompositionsForRunArgs) (*Result, error) {
+	call := CompositionsForRunBuild(args)
+	return qc.executeNamed(ctx, "compositionsForRun", call)
+}
+
+func CompositionsForRunBuild(args CompositionsForRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query compositionsForRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ConsentEventsBySubscriber -- Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. The concept tier and organization boundary authorize every returned row.
 //
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["consentEventsBySubscriber"] in generated_concepts.go).
@@ -12297,6 +12319,28 @@ func WarmupStateForIdentityBuild(args WarmupStateForIdentityArgs) string {
 	b.WriteString("query warmupStateForIdentity(")
 	b.WriteString("sendingIdentity: ")
 	b.WriteString(quoteMemQL(args.SendingIdentity))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkApprovalForOwner -- Exact caller-owned approval receipt, including decided approvals for recovery.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalForOwner"] in generated_concepts.go).
+type WorkApprovalForOwnerArgs struct {
+	ApprovalId string
+}
+
+// WorkApprovalForOwner calls the engine query workApprovalForOwner.
+func (qc *QueryClient) WorkApprovalForOwner(ctx context.Context, args WorkApprovalForOwnerArgs) (*Result, error) {
+	call := WorkApprovalForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workApprovalForOwner", call)
+}
+
+func WorkApprovalForOwnerBuild(args WorkApprovalForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query workApprovalForOwner(")
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
 	b.WriteString(")")
 	return b.String()
 }

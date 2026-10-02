@@ -147,3 +147,13 @@ query compositionInput compositionInputById {
   filter row => row.id == args.compositionId && row.ownerUserId == actor.userId
   shape compositionInputFull
 }
+
+/// Owned output receipts for one executing run, used by document revision review.
+@actor
+query composition compositionsForRun {
+ args { runId string! }
+ filter row => row.ownerUserId == actor.userId && row.runId == args.runId
+ sort "row.createdAt", "desc"
+ paginate 2
+ shape compositionFull
+}

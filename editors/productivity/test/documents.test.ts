@@ -66,3 +66,26 @@ test("campaign template saves use the opened client and exact revision", async (
   assert.equal(readTemplate(new TextDecoder().decode(opened.content)).subject,"Thanks for subscribing");
   assert.equal(opened.revision,"2026-10-01T12:00:01Z");
 });
+
+test("revision requests and decisions stay on the document lease and refuse another artifact", async () => {
+  const lease = { domain: "client.example", name: "client", generation: 9 };
+  const calls: { name: string; call: string }[] = [];
+  let wrong = false;
+  const api = { execute: async (actual: unknown, name: string, call: string) => {
+    assert.equal(actual, lease); calls.push({ name, call });
+    if (name === "libraryRequestDocumentRevision") return [{ approvalId: "approval", proposal: { artifactId: "abc" } }];
+    if (name === "libraryDocumentRevisionStatus") return [{ approvalId: "approval", proposal: { artifactId: wrong ? "another" : "abc" } }];
+    return [{ decision: "approved" }];
+  } } as unknown as EditorConnectionAPI;
+  const files = new Documents(api);
+  const doc = { resource: { domain: "client.example", kind: "artifacts" as const, id: "abc", name: "document.md" }, lease,
+    content: new TextEncoder().encode("Source"), mime: "text/markdown", sourceId: "source", kind: "file", version: 3, revision: "file:3" };
+  await files.requestRevision(doc, ["comment"], "Clarify", "same-request");
+  assert.match(calls[0].call, /expectedVersion: 3/);
+  assert.match(calls[0].call, /requestId: "same-request"/);
+  await files.decideRevision(doc, "same-request", "approval", "approved");
+  assert.equal(calls.filter(call => call.name === "decideApproval").length, 1);
+  wrong = true;
+  await assert.rejects(files.decideRevision(doc, "same-request", "approval", "approved"), /does not belong/);
+  assert.equal(calls.filter(call => call.name === "decideApproval").length, 1);
+});

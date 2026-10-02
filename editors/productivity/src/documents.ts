@@ -1,6 +1,6 @@
 import {
   buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
-  buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment,
+  buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment, buildLibraryRequestDocumentRevision, buildLibraryDocumentRevisionStatus, buildDecideApproval,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
@@ -28,9 +28,10 @@ const text = (row: Record<string, unknown>, field: string) => typeof row[field] 
 
 export class Documents {
   constructor(private readonly api: EditorConnectionAPI) {}
-  async read(uri: string): Promise<OpenDocument> {
+  async read(uri: string, openedLease?: ConnectionLease): Promise<OpenDocument> {
     const resource = resourceFrom(uri);
-    const lease = await this.api.connect(resource.domain);
+    const lease = openedLease ?? await this.api.connect(resource.domain);
+    if (lease.domain !== resource.domain) throw new Error("This file belongs to another cluster.");
     if (resource.kind === "templates") {
       const row = (await this.api.execute(lease, "templateById", buildTemplateById({ templateId: resource.id })))[0];
       if (!row) throw new Error("Template not found or unavailable to your organization.");
@@ -80,6 +81,31 @@ export class Documents {
       anchor, body, requestId,
     }));
     if (!result[0]?.saved) throw new Error("The cluster did not confirm this comment. Retry to recover its receipt.");
+  }
+  async requestRevision(document: OpenDocument, commentIds: string[], instruction: string, requestId: string): Promise<Record<string, unknown>> {
+    const result = (await this.api.execute(document.lease, "libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision({
+      artifactId: document.resource.id, expectedVersion: document.version, expectedRevision: document.revision ?? "", commentIds, instruction, requestId,
+    })))[0];
+    if (!result?.approvalId || !result.proposal) throw new Error("The cluster did not confirm the review request. Retry to recover it.");
+    return result;
+  }
+  async revision(document: OpenDocument, requestId: string): Promise<Record<string, unknown>> {
+    const result = (await this.api.execute(document.lease, "libraryDocumentRevisionStatus", buildLibraryDocumentRevisionStatus({ requestId })))[0];
+    const proposal = result?.proposal as Record<string, unknown> | undefined;
+    if (!proposal || proposal.artifactId !== document.resource.id) throw new Error("This revision request does not belong to the open document.");
+    return result;
+  }
+  async decideRevision(document: OpenDocument, requestId: string, approvalId: string, decision: "approved" | "rejected"): Promise<void> {
+    const current = await this.revision(document, requestId);
+    if (current.approvalId !== approvalId) throw new Error("The approval changed. Review the request again.");
+    const result = (await this.api.execute(document.lease, "decideApproval", buildDecideApproval({ approvalId, decision })))[0];
+    if (result?.decision !== decision) throw new Error("The cluster did not confirm your decision. Refresh or retry to recover it.");
+    if (result.resumeError) throw new Error("Your decision was saved, but the job could not start. Retry to recover the same job.");
+  }
+  async revisionDraft(document: OpenDocument, status: Record<string, unknown>): Promise<OpenDocument> {
+    if (status.compositionStatus !== "ready" || typeof status.outputArtifactId !== "string") throw new Error("The revised draft is not ready yet. Refresh its status.");
+    const name = typeof status.outputName === "string" ? status.outputName : "revised.md";
+    return this.read(`memql-file://${document.resource.domain}/artifacts/${encodeURIComponent(status.outputArtifactId)}/${encodeURIComponent(name.replace(/[\\/]/g, "_"))}`, document.lease);
   }
   async save(document: OpenDocument, content: Uint8Array): Promise<void> {
     if (isZip(document.resource.name, document.mime, document.content)) throw new Error("ZIP files are downloads; they cannot be edited or extracted here.");

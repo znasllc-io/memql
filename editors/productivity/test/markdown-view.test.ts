@@ -5,7 +5,7 @@ import { JSDOM } from "jsdom";
 import { renderMarkdown } from "../src/markdown.js";
 
 test("rendered passage selection sends a revision-bound comment and comments render as text", () => {
-  const dom = new JSDOM('<section id="content"></section><section id="comments"></section><div id="status"></div><textarea id="feedback"></textarea><button id="add"></button><button id="source"></button><button id="split"></button><button id="refresh"></button><blockquote id="selected"></blockquote>', {runScripts: "outside-only"});
+  const dom = new JSDOM('<section id="content"></section><section id="comments"></section><div id="status"></div><textarea id="feedback"></textarea><button id="add"></button><button id="source"></button><button id="split"></button><button id="refresh"></button><blockquote id="selected"></blockquote><textarea id="revision-instruction"></textarea><button id="prepare-revision"></button><section id="revision"></section>', {runScripts: "outside-only"});
   const messages: Record<string, unknown>[] = [];
   Object.assign(dom.window, { acquireVsCodeApi: () => ({postMessage: (message: Record<string,unknown>) => messages.push(message), getState: () => undefined, setState: () => {}}) });
   dom.window.eval(readFileSync("dist-test/markdown-view.js", "utf8"));
@@ -26,5 +26,37 @@ test("rendered passage selection sends a revision-bound comment and comments ren
   assert.match(doc.getElementById("comments")!.textContent!,/Earlier revision/);
   send({type:"document",html:renderMarkdown("Unsaved"),version:18,connected:false,status:"Save first"});
   assert.equal((doc.getElementById("add") as HTMLButtonElement).disabled,true);
+  dom.window.close();
+});
+
+test("review view binds selected current comments, renders captured content safely and gates applying behind comparison", () => {
+  const dom = new JSDOM('<section id="content"></section><section id="comments"></section><div id="status"></div><textarea id="feedback"></textarea><button id="add"></button><button id="source"></button><button id="split"></button><button id="refresh"></button><blockquote id="selected"></blockquote><textarea id="revision-instruction"></textarea><button id="prepare-revision"></button><section id="revision"></section>', { runScripts: "outside-only" });
+  const messages: Record<string, unknown>[] = [];
+  Object.assign(dom.window, { acquireVsCodeApi: () => ({ postMessage: (message: Record<string, unknown>) => messages.push(message), getState: () => undefined, setState: () => {} }) });
+  dom.window.eval(readFileSync("dist-test/markdown-view.js", "utf8"));
+  const send = (data: unknown) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data }));
+  const doc = dom.window.document;
+  send({ type: "document", html: renderMarkdown("Original"), version: 4, connected: true });
+  send({ type: "comments", rows: [{ id: "current", body: "Clarify", outdated: false }, { id: "old", body: "Old feedback", outdated: true }] });
+  assert.equal(doc.querySelectorAll('input[type="checkbox"]').length, 1);
+  (doc.querySelector('input[type="checkbox"]') as HTMLInputElement).click();
+  const instruction = doc.getElementById("revision-instruction") as HTMLTextAreaElement;
+  instruction.value = "Use clear language"; instruction.dispatchEvent(new dom.window.Event("input"));
+  doc.getElementById("prepare-revision")!.click();
+  const request = messages.find(message => message.type === "prepareRevision")!;
+  assert.equal(request.version, 4); assert.deepEqual(Array.from(request.commentIds as string[]), ["current"]);
+  const status = { approvalId: "exact-approval", status: "waiting", decision: "", proposal: { revision: "file:3", instruction: "Clarify", content: "<script>private()</script>", comments: [{ body: "<img src=x>", anchor: { quote: "Original" } }] } };
+  send({ type: "revision", status }); send({ type: "revisionIdle" });
+  assert.equal(doc.querySelectorAll("script,img").length, 0);
+  const buttons = () => [...doc.querySelectorAll<HTMLButtonElement>("#revision button")];
+  buttons().find(button => button.textContent === "Approve draft job")!.click();
+  assert.equal(messages.at(-1)?.approvalId, "exact-approval");
+  assert.equal(messages.at(-1)?.decision, "approved");
+  send({ type: "revision", status: { ...status, decision: "approved", status: "succeeded", compositionStatus: "ready", outputArtifactId: "draft" } });
+  send({ type: "revisionIdle" });
+  assert.ok(!buttons().some(button => button.textContent === "Apply compared draft"));
+  buttons().find(button => button.textContent === "Compare draft")!.click();
+  send({ type: "revisionCompared" }); send({ type: "revisionIdle" });
+  assert.ok(buttons().some(button => button.textContent === "Apply compared draft"));
   dom.window.close();
 });

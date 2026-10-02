@@ -271,6 +271,8 @@ func newTestIntegration(t *testing.T) (*Integration, *recordingEngine) {
 	eng := newRecordingEngine()
 	i := New(eng, testLogger())
 	i.SetNow(func() time.Time { return testNow })
+	var decisionMu sync.Mutex
+	i.decisionGate = func(context.Context, string) (func(), error) { decisionMu.Lock(); return decisionMu.Unlock, nil }
 	// Admit every row by default: these tests are about the actor and the
 	// origin, and a gate that denied everything would make every sweep
 	// assertion vacuous. sweep_test.go pins the REFUSAL case explicitly.
