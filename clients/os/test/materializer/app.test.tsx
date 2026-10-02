@@ -654,12 +654,19 @@ describe("organization and reference metadata", () => {
     ]});
   });
 
-  it("requires and stores the organization when binding a template file", async () => {
-    const conn = fakeConnection();
+  it("selects a named file and stores the organization when binding a template", async () => {
+    const conn = fakeConnection({files: [
+      {id: "artifact-shell", kind: "file", sourceConceptRef: "brand-file", title: "Brand shell.docx"},
+      {id: "artifact-zip", kind: "file", sourceConceptRef: "bundle", title: "assets.zip"},
+      {id: "artifact-old", kind: "file", sourceConceptRef: "old", title: "Old shell.docx", archived: true},
+    ]});
     mount(conn, "templates");
     fireEvent.click(screen.getByRole("button", {name: "Bind a file"}));
     fireEvent.change(screen.getByLabelText("Name"), {target: {value: "Brand shell"}});
-    fireEvent.change(screen.getByLabelText("Library file"), {target: {value: "brand-file"}});
+    fireEvent.click(screen.getByLabelText("Library file"));
+    fireEvent.click(await screen.findByRole("option", {name: "Brand shell.docx"}));
+    expect(screen.queryByRole("option", {name: "assets.zip"})).toBeNull();
+    expect(screen.queryByRole("option", {name: "Old shell.docx"})).toBeNull();
     expect(screen.queryByRole("button", {name: "Bind it"})).toBeNull();
     fireEvent.click(screen.getByLabelText("Organization"));
     fireEvent.click(await screen.findByRole("option", {name: "Client A"}));

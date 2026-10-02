@@ -232,7 +232,7 @@ export function MaterializerApp({
         busy={templateActs.busy || recipeActs.busy}
         error={templateActs.error || recipeActs.error}
         showArchived={settings.showArchived}
-        onCreateTemplate={(facts) => void templateActs.create(facts)}
+        onCreateTemplate={(facts) => templateActs.create(facts)}
         onArchiveTemplate={(id) => void templateActs.archive(id)}
         onRestoreTemplate={(id) => void templateActs.restore(id)}
         onRunRecipe={(id) => {

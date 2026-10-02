@@ -1,3 +1,5 @@
+import { useTemplateFiles } from "./useCompose";
+import { artifactFromRow } from "../files/rows";
 import { AccountPicker } from "../accounts/AccountPicker";
 import { accountIsArchived, type AccountRow } from "../accounts/rows";
 import { useState } from "react";
@@ -35,7 +37,7 @@ export interface TemplatesSectionProps {
   recipes: RecipeRow[];
   busy: boolean;
   error: string;
-  onCreateTemplate: (facts: NewTemplateFacts) => void;
+  onCreateTemplate: (facts: NewTemplateFacts) => Promise<string>;
   onArchiveTemplate: (templateId: string) => void;
   onRestoreTemplate: (templateId: string) => void;
   onRunRecipe: (recipeId: string) => void;
@@ -80,9 +82,9 @@ export function TemplatesSection({
         <NewTemplateForm
           accounts={accounts}
           busy={busy}
-          onCreate={(facts) => {
-            onCreateTemplate(facts);
-            setAdding(false);
+          onCreate={async (facts) => {
+            const id = await onCreateTemplate(facts);
+            if (id) setAdding(false);
           }}
         />
       ) : null}
@@ -203,6 +205,11 @@ function NewTemplateForm({
   const [description, setDescription] = useState("");
   const [fileId, setFileId] = useState("");
   const [format, setFormat] = useState("docx");
+  const feed = useTemplateFiles();
+  const files = feed.snapshot.rows.map(artifactFromRow).filter(file =>
+    file.kind === "file" && !file.archived && file.sourceConceptRef &&
+    !/\.zip$/i.test(file.title) && !/zip/i.test(file.mimeType));
+  const selectedFile = files.find(file => file.sourceConceptRef === fileId);
 
   return (
     <Panel label="Bind a Library file as a template">
@@ -222,13 +229,12 @@ function NewTemplateForm({
         />
       </Field>
       <Field label="Library file">
-        <Input
-          id="mz-tpl-file"
-          value={fileId}
-          onChange={setFileId}
-          label="Library file"
-          placeholder="The file's id, from Files"
-        />
+        <Select id="mz-tpl-file" value={selectedFile ? fileId : ""} onChange={setFileId} label="Library file">
+          <option value="" disabled>Choose a file</option>
+          {files.map(file => <option key={file.id} value={file.sourceConceptRef}>{file.title || "Untitled file"}</option>)}
+        </Select>
+        {feed.snapshot.error ? <Notice tone="error" sentence={feed.snapshot.error} /> : null}
+        {feed.snapshot.state === "seeding" ? <Caption>Loading your files…</Caption> : null}
       </Field>
       <Field label="What it produces">
         <Select id="mz-tpl-format" value={format} onChange={setFormat} label="What it produces">
@@ -243,7 +249,7 @@ function NewTemplateForm({
         Upload the file in Files first — a template is a binding to a file your Library already
         holds, so it keeps that file's versions and archives with it.
       </Caption>
-      {accounts.some(account => account.id === accountId && !accountIsArchived(account)) && name.trim() && fileId.trim() ? <Button
+      {accounts.some(account => account.id === accountId && !accountIsArchived(account)) && name.trim() && selectedFile ? <Button
         tone="primary"
         busy={busy}
         onClick={() => onCreate({ name, description, fileId, format, accountId })}

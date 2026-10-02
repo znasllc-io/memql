@@ -101,6 +101,20 @@ export function useTemplates(): LiveCollectionHandle<Row> {
   }));
 }
 
+/** Readable file names for template binding. The artifact index owns archive
+ * state; ZIPs remain downloads and are never offered as template shells. */
+export function useTemplateFiles(): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>("compose:template-files", connection => ({
+    concept: Concepts.LIBRARY_ARTIFACT,
+    seed: async (cursor, signal) => {
+      const result = await connection.query.libraryArtifactsByLens({ lens: "artifact" }, { signal, ...(cursor ? { cursor } : {}) });
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    },
+    reread: async (rowId, signal) =>
+      (await getRowByConceptAndId(connection.query, Concepts.LIBRARY_ARTIFACT, rowId, { signal }) as Row) ?? null,
+  }));
+}
+
 /** Every recipe this caller owns. */
 export function useRecipes(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("compose:recipes", (connection) => ({
