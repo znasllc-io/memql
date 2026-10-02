@@ -1,3 +1,5 @@
+import { AccountPicker } from "../accounts/AccountPicker";
+import { accountIsArchived, type AccountRow } from "../accounts/rows";
 import { useState } from "react";
 
 import { Button, Caption, Field, Head, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead, formatMoment } from "../../kit";
@@ -29,6 +31,7 @@ import { FORMATS, RECIPES_EMPTY, TEMPLATES_EMPTY, formatWord } from "./words";
 
 export interface TemplatesSectionProps {
   templates: TemplateRow[];
+  accounts: AccountRow[];
   recipes: RecipeRow[];
   busy: boolean;
   error: string;
@@ -44,6 +47,7 @@ export interface TemplatesSectionProps {
 }
 
 export function TemplatesSection({
+  accounts,
   templates,
   recipes,
   busy,
@@ -74,6 +78,7 @@ export function TemplatesSection({
 
       {adding ? (
         <NewTemplateForm
+          accounts={accounts}
           busy={busy}
           onCreate={(facts) => {
             onCreateTemplate(facts);
@@ -185,19 +190,25 @@ export function TemplatesSection({
 }
 
 function NewTemplateForm({
+  accounts,
   busy,
   onCreate,
 }: {
   busy: boolean;
   onCreate: (facts: NewTemplateFacts) => void;
+  accounts: AccountRow[];
 }) {
   const [name, setName] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [description, setDescription] = useState("");
   const [fileId, setFileId] = useState("");
   const [format, setFormat] = useState("docx");
 
   return (
     <Panel label="Bind a Library file as a template">
+      <Field label="Organization">
+        <AccountPicker id="mz-template-organization" label="Organization" required value={accountId} onChange={setAccountId} accounts={accounts} />
+      </Field>
       <Field label="Name">
         <Input id="mz-tpl-name" value={name} onChange={setName} label="Name" placeholder="Acme quarterly" />
       </Field>
@@ -232,13 +243,13 @@ function NewTemplateForm({
         Upload the file in Files first — a template is a binding to a file your Library already
         holds, so it keeps that file's versions and archives with it.
       </Caption>
-      <Button
+      {accounts.some(account => account.id === accountId && !accountIsArchived(account)) && name.trim() && fileId.trim() ? <Button
         tone="primary"
         busy={busy}
-        onClick={() => onCreate({ name, description, fileId, format })}
+        onClick={() => onCreate({ name, description, fileId, format, accountId })}
       >
         Bind it
-      </Button>
+      </Button> : null}
     </Panel>
   );
 }

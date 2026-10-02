@@ -65,6 +65,7 @@ function fakeSubscriptions() {
 
 export interface FakeSeed {
   compositions?: Row[];
+  accounts?: Row[];
   runs?: Row[];
   templates?: Row[];
   recipes?: Row[];
@@ -89,6 +90,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
     });
   return {
     query: {
+      clientAccountsAll: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) => rowsResult(seed.accounts ?? [{id: "client-a", name: "Client A", status: "active"}] as Row[])),
       // TYPED ARGS EVEN ON THE NO-ARGUMENT READS. A `vi.fn(async () => ...)`
       // has an empty parameter list, so `.mock.calls[0][0]` is a tuple of
       // length zero and `tsc -b` -- which covers test/ -- refuses the
