@@ -769,6 +769,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	if conceptMeta.Name == "v1:campaigns:template" && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("template writes require campaignSaveTemplate and a saved revision")
 	}
+	if conceptMeta.Name == "v1:campaigns:singleSendReceipt" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("single-send receipts require internal origin from the sending capability")
+	}
 
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {

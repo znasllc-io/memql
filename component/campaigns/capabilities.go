@@ -143,7 +143,8 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"templateId":       "string (required) - v1:campaigns:template.id supplying the subject and bodies",
 				"recipientId":      "string (required) - v1:campaigns:recipient.id to send to",
-				"senderIdentityId": "string (optional) - the identity to send as; empty is the configured default",
+				"senderIdentityId": "string (optional) - organization-owned recipients require an identity in that organization",
+				"requestId":        "string (optional) - stable identifier for one intended message; retries return its durable receipt",
 				"emailRuleId":      "string (optional) - the rule this send came from; also names the audience to resolve the recipient in",
 			},
 		},
