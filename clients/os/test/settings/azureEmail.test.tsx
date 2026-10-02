@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chooseOption } from "../selectControl";
 import { rowsResult, withSession } from "../campaigns/harness";
@@ -16,8 +16,8 @@ const query = (reply: (args: Args) => Record<string, unknown> | Promise<Record<s
   h.connection = { query: { emailAzureSetup: call } };
   return call;
 };
-const click = async (name: string) => { const button = await screen.findByRole("button", { name }); await act(async () => { fireEvent.click(button); }); };
-afterEach(() => { h.connection = null; sessionStorage.clear(); });
+const click = async (name: string) => { const button = vi.isFakeTimers() ? screen.getByRole("button", { name }) : await screen.findByRole("button", { name }); await act(async () => { fireEvent.click(button); }); };
+afterEach(() => { h.connection = null; sessionStorage.clear(); vi.useRealTimers(); });
 
 describe("one Azure configuration per cluster", () => {
   it("connects Microsoft once before saving the cluster's subscription and resource group", async () => {
@@ -88,6 +88,102 @@ describe("one Azure configuration per cluster", () => {
     expect(await screen.findByRole("button", { name: "Set up Azure" })).toBeTruthy();
     expect(call.mock.calls.find(([args]) => args.action === "disconnectCluster")?.[0]).toMatchObject({ accountId: "self", options: { confirmed: true } });
   });
+  it("continues asynchronous Azure creation automatically only after the reviewed plan is approved", async () => {
+    let checks = 0;
+    const call = query(args => {
+      if (args.action === "clusterStatus") return cluster;
+      if (args.action === "status") return { status: "planned", plan, planId: "reviewed" };
+      if (args.action === "provision") return ++checks < 3 ? { status: "provisioning", plan, planId: "reviewed" } : { status: "dns", plan, records: [] };
+      throw Error(`Unexpected ${args.action}`);
+    });
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
+    await screen.findByRole("button", { name: "Manage email for Our company" });
+    vi.useFakeTimers();
+    await click("Manage email for Our company");
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(checks).toBe(0);
+    await click("Create Azure resources");
+    expect(screen.getByText("Preparing email")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Check provisioning" })).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(checks).toBe(2);
+    expect(screen.getByText("Preparing email")).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.getByText(/Merge SPF/)).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(checks).toBe(3);
+    for (const [args] of call.mock.calls.filter(([args]) => args.action === "provision")) expect(args).toMatchObject({ accountId: "self", options: { confirmed: true, planId: "reviewed" } });
+  });
+  it("resumes approved setup, stops on leaving, and never overlaps a slow request", async () => {
+    let finish: (value: Record<string, unknown>) => void = () => {};
+    let checks = 0;
+    query(args => {
+      if (args.action === "clusterStatus") return cluster;
+      if (args.action === "provision") { checks++; return new Promise(done => { finish = done; }); }
+      return { status: "provisioning", plan, planId: "saved" };
+    });
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
+    await screen.findByRole("button", { name: "Manage email for Our company" });
+    vi.useFakeTimers();
+    await click("Manage email for Our company");
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(checks).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(checks).toBe(1);
+    await click("Leave");
+    await act(async () => finish({ status: "provisioning", plan, planId: "saved" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(checks).toBe(1);
+    await click("Manage email for Our company");
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(checks).toBe(2);
+  });
+  it("pauses automatic creation on an Azure error and offers an explicit continuation", async () => {
+    let checks = 0;
+    query(args => {
+      if (args.action === "clusterStatus") return cluster;
+      if (args.action === "provision") { if (++checks === 1) throw Error("Azure permission expired"); return { status: "dns", plan, records: [] }; }
+      return { status: "provisioning", plan, planId: "saved" };
+    });
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
+    await screen.findByRole("button", { name: "Manage email for Our company" });
+    vi.useFakeTimers();
+    await click("Manage email for Our company");
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(screen.getByText("Azure permission expired")).toBeTruthy();
+    expect(screen.getByText("Needs attention")).toBeTruthy();
+    expect(screen.queryByText(/MemQL continues automatically/)).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(checks).toBe(1);
+    await click("Continue setup");
+    expect(screen.getByText(/Merge SPF/)).toBeTruthy();
+    expect(checks).toBe(2);
+  });
+  it("bounds automatic checks and preserves the approved plan for retry", async () => {
+    let checks = 0;
+    query(args => {
+      if (args.action === "clusterStatus") return cluster;
+      if (args.action === "provision") checks++;
+      return { status: "provisioning", plan, planId: "saved" };
+    });
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
+    await screen.findByRole("button", { name: "Manage email for Our company" });
+    vi.useFakeTimers();
+    await click("Manage email for Our company");
+    for (let i = 0; i < 60; i++) await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(checks).toBe(60);
+    expect(screen.getByText("Setup paused")).toBeTruthy();
+    expect(screen.getByText("Azure is taking longer than expected.")).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(checks).toBe(60);
+    await click("Continue setup");
+    expect(checks).toBe(61);
+    expect(screen.getByText("Preparing email")).toBeTruthy();
+  });
   it("explains a missing publisher registration before offering sign-in", async () => {
     const call = query(() => ({ status: "unconfigured", applicationReady: false }));
     render(withSession(<AzureEmailConnections/>));
@@ -103,6 +199,46 @@ describe("one Azure configuration per cluster", () => {
     await click("Manage email for Client");
     expect(await screen.findByText("verification-proof")).toBeTruthy();
     expect(call.mock.calls.some(([args]) => ["begin", "poll", "prepare", "provision"].includes(args.action))).toBe(false);
+  });
+  it("uses the Deployables record layout with exact copy values and readable verification states", async () => {
+    const records = [
+      { purpose: "Domain", name: "client.example", type: "TXT", value: "ms-domain-verification=proof", status: "Verified" },
+      { purpose: "SPF", name: "client.example", type: "TXT", value: "v=spf1 include:spf.protection.outlook.com -all", status: "VerificationInProgress" },
+      { purpose: "DKIM", name: "selector1._domainkey", type: "CNAME", value: "selector1.azurecomm.net", status: "NotStarted" },
+      { purpose: "DKIM2", name: "selector2._domainkey", type: "CNAME", value: "selector2.azurecomm.net", status: "VerificationFailed" },
+    ];
+    query(args => args.action === "clusterStatus" ? cluster : { status: "dns", plan, planId: "saved", records });
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
+    await click("Manage email for Client");
+    expect(screen.queryByRole("table")).toBeNull();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const previous = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    try {
+      const ownership = screen.getByRole("group", { name: "Domain ownership" });
+      expect(within(ownership).getByText("Verified")).toBeTruthy();
+      expect(screen.getByText("Checking")).toBeTruthy();
+      expect(screen.getByText("Not verified")).toBeTruthy();
+      expect(screen.getByText("Check failed")).toBeTruthy();
+      for (const record of records) {
+        const copyValue = screen.getByRole("button", { name: `Copy value: ${record.value}` });
+        await act(async () => { fireEvent.click(copyValue); });
+        expect(writeText).toHaveBeenLastCalledWith(record.value);
+        expect(copyValue.getAttribute("title")).toBe("Copied");
+      }
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Copy name: selector1._domainkey" })); });
+      expect(writeText).toHaveBeenLastCalledWith("selector1._domainkey");
+      expect(screen.queryByRole("button", { name: /Copy type/ })).toBeNull();
+    } finally {
+      if (previous) Object.defineProperty(navigator, "clipboard", previous);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    }
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Domain client.example" })); });
+    expect(screen.queryByRole("group", { name: "Domain ownership" })).toBeNull();
+    expect(screen.queryByLabelText("Email domain")).toBeNull();
+    await click("Continue to verification");
+    expect(screen.getByRole("group", { name: "Domain ownership" })).toBeTruthy();
   });
   it("shows organization processing receipts without claiming recipient delivery", async () => {
     const call = query(args => args.action === "clusterStatus" ? cluster : args.action === "operations" ? { status: "ok", operations: [{ operationId: "receipt", status: "succeeded", detail: "", submittedAt: "2026-10-01T12:00:00Z" }] } : { status: "ready", sender: "news@client.example", plan });

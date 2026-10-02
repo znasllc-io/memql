@@ -233,3 +233,11 @@ Recurring campaigns use `campaign-repeat-empty`, `campaign-repeat-active`, and
 **Set up repeating sends** on the empty view to inspect the date/cadence form.
 
 Newsletter signup fixtures: `campaign-newsletter-empty` and `campaign-newsletter-active`. Open the plus control to review setup; use `width=narrow` for the compact layout.
+
+Azure email setup: `azure-email-dns`, `azure-email-provisioning`, and
+`azure-email-empty` use the shared Campaigns/Settings domain wizard. Open the
+domain row (or Add sending domain on the empty view). Inspect both modes and
+`width=narrow`: DNS names and values use the same copyable strips as Deployables
+domain binding; the footer stays reachable and prior steps reopen. Provisioning
+shows an elapsed wait and continues automatically using the fixture connection.
+These views never contact Azure or change DNS.

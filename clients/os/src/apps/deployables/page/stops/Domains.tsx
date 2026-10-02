@@ -1,6 +1,7 @@
 import { ContentSkeleton } from "../../../../kit/ContentSkeleton";
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Check, Copy, Globe } from "lucide-react";
+import { Globe } from "lucide-react";
+import { DnsRecord as RecordStrip } from "../../../../kit/DnsRecord";
 
 import { Button, Caption, Field, Input, Notice, Select, Subhead, type Stop } from "../../../../kit";
 import type { Act } from "../../../../kit/ActionBar";
@@ -31,7 +32,6 @@ import {
   recordsFor,
   sortDomains,
   statusLabel,
-  type DnsRecord,
   type DomainRow,
   type DomainStepId,
   type PointingMethod,
@@ -600,69 +600,4 @@ function DomainStepBody({ domain: d, site, step }: { domain: DomainRow; site: Si
     <Caption>{serving ? "DNS is verified and the HTTPS certificate is ready." : "DNS and HTTPS are ready. This deployable must be live before its domain can serve content."}</Caption>
     {serving ? <a href={`https://${d.hostname}`} target="_blank" rel="noreferrer noopener">Open {d.hostname}</a> : null}
   </>;
-}
-
-// ---------------------------------------------------------------------------
-// The record strip -- the signature of this surface
-// ---------------------------------------------------------------------------
-
-/**
- * One DNS record, in the three parts a registrar's own form asks for.
- *
- * TYPE / NAME / VALUE, separately copyable, because that is literally the shape
- * of the task: three fields, in another application, in another tab. A single
- * "copy record" button would hand somebody a line they then have to take apart.
- */
-function RecordStrip({ record, awaited }: { record: DnsRecord; awaited: boolean }) {
-  return (
-    <div className="os-record" data-awaited={awaited}>
-      <div className="os-record-parts">
-        {/* TYPE IS NOT COPYABLE, and that is the point rather than an
-            oversight: every registrar offers it as a dropdown, so nobody
-            pastes "TXT". A copy button there would be an affordance for
-            something no one does, crowding the two that matter. */}
-        <div className="os-record-part">
-          <span className="os-record-label">Type</span>
-          <span className="os-record-kind">{record.kind}</span>
-        </div>
-        <RecordPart label="Name" value={record.name} grow />
-        <RecordPart label="Value" value={record.value} grow />
-      </div>
-      <p className="os-record-purpose">{record.purpose}</p>
-    </div>
-  );
-}
-
-function RecordPart({ label, value, grow = false }: { label: string; value: string; grow?: boolean }) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      // A CLIPBOARD REFUSAL IS NOT AN ERROR TO REPORT. The value is on screen
-      // and selectable, so the fallback is the one somebody already has; a
-      // notice here would be a message about the browser rather than about the
-      // domain.
-      setCopied(false);
-    }
-  }
-
-  return (
-    <div className="os-record-part" data-grow={grow}>
-      <span className="os-record-label">{label}</span>
-      <button
-        type="button"
-        className="os-record-value"
-        onClick={() => void copy()}
-        title={`Copy ${label.toLowerCase()}`}
-        aria-label={`Copy ${label.toLowerCase()}: ${value}`}
-      >
-        <code>{value}</code>
-        {copied ? <Check size={11} aria-hidden /> : <Copy size={11} aria-hidden />}
-      </button>
-    </div>
-  );
 }
