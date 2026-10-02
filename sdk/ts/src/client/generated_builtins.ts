@@ -2279,6 +2279,35 @@ QueryClient.prototype.packageArchive = function (this: QueryClient, args: Packag
   return this.executeNamed("packageArchive", buildPackageArchive(args), opts);
 };
 
+/** Public configuration only. Import records a draft after explicit organization selection; Microsoft consent, provisioning and live DNS verification remain in email setup. Export merges into the supplied manifest, preserving apps. */
+export interface PackageCampaignsArgs {
+  action: string;
+  manifest?: string;
+  accountId?: string;
+  organization?: string;
+  confirmed?: boolean;
+}
+
+export function buildPackageCampaigns(args: PackageCampaignsArgs): string {
+  const parts: string[] = [];
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.manifest !== undefined) parts.push("manifest: " + renderMemQLValue(args.manifest));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.organization !== undefined) parts.push("organization: " + renderMemQLValue(args.organization));
+  if (args.confirmed !== undefined) parts.push("confirmed: " + renderMemQLValue(args.confirmed));
+  return "builtin packageCampaigns(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    packageCampaigns(args: PackageCampaignsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.packageCampaigns = function (this: QueryClient, args: PackageCampaignsArgs = {} as PackageCampaignsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("packageCampaigns", buildPackageCampaigns(args), opts);
+};
+
 /** Ask a running deployment to stop (epic memql#4937). It flags the row and ends nothing: the node running the attempt reads the flag at its next stage boundary and closes the run `cancelled`, which is what keeps the timeline from claiming a run stopped while its build is still running somewhere. Refuses a run that is already terminal, and refuses one at or past `staging_dsl` -- from the roll on there is no cancel, because a roll restarts the cluster onto staged MemQL and stopping half way through is the one outcome worse than either finishing or not starting. `cancelled` is its own terminal status and NOT a flavour of `failed`: nothing broke and nothing was published. Returns {deploymentId, status, cancelRequested}. */
 export interface PackageCancelDeploymentArgs {
   /** The v1:platform:package the run belongs to. */

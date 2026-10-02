@@ -16,6 +16,7 @@ const azureClusterKey = "azure-cluster"
 // their own resources, verified domains and sending keys. This sealed record
 // never crosses the client boundary; every replica reads the same version.
 type azureClusterConnection struct {
+	TenantID string       `json:"tenantId,omitempty"`
 	ID       string       `json:"id"`
 	Revision string       `json:"revision"`
 	Status   string       `json:"status"`
@@ -30,7 +31,7 @@ func azureClusterSummary(c azureClusterConnection) map[string]any {
 	}
 	return map[string]any{"status": status, "subscriptionId": c.Plan.SubscriptionID,
 		"resourceGroup": c.Plan.ResourceGroup, "createResourceGroup": c.Plan.CreateResourceGroup,
-		"resourceGroupLocation": c.Plan.ResourceGroupLocation, "dataLocation": c.Plan.DataLocation}
+		"resourceGroupLocation": c.Plan.ResourceGroupLocation, "dataLocation": c.Plan.DataLocation, "tenantId": publicAzure(c).TenantID}
 }
 
 func (a *azureSetup) clusterAction(ctx context.Context, action string, options map[string]any) (map[string]any, error) {
@@ -51,6 +52,17 @@ func (a *azureSetup) clusterAction(ctx context.Context, action string, options m
 		return nil, err
 	}
 	result := azureClusterSummary(cluster)
+	if action == "clusterStatus" && cluster.Plan.SubscriptionID == "" && a.packageDefaults != nil {
+		defaults, err := a.packageDefaults()
+		if err != nil {
+			return nil, err
+		}
+		if defaults != nil {
+			for key, value := range publicScopeMap(defaults.Azure) {
+				result[key] = value
+			}
+		}
+	}
 	clientID := a.protocol.clientID
 	if a.applicationID != nil {
 		var err error

@@ -447,7 +447,13 @@ export const PENDING_DEPLOYMENT_STATUSES = new Set([
   "analyzing", "awaiting_confirm", "building", "staging_dsl", "rolling", "publishing",
 ]);
 
+export interface CampaignPackage {
+  azure: { tenantId?: string; subscriptionId: string; resourceGroup: string; createResourceGroup?: boolean; resourceGroupLocation?: string; dataLocation: string };
+  domains: Array<{ organization: string; domain: string; emailService: string; communicationService: string; sender?: { username: string; displayName: string; replyTo?: string }; dns?: Array<{ purpose: string; name: string; type: string; value: string; ttl: number }> }>;
+}
+
 export interface PackageManifest {
+  campaigns?: CampaignPackage;
   formatVersion: number;
   name: string;
   deployables: Array<{ name: string; displayName?: string; path: string; kind: string; build?: {command?: string; output?: string}; binding?: {store?: string}; testing?: {binding?: {store?: string}}; deployment?: {slug?: string; domains?: string[]}; resolutionTail?: string; assets?: ReportDeployable["assets"] }>;

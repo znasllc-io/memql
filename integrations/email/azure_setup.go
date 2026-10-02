@@ -11,10 +11,12 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/emailconfig"
 	"github.com/znasllc-io/memql/core/id"
 )
 
 type azureSetup struct {
+	packageDefaults func() (*emailconfig.Campaigns, error)
 	store           *connectionStore
 	protocol        *azureProtocol
 	applicationID   func(context.Context) (string, error)
@@ -77,6 +79,24 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 	}
 	action := argString(args, "action")
 	options, _ := args["options"].(map[string]any)
+	if action == "exportPackage" {
+		organization, _ := rows[0]["domain"].(string)
+		if strings.TrimSpace(organization) == "" {
+			organization, _ = rows[0]["name"].(string)
+		}
+		output, err := a.exportPackage(ctx, account, organization)
+		if err != nil {
+			return nil, err
+		}
+		return configureResult(output)
+	}
+	if action == "importPackage" {
+		output, err := a.importPackage(ctx, account, options)
+		if err != nil {
+			return nil, err
+		}
+		return configureResult(output)
+	}
 	if action == "clusterStatus" || action == "disconnectCluster" {
 		if account != "self" {
 			return nil, fmt.Errorf("Azure account configuration belongs to the cluster")
@@ -91,6 +111,9 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 	}
 	if action == "status" || action == "disconnect" || action == "prepare" || action == "operations" {
 		output, err := a.connectionAction(ctx, account, action, options)
+		if err == nil && action == "status" && output["status"] == "unconfigured" {
+			err = a.organizationDefaults(output, rows[0])
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -124,6 +147,15 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 		tenant := argString(options, "tenantId")
 		if tenant == "" {
 			tenant = "organizations"
+			if a.packageDefaults != nil {
+				defaults, err := a.packageDefaults()
+				if err != nil {
+					return nil, err
+				}
+				if defaults != nil && defaults.Azure.TenantID != "" {
+					tenant = defaults.Azure.TenantID
+				}
+			}
 		}
 		grant, err := protocol.begin(ctx, tenant)
 		if err != nil {

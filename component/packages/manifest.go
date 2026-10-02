@@ -2,9 +2,11 @@ package packages
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"strings"
 
+	"github.com/znasllc-io/memql/core/emailconfig"
 	"gopkg.in/yaml.v3"
 )
 
@@ -64,9 +66,10 @@ var KnownUnofferedKinds = map[string]UnofferedTarget{
 // It describes software plus optional deployment defaults. Slugs are relative
 // to the receiving cluster; existing site addresses remain stable on redeploy.
 type Manifest struct {
-	FormatVersion int                  `yaml:"formatVersion" json:"formatVersion"`
-	Name          string               `yaml:"name"          json:"name"`
-	Deployables   []ManifestDeployable `yaml:"deployables"   json:"deployables"`
+	FormatVersion int                    `yaml:"formatVersion" json:"formatVersion"`
+	Name          string                 `yaml:"name"          json:"name"`
+	Deployables   []ManifestDeployable   `yaml:"deployables"   json:"deployables"`
+	Campaigns     *emailconfig.Campaigns `yaml:"campaigns,omitempty" json:"campaigns,omitempty"`
 }
 
 // ManifestDeployable is one declared web surface inside the package.
@@ -171,6 +174,11 @@ func ReadManifest(tree fs.FS) (*Manifest, error) {
 		return nil, refuse(CodeManifestInvalid, "%s could not be read: %v", ManifestName, err)
 	}
 
+	return ParseManifest(raw)
+}
+
+// ParseManifest validates the same manifest for repository sources and settings imports.
+func ParseManifest(raw []byte) (*Manifest, error) {
 	var m Manifest
 	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	// KnownFields turns a typo into a refusal instead of a silent omission.
@@ -180,6 +188,11 @@ func ReadManifest(tree fs.FS) (*Manifest, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&m); err != nil {
 		return nil, refuse(CodeManifestInvalid, "%s is not valid: %v", ManifestName, err)
+	}
+
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, refuse(CodeManifestInvalid, "%s must contain one YAML document", ManifestName)
 	}
 
 	if m.FormatVersion != ManifestFormatVersion {
@@ -198,6 +211,10 @@ func ReadManifest(tree fs.FS) (*Manifest, error) {
 		return nil, refuse(CodeManifestInvalid,
 			"%s does not declare a name. The name is how this package is listed and found after it is deployed.",
 			ManifestName)
+	}
+
+	if err := m.Campaigns.Validate(); err != nil {
+		return nil, refuse(CodeManifestInvalid, "%v", err)
 	}
 
 	seen := make(map[string]struct{}, len(m.Deployables))
@@ -242,6 +259,9 @@ func ReadManifest(tree fs.FS) (*Manifest, error) {
 		}
 	}
 
+	if m.Deployables == nil {
+		m.Deployables = []ManifestDeployable{}
+	}
 	return &m, nil
 }
 

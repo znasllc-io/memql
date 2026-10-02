@@ -13,7 +13,7 @@ const cluster = { status: "connected", subscriptionId: "subscription", resourceG
 type Args = { accountId: string; action: string; sessionId?: string; options?: Record<string, unknown> };
 const query = (reply: (args: Args) => Record<string, unknown> | Promise<Record<string, unknown>>) => {
   const call = vi.fn(async (args: Args) => rowsResult([await reply(args)]));
-  h.connection = { query: { emailAzureSetup: call } };
+  h.connection = { query: { emailAzureSetup: call, packageCampaigns: vi.fn(async () => rowsResult([{status:"installed",manifest:null}])) } };
   return call;
 };
 const click = async (name: string) => { const button = vi.isFakeTimers() ? screen.getByRole("button", { name }) : await screen.findByRole("button", { name }); await act(async () => { fireEvent.click(button); }); };

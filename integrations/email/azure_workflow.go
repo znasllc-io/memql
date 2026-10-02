@@ -15,7 +15,7 @@ func azurePlanID(connection azureConnection) string {
 }
 
 func azureConnectionSummary(connection azureConnection) map[string]any {
-	return map[string]any{"status": connection.Status, "plan": connection.Plan, "planId": azurePlanID(connection), "sender": connection.Config.Default, "senders": connection.Config.Senders, "replyTo": connection.ReplyTo, "senderIdentityId": connection.SenderIdentityID}
+	return map[string]any{"status": connection.Status, "plan": connection.Plan, "planId": azurePlanID(connection), "sender": connection.Config.Default, "senders": connection.Config.Senders, "replyTo": connection.ReplyTo, "senderIdentityId": connection.SenderIdentityID, "requestedSender": connection.RequestedSender}
 }
 
 // Organization status and disconnect require MemQL permission but no live
@@ -61,13 +61,13 @@ func (a *azureSetup) connectionAction(ctx context.Context, account, action strin
 		if err != nil {
 			return err
 		}
-		if found && connection.Status != "disconnected" && connection.Plan != plan {
+		if found && connection.Status != "disconnected" && connection.Status != "draft" && connection.Plan != plan {
 			return fmt.Errorf("disconnect the existing email connection before choosing different resources")
 		}
-		if found && connection.Plan == plan && connection.Status != "disconnected" {
+		if found && connection.Plan == plan && connection.Status != "disconnected" && connection.Status != "draft" {
 			return nil
 		}
-		connection = azureConnection{Status: "planned", AccountID: account, Plan: plan}
+		connection = azureConnection{Status: "planned", AccountID: account, Plan: plan, RequestedSender: connection.RequestedSender, RequestedDNS: connection.RequestedDNS}
 		return nil
 	})
 	if err != nil {
@@ -173,6 +173,8 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 			}
 			connection.Status = "ready"
 			connection.Config = cfg
+			connection.RequestedSender = nil
+			connection.RequestedDNS = nil
 			connection.ReplyTo = replyTo
 			identityID, err := a.saveSenderIdentity(ctx, connection)
 			if err != nil {

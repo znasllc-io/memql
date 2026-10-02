@@ -10,6 +10,7 @@ package app
 // build-tagged app/integrations_*.go files.
 func (a *App) integrationsCore() {
 	a.materializePlugins()
+	a.wireEmailPackageDefaults()
 	// The Shopify connector's boot work -- seeding the first store from the
 	// environment and reconciling every store's webhook subscriptions --
 	// runs after registration and in the background. See
