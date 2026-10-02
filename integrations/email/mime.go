@@ -2,11 +2,14 @@ package email
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/compose"
 )
 
 // mime.go -- RFC 5322 rendering, extracted so BOTH senders produce the
@@ -216,6 +219,11 @@ func RenderRFC5322(fromHeader string, msg Message) ([]byte, error) {
 	if err := ValidateExtraHeaders(msg.Headers); err != nil {
 		return nil, err
 	}
+	htmlBody, images, err := compose.ExtractEmailImages(msg.HTMLBody)
+	if err != nil {
+		return nil, err
+	}
+	msg.HTMLBody = htmlBody
 
 	var b strings.Builder
 	write := func(name, value string) {
@@ -235,12 +243,21 @@ func RenderRFC5322(fromHeader string, msg Message) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("email: generating MIME boundary: %w", err)
 	}
+	relatedBoundary := ""
+	if len(images) > 0 {
+		relatedBoundary, err = randomBoundary()
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	write("From", fromHeader)
 	write("To", msg.To)
 	write("Subject", msg.Subject)
 	write("MIME-Version", "1.0")
-	if multipart {
+	if len(images) > 0 {
+		write("Content-Type", fmt.Sprintf(`multipart/related; boundary="%s"`, relatedBoundary))
+	} else if multipart {
 		write("Content-Type", fmt.Sprintf(`multipart/alternative; boundary="%s"`, boundary))
 	} else {
 		write("Content-Type", "text/plain; charset=UTF-8")
@@ -260,6 +277,9 @@ func RenderRFC5322(fromHeader string, msg Message) ([]byte, error) {
 		b.WriteString(msg.TextBody)
 		return []byte(b.String()), nil
 	}
+	if len(images) > 0 {
+		fmt.Fprintf(&b, "--%s\r\nContent-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", relatedBoundary, boundary)
+	}
 	b.WriteString("--")
 	b.WriteString(boundary)
 	b.WriteString("\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n")
@@ -271,6 +291,20 @@ func RenderRFC5322(fromHeader string, msg Message) ([]byte, error) {
 	b.WriteString("\r\n--")
 	b.WriteString(boundary)
 	b.WriteString("--\r\n")
+	for _, image := range images {
+		fmt.Fprintf(&b, "--%s\r\nContent-Type: %s\r\nContent-ID: <%s>\r\nContent-Disposition: inline\r\nContent-Transfer-Encoding: base64\r\n\r\n", relatedBoundary, image.MIMEType, image.ContentID)
+		encoded := base64.StdEncoding.EncodeToString(image.Data)
+		for len(encoded) > 76 {
+			b.WriteString(encoded[:76])
+			b.WriteString("\r\n")
+			encoded = encoded[76:]
+		}
+		b.WriteString(encoded)
+		b.WriteString("\r\n")
+	}
+	if len(images) > 0 {
+		fmt.Fprintf(&b, "--%s--\r\n", relatedBoundary)
+	}
 	return []byte(b.String()), nil
 }
 

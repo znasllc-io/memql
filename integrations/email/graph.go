@@ -192,7 +192,7 @@ func (g *GraphSender) sendOnce(ctx context.Context, msg Message, as SendAs, forc
 	// transactional message in this deployment already goes out on and
 	// swapping it wholesale would put the guest-invite lane behind an
 	// untested encoder for no gain.
-	if len(msg.Headers) > 0 {
+	if len(msg.Headers) > 0 || strings.Contains(strings.ToLower(msg.HTMLBody), "data:") {
 		return g.sendMIME(ctx, endpoint, token, msg, sendAsAddr, fromName)
 	}
 

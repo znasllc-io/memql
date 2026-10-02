@@ -45,6 +45,9 @@ type SourceRef struct {
 	// Content explicitly opts a Library file into reference processing. Merely
 	// opening an archive in Files never opts it in or expands it.
 	Content bool `json:"content,omitempty"`
+	// IncludeImages permits actual image content in the email, separately
+	// from permission to study the source as a design reference.
+	IncludeImages bool `json:"includeImages,omitempty"`
 }
 
 // Resolved is what a SourceRef found.
@@ -106,6 +109,13 @@ func parseSourceRefs(raw any) ([]SourceRef, error) {
 		}
 		if ref.Content && ref.Kind != KindLibraryFile {
 			return nil, fmt.Errorf("compose: only library_file sources can supply reference contents")
+		}
+		if value, exists := m["includeImages"]; exists {
+			var valid bool
+			ref.IncludeImages, valid = value.(bool)
+			if !valid || (ref.IncludeImages && !ref.Content) {
+				return nil, fmt.Errorf("compose: includeImages must be a boolean and requires reference contents")
+			}
 		}
 		switch ref.Kind {
 		case KindConceptRow, KindLibraryFile, KindQuery:
@@ -240,11 +250,12 @@ func rowSources(resolved []Resolved) []map[string]any {
 	out := make([]map[string]any, 0, len(resolved))
 	for _, r := range resolved {
 		out = append(out, map[string]any{
-			"kind":       string(r.Ref.Kind),
-			"ref":        r.Ref.Ref,
-			"label":      r.Ref.Label,
-			"capturedAt": r.CapturedAt.Format(time.RFC3339),
-			"content":    r.Ref.Content,
+			"kind":          string(r.Ref.Kind),
+			"ref":           r.Ref.Ref,
+			"label":         r.Ref.Label,
+			"capturedAt":    r.CapturedAt.Format(time.RFC3339),
+			"content":       r.Ref.Content,
+			"includeImages": r.Ref.IncludeImages,
 		})
 	}
 	return out

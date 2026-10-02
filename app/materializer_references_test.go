@@ -38,7 +38,7 @@ func (a *referenceAI) CallAIStructured(_ context.Context, _ airoute.ResolveReque
 }
 func TestMaterializerComposesEditableEmailFromVisualReferences(t *testing.T) {
 	ai := &referenceAI{t: t}
-	request := composeint.ComposeRequest{Format: pure.FormatJSON, OutputKind: "email_template", Statement: "Create our autumn welcome email", Sources: []composeint.Resolved{{Ref: composeint.SourceRef{Label: "Brand references"}, Files: []composeint.SourceContent{{Name: "example.png", MimeType: "image/png", Image: []byte("actual-image-bytes")}, {Name: "brief.md", MimeType: "text/plain", Text: "Use our autumn announcement"}}}}}
+	request := composeint.ComposeRequest{Format: pure.FormatJSON, OutputKind: "email_template", Statement: "Create our autumn welcome email", Sources: []composeint.Resolved{{Ref: composeint.SourceRef{Label: "Brand references", Content: true}, Rows: []map[string]any{{"blobUrl": "https://private-storage.test/secret"}}, Files: []composeint.SourceContent{{Name: "example.png", MimeType: "image/png", Image: []byte("actual-image-bytes")}, {Name: "brief.md", MimeType: "text/plain", Text: "Use our autumn announcement"}}}}}
 	reply, err := (materializerComposer{engine: ai}).Compose(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestMaterializerComposesEditableEmailFromVisualReferences(t *testing.T) {
 		t.Fatal("reference did not reach exactly one visual analysis and one composition")
 	}
 	input := ai.messages[1].Content
-	if !strings.Contains(input, "Dark green headline") || !strings.Contains(input, "Use our autumn announcement") || strings.Contains(input, `"image":`) {
+	if !strings.Contains(input, "Dark green headline") || !strings.Contains(input, "Use our autumn announcement") || strings.Contains(input, `"image":`) || strings.Contains(input, "private-storage") {
 		t.Fatalf("composition input omitted references or sent image base64 as prose: %s", input)
 	}
 	var email pure.EmailTemplate
