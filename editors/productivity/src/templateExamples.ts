@@ -5,18 +5,23 @@ import {
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
-interface Reference { kind: "library_file"; ref: string; label: string; content: true }
+interface Reference { kind: "library_file"; ref: string; label: string; content: true; includeImages?: boolean }
 const value = (row: Record<string, unknown>, key: string) => typeof row[key] === "string" ? row[key] as string : "";
 const allowed = /\.(png|jpg|jpeg|gif|zip|txt|md|markdown|html?|css|json|csv|svg)$/i;
 const mimeFor = (name: string) => /\.png$/i.test(name) ? "image/png" : /\.jpe?g$/i.test(name) ? "image/jpeg" : /\.gif$/i.test(name) ? "image/gif" : /\.zip$/i.test(name) ? "application/zip" : "text/plain";
 
 export class TemplateExamples {
   constructor(private readonly api: EditorConnectionAPI, private readonly context: vscode.ExtensionContext) {}
-  async start(): Promise<void> {
+  private starting: Promise<void> | undefined;
+  start(): Promise<void> {
+    if (!this.starting) this.starting = this.create().finally(() => { this.starting = undefined; });
+    return this.starting;
+  }
+  private async create(): Promise<void> {
     const lease = this.api.current();
     if (!lease) throw new Error("Connect and sign in using the MemQL extension before creating from examples.");
     const accounts = await this.api.execute(lease, "clientAccountsAll", buildClientAccountsAll({}));
-    const organization = await vscode.window.showQuickPick(accounts.map(row => ({ label: value(row, "name") || value(row, "id"), id: value(row, "id") })),
+    const organization = await vscode.window.showQuickPick(accounts.filter(row => value(row, "status") === "active").map(row => ({ label: value(row, "name") || value(row, "id"), id: value(row, "id") })),
       { title: "Create email · Organization", placeHolder: "Choose the client this template belongs to", ignoreFocusOut: true });
     if (!organization) return;
     const from = await vscode.window.showQuickPick(["Choose files from this device", "Choose files already in MemQL"],
@@ -48,6 +53,13 @@ export class TemplateExamples {
       if (!selected?.length) return;
       for (const file of selected) sources.push({ kind: "library_file", ref: file.id, label: file.label, content: true });
     }
+    const imageSources = sources.filter(source => /\.(png|jpe?g|gif|zip)$/i.test(source.label));
+    if (imageSources.length) {
+      const assets = await vscode.window.showQuickPick(imageSources.map(source => ({ label: source.label, source, description: /\.zip$/i.test(source.label) ? "Include images from this bundle" : "Include this image" })),
+        { title: "Create email · Images to include", placeHolder: "Select logos or photos (1 MiB total). Leave layout examples unselected; Enter keeps them as references only.", canPickMany: true, ignoreFocusOut: true });
+      if (!assets) return;
+      for (const asset of assets) asset.source.includeImages = true;
+    }
     const name = await vscode.window.showInputBox({ title: "Create email · Name", prompt: "What should we call this template?", placeHolder: "Autumn welcome", ignoreFocusOut: true, validateInput: text => text.trim() ? undefined : "Give the template a name." });
     if (!name) return;
     const brief = await vscode.window.showInputBox({ title: "Create email · Brief", prompt: "What should the email say, and what should it borrow from the examples? Include any approved links.", placeHolder: "Use the layout in example.png, our green brand color, and the welcome copy in brief.md.", ignoreFocusOut: true, validateInput: text => text.trim() ? undefined : "Describe the email you want." });
@@ -59,7 +71,7 @@ export class TemplateExamples {
     if (action === "Save as recipe and create draft") {
       recipeId = globalThis.crypto.randomUUID();
       await this.api.execute(lease, "createComposeRecipe", buildCreateComposeRecipe({ recipeId, name, description: brief, outputKind: "email_template", format: "json", accountIds: [organization.id],
-        sourceSelectors: sources.map(source => ({ kind: "library_file", selector: source.ref, label: source.label, content: true })) }));
+        sourceSelectors: sources.map(source => ({ kind: "library_file", selector: source.ref, label: source.label, content: true, includeImages: source.includeImages === true })) }));
     }
     const result = (await this.api.execute(lease, "composeMaterialize", buildComposeMaterialize({ name, statement: brief,
       outputKind: "email_template", format: "json", accountIds: [organization.id], sources: sources.map(source => ({ ...source })), ...(recipeId ? { recipeId } : {}) })))[0];

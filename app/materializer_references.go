@@ -26,6 +26,10 @@ func (c materializerComposer) referenceInput(ctx context.Context, sources []comp
 	var labels []string
 	for n := range copySources {
 		source := &copySources[n]
+		if source.Ref.Content {
+			// The model gets captured content, not authenticated storage URLs.
+			source.Rows = nil
+		}
 		source.Files = append([]composeint.SourceContent(nil), source.Files...)
 		for f := range source.Files {
 			file := &source.Files[f]
@@ -34,6 +38,9 @@ func (c materializerComposer) referenceInput(ctx context.Context, sources []comp
 			}
 			images = append(images, common.VisionContent{Data: file.Image, MimeType: file.MimeType})
 			labels = append(labels, fmt.Sprintf("Image %d: %s / %s", len(images), source.Ref.Label, file.Name))
+			if outputKind == "email_template" && source.Ref.IncludeImages {
+				file.EmailAssetURL = "memql-asset:" + (pure.Result{Bytes: file.Image}).SHA256()
+			}
 			file.Image = nil
 		}
 	}

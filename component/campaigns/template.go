@@ -41,6 +41,10 @@ func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ 
 	if err != nil {
 		return nil, fmt.Errorf("template: %w", err)
 	}
+	if _, _, err := pure.ExtractEmailImages(content.HTMLBody); err != nil {
+		return nil, err
+	}
+
 	if w.templateGate == nil {
 		return nil, fmt.Errorf("template write coordination is unavailable")
 	}
