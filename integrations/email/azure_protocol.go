@@ -110,7 +110,7 @@ func (a *azureProtocol) begin(ctx context.Context, tenant string) (azureDeviceGr
 		return grant, err
 	}
 	link, err := url.Parse(grant.VerificationURI)
-	if err != nil || link.Scheme != "https" || link.User != nil || link.Port() != "" || (link.Host != "microsoft.com" && link.Host != "www.microsoft.com" && link.Host != "login.microsoftonline.com") || grant.DeviceCode == "" || grant.UserCode == "" || grant.ExpiresIn <= 0 || grant.ExpiresIn > 1800 || grant.Interval < 1 || grant.Interval > 60 {
+	if err != nil || link.Scheme != "https" || link.User != nil || link.Port() != "" || (link.Host != "microsoft.com" && link.Host != "www.microsoft.com" && link.Host != "login.microsoftonline.com" && link.Host != "login.microsoft.com") || grant.DeviceCode == "" || grant.UserCode == "" || grant.ExpiresIn <= 0 || grant.ExpiresIn > 1800 || grant.Interval < 1 || grant.Interval > 60 {
 		return azureDeviceGrant{}, fmt.Errorf("Microsoft returned an invalid sign-in challenge")
 	}
 	return grant, nil

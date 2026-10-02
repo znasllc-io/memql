@@ -2,6 +2,7 @@ package email
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -69,5 +70,35 @@ func TestAzureProtocolErrorsNeverExposeResponseBodies(t *testing.T) {
 	err := a.arm(context.Background(), http.MethodGet, "/subscriptions?api-version=2022-12-01", "secret", nil, nil)
 	if err == nil || strings.Contains(err.Error(), "private-") {
 		t.Fatal("provider diagnostic leaked", err)
+	}
+}
+
+func TestAzureDeviceFlowAcceptsCurrentMicrosoftAddressAndRefusesLookalikes(t *testing.T) {
+	for _, tc := range []struct {
+		uri     string
+		allowed bool
+	}{
+		{"https://login.microsoft.com/device", true},
+		{"https://microsoft.com/devicelogin", true},
+		{"https://login.microsoftonline.com/device", true},
+		{"https://login.microsoft.com.attacker.test/device", false},
+		{"https://login.microsoft.com@attacker.test/device", false},
+		{"http://login.microsoft.com/device", false},
+		{"https://login.microsoft.com:8443/device", false},
+	} {
+		t.Run(tc.uri, func(t *testing.T) {
+			a := newAzureProtocol("12345678-1234-1234-1234-123456789012")
+			a.client.Transport = acsRoundTrip(func(*http.Request) (*http.Response, error) {
+				body, _ := json.Marshal(map[string]any{"device_code": "private", "user_code": "VISIBLE", "verification_uri": tc.uri, "expires_in": 900, "interval": 5})
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+			})
+			grant, err := a.begin(context.Background(), "organizations")
+			if (err == nil) != tc.allowed {
+				t.Fatalf("allowed=%v err=%v", tc.allowed, err)
+			}
+			if err == nil && grant.VerificationURI != tc.uri {
+				t.Fatal("lost Microsoft verification address")
+			}
+		})
 	}
 }

@@ -35,7 +35,7 @@ function EmailSettings({ manageCluster = true, header, backLabel = "Email settin
   useEffect(() => { void call("clusterStatus").then(result => { if (result) setCluster(result); }); }, [call]);
   const name = accounts.find(row => row.id === accountId)?.name || accountId;
   if (manageCluster && view === "cluster" && cluster) return <ClusterAzureEmail state={cluster} onBack={() => setView("list")} onSaved={result => { setCluster(result); setView("list"); }}/>;
-  const picker = <div className="azure-email-organization"><Field label="Organization"><AccountPicker id={`${formID}-organization`} label="Organization" required accounts={accounts} value={accountId} onChange={setAccountId}/></Field></div>;
+  const picker = <div className="azure-email-organization"><AccountPicker id={`${formID}-organization`} label="Organization" required accounts={accounts} value={accountId} onChange={setAccountId}/></div>;
   return <div className="os-app-stack azure-email-connections">
     {view === "list" ? <>{header}<section className="os-app-stack" aria-label="Cluster email">
       {manageCluster ? <Subhead>Cluster email</Subhead> : null}
