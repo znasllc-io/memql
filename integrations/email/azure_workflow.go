@@ -57,7 +57,7 @@ func (a *azureSetup) connectionAction(ctx context.Context, account, action strin
 			connection.Config = ACSConfig{}
 			return nil
 		}
-		plan, err := readAzurePlan(options)
+		plan, err := a.organizationPlan(ctx, options)
 		if err != nil {
 			return err
 		}
@@ -84,6 +84,9 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 			return fmt.Errorf("choose the organization's email resources first")
 		}
 		plan := connection.Plan
+		if plan.ClusterID == "" || plan.ClusterID != session.ClusterID {
+			return fmt.Errorf("this domain's Azure settings differ from the cluster connection; disconnect the domain and configure it again")
+		}
 		if action != "domainStatus" && argString(options, "planId") != azurePlanID(connection) {
 			return fmt.Errorf("the email resource plan changed; reopen the connection and review it before continuing")
 		}
@@ -95,7 +98,7 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 			if err := a.claimResources(ctx, session.AccountID, plan); err != nil {
 				return err
 			}
-			ready, err := a.protocol.ensureSubscription(ctx, session.AccessToken, session.AccountID, plan)
+			ready, err := a.protocol.ensureSubscription(ctx, session.AccessToken, session.ClusterID, plan)
 			if err != nil {
 				return err
 			}
@@ -105,7 +108,7 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 				return nil
 			}
 			for _, path := range []string{plan.emailPath(), plan.communicationPath()} {
-				ready, err := a.protocol.ensureService(ctx, session.AccessToken, path, session.AccountID, plan.DataLocation)
+				ready, err := a.protocol.ensureService(ctx, session.AccessToken, path, session.AccountID, plan.DataLocation, session.ClusterID)
 				if err != nil {
 					return err
 				}

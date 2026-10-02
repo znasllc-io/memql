@@ -1047,7 +1047,7 @@ QueryClient.prototype.effectiveCapabilitiesForActor = function (this: QueryClien
   return this.executeNamed("effectiveCapabilitiesForActor", buildEffectiveCapabilitiesForActor(args), opts);
 };
 
-/** Connect the selected organization to Microsoft Azure email. Owner or developer only. Sign-in credentials stay encrypted on the cluster; responses expose only sign-in instructions and resource choices. */
+/** Configure one Microsoft Azure connection for the cluster with accountId self, then manage each organization's domain and sender using that saved connection. Owner or developer only. Credentials stay encrypted on the cluster. */
 export interface EmailAzureSetupArgs {
   accountId: string;
   action: string;

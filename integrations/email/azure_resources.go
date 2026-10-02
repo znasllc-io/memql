@@ -15,6 +15,7 @@ import (
 // A plan is saved before any Azure mutation. Repeated provisioning calls use
 // the same named resources, so a dropped response cannot create another set.
 type azurePlan struct {
+	ClusterID             string `json:"clusterId"`
 	CreateResourceGroup   bool   `json:"createResourceGroup"`
 	ResourceGroupLocation string `json:"resourceGroupLocation"`
 	SubscriptionID        string `json:"subscriptionId"`
@@ -108,11 +109,11 @@ func azureNotFound(err error) bool {
 
 // Existing resources are reused only when this connection created them. A
 // matching human-readable name alone is never permission to overwrite one.
-func (a *azureProtocol) ensureService(ctx context.Context, token, path, account, location string) (bool, error) {
+func (a *azureProtocol) ensureService(ctx context.Context, token, path, account, location, clusterID string) (bool, error) {
 	var resource azureResource
 	err := a.arm(ctx, http.MethodGet, azureVersion(path), token, nil, &resource)
 	if azureNotFound(err) {
-		body := map[string]any{"location": "Global", "tags": map[string]string{"memql-organization": account}, "properties": map[string]any{"dataLocation": location}}
+		body := map[string]any{"location": "Global", "tags": map[string]string{"memql-organization": account, "memql-cluster": clusterID}, "properties": map[string]any{"dataLocation": location}}
 		if err = a.arm(ctx, http.MethodPut, azureVersion(path), token, body, &resource); err != nil {
 			return false, err
 		}
@@ -122,7 +123,7 @@ func (a *azureProtocol) ensureService(ctx context.Context, token, path, account,
 		return false, err
 	}
 	decodedPath, decodeErr := url.PathUnescape(path)
-	if decodeErr != nil || resource.Tags["memql-organization"] != account || !strings.EqualFold(resource.ID, decodedPath) {
+	if decodeErr != nil || resource.Tags["memql-organization"] != account || resource.Tags["memql-cluster"] != clusterID || !strings.EqualFold(resource.ID, decodedPath) {
 		return false, fmt.Errorf("this Azure service already exists outside this organization's connection; choose another name")
 	}
 	if resource.Properties.DataLocation != location {
@@ -200,7 +201,7 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 		}
 	}
 	for _, path := range []string{plan.emailPath(), plan.communicationPath()} {
-		ready, err := a.ensureService(ctx, token, path, account, plan.DataLocation)
+		ready, err := a.ensureService(ctx, token, path, account, plan.DataLocation, plan.ClusterID)
 		if err != nil {
 			return empty, "", err
 		}
@@ -237,7 +238,7 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 	if err = a.arm(ctx, http.MethodGet, azureVersion(plan.communicationPath()), token, nil, &service); err != nil {
 		return empty, "", err
 	}
-	if service.Tags["memql-organization"] != account || service.Properties.DisableLocalAuth {
+	if service.Tags["memql-organization"] != account || service.Tags["memql-cluster"] != plan.ClusterID || service.Properties.DisableLocalAuth {
 		return empty, "", fmt.Errorf("this Azure service cannot provide this organization's email connection")
 	}
 	linked := false

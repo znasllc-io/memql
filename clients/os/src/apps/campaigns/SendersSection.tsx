@@ -36,25 +36,9 @@ import {
 } from "./rows";
 import type { CampaignFeeds } from "./useCampaigns";
 
-// Senders: the mailboxes this deployment may send campaign mail as.
-//
-// ===========================================================================
-// WHY THIS SECTION EXISTS AT ALL
-// ===========================================================================
-// Without it the campaign editor's identity picker is empty on every fresh
-// cluster, and the only way to get a row into it is a raw mutation. It is not
-// a Settings concern either, even though it sits next to one: Settings ->
-// Integrations is about CREDENTIALS -- the Graph client secret, the SMTP
-// password, the things an operator rotates from a shell -- and a sending
-// identity carries none. It is a campaigns record that says a mailbox exists
-// and may be used.
-//
-// NO CREDENTIAL CROSSES THIS BOUNDARY, which is what makes it an ordinary
-// client-reachable write. Authentication stays the cluster's single mail
-// credential. What declaring an address here CANNOT do is make a mailbox
-// sendable -- that is the tenant's own policy, and an address declared here
-// but missing from it comes back as the provider's own 403 on the campaign's
-// lastError.
+// Campaign authors select organization-owned, verified sender identities.
+// Cluster Settings owns Azure authorization; domain setup reuses that access.
+// Adding a mailbox row alone never grants permission to send from its address.
 
 export function SendersSection({
   feeds,
@@ -83,7 +67,7 @@ export function SendersSection({
     [source, source?.snapshot, openId],
   );
 
-  if (connecting) return <AzureEmailConnections onBack={() => setConnecting(false)} />;
+  if (connecting) return <AzureEmailConnections manageCluster={false} onBack={() => setConnecting(false)} />;
 
   if (adding)
     return (

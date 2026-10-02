@@ -7,6 +7,9 @@ import (
 )
 
 func TestAzureRegistrationRequestsOnlyDelegatedResourceManagement(t *testing.T) {
+	if !azureUUID.MatchString(defaultAzureApplicationID) {
+		t.Fatal("installations must ship MemQL's registered public application ID")
+	}
 	// This is the manifest reviewed before creating MemQL's first-party
 	// application. It must not acquire Graph/mailbox/application permissions
 	// or introduce a client secret to the device sign-in flow.

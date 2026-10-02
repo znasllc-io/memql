@@ -52,6 +52,11 @@ func (a *azureSetup) sender(ctx context.Context, account string) (Sender, error)
 	if connection.Status != "ready" || connection.AccountID != account || connection.Config.AccountID != account {
 		return nil, permanentSendRefusal("this organization's email connection is not ready")
 	}
+	var cluster azureClusterConnection
+	if found, _, err := a.store.read(ctx, azureClusterKey, &cluster); err != nil || !found ||
+		(cluster.Status != "connected" && cluster.Status != "reauthorize") || cluster.ID == "" || cluster.ID != connection.Plan.ClusterID {
+		return nil, permanentSendRefusal("this cluster's Azure email configuration is disconnected or has changed")
+	}
 	q := strings.Replace(renderConfigCall("clientAccountById", map[string]string{"accountId": account}), "mutation ", "query ", 1)
 	result, err := a.store.engine.Execute(emailStateContext(ctx), q)
 	if err != nil {

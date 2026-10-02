@@ -10,7 +10,7 @@ export function CampaignsSettingsSection({ settings, update }: {
 }) {
   const id = useId();
   return <div className="os-settings os-settings-wide campaigns-settings">
-    <AzureEmailConnections header={<Head title="Settings" />} backLabel="Settings">
+    <AzureEmailConnections manageCluster={false} header={<Head title="Settings" />} backLabel="Settings">
       <Panel label="Campaign preferences">
         <Subhead>Preferences</Subhead>
         <fieldset className="os-field-group campaigns-preferences">

@@ -215,7 +215,7 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 		op = acsOperation{ID: id.NewShortId(), AccountID: s.cfg.AccountID, Endpoint: s.cfg.Endpoint, Digest: digest, Intent: intent}
 	}
 	op.Status, op.Detail, op.SubmittedAt, op.NextPollAt = "submitting", "", s.now().UTC(), s.now().UTC().Add(15*time.Second)
-	prior, err = s.operations.write(ctx, key, op, prior)
+	_, err = s.operations.write(ctx, key, op, prior)
 	if err != nil {
 		return err
 	} // No POST before its durable receipt.

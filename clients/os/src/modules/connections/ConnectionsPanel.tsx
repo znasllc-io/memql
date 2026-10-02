@@ -49,5 +49,5 @@ export function ConnectionsPanel({ appId, initialProvider = "github", connectRes
     packages={packages.snapshot.rows.map(packageFromRow)}
     feed={{ state: credentials.snapshot.state, error: credentials.snapshot.error, retry: credentials.reseed }}
     header={header} returnPath={returnPathFor(section, appId)} connectResult={result} />
-    : provider === "email" ? <AzureEmailConnections header={header} /> : <ShopifyConnections header={header} appId={appId} result={shopifyResult} />;
+    : provider === "email" ? <AzureEmailConnections manageCluster={appId === "settings"} header={header} /> : <ShopifyConnections header={header} appId={appId} result={shopifyResult} />;
 }

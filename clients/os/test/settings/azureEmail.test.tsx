@@ -5,139 +5,137 @@ import { rowsResult, withSession } from "../campaigns/harness";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 vi.mock("../../src/apps/accounts/tie", () => ({ useAccountOptions: () => [
-        { id: "self", name: "Our company", status: "active" }, { id: "client", name: "Client", status: "active" },
-    ] }));
+  { id: "self", name: "Our company", status: "active" }, { id: "client", name: "Client", status: "active" },
+] }));
 import { AzureEmailConnections } from "../../src/modules/connections/AzureEmailConnections";
 const plan = { subscriptionId: "subscription", resourceGroup: "mail", emailService: "client-email", communicationService: "client-delivery", domain: "client.example", dataLocation: "United States" };
-const query = (reply: (args: {
-    accountId: string;
-    action: string;
-    sessionId?: string;
-    options?: Record<string, unknown>;
-}) => Record<string, unknown> | Promise<Record<string, unknown>>) => {
-    const call = vi.fn(async (args: Parameters<typeof reply>[0]) => rowsResult([await reply(args)]));
-    h.connection = { query: { emailAzureSetup: call } };
-    return call;
+const cluster = { status: "connected", subscriptionId: "subscription", resourceGroup: "mail", dataLocation: "United States" };
+type Args = { accountId: string; action: string; sessionId?: string; options?: Record<string, unknown> };
+const query = (reply: (args: Args) => Record<string, unknown> | Promise<Record<string, unknown>>) => {
+  const call = vi.fn(async (args: Args) => rowsResult([await reply(args)]));
+  h.connection = { query: { emailAzureSetup: call } };
+  return call;
 };
 const click = async (name: string) => { const button = await screen.findByRole("button", { name }); await act(async () => { fireEvent.click(button); }); };
 afterEach(() => { h.connection = null; sessionStorage.clear(); });
-describe("organization Azure email setup", () => {
-    it("uses Microsoft sign-in without requesting tokens and saves the reviewed plan before any provisioning", async () => {
-        let saved = {};
-        const call = query(args => {
-            if (args.action === "status")
-                return { status: "unconfigured" };
-            if (args.action === "begin")
-                return { status: "waiting", sessionId: "session", userCode: "ABCDEF", verificationUri: "https://microsoft.com/devicelogin", interval: 0.01 };
-            if (args.action === "poll")
-                return { status: "connected" };
-            if (args.action === "directories")
-                return { status: "connected", choices: [] };
-            if (args.action === "subscriptions")
-                return { status: "connected", choices: [{ id: "subscription", name: "Client subscription" }] };
-            if (args.action === "resourceGroups")
-                return { status: "connected", choices: [{ id: "group-id", name: "mail" }] };
-            if (args.action === "locations")
-                return { status: "connected", choices: [] };
-            if (args.action === "prepare") {
-                saved = args.options!;
-                return { status: "planned", plan: saved, planId: "reviewed-plan" };
-            }
-            if (args.action === "provision")
-                return { status: "dns", plan: saved, records: [] };
-            throw Error(`Unexpected ${args.action}`);
-        });
-        render(withSession(<AzureEmailConnections />));
-        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
-        await click("Connect email");
-        await click("Sign in with Microsoft");
-        expect(screen.queryByLabelText("Client secret")).toBeNull();
-        expect(screen.queryByLabelText("Access token")).toBeNull();
-        await screen.findByRole("combobox", { name: "Subscription" });
-        chooseOption(screen.getByRole("combobox", { name: "Subscription" }), "Client subscription");
-        await waitFor(() => expect(call.mock.calls.some(([args]) => args.action === "locations")).toBe(true));
-        chooseOption(screen.getByRole("combobox", { name: "Resource group" }), "mail");
-        fireEvent.change(screen.getByLabelText("Email domain"), { target: { value: "client.example" } });
-        await click("Review resources");
-        expect(call.mock.calls.filter(([args]) => args.action === "provision")).toHaveLength(0);
-        expect(screen.getByText(/Azure email usage is billed/)).toBeTruthy();
-        await click("Create Azure resources");
-        expect(call.mock.calls.find(([args]) => args.action === "provision")?.[0]).toMatchObject({ accountId: "self", sessionId: "session", options: { confirmed: true, planId: "reviewed-plan" } });
-        expect(await screen.findByText(/Merge SPF/)).toBeTruthy();
+
+describe("one Azure configuration per cluster", () => {
+  it("connects Microsoft once before saving the cluster's subscription and resource group", async () => {
+    const call = query(args => {
+      if (args.action === "clusterStatus") return { status: "unconfigured", applicationReady: true, capture: true };
+      if (args.action === "begin") return { status: "waiting", sessionId: "session", userCode: "ABCDEF", verificationUri: "https://microsoft.com/devicelogin", interval: 0.01 };
+      if (args.action === "poll") return { status: "connected" };
+      if (args.action === "subscriptions") return { status: "connected", choices: [{ id: "subscription", name: "Our subscription" }] };
+      if (args.action === "directories" || args.action === "locations") return { status: "connected", choices: [] };
+      if (args.action === "resourceGroups") return { status: "connected", choices: [{ id: "group", name: "mail" }] };
+      if (args.action === "saveCluster") return cluster;
+      if (args.action === "status") return { status: "unconfigured" };
+      throw Error(`Unexpected ${args.action}`);
     });
-    it("explains the one-time registration prerequisite without a failing sign-in button", async () => {
-        const call = query(() => ({ status: "unconfigured", applicationReady: false }));
-        render(withSession(<AzureEmailConnections />));
-        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
-        await click("Connect email");
-        expect(await screen.findByText("Microsoft sign-in needs a one-time MemQL app registration.")).toBeTruthy();
-        expect(screen.queryByRole("button", { name: "Sign in with Microsoft" })).toBeNull();
-        expect(call.mock.calls.some(([args]) => args.action === "begin")).toBe(false);
+    render(withSession(<AzureEmailConnections/>));
+    await click("Set up Azure");
+    await click("Sign in with Microsoft");
+    expect(screen.queryByLabelText("Client secret")).toBeNull();
+    expect(screen.queryByLabelText("Email domain")).toBeNull();
+    await screen.findByRole("combobox", { name: "Subscription" });
+    chooseOption(screen.getByRole("combobox", { name: "Subscription" }), "Our subscription");
+    await waitFor(() => expect(call.mock.calls.some(([args]) => args.action === "locations")).toBe(true));
+    chooseOption(screen.getByRole("combobox", { name: "Resource group" }), "mail");
+    await click("Save configuration");
+    expect(await screen.findByRole("button", { name: "Manage configuration" })).toBeTruthy();
+    expect(call.mock.calls.find(([args]) => args.action === "saveCluster")?.[0]).toMatchObject({ accountId: "self", sessionId: "session", options: { subscriptionId: "subscription", resourceGroup: "mail" } });
+    expect(call.mock.calls.some(([args]) => args.action === "provision")).toBe(false);
+  });
+  it("keeps cluster connection controls out of Campaigns", async () => {
+    const call = query(args => args.action === "clusterStatus" ? { status: "unconfigured", capture: true } : { status: "unconfigured" });
+    render(withSession(<AzureEmailConnections manageCluster={false}/>));
+    expect(await screen.findByText(/Configure Azure once in Settings/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Set up Azure" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in with Microsoft" })).toBeNull();
+    expect(call.mock.calls.some(([args]) => args.action === "begin")).toBe(false);
+  });
+  it("adds a client's domain using saved cluster settings without another Microsoft sign-in", async () => {
+    const call = query(args => {
+      if (args.action === "clusterStatus") return cluster;
+      if (args.action === "status") return { status: "unconfigured" };
+      if (args.action === "prepare") return { status: "planned", plan, planId: "reviewed" };
+      if (args.action === "provision") return { status: "dns", plan, records: [] };
+      throw Error(`Unexpected ${args.action}`);
     });
-    it("shows organization processing receipts without claiming recipient delivery", async () => {
-        const call = query(args => args.action === "operations" ? { status: "ok", operations: [{ operationId: "receipt-1", status: "succeeded", detail: "", submittedAt: "2026-10-01T12:00:00Z" }] } : { status: "ready", sender: "news@client.example", plan });
-        render(withSession(<AzureEmailConnections />));
-        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
-        await click("Manage email for Client");
-        await click("Check sends");
-        expect(await screen.findByText("Processing completed")).toBeTruthy();
-        expect(screen.getByText(/does not confirm inbox delivery/)).toBeTruthy();
-        expect(call.mock.calls.find(([args]) => args.action === "operations")?.[0].accountId).toBe("client");
-    });
-    it("does not show a previous organization's late connection reply", async () => {
-        let resolve: (value: Record<string, unknown>) => void = () => { };
-        query(args => args.accountId === "self" ? new Promise(done => { resolve = done; }) : { status: "ready", sender: "news@client.example", plan });
-        render(withSession(<AzureEmailConnections />));
-        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
-        await waitFor(() => expect(screen.getByRole("combobox", { name: "Organization" })).toBeTruthy());
-        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
-        expect(await screen.findByText("news@client.example")).toBeTruthy();
-        await act(async () => resolve({ status: "ready", sender: "owner@our-company.example", plan }));
-        expect(screen.queryByText("owner@our-company.example")).toBeNull();
-    });
-    it("resumes DNS verification after signing in again and keeps the saved resource plan", async () => {
-        const call = query(args => {
-            if (args.action === "status")
-                return { status: "dns", plan };
-            if (args.action === "begin")
-                return { status: "waiting", sessionId: "resumed", interval: 0.01 };
-            if (args.action === "poll")
-                return { status: "connected" };
-            if (args.action === "directories")
-                return { status: "connected", choices: [] };
-            if (args.action === "subscriptions")
-                return { status: "connected", choices: [] };
-            if (args.action === "domainStatus")
-                return { status: "dns", plan, records: [{ purpose: "Domain", name: "client.example", type: "TXT", value: "verification-proof", status: "NotStarted" }] };
-            throw Error(`Unexpected ${args.action}`);
-        });
-        render(withSession(<AzureEmailConnections />));
-        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
-        await click("Manage email for Our company");
-        await click("Continue setup");
-        await click("Sign in with Microsoft");
-        expect(await screen.findByText("verification-proof")).toBeTruthy();
-        expect(call.mock.calls.filter(([args]) => args.action === "prepare" || args.action === "provision")).toHaveLength(0);
-    });
-    it("does not offer connection setup until the status is known", async () => {
-        query(() => new Promise(() => {}));
-        render(withSession(<AzureEmailConnections />));
-        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
-        expect(screen.queryByRole("button", { name: "Connect email" })).toBeNull();
-        expect(screen.queryByText("No email connection")).toBeNull();
-    });
-    it("offers retry on a failed status read instead of treating it as unconfigured", async () => {
-        query(() => { throw Error("Connection unavailable"); });
-        render(withSession(<AzureEmailConnections />));
-        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
-        expect(await screen.findByText("Email connection could not be read.")).toBeTruthy();
-        expect(screen.queryByRole("button", { name: "Connect email" })).toBeNull();
-        expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
-    });
-    it("keeps connection configuration with owners and developers", async () => {
-        const call = query(() => ({ status: "ready" }));
-        render(withSession(<AzureEmailConnections />, { role: "writer" }));
-        expect(screen.getByText(/An owner or developer/)).toBeTruthy();
-        expect(call).not.toHaveBeenCalled();
-    });
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
+    await click("Add sending domain");
+    expect(screen.queryByRole("button", { name: "Sign in with Microsoft" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Subscription" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Email domain"), { target: { value: "client.example" } });
+    await click("Review domain");
+    expect(call.mock.calls.some(([args]) => args.action === "provision")).toBe(false);
+    await click("Create Azure resources");
+    expect(await screen.findByText(/Merge SPF/)).toBeTruthy();
+    expect(call.mock.calls.find(([args]) => args.action === "prepare")?.[0]).toMatchObject({ accountId: "client", options: { domain: "client.example" } });
+    expect(call.mock.calls.find(([args]) => args.action === "prepare")?.[0].options).not.toHaveProperty("subscriptionId");
+    expect(call.mock.calls.find(([args]) => args.action === "provision")?.[0]).toMatchObject({ accountId: "client", sessionId: "", options: { confirmed: true, planId: "reviewed" } });
+    expect(call.mock.calls.some(([args]) => args.action === "begin" || args.action === "poll")).toBe(false);
+  });
+  it("has one cluster configuration, with an explicit disconnect affecting all organizations", async () => {
+    const call = query(args => args.action === "disconnectCluster" ? { status: "disconnected" } : args.action === "clusterStatus" ? cluster : { status: "unconfigured" });
+    render(withSession(<AzureEmailConnections/>));
+    await click("Manage configuration");
+    await click("Disconnect");
+    expect(screen.getByText(/every organization/)).toBeTruthy();
+    expect(call.mock.calls.some(([args]) => args.action === "disconnectCluster")).toBe(false);
+    await click("Disconnect Azure");
+    expect(await screen.findByRole("button", { name: "Set up Azure" })).toBeTruthy();
+    expect(call.mock.calls.find(([args]) => args.action === "disconnectCluster")?.[0]).toMatchObject({ accountId: "self", options: { confirmed: true } });
+  });
+  it("explains a missing publisher registration before offering sign-in", async () => {
+    const call = query(() => ({ status: "unconfigured", applicationReady: false }));
+    render(withSession(<AzureEmailConnections/>));
+    await click("Set up Azure");
+    expect(await screen.findByText("Microsoft sign-in needs a one-time MemQL app registration.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Sign in with Microsoft" })).toBeNull();
+    expect(call.mock.calls.some(([args]) => args.action === "begin")).toBe(false);
+  });
+  it("resumes a client's DNS verification without a browser sign-in session", async () => {
+    const call = query(args => args.action === "clusterStatus" ? cluster : args.action === "domainStatus" ? { status: "dns", plan, records: [{ purpose: "Domain", name: "client.example", type: "TXT", value: "verification-proof", status: "NotStarted" }] } : { status: "dns", plan, planId: "saved-plan" });
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
+    await click("Manage email for Client");
+    expect(await screen.findByText("verification-proof")).toBeTruthy();
+    expect(call.mock.calls.some(([args]) => ["begin", "poll", "prepare", "provision"].includes(args.action))).toBe(false);
+  });
+  it("shows organization processing receipts without claiming recipient delivery", async () => {
+    const call = query(args => args.action === "clusterStatus" ? cluster : args.action === "operations" ? { status: "ok", operations: [{ operationId: "receipt", status: "succeeded", detail: "", submittedAt: "2026-10-01T12:00:00Z" }] } : { status: "ready", sender: "news@client.example", plan });
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
+    await click("Manage email for Client"); await click("Check sends");
+    expect(await screen.findByText("Processing completed")).toBeTruthy();
+    expect(screen.getByText(/does not confirm inbox delivery/)).toBeTruthy();
+    expect(call.mock.calls.find(([args]) => args.action === "operations")?.[0].accountId).toBe("client");
+  });
+  it("discards a previous organization's late domain response", async () => {
+    let resolve: (value: Record<string, unknown>) => void = () => {};
+    query(args => args.action === "clusterStatus" ? cluster : args.accountId === "self" ? new Promise(done => { resolve = done; }) : { status: "ready", sender: "news@client.example", plan });
+    render(withSession(<AzureEmailConnections/>));
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Our company");
+    chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
+    expect(await screen.findByText("news@client.example")).toBeTruthy();
+    await act(async () => resolve({ status: "ready", sender: "owner@our-company.example", plan }));
+    expect(screen.queryByText("owner@our-company.example")).toBeNull();
+  });
+  it("keeps Azure configuration unavailable until its status is known", async () => {
+    query(() => new Promise(() => {})); render(withSession(<AzureEmailConnections/>));
+    expect(screen.queryByRole("button", { name: "Set up Azure" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add sending domain" })).toBeNull();
+  });
+  it("offers retry when the cluster status is unreadable", async () => {
+    query(() => { throw Error("Connection unavailable"); }); render(withSession(<AzureEmailConnections/>));
+    expect(await screen.findByText("Cluster email configuration could not be read.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Set up Azure" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+  it("keeps configuration with owners and developers", async () => {
+    const call = query(() => cluster); render(withSession(<AzureEmailConnections/>, { role: "writer" }));
+    expect(screen.getByText(/An owner or developer/)).toBeTruthy(); expect(call).not.toHaveBeenCalled();
+  });
 });

@@ -1412,7 +1412,7 @@ func EffectiveCapabilitiesForActorBuild(args EffectiveCapabilitiesForActorArgs) 
 	return "builtin effectiveCapabilitiesForActor()"
 }
 
-// EmailAzureSetup -- Connect the selected organization to Microsoft Azure email. Owner or developer only. Sign-in credentials stay encrypted on the cluster; responses expose only sign-in instructions and resource choices.
+// EmailAzureSetup -- Configure one Microsoft Azure connection for the cluster with accountId self, then manage each organization's domain and sender using that saved connection. Owner or developer only. Credentials stay encrypted on the cluster.
 type EmailAzureSetupArgs struct {
 	AccountId string
 	Action    string

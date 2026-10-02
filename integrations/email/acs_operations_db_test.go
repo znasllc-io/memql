@@ -72,9 +72,16 @@ func TestACSSendReceiptReconcilesOnAnotherReplicaWithoutReposting(t *testing.T) 
 	}
 	cfg := acsFixture(t).cfg
 	cfg.AccountID = account
+	var cluster azureClusterConnection
+	if err := instances[0].azure.store.change(owner, azureClusterKey, &cluster, func(bool) error {
+		cluster = azureClusterConnection{ID: account, Status: "connected"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var connection azureConnection
 	if err := instances[0].azure.store.change(owner, "organization:"+account, &connection, func(bool) error {
-		connection = azureConnection{Status: "ready", AccountID: account, Config: cfg}
+		connection = azureConnection{Status: "ready", AccountID: account, Config: cfg, Plan: azurePlan{ClusterID: cluster.ID}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)

@@ -7,7 +7,7 @@ import (
 	"net/url"
 )
 
-func (a *azureProtocol) ensureSubscription(ctx context.Context, token, account string, plan azurePlan) (bool, error) {
+func (a *azureProtocol) ensureSubscription(ctx context.Context, token, clusterID string, plan azurePlan) (bool, error) {
 	providerPath := "/subscriptions/" + plan.SubscriptionID + "/providers/Microsoft.Communication"
 	var provider struct {
 		RegistrationState string `json:"registrationState"`
@@ -30,12 +30,12 @@ func (a *azureProtocol) ensureSubscription(ctx context.Context, token, account s
 	}
 	err := a.arm(ctx, http.MethodGet, groupPath, token, nil, &group)
 	if azureNotFound(err) && plan.CreateResourceGroup {
-		err = a.arm(ctx, http.MethodPut, groupPath, token, map[string]any{"location": plan.ResourceGroupLocation, "tags": map[string]string{"memql-organization": account}}, &group)
+		err = a.arm(ctx, http.MethodPut, groupPath, token, map[string]any{"location": plan.ResourceGroupLocation, "tags": map[string]string{"memql-cluster": clusterID}}, &group)
 	}
 	if err != nil {
 		return false, err
 	}
-	if plan.CreateResourceGroup && (group.Tags["memql-organization"] != account || group.Location != plan.ResourceGroupLocation) {
+	if plan.CreateResourceGroup && (group.Tags["memql-cluster"] != clusterID || group.Location != plan.ResourceGroupLocation) {
 		return false, fmt.Errorf("this resource group already exists with different settings; select it as an existing group or choose another name")
 	}
 	return true, nil

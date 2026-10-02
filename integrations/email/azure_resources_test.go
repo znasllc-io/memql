@@ -26,7 +26,7 @@ func TestAzureProvisioningDoesNotOverwriteUnrelatedResources(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"id": p.emailPath(), "tags": map[string]string{"memql-organization": "another-client"}, "properties": map[string]string{"dataLocation": "United States", "provisioningState": "Succeeded"}})
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
 	})
-	if _, err := a.ensureService(context.Background(), "token", p.emailPath(), "client", "United States"); err == nil {
+	if _, err := a.ensureService(context.Background(), "token", p.emailPath(), "client", "United States", p.ClusterID); err == nil {
 		t.Fatal("unrelated service accepted")
 	}
 	if writes != 0 {
@@ -100,5 +100,20 @@ func TestAzureDomainCannotBecomeReadyWithMissingVerification(t *testing.T) {
 	}
 	if azureDomainSummary(domain)["status"] != "dns" {
 		t.Fatal("incomplete domain claimed ready")
+	}
+}
+
+func TestAzureProvisioningRefusesSameOrganizationInAnotherCluster(t *testing.T) {
+	p := azurePlanFixture()
+	a := newAzureProtocol("")
+	a.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet {
+			t.Fatal("changed another cluster's resource")
+		}
+		body, _ := json.Marshal(map[string]any{"id": p.emailPath(), "tags": map[string]string{"memql-organization": "self", "memql-cluster": "other-cluster"}, "properties": map[string]string{"dataLocation": "United States", "provisioningState": "Succeeded"}})
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body)))}, nil
+	})
+	if _, err := a.ensureService(context.Background(), "token", p.emailPath(), "self", "United States", "this-cluster"); err == nil {
+		t.Fatal("borrowed another cluster's service")
 	}
 }

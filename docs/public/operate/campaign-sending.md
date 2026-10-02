@@ -87,70 +87,129 @@ The client write surface is `campaignSaveTemplate`, with `templateId`,
 `publish`, or `archive`). Its receipt includes the saved revision and status.
 Raw template writes and the underlying create/update mutations are internal.
 
-## Connect an organization's Azure email
+## Configure Azure once for the cluster
 
-In **Campaigns → Senders → Connect email domain**, or **Settings → Connections →
-Email**, choose the client organization first. These are two entrances to the
-same connection. An owner or developer with write access to that organization
-can configure it. Other campaign authors select its saved sending identities.
+An owner or developer configures **Settings → Connections → Email** once for
+this installation. There is one Azure configuration, shared by every client
+organization in the cluster. Clients do not need Azure accounts or separate
+Microsoft sign-ins when the operator runs their email on its own subscription.
+Campaigns manages client domains and senders; it links to Settings when the
+cluster needs configuration.
 
 1. **Sign in with Microsoft.** Enter the displayed code on Microsoft's page.
    MemQL requests delegated Azure Resource Manager access under your Microsoft
-   account. Your tenant may require an administrator's consent. No password,
-   client secret, or subscription key is entered into the campaign form.
-2. **Choose the subscription and resource group.** For accounts with access to
-   multiple Microsoft directories, switch directories before selecting the
-   subscription. You can select an existing resource group or name a new one
-   and choose its region. Enter the client's email domain and select the email
-   data location. The suggested service names can be changed.
-3. **Review, then create.** MemQL registers the Communication resource provider
+   account. Your tenant may require administrator consent. No password, client
+   secret, or subscription key is entered into MemQL.
+2. **Choose the subscription and resource group.** Switch Microsoft directories
+   first if necessary. Select an existing resource group, or name a new one and
+   choose its region. Select the email data location.
+3. **Save configuration.** MemQL verifies access to the enabled subscription and
+   an existing selected group, then saves the authorization encrypted in this
+   cluster. Saving creates no Azure services and sends no mail. A new group is
+   created only when you later confirm a domain's resource plan.
+
+All replicas use the same saved configuration and coordinate refresh-token
+rotation in PostgreSQL. The private browser sign-in session is bound to its
+initiating MemQL user and expires after one hour once authorized; the saved
+cluster authorization remains available after it expires. Only the opaque
+session identifier is kept by the browser. Access tokens, refresh tokens, and
+sending keys never appear in browser responses. Microsoft can revoke the
+saved authorization or require another sign-in under its directory policy.
+Existing verified sends can continue with their sending keys when management
+sign-in needs renewal; domain changes require renewed authorization.
+
+**Disconnect** in cluster email settings stops Azure sends and domain setup
+for every organization. Reconnect before choosing a different subscription or
+resource configuration. Reconnecting to the same configuration can resume its
+existing domains. Changing it requires reconfiguring each domain; the cluster
+never silently reuses credentials from a different configuration. Disconnect
+does not delete Azure resources, revoke keys in Azure, alter DNS, or stop Azure
+billing. Historical encrypted versions follow the installation's retention
+policy. Already submitted messages cannot be recalled.
+
+### Add each client's domain and sender
+
+In **Campaigns → Settings**, **Campaigns → Senders → Connect email domain**, or
+**Settings → Connections → Email**, select the client organization. An owner or
+developer also needs write access to that organization. Other campaign authors
+use its saved sending identities.
+
+1. **Add sending domain.** Enter the client's domain. Resource names are
+   suggested and can be changed. Subscription, group, and email data location
+   come from the cluster configuration; no client Microsoft sign-in is needed.
+2. **Review, then create.** MemQL registers the Communication resource provider
    if needed and creates the email service, delivery service, and custom-domain
-   resource. Azure usage belongs to the selected subscription. MemQL does not
-   convert the subscription, buy support, or send a message during setup.
-   Repeating an interrupted step checks the same resources. A conflicting
-   service owned outside this organization's connection is refused. Service names
-   are reserved across cluster replicas before Azure creation, and remain assigned
-   to that organization after disconnecting. If another operator changes the plan,
-   review the new plan before creating its resources.
-4. **Verify the domain.** Add the exact TXT/CNAME records Microsoft supplies at
-   the domain's DNS provider, then choose **Check domain records**. Merge an SPF
-   include into an existing SPF record instead of creating a second SPF record.
-   Do not replace existing MX or website records. Domain, SPF, and both DKIM
-   checks must succeed before the sender can be enabled. DNS propagation may
-   require returning later; the connection plan is saved.
-5. **Choose a sender.** For example, sender `news` on `client.com` sends from
-   `news@client.com`. Set the client's display name and a reply mailbox that
-   already receives mail, such as `help@client.com`. ACS is outbound email; it
-   does not create a mailbox. `no-reply` is an optional name, not a requirement.
-   The verified sender is saved in the ordinary Campaigns sender list.
+   resource. Usage is billed to the operator's selected Azure subscription.
+   MemQL does not convert the subscription, buy support, or send mail during
+   setup. Interrupted steps check the same resources. Resource ownership tags
+   bind services to this cluster configuration and organization; unrelated
+   resources are refused. Names are reserved across replicas before creation
+   and remain assigned after disconnecting. A changed plan must be reviewed
+   again before resources are created.
+3. **Verify domain.** Add the exact TXT/CNAME records Microsoft supplies at the
+   domain's DNS provider, then choose **Check domain records**. Merge an SPF
+   include into an existing SPF record rather than creating a second one.
+   Preserve existing MX and website records. Domain, SPF, and both DKIM checks
+   must succeed. The plan is saved, so you can return after DNS propagates
+   without another Microsoft sign-in.
+4. **Save sender.** Sender `news` on `client.com` sends as `news@client.com`.
+   Set the client's display name and an existing reply mailbox such as
+   `help@client.com`. ACS sends outbound mail; it does not create receiving
+   mailboxes. `no-reply` is optional. The verified sender appears in Campaigns.
 
-The organization credential is encrypted on the cluster. Microsoft sign-in
-sessions are tied to the exact MemQL user and organization, expire after one
-hour once connected, and are shared across replicas. Closing a screen does not
-lose the resource plan. A new Microsoft sign-in can resume it. Only the public
-session identifier is retained by the browser; access tokens, refresh tokens,
-and service keys are not returned to it.
+A client send requires that organization's ready transport and verified sender.
+It never falls back to the operator's Graph/SMTP mailbox. ACS sets the display
+name on the sender resource; a campaign override that differs is refused.
+**Disconnect domain** stops only that organization's future sends, preserving
+other organizations and the cluster's Azure authorization.
 
-A client send requires its own ready connection and a verified sender in that
-connection. It never falls back to the operator's Graph/SMTP mailbox. ACS sets
-its sender display name on the sender resource; a campaign override that does
-not match is refused. Disconnecting clears the active connection credential and
-stops future sends across replicas. It does not delete Azure resources, revoke
-keys in Azure, or alter DNS. Historical encrypted record versions remain
-subject to the installation's retention policy.
+A successful ACS submission means **accepted by Azure**, not delivered to an
+inbox. Ambiguous submission responses are not automatically resubmitted.
+Delivery feedback still needs the pipeline described below; this setup does
+not install an Event Grid delivery-feedback route.
 
-A successful ACS send currently means **accepted by Azure**, not delivered to
-an inbox. An ambiguous submission response is not automatically submitted a
-second time. Delivery feedback still needs the feedback pipeline described
-below; the setup flow does not install an Event Grid delivery-feedback route.
+### Registration and installation setup
 
-The installation must have a registered first-party MemQL Microsoft application
-before sign-in is available. This is installation/publisher configuration,
-separate from each organization's connection. The flow uses Microsoft's device
-code protocol and the existing MemQL stream; it adds no OAuth callback endpoint.
-See Microsoft's [device authorization flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code),
+MemQL ships the public application ID of **MemQL Azure Connection**, its
+multi-tenant Microsoft Entra application. This identifies the software; it is
+not a secret, subscription, or authorization. Register the application once
+for MemQL. Operators do not register another app or supply its ID in environment
+variables for each client or installation. The same registration supports local
+and cloud installations in commercial Azure.
+
+Each installation keeps its own authorization and sending credentials. A local
+connection is never copied into a cloud cluster or another client's installation.
+The same operator may configure separate clusters against its own directory and
+subscription. A client's directory consent is relevant only if the operator
+chooses to use Azure resources controlled by that client. Consent cannot give
+the signed-in user Azure permissions they do not already hold.
+
+The device code flow uses the existing MemQL stream. It adds no OAuth callback
+endpoint or per-installation redirect URL. Local capture works without Azure;
+connecting Microsoft does not switch test emails to external delivery.
+
+**Initial installation integration remains planned.** The intended onboarding
+is to configure cluster email during installation and leave Campaigns ready to
+manage client domains. Azure deployment authorization should be reused where
+possible, with a durable cluster identity and narrowly scoped access; deployment
+CLI credentials must not be copied into the cluster. The current implementation
+uses the one-time Settings flow above. The infrastructure installer does not yet
+provision this authorization or a verified sender. Existing transactional email
+bootstrap is separate: do not remove a working bootstrap transport before its
+replacement can deliver owner verification and login mail. Creating the app
+registration alone does not solve that bootstrap dependency.
+
+Microsoft directory policy can require administrator approval. Publisher
+verification is separate from verifying a publisher domain. The registration's
+publisher verification must be completed before relying on broad customer
+self-service consent. This does not require a separate registration for each
+operator-managed client. See Microsoft's [application and service principal model](https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals)
+and [publisher verification requirements](https://learn.microsoft.com/en-us/entra/identity-platform/publisher-verification-overview).
+
+Protocol references: [device authorization flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code),
 [email domain setup](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/add-custom-verified-domains),
-and [email sending API](https://learn.microsoft.com/en-us/rest/api/communication/email/email/send?view=rest-communication-email-2025-09-01).
+[email sending API](https://learn.microsoft.com/en-us/rest/api/communication/email/email/send?view=rest-communication-email-2025-09-01).
+
 ## Storefront newsletter signups
 
 In **Campaigns → Audiences**, open the client's audience and choose **Storefront

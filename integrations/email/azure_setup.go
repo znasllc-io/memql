@@ -24,9 +24,12 @@ type azureSetup struct {
 }
 
 type azureSession struct {
+	ID              string    `json:"id"`
+	ClusterRevision string    `json:"clusterRevision"`
 	ClientID        string    `json:"clientId"`
 	OwnerID         string    `json:"ownerId"`
 	AccountID       string    `json:"accountId"`
+	ClusterID       string    `json:"clusterId,omitempty"`
 	Tenant          string    `json:"tenant"`
 	Status          string    `json:"status"`
 	DeviceCode      string    `json:"deviceCode,omitempty"`
@@ -74,6 +77,18 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 	}
 	action := argString(args, "action")
 	options, _ := args["options"].(map[string]any)
+	if action == "clusterStatus" || action == "disconnectCluster" {
+		if account != "self" {
+			return nil, fmt.Errorf("Azure account configuration belongs to the cluster")
+		}
+		output, err := a.clusterAction(ctx, action, options)
+		if err != nil {
+			return nil, err
+		}
+		_, capture := captureSender(i.sender, ctx)
+		output["capture"] = capture
+		return configureResult(output)
+	}
 	if action == "status" || action == "disconnect" || action == "prepare" || action == "operations" {
 		output, err := a.connectionAction(ctx, account, action, options)
 		if err != nil {
@@ -81,7 +96,23 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 		}
 		return configureResult(output)
 	}
+	if action == "provision" || action == "verify" || action == "domainStatus" || action == "sender" {
+		output, err := a.withCluster(ctx, account, func(session azureSession) (map[string]any, error) {
+			return a.resourceAction(ctx, session, action, options)
+		})
+		if err != nil {
+			return nil, err
+		}
+		return configureResult(output)
+	}
+	if account != "self" {
+		return nil, fmt.Errorf("sign in to Microsoft once for the cluster, not for each organization")
+	}
 	if action == "begin" {
+		var cluster azureClusterConnection
+		if _, _, err := a.store.read(ctx, azureClusterKey, &cluster); err != nil {
+			return nil, err
+		}
 		protocol := a.protocol
 		if a.applicationID != nil {
 			clientID, err := a.applicationID(ctx)
@@ -104,7 +135,7 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 			if found {
 				return fmt.Errorf("could not allocate an Azure setup session")
 			}
-			session = azureSession{ClientID: protocol.clientID, OwnerID: memql.BareShortId(ac.UserId), AccountID: account, Tenant: tenant, Status: "waiting", DeviceCode: grant.DeviceCode, UserCode: grant.UserCode, VerificationURI: grant.VerificationURI, Interval: grant.Interval, ExpiresAt: a.clock().Add(time.Duration(grant.ExpiresIn) * time.Second), NextPollAt: a.clock().Add(time.Duration(grant.Interval) * time.Second)}
+			session = azureSession{ID: sessionID, ClusterRevision: cluster.Revision, ClientID: protocol.clientID, OwnerID: memql.BareShortId(ac.UserId), AccountID: account, Tenant: tenant, Status: "waiting", DeviceCode: grant.DeviceCode, UserCode: grant.UserCode, VerificationURI: grant.VerificationURI, Interval: grant.Interval, ExpiresAt: a.clock().Add(time.Duration(grant.ExpiresIn) * time.Second), NextPollAt: a.clock().Add(time.Duration(grant.Interval) * time.Second)}
 			return nil
 		})
 		if err != nil {
@@ -112,7 +143,7 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 		}
 		return configureResult(map[string]any{"sessionId": sessionID, "status": "waiting", "userCode": session.UserCode, "verificationUri": session.VerificationURI, "expiresAt": session.ExpiresAt, "interval": session.Interval})
 	}
-	if action != "poll" && action != "subscriptions" && action != "directories" && action != "resourceGroups" && action != "locations" && action != "cancel" && action != "provision" && action != "verify" && action != "domainStatus" && action != "sender" {
+	if action != "poll" && action != "subscriptions" && action != "directories" && action != "resourceGroups" && action != "locations" && action != "cancel" && action != "saveCluster" {
 		return nil, fmt.Errorf("unknown Azure setup action")
 	}
 	sessionID := argString(args, "sessionId")
@@ -190,9 +221,13 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 			}
 			session.TokenExpiresAt = a.clock().Add(time.Duration(reply.ExpiresIn) * time.Second)
 		}
-		if action == "provision" || action == "verify" || action == "domainStatus" || action == "sender" {
+		if action == "saveCluster" {
 			var err error
-			output, err = a.resourceAction(ctx, session, action, options)
+			output, err = a.saveCluster(ctx, session, options)
+			if err == nil {
+				session.Status = "saved"
+				session.AccessToken, session.RefreshToken = "", ""
+			}
 			return err
 		}
 		path := "/subscriptions?api-version=2022-12-01"
