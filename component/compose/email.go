@@ -49,6 +49,9 @@ func RenderEmailTemplate(source string) (Result, error) {
 	if strings.TrimSpace(email.HTMLBody) == "" {
 		return Result{}, errors.New("generated email template needs editable HTML")
 	}
+	if _, _, err := ExtractEmailImages(email.HTMLBody); err != nil {
+		return Result{}, err
+	}
 	data, err := json.MarshalIndent(email, "", "  ")
 	if err != nil {
 		return Result{}, err

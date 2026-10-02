@@ -19,6 +19,14 @@ require (
 )
 
 require (
+	github.com/aymerick/douceur v0.2.0 // indirect
+	github.com/go-pdf/fpdf v0.9.0 // indirect
+	github.com/gorilla/css v1.0.1 // indirect
+	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
+	github.com/yuin/goldmark v1.8.6 // indirect
+)
+
+require (
 	github.com/anthropics/anthropic-sdk-go v1.75.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -53,6 +61,7 @@ require (
 	github.com/znasllc-io/memql/component/actions v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/compose v0.0.0
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/envregistry v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/events v0.0.0 // indirect
@@ -124,3 +133,5 @@ replace github.com/znasllc-io/memql/dsl => ../../dsl
 replace github.com/znasllc-io/memql/component/frontdoor => ../../component/frontdoor
 
 replace github.com/znasllc-io/memql/component/metrics => ../../component/metrics
+
+replace github.com/znasllc-io/memql/component/compose => ../../component/compose

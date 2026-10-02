@@ -35,17 +35,20 @@ type SourceDownloader interface {
 // SourceContent is captured in the owner-only execution input before dispatch.
 // Another replica composes from the same bytes even if the source changes later.
 type SourceContent struct {
-	Name     string `json:"name"`
-	MimeType string `json:"mimeType"`
-	Text     string `json:"text,omitempty"`
-	Image    []byte `json:"image,omitempty"`
-	SHA256   string `json:"sha256"`
+	Name          string `json:"name"`
+	MimeType      string `json:"mimeType"`
+	Text          string `json:"text,omitempty"`
+	Image         []byte `json:"image,omitempty"`
+	SHA256        string `json:"sha256"`
+	EmailAssetURL string `json:"emailAssetUrl,omitempty"`
 }
 
 type referenceBudget struct{ bytes, text, images, entries int }
 
 func (i *Integration) captureSourceContents(ctx context.Context, sources []Resolved) error {
 	budget := &referenceBudget{}
+	assetBytes := 0
+	assets := map[string]bool{}
 	for n := range sources {
 		source := &sources[n]
 		if !source.Ref.Content {
@@ -78,6 +81,26 @@ func (i *Integration) captureSourceContents(ctx context.Context, sources []Resol
 			return fmt.Errorf("compose: reference %q: %w", source.Ref.Label, err)
 		}
 		source.Files = files
+		if source.Ref.IncludeImages {
+			hasImage := false
+			for _, file := range files {
+				hasImage = hasImage || len(file.Image) > 0
+				if len(file.Image) == 0 || assets[file.SHA256] {
+					continue
+				}
+				if err := pure.EmailImageData(file.Image, file.MimeType); err != nil {
+					return err
+				}
+				assets[file.SHA256] = true
+				assetBytes += len(file.Image)
+				if assetBytes > 1<<20 {
+					return errors.New("images selected for inclusion exceed 1 MiB; use smaller logo or photo files and keep full layouts as references")
+				}
+			}
+			if !hasImage {
+				return fmt.Errorf("reference %q contains no supported images to include; keep it as a reference only", source.Ref.Label)
+			}
+		}
 	}
 	return nil
 }
