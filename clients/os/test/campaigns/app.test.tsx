@@ -294,6 +294,7 @@ describe("one campaign", () => {
     // that then closes is a refusal nobody can re-read.
     const conn = fakeConnection({
       campaigns: [campaignRow({ id: "v1:campaigns:campaign:c1", recipientCount: 4182 })],
+      templates: [templateRow({ id: "v1:campaigns:template:t1" })],
     });
     await openCampaign(conn);
     fireEvent.click(await screen.findByText("Send now"));
@@ -311,6 +312,7 @@ describe("one campaign", () => {
     const conn = fakeConnection({
       campaigns: [campaignRow({ id: "c1" })],
       sendingReadiness: [{ ready: true, reason: "", capture: true }],
+      templates: [templateRow({ id: "v1:campaigns:template:t1" })],
     });
     conn.query.campaignTestSend = vi.fn(async () => rowsResult([{ unresolved: [] }]));
     await openCampaign(conn);
@@ -322,6 +324,59 @@ describe("one campaign", () => {
     fireEvent.click(screen.getByText("Send test"));
     expect(await screen.findByText("Test captured in the Email app. Every merge tag in this template resolved.")).toBeTruthy();
     expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
+  });
+
+  it("opens the draft for review and enables sending only after live publication", async () => {
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    const template = templateRow({ id: "t1", status: "draft", name: "Client newsletter" });
+    const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1", templateId: "t1" })], templates: [template] });
+    await openCampaign(conn);
+    expect(await screen.findByText("Publish “Client newsletter” before sending.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Schedule" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Send test" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Review template" }));
+    const url = new URL(String(opened.mock.calls[0]![0]));
+    expect(url.searchParams.get("resource")).toBe("memql-file://memql.example.com/templates/t1/Client%20newsletter.email.json");
+    expect(conn.query.campaignSaveTemplate).not.toHaveBeenCalled();
+    expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
+    expect(conn.query.campaignScheduleSend).not.toHaveBeenCalled();
+    opened.mockRestore();
+
+    // The editor can publish on another node. Only its committed row/event
+    // updates this screen; opening the editor or returning to the tab cannot.
+    act(() => conn.subscriptions.emit("v1:campaigns:template", { ...template, status: "ready", createdAt: "2026-10-02T15:00:00Z" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Send now" }));
+    expect(await screen.findByText(/Send August update now/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Schedule" })).toBeTruthy();
+    act(() => conn.subscriptions.emit("v1:campaigns:template", { ...template, createdAt: "2026-10-02T15:01:00Z" }));
+    expect(await screen.findByRole("button", { name: "Review template" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send now" })).toBeNull();
+    act(() => conn.subscriptions.emit("v1:campaigns:template", { ...template, status: "ready", createdAt: "2026-10-02T15:02:00Z" }));
+    await screen.findByRole("button", { name: "Send now" });
+    expect(screen.queryByText(/Send August update now/)).toBeNull();
+    expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
+  });
+
+  it.each(["missing", "archived", "other organization", "unreadable"])("does not offer sends for a %s template", async (condition) => {
+    const conn = fakeConnection({
+      campaigns: [campaignRow({ id: "c1", templateId: "t1" })],
+      templates: condition === "missing" ? [] : [templateRow({ id: "t1", status: condition === "archived" ? "archived" : "ready", accountId: condition === "other organization" ? "client-b" : "self" })],
+    });
+    if (condition === "unreadable") conn.query.templates.mockRejectedValue(new Error("Template read refused"));
+    await openCampaign(conn);
+    await screen.findByText(condition === "unreadable" ? "Template status could not be confirmed." : "Choose a published template from this organization before sending.");
+    expect(screen.queryByRole("button", { name: "Send now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Schedule" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Review template" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+  });
+
+  it("keeps resume available for a paused send with its already pinned template", async () => {
+    const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1", status: "paused" })] });
+    await openCampaign(conn);
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    expect(conn.query.campaignResumeSend).toHaveBeenCalledWith({ campaignId: "c1" });
   });
 
   it("names the merge tags a test send could not resolve", async () => {
@@ -351,6 +406,7 @@ describe("a cluster that cannot send mail", () => {
   it("does not mistake the operator mailbox report for every client’s sending status", async () => {
     const conn = fakeConnection({
       campaigns: [campaignRow({ id: "c1", accountId: "client-a" })],
+      templates: [templateRow({ id: "v1:campaigns:template:t1", accountId: "client-a" })],
       integrationStatus: [
         {
           integrations: [
