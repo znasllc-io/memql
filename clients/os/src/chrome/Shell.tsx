@@ -257,10 +257,14 @@ function ShellRoster({
   layout: ChromeLayout;
   children: ReactNode;
 }) {
-  const { access, ladderLoaded, accessEpoch } = useSession();
+  const { access, config, ladderLoaded, accessEpoch } = useSession();
+  const registry = useMemo(() => ({
+    ...OS_REGISTRY,
+    apps: OS_REGISTRY.apps.filter(app => app.id !== "email" || config.emailAppEnabled !== false),
+  }), [config.emailAppEnabled]);
   return (
     <OsProvider
-      registry={OS_REGISTRY}
+      registry={registry}
       actorRole={access?.role ?? ""}
       // The effective set's epoch (epic memql#5289): the roster gates on the
       // capability set now, and it lands after the role and changes on
@@ -280,7 +284,7 @@ function ShellRoster({
           memql#4915). Renders nothing, and does nothing at all on a browser
           that did not arrive from a callback -- which is every other one. It
           sits INSIDE OsProvider because opening an app is a shell act. */}
-      <AttentionProvider apps={OS_REGISTRY.apps}><SharedPackagesProvider><SharedCredentialsProvider><SharedSourceConnectionsProvider><SharedExternalConnectionsProvider><DeployablesAttentionFeed />
+      <AttentionProvider apps={registry.apps}><SharedPackagesProvider><SharedCredentialsProvider><SharedSourceConnectionsProvider><SharedExternalConnectionsProvider><DeployablesAttentionFeed />
       {/* Sharing a machine with people and groups (epic memql#5344, G15): a
           runtime change, published only while the viewer owns a machine still
           in the fleet. At shell lifetime, like the Deployables feed, so a
