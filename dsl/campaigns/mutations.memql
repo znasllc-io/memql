@@ -1172,3 +1172,58 @@ mutation newsletterSignup updateNewsletterWelcome {
     stamp { id: args.signupId, createdAt: args.versionTime }
   }
 }
+
+/// Configuration action supplies an organization-keyed id and monotonic revision.
+/// Scoping to actor.userId cannot prove the audience belongs to the organization or serialize
+/// concurrent changes. The builtin validates both references under current authority and a database lock.
+@actor
+@serverOnly
+mutation testSettings saveCampaignTestSettings {
+  args {
+    settingsId string!
+    accountId string!
+    audienceId string!
+    versionTime datetime!
+  }
+  insert {
+    accept { accountId, audienceId }
+    stamp {
+      id: args.settingsId
+      ownerUserId: actor.userId
+      createdAt: args.versionTime
+    }
+  }
+}
+
+/// A separate campaign for an explicitly requested test. The ordinary worker owns its execution.
+/// Scoping to actor.userId cannot prove this is the configured test audience or prevent a caller
+/// from forging a test instruction. The builtin substitutes the authorized audience and freezes the definition.
+@actor
+@serverOnly
+mutation campaign createCampaignTestRun {
+  args {
+    campaignId string!
+    testSourceCampaignId string!
+    name string!
+    accountId string!
+    audienceId string!
+    templateId string!
+    senderIdentityId string
+    fromName string
+    replyTo string
+    trackOpens bool
+    trackClicks bool
+  }
+  insert {
+    accept { testSourceCampaignId, name, accountId, audienceId, templateId, senderIdentityId, fromName, replyTo, trackOpens, trackClicks }
+    stamp {
+      id: args.campaignId
+      ownerUserId: actor.userId
+      status: "draft"
+      recipientCount: 0
+      sentCount: 0
+      failedCount: 0
+      skippedCount: 0
+    }
+  }
+}

@@ -61,8 +61,8 @@ scheduling. Open the template in the editor and choose **Use in Campaigns →
 Publish template for campaigns** after reviewing the preview. Saving keeps it
 as a draft. The campaign's **Review template** action opens that editor; send
 and schedule actions appear when its publication arrives through the live
-collection. **Send a test** can preview a draft template without starting the
-campaign. Ordinary campaigns do not depend on Shopify inventory: connecting
+collection. **Send a test** queues a separate run using a published template and the
+organization’s testing audience. Ordinary campaigns do not depend on Shopify inventory: connecting
 an empty store, including a store belonging to another organization, cannot
 block their sends. Storefront newsletter enrollment keeps its explicit
 organization, store and audience binding.
@@ -996,7 +996,58 @@ tag it could not resolve.
 
 ---
 
-## Test send
+## Testing a campaign with an audience
+
+Create a separate audience containing your reviewers’ email addresses and merge
+fields. In **Campaigns → Settings → Testing audience**, choose the organization,
+select that audience and save. This is shared cluster configuration, not a browser
+preference. Each organization has its own selection; an active audience from a
+different organization is refused. Choose **None selected** and save to disconnect.
+
+Open any campaign, including a sending, scheduled, paused or completed campaign,
+and choose **Send test**. Completed campaigns are available with **Show archived
+items** enabled in Settings. A test uses the published template and the same
+preflight, template snapshot, queue, worker, sender resolution, suppression,
+merge fields, rate limits, retries, tracking and signed unsubscribe as a live send.
+For a repeating campaign it copies the series’ saved instruction and does not
+advance its next occurrence. The testing audience must differ from both the
+campaign’s and the series’ live audiences. It never falls back to live subscribers.
+
+Each test has its own campaign occurrence, job and delivery ledger. Source counters,
+status and schedule stay unchanged. Tests are excluded from the regular campaign
+list and the organization’s campaign rollup. **Recent tests** shows the latest 50
+runs; refresh it for current counts and expand a run for per-address results.
+“Accepted” means the transport accepted the message, not proof of inbox delivery.
+Suppressed or unsubscribed testers are skipped, as they would be in a live run.
+Unsubscribe links are real: clicking one changes that test recipient’s consent and
+may suppress their address for subsequent mail from the organization.
+
+The configured transport applies equally to tests and live sends. With capture
+enabled, mail appears in the Email app. With external delivery enabled, the normal
+organization provider sends it. A localhost unsubscribe URL can only be exercised
+where that local installation is reachable; it does not validate public reachability.
+The test runs a send immediately; it does not simulate waiting for the recurrence clock.
+
+```
+builtin campaignConfigureTestAudience(accountId: "<organization>", audienceId: "<test-audience>")
+builtin campaignTestAudienceSend(campaignId: "<campaign>", audienceId: "<test-audience>", requestId: "<stable-request-id>")
+```
+
+Configuration changes include the `expectedRevision` returned by
+`query campaignTestSettings`. The send’s `audienceId` is the reviewed selection:
+if another operator changes the setting, a stale send is refused. Retain `requestId`
+after a network error and retry with the same inputs. A database lock and fresh
+reads make retries on separate replicas return the same run without requeuing it.
+A deliberate new test uses a new request id. The reply identifies `testRunId`; use
+`query campaignTestRuns` and the ordinary delivery queries to inspect outcomes.
+
+### Existing single-address preview API
+
+The existing `campaignTestSend` DSL builtin below remains a render-only preview
+for existing callers. It is not used by the Campaigns app’s **Send test** action
+and does not verify the normal queue or delivery ledger. Use the audience-based
+operation above for execution testing.
+
 
 ```
 builtin campaignTestSend(campaignId: "<id>", to: "you@example.com")

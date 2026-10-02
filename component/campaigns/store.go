@@ -143,14 +143,15 @@ func (j SendJob) Progress() int { return j.SentCount + j.SkippedCount + j.Failed
 
 // Campaign is the subset of v1:campaigns:campaign the sender reads.
 type Campaign struct {
-	ID          string
-	OwnerUserID string
-	Name        string
-	AudienceID  string
-	TemplateID  string
-	FromName    string
-	ReplyTo     string
-	Status      string
+	TestSourceCampaignID string
+	ID                   string
+	OwnerUserID          string
+	Name                 string
+	AudienceID           string
+	TemplateID           string
+	FromName             string
+	ReplyTo              string
+	Status               string
 
 	// ScheduledAt is THE authority on when a scheduled send fires
 	// (memql#3459). The job row carries a copy for the operator to look at;
@@ -321,15 +322,16 @@ func (s *Store) CampaignByID(ctx context.Context, campaignID string) (Campaign, 
 	}
 	r := rows[0]
 	return Campaign{
-		ID:          bare(str(r, "id")),
-		OwnerUserID: bare(str(r, "ownerUserId")),
-		Name:        str(r, "name"),
-		AudienceID:  bare(str(r, "audienceId")),
-		TemplateID:  bare(str(r, "templateId")),
-		FromName:    str(r, "fromName"),
-		ReplyTo:     str(r, "replyTo"),
-		Status:      str(r, "status"),
-		ScheduledAt: parseTime(str(r, "scheduledAt")),
+		TestSourceCampaignID: bare(str(r, "testSourceCampaignId")),
+		ID:                   bare(str(r, "id")),
+		OwnerUserID:          bare(str(r, "ownerUserId")),
+		Name:                 str(r, "name"),
+		AudienceID:           bare(str(r, "audienceId")),
+		TemplateID:           bare(str(r, "templateId")),
+		FromName:             str(r, "fromName"),
+		ReplyTo:              str(r, "replyTo"),
+		Status:               str(r, "status"),
+		ScheduledAt:          parseTime(str(r, "scheduledAt")),
 
 		SenderIdentityID: bare(str(r, "senderIdentityId")),
 		AccountID:        bare(str(r, "accountId")),

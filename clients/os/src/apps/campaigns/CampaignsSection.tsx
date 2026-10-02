@@ -36,7 +36,8 @@ import {
   formatMoment,
 } from "../../kit";
 import { useLiveView } from "../../live/liveView";
-import type { CampaignWrites, TestSendState } from "./actions";
+import { TestSendPanel } from "./TestAudiencePanel";
+import type { CampaignWrites } from "./actions";
 import { SendBar } from "./SendBar";
 import { RecurrencePanel } from "./RecurrencePanel";
 import {
@@ -365,7 +366,7 @@ function CampaignDetail({
         templateFeed={templateFeed} />
       <RecurrencePanel campaignId={campaign.id} />
 
-      <TestSendPanel campaignId={campaign.id} testSend={writes.testSend} />
+      <TestSendPanel key={campaign.id} campaign={campaign} audiences={audiences} />
 
       <StatsPanel campaign={campaign} stats={stats} />
 
@@ -636,114 +637,6 @@ function SendControls({ campaign, writes, template, templateFeed }: {
 // ---------------------------------------------------------------------------
 // Test send
 // ---------------------------------------------------------------------------
-
-/**
- * One test copy, and the merge tags it could not resolve.
- *
- * IT LIVES WITH THE CAMPAIGN because the builtin does: a test renders the
- * campaign's template through the campaign's resolved sending identity, so
- * there is no such thing as testing a template on its own. The template editor
- * mounts this same panel against a campaign that uses the template, which is
- * how the check lands where somebody is actually writing copy.
- *
- * THE UNRESOLVED LIST IS THE FEATURE. A typo'd `{{fields.compnay}}` renders as
- * its own literal text into somebody's inbox and looks like nothing from this
- * side; this is the only thing that catches it before the whole audience does.
- * A clean test says so out loud rather than showing nothing, because "no
- * warnings" and "the check did not run" look identical when both are silent.
- */
-export function TestSendPanel({
-  campaignId,
-  testSend,
-  label = "Send a test",
-}: {
-  campaignId: string;
-  testSend: TestSendState;
-  label?: string;
-}) {
-  const [to, setTo] = useState("");
-  const sending = useSendingReadiness("", "", campaignId);
-  const readyToSend = sending.ready;
-
-  // The result belongs to the campaign it was run against. Switching campaigns
-  // with a stale "Test sent" on screen would credit one campaign with another's
-  // check.
-  useEffect(() => {
-    testSend.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignId]);
-
-  return (
-    <Panel label={label}>
-      <Subhead>{label}</Subhead>
-      {sending.capture ? <Caption>View the test in the Email app. No email will reach the recipient’s inbox.</Caption> : null}
-      {!readyToSend ? (
-        <Notice
-          tone="warn"
-          sentence="Finish sending setup before sending a test."
-          next="Review this organization’s email connection in Senders."
-          detail={sending.reason}
-        ><Button onClick={sending.reload} busy={sending.state === "loading"}>Check again</Button></Notice>
-      ) : null}
-      <Field label="Send one copy to">
-        <Input
-          id={`os-campaign-test-${campaignId}`}
-          label="Test recipient address"
-          value={to}
-          onChange={setTo}
-          placeholder="you@example.com"
-          onEnter={() => {
-            if (readyToSend) void testSend.send(campaignId, to);
-          }}
-        />
-        <Button
-          disabled={!readyToSend}
-          busy={testSend.busy}
-          busyLabel="Sending"
-          onClick={() => testSend.send(campaignId, to)}
-        >
-          Send test
-        </Button>
-      </Field>
-      <Caption>
-        Renders the real template against a stand-in recipient, using the merge data of the first
-        real person in the audience so {"{{fields.*}}"} show the shape they will actually have. It
-        writes no delivery record and moves no counter.
-      </Caption>
-
-      {testSend.error === "" ? null : (
-        <Notice
-          tone="error"
-          sentence="The test did not go out."
-          next="Nothing was sent and no counter moved."
-          detail={testSend.error}
-        />
-      )}
-
-      {!testSend.sent ? null : testSend.unresolved.length === 0 ? (
-        <Notice tone="info" sentence={sending.capture ? "Test captured in the Email app. Every merge tag in this template resolved." : "Test sent. Every merge tag in this template resolved."} />
-      ) : (
-        <Notice
-          tone="warn"
-          sentence={sending.capture ? "Test captured in the Email app, but these merge tags did not resolve." : "Test sent -- but these merge tags did not resolve."}
-          next="They will appear as their own text in the message. Check the spelling, or the column name on the audience."
-        >
-          <div
-            className="os-campaign-tags"
-            role="list"
-            aria-label="Merge tags that did not resolve"
-          >
-            {testSend.unresolved.map((tag) => (
-              <span key={tag} className="os-campaign-tag" role="listitem" data-unresolved>
-                <span className="os-mono">{tag}</span>
-              </span>
-            ))}
-          </div>
-        </Notice>
-      )}
-    </Panel>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // The full breakdown

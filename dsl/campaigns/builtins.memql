@@ -251,3 +251,21 @@ builtin campaignRetryNewsletterWelcome {
   signupId string!
   expectedRevision string!
 }
+
+@description("Save the organization's shared testing audience. Must name an active audience in that organization; an empty audienceId disconnects it. Changes require the current revision.")
+@sdk
+@executor("integration.campaigns.configureTestAudience")
+builtin campaignConfigureTestAudience {
+  accountId string!
+  audienceId string!
+  expectedRevision string
+}
+
+@description("Queue a separate test run through the ordinary campaign worker, using this organization's configured testing audience. Works in every source lifecycle, including an active series, whose saved instruction is used without advancing its schedule. Requires the same published template and sending readiness as a live run. Replaying requestId returns the original run without resending.")
+@sdk
+@executor("integration.campaigns.testAudienceSend")
+builtin campaignTestAudienceSend {
+  campaignId string!
+  requestId string!
+  audienceId string! @description("The testing audience reviewed by the caller. Must still match the organization's saved setting; never replaces the saved setting.")
+}

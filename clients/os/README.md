@@ -1585,12 +1585,13 @@ out stays sent; a mailbox is retired because past campaigns name the row and
 the reputation and warmup history are keyed on its address. Removing any of
 them orphans the evidence a deliverability review is made of.
 
-**A test send is a CAMPAIGN operation, so the template editor borrows one.**
-`campaignTestSend` renders the campaign's template through the campaign's
-resolved sending identity; there is no such thing as testing copy with no
-sender. The editor therefore mounts the campaign detail's own panel against a
-campaign that uses the template, and says "no campaign uses this template yet"
-rather than showing a disabled control with no account of itself.
+**Campaign tests use the ordinary sending queue.** Settings selects an active,
+organization-owned testing audience. `campaignTestAudienceSend` makes an immutable
+run and invokes the same admission and worker as a live send; a stable request id
+recovers an uncertain result across replicas. Active and completed sources remain
+testable. Repeating sources use the saved series definition without advancing it.
+Recent tests and their delivery records are read on demand and show their read time;
+they do not inflate the live campaign’s counters or the regular campaign feed.
 
 **Senders live here rather than in Settings -> Integrations**, even though the
 two sit next to each other. Integrations is about CREDENTIALS -- the things an

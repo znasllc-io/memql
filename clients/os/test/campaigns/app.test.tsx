@@ -310,20 +310,23 @@ describe("one campaign", () => {
 
   it("identifies captured campaign and test messages before sending", async () => {
     const conn = fakeConnection({
-      campaigns: [campaignRow({ id: "c1" })],
+      campaigns: [campaignRow({ id: "c1", accountId: "org" })],
       sendingReadiness: [{ ready: true, reason: "", capture: true }],
-      templates: [templateRow({ id: "v1:campaigns:template:t1" })],
+      templates: [templateRow({ id: "v1:campaigns:template:t1", accountId: "org" })],
+      audiences: [audienceRow({ id: "test-audience", name: "Reviewers", accountId: "org" })],
+      testSettings: [{ id: "settings", accountId: "org", audienceId: "test-audience" }],
     });
-    conn.query.campaignTestSend = vi.fn(async () => rowsResult([{ unresolved: [] }]));
     await openCampaign(conn);
     expect(await screen.findByText("Messages will appear in the Email app. External delivery is disabled.")).toBeTruthy();
     fireEvent.click(await screen.findByText("Send now"));
     expect(await screen.findByText(/Messages are captured for review in the Email app/)).toBeTruthy();
     expect(screen.queryByText(/Mail starts leaving immediately/)).toBeNull();
-    fireEvent.change(screen.getByLabelText("Test recipient address"), { target: { value: "review@example.test" } });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send test" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByText("Send test"));
-    expect(await screen.findByText("Test captured in the Email app. Every merge tag in this template resolved.")).toBeTruthy();
+    expect(await screen.findByText("Test run queued. Check its delivery results below.")).toBeTruthy();
+    expect(conn.query.campaignTestAudienceSend).toHaveBeenCalledWith(expect.objectContaining({ campaignId: "c1", audienceId: "test-audience" }));
     expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
+    expect(conn.query.campaignTestSend).not.toHaveBeenCalled();
   });
 
   it("opens the draft for review and enables sending only after live publication", async () => {
@@ -334,7 +337,7 @@ describe("one campaign", () => {
     expect(await screen.findByText("Publish “Client newsletter” before sending.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Send now" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Schedule" })).toBeNull();
-    expect((screen.getByRole("button", { name: "Send test" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Send test" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Review template" }));
     const url = new URL(String(opened.mock.calls[0]![0]));
     expect(url.searchParams.get("resource")).toBe("memql-file://memql.example.com/templates/t1/Client%20newsletter.email.json");
@@ -379,22 +382,34 @@ describe("one campaign", () => {
     expect(conn.query.campaignResumeSend).toHaveBeenCalledWith({ campaignId: "c1" });
   });
 
-  it("names the merge tags a test send could not resolve", async () => {
-    // The only check that catches a typo'd {{fields.compnay}} before the whole
-    // audience gets it.
-    const conn = fakeConnection({
-      campaigns: [campaignRow({ id: "v1:campaigns:campaign:c1" })],
-    });
-    conn.query.campaignTestSend = vi.fn(async (_args: Record<string, unknown>) =>
-      (await import("./harness")).rowsResult([{ unresolved: ["{{fields.compnay}}"] }]),
-    );
+  it("refuses a test when Settings names the live audience", async () => {
+    const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1", accountId: "org", audienceId: "live" })], audiences: [audienceRow({ id: "live", accountId: "org" })], testSettings: [{ id: "settings", accountId: "org", audienceId: "live" }] });
     await openCampaign(conn);
-    fireEvent.change(await screen.findByLabelText("Test recipient address"), {
-      target: { value: "me@example.com" },
+    expect(await screen.findByText("Choose a separate testing audience in Settings.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send test" }));
+    expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
+  });
+
+  it.each(["sending", "paused", "sent", "scheduled"])("tests a %s campaign using its separate audience and recovers an uncertain response", async status => {
+    const conn = fakeConnection({
+      campaigns: [campaignRow({ id: "c1", accountId: "org", status })],
+      audiences: [audienceRow({ id: "test-audience", name: "Reviewers", accountId: "org" })],
+      testSettings: [{ id: "settings", accountId: "org", audienceId: "test-audience" }],
+      testRuns: [campaignRow({ id: "run-previous", testSourceCampaignId: "c1", status: "sent", sentCount: 2, skippedCount: 1 })],
     });
+    conn.query.campaignTestAudienceSend.mockRejectedValueOnce(new Error("Connection lost"));
+    h.connection = conn;
+    render(withSession(<CampaignsApp sectionId="campaigns" navigate={() => {}} askContext={() => {}} store={memoryStore({ showFiled: true })} uploads={fakeUploads()} />));
+    fireEvent.click(await screen.findByText("August update"));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send test" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByText("Send test"));
-    expect(await screen.findByText("{{fields.compnay}}")).toBeTruthy();
-    expect(screen.getByText(/did not resolve/)).toBeTruthy();
+    expect(await screen.findByText("Connection lost")).toBeTruthy();
+    fireEvent.click(screen.getByText("Send test"));
+    expect(await screen.findByText("Test run queued. Check its delivery results below.")).toBeTruthy();
+    expect(conn.query.campaignTestAudienceSend.mock.calls[0]).toEqual(conn.query.campaignTestAudienceSend.mock.calls[1]);
+    expect(await screen.findByText("2 accepted · 1 skipped · 0 failed")).toBeTruthy();
+    expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
+    expect(conn.query.campaignConfigureSeries).not.toHaveBeenCalled();
   });
 });
 
@@ -1078,6 +1093,21 @@ describe("a rule that stopped itself", () => {
 // ---------------------------------------------------------------------------
 
 describe("the app's settings", () => {
+  it("saves an organization testing audience and excludes other clients", async () => {
+    const conn = fakeConnection({
+      accounts: [{ id: "org", name: "Client", status: "active" }],
+      audiences: [audienceRow({ id: "reviewers", name: "Reviewers", accountId: "org" }), audienceRow({ id: "other", name: "Other client list", accountId: "other-org" })],
+    });
+    mount(conn, "settings");
+    const picker = await screen.findByRole("combobox", { name: "Testing audience" });
+    await waitFor(() => expect(screen.queryByText("Testing settings are not confirmed.")).toBeNull());
+    openSelect(picker);
+    expect(screen.queryByRole("option", { name: "Other client list" })).toBeNull();
+    fireEvent.click(screen.getByRole("option", { name: "Reviewers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save testing audience" }));
+    await waitFor(() => expect(conn.query.campaignConfigureTestAudience).toHaveBeenCalledWith({ accountId: "org", audienceId: "reviewers", expectedRevision: undefined }));
+  });
+
   it("offers exactly the sections the manifest declares", async () => {
     const conn = fakeConnection({});
     mount(conn, "settings");
@@ -1159,8 +1189,8 @@ it("keeps test, send and scheduling unavailable until organization setup is conf
   expect(screen.queryByRole("button", { name: "Send now" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Schedule" })).toBeNull();
   expect((screen.getByRole("button", { name: "Send test" }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.change(screen.getByLabelText("Test recipient address"), { target: { value: "me@example.com" } });
-  fireEvent.keyDown(screen.getByLabelText("Test recipient address"), { key: "Enter" });
+  fireEvent.click(screen.getByRole("button", { name: "Send test" }));
+  expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
   expect(conn.query.campaignTestSend).not.toHaveBeenCalled();
 });
 

@@ -1,16 +1,20 @@
+import { TestAudienceSettings } from "./TestAudiencePanel";
+import type { CampaignFeeds } from "./useCampaigns";
 import { useId } from "react";
 import { Check, Field, Head, Panel, Select, Subhead } from "../../kit";
 import { AzureEmailConnections } from "../../modules/connections/AzureEmailConnections";
 import { CAMPAIGNS_SECTIONS, type CampaignsSettings } from "./settings";
 import "./settings.css";
 
-export function CampaignsSettingsSection({ settings, update }: {
+export function CampaignsSettingsSection({ settings, update, feeds }: {
+  feeds: CampaignFeeds;
   settings: CampaignsSettings;
   update: (patch: Partial<CampaignsSettings>) => void;
 }) {
   const id = useId();
   return <div className="os-settings os-settings-wide campaigns-settings">
     <AzureEmailConnections manageCluster={false} header={<Head title="Settings" />} backLabel="Settings">
+      <TestAudienceSettings audiences={feeds.audiences} />
       <Panel label="Campaign preferences">
         <Subhead>Preferences</Subhead>
         <fieldset className="os-field-group campaigns-preferences">

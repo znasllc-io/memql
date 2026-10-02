@@ -80,6 +80,7 @@ import {
 export function useCampaignFeed(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("campaigns:campaigns", (connection) => ({
     concept: CAMPAIGN_CONCEPT,
+    inScope: row => !flatten(row).testSourceCampaignId,
     // NO STATUS ARGUMENT. `campaigns` takes an optional one and the filed
     // toggle deliberately does not pass it: seeding filtered would make the
     // toggle re-run the read and re-baseline every arrival cue, so revealing
@@ -218,7 +219,7 @@ function describe(err: unknown): string {
  * surface that only timestamps success tells somebody their refusal is
  * current when it is an hour old.
  */
-function useReading<T>(
+export function useReading<T>(
   empty: T,
   read: ((signal: AbortSignal) => Promise<T>) | null,
   deps: readonly unknown[],

@@ -61,6 +61,7 @@ shape template templateFull {
 /// writer (memql#3348).
 @row
 shape campaign campaignFull {
+  testSourceCampaignId
   row.id
   ownerUserId
   name
@@ -343,5 +344,14 @@ shape newsletterSignup newsletterSignupFull {
   senderIdentityId
   status
   lastError
+  row.createdAt
+}
+
+/// Organization testing settings, including revision for concurrent updates.
+@row
+shape testSettings campaignTestSettingsFull {
+  row.id
+  accountId
+  audienceId
   row.createdAt
 }

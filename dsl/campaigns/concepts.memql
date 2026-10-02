@@ -191,6 +191,7 @@ concept senderIdentity {
 @composable(as="campaign", fields="name,status,scheduledAt,startedAt,completedAt,lastError", list="campaigns")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept campaign {
+  testSourceCampaignId string @description("Original campaign for a test run. Engine-stamped; a test has its own audience, job and delivery ledger and never advances the original campaign or its series.")
   ownerUserId     string!  @description("v1:identity:user.id that owns this campaign. Stamped from actor.userId. The per-row authz key.")
   name            string!  @description("Operator-facing campaign name. The primary display field.")
   audienceId      string!  @description("v1:campaigns:audience.id this campaign is addressed to. Resolved to recipient rows at send time, not at authoring time, so an audience that grows between scheduling and sending is mailed as it stands when the send runs.")
@@ -638,4 +639,16 @@ concept newsletterSignup {
   @relationship(type="references", field="audienceId", target=audience, direction="outgoing")
   @relationship(type="references", field="templateId", target=template, direction="outgoing")
   @relationship(type="references", field="senderIdentityId", target=senderIdentity, direction="outgoing")
+}
+
+/// The shared testing audience for one organization. Only the governed configuration action writes it.
+// @no-displayCard: internal organization configuration; its audience reference has the human-facing name.
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept testSettings {
+  ownerUserId string!
+  accountId string!
+  audienceId string
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+  @relationship(type="references", field="audienceId", target=audience, direction="outgoing")
 }

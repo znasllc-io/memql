@@ -742,6 +742,7 @@
         "startedAt",
         "status",
         "templateId",
+        "testSourceCampaignId",
         "trackClicks",
         "trackOpens"
       ],
@@ -1223,6 +1224,19 @@
           "ready"
         ]
       }
+    },
+    {
+      "concept": "v1:campaigns:testSettings",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "audienceId",
+        "ownerUserId"
+      ],
+      "required": [
+        "accountId",
+        "ownerUserId"
+      ]
     },
     {
       "concept": "v1:campaigns:warmupState",

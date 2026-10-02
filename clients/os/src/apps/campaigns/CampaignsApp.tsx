@@ -111,7 +111,7 @@ export function CampaignsApp({
   if (sectionId === "overview") return <CampaignsOverview feeds={feeds} navigate={navigate} />;
 
   if (sectionId === "settings") {
-    return <CampaignsSettingsSection settings={settings} update={updateSettings} />;
+    return <CampaignsSettingsSection feeds={feeds} settings={settings} update={updateSettings} />;
   }
   if (sectionId === "logs") {
     return (

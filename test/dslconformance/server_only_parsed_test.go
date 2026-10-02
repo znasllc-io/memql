@@ -423,7 +423,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "campaigns/mutations.memql", Name: "updateNewsletterWelcome"}: true,
 		{Path: "campaigns/queries.memql", Name: "pendingNewsletterWelcomes"}: true,
 
-		{Path: "campaigns/mutations.memql", Name: "configureCampaignSeries"}:  true,
+		{Path: "campaigns/mutations.memql", Name: "configureCampaignSeries"}: true,
+		// A caller-scoped write cannot establish the testing audience choice,
+		// cross-organization agreement, or the serialized idempotent run.
+		{Path: "campaigns/mutations.memql", Name: "saveCampaignTestSettings"}: true,
+		{Path: "campaigns/mutations.memql", Name: "createCampaignTestRun"}:    true,
 		{Path: "campaigns/mutations.memql", Name: "advanceCampaignSeries"}:    true,
 		{Path: "campaigns/queries.memql", Name: "dueCampaignSeries"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "recordCampaignSingleSend"}: true,
