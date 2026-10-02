@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/secret"
@@ -43,7 +44,7 @@ func (s *storedACSOperations) rows(ctx context.Context, name string, args map[st
 	if err != nil {
 		return nil, err
 	}
-	value, err := s.connection.engine.Execute(emailStateContext(ctx), "query "+call)
+	value, err := s.connection.engine.Execute(auth.ContextWithInternalOrigin(emailStateContext(ctx)), "query "+call)
 	if err != nil {
 		return nil, fmt.Errorf("could not read Azure send receipts")
 	}
@@ -91,7 +92,7 @@ func (s *storedACSOperations) write(ctx context.Context, key string, operation a
 		"nextPollAt": operation.NextPollAt.Format(time.RFC3339Nano), "encryptedValue": sealed, "versionTime": version.Format(time.RFC3339Nano),
 	})
 	if err == nil {
-		_, err = s.connection.engine.Execute(emailStateContext(ctx), "mutation "+call)
+		_, err = s.connection.engine.Execute(auth.ContextWithInternalOrigin(emailStateContext(ctx)), "mutation "+call)
 	}
 	if err != nil {
 		return prior, fmt.Errorf("could not persist Azure send receipt")

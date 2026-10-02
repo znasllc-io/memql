@@ -183,7 +183,15 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// operator/organization authorization. Per-user row scoping cannot
 		// model one organization's connection consumed by multiple workers.
 		{Path: "email/mutations.memql", Name: "storeEmailConnectionState"}: true,
-		{Path: "email/queries.memql", Name: "emailConnectionStateById"}:   true,
+		{Path: "email/queries.memql", Name: "emailConnectionStateById"}:    true,
+		// Provider receipts belong to the organization's shared transport, not
+		// the user whose replica submitted a message. The internal poller spans
+		// organizations; the public projection first checks real organization
+		// management authority and omits encrypted contents and private routing.
+		{Path: "email/mutations.memql", Name: "storeEmailSendOperation"}:  true,
+		{Path: "email/queries.memql", Name: "emailSendOperationById"}:     true,
+		{Path: "email/queries.memql", Name: "emailPendingSendOperations"}: true,
+		{Path: "email/queries.memql", Name: "emailRecentSendOperations"}:  true,
 		// Shopify's outbox delivers rows under its connector actor, which has
 		// no actor.userId. These row-id reads keep the concept's mirroredTo
 		// admission: Shopify may read its source, another connector may not,

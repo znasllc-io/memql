@@ -1,3 +1,5 @@
+use common.traits.{ statusIsRunning }
+
 /// Restricted transport storage read. The public capability checks test-inbox access first.
 /// actor.userId scoping cannot represent an operator test inbox: identity services
 /// send to recipients who may not have an account. The owner/developer gate runs
@@ -43,7 +45,7 @@ query sendOperation emailSendOperationById {
 @cache(0)
 query sendOperation emailPendingSendOperations {
   args { dueBefore datetime! }
-  filter row => actor.isClusterOwner == true && row.nextPollAt <= args.dueBefore && (row.status == "submitting" || row.status == "unknown" || row.status == "accepted" || row.status == "running")
+  filter row => actor.isClusterOwner == true && row.nextPollAt <= args.dueBefore && (row.status == "submitting" || row.status == "unknown" || row.status == "accepted" || statusIsRunning(row))
   sort "nextPollAt", "asc"
   paginate 50
   shape emailSendOperationStored
