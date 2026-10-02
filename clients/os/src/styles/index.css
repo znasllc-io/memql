@@ -11000,13 +11000,9 @@ a.os-button {
   padding-right: 4px;
 }
 
-/* A SETTLED COMPOSITION IS A RECORD, NOT A FORM (DESIGN.md rule 9).
- * Composing, the three columns fill the window because the draft is the
- * page and real estate belongs to it. Finished, they are three short
- * readings of one row -- and stretching them drew 500px of dead space
- * beneath three paragraphs, which is exactly what rule 9 names. Found in
- * a browser; jsdom lays nothing out, so the suite was green over it. */
-.os-mz-columns[data-settled="true"] {
+/* A composition is a brief and its output settings. File content belongs
+ * in the editor, so these columns remain sized to their controls. */
+.os-mz-columns {
   align-content: start;
   overflow-y: auto;
 }
@@ -11015,33 +11011,8 @@ a.os-button {
   overflow-y: visible;
 }
 
-/* A FLEX ITEM'S DEFAULT min-width: auto REFUSES TO SHRINK BELOW ITS
- * CONTENT, which is how the Work app's goal list came to scroll sideways
- * on a sentence. Every column here is min-width: 0 for that reason. */
-.os-mz-col-draft {
+.os-mz-col-brief {
   min-width: 0;
-}
-
-.os-mz-draft {
-  flex: 1 1 auto;
-  min-height: 12rem;
-  resize: vertical;
-  padding: 10px 12px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
-  background: var(--os-plate);
-  color: var(--os-ink);
-  font-family: var(--os-font);
-  /* THE ONE TYPOGRAPHIC DECISION THIS APP MAKES. Everything else in the
-   * shell is chrome being scanned at --os-text-base; this is prose being
-   * READ, so it takes the app-content size and a longer line-height. */
-  font-size: var(--os-text-md);
-  line-height: 1.6;
-}
-
-.os-mz-draft:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
 }
 
 .os-mz-statement {

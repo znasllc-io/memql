@@ -36,7 +36,7 @@ export type ActId =
 export interface DraftState {
   /** How many sources are selected. */
   sourceCount: number;
-  /** A non-empty statement or starting draft can stand on its own. */
+  /** A non-empty brief can stand on its own. */
   hasContent: boolean;
   /** Whether a format has been chosen. */
   hasFormat: boolean;
@@ -130,7 +130,7 @@ export function actsFor(c: CompositionRow | null, draft: DraftState): ActSpec[] 
  */
 export function stateLine(c: CompositionRow | null, draft: DraftState): string {
   if (c === null) {
-    if (draft.sourceCount === 0 && !draft.hasContent) return "Describe what to make, add a draft, or pick a source";
+    if (draft.sourceCount === 0 && !draft.hasContent) return "Describe what to make or pick a source";
     if (!draft.hasFormat) return "Choose what kind of file to make";
     if (draft.sourceCount === 0) return "Ready to compose your file";
     return `Ready to compose from ${draft.sourceCount} ${draft.sourceCount === 1 ? "source" : "sources"}`;

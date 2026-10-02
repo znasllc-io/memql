@@ -1,10 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { useOs } from "../../src/chrome/state";
-import { withOs } from "../setup/harness";
 
-const h = vi.hoisted(() => ({ connection: null as unknown }));
+const h = vi.hoisted(() => ({ connection: null as unknown, download: vi.fn(async () => {}) }));
+vi.mock("../../src/apps/files/actions/download", () => ({ downloadArtifact: h.download }));
 
 vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
@@ -49,14 +48,13 @@ function mount(connection: Conn, sectionId = "composer", settings: Record<string
 describe("the composer", () => {
   it("says what it is waiting for rather than offering a control that would be refused", async () => {
     mount(fakeConnection());
-    // With no source, statement or draft, the bar explains what is needed.
+    // With no source or brief, the bar explains what is needed.
     expect(await screen.findByText(/Describe what to make/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Materialize" })).toBeNull();
   });
 
   it.each([
     ["What do you want made?", "statement", "Write a sample inventory."],
-    ["Draft", "draft", "Inventory: apples 3, pears 5."],
   ])("materializes from %s without requiring a graph source", async (label, field, value) => {
     const conn = fakeConnection({ materializeReply: { compositionId: "content-only" } as unknown as Row });
     mount(conn);
@@ -69,6 +67,8 @@ describe("the composer", () => {
     const args = conn.query.composeMaterialize.mock.calls[0]?.[0] ?? {};
     expect(args).toMatchObject({ name: "Inventory", [field]: value });
     expect(args).not.toHaveProperty("sources");
+    expect(args).not.toHaveProperty("draft");
+    expect(screen.queryByLabelText("Draft")).toBeNull();
   });
 
   it("offers the marked concepts first and says which are not marked", async () => {
@@ -191,26 +191,49 @@ describe("the composer", () => {
 });
 
 describe("the provenance chain", () => {
-  it("opens Files with the backing file identity from the ready output", async () => {
-    h.connection = fakeConnection({ compositions: [compositionRow({ id: "c-output", outputFileId: "f-output" })] });
-    function Destination() {
-      const { state } = useOs();
-      const destination = Object.values(state.shell.windows).find((window) => window.appId === "files");
-      return <output data-testid="file-destination">{JSON.stringify(destination)}</output>;
-    }
-    render(withSession(withOs(<>
-      <MaterializerApp
-        sectionId="composer"
-        navigate={() => {}}
-        askContext={() => {}}
-        intent={{ id: "open", payload: { compositionId: "c-output" } }}
-        store={memoryStore()}
-      />
-      <Destination />
-    </>, "owner")));
-    fireEvent.click(await screen.findByRole("button", { name: "Open Q3 report in Files" }));
-    await waitFor(() => expect(JSON.parse(screen.getByTestId("file-destination").textContent ?? "{}"))
-      .toMatchObject({ appId: "files", sectionId: "browse", intent: { payload: { fileId: "f-output" } } }));
+  it("opens the generated file in the browser editor with its current Library name", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: "c-output", outputFileId: "f-output" })],
+      outputArtifact: { id: "artifact-output" } as Row,
+      outputFile: { id: "f-output", name: "Q3 report.pdf", mimeType: "application/pdf", size: 900 } as Row });
+    h.connection = conn;
+    const tab = { navigate: vi.fn(), close: vi.fn() };
+    const ports = { reserve: vi.fn(() => tab), navigate: vi.fn(), schedule: vi.fn(() => () => {}) };
+    render(withSession(<MaterializerApp sectionId="composer" navigate={() => {}} askContext={() => {}}
+      intent={{ id: "open", payload: { compositionId: "c-output" } }} store={memoryStore()} handoffPorts={ports} />));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Q3 report" }));
+    expect(ports.reserve).toHaveBeenCalledOnce();
+    await waitFor(() => expect(tab.navigate).toHaveBeenCalledOnce());
+    const link = new URL(tab.navigate.mock.calls[0]![0]);
+    expect(link.origin).toBe("https://vscode.dev");
+    expect(JSON.parse(link.searchParams.get("payload")!)).toEqual([["openFile", "memql-file://memql.example.com/artifacts/artifact-output/Q3%20report.pdf"]]);
+    expect(conn.query.libraryArtifactBySourceConceptRef).toHaveBeenCalledWith({ sourceConceptRef: "f-output" });
+    expect(tab.close).not.toHaveBeenCalled();
+  });
+
+  it("downloads a generated ZIP intact even when its displayed name has no extension", async () => {
+    h.connection = fakeConnection({ compositions: [compositionRow({ id: "archive", outputFileId: "bundle", deployableKind: "site" })],
+      outputArtifact: { id: "bundle-artifact" } as Row,
+      outputFile: { id: "bundle", name: "Site resources", mimeType: "application/zip", size: 40 } as Row });
+    const tab = { navigate: vi.fn(), close: vi.fn() };
+    render(withSession(<MaterializerApp sectionId="composer" navigate={() => {}} askContext={() => {}}
+      intent={{ id: "open", payload: { compositionId: "archive" } }} store={memoryStore()}
+      handoffPorts={{ reserve: () => tab, navigate: vi.fn(), schedule: () => () => {} }} />));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Q3 report" }));
+    await waitFor(() => expect(h.download).toHaveBeenCalledWith(expect.objectContaining({ artifactId: "bundle-artifact", fileId: "bundle", name: "Site resources" })));
+    expect(tab.close).toHaveBeenCalledOnce();
+    expect(tab.navigate).not.toHaveBeenCalled();
+  });
+
+  it("closes the reserved editor tab and shows a missing output without guessing its identity", async () => {
+    h.connection = fakeConnection({ compositions: [compositionRow({ id: "missing", outputFileId: "absent" })] });
+    const tab = { navigate: vi.fn(), close: vi.fn() };
+    render(withSession(<MaterializerApp sectionId="composer" navigate={() => {}} askContext={() => {}}
+      intent={{ id: "open", payload: { compositionId: "missing" } }} store={memoryStore()}
+      handoffPorts={{ reserve: () => tab, navigate: vi.fn(), schedule: () => () => {} }} />));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Q3 report" }));
+    expect(await screen.findByText(/not available in your Library yet/)).toBeTruthy();
+    expect(tab.close).toHaveBeenCalledOnce();
+    expect(tab.navigate).not.toHaveBeenCalled();
   });
 
   // OPENED THROUGH THE INTENT rather than by clicking the list row,
