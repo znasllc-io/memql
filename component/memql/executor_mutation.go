@@ -777,6 +777,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	if conceptMeta.Name == "v1:campaigns:template" && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("template writes require campaignSaveTemplate and a saved revision")
 	}
+	if (conceptMeta.Name == "v1:email:connectionState" || conceptMeta.Name == "v1:email:sendOperation") && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("email connection state requires internal origin from the authorized connection capability")
+	}
 	if (conceptMeta.Name == "v1:campaigns:newsletterBinding" || conceptMeta.Name == "v1:campaigns:newsletterSignup") && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("newsletter writes require their configuration, signup or progress capability")
 	}

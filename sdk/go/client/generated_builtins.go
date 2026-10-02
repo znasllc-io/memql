@@ -489,6 +489,44 @@ func CampaignScheduleSendBuild(args CampaignScheduleSendArgs) string {
 	return b.String()
 }
 
+// CampaignSendingReadiness -- Check current organization sending permission, the selected sender and unsubscribe setup without sending mail. A campaignId reads that campaign's saved organization and sender. Otherwise select accountId and senderIdentityId explicitly. Readiness is not evidence of delivery and is rechecked when sending.
+type CampaignSendingReadinessArgs struct {
+	CampaignId       string
+	AccountId        string
+	SenderIdentityId string
+}
+
+// CampaignSendingReadiness calls the engine builtin campaignSendingReadiness.
+func (qc *QueryClient) CampaignSendingReadiness(ctx context.Context, args CampaignSendingReadinessArgs) (*Result, error) {
+	call := CampaignSendingReadinessBuild(args)
+	return qc.executeNamed(ctx, "campaignSendingReadiness", call)
+}
+
+func CampaignSendingReadinessBuild(args CampaignSendingReadinessArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSendingReadiness(")
+	if args.CampaignId != "" {
+		b.WriteString("campaignId: ")
+		b.WriteString(quoteMemQL(args.CampaignId))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 33 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.SenderIdentityId != "" {
+		if b.Len() > 33 {
+			b.WriteString(", ")
+		}
+		b.WriteString("senderIdentityId: ")
+		b.WriteString(quoteMemQL(args.SenderIdentityId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignStartSend -- Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through.
 type CampaignStartSendArgs struct {
 	// The campaign to send. The caller needs update permission in its organization.
@@ -1372,6 +1410,48 @@ func (qc *QueryClient) EffectiveCapabilitiesForActor(ctx context.Context, args E
 func EffectiveCapabilitiesForActorBuild(args EffectiveCapabilitiesForActorArgs) string {
 	_ = args
 	return "builtin effectiveCapabilitiesForActor()"
+}
+
+// EmailAzureSetup -- Configure one Microsoft Azure connection for the cluster with accountId self, then manage each organization's domain and sender using that saved connection. Owner or developer only. Credentials stay encrypted on the cluster.
+type EmailAzureSetupArgs struct {
+	AccountId string
+	Action    string
+	SessionId string
+	Options   map[string]any
+}
+
+// EmailAzureSetup calls the engine builtin emailAzureSetup.
+func (qc *QueryClient) EmailAzureSetup(ctx context.Context, args EmailAzureSetupArgs) (*Result, error) {
+	call := EmailAzureSetupBuild(args)
+	return qc.executeNamed(ctx, "emailAzureSetup", call)
+}
+
+func EmailAzureSetupBuild(args EmailAzureSetupArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailAzureSetup(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.SessionId != "" {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sessionId: ")
+		b.WriteString(quoteMemQL(args.SessionId))
+	}
+	if args.Options != nil {
+		if b.Len() > 24 {
+			b.WriteString(", ")
+		}
+		b.WriteString("options: ")
+		b.WriteString(renderMemQLValue(args.Options))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // EmailInbox -- Read the last 100 captured test messages from the last seven days. Owner or developer only; capture must be explicitly configured. This is a sensitive test inbox, not evidence of Internet delivery.

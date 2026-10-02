@@ -290,7 +290,7 @@ the reviewed Campaigns revision; generation never sends a message.
 
 Included PNG/JPEG/GIF images are bounded to eight images and 1 MiB total; the
 complete email template remains bounded to 2 MiB. Larger example images can
-remain design references. SMTP/Graph sending converts embedded images to inline attachments. The interim
-ACS adapter is being completed separately. Microsoft currently labels ACS inline attachments a preview feature; validate
+remain design references. SMTP/Graph sending converts embedded images to inline attachments; ACS uses CID
+attachments. Microsoft currently labels ACS inline attachments a preview feature; validate
 rendering with your recipient clients before enabling production sending.
 See [Microsoft's inline attachment documentation](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/send-email-advanced/send-email-with-inline-attachments).

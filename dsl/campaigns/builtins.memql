@@ -1,3 +1,12 @@
+@sdk
+@executor("integration.campaigns.sendingReadiness")
+@description("Check current organization sending permission, the selected sender and unsubscribe setup without sending mail. A campaignId reads that campaign's saved organization and sender. Otherwise select accountId and senderIdentityId explicitly. Readiness is not evidence of delivery and is rechecked when sending.")
+builtin campaignSendingReadiness {
+  campaignId string
+  accountId string
+  senderIdentityId string
+}
+
 // campaigns domain -- the Go-backed sending surface (memql#3348).
 //
 // WHY THESE ARE BUILTINS AND NOT MUTATIONS. Everything else an operator
@@ -159,7 +168,7 @@ builtin campaignSendToRecipient {
   requestId         string   @description("Stable identifier for one intended event email. Replays never submit it twice; an uncertain provider outcome remains uncertain and is not automatically resent.")
   templateId        string!  @description("v1:campaigns:template.id supplying the subject and bodies.")
   recipientId       string!  @description("v1:campaigns:recipient.id to send to. Its subscription state and the cluster suppression list are both consulted before anything leaves.")
-  senderIdentityId  string   @description("v1:campaigns:senderIdentity.id belonging to the recipient's organization. Required for organization-owned recipients; only legacy unattributed sends may omit it.")
+  senderIdentityId  string   @description("v1:campaigns:senderIdentity.id belonging to the recipient's organization. Omit to resolve that organization's configured sender; client sends never fall back to the operator identity.")
   emailRuleId       string   @description("Optional v1:campaigns:emailRule.id this send came from, stamped on the ledger row so 'which rule mailed this person' is answerable.")
 }
 

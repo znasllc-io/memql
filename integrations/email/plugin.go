@@ -1,6 +1,13 @@
 package email
 
-import "github.com/znasllc-io/memql/component/memql"
+import (
+	"context"
+	"database/sql"
+	"errors"
+
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
+)
 
 // init self-registers the email integration as a plug-in.
 //
@@ -16,7 +23,43 @@ import "github.com/znasllc-io/memql/component/memql"
 // stash; that target has never existed and the seeder reads a .env file.)
 func init() {
 	memql.RegisterPlugin("email", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
+		writer := NewConfigWriter(pctx.Engine)
+		azure := &azureSetup{store: &connectionStore{engine: writer, database: func() *sql.DB {
+			if pctx.BunDB == nil {
+				return nil
+			}
+			db := pctx.BunDB()
+			if db == nil {
+				return nil
+			}
+			return db.DB
+		}}, protocol: newAzureProtocol("")}
+		if engine, ok := pctx.Engine.(interface {
+			OrganizationCapable(context.Context, string, string, string) bool
+		}); ok {
+			azure.canManage = func(ctx context.Context, account string) bool {
+				return engine.OrganizationCapable(ctx, account, auth.VerbUpdate, auth.ResourceData)
+			}
+		}
+		azure.applicationID = func(ctx context.Context) (string, error) {
+			var application struct {
+				ClientID string `json:"clientId"`
+			}
+			found, _, err := azure.store.read(ctx, "azure-application", &application)
+			if !found && err == nil {
+				return defaultAzureApplicationID, nil
+			}
+			return application.ClientID, err
+		}
 		envSender, err := NewSenderFromEnv("", pctx.Logger)
+		if errors.Is(err, ErrLogOnlyRefused) {
+			// A saved operator-organization ACS connection satisfies the
+			// existing boot requirement. Client credentials never do.
+			if sender, resolveErr := azure.sender(context.Background(), "self"); resolveErr == nil && sender != nil {
+				envSender = NewLogSender(pctx.Logger)
+				err = nil
+			}
+		}
 		if err != nil {
 			// Returned rather than swallowed: app.materializePlugins fatals on
 			// a factory error, which is the point (memql#4477). An install
@@ -26,6 +69,7 @@ func init() {
 			return nil, err
 		}
 		lazySender := NewLazySender(envSender, pctx.ResolveSystemVariable, pctx.ResolveSystemSecret, pctx.Logger)
+		lazySender.organization = azure.sender
 		if capture, ok := envSender.(*CaptureSender); ok {
 			capture.store = NewConfigWriter(pctx.Engine)
 		}
@@ -34,6 +78,8 @@ func init() {
 		// so nothing new is trusted here -- what makes the write safe is the
 		// owner-or-developer gate and the fact that the row NAME is derived
 		// from the manifest rather than taken from the caller.
-		return NewIntegration(lazySender, pctx.Logger).WithConfigWriter(NewConfigWriter(pctx.Engine)), nil
+		integration := NewIntegration(lazySender, pctx.Logger).WithConfigWriter(writer)
+		integration.azure = azure
+		return integration, nil
 	})
 }

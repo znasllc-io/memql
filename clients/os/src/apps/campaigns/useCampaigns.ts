@@ -1,21 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getRowByConceptAndId, type Concept, type Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { useSession } from "../../chrome/access";
+import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
 import {
   AUDIENCE_CONCEPT,
   CAMPAIGN_CONCEPT,
   EMAIL_RULE_CONCEPT,
-  EMAIL_UNKNOWN,
   SENDER_IDENTITY_CONCEPT,
   TEMPLATE_CONCEPT,
   authoredAutomationsFrom,
-  emailReadinessFrom,
   statsFromPayload,
   type AuthoredAutomationsState,
   type CampaignStats,
-  type EmailReadiness,
 } from "./rows";
 
 // The Campaigns app's reads: five live feeds and four on-demand ones.
@@ -330,30 +329,26 @@ export function useCampaignStats(campaignId: string): Reading<CampaignStats | nu
   return useReading<CampaignStats | null>(null, read, [query, campaignId]);
 }
 
-/**
- * Whether this cluster can actually send mail.
- *
- * READ ONCE, AT THE APP ROOT, and said once at the top. The alternative -- a
- * failure per action -- tells somebody five times that the same thing is
- * missing, and tells them only after they have written a campaign.
- *
- * `probe: false`. The configuration question is answerable with no network
- * call; the health question needs a round trip whose "yes" goes stale, and
- * running one on every window open would dial a mail provider because
- * somebody opened an app.
- */
-export function useEmailReadiness(): Reading<EmailReadiness> {
+/** Organization-specific setup, read on demand and checked again by every send.
+ * A cluster operator's provider verdict cannot stand in for a client's domain. */
+export function useSendingReadiness(accountId: string, senderIdentityId = "", campaignId = "") {
   const connection = useOsConnection();
+  const { readiness } = useSession();
   const query = connection?.query ?? null;
+  const live = readiness?.loaded && readiness.state === "live";
+  const scope = `${accountId}:${senderIdentityId}:${campaignId}`;
   const read = useMemo(() => {
-    if (query === null) return null;
-    return async (signal: AbortSignal) => {
-      const result = await query.integrationStatus({ probe: false }, { signal });
-      const first = result.rows()[0];
-      return first ? emailReadinessFrom(first) : EMAIL_UNKNOWN;
+    if (!query || !live || (!accountId && !campaignId)) return null;
+    const execute = async (signal: AbortSignal): Promise<{ reader: unknown; ready: boolean; reason: string }> => {
+      const result = await query.campaignSendingReadiness(campaignId ? { campaignId } : { accountId, senderIdentityId }, { signal });
+      const row = flatten(result.rows()[0] ?? {});
+      return { reader: execute, ready: row.ready === true, reason: typeof row.reason === "string" ? row.reason : "" };
     };
-  }, [query]);
-  return useReading<EmailReadiness>(EMAIL_UNKNOWN, read, [query]);
+    return execute;
+  }, [query, scope, live]);
+  const reading = useReading<Awaited<ReturnType<NonNullable<typeof read>>> | null>(null, read, [read]);
+  return { ...reading, ready: !!live && !!read && reading.state === "ready" && reading.value?.reader === read && reading.value.ready,
+    reason: reading.error || reading.value?.reason || "Sending readiness is not confirmed." };
 }
 
 const NO_CONCEPTS: Concept[] = [];

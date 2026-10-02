@@ -10,7 +10,6 @@ import {
   conceptEntity,
   conditionRowIs,
   deliveryFromRow,
-  emailReadinessFrom,
   engineSentence,
   emailRuleFromRow,
   figureOf,
@@ -533,43 +532,6 @@ describe("what row is in a condition", () => {
     expect(conditionRowIs({ triggerConcept: "", eventKind: "created" })).toBe(
       "the record that was created",
     );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The email integration's self-report
-// ---------------------------------------------------------------------------
-
-describe("reading whether this cluster can send mail", () => {
-  it("says NOT configured when the report says so", () => {
-    const readiness = emailReadinessFrom({
-      integrations: [{ name: "email", configured: "no", health: "unknown", detail: "no sender" }],
-    });
-    expect(readiness.needsConfiguration).toBe(true);
-    expect(readiness.detail).toBe("no sender");
-  });
-
-  it("says NOT configured for the log-only sender, which looks fine from every other angle", () => {
-    // With no credentials the sender DEGRADES rather than failing: every send
-    // returns success and nothing is delivered.
-    const readiness = emailReadinessFrom({
-      integrations: [{ name: "email", configured: "yes", health: "degraded", mode: "log" }],
-    });
-    expect(readiness.needsConfiguration).toBe(true);
-    expect(readiness.mode).toBe("log");
-  });
-
-  it("treats SILENCE as unknown, not as a refusal", () => {
-    // Warning on "unknown" would put a permanent banner on a healthy cluster.
-    expect(emailReadinessFrom({}).needsConfiguration).toBe(false);
-    expect(
-      emailReadinessFrom({ integrations: [{ name: "storage", configured: "unknown" }] })
-        .needsConfiguration,
-    ).toBe(false);
-    expect(
-      emailReadinessFrom({ integrations: [{ name: "email", configured: "unknown", health: "unknown" }] })
-        .needsConfiguration,
-    ).toBe(false);
   });
 });
 

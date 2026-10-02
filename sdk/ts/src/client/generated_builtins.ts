@@ -373,6 +373,31 @@ QueryClient.prototype.campaignScheduleSend = function (this: QueryClient, args: 
   return this.executeNamed("campaignScheduleSend", buildCampaignScheduleSend(args), opts);
 };
 
+/** Check current organization sending permission, the selected sender and unsubscribe setup without sending mail. A campaignId reads that campaign's saved organization and sender. Otherwise select accountId and senderIdentityId explicitly. Readiness is not evidence of delivery and is rechecked when sending. */
+export interface CampaignSendingReadinessArgs {
+  campaignId?: string;
+  accountId?: string;
+  senderIdentityId?: string;
+}
+
+export function buildCampaignSendingReadiness(args: CampaignSendingReadinessArgs): string {
+  const parts: string[] = [];
+  if (args.campaignId !== undefined) parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  if (args.accountId !== undefined) parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.senderIdentityId !== undefined) parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  return "builtin campaignSendingReadiness(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSendingReadiness(args: CampaignSendingReadinessArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSendingReadiness = function (this: QueryClient, args: CampaignSendingReadinessArgs = {} as CampaignSendingReadinessArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSendingReadiness", buildCampaignSendingReadiness(args), opts);
+};
+
 /** Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through. */
 export interface CampaignStartSendArgs {
   /** The campaign to send. The caller needs update permission in its organization. */
@@ -1020,6 +1045,33 @@ declare module "./query.js" {
 
 QueryClient.prototype.effectiveCapabilitiesForActor = function (this: QueryClient, args: EffectiveCapabilitiesForActorArgs = {} as EffectiveCapabilitiesForActorArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("effectiveCapabilitiesForActor", buildEffectiveCapabilitiesForActor(args), opts);
+};
+
+/** Configure one Microsoft Azure connection for the cluster with accountId self, then manage each organization's domain and sender using that saved connection. Owner or developer only. Credentials stay encrypted on the cluster. */
+export interface EmailAzureSetupArgs {
+  accountId: string;
+  action: string;
+  sessionId?: string;
+  options?: Record<string, unknown>;
+}
+
+export function buildEmailAzureSetup(args: EmailAzureSetupArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.sessionId !== undefined) parts.push("sessionId: " + renderMemQLValue(args.sessionId));
+  if (args.options !== undefined) parts.push("options: " + renderMemQLValue(args.options));
+  return "builtin emailAzureSetup(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailAzureSetup(args: EmailAzureSetupArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailAzureSetup = function (this: QueryClient, args: EmailAzureSetupArgs = {} as EmailAzureSetupArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailAzureSetup", buildEmailAzureSetup(args), opts);
 };
 
 /** Read the last 100 captured test messages from the last seven days. Owner or developer only; capture must be explicitly configured. This is a sensitive test inbox, not evidence of Internet delivery. */

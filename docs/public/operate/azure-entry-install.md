@@ -386,8 +386,11 @@ Steps, deny reasons and the verification command:
 
 Magic links, invitations and admin notifications leave the identity
 service through `integrations/email`'s Microsoft Graph sender, and on
-this instance Graph is the ONLY path (memql#4218): no SMTP, no Azure
-Communication Services.
+the original instance Graph remains its bootstrap transport (memql#4218).
+Organization campaign sending can now use ACS through the separate
+[cluster email configuration](campaign-sending.md#configure-azure-once-for-the-cluster).
+That Settings flow is not yet part of infrastructure provisioning and must not
+be mistaken for an automatic replacement for bootstrap mail.
 
 The lesson from the first bring-up (memql#4226): AKS and the
 Pay-As-You-Go subscription sit on one Entra tenant; the sender mailbox

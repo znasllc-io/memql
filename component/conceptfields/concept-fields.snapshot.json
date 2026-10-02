@@ -1970,6 +1970,32 @@
       ]
     },
     {
+      "concept": "v1:email:connectionState",
+      "file": "email/concepts.memql",
+      "fields": [
+        "encryptedValue"
+      ],
+      "required": [
+        "encryptedValue"
+      ]
+    },
+    {
+      "concept": "v1:email:sendOperation",
+      "file": "email/concepts.memql",
+      "fields": [
+        "accountId",
+        "encryptedValue",
+        "nextPollAt",
+        "status"
+      ],
+      "required": [
+        "accountId",
+        "encryptedValue",
+        "nextPollAt",
+        "status"
+      ]
+    },
+    {
       "concept": "v1:forge:project",
       "file": "forge/concepts.memql",
       "fields": [

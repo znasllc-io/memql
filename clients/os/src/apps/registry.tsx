@@ -570,7 +570,7 @@ const campaigns: OsAppManifest = {
   wants: CAMPAIGNS_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
-  attentionChanges: [{ id: "campaigns:newsletter", revision: "newsletter-1", sectionId: "audiences", target: "newsletter", label: "Connect storefront newsletter signups" }, { id: "campaigns:recurring", revision: "recurring-1", sectionId: "campaigns", target: "recurring", label: "Set up repeating campaigns" }, { id: "campaigns:organization", revision: "organization-1", sectionId: "campaigns", label: "Choose the organization for every campaign" }, { id: "campaigns:template-editor", revision: "editor-1", sectionId: "templates", label: "Edit and publish email templates in Productivity Tools" }],
+  attentionChanges: [{ id: "campaigns:azure-email", revision: "azure-cluster-1", sectionId: "senders", label: "Use one cluster Azure setup for client email domains" }, { id: "campaigns:newsletter", revision: "newsletter-1", sectionId: "audiences", target: "newsletter", label: "Connect storefront newsletter signups" }, { id: "campaigns:recurring", revision: "recurring-1", sectionId: "campaigns", target: "recurring", label: "Set up repeating campaigns" }, { id: "campaigns:organization", revision: "organization-1", sectionId: "campaigns", label: "Choose the organization for every campaign" }, { id: "campaigns:template-editor", revision: "editor-1", sectionId: "templates", label: "Edit and publish email templates in Productivity Tools" }],
   component: CampaignsApp,
 };
 

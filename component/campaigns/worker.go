@@ -695,6 +695,7 @@ func (w *Worker) processRecipient(
 		return true, err
 	}
 
+	msg.IntentID = "campaign:" + bare(campaign.ID) + ":recipient:" + bare(r.ID)
 	sendCtx, cancel := context.WithTimeout(ctx, w.cfg.SendTimeout)
 	err = w.deliver(sendCtx, msg, identity.SendAs)
 	cancel()

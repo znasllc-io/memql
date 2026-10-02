@@ -82,10 +82,10 @@ describe("shared attention", () => {
     await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
     expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "files:editor"');
   });
-  it("acknowledges template editing only at visible Campaigns templates", async () => {
+  it.each([["campaigns:template-editor", "templates"], ["campaigns:azure-email", "senders"]])("acknowledges %s only at its visible destination", async (changeId, sectionId) => {
     const fake = setup();
     const campaigns = OS_REGISTRY.apps.find(app => app.id === "campaigns")!;
-    const feature = campaigns.attentionChanges!.find(change => change.id === "campaigns:template-editor")!;
+    const feature = campaigns.attentionChanges!.find(change => change.id === changeId)!;
     const apps = [{ ...campaigns, attentionChanges: [feature] }];
     function Destination({ section = "map", visible = true }: { section?: string; visible?: boolean }) {
       return <AttentionProvider apps={apps}><AttentionMarker appId="campaigns" />
@@ -95,11 +95,11 @@ describe("shared attention", () => {
     const view = render(withSession(<Destination />));
     await screen.findByRole("img", { name: "Unseen change" });
     expect(fake.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(0);
-    view.rerender(withSession(<Destination section="templates" visible={false} />));
+    view.rerender(withSession(<Destination section={sectionId} visible={false} />));
     expect(screen.getByRole("img", { name: "Unseen change" })).toBeTruthy();
-    view.rerender(withSession(<Destination section="templates" />));
+    view.rerender(withSession(<Destination section={sectionId} />));
     await waitFor(() => expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull());
-    expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain('changeId: "campaigns:template-editor"');
+    expect(fake.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")?.[1]).toContain(`changeId: "${changeId}"`);
   });
   it("acknowledges GitHub account management only at visible Deployables settings", async () => {
     const fake = setup();

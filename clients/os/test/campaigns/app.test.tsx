@@ -330,9 +330,9 @@ describe("one campaign", () => {
 // ---------------------------------------------------------------------------
 
 describe("a cluster that cannot send mail", () => {
-  it("says so ONCE at the top, not once per action", async () => {
+  it("does not mistake the operator mailbox report for every client’s sending status", async () => {
     const conn = fakeConnection({
-      campaigns: [campaignRow({ id: "v1:campaigns:campaign:c1" })],
+      campaigns: [campaignRow({ id: "c1", accountId: "client-a" })],
       integrationStatus: [
         {
           integrations: [
@@ -342,9 +342,11 @@ describe("a cluster that cannot send mail", () => {
       ],
     });
     mount(conn);
-    const notices = await screen.findAllByText(/nothing sent from here will arrive/);
-    expect(notices.length).toBe(1);
-    expect(screen.getByText(/Settings, under Integrations/)).toBeTruthy();
+    await screen.findByText("August update");
+    expect(screen.queryByText(/nothing sent from here will arrive/)).toBeNull();
+    fireEvent.click(screen.getByText("August update"));
+    expect(await screen.findByRole("button", { name: "Send now" })).toBeTruthy();
+    expect(conn.query.campaignSendingReadiness).toHaveBeenCalledWith({ campaignId: "c1" }, expect.anything());
   });
 
   it("stays SILENT on a healthy cluster", async () => {
@@ -961,9 +963,10 @@ describe("the app's settings", () => {
   it("offers exactly the sections the manifest declares", async () => {
     const conn = fakeConnection({});
     mount(conn, "settings");
-    const group = await screen.findByLabelText("Default section");
+    const group = await screen.findByRole("combobox", { name: "Opening page" });
+    openSelect(group);
     for (const name of ["Campaigns", "Audiences", "Templates", "Senders", "Rules", "Settings"]) {
-      expect(within(group).getByText(name)).toBeTruthy();
+      expect(screen.getByRole("option", { name })).toBeTruthy();
     }
   });
 
@@ -971,7 +974,7 @@ describe("the app's settings", () => {
     const conn = fakeConnection({});
     mount(conn, "settings");
     expect(
-      await screen.findByText(/changing this never reaches one that already exists/),
+      await screen.findByText(/Existing campaigns stay unchanged/),
     ).toBeTruthy();
   });
 });
@@ -1013,7 +1016,7 @@ describe("guided campaign preparation", () => {
   });
 
   it("does not confirm setup when the email status read fails", async () => {
-    mount(fakeConnection({ integrationStatus: new Error("Email report unavailable") }));
+    mount(fakeConnection({ sendingReadiness: new Error("Email report unavailable") }));
     fireEvent.click(screen.getByRole("button", { name: "New campaign" }));
     await screen.findByText("Email report unavailable");
     expect(screen.queryByText("Sending settings are configured.")).toBeNull();
@@ -1030,8 +1033,8 @@ describe("guided campaign preparation", () => {
   });
 });
 
-it("keeps test, send and scheduling unavailable until provider and unsubscribe setup is confirmed", async () => {
-  const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1" })] });
+it("keeps test, send and scheduling unavailable until organization setup is confirmed", async () => {
+  const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1" })], sendingReadiness: [{ ready: false, reason: "Connect this organization’s domain." }] });
   h.connection = conn;
   render(withSession(<CampaignsApp sectionId="campaigns" navigate={() => {}} askContext={() => {}} store={memoryStore()} uploads={fakeUploads()} />, { readiness: readiness(true, [verdict("email", "partial"), verdict("campaigns", "configured")]) }));
   fireEvent.click(await screen.findByText("August update"));

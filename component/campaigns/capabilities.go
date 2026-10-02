@@ -11,6 +11,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // capabilities.go -- the DSL-callable surface.
@@ -46,6 +47,7 @@ func (w *Worker) IntegrationName() string { return "campaigns" }
 // Capabilities returns the DSL-callable operations.
 func (w *Worker) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "sendingReadiness", Description: "Check the selected organization's sender and unsubscribe setup without sending mail.", Handler: w.handleSendingReadiness},
 		{Name: "configureNewsletter", Description: "Bind a deployable to its organization's audience and reviewed welcome template.", Handler: w.handleConfigureNewsletter},
 		{Name: "subscribe", Description: "Record an explicit storefront opt-in and queue one welcome.", Handler: w.handleSubscribe},
 		{Name: "retryNewsletterWelcome", Description: "Recheck a blocked welcome without repeating an uncertain delivery attempt.", Handler: w.handleRetryNewsletterWelcome},
@@ -147,7 +149,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 			ArgsSchema: map[string]string{
 				"templateId":       "string (required) - v1:campaigns:template.id supplying the subject and bodies",
 				"recipientId":      "string (required) - v1:campaigns:recipient.id to send to",
-				"senderIdentityId": "string (optional) - organization-owned recipients require an identity in that organization",
+				"senderIdentityId": "string (optional) - an identity in the recipient's organization; omission resolves that organization's configured sender",
 				"requestId":        "string (optional) - stable identifier for one intended message; retries return its durable receipt",
 				"emailRuleId":      "string (optional) - the rule this send came from; also names the audience to resolve the recipient in",
 			},
@@ -377,8 +379,12 @@ func (w *Worker) preflightAudience(ctx context.Context, op string, campaign Camp
 	// where an unreadable identity waits -- because a caller pressing the
 	// button is owed an answer now rather than a queued job that may or may
 	// not resolve later.
-	if _, refusal := w.resolveSendIdentity(ctx, campaign); refusal.refused() {
+	identity, refusal := w.resolveSendIdentity(ctx, campaign)
+	if refusal.refused() {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: %s", op, refusal.Reason)
+	}
+	if err := email.CheckSender(ctx, w.resolveSender(), identity.SendAs); err != nil {
+		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
 	}
 
 	tmpl, found, err := w.store.TemplateByID(ctx, campaign.TemplateID)

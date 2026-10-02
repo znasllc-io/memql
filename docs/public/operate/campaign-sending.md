@@ -40,6 +40,11 @@ current authority again before each delivery, so revoked membership also
 stops queued work. Test messages and single-recipient sends use the same
 organization permission check.
 
+Sending readiness is checked for the selected organization and sender. The
+operator organization's mailbox status does not enable or block client mail.
+Use **Check again** after changing a connection; the backend also repeats the
+check before scheduling and sending.
+
 Delivery records preserve the organization and authenticated owning user.
 Editing a shared resource preserves its existing owner; each new version
 separately records the user who made that change.
@@ -81,6 +86,129 @@ The client write surface is `campaignSaveTemplate`, with `templateId`,
 `accountId`, `name`, `content`, `expectedRevision`, and `action` (`save`,
 `publish`, or `archive`). Its receipt includes the saved revision and status.
 Raw template writes and the underlying create/update mutations are internal.
+
+## Configure Azure once for the cluster
+
+An owner or developer configures **Settings → Connections → Email** once for
+this installation. There is one Azure configuration, shared by every client
+organization in the cluster. Clients do not need Azure accounts or separate
+Microsoft sign-ins when the operator runs their email on its own subscription.
+Campaigns manages client domains and senders; it links to Settings when the
+cluster needs configuration.
+
+1. **Sign in with Microsoft.** Enter the displayed code on Microsoft's page.
+   MemQL requests delegated Azure Resource Manager access under your Microsoft
+   account. Your tenant may require administrator consent. No password, client
+   secret, or subscription key is entered into MemQL.
+2. **Choose the subscription and resource group.** Switch Microsoft directories
+   first if necessary. Select an existing resource group, or name a new one and
+   choose its region. Select the email data location.
+3. **Save configuration.** MemQL verifies access to the enabled subscription and
+   an existing selected group, then saves the authorization encrypted in this
+   cluster. Saving creates no Azure services and sends no mail. A new group is
+   created only when you later confirm a domain's resource plan.
+
+All replicas use the same saved configuration and coordinate refresh-token
+rotation in PostgreSQL. The private browser sign-in session is bound to its
+initiating MemQL user and expires after one hour once authorized; the saved
+cluster authorization remains available after it expires. Only the opaque
+session identifier is kept by the browser. Access tokens, refresh tokens, and
+sending keys never appear in browser responses. Microsoft can revoke the
+saved authorization or require another sign-in under its directory policy.
+Existing verified sends can continue with their sending keys when management
+sign-in needs renewal; domain changes require renewed authorization.
+
+**Disconnect** in cluster email settings stops Azure sends and domain setup
+for every organization. Reconnect before choosing a different subscription or
+resource configuration. Reconnecting to the same configuration can resume its
+existing domains. Changing it requires reconfiguring each domain; the cluster
+never silently reuses credentials from a different configuration. Disconnect
+does not delete Azure resources, revoke keys in Azure, alter DNS, or stop Azure
+billing. Historical encrypted versions follow the installation's retention
+policy. Already submitted messages cannot be recalled.
+
+### Add each client's domain and sender
+
+In **Campaigns → Settings**, **Campaigns → Senders → Connect email domain**, or
+**Settings → Connections → Email**, select the client organization. An owner or
+developer also needs write access to that organization. Other campaign authors
+use its saved sending identities.
+
+1. **Add sending domain.** Enter the client's domain. Resource names are
+   suggested and can be changed. Subscription, group, and email data location
+   come from the cluster configuration; no client Microsoft sign-in is needed.
+2. **Review, then create.** MemQL registers the Communication resource provider
+   if needed and creates the email service, delivery service, and custom-domain
+   resource. Usage is billed to the operator's selected Azure subscription.
+   MemQL does not convert the subscription, buy support, or send mail during
+   setup. Interrupted steps check the same resources. Resource ownership tags
+   bind services to this cluster configuration and organization; unrelated
+   resources are refused. Names are reserved across replicas before creation
+   and remain assigned after disconnecting. A changed plan must be reviewed
+   again before resources are created.
+3. **Verify domain.** Add the exact TXT/CNAME records Microsoft supplies at the
+   domain's DNS provider, then choose **Check domain records**. Merge an SPF
+   include into an existing SPF record rather than creating a second one.
+   Preserve existing MX and website records. Domain, SPF, and both DKIM checks
+   must succeed. The plan is saved, so you can return after DNS propagates
+   without another Microsoft sign-in.
+4. **Save sender.** Sender `news` on `client.com` sends as `news@client.com`.
+   Set the client's display name and an existing reply mailbox such as
+   `help@client.com`. ACS sends outbound mail; it does not create receiving
+   mailboxes. `no-reply` is optional. The verified sender appears in Campaigns.
+
+A client send requires that organization's ready transport and verified sender.
+It never falls back to the operator's Graph/SMTP mailbox. ACS sets the display
+name on the sender resource; a campaign override that differs is refused.
+**Disconnect domain** stops only that organization's future sends, preserving
+other organizations and the cluster's Azure authorization.
+
+A successful ACS submission means **accepted by Azure**, not delivered to an
+inbox. Ambiguous submission responses are not automatically resubmitted.
+Delivery feedback still needs the pipeline described below; this setup does
+not install an Event Grid delivery-feedback route.
+
+### Registration and installation setup
+
+MemQL ships the public application ID of **MemQL Azure Connection**, its
+multi-tenant Microsoft Entra application. This identifies the software; it is
+not a secret, subscription, or authorization. Register the application once
+for MemQL. Operators do not register another app or supply its ID in environment
+variables for each client or installation. The same registration supports local
+and cloud installations in commercial Azure.
+
+Each installation keeps its own authorization and sending credentials. A local
+connection is never copied into a cloud cluster or another client's installation.
+The same operator may configure separate clusters against its own directory and
+subscription. A client's directory consent is relevant only if the operator
+chooses to use Azure resources controlled by that client. Consent cannot give
+the signed-in user Azure permissions they do not already hold.
+
+The device code flow uses the existing MemQL stream. It adds no OAuth callback
+endpoint or per-installation redirect URL. Local capture works without Azure;
+connecting Microsoft does not switch test emails to external delivery.
+
+**Initial installation integration remains planned.** The intended onboarding
+is to configure cluster email during installation and leave Campaigns ready to
+manage client domains. Azure deployment authorization should be reused where
+possible, with a durable cluster identity and narrowly scoped access; deployment
+CLI credentials must not be copied into the cluster. The current implementation
+uses the one-time Settings flow above. The infrastructure installer does not yet
+provision this authorization or a verified sender. Existing transactional email
+bootstrap is separate: do not remove a working bootstrap transport before its
+replacement can deliver owner verification and login mail. Creating the app
+registration alone does not solve that bootstrap dependency.
+
+Microsoft directory policy can require administrator approval. Publisher
+verification is separate from verifying a publisher domain. The registration's
+publisher verification must be completed before relying on broad customer
+self-service consent. This does not require a separate registration for each
+operator-managed client. See Microsoft's [application and service principal model](https://learn.microsoft.com/en-us/entra/identity-platform/app-objects-and-service-principals)
+and [publisher verification requirements](https://learn.microsoft.com/en-us/entra/identity-platform/publisher-verification-overview).
+
+Protocol references: [device authorization flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-device-code),
+[email domain setup](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/add-custom-verified-domains),
+[email sending API](https://learn.microsoft.com/en-us/rest/api/communication/email/email/send?view=rest-communication-email-2025-09-01).
 
 ## Storefront newsletter signups
 
@@ -264,7 +392,7 @@ Minimum to send anything:
 | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` | Signs the one-click unsubscribe link. **Required** — a send is refused without it. Rotating it needs the variable below; see [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
 | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS` | The previous signing key: **verified against, never signed with**. Optional, and unset only on a deployment that has never rotated. |
 | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` | Public origin the link points at, e.g. `https://api.example.com`. **Required.** Must be externally reachable: the recipient's mail client POSTs to it. It is also the origin the open pixel and click redirects are built from — [tracking](#open-and-click-tracking) introduces no second variable, because two origins that can disagree is two ways for a message to carry a URL nothing serves. |
-| An email sender | `MEMQL_EMAIL_AZURE_*` + `MEMQL_EMAIL_SENDER` (Microsoft Graph), or `SMTP_*`. With neither, the node runs the `LogSender` and a send is refused. |
+| An email sender | A ready Azure connection and verified sender for the campaign organization. Explicit local capture is also supported. Graph/SMTP remain available for the operator organization; a client campaign cannot borrow them. |
 
 Tuning (all optional, all documented in [env-vars.md](env-vars.md)):
 `MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE`, `_BATCH_SIZE`, `_MAX_ATTEMPTS`,
@@ -612,24 +740,25 @@ exists in this tenant and that campaigns may send as it:
 
 | Field | Notes |
 |---|---|
-| `address` | the mailbox UPN the Graph application sends as. Normalized lowercase, validated for RFC 5322 shape **and** header safety — a CR or LF here would be header injection into every message the identity sends. It is also the reputation and warmup key, so two spellings of one mailbox would split its ramp in half |
+| `address` | the verified address the organization sends as. Normalized lowercase, validated for RFC 5322 shape **and** header safety — a CR or LF here would be header injection into every message the identity sends. It is also the reputation and warmup key, so two spellings of one mailbox would split its ramp in half |
 | `fromName` | the From display name, e.g. `Acme News`. Required: a From with no phrase shows the raw mailbox to every recipient |
 | `replyTo` | default Reply-To for campaigns that set none of their own. A campaign's own always wins |
-| `accountId` | the client this mailbox belongs to. A record, never a filter — see below |
+| `accountId` | the organization this sender belongs to; must match its campaign and transport |
 | `status` | `active` or `disabled` |
 | `notes` | operator provenance. Never a credential |
 
 **There is no secret material on the row, and that is the design.**
-Authentication stays the cluster's one Graph credential; an identity row says
-*this mailbox may be used*, not *here is how to log into it*. Which mailboxes
-the credential may actually send as is a tenant policy question, and no row in
-this graph can answer it.
+Azure credentials live in encrypted organization connection storage. The identity
+row records the address and presentation; the transport still requires that
+address to be in the organization's verified sender set. Graph/SMTP credentials
+remain installation configuration for the operator's own mail.
 
 ### Resolution order, and why there is no fallback
 
 ```
 campaign.senderIdentityId  →  the operator SAID which mailbox
-(empty)                    →  the env-configured default sender
+(empty, operator org)      →  the operator organization’s configured default
+(empty, client org)         →  refused: choose that client’s sending identity
 ```
 
 That is the whole ladder. **The engine never infers an identity from a
@@ -638,9 +767,8 @@ selected account's identities, and prefill is UX while resolution is explicit
 — an engine that guessed would mail a client's list from a mailbox nobody
 chose, and would be right often enough that the wrong case went unnoticed.
 
-An empty `senderIdentityId` is the ordinary case and means exactly what every
-campaign meant before identities existed, so plurality is additive rather than
-a migration.
+Client campaigns require an explicit identity. Legacy campaigns belonging to the
+operator organization can use its configured default.
 
 **A missing or `disabled` identity is refused, never silently defaulted.**
 Falling back to the cluster default would mail a client's audience from the
@@ -682,12 +810,12 @@ A client campaign cannot fall back to the operator's sender identity.
 
 ### Adding a sending identity
 
-Creating the row is the last step, not the first. **The row is a declaration
-that a mailbox may be used; it is not what makes the mailbox usable.** Three
-of the four steps below happen in somebody else's tenant, and the engine
-cannot check any of them — the honest verification is a real send, and the
-honest failure report is Graph's own 403 landing on the campaign's
-`lastError`.
+For ACS, use the guided connection above. It verifies the domain, creates the
+Azure sender username, and saves the corresponding Campaigns identity. Creating
+an identity manually does not prove that its address is verified.
+
+The following instructions apply only to an existing **Microsoft Graph operator
+mailbox** configuration. They do not configure a client's ACS connection.
 
 1. **Create the mailbox** in the Microsoft 365 tenant that hosts your sending
    domain — the tenant `MEMQL_EMAIL_AZURE_TENANT_ID` names, which is not
@@ -1292,3 +1420,29 @@ Still perfectly reasonable, and unchanged:
 | Everything `skipped` | The cluster suppression list matched. Browse `v1:campaigns:suppression` as the cluster owner. |
 | Recipient says the unsubscribe link does not work | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is not externally reachable, or the key that signed it has been retired by two rotations. Check the node log for `refused an unsubscribe link signed by a key this node no longer holds`; if the retired value can still be recovered, putting it back in `_PREVIOUS` revives those links. See [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
 | Boot warns "holds only ONE unsubscribe signing key" | This deployment has sent campaign mail and has no `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS`. Nothing is broken yet; the next rotation of the secret alone would break every link already sent. |
+
+### Azure send receipts
+
+Before an ACS request leaves the cluster, MemQL persists an encrypted receipt
+with its own operation UUID and the message's internal delivery identity. A lost
+response or a restart never authorizes another POST for that identity. The
+cluster polls the original resource's operation endpoint across replicas using
+shared database coordination. A confirmed rate-limit refusal can retry after
+Azure's requested delay; an unknown outcome cannot.
+
+In the organization's email connection detail, **Check sends** shows the most
+recent 25 Azure processing receipts. **Processing completed** means ACS finished
+processing the request, not that the recipient received it. This setup does not
+yet provision an Event Grid or Azure Monitor delivery-feedback source; recipient
+bounces and delivery cannot be inferred from operation success. Existing campaign
+`sent` counts continue to mean transport acceptance. An acceptance that initially
+returned an unknown result can later be visible as accepted in the receipt even
+when the earlier campaign attempt was recorded as failed; it is never resent
+automatically.
+
+Polling stops after 24 hours if processing remains unconfirmed, retaining the
+receipt to prevent accidental resubmission. Reconnecting to a different Azure
+resource does not move old operations: they belong to the original resource.
+No message body, mailbox address, or access key appears in the receipt status
+response. Disconnecting email stops new sends and pauses reconciliation until
+the original resource is connected again.

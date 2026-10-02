@@ -1,13 +1,9 @@
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { RecordList, listCount } from "../../kit/RecordRow";
-import { NeedsConfiguration } from "./NeedsConfiguration";
-import { useSession } from "../../chrome/access";
-import { campaignSendingConfigured } from "./readiness";
+import { useSendingReadiness } from "./useCampaigns";
 import type { UploadProvider } from "../../items/upload";
 import { CampaignJourney } from "./CampaignJourney";
-import type { EmailReadiness } from "./rows";
-import type { Reading } from "./useCampaigns";
 import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -72,10 +68,8 @@ export function CampaignsSection({
   showFiled,
   trackByDefault,
   uploads,
-  email,
 }: {
   uploads: UploadProvider;
-  email: Reading<EmailReadiness>;
   feeds: CampaignFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
@@ -111,7 +105,6 @@ export function CampaignsSection({
         feeds={feeds}
         writes={writes}
         uploads={uploads}
-        email={email}
         trackByDefault={trackByDefault}
         onDone={(id) => {
           setAdding(false);
@@ -136,7 +129,6 @@ export function CampaignsSection({
           title={campaignName(open)}
           back={{ label: "Campaigns", onSelect: () => setOpenId("") }}
         />
-        <NeedsConfiguration email={email} />
         <CampaignDetail
           key={open.id}
           campaign={open}
@@ -153,7 +145,6 @@ export function CampaignsSection({
       <Head title="Campaigns" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="New campaign" />
       </Head>
-      <NeedsConfiguration email={email} />
 
       {feeds.campaigns.snapshot.error ? (
         <Notice
@@ -417,7 +408,8 @@ function CampaignDetail({
  * "Send?" and it is the one being asked.
  */
 function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: CampaignWrites }) {
-  const readyToSend = campaignSendingConfigured(useSession().readiness);
+  const sending = useSendingReadiness(campaign.accountId, campaign.senderIdentityId, campaign.id);
+  const readyToSend = sending.ready;
   const controls = writes.sendControls;
   const [asking, setAsking] = useState<"" | "start" | "cancel">("");
   const [when, setWhen] = useState("");
@@ -447,8 +439,9 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
         <Notice
           tone="warn"
           sentence="Sending setup is incomplete or unconfirmed."
-          next="Review Campaigns settings. You can still edit this draft or stop an existing send."
-        />
+          next="Review this organization’s email connection in Senders. You can still edit the draft or stop an existing send."
+          detail={sending.reason}
+        ><Button onClick={sending.reload} busy={sending.state === "loading"}>Check again</Button></Notice>
       ) : null}
 
       {asking === "start" && readyToSend ? (
@@ -623,7 +616,8 @@ export function TestSendPanel({
   label?: string;
 }) {
   const [to, setTo] = useState("");
-  const readyToSend = campaignSendingConfigured(useSession().readiness);
+  const sending = useSendingReadiness("", "", campaignId);
+  const readyToSend = sending.ready;
 
   // The result belongs to the campaign it was run against. Switching campaigns
   // with a stale "Test sent" on screen would credit one campaign with another's
@@ -640,8 +634,9 @@ export function TestSendPanel({
         <Notice
           tone="warn"
           sentence="Finish sending setup before sending a test."
-          next="Review Campaigns settings, then check again."
-        />
+          next="Review this organization’s email connection in Senders."
+          detail={sending.reason}
+        ><Button onClick={sending.reload} busy={sending.state === "loading"}>Check again</Button></Notice>
       ) : null}
       <Field label="Send one copy to">
         <Input
