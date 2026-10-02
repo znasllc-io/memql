@@ -23,7 +23,7 @@ describe("identity authority", () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ state: "unclaimed" })));
     vi.stubGlobal("fetch", fetcher);
     expect(await ownershipState(config)).toBe("unclaimed");
-    expect(fetcher.mock.calls[0]?.[0].origin).toBe(config.identityUrl);
+    expect(fetcher.mock.calls[0]?.[0].origin).toBe(window.location.origin);
     expect(fetcher.mock.calls[0]?.[1].credentials).toBe("include");
     fetcher.mockResolvedValue(new Response("{}"));
     await expect(ownershipState(config)).rejects.toThrow();
