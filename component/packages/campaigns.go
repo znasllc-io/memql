@@ -111,14 +111,21 @@ func (i *Integration) handleCampaigns(ctx context.Context, args map[string]any, 
 			config.Azure.TenantID = manifest.Campaigns.Azure.TenantID
 		}
 		manifest.Campaigns.Azure = config.Azure
-		replaced := false
+		matched := -1
 		for n, d := range manifest.Campaigns.Domains {
-			if strings.EqualFold(d.Organization, config.Domains[0].Organization) {
-				manifest.Campaigns.Domains[n] = config.Domains[0]
-				replaced = true
+			if strings.EqualFold(d.Organization, config.Domains[0].Organization) || strings.EqualFold(d.Domain, config.Domains[0].Domain) {
+				if matched >= 0 {
+					return nil, fmt.Errorf("the loaded package matches different organization and domain bindings; review them before exporting")
+				}
+				matched = n
 			}
 		}
-		if !replaced {
+		if matched >= 0 {
+			// The package's portable label may differ from the live account's
+			// display name. Azure has already verified this domain's ownership.
+			config.Domains[0].Organization = manifest.Campaigns.Domains[matched].Organization
+			manifest.Campaigns.Domains[matched] = config.Domains[0]
+		} else {
 			manifest.Campaigns.Domains = append(manifest.Campaigns.Domains, config.Domains[0])
 		}
 	}
