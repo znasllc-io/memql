@@ -13,7 +13,7 @@ const mode = params.get("mode") || "light";
 document.documentElement.setAttribute("data-theme", mode);
 document.documentElement.setAttribute("data-os-theme", "graphite");
 document.documentElement.style.colorScheme = mode;
-if (params.get("width") === "mobile") document.body.style.width = "360px";
+
 function Device() {
   const [code, setCode] = useState("");
   const [done, setDone] = useState<string>();
@@ -39,4 +39,7 @@ function App() {
     onField={(name, text) => setFields(held => ({ ...held, [name]: text }))}
     onPasskey={() => setState("error")} onSubmit={() => setState("pending")} onLegal={() => {}} />;
 }
-createRoot(document.getElementById("root")!).render(params.get("view") === "device" ? <Device /> : <App />);
+const mobileSource = new URL(location.href); mobileSource.searchParams.delete("width");
+createRoot(document.getElementById("root")!).render(params.get("width") === "mobile"
+  ? <iframe title="Mobile auth preview" src={mobileSource.toString()} style={{ width: 360, height: "100dvh", border: 0 }} />
+  : params.get("view") === "device" ? <Device /> : <App />);

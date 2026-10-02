@@ -102,6 +102,12 @@ func (h *Handler) serveIdentityXHR(w http.ResponseWriter, r *http.Request, site 
 			}
 			// Keep the path identity mounted: /oauth/token stays /oauth/token.
 			pr.Out.Host = target.Host
+			if isIdentityUIRequest(pr.In) || isIdentityPasskeyRequest(pr.In) {
+				// Preserve the resolved public authority so identity can
+				// recognize a verified account front door, as it does when
+				// that host calls identity directly.
+				pr.Out.Host = pr.In.Host
+			}
 		},
 		// Identity sets two Set-Cookie headers (memql_refresh + memql_session).
 		// Do not add a ModifyResponse that copies headers with Header.Set --

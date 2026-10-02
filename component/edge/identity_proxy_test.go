@@ -258,6 +258,9 @@ func TestNativeIdentityKeepsCookiePairThroughProxy(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"csrf": identityweb.CSRFTokenFromRequest(r)})
 	}))
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "os.example.com" {
+			t.Errorf("lost public identity authority: %s", r.Host)
+		}
 		if r.Header.Get("Origin") != "https://os.example.com" {
 			http.Error(w, "origin refused", 403)
 			return
