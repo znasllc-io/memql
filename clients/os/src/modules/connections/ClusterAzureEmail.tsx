@@ -56,7 +56,8 @@ export function ClusterAzureEmail({ state, onSaved, onBack }: {
     return () => window.clearTimeout(timer);
   }, [session, signedIn, error, grant, call, state.status]);
   const begin = async (tenantId = "") => {
-    const result = await call("begin", tenantId ? { tenantId } : {});
+    const tenant = tenantId || state.tenantId;
+    const result = await call("begin", tenant ? { tenantId: tenant } : {});
     if (result?.sessionId) { keepSession(result.sessionId); setGrant(result); setSignedIn(false); }
   };
   if (state.status === "connected" || state.status === "reauthorize" && !renewing) return <section className="os-action-pane">

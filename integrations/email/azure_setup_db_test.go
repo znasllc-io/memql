@@ -20,6 +20,7 @@ import (
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/emailconfig"
 )
 
 func TestAzureSetupSessionSurvivesReplicaHopAndRefusesAnotherActor(t *testing.T) {
@@ -36,6 +37,7 @@ func TestAzureSetupSessionSurvivesReplicaHopAndRefusesAnotherActor(t *testing.T)
 	now := time.Now().UTC()
 	var tokenCalls atomic.Int32
 	var revoke atomic.Bool
+	var resourceAccount, resourceCluster string
 	protocol := newAzureProtocol("12345678-1234-1234-1234-123456789012")
 	protocol.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
 		body, code := `{"device_code":"private-device-code","user_code":"VISIBLE","verification_uri":"https://microsoft.com/devicelogin","expires_in":900,"interval":5}`, 200
@@ -54,6 +56,19 @@ func TestAzureSetupSessionSurvivesReplicaHopAndRefusesAnotherActor(t *testing.T)
 			body = `{"value":[{"subscriptionId":"12345678-1234-1234-1234-123456789012","displayName":"Selected subscription","state":"Enabled"}]}`
 			if strings.HasSuffix(r.URL.Path, "/12345678-1234-1234-1234-123456789012") {
 				body = `{"state":"Enabled"}`
+			}
+			if strings.Contains(r.URL.Path, "/providers/Microsoft.Communication/") {
+				if r.Method != http.MethodGet {
+					t.Error("export mutated Azure")
+				}
+				properties := map[string]any{"provisioningState": "Succeeded", "domainManagement": "CustomerManaged"}
+				records := map[string]any{}
+				for _, purpose := range []string{"Domain", "SPF", "DKIM", "DKIM2"} {
+					records[purpose] = map[string]any{"name": "example.com", "type": "TXT", "value": "public-reference-" + purpose, "ttl": 3600}
+				}
+				properties["verificationRecords"] = records
+				encoded, _ := json.Marshal(map[string]any{"id": r.URL.Path, "tags": map[string]string{"memql-organization": resourceAccount, "memql-cluster": resourceCluster}, "properties": properties})
+				body = string(encoded)
 			}
 		}
 		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body))}, nil
@@ -156,6 +171,44 @@ func TestAzureSetupSessionSurvivesReplicaHopAndRefusesAnotherActor(t *testing.T)
 		t.Fatal("cluster connection did not cross replicas", err)
 	}
 	plan.ClusterID = cluster.ID
+	// Package import on one replica becomes an unverified draft on the other.
+	// Importing reference DNS never activates a sender or needs an Azure call.
+	imported := emailconfig.Campaigns{Azure: publicAzure(cluster), Domains: []emailconfig.Domain{{Organization: "portable-client", Domain: plan.Domain, EmailService: plan.EmailService, CommunicationService: plan.CommunicationService, Sender: &emailconfig.Sender{Username: "news", DisplayName: "Client"}, DNS: []emailconfig.DNSRecord{{Purpose: "Domain", Name: plan.Domain, Type: "TXT", Value: "reference-proof", TTL: 3600}}}}}
+	data, _ := json.Marshal(imported)
+	beforeTokens := tokenCalls.Load()
+	if reply, err := call(0, owner, "importPackage", "", other, map[string]any{"configuration": string(data)}); err != nil || reply["status"] != "draft" {
+		t.Fatal("could not import draft", reply, err)
+	}
+	draft, err := call(1, owner, "status", "", other)
+	if err != nil || draft["status"] != "draft" || draft["requestedSender"] == nil {
+		t.Fatal("imported draft did not cross replicas", draft, err)
+	}
+	if draft["records"] != nil || draft["sender"] != "" || tokenCalls.Load() != beforeTokens {
+		t.Fatal("import trusted reference DNS or performed Azure authorization")
+	}
+	wrongScope := imported
+	wrongScope.Azure.ResourceGroup = "different-group"
+	wrongData, _ := json.Marshal(wrongScope)
+	if _, err := call(1, owner, "importPackage", "", other, map[string]any{"configuration": string(wrongData)}); err == nil {
+		t.Fatal("import replaced the cluster Azure connection")
+	}
+	if _, err := call(1, owner, "prepare", "", other, map[string]any{"domain": plan.Domain, "emailService": plan.EmailService, "communicationService": plan.CommunicationService}); err != nil {
+		t.Fatal("imported draft could not advance", err)
+	}
+	preparedDraft, err := call(0, owner, "status", "", other)
+	if err != nil || preparedDraft["status"] != "planned" || preparedDraft["requestedSender"] == nil {
+		t.Fatal("prepare lost imported sender", err)
+	}
+	if _, err := call(0, owner, "importPackage", "", other, map[string]any{"configuration": strings.Replace(string(data), plan.Domain, "changed.example", 1)}); err == nil {
+		t.Fatal("import replaced a reviewed plan")
+	}
+	denied := NewIntegration(NewLogSender(nil), nil)
+	denySetup := *instances[0].azure
+	denySetup.canManage = func(context.Context, string) bool { return false }
+	denied.azure = &denySetup
+	if _, err := denied.handleAzureSetup(owner, map[string]any{"action": "importPackage", "accountId": other, "options": map[string]any{"configuration": string(data)}}, 0); err == nil {
+		t.Fatal("import ignored organization authorization")
+	}
 	now = now.Add(2 * time.Hour)
 	expired, err := call(1, owner, "subscriptions", session, "self")
 	if err != nil || expired["status"] != "expired" {
@@ -198,6 +251,25 @@ func TestAzureSetupSessionSurvivesReplicaHopAndRefusesAnotherActor(t *testing.T)
 	if err = instances[0].azure.store.change(owner, "organization:"+account, &connection, func(bool) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
+	resourceAccount, resourceCluster = account, cluster.ID
+	exported, err := call(1, owner, "exportPackage", "", account)
+	if err != nil {
+		t.Fatal("export from another replica failed", err)
+	}
+	exportData, _ := json.Marshal(exported["configuration"])
+	public, err := emailconfig.Decode(exportData)
+	if err != nil || len(public.Domains) != 1 || len(public.Domains[0].DNS) != 4 {
+		t.Fatal("export lost fresh public DNS", err)
+	}
+	if strings.Contains(string(exportData), cfg.AccessKey) || strings.Contains(string(exportData), "clusterId") || strings.Contains(string(exportData), "senderIdentityId") {
+		t.Fatal("export leaked credentials or cluster identifiers")
+	}
+	resourceAccount = other
+	if _, err := call(0, owner, "exportPackage", "", account); err == nil {
+		t.Fatal("export trusted resource ownership from the stored plan")
+	}
+	resourceAccount = account
+
 	identityID, err := instances[0].azure.saveSenderIdentity(owner, connection)
 	if err != nil {
 		t.Fatal(err)

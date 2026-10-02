@@ -34,6 +34,10 @@ spec:
     spec:
       serviceAccountName: memql-engine
       volumes:
+        - name: package-config
+          configMap:
+            name: memql-package
+            optional: true
         - name: memql-ca
           secret:
             secretName: memql-ca
@@ -156,6 +160,7 @@ spec:
             - { name: MEMQL_SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:
+            - { name: package-config, mountPath: /etc/memql/package, readOnly: true }
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
             - { name: anthropic-identity, mountPath: /var/run/secrets/anthropic.com, readOnly: true }
             - { name: openai-identity, mountPath: /var/run/secrets/openai.com, readOnly: true }

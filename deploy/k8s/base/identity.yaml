@@ -76,6 +76,10 @@ spec:
       # it -- it is the only node that runs the Executor.
       serviceAccountName: memql-deploy
       volumes:
+        - name: package-config
+          configMap:
+            name: memql-package
+            optional: true
         - name: identity-tls
           secret:
             secretName: identity-tls
@@ -256,6 +260,7 @@ spec:
             # Migrations run ONCE, here. Every other node has this false.
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "true" }
           volumeMounts:
+            - { name: package-config, mountPath: /etc/memql/package, readOnly: true }
             - { name: identity-tls, mountPath: /etc/memql/tls, readOnly: true }
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
             - { name: anthropic-identity, mountPath: /var/run/secrets/anthropic.com, readOnly: true }

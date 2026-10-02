@@ -2960,6 +2960,59 @@ func PackageArchiveBuild(args PackageArchiveArgs) string {
 	return b.String()
 }
 
+// PackageCampaigns -- Public configuration only. Import records a draft after explicit organization selection; Microsoft consent, provisioning and live DNS verification remain in email setup. Export merges into the supplied manifest, preserving apps.
+type PackageCampaignsArgs struct {
+	Action       string
+	Manifest     string
+	AccountId    string
+	Organization string
+	Confirmed    bool
+	ConfirmedSet bool // set true to send confirmed; required because zero-value bool is ambiguous
+}
+
+// PackageCampaigns calls the engine builtin packageCampaigns.
+func (qc *QueryClient) PackageCampaigns(ctx context.Context, args PackageCampaignsArgs) (*Result, error) {
+	call := PackageCampaignsBuild(args)
+	return qc.executeNamed(ctx, "packageCampaigns", call)
+}
+
+func PackageCampaignsBuild(args PackageCampaignsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin packageCampaigns(")
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.Manifest != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("manifest: ")
+		b.WriteString(quoteMemQL(args.Manifest))
+	}
+	if args.AccountId != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accountId: ")
+		b.WriteString(quoteMemQL(args.AccountId))
+	}
+	if args.Organization != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("organization: ")
+		b.WriteString(quoteMemQL(args.Organization))
+	}
+	if args.ConfirmedSet {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("confirmed: ")
+		b.WriteString(fmt.Sprintf("%v", args.Confirmed))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // PackageCancelDeployment -- Ask a running deployment to stop (epic memql#4937). It flags the row and ends nothing: the node running the attempt reads the flag at its next stage boundary and closes the run `cancelled`, which is what keeps the timeline from claiming a run stopped while its build is still running somewhere. Refuses a run that is already terminal, and refuses one at or past `staging_dsl` -- from the roll on there is no cancel, because a roll restarts the cluster onto staged MemQL and stopping half way through is the one outcome worse than either finishing or not starting. `cancelled` is its own terminal status and NOT a flavour of `failed`: nothing broke and nothing was published. Returns {deploymentId, status, cancelRequested}.
 type PackageCancelDeploymentArgs struct {
 	// The v1:platform:package the run belongs to.

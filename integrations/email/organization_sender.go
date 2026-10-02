@@ -2,18 +2,21 @@ package email
 
 import (
 	"context"
+	"github.com/znasllc-io/memql/core/emailconfig"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
 )
 
 type azureConnection struct {
-	SenderIdentityID string    `json:"senderIdentityId"`
-	Status           string    `json:"status"`
-	AccountID        string    `json:"accountId"`
-	Plan             azurePlan `json:"plan"`
-	ReplyTo          string    `json:"replyTo"`
-	Config           ACSConfig `json:"config"`
+	RequestedSender  *emailconfig.Sender     `json:"requestedSender,omitempty"`
+	RequestedDNS     []emailconfig.DNSRecord `json:"requestedDns,omitempty"`
+	SenderIdentityID string                  `json:"senderIdentityId"`
+	Status           string                  `json:"status"`
+	AccountID        string                  `json:"accountId"`
+	Plan             azurePlan               `json:"plan"`
+	ReplyTo          string                  `json:"replyTo"`
+	Config           ACSConfig               `json:"config"`
 }
 
 // Preparing the operator's first ACS connection must not interrupt the

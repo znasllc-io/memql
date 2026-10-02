@@ -10,6 +10,8 @@ export interface AzureEmailPlan extends AzureEmailScope {
   domain: string; emailService: string; communicationService: string;
 }
 export interface AzureEmailReply {
+  requestedSender?: { username: string; displayName: string; replyTo?: string };
+  senders?: Record<string, string>; tenantId?: string;
   status: string; applicationReady?: boolean; capture?: boolean;
   sessionId?: string; userCode?: string; verificationUri?: string; interval?: number;
   subscriptionId?: string; resourceGroup?: string; dataLocation?: string;

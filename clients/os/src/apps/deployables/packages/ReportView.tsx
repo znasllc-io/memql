@@ -81,6 +81,7 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
 
   return (
     <div className="os-report">
+      {report.manifest?.campaigns ? <p className="os-caption">This package includes email configuration for {report.manifest.campaigns.domains.length} organization(s). Review and import it in Campaigns → Settings; publishing these apps does not set up email.</p> : null}
       {blocking.length > 0 ? (
         <div className="os-report-problems">
           {blocking.map((p, i) => (

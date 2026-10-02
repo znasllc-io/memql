@@ -14,6 +14,7 @@ import { AzureEmailDomainRecords } from "./AzureEmailDomainRecords";
 import { InfoDetail } from "../../kit/InfoDetail";
 import { useAzureEmailCall, type AzureEmailPlan, type AzureEmailReply } from "./azureEmailSetup";
 import "./azureEmail.css";
+import { CampaignPackageConfig } from "./CampaignPackageConfig";
 
 type ConnectionView = "list" | "detail" | "setup" | "cluster";
 const PROVISION_INTERVAL_MS = 10_000;
@@ -33,6 +34,7 @@ function EmailSettings({ manageCluster = true, header, backLabel = "Email settin
   const initial = useDefaultOrganization(accounts);
   const [accountId, setAccountId] = useState("");
   const [view, setView] = useState<ConnectionView>("list");
+  const [revision, setRevision] = useState(0);
   const [cluster, setCluster] = useState<AzureEmailReply | null>(null);
   const { call, error } = useAzureEmailCall("self");
   useEffect(() => { if (!accountId && initial) setAccountId(initial); }, [accountId, initial]);
@@ -53,8 +55,9 @@ function EmailSettings({ manageCluster = true, header, backLabel = "Email settin
         {settings.canOpenWindows ? <Button onClick={() => settings.open("connections", { provider: "email" })}>Open email settings</Button> : null}
       </Notice> : null}
     </section></> : null}
-    {accountId ? <OrganizationEmail key={accountId} accountId={accountId} name={name} view={view} setView={setView} picker={picker} backLabel={backLabel} cluster={cluster}/> :
+    {accountId ? <OrganizationEmail key={`${accountId}:${revision}`} accountId={accountId} name={name} view={view} setView={setView} picker={picker} backLabel={backLabel} cluster={cluster}/> :
       <section className="os-app-stack"><Subhead>Sending domains</Subhead>{picker}</section>}
+    {view === "list" && accountId ? <CampaignPackageConfig key={accountId} accountId={accountId} organizationName={name} onImported={() => { setRevision(value => value + 1); void call("clusterStatus").then(result => { if (result) setCluster(result); }); }}/> : null}
     {view === "list" ? children : null}
   </div>;
 }
@@ -83,6 +86,8 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
     setState(old => ({ ...old, ...result, planId: result.planId || old?.planId }));
     if (result.plan) { setDomain(result.plan.domain); setEmailService(result.plan.emailService); setCommunicationService(result.plan.communicationService); }
     if (result.replyTo) setReplyTo(result.replyTo);
+    if (result.requestedSender) { setUsername(result.requestedSender.username); setDisplayName(result.requestedSender.displayName); setReplyTo(result.requestedSender.replyTo || ""); }
+    else if (result.sender && result.senders) { setUsername(result.sender.split("@")[0] || ""); setDisplayName(result.senders[result.sender] || ""); }
     if (result.records) setRecords(result.records);
   }, []);
   useEffect(() => { void call("status").then(apply); }, [call, apply]);
@@ -142,7 +147,7 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
       if (state?.status === "planned") acts.push({ label: "Create Azure resources", onAct: () => perform("provision", { confirmed: true }) });
       else if (provisioning) {
         if (error || provisionPaused) acts.push({ label: "Continue setup", onAct: () => { setProvisionChecks(0); setStartedAt(Date.now()); perform("provision", { confirmed: true }); } });
-      } else if (domain && emailService && communicationService) acts.push({ label: "Review domain", onAct: () => { void call("prepare", { domain, emailService, communicationService }).then(apply); } });
+      } else if (domain && emailService && communicationService) acts.push({ label: "Review domain", onAct: () => { void call("prepare", { domain, emailService, communicationService, username, displayName, replyTo }).then(apply); } });
     }
     else if (phase === "dns") acts.push({ label: "Check domain records", onAct: () => perform("verify") });
     else if (phase === "sender" && username.trim() && displayName.trim()) acts.push({ label: "Save sender", onAct: () => perform("sender", { username, displayName, replyTo }) });
