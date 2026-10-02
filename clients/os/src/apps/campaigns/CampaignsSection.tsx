@@ -1,7 +1,10 @@
-import { ContentSkeleton } from "../../kit/ContentSkeleton";
+import { ContentSkeleton, InlineSkeleton } from "../../kit/ContentSkeleton";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { RecordList, listCount } from "../../kit/RecordRow";
 import { useSendingReadiness } from "./useCampaigns";
+import { useSession } from "../../chrome/access";
+import { editorTemplateURL } from "../../items/editorPreference";
+import { openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import type { UploadProvider } from "../../items/upload";
 import { CampaignJourney } from "./CampaignJourney";
 import { AddButton } from "../../kit/AddButton";
@@ -134,6 +137,7 @@ export function CampaignsSection({
           campaign={open}
           audiences={audiences}
           templates={templates}
+          templateFeed={feeds.templates}
           senders={senders}
           writes={writes}
         />
@@ -287,12 +291,14 @@ function CampaignDetail({
   campaign,
   audiences,
   templates,
+  templateFeed,
   senders,
   writes,
 }: {
   campaign: CampaignRow;
   audiences: AudienceRow[];
   templates: TemplateRow[];
+  templateFeed: CampaignFeeds["templates"];
   senders: SenderIdentityRow[];
   writes: CampaignWrites;
 }) {
@@ -354,7 +360,9 @@ function CampaignDetail({
         </Facts>
       </Panel>
 
-      <SendControls campaign={campaign} writes={writes} />
+      <SendControls campaign={campaign} writes={writes}
+        template={templates.find(template => template.id === campaign.templateId)}
+        templateFeed={templateFeed} />
       <RecurrencePanel campaignId={campaign.id} />
 
       <TestSendPanel campaignId={campaign.id} testSend={writes.testSend} />
@@ -407,12 +415,29 @@ function CampaignDetail({
  * when they hesitate. "Send to 4,182 people?" is a different question from
  * "Send?" and it is the one being asked.
  */
-function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: CampaignWrites }) {
+function SendControls({ campaign, writes, template, templateFeed }: {
+  campaign: CampaignRow; writes: CampaignWrites; template?: TemplateRow;
+  templateFeed: CampaignFeeds["templates"];
+}) {
+  const { config } = useSession();
+  const [editorNotice, setEditorNotice] = useState("");
+  const templatesCurrent = templateFeed.snapshot.state === "live" && !templateFeed.snapshot.error;
+  const ownTemplate = template?.accountId === campaign.accountId;
+  const templateReady = templatesCurrent && ownTemplate && template?.status === "ready";
   const sending = useSendingReadiness(campaign.accountId, campaign.senderIdentityId, campaign.id);
   const readyToSend = sending.ready;
+  const readyToStart = readyToSend && templateReady;
   const controls = writes.sendControls;
   const [asking, setAsking] = useState<"" | "start" | "cancel">("");
   const [when, setWhen] = useState("");
+
+  useEffect(() => {
+    // A publication or a later edit must not reuse an earlier send confirmation.
+    setAsking(held => held === "start" ? "" : held);
+    controls.reset();
+    // reset belongs to this campaign's write state; its wrapper changes each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaign.templateId, template?.createdAt, template?.status, templatesCurrent]);
 
   const draft = campaign.status === "draft";
   const scheduled = campaign.status === "scheduled";
@@ -445,7 +470,26 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
         ><Button onClick={sending.reload} busy={sending.state === "loading"}>Check again</Button></Notice>
       ) : null}
 
-      {asking === "start" && readyToSend ? (
+      {(draft || scheduled) && readyToSend && !templateReady ? (
+        !templatesCurrent ? templateFeed.snapshot.state === "seeding" ? (
+          <InlineSkeleton label="Checking template publication" />
+        ) : (
+          <Notice tone="warn" sentence="Template status could not be confirmed." detail={templateFeed.snapshot.error}>
+            <Button onClick={templateFeed.reseed}>Try again</Button>
+          </Notice>
+        ) : template && ownTemplate && template.status === "draft" ? (
+          <Notice tone="info" sentence={`Publish “${template.name || "Untitled template"}” before sending.`}
+            next="Review it in the editor, then choose Use in Campaigns → Publish template for campaigns.">
+            <Button onClick={() => openHandoff(editorTemplateURL(config.domain, template.id, template.name), () => setEditorNotice(VSCODE_NO_ANSWER_MESSAGE))}>Review template</Button>
+          </Notice>
+        ) : (
+          <Notice tone="warn" sentence="Choose a published template from this organization before sending."
+            next={scheduled ? "Restore and publish the template in Templates, or cancel this schedule to change it." : "Select another template under Details → Edit."} />
+        )
+      ) : null}
+      {editorNotice ? <Notice sentence={editorNotice} /> : null}
+
+      {asking === "start" && readyToStart ? (
         <div className="os-campaign-confirm">
           <p className="os-campaign-confirm-line">
             Send {campaignName(campaign)} now
@@ -509,7 +553,7 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
         </div>
       ) : (
         <div className="os-campaign-actions">
-          {(draft || scheduled) && readyToSend ? (
+          {(draft || scheduled) && readyToStart ? (
             <Button tone="primary" onClick={() => setAsking("start")}>
               Send now
             </Button>
@@ -543,7 +587,7 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
         </div>
       )}
 
-      {(draft || scheduled) && readyToSend ? (
+      {(draft || scheduled) && readyToStart ? (
         <div className="os-campaign-schedule">
           <Field label="Or send it at">
             <Input

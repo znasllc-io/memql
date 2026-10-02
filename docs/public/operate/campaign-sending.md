@@ -57,7 +57,11 @@ shows this delivery mode before sending and when confirming a test. A captured
 test verifies rendering and local persistence, not Azure delivery.
 
 Review the campaign's template and mark it `ready` before **Send now** or
-scheduling. **Send a test** can preview a draft template without starting the
+scheduling. Open the template in the editor and choose **Use in Campaigns →
+Publish template for campaigns** after reviewing the preview. Saving keeps it
+as a draft. The campaign's **Review template** action opens that editor; send
+and schedule actions appear when its publication arrives through the live
+collection. **Send a test** can preview a draft template without starting the
 campaign. Ordinary campaigns do not depend on Shopify inventory: connecting
 an empty store, including a store belonging to another organization, cannot
 block their sends. Storefront newsletter enrollment keeps its explicit

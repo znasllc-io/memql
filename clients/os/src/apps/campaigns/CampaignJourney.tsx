@@ -348,8 +348,8 @@ export function CampaignJourney({
             <Panel label="Before sending">
               <Subhead>Review and save</Subhead>
               <Caption>
-                Save a draft, send a test copy to yourself, then choose Send now or Schedule from
-                the campaign. The server rechecks the sender, content and audience before sending.
+                Save a draft and send a test copy. Review and publish the template in the editor
+                before choosing Send now or Schedule from the campaign.
               </Caption>
               {!configured ? (
                 <Notice

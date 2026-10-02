@@ -40,8 +40,8 @@ export function TemplatesSection({ feeds, writes, showFiled }: { feeds: Campaign
     <Panel label="Template">
       <p>{open.subject}</p>
       <AccountChip name={accounts.find(account => account.id === open.accountId)?.name || open.accountId} />
-      <p className="os-caption">{open.status === "ready" ? "Ready to use in campaigns" : open.status === "archived" ? "Archived" : "Draft · review and publish in the editor"}</p>
-      <p className="os-caption">View the email, edit its source, or create a new design from examples in Productivity Tools.</p>
+      <p className="os-caption">{open.status === "ready" ? "Ready to use in campaigns" : open.status === "archived" ? "Archived" : "Draft · not published"}</p>
+      <p className="os-caption">{open.status === "draft" ? "Open in editor, review the email, then choose Use in Campaigns → Publish template for campaigns. Saving keeps it as a draft." : "View the email, edit its source, or create a new design from examples in Productivity Tools."}</p>
       <Button disabled={writes.updateTemplate.busy} onClick={() => void writes.updateTemplate.update(open.id, { ...open, expectedRevision: open.createdAt, status: open.status === "archived" ? "draft" : "archived" })}>
         {open.status === "archived" ? "Restore draft" : "Archive"}
       </Button>
