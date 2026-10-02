@@ -307,6 +307,23 @@ describe("one campaign", () => {
     );
   });
 
+  it("identifies captured campaign and test messages before sending", async () => {
+    const conn = fakeConnection({
+      campaigns: [campaignRow({ id: "c1" })],
+      sendingReadiness: [{ ready: true, reason: "", capture: true }],
+    });
+    conn.query.campaignTestSend = vi.fn(async () => rowsResult([{ unresolved: [] }]));
+    await openCampaign(conn);
+    expect(await screen.findByText("Messages will appear in the Email app. External delivery is disabled.")).toBeTruthy();
+    fireEvent.click(await screen.findByText("Send now"));
+    expect(await screen.findByText(/Messages are captured for review in the Email app/)).toBeTruthy();
+    expect(screen.queryByText(/Mail starts leaving immediately/)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Test recipient address"), { target: { value: "review@example.test" } });
+    fireEvent.click(screen.getByText("Send test"));
+    expect(await screen.findByText("Test captured in the Email app. Every merge tag in this template resolved.")).toBeTruthy();
+    expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
+  });
+
   it("names the merge tags a test send could not resolve", async () => {
     // The only check that catches a typo'd {{fields.compnay}} before the whole
     // audience gets it.

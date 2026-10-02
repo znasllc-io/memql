@@ -107,8 +107,11 @@ func TestCaptureTransportCannotFallThroughToExternalMail(t *testing.T) {
 		t.Fatal(err)
 	}
 	lazy := NewLazySender(sender, nil, nil, nil)
-	if _, ok := captureSender(lazy, context.Background()); !ok {
+	if !CapturesMessages(lazy) || !CapturesMessages(sender) {
 		t.Fatal("capture did not override external configuration")
+	}
+	if CapturesMessages(nil) || CapturesMessages(NewLazySender(nil, nil, nil, nil)) {
+		t.Fatal("unconfigured external sender reported capture")
 	}
 	t.Setenv(TransportEnv, "misspelled")
 	if _, err := NewSenderFromEnv("", nil); err == nil {

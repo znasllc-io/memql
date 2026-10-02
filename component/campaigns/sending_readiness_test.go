@@ -65,3 +65,29 @@ func TestSendingReadinessUsesSelectedOrganizationAndNeverSends(t *testing.T) {
 		t.Fatal("reader gained sending authority")
 	}
 }
+
+func TestSendingReadinessReportsCaptureWithoutSending(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		sender  email.Sender
+		capture bool
+	}{
+		{"capture", &email.CaptureSender{}, true},
+		{"external", &organizationReadySender{}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := newTestWorker(t, organizationSendEngine(), test.sender)
+			rows, err := w.handleSendingReadiness(importCtx(), map[string]any{"accountId": "client-a", "senderIdentityId": "sender"}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reply struct{ Ready, Capture bool }
+			if err := json.Unmarshal(rows[0].Payload, &reply); err != nil {
+				t.Fatal(err)
+			}
+			if !reply.Ready || reply.Capture != test.capture {
+				t.Fatalf("incorrect transport readiness: %+v", reply)
+			}
+		})
+	}
+}

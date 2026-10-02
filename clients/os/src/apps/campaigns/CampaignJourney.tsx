@@ -157,7 +157,7 @@ export function CampaignJourney({
                 <Notice
                   tone="info"
                   sentence="Sending settings are configured."
-                  next="A test email is still needed to confirm provider access and delivery."
+                  next={sending.capture ? "Messages appear in the Email app. External delivery is disabled." : "Send a test email and check the recipient’s inbox to verify delivery."}
                 />
               ) : (
                 <Notice

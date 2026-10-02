@@ -38,5 +38,5 @@ func (w *Worker) handleSendingReadiness(ctx context.Context, args map[string]any
 			}
 		}
 	}
-	return resultNode("campaignSendingReadiness", map[string]any{"accountId": campaign.AccountID, "campaignId": campaign.ID, "ready": reason == "", "reason": reason})
+	return resultNode("campaignSendingReadiness", map[string]any{"accountId": campaign.AccountID, "campaignId": campaign.ID, "ready": reason == "", "reason": reason, "capture": email.CapturesMessages(w.resolveSender())})
 }

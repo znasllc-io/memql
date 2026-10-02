@@ -339,15 +339,16 @@ export function useSendingReadiness(accountId: string, senderIdentityId = "", ca
   const scope = `${accountId}:${senderIdentityId}:${campaignId}`;
   const read = useMemo(() => {
     if (!query || !live || (!accountId && !campaignId)) return null;
-    const execute = async (signal: AbortSignal): Promise<{ reader: unknown; ready: boolean; reason: string }> => {
+    const execute = async (signal: AbortSignal): Promise<{ reader: unknown; ready: boolean; reason: string; capture: boolean }> => {
       const result = await query.campaignSendingReadiness(campaignId ? { campaignId } : { accountId, senderIdentityId }, { signal });
       const row = flatten(result.rows()[0] ?? {});
-      return { reader: execute, ready: row.ready === true, reason: typeof row.reason === "string" ? row.reason : "" };
+      return { reader: execute, ready: row.ready === true, capture: row.capture === true, reason: typeof row.reason === "string" ? row.reason : "" };
     };
     return execute;
   }, [query, scope, live]);
   const reading = useReading<Awaited<ReturnType<NonNullable<typeof read>>> | null>(null, read, [read]);
   return { ...reading, ready: !!live && !!read && reading.state === "ready" && reading.value?.reader === read && reading.value.ready,
+    capture: !!live && !!read && reading.state === "ready" && reading.value?.reader === read && reading.value.capture,
     reason: reading.error || reading.value?.reason || "Sending readiness is not confirmed." };
 }
 
