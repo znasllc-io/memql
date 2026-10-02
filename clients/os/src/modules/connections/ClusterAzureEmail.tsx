@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from "react";
 import { Mail } from "lucide-react";
 import { useSession } from "../../chrome/access";
-import { Fact, Facts, Head, Input, Notice, Panel, Select, Subhead } from "../../kit";
+import { Fact, Facts, Field, Head, Input, Notice, Panel, Select, Subhead } from "../../kit";
 import { Wizard } from "../../kit/Wizard";
 import { ActionBar, type Act } from "../../kit/ActionBar";
 import { AZURE_EMAIL_LOCATIONS, useAzureEmailCall, type AzureEmailReply, type AzureEmailScope } from "./azureEmailSetup";
@@ -92,7 +92,7 @@ export function ClusterAzureEmail({ state, onSaved, onBack }: {
         <Select id={`${formID}-subscription`} label="Subscription" value={scope.subscriptionId} onChange={value => { if (busy) return; setScope(old => ({ ...old, subscriptionId: value, resourceGroup: "", createResourceGroup: false })); setGroups([]); void readGroups(value); }}><option value="">Choose a subscription</option>{subscriptions.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</Select>
         {subscriptions.length === 0 ? <Notice sentence="No enabled Azure subscriptions are available to this account."/> : null}
         <Select id={`${formID}-group`} label="Resource group" value={scope.createResourceGroup ? "__new__" : scope.resourceGroup} onChange={value => setScope(old => ({ ...old, resourceGroup: value === "__new__" ? "" : value, createResourceGroup: value === "__new__", resourceGroupLocation: "" }))}><option value="">Choose a resource group</option><option value="__new__">Create a resource group</option>{groups.map(row => <option key={row.id} value={row.name}>{row.name}</option>)}</Select>
-        {scope.createResourceGroup ? <><div><Input id={`${formID}-group-name`} label="Resource group name" value={scope.resourceGroup} onChange={value => setScope(old => ({ ...old, resourceGroup: value }))}/></div><Select id={`${formID}-region`} label="Resource group region" value={scope.resourceGroupLocation || ""} onChange={value => setScope(old => ({ ...old, resourceGroupLocation: value }))}><option value="">Choose a region</option>{locations.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</Select></> : null}
+        {scope.createResourceGroup ? <><Field label="Resource group name"><Input id={`${formID}-group-name`} label="Resource group name" value={scope.resourceGroup} onChange={value => setScope(old => ({ ...old, resourceGroup: value }))}/></Field><Select id={`${formID}-region`} label="Resource group region" value={scope.resourceGroupLocation || ""} onChange={value => setScope(old => ({ ...old, resourceGroupLocation: value }))}><option value="">Choose a region</option>{locations.map(row => <option key={row.id} value={row.id}>{row.name}</option>)}</Select></> : null}
         <Select id={`${formID}-location`} label="Email data location" value={scope.dataLocation} onChange={value => setScope(old => ({ ...old, dataLocation: value }))}>{AZURE_EMAIL_LOCATIONS.map(location => <option key={location}>{location}</option>)}</Select>
         <p className="os-caption">Saving authorizes this cluster to set up client email in these resources. Azure services are created only after you review a domain's setup.</p>
       </div> },

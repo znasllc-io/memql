@@ -4,7 +4,7 @@ import { useSession } from "../../chrome/access";
 import { AccountPicker } from "../../apps/accounts/AccountPicker";
 import { useAccountOptions } from "../../apps/accounts/tie";
 import { useDefaultOrganization } from "../../apps/accounts/organization";
-import { Button, EmptyState, Fact, Facts, Head, Input, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, Subhead, useAppReach } from "../../kit";
+import { Button, EmptyState, Fact, Facts, Field, Head, Input, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, Subhead, useAppReach } from "../../kit";
 import { AddButton } from "../../kit/AddButton";
 import { Wizard } from "../../kit/Wizard";
 import { ActionBar, type Act } from "../../kit/ActionBar";
@@ -35,7 +35,7 @@ function EmailSettings({ manageCluster = true, header, backLabel = "Email settin
   useEffect(() => { void call("clusterStatus").then(result => { if (result) setCluster(result); }); }, [call]);
   const name = accounts.find(row => row.id === accountId)?.name || accountId;
   if (manageCluster && view === "cluster" && cluster) return <ClusterAzureEmail state={cluster} onBack={() => setView("list")} onSaved={result => { setCluster(result); setView("list"); }}/>;
-  const picker = <div className="azure-email-organization"><AccountPicker id={`${formID}-organization`} label="Organization" required accounts={accounts} value={accountId} onChange={setAccountId}/></div>;
+  const picker = <div className="azure-email-organization"><Field label="Organization"><AccountPicker id={`${formID}-organization`} label="Organization" required accounts={accounts} value={accountId} onChange={setAccountId}/></Field></div>;
   return <div className="os-app-stack azure-email-connections">
     {view === "list" ? <>{header}<section className="os-app-stack" aria-label="Cluster email">
       {manageCluster ? <Subhead>Cluster email</Subhead> : null}
@@ -121,11 +121,11 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
   const plan: Partial<AzureEmailPlan> = state?.plan || {};
   return <Wizard icon={<Mail size={20}/>} title={`Sending domain · ${name}`} label="Sending domain" open={phase} onOpen={() => {}} back={{ label: backLabel, onSelect: () => setView("list") }} status={{ word: busy ? "Working" : !connected ? "Cluster setup required" : phase === "dns" ? "Waiting for DNS" : "Your turn", tone: busy ? "busy" : "paused" }} acts={acts} notices={error ? <Notice tone="error" sentence={error}/> : !connected ? <Notice sentence="Set up the cluster's Azure configuration before continuing."/> : undefined} steps={[
     { id: "domain", name: "Domain", body: <div className="os-app-stack">{state?.status === "planned" || state?.status === "provisioning" ? <><p>{plan.domain}</p><Facts><Fact label="Resource group" value={plan.resourceGroup || ""}/><Fact label="Data location" value={plan.dataLocation || ""}/></Facts><p className="os-caption">Azure email usage is billed to the cluster's selected subscription. Creating resources does not send mail.</p></> : <>
-      <div><Input id={`${formID}-domain`} label="Email domain" placeholder="client.com" value={domain} onChange={value => { setDomain(value); const base = value.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 45); setEmailService(`${base}-email`); setCommunicationService(`${base}-delivery`); }}/></div>
-      <details><summary>Resource names</summary><div><Input id={`${formID}-email-service`} label="Email service" value={emailService} onChange={setEmailService}/></div><div><Input id={`${formID}-delivery-service`} label="Delivery service" value={communicationService} onChange={setCommunicationService}/></div></details>
+      <Field label="Email domain"><Input id={`${formID}-domain`} label="Email domain" placeholder="client.com" value={domain} onChange={value => { setDomain(value); const base = value.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 45); setEmailService(`${base}-email`); setCommunicationService(`${base}-delivery`); }}/></Field>
+      <details><summary>Resource names</summary><Field label="Email service"><Input id={`${formID}-email-service`} label="Email service" value={emailService} onChange={setEmailService}/></Field><Field label="Delivery service"><Input id={`${formID}-delivery-service`} label="Delivery service" value={communicationService} onChange={setCommunicationService}/></Field></details>
     </>}</div> },
     { id: "dns", name: "Verify domain", body: <div className="os-app-stack"><p className="os-caption">Add these records where {plan.domain} manages DNS. Merge SPF into its existing record; do not create a second SPF record. Keep existing mail and website records.</p><table><thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Status</th></tr></thead><tbody>{records?.map(record => <tr key={record.purpose}><td>{record.type}</td><td><code>{record.name}</code></td><td><code>{record.value}</code></td><td>{record.status}</td></tr>)}</tbody></table></div> },
-    { id: "sender", name: "Sender", body: <div className="os-app-stack"><div><Input id={`${formID}-sender`} label="Sender address" value={username} onChange={setUsername}/><span className="os-caption">@{plan.domain}</span></div><div><Input id={`${formID}-name`} label="Display name" value={displayName} onChange={setDisplayName}/></div><div><Input id={`${formID}-reply`} label="Reply mailbox" placeholder={`help@${plan.domain}`} value={replyTo} onChange={setReplyTo}/></div><p className="os-caption">Replies need a mailbox that already receives mail.</p></div> },
+    { id: "sender", name: "Sender", body: <div className="os-app-stack"><Field label="Sender address"><Input id={`${formID}-sender`} label="Sender address" value={username} onChange={setUsername}/><span className="os-caption">@{plan.domain}</span></Field><Field label="Display name"><Input id={`${formID}-name`} label="Display name" value={displayName} onChange={setDisplayName}/></Field><Field label="Reply mailbox"><Input id={`${formID}-reply`} label="Reply mailbox" placeholder={`help@${plan.domain}`} value={replyTo} onChange={setReplyTo}/></Field><p className="os-caption">Replies need a mailbox that already receives mail.</p></div> },
   ].map(step => ({ ...step, state: step.id === phase ? "open" as const : order.indexOf(step.id) < order.indexOf(phase) ? "done" as const : "ahead" as const }))}/>;
 }
 
