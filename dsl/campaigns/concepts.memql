@@ -368,33 +368,16 @@ concept sendJob {
   @relationship(type="references", as="forAccount", field="campaignAccountId", target=account, direction="outgoing")
 }
 
-/// The cluster-wide do-not-mail list. ONE address per row, keyed by the SHA-256 hex digest of the
-/// normalized address (lowercased, trimmed) -- the digest IS the row id, so a lookup is a by-id read
-/// and a re-suppression is a new version of the same row rather than a duplicate.
-///
-/// SUPPRESSION IS CLUSTER-WIDE, NOT PER-ACCOUNT, and that is the decision this concept exists to
-/// record (memql#3348). An unsubscribe is a statement by a person to the operator of THIS
-/// DEPLOYMENT: every campaign leaves through the same authenticated mailbox, under the same From
-/// address, signed by the same SPF and DKIM records. A per-operator list would let operator B mail
-/// an address that unsubscribed from operator A, in a message the recipient cannot tell apart from
-/// the one they already opted out of -- and the complaint lands on the one shared domain reputation.
-/// Legally the obligation attaches to the sender, and there is one sender.
-///
-/// BEING CLUSTER-WIDE COSTS NOBODY AN ADDRESS. The row stores no mailbox: the id is a non-reversible
-/// digest and the only human-readable field is the address's DOMAIN, which is what a deliverability
-/// review actually asks for ("which domains are bouncing?") and which identifies no one. A caller
-/// can therefore ask "is this address suppressed" only about an address it already holds.
-///
-/// Reads and writes are clusterOwner because the list must not be caller-writable: a caller who
-/// could insert digests could silently suppress a competitor's audience, and one who could delete
-/// them could un-suppress a complaint. Every write goes through the engine -- the unsubscribe
-/// endpoint, the feedback builtin, or an operator's explicit suppress call -- and each of those
-/// derives the address from something it verified rather than from an argument. An operator's own
-/// view of who left is their recipient rows' subscriptionStatus, which the worker converges onto
-/// this list on the next send.
+/// Engine-owned suppression state. Rows without accountId are existing cluster-wide safety blocks.
+/// Organization opt-outs use a digest of (organization, normalized-email digest) as their row id,
+/// so leaving one client's mailing list does not unsubscribe the same person from another client.
+/// Both scopes are checked at send time; a later import cannot bypass either. No plaintext mailbox
+/// is stored. Organization scope is derived from a signed unsubscribe token or an authorized action.
 @displayCard(primary="domain", secondary="reason", tertiary="suppressedAt", status="reason")
 @rowAuthz(clusterOwner)
 concept suppression {
+  accountId         string  @description("Organization whose mail is blocked. Absent on existing cluster-wide safety suppressions.")
+  emailDigest       string  @description("SHA-256 of the normalized mailbox for organization-scoped rows. No plaintext address is stored.")
   reason            enum("unsubscribed", "hard_bounce", "complaint", "manual")!  @description("Why this address may never be mailed again. 'unsubscribed' is the recipient's own choice, via the RFC 8058 one-click header or the link in the body. 'hard_bounce' and 'complaint' are the provider's verdict and are kept apart because they mean different things to a review -- a bounce is a dead address, a complaint is a reputational event. 'manual' is an operator adding one by hand.")
   domain            string  @description("The domain part of the suppressed address, lowercased. Recorded rather than derived because the address itself is never stored: it is what makes 'which domains are bouncing' answerable without making 'who unsubscribed' answerable.")
   suppressedAt      datetime!  @description("When the address entered the list. Stamped from the engine clock at write time, not threaded by a caller -- unlike a recipient row's unsubscribedAt, which can legitimately record a state change that happened earlier.")
@@ -402,6 +385,7 @@ concept suppression {
   note              string  @description("Free-text provenance for a 'manual' row, or the provider's bounce classification for a reported one. Never the address.")
 
   @relationship(type="references", field="sourceCampaignId", target=campaign, direction="outgoing")
+  @relationship(type="references", field="accountId", target=account, direction="outgoing")
 }
 
 /// Per-(sending identity, recipient domain, day) counters -- the reputation telemetry a warming ramp

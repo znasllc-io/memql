@@ -45,7 +45,7 @@ func validToken(t *testing.T) string {
 
 func mustMint(t *testing.T, secret, owner, recipient, campaign string) string {
 	t.Helper()
-	tok, err := MintUnsubscribeToken(secret, owner, recipient, campaign)
+	tok, err := MintUnsubscribeToken(secret, UnsubscribePayload{OwnerUserID: owner, RecipientID: recipient, CampaignID: campaign})
 	if err != nil {
 		t.Fatalf("MintUnsubscribeToken: %v", err)
 	}
@@ -158,18 +158,18 @@ func TestTamperedTokenIsRefusedAndWritesNothing(t *testing.T) {
 // none of them can be swapped in transit. campaignId matters as much as
 // the other two: it is what attributes a complaint to a send.
 func TestTokenBindsAllThreeIds(t *testing.T) {
-	tok, err := MintUnsubscribeToken(testSecret, "owner-a", "rec-a", "camp-a")
+	tok, err := MintUnsubscribeToken(testSecret, UnsubscribePayload{OwnerUserID: "owner-a", RecipientID: "rec-a", CampaignID: "camp-a"})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	owner, recipient, campaign, err := ParseUnsubscribeToken([]string{testSecret}, tok)
+	payload, err := ParseUnsubscribeToken([]string{testSecret}, tok)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if owner != "owner-a" || recipient != "rec-a" || campaign != "camp-a" {
-		t.Fatalf("round trip lost a field: %q %q %q", owner, recipient, campaign)
+	if payload.OwnerUserID != "owner-a" || payload.RecipientID != "rec-a" || payload.CampaignID != "camp-a" {
+		t.Fatalf("round trip lost a field: %q %q %q", payload.OwnerUserID, payload.RecipientID, payload.CampaignID)
 	}
-	if _, _, _, err := ParseUnsubscribeToken([]string{"a-different-secret"}, tok); err == nil {
+	if _, err := ParseUnsubscribeToken([]string{"a-different-secret"}, tok); err == nil {
 		t.Error("a token verified under the wrong secret")
 	}
 }
@@ -179,20 +179,20 @@ func TestTokenBindsAllThreeIds(t *testing.T) {
 // two different triples produce one token body. Same injectivity argument
 // the DSL's composite-id derivation makes about its separator.
 func TestTokenSeparatorCannotBeSmuggled(t *testing.T) {
-	a, err := MintUnsubscribeToken(testSecret, "x.y", "z", "c")
+	a, err := MintUnsubscribeToken(testSecret, UnsubscribePayload{OwnerUserID: "x.y", RecipientID: "z", CampaignID: "c"})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	b, err := MintUnsubscribeToken(testSecret, "x", "y.z", "c")
+	b, err := MintUnsubscribeToken(testSecret, UnsubscribePayload{OwnerUserID: "x", RecipientID: "y.z", CampaignID: "c"})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
 	if a == b {
 		t.Fatal("two different (owner, recipient) pairs produced the same token")
 	}
-	owner, recipient, _, err := ParseUnsubscribeToken([]string{testSecret}, a)
-	if err != nil || owner != "x.y" || recipient != "z" {
-		t.Fatalf("a separator-bearing id did not round-trip: %q %q %v", owner, recipient, err)
+	payload, err := ParseUnsubscribeToken([]string{testSecret}, a)
+	if err != nil || payload.OwnerUserID != "x.y" || payload.RecipientID != "z" {
+		t.Fatalf("a separator-bearing id did not round-trip: %q %q %v", payload.OwnerUserID, payload.RecipientID, err)
 	}
 }
 

@@ -535,6 +535,30 @@ mutation suppression recordSuppression {
   }
 }
 
+/// ENGINE: append an organization opt-out. The capability derives both the composite identity
+/// and organization; external callers cannot forge a suppression for another client.
+/// actor.userId cannot scope this write: a mail client has no signed-in actor. The
+/// unsubscribe handler verifies the HMAC and borrows only its engine-owned write authority.
+@serverOnly
+mutation suppression recordOrganizationSuppression {
+  args {
+    suppressionId string!
+    accountId string!
+    emailDigest string!
+    reason enum("unsubscribed", "hard_bounce", "complaint", "manual")!
+    domain string
+    sourceCampaignId string
+    note string
+  }
+  insert {
+    accept { accountId, emailDigest, reason, domain, sourceCampaignId, note }
+    stamp {
+      id: args.suppressionId
+      suppressedAt: now
+    }
+  }
+}
+
 /// ENGINE: write one replica's counters for one (sending identity, domain, day) bucket (memql#3462).
 ///
 /// ABSOLUTE VALUES, NOT INCREMENTS, and that is the whole concurrency design. Each worker accumulates

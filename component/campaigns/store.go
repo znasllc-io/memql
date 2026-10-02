@@ -693,7 +693,7 @@ func (s *Store) SuppressionByDigest(ctx context.Context, digest string) (Suppres
 	if digest == "" {
 		return Suppression{}, false, nil
 	}
-	rows, err := s.rows(ctx, call("query", "suppressionByDigest", arg{"emailDigest", digest}))
+	rows, err := s.rows(memql.ContextWithFreshRead(ctx), call("query", "suppressionByDigest", arg{"emailDigest", digest}))
 	if err != nil || len(rows) == 0 {
 		return Suppression{}, false, err
 	}

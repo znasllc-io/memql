@@ -1034,7 +1034,9 @@
       "concept": "v1:campaigns:suppression",
       "file": "campaigns/concepts.memql",
       "fields": [
+        "accountId",
         "domain",
+        "emailDigest",
         "note",
         "reason",
         "sourceCampaignId",

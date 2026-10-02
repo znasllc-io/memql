@@ -11669,6 +11669,34 @@ func SuppressionByDigestBuild(args SuppressionByDigestArgs) string {
 	return b.String()
 }
 
+// SuppressionForOrganization -- ENGINE: lookup an organization-scoped suppression by its server-derived composite key.
+//
+// Bound concept: v1:campaigns:suppression (machine-readable: BoundConcepts["suppressionForOrganization"] in generated_concepts.go).
+type SuppressionForOrganizationArgs struct {
+	SuppressionId string
+	AccountId     string
+}
+
+// SuppressionForOrganization calls the engine query suppressionForOrganization.
+func (qc *QueryClient) SuppressionForOrganization(ctx context.Context, args SuppressionForOrganizationArgs) (*Result, error) {
+	call := SuppressionForOrganizationBuild(args)
+	return qc.executeNamed(ctx, "suppressionForOrganization", call)
+}
+
+func SuppressionForOrganizationBuild(args SuppressionForOrganizationArgs) string {
+	var b strings.Builder
+	b.WriteString("query suppressionForOrganization(")
+	b.WriteString("suppressionId: ")
+	b.WriteString(quoteMemQL(args.SuppressionId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SurfacesForOwner -- List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.
 //
 // Bound concept: v1:actions:surface (machine-readable: BoundConcepts["surfacesForOwner"] in generated_concepts.go).

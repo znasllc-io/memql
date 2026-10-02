@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -46,21 +47,15 @@ import (
 // # What the endpoint trusts
 //
 // The token, and nothing else. It carries the owner, recipient and
-// campaign ids and a MAC over all three; the handler verifies the MAC
-// before it does anything, then resolves the ADDRESS by reading the
-// recipient row under the owner the token names. No query parameter
+// campaign ids, organization and mailbox digest; the handler verifies the
+// MAC before writing the signed scope. It reads the recipient under the
+// owner in the token only to converge that membership and append consent. No query parameter
 // influences whose row is read, because the impersonated identity comes
 // out of the signed payload.
 //
-// # Why it always answers "done"
-//
-// Every outcome after a valid token renders the same confirmation. An
-// endpoint that distinguished "suppressed" from "recipient not found"
-// would be an oracle for which recipient ids exist, reachable without
-// credentials. And from the recipient's point of view the two are the
-// same fact: they will not be mailed again. Only an INVALID token gets a
-// different page, because that one needs a different next step from the
-// person holding it.
+// Valid tokens return the same success page for existing and deleted recipients.
+// A failed authoritative write returns 503 so neither people nor mail clients
+// are told an opt-out succeeded when it did not.
 
 // UnsubscribeHandler serves GET + POST on UnsubscribePath.
 type UnsubscribeHandler struct {
@@ -101,7 +96,7 @@ func (h *UnsubscribeHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 
 func (h *UnsubscribeHandler) serveGet(rw http.ResponseWriter, r *http.Request) {
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
-	if _, _, _, err := h.parseToken(token); err != nil {
+	if _, err := h.parseToken(token); err != nil {
 		h.render(rw, http.StatusBadRequest, pageInvalid, "")
 		return
 	}
@@ -117,15 +112,15 @@ func (h *UnsubscribeHandler) serveGet(rw http.ResponseWriter, r *http.Request) {
 // which had already signed live links -- the memql#3458 failure, which is
 // otherwise invisible from our side and maximally visible from theirs.
 // Neither branch logs the token or any secret.
-func (h *UnsubscribeHandler) parseToken(token string) (ownerUserID, recipientID, campaignID string, err error) {
-	ownerUserID, recipientID, campaignID, err = ParseUnsubscribeToken(h.cfg.UnsubscribeKeys(), token)
+func (h *UnsubscribeHandler) parseToken(token string) (UnsubscribePayload, error) {
+	payload, err := ParseUnsubscribeToken(h.cfg.UnsubscribeKeys(), token)
 	if errors.Is(err, errUnknownUnsubscribeKey) {
 		h.logger.Warn("campaigns: refused an unsubscribe link signed by a key this node no longer holds; "+
 			"the signing secret was rotated without keeping the old value in MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS, "+
 			"so a recipient could not opt out",
 			"keyId", unsubscribeKeyIDOf(token))
 	}
-	return ownerUserID, recipientID, campaignID, err
+	return payload, err
 }
 
 // unsubscribeKeyIDOf pulls the (public, non-secret) key id out of a token
@@ -134,7 +129,7 @@ func (h *UnsubscribeHandler) parseToken(token string) (ownerUserID, recipientID,
 // the log must never echo attacker-chosen bytes.
 func unsubscribeKeyIDOf(token string) string {
 	parts := strings.Split(strings.TrimSpace(token), ".")
-	if len(parts) != 6 || parts[0] != unsubscribeTokenVersion {
+	if !((len(parts) == 6 && parts[0] == "u2") || (len(parts) == 8 && parts[0] == unsubscribeTokenVersion)) {
 		return ""
 	}
 	if _, err := hex.DecodeString(parts[1]); err != nil || len(parts[1]) != unsubscribeKeyIDBytes*2 {
@@ -153,109 +148,66 @@ func (h *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) 
 		_ = r.ParseForm()
 		token = strings.TrimSpace(r.PostFormValue("token"))
 	}
-	ownerUserID, recipientID, campaignID, err := h.parseToken(token)
+	payload, err := h.parseToken(token)
 	if err != nil {
 		h.render(rw, http.StatusBadRequest, pageInvalid, "")
 		return
 	}
 
-	if err := h.suppress(r.Context(), ownerUserID, recipientID, campaignID); err != nil {
-		// The recipient is told it worked and the operator is told it did
-		// not. Retrying is the mail client's business and it will not; the
-		// honest recovery is an operator noticing this log line, which is
-		// why it is Error rather than Warn.
-		h.logger.Error("campaigns: unsubscribe failed after a VALID token; this address is still mailable",
-			"campaign", campaignID, "error", err)
+	if err := h.suppress(r.Context(), payload); err != nil {
+		h.logger.Error("campaigns: unsubscribe failed after a valid token", "campaign", payload.CampaignID, "error", err)
+		rw.Header().Set("Retry-After", "30")
+		h.render(rw, http.StatusServiceUnavailable, pageRetry, "")
+		return
 	}
 	h.render(rw, http.StatusOK, pageDone, "")
 }
 
-// suppress performs the writes an opt-out is made of: the cluster-wide list
-// (authoritative, consulted at every send), the operator's own recipient row
-// (their view of their audience), and -- since memql#4820 -- the CONSENT
-// EVENT that records the withdrawal itself.
-//
-// The consent row is not a duplicate of the other two, and the difference is
-// what an export has to answer. The suppression row says the address is on a
-// do-not-mail list and the recipient row says this membership is
-// unsubscribed; NEITHER says WHEN the person withdrew or BY WHAT MEANS. That
-// is the question a regulator, a client audit or a re-import asks, and
-// v1:campaigns:consentEvent is the only place with an answer. The whole
-// concept shipped in memql#4141 with no production writer at all, which meant
-// every consent stream in every deployment was empty and the export answered
-// "no record" for people who had explicitly opted out.
-//
-// The recipient row is read FIRST because it is the only place the
-// address lives -- the token deliberately does not carry it, so a leaked
-// link discloses no mailbox.
-//
-// # ONE read, and it is no longer conditional on the campaign
-//
-// This used to resolve the address by reading the CAMPAIGN, taking its
-// audience, and walking that roster for the id -- because no by-id read
-// existed. It cost a whole-roster walk per click, and it had a failure mode
-// that mattered more: the address was resolvable only when the campaign was.
-// A campaign the operator deleted, or one of the SYNTHETIC ids the
-// single-recipient send stamps, left addr empty -- so the click fell to the
-// row-level opt-out and NEVER REACHED THE CLUSTER SUPPRESSION LIST. The
-// person was removed from the audience that mailed them and remained
-// mailable by every other one, which is the exact thing the cluster list
-// exists to prevent, reached silently, on the path a regulator looks at.
-//
-// `recipientById` carries the same composite tier every other read in the
-// domain does, so the address still comes back only for the owner the SIGNED
-// TOKEN names, and campaignId stays what it always was here: provenance on
-// the suppression row, never a lookup key.
-func (h *UnsubscribeHandler) suppress(ctx context.Context, ownerUserID, recipientID, campaignID string) error {
-	ownerCtx := ownerActorContext(ctx, ownerUserID)
-
-	var addr string
-	if rec, found, err := h.store.RecipientByID(ownerCtx, recipientID); err == nil && found {
-		addr = rec.Email
-	} else if err != nil {
-		h.logger.Warn("campaigns: could not read the recipient behind a valid unsubscribe token",
-			"campaign", campaignID, "error", err)
+// suppress first persists the authoritative suppression. Recipient convergence
+// and the consent audit follow; neither may redirect a signed organization scope.
+func (h *UnsubscribeHandler) suppress(ctx context.Context, payload UnsubscribePayload) error {
+	ownerCtx := memql.ContextWithFreshRead(ownerActorContext(ctx, payload.OwnerUserID))
+	recipient, found, readErr := h.store.RecipientByID(ownerCtx, payload.RecipientID)
+	account, digest := payload.AccountID, payload.EmailDigest
+	if !payload.organizationBound {
+		account = recipient.AccountID
 	}
-	if addr == "" {
-		// The recipient row is gone, or it is not readable as the owner the
-		// token names. Nothing further is possible: with no address there is
-		// no digest, and the cluster list is keyed by digest. The row-level
-		// opt-out below still runs, so the person is removed from the
-		// audience that mailed them.
-		if err := h.store.SetRecipientSubscription(ownerCtx, recipientID, "unsubscribed", h.now().UTC()); err != nil {
-			return err
+	if digest == "" {
+		if readErr != nil {
+			return readErr
 		}
+		digest = EmailDigest(recipient.Email)
+	}
+	if digest == "" {
+		return h.store.SetRecipientSubscription(ownerCtx, payload.RecipientID, "unsubscribed", h.now().UTC())
+	}
+	matchesRecipient := found && readErr == nil && sameOrganization(account, recipient.AccountID) && digest == EmailDigest(recipient.Email)
+	domain := ""
+	if matchesRecipient {
+		domain = EmailDomain(recipient.Email)
+	}
+	var err error
+	if account == "" {
+		err = h.store.RecordSuppression(h.system(ctx), digest, "unsubscribed", domain, payload.CampaignID, "")
+	} else {
+		err = h.store.RecordOrganizationSuppression(h.system(ctx), account, digest, "unsubscribed", domain, payload.CampaignID, "")
+	}
+	if err != nil {
+		return err
+	}
+	// Deleted/moved recipients still get the signed mailbox suppression. Never
+	// alter a replacement membership belonging to another address or client.
+	if !matchesRecipient {
 		return nil
 	}
-
-	digest := EmailDigest(addr)
-	if digest != "" {
-		if err := h.store.RecordSuppression(h.system(ctx), digest, "unsubscribed", EmailDomain(addr), campaignID, ""); err != nil {
-			return err
-		}
-		// source "one_click": this arrived through the RFC 8058 endpoint,
-		// which is a fact about HOW consent was withdrawn and is exactly what
-		// distinguishes it from an operator honouring a support ticket by
-		// hand. Written under the OWNER's actor, which the signed token is
-		// the only source of -- the request itself carries none.
-		if err := h.store.RecordConsent(ownerCtx, ConsentWithdraw, ConsentRecord{
-			EventID:     id.NewShortId(),
-			EmailDigest: digest,
-			Source:      "one_click",
-			RecipientID: recipientID,
-			CampaignID:  campaignID,
-			OccurredAt:  h.now().UTC(),
-		}); err != nil {
-			// The person IS unsubscribed by the two writes around this one.
-			// A missing consent row is a gap in the audit trail, not a reason
-			// to report a failed opt-out -- and reporting one here would make
-			// the handler log "this address is still mailable" about an
-			// address that is not.
-			h.logger.Warn("campaigns: recorded an unsubscribe but could not append its consent event",
-				"campaign", campaignID, "error", err)
-		}
+	if err := h.store.RecordConsent(ownerCtx, ConsentWithdraw, ConsentRecord{
+		EventID: id.NewShortId(), EmailDigest: digest, Source: "one_click",
+		RecipientID: payload.RecipientID, CampaignID: payload.CampaignID,
+		AccountID: account, OccurredAt: h.now().UTC(),
+	}); err != nil {
+		h.logger.Warn("campaigns: recorded an unsubscribe but could not append its consent event", "campaign", payload.CampaignID, "error", err)
 	}
-	return h.store.SetRecipientSubscription(ownerCtx, recipientID, "unsubscribed", h.now().UTC())
+	return h.store.SetRecipientSubscription(ownerCtx, payload.RecipientID, "unsubscribed", h.now().UTC())
 }
 
 // ownerActorContext is the package-level twin of the worker's method, so
@@ -270,6 +222,7 @@ const (
 	pageConfirm unsubscribePage = iota
 	pageDone
 	pageInvalid
+	pageRetry
 )
 
 // render writes a minimal self-contained page. No external assets: this
@@ -296,6 +249,8 @@ func (h *UnsubscribeHandler) render(rw http.ResponseWriter, status int, page uns
 			// static analyser) sees it next to the interpolation.
 			`<form method="POST"><input type="hidden" name="token" value="` + html.EscapeString(token) + `">` +
 			`<button type="submit">Unsubscribe me</button></form>`
+	case pageRetry:
+		body = `<h1>Please try again</h1><p>We could not save your unsubscribe request. Please try this link again shortly.</p>`
 	case pageDone:
 		body = `<h1>Unsubscribed</h1><p>You will not receive further emails from this sender. ` +
 			`It may take a short time for a send already in progress to stop.</p>`

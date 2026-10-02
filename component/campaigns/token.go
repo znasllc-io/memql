@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"strings"
 )
 
@@ -23,16 +22,15 @@ import (
 // inbox has to keep working years later.
 //
 // A keyed MAC gives the same unforgeability with no storage. The token
-// carries the three ids the endpoint needs and a tag over them; the
+// carries the identities and mailbox digest the endpoint needs and a tag over them; the
 // endpoint recomputes the tag and refuses anything that does not match.
 // There is nothing to look up, nothing to expire, and nothing to grow.
 //
 // # What the token is allowed to do, and why that is safe to hand out
 //
-// Exactly one thing: suppress the address on the recipient row it names.
-// It is not a session, it grants no read, and it names no address -- the
-// endpoint resolves the address from the recipient row, under the owner
-// the token names. So the worst a leaked token does is unsubscribe the
+// Exactly one thing: suppress the original mailbox digest for its signed
+// organization. It is not a session, grants no read, and contains no plaintext
+// address. The recipient row only supplies optional display/audit metadata. So the worst a leaked token does is unsubscribe the
 // person it was already going to let unsubscribe.
 //
 // It is deliberately NOT expiring. An unsubscribe link that has gone
@@ -83,11 +81,12 @@ const (
 	// version-less token format produces is "invalid link", which tells
 	// a recipient nothing and an operator less.
 	//
-	// u2 added the key-id segment (memql#3458). u1 is not accepted: it
+	// u3 binds organization and mailbox digest. Already-mailed u2 links
+	// remain valid; u2 added the key-id segment (memql#3458). u1 is not accepted: it
 	// carries no key id, so a verifier could only try every key it holds
 	// and hope, and the format existed for one day between memql#3348 and
 	// this change -- before any deployment had sent campaign mail.
-	unsubscribeTokenVersion = "u2"
+	unsubscribeTokenVersion = "u3"
 
 	// unsubscribeTagBytes is how much of the HMAC-SHA256 output rides in
 	// the token. 16 bytes / 128 bits is the standard truncation floor for
@@ -129,99 +128,90 @@ func UnsubscribeKeyID(secret string) string {
 	return hex.EncodeToString(mac.Sum(nil)[:unsubscribeKeyIDBytes])
 }
 
-// MintUnsubscribeToken produces the token embedded in a campaign's
-// List-Unsubscribe URL.
-//
-// All three ids are covered by the tag, including campaignId -- so the
-// suppression row can record WHICH send drove the opt-out (a
-// deliverability review's first question when complaints rise) without
-// the campaign id being a caller-supplied claim.
-func MintUnsubscribeToken(secret, ownerUserId, recipientId, campaignId string) (string, error) {
+// UnsubscribePayload binds a sent message to its organization and mailbox
+// digest. Moving or deleting a recipient later cannot redirect that opt-out.
+// Legacy u2 links have no bound scope; only those resolve it from the recipient.
+type UnsubscribePayload struct {
+	OwnerUserID       string
+	RecipientID       string
+	CampaignID        string
+	AccountID         string
+	EmailDigest       string
+	organizationBound bool
+}
+
+func MintUnsubscribeToken(secret string, payload UnsubscribePayload) (string, error) {
 	if strings.TrimSpace(secret) == "" {
 		return "", errors.New("campaigns: no unsubscribe secret configured")
 	}
-	if strings.TrimSpace(ownerUserId) == "" || strings.TrimSpace(recipientId) == "" {
+	if payload.OwnerUserID == "" || payload.RecipientID == "" {
 		return "", errors.New("campaigns: unsubscribe token needs both an owner and a recipient")
 	}
-	body := encodeTokenBody(secret, ownerUserId, recipientId, campaignId)
-	tag := unsubscribeTag(secret, body)
-	return body + "." + base64.RawURLEncoding.EncodeToString(tag), nil
+	if payload.AccountID != "" && !validEmailDigest(payload.EmailDigest) {
+		return "", errors.New("campaigns: organization unsubscribe token requires a mailbox digest")
+	}
+	values := []string{unsubscribeTokenVersion, UnsubscribeKeyID(secret)}
+	for _, value := range []string{payload.OwnerUserID, payload.RecipientID, payload.CampaignID, bare(payload.AccountID), payload.EmailDigest} {
+		values = append(values, base64.RawURLEncoding.EncodeToString([]byte(value)))
+	}
+	body := strings.Join(values, ".")
+	return body + "." + base64.RawURLEncoding.EncodeToString(unsubscribeTag(secret, body)), nil
 }
 
-// ParseUnsubscribeToken verifies the tag against the key the token names
-// and returns the ids it covers. `keys` is the verification ring in
-// preference order (Config.UnsubscribeKeys: current, then previous).
-//
-// The comparison is hmac.Equal (constant time). That matters more here
-// than it looks: this endpoint is unauthenticated and rate-limited only
-// by the network, so a byte-at-a-time comparison is exactly the shape an
-// attacker can afford to measure. The key-id match is constant time too
-// -- not because the id is secret, but because a variable-time compare
-// on a value derived from the secret is a habit worth not having.
-func ParseUnsubscribeToken(keys []string, token string) (ownerUserId, recipientId, campaignId string, err error) {
+// ParseUnsubscribeToken accepts already-mailed u2 links and organization-bound
+// u3 links. Both use the same current/previous key ring and constant-time MAC.
+func ParseUnsubscribeToken(keys []string, token string) (UnsubscribePayload, error) {
+	empty := UnsubscribePayload{}
 	if len(keys) == 0 {
-		return "", "", "", errors.New("campaigns: no unsubscribe secret configured")
+		return empty, errors.New("campaigns: no unsubscribe secret configured")
+	}
+	if len(token) > 4096 {
+		return empty, errBadToken
 	}
 	parts := strings.Split(strings.TrimSpace(token), ".")
-	if len(parts) != 6 || parts[0] != unsubscribeTokenVersion {
-		return "", "", "", errBadToken
+	legacy := len(parts) == 6 && parts[0] == "u2"
+	if !legacy && (len(parts) != 8 || parts[0] != unsubscribeTokenVersion) {
+		return empty, errBadToken
 	}
-	body := strings.Join(parts[:5], ".")
-	presented, decodeErr := base64.RawURLEncoding.DecodeString(parts[5])
-	if decodeErr != nil || len(presented) != unsubscribeTagBytes {
-		return "", "", "", errBadToken
+	body := strings.Join(parts[:len(parts)-1], ".")
+	presented, err := base64.RawURLEncoding.DecodeString(parts[len(parts)-1])
+	if err != nil || len(presented) != unsubscribeTagBytes {
+		return empty, errBadToken
 	}
-
-	// Narrow to the key the token names FIRST. Without this the endpoint
-	// would compute a MAC per held key on every probe, and -- worse for
-	// an operator -- an expired link and a forged one would be the same
-	// event in the log.
-	named := 0
-	verified := false
+	named, verified := false, false
 	for _, key := range keys {
 		if !hmac.Equal([]byte(UnsubscribeKeyID(key)), []byte(parts[1])) {
 			continue
 		}
-		named++
+		named = true
 		if hmac.Equal(presented, unsubscribeTag(key, body)) {
 			verified = true
 		}
 	}
-	if named == 0 {
-		return "", "", "", errUnknownUnsubscribeKey
+	if !named {
+		return empty, errUnknownUnsubscribeKey
 	}
 	if !verified {
-		return "", "", "", errBadToken
+		return empty, errBadToken
 	}
-
-	owner, oerr := base64.RawURLEncoding.DecodeString(parts[2])
-	recipient, rerr := base64.RawURLEncoding.DecodeString(parts[3])
-	campaign, cerr := base64.RawURLEncoding.DecodeString(parts[4])
-	if oerr != nil || rerr != nil || cerr != nil {
-		return "", "", "", errBadToken
+	values := make([]string, 5)
+	for n, value := range parts[2 : len(parts)-1] {
+		decoded, err := base64.RawURLEncoding.DecodeString(value)
+		if err != nil {
+			return empty, errBadToken
+		}
+		values[n] = string(decoded)
 	}
-	if len(owner) == 0 || len(recipient) == 0 {
-		return "", "", "", errBadToken
+	payload := UnsubscribePayload{OwnerUserID: values[0], RecipientID: values[1], CampaignID: values[2], AccountID: values[3], EmailDigest: values[4], organizationBound: !legacy}
+	if payload.OwnerUserID == "" || payload.RecipientID == "" || (payload.AccountID != "" && !validEmailDigest(payload.EmailDigest)) || (payload.EmailDigest != "" && !validEmailDigest(payload.EmailDigest)) {
+		return empty, errBadToken
 	}
-	return string(owner), string(recipient), string(campaign), nil
+	return payload, nil
 }
 
-// encodeTokenBody joins the version, the key id and the three
-// base64url-encoded ids. Each id is encoded rather than escaped, so the
-// "." separator cannot occur inside a field and the split above is
-// unambiguous -- the same injectivity argument the DSL's composite-id
-// derivation makes about its separator (authoring rule 20).
-//
-// The key id is INSIDE the body, so the tag covers it: a token whose key
-// id was edited to name the other held key fails on the MAC rather than
-// being quietly verified under a key that did not sign it.
-func encodeTokenBody(secret, ownerUserId, recipientId, campaignId string) string {
-	return fmt.Sprintf("%s.%s.%s.%s.%s",
-		unsubscribeTokenVersion,
-		UnsubscribeKeyID(secret),
-		base64.RawURLEncoding.EncodeToString([]byte(ownerUserId)),
-		base64.RawURLEncoding.EncodeToString([]byte(recipientId)),
-		base64.RawURLEncoding.EncodeToString([]byte(campaignId)))
+func validEmailDigest(value string) bool {
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size && value == strings.ToLower(value)
 }
 
 func unsubscribeTag(secret, body string) []byte {
