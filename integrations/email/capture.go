@@ -73,7 +73,14 @@ func (s *CaptureSender) Send(ctx context.Context, msg Message, as SendAs) error 
 	return nil
 }
 
-func captureSender(sender Sender, ctx context.Context) (*CaptureSender, bool) {
+// CapturesMessages reports whether this sender records messages in the Email app
+// instead of delivering externally. It never resolves an external provider.
+func CapturesMessages(sender Sender) bool {
+	_, capture := captureSender(sender)
+	return capture
+}
+
+func captureSender(sender Sender) (*CaptureSender, bool) {
 	if lazy, ok := sender.(*LazySender); ok {
 		// Capture is an installation value fixed at boot. A status read must
 		// not freeze a still-unconfigured external sender in the lazy cache.
@@ -94,7 +101,7 @@ func (i *Integration) handleInbox(ctx context.Context, _ map[string]any, _ int) 
 	if ac.Synthetic {
 		return nil, fmt.Errorf("email: test inbox requires a signed-in operator")
 	}
-	s, ok := captureSender(i.sender, ctx)
+	s, ok := captureSender(i.sender)
 	if !ok {
 		return configureResult(map[string]any{"mode": "external", "messages": []capturedMessage{}})
 	}

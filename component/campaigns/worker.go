@@ -117,12 +117,6 @@ type Worker struct {
 	now            func() time.Time
 	sendHook       func(ctx context.Context, sender email.Sender, msg email.Message, as email.SendAs) error
 
-	// shopifyConfigured is the #4140 "catalog in play" half. Tests inject
-	// it; production leaves it nil and asks whether a v1:shopify:store row
-	// exists (memql#4389 -- it used to read the env, which a multi-store
-	// connector configured at runtime cannot answer from).
-	shopifyConfigured func() bool
-
 	// Object storage for the CSV import (memql#4822), resolved LAZILY and
 	// once. The worker is constructed on every node type and receives no
 	// blob client, so an eager resolution would either build an Azure client
@@ -544,10 +538,6 @@ func (w *Worker) sendBatch(
 		return errors.New("no email sender registered")
 	}
 	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
-		w.failJob(systemCtx, *job, reason)
-		return errors.New(reason)
-	}
-	if reason := w.catalogRefusal(ctx); reason != "" {
 		w.failJob(systemCtx, *job, reason)
 		return errors.New(reason)
 	}

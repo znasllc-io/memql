@@ -49,6 +49,20 @@ These defaults belong to the engine. Client domains, sender names and Azure
 resource choices belong to the instance or product repository and its saved
 cluster configuration; they are never engine defaults.
 
+## Checking a send locally
+
+With `MEMQL_EMAIL_TRANSPORT=capture`, messages appear in the MemQL OS **Email**
+app for owner/developer review; they do not reach external inboxes. Campaigns
+shows this delivery mode before sending and when confirming a test. A captured
+test verifies rendering and local persistence, not Azure delivery.
+
+Review the campaign's template and mark it `ready` before **Send now** or
+scheduling. **Send a test** can preview a draft template without starting the
+campaign. Ordinary campaigns do not depend on Shopify inventory: connecting
+an empty store, including a store belonging to another organization, cannot
+block their sends. Storefront newsletter enrollment keeps its explicit
+organization, store and audience binding.
+
 ## Organization permissions
 
 Select an organization when creating campaign work or a group. Operators who

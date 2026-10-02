@@ -435,6 +435,7 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
   return (
     <Panel label="Send controls">
       <Subhead>Sending</Subhead>
+      {sending.capture ? <Caption>Messages will appear in the Email app. External delivery is disabled.</Caption> : null}
       {!readyToSend ? (
         <Notice
           tone="warn"
@@ -451,8 +452,9 @@ function SendControls({ campaign, writes }: { campaign: CampaignRow; writes: Cam
             {campaign.recipientCount > 0 ? ` to ${campaign.recipientCount} people` : ""}?
           </p>
           <Caption>
-            Mail starts leaving immediately. Anyone on the do-not-mail list is skipped and recorded
-            as skipped; everybody else gets it. There is no unsend.
+            {sending.capture
+              ? "Messages are captured for review in the Email app. Anyone on the do-not-mail list is skipped."
+              : "Mail starts leaving immediately. Anyone on the do-not-mail list is skipped and recorded as skipped; everybody else gets it. There is no unsend."}
           </Caption>
           <div className="os-campaign-actions">
             <Button
@@ -630,6 +632,7 @@ export function TestSendPanel({
   return (
     <Panel label={label}>
       <Subhead>{label}</Subhead>
+      {sending.capture ? <Caption>View the test in the Email app. No email will reach the recipient’s inbox.</Caption> : null}
       {!readyToSend ? (
         <Notice
           tone="warn"
@@ -674,11 +677,11 @@ export function TestSendPanel({
       )}
 
       {!testSend.sent ? null : testSend.unresolved.length === 0 ? (
-        <Notice tone="info" sentence="Test sent. Every merge tag in this template resolved." />
+        <Notice tone="info" sentence={sending.capture ? "Test captured in the Email app. Every merge tag in this template resolved." : "Test sent. Every merge tag in this template resolved."} />
       ) : (
         <Notice
           tone="warn"
-          sentence="Test sent -- but these merge tags did not resolve."
+          sentence={sending.capture ? "Test captured in the Email app, but these merge tags did not resolve." : "Test sent -- but these merge tags did not resolve."}
           next="They will appear as their own text in the message. Check the spelling, or the column name on the audience."
         >
           <div

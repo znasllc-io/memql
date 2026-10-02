@@ -105,7 +105,7 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 		if err != nil {
 			return nil, err
 		}
-		_, capture := captureSender(i.sender, ctx)
+		_, capture := captureSender(i.sender)
 		output["capture"] = capture
 		return configureResult(output)
 	}

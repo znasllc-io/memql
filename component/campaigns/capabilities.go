@@ -55,7 +55,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		{Name: "saveTemplate", Description: "Save or publish the reviewed revision of an organization email template.", Handler: w.handleSaveTemplate},
 		{
 			Name:        "startSend",
-			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template, audience or product_purchasable catalog is not ready.",
+			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template or audience is not ready.",
 			Handler:     w.handleStartSend,
 			ArgsSchema: map[string]string{
 				"campaignId": "string (required) - the campaign to send",
@@ -366,9 +366,6 @@ func (w *Worker) preflightAudience(ctx context.Context, op string, campaign Camp
 	}
 	if w.resolveSender() == nil {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: no email sender is registered on this node, so nothing could deliver the campaign", op)
-	}
-	if reason := w.catalogRefusal(ctx); reason != "" {
-		return 0, Template{}, fmt.Errorf("campaigns.%s: %s", op, reason)
 	}
 
 	// THE IDENTITY, before anything else about the content (memql#4821).

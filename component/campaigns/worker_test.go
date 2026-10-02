@@ -449,11 +449,10 @@ func newTestWorker(t *testing.T, engine Engine, sender email.Sender) *Worker {
 			UnsubscribeSecret:  "test-signing-secret-not-a-credential",
 			UnsubscribeBaseURL: "https://example.test",
 		},
-		now:               time.Now,
-		readyCh:           make(chan struct{}),
-		doneCh:            make(chan struct{}),
-		reputation:        newReputationCollector("sender@example.test", "n1"),
-		shopifyConfigured: func() bool { return false },
+		now:        time.Now,
+		readyCh:    make(chan struct{}),
+		doneCh:     make(chan struct{}),
+		reputation: newReputationCollector("sender@example.test", "n1"),
 	}
 	w.limiter = newRateLimiter(w.cfg.SendRatePerMinute, w.now)
 	return w
