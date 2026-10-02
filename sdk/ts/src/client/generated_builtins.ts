@@ -129,6 +129,38 @@ QueryClient.prototype.campaignActivateEmailRule = function (this: QueryClient, a
   return this.executeNamed("campaignActivateEmailRule", buildCampaignActivateEmailRule(args), opts);
 };
 
+/** Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series. */
+export interface CampaignConfigureSeriesArgs {
+  campaignId: string;
+  // Enum: save | pause | resume
+  action: string;
+  intervalWeeks?: number;
+  firstSendAt?: string;
+  timeZone?: string;
+  expectedRevision?: string;
+}
+
+export function buildCampaignConfigureSeries(args: CampaignConfigureSeriesArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  if (args.intervalWeeks !== undefined) parts.push("intervalWeeks: " + renderMemQLValue(args.intervalWeeks));
+  if (args.firstSendAt !== undefined) parts.push("firstSendAt: " + renderMemQLValue(args.firstSendAt));
+  if (args.timeZone !== undefined) parts.push("timeZone: " + renderMemQLValue(args.timeZone));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignConfigureSeries(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignConfigureSeries(args: CampaignConfigureSeriesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignConfigureSeries = function (this: QueryClient, args: CampaignConfigureSeriesArgs = {} as CampaignConfigureSeriesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignConfigureSeries", buildCampaignConfigureSeries(args), opts);
+};
+
 /** Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'. */
 export interface CampaignImportRecipientsArgs {
   /** The audience to import into. The caller must be able to read it. */

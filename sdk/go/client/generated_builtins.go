@@ -161,6 +161,63 @@ func CampaignActivateEmailRuleBuild(args CampaignActivateEmailRuleArgs) string {
 	return b.String()
 }
 
+// CampaignConfigureSeries -- Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.
+type CampaignConfigureSeriesArgs struct {
+	CampaignId string
+	// Enum: save | pause | resume
+	Action           string
+	IntervalWeeks    int
+	FirstSendAt      string
+	TimeZone         string
+	ExpectedRevision string
+}
+
+// CampaignConfigureSeries calls the engine builtin campaignConfigureSeries.
+func (qc *QueryClient) CampaignConfigureSeries(ctx context.Context, args CampaignConfigureSeriesArgs) (*Result, error) {
+	call := CampaignConfigureSeriesBuild(args)
+	return qc.executeNamed(ctx, "campaignConfigureSeries", call)
+}
+
+func CampaignConfigureSeriesBuild(args CampaignConfigureSeriesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignConfigureSeries(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if args.IntervalWeeks != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("intervalWeeks: ")
+		b.WriteString(fmt.Sprintf("%v", args.IntervalWeeks))
+	}
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("firstSendAt: ")
+	b.WriteString(quoteMemQL(args.FirstSendAt))
+	if args.TimeZone != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("timeZone: ")
+		b.WriteString(quoteMemQL(args.TimeZone))
+	}
+	if args.ExpectedRevision != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignImportRecipients -- Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'.
 type CampaignImportRecipientsArgs struct {
 	// The audience to import into. The caller must be able to read it.

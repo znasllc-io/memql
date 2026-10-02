@@ -1,3 +1,5 @@
+import { RecurrencePanel } from "../src/apps/campaigns/RecurrencePanel";
+import { fakeConnection as campaignConnection, withSession as campaignSession } from "../test/campaigns/harness";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
 import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
@@ -521,6 +523,12 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
 // `syncStatesAll`. Two fixture harnesses rather than one widened one, for the
 // reason the README gives about the fake in general: each is the SUITE's, so a
 // screenshot cannot disagree with what those tests assert.
+const recurrenceQaRow = { id: "qa-series", sourceCampaignId: "qa-campaign", intervalWeeks: 3, timeZone: "America/Phoenix", status: "active", anchorAt: "2026-10-09T16:00:00Z", nextAt: "2026-10-30T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" };
+function RecurrenceQa() {
+  const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
+  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><RecurrencePanel campaignId="qa-campaign" /></div>;
+}
+
 const VIEWS: Record<
   string,
   {
@@ -532,6 +540,21 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  "campaign-repeat-empty": {
+    connect: () => campaignConnection(),
+    wrap: el => campaignSession(el),
+    render: () => <RecurrenceQa />,
+  },
+  "campaign-repeat-active": {
+    connect: () => campaignConnection({ campaignSeries: [recurrenceQaRow] }),
+    wrap: el => campaignSession(el),
+    render: () => <RecurrenceQa />,
+  },
+  "campaign-repeat-blocked": {
+    connect: () => campaignConnection({ campaignSeries: [{ ...recurrenceQaRow, status: "blocked", lastError: "Publish the template before resuming this schedule." }] }),
+    wrap: el => campaignSession(el),
+    render: () => <RecurrenceQa />,
+  },
   // NEXUS (epic memql#5414): what an automation is for. The procedure's page
   // in the three readings its Reuse panel has -- the evidence deciding, a
   // person's own label over evidence that disagrees, and nothing counted yet

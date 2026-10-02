@@ -281,3 +281,23 @@ shape singleSendReceipt campaignSingleSendFull {
   result
   row.createdAt
 }
+
+@row
+shape campaignSeries campaignSeriesFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  authorizedByUserId
+  accountId
+  sourceCampaignId
+  name
+  definition
+  intervalWeeks
+  timeZone
+  anchorAt
+  nextAt
+  status
+  lastCampaignId
+  lastOccurrenceAt
+  lastError
+}

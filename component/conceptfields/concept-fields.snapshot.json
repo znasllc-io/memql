@@ -764,6 +764,46 @@
       }
     },
     {
+      "concept": "v1:campaigns:campaignSeries",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "anchorAt",
+        "authorizedByUserId",
+        "definition",
+        "intervalWeeks",
+        "lastCampaignId",
+        "lastError",
+        "lastOccurrenceAt",
+        "name",
+        "nextAt",
+        "ownerUserId",
+        "sourceCampaignId",
+        "status",
+        "timeZone"
+      ],
+      "required": [
+        "accountId",
+        "anchorAt",
+        "authorizedByUserId",
+        "definition",
+        "intervalWeeks",
+        "name",
+        "nextAt",
+        "ownerUserId",
+        "sourceCampaignId",
+        "status",
+        "timeZone"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "blocked",
+          "paused"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:consentEvent",
       "file": "campaigns/concepts.memql",
       "fields": [

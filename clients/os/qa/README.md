@@ -227,3 +227,7 @@ and `cobalt` in both `dark` and `light`. Add `&window=1` to inspect the pattern
 behind the shell's window surface; also inspect a narrow viewport. All themes
 share the approved Fold geometry (3.1% / 1.7% ground–ink mixes). There are no
 nodes, lines, canvas or animation. The palette and numeral remain the theme's.
+
+Recurring campaigns use `campaign-repeat-empty`, `campaign-repeat-active`, and
+`campaign-repeat-blocked`. Add `width=narrow` for the constrained panel. Open
+**Set up repeating sends** on the empty view to inspect the date/cadence form.

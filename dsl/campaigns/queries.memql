@@ -1,3 +1,5 @@
+use common.traits.{ statusIsActive }
+
 // campaigns domain -- caller-scoped reads.
 //
 // The engine applies current organization membership and app permissions to
@@ -571,4 +573,26 @@ query singleSendReceipt campaignSingleSendById {
   args { receiptId string! }
   filter row => row.id == args.receiptId && row.ownerUserId == actor.userId
   shape campaignSingleSendFull
+}
+
+/// Current repeating instruction for this blueprint; organization authorization applies.
+@actor
+query campaignSeries campaignSeriesForCampaign {
+  args { campaignId string! }
+  filter row => row.sourceCampaignId == args.campaignId
+  sort "row.createdAt", "desc"
+  paginate 1
+  shape campaignSeriesFull
+}
+
+/// Internal scan across organizations. actor.userId cannot scope the scheduler's work;
+/// each result is locked, reread and authorized under its recorded person before use.
+@actor
+@serverOnly
+query campaignSeries dueCampaignSeries {
+  args { dueAt datetime! }
+  filter row => actor.isClusterOwner == true && statusIsActive(row) && row.nextAt <= args.dueAt
+  sort "row.createdAt", "asc"
+  paginate 100
+  shape campaignSeriesFull
 }
