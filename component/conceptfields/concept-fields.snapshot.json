@@ -952,6 +952,85 @@
       }
     },
     {
+      "concept": "v1:campaigns:newsletterBinding",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "audienceId",
+        "consentText",
+        "enabled",
+        "ownerUserId",
+        "senderIdentityId",
+        "siteId",
+        "storeId",
+        "templateId"
+      ],
+      "required": [
+        "accountId",
+        "audienceId",
+        "consentText",
+        "enabled",
+        "ownerUserId",
+        "senderIdentityId",
+        "siteId",
+        "storeId",
+        "templateId"
+      ]
+    },
+    {
+      "concept": "v1:campaigns:newsletterSignup",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "audienceId",
+        "consentRevision",
+        "consentText",
+        "displayName",
+        "email",
+        "emailDigest",
+        "lastError",
+        "newsletterId",
+        "ownerUserId",
+        "recipientId",
+        "requestedAt",
+        "senderIdentityId",
+        "siteId",
+        "status",
+        "storeId",
+        "submissionId",
+        "templateId",
+        "templateSnapshot"
+      ],
+      "required": [
+        "accountId",
+        "audienceId",
+        "consentRevision",
+        "consentText",
+        "email",
+        "emailDigest",
+        "newsletterId",
+        "ownerUserId",
+        "recipientId",
+        "requestedAt",
+        "senderIdentityId",
+        "siteId",
+        "status",
+        "storeId",
+        "submissionId",
+        "templateId",
+        "templateSnapshot"
+      ],
+      "enums": {
+        "status": [
+          "blocked",
+          "pending",
+          "sent",
+          "suppressed",
+          "uncertain"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:recipient",
       "file": "campaigns/concepts.memql",
       "fields": [

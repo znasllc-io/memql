@@ -442,3 +442,13 @@ func TestRecurringCampaignUpdatesReachOtherReplicas(t *testing.T) {
 		}
 	}
 }
+
+func TestNewsletterConfigurationReachesOtherReplicas(t *testing.T) {
+	for _, verb := range []string{"created", "updated"} {
+		topic := "graph.node." + verb + ".v1:campaigns:newsletterBinding"
+		result := evaluateRouting(defaultRoutingRules(), topic)
+		if !result.Forward || !result.Broadcast || result.TargetType != "" {
+			t.Fatalf("%s must broadcast: %+v", topic, result)
+		}
+	}
+}

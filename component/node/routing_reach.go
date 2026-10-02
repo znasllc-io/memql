@@ -171,6 +171,10 @@ func RoutingExclusions() []RoutingExclusion {
 				"kind), rather than by tailing them.",
 		},
 		{
+			Pattern: "graph.node.*.v1:campaigns:newsletterSignup",
+			Reason:  "Shopper-volume signup and welcome receipts. Campaigns reads their recent outcomes on demand, with an explicit refresh; configuration is broadcast separately.",
+		},
+		{
 			Pattern: "graph.node.*.v1:campaigns:recipient",
 			Reason: "A roster row, and the judgment call of the three campaigns " +
 				"entries rather than a flat volume denial. Hand-editing an " +

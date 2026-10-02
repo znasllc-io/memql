@@ -26,10 +26,15 @@ type singleSendReceipt struct {
 // after the provider accepted it. This is at-most-once submission, not a claim
 // that SMTP or a provider can guarantee exactly-once mailbox delivery.
 func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	return w.sendToRecipientOnce(ctx, args, nil, "")
+}
+
+// snapshot is accepted only from an internal durable welcome, never wire args.
+func (w *Worker) sendToRecipientOnce(ctx context.Context, args map[string]any, snapshot *Template, expectedEmailDigest string) ([]memorynodes.MemoryNode, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
 	requestID := argString(args, "requestId")
 	if requestID == "" {
-		return w.sendToRecipient(ctx, args, nil)
+		return w.sendToRecipient(ctx, args, nil, snapshot, expectedEmailDigest)
 	}
 	owner := callerUserID(ctx)
 	if owner == "" || !singleSendRequestID.MatchString(requestID) {
@@ -41,6 +46,12 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 	values := map[string]string{}
 	for _, key := range []string{"templateId", "recipientId", "senderIdentityId", "emailRuleId"} {
 		values[key] = memql.BareShortId(strings.TrimSpace(argString(args, key)))
+	}
+	if snapshot != nil {
+		values["templateRevision"] = snapshot.Revision
+	}
+	if expectedEmailDigest != "" {
+		values["emailDigest"] = expectedEmailDigest
 	}
 	encoded, _ := json.Marshal(values)
 	receipt := &singleSendReceipt{id: sha256Hex("campaign-single-send\x00" + owner + "\x00" + requestID), fingerprint: sha256Hex(string(encoded))}
@@ -75,7 +86,7 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 			"recipientId": values["recipientId"], "emailRuleId": values["emailRuleId"],
 		})
 	}
-	nodes, err := w.sendToRecipient(ctx, args, receipt)
+	nodes, err := w.sendToRecipient(ctx, args, receipt, snapshot, expectedEmailDigest)
 	if err != nil || len(nodes) != 1 {
 		return nodes, err
 	}
