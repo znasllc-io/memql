@@ -1055,3 +1055,49 @@ mutation singleSendReceipt recordCampaignSingleSend {
     stamp { id: args.receiptId, ownerUserId: actor.userId, createdAt: args.versionTime }
   }
 }
+
+/// Scoping to actor.userId cannot attest that the captured configuration passed preflight.
+/// Only campaignConfigureSeries writes this under a shared lock with a revision check.
+@actor
+@serverOnly
+mutation campaignSeries configureCampaignSeries {
+  args {
+    seriesId string!
+    accountId string!
+    sourceCampaignId string!
+    name string!
+    definition object!
+    intervalWeeks int!
+    timeZone string!
+    anchorAt datetime!
+    nextAt datetime!
+    status enum("active", "paused", "blocked")!
+    lastCampaignId string
+    lastOccurrenceAt datetime
+    versionTime datetime!
+  }
+  insert {
+    accept { accountId, sourceCampaignId, name, definition, intervalWeeks, timeZone, anchorAt, nextAt, status, lastCampaignId, lastOccurrenceAt }
+    stamp { id: args.seriesId, ownerUserId: actor.userId, authorizedByUserId: actor.userId, createdAt: args.versionTime, lastError: "" }
+  }
+}
+
+/// Internal scheduler progress; actor.userId cannot prove that an occurrence was queued.
+/// Preserve the person who authorized the series when a system replica advances it.
+@actor
+@serverOnly
+mutation campaignSeries advanceCampaignSeries {
+  args {
+    seriesId string!
+    nextAt datetime!
+    status enum("active", "paused", "blocked")!
+    lastCampaignId string
+    lastOccurrenceAt datetime
+    lastError string!
+    versionTime datetime!
+  }
+  update {
+    accept { nextAt, status, lastCampaignId, lastOccurrenceAt, lastError }
+    stamp { id: args.seriesId, createdAt: args.versionTime }
+  }
+}

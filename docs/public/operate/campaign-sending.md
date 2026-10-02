@@ -59,9 +59,10 @@ settings select browser VS Code (the default), desktop VS Code, or Cursor.
 files, or an explicitly selected ZIP of resources plus your brief. MemQL reads
 the authorized bytes and produces editable HTML, plain text, and a subject in
 an `.email.json` file. A resource ZIP is inspected only for that explicit
-composition; opening a ZIP in Files still downloads it intact. Private images
-currently inform the design; this flow does not publish private image URLs or
-attach those images to outgoing mail. Review placeholders before publishing.
+composition; opening a ZIP in Files still downloads it intact. Choose which images are visual inspiration and which should appear in the
+email. Included PNG, JPEG and GIF bytes stay with the editable template and
+are sent as inline attachments; the flow does not publish private file URLs.
+Review the generated layout and links before publishing.
 
 Use **Use in Campaigns** to save a draft or publish the reviewed template for
 its organization. Publishing makes it available to send; it does not send
@@ -80,6 +81,42 @@ The client write surface is `campaignSaveTemplate`, with `templateId`,
 `accountId`, `name`, `content`, `expectedRevision`, and `action` (`save`,
 `publish`, or `archive`). Its receipt includes the saved revision and status.
 Raw template writes and the underlying create/update mutations are internal.
+
+## Repeating campaigns
+
+Open a campaign and choose **Repeat → Set up repeating sends**. Select the first
+send and a weekly interval, such as every two or three weeks. The timezone is
+shown beside the date. Cadence follows its local calendar time across daylight
+saving changes. A recurring schedule can be created before its audience has
+subscribers; an empty occurrence completes without sending mail.
+
+The original campaign is a blueprint. Saving the schedule captures its audience,
+sender, organization and tracking settings. Save the schedule again after editing
+those campaign details. Each occurrence reads the then-published template and
+freezes that copy in a separate campaign/send job. Later edits cannot change an
+already queued occurrence. The audience is resolved when that occurrence runs,
+and consent and suppression are checked before delivery.
+
+Each occurrence appears in Campaigns with its scheduled date in the name and its
+own delivery history. The original draft can still be sent as a one-off; that is
+an additional campaign, independent of its repeating schedule.
+
+**Pause future sends** stops new occurrences. Already queued occurrences keep
+their own pause/cancel controls. **Resume future sends** skips missed dates. After
+an unexpected outage, an active schedule queues at most one overdue occurrence,
+then advances to its next future date, preventing a burst of missed newsletters.
+A configuration or authority refusal blocks the schedule with a visible reason;
+review and resume it after resolving the problem.
+
+`campaignConfigureSeries` accepts a campaign ID, `save`, `pause` or `resume`,
+and the exact saved series revision for changes. Saving also takes
+`intervalWeeks` (1–52), `firstSendAt` and an IANA `timeZone`. The cluster captures
+its definition from the readable campaign, never caller-supplied organization,
+audience or sender overrides. The person authorizing it must retain current
+organization write access. Shared PostgreSQL coordination, fresh reads and
+stable occurrence IDs make retries across replicas converge on the same job,
+including a crash after queueing but before advancing the schedule. A finished
+occurrence's job and delivery records are never reset.
 
 ## Retrying event emails
 
