@@ -12,3 +12,13 @@ shape connectionState emailConnectionStateStored {
   row.createdAt
   encryptedValue
 }
+
+@row
+shape sendOperation emailSendOperationStored {
+  row.id
+  row.createdAt
+  accountId
+  status
+  nextPollAt
+  encryptedValue
+}

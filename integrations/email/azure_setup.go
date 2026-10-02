@@ -3,6 +3,7 @@ package email
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -14,11 +15,12 @@ import (
 )
 
 type azureSetup struct {
-	store         *connectionStore
-	protocol      *azureProtocol
-	applicationID func(context.Context) (string, error)
-	canManage     func(context.Context, string) bool
-	now           func() time.Time
+	store           *connectionStore
+	protocol        *azureProtocol
+	applicationID   func(context.Context) (string, error)
+	canManage       func(context.Context, string) bool
+	now             func() time.Time
+	operationClient *http.Client
 }
 
 type azureSession struct {
@@ -72,7 +74,7 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 	}
 	action := argString(args, "action")
 	options, _ := args["options"].(map[string]any)
-	if action == "status" || action == "disconnect" || action == "prepare" {
+	if action == "status" || action == "disconnect" || action == "prepare" || action == "operations" {
 		output, err := a.connectionAction(ctx, account, action, options)
 		if err != nil {
 			return nil, err

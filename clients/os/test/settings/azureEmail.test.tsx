@@ -65,6 +65,25 @@ describe("organization Azure email setup", () => {
         expect(call.mock.calls.find(([args]) => args.action === "provision")?.[0]).toMatchObject({ accountId: "self", sessionId: "session", options: { confirmed: true, planId: "reviewed-plan" } });
         expect(await screen.findByText(/Merge SPF/)).toBeTruthy();
     });
+    it("explains the one-time registration prerequisite without a failing sign-in button", async () => {
+        const call = query(() => ({ status: "unconfigured", applicationReady: false }));
+        render(withSession(<AzureEmailConnections />));
+        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
+        await click("Connect email");
+        expect(await screen.findByText("Microsoft sign-in needs a one-time MemQL app registration.")).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Sign in with Microsoft" })).toBeNull();
+        expect(call.mock.calls.some(([args]) => args.action === "begin")).toBe(false);
+    });
+    it("shows organization processing receipts without claiming recipient delivery", async () => {
+        const call = query(args => args.action === "operations" ? { status: "ok", operations: [{ operationId: "receipt-1", status: "succeeded", detail: "", submittedAt: "2026-10-01T12:00:00Z" }] } : { status: "ready", sender: "news@client.example", plan });
+        render(withSession(<AzureEmailConnections />));
+        chooseOption(screen.getByRole("combobox", { name: "Organization" }), "Client");
+        await click("Manage email for Client");
+        await click("Check sends");
+        expect(await screen.findByText("Processing completed")).toBeTruthy();
+        expect(screen.getByText(/does not confirm inbox delivery/)).toBeTruthy();
+        expect(call.mock.calls.find(([args]) => args.action === "operations")?.[0].accountId).toBe("client");
+    });
     it("does not show a previous organization's late connection reply", async () => {
         let resolve: (value: Record<string, unknown>) => void = () => { };
         query(args => args.accountId === "self" ? new Promise(done => { resolve = done; }) : { status: "ready", sender: "news@client.example", plan });

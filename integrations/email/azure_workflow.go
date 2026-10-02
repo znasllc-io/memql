@@ -23,15 +23,32 @@ func azureConnectionSummary(connection azureConnection) map[string]any {
 // Azure resources, changes DNS, or cancels billing on the user's behalf.
 func (a *azureSetup) connectionAction(ctx context.Context, account, action string, options map[string]any) (map[string]any, error) {
 	var connection azureConnection
+	if action == "operations" {
+		rows, err := (&storedACSOperations{connection: a.store}).recent(ctx, account)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"status": "ok", "operations": rows, "deliveryFeedback": "not-configured"}, nil
+	}
 	if action == "status" {
 		found, _, err := a.store.read(ctx, "organization:"+account, &connection)
 		if err != nil {
 			return nil, err
 		}
-		if !found {
-			return map[string]any{"status": "unconfigured"}, nil
+		ready := a.protocol != nil && a.protocol.clientID != ""
+		if a.applicationID != nil {
+			clientID, appErr := a.applicationID(ctx)
+			if appErr != nil {
+				return nil, appErr
+			}
+			ready = clientID != ""
 		}
-		return azureConnectionSummary(connection), nil
+		summary := azureConnectionSummary(connection)
+		if !found {
+			summary = map[string]any{"status": "unconfigured"}
+		}
+		summary["applicationReady"] = ready
+		return summary, nil
 	}
 	err := a.store.change(ctx, "organization:"+account, &connection, func(found bool) error {
 		if action == "disconnect" {

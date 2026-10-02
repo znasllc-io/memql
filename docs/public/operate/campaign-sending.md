@@ -1361,3 +1361,29 @@ Still perfectly reasonable, and unchanged:
 | Everything `skipped` | The cluster suppression list matched. Browse `v1:campaigns:suppression` as the cluster owner. |
 | Recipient says the unsubscribe link does not work | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is not externally reachable, or the key that signed it has been retired by two rotations. Check the node log for `refused an unsubscribe link signed by a key this node no longer holds`; if the retired value can still be recovered, putting it back in `_PREVIOUS` revives those links. See [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
 | Boot warns "holds only ONE unsubscribe signing key" | This deployment has sent campaign mail and has no `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS`. Nothing is broken yet; the next rotation of the secret alone would break every link already sent. |
+
+### Azure send receipts
+
+Before an ACS request leaves the cluster, MemQL persists an encrypted receipt
+with its own operation UUID and the message's internal delivery identity. A lost
+response or a restart never authorizes another POST for that identity. The
+cluster polls the original resource's operation endpoint across replicas using
+shared database coordination. A confirmed rate-limit refusal can retry after
+Azure's requested delay; an unknown outcome cannot.
+
+In the organization's email connection detail, **Check sends** shows the most
+recent 25 Azure processing receipts. **Processing completed** means ACS finished
+processing the request, not that the recipient received it. This setup does not
+yet provision an Event Grid or Azure Monitor delivery-feedback source; recipient
+bounces and delivery cannot be inferred from operation success. Existing campaign
+`sent` counts continue to mean transport acceptance. An acceptance that initially
+returned an unknown result can later be visible as accepted in the receipt even
+when the earlier campaign attempt was recorded as failed; it is never resent
+automatically.
+
+Polling stops after 24 hours if processing remains unconfirmed, retaining the
+receipt to prevent accidental resubmission. Reconnecting to a different Azure
+resource does not move old operations: they belong to the original resource.
+No message body, mailbox address, or access key appears in the receipt status
+response. Disconnecting email stops new sends and pauses reconciliation until
+the original resource is connected again.

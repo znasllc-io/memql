@@ -1,11 +1,7 @@
-// Package email is a minimal outbound-mail helper used by MemQL for
-// transactional messages (currently just guest invites).
-//
-// The package intentionally avoids the full integrations.Integration
-// lifecycle: email is fire-and-forget, doesn't need a ticker, and the
-// SMTP connection is opened per-send. If volume ever grows we can swap
-// in a pooled vendor SDK behind the same Sender interface without
-// touching callers.
+// Package email provides organization-aware outbound transports and explicit
+// test capture. SMTP opens a connection per send; ACS persists send attempts
+// before submission and the cluster reconciles processing with signed GETs.
+// MemQL owns campaign, audience, consent, and approval behavior.
 package email
 
 import (
@@ -126,8 +122,11 @@ func resolveIdentity(as SendAs, defaultAddr, defaultName string) (string, string
 
 // Message is a rendered email ready to go on the wire.
 type Message struct {
-	To      string
-	Subject string
+	// IntentID is a stable internal delivery identity, never an email header.
+	// A transport can reconcile a lost response without submitting it again.
+	IntentID string
+	To       string
+	Subject  string
 	// TextBody is the plain-text alternative. Required.
 	TextBody string
 	// HTMLBody is optional; when set the message goes out as

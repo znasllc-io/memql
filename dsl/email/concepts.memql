@@ -14,3 +14,14 @@ concept capturedMessage {
 concept connectionState {
   encryptedValue string!
 }
+
+/// Private provider receipt. The integration checks organization authority before
+/// projecting status; addresses, message content and credentials are not stored.
+// @no-displayCard: Internal transport journal; the gated connection detail shows processing status.
+@rowAuthz(clusterOwner)
+concept sendOperation {
+  accountId string!
+  status string!
+  nextPollAt datetime!
+  encryptedValue string!
+}

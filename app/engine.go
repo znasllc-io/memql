@@ -261,7 +261,7 @@ func (a *App) engineAndBus() {
 		campaigns.LoadConfig().Enabled,
 		a.Logger,
 	)
-	a.Dependencies = append(a.Dependencies, ndrPoller)
+	a.Dependencies = append(a.Dependencies, ndrPoller, email.NewOperationPoller(a.emailIntegration, a.Logger))
 
 	// epic memql#4378: the outbox drain worker. Delivers every change to
 	// an ORIGIN concept out to the systems that mirror it, with an

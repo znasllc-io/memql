@@ -65,5 +65,6 @@ func (a *azureSetup) sender(ctx context.Context, account string) (Sender, error)
 	if err != nil {
 		return nil, permanentSendRefusal("this organization's Azure email connection is invalid; connect again")
 	}
+	sender.operations = &storedACSOperations{connection: a.store}
 	return sender, nil
 }

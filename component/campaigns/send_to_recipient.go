@@ -210,6 +210,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	// Record the attempt before contacting the transport. After this point a
 	// timeout or a node loss is uncertain, and replay must never send it again.
 	if receipt != nil {
+		msg.IntentID = "campaign-single:" + receipt.id
 		receipt.accountID = campaign.AccountID
 		if err := w.saveSingleSendReceipt(ctx, receipt, "attempting", nil); err != nil {
 			return nil, err

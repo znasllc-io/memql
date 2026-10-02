@@ -33,7 +33,10 @@ interface DNSRecord {
     value: string;
     status: string;
 }
+interface SendOperation { operationId: string; status: string; detail: string; submittedAt: string; checkedAt: string }
 interface Reply {
+    applicationReady?: boolean;
+    operations?: SendOperation[];
     planId?: string;
     status: string;
     sessionId?: string;
@@ -111,6 +114,7 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel }
     const [displayName, setDisplayName] = useState(name);
     const [replyTo, setReplyTo] = useState("");
     const [disconnect, setDisconnect] = useState(false);
+    const [operations, setOperations] = useState<SendOperation[] | null>(null);
     const generation = useRef(0);
     const inFlight = useRef<AbortController | null>(null);
     useEffect(() => { generation.current++; return () => { generation.current++; inFlight.current?.abort(); inFlight.current = null; }; }, [connection]);
@@ -243,6 +247,15 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel }
           <Fact label="Organization" value={name}/><Fact label="Sender" value={state?.sender || "Not configured"}/>
           <Fact label="Replies to" value={state?.replyTo || "No reply mailbox configured"}/>
         </Facts></Panel>
+        <section className="os-app-stack" aria-label="Azure send processing">
+          <div className="os-head"><Subhead>Send processing</Subhead><Button busy={busy} onClick={() => { void call("operations").then(result => { if (result) setOperations(result.operations || []); }); }}>{operations ? "Refresh" : "Check sends"}</Button></div>
+          <p className="os-caption">Azure processing status does not confirm inbox delivery. Delivery and bounce feedback is not connected yet.</p>
+          {operations?.length === 0 ? <p className="os-caption">No Azure sends recorded for this organization.</p> : null}
+          {operations?.map(operation => <Panel key={operation.operationId} label="Azure send"><Facts>
+            <Fact label="Requested" value={new Date(operation.submittedAt).toLocaleString()}/>
+            <Fact label="Processing" value={sendOperationLabel(operation.status)}/>
+          </Facts>{operation.detail ? <p className="os-caption">{operation.detail}</p> : null}<details><summary>Reference</summary><code>{operation.operationId}</code></details></Panel>)}
+        </section>
         {disconnect ? <Notice tone="warn" sentence="Disconnect this organization's email?" detail="New sends will stop. Azure resources and DNS records will remain."/> : null}
         {error ? <Notice tone="error" sentence={error}/> : null}
       </div>
@@ -257,7 +270,7 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel }
     const phase = !signedIn ? "signin" : state?.status === "verified" || state?.status === "ready" ? "sender" : state?.status === "dns" ? "dns" : "resources";
     const acts: Act[] = [{ label: "Back", text: true, busy, onAct: () => edit(false) }];
     if (!busy) {
-        if (phase === "signin" && !session)
+        if (phase === "signin" && !session && state?.applicationReady !== false)
             acts.push({ label: "Sign in with Microsoft", onAct: () => { void begin(); } });
         else if (phase === "signin" && error)
             acts.push({ label: "Sign in again", onAct: () => { keepSession(""); setGrant(null); void begin(); } });
@@ -272,7 +285,7 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel }
     }
     const order = ["signin", "resources", "dns", "sender"];
     return <Wizard icon={<Mail size={20}/>} title={`Email · ${name}`} label="Connect email" open={phase} onOpen={() => { }} back={{ label: backLabel, onSelect: () => edit(false) }} status={{ word: busy ? "Working" : phase === "signin" && session ? "Waiting for Microsoft" : phase === "dns" ? "Waiting for DNS" : "Your turn", tone: busy ? "busy" : "paused" }} acts={acts} notices={error ? <Notice tone="error" sentence={error}/> : undefined} steps={[
-            { id: "signin", name: "Microsoft", body: <div className="os-app-stack"><p className="os-caption">Use an Azure account that can manage this organization's email resources.</p>{grant?.verificationUri && grant.userCode ? <><p className="os-mono">{grant.userCode}</p><a href={grant.verificationUri} target="_blank" rel="noopener noreferrer">Enter this code at Microsoft</a></> : null}</div> },
+            { id: "signin", name: "Microsoft", body: <div className="os-app-stack">{state?.applicationReady === false ? <Notice sentence="Microsoft sign-in needs a one-time MemQL app registration." detail="Your cluster administrator needs to finish that registration before you can connect an organization."/> : null}<p className="os-caption">Use an Azure account that can manage this organization's email resources.</p>{grant?.verificationUri && grant.userCode ? <><p className="os-mono">{grant.userCode}</p><a href={grant.verificationUri} target="_blank" rel="noopener noreferrer">Enter this code at Microsoft</a></> : null}</div> },
             { id: "resources", name: "Domain and resources", body: <div className="os-app-stack">
         {state?.status === "planned" || state?.status === "provisioning" ? <><p>{plan.domain}</p><p className="os-caption">Create or resume {plan.emailService} and {plan.communicationService} in {plan.resourceGroup}. Data location: {plan.dataLocation}.</p><p className="os-caption">Azure email usage is billed to the selected subscription. This does not send mail or change your subscription.</p></> : <>
           {directories.length > 1 ? <Select id={`${formID}-azure-directory`} label="Microsoft directory" value={directory} onChange={value => { if (inFlight.current)
@@ -289,4 +302,8 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel }
             { id: "dns", name: "Verify domain", body: <div className="os-app-stack"><p className="os-caption">Add these records where {plan.domain} manages DNS. Merge SPF into its existing SPF record; do not create a second one. Keep existing mail and website records.</p><table><thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Status</th></tr></thead><tbody>{records.map(record => <tr key={record.purpose}><td>{record.type}</td><td><code>{record.name}</code></td><td><code>{record.value}</code></td><td>{record.status}</td></tr>)}</tbody></table></div> },
             { id: "sender", name: "Sender", body: <div className="os-app-stack"><Field label="Sender address"><Input disabled={busy} id={`${formID}-azure-sender`} label="Sender address" value={username} onChange={setUsername}/><span className="os-caption">@{plan.domain}</span></Field><Field label="Display name"><Input disabled={busy} id={`${formID}-azure-display-name`} label="Display name" value={displayName} onChange={setDisplayName}/></Field><Field label="Reply mailbox"><Input disabled={busy} id={`${formID}-azure-reply`} label="Reply mailbox" placeholder={`help@${plan.domain}`} value={replyTo} onChange={setReplyTo}/></Field><p className="os-caption">Azure sends email; it does not create an inbox. Replies need a mailbox that already receives mail.</p></div> },
         ].map(step => ({ ...step, state: step.id === phase ? "open" as const : order.indexOf(step.id) < order.indexOf(phase) ? "done" as const : "ahead" as const }))}/>;
+}
+
+export function sendOperationLabel(status: string): string {
+  return ({ submitting: "Checking acceptance", unknown: "Checking acceptance", accepted: "Accepted by Azure", running: "Processing", succeeded: "Processing completed", failed: "Processing failed", canceled: "Processing canceled", rejected: "Request refused", throttled: "Waiting for Azure", unconfirmed: "Unconfirmed" } as Record<string, string>)[status] || "Unconfirmed";
 }

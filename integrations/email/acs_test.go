@@ -25,6 +25,7 @@ func acsFixture(t *testing.T) *ACSSender {
 		t.Fatal(err)
 	}
 	s.now = func() time.Time { return time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC) }
+	s.operations = &memoryACSOperations{}
 	return s
 }
 

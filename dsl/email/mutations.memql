@@ -28,3 +28,21 @@ mutation connectionState storeEmailConnectionState {
     stamp { createdAt: args.versionTime }
   }
 }
+
+/// The transport records its attempt under a shared database lock.
+/// actor.userId cannot attest shared provider state; only internal origin writes.
+@serverOnly
+mutation sendOperation storeEmailSendOperation {
+  args {
+    id string!
+    accountId string!
+    status string!
+    nextPollAt datetime!
+    encryptedValue string!
+    versionTime datetime!
+  }
+  insert {
+    accept { id, accountId, status, nextPollAt, encryptedValue }
+    stamp { createdAt: args.versionTime }
+  }
+}

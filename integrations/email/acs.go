@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 const acsEmailAPIVersion = "2025-09-01"
@@ -38,10 +39,11 @@ type ACSConfig struct {
 // is a separate event. Redirects are refused so credentials never leave the
 // resource endpoint discovered through Azure Resource Manager.
 type ACSSender struct {
-	cfg    ACSConfig
-	key    []byte
-	client *http.Client
-	now    func() time.Time
+	cfg        ACSConfig
+	key        []byte
+	client     *http.Client
+	now        func() time.Time
+	operations acsOperationStore
 }
 
 func NewACSSender(cfg ACSConfig) (*ACSSender, error) {
@@ -143,11 +145,16 @@ func (s *ACSSender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if len(body) > 10<<20 {
 		return permanentSendRefusal("email exceeds the Azure message size limit")
 	}
+	return s.submitOnce(ctx, msg.IntentID, body)
+}
+
+func (s *ACSSender) post(ctx context.Context, operationID string, body []byte) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		s.cfg.Endpoint+"/emails:send?api-version="+acsEmailAPIVersion, bytes.NewReader(body))
 	if err != nil {
 		return permanentSendRefusal("could not construct Azure email request")
 	}
+	req.Header.Set("Operation-Id", operationID)
 	s.sign(req, body)
 	response, err := s.client.Do(req)
 	if err != nil {
@@ -169,6 +176,76 @@ func (s *ACSSender) Send(ctx context.Context, msg Message, as SendAs) error {
 		return permanentSendRefusal("Azure returned an unexpected email response; no redirect was followed")
 	}
 	return classifyHTTPSend(response.StatusCode, response.Header.Get("Retry-After"), "Azure did not accept the message")
+}
+
+func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) error {
+	if s.operations == nil {
+		return permanentSendRefusal("Azure send receipt storage is unavailable")
+	}
+	if intent == "" {
+		intent = "transactional:" + id.NewShortId()
+	}
+	key := emailStateID("acs-send:" + s.cfg.AccountID + ":" + intent)
+	release, err := s.operations.lock(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer release()
+	op, prior, found, err := s.operations.read(ctx, key)
+	if err != nil {
+		return err
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(body))
+	if found {
+		if op.AccountID != s.cfg.AccountID || op.Endpoint != s.cfg.Endpoint || op.Digest != digest {
+			return permanentSendRefusal("this delivery already has an Azure receipt for a different message or connection; it will not be sent again")
+		}
+		if op.Status != "throttled" {
+			return operationSendOutcome(op)
+		}
+		if s.now().Before(op.NextPollAt) {
+			return &SendError{Throttled: true, RetryAfter: op.NextPollAt.Sub(s.now()), Detail: "Azure asked this delivery to wait"}
+		}
+	} else {
+		op = acsOperation{ID: id.NewShortId(), AccountID: s.cfg.AccountID, Endpoint: s.cfg.Endpoint, Digest: digest, Intent: intent}
+	}
+	op.Status, op.Detail, op.SubmittedAt, op.NextPollAt = "submitting", "", s.now().UTC(), s.now().UTC().Add(15*time.Second)
+	prior, err = s.operations.write(ctx, key, op, prior)
+	if err != nil {
+		return err
+	} // No POST before its durable receipt.
+	sendErr := s.post(ctx, op.ID, body)
+	op.CheckedAt = s.now().UTC()
+	if sendErr == nil {
+		op.Status = "accepted"
+	} else if wait, throttled := IsThrottled(sendErr); throttled {
+		if wait < time.Second {
+			wait = time.Minute
+		}
+		op.Status, op.NextPollAt = "throttled", s.now().UTC().Add(wait)
+	} else {
+		op.Status, op.Detail = "unknown", "Azure acceptance could not be confirmed. This message will not be submitted again."
+		if e, ok := sendErr.(*SendError); ok && e.StatusCode >= 400 && e.StatusCode < 500 && e.StatusCode != 408 {
+			op.Status, op.Detail = "rejected", "Azure refused this send request."
+		}
+	}
+	persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err = s.operations.write(persist, key, op, prior); err != nil {
+		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
+	}
+	return sendErr
+}
+
+func operationSendOutcome(op acsOperation) error {
+	switch op.Status {
+	case "accepted", "running", "succeeded":
+		return nil
+	case "failed", "canceled", "rejected":
+		return permanentSendRefusal("Azure did not complete the previous send; this delivery will not be submitted again")
+	default:
+		return permanentSendRefusal("Azure acceptance is being reconciled; this delivery will not be submitted again")
+	}
 }
 
 func (s *ACSSender) sign(req *http.Request, body []byte) {
