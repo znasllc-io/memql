@@ -303,8 +303,8 @@ describe("the VS Code handoff (spec D3)", () => {
   it("opens a single file in browser VS Code by default", () => {
     saveEditorPreference("browser");
     const url = new URL(artifactHandoffUrl("acme.example.com", "abc", "report.pdf"));
-    expect(url.origin).toBe("https://vscode.dev");
-    expect(JSON.parse(url.searchParams.get("payload")!)).toEqual([["openFile", "memql-file://acme.example.com/artifacts/abc/report.pdf"]]);
+    expect(url.origin).toBe("https://vscode.acme.example.com");
+    expect(url.searchParams.get("resource")).toBe("memql-file://acme.example.com/artifacts/abc/report.pdf");
   });
 
   it("fires the URL and reports no-answer only while the page stays visible", () => {

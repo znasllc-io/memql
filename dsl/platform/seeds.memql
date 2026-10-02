@@ -74,6 +74,7 @@ seed site os {
 /// than naming either seed.
 @description("The MemQL extension landing page")
 seed site vscode {
+  extensionRuntimePath: "/editor/"
   id:          "vscode"
   hostname:    "vscode.memql.localhost"
   kind:        "static"

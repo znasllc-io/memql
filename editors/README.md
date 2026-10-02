@@ -98,7 +98,10 @@ editor; they do not own embedded document, PDF, or email-body editors.
 Names, organization selectors, filters, and other record settings remain
 ordinary OS controls.
 
-The requested default is **VS Code in a separate browser tab**. A setting can
+The default is the [MemQL-hosted browser editor](browser/README.md) in a separate
+tab, with both extensions included and checked before opening a MemQL file. Its
+status bar shows **MemQL tools active** and opens the bundled extensions list.
+A setting can
 select installed VS Code or Cursor instead. A ZIP is downloaded intact to the
 user's machine: opening it never extracts it or loads it as an editor folder.
 PDFs belong to Productivity Tools' viewing and editing surface, including

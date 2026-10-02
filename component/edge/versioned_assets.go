@@ -19,12 +19,13 @@ const versionedAssetPath = "/_memql/assets/"
 var publishedBundleRef = regexp.MustCompile(`^blob://sites/[^/]+/v[0-9a-f]{12}/$`)
 
 type filePolicy struct {
-	assetPrefix string
-	immutable   bool
+	assetPrefix     string
+	immutable       bool
+	suppressRefresh bool
 }
 
 func assetPrefixFor(site *Site) string {
-	if site == nil || !publishedBundleRef.MatchString(site.BundleRef) {
+	if site == nil || extensionRuntimePath(site) != "" || !publishedBundleRef.MatchString(site.BundleRef) {
 		return ""
 	}
 	return versionedAssetPath + strings.Trim(strongETag("assets-v1", site.BundleRef), `"`) + "/"

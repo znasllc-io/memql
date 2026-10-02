@@ -20,3 +20,9 @@ deploy/k8s
 clients/os/dist
 editors/vscode/site/dist
 editors/vscode/site/artifacts
+
+# The hosted editor and its bundled extensions are built inside the image.
+editors/browser/dist
+editors/browser/public/extensions
+editors/browser/src/bundled-extensions.json
+editors/browser/public/licenses
