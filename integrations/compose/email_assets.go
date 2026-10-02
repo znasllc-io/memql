@@ -4,9 +4,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	pure "github.com/znasllc-io/memql/component/compose"
+	"golang.org/x/net/html"
 )
 
 // EmbedEmailAssets resolves model-visible asset handles against the captured,
@@ -16,6 +18,9 @@ import (
 func EmbedEmailAssets(source string, references []Resolved) (string, error) {
 	draft, err := pure.ParseEmailTemplate(source)
 	if err != nil {
+		return "", err
+	}
+	if err := validateGeneratedEmailMarkup(draft.HTMLBody); err != nil {
 		return "", err
 	}
 	assets := map[string]SourceContent{}
@@ -61,4 +66,57 @@ func EmbedEmailAssets(source string, references []Resolved) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// Generated drafts use inline styles and img elements. Restrict alternate
+// resource channels too: validating img.src alone would let an unselected
+// image escape through srcset, CSS, SVG or Outlook conditional markup.
+// This applies to generated drafts, not the user's general HTML editor.
+func validateGeneratedEmailMarkup(source string) error {
+	allowed := map[string]bool{}
+	for _, tag := range strings.Fields("html head body title div span p br hr a img table thead tbody tfoot tr td th caption colgroup col h1 h2 h3 h4 h5 h6 strong b em i u s small sup sub blockquote pre code ul ol li center font") {
+		allowed[tag] = true
+	}
+	attributes := map[string]bool{}
+	for _, name := range strings.Fields("style class id title lang dir role aria-label aria-hidden align valign bgcolor width height border cellpadding cellspacing colspan rowspan scope face color size target rel href src alt") {
+		attributes[name] = true
+	}
+	z := html.NewTokenizer(strings.NewReader(source))
+	for {
+		kind := z.Next()
+		if kind == html.ErrorToken {
+			if z.Err() == io.EOF {
+				return nil
+			}
+			return z.Err()
+		}
+		if kind == html.CommentToken && strings.Contains(z.Token().Data, "<") {
+			return fmt.Errorf("generated email cannot contain hidden conditional markup")
+		}
+		if kind != html.StartTagToken && kind != html.SelfClosingTagToken {
+			continue
+		}
+		token := z.Token()
+		if !allowed[token.Data] {
+			return fmt.Errorf("generated email uses unsupported markup; use email tables, inline styles and selected img assets")
+		}
+		for _, attr := range token.Attr {
+			name, value := strings.ToLower(attr.Key), strings.ToLower(strings.TrimSpace(attr.Val))
+			if !attributes[name] || (name == "src" && token.Data != "img") || (name == "href" && token.Data != "a") {
+				return fmt.Errorf("generated email uses an unsupported resource or active attribute")
+			}
+			if name == "style" {
+				// Backslashes and comments can conceal CSS resource functions;
+				// imports and style blocks are not part of inline email styling.
+				for _, forbidden := range []string{"\\", "/*", "@", "url", "image(", "image-set", "expression", "behavior", "-moz-binding"} {
+					if strings.Contains(value, forbidden) {
+						return fmt.Errorf("generated email styles cannot load images; use selected img assets")
+					}
+				}
+			}
+			if name == "href" && value != "" && !strings.HasPrefix(value, "https://") && !strings.HasPrefix(value, "http://") && !strings.HasPrefix(value, "mailto:") && !strings.HasPrefix(value, "{{") {
+				return fmt.Errorf("generated email links must use a web address, email address, or merge field")
+			}
+		}
+	}
 }

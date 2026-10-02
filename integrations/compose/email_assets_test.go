@@ -64,3 +64,30 @@ func TestRecipeKeepsAssetPermissionSeparateFromReferencePermission(t *testing.T)
 		t.Fatal("asset without content permission accepted")
 	}
 }
+
+func TestGeneratedEmailCannotBypassImageSelections(t *testing.T) {
+	for _, body := range []string{
+		`<img srcset="https://private.example/image 2x">`,
+		`<a href="https://client.example" ping="https://unselected.example/track">Click</a>`,
+		`<p style="background:image('https://private.example/image')">Hi</p>`,
+		`<table background="https://private.example/image"><tr><td>Hi</td></tr></table>`,
+		`<p style="background:url(https://private.example/image)">Hi</p>`,
+		`<p style="background:u\72l(https://private.example/image)">Hi</p>`,
+		`<p style="background:u/**/rl(https://private.example/image)">Hi</p>`,
+		`<style>@import "https://private.example/style"</style>`,
+		`<svg><image href="https://private.example/image" /></svg>`,
+		`<!--[if mso]><v:fill src="https://private.example/image" /><![endif]-->`,
+		`<a href="javascript:alert(1)">Click</a>`,
+		`<p onclick="alert(1)">Hi</p>`,
+	} {
+		draft, _ := json.Marshal(pure.EmailTemplate{Subject: "Hello", TextBody: "Hello", HTMLBody: body})
+		if _, err := EmbedEmailAssets(string(draft), nil); err == nil {
+			t.Fatalf("accepted unselected resource or active markup: %s", body)
+		}
+	}
+	body := `<table style="width:100%; background:#fff"><tr><td><p style="color:#123; padding:16px">Hello</p><a href="https://client.example/news">Read more</a></td></tr></table>`
+	draft, _ := json.Marshal(pure.EmailTemplate{Subject: "Hello", TextBody: "Hello", HTMLBody: body})
+	if _, err := EmbedEmailAssets(string(draft), nil); err != nil {
+		t.Fatal(err)
+	}
+}
