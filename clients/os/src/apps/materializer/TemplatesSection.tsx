@@ -1,3 +1,5 @@
+import { AddButton } from "../../kit/AddButton";
+import { InlineSkeleton } from "../../kit/ContentSkeleton";
 import { useTemplateFiles } from "./useCompose";
 import { artifactFromRow } from "../files/rows";
 import { AccountPicker } from "../accounts/AccountPicker";
@@ -71,9 +73,8 @@ export function TemplatesSection({
   return (
     <div className="os-mz-templates">
       <Head title="Templates" meta={templatesAvailable ? visibleTemplates.length : undefined}>
-        <Button tone="primary" onClick={() => setAdding((v) => !v)}>
-          {adding ? "Cancel" : "Bind a file"}
-        </Button>
+        {adding ? <Button tone="quiet" onClick={() => setAdding(false)}>Cancel</Button>
+          : <AddButton label="Bind a file" onClick={() => setAdding(true)} />}
       </Head>
 
       {error ? <Notice tone="error" sentence={error} /> : null}
@@ -234,7 +235,7 @@ function NewTemplateForm({
           {files.map(file => <option key={file.id} value={file.sourceConceptRef}>{file.title || "Untitled file"}</option>)}
         </Select>
         {feed.snapshot.error ? <Notice tone="error" sentence={feed.snapshot.error} /> : null}
-        {feed.snapshot.state === "seeding" ? <Caption>Loading your files…</Caption> : null}
+        {feed.snapshot.state === "seeding" && files.length === 0 ? <InlineSkeleton label="Loading files" /> : null}
       </Field>
       <Field label="What it produces">
         <Select id="mz-tpl-format" value={format} onChange={setFormat} label="What it produces">
@@ -249,13 +250,13 @@ function NewTemplateForm({
         Upload the file in Files first — a template is a binding to a file your Library already
         holds, so it keeps that file's versions and archives with it.
       </Caption>
-      {accounts.some(account => account.id === accountId && !accountIsArchived(account)) && name.trim() && selectedFile ? <Button
+      <div className="os-panel-actions">{accounts.some(account => account.id === accountId && !accountIsArchived(account)) && name.trim() && selectedFile ? <Button
         tone="primary"
         busy={busy}
         onClick={() => onCreate({ name, description, fileId, format, accountId })}
       >
         Bind it
-      </Button> : null}
+      </Button> : null}</div>
     </Panel>
   );
 }

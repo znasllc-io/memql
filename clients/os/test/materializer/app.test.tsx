@@ -654,6 +654,23 @@ describe("organization and reference metadata", () => {
     ]});
   });
 
+  it("keeps template form entries when the cluster refuses the binding", async () => {
+    const conn = fakeConnection({writeError: new Error("File access changed"), files: [
+      {id: "artifact-shell", kind: "file", sourceConceptRef: "brand-file", title: "Brand shell.docx"},
+    ]});
+    mount(conn, "templates");
+    fireEvent.click(screen.getByRole("button", {name: "Bind a file"}));
+    fireEvent.change(screen.getByLabelText("Name"), {target: {value: "Brand shell"}});
+    fireEvent.click(screen.getByLabelText("Library file"));
+    fireEvent.click(await screen.findByRole("option", {name: "Brand shell.docx"}));
+    fireEvent.click(screen.getByLabelText("Organization"));
+    fireEvent.click(await screen.findByRole("option", {name: "Client A"}));
+    fireEvent.click(screen.getByRole("button", {name: "Bind it"}));
+    await screen.findByText("File access changed");
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Brand shell");
+    expect(screen.getByLabelText("Library file").textContent).toContain("Brand shell.docx");
+  });
+
   it("selects a named file and stores the organization when binding a template", async () => {
     const conn = fakeConnection({files: [
       {id: "artifact-shell", kind: "file", sourceConceptRef: "brand-file", title: "Brand shell.docx"},
