@@ -62,9 +62,8 @@ import { useCampaignDeliveries, useCampaignStats, type CampaignFeeds } from "./u
 // The campaigns list and one campaign in full.
 //
 // The list is LIVE (`v1:campaigns:campaign` broadcasts both verbs). The
-// detail's two heavy readings -- the delivery ledger and the server-computed
-// stats -- are NOT, deliberately, and they say when they were read. See
-// useCampaigns.ts for the volume argument.
+// detail refreshes delivery records and server-computed statistics
+// automatically without broadcasting recipient-volume events.
 
 export function CampaignsSection({
   feeds,
@@ -311,7 +310,7 @@ function CampaignDetail({
     <div className="os-campaign-detail">
       <Panel label={`${campaignName(campaign)} progress`}>
         <div className="os-campaign-detail-head">
-          <Subhead>{campaignName(campaign)}</Subhead>
+          <Subhead>Campaign results</Subhead>
           <AccountChip name={accountNameFrom(accounts, campaign.accountId)} />
         </div>
 
@@ -319,6 +318,7 @@ function CampaignDetail({
             counters, which arrive live, so it fills under somebody watching a
             send without this panel re-reading anything. */}
         <SendBar campaign={campaign} stats={stats.value} />
+        <Caption>Results for this campaign’s audience. Test sends have their own results below.</Caption>
 
         {/* A SEND'S REFUSAL IS THE SERVER'S SENTENCE, verbatim and in place.
             "no email sender is registered on this node" names the thing to go
@@ -361,14 +361,14 @@ function CampaignDetail({
         </Facts>
       </Panel>
 
+      <TestSendPanel key={campaign.id} campaign={campaign} audiences={audiences} />
+
       <SendControls campaign={campaign} writes={writes}
         template={templates.find(template => template.id === campaign.templateId)}
         templateFeed={templateFeed} />
       <RecurrencePanel campaignId={campaign.id} />
 
-      <TestSendPanel key={campaign.id} campaign={campaign} audiences={audiences} />
-
-      <StatsPanel campaign={campaign} stats={stats} />
+      <StatsPanel stats={stats} />
 
       <DeliveriesPanel campaignId={campaign.id} />
 
@@ -642,31 +642,13 @@ function SendControls({ campaign, writes, template, templateFeed }: {
 // The full breakdown
 // ---------------------------------------------------------------------------
 
-/**
- * Everything the server counted, under the bar that summarises it.
- *
- * ON DEMAND AND IT SAYS SO. `campaignStats` reads the delivery ledger and the
- * consent stream, neither of which broadcasts, so this panel prints when it
- * looked and offers to look again. During a live send the BAR above moves and
- * this does not, which is exactly the honest split: the counters are on the
- * campaign row and arrive live, and the breakdown is a computation over rows
- * nothing announces.
- */
-function StatsPanel({
-  campaign,
-  stats,
-}: {
-  campaign: CampaignRow;
-  stats: ReturnType<typeof useCampaignStats>;
-}) {
+/** Server-computed totals refresh automatically, including late engagement. */
+function StatsPanel({ stats }: { stats: ReturnType<typeof useCampaignStats> }) {
   const value = stats.value;
   return (
     <Panel label="Full breakdown">
       <div className="os-campaign-detail-head">
         <Subhead>Breakdown</Subhead>
-        <Button busy={stats.state === "loading"} onClick={stats.reload}>
-          {campaignIsRunning(campaign) ? "Read again" : "Re-read"}
-        </Button>
       </div>
 
       {stats.state === "error" ? (
@@ -704,12 +686,7 @@ function StatsPanel({
         </>
       )}
 
-      {stats.readAt === "" ? null : (
-        <Caption>
-          Read at {new Date(stats.readAt).toLocaleTimeString()}. This is not live -- read again to
-          see what has happened since.
-        </Caption>
-      )}
+      <Caption>Updates automatically</Caption>
     </Panel>
   );
 }
@@ -731,9 +708,6 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
     <Panel label="Who got it">
       <div className="os-campaign-detail-head">
         <Subhead meta={ledger.state === "ready" && !ledger.error ? `${rows.length} read` : undefined}>Who got it</Subhead>
-        <Button busy={ledger.state === "loading"} onClick={ledger.reload}>
-          Read again
-        </Button>
       </div>
 
       {ledger.state === "error" ? (
@@ -759,13 +733,7 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
         </RecordList>
       )}
 
-      {ledger.readAt === "" ? null : (
-        <Caption>
-          Read at {new Date(ledger.readAt).toLocaleTimeString()}. Delivery records are not broadcast
-          -- there is one per recipient per send, so they are read when you ask rather than
-          streamed.
-        </Caption>
-      )}
+      <Caption>Latest 100 · Updates automatically</Caption>
     </Panel>
   );
 }

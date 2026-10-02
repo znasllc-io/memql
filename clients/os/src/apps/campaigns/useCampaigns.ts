@@ -17,48 +17,10 @@ import {
   type CampaignStats,
 } from "./rows";
 
-// The Campaigns app's reads: five live feeds and four on-demand ones.
-//
-// ===========================================================================
-// WHAT IS LIVE, WHAT IS NOT, AND WHY THE LINE IS WHERE IT IS
-// ===========================================================================
-// The README's rule is to read `component/node/routing.go` before deciding
-// what a feed does, and this domain is the first where the answer is a
-// deliberate SPLIT rather than a fact about the tree.
-//
-// LIVE -- `campaign`, `audience`, `template`, `senderIdentity`, `emailRule`
-// carry broadcast rules. They are low-volume operator rows: one per thing a
-// person authored. A campaign moving from `scheduled` to `sending` while
-// somebody watches is the app's headline, and a rule the circuit breaker just
-// tripped is the news an operator most needs unasked.
-//
-// NOT LIVE -- three concepts are RECORDED EXCLUSIONS rather than omissions
-// (`RoutingExclusions()` in the same file carries each one's reason), and the
-// ground is volume in every case:
-//
-//   delivery         one row per recipient per send.
-//   engagementEvent  one row per open and per click -- delivery's volume and
-//                    then some, because mail clients prefetch the pixel.
-//   recipient        the surprising one. Hand-editing an audience is
-//                    human-paced and would be affordable; a CSV IMPORT is the
-//                    same concept and is not, because a 20k-address file is a
-//                    20k-event burst proportional to a FILE rather than to
-//                    anything a person did.
-//
-// That is the same ground `v1:worker:invocation` is excluded on.
-//
-// The campaign row is the interesting near-miss and the reason the fingerprint
-// rule matters here: `updateCampaignProgress` fires once per drain tick per
-// RUNNING job -- single-digit events per minute, not one per message -- so the
-// row is affordable to broadcast AND moves constantly while a send runs. It
-// must re-render live without ringing, which is exactly what
-// `campaignFingerprint` is for.
-//
-// So every surface over those three is an ON-DEMAND read that prints WHEN it
-// was read and offers to look again. A `LiveList` over them would render
-// "Loading from the cluster" and then a list that silently never moved --
-// worse than a plain one, because the caption would be claiming wiring that is
-// not there.
+// Operator records use graph subscriptions. High-volume delivery, engagement
+// and recipient rows stay out of mesh broadcasts; visible views re-read their
+// bounded queries automatically. Requests never overlap and pause in hidden tabs.
+export const CAMPAIGN_REFRESH_MS = 5_000;
 
 // ---------------------------------------------------------------------------
 // The five live feeds
@@ -200,7 +162,7 @@ export interface Reading<T> {
   value: T;
   state: "idle" | "loading" | "ready" | "error";
   error: string;
-  /** When this browser last looked. Printed, because these do not move. */
+  /** Last successful read. Errors retain this timestamp and the last answer. */
   readAt: string;
   reload: () => void;
 }
@@ -209,53 +171,63 @@ function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/**
- * The one on-demand reader every non-live surface here uses.
- *
- * ONE IMPLEMENTATION rather than four copies of the same effect, because the
- * part that is easy to get wrong is identical every time: abort on unmount,
- * ignore a resolved promise whose request was cancelled, and stamp `readAt`
- * on BOTH outcomes. A read that failed is still a read that happened, and a
- * surface that only timestamps success tells somebody their refusal is
- * current when it is an hour old.
- */
+/** Reads immediately, optionally refreshing while visible. Keep the last good
+ * answer during background reads, abort stale requests, and retry failures. */
 export function useReading<T>(
   empty: T,
   read: ((signal: AbortSignal) => Promise<T>) | null,
   deps: readonly unknown[],
+  refreshEveryMs = 0,
 ): Reading<T> {
-  const [value, setValue] = useState<T>(empty);
-  const [state, setState] = useState<Reading<T>["state"]>("idle");
-  const [error, setError] = useState("");
-  const [readAt, setReadAt] = useState("");
+  const [snapshot, setSnapshot] = useState({ reader: read, value: empty,
+    state: "idle" as Reading<T>["state"], error: "", readAt: "" });
   const [nonce, setNonce] = useState(0);
-  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const reload = useCallback(() => setNonce(n => n + 1), []);
 
   useEffect(() => {
     if (read === null) return;
-    const controller = new AbortController();
-    setState("loading");
-    setError("");
-    void (async () => {
+    let disposed = false;
+    let inFlight = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+    setSnapshot(previous => previous.reader === read && previous.readAt ? previous :
+      { reader: read, value: empty, state: "loading", error: "", readAt: "" });
+    const visible = () => document.visibilityState !== "hidden";
+    const run = async () => {
+      if (disposed || inFlight || (refreshEveryMs > 0 && !visible())) return;
+      clearTimeout(timer);
+      inFlight = true;
+      controller = new AbortController();
       try {
-        const next = await read(controller.signal);
-        if (controller.signal.aborted) return;
-        setValue(next);
-        setState("ready");
-        setReadAt(new Date().toISOString());
-      } catch (err: unknown) {
-        if (controller.signal.aborted) return;
-        setValue(empty);
-        setError(describe(err));
-        setState("error");
-        setReadAt(new Date().toISOString());
+        const value = await read(controller.signal);
+        if (!disposed) setSnapshot({ reader: read, value, state: "ready", error: "", readAt: new Date().toISOString() });
+      } catch (err) {
+        if (!disposed) setSnapshot(previous => ({ ...previous, state: "error", error: describe(err) }));
+      } finally {
+        inFlight = false;
+        if (!disposed && refreshEveryMs > 0 && visible()) timer = setTimeout(() => void run(), refreshEveryMs);
       }
-    })();
-    return () => controller.abort();
+    };
+    const wake = () => { clearTimeout(timer); if (visible()) void run(); };
+    if (refreshEveryMs > 0) {
+      document.addEventListener("visibilitychange", wake);
+      window.addEventListener("focus", wake);
+      window.addEventListener("online", wake);
+    }
+    void run();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      controller?.abort();
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("focus", wake);
+      window.removeEventListener("online", wake);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, nonce]);
+  }, [...deps, nonce, refreshEveryMs]);
 
-  return { value, state, error, readAt, reload };
+  if (read === null || snapshot.reader !== read) return { value: empty, state: read ? "loading" : "idle", error: "", readAt: "", reload };
+  return { ...snapshot, reload };
 }
 
 const NO_ROWS: Row[] = [];
@@ -263,9 +235,8 @@ const NO_ROWS: Row[] = [];
 /**
  * The per-recipient ledger for one campaign.
  *
- * ON DEMAND, because `v1:campaigns:delivery` carries no broadcast rule and
- * should not: one row per recipient per send. The panel says when it looked
- * and offers to look again, which is the Files version-history shape.
+ * Automatically re-read while visible. `v1:campaigns:delivery` stays out of
+ * broadcasts because it produces one row per recipient per send.
  */
 export function useCampaignDeliveries(campaignId: string): Reading<Row[]> {
   const connection = useOsConnection();
@@ -277,7 +248,7 @@ export function useCampaignDeliveries(campaignId: string): Reading<Row[]> {
       return result.rows();
     };
   }, [query, campaignId]);
-  return useReading<Row[]>(NO_ROWS, read, [query, campaignId]);
+  return useReading<Row[]>(NO_ROWS, read, [query, campaignId], CAMPAIGN_REFRESH_MS);
 }
 
 /**
@@ -299,7 +270,7 @@ export function useAudienceRecipients(audienceId: string): Reading<Row[]> {
       return result.rows();
     };
   }, [query, audienceId]);
-  return useReading<Row[]>(NO_ROWS, read, [query, audienceId]);
+  return useReading<Row[]>(NO_ROWS, read, [query, audienceId], CAMPAIGN_REFRESH_MS);
 }
 
 /**
@@ -310,10 +281,9 @@ export function useAudienceRecipients(audienceId: string): Reading<Row[]> {
  * every campaign past the page bound and did so silently. Every bucket that
  * can be an exact COUNT is one here, at any audience size.
  *
- * It is on demand for the same reason the ledger is -- it reads the ledger --
- * and it re-reads when the caller asks. During a live send the BAR is fed by
- * the campaign row's own counters, which do arrive live; the stats are the
- * finer breakdown underneath it.
+ * It refreshes automatically while visible, including after a send finishes
+ * because opens, clicks and unsubscribes can arrive later. The main bar also
+ * receives the campaign row's progress through its existing subscription.
  */
 export function useCampaignStats(campaignId: string): Reading<CampaignStats | null> {
   const connection = useOsConnection();
@@ -327,7 +297,7 @@ export function useCampaignStats(campaignId: string): Reading<CampaignStats | nu
       return first ? statsFromPayload(first) : null;
     };
   }, [query, campaignId]);
-  return useReading<CampaignStats | null>(null, read, [query, campaignId]);
+  return useReading<CampaignStats | null>(null, read, [query, campaignId], CAMPAIGN_REFRESH_MS);
 }
 
 /** Organization-specific setup, read on demand and checked again by every send.
@@ -447,11 +417,11 @@ export function useAuthoredAutomations(): Reading<AuthoredAutomationsState> {
 }
 
 
-/** Signup receipts are shopper-volume data; read recent outcomes on demand. */
+/** Signup receipts are shopper-volume data; refresh the bounded visible view. */
 export function useNewsletterWelcomes(audienceId: string): Reading<Row[]> {
   const connection = useOsConnection();
   const query = connection?.query ?? null;
   const read = useMemo(() => query === null ? null : async (signal: AbortSignal) =>
     (await query.newsletterWelcomesForAudience({ audienceId }, { signal })).rows(), [query, audienceId]);
-  return useReading<Row[]>(NO_ROWS, read, [query, audienceId]);
+  return useReading<Row[]>(NO_ROWS, read, [query, audienceId], CAMPAIGN_REFRESH_MS);
 }

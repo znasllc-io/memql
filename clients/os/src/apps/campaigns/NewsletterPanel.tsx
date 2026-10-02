@@ -90,12 +90,12 @@ export function NewsletterPanel({ audienceId, accountId, resources }: { audience
       {copyError ? <Notice tone="error" sentence={copyError} /> : null}
     </div> : null}
     {rows.length && !editing && !formFor ? <>
-      <div className="os-campaign-detail-head"><Subhead>Recent welcomes</Subhead><Button disabled={welcomes.state === "loading"} onClick={welcomes.reload}>Refresh</Button></div>
+      <Subhead>Recent welcomes</Subhead>
       {welcomes.state === "loading" && !welcomes.value.length ? <RecordListSkeleton rows={2} label="Recent welcome messages" /> : null}
       {welcomes.error ? <Notice tone="error" sentence="Welcome outcomes could not be read." detail={welcomes.error} /> : null}
       <RecordList>{welcomes.value.map(flatten).map(row => <RecordRow key={text(row,"id")} name={text(row,"displayName") || text(row,"email") || "Subscriber"} secondary={text(row,"lastError") || formatMoment(text(row,"requestedAt"))} state={text(row,"status")} actions={row.status === "blocked" ? <Button busy={retry.busy} onClick={() => void retry.call({ signupId: text(row,"id"), expectedRevision: text(row,"createdAt") }).then(ok => { if (ok) welcomes.reload(); })}>Check again</Button> : undefined} />)}</RecordList>
       {welcomes.state === "ready" && !welcomes.value.length ? <Caption>No welcomes yet.</Caption> : null}
-      <Caption>Latest 50 · Read {formatMoment(welcomes.readAt)}</Caption>
+      <Caption>Latest 50 · Updates automatically</Caption>
       {retry.error ? <Notice tone="error" sentence="The welcome was not requeued." detail={retry.error} /> : null}
     </> : null}
   </Panel>;

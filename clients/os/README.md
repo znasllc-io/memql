@@ -1458,22 +1458,16 @@ rather than repetitions of the seven before it.
   `data-arrival` null AND puts the new figure on screen; a rename rings. A
   test of one half passes against a cue that fires on everything.
 
-- **THE LIVE/ON-DEMAND SPLIT IS A VOLUME ARGUMENT, AND IT IS RECORDED RATHER
-  THAN INFERRED.** `campaign`, `audience`, `template`, `senderIdentity` and
-  `emailRule` carry broadcast rules: one row per thing a person authored.
-  `delivery`, `engagementEvent` and `recipient` are EXCLUSIONS with their
-  reasons written down in `RoutingExclusions()` -- one delivery row per
-  recipient per send, one engagement row per open (mail clients prefetch the
-  pixel), and, the surprising one, an audience roster, because hand-editing
-  is human-paced but a 20,000-address CSV import is a 20,000-event burst
-  proportional to a FILE rather than to anything a person did.
-
-  So the ledger, the stats and the roster are on-demand reads that print when
-  they were read and offer to look again, and they SAY WHAT THAT COSTS: an
-  address added in another window does not appear, and an unsubscribe does not
-  flip a row. A `LiveList` over any of them would render "Loading from the
-  cluster" and then a list that silently never moved -- worse than a plain one,
-  because the caption would be claiming wiring that is not there.
+- **AUTOMATIC UPDATES WITHOUT RECIPIENT-VOLUME BROADCASTS.** Operator records
+  use existing graph subscriptions. Delivery, engagement and recipient events
+  remain mesh routing exclusions because CSV imports and sends can produce tens
+  of thousands of rows. Visible statistics, ledgers, audience rosters, welcome
+  outcomes and test history re-read every five seconds after the preceding read
+  settles. Reads never overlap, pause in hidden browser tabs, resume on focus or
+  reconnect, abort on navigation, and retry errors. Loaded data remains during
+  background reads; failed reads show their error. Routine refresh buttons are
+  absent. Campaign results and the latest test show separate progress bars, so a
+  test unsubscribe cannot be mistaken for a change to the original send.
 
 - **AN ABSENT FIGURE IS AN EM DASH WITH A REASON, NEVER A ZERO.**
   `campaignStats` reports a unique open or click count as UNMEASURED when the
@@ -1590,7 +1584,7 @@ organization-owned testing audience. `campaignTestAudienceSend` makes an immutab
 run and invokes the same admission and worker as a live send; a stable request id
 recovers an uncertain result across replicas. Active and completed sources remain
 testable. Repeating sources use the saved series definition without advancing it.
-Recent tests and their delivery records are read on demand and show their read time;
+Recent tests and their delivery records update automatically while visible;
 they do not inflate the live campaign’s counters or the regular campaign feed.
 
 **Senders live here rather than in Settings -> Integrations**, even though the
