@@ -563,3 +563,12 @@ query emailRule emailRuleById {
   filter  row => row.id == args.emailRuleId
   shape   emailRuleFull
 }
+
+/// Internal replay check; actor.userId alone cannot make this a sending API.
+@actor
+@serverOnly
+query singleSendReceipt campaignSingleSendById {
+  args { receiptId string! }
+  filter row => row.id == args.receiptId && row.ownerUserId == actor.userId
+  shape campaignSingleSendFull
+}

@@ -151,6 +151,30 @@ See Microsoft's [device authorization flow](https://learn.microsoft.com/en-us/en
 [email domain setup](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/add-custom-verified-domains),
 and [email sending API](https://learn.microsoft.com/en-us/rest/api/communication/email/email/send?view=rest-communication-email-2025-09-01).
 
+## Retrying event emails
+
+Email rules supply a stable identifier automatically for each event and recipient.
+Their firing reports count suppressed and replayed sends as skipped, and show
+uncertain outcomes as refusals.
+
+Other automations that call `campaignSendToRecipient` should supply a stable
+`requestId` for each intended message, such as one signup event's welcome.
+Keep that identifier unchanged when retrying the same event. The recipient,
+template, rule and sender must also remain unchanged; reusing the identifier
+with different inputs is refused. The template must be published before sending.
+
+The cluster records an attempt before contacting the provider. A retry on any
+replica returns the saved result without submitting another message. If the
+provider response was lost, or the process stopped after the attempt began,
+the retry returns `uncertain: true` and does not resend. Inspect the provider
+and delivery records before deciding whether another message is warranted.
+This prevents duplicate submissions; it does not guarantee mailbox delivery.
+Requests that omit `requestId` retain the existing per-invocation behavior.
+
+Suppression and preflight refusals make no external send attempt and remain
+retryable. Receipt reads still require current send authority in the recorded
+organization. The internal receipt cannot be forged through client mutations.
+
 ## Local test inbox
 
 The local k3d overlay selects the capture email transport automatically. Open

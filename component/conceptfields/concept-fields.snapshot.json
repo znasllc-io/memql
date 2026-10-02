@@ -1031,6 +1031,30 @@
       }
     },
     {
+      "concept": "v1:campaigns:singleSendReceipt",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "fingerprint",
+        "ownerUserId",
+        "result",
+        "status"
+      ],
+      "required": [
+        "accountId",
+        "fingerprint",
+        "ownerUserId",
+        "result",
+        "status"
+      ],
+      "enums": {
+        "status": [
+          "attempting",
+          "complete"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:suppression",
       "file": "campaigns/concepts.memql",
       "fields": [

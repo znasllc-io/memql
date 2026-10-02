@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/component/compose"
 )
 
 const acsEmailAPIVersion = "2025-09-01"
@@ -113,12 +115,23 @@ func (s *ACSSender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if len(replyTo) == 0 && s.cfg.ReplyTo != "" {
 		replyTo = []map[string]string{{"address": s.cfg.ReplyTo}}
 	}
+	htmlBody, images, err := compose.ExtractEmailImages(msg.HTMLBody)
+	if err != nil {
+		return permanentSendRefusal(err.Error())
+	}
 	payload := map[string]any{
 		"senderAddress":                  address,
 		"recipients":                     map[string]any{"to": []map[string]string{{"address": to.Address, "displayName": to.Name}}},
-		"content":                        map[string]string{"subject": msg.Subject, "plainText": msg.TextBody, "html": msg.HTMLBody},
+		"content":                        map[string]string{"subject": msg.Subject, "plainText": msg.TextBody, "html": htmlBody},
 		"headers":                        headers,
 		"userEngagementTrackingDisabled": true, // MemQL owns campaign tracking
+	}
+	if len(images) > 0 {
+		attachments := make([]map[string]string, 0, len(images))
+		for _, image := range images {
+			attachments = append(attachments, map[string]string{"name": image.ContentID + "." + strings.TrimPrefix(image.MIMEType, "image/"), "contentType": image.MIMEType, "contentInBase64": base64.StdEncoding.EncodeToString(image.Data), "contentId": image.ContentID})
+		}
+		payload["attachments"] = attachments
 	}
 	if len(replyTo) != 0 {
 		payload["replyTo"] = replyTo

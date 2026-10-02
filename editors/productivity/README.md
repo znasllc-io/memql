@@ -66,8 +66,17 @@ References are bounded to 64 files, eight images, 16 MiB expanded content, and
 256 KiB of text per composition; each image must be at most 24 million pixels.
 ZIP processing rejects unsafe paths, symlinks, nested archives, and unsupported
 files. PDF and Word reference extraction are not offered by this flow yet.
-Images are design references; private assets are not automatically published to
-public email URLs. A missing approved image URL remains an editable placeholder.
+Images are references by default. **Images to include** separately selects logos,
+photos, or the images within a ZIP for the actual email. Included images must be
+PNG, JPEG, or GIF, with up to eight images totaling 1 MiB. Large layout examples
+can stay reference-only. The backend checks this limit before invoking a model.
+The editable draft carries selected image bytes; SMTP/Graph sends encode them as
+inline MIME attachments; ACS uses its CID attachment field. Live Azure setup and
+recipient-client rendering verification remain separate checks. No public image hosting or private Library URL is required. The local Email app can display these
+embedded assets while continuing to block remote tracking images. Each template
+file remains limited to 2 MiB, including its image content. Generated drafts use
+inline CSS and selected `img` assets; external CSS, alternate image sources and
+conditional markup are refused instead of bypassing the inclusion choices.
 
 Email **Source**, **Preview**, and **Split** use the same document, including
 unsaved changes. Preview preserves presentation HTML, blocks active content and

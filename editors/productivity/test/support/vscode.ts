@@ -23,3 +23,5 @@ export const workspace = { fs: {
   async writeFile(uri: Uri, bytes: Uint8Array) { writes.push(uri.toString()); stored.set(uri.toString(), new Uint8Array(bytes)); },
   async delete(uri: Uri) { stored.delete(uri.toString()); },
 } };
+
+export const ProgressLocation = { Notification: 15 };

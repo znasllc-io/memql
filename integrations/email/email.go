@@ -17,6 +17,8 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/core/env"
+
+	"github.com/znasllc-io/memql/component/compose"
 )
 
 // ComponentName identifies the package in logs + env lookups.
@@ -165,6 +167,9 @@ func headerUnsafe(v string) bool {
 
 // Validate reports missing or obviously malformed fields.
 func (m Message) Validate() error {
+	if _, _, err := compose.ExtractEmailImages(m.HTMLBody); err != nil {
+		return err
+	}
 	if strings.TrimSpace(m.To) == "" {
 		return errors.New("email: To is required")
 	}

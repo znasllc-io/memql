@@ -772,6 +772,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	if conceptMeta.Name == "v1:email:connectionState" && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("email connection state requires internal origin from the authorized connection capability")
 	}
+	if conceptMeta.Name == "v1:campaigns:singleSendReceipt" && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("single-send receipts require internal origin from the sending capability")
+	}
 
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {

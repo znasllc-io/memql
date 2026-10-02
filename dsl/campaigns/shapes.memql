@@ -271,3 +271,13 @@ shape emailRule emailRuleFull {
   firedCount
   row.createdAt
 }
+
+@row
+shape singleSendReceipt campaignSingleSendFull {
+  row.id
+  accountId
+  fingerprint
+  status
+  result
+  row.createdAt
+}

@@ -51,7 +51,7 @@ import (
 // answer campaignById gives. The audience was never a check; it was a search
 // key, and there is nothing left on this path that needs the audience itself.
 
-func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, receipt *singleSendReceipt) ([]memorynodes.MemoryNode, error) {
 	templateID := memql.BareShortId(strings.TrimSpace(argString(args, "templateId")))
 	recipientID := memql.BareShortId(strings.TrimSpace(argString(args, "recipientId")))
 	senderIdentityID := memql.BareShortId(strings.TrimSpace(argString(args, "senderIdentityId")))
@@ -79,6 +79,9 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 	}
 	if !found {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: template %q is not readable", templateID)
+	}
+	if tmpl.Status != "ready" {
+		return nil, errors.New("campaigns.sendToRecipient: publish the reviewed template before sending")
 	}
 
 	recipient, found, err := w.store.RecipientByID(ctx, recipientID)
@@ -191,6 +194,14 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 
 	if !w.allowSend() {
 		return nil, errors.New("campaigns.sendToRecipient: the send-rate limit is exhausted; try again shortly")
+	}
+	// Record the attempt before contacting the transport. After this point a
+	// timeout or a node loss is uncertain, and replay must never send it again.
+	if receipt != nil {
+		receipt.accountID = campaign.AccountID
+		if err := w.saveSingleSendReceipt(ctx, receipt, "attempting", nil); err != nil {
+			return nil, err
+		}
 	}
 	now := w.nowUTC()
 	sendCtx, cancel := context.WithTimeout(ctx, w.cfg.SendTimeout)

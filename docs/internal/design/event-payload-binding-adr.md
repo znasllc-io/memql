@@ -145,7 +145,7 @@ sites. Explicit `args.X` remains valid everywhere as the disambiguating form.
   reference skeleton's documented-but-phantom `event.actor.id` real and lets
   emitters stop hand-stamping `triggeredBy` into payloads (the deploy payload
   migrates in [#2366](https://github.com/znasllc-io/memql/issues/2366)).
-- **`event.timestamp`** (RFC3339, the event's occurrence time, distinct from
+- **`event.timestamp`** (RFC3339 with fractional seconds preserved, the event's occurrence time, distinct from
   the reserved `now` captured at eval start) is added alongside it.
 - `OriginNodeId` and `Partition` stay dropped (partition retires with #56
   phase 8; origin routing is not an authoring concern).
