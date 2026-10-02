@@ -132,6 +132,8 @@ var piiProjectionExemptions = map[string]string{}
 // contact details, credentials, preferences or role does not qualify however
 // narrow its filter.
 var piiProjectionAccepted = map[string]string{
+	"campaigns/queries.memql newsletterSignupById":          "signup organization membership plus Campaigns app permission enforced by the engine; the raw/named private write guard prevents forged attribution. TestNewsletterEnrollmentAndWelcomeAcrossReplicas checks outsider reads.",
+	"campaigns/queries.memql newsletterWelcomesForAudience": "same enforced organization boundary as newsletterSignupById, applied before the recent-outcome limit; TestOrganizationPiiBoundariesRemainEnforced pins it.",
 	"accounts/queries.memql clientAccountsAll":              "engine-enforced organization boundary; only current account members or global cluster operators see account contact fields. TestOrganizationPiiBoundariesRemainEnforced pins the policy and declaration.",
 	"accounts/queries.memql clientAccountById":              "same engine-enforced organization boundary as the account picker.",
 	"campaigns/queries.memql audienceRosterForSend":         "recipient organization membership plus app permission enforced before pagination and again on each row; worker borrowed authority resolves current user role and grants.",
@@ -416,7 +418,7 @@ func TestOrganizationPiiBoundariesRemainEnforced(t *testing.T) {
 	if _, err := memqlengine.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"v1:accounts:account", "v1:campaigns:recipient", "v1:campaigns:delivery"} {
+	for _, name := range []string{"v1:accounts:account", "v1:campaigns:recipient", "v1:campaigns:delivery", "v1:campaigns:newsletterSignup"} {
 		c := memorynodes.All()[name]
 		if c == nil || c.RowAuthz == nil || !memqlengine.HasOrganizationBoundary(name) {
 			t.Fatalf("PII acceptance lost enforced boundary for %s", name)

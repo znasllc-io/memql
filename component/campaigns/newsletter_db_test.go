@@ -333,6 +333,14 @@ func TestNewsletterEnrollmentAndWelcomeAcrossReplicas(t *testing.T) {
 	if err == nil && hidden != nil {
 		t.Fatal("another organization read newsletter config")
 	}
+	hidden, err = workers[1].newsletterRow(actor(outsider, auth.RoleWriter), "newsletterSignupById", "signupId", bare(str(signup, "id")))
+	if err == nil && hidden != nil {
+		t.Fatal("another organization read the subscriber mailbox")
+	}
+	hidden, err = workers[1].newsletterRow(actor(outsider, auth.RoleWriter), "newsletterWelcomesForAudience", "audienceId", audience)
+	if err == nil && hidden != nil {
+		t.Fatal("another organization read recent welcome outcomes")
+	}
 	for _, concept := range []string{"newsletterBinding", "newsletterSignup"} {
 		_, err = engines[1].Execute(owner, fmt.Sprintf(`insert("v1:campaigns:%s", id="forged-newsletter", payload={})`, concept))
 		if err == nil || !strings.Contains(err.Error(), "newsletter writes require") {
