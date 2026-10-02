@@ -101,7 +101,7 @@ func TestBuiltinClient_StaticConfigShadowsIt(t *testing.T) {
 	}
 	// And the floor goes with it: CheckClientRoleFloor keys on the registry,
 	// which the operator has taken responsibility for shadowing.
-	if r := CheckClientRoleFloor(BuiltinClientVSCode, auth.RoleReader); r == nil {
+	if r := CheckClientRoleFloor(BuiltinClientVSCode, auth.Role("")); r == nil {
 		t.Fatalf("sanity: the registry entry still declares a floor")
 	}
 }
@@ -177,7 +177,7 @@ func TestBuiltinRegistry_ShapeSupportsASecondEntry(t *testing.T) {
 		t.Fatalf("an entry with no MinRole must impose no floor, got %+v", r)
 	}
 	// ...and the editor's own floor is unaffected by the neighbour.
-	if r := CheckClientRoleFloor(BuiltinClientVSCode, auth.RoleReader); r == nil {
+	if r := CheckClientRoleFloor(BuiltinClientVSCode, auth.Role("")); r == nil {
 		t.Fatalf("the editor floor must survive a second registry entry")
 	}
 }
@@ -186,22 +186,22 @@ func TestBuiltinRegistry_ShapeSupportsASecondEntry(t *testing.T) {
 // The role floor (memql#4516)
 // -----------------------------------------------------------------------------
 
-func TestEditorRoleFloor_AdmitsDeveloperAndAbove(t *testing.T) {
-	for _, role := range []auth.Role{auth.RoleOwner, auth.RoleAdmin, auth.RoleDeveloper} {
+func TestEditorRoleFloor_AdmitsProductivityRoles(t *testing.T) {
+	for _, role := range auth.ValidRoles() {
 		if r := CheckClientRoleFloor(BuiltinClientVSCode, role); r != nil {
-			t.Errorf("role %q was refused (%v); owner, admin and developer must be admitted", role, r)
+			t.Errorf("role %q was refused (%v); registered productivity roles must be admitted", role, r)
 		}
 	}
 }
 
-func TestEditorRoleFloor_RefusesBelowDeveloper(t *testing.T) {
-	for _, role := range []auth.Role{auth.RoleWriter, auth.RoleReader, auth.Role(""), auth.Role("nonsense")} {
+func TestEditorRoleFloor_RefusesMissingAndUnknownRoles(t *testing.T) {
+	for _, role := range []auth.Role{auth.Role(""), auth.Role("nonsense")} {
 		r := CheckClientRoleFloor(BuiltinClientVSCode, role)
 		if r == nil {
-			t.Fatalf("role %q was admitted; the editor floor is developer and above", role)
+			t.Fatalf("role %q was admitted; the editor requires a registered role", role)
 		}
-		if r.Required != auth.RoleDeveloper {
-			t.Errorf("Required = %q, want developer", r.Required)
+		if r.Required != auth.RoleReader {
+			t.Errorf("Required = %q, want reader", r.Required)
 		}
 		if r.Actual != role {
 			t.Errorf("Actual = %q, want %q", r.Actual, role)
@@ -215,12 +215,12 @@ func TestEditorRoleFloor_RefusesBelowDeveloper(t *testing.T) {
 func TestRoleFloorRefusal_CopyNamesTheRoleAndTheRequirement(t *testing.T) {
 	// The extension shows this string verbatim in a notification, so it has to
 	// stand on its own: what happened, why, and what to do next.
-	r := CheckClientRoleFloor(BuiltinClientVSCode, auth.RoleReader)
+	r := CheckClientRoleFloor(BuiltinClientVSCode, auth.Role("unknown"))
 	if r == nil {
 		t.Fatal("expected a refusal")
 	}
 	got := r.Description()
-	for _, want := range []string{"MemQL for Visual Studio Code and Cursor", "reader", "developer"} {
+	for _, want := range []string{"MemQL for Visual Studio Code and Cursor", "unknown", "reader"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Description() = %q, missing %q", got, want)
 		}
@@ -241,8 +241,8 @@ func TestRoleFloorRefusal_CopyNamesTheRoleAndTheRequirement(t *testing.T) {
 
 	detail := r.AuditDetail()
 	if detail["clientId"] != BuiltinClientVSCode ||
-		detail["requiredRole"] != string(auth.RoleDeveloper) ||
-		detail["actualRole"] != string(auth.RoleReader) {
+		detail["requiredRole"] != string(auth.RoleReader) ||
+		detail["actualRole"] != "unknown" {
 		t.Errorf("AuditDetail() = %+v", detail)
 	}
 }

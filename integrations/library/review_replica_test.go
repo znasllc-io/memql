@@ -105,6 +105,15 @@ func TestReviewCommentsAcrossReplicasAndDocumentRevisions(t *testing.T) {
 	if len(rows) != 1 || rows[0]["outdated"] != false || rows[0]["authorUserId"] != owner {
 		t.Fatalf("saved review: %#v", rows)
 	}
+	// The editor's reader sign-in can consume authorized review content, but
+	// it must not turn a read-only participant into an author. The write
+	// refusals below exercise the same backend used by Productivity Tools.
+	if _, err = second.handleDocumentReview(actor(owner, auth.RoleReader), map[string]any{"artifactId": artifactID}, 0); err != nil {
+		t.Fatalf("reader could not view an authorized document review: %v", err)
+	}
+	if _, err = second.handleEditDocument(actor(owner, auth.RoleReader), map[string]any{"documentId": documentID, "content": "unauthorized replacement", "expectedVersion": 0, "expectedRevision": base.revision}, 0); err == nil {
+		t.Fatal("reader saved a document after connecting")
+	}
 	// The source moved. Its old comments remain readable and explicitly old.
 	if _, err = second.handleEditDocument(ctx, map[string]any{"documentId": documentID, "content": "# Heading\n\nChanged.", "expectedVersion": 0, "expectedRevision": base.revision}, 0); err != nil {
 		t.Fatal(err)

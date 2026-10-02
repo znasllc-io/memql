@@ -391,9 +391,11 @@ own, and `.localhost` resolves to loopback for whichever machine asks -- so the
 credential links the wizard hands you open a tab that cannot connect. Install
 locally, then register the cluster from wherever you like.
 
-**Sign-in needs the developer role or above on the cluster.** The editor is a
-management surface, so writer and reader are refused -- with a message naming
-your role, in both flows. Ask a cluster owner or admin to raise it.
+**Readers and writers can sign in for Productivity Tools.** The core extension
+provides the shared connection without changing your role. Viewing documents,
+saving files, adding feedback, authoring DSL, and managing deployments each
+retain their own backend permissions and document access checks. A missing or
+unrecognized cluster role is refused with an explanation.
 
 Operator-facing detail:
 [Connecting an Editor](https://github.com/znasllc-io/memql/blob/main/docs/public/operate/auth/connecting-editors.md).

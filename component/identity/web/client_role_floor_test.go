@@ -17,16 +17,16 @@ import (
 
 // client_role_floor_test.go -- memql#4516.
 //
-// The editor is a management surface, so the built-in editor client declares a
-// role floor: owner, admin and developer complete sign-in; writer and reader
-// are refused. The rule lives in ONE function
+// The editor also connects Productivity Tools. All registered roles can sign
+// in; missing or unknown roles are refused. Each backend operation continues
+// to enforce its own authority. The admission rule lives in ONE function
 // (identity.CheckClientRoleFloor); these tests pin the two places a signed-in
 // person is known at the moment a credential would be minted -- the device
 // approval, and the /authorize SSO fast path -- plus the fact that a client
 // which declares no floor is untouched.
 //
 // The magic-link and passkey halves of the code flow are pinned beside their
-// own code (magiclink/role_floor_test.go, http/webauthn_role_floor_test.go).
+// own code (magiclink/role_floor_test.go, http/passkey_role_floor_test.go).
 
 // find returns the first recorded event with the given action, or nil. The type
 // itself lives in enroll_test.go -- one capture sink for the package.
@@ -102,8 +102,8 @@ func approveRoleFloorDevice(s *Server, token string) *httptest.ResponseRecorder 
 	})
 }
 
-func TestDeviceApproval_AdmitsDeveloperAndAbove(t *testing.T) {
-	for _, role := range []string{"owner", "admin", "developer"} {
+func TestDeviceApproval_AdmitsProductivityRoles(t *testing.T) {
+	for _, role := range []string{"owner", "admin", "developer", "writer", "reader"} {
 		t.Run(role, func(t *testing.T) {
 			s, adapter, _, token := newRoleFloorDeviceServer(t, identity.BuiltinClientVSCode, role)
 			rec := approveRoleFloorDevice(s, token)
@@ -123,8 +123,8 @@ func TestDeviceApproval_AdmitsDeveloperAndAbove(t *testing.T) {
 	}
 }
 
-func TestDeviceApproval_RefusesBelowDeveloper(t *testing.T) {
-	for _, role := range []string{"writer", "reader"} {
+func TestDeviceApproval_RefusesUnknownRole(t *testing.T) {
+	for _, role := range []string{"unknown"} {
 		t.Run(role, func(t *testing.T) {
 			s, adapter, audit, token := newRoleFloorDeviceServer(t, identity.BuiltinClientVSCode, role)
 			rec := approveRoleFloorDevice(s, token)
@@ -136,7 +136,7 @@ func TestDeviceApproval_RefusesBelowDeveloper(t *testing.T) {
 			approved, denied := adapter.approvedId, adapter.deniedId
 			adapter.mu.Unlock()
 			if approved != "" {
-				t.Fatalf("role %q was APPROVED; the editor floor is developer and above", role)
+				t.Fatalf("role %q was APPROVED; the editor requires a registered role", role)
 			}
 			// The grant is denied rather than left pending: the device is
 			// polling, and a decision it never hears about reads to the user
@@ -147,7 +147,7 @@ func TestDeviceApproval_RefusesBelowDeveloper(t *testing.T) {
 
 			// The page names the role and the requirement.
 			body := rec.Body.String()
-			for _, want := range []string{role, "developer"} {
+			for _, want := range []string{role, "reader"} {
 				if !strings.Contains(body, want) {
 					t.Errorf("refusal page does not mention %q; body=%s", want, body)
 				}
@@ -166,7 +166,7 @@ func TestDeviceApproval_RefusesBelowDeveloper(t *testing.T) {
 			if ev.Detail["clientId"] != identity.BuiltinClientVSCode {
 				t.Errorf("audit detail clientId = %v, want %q", ev.Detail["clientId"], identity.BuiltinClientVSCode)
 			}
-			if ev.Detail["requiredRole"] != "developer" || ev.Detail["actualRole"] != role {
+			if ev.Detail["requiredRole"] != "reader" || ev.Detail["actualRole"] != role {
 				t.Errorf("audit detail = %+v", ev.Detail)
 			}
 		})
@@ -215,8 +215,8 @@ func TestDeviceDenial_IsNeverBlockedByTheFloor(t *testing.T) {
 // The /authorize SSO fast path
 // -----------------------------------------------------------------------------
 
-func TestSSOFastPath_RefusesBelowDeveloperWithAnOAuthErrorRedirect(t *testing.T) {
-	s, token, audit := newSSOFloorServer(t, "reader")
+func TestSSOFastPath_RefusesUnknownRoleWithAnOAuthErrorRedirect(t *testing.T) {
+	s, token, audit := newSSOFloorServer(t, "unknown")
 
 	rec := ssoAuthorizeRequest(s, token)
 	if rec.Code != http.StatusFound {
@@ -233,7 +233,7 @@ func TestSSOFastPath_RefusesBelowDeveloperWithAnOAuthErrorRedirect(t *testing.T)
 		t.Fatalf("error = %q, want access_denied", got)
 	}
 	desc := loc.Query().Get("error_description")
-	for _, want := range []string{"reader", "developer"} {
+	for _, want := range []string{"unknown", "reader"} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("error_description = %q, missing %q -- the editor prints this verbatim", desc, want)
 		}
@@ -246,8 +246,8 @@ func TestSSOFastPath_RefusesBelowDeveloperWithAnOAuthErrorRedirect(t *testing.T)
 	}
 }
 
-func TestSSOFastPath_AdmitsDeveloperAndAbove(t *testing.T) {
-	for _, role := range []string{"owner", "admin", "developer"} {
+func TestSSOFastPath_AdmitsProductivityRoles(t *testing.T) {
+	for _, role := range []string{"owner", "admin", "developer", "writer", "reader"} {
 		t.Run(role, func(t *testing.T) {
 			s, token, _ := newSSOFloorServer(t, role)
 			rec := ssoAuthorizeRequest(s, token)
@@ -357,8 +357,8 @@ func (f *floorVerifier) Finish(_ context.Context, _ magiclink.FinishInput) (*mag
 		Refusal: identity.RoleFloorRefusal{
 			ClientId:   identity.BuiltinClientVSCode,
 			ClientName: "MemQL for VS Code",
-			Required:   "developer",
-			Actual:     "reader",
+			Required:   "reader",
+			Actual:     "unknown",
 		},
 		RedirectURI: f.redirectURI,
 		State:       "st-1",
@@ -392,7 +392,7 @@ func TestMagicLinkHandler_RefusalLeavesAsAnOAuthErrorRedirect(t *testing.T) {
 		t.Errorf("error = %q, want access_denied", loc.Query().Get("error"))
 	}
 	desc := loc.Query().Get("error_description")
-	for _, want := range []string{"reader", "developer"} {
+	for _, want := range []string{"unknown", "reader"} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("error_description = %q, missing %q", desc, want)
 		}
@@ -425,7 +425,7 @@ func TestMagicLinkHandler_RefusalWithNoRedirectRendersAPage(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (the rendered page); body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"reader", "developer"} {
+	for _, want := range []string{"unknown", "reader"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("page does not mention %q; body=%s", want, body)
 		}

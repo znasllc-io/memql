@@ -22,7 +22,7 @@ import (
 //   - a role below the floor is refused BEFORE any auth code exists, and the
 //     refusal carries the redirect URI + state the handler needs to send an
 //     OAuth error envelope back to the editor;
-//   - developer, admin and owner are admitted and DO get a code;
+//   - registered productivity roles are admitted and DO get a code;
 //   - a client that declares no floor is untouched;
 //   - the refusal writes one audit row naming the client, the requirement and
 //     the role.
@@ -141,13 +141,13 @@ func finishOnce(v *Verifier) (*VerifyResult, error) {
 }
 
 func TestMagicLinkFinish_RefusesBelowTheEditorFloor(t *testing.T) {
-	for _, role := range []string{"writer", "reader", ""} {
+	for _, role := range []string{"unknown", ""} {
 		t.Run("role="+role, func(t *testing.T) {
 			v, eng, audit := newFloorVerifier(role)
 
 			res, err := finishOnce(v)
 			if err == nil {
-				t.Fatalf("role %q completed sign-in; the editor floor is developer and above (res=%+v)", role, res)
+				t.Fatalf("role %q completed sign-in; the editor requires a registered role (res=%+v)", role, res)
 			}
 			var floor *RoleFloorError
 			if !errors.As(err, &floor) {
@@ -162,7 +162,7 @@ func TestMagicLinkFinish_RefusesBelowTheEditorFloor(t *testing.T) {
 			if floor.State != "st-42" {
 				t.Errorf("State = %q, want st-42", floor.State)
 			}
-			for _, want := range []string{"developer"} {
+			for _, want := range []string{"reader"} {
 				if !strings.Contains(floor.Error(), want) {
 					t.Errorf("message %q is missing %q", floor.Error(), want)
 				}
@@ -188,7 +188,7 @@ func TestMagicLinkFinish_RefusesBelowTheEditorFloor(t *testing.T) {
 				t.Errorf("Outcome = %q", ev.Outcome)
 			}
 			if ev.Detail["clientId"] != identity.BuiltinClientVSCode ||
-				ev.Detail["requiredRole"] != "developer" ||
+				ev.Detail["requiredRole"] != "reader" ||
 				ev.Detail["actualRole"] != role {
 				t.Errorf("Detail = %+v", ev.Detail)
 			}
@@ -196,8 +196,8 @@ func TestMagicLinkFinish_RefusesBelowTheEditorFloor(t *testing.T) {
 	}
 }
 
-func TestMagicLinkFinish_AdmitsDeveloperAndAbove(t *testing.T) {
-	for _, role := range []string{"owner", "admin", "developer"} {
+func TestMagicLinkFinish_AdmitsProductivityRoles(t *testing.T) {
+	for _, role := range []string{"owner", "admin", "developer", "writer", "reader"} {
 		t.Run(role, func(t *testing.T) {
 			v, eng, audit := newFloorVerifier(role)
 
