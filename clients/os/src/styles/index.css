@@ -5597,6 +5597,13 @@ a.os-button {
   color: var(--os-muted);
 }
 
+.os-record-purpose:has(.os-record-status) {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
 /* ==================================================================== * The MemQL address stop -- an account's reserved name and the three hosts
  * this cluster serves beneath it (epic memql#5168).
  *

@@ -1,4 +1,5 @@
 import { CampaignsSettingsSection } from "../src/apps/campaigns/CampaignsSettingsSection";
+import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
 import { DEFAULT_CAMPAIGNS_SETTINGS } from "../src/apps/campaigns/settings";
 import { fakeConnection as campaignConnection, rowsResult, withSession as campaignSession } from "../test/campaigns/harness";
 import { NewsletterPanel } from "../src/apps/campaigns/NewsletterPanel";
@@ -330,10 +331,10 @@ function settingsStore() {
  * the wrong height, and a wizard judged outside a bounded body has no floor --
  * its action bar is only at the bottom of something that has a bottom.
  */
-function WindowBody({ fallback, children }: { fallback: string; children: ReactNode }) {
+function WindowBody({ fallback, children, width }: { fallback: string; children: ReactNode; width?: number }) {
   const content = useRef<HTMLDivElement>(null);
   return (
-    <div className="os-window" style={{ position: "fixed", inset: 0, display: "flex", flexDirection: "column" }}>
+    <div className="os-window" style={{ position: "fixed", inset: 0, maxWidth: width, display: "flex", flexDirection: "column" }}>
       <div className="os-window-body">
         <PageNavigationProvider root={content} trail={[]}>
           <TrailRow fallback={fallback} />
@@ -559,6 +560,9 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  "azure-email-dns": azureEmailView("dns"),
+  "azure-email-provisioning": azureEmailView("provisioning"),
+  "azure-email-empty": azureEmailView("unconfigured"),
   "campaigns-settings": campaignSettingsView(false),
   "campaigns-settings-connected": campaignSettingsView(true),
   "campaign-newsletter-empty": { connect: () => newsletterQaConnection(false), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
@@ -939,6 +943,30 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
       <MachineDetail machine={machine} writes={writes} now={FLEET_NOW} view="details" />
     </div>
   );
+}
+
+function azureEmailView(status: string) {
+  return {
+    connect: () => {
+      const conn = campaignConnection({ accounts: [accountRow({ id: "studio", name: "Our Studio" })] });
+      const plan = { domain: "studio.example", subscriptionId: "subscription", resourceGroup: "mail", dataLocation: "United States", emailService: "studio-email", communicationService: "studio-delivery" };
+      const records = [
+        { purpose: "Domain", type: "TXT", name: "studio.example", value: "ms-domain-verification=00000000-1111-2222-3333-444444444444", status: "Verified" },
+        { purpose: "SPF", type: "TXT", name: "studio.example", value: "v=spf1 include:spf.protection.outlook.com -all", status: "VerificationInProgress" },
+        { purpose: "DKIM", type: "CNAME", name: "selector1-azurecomm-prod-net._domainkey", value: "selector1-azurecomm-prod-net._domainkey.azurecomm.net", status: "NotStarted" },
+        { purpose: "DKIM2", type: "CNAME", name: "selector2-azurecomm-prod-net._domainkey", value: "selector2-azurecomm-prod-net._domainkey.azurecomm.net", status: "NotStarted" },
+      ];
+      Object.assign(conn.query, { emailAzureSetup: async ({ action }: { action: string }) => rowsResult([
+        action === "clusterStatus" ? { status: "connected", capture: true, resourceGroup: "mail" } :
+        action === "prepare" ? { status: "planned", plan, planId: "qa" } :
+        status === "unconfigured" ? { status } :
+        { status, plan, planId: "qa", ...(status === "dns" ? { records } : {}) },
+      ]) });
+      return conn;
+    },
+    wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
+    render: () => <WindowBody fallback="Campaigns" width={new URLSearchParams(window.location.search).get("width") === "narrow" ? 390 : undefined}><AzureEmailConnections manageCluster={false}/></WindowBody>,
+  };
 }
 
 function campaignSettingsView(connected: boolean) {

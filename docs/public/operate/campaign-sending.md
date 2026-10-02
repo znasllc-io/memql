@@ -145,9 +145,16 @@ use its saved sending identities.
    bind services to this cluster configuration and organization; unrelated
    resources are refused. Names are reserved across replicas before creation
    and remain assigned after disconnecting. A changed plan must be reviewed
-   again before resources are created.
+   again before resources are created. After confirmation, the open wizard
+   continues the setup automatically and advances to domain verification when
+   Azure is ready. **Preparing email** shows the elapsed wait. Leaving preserves
+   the approved plan; reopening resumes it. An Azure error or an extended wait
+   pauses automatic checks and offers **Continue setup** for the same resources.
 3. **Verify domain.** Add the exact TXT/CNAME records Microsoft supplies at the
-   domain's DNS provider, then choose **Check domain records**. Merge an SPF
+   domain's DNS provider, then choose **Check domain records**. Each record uses
+   the same Type, Name, and Value layout as Deployables domain binding; click a
+   name or value to copy it, and read its verification state below. Completed
+   wizard steps remain available to review. Merge an SPF
    include into an existing SPF record rather than creating a second one.
    Preserve existing MX and website records. Domain, SPF, and both DKIM checks
    must succeed. The plan is saved, so you can return after DNS propagates
