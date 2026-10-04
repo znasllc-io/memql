@@ -633,6 +633,16 @@ whole repair -- [Upgrading an app registered before pipelines](github-connect.md
 -- and the next run reports its check. A run that can write no check run at
 all, with no app or no token, records `checkRunState: unavailable`.
 
+**A final report that did not land is written again.** A run that concluded
+while GitHub would not take its last check-run write -- GitHub down, the token
+unobtainable -- records `checkRunState: unavailable`, and its check run still
+shows it unfinished, which holds a merge on a required check. The every-minute
+recovery on an agent replica republishes the final report of each such run
+concluded in the last 24 hours, trying less often while it keeps failing, and
+records `written` once it lands. The republished report carries the stage table
+and each failed step's message and code, but not the log excerpt, which only
+the agent that drove the run held.
+
 ## Readiness
 
 Pipelines is an optional item in the cluster's

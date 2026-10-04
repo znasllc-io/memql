@@ -3,6 +3,7 @@ package pipelinerun
 import (
 	"context"
 	"io/fs"
+	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
@@ -75,6 +76,10 @@ type Store interface {
 	RunByCheckRun(ctx context.Context, repository string, checkRunID int64) (*Run, error)
 	// RunsUnfinished answers oldest first: recovery's read (Task 10b).
 	RunsUnfinished(ctx context.Context) ([]Run, error)
+	// RunsFinalCheckRunUnavailable is every run concluded at or after since
+	// whose final check run did not land (checkRunState unavailable), newest
+	// first: what recovery republishes.
+	RunsFinalCheckRunUnavailable(ctx context.Context, since time.Time) ([]Run, error)
 	RunByID(ctx context.Context, runID string) (*Run, error)
 	// PipelinesActive answers at most one active pipeline, whoever owns it:
 	// the readiness report asks only whether ANY repository is connected.

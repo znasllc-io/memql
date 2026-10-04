@@ -1510,7 +1510,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// epic memql#5477, pipelines. Two arguments, and neither is "caller
 		// scoping was inconvenient".
 		//
-		// THE NINE READS have NO PERSON BEHIND THEIR CALLER. A delivery is
+		// THE TEN READS have NO PERSON BEHIND THEIR CALLER. A delivery is
 		// GitHub's, the poll and recovery are a schedule's, the driver is an
 		// agent replica acting for a run, and the readiness report is the
 		// cluster asking about itself -- so actor.userId names nobody, and
@@ -1519,10 +1519,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// the dedup read must find the other path's run for the same head
 		// whoever owns it (Review Focus 1: one run, one check run),
 		// recovery must find the run a lost replica stranded, which is the one
-		// its owner cannot rescue, and "is any repository connected" is a
-		// fact about the cluster, not about whichever owner asked. A
-		// self-scoped filter answers zero rows and no error, which reads
-		// exactly like a cluster with nothing connected.
+		// its owner cannot rescue, and the concluded run whose final check run
+		// did not land, which its owner cannot see is stuck; and "is any
+		// repository connected" is a fact about the cluster, not about
+		// whichever owner asked. A self-scoped filter answers zero rows and
+		// no error, which reads exactly like a cluster with nothing
+		// connected.
 		// Each spells the cluster-owner arm out (`actor.isClusterOwner ==
 		// true`) and component/pipelinerun reads under its own synthetic
 		// cluster owner; the person-facing reads of the same rows are the
@@ -1536,19 +1538,20 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Caller-scoping admits exactly those calls. The only writer is
 		// component/pipelinerun, after it has minted a token through the
 		// grant and read the manifest, under the owner's borrowed authority.
-		{Path: "pipelines/queries.memql", Name: "pipelinesForRepository"}:     true,
-		{Path: "pipelines/queries.memql", Name: "pipelinesPolled"}:            true,
-		{Path: "pipelines/queries.memql", Name: "pipelineById"}:               true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunsForKey"}:         true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineSha"}: true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunByCheckRun"}:      true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunsUnfinished"}:     true,
-		{Path: "pipelines/queries.memql", Name: "pipelineRunById"}:            true,
-		{Path: "pipelines/queries.memql", Name: "pipelinesActive"}:            true,
-		{Path: "pipelines/mutations.memql", Name: "createPipeline"}:           true,
-		{Path: "pipelines/mutations.memql", Name: "updatePipeline"}:           true,
-		{Path: "pipelines/mutations.memql", Name: "createPipelineRun"}:        true,
-		{Path: "pipelines/mutations.memql", Name: "updatePipelineRun"}:        true,
+		{Path: "pipelines/queries.memql", Name: "pipelinesForRepository"}:               true,
+		{Path: "pipelines/queries.memql", Name: "pipelinesPolled"}:                      true,
+		{Path: "pipelines/queries.memql", Name: "pipelineById"}:                         true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsForKey"}:                   true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineSha"}:           true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunByCheckRun"}:                true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsUnfinished"}:               true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsFinalCheckRunUnavailable"}: true,
+		{Path: "pipelines/queries.memql", Name: "pipelineRunById"}:                      true,
+		{Path: "pipelines/queries.memql", Name: "pipelinesActive"}:                      true,
+		{Path: "pipelines/mutations.memql", Name: "createPipeline"}:                     true,
+		{Path: "pipelines/mutations.memql", Name: "updatePipeline"}:                     true,
+		{Path: "pipelines/mutations.memql", Name: "createPipelineRun"}:                  true,
+		{Path: "pipelines/mutations.memql", Name: "updatePipelineRun"}:                  true,
 	}
 	for k := range want {
 		if !set[k] {

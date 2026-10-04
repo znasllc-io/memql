@@ -324,6 +324,21 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 		t.Errorf("a completed run is not unfinished: %v", err)
 	}
 
+	// ---- recovery's other read: a concluded run whose final check run did
+	// not land, found while it is inside the window and not before ----
+	if lost, err := store.RunsFinalCheckRunUnavailable(ctx, finished.Add(-time.Minute)); err != nil || hasRun(lost, run.ID) {
+		t.Errorf("a run whose check run is refused is not one recovery republishes: %v", err)
+	}
+	if err := store.UpdateRun(ctx, r.OwnerUserID, run.ID, RunPatch{CheckRunState: ptr(CheckRunUnavailable)}); err != nil {
+		t.Fatalf("checkRunState unavailable: %v", err)
+	}
+	if lost, err := store.RunsFinalCheckRunUnavailable(ctx, finished.Add(-time.Minute)); err != nil || !hasRun(lost, run.ID) {
+		t.Errorf("pipelineRunsFinalCheckRunUnavailable finds the run concluded inside the window: %d rows, %v", len(lost), err)
+	}
+	if lost, err := store.RunsFinalCheckRunUnavailable(ctx, finished.Add(time.Minute)); err != nil || hasRun(lost, run.ID) {
+		t.Errorf("and not a run concluded before it: %v", err)
+	}
+
 	// ---- a reconnect of a source no longer tied to an organization unties
 	// its pipeline: createPipeline is a read-merge insert, and the account is
 	// written as it is now, empty included ----

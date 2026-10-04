@@ -42,6 +42,10 @@ const (
 	qPipelineRunByID            = "pipelineRunById"            // (runId)
 	qPipelinesActive            = "pipelinesActive"            // ()
 
+	// Recovery's other read, likewise server-only: concluded runs whose
+	// final check run did not land, which it republishes.
+	qPipelineRunsCheckRunLost = "pipelineRunsFinalCheckRunUnavailable" // (finishedSince)
+
 	// The work spine's read of one run's steps (dsl/work), server-only and
 	// cluster-owner-conjoined like the reads above: a resumed driver reads the
 	// steps its predecessor's journal wrote.
@@ -247,6 +251,10 @@ func (s *dslStore) RunByCheckRun(ctx context.Context, repository string, checkRu
 
 func (s *dslStore) RunsUnfinished(ctx context.Context) ([]Run, error) {
 	return allRuns(s.systemRead(ctx, qPipelineRunsUnfinished, nil))
+}
+
+func (s *dslStore) RunsFinalCheckRunUnavailable(ctx context.Context, since time.Time) ([]Run, error) {
+	return allRuns(s.systemRead(ctx, qPipelineRunsCheckRunLost, map[string]any{"finishedSince": formatTime(since)}))
 }
 
 func (s *dslStore) RunByID(ctx context.Context, runID string) (*Run, error) {

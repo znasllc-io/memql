@@ -313,6 +313,22 @@ func (s *memStore) RunsUnfinished(context.Context) ([]Run, error) {
 	return out, nil
 }
 
+// RunsFinalCheckRunUnavailable is pipelineRunsFinalCheckRunUnavailable:
+// completed, the final report not landed, finished at or after since; newest
+// first.
+func (s *memStore) RunsFinalCheckRunUnavailable(_ context.Context, since time.Time) ([]Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Run
+	for _, r := range s.runs {
+		if r.Status == StatusCompleted && r.CheckRunState == CheckRunUnavailable && !r.FinishedAt.Before(since) {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].FinishedAt.After(out[j].FinishedAt) })
+	return out, nil
+}
+
 func (s *memStore) RunByID(_ context.Context, runID string) (*Run, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

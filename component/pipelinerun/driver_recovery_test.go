@@ -122,3 +122,103 @@ func TestRecoveryOnANodeThatCannotDriveSaysWhy(t *testing.T) {
 		t.Errorf("the poll reports it: %+v %v", res, err)
 	}
 }
+
+// A run that concluded while GitHub would not take its final report keeps a
+// check run that still shows it unfinished -- a required check holding a merge
+// -- and its row says `unavailable`. Recovery republishes it: the run's final
+// report, rebuilt from its row and its work run's step rows, written with no
+// gate held, and `written` recorded once it lands. A failure that persists is
+// left alone for a while, longer each time, and a run concluded more than a
+// day ago is past republishing.
+func TestRecoveryRepublishesAFinalCheckRunThatDidNotLand(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	var clock atomic.Int64 // seconds past testNow
+	flaky := &flakyFinal{GitHub: dh.github}
+	flaky.fails.Store(99)
+	dh.integ.Configure(func(d *Deps) {
+		d.GitHub = flaky
+		d.Now = func() time.Time { return testNow.Add(time.Duration(clock.Load()) * time.Second) }
+	})
+	run := dh.openRun(t, prOpening())
+	deliver(t, dh.integ, run)
+	stuck, _ := dh.store.run(run.ID)
+	if stuck.Status != StatusCompleted || stuck.CheckRunState != CheckRunUnavailable {
+		t.Fatalf("the final report did not land and the row says so: %s %q", stuck.Status, stuck.CheckRunState)
+	}
+
+	// Older than the window: concluded 25 hours ago, never republished.
+	old := queuedRun(dh.p, shaC)
+	old.ID, old.Status, old.Conclusion = "run-old", StatusCompleted, ConclusionSuccess
+	old.CheckRunState, old.CheckRunID, old.FinishedAt = CheckRunUnavailable, 777, testNow.Add(-25*time.Hour)
+	dh.store.addRun(old)
+
+	completedWrites := func() []checkWrite {
+		var out []checkWrite
+		for _, w := range dh.github.updatedRuns() {
+			if w.Run.Status == StatusCompleted {
+				out = append(out, w)
+			}
+		}
+		return out
+	}
+
+	// Still failing: nothing lands, the row still says unavailable, and the
+	// next pass inside the backoff asks GitHub nothing.
+	tries := flaky.fails.Load()
+	if err := dh.integ.RecoverRuns(context.Background()); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if flaky.fails.Load() != tries-1 {
+		t.Fatalf("recovery tried the final write once: %d tries", tries-flaky.fails.Load())
+	}
+	if got, _ := dh.store.run(run.ID); got.CheckRunState != CheckRunUnavailable {
+		t.Errorf("a republish that did not land changes nothing: %q", got.CheckRunState)
+	}
+	left := flaky.fails.Load()
+	if err := dh.integ.RecoverRuns(context.Background()); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if flaky.fails.Load() != left {
+		t.Errorf("a failing republish is left alone for a while before it is tried again")
+	}
+
+	// GitHub takes it again: past the backoff, the report lands.
+	flaky.fails.Store(0)
+	clock.Add(61)
+	before := len(dh.gate.seen())
+	if err := dh.integ.RecoverRuns(context.Background()); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	writes := completedWrites()
+	if len(writes) != 1 || writes[0].ID != stuck.CheckRunID {
+		t.Fatalf("the run's own check run is completed once: %+v", writes)
+	}
+	cr := writes[0].Run
+	if cr.Conclusion != "success" || cr.Output == nil || !strings.Contains(cr.Output.Summary, "| checks |") ||
+		!strings.Contains(cr.Output.Summary, "| tests |") || !strings.Contains(cr.Output.Title, "Passed") {
+		t.Errorf("the republished report is the run's final one, its stage table rebuilt from the work rows: %+v", cr.Output)
+	}
+	if got, _ := dh.store.run(run.ID); got.CheckRunState != CheckRunWritten {
+		t.Errorf("a republish that landed is recorded written: %q", got.CheckRunState)
+	}
+	sawRunGate := false
+	for _, k := range dh.gate.seen()[before:] {
+		sawRunGate = sawRunGate || k == RunGateKey(run.ID)
+	}
+	if !sawRunGate {
+		t.Errorf("the answer is recorded under the run's gate: %v", dh.gate.seen()[before:])
+	}
+	for _, w := range dh.github.updatedRuns() {
+		if w.ID == old.CheckRunID {
+			t.Errorf("a run concluded more than a day ago is past republishing")
+		}
+	}
+
+	// Recorded written, it is not republished again.
+	if err := dh.integ.RecoverRuns(context.Background()); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+	if n := len(completedWrites()); n != 1 {
+		t.Errorf("a written check run is republished no more: %d completed writes", n)
+	}
+}

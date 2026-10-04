@@ -112,6 +112,7 @@ func everyStoreCall(s Store, value string) []struct {
 		{"RunsForPipelineSHA", func() error { _, err := s.RunsForPipelineSHA(ctx, value, value); return err }},
 		{"RunByCheckRun", func() error { _, err := s.RunByCheckRun(ctx, value, 30431907812); return err }},
 		{"RunsUnfinished", func() error { _, err := s.RunsUnfinished(ctx); return err }},
+		{"RunsFinalCheckRunUnavailable", func() error { _, err := s.RunsFinalCheckRunUnavailable(ctx, now); return err }},
 		{"RunByID", func() error { _, err := s.RunByID(ctx, value); return err }},
 		{"CreatePipeline", func() error { return s.CreatePipeline(ctx, p) }},
 		{"UpdatePipeline (every field)", func() error {
@@ -222,7 +223,7 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 	for _, want := range []string{
 		qPipelinesForOwner, qPipelineForOwner, qPipelineForPackage, qPipelineRunsForOwner, qPipelineRunForOwner,
 		qPipelinesForRepository, qPipelinesPolled, qPipelineByID, qPipelineRunsForKey, qPipelineRunsForPipelineSha,
-		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
+		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunsCheckRunLost, qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
 		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID, qInboundRequestByID,
 	} {
 		if !seen[want] {

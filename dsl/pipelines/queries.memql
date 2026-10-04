@@ -25,7 +25,7 @@
 // and component/pipelinerun reads under its own synthetic cluster-owner actor
 // (auth.ContextWithSystemActor), which is precisely what the conjunct tests.
 
-use common.traits.{ statusIsActive }
+use common.traits.{ isCompleted, statusIsActive }
 
 // ---- person-facing, owner-scoped ----
 
@@ -207,6 +207,29 @@ query run pipelineRunsUnfinished {
   filter    row => row.status in ["queued", "in_progress"] && actor.isClusterOwner == true
   sort      "queuedAt", "asc"
   paginate  500
+  shape     pipelineRunFull
+}
+
+/// Every run concluded since a moment whose FINAL check run did not land -- recovery's other read: a
+/// run concluded while GitHub would not take its report keeps a check run that still shows it
+/// unfinished, which holds a merge on a required check, and recovery republishes it. @serverOnly:
+/// recovery runs on a schedule across every owner, and the run whose report did not land is exactly
+/// the one its owner cannot see is stuck, so an actor.userId conjunct would hide the population the
+/// read exists for. Bounded at 100, newest first: the runs a pull request is waiting on now come
+/// first, and the runner reports a page that comes back full.
+@serverOnly
+@actor
+query run pipelineRunsFinalCheckRunUnavailable {
+  args {
+    /// RFC3339: a run concluded before it is past republishing.
+    finishedSince  string!
+  }
+  filter    row => isCompleted(row)
+                && row.checkRunState == "unavailable"
+                && row.finishedAt >= args.finishedSince
+                && actor.isClusterOwner == true
+  sort      "finishedAt", "desc"
+  paginate  100
   shape     pipelineRunFull
 }
 
