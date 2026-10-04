@@ -7,12 +7,13 @@ import type { SiteRow } from "../rows";
 import { siteStateWord } from "../words";
 import { DeployMap } from "./DeployMap";
 import type { MapNode } from "./layout";
+import type { PipelineRow, RunRow } from "../pipelines/rows";
 
 export interface MapSelection { nodeId: string; siteIds: string[] }
 export const NO_SELECTION: MapSelection = { nodeId: "", siteIds: [] };
 
 /** Overview reads the same measured rows as the list; it never repeats the list. */
-export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, onOpenDeployable, onBrowse }: {
+export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, onOpenDeployable, onBrowse, pipelines = [], runs = [], onOpenSource }: {
   sites: readonly SiteRow[];
   snapshot: LiveSnapshot<SiteRow>;
   ticks: Map<string, ArrivalTick>;
@@ -20,7 +21,14 @@ export function MapSection({ sites, snapshot, ticks, selection, onSelectNode, on
   onSelectNode: (node: MapNode) => void;
   onOpenDeployable: (siteId: string) => void;
   onBrowse?: () => void;
+  /** The caller's pipelines and runs (epic memql#5479): a source with checks draws a Checks node. */
+  pipelines?: readonly PipelineRow[];
+  runs?: readonly RunRow[];
+  /** Open a source's page: what selecting its Checks node does. */
+  onOpenSource?: (packageId: string) => void;
 }) {
+  // PLACEHOLDER (Task 8 draws the Checks node from these).
+  void [pipelines, runs, onOpenSource];
   const current = sites.filter(site => site.status !== "archived");
   const fresh = snapshot.state === "live" && !snapshot.error;
   const count = (value: number) => fresh ? figureOf(value) : absent(snapshot.error ? "failed" : "unread");

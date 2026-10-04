@@ -20,6 +20,7 @@ import { siteName, type SiteRow } from "../rows";
 import type { CredentialRow } from "../sources/rows";
 import { deploymentStateWord, siteStateWord, stateChip } from "../words";
 import { AutoDeploySwitch, CredentialChip, PackageLifecycle } from "./stops/Source";
+import type { PipelineRow, RunRow } from "../pipelines/rows";
 
 // SourceView -- a source is a THING, with its own page (epic memql#4937, D4).
 //
@@ -70,6 +71,14 @@ export function SourceView({
   attempts,
   pendingStatus,
   deployedBy,
+  pipeline = null,
+  pipelineRuns = [],
+  pipelinesSettled = false,
+  canConnect = false,
+  onOpenRun,
+  onOpenRuns,
+  onConnectPipeline,
+  onPipelineSettings,
 }: {
   pkg: PackageRow;
   viewerUserId?: string;
@@ -106,7 +115,22 @@ export function SourceView({
    * Read off the newest parked run's requester, else the source's owner.
    */
   deployedBy: string;
+  /** The source's pipeline (epic memql#5479), or null when it has none -- or none the viewer may read. */
+  pipeline?: PipelineRow | null;
+  /** The pipeline's runs, newest first. */
+  pipelineRuns?: readonly RunRow[];
+  /** Whether the pipelines feeds have answered; before that nothing is said about checks. */
+  pipelinesSettled?: boolean;
+  /** Whether this session holds the `connect` part. */
+  canConnect?: boolean;
+  onOpenRun?: (runId: string) => void;
+  onOpenRuns?: () => void;
+  onConnectPipeline?: () => void;
+  onPipelineSettings?: () => void;
 }) {
+  // PLACEHOLDER (Task 8 renders the pipeline props: the Checks part, the
+  // Pipeline fact, Latest upstream's checks and the bar's pipeline acts).
+  void [pipeline, pipelineRuns, pipelinesSettled, canConnect, onOpenRun, onOpenRuns, onConnectPipeline, onPipelineSettings];
   const accounts = useAccountOptions();
   const label = sourceName(pkg);
   const connections = useSourceConnections();

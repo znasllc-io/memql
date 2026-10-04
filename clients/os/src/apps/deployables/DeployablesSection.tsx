@@ -68,6 +68,13 @@ import { LIST_TRAFFIC_WINDOW, type TrafficSummary } from "./traffic";
 import { useSiteTraffic } from "./useSiteTraffic";
 import type { CredentialFeedStatus, CredentialRow } from "./sources/rows";
 import { DEPLOYABLE_KINDS, kindLabel } from "./targets";
+import { ConnectPage } from "./pipelines/connect/ConnectPage";
+import type { ConnectFlow } from "./pipelines/connect/useConnectFlow";
+import { PipelinePage } from "./pipelines/PipelinePage";
+import { RunPage } from "./pipelines/RunPage";
+import { pipelineForPackage, runsOfPipeline } from "./pipelines/runs";
+import { sameId, type PipelineRow, type RunRow } from "./pipelines/rows";
+import { branchWords, shortSha } from "./pipelines/words";
 
 // The Deployables section (epic memql#4937, design section A): FOUR SIBLING
 // VIEWS, one at a time, one Head each.
@@ -112,7 +119,13 @@ type DeployablesView =
   | { kind: "deployable"; siteId: string; from?: string; detail?: "store"; result?: string; revision?: number }
   | { kind: "source"; packageId: string; fromSite?: string }
   | { kind: "history"; packageId: string; siteId?: string; returnTo?: DeployablesView }
-  | { kind: "compose"; parkedPackageId?: string; only?: string; fromSource?: string; connectResult?: ConnectReturn };
+  | { kind: "compose"; parkedPackageId?: string; only?: string; fromSource?: string; connectResult?: ConnectReturn }
+  // A SOURCE'S PIPELINE (epic memql#5479): a run its Checks row opened, its
+  // pipeline settings, and the connect rail over it. Each is reached from the
+  // source page and goes back to it.
+  | { kind: "run"; packageId: string; runId: string }
+  | { kind: "pipeline"; packageId: string }
+  | { kind: "connect"; packageId: string };
 
 /** What the list says about the row that just left it. */
 type Gone = { name: string; what: "deleted" | "deactivated" } | null;
@@ -128,7 +141,8 @@ const ROOT_LABEL: Readonly<Record<SectionRoot, string>> = { deployables: "Deploy
 
 export function DeployablesSection({
   root = "deployables",
-  active = true, navigation, openRequest, connectResult,
+  active = true, navigation, openRequest, connectResult, sourceOpenRequest,
+  pipelines, runs, pipelinesSettled = false, connectFlow, onOpenRuns,
   sites,
   packages,
   parked,
@@ -150,6 +164,16 @@ export function DeployablesSection({
   navigation?: OsAppProps["navigation"];
   openRequest?: { siteId: string; revision: number; detail?: "store"; result?: string };
   connectResult?: ConnectReturn | null;
+  /** Open a source's page: the map's Checks node, a run page's trail. */
+  sourceOpenRequest?: { packageId: string; revision: number };
+  /** The caller's pipelines and their runs, from the root's feeds (epic memql#5479). */
+  pipelines?: LiveView<PipelineRow> | null;
+  runs?: LiveView<RunRow> | null;
+  pipelinesSettled?: boolean;
+  /** The connect rail's answers, held at the app root. */
+  connectFlow?: ConnectFlow;
+  /** Open the Runs tab refined to one pipeline. */
+  onOpenRuns?: (pipelineId: string) => void;
   sites: LiveView<SiteRow> | null;
   packages: LiveView<PackageRow> | null;
   parked: LiveView<DeploymentRow> | null;
@@ -180,9 +204,16 @@ export function DeployablesSection({
   const [landing, setLanding] = useState(false);
   const lastNavigation = useRef<number | undefined>(undefined);
   const lastOpenRequest = useRef<number | undefined>(undefined);
+  const lastSourceRequest = useRef<number | undefined>(undefined);
   function setView(next: DeployablesView) { setLanding(false); holdView(next); }
   useLayoutEffect(() => {
     if (!active) return;
+    if (sourceOpenRequest && sourceOpenRequest.revision !== lastSourceRequest.current) {
+      lastSourceRequest.current = sourceOpenRequest.revision;
+      setView({ kind: "source", packageId: sourceOpenRequest.packageId });
+      lastNavigation.current = navigation?.revision;
+      return;
+    }
     if (openRequest && openRequest.revision !== lastOpenRequest.current) {
       lastOpenRequest.current = openRequest.revision;
       setView({ kind: "deployable", siteId: openRequest.siteId, detail: openRequest.detail, result: openRequest.result, revision: openRequest.revision });
@@ -193,7 +224,7 @@ export function DeployablesSection({
       lastNavigation.current = navigation.revision;
       setLanding(navigation.origin === "peer");
     }
-  }, [active, navigation?.revision, navigation?.origin, openRequest?.revision, openRequest?.siteId]);
+  }, [active, navigation?.revision, navigation?.origin, openRequest?.revision, openRequest?.siteId, sourceOpenRequest?.revision]);
   const canOpenCompose = can.deploy || availableInAnyOrganization("execute", "app:deployables/deploy");
   // OAuth is a full-page return. Resume the repository step once; the
   // live credential feed decides whether this account actually connected.
@@ -215,6 +246,8 @@ export function DeployablesSection({
   const siteRows = sites?.snapshot.rows ?? [];
   const packageRows = packages?.snapshot.rows ?? [];
   const parkedRows = parked?.snapshot.rows ?? [];
+  const pipelineRows = pipelines?.snapshot.rows ?? [];
+  const runRows = runs?.snapshot.rows ?? [];
 
   const connections = useSourceConnections();
   const provenanceKey = JSON.stringify(packageRows.map(pkg => sourceRecord(pkg, credentials, connections.rows).provenance));
@@ -345,45 +378,74 @@ export function DeployablesSection({
       );
     }
 
+    if (view.kind === "run" || view.kind === "pipeline" || view.kind === "connect") {
+      const pkg = packageRows.find((p) => p.id === view.packageId) ?? null;
+      if (pkg === null) return renderList();
+      const label = sourceName(pkg);
+      const pipeline = pipelineForPackage(pipelineRows, pkg.id);
+      const toSource = () => setView({ kind: "source", packageId: pkg.id });
+      const sourceCrumbs = [{ label: ROOT_LABEL[root], onSelect: backToList }, { label, onSelect: toSource }];
+      if (view.kind === "run") {
+        const run = runRows.find((r) => sameId(r.id, view.runId)) ?? null;
+        return (
+          <RunPage
+            key={view.runId}
+            runId={view.runId}
+            runs={runRows}
+            runsState={runs?.snapshot.state ?? "disconnected"}
+            pipeline={pipeline}
+            sourceName={label}
+            breadcrumbs={[...sourceCrumbs, { label: run ? branchWords(run) || shortSha(run.sha) : "Run" }]}
+            back={{ label, onSelect: toSource }}
+            can={can}
+            onOpenRun={(runId) => setView({ kind: "run", packageId: pkg.id, runId })}
+          />
+        );
+      }
+      if (view.kind === "pipeline") {
+        // The pipeline left the feed -- disconnected and read away, another
+        // window -- so the source is what the person sees.
+        if (pipeline === null) return sourcePage(pkg);
+        return (
+          <PipelinePage
+            pkg={pkg}
+            pipeline={pipeline}
+            runs={runsOfPipeline(runRows, pipeline.id)}
+            can={can}
+            backLabel={label}
+            onBack={toSource}
+            onChange={() => { connectFlow?.start(pkg.id, pipeline); setView({ kind: "connect", packageId: pkg.id }); }}
+            onOpenRuns={() => onOpenRuns?.(pipeline.id)}
+          />
+        );
+      }
+      if (connectFlow === undefined) return sourcePage(pkg);
+      return (
+        <ConnectPage
+          pkg={pkg}
+          pipeline={pipeline}
+          flow={connectFlow}
+          can={can}
+          backLabel={label}
+          onBack={toSource}
+          onDone={toSource}
+        />
+      );
+    }
+
     if (view.kind === "source" || view.kind === "history") {
       const pkg = packageRows.find((p) => p.id === view.packageId) ?? null;
       // The source left the feed while this was open -- archived from another
       // window, say. The list is what the person sees, rather than a page about
       // a thing that is gone.
       if (pkg === null) return renderList();
-      const apps = siteRows.filter((s) => s.packageId === pkg.id);
       if (view.kind === "history") {
         return <HistoryView pkg={pkg} can={partsForOrganization(pkg.accountId, can)} app={siteRows.find(s => s.id === view.siteId)}
           backLabel={view.returnTo?.kind === "history" ? "App history" : undefined}
           onOpenSourceHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: view })}
           onBack={() => setView(view.returnTo ?? (view.siteId ? { kind: "deployable", siteId: view.siteId } : { kind: "source", packageId: pkg.id }))} />;
       }
-      return (
-        <SourceView
-          key={`${pkg.id}:${viewerUserId}`}
-          pkg={pkg}
-          viewerUserId={viewerUserId}
-          onRemoved={() => { refreshSources(); backToList(); }}
-          apps={apps}
-          appsSettled={!feedError && sites?.snapshot.state === "live" && packages?.snapshot.state === "live"}
-          credentials={credentials}
-          can={partsForOrganization(pkg.accountId, can)}
-          backLabel={view.fromSite ? (siteRows.find(s => s.id === view.fromSite)?.title || "Deployable") : ROOT_LABEL[root]}
-          onBack={() => view.fromSite ? setView({ kind: "deployable", siteId: view.fromSite }) : backToList()}
-          onOpenHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: view })}
-          onOpenApp={openSite}
-          onOpenDeclared={(app) => openDeclared(pkg.id, app)}
-          onReview={reviewFor(pkg.id)}
-          onAsk={onAsk}
-          attempts={parkedRows.filter((d) => d.packageId === pkg.id && d.status === "awaiting_confirm").length}
-          pendingStatus={newestParkedRun(parkedRows, pkg.id)?.status}
-          deployedBy={deployedByLabel(
-            deployerOf(parkedRows.find((d) => d.packageId === pkg.id) ?? null, null, pkg),
-            viewerUserId,
-            nameOf,
-          )}
-        />
-      );
+      return sourcePage(pkg, view.fromSite);
     }
 
     if (view.kind === "deployable") {
@@ -418,6 +480,50 @@ export function DeployablesSection({
     }
 
     return renderList();
+  }
+
+  /**
+   * A source's page. Its own function because a pipeline view whose subject
+   * left the feed -- a pipeline read away, a flow with nowhere to hold its
+   * answers -- shows the source it belongs to rather than an empty page.
+   */
+  function sourcePage(pkg: PackageRow, fromSite?: string) {
+    const here: DeployablesView = { kind: "source", packageId: pkg.id, ...(fromSite ? { fromSite } : {}) };
+    const pipeline = pipelineForPackage(pipelineRows, pkg.id);
+    return (
+      <SourceView
+        key={`${pkg.id}:${viewerUserId}`}
+        pkg={pkg}
+        viewerUserId={viewerUserId}
+        onRemoved={() => { refreshSources(); backToList(); }}
+        apps={siteRows.filter((s) => s.packageId === pkg.id)}
+        appsSettled={!feedError && sites?.snapshot.state === "live" && packages?.snapshot.state === "live"}
+        credentials={credentials}
+        can={partsForOrganization(pkg.accountId, can)}
+        backLabel={fromSite ? (siteRows.find(s => s.id === fromSite)?.title || "Deployable") : ROOT_LABEL[root]}
+        onBack={() => fromSite ? setView({ kind: "deployable", siteId: fromSite }) : backToList()}
+        onOpenHistory={() => setView({ kind: "history", packageId: pkg.id, returnTo: here })}
+        onOpenApp={openSite}
+        onOpenDeclared={(app) => openDeclared(pkg.id, app)}
+        onReview={reviewFor(pkg.id)}
+        onAsk={onAsk}
+        pipeline={pipeline}
+        pipelineRuns={pipeline === null ? [] : runsOfPipeline(runRows, pipeline.id)}
+        pipelinesSettled={pipelinesSettled && connectFlow !== undefined}
+        canConnect={can.connect}
+        onOpenRun={(runId) => setView({ kind: "run", packageId: pkg.id, runId })}
+        onOpenRuns={pipeline === null ? undefined : () => onOpenRuns?.(pipeline.id)}
+        onConnectPipeline={connectFlow === undefined ? undefined : () => { connectFlow.start(pkg.id, pipeline); setView({ kind: "connect", packageId: pkg.id }); }}
+        onPipelineSettings={pipeline === null ? undefined : () => setView({ kind: "pipeline", packageId: pkg.id })}
+        attempts={parkedRows.filter((d) => d.packageId === pkg.id && d.status === "awaiting_confirm").length}
+        pendingStatus={newestParkedRun(parkedRows, pkg.id)?.status}
+        deployedBy={deployedByLabel(
+          deployerOf(parkedRows.find((d) => d.packageId === pkg.id) ?? null, null, pkg),
+          viewerUserId,
+          nameOf,
+        )}
+      />
+    );
   }
 
   // ---- the list ------------------------------------------------------------
@@ -602,7 +708,7 @@ export function DeployablesSection({
               {showArchived ? "Archived sources will appear here." : filtered ? "Try a different search." : "Configured GitHub account, organization and repository paths appear here. Start with Add deployable."}
             </EmptyState>}
             renderRow={(group, tick) => (
-              <SourceLine accounts={accounts} group={group} tick={tick} provenance={sourceSearch(group.pkg!)} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
+              <SourceLine accounts={accounts} group={group} tick={tick} provenance={sourceSearch(group.pkg!)} hasPipeline={pipelineForPackage(pipelineRows, group.pkg!.id)?.status === "active"} onOpen={() => setView({ kind: "source", packageId: group.pkg!.id })} />
             )}
           />
         ) : (
@@ -680,7 +786,7 @@ function newestParked(
  * ONE SOURCE, as a row: what it is called and where it lives, how much it
  * produced, and the one thing about it a person might have to act on.
  */
-function SourceLine({ group, tick, onOpen, accounts, provenance }: { accounts: AccountRow[]; group: DeployableListGroup; tick: ArrivalKind | null; onOpen: () => void; provenance: string }) {
+function SourceLine({ group, tick, onOpen, accounts, provenance, hasPipeline = false }: { accounts: AccountRow[]; group: DeployableListGroup; tick: ArrivalKind | null; onOpen: () => void; provenance: string; hasPipeline?: boolean }) {
   const pkg = group.pkg!;
   const { apps, deployed } = sourceSummary(group);
   const state = sourceStateWord(group);
@@ -700,9 +806,11 @@ function SourceLine({ group, tick, onOpen, accounts, provenance }: { accounts: A
     onOpen={onOpen}
   >
     {/* A sentence when there is nothing to count: "0 apps" reads as a result,
-        and a source that has made nothing has not been asked yet. */}
+        and a source that has made nothing has not been asked yet. A source
+        that produces no apps and runs a pipeline -- the engine repository is
+        one -- is a pipeline, and says so where the count goes (memql#5501). */}
     <AccountChip name={accountNameFrom(accounts, pkg.accountId)} />
-    <span>{apps === 0 ? (pkg.status === "archived" ? "No apps" : "No apps yet") : `${apps} app${apps === 1 ? "" : "s"}, ${deployed} deployed`}</span>
+    <span>{apps === 0 ? (hasPipeline ? "pipeline" : pkg.status === "archived" ? "No apps" : "No apps yet") : `${apps} app${apps === 1 ? "" : "s"}, ${deployed} deployed`}</span>
   </RecordRow>;
 }
 

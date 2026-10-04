@@ -21,6 +21,7 @@ import { SdkAskTransport } from "../ask/sdkTransport";
 import { type AskTransport } from "../ask/askController";
 import { OS_REGISTRY } from "../apps/registry";
 import { ConceptOpenDispatcher } from "../apps/concepts/ConceptOpenDispatcher";
+import { RunOpenDispatcher } from "../apps/deployables/pipelines/RunOpenDispatcher";
 import { ConnectReturnDispatcher } from "../apps/deployables/sources/ConnectReturnDispatcher";
 import { SetupFactsScope } from "../apps/setup/SetupFactsScope";
 import { SetupPresence } from "../apps/setup/SetupPresence";
@@ -304,6 +305,9 @@ function ShellRoster({
           answer to a portal route that no longer exists. Renders nothing,
           and does nothing on a browser that arrived without the marker. */}
       <ConceptOpenDispatcher />
+      {/* A pipeline run named in the address opens Deployables' Runs on it
+          (epic memql#5479): a check run's details link on GitHub. */}
+      <RunOpenDispatcher />
       <IdentityOpenDispatcher />
       {/* Where a captured line comes from: the focused window's app and
           section, read from this provider's state at capture time. */}
