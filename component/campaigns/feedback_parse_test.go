@@ -2,8 +2,11 @@ package campaigns
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // feedback_parse_test.go -- memql#3461's acceptance criteria, one test each:
@@ -15,6 +18,12 @@ import (
 //	an unparseable payload is VISIBLE           TestUnreadablePayloadFailsTheInboundRow
 //	an unverified source cannot suppress        TestUnverifiedDeliveryCannotSuppress
 //	a non-feedback source is not a failure      TestUnconfiguredSourceIsNotAFailure
+//
+// and two from epic memql#5477, where a builtin's caller was found to be any
+// signed-in client:
+//
+//	only the automation reaches it              TestIngestFeedbackRefusesAClientBeforeReadingTheRow
+//	the row decides, never the arguments        TestIngestFeedbackTakesTheDeliveryFromTheRowNotItsArguments
 
 const hardBounceDSN = `Content-Type: multipart/report; report-type=delivery-status; boundary="b"
 
@@ -187,6 +196,124 @@ func ingestWorker(t *testing.T, row map[string]any, sources map[string]string) (
 	return w, engine
 }
 
+// feedbackAutomationCtx is the context the shipped ingestCampaignFeedback
+// automation's step runs under: internal origin, which the executor stamps on
+// a tree-loaded automation and on nothing a client sends.
+func feedbackAutomationCtx() context.Context {
+	return auth.ContextWithInternalOrigin(context.Background())
+}
+
+// countedHardBounces is what the sending ramp's reputation window holds, across
+// every domain: the side effect a re-processed bounce repeats.
+func countedHardBounces(w *Worker) int {
+	w.reputation.mu.Lock()
+	defer w.reputation.mu.Unlock()
+	n := 0
+	for _, c := range w.reputation.counts {
+		n += c.hardBounce
+	}
+	return n
+}
+
+// THE GATE BEFORE THE ROW (epic memql#5477). campaignIngestFeedback is a
+// builtin, and any signed-in client's query can name a builtin -- @sdk has no
+// engine effect -- so it refuses every call that did not arrive with internal
+// origin, before the row is read: no suppression, no stamp and nothing counted.
+// Re-processing a real bounce is not free -- each pass counts it into the
+// ramp's reputation window again -- which is why a client able to read a staged
+// row's id still may not drive it.
+func TestIngestFeedbackRefusesAClientBeforeReadingTheRow(t *testing.T) {
+	sources := map[string]string{"postmaster": FormatRFC3464}
+	for name, ctx := range map[string]context.Context{
+		"a signed-in person": auth.ContextWithUserActor(context.Background(), "v1:identity:user:someone"),
+		"a cluster owner": auth.ContextWithAccess(context.Background(),
+			&auth.AccessContext{UserId: "v1:identity:user:owner", Role: auth.RoleOwner}),
+		"nobody": context.Background(),
+		// Client origin stamped over an internal one: the mark a trusted
+		// frame carried does not survive the client's stamp.
+		"a client descended from a trusted frame": auth.ContextWithClientOrigin(feedbackAutomationCtx()),
+	} {
+		t.Run(name, func(t *testing.T) {
+			w, engine := ingestWorker(t, inboundRow("inb6", "postmaster", hardBounceDSN, true), sources)
+			_, err := w.handleIngestFeedback(ctx, map[string]any{"inboundRequestId": "inb6"}, 0)
+			if !errors.Is(err, errIngestFeedbackClientOrigin) {
+				t.Fatalf("err = %v, want errIngestFeedbackClientOrigin", err)
+			}
+			if n := len(engine.fakeEngine.calls); n != 0 {
+				t.Fatalf("a refused call reached the engine %d times; the refusal must come before the row is read: %v", n, engine.fakeEngine.calls)
+			}
+			if n := countedHardBounces(w); n != 0 {
+				t.Fatalf("a refused call counted %d hard bounces into the reputation window", n)
+			}
+		})
+	}
+
+	// THE CONTROL: the same row on the automation's context suppresses the
+	// address and counts the bounce, so the silence above is the origin's.
+	w, engine := ingestWorker(t, inboundRow("inb6", "postmaster", hardBounceDSN, true), sources)
+	if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), map[string]any{"inboundRequestId": "inb6"}, 0); err != nil {
+		t.Fatalf("the automation's call: %v", err)
+	}
+	if n := len(engine.fakeEngine.mutations("recordSuppression")); n != 1 {
+		t.Fatalf("the automation's call recorded %d suppressions, want 1", n)
+	}
+	if n := countedHardBounces(w); n != 1 {
+		t.Fatalf("the automation's call counted %d hard bounces, want 1", n)
+	}
+}
+
+// The ingester reads its delivery from the STAGED ROW and from nothing its
+// caller hands it: a body, a source or a verdict passed beside the id -- which
+// the automation never passes, and a caller could forge -- changes nothing the
+// row decides.
+func TestIngestFeedbackTakesTheDeliveryFromTheRowNotItsArguments(t *testing.T) {
+	sources := map[string]string{"postmaster": FormatRFC3464}
+	forged := map[string]any{
+		"inboundRequestId":  "inb7",
+		"source":            "postmaster",
+		"body":              hardBounceDSN,
+		"signatureVerified": true,
+	}
+	nothingWritten := func(t *testing.T, engine *inboundEngine) {
+		t.Helper()
+		if n := len(engine.fakeEngine.mutations("recordSuppression")); n != 0 {
+			t.Fatalf("a forged argument produced %d suppressions", n)
+		}
+	}
+
+	t.Run("a staged soft bounce stays soft", func(t *testing.T) {
+		w, engine := ingestWorker(t, inboundRow("inb7", "postmaster", softBounceDSN, true), sources)
+		if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), forged, 0); err != nil {
+			t.Fatalf("ingestFeedback: %v", err)
+		}
+		nothingWritten(t, engine)
+	})
+	t.Run("another source's row stays another source's", func(t *testing.T) {
+		w, engine := ingestWorker(t, inboundRow("inb7", "shopify", `{"order":1}`, true), sources)
+		if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), forged, 0); err != nil {
+			t.Fatalf("an unrelated webhook is not a failure: %v", err)
+		}
+		nothingWritten(t, engine)
+		if n := len(engine.fakeEngine.mutations("updateInboundRequestStatus")); n != 0 {
+			t.Fatalf("another source's row was stamped %d times", n)
+		}
+	})
+	t.Run("an unsigned staged row is not signed by an argument", func(t *testing.T) {
+		w, engine := ingestWorker(t, inboundRow("inb7", "postmaster", hardBounceDSN, false), sources)
+		if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), forged, 0); err == nil {
+			t.Fatal("an argument's verdict let an unverified delivery through")
+		}
+		nothingWritten(t, engine)
+	})
+	t.Run("no staged row is no delivery", func(t *testing.T) {
+		w, engine := ingestWorker(t, nil, sources)
+		if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), forged, 0); err == nil {
+			t.Fatal("arguments with no staged row behind them were accepted")
+		}
+		nothingWritten(t, engine)
+	})
+}
+
 // TestDSNIngestionSuppressesEndToEnd is the issue's headline criterion: a
 // provider's bounce reaches the suppression path end to end, without anyone
 // writing a parser first.
@@ -195,7 +322,7 @@ func TestDSNIngestionSuppressesEndToEnd(t *testing.T) {
 		inboundRow("inb1", "postmaster", hardBounceDSN, true),
 		map[string]string{"postmaster": FormatRFC3464})
 
-	if _, err := w.handleIngestFeedback(context.Background(), map[string]any{"inboundRequestId": "inb1"}, 0); err != nil {
+	if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), map[string]any{"inboundRequestId": "inb1"}, 0); err != nil {
 		t.Fatalf("ingestFeedback: %v", err)
 	}
 
@@ -233,7 +360,7 @@ func TestSoftBounceIngestionDoesNotSuppress(t *testing.T) {
 		inboundRow("inb2", "postmaster", softBounceDSN, true),
 		map[string]string{"postmaster": FormatRFC3464})
 
-	if _, err := w.handleIngestFeedback(context.Background(), map[string]any{"inboundRequestId": "inb2"}, 0); err != nil {
+	if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), map[string]any{"inboundRequestId": "inb2"}, 0); err != nil {
 		t.Fatalf("ingestFeedback: %v", err)
 	}
 	if n := len(engine.fakeEngine.mutations("recordSuppression")); n != 0 {
@@ -249,7 +376,7 @@ func TestUnreadablePayloadFailsTheInboundRow(t *testing.T) {
 		inboundRow("inb3", "postmaster", "this is not a delivery status notification", true),
 		map[string]string{"postmaster": FormatRFC3464})
 
-	_, err := w.handleIngestFeedback(context.Background(), map[string]any{"inboundRequestId": "inb3"}, 0)
+	_, err := w.handleIngestFeedback(feedbackAutomationCtx(), map[string]any{"inboundRequestId": "inb3"}, 0)
 	if err == nil {
 		t.Fatal("an unreadable payload was accepted quietly")
 	}
@@ -270,7 +397,7 @@ func TestUnverifiedDeliveryCannotSuppress(t *testing.T) {
 		inboundRow("inb4", "postmaster", hardBounceDSN, false),
 		map[string]string{"postmaster": FormatRFC3464})
 
-	if _, err := w.handleIngestFeedback(context.Background(), map[string]any{"inboundRequestId": "inb4"}, 0); err == nil {
+	if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), map[string]any{"inboundRequestId": "inb4"}, 0); err == nil {
 		t.Fatal("an unverified delivery was allowed to suppress an address")
 	}
 	if n := len(engine.fakeEngine.mutations("recordSuppression")); n != 0 {
@@ -286,7 +413,7 @@ func TestUnconfiguredSourceIsNotAFailure(t *testing.T) {
 		inboundRow("inb5", "shopify", `{"order":1}`, true),
 		map[string]string{"postmaster": FormatRFC3464})
 
-	if _, err := w.handleIngestFeedback(context.Background(), map[string]any{"inboundRequestId": "inb5"}, 0); err != nil {
+	if _, err := w.handleIngestFeedback(feedbackAutomationCtx(), map[string]any{"inboundRequestId": "inb5"}, 0); err != nil {
 		t.Fatalf("an unrelated webhook was reported as a failure: %v", err)
 	}
 	if n := len(engine.fakeEngine.mutations("updateInboundRequestStatus")); n != 0 {

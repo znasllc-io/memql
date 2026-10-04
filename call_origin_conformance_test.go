@@ -117,7 +117,17 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// replica's log. That is the shape of bug that survives a release, which
 		// is why these two packages stamp rather than being exempted from the
 		// annotation.
-		"component/campaigns": "campaign drain worker, tracking endpoints and consent writers -- server-initiated; every write it stamps for is @serverOnly (memql#4820)",
+		//
+		// One more caller, and the one a person could reach: the provider
+		// feedback ingester, which stamps the staged inbound row it worked
+		// (updateInboundRequestStatus). campaignIngestFeedback is a builtin,
+		// which any signed-in client's query can name (@sdk has no engine
+		// effect), and it was gated by configuration alone. It now refuses
+		// every call that did not arrive with internal origin before it reads
+		// the row, and it takes the source, the body and the signature verdict
+		// from the staged row, never from an argument
+		// (component/campaigns/feedback_parse_test.go).
+		"component/campaigns": "campaign drain worker, tracking endpoints, consent writers and the feedback ingester -- server-initiated; every write it stamps for is @serverOnly, and the ingester refuses every call without internal origin (memql#4820, epic memql#5477)",
 		// The proving suite's row writer (epic memql#4993, design section G).
 		// SERVER-INITIATED with no request anywhere near it: its only caller is
 		// cmd/memql-bench, a CI-lane binary run from a workflow step, and the

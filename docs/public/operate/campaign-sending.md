@@ -1304,9 +1304,11 @@ verdict comes out of a body the provider signed with a secret you configured,
 arriving at a source you allowlisted, in a format you named — three
 deployment-level decisions, all made by whoever holds the env. A payload from
 a source configured `scheme=none` is refused, because unauthenticated input
-must not write a cluster-wide list. The most anyone can do by calling the
-builtin directly is re-process a webhook you already trusted, which is
-idempotent.
+must not write a cluster-wide list. Nobody can call the builtin directly: it
+refuses every call that did not come from the shipped automation, before it
+reads the row. Re-processing a webhook you already trusted is not harmless —
+each pass would count its bounces into the sending ramp's reputation window
+again and append another consent event.
 
 ### The Graph mailbox reader
 
