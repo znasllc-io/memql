@@ -255,6 +255,120 @@ func TestDispatchDB_ADueRetryIsServedByExactlyOneOfTwoReplicas(t *testing.T) {
 	}
 }
 
+// TestDispatchDB_ARetryNobodyServedRunsOnceUnderANonAgentLeader (memql#5664,
+// review finding 1) is the whole path against the real claim table, with the
+// cron led by a node that runs no steps and the failing execution's claim on
+// the bare run id still held. A goal's run is parked on a retry that came due
+// a minute and a half ago with no agent serving it -- the agents that heard its
+// event have restarted since. The leader announces it again; both agents hear
+// the announcement at once and race to release it, under the per-wait claim;
+// both hear the release, and the run executes on exactly one of them, claimed
+// under its request.
+func TestDispatchDB_ARetryNobodyServedRunsOnceUnderANonAgentLeader(t *testing.T) {
+	db, leader := sweepDB(t)
+	eng := dispatchDBEngine(t, db)
+	leader.engine = eng
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	now := time.Now().UTC()
+	runId := runConcept + ":retry-" + bareRunId(newRowId(runConcept))
+	owner := "retry-owner-" + bareRunId(runId)
+	ownerCtx := actorCtx(owner)
+	st := leader.store()
+	goalId := newRowId(goalConcept)
+	write := func(name string, args map[string]any) {
+		t.Helper()
+		if err := st.writeInternal(ownerActor(context.Background(), owner), "mutation "+call(name, args)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	write("createWorkGoal", map[string]any{"goalId": goalId, "statement": "Fetch the report", "origin": "user", "requestedVia": "nexus"})
+	if err := st.createRunRow(ownerCtx, runSeed{RunId: runId, GoalId: goalId, AutomationName: "probe", TemplateFingerprint: "probe", Status: runStatusWaiting, Mode: modeLive, ReplayPolicy: "strict", StartedAt: now.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	stepId := bareRunId(runId) + "-fetch"
+	write("createWorkStep", map[string]any{
+		"stepId": stepId, "runId": runId, "key": "fetch", "seq": 0, "stepType": "function", "kind": "reasoning",
+		"call": map[string]any{"construct": "function", "name": "fetch"}, "status": "running", "attempt": 1, "version": 1,
+		"idempotencyKey": runId + ":fetch:1", "startedAt": rfc(now.Add(-3 * time.Minute)),
+	})
+	write("updateWorkStep", map[string]any{"stepId": stepId, "status": "failed", "errorCode": "step_failed", "errorMessage": "503 from the far side", "finishedAt": rfc(now.Add(-2 * time.Minute))})
+	if err := st.updateRun(ownerCtx, runId, map[string]any{"stepOrder": []string{"fetch"}, "waitingOn": map[string]any{
+		"kind": waitKindRetry, "subject": "fetch", "since": now.Add(-2 * time.Minute).Format(time.RFC3339Nano),
+		"resumeAt": now.Add(-90 * time.Second).Format(time.RFC3339Nano), "reason": "the far side reported itself temporarily unavailable",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	failing := automations.NewClusterExecutionGuard(func() *bun.DB { return db }, logger).StrictClaimer()
+	if !failing.ClaimWithTTL(context.Background(), runClaimName, runId, runClaimTTL) {
+		t.Fatal("could not stand in for the failing execution's claim")
+	}
+
+	maintenance := auth.ContextWithAccess(context.Background(), auth.MaintenanceActor("sweepWaitingWorkRuns"))
+	res, err := leader.SweepWaiting(maintenance, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Redispatched != 1 {
+		t.Fatalf("sweep = %+v, want the stranded retry announced", res)
+	}
+
+	stored := func() events.Event {
+		t.Helper()
+		row, err := st.runForOwner(ownerActor(memqlengine.ContextWithFreshRead(context.Background()), owner), runId)
+		if err != nil || row == nil {
+			t.Fatalf("read the run back: %v", err)
+		}
+		return remedyEvent(merged(row, map[string]any{"id": runId}))
+	}
+	agents := map[string]*replicaAdmission{}
+	var replicas []*Integration
+	for _, name := range []string{"a", "b"} {
+		r := New(eng, logger, func() *bun.DB { return db })
+		r.admitRow = leader.admitRow
+		d := &replicaAdmission{engine: eng}
+		agents[name] = d
+		r.SetDispatcher(d)
+		r.SetRunClaimer(automations.NewClusterExecutionGuard(func() *bun.DB { return db }, logger).StrictClaimer())
+		r.schedule = func(_ time.Duration, f func()) { f() }
+		replicas = append(replicas, r)
+	}
+	deliver := func(ev events.Event) {
+		var wg sync.WaitGroup
+		for _, r := range replicas {
+			wg.Add(1)
+			go func(r *Integration) { defer wg.Done(); r.HandleRunEvent(ev) }(r)
+		}
+		wg.Wait()
+	}
+
+	deliver(stored())
+	var requests int
+	if err := db.NewRaw(`SELECT count(DISTINCT payload->'rerun'->>'requestId') FROM "MemoryNodes" WHERE id = ? AND coalesce(payload->'rerun'->>'requestId', '') <> ''`, runId).Scan(context.Background(), &requests); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Fatalf("the announced retry was released under %d requests, want exactly one: two would each be claimable once", requests)
+	}
+
+	deliver(stored())
+	deadline := time.Now().Add(5 * time.Second)
+	count := func() (claimed, admitted int) {
+		for _, d := range agents {
+			d.mu.Lock()
+			claimed, admitted = claimed+len(d.claimed), admitted+len(d.admitted)
+			d.mu.Unlock()
+		}
+		return
+	}
+	for _, admitted := count(); admitted == 0 && time.Now().Before(deadline); _, admitted = count() {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if claimed, admitted := count(); claimed != 1 || admitted != 1 {
+		t.Fatalf("the released retry was claimed %d and executed %d times across two agents, want once each -- under its request, while the failing execution holds the bare run id", claimed, admitted)
+	}
+}
+
 // TestDispatchDB_SweepLeavesAProcedureReplayRunToItsRunner is the unit test's
 // finding against the REAL recovery read: runsInFlight projects the payload
 // into the row the sweep judges, and the replay runner's trigger has to survive

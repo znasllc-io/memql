@@ -10,13 +10,15 @@ package work
 // performed where it was decided would be a call into machinery that node does
 // not have, on a run another node owns.
 //
-// THREE KINDS ARRIVE HERE AND ONE OF THEM NEEDS NOTHING NEW.
+// THREE KINDS ARRIVE HERE.
 //
-//   - `retry` is a due timer plus a re-dispatch: the symptom said the failure
-//     was a blip, the run's retry budget had room, and the run resumes from
-//     the step that failed because the seam replays the journal. The agent
-//     admits the re-dispatch only for a DUE retry the sweep asked for
-//     (failureRetryDue, CanDispatchStoredRun).
+//   - `retry` is a due timer plus a re-execution: the symptom said the
+//     failure was a blip, the run's retry budget had room, and the run runs
+//     the failed step again with the completed prefix served. Every agent
+//     arms a timer for it from the wait's own event, and the first to fire
+//     serves it under a claim per wait (armRetry, serveRetry); a goal's run is
+//     released under a re-run request of its own, so the claim the failing
+//     execution still holds on the bare run id does not strand it.
 //   - `replan` and `repair` need a REMEDY -- the machinery that invokes
 //     replanGap or re-runs a step with the violation as guidance. That lives
 //     in the planner, so it arrives here as a seam, served under a claim per
@@ -26,8 +28,17 @@ package work
 // The alternative -- treating "I cannot remedy this" as "somebody else will"
 // -- is how a run reaches `abandoned` while the thing that could have fixed it
 // was simply on another replica. A parked run is visible and waits on a state
-// a person can read; a planner replica serves it from the run's event, and the
-// sweep serves it again if that event was missed and a planner leads the cron.
+// a person can read; a planner replica serves it from the run's event.
+//
+// THE SWEEP IS THE BACKSTOP, WHATEVER NODE LEADS ITS CRON (memql#5664). An
+// event is heard only by the replicas that were subscribed when it was
+// written -- a pod started since begins at the stream's high watermark -- and
+// a timer or a remedy dies with its replica. So a pass serves a wait it can
+// serve, and a wait it cannot it ANNOUNCES AGAIN once nobody has served it
+// for long enough (nudgeWait): one heartbeat write, whose event reaches every
+// agent and planner subscribed now. The general cron leader can be any node
+// type; with only "serve it if you can" a wait whose event was missed waited
+// for an agent or a planner to lead.
 
 import (
 	"context"
@@ -135,11 +146,14 @@ func failureRetryDue(waitingOn map[string]any, now time.Time) (due bool, isRetry
 
 // serveFailureWait handles one classified-failure wait. It reports whether the
 // run was moved, so the caller knows not to consider it for anything else.
+// A wait announced again (nudgeWait) is counted as handed back: the pass gave
+// it to the cluster rather than leaving it where it was.
 func (i *Integration) serveFailureWait(ctx context.Context, run map[string]any, runId, owner string, now time.Time, res *WaitSweepResult) (handled bool) {
-	kind, stepKey, reason, _, ok := failureWait(run)
+	kind, stepKey, reason, resumeAt, ok := failureWait(run)
 	if !ok {
 		return false
 	}
+	since := rowString(rowMap(run, "waitingOn"), "since")
 
 	switch kind {
 	case waitKindRetry:
@@ -151,15 +165,31 @@ func (i *Integration) serveFailureWait(ctx context.Context, run map[string]any, 
 		if due, _ := failureRetryDue(rowMap(run, "waitingOn"), now); !due {
 			return true
 		}
-		if i.redispatchStale(ownerActor(ctx, owner), run, runId, owner) {
-			i.log().Info("work: a failure the rules called transient came due and was handed back to the cluster",
-				"component", "work.sweep", "run", runId, "step", stepKey, "reason", reason)
+		if i.dispatcherRef() != nil {
+			if i.serveRetry(ctx, runId, owner, since) {
+				i.log().Info("work: a failure the rules called transient came due and was handed back to the cluster",
+					"component", "work.sweep", "run", runId, "step", stepKey, "reason", reason)
+				res.Redispatched++
+			}
+			return true
+		}
+		dueAt, _ := parseTime(resumeAt)
+		if i.nudgeWait(ctx, run, runId, owner, dueAt, retryNudgeAfter) {
+			i.log().Info("work: a retry that came due with no agent serving it was announced to the cluster again",
+				"component", "work.sweep", "run", runId, "step", stepKey)
 			res.Redispatched++
 		}
 		return true
 
 	case waitKindReplan, waitKindRepair:
 		if i.remedyRef() == nil {
+			at, _ := parseTime(since)
+			if i.nudgeWait(ctx, run, runId, owner, at, remedyNudgeAfter) {
+				i.log().Info("work: a remedy wait no planner has served was announced to the cluster again",
+					"component", "work.sweep", "run", runId, "kind", kind, "step", stepKey)
+				res.Redispatched++
+				return true
+			}
 			i.log().Info("work: a run is waiting on a remedy this node cannot serve, so it stays parked",
 				"component", "work.sweep", "run", runId, "kind", kind, "step", stepKey)
 			return true
@@ -170,6 +200,222 @@ func (i *Integration) serveFailureWait(ctx context.Context, run map[string]any, 
 		return true
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// Serving a retry: the timer, the claim, and the release
+// ---------------------------------------------------------------------------
+
+// retryClaimName is the claim namespace a goal run's retry is released under,
+// distinct from the run's dispatch claim so the failing execution's lease on
+// the bare run id never holds the release back.
+const retryClaimName = "work.run.retry"
+
+// retryReleaseTimeout bounds one release: a fresh read, the versions read and
+// one write. It is strictly inside the claim's lease, for remedyTimeout's
+// reason: a stalled releaser must not wake after a peer has taken its expired
+// claim and released the run under a request of its own.
+const retryReleaseTimeout = time.Minute
+
+// retryClaimTTL is the lease on one wait's release.
+const retryClaimTTL = retryReleaseTimeout + time.Minute
+
+// retryNudgeAfter is how long a due retry goes unserved before a node that
+// cannot serve it announces it again. Every agent subscribed when the wait was
+// written armed a timer for the moment it came due and serves it within a
+// claim's round trip, so a retry still parked a minute later is one no agent
+// holds a timer for; the minute keeps the announcement clear of a release in
+// flight.
+const retryNudgeAfter = time.Minute
+
+// remedyNudgeAfter is how long a remedy wait goes untouched before a node
+// without the remedy announces it again: past remedyClaimTTL, so no planner
+// still holds its claim or is writing its remedy -- a claimant gives up at
+// remedyTimeout -- and the planner that hears the announcement can take it.
+const remedyNudgeAfter = remedyClaimTTL + time.Minute
+
+// armRetry schedules a `retry` wait's serving for the moment its backoff ends,
+// once per wait on this replica: the wait's event arrives again with every
+// write to the run while it is parked, and each would otherwise arm another
+// timer. Every agent subscribed when the wait was written arms its own, and
+// serveRetry's claim keeps the retry to whichever fires first; a timer dies
+// with its replica, which is the sweep's backstop to cover.
+func (i *Integration) armRetry(runId, owner, since string, resumeAt time.Time) {
+	key := runId + "#" + since
+	if _, armed := i.armedRetries.LoadOrStore(key, struct{}{}); armed {
+		return
+	}
+	delay := resumeAt.Sub(i.clock())
+	if delay < 0 {
+		delay = 0
+	}
+	i.after(delay, func() {
+		defer i.armedRetries.Delete(key)
+		i.serveRetry(context.Background(), runId, owner, since)
+	})
+}
+
+// after runs f once d has passed: time.AfterFunc, or the scheduler a test
+// installed so it can see the delay and choose the moment.
+func (i *Integration) after(d time.Duration, f func()) {
+	i.mu.RLock()
+	schedule := i.schedule
+	i.mu.RUnlock()
+	if schedule != nil {
+		schedule(d, f)
+		return
+	}
+	time.AfterFunc(d, f)
+}
+
+// serveRetry serves one due `retry` wait on a replica that executes runs --
+// from its timer, or from the sweep on an agent -- and reports whether this
+// replica took it.
+//
+// A GOAL'S RUN IS RELEASED UNDER A REQUEST OF ITS OWN (releaseRetry): the
+// failed step and every step after it, as the re-run nobody asked for, which
+// the agents claim once under the request from the release's own event. The
+// claim the failing execution took at its dispatch -- four minutes on the bare
+// run id, against a thirty-second backoff -- does not hold it back, and the
+// request rides the row, so the retried execution's own events claim under it
+// and cannot start it a second time.
+//
+// ANY OTHER RUN IS DISPATCHED HERE, under a claim keyed on the wait
+// (runClaimKey): a scheduler's journal, which no event dispatches, so nothing
+// but this could start it and the claim keeps it to one replica.
+func (i *Integration) serveRetry(ctx context.Context, runId, owner, since string) bool {
+	if i.dispatcherRef() == nil || strings.TrimSpace(since) == "" {
+		return false
+	}
+	run, err := i.store().runForOwner(ownerActor(memql.ContextWithFreshRead(ctx), owner), runId)
+	if err != nil || run == nil || !onRetryWait(run, since, i.clock()) {
+		return false
+	}
+	if retryAsRequest(run) {
+		return i.releaseRetry(ctx, runId, owner, since)
+	}
+	if name := rowString(run, "automationName"); name == "" || name == compilingAutomationName {
+		// Nothing to execute, for redispatchStale's reason: the claim would
+		// be taken for a run the seam then refuses.
+		return false
+	}
+	return i.dispatchRun(ctx, DispatchRequest{
+		RunId: runId, OwnerUserId: owner, GoalId: rowString(run, "goalId"), Status: runStatusWaiting,
+		TriggeredBy: rowString(run, "triggeredBy"), Recovery: true, RetryWait: since,
+	})
+}
+
+// onRetryWait reports a run still parked on the due `retry` wait since names,
+// and not asked to stop.
+func onRetryWait(run map[string]any, since string, now time.Time) bool {
+	if rowString(run, "status") != runStatusWaiting || argBool(run, "cancelRequested") {
+		return false
+	}
+	waiting := rowMap(run, "waitingOn")
+	if rowString(waiting, "since") != since {
+		return false
+	}
+	due, retry := failureRetryDue(waiting, now)
+	return retry && due
+}
+
+// retryAsRequest reports a run whose retry can be a re-run request: one the
+// executor runs again on a request (actRun.requireExecutable -- a goal's run
+// with a template) whose failed step is one of its own top-level steps.
+func retryAsRequest(row map[string]any) bool {
+	run := actRun{row: row, order: topLevelOrder(rowStringSlice(row, "stepOrder"))}
+	key := topLevelStepKey(rowString(rowMap(row, "waitingOn"), "subject"))
+	return key != "" && run.requireExecutable() == nil && run.requireTopLevel(key) == nil
+}
+
+// releaseRetry puts a goal's run back to `running` off its due retry, under a
+// re-run request on the step it failed at (failureRetryRequest), and reports
+// whether this replica wrote it.
+//
+// THE CLAIM IS PER WAIT AND COMES FIRST. Every agent's timer and the sweep can
+// serve the same wait, and two releases are two requests, each claimable once:
+// the run executed twice. The key is the run and the wait's `since`, so a later
+// failure of the same run is a new claim; the lease outlives the release, so a
+// live releaser is never stolen from, and a dead one's wait is released again
+// once the lease lapses. After the claim the run is read again, fresh, and only
+// a run still parked on THIS wait is released.
+func (i *Integration) releaseRetry(ctx context.Context, runId, owner, since string) bool {
+	claimer := i.runClaimerRef()
+	if claimer == nil {
+		i.log().Warn("work: a retry came due but this node has no cross-replica claim; refusing to release it rather than once per replica",
+			"component", "work.retry", "run", runId)
+		return false
+	}
+	if !claimer.ClaimWithTTL(ctx, retryClaimName, runId+"#"+since, retryClaimTTL) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), retryReleaseTimeout)
+	defer cancel()
+	run, err := i.store().runForOwner(ownerActor(memql.ContextWithFreshRead(ctx), owner), runId)
+	if err != nil || run == nil || !onRetryWait(run, since, i.clock()) {
+		return false
+	}
+	now := i.clock().UTC()
+	writeCtx := ownerActor(ctx, owner)
+	request, stale, ok := i.failureRetryRequest(writeCtx, run, runId, failureRetry{stepKey: rowString(rowMap(run, "waitingOn"), "subject")}, now)
+	if !ok {
+		return false
+	}
+	if err := i.store().updateRun(writeCtx, runId, map[string]any{
+		"status":      runStatusRunning,
+		"waitingOn":   map[string]any{},
+		"heartbeatAt": rfc(now),
+		"rerun":       request,
+		"staleSteps":  stale,
+	}); err != nil {
+		i.log().Warn("work: a due retry could not be released",
+			"component", "work.retry", "run", runId, "err", err)
+		return false
+	}
+	i.log().Info("work: released a due retry under a request of its own",
+		"component", "work.retry", "run", runId, "step", rowString(request, "stepKey"), "request", rowString(request, "requestId"), "node", selfNodeId())
+	return true
+}
+
+// nudgeWait announces a failure wait to the cluster again, on a node that
+// cannot serve it itself, once nobody has served it for `after` since anchor
+// (its resumeAt or its since) or since the last announcement: one write of the
+// run's heartbeat, whose event reaches every agent and planner subscribed now,
+// each serving it as it serves the wait's first event. It reports whether it
+// wrote.
+//
+// The run is read again, fresh, immediately before the write, and announced
+// only while it is the same wait the pass read and nobody has touched it since
+// -- the write is the engine's read-merge, so the window it leaves to a
+// concurrent writer is that one round trip, on a wait nothing has served for
+// `after`.
+func (i *Integration) nudgeWait(ctx context.Context, run map[string]any, runId, owner string, anchor time.Time, after time.Duration) bool {
+	if anchor.IsZero() {
+		return false
+	}
+	last := anchor
+	if beat, ok := parseTime(rowString(run, "heartbeatAt")); ok && beat.After(last) {
+		last = beat
+	}
+	now := i.clock().UTC()
+	if now.Sub(last) < after {
+		return false
+	}
+	current, err := i.store().runForOwner(ownerActor(memql.ContextWithFreshRead(ctx), owner), runId)
+	if err != nil || current == nil || rowString(current, "status") != runStatusWaiting || argBool(current, "cancelRequested") {
+		return false
+	}
+	read, fresh := rowMap(run, "waitingOn"), rowMap(current, "waitingOn")
+	if rowString(fresh, "kind") != rowString(read, "kind") || rowString(fresh, "since") != rowString(read, "since") ||
+		rowString(current, "heartbeatAt") != rowString(run, "heartbeatAt") {
+		return false
+	}
+	if err := i.store().updateRun(ownerActor(ctx, owner), runId, map[string]any{"heartbeatAt": rfc(now)}); err != nil {
+		i.log().Warn("work: could not announce a failure wait again",
+			"component", "work.sweep", "run", runId, "err", err)
+		return false
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------

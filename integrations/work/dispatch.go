@@ -136,6 +136,13 @@ type DispatchRequest struct {
 	// stored value. It is what marks a run another runner owns (runnerOwned):
 	// a procedure's replay run or a pipeline's run.
 	TriggeredBy string
+	// RetryWait is the `since` of the failure path's `retry` wait this dispatch
+	// serves (memql#5664), set only by that wait's own serving (serveRetry)
+	// for a run no re-run request can be written for. The claim is keyed on it
+	// (runClaimKey), so the claim an earlier execution still holds on the bare
+	// run id does not hold the retry back, and the seam admits the waiting run
+	// only while it is still parked on that very wait (CanDispatchStoredRun).
+	RetryWait string
 }
 
 // ProcedureReplayTriggerPrefix marks a run a learned procedure's REPLAY RUNNER
@@ -205,11 +212,11 @@ func runnerOwnsRecovery(triggeredBy string) bool {
 // CanDispatchStoredRun rechecks an event or explicit recovery request against
 // the authoritative row. Ordinary journals belong to their scheduler; only
 // the sweep can take one over. A waiting run is eligible solely for a retry
-// that is DUE and explicitly requested by that sweep, never a stale event:
-// a due inference retry, or a due `retry` wait the failure path parked on
-// (memql#5664) -- which this refused until then, so the sweep's recovery
-// dispatch ran nothing and held the run's claim for its lease, and a blip the
-// rules had called retryable was never retried. A replan or repair wait is
+// that is DUE and explicitly requested, never a stale event: a due inference
+// retry the sweep asked for, or a due `retry` wait the failure path parked on
+// (memql#5664), asked for by that wait's own serving (serveRetry) and only
+// while the run is still parked on the very wait it names (RetryWait) -- a
+// dispatch for one failure never serves the next. A replan or repair wait is
 // never eligible here: it is the planner's remedy, not an execution. A
 // driver-owned run is never eligible (IsDriverOwnedRun).
 func (r DispatchRequest) CanDispatchStoredRun(goalId, status string, waitingOn map[string]any, now time.Time) bool {
@@ -224,7 +231,8 @@ func (r DispatchRequest) CanDispatchStoredRun(goalId, status string, waitingOn m
 			return due
 		}
 		due, retry := failureRetryDue(waitingOn, now)
-		return retry && due
+		since := strings.TrimSpace(r.RetryWait)
+		return retry && due && since != "" && since == rowString(waitingOn, "since")
 	}
 	return false
 }
@@ -311,6 +319,17 @@ func (i *Integration) HandleRunEvent(ev events.Event) {
 		if i.remedyRef() != nil && !IsDriverOwnedRun(req.TriggeredBy) {
 			if kind, since, ok := remedyWaitOf(ev); ok {
 				go i.handOffRemedy(context.Background(), kind, req.RunId, req.OwnerUserId, since)
+			}
+		}
+		// A RETRY WAIT IS ARMED FROM ITS EVENT ON EVERY AGENT (memql#5664),
+		// for the moment its backoff ends. The sweep alone served it, and the
+		// sweep runs on the general cron leader: a cluster whose leader ran no
+		// steps never retried anything, and one whose leader did retried only
+		// once the failing execution's claim had lapsed. serveRetry's claim
+		// keeps the retry to one replica.
+		if i.dispatcherRef() != nil && !IsDriverOwnedRun(req.TriggeredBy) {
+			if since, resumeAt, ok := retryWaitOf(ev); ok {
+				i.armRetry(req.RunId, req.OwnerUserId, since, resumeAt)
 			}
 		}
 		return
@@ -465,9 +484,19 @@ func (i *Integration) dispatchRun(ctx context.Context, req DispatchRequest) bool
 // means only the first claimant serves it from an event. A claimant that dies
 // is not stranded by that: its heartbeat goes stale, and the sweep's recovery
 // claims the RUN (leased, as ever) and resumes the request where it stopped.
+//
+// A RETRY THE FAILURE PATH PARKED ON claims under its wait (RetryWait), leased
+// like the run's own claim: the failing execution took the bare run id at its
+// dispatch and holds it for runClaimTTL, while the retry's backoff is thirty
+// seconds, so a retry claimed on the run id waited out the lease. It is only
+// ever a run no event dispatches (serveRetry): a goal's run is released under a
+// re-run request instead, which its own events claim under.
 func runClaimKey(req DispatchRequest) (string, time.Duration) {
 	if id := strings.TrimSpace(req.RerunRequestId); id != "" {
 		return req.RunId + "#rerun:" + id, 0
+	}
+	if since := strings.TrimSpace(req.RetryWait); since != "" {
+		return req.RunId + "#retry:" + since, runClaimTTL
 	}
 	return req.RunId, runClaimTTL
 }
@@ -530,6 +559,27 @@ func remedyWaitOf(ev events.Event) (kind, since string, ok bool) {
 		return "", "", false
 	}
 	return kind, rowString(rowMap(payload, "waitingOn"), "since"), true
+}
+
+// retryWaitOf reads a `retry` wait off a run event's payload: the `since` that
+// identifies it and the moment its backoff ends. ok is false for every other
+// wait, for an event that carried no payload to read one out of, and for a
+// retry whose time nobody can read, which is never due (failureRetryDue).
+func retryWaitOf(ev events.Event) (since string, resumeAt time.Time, ok bool) {
+	payload, _ := ev.Payload["payload"].(map[string]any)
+	if payload == nil {
+		return "", time.Time{}, false
+	}
+	kind, _, _, at, isWait := failureWait(payload)
+	if !isWait || kind != waitKindRetry {
+		return "", time.Time{}, false
+	}
+	since = strings.TrimSpace(rowString(rowMap(payload, "waitingOn"), "since"))
+	resumeAt, parsed := parseTime(at)
+	if !parsed || since == "" {
+		return "", time.Time{}, false
+	}
+	return since, resumeAt, true
 }
 
 // ErrRunAlreadyClosed is FailRun's answer for a run that reached a terminal
