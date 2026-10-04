@@ -353,4 +353,17 @@ var ownerGateExemptions = map[string]string{
 		"reshapes this concept and gives it a writer, and THAT is when the stamp becomes " +
 		"required; this entry self-expires, since the gate errors on an exemption that starts " +
 		"passing.",
+	// The v1:actions:action shape, ahead of its writer rather than behind it.
+	// Epic memql#5477 declares v1:pipelines:channel -- its tier, its card and
+	// its routing -- because a pipeline names its channels and a notify stage
+	// names one; epic memql#5480 (Delivery: channels and the notify stage) is
+	// where a channel is first WRITTEN, and its writer stamps ownerUserId from
+	// actor.userId like every pipelines write. Inventing a writer here to turn
+	// the gate green is the move the memql#3323 note above argues against, and
+	// dropping the tier would leave the concept undeclared on the read side,
+	// the subscription side and graph expansion until then. Self-expiring.
+	"v1:pipelines:channel": "memql#5480 -- the concept has NO WRITER in this build: epic memql#5477 " +
+		"declares it, its composite tier and its routing so a pipeline can name channels, and " +
+		"epic memql#5480 adds the channel writer, which stamps ownerUserId from actor.userId. " +
+		"This entry self-expires, since the gate errors on an exemption that starts passing.",
 }

@@ -2554,6 +2554,103 @@ QueryClient.prototype.packageSourceRegister = function (this: QueryClient, args:
   return this.executeNamed("packageSourceRegister", buildPackageSourceRegister(args), opts);
 };
 
+/** Ask one of the caller's pipeline runs to stop. It flags the row and ends nothing itself: the agent driving the run reads the flag at its next heartbeat, cancels what is executing and concludes the run cancelled. A queued run no agent has claimed is concluded cancelled on the spot. */
+export interface PipelinesCancelArgs {
+  /** The v1:pipelines:run to stop. Must be the caller's own. */
+  runId: string;
+}
+
+export function buildPipelinesCancel(args: PipelinesCancelArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "builtin pipelinesCancel(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesCancel(args: PipelinesCancelArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesCancel = function (this: QueryClient, args: PipelinesCancelArgs = {} as PipelinesCancelArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesCancel", buildPipelinesCancel(args), opts);
+};
+
+/** Connect a pipeline to one of the caller's sources (D12, D14). The caller must own the package, which must be a GitHub repository source fetched under a grant; the grant must reach the repository, proved by minting an installation token through it. Reads memql-package.yaml at the repository's default-branch head: a source with no `pipeline:` block is refused with pipeline_not_declared, and a block that does not validate is refused with its own pipeline_* code, so a pipeline that could never compile is never connected. Creates the source's one pipeline -- its id derived from the package id -- or reconnects it, which restates the configuration and keeps what the poll has seen. Answers {pipelineId, repository, delivery, compute, stages}, the stages being the block's stage names in order. */
+export interface PipelinesConnectArgs {
+  /** The v1:platform:package source to connect. Must be the caller's own. */
+  packageId: string;
+  /** How changes reach the pipeline: webhook (a GitHub delivery to this cluster's inbound seam) or poll (every minute, for a cluster GitHub cannot reach). */
+  delivery: string;
+  /** Where steps may run: cluster, the default, or cluster_and_fleet to let a step naming a need the cluster cannot meet route to a machine in the caller's fleet. */
+  compute?: string;
+  /** The globalSecret NAMES the pipeline's steps may resolve -- the allowlist. A name beginning MEMQL_ is refused. Values are never sent here or stored on the pipeline. */
+  secretNames?: string[];
+}
+
+export function buildPipelinesConnect(args: PipelinesConnectArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  parts.push("delivery: " + renderMemQLValue(args.delivery));
+  if (args.compute !== undefined) parts.push("compute: " + renderMemQLValue(args.compute));
+  if (args.secretNames !== undefined) parts.push("secretNames: " + renderMemQLValue(args.secretNames));
+  return "builtin pipelinesConnect(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesConnect(args: PipelinesConnectArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesConnect = function (this: QueryClient, args: PipelinesConnectArgs = {} as PipelinesConnectArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesConnect", buildPipelinesConnect(args), opts);
+};
+
+/** Disconnect one of the caller's pipelines. It opens no more runs, and a run an agent has yet to start concludes with pipeline_disconnected. The pipeline row and every run stay, because they are the history the source's Runs list shows; connecting again reactivates the same pipeline. */
+export interface PipelinesDisconnectArgs {
+  /** The v1:pipelines:pipeline to disconnect. Must be the caller's own. */
+  pipelineId: string;
+}
+
+export function buildPipelinesDisconnect(args: PipelinesDisconnectArgs): string {
+  const parts: string[] = [];
+  parts.push("pipelineId: " + renderMemQLValue(args.pipelineId));
+  return "builtin pipelinesDisconnect(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesDisconnect(args: PipelinesDisconnectArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesDisconnect = function (this: QueryClient, args: PipelinesDisconnectArgs = {} as PipelinesDisconnectArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesDisconnect", buildPipelinesDisconnect(args), opts);
+};
+
+/** Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. The original stays exactly as it ended. */
+export interface PipelinesRerunArgs {
+  /** The v1:pipelines:run to re-run. Must be the caller's own. */
+  runId: string;
+}
+
+export function buildPipelinesRerun(args: PipelinesRerunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "builtin pipelinesRerun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesRerun(args: PipelinesRerunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesRerun = function (this: QueryClient, args: PipelinesRerunArgs = {} as PipelinesRerunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesRerun", buildPipelinesRerun(args), opts);
+};
+
 /** List every AI provider this NODE has registered: its vendor and model, whether this node can call it, which tier of the resolution chain supplied its credential (federation | globalSecret | globalVariable | env | unresolved), and -- when it cannot be called -- why not. Produced from the live provider registry, never persisted, and carrying no credential or fingerprint of one. Per-node on purpose: two replicas genuinely can disagree, and that disagreement is the most useful thing this read surfaces. Owner-only. */
 export interface ProviderAuthStatusArgs {
 }

@@ -190,7 +190,14 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // the same section is served it instead of planning it again (D24). One
 // added, none removed; measured by the strict loader on this tree.
 // reviseLibraryDocument adds the human-approved document revision template.
-const shippedAutomationCount = 75
+//
+// 75 -> 77 in epic memql#5477 (pipelines, the seam): the new `pipelines`
+// domain's two triggers. triggerPipelinesOnGitHubDelivery opens runs from a
+// staged GitHub delivery, and pollPipelines is the every-minute poll and
+// recovery, placed on agent replicas behind its own `pipelines-poll` lease
+// (app/automation_schedule_placement.go). Two added, none removed; measured by
+// the strict loader on this tree.
+const shippedAutomationCount = 77
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

@@ -1,0 +1,42 @@
+// automations.memql
+//
+// The pipelines namespace's two triggers (epic memql#5477): a GitHub delivery
+// staged on the inbound seam, and the every-minute poll. Both only OPEN runs;
+// an agent node claims and drives each one (plan decision 10), so neither
+// automation executes a step itself.
+//
+// NEITHER RUNS UNDER THE MAINTENANCE PRINCIPAL. Both builtins read across
+// owners, and component/pipelinerun does those reads under its own synthetic
+// cluster-owner actor and every write under the owner's borrowed authority, so
+// the automation's default actor is never what a read is judged by.
+
+/// A GitHub delivery opens pipeline runs (design record D4-D6). Filtered to the first, received
+/// version of a github row: a status write republishes node.created, and a redelivery collapses onto
+/// the same row id, so the trigger's run key is what keeps either from opening a second run.
+@trigger(event="node.created", concept="v1:platform:inboundRequest")
+@filter(row => row.source == "github" && row.status == "received")
+automation triggerPipelinesOnGitHubDelivery {
+  args {
+    id           any
+    source       any
+    body         any
+    headersJson  any
+  }
+
+  opened := builtin pipelinesTrigger(
+    inboundRequestId: args.id,
+    source: args.source,
+    body: args.body,
+    headersJson: args.headersJson
+  )
+}
+
+/// Every minute: delivery=poll pipelines read the default branch's head and the open pull requests'
+/// heads and open runs for SHAs not seen, and runs no agent claimed, or whose driver went silent, are
+/// claimed again (D4, D11). Scheduled, and placed on AGENT replicas only, behind a cron lease of its
+/// own (`pipelines-poll`, app/automation_schedule_placement.go): the recovery half claims runs to
+/// drive them, and only an agent drives.
+@trigger(schedule="0 * * * * *")
+automation pollPipelines {
+  polled := builtin pipelinesPoll()
+}

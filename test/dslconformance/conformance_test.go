@@ -549,6 +549,21 @@ var idBearingFieldExemptions = map[string]string{
 	// into the slug and make every join and every selection miss.
 	"platform/modelMeasurement.modelId": "a runtime's own model tag, not a node id: the modelProfile row lives at a SLUG of it, and canonicalizing would break the byte-identity with the `model:<id>` label the router selects on (epic memql#5146)",
 	"platform/modelEvidence.modelId":    "a runtime's own model tag, not a node id; same reason as modelMeasurement.modelId (epic memql#5146)",
+	// --- epic memql#5477 (pipelines) ---
+	// v1:pipelines:run.workRunId names a v1:work:run, and the relationship
+	// CANNOT be written: dsl/pipelines declares its own `run`, and a
+	// relationship target resolves the owning domain's concept before any
+	// import (unified_loader.go resolveRelationshipTargetName), so
+	// `target=run` would canonicalize the value under v1:pipelines:run -- the
+	// group.accountId shadowing case. Its sibling workGoalId does carry one.
+	"pipelines/run.workRunId": "plain-fk-by-design: the bare name `run` shadows in this file -- dsl/pipelines declares its own run, so a relationship would canonicalize under the WRONG concept (epic memql#5477)",
+	// v1:work:step.logFileId is copied from an EXTERNAL runner's receipt (the
+	// pipelines substrate, epic memql#5478). A relationship canonicalizes on
+	// write and refuses an id of the wrong shape, and that write is the
+	// step's receipt -- so a runner handing over a malformed file id would
+	// leave the step with no receipt, re-sent at the same attempt on resume,
+	// rather than with a wrong link a person can see.
+	"work/step.logFileId": "plain-fk-by-design (@description declares plain string FK): copied from an external runner's receipt, where canonicalize-on-write would turn a malformed id into a failed receipt (epic memql#5477)",
 }
 
 // idBearingReferencesConcept detects the id-bearing-FK heuristic: a `v1:ns:concept`

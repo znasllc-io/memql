@@ -6284,6 +6284,131 @@ func PendingUserInvitationsBuild(args PendingUserInvitationsArgs) string {
 	return "query pendingUserInvitations()"
 }
 
+// PipelineChannelsForOwner -- The caller's notification channels, by name.
+//
+// Bound concept: v1:pipelines:channel (machine-readable: BoundConcepts["pipelineChannelsForOwner"] in generated_concepts.go).
+type PipelineChannelsForOwnerArgs struct {
+}
+
+// PipelineChannelsForOwner calls the engine query pipelineChannelsForOwner.
+func (qc *QueryClient) PipelineChannelsForOwner(ctx context.Context, args PipelineChannelsForOwnerArgs) (*Result, error) {
+	call := PipelineChannelsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "pipelineChannelsForOwner", call)
+}
+
+func PipelineChannelsForOwnerBuild(args PipelineChannelsForOwnerArgs) string {
+	_ = args
+	return "query pipelineChannelsForOwner()"
+}
+
+// PipelineForOwner -- One of the caller's pipelines by id.
+//
+// Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelineForOwner"] in generated_concepts.go).
+type PipelineForOwnerArgs struct {
+	PipelineId string
+}
+
+// PipelineForOwner calls the engine query pipelineForOwner.
+func (qc *QueryClient) PipelineForOwner(ctx context.Context, args PipelineForOwnerArgs) (*Result, error) {
+	call := PipelineForOwnerBuild(args)
+	return qc.executeNamed(ctx, "pipelineForOwner", call)
+}
+
+func PipelineForOwnerBuild(args PipelineForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineForOwner(")
+	b.WriteString("pipelineId: ")
+	b.WriteString(quoteMemQL(args.PipelineId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelineForPackage -- The caller's pipeline for one source -- what the source page reads to show its Pipeline facts. One pipeline per source, so this answers at most one row; the sort and page of one say so.
+//
+// Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelineForPackage"] in generated_concepts.go).
+type PipelineForPackageArgs struct {
+	PackageId string
+}
+
+// PipelineForPackage calls the engine query pipelineForPackage.
+func (qc *QueryClient) PipelineForPackage(ctx context.Context, args PipelineForPackageArgs) (*Result, error) {
+	call := PipelineForPackageBuild(args)
+	return qc.executeNamed(ctx, "pipelineForPackage", call)
+}
+
+func PipelineForPackageBuild(args PipelineForPackageArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineForPackage(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelineRunForOwner -- One of the caller's runs by id -- the run page.
+//
+// Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunForOwner"] in generated_concepts.go).
+type PipelineRunForOwnerArgs struct {
+	RunId string
+}
+
+// PipelineRunForOwner calls the engine query pipelineRunForOwner.
+func (qc *QueryClient) PipelineRunForOwner(ctx context.Context, args PipelineRunForOwnerArgs) (*Result, error) {
+	call := PipelineRunForOwnerBuild(args)
+	return qc.executeNamed(ctx, "pipelineRunForOwner", call)
+}
+
+func PipelineRunForOwnerBuild(args PipelineRunForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineRunForOwner(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelineRunsForOwner -- The caller's runs, most recently queued first, optionally narrowed to one pipeline -- the Runs list across every source, or one source's runs.
+//
+// Bound concept: v1:pipelines:run (machine-readable: BoundConcepts["pipelineRunsForOwner"] in generated_concepts.go).
+type PipelineRunsForOwnerArgs struct {
+	// The pipeline to narrow to. Absent lists every pipeline's runs.
+	PipelineId string
+}
+
+// PipelineRunsForOwner calls the engine query pipelineRunsForOwner.
+func (qc *QueryClient) PipelineRunsForOwner(ctx context.Context, args PipelineRunsForOwnerArgs) (*Result, error) {
+	call := PipelineRunsForOwnerBuild(args)
+	return qc.executeNamed(ctx, "pipelineRunsForOwner", call)
+}
+
+func PipelineRunsForOwnerBuild(args PipelineRunsForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query pipelineRunsForOwner(")
+	if args.PipelineId != "" {
+		b.WriteString("pipelineId: ")
+		b.WriteString(quoteMemQL(args.PipelineId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// PipelinesForOwner -- The caller's pipelines, most recently connected first.
+//
+// Bound concept: v1:pipelines:pipeline (machine-readable: BoundConcepts["pipelinesForOwner"] in generated_concepts.go).
+type PipelinesForOwnerArgs struct {
+}
+
+// PipelinesForOwner calls the engine query pipelinesForOwner.
+func (qc *QueryClient) PipelinesForOwner(ctx context.Context, args PipelinesForOwnerArgs) (*Result, error) {
+	call := PipelinesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "pipelinesForOwner", call)
+}
+
+func PipelinesForOwnerBuild(args PipelinesForOwnerArgs) string {
+	_ = args
+	return "query pipelinesForOwner()"
+}
+
 // Policy -- Returns the validation policy for a record type. Space-specific policies take precedence over global.
 //
 // Bound concept: v1:data:policy (machine-readable: BoundConcepts["policy"] in generated_concepts.go).

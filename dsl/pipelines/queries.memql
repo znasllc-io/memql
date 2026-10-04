@@ -1,0 +1,223 @@
+// queries.memql
+//
+// Reads over the pipelines namespace. Same-domain constructs are ambient, so
+// there is no `use pipelines.*` line here (#2617); `run` and `channel` resolve
+// to this domain's own concepts although v1:work:run, v1:bench:run and
+// v1:shopify:channel share the bare names.
+//
+// TWO KINDS OF READ, and they are separate constructs on purpose.
+//
+// The PERSON-FACING reads carry `row.ownerUserId == actor.userId`: the Runs
+// list, the run page and the source page's Pipeline facts ask about the
+// caller's own pipelines and nobody else's.
+//
+// The SERVER-ONLY reads are component/pipelinerun's, and they have to see
+// every owner's rows BY NATURE: a delivery names a repository and the trigger
+// must find whichever pipelines of it exist, whoever connected them; the poll
+// walks every polled pipeline in the cluster; and recovery must find a run
+// whose driver went silent no matter whose run it is. There is no person
+// behind any of those calls -- GitHub, a schedule, an agent replica -- so an
+// actor.userId conjunct would match zero rows and answer as if nothing were
+// connected. Each spells the composite tier's cluster-owner arm out as a
+// top-level conjunct (`actor.isClusterOwner == true`), which is what
+// TestRowAuthzEnforcementLandGate needs to see, and narrows nothing that
+// reaches them: @serverOnly admits only server-side Go under internal origin,
+// and component/pipelinerun reads under its own synthetic cluster-owner actor
+// (auth.ContextWithSystemActor), which is precisely what the conjunct tests.
+
+use common.traits.{ statusIsActive }
+
+// ---- person-facing, owner-scoped ----
+
+/// The caller's pipelines, most recently connected first.
+@actor
+query pipeline pipelinesForOwner {
+  filter    row => row.ownerUserId == actor.userId
+  sort      "connectedAt", "desc"
+  paginate  50
+  shape     pipelineFull
+}
+
+/// One of the caller's pipelines by id.
+@actor
+query pipeline pipelineForOwner {
+  args {
+    pipelineId  string!
+  }
+  filter  row => row.id == args.pipelineId && row.ownerUserId == actor.userId
+  shape   pipelineFull
+}
+
+/// The caller's pipeline for one source -- what the source page reads to show its Pipeline facts.
+/// One pipeline per source, so this answers at most one row; the sort and page of one say so.
+@actor
+query pipeline pipelineForPackage {
+  args {
+    packageId  string!
+  }
+  filter    row => row.packageId == args.packageId && row.ownerUserId == actor.userId
+  sort      "row.createdAt", "desc"
+  paginate  1
+  shape     pipelineFull
+}
+
+/// The caller's runs, most recently queued first, optionally narrowed to one pipeline -- the Runs
+/// list across every source, or one source's runs.
+@actor
+query run pipelineRunsForOwner {
+  args {
+    /// The pipeline to narrow to. Absent lists every pipeline's runs.
+    pipelineId  string
+  }
+  filter    row => row.ownerUserId == actor.userId
+                && (args.pipelineId == nil || row.pipelineId == args.pipelineId)
+  sort      "queuedAt", "desc"
+  paginate  50
+  shape     pipelineRunFull
+}
+
+/// One of the caller's runs by id -- the run page.
+@actor
+query run pipelineRunForOwner {
+  args {
+    runId  string!
+  }
+  filter  row => row.id == args.runId && row.ownerUserId == actor.userId
+  shape   pipelineRunFull
+}
+
+/// The caller's notification channels, by name.
+@actor
+query channel pipelineChannelsForOwner {
+  filter    row => row.ownerUserId == actor.userId
+  sort      "name", "asc"
+  paginate  100
+  shape     pipelineChannelFull
+}
+
+// ---- server-only, the runner's ----
+
+/// The active pipelines of one repository -- the trigger's match for a delivery. @serverOnly: the
+/// caller is a GitHub delivery with no person behind it, and every owner who connected the
+/// repository must be found, so an actor.userId conjunct would match nothing and the delivery would
+/// open no run. Several owners may connect one repository, hence a page rather than one row.
+@serverOnly
+@actor
+query pipeline pipelinesForRepository {
+  args {
+    repository  string!
+  }
+  filter    row => row.repository == args.repository
+                && statusIsActive(row)
+                && actor.isClusterOwner == true
+  sort      "row.createdAt", "asc"
+  paginate  100
+  shape     pipelineFull
+}
+
+/// Every active pipeline whose delivery is the poll -- the every-minute poll's walk. @serverOnly: a
+/// schedule has nobody attached, and the walk spans every owner by nature, so actor.userId scoping
+/// would read zero rows and look exactly like a cluster with nothing to poll. Bounded at 500; the
+/// runner reports a page that comes back full rather than treating it as the whole set.
+@serverOnly
+@actor
+query pipeline pipelinesPolled {
+  filter    row => row.delivery == "poll"
+                && statusIsActive(row)
+                && actor.isClusterOwner == true
+  sort      "row.createdAt", "asc"
+  paginate  500
+  shape     pipelineFull
+}
+
+/// One pipeline by id, whoever owns it -- what the driver loads before it drives a run. @serverOnly:
+/// the driver is an agent replica acting for the run, not a person, and must learn the owner FROM
+/// this row before it can borrow that owner's authority, so it cannot scope by actor.userId first.
+@serverOnly
+@actor
+query pipeline pipelineById {
+  args {
+    pipelineId  string!
+  }
+  filter  row => row.id == args.pipelineId && actor.isClusterOwner == true
+  shape   pipelineFull
+}
+
+/// Every attempt of one run key -- the trigger's dedup read, taken under the run key's gate with a
+/// fresh read. @serverOnly: a webhook and the poll for one head must find each other's run whoever
+/// owns it, and an actor.userId conjunct would hide exactly the row that makes the second one a
+/// no-op. Bounded by the re-runs of one head; the caller takes the highest attempt itself, because
+/// @unbounded cannot be combined with a sort.
+@serverOnly
+@unbounded("every attempt of ONE run key -- bounded by the re-runs of one head")
+@actor
+query run pipelineRunsForKey {
+  args {
+    runKey  string!
+  }
+  filter  row => row.runKey == args.runKey && actor.isClusterOwner == true
+  shape   pipelineRunFull
+}
+
+/// The runs of one pipeline at one SHA, most recently queued first -- what a re-requested check
+/// suite re-runs. @serverOnly: the request is GitHub's, with no person behind it, so there is no
+/// actor.userId to scope to; the owner is learned from the rows this returns.
+@serverOnly
+@actor
+query run pipelineRunsForPipelineSha {
+  args {
+    pipelineId  string!
+    sha         string!
+  }
+  filter    row => row.pipelineId == args.pipelineId
+                && row.sha == args.sha
+                && actor.isClusterOwner == true
+  sort      "queuedAt", "desc"
+  paginate  50
+  shape     pipelineRunFull
+}
+
+/// The run a GitHub check run reports, by its check-run id -- what a re-requested check run re-runs.
+/// @serverOnly for pipelineRunsForPipelineSha's reason: the caller is GitHub, so actor.userId names
+/// nobody. A check run belongs to one run; the sort and page of one say so.
+@serverOnly
+@actor
+query run pipelineRunByCheckRun {
+  args {
+    repository  string!
+    checkRunId  string!
+  }
+  filter    row => row.repository == args.repository
+                && row.checkRunId == args.checkRunId
+                && actor.isClusterOwner == true
+  sort      "row.createdAt", "desc"
+  paginate  1
+  shape     pipelineRunFull
+}
+
+/// Every run not yet completed, oldest first -- recovery's read: a queued run no agent claimed, and a
+/// run whose driver stopped renewing its lease. @serverOnly: recovery runs on a schedule across
+/// every owner, and a run stranded by a lost replica is exactly the one its owner cannot rescue, so
+/// an actor.userId conjunct would hide the population the read exists for. Bounded at 500; the age
+/// comparison stays in Go, which already holds the thresholds.
+@serverOnly
+@actor
+query run pipelineRunsUnfinished {
+  filter    row => row.status in ["queued", "in_progress"] && actor.isClusterOwner == true
+  sort      "queuedAt", "asc"
+  paginate  500
+  shape     pipelineRunFull
+}
+
+/// One run by id, whoever owns it -- the driver's claim, heartbeat and conclusion read it fresh
+/// under the run's gate. @serverOnly for pipelineById's reason: the driver learns the owner from this
+/// row, so it cannot scope by actor.userId before reading it.
+@serverOnly
+@actor
+query run pipelineRunById {
+  args {
+    runId  string!
+  }
+  filter  row => row.id == args.runId && actor.isClusterOwner == true
+  shape   pipelineRunFull
+}
