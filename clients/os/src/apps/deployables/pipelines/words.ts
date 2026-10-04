@@ -16,7 +16,7 @@ import type { Compute, Delivery, RunRow, StageRow, StageStatus, StepRow } from "
 export type RunTone = "accent" | "warn" | "muted";
 
 /** The mark a run, a stage or a step draws: the kit rail's states. */
-export type RunMark = "done" | "stopped" | "current" | "ahead" | "skipped" | "pending";
+export type RunMark = "done" | "stopped" | "current" | "waiting" | "ahead" | "skipped" | "pending";
 
 export interface Outcome {
   /** One word: Passed, Failed, Running, Queued, Cancelling, Cancelled, Refused. */
@@ -97,12 +97,12 @@ export function runOutcome(run: RunRow): Outcome {
   if (run.status === "queued") {
     return run.cancelRequested
       ? { word: "Cancelling", detail: "", tone: "muted", mark: "current" }
-      : { word: "Queued", detail: "", tone: "muted", mark: "ahead" };
+      : { word: "Queued", detail: "", tone: "muted", mark: "waiting" };
   }
   if (run.status === "in_progress") {
     const at = currentStage(run.stages);
     if (run.cancelRequested) return { word: "Cancelling", detail: at ? `at ${at.name}` : "", tone: "muted", mark: "current" };
-    return { word: "Running", detail: at ? at.name : "", tone: "accent", mark: "current" };
+    return { word: "Running", detail: at ? `at ${at.name}` : "", tone: "accent", mark: "current" };
   }
   switch (run.conclusion) {
     case "success": {
@@ -147,8 +147,15 @@ export function attemptWords(run: RunRow): string {
   return run.rerunFailedOnly ? `Attempt ${run.attempt}, failed steps only` : `Attempt ${run.attempt}`;
 }
 
+/** What a run covered: an affected run tests what the change touches, a full run everything once. */
 export function modeWord(mode: RunRow["mode"]): string {
-  return mode === "full" ? "Full suite" : "Affected";
+  return mode === "full" ? "Full suite" : "Only what changed";
+}
+
+/** When a run was asked for, in the reader's own day: "Today, 07:11", "Friday, October 2, 05:03". */
+export function whenWords(iso: string, now: Date): string {
+  const time = timeOfDay(iso);
+  return time === "" ? "" : `${dayLabel(iso, now)}, ${time}`;
 }
 
 export function shortSha(sha: string): string {

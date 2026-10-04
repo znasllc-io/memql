@@ -22,6 +22,30 @@
   display: none;
 }
 
+/* A RUNNING MARK HOLDS STILL HERE. The deploy rail pulses its one running
+ * stage; a list of runs and a stage's steps can hold several at once, and a
+ * page of pulses is the perpetual motion SUPERVISED-VISUAL-COMPOSITION.md
+ * rules out. The solid accent disc with no glyph already says "moving"; the
+ * stops across a run page keep the reduced-motion ring, since there the
+ * running stop is also the one the eye should find first. */
+.os-rail-stage.pipeline-mark[data-state="current"] .os-rail-mark {
+  animation: none;
+  box-shadow: none;
+}
+.pipeline-stops .os-rail-stage[data-state="current"] .os-rail-mark {
+  animation: none;
+  box-shadow: 0 0 0 3px var(--os-accent-soft);
+}
+
+/* A QUEUED RUN'S EMPTY RING takes the muted ink for its edge: the base mark's
+ * hairline all but disappears on the plate at list size, and an empty ring is
+ * the whole of what says "not started". */
+.os-rail-stage.pipeline-mark[data-state="waiting"] .os-rail-mark,
+.os-rail-stage.pipeline-mark[data-state="ahead"] .os-rail-mark,
+.pipeline-stops .os-rail-stage[data-state="ahead"] .os-rail-mark {
+  border-color: var(--os-muted);
+}
+
 /* ---- facts on one line, separated by hairlines rather than glyphs -------- */
 
 .pipeline-run-facts,
@@ -75,6 +99,8 @@
 .pipeline-run-detail {
   color: var(--os-muted);
   font-size: var(--os-text-sm);
+}
+.pipeline-nowrap {
   white-space: nowrap;
 }
 .pipeline-run-time {
@@ -242,9 +268,14 @@
   color: var(--os-ink);
   font-family: var(--os-font-mono);
   font-size: var(--os-text-xs);
+  font-variant-ligatures: none;
   line-height: 1.55;
   white-space: pre;
   tab-size: 4;
+}
+.pipeline-log:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
 }
 .pipeline-log-acts {
   display: flex;

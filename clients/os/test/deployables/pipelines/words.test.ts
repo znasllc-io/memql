@@ -19,9 +19,9 @@ describe("the pipelines vocabulary", () => {
     expect(runOutcome(run())).toMatchObject({ word: "Failed", detail: "at tests, 7m 40s", mark: "stopped", tone: "warn" });
     expect(runOutcome(run({ conclusion: "success", stages: [{ name: "checks", status: "passed", durationMs: 1, steps: 1, failed: 0 }] })))
       .toMatchObject({ word: "Passed", detail: "1 stage, 7m 40s", mark: "done" });
-    expect(runOutcome(run({ status: "queued", conclusion: "", durationMs: 0 }))).toMatchObject({ word: "Queued", detail: "" });
+    expect(runOutcome(run({ status: "queued", conclusion: "", durationMs: 0 }))).toMatchObject({ word: "Queued", detail: "", mark: "waiting" });
     expect(runOutcome(run({ status: "in_progress", conclusion: "", stages: [{ name: "checks", status: "passed" }, { name: "tests", status: "waiting" }] })))
-      .toMatchObject({ word: "Running", detail: "tests", mark: "current" });
+      .toMatchObject({ word: "Running", detail: "at tests", mark: "current" });
     expect(runOutcome(run({ status: "in_progress", conclusion: "", cancelRequested: true, stages: [] }))).toMatchObject({ word: "Cancelling" });
     expect(runOutcome(run({ conclusion: "cancelled", stages: [{ name: "tests", status: "cancelled" }] }))).toMatchObject({ word: "Cancelled", detail: "at tests, 7m 40s" });
   });

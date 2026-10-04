@@ -128,7 +128,7 @@ export function RunsSection(props: RunsSectionProps) {
         breadcrumbs={[
           { label: "Runs", onSelect: toList },
           ...(source.name !== "" ? [{ label: source.name, ...(source.packageId !== "" ? { onSelect: () => props.onOpenSource(source.packageId) } : {}) }] : []),
-          { label: run ? branchWords(run) || shortSha(run.sha) : "Run" },
+          { label: run ? runTitle(run) : "Run" },
         ]}
         back={{ label: "Runs", onSelect: toList }}
         can={props.can}
@@ -139,6 +139,25 @@ export function RunsSection(props: RunsSectionProps) {
 
   return <RunsList {...props} all={all} older={older} setOlder={setOlder} filter={filter} setFilter={setFilter} sourceOf={sourceOf}
     pipelineName={pipelineName} onOpen={(runId) => setView({ kind: "run", runId })} />;
+}
+
+/**
+ * An outcome's detail ("2 stages, deploy skipped, 3m 9s"), wrapping only
+ * BETWEEN its phrases: a narrow column broke "3m 9s" across two lines, which
+ * reads as two facts.
+ */
+function Phrases({ text }: { text: string }) {
+  const parts = text.split(", ");
+  return (
+    <>
+      {parts.map((part, i) => (
+        <span key={i}>
+          <span className="pipeline-nowrap">{part}</span>
+          {i < parts.length - 1 ? ", " : ""}
+        </span>
+      ))}
+    </>
+  );
 }
 
 function RunsList({ runs, feed, pipelines, all, older, setOlder, filter, setFilter, sourceOf, pipelineName, onOpen, onOpenSources }: RunsSectionProps & {
@@ -292,11 +311,12 @@ function RunLine({ run, source, onOpen }: { run: RunRow; source: string; onOpen:
       }
       state={outcome.word}
       tone={outcome.tone}
-      stateExtra={outcome.detail !== "" ? <span className="pipeline-run-detail">{outcome.detail}</span> : null}
       trailing={<time className="pipeline-run-time" dateTime={run.queuedAt}>{timeOfDay(run.queuedAt)}</time>}
       current={outcome.mark === "current"}
       label={`Open ${title}: ${source}${branch ? `, ${branch}` : ""}, ${outcome.word.toLowerCase()}${outcome.detail ? ` ${outcome.detail}` : ""}`}
       onOpen={onOpen}
-    />
+    >
+      {outcome.detail !== "" ? <span className="pipeline-run-detail"><Phrases text={outcome.detail} /></span> : null}
+    </RecordRow>
   );
 }

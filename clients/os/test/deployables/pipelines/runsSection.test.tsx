@@ -71,9 +71,12 @@ describe("the Runs tab", () => {
     expect(within(failed).getByText("3f9c2ab")).toBeTruthy();
     expect(within(failed).getByText("Pull request #42")).toBeTruthy();
     expect(within(failed).getByText("Failed")).toBeTruthy();
-    expect(within(failed).getByText("at tests, 7m 40s")).toBeTruthy();
-    // A push that ran every stage but could not notify says so, in words.
-    expect(within(rowFor("Fix shard balance")).getByText("3 stages, notify skipped, 7m 40s")).toBeTruthy();
+    expect(failed.querySelector(".pipeline-run-detail")?.textContent).toBe("at tests, 7m 40s");
+    // A push that ran every stage but could not notify says so, in words, and
+    // a narrow column wraps between its phrases, never inside one.
+    const pushed = rowFor("Fix shard balance").querySelector(".pipeline-run-detail");
+    expect(pushed?.textContent).toBe("3 stages, notify skipped, 7m 40s");
+    expect([...(pushed?.querySelectorAll(".pipeline-nowrap") ?? [])].map((p) => p.textContent)).toEqual(["3 stages", "notify skipped", "7m 40s"]);
   });
 
   it("narrows by outcome behind Refine, with a chip that takes the question back", async () => {

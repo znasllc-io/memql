@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { FileText } from "lucide-react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -24,7 +24,7 @@ import { newerAttemptOf, runById } from "./runs";
 import { Mark } from "./Mark";
 import { StopsAcross } from "./StopsAcross";
 import { openStopFor, shardsOf, stopsForRun, type RunStop } from "./stops";
-import { attemptWords, durationWords, modeWord, runTitle, shortSha, stepLabel, stepMark, stepWord, triggerWords, whereWords } from "./words";
+import { attemptWords, branchWords, durationWords, modeWord, runTitle, shortSha, stepLabel, stepMark, stepWord, triggerWords, whenWords, whereWords } from "./words";
 import "./pipelines.css";
 
 // THE RUN PAGE, layout A (design record D13; issue memql#5500): the
@@ -181,11 +181,13 @@ function RunPageFor({ run, runs, pipeline, sourceName, breadcrumbs, back, can, o
             {run.event === "pull_request" && run.pullRequest > 0 ? (
               <a href={`https://github.com/${run.repository}/pull/${run.pullRequest}`} target="_blank" rel="noopener noreferrer">{triggerWords(run)}</a>
             ) : <span>{triggerWords(run)}</span>}
+            {branchWords(run) !== "" ? <span>{branchWords(run)}</span> : null}
             {run.sha !== "" ? (
               <a className="pipeline-mono" href={`https://github.com/${run.repository}/commit/${run.sha}`} target="_blank" rel="noopener noreferrer" title={run.sha}>{shortSha(run.sha)}</a>
             ) : null}
             <span>{modeWord(run.mode)}</span>
             {attemptWords(run) !== "" ? <span>{attemptWords(run)}</span> : null}
+            {whenWords(run.queuedAt, new Date()) !== "" ? <time dateTime={run.queuedAt}>{whenWords(run.queuedAt, new Date())}</time> : null}
           </p>
 
           {run.notes.map((note) => (
@@ -269,7 +271,7 @@ function StageSteps({ stop, files, machineName, onOpenFile }: {
               name={label}
               secondary={skipped ? (step.reason || word) : where}
               state={word}
-              tone={step.status === "failed" ? "warn" : step.status === "done" || step.errorCode === "pipeline_passed_earlier" ? "accent" : "muted"}
+              tone={step.status === "failed" ? "warn" : step.status === "done" || step.status === "running" || step.errorCode === "pipeline_passed_earlier" ? "accent" : "muted"}
               stateExtra={step.durationMs > 0 && !skipped ? <span className="pipeline-step-took">{durationWords(step.durationMs)}</span> : null}
               dim={step.status === "pending" || step.status === "ready" || step.status === "waiting"}
             />
@@ -300,6 +302,14 @@ function FailedStep({ step, log, onOpenFile }: { step: StepRow; log: RunFileRow 
   const [tail, setTail] = useState<LogTail | null>(null);
   const [tailError, setTailError] = useState("");
   const artifactId = log?.artifactId ?? "";
+  // A LOG TAIL OPENS AT ITS END. The failure's own summary -- the FAIL line,
+  // the exit status -- is the last thing a step prints, and a box that opens
+  // at its top shows the setup above it with the answer below the fold.
+  const box = useRef<HTMLPreElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [tail]);
   useEffect(() => {
     if (artifactId === "") return;
     const abort = new AbortController();
@@ -322,7 +332,7 @@ function FailedStep({ step, log, onOpenFile }: { step: StepRow; log: RunFileRow 
       ) : tailError !== "" ? (
         <Caption>{tailError}</Caption>
       ) : tail !== null && tail.lines.length > 0 ? (
-        <pre className="pipeline-log" aria-label={`The last lines of ${step.key}'s log`}>{tail.lines.join("\n")}</pre>
+        <pre ref={box} className="pipeline-log" tabIndex={0} aria-label={`The last lines of ${step.key}'s log`}>{tail.lines.join("\n")}</pre>
       ) : (
         <Caption>The log is empty.</Caption>
       )}

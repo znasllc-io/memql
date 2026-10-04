@@ -34,6 +34,7 @@ import {
   type FakeSeed,
 } from "../test/deployables/harness";
 import { installQaConnection } from "./connectionShim";
+import { FAILED_LOG, PIPELINES_NO_RUNS_SEED, PIPELINES_SEED, installContentRoute } from "./pipelinesSeeds";
 import { StorePanel } from "../src/apps/deployables/store/StorePanel";
 import { DeployablesApp } from "../src/apps/deployables/DeployablesApp";
 import { LocalDeployablesSettingsStore } from "../src/apps/deployables/settings";
@@ -372,6 +373,25 @@ function Lists({ section }: { section: "deployables" | "sources" | "repositories
   );
 }
 
+/**
+ * The Runs tab, or one run's page opened as the check run's details link opens
+ * it: a window intent naming the run (epic memql#5479).
+ */
+function RunsWindow({ runId }: { runId?: string }) {
+  return (
+    <WindowBody fallback="Runs">
+      <DeployablesApp
+        sectionId="runs"
+        navigate={() => {}}
+        askContext={() => {}}
+        store={settingsStore()}
+        intent={runId ? { id: `qa-${runId}`, payload: { runId } } : undefined}
+        consumeIntent={() => {}}
+      />
+    </WindowBody>
+  );
+}
+
 /** The pane wrapper `DeployablePage` gives the Store view, verbatim. */
 function StorePane({ site, canBind }: { site: ReturnType<typeof siteFromRow>; canBind: boolean }) {
   return (
@@ -684,6 +704,25 @@ const VIEWS: Record<
   // The cluster's GitHub App, in each reading a surface has of it.
   "github-owner": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="deployables" /> },
   "github-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="deployables" /> },
+  // Pipelines (epic memql#5479): the Runs tab and a run page in each state.
+  "pipeline-runs": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow /> },
+  "pipeline-runs-empty": { seed: PIPELINES_NO_RUNS_SEED, framed: true, render: () => <RunsWindow /> },
+  "pipeline-runs-none": { seed: {}, framed: true, render: () => <RunsWindow /> },
+  "pipeline-run-failed": {
+    connect: () => {
+      installContentRoute(FAILED_LOG);
+      return fakeConnection(PIPELINES_SEED);
+    },
+    framed: true,
+    render: () => <RunsWindow runId="r-7" />,
+  },
+  "pipeline-run-running": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-8" /> },
+  "pipeline-run-queued": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-9" /> },
+  "pipeline-run-passed": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-6" /> },
+  "pipeline-run-refused": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-5" /> },
+  "pipeline-run-cancelled": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-4" /> },
+  "pipeline-run-rerun": { seed: PIPELINES_SEED, framed: true, render: () => <RunsWindow runId="r-3" /> },
+  "pipeline-run-developer": { seed: PIPELINES_SEED, role: "developer", framed: true, render: () => <RunsWindow runId="r-7" /> },
   "settings-no-app": { seed: NO_APP_OWNER, framed: true, render: () => <Lists section="settings" /> },
   "settings-no-app-member": { seed: NO_APP_MEMBER, role: "developer", framed: true, render: () => <Lists section="settings" /> },
   "settings-app": { seed: APP_FROM_HERE, framed: true, render: () => <Lists section="settings" /> },

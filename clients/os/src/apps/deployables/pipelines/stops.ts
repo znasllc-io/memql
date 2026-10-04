@@ -29,7 +29,12 @@ export interface RunStop {
   status: StageStatus;
   /** The stage's state in one word, as the check run says it. */
   word: string;
-  /** Its time -- its longest finished step's, since its steps run at once -- or "". */
+  /**
+   * Its time -- its longest finished step's, since its steps run at once (the
+   * driver's own rule) -- or "" while it is still running or waiting: a
+   * finished step's time beside "Running" would read as the stage's elapsed
+   * time, which nothing here measures.
+   */
   took: string;
   steps: StepRow[];
 }
@@ -124,7 +129,7 @@ export function stopsForRun(run: RunRow, steps: readonly StepRow[]): RunStop[] {
         status,
         state: stateFor(statuses[i]!, run, i === current),
         word: stageWord(status),
-        took: durationWords(longest(stage.steps)),
+        took: status === "running" || status === "waiting" ? "" : durationWords(longest(stage.steps)),
         steps: stage.steps,
       };
     });

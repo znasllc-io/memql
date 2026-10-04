@@ -90,6 +90,19 @@ describe("a run's stops", () => {
     expect(openStopFor(stops, going)).toBe("tests");
   });
 
+  it("gives a stage still running no time: its longest finished step is not its elapsed time", () => {
+    const going = run({ status: "in_progress", conclusion: "", stages: [] });
+    const stops = stopsForRun(going, [
+      step("checks.vet", { seq: 0, durationMs: 29000 }),
+      step("tests.unit", { seq: 1, status: "running", durationMs: 0 }),
+      step("tests.os", { seq: 2, durationMs: 88000 }),
+      step("deploy.verify", { seq: 3, status: "pending", durationMs: 0 }),
+    ]);
+    expect(stops.map((s) => [s.name, s.word, s.took])).toEqual([
+      ["checks", "Passed", "29s"], ["tests", "Running", ""], ["deploy", "Waiting", ""],
+    ]);
+  });
+
   it("carries a failed-only re-run's earlier passes as passes", () => {
     const stops = stopsForRun(run({ conclusion: "success" }), [step("checks.vet", { seq: 0, status: "skipped", errorCode: "pipeline_passed_earlier" })]);
     expect(stops[0]).toMatchObject({ state: "done", word: "Passed" });

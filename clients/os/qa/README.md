@@ -46,7 +46,14 @@ what says the page has not become a wall of advisories), or `overview`,
 `nexus-overview` (what an automation is for, epic memql#5414: a learned
 procedure's Reuse panel with the evidence deciding, with a person's own label
 over evidence that disagrees, and before anything was counted; the list with
-every label on it; an authored automation's detail; the Overview's ratio);
+every label on it; an authored automation's detail; the Overview's ratio),
+or `pipeline-runs`, `pipeline-runs-empty`, `pipeline-runs-none`,
+`pipeline-run-failed`, `pipeline-run-running`, `pipeline-run-queued`,
+`pipeline-run-passed`, `pipeline-run-refused`, `pipeline-run-cancelled`,
+`pipeline-run-rerun`, `pipeline-run-developer` (Deployables > Runs and a run
+page in each state, epic memql#5479; the seeds are `qa/pipelinesSeeds.ts`, and
+`pipeline-run-failed` answers the Library content route with a Go test's last
+lines so the log tail is judged with a real failure in it);
 `mode` is `dark`
 or `light`. **Take at least one narrow capture** (`820,760`): two of
 the first three real defects this harness found were invisible at 1400x900.

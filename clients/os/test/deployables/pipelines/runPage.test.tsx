@@ -79,7 +79,7 @@ describe("the run page", () => {
     // The stop the run stopped at is the open one.
     expect(stops[1]!.getAttribute("aria-selected")).toBe("true");
     expect(screen.getByText("Pull request #42")).toBeTruthy();
-    expect(screen.getByText("Affected")).toBeTruthy();
+    expect(screen.getByText("Only what changed")).toBeTruthy();
   });
 
   it("shows a failed step's last lines, the way to its whole log, and that it is already in the Library", async () => {
