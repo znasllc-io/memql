@@ -178,6 +178,8 @@ type Runner struct {
 	lastReap  time.Time
 	reaping   bool
 	onReaped  func(deleted int)
+	// statusTrouble is what Status last logged of the API errors it met.
+	statusTrouble apiTrouble
 }
 
 // inflight is one Run on this replica: what CancelRun cancels by run, and
@@ -215,6 +217,7 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 		inflight:       map[*inflight]struct{}{},
 		claims:         map[string]*step{},
 		reapEvery:      reapInterval,
+		statusTrouble:  apiTrouble{},
 	}
 }
 
@@ -260,8 +263,14 @@ func (r *Runner) Status(ctx context.Context, req StatusRequest) StatusReply {
 		return StatusReply{State: StateRunning}
 	case err != nil:
 		// Nothing here vouches for the step: whoever asks may try another
-		// replica.
-		r.log.Warn("pipelines: reading a step's Job for its status", "jobName", req.JobName, "error", err)
+		// replica. The agent asks after every step it waits on every
+		// statusPollInterval, so a persistent error is logged as a loop's is.
+		r.mu.Lock()
+		due := r.statusTrouble.due(r.now(), "reading a step's Job for its status", err)
+		r.mu.Unlock()
+		if due {
+			r.log.Warn("pipelines: reading a step's Job for its status", "jobName", req.JobName, "error", err)
+		}
 		return StatusReply{State: StateStale}
 	}
 	if out, ok := persisted(job); ok {
@@ -1198,12 +1207,21 @@ type troubleLogged struct {
 // warn logs err, met making the call what, unless it is what was logged for
 // that call last, less than apiTroubleRepeat ago.
 func (t apiTrouble) warn(s *step, what string, err error) {
-	now, said := s.r.now(), err.Error()
+	if t.due(s.r.now(), what, err) {
+		s.log.Warn("pipelines: "+what, "error", err)
+	}
+}
+
+// due says err, met making the call what at now, is to be logged -- it is not
+// what was logged for that call last, less than apiTroubleRepeat ago -- and
+// records it when it is.
+func (t apiTrouble) due(now time.Time, what string, err error) bool {
+	said := err.Error()
 	if last, ok := t[what]; ok && last.err == said && now.Sub(last.at) < apiTroubleRepeat {
-		return
+		return false
 	}
 	t[what] = troubleLogged{err: said, at: now}
-	s.log.Warn("pipelines: "+what, "error", err)
+	return true
 }
 
 // createFailure is the step's failure when the API server refused to create

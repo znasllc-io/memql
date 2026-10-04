@@ -4311,6 +4311,27 @@ func TestStatusStates(t *testing.T) {
 	})
 }
 
+// TestStatusLogsAPersistentAPIErrorOnce (fix round 2, minor 5): the agent
+// asks after every step it waits on every statusPollInterval, so an API error
+// Status keeps meeting is logged when it appears, not on every question.
+func TestStatusLogsAPersistentAPIErrorOnce(t *testing.T) {
+	h := newRunnerHarness(t)
+	logs := h.logs()
+	h.c.with(func(c *rtCluster) {
+		for i := 0; i < 10; i++ {
+			c.jobGetFailures = append(c.jobGetFailures, rtUnavailable)
+		}
+	})
+	for i := 0; i < 10; i++ {
+		if got := h.r.Status(context.Background(), StatusRequest{JobName: testJobName}); got.State != StateStale {
+			t.Fatalf("Status = %+v, want stale: nothing here vouches for the step", got)
+		}
+	}
+	if n := logs.count("pipelines: reading a step's Job for its status"); n != 1 {
+		t.Errorf("%d warnings of ten failed reads, want one\n%s", n, logs)
+	}
+}
+
 // TestJobNamesAreWhatStatusAndAckAccept: Status and Ack refuse a name that is
 // not a step Job's, so JobName's names must all be accepted.
 func TestJobNamesAreWhatStatusAndAckAccept(t *testing.T) {
