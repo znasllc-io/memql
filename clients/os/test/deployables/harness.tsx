@@ -312,8 +312,10 @@ export interface FakeSeed {
   // ---- pipelines (epic memql#5479) ----
   /** v1:pipelines:run rows `pipelineRunsForOwner` answers as its first page. */
   pipelineRuns?: Row[];
-  /** The page after `pipelineRuns`, read with the cursor "older-runs". */
+  /** The page after `pipelineRuns`. */
   olderPipelineRuns?: Row[];
+  /** Every page of runs, newest first; each names the next by cursor. Overrides the two above. */
+  pipelineRunPages?: Row[][];
   /** v1:pipelines:pipeline rows `pipelinesForOwner` answers. */
   pipelines?: Row[];
   /** v1:work:step rows, by the bare work run id `workStepsForOwnerRun` names. */
@@ -400,8 +402,9 @@ export function fakeConnection(seed: FakeSeed = {}): FakeConnection {
 
       // ---- pipelines (epic memql#5479) ----
       if (call === "query pipelineRunsForOwner()") {
-        if (opts?.cursor === "older-runs") return rowsResult(seed.olderPipelineRuns ?? []);
-        return rowsResultWithCursor(seed.pipelineRuns ?? [], seed.olderPipelineRuns ? "older-runs" : "");
+        const pages = seed.pipelineRunPages ?? [seed.pipelineRuns ?? [], ...(seed.olderPipelineRuns ? [seed.olderPipelineRuns] : [])];
+        const at = opts?.cursor?.startsWith("runs-page-") ? Number(opts.cursor.slice("runs-page-".length)) : 0;
+        return rowsResultWithCursor(pages[at] ?? [], at + 1 < pages.length ? `runs-page-${at + 1}` : "");
       }
       if (call === "query pipelinesForOwner()") return rowsResult(seed.pipelines ?? []);
       if (call.startsWith("query workStepsForOwnerRun(")) {

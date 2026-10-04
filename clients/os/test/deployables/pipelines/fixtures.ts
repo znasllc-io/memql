@@ -71,3 +71,50 @@ export function stepRow(key: string, over: Record<string, unknown> = {}): Row {
 export function step(key: string, over: Record<string, unknown> = {}): StepRow {
   return stepFromRow(stepRow(key, over));
 }
+
+/** The viewer `withSession` signs in as, owning the pipeline rows below. */
+export const VIEWER = "u-me";
+
+/** A GitHub repository source the viewer owns: the package a pipeline hangs off. */
+export function packageRow(over: Record<string, unknown> = {}): Row {
+  return {
+    id: PACKAGE_ID,
+    ownerUserId: VIEWER,
+    accountId: "self",
+    name: "shop",
+    sourceKind: "repo",
+    repoUrl: "https://github.com/acme/shop",
+    repoRef: "",
+    credentialId: "cred-1",
+    deployedVersion: SHA_B,
+    latestKnownVersion: SHA_A,
+    declares: [],
+    status: "active",
+    createdAt: "2026-09-01T00:00:00Z",
+    ...over,
+  } as Row;
+}
+
+/** The viewer's pipeline on that source. */
+export function pipelineRow(over: Record<string, unknown> = {}): Row {
+  return {
+    id: PIPELINE_ID,
+    ownerUserId: VIEWER,
+    packageId: PACKAGE_ID,
+    name: "shop",
+    repository: "acme/shop",
+    defaultBranch: "main",
+    installationId: "7",
+    delivery: "webhook",
+    compute: "cluster",
+    status: "active",
+    secretNames: ["SHOP_TOKEN"],
+    connectedAt: "2026-10-01T09:00:00Z",
+    ...over,
+  } as Row;
+}
+
+/** An ISO time `minutes` before now: runs are grouped by the reader's own day. */
+export function minutesAgo(minutes: number): string {
+  return new Date(Date.now() - minutes * 60_000).toISOString();
+}
