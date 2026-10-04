@@ -3,6 +3,7 @@ package pipelinerun
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -765,15 +766,18 @@ func TestALateRedeliveryOfASupersededHeadOpensNothing(t *testing.T) {
 
 // Whatever keeps the head from being KNOWN leaves the superseded run
 // answering, as today: nothing re-runs, nothing is stopped, and a warning
-// says why on its own line.
+// says why on its own line -- with the error that made it so, where there is
+// one. The failed MINT matters most: on this path the opening returns at once,
+// so no check-run warning records it either.
 func TestTheHeadUnknownLeavesTheSupersededRunAnswering(t *testing.T) {
 	for name, c := range map[string]struct {
 		break_ func(g *fakeGitHub)
 		says   string
+		why    string // the error the same line carries; "" for none
 	}{
-		"GitHub refuses the read": {func(g *fakeGitHub) { g.pullHeadErr = errStatus(502) }, "head could not be read from GitHub, so the superseded run answers"},
-		"no installation token":   {func(g *fakeGitHub) { g.tokenErr = errors.New("reconnect_required") }, "no installation token to ask GitHub whether"},
-		"GitHub names no head":    {func(g *fakeGitHub) { g.setPullHead(repoName, 42, "") }, "named no head for the pull request, so the superseded run answers"},
+		"GitHub refuses the read": {func(g *fakeGitHub) { g.pullHeadErr = errStatus(502) }, "head could not be read from GitHub, so the superseded run answers", "GitHub answered HTTP 502"},
+		"no installation token":   {func(g *fakeGitHub) { g.tokenErr = errors.New("reconnect_required: the grant was revoked") }, "no installation token to ask GitHub whether", "reconnect_required: the grant was revoked"},
+		"GitHub names no head":    {func(g *fakeGitHub) { g.setPullHead(repoName, 42, "") }, "named no head for the pull request, so the superseded run answers", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
@@ -794,6 +798,9 @@ func TestTheHeadUnknownLeavesTheSupersededRunAnswering(t *testing.T) {
 			}
 			wantUntouched(t, h, current)
 			wantLogged(t, logs.String(), c.says, "WARN")
+			if line := logLine(logs.String(), c.says); c.why != "" && !strings.Contains(line, c.why) {
+				t.Errorf("the warning's own line says why (%q): %q", c.why, line)
+			}
 		})
 	}
 }
@@ -975,4 +982,91 @@ func TestARunThatFinishedBeforeItsAskIsPassedOverAndSaid(t *testing.T) {
 		t.Errorf("a run that finished keeps its own answer: %s cancelRequested %v", got.Conclusion, got.CancelRequested)
 	}
 	wantLogged(t, logs.String(), "had finished before it could be asked", "INFO")
+}
+
+// A FORK never re-runs a superseded commit (R37 leaves forks out): a fork's
+// pull request whose head is a commit this repository's own pull request ran
+// -- and a newer push then superseded -- is answered by that superseded run,
+// as before. Asking GitHub would be pointless, a fork runs nothing; opening
+// past the superseded run would open a REFUSED fork attempt, whose failing
+// check run would sit on the commit.
+func TestAForkNeverRerunsASupersededCommit(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	// #42, from this repository, ran shaA; a push to shaB superseded it.
+	current := drivenBy(prRun(p, 42, shaB, 502), "agent-b")
+	superseded := supersededAt(p, 42, shaA, 501, current.ID, false)
+	h.store.addRun(superseded)
+	h.store.addRun(current)
+	// A fork's pull request #7 has that same commit as its head, and GitHub
+	// says so.
+	h.github.setPullHead(repoName, 7, shaA)
+
+	res := trigger(t, h, "pull_request", "d-fork", prDelivery(t, "synchronize", 7, shaA, "mallory/shop", testInstallation))
+	if len(res.Opened) != 0 || len(res.Existing) != 1 || res.Existing[0].ID != superseded.ID {
+		var opened, checks []string
+		for _, r := range res.Opened {
+			opened = append(opened, fmt.Sprintf("attempt %d of %s, %s/%s %s", r.Attempt, r.RunKey, r.Status, r.Conclusion, r.RefusalCode))
+		}
+		for _, c := range h.github.createdRuns() {
+			checks = append(checks, c.Run.Status+"/"+c.Run.Conclusion)
+		}
+		t.Fatalf("the fork's delivery is answered by the superseded run, and opens nothing: opened %v, existing %d, check runs written %v",
+			opened, len(res.Existing), checks)
+	}
+	if reads := h.github.headReads(); len(reads) != 0 {
+		t.Errorf("a fork's delivery asked GitHub for a head: %v", reads)
+	}
+	if created := h.github.createdRuns(); len(created) != 0 {
+		t.Errorf("a fork's delivery wrote a check run: %+v", created)
+	}
+	if n := len(h.store.allRuns()); n != 2 {
+		t.Errorf("runs = %d, want the two there were", n)
+	}
+	wantUntouched(t, h, current)
+}
+
+// The head answer, asked once before the gate, is about ONE attempt -- the
+// superseded attempt the ungated read judged -- and frees only that attempt.
+// Here another replica opened the key's second attempt for the same
+// force-push back between this opening's two reads, and a newer push has
+// superseded THAT one already: GitHub's answer said nothing about attempt 2,
+// so attempt 2 answers and no third attempt opens.
+func TestTheHeadAnswerFreesOnlyTheAttemptItWasAsked(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(p)
+	dropped := drivenBy(prRun(p, 42, shaB, 502), "agent-b")
+	back := supersededAt(p, 42, shaA, 501, dropped.ID, false)
+	h.store.addRun(back)
+	h.store.addRun(dropped)
+	h.github.setPullHead(repoName, 42, shaA)
+	second := supersededAt(p, 42, shaA, 503, "a-run-of-shaC", false)
+	second.ID, second.Attempt, second.QueuedAt = RunIDFor(p.ID, back.RunKey, 2), 2, testNow
+	inner := h.gate.run
+	var once sync.Once
+	h.integ.Configure(func(d *Deps) {
+		d.Gate = func(ctx context.Context, key string, fn func(context.Context) error) error {
+			if key == OpenGateKey(back.RunKey) {
+				once.Do(func() {
+					h.store.addRun(second)
+					h.github.setPullHead(repoName, 42, shaC)
+				})
+			}
+			return inner(ctx, key, fn)
+		}
+	})
+
+	res := trigger(t, h, "pull_request", "d-back", prDelivery(t, "synchronize", 42, shaA, repoName, testInstallation))
+	if len(res.Opened) != 0 || len(res.Existing) != 1 || res.Existing[0].ID != second.ID {
+		t.Fatalf("the attempt the answer was not about answers; nothing opens: %+v", res)
+	}
+	if n := len(h.store.allRuns()); n != 3 {
+		t.Errorf("runs = %d, want no third attempt", n)
+	}
+	if reads := h.github.headReads(); len(reads) != 1 {
+		t.Errorf("one head read decided the dedup, and nothing asked again: %v", reads)
+	}
+	wantUntouched(t, h, dropped)
 }

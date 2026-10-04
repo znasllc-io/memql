@@ -123,16 +123,19 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 	// own head coming back. Whether this commit IS the pull request's head
 	// again is asked of GitHub here -- before the gate, and only when the
 	// key's newest attempt is such a run -- and the gated read reuses the
-	// answer rather than asking under the gate.
+	// answer rather than asking under the gate. The answer is about THAT
+	// attempt (headBackFor names it), and frees no other.
 	var tokenErr error
-	headBack := false
+	headBackFor := ""
 	if superseded, ok := supersededNewest(runs, o); ok {
 		if token == "" {
 			token, tokenErr = checkRunToken(ctx, d, p)
 		}
-		headBack = headCameBack(ctx, d, p, o, sha, token, tokenErr, superseded)
+		if headCameBack(ctx, d, p, o, sha, token, tokenErr, superseded) {
+			headBackFor = superseded.ID
+		}
 	}
-	if run, ok := answeredBy(runs, o, headBack); ok {
+	if run, ok := answeredBy(runs, o, headBackFor); ok {
 		return OpenResult{Run: run}, nil
 	}
 
@@ -150,7 +153,7 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			return err
 		}
 		runs := runsOf(keyed, p.ID)
-		if run, ok := answeredBy(runs, o, headBack); ok {
+		if run, ok := answeredBy(runs, o, headBackFor); ok {
 			result = OpenResult{Run: run}
 			return nil
 		}
@@ -240,13 +243,16 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 //
 // A SUPERSEDED RUN DOES NOT ANSWER ITS HEAD COMING BACK (R37, supersede.go).
 // When the key's newest attempt was stopped because a newer push superseded
-// it, and headBack says GitHub names this opening's commit as the pull
-// request's head again -- a force-push back -- the opening opens the next
-// attempt, the way a same-repository opening opens past a fork's refusal.
-// headBack is decided ONCE, before the gate, and both dedup reads take it;
-// when the gated read finds a different newest attempt (another replica's
-// opening of the head that came back), that attempt answers as usual.
-func answeredBy(runs []Run, o Opening, headBack bool) (Run, bool) {
+// it, and GitHub names this opening's commit as the pull request's head again
+// -- a force-push back -- the opening opens the next attempt, the way a
+// same-repository opening opens past a fork's refusal. headBackFor names the
+// attempt GitHub's answer was about ("" when it freed none): the answer is
+// asked ONCE, before the gate, about the newest attempt the ungated read
+// judged, and both dedup reads take it -- but it frees ONLY that attempt.
+// When the gated read finds a different newest attempt (another replica's
+// opening of the head that came back, or one a newer push superseded since),
+// the answer said nothing about it, and that attempt answers as usual.
+func answeredBy(runs []Run, o Opening, headBackFor string) (Run, bool) {
 	newest, attempts := newestAttempt(runs)
 	if attempts == 0 {
 		return Run{}, false
@@ -255,7 +261,7 @@ func answeredBy(runs []Run, o Opening, headBack bool) (Run, bool) {
 		if !o.Fork && onlyForkRefusals(runs) {
 			return Run{}, false
 		}
-		if headBack && stoppedBySupersede(newest) {
+		if headBackFor != "" && sameID(newest.ID, headBackFor) && stoppedBySupersede(newest) {
 			return Run{}, false
 		}
 		return newest, true

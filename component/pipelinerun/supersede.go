@@ -256,6 +256,11 @@ func headCameBack(ctx context.Context, d Deps, p Pipeline, o Opening, sha, token
 		d.Logger.Info("pipelines: a delivery for a head a newer push superseded is answered by its superseded run; the pull request's head is elsewhere",
 			append(attrs, "head", head)...)
 	case errors.Is(err, errNoHeadToken):
+		// The mint's own error, on this line: the opening returns at once on
+		// this path, so no check-run warning records why the mint failed.
+		if tokenErr != nil {
+			attrs = append(attrs, "error", tokenErr)
+		}
 		d.Logger.Warn("pipelines: there is no installation token to ask GitHub whether the pull request's head came back to this commit, so its superseded run answers the delivery", attrs...)
 	case errors.Is(err, errNoHeadNamed):
 		d.Logger.Warn("pipelines: GitHub named no head for the pull request, so the superseded run answers the delivery", attrs...)
