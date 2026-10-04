@@ -543,6 +543,9 @@ type fakeGitHub struct {
 	trees   map[string]fstest.MapFS
 	compare map[string]compareAnswer
 
+	// pullsErr is every OpenPullRequests call's answer when set.
+	pullsErr error
+
 	// treeKeeps records each Tree call's keep decision for the files it
 	// held, so a test can assert what was asked for.
 	treeCalls []string
@@ -658,6 +661,9 @@ func (g *fakeGitHub) OpenPullRequests(ctx context.Context, _, repository string)
 	watchGitHubCall(g.t, ctx, "OpenPullRequests")
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.pullsErr != nil {
+		return nil, g.pullsErr
+	}
 	return slices.Clone(g.pulls[repository]), nil
 }
 

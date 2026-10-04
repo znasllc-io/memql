@@ -3,7 +3,9 @@ package pipelinerun
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/packages/githubapp"
@@ -178,6 +180,75 @@ func TestAFailedOpenKeepsThePreviousHead(t *testing.T) {
 	res = poll(t, h)
 	if len(res.Opened) != 2 {
 		t.Errorf("the next poll opens what the last one could not: opened %d", len(res.Opened))
+	}
+}
+
+// The pull requests could not be read -- GitHub answered 502, or the list
+// timed out. The default branch is a separate question with its own answer:
+// a push the poll did see still opens its run, every pull request's head
+// stays as the last poll recorded it (a read that failed proves nothing about
+// which are closed), and the failure is reported and said.
+func TestAFailedPullRequestReadStillRunsTheDefaultBranch(t *testing.T) {
+	h := newHarness(t)
+	logs := &lockedBuffer{}
+	h.integ.Configure(func(d *Deps) { d.Logger = slog.New(slog.NewTextHandler(logs, nil)) })
+	p := testPipeline(DeliveryPoll)
+	p.Heads = map[string]string{"branch:main": shaA, "pr:5": shaB}
+	h.store.addPipeline(p)
+	h.github.heads[repoName+"@main"] = headAnswer{SHA: shaB, Message: "Land it"}
+	h.github.pullsErr = errStatus(502)
+
+	res := poll(t, h)
+	if len(res.Opened) != 1 || res.Opened[0].Event != pipelines.EventPush || res.Opened[0].SHA != shaB {
+		t.Fatalf("the moved default branch opens its push run: %+v", res.Opened)
+	}
+	if len(res.Failed) != 1 || res.Failed[0].PipelineID != p.ID || !strings.Contains(res.Failed[0].Reason, "pull requests") {
+		t.Errorf("the failed read is reported: %+v", res.Failed)
+	}
+	if !strings.Contains(logs.String(), "could not be polled") || !strings.Contains(logs.String(), "pull requests") {
+		t.Errorf("and said in the log:\n%s", logs.String())
+	}
+	got, _ := h.store.pipeline(p.ID)
+	if got.Heads["branch:main"] != shaB || got.Heads["pr:5"] != shaB || len(got.Heads) != 2 {
+		t.Errorf("heads = %v; want the branch moved and the pull request kept as it was", got.Heads)
+	}
+
+	// The next poll that can read them carries on from there.
+	h.github.pullsErr = nil
+	h.github.pulls[repoName] = []githubapp.PullRequestHead{{Number: 5, HeadSHA: shaC, HeadRef: "cart", HeadRepository: repoName}}
+	res = poll(t, h)
+	if len(res.Opened) != 1 || res.Opened[0].PullRequest != 5 || len(res.Failed) != 0 {
+		t.Errorf("the next poll opens the moved pull request: %+v", res)
+	}
+}
+
+// A FIRST poll whose pull requests cannot be read records no baseline: a
+// baseline without them would make every open pull request look new at the
+// next poll, and open a run for each -- the flood the baseline exists to
+// prevent. It reports the failure and leaves the baseline to the next poll.
+func TestAFirstPollThatCannotReadPullRequestsRecordsNoBaseline(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryPoll)
+	h.store.addPipeline(p)
+	h.github.heads[repoName+"@main"] = headAnswer{SHA: shaA}
+	h.github.pulls[repoName] = []githubapp.PullRequestHead{{Number: 5, HeadSHA: shaB, HeadRef: "cart", HeadRepository: repoName}}
+	h.github.pullsErr = errStatus(502)
+
+	res := poll(t, h)
+	if res.Baselines != 0 || len(res.Opened) != 0 || len(res.Failed) != 1 {
+		t.Fatalf("no baseline, nothing opened, the failure reported: %+v", res)
+	}
+	if got, _ := h.store.pipeline(p.ID); len(got.Heads) != 0 {
+		t.Errorf("heads = %v, want none recorded", got.Heads)
+	}
+
+	h.github.pullsErr = nil
+	res = poll(t, h)
+	if res.Baselines != 1 || len(res.Opened) != 0 {
+		t.Errorf("the next poll records the whole baseline and opens nothing: %+v", res)
+	}
+	if got, _ := h.store.pipeline(p.ID); got.Heads["pr:5"] != shaB || got.Heads["branch:main"] != shaA {
+		t.Errorf("heads = %v", got.Heads)
 	}
 }
 

@@ -139,9 +139,16 @@ func (i *Integration) pollOne(ctx context.Context, d Deps, listed Pipeline) (pol
 	if err != nil {
 		return out, err
 	}
-	pulls, err := d.GitHub.OpenPullRequests(ctx, token, p.Repository)
-	if err != nil {
-		return out, fmt.Errorf("reading open pull requests: %w", err)
+	// The pull requests are a separate question with an answer of their
+	// own: a list GitHub would not give does not stop the default branch,
+	// whose head is already read. It is reported with the poll's other
+	// failures, and every pull request's head stays as the last poll left
+	// it -- a read that failed says nothing about which are closed.
+	var failures []error
+	pulls, pullsErr := d.GitHub.OpenPullRequests(ctx, token, p.Repository)
+	if pullsErr != nil {
+		failures = append(failures, fmt.Errorf("reading open pull requests: %w", pullsErr))
+		pulls = nil
 	}
 
 	branchKey := headKeyBranch(head.branch)
@@ -160,14 +167,26 @@ func (i *Integration) pollOne(ctx context.Context, d Deps, listed Pipeline) (pol
 	}
 
 	if len(p.Heads) == 0 {
-		// The baseline: record, open nothing.
+		// The baseline: record, open nothing -- and only when BOTH reads
+		// answered. A baseline missing the pull requests would make every
+		// open one look new at the next poll, and open a run for each: the
+		// flood the baseline exists to prevent.
+		if pullsErr != nil {
+			return out, errors.Join(failures...)
+		}
 		written, err := i.writeHeads(ctx, d, *p, seen, branchPatch)
 		out.baseline = written
 		return out, err
 	}
 
 	next := maps.Clone(seen) // closed pull requests' keys drop out here
-	var failures []error
+	if pullsErr != nil {
+		for key, sha := range p.Heads {
+			if strings.HasPrefix(key, headPRPrefix) {
+				next[key] = sha
+			}
+		}
+	}
 	openOrKeep := func(key string, o Opening) {
 		res, err := i.openWithToken(ctx, d, *p, o, token)
 		if err != nil {
@@ -297,8 +316,11 @@ func (i *Integration) writeHeads(ctx context.Context, d Deps, read Pipeline, hea
 	return written, err
 }
 
+// headPRPrefix begins every pull request's key in a pipeline's heads.
+const headPRPrefix = "pr:"
+
 func headKeyBranch(branch string) string { return "branch:" + branch }
-func headKeyPR(number int) string        { return "pr:" + strconv.Itoa(number) }
+func headKeyPR(number int) string        { return headPRPrefix + strconv.Itoa(number) }
 
 // firstLine is a message's subject line.
 func firstLine(s string) string {
