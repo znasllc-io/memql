@@ -1,5 +1,5 @@
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
-import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Plus, User, Users, X } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, ChoiceStack, Notice, Subhead, type ChoiceOption } from "../../../kit";
@@ -11,12 +11,18 @@ import {
   draftDiffers,
   draftFrom,
   draftNamesSomebody,
+  draftUntouched,
   groupSize,
   matchesQuery,
+  sharingSignature,
+  sharingSummary,
+  standInNames,
+  storedShare,
   subjectKey,
   withSubject,
   withoutSubject,
   type ShareDraft,
+  type StoredShare,
   type Subject,
   type SubjectKind,
 } from "./sharing";
@@ -53,6 +59,35 @@ import { useShareDirectory, type ShareDirectory } from "./useShareDirectory";
 // Focus stays in the search while arrow keys move the active option
 // (`aria-activedescendant`), and Enter adds it -- type a name, Enter, the next
 // name, Enter. Options take a click without taking focus.
+//
+// ===========================================================================
+// THE ROW KEEPS MOVING; THE DRAFT REMEMBERS WHERE IT STARTED (memql#5659)
+// ===========================================================================
+// The draft is copied from the row once, and the row keeps arriving on the
+// subscription -- another tab, another device. So the draft carries its
+// STARTING value, and "the share moved" means the row differing from THAT.
+// Comparing the row with the draft instead made a change from elsewhere look
+// like the owner's own unsaved edit, and Save wrote the old draft back over it.
+//
+// What happens next depends on what the person stands to lose:
+//
+//   - Nothing (the draft is untouched): it follows the row, and a quiet note
+//     says why the choice in front of them changed. Staleness resolves toward
+//     the row, but only into an untouched draft -- Fleet > Routing's rule.
+//   - Nothing to choose (the draft already says what is stored): the starting
+//     point catches up, silently, because nobody's decision is at stake.
+//   - Their edit: the dialog SAYS SO BEFORE SAVING, keeps the draft, and Save
+//     waits for a decision -- take the new share, or keep the edit knowing it
+//     replaces it. Neither side is dropped without the person choosing.
+//
+// ===========================================================================
+// WHO IS ON THE LIST COMES FROM THE ROW; ONLY THEIR NAMES ARE READ
+// ===========================================================================
+// The chips are the stored ids, drawn from the machine row in every state of
+// the directory read. While it is out they are the list's own shape; when it
+// fails they are stand-ins ("Person 2") beside a calm notice with a way to
+// read again -- still removable, so a failed read never takes the owner's
+// control of their own machine with it.
 
 const CHOICES: readonly ChoiceOption[] = [
   { value: "owner", label: "Only me", description: "Nobody else's work runs on it." },
@@ -124,19 +159,97 @@ export function ShareDialog({
   const dialogRef = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const refusalRef = useRef<HTMLDivElement>(null);
+  const movedRef = useRef<HTMLDivElement>(null);
   const { read, retry } = useShareDirectory(machine.id);
   const directory = read.state === "ready" ? read.directory : null;
 
   const [draft, setDraft] = useState<ShareDraft>(() => draftFrom(machine));
+  // THE DRAFT'S STARTING VALUE: the stored share it was taken from, or last
+  // caught up with (see the header, and `storedShare`).
+  const [start, setStart] = useState<StoredShare>(() => storedShare(machine));
+  // The draft followed a change made elsewhere and nobody has edited it since.
+  // The note saying so stands exactly as long as that is true.
+  const [followed, setFollowed] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(-1);
   const [refused, setRefused] = useState(false);
-  const [pendingFocus, setPendingFocus] = useState<number | "search" | null>(null);
-  // What the last add or remove did, for a screen reader: a chip appearing or
-  // going is otherwise silent to anybody who cannot see it.
+  const [pendingFocus, setPendingFocus] = useState<number | "search" | "save" | "mode" | null>(null);
+  // What the last add or remove did, and what changed elsewhere, for a screen
+  // reader: a chip appearing or going, or a choice moving under the person, is
+  // otherwise silent to anybody who cannot see it.
   const [announced, setAnnounced] = useState("");
 
   const busy = writes.busyId === machine.id;
+
+  // ---- the stored share, moving under the draft ----------------------------
+
+  const storedSig = sharingSignature(machine);
+  const moved = storedSig !== sharingSignature(start);
+  // THE PERSON'S EDIT AND THE NEW SHARE DISAGREE: the one state in which Save
+  // waits for a decision.
+  const asking = moved && draftDiffers(draft, machine);
+
+  // The row moved. LAYOUT, not passive: an untouched draft follows before the
+  // browser paints, or the disagreement it resolves -- and a Save that would
+  // revert the other change -- would flash for a frame first.
+  //
+  // KEYED ON WHAT IS STORED, not on the draft: this is the moment the row
+  // moved. A draft edited back to its starting value DURING a disagreement
+  // must not be swept onto the new share, which would undo the very click
+  // that made it.
+  useLayoutEffect(() => {
+    if (!moved) return;
+    if (draftUntouched(draft, start)) {
+      setDraft(draftFrom(machine));
+      setStart(storedShare(machine));
+      setFollowed(true);
+      setAnnounced("Sharing was changed somewhere else. This now shows the new sharing.");
+    } else if (draftDiffers(draft, machine)) {
+      setAnnounced("Sharing was changed somewhere else. Choose which sharing to keep.");
+    }
+  }, [storedSig]);
+
+  // THE DRAFT SAYS WHAT IS STORED, whichever of the two moved to make it so:
+  // nothing is left to choose between, so the starting point catches up, and
+  // a later edit is measured from the share as it now is.
+  const draftKey = [draft.mode, ...draft.subjects.map((s) => subjectKey(s.kind, s.id)).sort()].join("|");
+  useLayoutEffect(() => {
+    if (moved && !draftDiffers(draft, machine)) setStart(storedShare(machine));
+  }, [moved, draftKey, storedSig]);
+
+  // THE KEYBOARD STAYS IN THE MODAL, AND OFF THE CHOICES. A Save that had
+  // focus when the change landed is disabled now, and a browser drops focus
+  // from a disabled control to the page behind the modal. It goes to the
+  // notice -- never to one of its buttons, where the Enter the person was
+  // about to press would make the decision for them.
+  useEffect(() => {
+    if (!asking) return;
+    const held = document.activeElement;
+    if (held instanceof HTMLElement && dialogRef.current?.contains(held) && !held.matches(":disabled")) return;
+    movedRef.current?.focus();
+  }, [asking]);
+
+  /** A change the PERSON made. The draft is theirs from here, so a note that
+   *  it shows the new share would stop being true. */
+  function edit(next: (held: ShareDraft) => ShareDraft): void {
+    setDraft(next);
+    setFollowed(false);
+  }
+
+  /** Take the share as it is stored now, dropping the draft it replaces. */
+  function takeStored(): void {
+    setDraft(draftFrom(machine));
+    setStart(storedShare(machine));
+    setAnnounced("This now shows the new sharing.");
+    setPendingFocus("mode");
+  }
+
+  /** Keep the draft, knowing that saving it replaces the new share. */
+  function keepDraft(): void {
+    setStart(storedShare(machine));
+    setAnnounced("Your changes are kept. Saving them replaces the new sharing.");
+    setPendingFocus("save");
+  }
 
   // The latest callbacks and state, for the handlers the platform calls.
   const discardRef = useRef(onDiscard);
@@ -223,23 +336,46 @@ export function ShareDialog({
   const results = available.filter((c) => matchesQuery(query, c.name, c.kind === "person" ? c.detail : ""));
   const activeIndex = active >= 0 && active < results.length ? active : -1;
 
-  /** A chip's name, and whether it has left what this owner may pick. */
-  function describe(subject: Subject): { name: string; stale: boolean } {
+  const standIns = standInNames(draft.subjects, start);
+
+  /**
+   * A chip's name; whether it is only a stand-in for one; and whether it has
+   * left what this owner may pick.
+   *
+   * UNREAD IS NOT UNKNOWN. With no directory there is no answer about anybody,
+   * so the chip is a stand-in by kind and place ("Person 2") -- not "Unknown
+   * person", which is the directory's word for somebody no row names any more,
+   * and not "no longer available", which nobody has said.
+   */
+  function describe(subject: Subject): { name: string; standIn: boolean; stale: boolean } {
     const key = subjectKey(subject.kind, subject.id);
-    const stored = (subject.kind === "group" ? directory?.current.groups : directory?.current.people)?.find(
+    if (directory === null) return { name: standIns.get(key) ?? unknownName(subject.kind), standIn: true, stale: false };
+    const stored = (subject.kind === "group" ? directory.current.groups : directory.current.people).find(
       (s) => subjectKey(subject.kind, s.id) === key,
     );
     if (stored !== undefined) {
-      return { name: stored.known ? stored.name : unknownName(subject.kind), stale: !stored.inDirectory };
+      return { name: stored.known ? stored.name : unknownName(subject.kind), standIn: false, stale: !stored.inDirectory };
     }
     const offered = candidates.find((c) => subjectKey(c.kind, c.id) === key);
-    if (offered !== undefined) return { name: offered.name, stale: false };
+    if (offered !== undefined) return { name: offered.name, standIn: false, stale: false };
     // On the row but in neither list: something no read has named.
-    return { name: unknownName(subject.kind), stale: true };
+    return { name: unknownName(subject.kind), standIn: false, stale: true };
+  }
+
+  /** A real name the directory gave, or nothing -- and `sharingSummary` then
+   *  counts, which is a true sentence with nothing guessed. */
+  function nameOf(subject: Subject): string | undefined {
+    if (directory === null) return undefined;
+    const key = subjectKey(subject.kind, subject.id);
+    const stored = (subject.kind === "group" ? directory.current.groups : directory.current.people).find(
+      (s) => subjectKey(subject.kind, s.id) === key,
+    );
+    if (stored !== undefined) return stored.known ? stored.name : undefined;
+    return candidates.find((c) => subjectKey(c.kind, c.id) === key)?.name;
   }
 
   function pick(candidate: Candidate): void {
-    setDraft((held) => withSubject(held, { kind: candidate.kind, id: candidate.id }));
+    edit((held) => withSubject(held, { kind: candidate.kind, id: candidate.id }));
     // The next name starts from the whole list again.
     setQuery("");
     setActive(-1);
@@ -247,7 +383,7 @@ export function ShareDialog({
   }
 
   function remove(index: number, subject: Subject): void {
-    setDraft((held) => withoutSubject(held, subject));
+    edit((held) => withoutSubject(held, subject));
     setAnnounced(`Removed ${describe(subject).name}.`);
     const remaining = draft.subjects.length - 1;
     // Focus goes to a NEIGHBOUR -- the chip that took this one's place, else
@@ -255,13 +391,21 @@ export function ShareDialog({
     setPendingFocus(remaining <= 0 ? "search" : Math.min(index, remaining - 1));
   }
 
+  // Focus asked for by an act, placed once the render it waited for is in.
+  // Anything that is not there to take it -- the search while the names could
+  // not be read, a Save that the draft cannot use -- falls to the choice in
+  // force, which always is.
   useEffect(() => {
     if (pendingFocus === null) return;
     const root = dialogRef.current;
     const target =
       pendingFocus === "search"
         ? document.getElementById(searchId)
-        : root?.querySelectorAll<HTMLElement>(".fleet-share-chip-remove")[pendingFocus] ?? null;
+        : pendingFocus === "save"
+          ? root?.querySelector<HTMLElement>(".os-actbar-acts .os-button[data-tone='primary']:not(:disabled)") ?? null
+          : pendingFocus === "mode"
+            ? null
+            : root?.querySelectorAll<HTMLElement>(".fleet-share-chip-remove")[pendingFocus] ?? null;
     (target ?? root?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]'))?.focus();
     setPendingFocus(null);
   }, [pendingFocus, searchId]);
@@ -301,14 +445,18 @@ export function ShareDialog({
 
   const dirty = draftDiffers(draft, machine);
   const namesSomebody = draftNamesSomebody(draft);
-  const canSave = dirty && namesSomebody && !busy;
-  const floor = refused
-    ? "Not saved."
-    : !namesSomebody
-      ? "Choose at least one person or group."
-      : dirty
-        ? "Unsaved changes"
-        : "Nothing changed yet.";
+  // NOT WHILE THERE IS A DECISION TO MAKE: that Save is the write that would
+  // put the old draft back over a change made elsewhere.
+  const canSave = dirty && namesSomebody && !busy && !asking;
+  const floor = asking
+    ? "Choose which sharing to keep."
+    : refused
+      ? "Not saved."
+      : !namesSomebody
+        ? "Choose at least one person or group."
+        : dirty
+          ? "Unsaved changes"
+          : "Nothing changed yet.";
 
   return (
     <dialog
@@ -352,8 +500,9 @@ export function ShareDialog({
           voice="prose"
           value={draft.mode}
           onChange={(next) => {
-            if (busy) return;
-            setDraft((held) => ({ ...held, mode: next as SharingMode }));
+            // The choice already in force, chosen again, is not an edit.
+            if (busy || next === draft.mode) return;
+            edit((held) => ({ ...held, mode: next as SharingMode }));
           }}
           options={CHOICES}
         />
@@ -362,27 +511,32 @@ export function ShareDialog({
           <section className="fleet-share-picker" aria-label="People and groups">
             <Subhead>People and groups</Subhead>
 
-            {read.state === "loading" ? (
-              <RecordListSkeleton label="Loading people and groups" />
+            {read.state === "loading" && draft.subjects.length > 0 ? (
+              // THE LIST'S OWN SHAPE while its names are read: a quiet pill per
+              // stored entry, as many as the row holds, with nothing to focus
+              // and no name guessed. The skeleton below carries the status.
+              <div className="os-chips" aria-hidden="true">
+                {draft.subjects.map((subject) => (
+                  <span key={subjectKey(subject.kind, subject.id)} className="fleet-share-chip" data-shape>
+                    <span className="os-chip">
+                      <span className="os-skeleton-block fleet-share-chip-shape" />
+                    </span>
+                  </span>
+                ))}
+              </div>
             ) : null}
 
-            {read.state === "failed" ? (
-              // NOT the empty state: nobody was found because nobody was asked.
-              <Notice tone="error" sentence="Could not read who you can share with." detail={read.error}>
-                <Button onClick={retry}>Try again</Button>
-              </Notice>
-            ) : null}
-
-            {directory !== null && draft.subjects.length > 0 ? (
+            {read.state !== "loading" && draft.subjects.length > 0 ? (
               <Chips label="Chosen people and groups">
                 {draft.subjects.map((subject, index) => {
-                  const { name, stale } = describe(subject);
+                  const { name, standIn, stale } = describe(subject);
                   return (
                     <span
                       key={subjectKey(subject.kind, subject.id)}
                       className="fleet-share-chip"
                       role="listitem"
                       data-stale={stale || undefined}
+                      data-stand-in={standIn || undefined}
                     >
                       <Chip tone={stale ? "muted" : "neutral"}>
                         {subject.kind === "group" ? <Users size={12} aria-hidden /> : null}
@@ -402,6 +556,19 @@ export function ShareDialog({
                   );
                 })}
               </Chips>
+            ) : null}
+
+            {read.state === "loading" ? <RecordListSkeleton label="Loading people and groups" /> : null}
+
+            {read.state === "failed" ? (
+              // NOT the empty state: nobody was found because nobody was asked.
+              // And CALM, in the search's place: everything the row holds is
+              // above, named by kind and still the owner's to remove or to
+              // stop with Only me. Only the names, and anybody new, wait on a
+              // second read.
+              <Notice tone="warn" sentence="Names could not be loaded." detail={read.error}>
+                <Button onClick={retry}>Try again</Button>
+              </Notice>
             ) : null}
 
             {directory !== null && candidates.length === 0 ? (
@@ -487,9 +654,6 @@ export function ShareDialog({
                 ) : (
                   <p className="os-caption" role="status">{`No person or group matches “${query.trim()}”.`}</p>
                 )}
-                <p className="os-sr-only" role="status">
-                  {announced}
-                </p>
               </>
             ) : null}
           </section>
@@ -521,22 +685,63 @@ export function ShareDialog({
 
       </div>
 
-      {refused ? (
+      {/* ONE STATUS REGION FOR THE WHOLE DIALOG, standing from the first render
+          so that what it says is announced -- an add, a remove, a change made
+          elsewhere. It used to live beside the search, and a chip removed
+          while the names could not be read went unannounced. */}
+      <p className="os-sr-only" role="status">
+        {announced}
+      </p>
+
+      {asking || followed || refused ? (
         // PINNED ABOVE THE FLOOR, not at the end of the scrolling body: that
         // is below the fold at common sizes, and a reason the person has to
-        // scroll to find is a reason they did not get. Here it is always on
-        // screen, beside the Save that produced it.
-        <div ref={refusalRef} tabIndex={-1} className="fleet-share-refusal">
-          {/* HONEST ABOUT WHAT IT KNOWS. A refusal changed nothing, but a
-              dropped connection may have landed the write anyway; the choices
-              are kept either way, and the panel's live line says what is
-              actually stored. */}
-          <Notice
-            tone="error"
-            sentence="That change was not saved."
-            next="Your choices are still here."
-            detail={writes.actionError}
-          />
+        // scroll to find is a reason they did not get. What is said here is
+        // always on screen, beside the Save it is about.
+        <div className="fleet-share-band">
+          {asking ? (
+            <div ref={movedRef} tabIndex={-1} className="fleet-share-moved">
+              {/* WHAT IT IS NOW, in the panel's own words, so the choice is
+                  between two things the person can see: the new share here,
+                  their draft above it. Neither act writes anything -- the
+                  write stays on the floor's one Save (DESIGN.md rule 12). */}
+              <Notice tone="warn" sentence="Sharing changed somewhere else while this was open.">
+                <p className="os-caption">
+                  Now: <span className="fleet-share-moved-now">{sharingSummary(machine, true, nameOf)}</span>
+                </p>
+                <div className="fleet-share-moved-acts">
+                  <Button disabled={busy} onClick={takeStored}>
+                    Use the new sharing
+                  </Button>
+                  <Button disabled={busy} onClick={keepDraft}>
+                    Keep my changes
+                  </Button>
+                </div>
+              </Notice>
+            </div>
+          ) : followed ? (
+            // Why the choice in front of them changed, said once and quietly;
+            // it goes with the person's first edit.
+            <Notice
+              tone="info"
+              sentence="Sharing changed somewhere else while this was open."
+              next="This shows the new sharing."
+            />
+          ) : null}
+          {refused ? (
+            <div ref={refusalRef} tabIndex={-1} className="fleet-share-refusal">
+              {/* HONEST ABOUT WHAT IT KNOWS. A refusal changed nothing, but a
+                  dropped connection may have landed the write anyway; the
+                  choices are kept either way, and the panel's live line says
+                  what is actually stored. */}
+              <Notice
+                tone="error"
+                sentence="That change was not saved."
+                next="Your choices are still here."
+                detail={writes.actionError}
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
 

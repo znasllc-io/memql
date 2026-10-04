@@ -154,6 +154,20 @@ function search(dialog: HTMLElement): HTMLInputElement {
   return within(dialog).getByRole("combobox", { name: "Search people and groups" }) as HTMLInputElement;
 }
 
+function radio(dialog: HTMLElement, name: RegExp): HTMLElement {
+  return within(dialog).getByRole("radio", { name });
+}
+
+/** The chips the dialog holds, as a person reads them. */
+function chipTexts(dialog: HTMLElement): string[] {
+  const list = within(dialog).getByRole("list", { name: "Chosen people and groups" });
+  return within(list)
+    .getAllByRole("listitem")
+    .map((chip) => chip.textContent ?? "");
+}
+
+const MOVED = "Sharing changed somewhere else while this was open.";
+
 // ---------------------------------------------------------------------------
 // The panel
 // ---------------------------------------------------------------------------
@@ -558,7 +572,7 @@ describe("the share dialog", () => {
     mount(studio(), { conn });
     const dialog = await openDialog();
     fireEvent.click(within(dialog).getByRole("radio", { name: /^Specific people and groups/ }));
-    expect(within(dialog).getByText("Could not read who you can share with.")).toBeTruthy();
+    expect(within(dialog).getByText("Names could not be loaded.")).toBeTruthy();
     expect(within(dialog).getByText("stream closed")).toBeTruthy();
     expect(within(dialog).queryByText(/Nobody shares a group with you/)).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
@@ -779,6 +793,303 @@ describe("the share dialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
     expect(screen.getByText("Only you")).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The share moving under an open dialog (memql#5659, item 1)
+// ---------------------------------------------------------------------------
+//
+// The draft is copied from the row once, when the dialog opens, and the row
+// keeps arriving on the subscription while it is open. "Moved" is the STORED
+// share differing from the draft's STARTING value -- never the draft differing
+// from what is stored, which it does the moment anybody picks. Measuring the
+// second made a change from another tab look like the owner's own unsaved
+// edit, and Save wrote the old draft back over it.
+
+describe("a share changed somewhere else while the dialog is open", () => {
+  it("says so before Save can write over it, keeps the draft, and replaces the new share only when asked", async () => {
+    const { conn, rerender } = mount(studio());
+    const dialog = await openDialog();
+    fireEvent.click(radio(dialog, /^Everyone in this cluster/));
+    // The person's hand is on Save when the other change lands.
+    saveButton(dialog).focus();
+
+    // Another tab lends the machine to Bo while this draft is open.
+    rerender(studio({ mode: "people", userIds: ["bo"] }));
+    await settle();
+
+    expect(within(dialog).getByText(MOVED)).toBeTruthy();
+    // What it is NOW, in the panel's own words, so the choice is between two
+    // things the person can see.
+    expect(within(dialog).getByText("Shared with Bo Chen")).toBeTruthy();
+    // The draft is the person's, and it stays.
+    expect(radio(dialog, /^Everyone in this cluster/).getAttribute("aria-checked")).toBe("true");
+    // Save cannot put the old draft back over the new share without a decision.
+    expect(saveButton(dialog).disabled).toBe(true);
+    expect(within(dialog).getByText("Choose which sharing to keep.")).toBeTruthy();
+    // The disabled Save lost the keyboard; it went to the notice, inside the
+    // modal, and never to a control whose Enter would decide for them.
+    expect(document.activeElement).toBe(within(dialog).getByText(MOVED).closest(".fleet-share-moved"));
+    fireEvent.click(saveButton(dialog));
+    await settle();
+    expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep my changes" }));
+    await settle();
+    expect(within(dialog).queryByText(MOVED)).toBeNull();
+    // The choice leads to the act it enables.
+    expect(document.activeElement).toBe(saveButton(dialog));
+    expect(within(dialog).getByText("Unsaved changes")).toBeTruthy();
+    fireEvent.click(saveButton(dialog));
+    await settle();
+    expect(conn.query.fleetSetSharing).toHaveBeenCalledTimes(1);
+    expect(conn.query.fleetSetSharing.mock.calls[0]?.[0]).toEqual({
+      registrationId: MACHINE_ID,
+      mode: "cluster",
+      userIds: [],
+      groupIds: [],
+    });
+  });
+
+  it("takes the new share on request, and drops nothing but the draft it replaces", async () => {
+    const { conn, rerender } = mount(studio());
+    const dialog = await openDialog();
+    fireEvent.click(radio(dialog, /^Everyone in this cluster/));
+    rerender(studio({ mode: "people", userIds: ["bo"] }));
+    await settle();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Use the new sharing" }));
+    await settle();
+    expect(within(dialog).queryByText(MOVED)).toBeNull();
+    expect(radio(dialog, /^Specific people and groups/).getAttribute("aria-checked")).toBe("true");
+    expect(chipTexts(dialog)).toEqual(["Bo Chen"]);
+    // The dialog now says what is stored, so there is nothing to save...
+    expect(within(dialog).getByText("Nothing changed yet.")).toBeTruthy();
+    expect(saveButton(dialog).disabled).toBe(true);
+    // ...and focus is back on the choice in force, not on the page behind.
+    expect(document.activeElement).toBe(radio(dialog, /^Specific people and groups/));
+    expect(conn.query.fleetSetSharing).not.toHaveBeenCalled();
+  });
+
+  it("lets a draft nobody has touched follow the new share, and says so", async () => {
+    const { rerender } = mount(studio());
+    const dialog = await openDialog();
+    rerender(studio({ mode: "cluster" }));
+    await settle();
+
+    // Nothing of the person's was at stake, so the dialog shows the truth --
+    // where it used to keep "Only me" and offer a Save that would have
+    // reverted the other change.
+    expect(radio(dialog, /^Everyone in this cluster/).getAttribute("aria-checked")).toBe("true");
+    expect(within(dialog).getByText(MOVED)).toBeTruthy();
+    expect(within(dialog).getByText("This shows the new sharing.")).toBeTruthy();
+    expect(within(dialog).getByText("Nothing changed yet.")).toBeTruthy();
+    expect(saveButton(dialog).disabled).toBe(true);
+
+    // The first edit makes the draft the person's, and the note goes with it:
+    // "this shows the new sharing" would no longer be true.
+    fireEvent.click(radio(dialog, /^Only me/));
+    expect(within(dialog).queryByText("This shows the new sharing.")).toBeNull();
+    expect(within(dialog).getByText("Unsaved changes")).toBeTruthy();
+  });
+
+  it("asks nothing when the draft already says what is now stored", async () => {
+    const { rerender } = mount(studio());
+    const dialog = await openDialog();
+    fireEvent.click(radio(dialog, /^Everyone in this cluster/));
+    rerender(studio({ mode: "cluster" }));
+    await settle();
+    expect(within(dialog).queryByText(MOVED)).toBeNull();
+    expect(within(dialog).getByText("Nothing changed yet.")).toBeTruthy();
+    // An edit after it is an ordinary edit, measured from the new share.
+    fireEvent.click(radio(dialog, /^Only me/));
+    expect(within(dialog).queryByText(MOVED)).toBeNull();
+    expect(saveButton(dialog).disabled).toBe(false);
+  });
+
+  it("does not count a heartbeat, or an id respelled bare, as a change made elsewhere", async () => {
+    const stored = { mode: "people", userIds: ["v1:identity:user:ana"], groupIds: ["design"] };
+    const { rerender } = mount(studio(stored), {
+      directory: directory({
+        current: current(
+          [{ id: "ana", name: "Ana Ruiz", known: true, inDirectory: true }],
+          [{ id: "design", name: "Design", known: true, inDirectory: true }],
+        ),
+      }),
+    });
+    await settle();
+    const dialog = await openDialog();
+    fireEvent.change(search(dialog), { target: { value: "bo" } });
+    fireEvent.keyDown(search(dialog), { key: "Enter" });
+    rerender(
+      studio({ ...stored, userIds: ["ana"] }, { lastSeenAt: new Date(Date.now() + 15_000).toISOString() }),
+    );
+    await settle();
+    expect(within(dialog).queryByText(MOVED)).toBeNull();
+    expect(saveButton(dialog).disabled).toBe(false);
+    expect(chipTexts(dialog)).toEqual(["Ana Ruiz", "Design", "Bo Chen"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A directory that could not be read (memql#5659, item 2)
+// ---------------------------------------------------------------------------
+//
+// WHO THE MACHINE IS LENT TO IS ON THE ROW; ONLY THEIR NAMES ARE IN THE
+// DIRECTORY. The chips used to be drawn only once the directory answered, so a
+// failed read left the owner unable to see or change who could use their
+// machine. The list comes from the row now, and the directory only names it.
+
+describe("a share directory that could not be read", () => {
+  it("keeps who the machine is lent to on the list, removable, while names load and after they fail", async () => {
+    let fail: (err: unknown) => void = () => {};
+    const pending = new Promise<never>((_, reject) => {
+      fail = reject;
+    });
+    const conn = fakeConnection();
+    conn.query.fleetShareDirectory.mockImplementation(() => pending);
+    mount(studio({ mode: "people", userIds: ["ana", "bo"], groupIds: ["design"] }), { conn });
+    const dialog = await openDialog();
+
+    // While the read is out: the list's own shape, as long as the row says,
+    // with nothing to focus and no name guessed.
+    expect(dialog.querySelectorAll(".fleet-share-chip")).toHaveLength(3);
+    expect(within(dialog).queryByRole("button", { name: /^Remove / })).toBeNull();
+    expect(within(dialog).queryByText(/Unknown/)).toBeNull();
+
+    await act(async () => {
+      fail(new Error("stream closed"));
+    });
+    await settle();
+
+    // Failed: still all three, by kind and place on the list -- never an id,
+    // never "unknown", which would be a claim about the person.
+    expect(chipTexts(dialog)).toEqual(["Person 1", "Person 2", "Group 1"]);
+    expect(within(dialog).getByText("Names could not be loaded.")).toBeTruthy();
+    expect(within(dialog).getByText("stream closed")).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: "Try again" })).toBeTruthy();
+    // Nobody can be added from a directory nobody read.
+    expect(within(dialog).queryByRole("combobox")).toBeNull();
+
+    // Still the owner's list to change: remove one, and the rest go back
+    // exactly as stored.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove Person 1" }));
+    // A label is a stable handle on its entry, not a count that renumbers.
+    expect(chipTexts(dialog)).toEqual(["Person 2", "Group 1"]);
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Remove Person 2" }));
+    fireEvent.click(saveButton(dialog));
+    await settle();
+    expect(conn.query.fleetSetSharing.mock.calls[0]?.[0]).toEqual({
+      registrationId: MACHINE_ID,
+      mode: "people",
+      userIds: ["bo"],
+      groupIds: ["design"],
+    });
+  });
+
+  it("names the list once a second read lands", async () => {
+    const conn = fakeConnection();
+    conn.query.fleetShareDirectory.mockRejectedValue(new Error("stream closed"));
+    mount(studio({ mode: "people", userIds: ["ana"], groupIds: ["design"] }), { conn });
+    const dialog = await openDialog();
+    expect(chipTexts(dialog)).toEqual(["Person 1", "Group 1"]);
+
+    conn.query.fleetShareDirectory.mockImplementation(async () =>
+      builtinReply("fleetShareDirectory", [
+        directory({
+          current: current(
+            [{ id: "ana", name: "Ana Ruiz", known: true, inDirectory: true }],
+            [{ id: "design", name: "Design", known: true, inDirectory: true }],
+          ),
+        }),
+      ]),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+    await settle();
+    expect(chipTexts(dialog)).toEqual(["Ana Ruiz", "Design"]);
+    expect(within(dialog).queryByText("Names could not be loaded.")).toBeNull();
+    expect(search(dialog)).toBeTruthy();
+  });
+
+  it("still stops lending to anyone with Only me", async () => {
+    const conn = fakeConnection();
+    conn.query.fleetShareDirectory.mockRejectedValue(new Error("stream closed"));
+    mount(studio({ mode: "people", userIds: ["ana"], groupIds: ["design"] }), { conn });
+    const dialog = await openDialog();
+    fireEvent.click(radio(dialog, /^Only me/));
+    fireEvent.click(saveButton(dialog));
+    await settle();
+    expect(conn.query.fleetSetSharing.mock.calls[0]?.[0]).toEqual({
+      registrationId: MACHINE_ID,
+      mode: "owner",
+      userIds: [],
+      groupIds: [],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A stored canonical id (memql#5659, item 3)
+// ---------------------------------------------------------------------------
+//
+// The engine stores bare ids and sends the directory bare, but a row written
+// with the canonical spelling is still one person. `sameEntityId` and
+// `bareShortId` are tested as helpers; this is the dialog path end to end.
+
+describe("a share stored with canonical ids", () => {
+  it("matches the directory's bare ids in the dialog, and sends each id back spelled as stored", async () => {
+    const { conn } = mount(
+      studio({ mode: "people", userIds: ["v1:identity:user:ana"], groupIds: ["v1:identity:group:design"] }),
+      {
+        directory: directory({
+          current: current(
+            [{ id: "ana", name: "Ana Ruiz", known: true, inDirectory: true }],
+            [{ id: "design", name: "Design", known: true, inDirectory: true }],
+          ),
+        }),
+      },
+    );
+    await settle();
+    const dialog = await openDialog();
+    // Named, and not marked as having left the directory.
+    expect(chipTexts(dialog)).toEqual(["Ana Ruiz", "Design"]);
+    expect(within(dialog).queryByText("No longer available to pick")).toBeNull();
+    // Not offered a second time under the other spelling.
+    expect(within(dialog).getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "OpsGroup of 1 person",
+      "Bo Chen",
+      "Cy Diaz",
+    ]);
+    // And the same list as the one stored, so nothing has changed yet.
+    expect(saveButton(dialog).disabled).toBe(true);
+
+    fireEvent.change(search(dialog), { target: { value: "bo" } });
+    fireEvent.keyDown(search(dialog), { key: "Enter" });
+    fireEvent.click(saveButton(dialog));
+    await settle();
+    expect(conn.query.fleetSetSharing.mock.calls[0]?.[0]).toEqual({
+      registrationId: MACHINE_ID,
+      mode: "people",
+      userIds: ["v1:identity:user:ana", "bo"],
+      groupIds: ["v1:identity:group:design"],
+    });
+  });
+
+  it("keeps a canonical id's spelling when the names could not be read", async () => {
+    const conn = fakeConnection();
+    conn.query.fleetShareDirectory.mockRejectedValue(new Error("stream closed"));
+    mount(studio({ mode: "people", userIds: ["v1:identity:user:ana", "bo"] }), { conn });
+    const dialog = await openDialog();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove Person 2" }));
+    fireEvent.click(saveButton(dialog));
+    await settle();
+    expect(conn.query.fleetSetSharing.mock.calls[0]?.[0]).toEqual({
+      registrationId: MACHINE_ID,
+      mode: "people",
+      userIds: ["v1:identity:user:ana"],
+      groupIds: [],
+    });
   });
 });
 
