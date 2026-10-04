@@ -45,10 +45,19 @@ reader to honour by mistake. Every reader maps a value it does not know to
 `owner`, so an engine older than a mode reads it as private rather than as
 open, and a `people` share that names nobody is read as `owner` too.
 
-Group membership is read **on every call**, from the same membership rows that
-decide what a person can see elsewhere in the product. Removing somebody from
-a group, or archiving the group, ends their use of the machine on their next
-call, on every replica. Nothing is cached.
+Group membership comes from the same membership rows that decide what a person
+can see elsewhere in the product. Removing somebody from a group, or archiving
+the group, ends their use of the machine on their next call, on every replica.
+
+The replica that plans a call reads membership **on every call**. The replica
+holding a lent machine's stream re-checks every call forwarded to it, and keeps
+one answer per person rather than reading again each time
+([memql#5660](https://github.com/znasllc-io/memql/issues/5660)): any change to
+a membership or a group, written on any replica, empties it everywhere, and no
+answer is kept longer than **30 seconds** — the bound if that change never
+reaches the replica, because it was cut off from the others when the change
+was written. That is far inside the window a call already admitted is allowed
+to finish in (see [What stopping does](#what-stopping-does)).
 
 ---
 

@@ -320,7 +320,16 @@ func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUse
 	if err != nil {
 		return err
 	}
-	person := workerservice.NewPerson(ctx, actingUserId, h.groups)
+	// The groups come from THIS replica's membership cache unless a test set a
+	// resolver: one read per person, reused until a membership or a group
+	// changes anywhere in the mesh, and never for longer than
+	// MembershipCacheTTL (memql#5660). A fresh Person per call used to read
+	// them again for every call this receiver re-checked.
+	groups := h.groups
+	if groups == nil {
+		groups = workerservice.CachedGroups
+	}
+	person := workerservice.NewPerson(ctx, actingUserId, groups)
 	for _, m := range machines {
 		if !sameSubject(m.RegistrationId, registrationId) {
 			continue
