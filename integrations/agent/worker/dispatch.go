@@ -138,9 +138,10 @@ type Request struct {
 
 	// OnStreamChunk, when set, receives the machine's streamed stdout / stderr
 	// as it arrives. Set by nothing in the tool loop today -- the loop takes a
-	// whole result -- and carried here so a chunk that crosses a node hop has
-	// somewhere to land rather than being dropped at the boundary that was
-	// supposed to relay it.
+	// whole result -- and by the pipeline executor, whose step log IS this
+	// stream (#5494). Delivered whichever replica holds the machine's stream:
+	// relayed by the forward from a sibling, directly from this one. It runs
+	// on a stream's receive goroutine either way, so it must not block.
 	OnStreamChunk func(*nodev1.WorkerForwardStream)
 
 	// ReroutedFrom records that this call is not where it was first sent:
@@ -462,7 +463,19 @@ func (d *Dispatcher) attemptLocal(
 	d.stampSelected(ctx, req.OwnerUserId, cand.RegistrationId)
 
 	envelope := buildToolDispatch(req, timeout)
-	res, err := w.Dispatch(dispatchCtx, envelope)
+	// The machine's stream is HERE, so its chunks reach the caller directly --
+	// in the shape a forward relays them in, so OnStreamChunk is one callback
+	// whichever replica holds the stream. Without this a caller whose log IS
+	// the stream (a pipeline step) got output only when a sibling held it.
+	var onChunk func(*memqlv1.ToolStream)
+	if req.OnStreamChunk != nil {
+		onChunk = func(chunk *memqlv1.ToolStream) {
+			if out := forwardStreamChunk(envelope.GetCallId(), chunk); out != nil {
+				req.OnStreamChunk(out)
+			}
+		}
+	}
+	res, err := w.DispatchWithStream(dispatchCtx, envelope, onChunk)
 	return translateResult(envelope.GetCallId(), res, err), ForwardCompleted
 }
 

@@ -370,10 +370,12 @@ func (h *ForwardHandler) ownerOfSharedMachine(ctx context.Context, registrationI
 	return errRegistrationNotOwned
 }
 
-// relayChunk forwards one ToolStream chunk across the hop.
-func (h *ForwardHandler) relayChunk(send func(*nodev1.NodeServerMessage) error, requestId string, chunk *memqlv1.ToolStream) {
+// forwardStreamChunk renders one machine chunk in the shape a forward relays
+// it in -- the shape Request.OnStreamChunk takes on either path -- or nil for
+// a payload the relay does not carry.
+func forwardStreamChunk(requestId string, chunk *memqlv1.ToolStream) *nodev1.WorkerForwardStream {
 	if chunk == nil {
-		return
+		return nil
 	}
 	out := &nodev1.WorkerForwardStream{RequestId: requestId}
 	switch payload := chunk.GetPayload().(type) {
@@ -384,6 +386,15 @@ func (h *ForwardHandler) relayChunk(send func(*nodev1.NodeServerMessage) error, 
 	case *memqlv1.ToolStream_DataChunk:
 		out.Payload = &nodev1.WorkerForwardStream_DataChunk{DataChunk: payload.DataChunk}
 	default:
+		return nil
+	}
+	return out
+}
+
+// relayChunk forwards one ToolStream chunk across the hop.
+func (h *ForwardHandler) relayChunk(send func(*nodev1.NodeServerMessage) error, requestId string, chunk *memqlv1.ToolStream) {
+	out := forwardStreamChunk(requestId, chunk)
+	if out == nil {
 		return
 	}
 	if err := send(&nodev1.NodeServerMessage{

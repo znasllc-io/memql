@@ -442,6 +442,52 @@ func TestPipelineResultNamesTheMachine(t *testing.T) {
 	})
 }
 
+// --- the step's output reaches the caller wherever the stream is -------------
+
+func TestPipelineStepOutputStreamsFromAMachineHeldHere(t *testing.T) {
+	// A pipeline step's log IS its streamed output: the cockpit's result
+	// carries the exit code and the artifacts, not the output. A forward relays
+	// the chunks (TestStreamedChunksCrossTheHop); a machine held by THIS replica
+	// must deliver them too, or a step's log is empty whenever its machine
+	// happens to be connected to the replica running it.
+	reg := workerservice.NewRegistry(testLogger(), fleetNow)
+	w := &workerservice.Worker{
+		RegistrationId: "ci-box", OwnerUserId: pipelineOwner, Name: "ci-box",
+		Capabilities: []string{workerservice.CapabilityHeadless},
+		Concurrency:  map[string]uint32{workerservice.CapabilityHeadless: 2},
+	}
+	w.SetDispatchFunc(func(_ context.Context, d *memqlv1.ToolDispatch, onChunk func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+		if onChunk == nil {
+			return okResult(d.GetCallId()), nil // the output went nowhere
+		}
+		onChunk(&memqlv1.ToolStream{CallId: d.GetCallId(), Payload: &memqlv1.ToolStream_StdoutChunk{StdoutChunk: []byte("ok  pkg/a\n")}})
+		onChunk(&memqlv1.ToolStream{CallId: d.GetCallId(), Payload: &memqlv1.ToolStream_StderrChunk{StderrChunk: []byte("warning\n")}})
+		return okResult(d.GetCallId()), nil
+	}, func() {})
+	reg.Add(w)
+	cand := machine("ci-box", withLabels(pipelineLabels()))
+	cand.ConnectedNodeId = "agent-1"
+	store := &fakeStore{fakeFleet: &fakeFleet{owner: pipelineOwner, machines: []Candidate{cand}}}
+	d := newTestDispatcher(t, store, reg, "agent-1", nil)
+
+	var got []string
+	req := pipelineRequest()
+	req.OnStreamChunk = func(c *nodev1.WorkerForwardStream) {
+		switch p := c.GetPayload().(type) {
+		case *nodev1.WorkerForwardStream_StdoutChunk:
+			got = append(got, "out:"+string(p.StdoutChunk))
+		case *nodev1.WorkerForwardStream_StderrChunk:
+			got = append(got, "err:"+string(p.StderrChunk))
+		}
+	}
+	if res, err := d.Dispatch(asPipelineExecutor(), req); err != nil || !res.OK {
+		t.Fatalf("result = %+v err = %v", res, err)
+	}
+	if strings.Join(got, "|") != "out:ok  pkg/a\n|err:warning\n" {
+		t.Fatalf("chunks = %q, want both, in order, from the machine held here", got)
+	}
+}
+
 // --- rule 6: a sibling-held machine that cannot be reached is skipped --------
 
 func TestPipelineSkipsAMachineItsSiblingHoldsAndCannotReach(t *testing.T) {
