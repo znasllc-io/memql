@@ -202,7 +202,7 @@ func TestAPipelineFileLandsInItsOwnersLibrary(t *testing.T) {
 		"producedByRunId":   "run-7",
 		"producedByStepKey": "tests.unit",
 		"name":              "tests.unit.log",
-		"mimeType":          "text/plain; charset=utf-8",
+		"mimeType":          "text/plain", // the runner's "text/plain; charset=utf-8", as the route stores it
 		"format":            "text",
 		"size":              float64(len(f.Bytes)),
 		"sha256":            hex.EncodeToString(sum[:]),
@@ -244,23 +244,34 @@ func TestAPipelineFileLandsInItsOwnersLibrary(t *testing.T) {
 	}
 }
 
-// TestAPipelineFileKeepsTheContentTypeTheRunnerGaveIt (ruling R32b): the row
-// says what the runner said. A step's report.html stays text/html and its
-// badge.svg image/svg+xml: the Library serves every byte as an attachment and
-// the OS saves through an anchor, so neither is rendered in the OS's origin,
-// and a stamped type would make a person's own artifact lie about what it is.
-func TestAPipelineFileKeepsTheContentTypeTheRunnerGaveIt(t *testing.T) {
+// TestAPipelineFileKeepsTheRunnersContentTypeNormalised (ruling R32b): the row
+// says what the runner said, normalized the way the upload route normalizes a
+// client's declared type -- parameters stripped, lowercased -- and sniffed
+// from the bytes only when the runner said nothing. A step's report.html
+// stays text/html and its badge.svg image/svg+xml: the Library serves every
+// byte as an attachment and the OS saves through an anchor, so neither is
+// rendered in the OS's origin, and a stamped type would make a person's own
+// artifact lie about what it is.
+func TestAPipelineFileKeepsTheRunnersContentTypeNormalised(t *testing.T) {
 	for _, tc := range []struct {
-		name, mimeType, format string
+		name, given  string
+		bytes        []byte
+		want, format string
 	}{
-		{"dist__report.html", "text/html; charset=utf-8", "text"},
-		{"badge.svg", "image/svg+xml", "image"},
-		{"coverage.out", "application/octet-stream", "other"},
+		{"dist__report.html", "text/html; charset=utf-8", nil, "text/html", "text"},
+		{"badge.svg", "image/svg+xml", nil, "image/svg+xml", "image"},
+		{"coverage.out", "application/octet-stream", nil, "application/octet-stream", "other"},
+		{"dist__summary.json", "Application/JSON", nil, "application/json", "text"},
+		// None given: the bytes decide, as they do for an upload that sends none.
+		{"dist__report.pdf", "", []byte("%PDF-1.7\n%fake\n"), "application/pdf", "pdf"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, eng, up := newPipelinesStoreForTest(t)
 			f := pipelineLogFile()
-			f.Name, f.MimeType = tc.name, tc.mimeType
+			f.Name, f.MimeType = tc.name, tc.given
+			if tc.bytes != nil {
+				f.Bytes = tc.bytes
+			}
 			if _, err := s.StoreRunFile(context.Background(), f); err != nil {
 				t.Fatalf("StoreRunFile: %v", err)
 			}
@@ -268,11 +279,11 @@ func TestAPipelineFileKeepsTheContentTypeTheRunnerGaveIt(t *testing.T) {
 			if len(uploads) != 1 || len(creates) != 1 {
 				t.Fatalf("%d uploads and %d rows, want one of each", len(uploads), len(creates))
 			}
-			if uploads[0].contentType != tc.mimeType {
-				t.Errorf("the object's content type = %q, want the runner's %q", uploads[0].contentType, tc.mimeType)
+			if uploads[0].contentType != tc.want {
+				t.Errorf("the object's content type = %q, want %q (the runner's %q, as the route takes it)", uploads[0].contentType, tc.want, tc.given)
 			}
-			if got := pipelinesCallArg(t, creates[0].query, "mimeType"); got != tc.mimeType {
-				t.Errorf("the row's mimeType = %v, want the runner's %q", got, tc.mimeType)
+			if got := pipelinesCallArg(t, creates[0].query, "mimeType"); got != tc.want {
+				t.Errorf("the row's mimeType = %v, want %q (the runner's %q, as the route takes it)", got, tc.want, tc.given)
 			}
 			if got := pipelinesCallArg(t, creates[0].query, "format"); got != tc.format {
 				t.Errorf("the row's format = %v, want %q, the Library's own reading of that type", got, tc.format)
@@ -408,24 +419,45 @@ func TestThePipelineStoreReadsTheLibrarysOwnLimits(t *testing.T) {
 	}
 }
 
-// TestAPipelineFileNameNeverEscapesItsPrefix. The name is the last segment of
+// TestAPipelineFileIsNamedTheWayAnUploadIs. The name is the last segment of
 // the object path, so a separator in it would write outside the file's own
-// prefix. The runner's names are already flat; the Library's writer does not
-// lean on that.
-func TestAPipelineFileNameNeverEscapesItsPrefix(t *testing.T) {
-	s, _, up := newPipelinesStoreForTest(t)
-	f := pipelineLogFile()
-	f.Name = "dist/../..\\..\\etc/passwd"
-	if _, err := s.StoreRunFile(context.Background(), f); err != nil {
-		t.Fatal(err)
-	}
-	uploads := up.recorded()
-	if len(uploads) != 1 {
-		t.Fatal("nothing was uploaded")
-	}
-	// Exactly the three separators library/{owner}/{fileId}/{name} has.
-	if object := uploads[0].object; strings.Count(object, "/") != 3 || strings.Contains(object, "\\") {
-		t.Errorf("object path %q escaped library/{owner}/{fileId}/{name}", object)
+// prefix, and it is the filename a download hands over. The runner's names
+// are already flat; the Library's writer does not lean on that, and it names
+// a file by the upload route's own rule rather than a second one: the last
+// path segment, quotes and control characters dropped, the dots at either end
+// trimmed.
+func TestAPipelineFileIsNamedTheWayAnUploadIs(t *testing.T) {
+	for given, want := range map[string]string{
+		"dist/../..\\..\\etc/passwd": "passwd",
+		`say "hi".log`:               "say hi.log",
+		"..tests.unit.log..":         "tests.unit.log",
+		"line\nbreak.log":            "linebreak.log",
+		" ":                          "upload",
+	} {
+		t.Run(want, func(t *testing.T) {
+			if route := server.SanitizeLibraryFileName(given); route != want {
+				t.Fatalf("the upload route names %q %q; this table expects %q", given, route, want)
+			}
+			s, eng, up := newPipelinesStoreForTest(t)
+			f := pipelineLogFile()
+			f.Name = given
+			got, err := s.StoreRunFile(context.Background(), f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			uploads, creates := up.recorded(), eng.callsTo("createLibraryFile")
+			if len(uploads) != 1 || len(creates) != 1 {
+				t.Fatalf("%d uploads and %d rows, want one of each", len(uploads), len(creates))
+			}
+			// Exactly the three separators library/{owner}/{fileId}/{name} has.
+			wantObject := "library/" + pipelinesTestOwner + "/" + got.FileID + "/" + want
+			if object := uploads[0].object; object != wantObject {
+				t.Errorf("object path %q, want %q", object, wantObject)
+			}
+			if name := pipelinesCallArg(t, creates[0].query, "name"); name != want {
+				t.Errorf("the row's name = %v, want %q", name, want)
+			}
+		})
 	}
 }
 

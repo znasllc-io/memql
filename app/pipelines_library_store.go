@@ -52,7 +52,12 @@ import (
 // owner's whole Library by its MEMQL_LIBRARY_USER_QUOTA_BYTES, measured the
 // way the route measures it: stored files, every earlier version and open
 // upload sessions, plus this file. The bytes land at the route's object path,
-// library/{owner}/{fileId}/{name}, so one bucket has one layout.
+// library/{owner}/{fileId}/{name}, so one bucket has one layout. The name and
+// the content type go through the route's OWN functions, never a copy of
+// them: server.SanitizeLibraryFileName (the last path segment, quotes and
+// control characters dropped, the dots at either end trimmed) and
+// server.ResolveLibraryMIME (parameters stripped, lowercased, sniffed from the
+// bytes only when none was given).
 //
 // What the Library will not take -- a file over the limit, an owner over the
 // quota, a node with no object storage -- is an OMISSION, which the runner
@@ -153,12 +158,13 @@ func (s *pipelinesLibraryStore) StoreRunFile(ctx context.Context, f pipelinestep
 
 	// THE BYTES, THEN THE ROW. Never the other way round: a row written first
 	// would claim a blobUrl nothing answers.
-	name := sanitizeContentName(f.Name)
-	// The runner's content type AS IT GAVE IT (ruling R32b): the Library
+	name := server.SanitizeLibraryFileName(f.Name)
+	// The runner's content type, believed as the route believes a client's
+	// (ruling R32b) and normalized as the route normalizes one: the Library
 	// serves every byte as an attachment, so a step's .html or .svg is never
 	// rendered in the OS's origin, and a stamped type would make a person's
 	// own artifact lie about what it is.
-	mimeType := firstNonEmptyStr(f.MimeType, "application/octet-stream")
+	mimeType := server.ResolveLibraryMIME(f.MimeType, f.Bytes)
 	fileID := id.NewShortId()
 	object := fmt.Sprintf("library/%s/%s/%s", owner, fileID, name)
 	blobURL, err := s.uploader.Upload(ctx, s.bucket, object, f.Bytes, mimeType)
@@ -193,6 +199,13 @@ func (s *pipelinesLibraryStore) StoreRunFile(ctx context.Context, f pipelinestep
 		return pipelinesteps.StoredFile{}, fmt.Errorf("the file's row could not be composed, so it was not recorded: %w", err)
 	}
 	if _, err := s.engine.Execute(ownerCtx, "mutation "+call); err != nil {
+		// THE BYTES STAY BEHIND, AND THIS SAYS SO. No row points at them, so
+		// nothing lists, serves or counts them against the owner's quota (the
+		// footprint is read from rows), but they occupy the bucket. Taking them
+		// back needs a delete the node's uploader does not have:
+		// server.FileUploader is Upload alone, and integrations/azureblob
+		// implements no delete. app/appsession_content_store.go leaves its
+		// bytes the same way when its row write fails after an upload.
 		return pipelinesteps.StoredFile{}, fmt.Errorf("the file's bytes are stored but its Library row could not be written: %w", err)
 	}
 
