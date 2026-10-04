@@ -68,6 +68,7 @@ var refusalTitles = map[string]string{
 	CodeFleetNotConsented: "fleet compute not allowed",
 	CodeForkRefused:       "pull request from a fork",
 	CodeDisconnected:      "pipeline disconnected",
+	CodeAlreadyConnected:  "repository already has a pipeline",
 }
 
 // manifestRemedy is the remedy for every refusal a manifest edit fixes.
@@ -90,6 +91,7 @@ var refusalRemedies = map[string]string{
 	CodeFleetNotConsented: "Allow fleet compute for the pipeline in MemQL OS, or remove the step's needs.",
 	CodeForkRefused:       "Checks run only on branches in this repository. Push the branch here to run them.",
 	CodeDisconnected:      "Reconnect the pipeline in MemQL OS to run checks again.",
+	CodeAlreadyConnected:  "Disconnect the pipeline the other source holds, or work from that source.",
 }
 
 // The stage table's Status values that are not built from a reason.

@@ -135,6 +135,7 @@ the variables for the second.
 | Campaign sending | The deployment, on the bff | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET`, `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` |
 | Workbenches | The deployment, on the agent | `MEMQL_WORKBENCH_REMOTE`, `MEMQL_WORKER_PEERS` |
 | Local apps | The deployment, on the agent | `MEMQL_MCP_PUBLIC_URL`, `MEMQL_NODE_BOOTSTRAP_TOKEN`, `MEMQL_IDENTITY_VERIFIER_BASE_URL` |
+| Pipelines (optional) | Connecting a pipeline to a source; its Settings section arrives with epic memql#5479 | The GitHub App holding checks write, one connected repository, and a pipeline runner on the agent ([Pipelines](pipelines.md)) |
 
 A module is **configured** when any one of its lanes is complete -- lanes are
 alternatives, not requirements. A module with some required slots present and

@@ -73,7 +73,11 @@ const (
 	CodeExecutorError     = "pipeline_executor_error"
 	CodeSecretMissing     = "pipeline_secret_missing"
 	CodeDisconnected      = "pipeline_disconnected"
-	CodeCheckPermission   = "pipeline_check_permission_missing"
+	// One pipeline per repository: a second source connecting a repository
+	// another source already runs would write a second, same-named check
+	// run on every commit.
+	CodeAlreadyConnected = "pipeline_already_connected"
+	CodeCheckPermission  = "pipeline_check_permission_missing"
 
 	// Skips.
 	CodeStageBlocked      = "pipeline_stage_blocked"
@@ -119,6 +123,7 @@ var codeClasses = map[string]Class{
 	CodeFleetNotConsented: ClassRefusal,
 	CodeForkRefused:       ClassRefusal,
 	CodeDisconnected:      ClassRefusal,
+	CodeAlreadyConnected:  ClassRefusal,
 
 	CodeRunnerUnavailable:   ClassFailure,
 	CodeExecutorError:       ClassFailure,

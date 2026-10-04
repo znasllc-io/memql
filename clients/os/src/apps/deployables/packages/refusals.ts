@@ -640,6 +640,13 @@ const COPY: Record<string, RefusalCopy> = {
     title: "This pipeline is disconnected",
     next: "The run did not go ahead. Connect the pipeline again, and the next push runs it.",
   },
+  pipeline_already_connected: {
+    // One pipeline per repository. A second would write a second check run
+    // with the same name on every commit, so connect refuses it and names the
+    // way forward rather than the rule.
+    title: "This repository already has a pipeline",
+    next: "Another source runs its checks. Disconnect that pipeline first, or work from that source.",
+  },
   pipeline_check_permission_missing: {
     // A NOTE: the run executes and concludes as usual. An app registered
     // before pipelines cannot write checks until its permissions are widened
@@ -837,6 +844,7 @@ const NOT_A_FAULT: ReadonlySet<string> = new Set([
   "pipeline_fleet_not_consented",
   "pipeline_fleet_disabled",
   "pipeline_disconnected",
+  "pipeline_already_connected",
   "pipeline_step_cancelled",
 ]);
 

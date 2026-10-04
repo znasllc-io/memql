@@ -79,8 +79,8 @@ func NeedsSelector(spec *Spec) bool {
 // stage compiles, in order:
 //
 //   - a notify stage to one notify step, "<stage>.notify";
-//   - every other step to one step "<stage>/<step>", or, split by the timing
-//     table into k > 1 shards, to k steps "<stage>/<step>#<i>";
+//   - every other step to one step "<stage>.<step>", or, split by the timing
+//     table into k > 1 shards, to k steps "<stage>.<step>#<i>";
 //   - every step depends on every step of the stage planned before it, so
 //     stages run strictly in the order written.
 //
@@ -171,32 +171,9 @@ type planCompiler struct {
 func (c *planCompiler) compileStep(stage string, declared StepSpec, dependsOn []string) ([]Step, *Refusal) {
 	scope := stage + "/" + declared.Name
 
-	var needs []string
-	for _, need := range slices.Sorted(maps.Keys(declared.Needs)) {
-		if declared.Needs[need] {
-			needs = append(needs, need)
-		}
-	}
-	if len(needs) > 0 && c.in.Compute != ComputeClusterAndFleet {
-		compute := c.in.Compute
-		if compute == "" {
-			compute = ComputeCluster
-		}
-		return nil, Refuse(CodeFleetNotConsented, scope,
-			"The step needs %s, which sends it to a fleet machine, and this pipeline's compute is %s: the owner has not consented to the fleet (compute: %s).",
-			strings.Join(needs, ", "), compute, ComputeClusterAndFleet)
-	}
-
-	var notAllowed []string
-	for _, name := range declared.Secrets {
-		if !slices.Contains(c.in.AllowedSecrets, name) && !slices.Contains(notAllowed, name) {
-			notAllowed = append(notAllowed, name)
-		}
-	}
-	if len(notAllowed) > 0 {
-		return nil, Refuse(CodeSecretNotAllowed, scope,
-			"The step uses %s, which the pipeline's owner has not allowed; a secret resolves only when the pipeline's allowed secret names include it.",
-			strings.Join(notAllowed, ", "))
+	needs := stepNeeds(declared)
+	if r := stepConsent(scope, declared, c.in.Compute, c.in.AllowedSecrets); r != nil {
+		return nil, r
 	}
 
 	if declared.Packages != "" && c.in.Selector == nil {
@@ -396,4 +373,60 @@ func cloneCompiledStep(s Step) Step {
 		s.Skip = &skip
 	}
 	return s
+}
+
+// Consent checks what a pipeline row allows against EVERY step of spec,
+// whatever event would plan it: fleet consent for a step that names a need,
+// and the secret allowlist for a step that names a secret. Compile asks the
+// same question of the planned stages only, at run time; connect asks it of
+// all of them, so a pipeline that one event could never run is refused when
+// it is connected rather than on the first push that reaches that stage.
+func Consent(spec *Spec, compute Compute, allowedSecrets []string) *Refusal {
+	if spec == nil {
+		return nil
+	}
+	for _, stage := range spec.Stages {
+		for _, step := range stage.Steps {
+			if r := stepConsent(stage.Name+"/"+step.Name, step, compute, allowedSecrets); r != nil {
+				return r
+			}
+		}
+	}
+	return nil
+}
+
+// stepNeeds is a step's needs set true, sorted.
+func stepNeeds(declared StepSpec) []string {
+	var needs []string
+	for _, need := range slices.Sorted(maps.Keys(declared.Needs)) {
+		if declared.Needs[need] {
+			needs = append(needs, need)
+		}
+	}
+	return needs
+}
+
+// stepConsent refuses a step whose needs the owner has not consented to send
+// to the fleet, or whose secrets the owner has not allowed.
+func stepConsent(scope string, declared StepSpec, compute Compute, allowedSecrets []string) *Refusal {
+	if needs := stepNeeds(declared); len(needs) > 0 && compute != ComputeClusterAndFleet {
+		if compute == "" {
+			compute = ComputeCluster
+		}
+		return Refuse(CodeFleetNotConsented, scope,
+			"The step needs %s, which sends it to a fleet machine, and this pipeline's compute is %s: the owner has not consented to the fleet (compute: %s).",
+			strings.Join(needs, ", "), compute, ComputeClusterAndFleet)
+	}
+	var notAllowed []string
+	for _, name := range declared.Secrets {
+		if !slices.Contains(allowedSecrets, name) && !slices.Contains(notAllowed, name) {
+			notAllowed = append(notAllowed, name)
+		}
+	}
+	if len(notAllowed) > 0 {
+		return Refuse(CodeSecretNotAllowed, scope,
+			"The step uses %s, which the pipeline's owner has not allowed; a secret resolves only when the pipeline's allowed secret names include it.",
+			strings.Join(notAllowed, ", "))
+	}
+	return nil
 }

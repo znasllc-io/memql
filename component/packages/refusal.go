@@ -520,6 +520,7 @@ const (
 	CodePipelineArtifactMissing     = "pipeline_artifact_missing"
 	CodePipelineLogCapped           = "pipeline_log_capped"
 	CodePipelineIsolationUnenforced = "pipeline_isolation_unenforced"
+	CodePipelineAlreadyConnected    = "pipeline_already_connected"
 )
 
 // Refusal is an analysis or pipeline failure carrying a stable Code.

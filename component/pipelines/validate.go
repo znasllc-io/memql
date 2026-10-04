@@ -31,8 +31,8 @@ const manifestNameRule = "use lower-case letters, digits and hyphens, starting w
 var (
 	// manifestNameRe is every name a pipeline declares: stages, steps,
 	// channels, buckets and services. A name is part of a step key
-	// ("stage/step#2") and of a refusal's scope, so it may hold neither a
-	// slash nor a hash.
+	// ("stage.step#2") and of a refusal's scope ("stage/step"), so it may
+	// hold no dot, slash or hash.
 	manifestNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 	// serviceEnvKeyRe is an environment variable name a sidecar can be given.
 	serviceEnvKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)

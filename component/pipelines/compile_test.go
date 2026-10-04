@@ -528,3 +528,25 @@ func TestCompileSharesNoStorageWithTheSpecOrBetweenSteps(t *testing.T) {
 		t.Errorf("changing one shard changed its sibling: %+v", second)
 	}
 }
+
+// Consent asks Compile's per-run question of EVERY step, whatever event would
+// plan it: connect uses it, so a step a push would refuse is refused when the
+// pipeline is connected, not on the first push that reaches its stage.
+func TestConsentChecksEveryStageNotOnlyThePlannedOnes(t *testing.T) {
+	spec := d7ExampleSpec()
+	spec.Stages[2].Steps[0].Secrets = []string{"DEPLOY_TOKEN"}
+	// os-checks needs docker and deploy/verify-rollout uses a secret; neither
+	// step runs on every event, and Consent must not care.
+	if r := Consent(spec, ComputeCluster, []string{"DEPLOY_TOKEN", "VERIFY_TOKEN"}); r == nil || r.Code != CodeFleetNotConsented || r.Scope != "tests/os-checks" {
+		t.Errorf("Consent on a cluster-only pipeline = %v, want pipeline_fleet_not_consented at tests/os-checks", r)
+	}
+	if r := Consent(spec, ComputeClusterAndFleet, nil); r == nil || r.Code != CodeSecretNotAllowed {
+		t.Errorf("Consent with no allowed secrets = %v, want pipeline_secret_not_allowed", r)
+	}
+	if r := Consent(spec, ComputeClusterAndFleet, []string{"DEPLOY_TOKEN", "VERIFY_TOKEN"}); r != nil {
+		t.Errorf("Consent with fleet consent and every secret allowed = %v, want nil", r)
+	}
+	if r := Consent(nil, ComputeCluster, nil); r != nil {
+		t.Errorf("Consent(nil) = %v, want nil", r)
+	}
+}
