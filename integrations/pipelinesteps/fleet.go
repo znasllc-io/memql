@@ -361,6 +361,12 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 		return withWhere(refusedResult(pl.CodeFleetDisabled,
 			"The owner has turned computer use off, so no step runs on their machines; turning it back on lets this "+
 				"one run. Nothing ran."), where)
+	case r.RefusedByGate:
+		// THIS ENGINE'S OWN GATE refused before any routing (ruling R33b): a
+		// decision about the request, not a fact about the owner's machines,
+		// so it is the executor's error, carrying the gate's code and words.
+		return withWhere(refusedResult(pl.CodeExecutorError, fmt.Sprintf(
+			"The engine's dispatcher refused the step before routing it (%s): %s. Nothing ran.", code, msg)), where)
 	case r.RefusedBeforeStart:
 		// THE DISPATCHER'S VERDICT, never a guess from the code: nothing
 		// started on any machine -- no candidate, or every one refused before

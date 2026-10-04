@@ -117,6 +117,16 @@ type Result struct {
 	// refuses with, and a step that never ran must not read as one that
 	// failed.
 	RefusedBeforeStart bool
+
+	// RefusedByGate says THIS engine's own gate refused the call before any
+	// routing (preDispatchCheck: rule 0, the pipeline gate, the agent gates):
+	// a decision about the request -- who asked, its shape, a read the gate
+	// could not make, the owner's off switch -- rather than a fact about the
+	// owner's machines. Always alongside RefusedBeforeStart. Never set by a
+	// routing or machine refusal, a sibling replica's included, whatever code
+	// it carries: the same code from a sibling is that replica's word about a
+	// machine it holds.
+	RefusedByGate bool
 }
 
 // Request carries the inputs of one dispatch: from the agent tool loop, or --
@@ -307,8 +317,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			OK:           false,
 			ErrorCode:    gate.errorCode,
 			ErrorMessage: gate.errorMessage,
-			// Refused at a gate: nothing was routed, so nothing started.
+			// Refused at a gate: nothing was routed, so nothing started --
+			// and it was this engine's gate that said no.
 			RefusedBeforeStart: true,
+			RefusedByGate:      true,
 		}
 		// A denial never reached the pick, so the record carries only what was
 		// asked for -- not an empty candidate list, which would read as "the

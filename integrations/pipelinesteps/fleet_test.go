@@ -353,11 +353,55 @@ func TestFleetStepWithNoMachineIsTyped(t *testing.T) {
 // TestFleetKillSwitchIsTyped: the owner's off switch for their machines is
 // pipeline_fleet_disabled, which tells a person what to turn back on.
 func TestFleetKillSwitchIsTyped(t *testing.T) {
+	// The off switch is the engine's own gate refusing, flagged as the real
+	// dispatcher flags it -- so its own code has to be read first.
 	d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
-		return worker.Result{OK: false, ErrorCode: "kill_switch_engaged", ErrorMessage: "computer use is currently disabled by the user"}, nil
+		return worker.Result{OK: false, ErrorCode: "kill_switch_engaged", ErrorMessage: "computer use is currently disabled by the user",
+			RefusedBeforeStart: true, RefusedByGate: true}, nil
 	}}
 	f, _, _, _ := newTestFleet(t, d)
 	wantFailure(t, runFleet(t, f, fleetReq()), pl.OutcomeRefused, pl.CodeFleetDisabled)
+}
+
+// TestFleetStepTheEnginesGateRefusalIsAnExecutorError (ruling R33b): a
+// refusal by THIS engine's own gate before any routing is a decision about
+// the request -- its origin, its shape, a read the gate could not make -- not
+// a fact about the owner's machines, so it is pipeline_executor_error
+// carrying the gate's code and sentence, never "no machine offers this need".
+// Read off the dispatcher's RefusedByGate, not a list of the gate's codes.
+func TestFleetStepTheEnginesGateRefusalIsAnExecutorError(t *testing.T) {
+	for _, code := range []string{
+		"denied_pipeline_purpose", "unknown_purpose", "bad_request", "preferences_lookup_failed",
+		"authorization_lookup_failed", "unknown_action", "a_gate_code_this_engine_has_never_seen",
+	} {
+		t.Run(code, func(t *testing.T) {
+			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+				return worker.Result{OK: false, ErrorCode: code, ErrorMessage: "the gate's own sentence",
+					RefusedBeforeStart: true, RefusedByGate: true}, nil
+			}}
+			f, lib, _, _ := newTestFleet(t, d)
+			res := runFleet(t, f, fleetReq())
+			wantFailure(t, res, pl.OutcomeRefused, pl.CodeExecutorError)
+			if !strings.Contains(res.Failure.Message, code) || !strings.Contains(res.Failure.Message, "the gate's own sentence") {
+				t.Errorf("message %q does not carry the gate's code and sentence", res.Failure.Message)
+			}
+			if len(lib.files) != 0 {
+				t.Errorf("a step the gate refused stored %d Library file(s)", len(lib.files))
+			}
+		})
+	}
+
+	t.Run("the same code from a sibling replica is a routing refusal", func(t *testing.T) {
+		// Rule 0 re-decided on the replica holding the machine -- the
+		// version-skew case of a rolling deploy -- is not this engine's gate:
+		// no machine took the step.
+		d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+			return worker.Result{OK: false, ErrorCode: "denied_pipeline_purpose", ErrorMessage: "unknown purpose there",
+				RefusedBeforeStart: true, WorkerId: "reg-9", NodeId: "agent-b"}, nil
+		}}
+		f, _, _, _ := newTestFleet(t, d)
+		wantFailure(t, runFleet(t, f, fleetReq()), pl.OutcomeRefused, pl.CodeNoMachineForNeed)
+	})
 }
 
 // TestFleetRecordsTheMachine: the request carries no machine (design D4), so
@@ -668,6 +712,7 @@ type gateStore struct {
 	mu          sync.Mutex
 	machines    []worker.Candidate
 	computerUse bool
+	prefsErr    error
 	invocations []workerservice.InvocationRow
 }
 
@@ -679,7 +724,7 @@ func (s *gateStore) RoutingPolicyForOwner(context.Context, string) (*worker.Poli
 }
 func (s *gateStore) TouchWorkerSelected(context.Context, string, string) error { return nil }
 func (s *gateStore) UserPreferences(context.Context, string) (worker.Preferences, error) {
-	return worker.Preferences{ComputerUseEnabled: s.computerUse}, nil
+	return worker.Preferences{ComputerUseEnabled: s.computerUse}, s.prefsErr
 }
 func (s *gateStore) AgentAuthorization(context.Context, string, string) (*worker.Authorization, error) {
 	return nil, nil
@@ -709,15 +754,18 @@ func TestFleetStepPassesTheRealDispatchersPipelineGate(t *testing.T) {
 		name        string
 		machines    []worker.Candidate
 		computerUse bool
+		prefsErr    error
 		status      pl.Outcome
 		code        string
 	}{
-		{"an owner with no machines", nil, true, pl.OutcomeRefused, pl.CodeNoMachineForNeed},
-		{"a machine held by a sibling replica this node cannot reach", []worker.Candidate{builder}, true, pl.OutcomeRefused, pl.CodeNoMachineForNeed},
-		{"an owner whose computer use is off", []worker.Candidate{builder}, false, pl.OutcomeRefused, pl.CodeFleetDisabled},
+		{"an owner with no machines", nil, true, nil, pl.OutcomeRefused, pl.CodeNoMachineForNeed},
+		{"a machine held by a sibling replica this node cannot reach", []worker.Candidate{builder}, true, nil, pl.OutcomeRefused, pl.CodeNoMachineForNeed},
+		{"an owner whose computer use is off", []worker.Candidate{builder}, false, nil, pl.OutcomeRefused, pl.CodeFleetDisabled},
+		// The real gate refusing for a reason of its own: an executor error.
+		{"an owner whose computer-use setting cannot be read", []worker.Candidate{builder}, true, errors.New("db down"), pl.OutcomeRefused, pl.CodeExecutorError},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			store := &gateStore{machines: c.machines, computerUse: c.computerUse}
+			store := &gateStore{machines: c.machines, computerUse: c.computerUse, prefsErr: c.prefsErr}
 			d, err := worker.NewDispatcher(worker.Options{
 				Logger:     quietLogger(),
 				Registry:   workerservice.NewRegistry(quietLogger(), nil),
