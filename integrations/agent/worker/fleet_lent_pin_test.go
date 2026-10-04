@@ -31,6 +31,7 @@ import (
 
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 const (
@@ -67,7 +68,8 @@ func newLentPinHop(t *testing.T, lend func(*Candidate), groupsOf workerservice.G
 		}
 	}
 	modelCaps := []string{workerservice.CapabilityHeadless, workerservice.ModelCapability}
-	modelLabels := map[string]string{workerservice.ModelLabel(sharedHopModel): "1"}
+	// A window the provider path's working-context floor clears.
+	modelLabels := map[string]string{workerservice.ModelLabel(sharedHopModel): "ctx=32768"}
 
 	// Replica B holds the lent machine's stream.
 	regB := workerservice.NewRegistry(testLogger(), fleetNow)
@@ -300,5 +302,36 @@ func TestSystemWorkCannotPinAMachine(t *testing.T) {
 				t.Fatalf("lent=%d own=%d: system work must not run on a pinned machine", h.studioCalls.Load(), h.ownCalls.Load())
 			}
 		})
+	}
+}
+
+func TestAPinnedCallIsNoNarrowerThanTheGateThatAdmittedIt(t *testing.T) {
+	// THE BUG CLASS, end to end. The provider path decides availability on
+	// the person's catalog (fleetEntry), which has listed machines lent to
+	// them since design G8; the pinned executor read the caller's own
+	// machines only. So the gate said "available", the call was made, and
+	// the executor refused it with the pin's sentence: the gate's extra reach
+	// was dead code. This walks the seam AiChat walks -- resolve
+	// `fleet:<model>` for the person, then call it under the pin.
+	h := newLentPinHop(t, lendTo([]string{"ursula"}, nil, true), nil)
+	registry := memqlengine.NewProviderRegistryForTest()
+	registry.SetFleetInference(h.f)
+	ctx := common.ContextWithFleetRegistration(authorityCtx(t, sharedHopCaller), lentPin)
+
+	entry, ok := registry.EntryForUser(ctx, sharedHopCaller, memqlengine.FleetReferencePrefix+sharedHopModel)
+	if !ok || entry == nil || !entry.Available {
+		t.Fatalf("the availability gate refused a model offered by a machine lent to the caller: %+v", entry)
+	}
+	chat, ok := entry.Client.(common.ChatAIProvider)
+	if !ok {
+		t.Fatalf("a fleet entry must serve chat, got %T", entry.Client)
+	}
+	answer, err := chat.CallChat(ctx, []common.ChatMessage{{Role: "user", Content: "hello"}})
+	if err != nil {
+		t.Fatalf("the gate admitted the call and the pinned executor refused it: %v", err)
+	}
+	if answer != lentAnswer || h.studioCalls.Load() != 1 || h.ownCalls.Load() != 0 {
+		t.Fatalf("answer %q (lent=%d own=%d): the pinned call must run on the machine it names",
+			answer, h.studioCalls.Load(), h.ownCalls.Load())
 	}
 }
