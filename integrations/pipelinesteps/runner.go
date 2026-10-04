@@ -126,8 +126,9 @@ const (
 	apiTroubleRepeat = 5 * time.Minute
 	// outcomeMaxBytes is the most the encoded outcome may take. The other
 	// annotations on the Job -- the observation (at most some 13 KiB), the
-	// claim, the cursor and the step's identity -- stay well inside the
-	// 32 KiB of the 256 KiB this leaves them.
+	// claim, the log cursor, the step's first line (memql.io/log-first) and
+	// the step's identity -- stay well inside the 32 KiB of the 256 KiB this
+	// leaves them.
 	outcomeMaxBytes = 224 << 10
 	// tokenRefreshAge is how old a clone token may be when the step's Job is
 	// created: an installation token lasts an hour, the step queues for as

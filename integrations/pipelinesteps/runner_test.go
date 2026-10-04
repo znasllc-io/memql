@@ -4004,6 +4004,7 @@ func TestWhatTheCutsLeaveAlwaysFits(t *testing.T) {
 		AnnotObservation: string(observation),
 		AnnotRunner:      rtStamp(strings.Repeat("n", 253), rtT0),
 		AnnotLogCursor:   rtT0.Format(time.RFC3339Nano),
+		AnnotLogFirst:    rtT0.Format(time.RFC3339Nano),
 		AnnotStepKey:     strings.Repeat("s", 1024),
 		AnnotWorkRun:     strings.Repeat("w", 256),
 		AnnotOwner:       strings.Repeat("o", 256),
