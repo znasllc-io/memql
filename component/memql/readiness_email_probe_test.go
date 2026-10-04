@@ -71,11 +71,11 @@ func TestAnUnauthorizedProbeIsWhatMadeEmailNotApplicable(t *testing.T) {
 	// (1) The old shape. A bare context reaches the probe, the probe refuses,
 	// and the verdict was notApplicable -- on every node, forever.
 	refusing := readinessResolvers{
-		IntegrationState: func(ctx context.Context, _ string) (string, bool, bool, error) {
+		IntegrationState: func(ctx context.Context, _ string) (IntegrationReading, error) {
 			if err := statusAuthorizedRule(ctx); err != nil {
-				return "", false, true, err
+				return IntegrationReading{Registered: true}, err
 			}
-			return "configured", true, true, nil
+			return IntegrationReading{State: "configured", Touched: true, Registered: true}, nil
 		},
 	}
 	// A PROBE THAT REFUSES MAPS TO unknown, which is the half of this that is
@@ -86,8 +86,8 @@ func TestAnUnauthorizedProbeIsWhatMadeEmailNotApplicable(t *testing.T) {
 	// a reason no actor can fix, because the ACTOR reason is no longer
 	// reachable through this entry point -- see (2).
 	alwaysRefuses := readinessResolvers{
-		IntegrationState: func(context.Context, string) (string, bool, bool, error) {
-			return "", false, true, errors.New("email.status: the probe itself failed")
+		IntegrationState: func(context.Context, string) (IntegrationReading, error) {
+			return IntegrationReading{Registered: true}, errors.New("email.status: the probe itself failed")
 		},
 	}
 	if got := evaluateModule(context.Background(), alwaysRefuses, emailModule(), "n", "bff", inferenceNow); got.State != readiness.Unknown {

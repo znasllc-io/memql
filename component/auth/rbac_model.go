@@ -207,6 +207,7 @@ var appReadFloors = map[string][]Role{
 	"app:files/logs":            {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:deployables":           {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	"app:deployables/logs":      {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:deployables/runs":      {RoleOwner, RoleDeveloper},
 	"app:fleet":                 {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	"app:fleet/logs":            {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:logs":                  {RoleOwner, RoleDeveloper, RoleAdmin},
@@ -234,6 +235,7 @@ var appReadFloors = map[string][]Role{
 	"app:settings/tokens":       {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/keys":         {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:settings/logs":         {RoleOwner, RoleDeveloper, RoleAdmin},
+	"app:settings/pipelines":    {RoleOwner},
 	"app:identity":              {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
 	"app:identity/logs":         {RoleOwner, RoleDeveloper, RoleAdmin},
 	"app:bin":                   {RoleOwner, RoleDeveloper, RoleAdmin, RoleWriter, RoleReader},
@@ -272,6 +274,14 @@ var appPartGrants = map[string][]Role{
 	// the Storefront token references a binding can expose are ones an owner
 	// or Connect chose.
 	"app:deployables/store": {RoleOwner, RoleDeveloper},
+	// The pipelines parts (epic memql#5479, task memql#5498): connecting a
+	// source's pipeline, re-running a run, cancelling one, and naming where a
+	// notify stage delivers -- four consequences, four parts, on the two roles
+	// that deploy.
+	"app:deployables/connect":  {RoleOwner, RoleDeveloper},
+	"app:deployables/rerun":    {RoleOwner, RoleDeveloper},
+	"app:deployables/cancel":   {RoleOwner, RoleDeveloper},
+	"app:deployables/channels": {RoleOwner, RoleDeveloper},
 	// The pack switch in Cluster > Modules (Connect Shopify design, D4). A
 	// developer holding it flips only a STOREFRONT pack: the other half of
 	// that rule is component/memql's AuthorizeSetPackEnabled, and an owner

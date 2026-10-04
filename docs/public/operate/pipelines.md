@@ -54,8 +54,9 @@ token, a secret value or a log line.
 
 ## Connecting a pipeline
 
-**Who:** the source's owner, holding `execute` on `app:deployables/sources`.
-**How:** the `pipelinesConnect` builtin. MemQL OS's connect flow, on the source page, arrives with epic memql#5479.
+**Who:** the source's owner, holding `execute` on `app:deployables/connect`.
+**How:** in MemQL OS, **Connect pipeline** on the source's page in Deployables
+([below](#in-memql-os)); or the `pipelinesConnect` builtin.
 
 Before connecting:
 
@@ -130,16 +131,26 @@ Afterwards:
   deliveries are matched on the installation and the repository name a
   pipeline was connected with ([Delivery](#delivery-webhook-or-poll)).
 - **Disconnect** with `builtin pipelinesDisconnect(pipelineId: "<pipeline id>")`
-  (`execute` on `app:deployables/sources`). It opens no more runs, and a run no
+  (`execute` on `app:deployables/connect`). It opens no more runs, and a run no
   agent has started yet concludes `pipeline_disconnected`. The pipeline and its
   runs stay, as the history, and the repository is free for another source's
   pipeline.
 - **Re-run** with `builtin pipelinesRerun(runId: "<run id>")` (`execute` on
-  `app:deployables/deploy`): the next attempt of the run's key, in the
+  `app:deployables/rerun`): the next attempt of the run's key, in the
   original's mode and event, with a new check run. The original stays as it
   ended.
+- **Re-run failed** with `builtin pipelinesRerun(runId: "<run id>", failedOnly:
+  true)`: the same new attempt, running only what the original did not pass.
+  Every step the original passed **with the same package slice** is carried
+  over as skipped `pipeline_passed_earlier` (*Passed in attempt 1.*), and
+  everything else runs. A shard whose slice moved since -- the timing table
+  learned between the attempts -- runs again, because a pass over other
+  packages is not a pass of these. A run with no failed or cancelled step (one
+  that passed, or one refused before any step) is refused
+  `pipeline_nothing_to_rerun`. GitHub's own re-request stays a whole re-run:
+  one check run reports the whole run.
 - **Cancel** with `builtin pipelinesCancel(runId: "<run id>")` (`execute` on
-  `app:deployables/deploy`). It flags the run; the agent driving it cancels
+  `app:deployables/cancel`). It flags the run; the agent driving it cancels
   what is executing at its next heartbeat and concludes the run cancelled. A
   queued run no agent has claimed is concluded cancelled at once.
 
@@ -148,6 +159,56 @@ refused by name before anything is written. The one exception is disconnect: a
 cluster owner may disconnect any pipeline, so an operator can free a repository
 whose pipeline belongs to somebody who has left. It writes the pipeline's
 status and nothing else.
+
+**Preview** with `builtin pipelinesPreview(packageId: "<package id>")`
+(`execute` on `app:deployables/connect`) to read what connecting would act on,
+writing nothing: the same read connect makes -- the grant proved by a mint, the
+default branch's head and the block there, validated -- answered as the stages
+and steps (their shape, never a command), the needs and secrets they name, the
+check's name, the source's existing pipeline for a reconnect, and a delivery
+suggestion (webhook where GitHub can plausibly reach the cluster, poll
+otherwise). A typed refusal is the answer's `refusal`, not an error.
+
+## In MemQL OS
+
+A pipeline lives in **Deployables**, on its source -- not in an app of its own
+(design record D12).
+
+- **The source's page** carries a **Checks** part between its facts and the
+  apps it produces: the newest run on each branch, the default branch first,
+  each opening its run. Its facts gain a **Pipeline** line (the manifest, how
+  many stages the newest run planned, how changes arrive, where steps run), and
+  **Latest upstream** says what that commit's checks said -- *checks passed,
+  not yet deployed* among them. The bar reads *checks on* and carries **Pipeline
+  settings**, or **Connect pipeline** for a source that has none. A source that
+  produces no apps and runs a pipeline -- the engine repository is one -- reads
+  *pipeline* where its app count goes in the Sources list, and the Overview map
+  draws a **Checks** node beside the deployables a checked source serves.
+- **Connect pipeline** is the add-a-deployable wizard's device over the source,
+  three steps. **Repository** reads `memql-package.yaml` at the default
+  branch's head with `pipelinesPreview`, so the stages show before anything is
+  confirmed. **Compute** offers *Cluster* and, only when one of your machines
+  reports `pipelines=allowed`, *Cluster and your fleet* -- the fleet alone
+  when a step names a need, which the cluster refuses -- and waits for a
+  choice, because running steps on your own machines is consent. **Confirm**
+  names the check, the stages and the secrets the steps read, and asks how
+  changes arrive. A refusal lands at the stop it is about, with its remedy: a
+  fleet code at Compute, a secret code at Confirm, everything else at
+  Repository. Nothing is written until Connect, and leaving keeps the answers.
+- **Runs** is a tab of its own, after Sources (`read app:deployables/runs`):
+  every run of every source you connected, newest first, grouped by day,
+  Refine for the source, branch and outcome. A run rings once, when it has an
+  answer.
+- **A run's page** draws the stages as stops across the top, read from the step
+  rows; the open stop's steps say where each ran and for how long; a failed
+  step shows its last lines -- read from its full log, which the runner keeps in
+  your Library -- with **Open the full log**; a skipped step says why; the
+  artifacts open in Files. One bar carries the state and the acts the run
+  allows: **Open on GitHub**, **Re-run**, **Re-run failed**, or **Cancel** while
+  it runs. The check run's details link, `https://os.<domain>/?pipelineRun=<run
+  id>`, opens it.
+- **Settings -> Pipelines** (`read app:settings/pipelines`, the cluster owner)
+  is the [readiness](#readiness) item.
 
 ---
 
@@ -602,8 +663,7 @@ Each run writes one check run on its commit, named **`MemQL / <name>`** --
 the name a ruleset requires. It is `queued` when the run opens, `in_progress`
 when an agent starts driving it, and `completed` with the run's conclusion. Its
 `external_id` is the run's id, and its details link is the run's page in MemQL
-OS, `https://os.<domain>/?pipelineRun=<run id>`, which the OS opens once its
-run page lands (epic memql#5479).
+OS, `https://os.<domain>/?pipelineRun=<run id>`.
 
 | State | Title |
 |---|---|
@@ -667,18 +727,35 @@ which are missing. It cannot see whether an installation accepted checks write,
 which is a fact per installation: a run that could not write its check run says
 so itself ([The check run](#the-check-run)).
 Nothing needs the item, so the first-run wizard does not walk it, and an owner
-may answer *Not now*. Its Settings section arrives with epic memql#5479.
+may answer *Not now*.
+
+**Settings -> Pipelines** is the item, for the cluster owner. Its three
+sub-steps are the report's three facts, as the agent nodes that run steps
+report them: the GitHub App (registered from Settings through GitHub's
+app-manifest flow, so the permissions arrive filled in), a repository
+connected, and a runner -- with a line about how many of your machines allow
+pipelines. While the item is neither set up nor dismissed, the Settings icon
+carries the marker; *Not now* clears it for you and the section stays.
+
+**An app whose permissions grew is named there.** Every existing installation
+of the GitHub App keeps the permissions it accepted until the account that
+installed it approves the change GitHub sends it, and until then every
+check-run write there answers 403. Settings -> Pipelines asks GitHub
+(`pipelinesInstallations`, `read app:settings/pipelines`) which installations
+lag what the app asks for and links each to the page where the change waits --
+before a run finds out by failing to report.
 
 ## What runs today
 
-This release is the seam (epic memql#5477): deliveries, the poll, run keys,
-the plan, the work goal and the check run. Three things wait for later epics:
+This release is the seam (epic memql#5477) and MemQL OS's surfaces for it
+(epic memql#5479): deliveries, the poll, run keys, the plan, the work goal, the
+check run, and the Runs tab, run page, Checks and connect flow. Two things wait
+for later epics:
 
 | Not yet | Arrives with | Until then |
 |---|---|---|
 | A runner to execute command steps: a Kubernetes Job per step, a fleet machine for a step naming a need, logs into the log store, artifacts into the Library | epic memql#5478 | Every command step that would execute fails `pipeline_runner_unavailable`. The first stage holding one fails, every later stage is *Not run*, and the run concludes failure. Nothing in the repository is wrong |
 | Channels and notify delivery | epic memql#5480 | A notify stage's step is skipped `pipeline_notify_unavailable`, which fails nothing |
-| MemQL OS's Runs tab, run page, the source page's pipeline facts, the connect flow and the Settings section | epic memql#5479 | Runs are read on GitHub and through `pipelineRunsForOwner` and `pipelineRunForOwner`; the details link opens MemQL OS without a run page |
 
 Everything decided before a step executes works today: which deliveries open
 runs, the mode, the run key, fork refusal, the manifest's refusals, the plan
@@ -710,12 +787,14 @@ says where: `<stage>/<step>`, a stage, or a path into the block.
 | `pipeline_fork_refused` | refusal | The pull request's head is in another repository | Push the branch to this repository and open the pull request from it |
 | `pipeline_disconnected` | refusal | The pipeline was disconnected before an agent started the run | Connect it again; the next change runs |
 | `pipeline_already_connected` | refusal | Connect only: another source's pipeline already runs the repository, and a repository has one | Disconnect that pipeline -- its owner does, with `pipelinesDisconnect` -- or work from that source |
+| `pipeline_nothing_to_rerun` | refusal | Re-run failed only: the run has no failed or cancelled step to run again | Re-run it whole |
 | `pipeline_runner_unavailable` | failure | This cluster has no runner to execute steps | Install the runner (epic memql#5478). Nothing in the repository is wrong |
 | `pipeline_executor_error` | failure | The runner could not report how the step ended | Re-run; if it repeats, look at the runner |
 | `pipeline_secret_missing` | failure | An allowed secret has no value on this cluster | Store a value under that name, then re-run |
 | `pipeline_stage_blocked` | skip | An earlier stage failed | Fix that stage |
 | `pipeline_not_affected` | skip | The change touched nothing the step covers | Nothing |
 | `pipeline_notify_unavailable` | skip | Notify delivery arrives with epic memql#5480 | Nothing |
+| `pipeline_passed_earlier` | skip | A failed-only re-run carried the step over: the attempt it re-ran passed it with the same packages | Nothing |
 | `pipeline_check_permission_missing` | note | GitHub answered 403 to a check-run write; the run went ahead | Accept the app's wider permissions on GitHub |
 
 The runner adds codes of its own -- a step past its timeout

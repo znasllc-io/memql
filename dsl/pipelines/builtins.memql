@@ -15,17 +15,20 @@
 // and reads the body, the headers and the receiver's signature verdict from
 // the row.
 //
-// FOUR ARE A PERSON'S, and AUTHORIZATION IS NOT IN THESE DECLARATIONS beyond
-// the part: each runs under the CALLER's actor and resolves its target through
-// an owner-scoped read first (the package for connect, the pipeline for
-// disconnect, the run for re-run and cancel), so a caller who does not own it
-// resolves zero rows and is refused by name before anything is written -- save
-// a cluster owner's disconnect, which reaches any pipeline so an operator can
-// free a repository a departed owner's pipeline holds. The
-// part is the door, exactly as for the Deployables actions beside them in
-// dsl/platform/builtins.memql: connecting and disconnecting a pipeline is
-// editing a source (`app:deployables/sources`), and re-running or cancelling a
-// run is the run half of a source's work (`app:deployables/deploy`).
+// THE REST ARE A PERSON'S, and AUTHORIZATION IS NOT IN THESE DECLARATIONS
+// beyond the part: each runs under the CALLER's actor and resolves its target
+// through an owner-scoped read first (the package for preview and connect, the
+// pipeline for disconnect, the run for re-run and cancel), so a caller who does
+// not own it resolves zero rows and is refused by name before anything is
+// written -- save a cluster owner's disconnect, which reaches any pipeline so
+// an operator can free a repository a departed owner's pipeline holds. The part
+// is the door, exactly as for the Deployables actions beside them in
+// dsl/platform/builtins.memql, and each act has its own (task memql#5498):
+// previewing, connecting and disconnecting is `app:deployables/connect`,
+// re-running is `app:deployables/rerun`, cancelling is
+// `app:deployables/cancel`. The installations read is the Settings Pipelines
+// item's (`read app:settings/pipelines`): it asks GitHub about the cluster's
+// own app, which is an owner's question, not a source's.
 
 @executor("integration.pipelines.trigger")
 @args(profile="object")
@@ -42,7 +45,7 @@ builtin pipelinesPoll {
 @sdk
 @executor("integration.pipelines.connect")
 @args(profile="object")
-@requiresCapability("execute", "app:deployables/sources")
+@requiresCapability("execute", "app:deployables/connect")
 @description("Connect a pipeline to one of the caller's sources (D12, D14). The caller must own the package, which must be a GitHub repository source fetched under a grant; the grant must reach the repository, proved by minting an installation token through it. Reads memql-package.yaml at the repository's default-branch head: a source with no `pipeline:` block is refused with pipeline_not_declared; a block that does not validate, or a step whose need or secret this connection's compute and secretNames do not allow, is refused with its own pipeline_* code; and a repository another source already runs is refused with pipeline_already_connected, so a pipeline that could never compile is never connected. Creates the source's one pipeline -- its id derived from the package id -- or reconnects it, which restates the configuration and keeps what the poll has seen. Answers {pipelineId, repository, delivery, compute, stages}, the stages being the block's stage names in order.")
 builtin pipelinesConnect {
   packageId    string!    @description("The v1:platform:package source to connect. Must be the caller's own.")
@@ -52,9 +55,25 @@ builtin pipelinesConnect {
 }
 
 @sdk
+@executor("integration.pipelines.preview")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/connect")
+@description("Read what connecting one of the caller's sources would act on, and write nothing (epic memql#5479: the connect rail's first stop shows the stages before anything is confirmed). The same read pipelinesConnect makes: the caller must own the package; the grant is proved by minting a token through it; memql-package.yaml is read at the default branch's head and its pipeline block validated. Answers one row: {repository, defaultBranch, sha, name, checkName, stages [{name, on, channel, steps [{name, packages, only, shards, bucket, needs, secrets, services}]}], needs, secrets, suggestedDelivery, existing {pipelineId, status, delivery, compute, secretNames} or null, refusal {code, message, scope} or null}. A typed refusal -- no pipeline block, a block that does not validate, a repository another source runs, a grant that no longer reaches it -- is the answer's refusal, never an error, so the stop that asked can render it with its remedy. suggestedDelivery is webhook where GitHub can plausibly reach this cluster and poll otherwise.")
+builtin pipelinesPreview {
+  packageId  string!  @description("The v1:platform:package source to read. Must be the caller's own.")
+}
+
+@sdk
+@executor("integration.pipelines.installations")
+@requiresCapability("read", "app:settings/pipelines")
+@description("The installations of this cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): when an app's permissions grow -- pipelines added checks write -- every existing installation keeps the old set until the account that installed it approves the change on GitHub, and until then every check-run write there answers 403. Asked of GitHub as the app itself. Answers one row, {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}: htmlUrl is the installation's settings page, where the change waits. A cluster with no GitHub App answers none; a GitHub that could not be asked is an error, never an empty list.")
+builtin pipelinesInstallations {
+}
+
+@sdk
 @executor("integration.pipelines.disconnect")
 @args(profile="object")
-@requiresCapability("execute", "app:deployables/sources")
+@requiresCapability("execute", "app:deployables/connect")
 @description("Disconnect one of the caller's pipelines -- or, for a cluster owner, any pipeline, so an operator can free a repository a departed owner's pipeline holds. It opens no more runs, and a run an agent has yet to start concludes with pipeline_disconnected. The pipeline row and every run stay, because they are the history the source's Runs list shows; connecting again reactivates the same pipeline.")
 builtin pipelinesDisconnect {
   pipelineId  string!  @description("The v1:pipelines:pipeline to disconnect. Must be the caller's own, unless the caller is a cluster owner.")
@@ -63,16 +82,17 @@ builtin pipelinesDisconnect {
 @sdk
 @executor("integration.pipelines.rerun")
 @args(profile="object")
-@requiresCapability("execute", "app:deployables/deploy")
-@description("Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. The original stays exactly as it ended.")
+@requiresCapability("execute", "app:deployables/rerun")
+@description("Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended.")
 builtin pipelinesRerun {
-  runId  string!  @description("The v1:pipelines:run to re-run. Must be the caller's own.")
+  runId       string!  @description("The v1:pipelines:run to re-run. Must be the caller's own.")
+  failedOnly  bool     @description("Run again only what did not pass: the original's passed steps are carried over. Absent or false re-runs every step.")
 }
 
 @sdk
 @executor("integration.pipelines.cancel")
 @args(profile="object")
-@requiresCapability("execute", "app:deployables/deploy")
+@requiresCapability("execute", "app:deployables/cancel")
 @description("Ask one of the caller's pipeline runs to stop. It flags the row and ends nothing itself: the agent driving the run reads the flag at its next heartbeat, cancels what is executing and concludes the run cancelled. A queued run no agent has claimed is concluded cancelled on the spot.")
 builtin pipelinesCancel {
   runId  string!  @description("The v1:pipelines:run to stop. Must be the caller's own.")

@@ -204,6 +204,10 @@ type githubAt struct {
 
 func (h githubAt) Configured() bool { return true }
 
+// Installations answers none: no hop reads the app's installations, which
+// only the Settings item asks for, on the node that answers the builtin.
+func (h githubAt) Installations(context.Context) ([]githubapp.AppInstallation, error) { return nil, nil }
+
 func (h githubAt) InstallationToken(_ context.Context, credentialID, ownerUserID, repository string) (string, int64, error) {
 	g := h.g
 	g.mu.Lock()

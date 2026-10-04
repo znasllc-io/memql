@@ -107,6 +107,10 @@ describe("the settings-section contract", () => {
   // EIGHTEEN since Procedures (epic memql#5408, #5412), closing the AI group
   // after Decisions: the certification ladder's values -- when a learned
   // procedure stops needing a model -- read-only, on the Levels roles.
+  //
+  // NINETEEN since Pipelines (epic memql#5479, D15), after Integrations: the
+  // cluster's optional Pipelines readiness item and where its marker points.
+  // OWNER ONLY -- it asks about the cluster's own GitHub App.
   it("Settings itself declares its sections", () => {
     const settings = OS_REGISTRY.apps.find((a) => a.id === "settings");
     expect(settings?.sections?.map((s) => s.id)).toEqual([
@@ -121,6 +125,7 @@ describe("the settings-section contract", () => {
       "benchmarks",
       "connections",
       "integrations",
+      "pipelines",
       "providers",
       "levels",
       "rules",
@@ -130,6 +135,8 @@ describe("the settings-section contract", () => {
       "keys",
       "logs",
     ]);
+    expect(settings?.sections?.find((s) => s.id === "pipelines")?.requires).toBe("app:settings/pipelines");
+    expect(rolesOpening("app:settings/pipelines")).toEqual(["owner"]);
     expect(settings?.sections?.find((s) => s.id === "cluster")?.requires).toBe("app:settings/cluster");
     expect(rolesOpening("app:settings/cluster")).toEqual(["owner", "developer", "admin"]);
     // Language (memql#5390): the same three roles, and the same name the

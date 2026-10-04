@@ -145,7 +145,7 @@ func assertKnownResourcesNameEveryApp(t *testing.T, known []string) {
 			t.Errorf("knownResources does not list %s", resource)
 		}
 	}
-	for _, part := range []string{"sources", "deploy", "publish", "retire", "domains", "store"} {
+	for _, part := range []string{"sources", "deploy", "publish", "retire", "domains", "store", "connect", "rerun", "cancel", "channels"} {
 		if !vocabularyHas(known, "app:deployables/"+part) {
 			t.Errorf("knownResources does not list app:deployables/%s; the Deployables part is not seeded on any role", part)
 		}
@@ -226,6 +226,18 @@ func TestTheDeployablesPartsAreDeclaredOnTheirConstructs(t *testing.T) {
 		// domains
 		"customDomainAdd":    "app:deployables/domains",
 		"removeCustomDomain": "app:deployables/domains",
+		// pipelines (task memql#5498): one part per consequence
+		"pipelinesPreview":    "app:deployables/connect",
+		"pipelinesConnect":    "app:deployables/connect",
+		"pipelinesDisconnect": "app:deployables/connect",
+		"pipelinesRerun":      "app:deployables/rerun",
+		"pipelinesCancel":     "app:deployables/cancel",
+	}
+	// The reads a section opens, declared on the construct that serves it: the
+	// installations read asks GitHub about the cluster's own app, which is the
+	// Settings Pipelines item's question (D15) and an owner's.
+	wantRead := map[string]string{
+		"pipelinesInstallations": "app:settings/pipelines",
 	}
 	// The shared reads stay unannotated (D8).
 	unannotated := []string{"sitesAll", "siteById", "packagesAll", "packageById", "packageDeployments"}
@@ -249,6 +261,16 @@ func TestTheDeployablesPartsAreDeclaredOnTheirConstructs(t *testing.T) {
 		}
 		if fn.RequiresCapability != (CapabilityRequirement{Verb: auth.VerbExecute, Resource: resource}) {
 			t.Errorf("%s declares %v, want execute on %s", name, fn.RequiresCapability, resource)
+		}
+	}
+	for name, resource := range wantRead {
+		fn, err := fns.Get(name)
+		if err != nil || fn == nil {
+			t.Errorf("%s is not in the loaded tree: %v", name, err)
+			continue
+		}
+		if fn.RequiresCapability != (CapabilityRequirement{Verb: auth.VerbRead, Resource: resource}) {
+			t.Errorf("%s declares %v, want read on %s", name, fn.RequiresCapability, resource)
 		}
 	}
 	for _, name := range unannotated {

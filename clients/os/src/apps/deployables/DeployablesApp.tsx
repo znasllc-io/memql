@@ -2,7 +2,7 @@ import { PENDING_DEPLOYMENT_STATUSES } from "./packages/rows";
 import { useEffect, useMemo, useState } from "react";
 import { Concepts, type LiveSnapshot, type Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Notice, roleAdmits } from "../../kit";
+import { Notice, roleAdmits, useAppReach } from "../../kit";
 import { useDeployableParts } from "./parts";
 import { useSession } from "../../chrome/access";
 import { useLiveView } from "../../live/liveView";
@@ -34,6 +34,10 @@ import { useSiteHealth } from "./useSiteHealth";
 import { siteStateWord } from "./words";
 import { shopifyMessage } from "../../modules/connections/shopifyReply";
 import { useSites } from "./useSites";
+import { usePipelineRuns, usePipelines } from "./pipelines/feeds";
+import { pipelineFromRow, runFromRow, type PipelineRow, type RunRow } from "./pipelines/rows";
+import { RunsSection } from "./pipelines/RunsSection";
+import { useConnectFlow } from "./pipelines/connect/useConnectFlow";
 
 // Deployables: the things this cluster serves, the map of what serves where,
 // and the one flow that makes a new one (epic memql#4725, rebuilt by
@@ -99,7 +103,7 @@ function DeployablesAppContent({
   const actorRole = access?.role ?? "";
   const viewerUserId = access?.userId ?? "";
   // THE PARTS THIS SESSION HOLDS (epic memql#5289, task memql#5305), read
-  // from the effective capability set: `execute` on each of the five
+  // from the effective capability set: `execute` on each of the eleven
   // `app:deployables/<part>` resources. This replaced `canWrite` (rank >=
   // 200, one answer for every act): a person granted `deploy` and not
   // `publish` pushes a build and cannot take a site live, and every control
@@ -132,6 +136,17 @@ function DeployablesAppContent({
   // gates, so leaving analysis does not hide it. Terminal runs leave this
   // feed; their full history remains on the package's own page.
   const { source: awaitingCollection, reseed: reseedAwaiting } = usePendingDeployments();
+  // THE PIPELINES FEEDS, a fifth and sixth concept (epic memql#5479): the
+  // caller's pipelines -- one per source they connected -- and their runs.
+  // Retained here for the rule this file exists for: the Runs tab, a source
+  // page's Checks and Pipeline fact, and the Overview map's Checks node are
+  // readings of ONE collection per concept. Both are read owner-scoped, so
+  // they answer the viewer's own pipelines and nobody else's.
+  const runsFeed = usePipelineRuns();
+  const { source: pipelineCollection, reseed: reseedPipelines } = usePipelines();
+  // The connect rail's answers live above the sections (issue memql#5502), so
+  // leaving the rail -- for another tab, for the source page -- keeps them.
+  const connectFlow = useConnectFlow();
 
   // PROJECT, then narrow, in one pass. The collection holds RAW wire rows --
   // the fold upserts an event payload as the row type with no projection hook
@@ -183,7 +198,39 @@ function DeployablesAppContent({
   );
   const parkedSnapshot = parked?.snapshot ?? EMPTY_SNAPSHOT<DeploymentRow>();
 
+  const runs = useLiveView<Row, RunRow>(runsFeed.source, "pipelineRuns", (rows) =>
+    rows.map(runFromRow).filter((r) => r.id !== ""),
+  );
+  const pipelines = useLiveView<Row, PipelineRow>(pipelineCollection, "pipelines", (rows) =>
+    rows.map(pipelineFromRow).filter((p) => p.id !== ""),
+  );
+  const pipelineRows = pipelines?.snapshot.rows ?? [];
+  // Whether both pipelines feeds have answered: before that a source's Checks
+  // say nothing at all, because "no pipeline" read before the read landed is a
+  // claim, not a fact. A read that FAILED is live with an error and no rows,
+  // which is not an answer either: taken as "no pipeline" it would offer
+  // Connect pipeline to a source that has one. It is said as the failure.
+  const pipelinesError = pipelines?.snapshot.error || runs?.snapshot.error || "";
+  const pipelinesSettled = pipelines?.snapshot.state === "live" && runs?.snapshot.state === "live" && pipelinesError === "";
+  // "All runs" goes to the Runs tab, so it is offered only to somebody the tab
+  // is drawn for (`read app:deployables/runs`).
+  const runsReachable = useAppReach("deployables").sections.includes("runs");
+
   const [openRequest, setOpenRequest] = useState<{ siteId: string; revision: number; detail?: "store"; result?: string } | undefined>();
+  // A run to open on the Runs tab -- a check run's details link, a link from
+  // Ask -- and a source to open on the Sources tab -- the map's Checks node, a
+  // run page's trail. Each is consumed once by revision.
+  const [runOpenRequest, setRunOpenRequest] = useState<{ runId: string; revision: number } | undefined>();
+  const [runsFilterRequest, setRunsFilterRequest] = useState<{ pipelineId: string; revision: number } | undefined>();
+  const [sourceOpenRequest, setSourceOpenRequest] = useState<{ packageId: string; revision: number } | undefined>();
+  function openSource(packageId: string) {
+    setSourceOpenRequest((held) => ({ packageId, revision: (held?.revision ?? 0) + 1 }));
+    navigate("sources", { fromContent: true });
+  }
+  function openRunsFor(pipelineId: string) {
+    setRunsFilterRequest((held) => ({ pipelineId, revision: (held?.revision ?? 0) + 1 }));
+    navigate("runs", { fromContent: true });
+  }
   const [selection, setSelection] = useState<MapSelection>(NO_SELECTION);
   const selectedSiteId = selection.siteIds.length === 1 ? (selection.siteIds[0] ?? "") : "";
 
@@ -201,6 +248,8 @@ function DeployablesAppContent({
     reseed();
     reseedPackages();
     reseedAwaiting();
+    runsFeed.reseed();
+    reseedPipelines();
   }
 
   function update(patch: Partial<DeployablesSettings>) {
@@ -251,6 +300,18 @@ function DeployablesAppContent({
     if (typeof requestedSite === "string" && requestedSite) {
       setOpenRequest(held => ({ siteId: requestedSite, revision: (held?.revision ?? 0) + 1 }));
       navigate("deployables");
+    }
+    const requestedRun = intent.payload.runId;
+    if (typeof requestedRun === "string" && requestedRun) {
+      setRunOpenRequest(held => ({ runId: requestedRun, revision: (held?.revision ?? 0) + 1 }));
+      navigate("runs");
+    }
+    // A source named by a link: its page, on the Sources tab -- the same
+    // request the map's Checks node and a run page's trail make.
+    const requestedSource = intent.payload.packageId;
+    if (typeof requestedSource === "string" && requestedSource && typeof requestedRun !== "string") {
+      setSourceOpenRequest(held => ({ packageId: requestedSource, revision: (held?.revision ?? 0) + 1 }));
+      navigate("sources");
     }
     if (intent.payload.provider === "shopify") { setConnectionProvider("shopify"); setConnectionsIntent(intent); }
     const shopify = intent.payload["shopify"];
@@ -304,6 +365,12 @@ function DeployablesAppContent({
           navigation={navigation}
           openRequest={openRequest}
           connectResult={connectResult?.section === "deployables" ? connectResult : null}
+          pipelines={pipelines}
+          runs={runs}
+          pipelinesSettled={pipelinesSettled}
+          pipelinesError={pipelinesError}
+          connectFlow={connectFlow}
+          onOpenRuns={runsReachable ? openRunsFor : undefined}
           sites={measuredSource}
           packages={packages}
           parked={parked}
@@ -335,6 +402,13 @@ function DeployablesAppContent({
           active={sectionId === "sources"}
           navigation={navigation}
           connectResult={null}
+          sourceOpenRequest={sourceOpenRequest}
+          pipelines={pipelines}
+          runs={runs}
+          pipelinesSettled={pipelinesSettled}
+          pipelinesError={pipelinesError}
+          connectFlow={connectFlow}
+          onOpenRuns={runsReachable ? openRunsFor : undefined}
           sites={measuredSource}
           packages={packages}
           parked={parked}
@@ -370,6 +444,27 @@ function DeployablesAppContent({
         navigate("deployables", { fromContent: true });
       }}
       onBrowse={() => navigate("deployables", { fromContent: true })}
+      pipelines={pipelineRows}
+      runs={runs?.snapshot.rows ?? []}
+      onOpenSource={openSource}
+    />
+  );
+  // RUNS (epic memql#5479): every run of every source this person connected.
+  // Its own section and its own view state, so opening a run here does not
+  // move Sources off whatever it was showing.
+  const runsContent = (
+    <RunsSection
+      active={sectionId === "runs"}
+      navigation={navigation}
+      runs={runs}
+      feed={runsFeed}
+      pipelines={pipelineRows}
+      packages={packageSnapshot.rows}
+      openRequest={runOpenRequest}
+      filterRequest={runsFilterRequest}
+      can={can}
+      onOpenSource={openSource}
+      onOpenSources={() => navigate("sources", { fromContent: true })}
     />
   );
   return <ActivePane active={windowVisible}>
@@ -380,7 +475,8 @@ function DeployablesAppContent({
       <ConnectReturnNotice result={connectResult?.section === "sources" ? connectResult : null} />
       {sourcesContent}
     </RetainedSection>
-    <RetainedSection active={!["settings", "logs", "deployables", "sources"].includes(sectionId)}>{mapContent}</RetainedSection>
+    <RetainedSection active={sectionId === "runs"}>{runsContent}</RetainedSection>
+    <RetainedSection active={!["settings", "logs", "deployables", "sources", "runs"].includes(sectionId)}>{mapContent}</RetainedSection>
   </ActivePane>;
 }
 

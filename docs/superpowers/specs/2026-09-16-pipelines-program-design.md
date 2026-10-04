@@ -589,3 +589,87 @@ open. The operator's account is `docs/public/operate/pipelines.md`.
   command step fails `pipeline_runner_unavailable`; the substrate (epic 3,
   #5478) registers the runner. A notify step is skipped
   `pipeline_notify_unavailable` until epic 5 (#5480).
+
+## 10. Implementation notes (epic 4)
+
+Recorded when epic 4 (#5479) landed. The decisions above stand as written;
+these notes say where the implementation reads one more narrowly and what it
+decided where this record left a choice open. The operator's account is
+`docs/public/operate/pipelines.md`, "In MemQL OS".
+
+- **Four parts, two section reads (amends nothing; fills D15's "parts are
+  seeded").** `execute` on `app:deployables/connect` (preview, connect,
+  reconnect, disconnect), `rerun`, `cancel` and `channels`, on owner and
+  developer, replace the seam's borrowing of `sources` and `deploy`: connecting
+  a repository's CI, spending its compute again and stopping work somebody may
+  be waiting on are three consequences. `read app:deployables/runs` (owner,
+  developer) opens the Runs tab -- the runs it lists are read owner-scoped, so a
+  role that cannot connect would only open it empty -- and
+  `read app:settings/pipelines` (owner) opens Settings -> Pipelines. The
+  pipelines parts are GLOBAL in the OS, never per organization: a pipeline is
+  acted on by its owner alone and the organization capability table does not
+  name them.
+- **Re-run failed is a new attempt that carries what passed (D13).** The record
+  names the act and no semantics. `pipelinesRerun(failedOnly)` opens the key's
+  next attempt marked `rerunFailedOnly`; the driver, when it first opens that
+  attempt's work, carries every step the attempt it re-runs PASSED with the SAME
+  package slice over as skipped `pipeline_passed_earlier` ("Passed in attempt
+  1."), and runs everything else. A shard whose slice moved runs again; a step
+  already carried keeps the attempt it first passed in; a resume reads the
+  carried skips back from its rows rather than re-asking the original. A run
+  with nothing failed or cancelled is refused `pipeline_nothing_to_rerun`, so
+  the act the OS offers and the act the engine takes agree on when it is legal.
+  A carried step is a SKIP, not a pass: this attempt executed nothing, and the
+  journal does not say otherwise. GitHub's own re-request stays whole: one
+  check run reports the whole run.
+- **"Save to Library" is a fact, not an act (D13).** The runner archives every
+  step that ran as `<stepKey>.log` in its owner's Library before it reports
+  (epic 3), and the Library never deletes it, so a "Save" button would promise
+  an act that already happened. The run page says "Saved to your Library" and
+  offers "Open the full log", which opens the file in Files. A failed step's
+  last lines are read from the tail of that same file through the Library's
+  content route (one suffix Range) -- no row ever carries a log line, as the
+  seam decided, and the Logs app's admin floor does not stand between an owner
+  and their own run's output.
+- **The connect rail reads before it asks (D14).** `pipelinesPreview` is connect's
+  read half, writing nothing; a typed refusal is its answer's refusal, so the
+  Repository step renders it in place. It suggests webhook delivery where
+  `githubconnect.DomainIsPubliclyReachable` -- the rule the registered app's
+  webhook is composed by -- says GitHub can reach the cluster, and the poll
+  otherwise; Confirm lets a person change it.
+- **"Compute confirmed" reads only what is enforced (D15, #5502).** There is no
+  cluster-level switch for fleet compute, and none was added. The cluster half
+  is the readiness report's `runner` setting, as the agent nodes that run steps
+  report it; the fleet half is a machine of the viewer's reporting the
+  `pipelines=allowed` label the router requires. The connect rail offers "Cluster
+  and your fleet" only then. Whether the workbench's runner is configured and
+  its network isolation proven are facts no read reports yet; memql#5803 adds
+  one.
+- **The readiness row carries the report's settings (D15).** An
+  integration-evaluated module's row now carries one lane, `report`, one slot
+  per setting of its status report -- presence and source, never a value --
+  written only by a node that hosts the integration and answered. The Settings
+  item's three sub-steps are the pipelines report's three settings read off
+  that lane, not a second opinion asked of a bff, which has no runner.
+- **The permissions-changed prompt asks GitHub (D15).** `pipelinesInstallations`
+  lists the app's installations as the app sees them and names those whose
+  ACCEPTED permissions lag `githubconnect.RequestedPermissions` (a wider grant is
+  not a lag), each with its settings page -- before a run discovers it by being
+  refused a check run. No app answers none; a GitHub that could not be asked is
+  an error, never an empty list.
+- **The marker is an attention change, and only Not now acknowledges it
+  (D15).** While an optional, dismissable module is neither configured nor
+  dismissed, the shell publishes a runtime attention change on its Settings
+  section for a viewer who may open it; the dock's existing dot on the Settings
+  icon draws it. *Not now* writes that viewer's receipt. Visiting the section
+  does not, because seeing the item is not deciding about it.
+- **The Runs list rings on a terminal state only (D14).** The arrival cue is fed
+  the finished runs alone, so a run enters the cue's set the moment it has an
+  answer: a queued run arrives quietly and a moving one stays quiet. The live
+  window is the newest four pages of `pipelineRunsForOwner`; older runs are read
+  a page at a time on request.
+- **The run page's stops are tabs (D13).** They select which stage's steps the
+  panel shows, so they are a `tablist` with arrow-key movement and one tab stop,
+  and the open stop is drawn as a selection apart from its state and from focus.
+  They are read from the step rows -- the run row's stage table moves only at
+  stage boundaries -- and fall back to the table when no step rows exist.

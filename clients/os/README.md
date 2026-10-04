@@ -843,6 +843,62 @@ repetitions of what the app already had.
   source moves, then what", which is a property of the source rather than of
   any one run.
 
+### Pipelines, on the source (epic memql#5479)
+
+A pipeline is a fact about a source (design record
+`docs/superpowers/specs/2026-09-16-pipelines-program-design.md`, D12-D15 and
+section 10), so it lives here rather than in an app of its own: a tab of its
+own, **Runs**, a source's **Checks** and Pipeline fact, a run's page, the
+connect flow, and Settings -> Pipelines for the cluster owner. Everything reads
+from `apps/deployables/pipelines/`. Seven things are worth knowing before
+changing it.
+
+- **TWO MORE FEEDS AT THE ROOT, AND TWO ON THE RUN PAGE.** The caller's
+  pipelines and runs are retained by `DeployablesApp` like every other concept
+  here; a run's work steps and Library files are retained by its page while it
+  is open, keyed by the work run. Every one re-applies its read's scope to
+  events (`inScope`): a subscription is scoped by concept, so a cluster owner's
+  carries every owner's runs, and two runs at once fold into each other's step
+  lists without it -- `runPage.test.tsx` holds that, and its negative control
+  fails when the scope is taken away.
+- **THE RUNS LIST RINGS WHEN A RUN HAS AN ANSWER.** The cue is LiveList's own
+  (`useArrivals`), fed the finished runs alone, because a run moves for minutes
+  and ringing on every stage would be the strobe the cue exists not to be. The
+  rows are drawn by the section rather than by `LiveList` because they sit
+  under day headings.
+- **THE STOPS ARE THE RAIL, TURNED SIDEWAYS, AND THEY ARE TABS.** `StopsAcross`
+  draws the kit rail's own marks and states (`StopGlyph`, promoted on this
+  second use) on one horizontal thread; it is a `tablist`, because the stops
+  choose what the panel shows. They are read from the step rows -- the run
+  row's stage table moves only at stage boundaries -- and a FAILURE DOES NOT
+  DIM THE STOPS AFTER IT: a stage an earlier failure kept from running reads
+  "Not run" at full strength, which is a decision, not "not reached".
+- **THE CONNECT FLOW IS HELD ABOVE THE SECTION** (`connect/useConnectFlow.ts`),
+  the way `useAddMachineFlow` holds a machine's install draft: React state on
+  `DeployablesApp`, never storage, so leaving the page mid-read or mid-connect
+  keeps the answers and still lands the reply, and both tabs' pages are views
+  of the one flow. A reply that arrives after Cancel, or after the flow moved
+  to another source, is dropped. The page itself is pure readings over that
+  state (`connect/flow.ts`); whether "your fleet" exists is the one rule in
+  `pipelines/fleet.ts`, which Settings -> Pipelines reads too.
+- **THE MARKS HOLD STILL.** The deploy rail pulses its one running stage; a
+  list of runs and a stage's steps can hold several running at once, and a
+  page of pulses is the perpetual motion `SUPERVISED-VISUAL-COMPOSITION.md`
+  rules out, so `pipelines.css` stops the kit's animation for every pipelines
+  mark and the running stop keeps the reduced-motion ring.
+- **SAVED TO YOUR LIBRARY IS A FACT.** The runner keeps every step's full log
+  in its owner's Library before it reports, so the run page offers "Open the
+  full log" and says the log is saved, rather than offering to save it; a
+  failed step's last lines are the tail of that file, read through the
+  Library's content route with one suffix Range.
+- **NOTHING HERE IS A SECOND COPY OF A RUN'S STATE OR OF ITS RULES.** The
+  words are `pipelines/words.ts` (the check run's own words), the bar is the
+  pure `pipelines/acts.ts` (an act the engine would refuse is absent: no re-run
+  while a newer attempt of the key runs, none for a fork or a disconnected
+  pipeline, Re-run failed only with a failed or cancelled step), and the
+  pipelines parts (`connect`, `rerun`, `cancel`, `channels`) are read GLOBALLY,
+  never per organization -- a pipeline is acted on by its owner alone.
+
 ## Training, the fourth app (memql#4737, re-keyed to the Library in memql#4970)
 
 `src/apps/training/` is teaching MemQL from files: a dropzone into the LIBRARY,
@@ -2483,6 +2539,16 @@ lifetime if the app should be marked while closed. Deployables does this via
 one shared package collection, so its map, list and closed-app marker cannot
 hold different package feeds. A source retracts an item when it no longer
 applies; viewing an item does not change its underlying availability.
+
+**A change that only an EXPLICIT answer may clear names a target nothing
+wraps.** The common shell acknowledges every unseen change aimed at a visible
+section, so a section-level runtime change is cleared by a visit. The optional
+readiness item (`chrome/OptionalReadiness.tsx`, epic memql#5479) must not be:
+looking at what Settings > Pipelines asks is not answering it. Its change
+carries `target: "readiness"`, which no `AttentionDestination` wraps, so the
+dock, launcher and section navigation still draw the dot, and the section's
+"Not now" acknowledges exactly that change. The mark also retracts by itself
+when the item stops being open (set up, or no longer reported unset).
 
 Acknowledgments are `v1:os:attentionReceipt` rows, keyed by server-derived
 (user, change ID, revision), owner-scoped and broadcast between nodes. The UI

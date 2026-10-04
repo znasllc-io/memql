@@ -2629,15 +2629,59 @@ QueryClient.prototype.pipelinesDisconnect = function (this: QueryClient, args: P
   return this.executeNamed("pipelinesDisconnect", buildPipelinesDisconnect(args), opts);
 };
 
-/** Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. The original stays exactly as it ended. */
+/** The installations of this cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): when an app's permissions grow -- pipelines added checks write -- every existing installation keeps the old set until the account that installed it approves the change on GitHub, and until then every check-run write there answers 403. Asked of GitHub as the app itself. Answers one row, {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}: htmlUrl is the installation's settings page, where the change waits. A cluster with no GitHub App answers none; a GitHub that could not be asked is an error, never an empty list. */
+export interface PipelinesInstallationsArgs {
+}
+
+export function buildPipelinesInstallations(args: PipelinesInstallationsArgs): string {
+  void args;
+  return "builtin pipelinesInstallations()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesInstallations(args?: PipelinesInstallationsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesInstallations = function (this: QueryClient, args: PipelinesInstallationsArgs = {} as PipelinesInstallationsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesInstallations", buildPipelinesInstallations(args), opts);
+};
+
+/** Read what connecting one of the caller's sources would act on, and write nothing (epic memql#5479: the connect rail's first stop shows the stages before anything is confirmed). The same read pipelinesConnect makes: the caller must own the package; the grant is proved by minting a token through it; memql-package.yaml is read at the default branch's head and its pipeline block validated. Answers one row: {repository, defaultBranch, sha, name, checkName, stages [{name, on, channel, steps [{name, packages, only, shards, bucket, needs, secrets, services}]}], needs, secrets, suggestedDelivery, existing {pipelineId, status, delivery, compute, secretNames} or null, refusal {code, message, scope} or null}. A typed refusal -- no pipeline block, a block that does not validate, a repository another source runs, a grant that no longer reaches it -- is the answer's refusal, never an error, so the stop that asked can render it with its remedy. suggestedDelivery is webhook where GitHub can plausibly reach this cluster and poll otherwise. */
+export interface PipelinesPreviewArgs {
+  /** The v1:platform:package source to read. Must be the caller's own. */
+  packageId: string;
+}
+
+export function buildPipelinesPreview(args: PipelinesPreviewArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  return "builtin pipelinesPreview(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesPreview(args: PipelinesPreviewArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesPreview = function (this: QueryClient, args: PipelinesPreviewArgs = {} as PipelinesPreviewArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesPreview", buildPipelinesPreview(args), opts);
+};
+
+/** Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended. */
 export interface PipelinesRerunArgs {
   /** The v1:pipelines:run to re-run. Must be the caller's own. */
   runId: string;
+  /** Run again only what did not pass: the original's passed steps are carried over. Absent or false re-runs every step. */
+  failedOnly?: boolean;
 }
 
 export function buildPipelinesRerun(args: PipelinesRerunArgs): string {
   const parts: string[] = [];
   parts.push("runId: " + renderMemQLValue(args.runId));
+  if (args.failedOnly !== undefined) parts.push("failedOnly: " + renderMemQLValue(args.failedOnly));
   return "builtin pipelinesRerun(" + parts.join(", ") + ")";
 }
 

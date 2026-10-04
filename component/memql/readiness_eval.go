@@ -42,10 +42,9 @@ type readinessResolvers struct {
 	// FederationConfigured reports structural presence of a federated
 	// provider, which every node type can answer from its own registry.
 	FederationConfigured func() bool
-	// IntegrationState asks integration.<name>.status in-process:
-	// state is the report's own word, touched is "any slot present",
-	// registered=false means the integration is not on this node.
-	IntegrationState func(ctx context.Context, name string) (state string, touched bool, registered bool, err error)
+	// IntegrationState asks integration.<name>.status in-process (see
+	// IntegrationReading).
+	IntegrationState func(ctx context.Context, name string) (IntegrationReading, error)
 	// Logger records the reads that FAILED. A failed read answers Unknown with
 	// a closed-vocabulary reason (design record
 	// 2026-09-14-readiness-convergence, D1); the log line is where the error
@@ -54,6 +53,19 @@ type readinessResolvers struct {
 	//
 	// Optional: nil is a valid resolver set, and the pure tests pass one.
 	Logger *slog.Logger
+}
+
+// IntegrationReading is what integration.<name>.status told the evaluator:
+// State is the report's own word, Touched is "any slot present", and
+// Registered=false means the integration is not on this node. Lane is the
+// report's settings as one lane of slots, presence only -- nil when the report
+// names none -- so a surface can say WHICH of the integration's facts hold
+// (the pipelines item's three sub-steps, design record D15).
+type IntegrationReading struct {
+	State      string
+	Touched    bool
+	Registered bool
+	Lane       *readiness.LaneReport
 }
 
 // resolveSlot walks the ladder -- environment, then the row tier the slot's
@@ -185,9 +197,19 @@ func evaluateModule(ctx context.Context, r readinessResolvers, mod envregistry.M
 		}
 	case strings.HasPrefix(mod.Evaluator, envregistry.EvaluatorIntegrationPrefix):
 		name := strings.TrimPrefix(mod.Evaluator, envregistry.EvaluatorIntegrationPrefix)
-		state, touched, registered, err := "", false, false, error(nil)
+		var (
+			reading IntegrationReading
+			err     error
+		)
 		if r.IntegrationState != nil {
-			state, touched, registered, err = r.IntegrationState(ctx, name)
+			reading, err = r.IntegrationState(ctx, name)
+		}
+		state, touched, registered := reading.State, reading.Touched, reading.Registered
+		// The report's settings ride the row whatever its verdict, so the
+		// facts a surface reads are the voting node's own -- never a second
+		// opinion asked of a node that does not host the integration.
+		if err == nil && registered && reading.Lane != nil {
+			out.Lanes = []readiness.LaneReport{*reading.Lane}
 		}
 		switch {
 		// A probe that FAILED -- or answered with a report this evaluator
@@ -285,25 +307,28 @@ func (e *MemQLEngine) readinessResolvers() readinessResolvers {
 		Registrations:        e.readInferenceRegistrations,
 		Logger:               e.safeLogger(),
 		FederationConfigured: func() bool { return e.providers != nil && e.providers.federationConfigured() },
-		IntegrationState: func(ctx context.Context, name string) (string, bool, bool, error) {
+		IntegrationState: func(ctx context.Context, name string) (IntegrationReading, error) {
 			handler, ok := e.builtinExecutorHandlers["integration."+name+".status"]
 			if !ok {
-				return "", false, false, nil
+				return IntegrationReading{}, nil
 			}
 			nodes, err := handler(ctx, map[string]any{"probe": false}, 0)
 			if err != nil {
-				return "", false, true, err
+				return IntegrationReading{Registered: true}, err
 			}
 			for _, n := range nodes {
 				state, touched, err := readiness.IntegrationStatus(n.Payload, name)
 				if err == nil {
-					return state, touched, true, nil
+					return IntegrationReading{
+						State: state, Touched: touched, Registered: true,
+						Lane: readiness.IntegrationLane(n.Payload, name),
+					}, nil
 				}
 			}
 			// Malformed or missing reports cannot establish whether setup
 			// is complete. Keep them on the existing failed-probe path and
 			// never include the value-bearing payload in an error.
-			return "", false, true, errors.New("readiness: integration status has no matching report")
+			return IntegrationReading{Registered: true}, errors.New("readiness: integration status has no matching report")
 		},
 	}
 }

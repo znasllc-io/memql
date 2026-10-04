@@ -1,0 +1,93 @@
+/* Connect pipeline (epic memql#5479, issue memql#5502): the connect rail's own
+ * block, beside pipelines.css.
+ *
+ * THE WIZARD'S LAYOUT, AND NOTHING THEMEABLE HERE. Everything below sits inside
+ * a kit Wizard step body, so the two left edges, the gaps between parts and the
+ * readable measure are the wizard's (styles/index.css, "the wizard"). This file
+ * lays out the one thing the kit has no piece for: the stages memql-package.yaml
+ * declares, read before anything is confirmed. Every colour is a token. */
+
+/* ---- the stages, as the Repository stop lists them ----------------------- */
+
+/* A COLUMN OF STAGES, NOT A TABLE. A stage's name is short and its steps are
+ * not, so the name keeps a narrow column and the steps take the rest, wrapping
+ * under themselves rather than under the name: the order the pipeline runs in
+ * reads straight down the left edge. */
+.pipeline-connect-stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.pipeline-connect-stage {
+  display: grid;
+  grid-template-columns: minmax(5rem, 9rem) minmax(0, 1fr);
+  column-gap: 16px;
+  align-items: baseline;
+}
+.pipeline-connect-stage-name {
+  font-weight: 600;
+  color: var(--os-ink);
+  overflow-wrap: anywhere;
+}
+.pipeline-connect-stage-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* STEPS ARE SEPARATED BY HAIRLINES, NOT COMMAS. A step's own phrase carries a
+ * comma ("go-tests, 4 shards"), and a comma between steps as well would read
+ * two steps as one. The hairline is the run page's fact separator. */
+.pipeline-connect-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 9px;
+  row-gap: 2px;
+  min-width: 0;
+  color: var(--os-ink);
+}
+.pipeline-connect-steps > li {
+  overflow-wrap: anywhere;
+}
+.pipeline-connect-steps > li + li {
+  position: relative;
+  padding-left: 10px;
+}
+.pipeline-connect-steps > li + li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1px;
+  height: 0.85em;
+  transform: translateY(-50%);
+  background: var(--os-line);
+}
+
+.pipeline-connect-notify,
+.pipeline-connect-when {
+  margin: 0;
+}
+.pipeline-connect-notify {
+  color: var(--os-ink);
+}
+/* When a stage runs is a qualification of the line above it, said quietly. */
+.pipeline-connect-when {
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+
+/* ONE COLUMN, ONE STAGE OVER THE NEXT, when a phone-width pane cannot give the
+ * name a column of its own. */
+@media (max-width: 520px) {
+  .pipeline-connect-stage {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2px;
+  }
+}

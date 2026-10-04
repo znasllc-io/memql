@@ -3826,6 +3826,7 @@
         "refusalMessage",
         "refusalScope",
         "repository",
+        "rerunFailedOnly",
         "rerunOf",
         "runKey",
         "sha",

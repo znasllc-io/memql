@@ -71,6 +71,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "preview",
+			Description: "Read what connecting one of the caller's sources would act on, writing nothing (epic memql#5479): the grant proved by a mint, the default branch's head, and the pipeline block there -- its stages and steps, the needs and the secrets they name -- with the source's existing pipeline when it has one. A typed refusal (no block, a block that does not validate, a repository another source runs, a grant that no longer reaches it) is the answer's refusal, not an error. Answers {repository, defaultBranch, sha, name, checkName, stages, needs, secrets, suggestedDelivery, existing, refusal}.",
+			Handler:     i.handlePreview,
+			ArgsSchema:  map[string]string{"packageId": "string (required) -- the caller's v1:platform:package source"},
+		},
+		{
 			Name:        "disconnect",
 			Description: "Disconnect one of the caller's pipelines -- or, for a cluster owner, any pipeline, so an operator can free a repository a departed owner's pipeline holds: it opens no more runs, and a run no agent has started concludes pipeline_disconnected. The row and its runs stay as history. Answers {pipelineId, status}.",
 			Handler:     i.handleDisconnect,
@@ -78,15 +84,24 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "rerun",
-			Description: "Re-run one of the caller's runs: the next attempt of its run key, with the original's mode and event, trigger rerun and rerunOf naming the original, and a new check run. Refused while the key's newest attempt is still going. Answers {runId, attempt, rerunOf, status}.",
+			Description: "Re-run one of the caller's runs: the next attempt of its run key, with the original's mode and event, trigger rerun and rerunOf naming the original, and a new check run. With failedOnly, only what the original did not pass runs again -- every step it passed with the same package slice is carried over as skipped pipeline_passed_earlier -- and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. Refused while the key's newest attempt is still going. Answers {runId, attempt, rerunOf, status, failedOnly}.",
 			Handler:     i.handleRerun,
-			ArgsSchema:  map[string]string{"runId": "string (required) -- the caller's v1:pipelines:run"},
+			ArgsSchema: map[string]string{
+				"runId":      "string (required) -- the caller's v1:pipelines:run",
+				"failedOnly": "boolean -- run again only what did not pass; absent re-runs every step",
+			},
 		},
 		{
 			Name:        "cancel",
 			Description: "Ask one of the caller's runs to stop: flags it for its driver, which cancels what is executing and concludes it cancelled. A queued run no agent has claimed is concluded cancelled on the spot, check run included. Answers {runId, status, conclusion, cancelRequested}.",
 			Handler:     i.handleCancel,
 			ArgsSchema:  map[string]string{"runId": "string (required) -- the caller's v1:pipelines:run"},
+		},
+		{
+			Name:        "installations",
+			Description: "The installations of the cluster's GitHub App whose accepted permissions lag what the app asks for (epic memql#5479, D15): an app whose permissions grew keeps every existing installation on the old set until its account approves, and until then every check-run write there answers 403. Asked of GitHub as the app itself. A cluster with no app has none. Answers {installations [{installationId, account, accountType, htmlUrl, missingPermissions, suspended}]}.",
+			Handler:     i.handleInstallations,
+			ArgsSchema:  map[string]string{},
 		},
 		{
 			Name:        "status",

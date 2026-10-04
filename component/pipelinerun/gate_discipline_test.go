@@ -178,7 +178,7 @@ func TestEveryGatedPathKeepsTheGateDiscipline(t *testing.T) {
 				finished = r
 			}
 		}
-		next, err := dh.integ.Rerun(personCtx(ownerID), finished.ID)
+		next, err := dh.integ.Rerun(personCtx(ownerID), finished.ID, false)
 		if err != nil {
 			t.Fatalf("rerun: %v", err)
 		}

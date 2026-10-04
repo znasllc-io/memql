@@ -1,0 +1,62 @@
+/* A source's checks (epic memql#5479, D14): the Checks part on its page, the
+ * Checks node on the Overview map, and the pipeline settings page.
+ *
+ * ALMOST EVERYTHING HERE IS THE KIT'S. The part is `.os-report-part` with its
+ * `.os-report-heading`, exactly as "Apps it produces" beneath it, so the two
+ * read as one page; its rows are `RecordRow`s whose mark, detail and time are
+ * the Runs list's own (`pipelines.css`); the settings page is `Panel`, `Facts`
+ * and `ActionBar`. What is left is the two things the kit has no piece for,
+ * and every colour is a token. */
+
+/* ---- the Checks part's heading line --------------------------------------- */
+
+/* The heading, and on the same line its one way out: All runs. A sibling of
+ * the heading rather than inside it, so the heading's accessible name stays
+ * "Checks" and the link is its own control. */
+.pipeline-checks-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+.pipeline-checks-heading > .os-report-heading {
+  min-width: 0;
+}
+
+/* Quiet text, the height of the heading it sits beside: `.os-sort` is the
+ * kit's quiet text but stands a control tall, which would push this part's
+ * heading below the line "Apps it produces" keeps. */
+.pipeline-checks-all {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--os-muted);
+  font: inherit;
+  font-size: var(--os-text-sm);
+  cursor: pointer;
+}
+.pipeline-checks-all:hover {
+  color: var(--os-ink);
+}
+.pipeline-checks-all:focus-visible {
+  outline: 2px solid var(--os-accent);
+  outline-offset: 1px;
+  border-radius: var(--os-radius-xs);
+}
+
+/* ---- the Checks node on the map ------------------------------------------- */
+
+/* The dot is the site node's own (`.os-deploy-node-dot`), and so are its
+ * colours: a pass in the accent a live site takes, a failure or a refusal in
+ * the warn an unavailable one takes, and anything still moving or with no
+ * verdict -- running, queued, cancelled -- in the muted fill it already has.
+ * A source with no run draws no dot at all. */
+.os-deploy-node[data-kind="checks"] .os-deploy-node-dot[data-status="passed"] {
+  fill: var(--os-accent);
+}
+.os-deploy-node[data-kind="checks"] .os-deploy-node-dot[data-status="failed"],
+.os-deploy-node[data-kind="checks"] .os-deploy-node-dot[data-status="refused"] {
+  fill: var(--os-warn);
+}

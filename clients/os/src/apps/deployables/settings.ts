@@ -14,6 +14,13 @@ export const DEPLOYABLES_SECTIONS: OsAppSection[] = [
   { id: "map", name: "Overview" },
   { id: "deployables", name: "Deployables" },
   { id: "sources", name: "Sources" },
+  // Runs (epic memql#5479, D12): every pipeline run of every source this
+  // person connected, newest first. A third NOUN beside the two lists, not a
+  // filter over Sources, because a run is a thing with a page of its own --
+  // what a source's Checks row and a check run's details link both open.
+  // Owner and developer, the roles holding the `connect` part: the runs are
+  // read owner-scoped, so a role that cannot connect would only see it empty.
+  { id: "runs", name: "Runs", requires: "app:deployables/runs" },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section

@@ -291,9 +291,9 @@ func TestReadinessEvaluatesAsTheClusterAndNotAsTheCaller(t *testing.T) {
 		Variable: func(ctx context.Context, _ string) (string, error) { record(ctx); return "", nil },
 		Secret:   func(ctx context.Context, _ string) (string, error) { record(ctx); return "", nil },
 		IsSecret: func(string) bool { return false },
-		IntegrationState: func(ctx context.Context, _ string) (string, bool, bool, error) {
+		IntegrationState: func(ctx context.Context, _ string) (IntegrationReading, error) {
 			record(ctx)
-			return "", false, false, nil
+			return IntegrationReading{}, nil
 		},
 	}
 

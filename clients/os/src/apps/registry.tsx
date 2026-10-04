@@ -107,6 +107,13 @@ const settings: OsAppManifest = {
     // capability's own `statusAuthorized` remains the authority on.
     { id: "connections", name: "Connections", requires: "app:settings/connections" },
     { id: "integrations", name: "Integrations", requires: "app:settings/integrations" },
+    // Pipelines (epic memql#5479, D15): the cluster's OPTIONAL readiness item
+    // -- the GitHub App, a connected repository, compute -- and the place its
+    // marker under the gear points. OWNER ONLY: it asks about the cluster's
+    // own GitHub App and its installations, which only an owner registers.
+    // Beside Integrations because it is the same kind of thing: something
+    // this cluster can be connected to, set up once.
+    { id: "pipelines", name: "Pipelines", requires: "app:settings/pipelines" },
     // The three that arrived when the portal's admin console was retired
     // (epic memql#4984). Each requirement is the one the ENGINE will
     // actually apply, not a rounder number: the Tokens reads and the revokes

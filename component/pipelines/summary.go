@@ -69,6 +69,7 @@ var refusalTitles = map[string]string{
 	CodeForkRefused:       "pull request from a fork",
 	CodeDisconnected:      "pipeline disconnected",
 	CodeAlreadyConnected:  "repository already has a pipeline",
+	CodeNothingToRerun:    "nothing failed to re-run",
 }
 
 // manifestRemedy is the remedy for every refusal a manifest edit fixes.
@@ -92,6 +93,7 @@ var refusalRemedies = map[string]string{
 	CodeForkRefused:       "Checks run only on branches in this repository. Push the branch here to run them.",
 	CodeDisconnected:      "Reconnect the pipeline in MemQL OS to run checks again.",
 	CodeAlreadyConnected:  "Disconnect the pipeline the other source holds, or work from that source.",
+	CodeNothingToRerun:    "Re-run the whole run in MemQL OS instead.",
 }
 
 // The stage table's Status values that are not built from a reason.

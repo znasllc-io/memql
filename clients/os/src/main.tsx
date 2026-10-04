@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
 import { applyStoredTheme } from "./app/theme";
 import { captureConceptOpen } from "./apps/concepts/openConcept";
+import { captureRunOpen } from "./apps/deployables/pipelines/openRun";
 import { captureShopifyReturn } from "./apps/deployables/store/connectReturn";
 import { captureConnectReturn } from "./apps/deployables/sources/connectReturn";
 import "./styles/index.css";
@@ -29,6 +30,11 @@ captureShopifyReturn(window);
 // into an open intent. Each reader removes only its own parameter, so the
 // two cannot eat each other's.
 captureConceptOpen(window);
+
+// A pipeline run named in the address (epic memql#5479): a GitHub check run's
+// details link, `?pipelineRun=<run id>`, opens the run page. Read and scrubbed
+// here for the concept link's reasons, removing only its own parameter.
+captureRunOpen(window);
 
 const container = document.getElementById("root");
 if (container === null) {

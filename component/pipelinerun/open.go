@@ -43,9 +43,12 @@ type Opening struct {
 	ReleaseTag     string
 	// Version is MEMQL_VERSION; empty derives it (pipelines.Version). A
 	// re-run carries its original's, which for a release is the tag.
-	Version    string
-	Trigger    string
-	RerunOf    string
+	Version string
+	Trigger string
+	RerunOf string
+	// FailedOnly is a person's "Re-run failed": the new attempt runs only
+	// what RerunOf did not pass.
+	FailedOnly bool
 	DeliveryID string
 }
 
@@ -151,14 +154,17 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 			Attempt:     attempts + 1,
 			Trigger:     o.Trigger,
 			RerunOf:     bareID(o.RerunOf),
-			DeliveryID:  strings.TrimSpace(o.DeliveryID),
-			PullRequest: o.PullRequest,
-			HeadBranch:  strings.TrimSpace(o.Branch),
-			BaseSHA:     strings.ToLower(strings.TrimSpace(o.BaseSHA)),
-			Title:       strings.TrimSpace(o.Title),
-			Version:     version,
-			Status:      StatusQueued,
-			QueuedAt:    now,
+			// Only a re-run can carry anything over: an attempt a delivery
+			// or the poll opened has nothing before it to carry from.
+			RerunFailedOnly: o.FailedOnly && o.Trigger == TriggerRerun,
+			DeliveryID:      strings.TrimSpace(o.DeliveryID),
+			PullRequest:     o.PullRequest,
+			HeadBranch:      strings.TrimSpace(o.Branch),
+			BaseSHA:         strings.ToLower(strings.TrimSpace(o.BaseSHA)),
+			Title:           strings.TrimSpace(o.Title),
+			Version:         version,
+			Status:          StatusQueued,
+			QueuedAt:        now,
 		}
 		if o.Fork {
 			// D6: a stranger's code is refused, never queued -- and the

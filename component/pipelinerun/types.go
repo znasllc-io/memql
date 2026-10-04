@@ -191,12 +191,16 @@ type Run struct {
 	Attempt     int
 	Trigger     string
 	RerunOf     string
-	DeliveryID  string
-	PullRequest int
-	HeadBranch  string
-	BaseSHA     string
-	Title       string
-	Version     string
+	// RerunFailedOnly: this attempt runs only what RerunOf did not pass
+	// (epic memql#5479); the driver carries the rest over as skipped
+	// pipeline_passed_earlier.
+	RerunFailedOnly bool
+	DeliveryID      string
+	PullRequest     int
+	HeadBranch      string
+	BaseSHA         string
+	Title           string
+	Version         string
 
 	Status         string
 	Conclusion     string
