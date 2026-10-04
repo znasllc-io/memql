@@ -305,23 +305,33 @@ func (f *follower) fedLine(fate lineFate, at time.Time, print linePrint) {
 	}
 }
 
-// logLines reads a stream as lines without holding more than max bytes of any
-// one: a longer line comes in pieces of at most max bytes, each cut where a
-// rune starts -- and never inside a secret (review finding 4). Each piece is
-// masked on its own, so a secret a cut fell inside would be masked in neither:
-// a piece that ends with the beginning of one of secrets is cut before it,
-// and the secret goes whole into the next piece (the cockpit's chunker holds
-// back the same way).
+// logLines reads a stream as lines without holding more than about max bytes
+// of any one: a longer line comes in pieces of at most max bytes (Review
+// Focus 5), and no piece ends inside a secret.
+//
+// MASK FIRST, THEN CUT (fix round 2, Important A). The capture masks each
+// piece on its own, so a secret a cut fell inside would be masked in neither
+// piece. A piece of a cut line is therefore repaired and masked HERE, as the
+// capture repairs and masks a whole line -- every whole secret replaced --
+// and it ends before the first position whose masking is not decided yet: a
+// secret that may continue into bytes not read yet, or a rune cut short.
+// Those bytes go back to be read with the next chunk. With every whole secret
+// masked before a cut is chosen, and every undecided one held back, a cut can
+// split no secret, and the pieces mask to exactly what the whole line masks
+// to. A line that fits in one read is left whole, to the capture.
 type logLines struct {
-	br      *bufio.Reader
-	max     int
-	secrets []string // the capture's mask forms
-	carry   []byte
-	mid     bool // the last piece ended inside its line
+	br     *bufio.Reader
+	max    int
+	masker *lineMasker
+	// carry is what was read of the line and not yet given out: repaired
+	// text, then the raw bytes of a rune cut short.
+	carry []byte
+	ended bool // carry is the rest of a line whose newline was read
+	mid   bool // the last piece ended inside its line
 }
 
-func newLogLines(r io.Reader, max int, secrets []string) *logLines {
-	return &logLines{br: bufio.NewReaderSize(r, max), max: max, secrets: secrets}
+func newLogLines(r io.Reader, max int, forms []string) *logLines {
+	return &logLines{br: bufio.NewReaderSize(r, max), max: max, masker: newLineMasker(forms)}
 }
 
 // next is the next piece of the stream, without its newline. first says it
@@ -330,62 +340,89 @@ func newLogLines(r io.Reader, max int, secrets []string) *logLines {
 // with end false and the stream's error.
 func (l *logLines) next() (piece string, first, end bool, err error) {
 	first = !l.mid
-	chunk, err := l.br.ReadSlice('\n')
-	buf := append(l.carry, chunk...)
-	l.carry = nil
-	switch {
-	case err == nil:
-		l.mid = false
-		buf = buf[:len(buf)-1]
-		if n := len(buf); n > 0 && buf[n-1] == '\r' {
-			buf = buf[:n-1]
+	for {
+		if l.ended {
+			if len(l.carry) <= l.max {
+				piece = string(l.carry)
+				l.carry, l.ended, l.mid = nil, false, false
+				return piece, first, true, nil
+			}
+			piece, l.carry = l.cut(l.carry, true)
+			l.mid = true
+			return piece, first, false, nil
 		}
-		return string(buf), first, true, nil
-	case errors.Is(err, bufio.ErrBufferFull):
-		cut := holdBack(buf, runeCut(buf, l.max), l.secrets)
-		l.carry = append([]byte(nil), buf[cut:]...)
-		l.mid = true
-		return string(buf[:cut]), first, false, nil
-	default:
-		l.mid = false
-		return string(buf), first, false, err
+		chunk, rerr := l.br.ReadSlice('\n')
+		buf := append(l.carry, chunk...)
+		l.carry = nil
+		switch {
+		case rerr == nil:
+			buf = buf[:len(buf)-1]
+			if n := len(buf); n > 0 && buf[n-1] == '\r' {
+				buf = buf[:n-1]
+			}
+			if !l.mid && len(buf) <= l.max {
+				// The whole line in one read: the capture masks it.
+				return string(buf), first, true, nil
+			}
+			l.carry, l.ended = buf, true
+		case errors.Is(rerr, bufio.ErrBufferFull):
+			piece, l.carry = l.cut(buf, false)
+			if piece == "" {
+				continue // nothing of it is decided yet: read on
+			}
+			l.mid = true
+			return piece, first, false, nil
+		default:
+			l.mid = false
+			return string(buf), first, false, rerr
+		}
 	}
 }
 
-// holdBack moves a cut in b back to before the earliest place where what
-// precedes the cut is the beginning -- a proper prefix -- of a secret, so no
-// secret straddles it. A secret starts where a rune does, so the cut stays on
-// a rune boundary. It never moves the cut to the start: a piece holds
-// something.
-func holdBack(b []byte, cut int, secrets []string) int {
-	longest := 0
-	for _, s := range secrets {
-		longest = max(longest, len(s))
+// cut is the next piece of b, its line's bytes from where the last piece
+// ended, and what is left of b for the next: at most max bytes, repaired and
+// masked, ending before the first undecided position. complete says nothing
+// follows b in its line. The line's timestamp, at the start of its first
+// piece, is never masked: the capture splits it off before it masks.
+func (l *logLines) cut(b []byte, complete bool) (piece string, rest []byte) {
+	prefix := 0
+	if !l.mid {
+		prefix = stampPrefix(b)
 	}
-	for k := max(1, cut-longest+1); k < cut; k++ {
-		tail := b[k:cut]
-		for _, s := range secrets {
-			if len(tail) < len(s) && strings.HasPrefix(s, string(tail)) {
-				return k
-			}
-		}
+	body, short := b[prefix:], []byte(nil)
+	if !complete {
+		n := wholeRunes(body)
+		body, short = body[:n], body[n:]
 	}
-	return cut
+	text := captureRepair(string(body))
+	out, used := l.masker.scan(text, l.max-prefix, complete)
+	if used == 0 {
+		return "", append(append(append([]byte(nil), b[:prefix]...), text...), short...)
+	}
+	return string(b[:prefix]) + out, append([]byte(text[used:]), short...)
 }
 
-// runeCut is where a piece of b of at most max bytes ends on a rune boundary:
-// at max, moved back to where a rune starts when it falls inside one -- or,
-// when b is no longer than max, at its end, less an incomplete last rune.
-func runeCut(b []byte, max int) int {
-	if len(b) > max {
-		for c := max; c > 0 && c > max-utf8.UTFMax; c-- {
-			if utf8.RuneStart(b[c]) {
-				return c
+// stampPrefix is how many bytes at the start of b are a line's timestamp and
+// the space after it (timestamps=true; captureSplitStamp's rule), 0 when b
+// starts with none.
+func stampPrefix(b []byte) int {
+	head := b[:min(len(b), 64)]
+	for i, c := range head {
+		if c == ' ' {
+			if _, err := time.Parse(time.RFC3339Nano, string(head[:i])); err == nil {
+				return i + 1
 			}
+			return 0
 		}
-		return max
 	}
-	for c := len(b) - 1; c >= 0 && c > len(b)-1-utf8.UTFMax; c-- {
+	return 0
+}
+
+// wholeRunes is how many bytes of b come before a last rune that is cut
+// short; all of b when it ends on a whole rune (or on bytes no rune could
+// complete).
+func wholeRunes(b []byte) int {
+	for c := len(b) - 1; c >= 0 && c > len(b)-utf8.UTFMax; c-- {
 		if utf8.RuneStart(b[c]) {
 			if utf8.FullRune(b[c:]) {
 				return len(b)
@@ -394,6 +431,95 @@ func runeCut(b []byte, max int) int {
 		}
 	}
 	return len(b)
+}
+
+// lineMasker masks a line a piece at a time exactly as strings.Replacer over
+// the same forms, given longest first, masks it whole: at each position the
+// first form in that order that matches there is replaced, and the scan moves
+// past it (strings.Replacer's own rule for a position several forms match).
+type lineMasker struct {
+	starts  [256]bool         // the bytes a form starts with
+	byFirst map[byte][]string // the forms by their first byte, in order
+}
+
+func newLineMasker(forms []string) *lineMasker {
+	m := &lineMasker{byFirst: map[byte][]string{}}
+	for _, f := range forms {
+		m.starts[f[0]] = true
+		m.byFirst[f[0]] = append(m.byFirst[f[0]], f)
+	}
+	return m
+}
+
+// scan masks s, repaired text, from its start, into at most room bytes of
+// output, and answers that and how much of s it covers. It stops before the
+// first position it cannot decide yet: one where a form earlier in the order
+// than any form matching whole there could still match, s ending before the
+// form does -- unless complete says s ends where its line does. A first token
+// longer than room is given whole: a piece holds something.
+func (m *lineMasker) scan(s string, room int, complete bool) (string, int) {
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		j := i
+		for j < len(s) && !m.starts[s[j]] {
+			j++
+		}
+		if j > i {
+			// A run no form starts in, as it is.
+			n := j - i
+			if free := room - out.Len(); n > free {
+				n = runeFloor(s[i:j], free)
+				if n == 0 && out.Len() == 0 {
+					_, n = utf8.DecodeRuneInString(s[i:])
+				}
+				out.WriteString(s[i : i+n])
+				return out.String(), i + n
+			}
+			out.WriteString(s[i:j])
+			i = j
+			continue
+		}
+		tok, n, decided := m.at(s, i, complete)
+		if !decided || (out.Len()+len(tok) > room && out.Len() > 0) {
+			break
+		}
+		out.WriteString(tok)
+		i += n
+	}
+	return out.String(), i
+}
+
+// at is what the masker makes of s at i, where some form starts with s[i]:
+// the mask over the first form in order that matches whole there, or the one
+// rune of s there. decided is false when a form earlier in the order than any
+// whole match may still match with more of the line.
+func (m *lineMasker) at(s string, i int, complete bool) (tok string, n int, decided bool) {
+	rest := s[i:]
+	for _, f := range m.byFirst[s[i]] {
+		switch {
+		case strings.HasPrefix(rest, f):
+			return captureMask, len(f), true
+		case !complete && len(rest) < len(f) && strings.HasPrefix(f, rest):
+			return "", 0, false
+		}
+	}
+	_, n = utf8.DecodeRuneInString(rest)
+	return rest[:n], n, true
+}
+
+// runeFloor is the longest prefix of s, valid UTF-8, of whole runes and at
+// most max bytes.
+func runeFloor(s string, max int) int {
+	if max >= len(s) {
+		return len(s)
+	}
+	for n := max; n > 0; n-- {
+		if utf8.RuneStart(s[n]) {
+			return n
+		}
+	}
+	return 0
 }
 
 // publishCursor moves the cursor the heartbeat publishes to at, never back.

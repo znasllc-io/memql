@@ -2265,57 +2265,139 @@ func TestRunnerKeepsTheKubeletsWordsOutOfTheStepsOutput(t *testing.T) {
 	}
 }
 
-// TestRunnerNeverCutsInsideASecret (review finding 4, Review Focus 1): an
-// endless line is fed in pieces, and each piece is masked on its own, so a
-// secret the cut fell inside would be masked in neither. The cut moves back
-// to before any part of a secret at a piece's end; the secret goes whole into
-// the next piece, and is masked there.
+// TestRunnerNeverCutsInsideASecret (review finding 4, fix round 2 Important
+// A, Review Focus 1): an endless line is fed in pieces, and each piece is
+// masked on its own, so a secret a cut fell inside would be masked in
+// neither. The follower masks every whole secret before it chooses a cut, and
+// holds back one that may continue: no secret is cut, whole or begun.
 func TestRunnerNeverCutsInsideASecret(t *testing.T) {
-	h := newRunnerHarness(t, func(c *Config) { c.ArchiveMaxBytes = 4 << 20 })
+	const s1, s2 = "tokA-0123456789Z", "Zeta-secret-24680"
 	stamp := rtAt(1200).Format(time.RFC3339Nano) + " "
-	// The secret begins six bytes before the first cut, at a mebibyte.
-	line := stamp + strings.Repeat("a", followLineMax-len(stamp)-6) + plantedNPM + strings.Repeat("b", 1000)
-	h.c.script(testJobName, rtFinishingScript(testJobName, 0, line))
+	for _, c := range []struct {
+		name    string
+		secrets map[string]string
+		line    string
+		leaks   []string // what must reach nowhere
+	}{
+		{
+			name:    "a secret begun six bytes before the cut",
+			secrets: map[string]string{"NPM_TOKEN": plantedNPM},
+			line:    stamp + strings.Repeat("a", followLineMax-len(stamp)-6) + plantedNPM + strings.Repeat("b", 1000),
+			leaks:   []string{plantedNPM[:6], plantedNPM[6:]},
+		},
+		{
+			// The re-review's probe: s1 ends exactly at the cut, and its last
+			// byte begins s2. Holding back what begins a secret, alone, moved
+			// the cut inside the whole s1.
+			name:    "a whole secret ending at the cut, whose last byte begins another",
+			secrets: map[string]string{"A": s1, "B": s2},
+			line:    stamp + strings.Repeat("a", followLineMax-len(stamp)-len(s1)) + s1 + strings.Repeat("b", 1000),
+			leaks:   []string{s1[:len(s1)-1], s1[1:]},
+		},
+		{
+			name:    "the same secret alone",
+			secrets: map[string]string{"A": s1},
+			line:    stamp + strings.Repeat("a", followLineMax-len(stamp)-len(s1)) + s1 + strings.Repeat("b", 1000),
+			leaks:   []string{s1[:len(s1)-1], s1[1:]},
+		},
+		{
+			// The line's timestamp is never masked (the capture splits it off
+			// first): masked, the line would read as the stream's own words.
+			name:    "a secret the timestamp holds",
+			secrets: map[string]string{"YEAR": "2026"},
+			line:    stamp + strings.Repeat("y", followLineMax) + "2026" + "tail",
+			leaks:   []string{"2026tail"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newRunnerHarness(t, func(c *Config) { c.ArchiveMaxBytes = 4 << 20 })
+			run := rtRun()
+			run.Secrets = c.secrets
+			h.c.script(testJobName, rtFinishingScript(testJobName, 0, c.line))
 
-	res := h.run(t, rtRun())
+			res := h.run(t, run)
 
-	if res.Status != pl.OutcomeSucceeded {
-		t.Fatalf("result = %+v, want success", res)
-	}
-	archive := string(h.file(t, "tests-go-tests-2.log").Bytes)
-	store := strings.Join(h.sink.messages(), "\n")
-	for name, text := range map[string]string{"archive": archive, "store": store, "tail": res.LogTail} {
-		if strings.Contains(text, plantedNPM[:6]) || strings.Contains(text, plantedNPM[6:]) {
-			t.Errorf("the %s holds part of the secret: the cut split it, and neither piece was masked", name)
-		}
-	}
-	if !strings.Contains(archive, "***") {
-		t.Error("the archive has no mask at all: the secret was not masked anywhere")
+			if res.Status != pl.OutcomeSucceeded {
+				t.Fatalf("result = %+v, want success", res)
+			}
+			archive := string(h.file(t, "tests-go-tests-2.log").Bytes)
+			store := strings.Join(h.sink.messages(), "\n")
+			for name, text := range map[string]string{"archive": archive, "store": store, "tail": res.LogTail} {
+				for _, leak := range c.leaks {
+					if strings.Contains(text, leak) {
+						t.Errorf("the %s holds %q: a cut split a secret, and neither piece was masked", name, leak)
+					}
+				}
+			}
+			if n := strings.Count(archive, "***"); n != 1 {
+				t.Errorf("the archive holds %d masks, want the secret masked once", n)
+			}
+			if !strings.Contains(archive, c.line[len(stamp):len(stamp)+1000]) || strings.Contains(archive, "stream reported") {
+				t.Errorf("the line is not in the archive as the step's output: %.200q...", archive)
+			}
+		})
 	}
 }
 
-// TestHoldBackNeverLeavesPartOfASecretAtACut: where holdBack moves a cut.
-func TestHoldBackNeverLeavesPartOfASecretAtACut(t *testing.T) {
+// TestLogLinesMaskAsTheWholeLineWould (fix round 2, Important A): whatever
+// window the reader cuts a line with, the pieces -- each then masked by the
+// capture, as the capture masks every piece -- are exactly the whole line
+// masked by the capture: no secret is cut, and none is masked differently.
+// Every window from 4 bytes to past the line is tried, around overlapping,
+// nested and adjacent secrets, multi-byte runes, and secrets longer than the
+// window.
+func TestLogLinesMaskAsTheWholeLineWould(t *testing.T) {
+	const s1, s2 = "tokA-0123456789Z", "Zeta-secret-24680"
+	long := "LONG-" + strings.Repeat("s3cr", 10) + "-END"
 	for _, c := range []struct {
 		name    string
-		b       string
-		cut     int
 		secrets []string
-		want    int
+		line    string
 	}{
-		{"nothing to protect", "aaaaSECR", 8, nil, 8},
-		{"no secret near the cut", "aaaaxxxx", 8, []string{"SECRET"}, 8},
-		{"a whole secret ending at the cut stays", "aaSECRET", 8, []string{"SECRET"}, 8},
-		{"the beginning of a secret goes to the next piece", "aaaaSECR", 8, []string{"SECRET"}, 4},
-		{"one byte of it", "aaaaaaaS", 8, []string{"SECRET"}, 7},
-		{"the earliest of two prefixes", "aaabcabc", 8, []string{"abcabcX", "cX"}, 2},
-		// The whole piece begins the secret: no later cut helps, and a piece
-		// must hold something, so the cut stays.
-		{"never to the start", "ABCDEFGH", 8, []string{"ABCDEFGHIJ"}, 8},
+		{"a whole secret whose last byte begins another", []string{s1, s2}, "aaaa" + s1 + "bbbb" + s2 + "cc"},
+		{"overlapping: the first in the line wins", []string{"abcdef12", "ef12ghij"}, "xx" + "abcdef12ghij" + "yy" + "ef12ghij" + "zz"},
+		{"a secret that begins a longer one", []string{"SECRET", "SECRETIVE-LONGER"}, "aa" + "SECRETIVE-LONGER" + "bb" + "SECRET" + "cc" + "SECRETIV"},
+		{"a secret nested inside another", []string{"inner", "the-inner-part"}, "the-inner-part and inner and the-inn"},
+		{"secrets among multi-byte runes", []string{"péché-ëëë", "ÿ€€€"}, strings.Repeat("é", 7) + "péché-ëëë" + "€" + "ÿ€€€" + strings.Repeat("ü", 5)},
+		{"a secret longer than the window", []string{long}, "head " + long + " middle " + long[:20] + " tail"},
+		{"a repeated secret back to back", []string{"abab"}, "abababababab"},
+		// The capture drops NUL before it masks, so a NUL inside a secret
+		// must not keep the reader from seeing it whole.
+		{"a NUL inside a secret", []string{"abcdefgh"}, "xx" + "abcd\x00efgh" + "yy" + "abcdefgh"},
+		{"no secret at all", nil, "plain " + strings.Repeat("ø", 9)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if got := holdBack([]byte(c.b), c.cut, c.secrets); got != c.want {
-				t.Errorf("holdBack(%q, %d) = %d, want %d", c.b, c.cut, got, c.want)
+			masker := captureMasker(c.secrets)
+			mask := func(s string) string {
+				s = captureRepair(s)
+				if masker != nil {
+					s = masker.Replace(s)
+				}
+				return s
+			}
+			want := mask(c.line)
+			for window := 4; window <= len(c.line)+1; window++ {
+				lines := newLogLines(strings.NewReader(c.line+"\nnext\n"), window, captureMaskForms(c.secrets))
+				var got strings.Builder
+				for {
+					piece, _, end, err := lines.next()
+					if err != nil {
+						t.Fatalf("window %d: %v", window, err)
+					}
+					if len(piece) > window {
+						t.Errorf("window %d: a piece of %d bytes", window, len(piece))
+					}
+					got.WriteString(mask(piece))
+					if end {
+						break
+					}
+				}
+				if got.String() != want {
+					t.Errorf("window %d: the pieces mask to\n  %q\nwant the whole line masked\n  %q", window, got.String(), want)
+				}
+				if piece, first, end, err := lines.next(); piece != "next" || !first || !end || err != nil {
+					t.Errorf("window %d: the line after = %q first %v end %v (%v), want it whole", window, piece, first, end, err)
+				}
 			}
 		})
 	}
