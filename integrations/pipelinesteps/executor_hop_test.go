@@ -30,9 +30,9 @@ import (
 //
 // The backend here is a fake that keeps the runner's multi-replica contract
 // (an outcome on the Job wins, a fresh heartbeat is waited on, a stale one is
-// adopted, a cancel after the outcome is a no-op). hopBackend is the seam the
-// real runner drops into: the same tests, a fake API server under two real
-// Runners.
+// adopted, a cancel after the outcome is a no-op), so these tests are about
+// the executor's own paths. executor_runner_hop_test.go puts two REAL Runners
+// over one fake API server behind the same mesh.
 //
 // What the mesh fakes is exactly what production produces when a replica
 // goes away: the agent's peer table sees the replica DEGRADED -- heartbeats
@@ -100,15 +100,22 @@ type hopMesh struct {
 	sends    []hopSend
 }
 
-func newHopMesh(t *testing.T, backend hopBackend, nodes ...string) *hopMesh {
+// newHopMesh is the named replicas, each a real ForwardHandler over the
+// PipelineRunner runner answers for it.
+func newHopMesh(t *testing.T, runner func(node string) workbench.PipelineRunner, nodes ...string) *hopMesh {
 	t.Helper()
 	m := &hopMesh{inflight: map[string]chan *nodev1.WorkbenchForwardResponse{}}
 	for _, n := range nodes {
-		h := workbench.NewForwardHandler(nil, quietLogger())
-		h.SetPipelineRunner(backend.runner(n))
-		m.replicas = append(m.replicas, &hopReplica{id: n, handler: h, healthy: true, alive: true, lost: map[string]bool{}})
+		m.replicas = append(m.replicas, &hopReplica{id: n, handler: hopHandler(runner(n)), healthy: true, alive: true, lost: map[string]bool{}})
 	}
 	return m
+}
+
+// hopHandler is one replica process's forward handler over its runner.
+func hopHandler(runner workbench.PipelineRunner) *workbench.ForwardHandler {
+	h := workbench.NewForwardHandler(nil, quietLogger())
+	h.SetPipelineRunner(runner)
+	return h
 }
 
 func (m *hopMesh) SelfNodeId() string   { return exAgent }
@@ -165,7 +172,7 @@ func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardReque
 	m.inflight[req.RequestId] = ch
 	m.sends = append(m.sends, hopSend{node: r.id, action: req.GetAction(), requestID: req.GetRequestId(),
 		pinned: pin, excluded: exclude})
-	alive := r.alive
+	alive, handler := r.alive, r.handler
 	if req.GetAction() == workbench.PipelineStepAction && r.dropNextStep {
 		// Lost on the way: the replica never reads it.
 		r.dropNextStep, alive = false, false
@@ -180,7 +187,7 @@ func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardReque
 	if alive {
 		// The replica's receive loop: the node stream calls the handler
 		// inline, which is why a step must not block it.
-		r.handler.HandleForwardedRequest(context.Background(), req, m.replyFrom(r))
+		handler.HandleForwardedRequest(context.Background(), req, m.replyFrom(r))
 	}
 
 	var tick <-chan time.Time
@@ -194,8 +201,10 @@ func (m *hopMesh) forward(ctx context.Context, req *nodev1.WorkbenchForwardReque
 		case resp := <-ch:
 			return resp, r.id, nil
 		case <-ctx.Done():
-			if m.answers(r) {
-				r.handler.CancelForwardedRequest(context.Background(), req.RequestId)
+			// The cancel reaches whichever process answers for the replica
+			// now -- after a restart, one that never saw the request.
+			if h := m.answering(r); h != nil {
+				h.CancelForwardedRequest(context.Background(), req.RequestId)
 			}
 			return nil, r.id, ctx.Err()
 		case <-tick:
@@ -239,10 +248,15 @@ func (m *hopMesh) serving(r *hopReplica) bool {
 	return r.healthy
 }
 
-func (m *hopMesh) answers(r *hopReplica) bool {
+// answering is the handler of the process answering for the replica, or nil
+// when nothing does.
+func (m *hopMesh) answering(r *hopReplica) *workbench.ForwardHandler {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return r.alive
+	if !r.alive {
+		return nil
+	}
+	return r.handler
 }
 
 func (m *hopMesh) replica(node string) *hopReplica {
@@ -273,7 +287,12 @@ func (m *hopMesh) dropNextStepTo(node string) {
 // flap bounces the stream to a replica that stays healthy: every reply to a
 // request in flight on it is lost, and requests sent after are answered. The
 // peer table never notices, which is why the watched forward cannot.
-func (m *hopMesh) flap(node string) {
+func (m *hopMesh) flap(node string) { m.bounce(node, nil) }
+
+// bounce is flap, and -- given a handler -- the replica's process restarted
+// in place with it: a container restart in the same pod, whose new process,
+// under the same node id, answers what is sent from now on.
+func (m *hopMesh) bounce(node string, restarted *workbench.ForwardHandler) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r := m.replica(node)
@@ -281,6 +300,9 @@ func (m *hopMesh) flap(node string) {
 		if _, waiting := m.inflight[s.requestID]; waiting && s.node == node {
 			r.lost[s.requestID] = true
 		}
+	}
+	if restarted != nil {
+		r.handler = restarted
 	}
 }
 
@@ -622,9 +644,8 @@ func (r *hopRunner) CancelRun(_ context.Context, args []byte) ([]byte, string) {
 // The tests
 // ---------------------------------------------------------------------------
 
-// newHop is an executor on agent-a and two workbench replicas over one
-// cluster. The backend is the seam the real runner drops into: two Runners
-// over one fake API server, with nothing below this function changed.
+// newHop is an executor on agent-a and two workbench replicas over one fake
+// cluster (the real Runners' version is newRunnerHop).
 func newHop(t *testing.T) (*Executor, *hopMesh, hopBackend) {
 	t.Helper()
 	cluster := newHopCluster("workbench-a", "workbench-b")
@@ -633,7 +654,7 @@ func newHop(t *testing.T) (*Executor, *hopMesh, hopBackend) {
 			r.die()
 		}
 	})
-	mesh := newHopMesh(t, cluster, "workbench-a", "workbench-b")
+	mesh := newHopMesh(t, cluster.runner, "workbench-a", "workbench-b")
 	// On the executor's fixed clock a stale reading -- the adopting replica
 	// waiting out the dead one's heartbeat -- never forwards the step again;
 	// the tests about a stale re-forward move the clock.
