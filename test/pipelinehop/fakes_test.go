@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing/fstest"
@@ -288,6 +289,25 @@ func (h githubAt) OpenPullRequests(_ context.Context, token, repository string) 
 		return nil, err
 	}
 	return slices.Clone(r.pulls), nil
+}
+
+// PullRequestHead answers one pull request by number, from the same list
+// OpenPullRequests serves -- what an opening asks before it supersedes the
+// pull request's earlier runs (component/pipelinerun/supersede.go).
+func (h githubAt) PullRequestHead(_ context.Context, token, repository string, number int) (githubapp.PullRequestHead, error) {
+	g := h.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	r, err := g.repo(token, repository)
+	if err != nil {
+		return githubapp.PullRequestHead{}, err
+	}
+	for _, pr := range r.pulls {
+		if pr.Number == number {
+			return pr, nil
+		}
+	}
+	return githubapp.PullRequestHead{}, &githubapp.StatusError{Status: 404, Endpoint: "/repos/" + repository + "/pulls/" + strconv.Itoa(number)}
 }
 
 func (h githubAt) Compare(_ context.Context, token, repository, base, head string) ([]string, bool, error) {
