@@ -11,6 +11,17 @@
 # Without it the claim sits Pending naming a class that does not exist, and
 # every step that declares a cache waits out its scheduling timeout. Gated by
 # ../substrate_overlay_coupling_test.go.
+#
+# THE CEILING AND THE LIMITS ARE SIZED FOR THE DEFAULT POOL azure-provision.sh
+# CREATES -- 2 x Standard_D2as_v4, about 3.8 allocatable CPU -- with this
+# overlay's mesh already on it, requesting 2.4 CPU / 3Gi (measured from the
+# render). The LimitRange applies to EVERY container of a step pod -- the clone
+# init container and each service sidecar as well as the step -- so a step's
+# request multiplies with its services. Two steps at 250m / 512Mi a container
+# fit beside the mesh; at the 1 CPU / 2Gi this file first carried, not one did.
+# A CI-heavy instance raises the ceiling and the requests in ITS OWN overlay,
+# together with a dedicated node pool for the steps: raising them alone gives
+# steps that sit Pending until their scheduling timeout.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -30,7 +41,7 @@ metadata:
   namespace: memql-pipelines
 spec:
   hard:
-    count/jobs.batch: "12"
+    count/jobs.batch: "2"
 ---
 # `limits` is replaced whole, not merged, so the item is restated in full.
 apiVersion: v1
@@ -42,8 +53,8 @@ spec:
   limits:
     - type: Container
       default:
-        cpu: "4"
-        memory: 8Gi
+        cpu: "2"
+        memory: 4Gi
       defaultRequest:
-        cpu: "1"
-        memory: 2Gi
+        cpu: 250m
+        memory: 512Mi

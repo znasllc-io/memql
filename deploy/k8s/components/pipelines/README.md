@@ -72,9 +72,21 @@ can run.
 | Cache class | cluster default (field absent) | `azureblob-nfs-premium` | `azureblob-nfs-premium` |
 | Cache access mode | `ReadWriteOnce` | `ReadWriteMany` | `ReadWriteMany` |
 | Cache size | 20Gi | 100Gi | 50Gi |
-| Steps at once | 4 | 12 | 4 |
-| Container limit | 2 CPU / 4Gi | 4 CPU / 8Gi | 2 CPU / 4Gi |
-| Container request | 250m / 512Mi | 1 CPU / 2Gi | 250m / 512Mi |
+| Cache marked `binds-on-first-use` | yes | no | no |
+| Steps at once | 4 | 2 | 1 |
+| Container limit | 2 CPU / 4Gi | 2 CPU / 4Gi | 2 CPU / 4Gi |
+| Container request | 250m / 512Mi | 250m / 512Mi | 250m / 512Mi |
+
+- **The cloud numbers are sized for the default pool** `azure-provision.sh`
+  creates — 2 x Standard_D2as_v4, about 3.8 allocatable CPU — with the
+  overlay's own mesh already on it (cloud requests 2.4 CPU / 3Gi, entry
+  250m / 640Mi, measured from the renders). A step's request multiplies with
+  its containers (below), so two plain steps fit beside the cloud mesh; at the
+  12 Jobs x 1 CPU / 2Gi first proposed, not one did. **A CI-heavy instance
+  raises the ceiling and the requests in its own overlay, together with a
+  dedicated node pool for the steps**; raising them alone gives steps that sit
+  Pending until their scheduling timeout. `render_pipelines_test.go` pins all
+  three overlays' numbers, so that decision shows in review.
 
 - **The cache's access mode is not a preference.** The steps of one run land on
   whichever node has room, so on a multi-node cloud cluster the cache two step
@@ -90,10 +102,27 @@ can run.
   --enable-blob-driver --yes` on a cluster that predates it (read first, so a
   converged cluster reports `changed: false`). Without the driver the claim
   sits Pending naming a class that does not exist.
+- **The local cache is marked `memql.io/binds-on-first-use: "true"`.**
+  `local-path` binds on first consumer, so the claim stays Pending until a step
+  mounts it, and Argo CD reads a Pending claim as Progressing and an
+  Application as its worst resource: without the mark every dev cluster's
+  Application reported Progressing until a pipeline had run, and anything
+  waiting for Healthy waited forever. The ArgoCD bootstrap carries a
+  PersistentVolumeClaim health customization
+  ([`deploy/argocd/bootstrap/pvc-health.yaml`](../../../argocd/bootstrap/pvc-health.yaml))
+  that reads a marked Pending claim as Healthy and gives every other claim Argo
+  CD's own answer. The cloud claims are not marked: there a Pending cache can
+  mean its class does not exist, which must keep reading Progressing. An
+  existing dev cluster picks the customization up when the bootstrap is
+  applied again (`kubectl apply -k deploy/argocd/bootstrap`); `make up` applies
+  it on a fresh one.
 - **The ceiling is a count of Jobs**, enforced atomically by the API server
   across every workbench replica. A step that meets a full quota is refused
   with `exceeded quota` and the runner waits, bounded by the run's wall-clock
-  ceiling, rather than failing it.
+  ceiling, rather than failing it. **It counts Jobs and nothing else**: a
+  compute quota is enforced when the Job's pod is created, after the Job
+  exists, so a step it refused would wait inside its own
+  `activeDeadlineSeconds` and time out having never run.
 - **The limits are a `LimitRange` default**, so the runner sets no resources on
   a step and this is the one place a step's size is decided. It covers every
   container in the pod — the clone init container and each service sidecar as
@@ -166,8 +195,12 @@ docker buildx imagetools inspect docker.io/library/buildpack-deps:bookworm-scm
 
 - [`../../overlays/render_pipelines_test.go`](../../overlays/render_pipelines_test.go)
   renders all three overlays: placement, the grant verb for verb, the binding,
-  the step identity, the network policy, the ceiling and limits as stated
-  values, the cache per overlay, and the workbench's env.
+  the step identity, the network policy, the ceiling and limits as stated and
+  pinned values (Jobs only in the quota), the cache per overlay, the
+  binds-on-first-use mark (local only), and the workbench's env. It also
+  renders the ArgoCD bootstrap, with the remote upstream install swapped for a
+  local stand-in, and asserts `argocd-cm` carries the claim health script that
+  reads the mark.
 - `../../overlays/render_cloud_test.go` and `render_cloud_entry_test.go`: the
   one-namespace gates, which accept this component's objects in
   `memql-pipelines` and nothing else.

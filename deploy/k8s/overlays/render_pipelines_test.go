@@ -33,6 +33,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -83,16 +84,50 @@ var pipelinesOverlays = []string{"cloud", "cloud-entry", "local"}
 // "No class" is an ABSENT storageClassName, never an empty one: `""` means
 // "bind only to a pre-made PersistentVolume", which no local cluster has, so
 // the claim would sit Pending forever.
+//
+// bindsOnFirstUse is the bindsOnFirstUseAnnotation mark, LOCAL ONLY:
+// local-path binds on first consumer, so the claim is Pending until a step
+// mounts it, and the mark is what lets Argo CD read that as Healthy (see
+// TestTheArgoCDBootstrapReadsAMarkedUnboundClaimAsHealthy). On a cloud
+// cluster a Pending cache can mean its class does not exist, which must keep
+// reading Progressing.
 var pipelinesCache = map[string]struct {
-	storageClass *string
-	accessMode   string
+	storageClass    *string
+	accessMode      string
+	bindsOnFirstUse bool
 }{
 	"cloud":       {storageClass: ptr("azureblob-nfs-premium"), accessMode: "ReadWriteMany"},
 	"cloud-entry": {storageClass: ptr("azureblob-nfs-premium"), accessMode: "ReadWriteMany"},
-	"local":       {storageClass: nil, accessMode: "ReadWriteOnce"},
+	"local":       {storageClass: nil, accessMode: "ReadWriteOnce", bindsOnFirstUse: true},
 }
 
+// bindsOnFirstUseAnnotation marks a claim whose Pending phase is its healthy
+// steady state; deploy/argocd/bootstrap/pvc-health.yaml is what reads it.
+const bindsOnFirstUseAnnotation = "memql.io/binds-on-first-use"
+
 func ptr[T any](v T) *T { return &v }
+
+// pipelinesSizing is the step sizing each overlay states: the concurrency
+// ceiling and every step container's default limit and request.
+//
+// Pinned, because each number is a capacity decision. The cloud overlays are
+// sized for the pool scripts/deploy/azure-provision.sh creates by default --
+// 2 x Standard_D2as_v4, about 3.8 allocatable CPU -- with that overlay's mesh
+// already on it (cloud requests 2.4 CPU / 3Gi). The LimitRange applies to
+// every container of a step pod, the clone init container and each service
+// sidecar included, so services multiply a step's request. At the 12 Jobs x
+// 1 CPU / 2Gi the cloud overlay first carried, not one step fit. A CI-heavy
+// instance raises these in its own overlay together with a dedicated node pool
+// for the steps; changing them here is that decision, so it shows in review.
+var pipelinesSizing = map[string]struct {
+	ceiling                   string
+	limitCPU, limitMemory     string
+	requestCPU, requestMemory string
+}{
+	"cloud":       {ceiling: "2", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi"},
+	"cloud-entry": {ceiling: "1", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi"},
+	"local":       {ceiling: "4", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi"},
+}
 
 // wantRunnerGrants is the runner's whole grant, as group/resource -> verbs.
 //
@@ -614,17 +649,25 @@ func stated(t *testing.T, overlay, kind string) *yaml.Node {
 //
 // The CEILING is a ResourceQuota on count/jobs.batch: the API server counts it
 // atomically across every replica of the workbench, so two replicas cannot
-// both create the fifth Job; the runner waits on `exceeded quota` instead of
-// failing. The LIMITS are a LimitRange default, so the runner sets no
-// resources and this is the one place a step's size is decided.
+// both create the Job that exceeds it; the runner waits on `exceeded quota`
+// instead of failing. The LIMITS are a LimitRange default, so the runner sets
+// no resources and this is the one place a step's size is decided.
 //
 // Both are an overlay's VALUES -- what a laptop and a cloud node pool can give
 // differ -- so each overlay states them in pipelines-values.yaml rather than
-// inheriting the component's, and this asserts the stated value is the one
-// that renders.
+// inheriting the component's, this asserts the stated value is the one that
+// renders, and pipelinesSizing pins what each overlay states.
+//
+// The quota counts Jobs and NOTHING ELSE: a compute quota is enforced when the
+// Job's pod is created, after the Job exists, so a step it refused would wait
+// inside its own activeDeadlineSeconds and time out having never run.
 func TestPipelinesCeilingAndLimitsAreValues(t *testing.T) {
 	for _, overlay := range pipelinesOverlays {
 		t.Run(overlay, func(t *testing.T) {
+			want, ok := pipelinesSizing[overlay]
+			if !ok {
+				t.Fatalf("pipelinesSizing has no entry for %s", overlay)
+			}
 			objs := renderedObjects(t, overlay)
 
 			var quota pipelinesQuota
@@ -637,6 +680,15 @@ func TestPipelinesCeilingAndLimitsAreValues(t *testing.T) {
 			if n, err := strconv.Atoi(ceiling); err != nil || n <= 0 {
 				t.Errorf("count/jobs.batch is %q, want a positive integer -- zero refuses every step forever", ceiling)
 			}
+			if ceiling != want.ceiling {
+				t.Errorf("count/jobs.batch is %q, want %q (pipelinesSizing says why)", ceiling, want.ceiling)
+			}
+			for resource := range quota.Spec.Hard {
+				if resource != "count/jobs.batch" {
+					t.Errorf("the ceiling also limits %q. It counts Jobs and nothing else: a compute quota refuses "+
+						"at POD creation, after the Job exists, so the step waits out its own deadline unrun.", resource)
+				}
+			}
 
 			var limits pipelinesLimits
 			theOne(t, objs, "LimitRange", "memql-pipelines-limits").decode(t, &limits)
@@ -646,6 +698,15 @@ func TestPipelinesCeilingAndLimitsAreValues(t *testing.T) {
 					continue
 				}
 				containerItems++
+				for res, pinned := range map[string][2]string{
+					"cpu":    {want.limitCPU, want.requestCPU},
+					"memory": {want.limitMemory, want.requestMemory},
+				} {
+					if item.Default[res] != pinned[0] || item.DefaultRequest[res] != pinned[1] {
+						t.Errorf("the Container %s default limit / request is %q / %q, want %q / %q "+
+							"(pipelinesSizing says why)", res, item.Default[res], item.DefaultRequest[res], pinned[0], pinned[1])
+					}
+				}
 				for _, res := range []string{"cpu", "memory"} {
 					lim, req := item.Default[res], item.DefaultRequest[res]
 					if lim == "" || req == "" {
@@ -775,6 +836,148 @@ func TestWorkbenchReadsThePipelinesConfig(t *testing.T) {
 					"container is handed the repository token; whoever controls a mutable tag controls that token.", image)
 			}
 		})
+	}
+}
+
+// TestOnlyTheLocalCacheIsMarkedToBindOnFirstUse is the overlay half of the
+// health coupling: the local cache claim carries the mark, so the dev
+// cluster's Application is not held at Progressing until the first pipeline
+// runs; the cloud ones do not, so a cache whose class is missing there still
+// reads Progressing.
+func TestOnlyTheLocalCacheIsMarkedToBindOnFirstUse(t *testing.T) {
+	for _, overlay := range pipelinesOverlays {
+		t.Run(overlay, func(t *testing.T) {
+			want, ok := pipelinesCache[overlay]
+			if !ok {
+				t.Fatalf("pipelinesCache has no entry for %s", overlay)
+			}
+			var pvc struct {
+				Metadata struct {
+					Annotations map[string]string `yaml:"annotations"`
+				} `yaml:"metadata"`
+			}
+			theOne(t, renderedObjects(t, overlay), "PersistentVolumeClaim", "memql-pipelines-cache").decode(t, &pvc)
+
+			value, marked := pvc.Metadata.Annotations[bindsOnFirstUseAnnotation]
+			switch {
+			case want.bindsOnFirstUse && value != "true":
+				t.Errorf("the %s cache claim does not carry %s: \"true\" (got %q, present=%v). Its class binds on "+
+					"first use, so it stays Pending until a step mounts it, and Argo CD holds the whole "+
+					"Application at Progressing for as long as no pipeline has run.",
+					overlay, bindsOnFirstUseAnnotation, value, marked)
+			case !want.bindsOnFirstUse && marked:
+				t.Errorf("the %s cache claim carries %s: %q. On this overlay a Pending cache can mean its class "+
+					"does not exist; the mark would report that as Healthy.", overlay, bindsOnFirstUseAnnotation, value)
+			}
+		})
+	}
+}
+
+// upstreamArgoCDInstall is the remote resource deploy/argocd/bootstrap pulls.
+var upstreamArgoCDInstall = regexp.MustCompile(`https://raw\.githubusercontent\.com/argoproj/argo-cd/[^/\s]+/manifests/install\.yaml`)
+
+// upstreamStandIn is what the bootstrap's patches need of that remote install:
+// the objects they target, as upstream ships them -- argocd-cm verbatim from
+// the v2.13.3 install (no namespace, no data), argocd-repo-server cut to the
+// container repo-server-exec-timeout.yaml names. The deploy gates never touch
+// the network, so the render below swaps the URL for this file and keeps the
+// bootstrap kustomization otherwise as it is. A new bootstrap patch on another
+// upstream object fails that render naming the missing Id: add the object here.
+const upstreamStandIn = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: argocd-cm
+    app.kubernetes.io/part-of: argocd
+  name: argocd-cm
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-repo-server
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-repo-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: argocd-repo-server
+    spec:
+      containers:
+        - name: argocd-repo-server
+          image: quay.io/argoproj/argocd:v2.13.3
+`
+
+// TestTheArgoCDBootstrapReadsAMarkedUnboundClaimAsHealthy is the other half:
+// the Argo CD the bootstrap installs carries the PersistentVolumeClaim health
+// customization that reads the mark, in argocd-cm, in argocd's namespace.
+//
+// What a Go test cannot do is run the Lua. That was verified against the
+// pinned release's own evaluator (`argocd admin settings resource-overrides
+// health` in quay.io/argoproj/argocd:v2.13.3), which answers exactly as Argo
+// CD's built-in check does for a Bound, Lost, unmarked Pending and phase-less
+// claim, and Healthy for a marked Pending one. These assertions keep the
+// script naming what that verification depended on.
+func TestTheArgoCDBootstrapReadsAMarkedUnboundClaimAsHealthy(t *testing.T) {
+	const healthKey = "resource.customizations.health.PersistentVolumeClaim"
+
+	src := filepath.Join("..", "..", "argocd", "bootstrap")
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatalf("reading %s: %v", src, err)
+	}
+	dir := t.TempDir()
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			t.Fatalf("reading %s: %v", e.Name(), err)
+		}
+		if e.Name() == "kustomization.yaml" {
+			if n := len(upstreamArgoCDInstall.FindAll(body, -1)); n != 1 {
+				t.Fatalf("the bootstrap names the upstream install %d time(s), want exactly 1; this gate swaps "+
+					"that one remote resource for upstreamStandIn", n)
+			}
+			body = upstreamArgoCDInstall.ReplaceAll(body, []byte("upstream-standin.yaml"))
+		}
+		if err := os.WriteFile(filepath.Join(dir, e.Name()), body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "upstream-standin.yaml"), []byte(upstreamStandIn), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cm := theOne(t, renderedObjects(t, dir), "ConfigMap", "argocd-cm")
+	if cm.Namespace != "argocd" {
+		t.Errorf("argocd-cm renders in namespace %q, want argocd -- Argo CD reads its settings nowhere else", cm.Namespace)
+	}
+	var settings struct {
+		Data map[string]string `yaml:"data"`
+	}
+	cm.decode(t, &settings)
+	lua, ok := settings.Data[healthKey]
+	if !ok {
+		t.Fatalf("argocd-cm carries no %s, so Argo CD reads every Pending claim as Progressing and the local "+
+			"Application never reports Healthy until a pipeline has run", healthKey)
+	}
+	for _, needle := range []string{
+		// The mark, exactly as the local overlay writes it.
+		`annotations["` + bindsOnFirstUseAnnotation + `"] == "true"`,
+		`"binds when the first pipeline step mounts it"`,
+		// Argo CD's own answer for every other claim: a customization replaces
+		// the built-in check, so the script must give all of it.
+		`phase == "Bound"`, `"Healthy"`,
+		`phase == "Pending"`, `"Progressing"`,
+		`phase == "Lost"`, `"Degraded"`,
+		`"Unknown"`,
+	} {
+		if !strings.Contains(lua, needle) {
+			t.Errorf("the %s script does not contain %s", healthKey, needle)
+		}
 	}
 }
 

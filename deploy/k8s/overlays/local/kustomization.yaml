@@ -373,8 +373,10 @@ patches:
 
   # -------------------------------------------------------------------------
   # PIPELINES -- local VALUES over the pipelines component (epic memql#5478,
-  # task #5492): the concurrency ceiling and the step limits a laptop gives.
-  # The cache keeps the component's local shape; the file says why.
+  # task #5492): the concurrency ceiling and the step limits a laptop gives,
+  # and the cache's binds-on-first-use mark, which Argo CD's claim health
+  # check (deploy/argocd/bootstrap/pvc-health.yaml) reads so an unbound cache
+  # does not hold this Application at Progressing. The file says why.
   # -------------------------------------------------------------------------
   - path: pipelines-values.yaml
 

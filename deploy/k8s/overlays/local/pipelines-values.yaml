@@ -2,10 +2,11 @@
 # ../../components/pipelines -- one strategic-merge patch per object. The
 # component's README.md says what each number bounds.
 #
-# THE CACHE is not restated: the component's default is the local shape. No
+# THE CACHE's shape is the component's default, which is the local one: no
 # storageClassName, so k3d's default local-path class provisions it, and
 # ReadWriteOnce, the only mode local-path offers (per node, and the volume pins
-# the step pods that mount it to its node).
+# the step pods that mount it to its node). The one thing local adds is the
+# binds-on-first-use mark, at the bottom.
 #
 # THE CEILING AND THE LIMITS are stated although they equal the component's
 # defaults, because they are this overlay's decision and an inherited number is
@@ -36,3 +37,22 @@ spec:
       defaultRequest:
         cpu: 250m
         memory: 512Mi
+---
+# BINDS ON FIRST USE. local-path is WaitForFirstConsumer, so this claim stays
+# Pending until a pipeline step first mounts it. Argo CD reads a Pending claim
+# as Progressing, and an Application takes its worst resource's health, so
+# without this mark every dev cluster's Application reports Progressing for as
+# long as no pipeline has run, and anything waiting for Healthy waits forever.
+# The mark is what ../../../argocd/bootstrap/pvc-health.yaml reads: Pending
+# plus memql.io/binds-on-first-use=true is Healthy. LOCAL ONLY: on a cloud
+# cluster a Pending cache can mean its class does not exist (no Blob CSI
+# driver), which must keep reading Progressing. An existing dev cluster's
+# Argo CD picks the customization up when deploy/argocd/bootstrap is applied
+# again; a fresh `make up` applies it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memql-pipelines-cache
+  namespace: memql-pipelines
+  annotations:
+    memql.io/binds-on-first-use: "true"

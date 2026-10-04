@@ -12,10 +12,16 @@
 # every step that declares a cache waits out its scheduling timeout. Gated by
 # ../substrate_overlay_coupling_test.go.
 #
-# SIZED FOR THE ENTRY POOL. The requests stay at the component's 250m / 512Mi
-# per container, the same reasoning as the mesh's right-sizing in
-# kustomization.yaml (memql#4598): four steps at once must fit beside the mesh
-# on a two-node, 2-vCPU pool rather than sit unschedulable.
+# THE CEILING AND THE LIMITS ARE SIZED FOR THE DEFAULT POOL azure-provision.sh
+# CREATES -- 2 x Standard_D2as_v4 -- with this overlay's mesh already on it,
+# requesting 250m / 640Mi (measured from the render) and needing room for the
+# surge replica every roll places (kustomization.yaml, memql#4598). One step at
+# a time, the smallest ceiling that runs a pipeline at all: the LimitRange
+# applies to EVERY container of a step pod -- the clone init container and each
+# service sidecar as well as the step -- so a step's request multiplies with
+# its services. A CI-heavy instance raises the ceiling and the requests in ITS
+# OWN overlay, together with a dedicated node pool for the steps: raising them
+# alone gives steps that sit Pending until their scheduling timeout.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -35,7 +41,7 @@ metadata:
   namespace: memql-pipelines
 spec:
   hard:
-    count/jobs.batch: "4"
+    count/jobs.batch: "1"
 ---
 # `limits` is replaced whole, not merged, so the item is restated in full.
 apiVersion: v1

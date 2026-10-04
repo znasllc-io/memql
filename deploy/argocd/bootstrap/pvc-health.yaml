@@ -1,0 +1,63 @@
+# How Argo CD reads a PersistentVolumeClaim's health (memql#5492).
+#
+# WHY. A claim whose class binds on first use (WaitForFirstConsumer -- k3d's
+# default local-path class) stays Pending until a pod mounts it. Argo CD's
+# built-in check reads Pending as Progressing, and an Application takes its
+# worst resource's health, so the local overlay's pipelines cache -- which
+# nothing mounts until the first pipeline step runs -- kept every dev
+# cluster's Application Progressing forever: `make status` reported it, and
+# anything that waits for Healthy (the deploy console's repair watch,
+# scripts/deploy/settle-after-sync.sh) could never pass locally.
+#
+# WHAT. A claim in phase Pending that carries the annotation
+# `memql.io/binds-on-first-use: "true"` is Healthy, with a message saying why.
+# Only the local overlay sets that annotation (on memql-pipelines-cache): on a
+# cloud cluster a Pending cache can mean its class does not exist at all (no
+# Blob CSI driver), which must keep reading Progressing.
+#
+# EVERY OTHER CLAIM KEEPS ARGO CD'S OWN ANSWER, replicated below, because a
+# customization REPLACES the built-in check for the kind rather than wrapping
+# it (gitops-engine's health_pvc.go): Bound -> Healthy, Pending -> Progressing,
+# Lost -> Degraded, anything else -> Unknown, no message. A script that
+# returned nothing would not fall back to it either -- the claim would read as
+# a blank status.
+#
+# The key is `resource.customizations.health.<kind>`: a core-group kind has no
+# group part. Verified offline against the pinned release's own evaluator,
+# `argocd admin settings resource-overrides health <claim.yaml>
+# --argocd-cm-path <argocd-cm.yaml>` in quay.io/argoproj/argocd:v2.13.3, for a
+# marked Pending, an unmarked Pending, a Bound and a Lost claim.
+#
+# A strategic-merge patch on the upstream install's argocd-cm, which ships with
+# no data; no namespace here, for the reason repo-server-exec-timeout.yaml has
+# none (the kustomization's `namespace: argocd` is applied after the patches).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+data:
+  resource.customizations.health.PersistentVolumeClaim: |
+    local hs = {}
+    local phase = nil
+    if obj.status ~= nil then
+      phase = obj.status.phase
+    end
+    if phase == "Bound" then
+      hs.status = "Healthy"
+    elseif phase == "Pending" then
+      local annotations = nil
+      if obj.metadata ~= nil then
+        annotations = obj.metadata.annotations
+      end
+      if annotations ~= nil and annotations["memql.io/binds-on-first-use"] == "true" then
+        hs.status = "Healthy"
+        hs.message = "binds when the first pipeline step mounts it"
+      else
+        hs.status = "Progressing"
+      end
+    elseif phase == "Lost" then
+      hs.status = "Degraded"
+    else
+      hs.status = "Unknown"
+    end
+    return hs

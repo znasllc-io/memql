@@ -9,6 +9,12 @@
 # retries rather than failing the step (the run shows it queued, bounded by the
 # run's wall-clock ceiling). A finished Job counts until the runner deletes it
 # after the agent has the result, or until its TTL does.
+#
+# JOBS AND NOTHING ELSE. A compute quota (requests.cpu, limits.memory, ...) is
+# enforced when the Job's POD is created, after the Job exists, so a step
+# refused by it would wait inside its own activeDeadlineSeconds instead of in
+# the runner's queue, and time out having never run. What a step may take is
+# the LimitRange's job, and how many run at once is this count's.
 apiVersion: v1
 kind: ResourceQuota
 metadata:
