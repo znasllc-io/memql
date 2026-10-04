@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -571,6 +572,89 @@ func TestExecuteForwardsAClusterStepAndAcks(t *testing.T) {
 		t.Error("the answered forward was cancelled")
 	default:
 	}
+}
+
+// ackEnd is how one step's ack ended, as Executor.onAcked is told.
+type ackEnd struct {
+	job      string
+	attempts int
+	err      error
+}
+
+// TestALostAckIsSentAgain (final review, M1): the ack is what deletes a
+// finished step's Job and its Secret now, and a finished Job counts against
+// the pipelines ceiling's quota until it is deleted -- so an ack lost to a
+// stream that dropped mid-answer would hold a slot a queued step waits for,
+// until the Job's TTL. It is sent again, each time under a fresh request id
+// and the engine's own assertion, until a replica confirms it -- and only so
+// many times.
+func TestALostAckIsSentAgain(t *testing.T) {
+	run := func(t *testing.T, ack func(n int) (*nodev1.WorkbenchForwardResponse, string, error)) (ackEnd, []*exForward) {
+		t.Helper()
+		var n atomic.Int32
+		wb := &scriptedWorkbench{
+			step: func(int, *exForward) (*nodev1.WorkbenchForwardResponse, string, error) {
+				return outcomeResponse(exOutcome("workbench-a")), "workbench-a", nil
+			},
+			ack: func(*exForward) (*nodev1.WorkbenchForwardResponse, string, error) { return ack(int(n.Add(1))) },
+		}
+		e := newTestExecutor(wb, nil)
+		ended := make(chan ackEnd, 1)
+		e.onAcked = func(job string, attempts int, err error) { ended <- ackEnd{job, attempts, err} }
+		if res, err := e.Execute(context.Background(), exRequest()); err != nil || res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("Execute = %+v, %v; want the runner's outcome", res, err)
+		}
+		select {
+		case end := <-ended:
+			return end, wb.sent(workbench.PipelineAckAction)
+		case <-time.After(5 * time.Second):
+			t.Fatal("the ack never ended")
+			return ackEnd{}, nil
+		}
+	}
+	job := JobName(exRequest().RunID, exRequest().StepKey, exRequest().Attempt)
+
+	t.Run("lost, then refused, then confirmed", func(t *testing.T) {
+		end, sent := run(t, func(n int) (*nodev1.WorkbenchForwardResponse, string, error) {
+			switch n {
+			case 1:
+				return nil, "workbench-a", context.DeadlineExceeded // the stream dropped mid-answer
+			case 2:
+				return &nodev1.WorkbenchForwardResponse{ErrorCode: "ack_failed", ErrorMessage: "the API server did not answer"}, "workbench-b", nil
+			}
+			return &nodev1.WorkbenchForwardResponse{}, "workbench-b", nil
+		})
+		if end.err != nil || end.attempts != 3 || end.job != job {
+			t.Fatalf("the ack ended %+v, want confirmed for %s on its third send", end, job)
+		}
+		if len(sent) != 3 {
+			t.Fatalf("%d acks were sent, want 3: two that went unconfirmed and the one a replica confirmed", len(sent))
+		}
+		ids := map[string]bool{}
+		for i, f := range sent {
+			wantSystemAssertion(t, f.req)
+			var ar AckRequest
+			if err := json.Unmarshal(f.req.GetArgsJson(), &ar); err != nil || ar.JobName != job {
+				t.Errorf("ack %d names %s (%v), want the step's Job %s", i+1, f.req.GetArgsJson(), err, job)
+			}
+			ids[f.req.GetRequestId()] = true
+		}
+		if len(ids) != 3 {
+			t.Errorf("the acks went under %d request ids, want 3: a repeat under one id collides in the router's in-flight table", len(ids))
+		}
+	})
+
+	t.Run("never confirmed: sent ackAttempts times, then left to the TTL", func(t *testing.T) {
+		end, sent := run(t, func(int) (*nodev1.WorkbenchForwardResponse, string, error) {
+			return nil, "", workbench.ErrNoWorkbenchPeer
+		})
+		if end.err == nil || end.attempts != ackAttempts {
+			t.Fatalf("the ack ended %+v, want unconfirmed after %d sends", end, ackAttempts)
+		}
+		if len(sent) != ackAttempts {
+			t.Errorf("%d acks were sent, want exactly %d: the retry is bounded", len(sent), ackAttempts)
+		}
+	})
 }
 
 // wantSystemAssertion: every pipeline forward carries the engine's own

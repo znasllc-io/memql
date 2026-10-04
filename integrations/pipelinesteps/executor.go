@@ -100,6 +100,8 @@ const (
 	absentBackoffMax = 3
 	// cancelAttempts bounds the run-wide delete's retries.
 	cancelAttempts = 5
+	// ackAttempts bounds how many times one step's ack is sent (ack).
+	ackAttempts = 5
 )
 
 // errRunCancelled is the cause Cancel ends a step's context with, so the
@@ -125,6 +127,9 @@ type Executor struct {
 	noPeerPatience time.Duration
 	callTimeout    time.Duration
 	stalePatience  time.Duration
+	// onAcked, when set, is told how each step's ack ended: how many sends
+	// it took, and why the last went unconfirmed when none was confirmed.
+	onAcked func(job string, attempts int, err error)
 
 	mu sync.Mutex
 	// inflight is this node's Execute calls in flight, by pipelines run id,

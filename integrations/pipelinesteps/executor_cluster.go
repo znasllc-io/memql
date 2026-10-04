@@ -420,27 +420,62 @@ func (e *Executor) status(ctx context.Context, run StepRun, job string) (StatusR
 }
 
 // ack tells a replica the agent holds the step's outcome, so the Job and its
-// Secret are deleted now; fire and forget, because the Job's TTL is the
-// backstop. It outlives the step's context: it is sent as the step returns.
+// Secret are deleted now rather than at their TTL. It outlives the step's
+// context -- it is sent as the step returns -- on a goroutine of its own.
+//
+// It is sent again until a replica confirms it, waiting twice as long before
+// each send (from noPeerWait), at most ackAttempts times, the way the
+// run-wide delete is retried (deleteRunJobs): a finished Job counts against
+// the pipelines ceiling's quota until it is deleted, so an ack lost to a
+// stream that dropped mid-answer would hold a slot that a queued step waits
+// for (final review, M1). Deleting is idempotent, so a repeat that finds the
+// two gone is confirmed. An ack still lost after the last send costs that
+// slot, and the Secret holding the clone token and the step's secrets, until
+// the Job's TTL collects both (Config.JobTTL after the Job finished).
 func (e *Executor) ack(ctx context.Context, run StepRun, job string) {
 	args, err := json.Marshal(AckRequest{JobName: job})
 	if err != nil {
 		return
 	}
-	req, err := e.request(workbench.PipelineAckAction, run.RunID, run.StepKey, args, 0)
-	if err != nil {
-		return
-	}
+	ctx = context.WithoutCancel(ctx)
 	go func() {
-		ackCtx, done := context.WithTimeout(context.WithoutCancel(ctx), e.callTimeout)
-		defer done()
-		resp, servedBy, err := e.fwd.Forward(ackCtx, req, "")
-		if err != nil || resp.GetErrorCode() != "" {
-			e.logger.Warn("pipelines: a step's outcome was not acked; its Job and Secret go at their TTL instead",
+		attempts, err := e.sendAck(ctx, run, args)
+		if err != nil {
+			e.logger.Warn("pipelines: a step's outcome was not acked; its Job and Secret hold their slot of the ceiling until their TTL",
 				slog.String("runId", run.RunID), slog.String("stepKey", run.StepKey), slog.String("jobName", job),
-				slog.String("nodeId", servedBy), slog.String("errorCode", resp.GetErrorCode()), slog.Any("error", err))
+				slog.Int("attempts", attempts), slog.String("error", err.Error()))
+		}
+		if e.onAcked != nil {
+			e.onAcked(job, attempts, err)
 		}
 	}()
+}
+
+// sendAck sends one step's ack until a replica confirms it or ackAttempts
+// sends have gone unconfirmed, each under a fresh request id, and answers how
+// many it took and, when none was confirmed, why the last was not.
+func (e *Executor) sendAck(ctx context.Context, run StepRun, args []byte) (int, error) {
+	wait := e.noPeerWait
+	for attempt := 1; ; attempt++ {
+		req, err := e.request(workbench.PipelineAckAction, run.RunID, run.StepKey, args, 0)
+		if err != nil {
+			return attempt, err
+		}
+		callCtx, done := context.WithTimeout(ctx, e.callTimeout)
+		resp, servedBy, err := e.fwd.Forward(callCtx, req, "")
+		done()
+		switch {
+		case err == nil && resp.GetErrorCode() == "":
+			return attempt, nil
+		case err == nil:
+			err = fmt.Errorf("workbench replica %s refused it (%s): %s", servedBy, resp.GetErrorCode(), resp.GetErrorMessage())
+		}
+		if attempt == ackAttempts {
+			return attempt, err
+		}
+		time.Sleep(wait)
+		wait *= 2
+	}
 }
 
 // decodeOutcome reads a runner's reply as a step's outcome.
