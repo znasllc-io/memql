@@ -75,8 +75,9 @@ type ForwardHandler struct {
 	apps        AppCallServer
 
 	// groups resolves the verified caller's ACTIVE groups for a machine lent
-	// to a group (epic memql#5344). Nil is workerservice.InstalledGroups --
-	// THIS replica's membership source, never anything the envelope says.
+	// to a group (epic memql#5344). Nil is workerservice.CachedGroups --
+	// THIS replica's membership source behind its per-person cache
+	// (memql#5660), never anything the envelope says.
 	groups workerservice.GroupResolver
 }
 
