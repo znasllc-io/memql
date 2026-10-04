@@ -634,24 +634,37 @@ func TestFleetStepStoresItsArtifactsAndNotes(t *testing.T) {
 		}
 	})
 
-	t.Run("no archive: every declared path matched nothing", func(t *testing.T) {
-		// The machine sends no archive when no declared path matched a file.
-		d := &fakeDispatcher{answer: answer(`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"",` +
-			`"artifactsMissing":["coverage.out","dist/report.json","missing.txt"]}`)}
-		f, lib, _, _ := newTestFleet(t, d)
-		res := runFleet(t, f, fleetReq())
-		if res.Status != pl.OutcomeSucceeded || len(lib.files) != 1 {
-			t.Fatalf("result = %+v with %d Library files, want a success with only the log", res, len(lib.files))
-		}
-		if len(res.Notes) != 3 {
-			t.Fatalf("notes = %+v, want one for each declared path", res.Notes)
-		}
-		for i, p := range fleetReq().Step.Artifacts {
-			if n := res.Notes[i]; n.Code != pl.CodeArtifactMissing || !strings.Contains(n.Message, strconv.Quote(p)) {
-				t.Errorf("note %d = %+v, want the %s note naming %q", i, n, pl.CodeArtifactMissing, p)
+	// No archive: which declared paths matched nothing is the machine's word
+	// when it gives one (artifactsMissing), and every declared path only when
+	// it says nothing.
+	for _, c := range []struct {
+		name, out string
+		missing   []string
+	}{
+		{"no archive: the paths the machine says matched nothing",
+			`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":"","artifactsMissing":["missing.txt"]}`, []string{"missing.txt"}},
+		{"no archive from a failed command that packed nothing and names nothing",
+			`{"exitCode":2,"durationMs":10,"artifactsTgzBase64":"","artifactsMissing":[]}`, nil},
+		{"no archive and no word from the machine: every declared path",
+			`{"exitCode":0,"durationMs":10,"artifactsTgzBase64":""}`, fleetReq().Step.Artifacts},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := &fakeDispatcher{answer: answer(c.out)}
+			f, lib, _, _ := newTestFleet(t, d)
+			res := runFleet(t, f, fleetReq())
+			if len(lib.files) != 1 || res.Failure != nil {
+				t.Fatalf("result = %+v with %d Library files, want no failure and only the log", res, len(lib.files))
 			}
-		}
-	})
+			if len(res.Notes) != len(c.missing) {
+				t.Fatalf("notes = %+v, want one for each of %q", res.Notes, c.missing)
+			}
+			for i, p := range c.missing {
+				if n := res.Notes[i]; n.Code != pl.CodeArtifactMissing || !strings.Contains(n.Message, strconv.Quote(p)) {
+					t.Errorf("note %d = %+v, want the %s note naming %q", i, n, pl.CodeArtifactMissing, p)
+				}
+			}
+		})
+	}
 
 	t.Run("a command that failed keeps its exit code beside the failure", func(t *testing.T) {
 		// As on the cluster: the artifacts' failure-class code is the step's

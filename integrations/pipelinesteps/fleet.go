@@ -110,14 +110,18 @@ func NewFleet(cfg Config, d FleetDispatcher, library LibraryStore, tokens TokenM
 	}
 }
 
-// fleetOutput is the cockpit's pipeline_step result. Its artifactsMissing is
-// not read: which declared paths matched nothing is decided here, from what
-// arrived, as the cluster's runner decides it (stepFiles.storeArtifacts).
+// fleetOutput is the cockpit's pipeline_step result.
 type fleetOutput struct {
 	ExitCode           *int   `json:"exitCode"`
 	DurationMs         int64  `json:"durationMs"`
 	ArtifactsTgzBase64 string `json:"artifactsTgzBase64"`
-	ArtifactsTooLarge  bool   `json:"artifactsTooLarge"`
+	// ArtifactsMissing is the machine's word on which declared paths
+	// contributed no file; nil when its answer carries none. It is read only
+	// when no archive arrived: from an archive, which declared paths matched
+	// nothing is decided here, from what arrived, as the cluster's runner
+	// decides it (stepFiles.storeArtifacts).
+	ArtifactsMissing  []string `json:"artifactsMissing"`
+	ArtifactsTooLarge bool     `json:"artifactsTooLarge"`
 }
 
 // RunStep runs one step on a machine that offers what it needs.
@@ -416,11 +420,9 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 // storeReturnedArtifacts files the artifacts the machine returned through the
 // cluster runner's own helpers (stepFiles.storeArtifacts): what it adds is the
 // machine's answer -- its archive, sent base64 and refused before it is
-// decoded when far past the cap, or its word that it sent none. An archive
-// past this cluster's cap, or past what the machine sends back, fails the step
-// as one past the cluster's does. The machine sends no archive when the
-// declared paths matched nothing, so then each of them is noted as matching
-// nothing.
+// decoded when far past the cap, or its word on what matched nothing when it
+// sent none. An archive past this cluster's cap, or past what the machine
+// sends back, fails the step as one past the cluster's does.
 func (f *Fleet) storeReturnedArtifacts(ctx context.Context, files stepFiles, out *fleetOutput, res *pl.StepResult, notes *noteList) {
 	if len(files.run.Artifacts) == 0 || out == nil {
 		return
@@ -434,11 +436,17 @@ func (f *Fleet) storeReturnedArtifacts(ctx context.Context, files stepFiles, out
 	}
 	encoded := strings.TrimSpace(out.ArtifactsTgzBase64)
 	if encoded == "" {
-		var declared []string
-		for _, p := range extractPatterns(files.run.Artifacts) {
-			declared = append(declared, p.declared)
+		// No archive: the paths the machine says matched nothing -- none, for
+		// one that packed nothing and names nothing, say after a failed
+		// command. Only a machine that says nothing at all leaves every
+		// declared path to read as matching nothing.
+		missing := out.ArtifactsMissing
+		if missing == nil {
+			for _, p := range extractPatterns(files.run.Artifacts) {
+				missing = append(missing, p.declared)
+			}
 		}
-		files.noteMissing(notes, declared)
+		files.noteMissing(notes, missing)
 		return
 	}
 	// A gzip stream is no larger than what it holds plus framing, so an
