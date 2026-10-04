@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -241,6 +242,9 @@ type rtCluster struct {
 	quotaJobs map[string]bool
 	// createJobAnswer, when set, answers every Job create instead.
 	createJobAnswer *kubeAnswer
+	// createJobAnswers answer the first Job creates, one each, before
+	// anything else does.
+	createJobAnswers []kubeAnswer
 	// jobGetFailures answer the first GETs of a Job, one each.
 	jobGetFailures []kubeAnswer
 	reqs           []rtReq
@@ -295,6 +299,14 @@ func rtAnswer(w http.ResponseWriter, a kubeAnswer) {
 	w.WriteHeader(a.code)
 	_, _ = io.WriteString(w, a.body)
 }
+
+// rtQuotaRefusal is the ceiling's quota refusing a Job create.
+func rtQuotaRefusal(name string) kubeAnswer {
+	return kubeStatus(403, "Forbidden", fmt.Sprintf(`jobs.batch %q is forbidden: exceeded quota: memql-pipelines-ceiling, requested: count/jobs.batch=1, used: count/jobs.batch=2, limited: count/jobs.batch=2`, name))
+}
+
+// rtUnavailable is an API server answer that may pass.
+var rtUnavailable = kubeStatus(503, "ServiceUnavailable", "the server is currently unable to handle the request")
 
 // rtNotStarted is the kubelet's answer for the log of a container that has
 // not started (measured, kube_test.go).
@@ -386,6 +398,11 @@ func (c *rtCluster) createJob(w http.ResponseWriter, body []byte) {
 	defer c.mu.Unlock()
 	name := job.Metadata.Name
 	switch {
+	case len(c.createJobAnswers) > 0:
+		a := c.createJobAnswers[0]
+		c.createJobAnswers = c.createJobAnswers[1:]
+		rtAnswer(w, a)
+		return
 	case c.createJobAnswer != nil:
 		rtAnswer(w, *c.createJobAnswer)
 		return
@@ -393,7 +410,7 @@ func (c *rtCluster) createJob(w http.ResponseWriter, body []byte) {
 		if !c.quotaJobs[name] {
 			c.quotaRefusals--
 		}
-		rtAnswer(w, kubeStatus(403, "Forbidden", fmt.Sprintf(`jobs.batch %q is forbidden: exceeded quota: memql-pipelines-ceiling, requested: count/jobs.batch=1, used: count/jobs.batch=2, limited: count/jobs.batch=2`, name)))
+		rtAnswer(w, rtQuotaRefusal(name))
 		return
 	case c.jobs[name] != nil:
 		rtAnswer(w, kubeStatus(409, "AlreadyExists", fmt.Sprintf(`jobs.batch %q already exists`, name)))
@@ -991,6 +1008,29 @@ func (m *rtTokens) called() []string {
 	return append([]string(nil), m.calls...)
 }
 
+// rtLogs records what a Runner logs.
+type rtLogs struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *rtLogs) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *rtLogs) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// count is how many records say msg.
+func (l *rtLogs) count(msg string) int {
+	return strings.Count(l.String(), "msg="+strconv.Quote(msg)+" ")
+}
+
 type rtHarness struct {
 	r      *Runner
 	c      *rtCluster
@@ -1015,6 +1055,13 @@ func newRunnerHarness(t *testing.T, mutate ...func(*Config)) *rtHarness {
 	}
 	h.r = h.newRunner(cfg)
 	return h
+}
+
+// logs makes the harness's Runner log into a recorder.
+func (h *rtHarness) logs() *rtLogs {
+	l := &rtLogs{}
+	h.r.log = slog.New(slog.NewTextHandler(l, nil)).With("component", "pipelines.runner")
+	return l
 }
 
 // newRunner builds a Runner over the fake, with the test's clock, a private
@@ -2501,6 +2548,137 @@ func TestRunnerReportsWhatTheAPIServerRefuses(t *testing.T) {
 			h.leftNoArchive(t)
 		})
 	}
+}
+
+// TestRunnerKeepsAskingForAJobItHasSeen (fix round 1, minor 5): once a Run
+// has seen the step's Job exist, an API server that cannot answer for a while
+// is waited out, never a failure -- the Job runs on, under this Run or another
+// replica's. Here the creator's first claim is refused (the Job controller
+// wrote the Job's status since the create answered), and its next reads of
+// the Job meet more failures than one read retries.
+func TestRunnerKeepsAskingForAJobItHasSeen(t *testing.T) {
+	h := newRunnerHarness(t)
+	logs := h.logs()
+	armed := false
+	h.c.with(func(c *rtCluster) {
+		c.onJobPatch = func(c *rtCluster, p rtPatch) {
+			if !armed {
+				armed = true
+				for i := 0; i < 2*apiAttempts+1; i++ {
+					c.jobGetFailures = append(c.jobGetFailures, rtUnavailable)
+				}
+			}
+		}
+	})
+	h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
+
+	res := h.run(t, rtRun())
+
+	if res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("result = %+v (failure %+v), want success: the Job ran on while the API server could not say so", res, res.Failure)
+	}
+	h.c.with(func(c *rtCluster) {
+		if !armed || len(c.jobGetFailures) != 0 {
+			t.Errorf("armed %v, %d failures left: the Run never met them", armed, len(c.jobGetFailures))
+		}
+	})
+	if n := logs.count("pipelines: reading the step's Job"); n != 1 {
+		t.Errorf("%d warnings of the failed reads, want one: the same error is logged once\n%s", n, logs)
+	}
+}
+
+// TestRunnerCountsFailuresThatMayPassFromTheLastAnswer (fix round 1, minor 6):
+// a quota refusal is the API server answering, so the failures that may pass
+// are counted from it -- a step waiting out the ceiling is not failed for
+// 503s spread over its whole wait.
+func TestRunnerCountsFailuresThatMayPassFromTheLastAnswer(t *testing.T) {
+	h := newRunnerHarness(t)
+	var answers []kubeAnswer
+	for i := 0; i < 2*apiAttempts; i++ {
+		answers = append(answers, rtUnavailable, rtQuotaRefusal(testJobName))
+	}
+	h.c.with(func(c *rtCluster) { c.createJobAnswers = answers })
+	h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "done")))
+
+	res := h.run(t, rtRun())
+
+	if res.Status != pl.OutcomeSucceeded {
+		t.Fatalf("result = %+v (failure %+v), want success: no run of failures was longer than %d", res, res.Failure, apiAttempts)
+	}
+	if n := len(h.c.requestsFor(http.MethodPost, kubeJobs)); n != len(answers)+1 {
+		t.Errorf("%d Job creates, want %d refused or failed and one admitted", n, len(answers))
+	}
+	if store := h.sink.messages(); len(store) != 2 || store[1] != "done" {
+		t.Errorf("store = %q, want one notice of the wait, then the step's output", store)
+	}
+}
+
+// TestRunnerLogsAPersistentAPIErrorOnce (fix round 1, minor 12): an API error
+// a loop keeps meeting is logged when it appears and when what it says
+// changes, not once a poll interval.
+func TestRunnerLogsAPersistentAPIErrorOnce(t *testing.T) {
+	t.Run("the watch's reads of the Job", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		logs := h.logs()
+		armed := false
+		h.c.with(func(c *rtCluster) {
+			c.onJobGet = func(c *rtCluster, n int) {
+				if !armed && len(c.patches) > 0 {
+					// Claimed: the watch is under way.
+					armed = true
+					for i := 0; i < 40; i++ {
+						c.jobGetFailures = append(c.jobGetFailures, rtUnavailable)
+					}
+				}
+			}
+		})
+		h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
+
+		res := h.run(t, rtRun())
+
+		if res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("result = %+v (failure %+v), want success", res, res.Failure)
+		}
+		if n := logs.count("pipelines: reading the step's Job"); n != 1 {
+			t.Errorf("%d warnings of 40 failed reads, want one\n%s", n, logs)
+		}
+	})
+
+	t.Run("the heartbeat's stamps", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		logs := h.logs()
+		released := false
+		running := rtPod(testJobName, rtStepRunning(rtAt(1000)), clsCloneDone)
+		h.c.script(testJobName, &rtScript{
+			states: []rtState{
+				{pod: running, visible: 1, until: func(*rtCluster) bool { return released }},
+				{pod: rtPod(testJobName, rtStepEnded(0, rtAt(1000), rtAt(4000)), clsCloneDone), visible: 1},
+			},
+			log:   []string{captureKubeLine(rtAt(1100), "ok")},
+			tails: map[string]string{ContainerClone: rtCloneTail},
+		})
+		h.c.with(func(c *rtCluster) { c.refuseBeats = true })
+		done := h.start(context.Background(), rtRun())
+		rtWaitUntil(t, "ten refused heartbeats", func() bool {
+			n := 0
+			for _, r := range h.c.requestsFor(http.MethodPatch, rtJobPath) {
+				if strings.Contains(r.Body, AnnotLogCursor) {
+					n++
+				}
+			}
+			return n >= 10
+		})
+		h.c.with(func(*rtCluster) { released = true })
+
+		res := h.await(t, done)
+
+		if res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("result = %+v (failure %+v), want success", res, res.Failure)
+		}
+		if n := logs.count("pipelines: the step's claim could not be stamped"); n != 1 {
+			t.Errorf("%d warnings of ten refused stamps, want one\n%s", n, logs)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

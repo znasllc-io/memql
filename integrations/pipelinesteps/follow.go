@@ -64,6 +64,9 @@ type follower struct {
 	// seen fingerprints the lines fed in seenSecond, fed's second.
 	seenSecond time.Time
 	seen       map[linePrint]struct{}
+	// trouble is what the follower last logged of the errors its streams
+	// ended on.
+	trouble apiTrouble
 }
 
 // follow starts following the pod's step container. draining starts it
@@ -75,7 +78,7 @@ func (s *step) follow(pod string, draining bool) *follower {
 	f := &follower{
 		s: s, capture: s.capture, pod: pod, cancel: cancel,
 		drainC: make(chan struct{}), done: make(chan struct{}), noted: map[string]bool{},
-		adopted: s.adoptedAt, seen: map[linePrint]struct{}{},
+		adopted: s.adoptedAt, seen: map[linePrint]struct{}{}, trouble: apiTrouble{},
 	}
 	if draining {
 		f.once.Do(func() { close(f.drainC) })
@@ -116,7 +119,7 @@ func (f *follower) run(ctx context.Context) {
 			return
 		}
 		if !ended {
-			f.s.log.Warn("pipelines: reading the step's log", "error", err)
+			f.trouble.warn(f.s, "reading the step's log", err)
 		}
 		if !f.pause(ctx, final) {
 			return

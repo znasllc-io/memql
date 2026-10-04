@@ -106,6 +106,9 @@ const (
 	// maxStreamNotes bounds how many distinct sentences of the stream's own
 	// (the kubelet's, not the step's) one step's archive keeps.
 	maxStreamNotes = 16
+	// apiTroubleRepeat is how often a polling loop logs an API error again
+	// while what it says has not changed (apiTrouble).
+	apiTroubleRepeat = 5 * time.Minute
 )
 
 // stepJobNameShape is what JobName produces. Status and Ack refuse any other
@@ -191,7 +194,7 @@ func (r *Runner) Run(ctx context.Context, run StepRun) pl.StepResult {
 	defer r.track(run.RunID, jobName, cancel)()
 
 	s := &step{
-		r: r, run: run, jobName: jobName, ctx: ctx,
+		r: r, run: run, jobName: jobName, ctx: ctx, trouble: apiTrouble{},
 		// The ids, never the StepRun: its secrets would print.
 		log: r.log.With("runId", run.RunID, "workRunId", run.WorkRunID, "stepKey", run.StepKey,
 			"attempt", run.Attempt, "jobName", jobName, "node", r.cfg.NodeID),
@@ -385,6 +388,9 @@ type step struct {
 	// the archive -- the node's log still reached back that far. Written by
 	// the follower, read once it has stopped.
 	replayedHead bool
+	// trouble is what this Run's own loops last logged of the API errors
+	// they met; the heartbeat and the follower keep their own.
+	trouble apiTrouble
 
 	mu     sync.Mutex
 	cursor time.Time // the timestamp of the last line stored, published by the heartbeat
@@ -412,6 +418,15 @@ func (s *step) execute() pl.StepResult {
 			switch {
 			case err != nil && s.ctx.Err() != nil:
 				return s.abandon(nil)
+			case err != nil && seen:
+				// The Job exists, and runs on -- under this Run or another
+				// replica's -- whatever the API server answers for now: ask
+				// again, as watch and wait do.
+				s.trouble.warn(s, "reading the step's Job", err)
+				if !s.sleep(s.r.cfg.PollInterval) {
+					return s.abandon(nil)
+				}
+				continue
 			case err != nil:
 				return s.failed(pl.CodeRunnerUnavailable, "the Kubernetes API server could not be asked for the step's Job: "+apiMessage(err))
 			case !found && seen:
@@ -539,7 +554,9 @@ func (s *step) create() (res pl.StepResult, job Job, done bool) {
 			return s.abandon(nil), Job{}, true
 		case deploycontrol.IsForbiddenQuota(err):
 			// The ceiling is full (Review Focus 4): wait for a slot, as long
-			// as the step is wanted, and say so once.
+			// as the step is wanted, and say so once. The API server
+			// answered, so the failures that may pass start counting again.
+			attempts = 0
 			if !waiting {
 				waiting = true
 				s.capture.Notice("memql: waiting for a free slot under the pipelines ceiling")
@@ -689,7 +706,7 @@ func (s *step) watch(hb *heartbeat) (pl.StepResult, bool) {
 			return s.vanished(last), true
 		case err != nil:
 			if s.ctx.Err() == nil {
-				s.log.Warn("pipelines: reading the step's Job", "error", err)
+				s.trouble.warn(s, "reading the step's Job", err)
 			}
 			continue
 		}
@@ -707,7 +724,7 @@ func (s *step) watch(hb *heartbeat) (pl.StepResult, bool) {
 		pod, err := s.r.kube.JobPod(s.ctx, s.jobName)
 		if err != nil {
 			if s.ctx.Err() == nil {
-				s.log.Warn("pipelines: reading the step's pod", "error", err)
+				s.trouble.warn(s, "reading the step's pod", err)
 			}
 			continue
 		}
@@ -760,7 +777,7 @@ func (s *step) wait() (pl.StepResult, bool) {
 			return s.failed(pl.CodeNodeLost, "the step's Job was deleted while another runner held it, before an outcome was recorded on it"), true
 		case err != nil:
 			if s.ctx.Err() == nil {
-				s.log.Warn("pipelines: reading the step's Job", "error", err)
+				s.trouble.warn(s, "reading the step's Job", err)
 			}
 			continue
 		}
@@ -969,6 +986,28 @@ func apiMessage(err error) string {
 	return err.Error()
 }
 
+// apiTrouble is what a polling loop last logged of each call it makes, so an
+// API error that persists is logged when what it says changes, and again
+// every apiTroubleRepeat while it lasts -- not once a poll interval (fix
+// round 1, minor 12). Each goroutine that polls keeps its own.
+type apiTrouble map[string]troubleLogged
+
+type troubleLogged struct {
+	err string
+	at  time.Time
+}
+
+// warn logs err, met making the call what, unless it is what was logged for
+// that call last, less than apiTroubleRepeat ago.
+func (t apiTrouble) warn(s *step, what string, err error) {
+	now, said := s.r.now(), err.Error()
+	if last, ok := t[what]; ok && last.err == said && now.Sub(last.at) < apiTroubleRepeat {
+		return
+	}
+	t[what] = troubleLogged{err: said, at: now}
+	s.log.Warn("pipelines: "+what, "error", err)
+}
+
 // createFailure is the step's failure when the API server refused to create
 // one of its objects outright.
 func createFailure(what string, err error) (code, why string) {
@@ -1003,13 +1042,14 @@ func (s *step) startHeartbeat() *heartbeat {
 		defer close(exited)
 		t := time.NewTicker(s.r.cfg.HeartbeatInterval)
 		defer t.Stop()
+		trouble := apiTrouble{}
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-t.C:
 			}
-			if !s.beat(ctx) {
+			if !s.beat(ctx, trouble) {
 				close(lost)
 				return
 			}
@@ -1027,7 +1067,7 @@ func (s *step) startHeartbeat() *heartbeat {
 // beat re-stamps the claim, with the log cursor beside it, by compare-and-swap
 // on the version just read: a claim another runner made is never stamped
 // over. It answers false when another runner holds the Job.
-func (s *step) beat(ctx context.Context) bool {
+func (s *step) beat(ctx context.Context, trouble apiTrouble) bool {
 	for attempt := 0; attempt < 3; attempt++ {
 		job, err := s.r.kube.GetJob(ctx, s.jobName)
 		if err != nil {
@@ -1043,7 +1083,7 @@ func (s *step) beat(ctx context.Context) bool {
 		_, err = s.r.kube.AnnotateJob(ctx, s.jobName, annots, job.Metadata.ResourceVersion)
 		if !deploycontrol.IsConflict(err) {
 			if err != nil && ctx.Err() == nil {
-				s.log.Warn("pipelines: the step's claim could not be stamped", "error", err)
+				trouble.warn(s, "the step's claim could not be stamped", err)
 			}
 			return true
 		}
