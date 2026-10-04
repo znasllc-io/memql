@@ -960,6 +960,11 @@ func (s *step) ensureCapture() error {
 
 // discardCapture closes the capture and removes its archive unstored: what it
 // holds is another runner's to settle, or nobody's.
+//
+// What an ownership of the step learned goes with its capture (fix round 3,
+// item 5): a Run that takes the step again -- after yielding it, or waiting
+// on another replica -- adopts it afresh, from the cursor the Job carries
+// then, with its own seam notice and its own judgement of the head.
 func (s *step) discardCapture() {
 	if s.capture == nil {
 		return
@@ -967,6 +972,12 @@ func (s *step) discardCapture() {
 	_, _ = s.capture.Close()
 	s.removeArchive()
 	s.capture = nil
+	s.adopted, s.adoptedAt, s.logFirst = false, time.Time{}, time.Time{}
+	s.reattachNoted, s.head = false, headWhole
+	s.replayedHead, s.firstReplayed = false, time.Time{}
+	s.mu.Lock()
+	s.cursor = time.Time{}
+	s.mu.Unlock()
 }
 
 func (s *step) removeArchive() {

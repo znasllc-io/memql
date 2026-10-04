@@ -2392,6 +2392,78 @@ func TestRunnerYieldsWhenAnotherReplicaTakesTheJob(t *testing.T) {
 	})
 }
 
+// TestARunTakingAStepAgainStartsItsAdoptionAfresh (fix round 3, item 5): a
+// Run adopts a step, yields it to a third replica, waits, and adopts it again
+// when that replica goes quiet -- by when the node has rotated the step's
+// log, and no longer serves line 0. Its second ownership is a new capture and
+// a new adoption, from the cursor the third replica left: the seam notice is
+// written again, and what the archive holds of the head is judged again
+// (missing now), never carried over from the first ownership.
+func TestARunTakingAStepAgainStartsItsAdoptionAfresh(t *testing.T) {
+	h := newRunnerHarness(t)
+	run := rtRun()
+	l0 := captureKubeLine(rtAt(1100), "line 0, before the first cursor")
+	l1 := captureKubeLine(rtAt(2100), "line 1")
+	l2 := captureKubeLine(rtAt(3100), "line 2, captured by workbench-c")
+	l3 := captureKubeLine(rtAt(4100), "line 3")
+	taken, retaken := false, false
+	running := rtPod(testJobName, rtStepRunning(rtAt(1000)), clsCloneDone)
+	h.c.putJob(h.existingJob(t, run, map[string]string{
+		AnnotRunner:    rtStamp(rtOther, rtT0.Add(-time.Minute)),
+		AnnotLogCursor: rtAt(1100).Format(time.RFC3339Nano),
+		AnnotLogFirst:  rtAt(1100).Format(time.RFC3339Nano),
+	}), &rtScript{
+		states: []rtState{
+			{pod: running, visible: 2, until: func(*rtCluster) bool { return retaken }},
+			{pod: running, visible: 4, reads: 2},
+			{pod: rtPod(testJobName, rtStepEnded(0, rtAt(1000), rtAt(5000)), clsCloneDone), visible: 4},
+		},
+		log:   []string{l0, l1, l2, l3},
+		tails: map[string]string{ContainerClone: rtCloneTail},
+	})
+	h.c.putSecret(BuildSecret(h.cfg, run, testJobName, rtCloneToken))
+	h.c.with(func(c *rtCluster) {
+		c.onJobPatch = func(c *rtCluster, p rtPatch) {
+			if v, ok := p.get(AnnotRunner); ok && taken && strings.HasPrefix(v, rtNode+" ") && len(p.annots) == 1 {
+				retaken = true
+			}
+		}
+	})
+	done := h.start(context.Background(), run)
+	rtWaitUntil(t, "the first adoption to store line 1", func() bool { return len(h.sink.messages()) == 2 })
+	// workbench-c took the step, captured line 2, and went quiet; the node
+	// rotated the log meanwhile, and serves it from line 1.
+	h.c.with(func(c *rtCluster) {
+		taken = true
+		sc := c.jobs[testJobName].script
+		sc.log = sc.log[1:]
+		for i := range sc.states {
+			sc.states[i].visible--
+		}
+		c.annotateLocked(testJobName, AnnotRunner, rtStamp("workbench-c", rtT0.Add(-time.Minute)))
+		c.annotateLocked(testJobName, AnnotLogCursor, rtAt(3100).Format(time.RFC3339Nano))
+	})
+
+	res := h.await(t, done)
+
+	if res.Status != pl.OutcomeSucceeded || !retaken {
+		t.Fatalf("result = %+v (retaken %v), want the step settled by its second adoption", res, retaken)
+	}
+	store := h.sink.messages()
+	if len(store) != 4 || !strings.Contains(store[0], "from the step's first line") || store[1] != "line 1" ||
+		!strings.Contains(store[2], "re-attached") || !strings.Contains(store[2], rtAt(3100).Format(time.RFC3339Nano)) || store[3] != "line 3" {
+		t.Fatalf("store = %q, want each adoption's notice, then the lines after its cursor", store)
+	}
+	if !strings.Contains(store[2], "the head may be missing") || !strings.Contains(store[2], "from "+rtAt(2100).Format(time.RFC3339Nano)) {
+		t.Errorf("second notice %q, want it to say the archive starts at line 1, the head missing", store[2])
+	}
+	archive := string(h.file(t, "tests-go-tests-2.log").Bytes)
+	want := strings.Join(rtTexts(l1, l2), "\n") + "\n" + store[2] + "\n" + "line 3\n"
+	if !strings.HasPrefix(archive, want) {
+		t.Errorf("archive = %q, want the second capture whole: what the node still had, its own notice at the seam, then line 3", archive)
+	}
+}
+
 // TestAFollowerReopensOnlyForTheClaimsHolder: a stream that ended while the
 // step ran is opened again only by the runner that still holds the claim.
 // One cut off from the API server long enough to lose it -- another replica
