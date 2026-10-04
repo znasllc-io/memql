@@ -118,6 +118,19 @@ test('the runtime commands are registered, so a cluster can be selected and conn
   }
 });
 
+test('every command the manifest contributes is registered, and nothing else is', () => {
+  // A contributed command with no registration is still in the palette and on
+  // its menus, and every click on it says "command not found". The inventory
+  // (capabilityInventory.test.ts) holds that each one can be reached; this
+  // holds that reaching it does something.
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf8')
+  ) as { contributes: { commands: { command: string }[] } };
+  const contributed = manifest.contributes.commands.map((c) => c.command);
+  assert.deepEqual(contributed.filter((id) => !recorded.commands.includes(id)), [], 'contributed but never registered');
+  assert.deepEqual(recorded.commands.filter((id) => !contributed.includes(id)), [], 'registered but not contributed');
+});
+
 test('a portal link can activate the extension, and reaches a handler when it does', () => {
   // memql#4251 -- two halves of one premise, both invisible to every other test.
   //

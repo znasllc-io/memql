@@ -8,10 +8,13 @@
 // still be reached by a person.
 //
 // REACHABLE means at least one of: listed in the Command Palette (no
-// commandPalette entry, or one whose `when` is not "false"); on a menu; a
-// welcome view's button; or named by the source as something other than its
-// own registration, which is how a tree row, a CodeLens or another command
-// runs it.
+// commandPalette entry, or one whose `when` is not "false"); on a menu, under a
+// `when` other than "false"; a welcome view's button; or run by the source, as
+// a tree row's, a CodeLens's or a status bar item's `command` or through
+// `executeCommand`. A view is still there when it is contributed and its
+// `when` is not "false". That every contributed command is also REGISTERED,
+// so none of these ends in "command not found", is held by
+// activation.test.ts, which is where the extension is activated.
 //
 // An intentional removal goes in REMOVED with its reason. It is empty.
 
@@ -76,7 +79,7 @@ const REMOVED: Readonly<Record<string, string>> = {};
 interface Manifest {
   contributes: {
     commands: { command: string }[];
-    views: Record<string, { id: string }[]>;
+    views: Record<string, { id: string; when?: string }[]>;
     viewsWelcome: { contents: string }[];
     menus: Record<string, { command?: string; when?: string }[]>;
   };
@@ -113,24 +116,20 @@ function escapeRe(s: string): string {
 }
 
 /**
- * Whether the source runs `id` from somewhere other than its own registration:
- * a tree row's or a lens's `command`, an `executeCommand`. A constant holding
- * the id counts through its uses, by the same rule.
+ * Whether the source runs `id`: a tree row's, a lens's or a status bar item's
+ * `command`, or an `executeCommand`. A constant holding the id counts through
+ * the places that run it, by the same rule. Its registration, or a mention in
+ * a list, runs nothing and does not count.
  */
-function namedBySource(id: string, texts: readonly string[]): boolean {
-  const quoted = new RegExp(`(registerCommand\\(\\s*)?(?:export\\s+)?(?:const\\s+(\\w+)\\s*=\\s*)?["'\`]${escapeRe(id)}["'\`]`, "g");
-  for (const text of texts) {
-    for (const m of text.matchAll(quoted)) {
-      if (m[1] !== undefined) continue;
-      const constant = m[2];
-      if (constant === undefined) return true;
-      const use = new RegExp(`(registerCommand\\(\\s*)?(const\\s+)?\\b${constant}\\b`, "g");
-      for (const t of texts) {
-        for (const u of t.matchAll(use)) if (u[1] === undefined && u[2] === undefined) return true;
-      }
-    }
-  }
-  return false;
+function runBySource(id: string, texts: readonly string[]): boolean {
+  const runs = (expr: string): RegExp =>
+    new RegExp(`(?:\\bcommand\\s*(?::|=(?!=))|\\bexecuteCommand\\s*\\()[^,;)}\\n]*?${expr}`);
+  const quoted = `["'\`]${escapeRe(id)}["'\`]`;
+  if (texts.some((t) => runs(quoted).test(t))) return true;
+  const constants = texts.flatMap((t) =>
+    [...t.matchAll(new RegExp(`\\bconst\\s+(\\w+)\\s*=\\s*${quoted}`, "g"))].map((m) => m[1] ?? ""),
+  );
+  return constants.some((c) => texts.some((t) => runs(`\\b${c}\\b`).test(t)));
 }
 
 function reachVia(id: string, m: Manifest, texts: readonly string[]): string[] {
@@ -138,10 +137,10 @@ function reachVia(id: string, m: Manifest, texts: readonly string[]): string[] {
   const palette = (m.contributes.menus["commandPalette"] ?? []).filter((e) => e.command === id);
   if (palette.length === 0 || palette.some((e) => e.when !== "false")) how.push("palette");
   for (const [menu, entries] of Object.entries(m.contributes.menus)) {
-    if (menu !== "commandPalette" && entries.some((e) => e.command === id)) how.push(menu);
+    if (menu !== "commandPalette" && entries.some((e) => e.command === id && e.when !== "false")) how.push(menu);
   }
   if (m.contributes.viewsWelcome.some((w) => w.contents.includes(`(command:${id})`))) how.push("welcome");
-  if (namedBySource(id, texts)) how.push("source");
+  if (runBySource(id, texts)) how.push("source");
   return how;
 }
 
@@ -151,10 +150,15 @@ test("every command contributed before the redesign is still contributed", () =>
   assert.deepEqual(missing, [], "a command was dropped; restore it, or add it to REMOVED with the reason");
 });
 
-test("every view contributed before the redesign is still contributed", () => {
-  const now = new Set(Object.values(manifest().contributes.views).flat().map((v) => v.id));
+test("every view contributed before the redesign is still contributed, and can be shown", () => {
+  const now = new Set(
+    Object.values(manifest().contributes.views)
+      .flat()
+      .filter((v) => v.when !== "false")
+      .map((v) => v.id),
+  );
   const missing = VIEWS_BEFORE.filter((id) => !now.has(id) && REMOVED[id] === undefined);
-  assert.deepEqual(missing, [], "a view was dropped; restore it, or add it to REMOVED with the reason");
+  assert.deepEqual(missing, [], "a view was dropped or hidden; restore it, or add it to REMOVED with the reason");
 });
 
 test("every contributed command can be reached by a person", () => {
@@ -173,13 +177,15 @@ test("a command run only from a tree row or a lens is seen as reachable", () => 
   const texts = sourceTexts();
   assert.deepEqual(reachVia("memql.constructs.open", m, texts), ["source"]);
   assert.deepEqual(reachVia("memql.training.dryRun", m, texts), ["source"]);
-  // ...and its negative: registration alone is not a way in.
-  assert.equal(namedBySource("memql.example", ['commands.registerCommand("memql.example", () => {});']), false);
+  // ...and its negative: registration alone is not a way in, nor is a mention.
+  assert.equal(runBySource("memql.example", ['commands.registerCommand("memql.example", () => {});']), false);
   assert.equal(
-    namedBySource("memql.example", ['export const RUN = "memql.example";', "commands.registerCommand(RUN, run);"]),
+    runBySource("memql.example", ['export const RUN = "memql.example";', "commands.registerCommand(RUN, run);"]),
     false,
   );
-  assert.equal(namedBySource("memql.example", ['const RUN = "memql.example";', "lens({ command: RUN });"]), true);
+  assert.equal(runBySource("memql.example", ['const HIDDEN = ["memql.example"];']), false);
+  assert.equal(runBySource("memql.example", ['const RUN = "memql.example";', "lens({ command: RUN });"]), true);
+  assert.equal(runBySource("memql.example", ['void commands.executeCommand(ok ? "memql.other" : "memql.example");']), true);
 });
 
 test("REMOVED names only what was there before and is gone now, each with a reason", () => {

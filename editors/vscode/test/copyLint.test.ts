@@ -3,12 +3,14 @@
 // voice").
 //
 // THREE SOURCES, because copy reaches a person three ways:
-//   1. package.json: command titles, welcome views, setting descriptions, the
-//      Restricted Mode line and the extension's own description.
+//   1. package.json: every string it contributes (command titles, welcome
+//      views, view names, setting descriptions and the rest), the Restricted
+//      Mode line and the extension's own name and description.
 //   2. Every gallery scenario's visible text, in both themes: the pages as the
 //      editor draws them, with tags, scripts and styles stripped.
-//   3. The string literals a source file hands straight to a toast, an input
-//      box's prompt or title, or a progress notification's title.
+//   3. The string literals a source file hands straight to a toast (directly
+//      or through offerDetails), an input box's prompt or title, or a progress
+//      notification's title.
 //
 // WHAT FAILS: an issue reference, " -- " as punctuation, "portal" or
 // "console" (MemQL OS is MemQL OS), internal vocabulary a reader cannot act on
@@ -43,7 +45,8 @@ interface Rule {
 }
 
 const RULES: readonly Rule[] = [
-  { name: "issue reference", re: /\bmemql#\d+|(?<![\w&/])#\d+\b/i },
+  // memql#12, memql-cockpit#12, a bare #12 in prose, or a link to one.
+  { name: "issue reference", re: /\b[a-z][\w.-]*#\d+\b|(?<![\w&/])#\d+\b|\/(issues|pull)\/\d+/i },
   { name: "-- as punctuation", re: /(^|\s)--(\s|$)/ },
   { name: "portal", re: /\bportals?\b/i },
   { name: "console", re: /\bconsoles?\b/i },
@@ -93,18 +96,47 @@ const ALLOWED: readonly Allowed[] = [
 // ---------------------------------------------------------------------------
 
 interface Manifest {
+  displayName: string;
   description: string;
   capabilities: { untrustedWorkspaces: { description: string } };
-  contributes: {
-    commands: { command: string; title: string }[];
-    viewsWelcome: { view: string; contents: string }[];
-    configuration: { properties: Record<string, { description?: string; enumDescriptions?: string[] }> };
-  };
+  contributes: unknown;
 }
+
+/**
+ * Keys whose strings are identifiers, paths, conditions or enum values, never
+ * words a person reads. Every other string under `contributes` is copy, so a
+ * key added later (a setting's markdownDescription, a submenu's label) is read
+ * without anyone having to list it here.
+ */
+const NOT_COPY: ReadonlySet<string> = new Set([
+  "command",
+  "configuration",
+  "dark",
+  "default",
+  "enum",
+  "extensions",
+  "group",
+  "icon",
+  "id",
+  "language",
+  "light",
+  "path",
+  "scope",
+  "scopeName",
+  "submenu",
+  "type",
+  "uiTheme",
+  "view",
+  "when",
+]);
+
+/** Whole subtrees with no copy in them: TextMate scope names. */
+const NOT_COPY_TREES: ReadonlySet<string> = new Set(["semanticTokenScopes"]);
 
 function manifestCopy(): Copy[] {
   const manifest = JSON.parse(fs.readFileSync(path.join(PKG, "package.json"), "utf8")) as Manifest;
   const out: Copy[] = [
+    { where: "package.json displayName", text: manifest.displayName },
     { where: "package.json description", text: manifest.description },
     {
       where: "package.json untrustedWorkspaces",
@@ -112,21 +144,43 @@ function manifestCopy(): Copy[] {
       line: true,
     },
   ];
-  for (const c of manifest.contributes.commands) {
-    out.push({ where: `command ${c.command}`, text: c.title, title: true });
-  }
-  manifest.contributes.viewsWelcome.forEach((w, i) => {
-    for (const raw of w.contents.split("\n")) {
-      // A button line is its label; the command it names is not copy.
-      const text = raw.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").trim();
-      if (text !== "") out.push({ where: `welcome ${w.view} #${i}`, text, line: true });
-    }
-  });
-  for (const [key, prop] of Object.entries(manifest.contributes.configuration.properties)) {
-    if (prop.description !== undefined) out.push({ where: `setting ${key}`, text: prop.description });
-    for (const d of prop.enumDescriptions ?? []) out.push({ where: `setting ${key} option`, text: d });
-  }
+  collectManifest(manifest.contributes, "contributes", "", out);
   return out;
+}
+
+/**
+ * Every string under `value`, as copy. An array entry is named by its command,
+ * id or view where it has one, so a finding says which entry it is.
+ */
+function collectManifest(value: unknown, where: string, key: string, out: Copy[]): void {
+  if (typeof value === "string") {
+    if (NOT_COPY.has(key)) return;
+    if (key === "contents") {
+      // A welcome view: each line is a line, and a button line is its label;
+      // the command it names is not copy.
+      for (const raw of value.split("\n")) {
+        const text = raw.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").trim();
+        if (text !== "") out.push({ where, text, line: true });
+      }
+      return;
+    }
+    const title = key === "title" && where.startsWith("contributes.commands[");
+    out.push({ where, text: value, title });
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry: unknown, i) => {
+      const named = entry !== null && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+      const name = [named["command"], named["id"], named["view"]].find((v) => typeof v === "string");
+      collectManifest(entry, `${where}[${i}${name === undefined ? "" : ` ${String(name)}`}]`, key, out);
+    });
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      if (!NOT_COPY_TREES.has(k)) collectManifest(v, `${where}.${k}`, k, out);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +219,7 @@ function visibleText(html: string): string[] {
 }
 
 /** The classes whose paragraph is a line: a notice, a lede, an empty state, a confirmation. */
-const LINE_CLASS = /\b(mq-notice-line|mq-notice-next|mq-empty-line|mq-actbar-confirm|ac-line|[\w-]+-lede)\b/;
+const LINE_CLASS = /\b(mq-notice-line|mq-notice-next|mq-empty-line|mq-actbar-confirm|ac-line|ac-empty|[\w-]+-lede)\b/;
 
 function pageLines(html: string): string[] {
   const out: string[] = [];
@@ -318,8 +372,10 @@ function sourceCopy(): Copy[] {
     const src = fs.readFileSync(file, "utf8");
     const rel = path.relative(PKG, file);
     const at = (index: number): string => `${rel}:${src.slice(0, index).split("\n").length}`;
-    for (const m of src.matchAll(/\bshow(Information|Warning|Error)Message\s*\(/g)) {
-      const args = callArguments(src, (m.index ?? 0) + m[0].length - 1);
+    // offerDetails (src/extension.ts) is the error-toast policy: its third
+    // argument is the toast, and the rest are its buttons.
+    for (const m of src.matchAll(/(?<!function\s+)\b(show(Information|Warning|Error)Message|offerDetails)\s*\(/g)) {
+      const args = callArguments(src, (m.index ?? 0) + m[0].length - 1).slice(m[1] === "offerDetails" ? 2 : 0);
       args.forEach((arg, n) => {
         const text = literalText(arg);
         if (text !== undefined) out.push({ where: at(m.index ?? 0), text, line: n === 0 });
@@ -408,6 +464,26 @@ test("the source scan reads the calls it exists for", () => {
   const progress = callArguments(sample, sample.indexOf("withProgress(") + "withProgress".length)[0] ?? "";
   assert.equal(propertyText(progress, "title"), "Signing in");
   assert.ok(sourceCopy().length > 20, "the scan found the extension's toasts");
+  assert.ok(
+    sourceCopy().some((c) => c.text === "MemQL: Couldn't save the cluster." && c.line === true),
+    "the scan reads a toast offerDetails shows",
+  );
+});
+
+test("the manifest scan reads every kind of copy, and no identifier", () => {
+  // The positive control for section 1: a walker that skipped a key would pass forever.
+  const copy = manifestCopy();
+  const texts = new Set(copy.map((c) => c.text));
+  for (const expected of ["Clusters", "MemQL Dark", "Refresh Clusters", "No clusters yet."]) {
+    assert.ok(texts.has(expected), `the scan did not read "${expected}"`);
+  }
+  assert.ok(
+    copy.some((c) => c.title === true && c.text === "Refresh Clusters"),
+    "a command title is read as a title",
+  );
+  for (const notCopy of ["isWorkspaceTrusted", "memqlClusters", "verbose", "keyword.control.memql", "navigation@0"]) {
+    assert.ok(!texts.has(notCopy), `"${notCopy}" is not copy`);
+  }
 });
 
 test("every exemption still matches the copy it excuses", () => {
