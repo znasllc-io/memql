@@ -180,6 +180,79 @@ func TestCaptureMasksSecretValues(t *testing.T) {
 	}
 }
 
+// TestCaptureMasksAsTheSeamMasks (the final review of epic memql#5478, its
+// three probes): a line is masked as pl.MaskSecrets masks text -- every form
+// of every secret, and occurrences that overlap as one span -- in the store,
+// the archive and the tail alike. The seam re-masks the check run, but not
+// the store an admin reads nor the owner's archive; and what is half masked
+// here is a remnant the seam cannot find again in the public tail.
+func TestCaptureMasksAsTheSeamMasks(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		secrets []string
+		printed []string // the step's lines
+		want    []string // the same lines as the store, the archive and the tail hold them
+		leaks   []string // what must reach none of the three
+	}{
+		{
+			// `echo $S` prints a value stored with whitespace around it
+			// without that whitespace.
+			name:    "a secret stored padded and printed trimmed",
+			secrets: []string{"hunter2-token "},
+			printed: []string{"token=hunter2-token", "hunter2-token"},
+			want:    []string{"token=***", "***"},
+			leaks:   []string{"hunter2-token"},
+		},
+		{
+			// An indent-only line of a multi-line secret is whitespace, not a
+			// form: indentation elsewhere in the log stays as printed.
+			name:    "a multi-line secret with an indent-only line",
+			secrets: []string{"-----BEGIN KEY-----\n    \nMIIBOgIBAAJBAKj34GkxFhD90vcN\n-----END KEY-----\n"},
+			printed: []string{"func main() {", "    return nil", "        MIIBOgIBAAJBAKj34GkxFhD90vcN"},
+			want:    []string{"func main() {", "    return nil", "        ***"},
+			leaks:   []string{"MIIBOgIBAAJBAKj34GkxFhD90vcN"},
+		},
+		{
+			// Two secrets printed overlapping are one span: masking them one
+			// after the other leaves "***ijkl".
+			name:    "overlapping secrets",
+			secrets: []string{"abcdefgh", "efghijkl"},
+			printed: []string{"abcdefghijkl", "x efghijklmnop abcdefgh y"},
+			want:    []string{"***", "x ***mnop *** y"},
+			leaks:   []string{"ijkl", "efgh"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			for i, line := range c.printed {
+				if seam := pl.MaskSecrets(line, c.secrets); seam != c.want[i] {
+					t.Fatalf("the seam masks %q to %q, and the case wants %q: fix the case", line, seam, c.want[i])
+				}
+			}
+			capture, sink := newCaptureForTest(t, CaptureOptions{Secrets: c.secrets})
+			for _, line := range c.printed {
+				capture.Feed(captureKubeLine(captureTestClock, line))
+			}
+			res := closeCaptureForTest(t, capture)
+
+			want := strings.Join(c.want, "\n")
+			for _, held := range []struct{ where, text string }{
+				{"store", strings.Join(sink.messages(), "\n")},
+				{"archive", strings.TrimSuffix(readArchiveForTest(t, res), "\n")},
+				{"tail", res.Tail},
+			} {
+				if held.text != want {
+					t.Errorf("the %s holds %q, want %q", held.where, held.text, want)
+				}
+				for _, leak := range c.leaks {
+					if strings.Contains(held.text, leak) {
+						t.Errorf("the %s holds %q", held.where, leak)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestCaptureSplitsLongLinesAndRepairsUTF8(t *testing.T) {
 	c, sink := newCaptureForTest(t, CaptureOptions{})
 	long := strings.Repeat("a", 10000)

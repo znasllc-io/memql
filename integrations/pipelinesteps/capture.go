@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -42,9 +41,13 @@ import (
 //
 // Every output line is CLEANED once, before it goes anywhere: NUL bytes are
 // dropped (Postgres refuses them in text and in jsonb), invalid UTF-8 becomes
-// U+FFFD, and every secret value of four bytes or more becomes *** (Review
-// Focus 1: a step that echoes a resolved secret must put it in none of the
-// three). Masking runs on the whole line BEFORE the store's split, so a value
+// U+FFFD, and every secret becomes *** exactly as the seam masks text
+// (pl.MaskSecrets: each value as stored, without the whitespace around it,
+// and line by line, four bytes or more; occurrences that overlap or touch as
+// one span) -- Review Focus 1: a step that echoes a resolved secret must put
+// it in none of the three, and the seam re-masks the check run but neither
+// the store nor the archive, nor can it find again a secret half masked here.
+// Masking runs on the whole line BEFORE the store's split, so a value
 // straddling a split boundary is masked like any other.
 //
 // One thing in the stream is not output at all. A step that declares
@@ -63,10 +66,12 @@ type CaptureOptions struct {
 	// WorkRunID (the v1:work:run) and StepKey ride on each line as
 	// attributes, so the run's view can tell its steps apart.
 	RunID, WorkRunID, StepKey string
-	// Secrets are the resolved values to mask. A value shorter than four
-	// bytes is not masked -- it would mask ordinary words -- and a value
-	// holding newlines is masked line by line as well as whole, because the
-	// capture sees one line at a time.
+	// Secrets are the resolved values to mask, masked as the seam masks them
+	// (pl.MaskSecrets): as stored, without the whitespace around them, and --
+	// a value holding newlines -- line by line as well as whole, because the
+	// capture sees one line at a time. A form shorter than four bytes is not
+	// masked: it would mask ordinary words, and an indent-only line of a
+	// key would mask every indentation in the log.
 	Secrets []string
 	// Marker is the step's artifact marker (MEMQL_ARTIFACT_MARKER on the
 	// Job). Set it exactly when the step declares artifacts: it is how the
@@ -143,9 +148,9 @@ const (
 	captureTailBytes = 16 << 10
 	// captureDefaultStoreRate is StoreRate's default.
 	captureDefaultStoreRate = 200
-	// captureMaskMinBytes is the shortest secret value that is masked.
-	captureMaskMinBytes = 4
-	// captureMask replaces a secret value.
+	// captureMask is the seam's mask, which pl.MaskSecrets writes for a span:
+	// the follower writes it for a span of a line it cuts, and its tests hold
+	// the pieces to what the seam makes of the whole line.
 	captureMask = "***"
 	// captureNoteQuoteBytes bounds the frame line an undecodable-frame note
 	// quotes.
@@ -165,9 +170,10 @@ type Capture struct {
 	sink                      LineSink
 	bucket                    *captureBucket
 	now                       func() time.Time
-	// mask is swapped whole when AddSecrets adds to secrets, so it is read
-	// without the lock; nil: nothing to mask.
-	mask    atomic.Pointer[strings.Replacer]
+	// masked is the forms every line is masked for (captureMaskForms),
+	// swapped whole when AddSecrets adds to secrets, so it is read without
+	// the lock; nil: nothing to mask.
+	masked  atomic.Pointer[[]string]
 	secrets []string
 
 	lines       int
@@ -248,7 +254,7 @@ func newCapture(o CaptureOptions, now func() time.Time, bucket *captureBucket) (
 		archiveFile: f,
 		archive:     bufio.NewWriterSize(f, 64<<10),
 	}
-	c.mask.Store(captureMasker(c.secrets))
+	c.masked.Store(captureMasked(c.secrets))
 	if o.Marker != "" {
 		c.frameBegin = o.Marker + " begin"
 		c.frameEnd = o.Marker + " end"
@@ -385,7 +391,7 @@ func (c *Capture) AddSecrets(values ...string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.secrets = append(c.secrets, values...)
-	c.mask.Store(captureMasker(c.secrets))
+	c.masked.Store(captureMasked(c.secrets))
 }
 
 // Close finishes the capture: the archive's truncation line when it was
@@ -581,11 +587,11 @@ func captureTail(pieces []string, budget int) string {
 }
 
 // clean is the one repair every line gets: NUL dropped, invalid UTF-8
-// replaced, secrets masked.
+// replaced, secrets masked as the seam masks them.
 func (c *Capture) clean(s string) string {
 	s = captureRepair(s)
-	if m := c.mask.Load(); m != nil {
-		s = m.Replace(s)
+	if forms := c.masked.Load(); forms != nil {
+		s = pl.MaskSecrets(s, *forms)
 	}
 	return s
 }
@@ -753,53 +759,28 @@ func captureSplit(s string, limit int) []string {
 	return append(pieces, strings.Clone(s))
 }
 
-// captureMaskForms is every form of the secrets a line is masked for, longest
-// first: each value repaired the way lines are, so the two can meet, and a
-// multi-line value's lines too, since the capture sees one line at a time.
-// Values shorter than captureMaskMinBytes are not masked. The follower keeps
-// its cuts out of the same forms, so no piece it feeds holds part of one.
+// captureMaskForms is every form of the secrets a line is masked for: the
+// seam's (pl.MaskForms), of each value repaired the way lines are, so the two
+// can meet. A line is masked with pl.MaskSecrets over them, which masks over
+// the forms exactly what it masks over the values -- the seam's masking, in
+// one implementation. The follower keeps its cuts out of the same forms, so
+// no piece it feeds ends inside one.
 func captureMaskForms(secrets []string) []string {
-	seen := map[string]bool{}
-	var values []string
-	add := func(v string) {
-		if len(v) >= captureMaskMinBytes && !seen[v] {
-			seen[v] = true
-			values = append(values, v)
-		}
-	}
+	repaired := make([]string, 0, len(secrets))
 	for _, s := range secrets {
-		s = captureRepair(s)
-		add(s)
-		if strings.Contains(s, "\n") {
-			for _, line := range strings.Split(s, "\n") {
-				add(strings.TrimSuffix(line, "\r"))
-			}
-		}
+		repaired = append(repaired, captureRepair(s))
 	}
-	sort.Slice(values, func(i, j int) bool {
-		if len(values[i]) != len(values[j]) {
-			return len(values[i]) > len(values[j])
-		}
-		return values[i] < values[j]
-	})
-	return values
+	return pl.MaskForms(repaired)
 }
 
-// captureMasker builds the replacer every line goes through, or nil when no
-// value is long enough to mask. The longest values come first, because
-// strings.Replacer tries its pairs in argument order at each position -- so
-// where "pass" and "pass-and-more" both match, the longer is masked whole
-// rather than leaving "-and-more" behind.
-func captureMasker(secrets []string) *strings.Replacer {
-	values := captureMaskForms(secrets)
-	if len(values) == 0 {
+// captureMasked is what the capture holds to mask with: the forms, or nil
+// when no value is long enough to mask.
+func captureMasked(secrets []string) *[]string {
+	forms := captureMaskForms(secrets)
+	if len(forms) == 0 {
 		return nil
 	}
-	pairs := make([]string, 0, 2*len(values))
-	for _, v := range values {
-		pairs = append(pairs, v, captureMask)
-	}
-	return strings.NewReplacer(pairs...)
+	return &forms
 }
 
 // captureQuote is a frame line for a note: quoted, and cut on a rune

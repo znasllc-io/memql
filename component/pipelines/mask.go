@@ -23,7 +23,7 @@ const secretMask = "***"
 // value, or of two -- are masked as one span, so no byte of either survives
 // between two masks.
 func MaskSecrets(text string, values []string) string {
-	needles := maskForms(values)
+	needles := MaskForms(values)
 	if text == "" || len(needles) == 0 {
 		return text
 	}
@@ -67,8 +67,14 @@ func MaskSecrets(text string, values []string) string {
 	return b.String()
 }
 
-// maskForms is every form of every value worth masking, deduplicated.
-func maskForms(values []string) []string {
+// MaskForms is every form of every value MaskSecrets masks, each once: the
+// value as stored, the value without the whitespace around it, and -- when it
+// spans lines -- each line without the whitespace around it, four bytes or
+// more. It is for a caller that masks text a piece at a time and must know
+// what a piece may end inside of (the substrate's log follower), and for one
+// that masks many texts for the same values: the forms are their own forms,
+// so MaskSecrets(text, MaskForms(values)) is MaskSecrets(text, values).
+func MaskForms(values []string) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(s string) {

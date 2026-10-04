@@ -6,6 +6,7 @@ import (
 	"errors"
 	"hash/crc64"
 	"io"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -443,16 +444,21 @@ func (f *follower) prune() {
 // of any one: a longer line comes in pieces of at most max bytes (Review
 // Focus 5), and no piece ends inside a secret.
 //
-// MASK FIRST, THEN CUT (fix round 2, Important A). The capture masks each
-// piece on its own, so a secret a cut fell inside would be masked in neither
-// piece. A piece of a cut line is therefore repaired and masked HERE, as the
-// capture repairs and masks a whole line -- every whole secret replaced --
-// and it ends before the first position whose masking is not decided yet: a
-// secret that may continue into bytes not read yet, or a rune cut short.
-// Those bytes go back to be read with the next chunk. With every whole secret
-// masked before a cut is chosen, and every undecided one held back, a cut can
-// split no secret, and the pieces mask to exactly what the whole line masks
-// to. A line that fits in one read is left whole, to the capture.
+// MASK FIRST, THEN CUT (fix round 2, Important A; the final review of epic
+// memql#5478). The capture masks each piece on its own, as the seam masks
+// text (pl.MaskSecrets: every form of every secret, occurrences that overlap
+// or touch as one span), so a secret a cut fell inside would be masked in
+// neither piece, and a span a cut fell inside would leave its rest readable
+// in the next. A piece of a cut line is therefore repaired and masked HERE,
+// as the capture repairs and masks a whole line, and it ends before the first
+// position whose masking is not decided yet: one where a form may occur that
+// runs into bytes not read yet, or a rune cut short. Those bytes go back to
+// be read with the next chunk. A span is masked where it starts, and how far
+// it reaches is carried from piece to piece (lineMasker), so the next piece
+// begins where the span ends. With every decided position masked before a
+// cut is chosen, and every undecided one held back, the pieces mask to
+// exactly what the whole line masks to. A line that fits in one read is left
+// whole, to the capture.
 type logLines struct {
 	br     *bufio.Reader
 	max    int
@@ -474,16 +480,22 @@ func newLogLines(r io.Reader, max int, forms []string) *logLines {
 // with end false and the stream's error.
 func (l *logLines) next() (piece string, first, end bool, err error) {
 	first = !l.mid
+	if first {
+		l.masker.reset()
+	}
 	for {
 		if l.ended {
-			if len(l.carry) <= l.max {
-				piece = string(l.carry)
-				l.carry, l.ended, l.mid = nil, false, false
-				return piece, first, true, nil
-			}
+			// The rest of a line already cut is masked here too, from where
+			// the last piece left it: perhaps inside a span whose mask that
+			// piece holds, which the capture, given the rest alone, could
+			// not know.
 			piece, l.carry = l.cut(l.carry, true)
-			l.mid = true
-			return piece, first, false, nil
+			if len(l.carry) > 0 {
+				l.mid = true
+				return piece, first, false, nil
+			}
+			l.carry, l.ended, l.mid = nil, false, false
+			return piece, first, true, nil
 		}
 		chunk, rerr := l.br.ReadSlice('\n')
 		buf := append(l.carry, chunk...)
@@ -502,13 +514,21 @@ func (l *logLines) next() (piece string, first, end bool, err error) {
 		case errors.Is(rerr, bufio.ErrBufferFull):
 			piece, l.carry = l.cut(buf, false)
 			if piece == "" {
-				continue // nothing of it is decided yet: read on
+				// Nothing of it decided yet, or only more of a span whose
+				// mask is given out: read on.
+				continue
 			}
 			l.mid = true
 			return piece, first, false, nil
 		default:
-			l.mid = false
-			return string(buf), first, false, rerr
+			piece = string(buf)
+			if l.mid {
+				// What the stream had of a line already cut, masked from
+				// where the last piece left it, in one piece.
+				piece, _ = l.masker.scan(captureRepair(piece), math.MaxInt, true)
+			}
+			l.carry, l.mid = nil, false
+			return piece, first, false, rerr
 		}
 	}
 }
@@ -516,8 +536,10 @@ func (l *logLines) next() (piece string, first, end bool, err error) {
 // cut is the next piece of b, its line's bytes from where the last piece
 // ended, and what is left of b for the next: at most max bytes, repaired and
 // masked, ending before the first undecided position. complete says nothing
-// follows b in its line. The line's timestamp, at the start of its first
-// piece, is never masked: the capture splits it off before it masks.
+// follows b in its line. The piece is empty when nothing of b is decided yet
+// -- b comes back whole -- or when all that is decided is more of a span an
+// earlier piece holds the mask of. The line's timestamp, at the start of its
+// first piece, is never masked: the capture splits it off before it masks.
 func (l *logLines) cut(b []byte, complete bool) (piece string, rest []byte) {
 	prefix := 0
 	if !l.mid {
@@ -535,7 +557,7 @@ func (l *logLines) cut(b []byte, complete bool) (piece string, rest []byte) {
 	// JSON strings, which are valid UTF-8 (accepted in fix round 3).
 	text := captureRepair(string(body))
 	out, used := l.masker.scan(text, l.max-prefix, complete)
-	if used == 0 {
+	if used == 0 && !complete {
 		return "", append(append(append([]byte(nil), b[:prefix]...), text...), short...)
 	}
 	return string(b[:prefix]) + out, append([]byte(text[used:]), short...)
@@ -572,13 +594,22 @@ func wholeRunes(b []byte) int {
 	return len(b)
 }
 
-// lineMasker masks a line a piece at a time exactly as strings.Replacer over
-// the same forms, given longest first, masks it whole: at each position the
-// first form in that order that matches there is replaced, and the scan moves
-// past it (strings.Replacer's own rule for a position several forms match).
+// lineMasker masks a line a piece at a time exactly as pl.MaskSecrets masks
+// it whole: every occurrence of every form, occurrences that overlap or touch
+// as one span, each span one mask. It reads the line from its start, writing
+// the line's own bytes as they are and a span's mask where the span starts;
+// where the span it is inside ends is carried from one scan of the line to
+// the next, so a span longer than a piece -- a long secret, or one printed
+// over and over with nothing between -- is one mask, and costs no more of
+// the line held than a form.
 type lineMasker struct {
 	starts  [256]bool         // the bytes a form starts with
-	byFirst map[byte][]string // the forms by their first byte, in order
+	byFirst map[byte][]string // the forms by their first byte
+	// span says the last scan stopped inside a span whose mask it gave out,
+	// or where the span ends, which a form occurring there carries on;
+	// reach is how far past where it stopped the span covers.
+	span  bool
+	reach int
 }
 
 func newLineMasker(forms []string) *lineMasker {
@@ -590,22 +621,42 @@ func newLineMasker(forms []string) *lineMasker {
 	return m
 }
 
-// scan masks s, repaired text, from its start, into at most room bytes of
-// output, and answers that and how much of s it covers. It stops before the
-// first position it cannot decide yet: one where a form earlier in the order
-// than any form matching whole there could still match, s ending before the
-// form does -- unless complete says s ends where its line does. A first token
-// longer than room is given whole: a piece holds something.
+// reset is a new line: no span is open.
+func (m *lineMasker) reset() { m.span, m.reach = false, 0 }
+
+// scan masks s -- repaired text, the line from where the last scan of it
+// stopped -- into at most room bytes of output, and answers that and how much
+// of s it covers. It stops before the first position it cannot decide yet:
+// one where a form may occur that s ends inside of -- unless complete says s
+// ends where its line does. A first token longer than room is given whole: a
+// piece holds something.
 func (m *lineMasker) scan(s string, room int, complete bool) (string, int) {
 	var out strings.Builder
+	cover := m.reach // where the open span ends, in s
 	i := 0
+scan:
 	for i < len(s) {
-		j := i
-		for j < len(s) && !m.starts[s[j]] {
-			j++
+		if m.span && i < cover {
+			// Inside the span: nothing is written, and a form occurring here
+			// may carry the span further.
+			if m.starts[s[i]] {
+				end, decided := m.at(s, i, complete)
+				if !decided {
+					break
+				}
+				cover = max(cover, end)
+			}
+			i++
+			continue
 		}
-		if j > i {
-			// A run no form starts in, as it is.
+		if !m.starts[s[i]] {
+			// The line's own bytes, as they are, up to where a form could
+			// start; a span that ended here is over.
+			m.span = false
+			j := i + 1
+			for j < len(s) && !m.starts[s[j]] {
+				j++
+			}
 			n := j - i
 			if free := room - out.Len(); n > free {
 				n = runeFloor(s[i:j], free)
@@ -613,38 +664,62 @@ func (m *lineMasker) scan(s string, room int, complete bool) (string, int) {
 					_, n = utf8.DecodeRuneInString(s[i:])
 				}
 				out.WriteString(s[i : i+n])
-				return out.String(), i + n
+				i += n
+				break
 			}
 			out.WriteString(s[i:j])
 			i = j
 			continue
 		}
-		tok, n, decided := m.at(s, i, complete)
-		if !decided || (out.Len()+len(tok) > room && out.Len() > 0) {
-			break
+		end, decided := m.at(s, i, complete)
+		switch {
+		case !decided:
+			break scan
+		case end >= 0 && m.span:
+			// A form occurring where the span ends carries it on.
+			cover = end
+			i++
+		case end >= 0:
+			// A span starts here: its mask.
+			if out.Len()+len(captureMask) > room && out.Len() > 0 {
+				break scan
+			}
+			out.WriteString(captureMask)
+			m.span, cover = true, end
+			i++
+		default:
+			// No form here: one rune of the line's own, and any span over.
+			m.span = false
+			_, n := utf8.DecodeRuneInString(s[i:])
+			if out.Len()+n > room && out.Len() > 0 {
+				break scan
+			}
+			out.WriteString(s[i : i+n])
+			i += n
 		}
-		out.WriteString(tok)
-		i += n
+	}
+	m.reach = 0
+	if m.span {
+		m.reach = cover - i
 	}
 	return out.String(), i
 }
 
-// at is what the masker makes of s at i, where some form starts with s[i]:
-// the mask over the first form in order that matches whole there, or the one
-// rune of s there. decided is false when a form earlier in the order than any
-// whole match may still match with more of the line.
-func (m *lineMasker) at(s string, i int, complete bool) (tok string, n int, decided bool) {
-	rest := s[i:]
+// at is where the longest form occurring at s[i] ends, or -1 when none does.
+// decided is false when a form s ends inside of may still occur there: s is
+// cut short of its line (complete is false), and the form's end decides how
+// far a span reaches.
+func (m *lineMasker) at(s string, i int, complete bool) (end int, decided bool) {
+	end, rest := -1, s[i:]
 	for _, f := range m.byFirst[s[i]] {
 		switch {
 		case strings.HasPrefix(rest, f):
-			return captureMask, len(f), true
+			end = max(end, i+len(f))
 		case !complete && len(rest) < len(f) && strings.HasPrefix(f, rest):
-			return "", 0, false
+			return -1, false
 		}
 	}
-	_, n = utf8.DecodeRuneInString(rest)
-	return rest[:n], n, true
+	return end, true
 }
 
 // runeFloor is the longest prefix of s, valid UTF-8, of whole runes and at

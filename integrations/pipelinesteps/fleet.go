@@ -156,9 +156,9 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 	}
 	defer capture.Close()
 	// Text the machine or the step wrote is masked as the capture masks a line
-	// -- the cluster's masking, its repair included -- and for every form of a
-	// secret the seam masks besides (pl.MaskSecrets: a value's trimmed forms).
-	mask := func(s string) string { return pl.MaskSecrets(capture.Mask(s), values) }
+	// -- the cluster's masking, its repair included, which is the seam's
+	// (pl.MaskSecrets: every form of every secret, overlaps as one span).
+	mask := capture.Mask
 	lines := &fleetLines{capture: capture, pending: map[string][]byte{}}
 
 	started := f.now()

@@ -1,6 +1,7 @@
 package pipelines
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -59,6 +60,49 @@ func TestMaskSecretsMasksTheFormsAValueIsPrintedIn(t *testing.T) {
 	if strings.Contains(got, "MIIBOgIBAAJBAKj34GkxFhD90vcN") || strings.Contains(got, "LYLInFEX6Ppy1tPf9Cnzj4p4WGeK") {
 		t.Errorf("a line of a multi-line secret survived: %q", got)
 	}
+}
+
+// MaskForms is what MaskSecrets masks, for a caller that masks text a piece
+// at a time and must know what a piece may end inside of (the substrate's log
+// follower): each value as stored, without the whitespace around it, and each
+// of its lines without theirs -- four bytes or more, each once. The forms are
+// their own forms, so MaskSecrets over them masks exactly what it masks over
+// the values.
+func TestMaskFormsAreWhatMaskSecretsMasks(t *testing.T) {
+	values := []string{
+		"hunter2-token \n",                           // stored with whitespace around it
+		"-----BEGIN-----\n    \nbody-line\n  ab  \n", // an indent-only line and a short one are no forms
+		"abc",           // too short to mask
+		"hunter2-token", // a form already given
+	}
+	want := []string{
+		"hunter2-token \n",
+		"hunter2-token",
+		"-----BEGIN-----\n    \nbody-line\n  ab  \n",
+		"-----BEGIN-----\n    \nbody-line\n  ab",
+		"-----BEGIN-----",
+		"body-line",
+	}
+	got := MaskForms(values)
+	if !slices.Equal(sorted(got), sorted(want)) {
+		t.Errorf("MaskForms = %q,\nwant (in any order) %q", got, want)
+	}
+	if again := MaskForms(got); !slices.Equal(sorted(again), sorted(got)) {
+		t.Errorf("MaskForms(MaskForms(values)) = %q, want the forms again: they are their own forms", again)
+	}
+	text := "token hunter2-token printed; key -----BEGIN----- then body-line;    return nil; ab"
+	if byForms, byValues := MaskSecrets(text, got), MaskSecrets(text, values); byForms != byValues {
+		t.Errorf("MaskSecrets over the forms = %q, over the values = %q: want the same", byForms, byValues)
+	}
+	if got := MaskForms(nil); len(got) != 0 {
+		t.Errorf("MaskForms(nil) = %q, want none", got)
+	}
+}
+
+func sorted(s []string) []string {
+	out := slices.Clone(s)
+	slices.Sort(out)
+	return out
 }
 
 func TestMaskSecretsWithNothingToMaskReturnsTheText(t *testing.T) {

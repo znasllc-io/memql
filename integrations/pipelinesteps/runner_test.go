@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/deploycontrol"
 	pl "github.com/znasllc-io/memql/component/pipelines"
@@ -2799,68 +2801,188 @@ func TestRunnerNeverCutsInsideASecret(t *testing.T) {
 	}
 }
 
-// TestLogLinesMaskAsTheWholeLineWould (fix round 2, Important A): whatever
-// window the reader cuts a line with, the pieces -- each then masked by the
-// capture, as the capture masks every piece -- are exactly the whole line
-// masked by the capture: no secret is cut, and none is masked differently.
-// Every window from 4 bytes to past the line is tried, around overlapping,
-// nested and adjacent secrets, multi-byte runes, and secrets longer than the
-// window.
+// TestLogLinesMaskAsTheWholeLineWould (fix round 2, Important A; the final
+// review of epic memql#5478): whatever window the reader cuts a line with,
+// the pieces -- each then masked by the capture, as the capture masks every
+// piece -- are exactly the whole line masked as the seam masks it
+// (pl.MaskSecrets): no secret is cut, none is masked differently, none leaves
+// a remnant. Every window from 4 bytes to past the line is tried, around
+// padded, overlapping, nested, adjacent and multi-line secrets, multi-byte
+// runes, and secrets longer than the window. A secret printed over and over
+// with nothing between is one span however long, and the reader holds no more
+// of it than a window and a form.
 func TestLogLinesMaskAsTheWholeLineWould(t *testing.T) {
 	const s1, s2 = "tokA-0123456789Z", "Zeta-secret-24680"
 	long := "LONG-" + strings.Repeat("s3cr", 10) + "-END"
+	key := "-----BEGIN KEY-----\n    \nMIIBOgIBAAJBAKj34GkxFhD90vcN\n\t\n-----END KEY-----\n"
 	for _, c := range []struct {
 		name    string
 		secrets []string
 		line    string
+		bounded bool // the reader may hold no more of the line than a window and its longest form
 	}{
-		{"a whole secret whose last byte begins another", []string{s1, s2}, "aaaa" + s1 + "bbbb" + s2 + "cc"},
-		{"overlapping: the first in the line wins", []string{"abcdef12", "ef12ghij"}, "xx" + "abcdef12ghij" + "yy" + "ef12ghij" + "zz"},
-		{"a secret that begins a longer one", []string{"SECRET", "SECRETIVE-LONGER"}, "aa" + "SECRETIVE-LONGER" + "bb" + "SECRET" + "cc" + "SECRETIV"},
-		{"a secret nested inside another", []string{"inner", "the-inner-part"}, "the-inner-part and inner and the-inn"},
-		{"secrets among multi-byte runes", []string{"péché-ëëë", "ÿ€€€"}, strings.Repeat("é", 7) + "péché-ëëë" + "€" + "ÿ€€€" + strings.Repeat("ü", 5)},
-		{"a secret longer than the window", []string{long}, "head " + long + " middle " + long[:20] + " tail"},
-		{"a repeated secret back to back", []string{"abab"}, "abababababab"},
+		{"a whole secret whose last byte begins another", []string{s1, s2}, "aaaa" + s1 + "bbbb" + s2 + "cc", false},
+		{"overlapping secrets are one span", []string{"abcdef12", "ef12ghij"}, "xx" + "abcdef12ghij" + "yy" + "ef12ghij" + "zz" + "abcdef12" + "ef12ghij", false},
+		{"a secret that begins a longer one", []string{"SECRET", "SECRETIVE-LONGER"}, "aa" + "SECRETIVE-LONGER" + "bb" + "SECRET" + "cc" + "SECRETIV", false},
+		{"a secret nested inside another", []string{"inner", "the-inner-part"}, "the-inner-part and inner and the-inn", false},
+		{"secrets among multi-byte runes", []string{"péché-ëëë", "ÿ€€€"}, strings.Repeat("é", 7) + "péché-ëëë" + "€" + "ÿ€€€" + strings.Repeat("ü", 5), false},
+		{"a secret longer than the window", []string{long}, "head " + long + " middle " + long[:20] + " tail", false},
+		{"a repeated secret back to back", []string{"abab"}, "abababababab", false},
+		{"a secret printed over and over with nothing between", []string{"TOKEN-42"}, "x" + strings.Repeat("TOKEN-42", 400) + "TOKEN-4", true},
+		// A value stored with whitespace around it is printed without it (a
+		// form of its own), or with it, when the two forms are one span.
+		{"secrets stored padded, printed trimmed and whole", []string{"  hunter2-token \n", "pad-value  "},
+			"a hunter2-token b pad-value  c pad-value d hunter2-toke", false},
+		// An indent-only line of a multi-line secret is no form: the line's
+		// own indentation is not masked.
+		{"a multi-line secret with indent-only lines", []string{key},
+			"    return nil;\t\tMIIBOgIBAAJBAKj34GkxFhD90vcN    -----END KEY----- \t", false},
 		// The capture drops NUL before it masks, so a NUL inside a secret
 		// must not keep the reader from seeing it whole.
-		{"a NUL inside a secret", []string{"abcdefgh"}, "xx" + "abcd\x00efgh" + "yy" + "abcdefgh"},
-		{"no secret at all", nil, "plain " + strings.Repeat("ø", 9)},
+		{"a NUL inside a secret", []string{"abcdefgh"}, "xx" + "abcd\x00efgh" + "yy" + "abcdefgh", false},
+		{"no secret at all", nil, "plain " + strings.Repeat("ø", 9), false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			masker := captureMasker(c.secrets)
-			mask := func(s string) string {
-				s = captureRepair(s)
-				if masker != nil {
-					s = masker.Replace(s)
-				}
-				return s
-			}
-			want := mask(c.line)
-			for window := 4; window <= len(c.line)+1; window++ {
-				lines := newLogLines(strings.NewReader(c.line+"\nnext\n"), window, captureMaskForms(c.secrets))
-				var got strings.Builder
-				for {
-					piece, _, end, err := lines.next()
-					if err != nil {
-						t.Fatalf("window %d: %v", window, err)
-					}
-					if len(piece) > window {
-						t.Errorf("window %d: a piece of %d bytes", window, len(piece))
-					}
-					got.WriteString(mask(piece))
-					if end {
-						break
-					}
-				}
-				if got.String() != want {
-					t.Errorf("window %d: the pieces mask to\n  %q\nwant the whole line masked\n  %q", window, got.String(), want)
-				}
-				if piece, first, end, err := lines.next(); piece != "next" || !first || !end || err != nil {
-					t.Errorf("window %d: the line after = %q first %v end %v (%v), want it whole", window, piece, first, end, err)
-				}
-			}
+			wantPiecesMaskedAsTheSeamMasks(t, c.secrets, c.line, 4, len(c.line)+1, c.bounded)
 		})
 	}
+}
+
+// TestLogLinesMaskRandomLinesAsTheSeamDoes is the same rule, randomized:
+// secrets drawn from a small alphabet -- so they overlap, nest and repeat --
+// stored padded, or over lines with indent-only lines among them; lines made
+// of their forms, whole and cut short, between filler of the same alphabet,
+// with runes of two and three bytes for cuts to fall inside of.
+func TestLogLinesMaskRandomLinesAsTheSeamDoes(t *testing.T) {
+	rng := rand.New(rand.NewSource(20261004))
+	alphabet := []string{"a", "b", "c", "a", "b", "é", "€", " ", "\t"}
+	word := func(n int) string {
+		var b strings.Builder
+		for b.Len() < n {
+			b.WriteString(alphabet[rng.Intn(len(alphabet))])
+		}
+		return b.String()
+	}
+	for n := 0; n < 250; n++ {
+		var secrets []string
+		for k := 0; k < 1+rng.Intn(3); k++ {
+			s := word(4 + rng.Intn(8))
+			switch rng.Intn(5) {
+			case 0: // stored padded
+				s = strings.Repeat(" ", rng.Intn(3)) + s + strings.Repeat(" ", rng.Intn(3)) + []string{"", "\n"}[rng.Intn(2)]
+			case 1: // over lines, an indent-only one among them
+				s += "\n" + strings.Repeat(" ", 4+rng.Intn(3)) + "\n" + word(4+rng.Intn(6)) + "\n"
+			case 2: // the end of another, carried on: the two overlap where printed together
+				if len(secrets) > 0 {
+					prev := strings.TrimSpace(secrets[rng.Intn(len(secrets))])
+					cut := len(prev) / 2
+					for cut > 0 && !utf8.RuneStart(prev[cut]) {
+						cut--
+					}
+					s = prev[cut:] + word(3)
+				}
+			case 3: // inside another
+				if len(secrets) > 0 {
+					prev := strings.TrimSpace(secrets[rng.Intn(len(secrets))])
+					if len(prev) > 6 {
+						s = prev[1 : len(prev)-1]
+						s = strings.ToValidUTF8(s, "")
+					}
+				}
+			}
+			secrets = append(secrets, s)
+		}
+		var printable []string // the forms a line can hold: one with no newline
+		for _, f := range pl.MaskForms(secrets) {
+			if !strings.Contains(f, "\n") {
+				printable = append(printable, f)
+			}
+		}
+		var line strings.Builder
+		for size := 30 + rng.Intn(90); line.Len() < size; {
+			if len(printable) == 0 || rng.Intn(3) == 0 {
+				line.WriteString(word(1 + rng.Intn(6)))
+				continue
+			}
+			f := printable[rng.Intn(len(printable))]
+			if rng.Intn(3) == 0 { // cut short
+				f = strings.ToValidUTF8(f[:rng.Intn(len(f))], "")
+			}
+			line.WriteString(f)
+		}
+		ok := t.Run(fmt.Sprintf("case %d", n), func(t *testing.T) {
+			wantPiecesMaskedAsTheSeamMasks(t, secrets, line.String(), 4, line.Len()+1, false)
+		})
+		if !ok {
+			t.Logf("secrets %q, line %q", secrets, line.String())
+			break
+		}
+	}
+}
+
+// wantPiecesMaskedAsTheSeamMasks reads line through the follower's reader at
+// every window from lo to hi bytes, masks each piece as the capture masks a
+// line it is fed, and wants the pieces to join into the whole line as
+// pl.MaskSecrets masks it -- the capture's repair first, as the capture
+// repairs every line and every secret -- with no piece over its window, and
+// the line after it read whole. bounded also wants the reader to hold no more
+// of the line than a window and the longest form whenever it reads more --
+// what it holds while it reads on through a span gives out no piece to look
+// at -- at windows no smaller than what one read gives it (bufio's 16 bytes).
+func wantPiecesMaskedAsTheSeamMasks(t *testing.T, secrets []string, line string, lo, hi int, bounded bool) {
+	t.Helper()
+	capture, _ := newCaptureForTest(t, CaptureOptions{Secrets: secrets})
+	repaired := make([]string, 0, len(secrets))
+	for _, s := range secrets {
+		repaired = append(repaired, captureRepair(s))
+	}
+	want := pl.MaskSecrets(captureRepair(line), repaired)
+	forms := captureMaskForms(secrets)
+	longest := 0
+	for _, f := range forms {
+		longest = max(longest, len(f))
+	}
+	for window := lo; window <= hi; window++ {
+		var lines *logLines
+		held := func() {
+			if n := len(lines.carry); bounded && window >= 16 && n > window+longest {
+				t.Fatalf("window %d: the reader holds %d bytes of the line, more than the window and the longest form (%d)", window, n, longest)
+			}
+		}
+		lines = newLogLines(&readProbe{r: strings.NewReader(line + "\nnext\n"), each: held}, window, forms)
+		var got strings.Builder
+		for {
+			piece, _, end, err := lines.next()
+			if err != nil {
+				t.Fatalf("window %d: %v", window, err)
+			}
+			if len(piece) > window {
+				t.Errorf("window %d: a piece of %d bytes", window, len(piece))
+			}
+			held()
+			got.WriteString(capture.Mask(piece))
+			if end {
+				break
+			}
+		}
+		if got.String() != want {
+			t.Fatalf("window %d: the pieces mask to\n  %q\nwant the whole line as the seam masks it\n  %q", window, got.String(), want)
+		}
+		if piece, first, end, err := lines.next(); piece != "next" || !first || !end || err != nil {
+			t.Errorf("window %d: the line after = %q first %v end %v (%v), want it whole", window, piece, first, end, err)
+		}
+	}
+}
+
+// readProbe calls each before every read it passes on.
+type readProbe struct {
+	r    io.Reader
+	each func()
+}
+
+func (p *readProbe) Read(b []byte) (int, error) {
+	p.each()
+	return p.r.Read(b)
 }
 
 // TestRunnerCutsAnEndlessLine (Review Focus 5): a step that prints one
