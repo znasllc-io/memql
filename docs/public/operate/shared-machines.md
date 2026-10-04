@@ -146,6 +146,16 @@ list of names is consent for those people, and the cluster's own work is
 nobody on the list. The routing plan says so in as many words: "Its owner has
 shared it with specific people, not with the cluster's own work."
 
+**An automation acting for a person is not the cluster's own work.** One that
+runs under a listed person's borrowed authority carries *their* identity, and
+it may use every machine lent to them — **lending to a person lends to all of
+their work, automated or not.** Only an automation running as itself, under
+the cluster's synthetic identity, is held to machines lent to everyone, and
+such an identity never matches a person on a list, even when the automation's
+name spells somebody's id. Decided by the owner on 2026-10-04
+([memql#5662](https://github.com/znasllc-io/memql/issues/5662)); it is the
+behaviour the routing already had, now written down as a rule.
+
 ---
 
 ## What the owner sees afterwards
@@ -170,7 +180,9 @@ change could quietly widen.
 
 The cluster's own work is every call with no acting person, or with the
 cluster's synthetic identity (an automation or a maintenance sweep) — never
-"another person". The type the fold is built on cannot express a prompt. Other
+"another person". An automation acting under a person's borrowed authority is
+that person's work, and is counted as theirs. The type the fold is built on
+cannot express a prompt. Other
 people are **counted and never named**: the row carries `calls`, `people`,
 `otherCalls`, `otherPeople`, `systemCalls` and calls per level, and nothing
 else. With a one-person share the count of other people implies that person,
@@ -231,6 +243,21 @@ it is offered, rather than in this document.
   everyone, with B, or with a group B is an active member of — and the
   machine itself agreed. Machines lent to you may serve your calls, with your
   own machines always preferred first.
+- **Work done under your authority is yours.** An automation acting under
+  your borrowed authority uses what is lent to you, exactly as your own calls
+  do (see [The cluster's own work](#the-clusters-own-work)).
+- **A call pinned to one machine may name a machine lent to you.** "Ask it
+  something" on a machine's page, or any call that names the machine that must
+  run it, reaches your own machines and every machine lent to you under both
+  consents — and nothing else. A pin never falls through to another machine,
+  and system work cannot pin. A pin to a machine that is not lent to you is
+  refused with the pin's own sentence ("unavailable or not eligible for this
+  call; check that it is yours or lent to you, online, and offers the model
+  with the required context"), which reads the same for a machine that is
+  offline, one that is somebody else's, and one that does not exist. Decided
+  by the owner on 2026-10-04
+  ([memql#5662](https://github.com/znasllc-io/memql/issues/5662)); before
+  that, a pin reached your own machines only.
 - **System work** reaches only machines lent to everyone, with both consents.
 
 When a person's own machines and a lent one could both serve a call, **the

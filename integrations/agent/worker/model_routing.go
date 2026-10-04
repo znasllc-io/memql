@@ -148,7 +148,10 @@ func (r *Router) PlanPinnedModel(
 }
 
 // PlanSharedModel orders the machines eligible for CLUSTER work -- the calls
-// with no acting user: system automations, cluster maintenance.
+// with no acting user: system automations, cluster maintenance. (A synthetic
+// `system:` actor takes the person path instead and reaches the same machines
+// through ServesPerson; an automation under a person's borrowed authority is
+// that person's call, memql#5662.)
 //
 // Eligibility here is one extra thing on top of everything PlanModel checks:
 // the machine is lent to EVERYONE, by its owner and by its cockpit. A machine

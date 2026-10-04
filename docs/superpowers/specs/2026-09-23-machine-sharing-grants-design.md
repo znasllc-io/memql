@@ -9,7 +9,9 @@
   is `@serverOnly`), D12 (refusals never enumerate foreign machines) and the M-2
   ruling (only a machine's owner may lend it). None of those is reopened here.
 - **Status:** G1-G4 were chosen by the owner in the 2026-09-23 brainstorm. G5-G15
-  are this record's rulings, for the owner to overturn.
+  are this record's rulings, for the owner to overturn. The two questions the
+  final review left open (memql#5662) were decided by the owner on 2026-10-04:
+  G3's borrowed-authority clause and G16.
 
 ## Why
 
@@ -25,7 +27,7 @@ whole cluster, and system work rides it.
 |---|---|---|
 | G1 | Where the share list lives | On the machine's own row. `registration.sharing.mode` gains `people`, with `userIds` and `groupIds` beside it. Written only by the machine's owner through `fleetSetSharing`, exactly as today. Not a `machine:<id>` resource on `v1:rbac:grant` |
 | G2 | Who the owner can pick | People who share an active group with the owner, and those groups. A caller who may already read every person -- `read` on `principal` through `auth.CapableFor`, which owner, developer and admin hold by seed and a grant can give or withhold -- sees every active person and every active group. (First implemented as a rank floor; the review showed a rank hands the roster to an admin with a deny grant, so the capability is the owner's rule, "anyone who can already see everyone", stated exactly) |
-| G3 | The cluster's own work | Only a machine shared with **everyone** (`cluster`) serves a call with no acting person. A `people` share never does |
+| G3 | The cluster's own work | Only a machine shared with **everyone** (`cluster`) serves a call with no acting person, or one under the cluster's synthetic identity (`system:automation:<name>`, `system:maintenance:<name>`). A `people` share never does. **Decided 2026-10-04 (memql#5662):** an automation acting under a listed person's BORROWED authority may use machines lent to that person. Lending to a person lends to all of their work, automated or not; such a call carries the person's id and is planned, admitted and counted as theirs. No routing change: this was already the behaviour, and the ruling keeps it |
 | G4 | The ledger | Counts split by who the calls were for: "Served 41 calls this week, 12 of them for 2 other people." Still counts only, never names |
 | G5 | The cockpit's consent keeps its two values | `inference.serve: cluster` now means "may serve people other than its owner"; the owner decides which. No cockpit release |
 | G6 | Resolution is per call, from the rows | A person's groups come from the membership source the account scope and the grant resolver already read: active membership in an active group. Resolved lazily, only when a candidate carries a group share. Nothing is cached, so removal from a group ends access on the next call, on every replica |
@@ -38,6 +40,7 @@ whole cluster, and system work rides it.
 | G13 | Mixed versions fail closed | Every existing reader maps anything but `cluster` to `owner`, so during a rollout a `people` machine is private, never open |
 | G14 | What a person the machine is shared with sees | The machine's models in their catalog and model library, with the facts routing uses about it: its name, whether it is online and how busy, its memory, platform and runtimes -- the same catalog fields a machine lent to everyone already shows everyone. They read no registration row: not its labels, history, hardware inventory or who else it is lent to |
 | G15 | Attention | A runtime marker, published only to a person who owns an unrevoked machine, at that machine's Sharing view |
+| G16 | A call pinned to one machine | **Decided 2026-10-04 (memql#5662):** a pin reaches every machine `ServesPerson` admits for the caller, as well as their own. `Router.PlanPinnedModel` selects the pinned machine from `PlanUserModelWithShared`, the plan the same call gets unpinned, so a pin narrows and never widens: no machine that plan would not reach, no skipped eligibility, no fall-through to another machine, and no pin for system work. A pin to a machine not lent to the caller is refused with the pin's own sentence, which names no machine and no owner. Before the ruling pins read `PlanModel` (own machines only), so a pin to a lent machine was refused while the same call unpinned could use it |
 
 ## 1. The data model (#5346)
 
@@ -77,6 +80,7 @@ admit a shared machine for a person, and each now asks it:
 | `Router.PlanUserModelWithShared` | `ServesCluster()` | `ServesPerson(user, groups)`; own-first and the stable partition unchanged |
 | `ForwardHandler.verifySharedRegistration` (the replica hop) | `ServesCluster()` | `ServesPerson` for the VERIFIED authority's subject, with groups resolved on the receiving replica |
 | `ForwardHandler.ownerOfSharedMachine` | unchanged | unchanged. It checks the live stream against the row, not consent |
+| `Router.PlanPinnedModel` (G16, memql#5662) | `PlanModel`: own machines only | the pinned machine, selected from `PlanUserModelWithShared` |
 
 Where the groups come from: an injectable `GroupResolver` on the Router, the
 ForwardHandler and the catalog reader. It defaults to `auth.InstalledMembershipSource()`,
@@ -103,6 +107,19 @@ the cluster's own work. One consequence of G8 follows and is intended: with the
 catalog now reading machines lent to the caller, an automation under a synthetic
 actor reaches machines lent to EVERYONE, which D6 always said system work should
 and the own-only catalog had silently prevented.
+
+**An automation under a person's borrowed authority is that person's work**
+(decided 2026-10-04, memql#5662). It carries the person's id, not a synthetic one,
+so the plan, the catalog, the replica-hop receiver and the ledger all treat it as
+the person -- and it may use what is lent to them. The owner's reasoning: lending
+to a person lends to all of their work, automated or not. The alternative, lent
+machines taking only calls the person makes directly, would need a second
+predicate that could tell the two apart, and nothing on the call carries that fact.
+Only an automation running AS ITSELF is the cluster's own work. The same ruling
+closed a hole the own-machine arm of `PlanUserModelWithShared` still had: it
+compared ids by the text after the last colon, so `system:automation:ana`
+recovered ana's PRIVATE machine as its own; it now compares through
+`SameSubjectId` like the share list does.
 
 ## 4. The directory and the write
 
