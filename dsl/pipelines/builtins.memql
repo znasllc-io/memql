@@ -55,6 +55,15 @@ builtin pipelinesConnect {
 }
 
 @sdk
+@executor("integration.pipelines.preview")
+@args(profile="object")
+@requiresCapability("execute", "app:deployables/connect")
+@description("Read what connecting one of the caller's sources would act on, and write nothing (epic memql#5479: the connect rail's first stop shows the stages before anything is confirmed). The same read pipelinesConnect makes: the caller must own the package; the grant is proved by minting a token through it; memql-package.yaml is read at the default branch's head and its pipeline block validated. Answers one row: {repository, defaultBranch, sha, name, checkName, stages [{name, on, channel, steps [{name, packages, only, shards, bucket, needs, secrets, services}]}], needs, secrets, suggestedDelivery, existing {pipelineId, status, delivery, compute, secretNames} or null, refusal {code, message, scope} or null}. A typed refusal -- no pipeline block, a block that does not validate, a repository another source runs, a grant that no longer reaches it -- is the answer's refusal, never an error, so the stop that asked can render it with its remedy. suggestedDelivery is webhook where GitHub can plausibly reach this cluster and poll otherwise.")
+builtin pipelinesPreview {
+  packageId  string!  @description("The v1:platform:package source to read. Must be the caller's own.")
+}
+
+@sdk
 @executor("integration.pipelines.disconnect")
 @args(profile="object")
 @requiresCapability("execute", "app:deployables/connect")

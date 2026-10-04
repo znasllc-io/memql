@@ -51,6 +51,12 @@ type Deps struct {
 	// check run's details link. "" omits the link rather than sending a
 	// relative one GitHub would refuse.
 	OSOrigin func() string
+	// WebhookReachable reports whether GitHub could plausibly deliver a
+	// webhook to this cluster -- githubconnect's own rule for whether the
+	// app it registers subscribes to events. The connect preview suggests
+	// webhook delivery where it does and the poll where it does not; nil is
+	// "no", which suggests the poll.
+	WebhookReachable func() bool
 	// NodeID is this replica's MEMQL_NODE_ID: what a driver writes as its
 	// lease, and what RequestCancel compares a run's driverNodeId with.
 	NodeID string

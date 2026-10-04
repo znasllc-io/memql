@@ -2629,6 +2629,28 @@ QueryClient.prototype.pipelinesDisconnect = function (this: QueryClient, args: P
   return this.executeNamed("pipelinesDisconnect", buildPipelinesDisconnect(args), opts);
 };
 
+/** Read what connecting one of the caller's sources would act on, and write nothing (epic memql#5479: the connect rail's first stop shows the stages before anything is confirmed). The same read pipelinesConnect makes: the caller must own the package; the grant is proved by minting a token through it; memql-package.yaml is read at the default branch's head and its pipeline block validated. Answers one row: {repository, defaultBranch, sha, name, checkName, stages [{name, on, channel, steps [{name, packages, only, shards, bucket, needs, secrets, services}]}], needs, secrets, suggestedDelivery, existing {pipelineId, status, delivery, compute, secretNames} or null, refusal {code, message, scope} or null}. A typed refusal -- no pipeline block, a block that does not validate, a repository another source runs, a grant that no longer reaches it -- is the answer's refusal, never an error, so the stop that asked can render it with its remedy. suggestedDelivery is webhook where GitHub can plausibly reach this cluster and poll otherwise. */
+export interface PipelinesPreviewArgs {
+  /** The v1:platform:package source to read. Must be the caller's own. */
+  packageId: string;
+}
+
+export function buildPipelinesPreview(args: PipelinesPreviewArgs): string {
+  const parts: string[] = [];
+  parts.push("packageId: " + renderMemQLValue(args.packageId));
+  return "builtin pipelinesPreview(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    pipelinesPreview(args: PipelinesPreviewArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.pipelinesPreview = function (this: QueryClient, args: PipelinesPreviewArgs = {} as PipelinesPreviewArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("pipelinesPreview", buildPipelinesPreview(args), opts);
+};
+
 /** Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended. */
 export interface PipelinesRerunArgs {
   /** The v1:pipelines:run to re-run. Must be the caller's own. */

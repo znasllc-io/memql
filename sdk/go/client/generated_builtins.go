@@ -3437,6 +3437,27 @@ func PipelinesDisconnectBuild(args PipelinesDisconnectArgs) string {
 	return b.String()
 }
 
+// PipelinesPreview -- Read what connecting one of the caller's sources would act on, and write nothing (epic memql#5479: the connect rail's first stop shows the stages before anything is confirmed). The same read pipelinesConnect makes: the caller must own the package; the grant is proved by minting a token through it; memql-package.yaml is read at the default branch's head and its pipeline block validated. Answers one row: {repository, defaultBranch, sha, name, checkName, stages [{name, on, channel, steps [{name, packages, only, shards, bucket, needs, secrets, services}]}], needs, secrets, suggestedDelivery, existing {pipelineId, status, delivery, compute, secretNames} or null, refusal {code, message, scope} or null}. A typed refusal -- no pipeline block, a block that does not validate, a repository another source runs, a grant that no longer reaches it -- is the answer's refusal, never an error, so the stop that asked can render it with its remedy. suggestedDelivery is webhook where GitHub can plausibly reach this cluster and poll otherwise.
+type PipelinesPreviewArgs struct {
+	// The v1:platform:package source to read. Must be the caller's own.
+	PackageId string
+}
+
+// PipelinesPreview calls the engine builtin pipelinesPreview.
+func (qc *QueryClient) PipelinesPreview(ctx context.Context, args PipelinesPreviewArgs) (*Result, error) {
+	call := PipelinesPreviewBuild(args)
+	return qc.executeNamed(ctx, "pipelinesPreview", call)
+}
+
+func PipelinesPreviewBuild(args PipelinesPreviewArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin pipelinesPreview(")
+	b.WriteString("packageId: ")
+	b.WriteString(quoteMemQL(args.PackageId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PipelinesRerun -- Re-run one of the caller's pipeline runs: open the next attempt of its run key with the original's mode and event, trigger rerun, rerunOf naming the original, and a new check run. With failedOnly, only what did not pass runs again: every step the original passed, with the same package slice, is carried over as skipped pipeline_passed_earlier, and a run with no failed or cancelled step is refused pipeline_nothing_to_rerun. The original stays exactly as it ended.
 type PipelinesRerunArgs struct {
 	// The v1:pipelines:run to re-run. Must be the caller's own.

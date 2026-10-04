@@ -113,79 +113,11 @@ func (i *Integration) Connect(ctx context.Context, req ConnectRequest) (ConnectR
 		return ConnectResult{}, refusal
 	}
 
-	// THE CALLER'S OWN READ of the source: a package they cannot read
-	// answers nothing, and "not there" and "not yours" are the same zero
-	// rows -- the sentence must not claim to know which.
-	pkg, err := d.Store.PackageForCaller(ctx, packageID)
+	insp, err := i.inspect(ctx, d, caller, packageID)
 	if err != nil {
 		return ConnectResult{}, err
 	}
-	if pkg == nil {
-		return ConnectResult{}, &packages.Refusal{Code: packages.CodeSourceUnreadable,
-			Detail: fmt.Sprintf("no source %q is readable by you", packageID)}
-	}
-	// A cluster owner reads every source; only its owner connects one,
-	// because every token the pipeline holds is minted through the owner's
-	// grant.
-	if !sameID(pkg.OwnerUserID, caller) {
-		return ConnectResult{}, ErrNotOwner
-	}
-	if pkg.Status != "" && pkg.Status != "active" {
-		return ConnectResult{}, &packages.Refusal{Code: packages.CodeSourceUnreadable,
-			Detail: "this source is archived; restore it before connecting a pipeline to it"}
-	}
-	if pkg.SourceKind != "repo" {
-		return ConnectResult{}, &packages.Refusal{Code: packages.CodeSourceHostUnsupported,
-			Detail: "a pipeline runs on a GitHub repository source, and this source is a zip from the Library: add the repository as a source to connect its pipeline"}
-	}
-	repository, err := githubRepository(pkg.RepoURL)
-	if err != nil {
-		return ConnectResult{}, err
-	}
-	if pkg.CredentialID == "" {
-		return ConnectResult{}, &packages.Refusal{Code: packages.CodeCredentialNotFound,
-			Detail: "this source names no GitHub connection, and a pipeline's checks are minted only through its owner's: switch the source to your GitHub connection first"}
-	}
-	// One pipeline per repository, asked BEFORE any request leaves the
-	// cluster so a second source learns it at once; asked again under the
-	// repository's gate before the write, which is the answer that counts.
-	if refusal, err := alreadyConnected(ctx, d, repository, pkg.ID); err != nil || refusal != nil {
-		return ConnectResult{}, firstErr(err, refusal)
-	}
-
-	// THE GRANT: minting proves it still reaches the repository, and names
-	// the installation deliveries must arrive through.
-	token, installationID, err := d.GitHub.InstallationToken(ctx, pkg.CredentialID, pkg.OwnerUserID, repository)
-	if err != nil {
-		return ConnectResult{}, err
-	}
-	info, err := d.GitHub.Repository(ctx, token, repository)
-	if err != nil {
-		return ConnectResult{}, fmt.Errorf("pipelines: reading %s: %w", repository, err)
-	}
-	branch := strings.TrimSpace(info.DefaultBranch)
-	if branch == "" {
-		return ConnectResult{}, fmt.Errorf("pipelines: GitHub names no default branch for %s", repository)
-	}
-	head, _, err := d.GitHub.BranchHead(ctx, token, repository, branch)
-	if err != nil {
-		return ConnectResult{}, fmt.Errorf("pipelines: reading %s's head: %w", branch, err)
-	}
-	tree, err := d.GitHub.Tree(ctx, token, repository, head, func(p string) bool { return p == pipelines.ManifestPath }, maxManifestBytes)
-	if err != nil {
-		return ConnectResult{}, fmt.Errorf("pipelines: reading %s at %s: %w", pipelines.ManifestPath, branch, err)
-	}
-	manifest, err := packages.ReadManifest(tree)
-	if err != nil {
-		return ConnectResult{}, err
-	}
-	if manifest.Pipeline == nil {
-		return ConnectResult{}, pipelines.Refuse(pipelines.CodeNotDeclared, "",
-			"%s at the head of %s declares no pipeline block, so there is nothing to connect.", pipelines.ManifestPath, branch)
-	}
-	if refusal := pipelines.Validate(manifest.Pipeline); refusal != nil {
-		return ConnectResult{}, refusal
-	}
+	pkg, repository, installationID, branch, manifest := insp.pkg, insp.repository, insp.installationID, insp.branch, insp.manifest
 	// Consent, of EVERY step whatever event would plan it: a step naming a
 	// need on a cluster-only pipeline, or a secret this allowlist does not
 	// hold, is refused now rather than on the first push that reaches it.
@@ -272,6 +204,112 @@ func (i *Integration) Connect(ctx context.Context, req ConnectRequest) (ConnectR
 		PipelineID: p.ID, Repository: repository, Delivery: delivery, Compute: compute,
 		Stages: stages, Reconnected: reconnected,
 	}, nil
+}
+
+// inspection is what connecting a source's pipeline learns before it writes
+// anything: the caller's own source, the repository its grant reaches and the
+// installation that grant was minted through, the default branch and its
+// head, and the manifest there. The fields are filled as far as inspect got,
+// so a preview can still say which repository and branch it read when what
+// it read refused.
+type inspection struct {
+	pkg            *PackageSource
+	repository     string
+	installationID int64
+	branch         string
+	head           string
+	manifest       *packages.Manifest
+}
+
+// inspect is connect's READ half, shared with the preview so the rail shows
+// exactly what connecting would act on: the caller owns the source; it is an
+// active GitHub repository source fetched under the caller's grant; no other
+// source's pipeline runs the repository; the grant still reaches it, proved by
+// a mint; and its default branch's head declares a pipeline block that
+// validates. It writes nothing. Every refusal is typed -- a packages or a
+// pipelines *Refusal -- and anything else is a fault.
+func (i *Integration) inspect(ctx context.Context, d Deps, caller, packageID string) (inspection, error) {
+	var insp inspection
+	// THE CALLER'S OWN READ of the source: a package they cannot read
+	// answers nothing, and "not there" and "not yours" are the same zero
+	// rows -- the sentence must not claim to know which.
+	pkg, err := d.Store.PackageForCaller(ctx, packageID)
+	if err != nil {
+		return insp, err
+	}
+	if pkg == nil {
+		return insp, &packages.Refusal{Code: packages.CodeSourceUnreadable,
+			Detail: fmt.Sprintf("no source %q is readable by you", packageID)}
+	}
+	// A cluster owner reads every source; only its owner connects one,
+	// because every token the pipeline holds is minted through the owner's
+	// grant.
+	if !sameID(pkg.OwnerUserID, caller) {
+		return insp, ErrNotOwner
+	}
+	insp.pkg = pkg
+	if pkg.Status != "" && pkg.Status != "active" {
+		return insp, &packages.Refusal{Code: packages.CodeSourceUnreadable,
+			Detail: "this source is archived; restore it before connecting a pipeline to it"}
+	}
+	if pkg.SourceKind != "repo" {
+		return insp, &packages.Refusal{Code: packages.CodeSourceHostUnsupported,
+			Detail: "a pipeline runs on a GitHub repository source, and this source is a zip from the Library: add the repository as a source to connect its pipeline"}
+	}
+	repository, err := githubRepository(pkg.RepoURL)
+	if err != nil {
+		return insp, err
+	}
+	insp.repository = repository
+	if pkg.CredentialID == "" {
+		return insp, &packages.Refusal{Code: packages.CodeCredentialNotFound,
+			Detail: "this source names no GitHub connection, and a pipeline's checks are minted only through its owner's: switch the source to your GitHub connection first"}
+	}
+	// One pipeline per repository, asked BEFORE any request leaves the
+	// cluster so a second source learns it at once; connect asks again under
+	// the repository's gate before the write, which is the answer that counts.
+	if refusal, err := alreadyConnected(ctx, d, repository, pkg.ID); err != nil || refusal != nil {
+		return insp, firstErr(err, refusal)
+	}
+
+	// THE GRANT: minting proves it still reaches the repository, and names
+	// the installation deliveries must arrive through.
+	token, installationID, err := d.GitHub.InstallationToken(ctx, pkg.CredentialID, pkg.OwnerUserID, repository)
+	if err != nil {
+		return insp, err
+	}
+	insp.installationID = installationID
+	info, err := d.GitHub.Repository(ctx, token, repository)
+	if err != nil {
+		return insp, fmt.Errorf("pipelines: reading %s: %w", repository, err)
+	}
+	branch := strings.TrimSpace(info.DefaultBranch)
+	if branch == "" {
+		return insp, fmt.Errorf("pipelines: GitHub names no default branch for %s", repository)
+	}
+	insp.branch = branch
+	head, _, err := d.GitHub.BranchHead(ctx, token, repository, branch)
+	if err != nil {
+		return insp, fmt.Errorf("pipelines: reading %s's head: %w", branch, err)
+	}
+	insp.head = head
+	tree, err := d.GitHub.Tree(ctx, token, repository, head, func(p string) bool { return p == pipelines.ManifestPath }, maxManifestBytes)
+	if err != nil {
+		return insp, fmt.Errorf("pipelines: reading %s at %s: %w", pipelines.ManifestPath, branch, err)
+	}
+	manifest, err := packages.ReadManifest(tree)
+	if err != nil {
+		return insp, err
+	}
+	insp.manifest = manifest
+	if manifest.Pipeline == nil {
+		return insp, pipelines.Refuse(pipelines.CodeNotDeclared, "",
+			"%s at the head of %s declares no pipeline block, so there is nothing to connect.", pipelines.ManifestPath, branch)
+	}
+	if refusal := pipelines.Validate(manifest.Pipeline); refusal != nil {
+		return insp, refusal
+	}
+	return insp, nil
 }
 
 func (i *Integration) handleDisconnect(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

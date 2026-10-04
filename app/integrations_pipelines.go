@@ -63,6 +63,12 @@ func (a *App) wirePipelines() {
 		}
 		d.NodeID = nodeID
 		d.OSOrigin = pipelinesOSOrigin
+		// The connect preview's delivery suggestion, by the rule the GitHub
+		// App this cluster registers is composed by: its webhook is active
+		// only on a name GitHub could reach (githubconnect, manifest D5).
+		d.WebhookReachable = func() bool {
+			return githubconnect.DomainIsPubliclyReachable(os.Getenv("MEMQL_DOMAIN"))
+		}
 		if a.engine != nil {
 			d.Journal = workjournal.New(
 				workjournal.ExecutorFunc(func(ctx context.Context, q string) (any, error) {

@@ -71,6 +71,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "preview",
+			Description: "Read what connecting one of the caller's sources would act on, writing nothing (epic memql#5479): the grant proved by a mint, the default branch's head, and the pipeline block there -- its stages and steps, the needs and the secrets they name -- with the source's existing pipeline when it has one. A typed refusal (no block, a block that does not validate, a repository another source runs, a grant that no longer reaches it) is the answer's refusal, not an error. Answers {repository, defaultBranch, sha, name, checkName, stages, needs, secrets, suggestedDelivery, existing, refusal}.",
+			Handler:     i.handlePreview,
+			ArgsSchema:  map[string]string{"packageId": "string (required) -- the caller's v1:platform:package source"},
+		},
+		{
 			Name:        "disconnect",
 			Description: "Disconnect one of the caller's pipelines -- or, for a cluster owner, any pipeline, so an operator can free a repository a departed owner's pipeline holds: it opens no more runs, and a run no agent has started concludes pipeline_disconnected. The row and its runs stay as history. Answers {pipelineId, status}.",
 			Handler:     i.handleDisconnect,
