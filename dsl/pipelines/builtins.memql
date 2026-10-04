@@ -24,7 +24,7 @@
 @description("Open the pipeline runs a staged GitHub delivery asks for (design record D4-D6). Reads a v1:platform:inboundRequest row the inbound receiver already verified, classifies the event from the SIGNED body's shape -- the X-GitHub-Event header is a cross-check only -- and, for every active pipeline of the delivery's repository whose installation matches, opens one run keyed on (repository, SHA, mode, event): a pull request opened, synchronized or reopened runs affected, a merge group, a push to the default branch and a published release run full, and a re-requested check run or suite re-runs the original's mode and event as a new attempt. A fork's pull request is REFUSED with a failing check run, never queued. A redelivery, or a poll that saw the same head, opens nothing: the run key is the dedup. A delivery matching no pipeline is a no-op, because most of a cluster's webhooks are about something else.")
 builtin pipelinesTrigger {
   inboundRequestId  string!  @description("The v1:platform:inboundRequest row the inbound receiver staged.")
-  source            string   @description("The allowlisted source segment the delivery arrived on. Anything other than github is a no-op.")
+  source            string   @description("The allowlisted source segment the delivery arrived on. Only github is a pipelines delivery; the automation passes nothing else.")
   body              string   @description("The verified raw body, exactly as signed.")
   headersJson       string   @description("The allowlisted delivery headers as a JSON object, for the event and delivery GUID cross-check. Not proof of anything: the body's HMAC does not sign them.")
 }
