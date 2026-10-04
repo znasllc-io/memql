@@ -1006,12 +1006,13 @@ The cron-leader job `workJournalRetentionSweep` runs nightly at 03:40 UTC. It
 archives complete historical versions, verifies the uploaded bytes, then removes
 only the archived versions in bounded transactions. Failed verification preserves
 the records. Active parent work, goals and user-owned runs remain protected; a
-finished pipeline's runs are the one exception, on their own window.
+finished pipeline's runs, and its goal once no run of it remains, are the one
+exception, on their own window.
 
 | Variable | Default | Records |
 | --- | --- | --- |
 | `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned scheduled runs, their steps and closed approvals |
-| `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs: the `v1:pipelines:run` row and the work run it compiled into, with that run's steps and closed approvals. The Library files a run's steps archived (logs, artifacts) are the owner's and are kept |
+| `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs: the `v1:pipelines:run` row and the work run it compiled into, with that run's steps and closed approvals, then the pipeline's goal once no run of it remains. The Library files a run's steps archived (logs, artifacts) are the owner's and are kept |
 | `MEMQL_WORKER_INVOCATION_RETENTION_DAYS` | `90` | Completed worker invocation history |
 | `MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS` | `90` | Safety classification evidence |
 | `MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS` | `90` | Safety output-screening evidence |
@@ -1034,4 +1035,5 @@ use the documented defaults.
 Archives use `retention/<UTC-day>/<sha256>.ndjson.gz`, with the original node
 identity, timestamps, schema, metadata, provenance and payload. Archive lifecycle
 is managed separately from database retention. No default age-based deletion
-applies to other concepts, including catalogs, files, goals and customer records.
+applies to other concepts, including catalogs, files, goals other than a
+pipeline's, and customer records.

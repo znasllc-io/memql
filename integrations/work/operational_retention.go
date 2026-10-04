@@ -22,11 +22,13 @@ const EnvSystemRunRetentionDays = "MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS"
 const DefaultSystemRunRetentionDays = 30
 
 // EnvPipelinesRunRetentionDays is how long a finished pipeline run is kept
-// (epic memql#5478, #5496): its v1:pipelines:run row, and the v1:work:run it
-// compiled into with that run's steps. One window for both, so a run and its
-// work leave on the same night rather than on two clocks. The Library files a
-// run's steps archived -- logs, artifacts -- are the owner's, and no policy
-// here names them.
+// (epic memql#5478, #5496): its v1:pipelines:run row, the v1:work:run it
+// compiled into with that run's steps, and the v1:work:goal behind them once
+// no run of it remains. One window for all three, so an unblocked run's rows
+// leave in the same sweep; a work run something keeps (detail on a longer
+// window, a child that is not its own) stays behind, and its goal with it,
+// until that clears. The Library files a run's steps archived -- logs,
+// artifacts -- are the owner's, and no policy here names them.
 const EnvPipelinesRunRetentionDays = "MEMQL_PIPELINES_RUN_RETENTION_DAYS"
 const DefaultPipelinesRunRetentionDays = 30
 
@@ -48,23 +50,34 @@ const retirementMaxBytes = 32 << 20
 const retentionInactiveParentSQL = `NOT EXISTS (SELECT 1 FROM "MemoryNodes" parent WHERE parent.concept='v1:work:run' AND parent.id=n.payload->>'runId' AND COALESCE(parent.payload->>'status','') NOT IN ('succeeded','failed','cancelled','abandoned') AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newerParent WHERE newerParent.concept=parent.concept AND newerParent.id=parent.id AND newerParent."createdAt">parent."createdAt"))`
 
 // This is a closed list of operational records, never a default lifetime for
-// arbitrary concepts. Business records, goals, templates and active work are
-// not eligible. A terminal run owns its step/approval archive as a unit: the
-// children that are the run's own (retireVerified says which).
+// arbitrary concepts. Business records, goals (but a pipeline's, below),
+// templates and active work are not eligible. A terminal run owns its
+// step/approval archive as a unit: the children that are the run's own
+// (retireVerified says which).
 //
 // A WINDOW IS KEYED BY ITS ENV NAME, NEVER BY ITS CONCEPT. Two policies read
 // v1:work:run, and they never select the same run: a system run is triggered
 // by `schedule`, a pipeline's by `pipeline:<mode>` (pipelines.WorkTriggerPrefix).
-// And one window, MEMQL_PIPELINES_RUN_RETENTION_DAYS, governs two concepts.
+// And one window, MEMQL_PIPELINES_RUN_RETENTION_DAYS, governs three concepts.
 //
 // A FINISHED PIPELINE RUN (#5496) is its v1:pipelines:run row once it is
 // `completed` -- the conclusion is not the test, a refused run is completed
 // too -- and the work run it compiled into once component/workjournal closed
 // it succeeded, failed or cancelled. Nothing closes a pipeline's work run
 // `abandoned` (the waiting sweep reads past it: runnerOwnsRecovery), so that
-// status is not one this list was told about and such a run is kept. The work
-// run comes first: the run row carries the stage table, so it is the last
-// thing of a run to go. The goal the run compiled into stays, like every goal.
+// status is not one this list was told about and such a run is kept.
+//
+// A PIPELINE'S GOAL is the v1:work:goal the driver opens for a run key
+// (requestedVia `pipeline`, origin `system`), retired once NO v1:work:run of it
+// remains -- of any version, naming it in either spelling (goalRefSQL). A
+// re-run is a second run of the same goal, so the goal outlives each run and
+// goes with the last.
+//
+// THE ORDER BELOW IS WHAT LETS ONE SWEEP FINISH A RUN, and it holds for a run
+// nothing keeps: the work run with its steps, then the run row, then the goal,
+// each policy finding what the one before it left. A work run something keeps
+// holds its goal in place too, so a goal never goes ahead of its runs; the run
+// row is kept or retired on its own age.
 type operationalPolicy struct {
 	concept, env string
 	days         int
@@ -79,6 +92,22 @@ var operationalPolicies = []operationalPolicy{
 	{runConcept, EnvSystemRunRetentionDays, DefaultSystemRunRetentionDays, `n.payload->>'ownerUserId' = '' AND COALESCE(n.payload->>'goalId','') = '' AND n.payload->>'triggeredBy' = 'schedule' AND n.payload->>'status' IN ('succeeded','failed','cancelled','abandoned')`},
 	{runConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'triggeredBy' LIKE '` + pipelines.WorkTriggerPrefix + `%' AND n.payload->>'status' IN ('succeeded','failed','cancelled')`},
 	{pipelinesRunConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'status' = 'completed'`},
+	// After the work-run policy, always: the "no run remains" term is added in
+	// operationalRetention and checked again in retireVerified's delete.
+	{goalConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'requestedVia' = 'pipeline' AND n.payload->>'origin' = 'system'`},
+}
+
+// goalRefSQL folds a SQL expression naming a v1:work:goal to its bare id.
+//
+// A run's goalId is an outgoing @relationship, so the write path stores it
+// canonical ("v1:work:goal:<id>"), and the goal row's own id is canonical too.
+// A row written before the relationship existed, or by hand, may hold it bare.
+// "No run of this goal remains" must see a run naming the goal in EITHER
+// spelling: a run it missed would be a goal deleted under a run that still
+// names it. Both sides go through the fold, so the comparison stays one
+// equality the planner can hash.
+func goalRefSQL(expr string) string {
+	return `regexp_replace(` + expr + `, '^v1:work:goal:', '')`
 }
 
 type OperationalRetentionResult struct {
@@ -119,19 +148,27 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 			predicate += ` AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" child WHERE child.concept IN ('v1:work:step','v1:work:approval','v1:work:modelCall','v1:work:observation') AND child.payload->>'runId'=n.id AND (child.concept IN ('v1:work:modelCall','v1:work:observation') OR child."createdAt">=? OR child.payload->>'ownerUserId' IS NULL OR child.payload->>'ownerUserId' IS DISTINCT FROM n.payload->>'ownerUserId' OR (child.concept='v1:work:approval' AND COALESCE(child.payload->>'decision','')='')) AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newerChild WHERE newerChild.concept=child.concept AND newerChild.id=child.id AND newerChild."createdAt">child."createdAt"))`
 			params = append(params, cutoff)
 		}
+		if p.concept == goalConcept {
+			// A goal goes only once no run of it remains -- any version, either
+			// spelling. Before LIMIT for the reason above: goals whose runs are
+			// still kept must not crowd out the ones that could go. The delete
+			// asks again (retireVerified), for a run opened since this read.
+			predicate += ` AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" r WHERE r.concept='v1:work:run' AND ` + goalRefSQL(`r.payload->>'goalId'`) + `=` + goalRefSQL(`n.id`) + `)`
+		}
 		query := `SELECT n.id,n."createdAt",n.payload FROM "MemoryNodes" n WHERE n.concept=? AND n."createdAt" < ? AND (` + predicate + `) AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newer WHERE newer.concept=n.concept AND newer.id=n.id AND newer."createdAt">n."createdAt") AND ` + retentionInactiveParentSQL + ` ORDER BY n."createdAt",n.id LIMIT 20000`
 		rows, err := i.selectAdmitted(ctx, p.concept, query, params...)
 		if err != nil {
 			return results, err
 		}
-		result := OperationalRetentionResult{Concept: p.concept, Env: p.env, RetentionDays: days, Candidates: len(rows)}
-		for start := 0; start < len(rows); start += retirementBatchSize {
-			end := min(start+retirementBatchSize, len(rows))
-			if err := i.retireBatch(ctx, p, rows[start:end], cutoff, dry, &result); err != nil {
-				return append(results, result), err
-			}
+		var tally retirementTally
+		err = i.retireInBatches(ctx, p.concept, rows, p.concept == runConcept, cutoff, dry, &tally)
+		results = append(results, OperationalRetentionResult{
+			Concept: p.concept, Env: p.env, RetentionDays: days, Candidates: len(rows),
+			ArchivedVersions: tally.archived, DeletedVersions: tally.deleted, Objects: tally.objects, Oversized: tally.oversized,
+		})
+		if err != nil {
+			return results, err
 		}
-		results = append(results, result)
 	}
 	return results, nil
 }
@@ -141,44 +178,68 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 // rows are read, so nothing was uploaded and nothing was deleted.
 var errRetirementOverBudget = errors.New("retention batch exceeds archive budget; records preserved")
 
-// retireBatch retires one batch of a policy's candidates, halving it while it
-// is more than one archive object takes.
+// retirementTally is what retiring a set of candidates did, accumulated
+// across its batches -- including the batches before one that failed, which
+// is what a caller reports alongside the error.
+type retirementTally struct {
+	archived, deleted  int
+	objects, oversized []string
+}
+
+// retireInBatches retires one concept's candidates in batches of
+// retirementBatchSize, each through retireSplitting. Both sweeps come through
+// here: the operational policies and the journal's model-call and observation
+// detail (journalRetentionSweep), so neither can fail a night on a batch the
+// other would have split.
+func (i *Integration) retireInBatches(ctx context.Context, concept string, rows []map[string]any, withChildren bool, cutoff time.Time, dry bool, tally *retirementTally) error {
+	for start := 0; start < len(rows); start += retirementBatchSize {
+		end := min(start+retirementBatchSize, len(rows))
+		if err := i.retireSplitting(ctx, concept, rows[start:end], withChildren, cutoff, dry, tally); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// retireSplitting retires one batch, halving it while it is more than one
+// archive object takes.
 //
 // A batch is counted in CANDIDATES and an object is bounded in VERSIONS, and a
 // candidate is every version of a record -- of a run, every version of its
 // steps and approvals as well. A pipeline's run is many: both its rows take a
 // version per 30-second heartbeat, and each of its steps three (queued,
 // running, finished), so a hundred finished runs of a few dozen steps, or of
-// an hour each, pass the 10,000 versions one object holds. Refused whole, the
-// batch would be refused again every night and hold every run behind it for
-// good. So it is halved until each half fits. A record that ALONE does not fit
-// cannot be archived in one object, so it is kept whole -- never deleted
-// without its archive -- named in the result and logged, and the sweep goes
-// on: one oversized record is never the reason nothing else is retired.
-func (i *Integration) retireBatch(ctx context.Context, p operationalPolicy, rows []map[string]any, cutoff time.Time, dry bool, result *OperationalRetentionResult) error {
-	archived, deleted, object, err := i.retireVerified(ctx, p.concept, rows, p.concept == runConcept, cutoff, dry)
+// an hour each, pass the 10,000 versions one object holds; a hundred journal
+// rows with large payloads pass its 32 MiB. Refused whole, the batch would be
+// refused again every night and hold every record behind it for good. So it is
+// halved until each half fits. A record that ALONE does not fit cannot be
+// archived in one object, so it is kept whole -- never deleted without its
+// archive -- named in the result and logged, and the sweep goes on: one
+// oversized record is never the reason nothing else is retired.
+func (i *Integration) retireSplitting(ctx context.Context, concept string, rows []map[string]any, withChildren bool, cutoff time.Time, dry bool, tally *retirementTally) error {
+	archived, deleted, object, err := i.retireVerified(ctx, concept, rows, withChildren, cutoff, dry)
 	if errors.Is(err, errRetirementOverBudget) {
 		if len(rows) == 1 {
 			id := rowString(rows[0], "id")
-			result.Oversized = append(result.Oversized, id)
+			tally.oversized = append(tally.oversized, id)
 			i.log().Warn("work: a record is more than one retention archive object holds, so it was kept",
-				"component", "work.retention", "concept", p.concept, "env", p.env, "id", id,
+				"component", "work.retention", "concept", concept, "id", id,
 				"maxVersions", retirementMaxVersions, "maxBytes", retirementMaxBytes)
 			return nil
 		}
 		half := len(rows) / 2
-		if err := i.retireBatch(ctx, p, rows[:half], cutoff, dry, result); err != nil {
+		if err := i.retireSplitting(ctx, concept, rows[:half], withChildren, cutoff, dry, tally); err != nil {
 			return err
 		}
-		return i.retireBatch(ctx, p, rows[half:], cutoff, dry, result)
+		return i.retireSplitting(ctx, concept, rows[half:], withChildren, cutoff, dry, tally)
 	}
 	if err != nil {
 		return err
 	}
-	result.ArchivedVersions += archived
-	result.DeletedVersions += deleted
+	tally.archived += archived
+	tally.deleted += deleted
 	if object != "" {
-		result.Objects = append(result.Objects, object)
+		tally.objects = append(tally.objects, object)
 	}
 	return nil
 }
@@ -233,7 +294,8 @@ type retirementKey struct {
 // retireVerified archives ALL versions, including schema/provenance, with a
 // content-addressed object name. Read-back must match before an exact-key
 // transactional delete. Bounded batches cap both memory and database work.
-// A concurrent revision or a new child leaves the entire batch in place.
+// A concurrent revision, a new child, or -- for a goal -- a new run of it
+// leaves the entire batch in place.
 // staged-data: MUST-NOT-GATE -- hiding staged versions loses their archive
 // evidence, and hiding staged revisions/children defeats the concurrent-write
 // guards. Every archived version passes admitRow before any deletion.
@@ -430,6 +492,14 @@ func (i *Integration) retireVerified(ctx context.Context, concept string, candid
 		if withChildren {
 			guard += ` AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" child WHERE child.concept IN ('v1:work:step','v1:work:approval','v1:work:modelCall','v1:work:observation') AND child.payload->>'runId' IN (?) AND NOT EXISTS (SELECT 1 FROM keys k WHERE k.id=child.id AND k.concept=child.concept AND k.at=child."createdAt"))`
 			params = append(params, bun.In(parentIDs))
+		}
+		if concept == goalConcept {
+			// And no run of an archived goal may have been opened since the
+			// candidate read. The pipelines driver opens a new run of an old
+			// goal by writing the goal first -- a newer version, which the
+			// statement's own newer-version check refuses -- and then the run,
+			// refused here; a run written on its own is refused here too.
+			guard += ` AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" r WHERE r.concept='v1:work:run' AND ` + goalRefSQL(`r.payload->>'goalId'`) + ` IN (SELECT ` + goalRefSQL(`k.id`) + ` FROM keys k))`
 		}
 		result, e := tx.ExecContext(ctx, `WITH keys AS MATERIALIZED (SELECT * FROM jsonb_to_recordset(?::jsonb) AS k(id text,concept text,at timestamptz)), latest AS (SELECT id,concept,max(at) AS at FROM keys GROUP BY id,concept) DELETE FROM "MemoryNodes" n USING keys k WHERE n.id=k.id AND n.concept=k.concept AND n."createdAt"=k.at AND NOT EXISTS (SELECT 1 FROM latest l JOIN "MemoryNodes" newer ON newer.id=l.id AND newer.concept=l.concept AND newer."createdAt">l.at)`+guard, params...)
 		if e != nil {

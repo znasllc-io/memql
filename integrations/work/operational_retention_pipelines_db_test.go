@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"maps"
 	"slices"
 	"strconv"
@@ -36,6 +37,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/component/workjournal"
 )
 
 // The two people these fixtures belong to, spelled as the write path stores an
@@ -115,6 +117,43 @@ func seedWorkChild(t *testing.T, db *bun.DB, concept, name, runID string, at tim
 	insertSweepRow(t, db, id, concept, at.Add(-time.Minute), payload)
 	insertSweepRow(t, db, id, concept, at, payload)
 	return id
+}
+
+// pipelineGoal is the payload of the v1:work:goal the pipelines driver opens
+// for a run key: component/workjournal's Begin writes origin "system" and the
+// driver's RequestedVia, "pipeline".
+func pipelineGoal(owner string) map[string]any {
+	return map[string]any{"ownerUserId": owner, "statement": "Run acme-app on 3f9c2ab (push)", "origin": "system", "requestedVia": "pipeline"}
+}
+
+// seedGoal writes a v1:work:goal as the journal does over one run: open at
+// Begin, active once the run is opened, closed with the run -- the last at
+// `at`. Its id is canonical, as the write path stores a row id, and
+// seedPipelineWorkRun(name) names it.
+func seedGoal(t *testing.T, db *bun.DB, name string, at time.Time, base map[string]any) string {
+	t.Helper()
+	id := goalConcept + ":" + name
+	for k, status := range []string{"open", "active", "closed"} {
+		fields := maps.Clone(base)
+		fields["status"] = status
+		insertSweepRow(t, db, id, goalConcept, at.Add(time.Duration(k-2)*time.Minute), fields)
+	}
+	return id
+}
+
+// assertStillStored fails unless every version stored BEFORE is still stored;
+// a version written since is allowed.
+func assertStillStored(t *testing.T, db *bun.DB, before map[string]bool) {
+	t.Helper()
+	if len(before) == 0 {
+		t.Fatal("nothing was seeded; the assertion would pass over nothing")
+	}
+	now := storedKeys(t, db, idsOf(before)...)
+	for key := range before {
+		if !now[key] {
+			t.Errorf("version %s was deleted", key)
+		}
+	}
 }
 
 // ownedBy is a child's payload carrying an owner.
@@ -303,11 +342,12 @@ func (a *witnessArchive) objectBlobs() [][]byte {
 }
 
 // TestRetentionArchivesBeforeItDeletes is the rule's headline: a finished
-// pipeline's run -- the pipelines run row, the work run it compiled into and
-// that run's steps -- is archived, every version of it, the archive read back
-// and found intact, and only THEN deleted. What the run leaves that is not the
-// run's stays: the goal, and the Library file its step's log was archived to,
-// which is the owner's.
+// pipeline's run -- the pipelines run row, the work run it compiled into, that
+// run's steps, and (ruling R28) the goal once no run of it remains -- is
+// archived, every version of it, the archive read back and found intact, and
+// only THEN deleted, all in one sweep. What the run leaves that is not the
+// run's stays: the Library file its step's log was archived to, which is the
+// owner's.
 func TestRetentionArchivesBeforeItDeletes(t *testing.T) {
 	db, i := sweepDB(t)
 	ctx := retentionOwner()
@@ -322,13 +362,12 @@ func TestRetentionArchivesBeforeItDeletes(t *testing.T) {
 	logFile := "v1:library:file:finished-checks-log"
 	checks := seedWorkChild(t, db, "v1:work:step", "finished-checks", workRun, finished, ownedBy(pipelineOwner, "status", "done", "logFileId", logFile))
 	tests := seedWorkChild(t, db, "v1:work:step", "finished-tests", workRun, finished, ownedBy(pipelineOwner, "status", "skipped"))
-	goal := "v1:work:goal:finished"
-	insertSweepRow(t, db, goal, goalConcept, finished, map[string]any{"ownerUserId": pipelineOwner, "status": "closed", "requestedVia": "pipeline"})
+	goal := seedGoal(t, db, "finished", finished, pipelineGoal(pipelineOwner))
 	insertSweepRow(t, db, logFile, "v1:library:file", finished, map[string]any{"ownerUserId": pipelineOwner, "name": "checks.log"})
 
-	retired := []string{pipelinesRun, workRun, checks, tests}
+	retired := []string{pipelinesRun, workRun, checks, tests, goal}
 	before := storedKeys(t, db, retired...)
-	kept := storedKeys(t, db, goal, logFile)
+	kept := storedKeys(t, db, logFile)
 	archive := &witnessArchive{db: db}
 	i.SetArchiver(archive)
 
@@ -352,10 +391,10 @@ func TestRetentionArchivesBeforeItDeletes(t *testing.T) {
 	// DELETED SECOND: nothing of the run remains.
 	assertRetired(t, db, retired...)
 	// What is not the run's stays.
-	assertKeptWhole(t, db, kept, goal, logFile)
+	assertKeptWhole(t, db, kept, logFile)
 
 	deleted := 0
-	for _, concept := range []string{runConcept, pipelinesRunConcept} {
+	for _, concept := range []string{runConcept, pipelinesRunConcept, goalConcept} {
 		r := resultFor(t, results, concept, EnvPipelinesRunRetentionDays)
 		if r.RetentionDays != DefaultPipelinesRunRetentionDays {
 			t.Errorf("%s retained %d days, want the default %d", concept, r.RetentionDays, DefaultPipelinesRunRetentionDays)
@@ -374,61 +413,78 @@ func TestRetentionArchivesBeforeItDeletes(t *testing.T) {
 // archive that will not take the object, or one whose read-back is missing or
 // different, a finished pipeline run is kept whole and the sweep says why.
 //
-// Each case ends on the REACHABLE POSITIVE: the same rows, with the archive
-// repaired, are retired. So a kept run was kept because of the archive, never
-// because the policy did not match it.
+// Each population is seeded ALONE, so each of the three pipelines policies is
+// refused by its own archive step: the work run with its steps, the run row on
+// its own, and the goal on its own (no run of it left). The failing policy is
+// the last one reported. And each case ends on the REACHABLE POSITIVE: the same
+// rows, with the archive repaired, are retired -- so a kept row was kept
+// because of the archive, never because the policy did not match it.
 func TestRetentionRefusesToDeleteWithoutAnArchive(t *testing.T) {
-	for _, mode := range []string{"no archive container", "no archiver", "upload fails", "read-back fails", "read-back differs"} {
-		t.Run(mode, func(t *testing.T) {
-			db, i := sweepDB(t)
-			ctx := retentionOwner()
-			now := time.Now().UTC().Truncate(time.Second)
-			i.SetNow(func() time.Time { return now })
-			t.Setenv(EnvPipelinesRunRetentionDays, "")
-			t.Setenv(EnvArchiveContainer, "test-retention")
-			finished := now.AddDate(0, 0, -(DefaultPipelinesRunRetentionDays + 10))
-			workRun := seedPipelineWorkRun(t, db, "refused", pipelineOwner, "failed", finished)
-			ids := []string{
-				seedPipelinesRun(t, db, "refused", pipelineOwner, "completed", finished),
-				workRun,
-				seedWorkChild(t, db, "v1:work:step", "refused-tests", workRun, finished, ownedBy(pipelineOwner, "status", "failed")),
-			}
-			before := storedKeys(t, db, ids...)
+	populations := []struct {
+		name, concept string
+		seed          func(t *testing.T, db *bun.DB, at time.Time) []string
+	}{
+		{"work run and steps", runConcept, func(t *testing.T, db *bun.DB, at time.Time) []string {
+			workRun := seedPipelineWorkRun(t, db, "refused", pipelineOwner, "failed", at)
+			return []string{workRun, seedWorkChild(t, db, "v1:work:step", "refused-tests", workRun, at, ownedBy(pipelineOwner, "status", "failed"))}
+		}},
+		{"run row alone", pipelinesRunConcept, func(t *testing.T, db *bun.DB, at time.Time) []string {
+			return []string{seedPipelinesRun(t, db, "refused", pipelineOwner, "completed", at)}
+		}},
+		{"goal alone", goalConcept, func(t *testing.T, db *bun.DB, at time.Time) []string {
+			return []string{seedGoal(t, db, "refused", at, pipelineGoal(pipelineOwner))}
+		}},
+	}
+	for _, population := range populations {
+		for _, mode := range []string{"no archive container", "no archiver", "upload fails", "read-back fails", "read-back differs"} {
+			t.Run(population.name+"/"+mode, func(t *testing.T) {
+				db, i := sweepDB(t)
+				ctx := retentionOwner()
+				now := time.Now().UTC().Truncate(time.Second)
+				i.SetNow(func() time.Time { return now })
+				t.Setenv(EnvPipelinesRunRetentionDays, "")
+				t.Setenv(EnvArchiveContainer, "test-retention")
+				ids := population.seed(t, db, now.AddDate(0, 0, -(DefaultPipelinesRunRetentionDays+10)))
+				before := storedKeys(t, db, ids...)
 
-			archive := &verifyingArchive{}
-			i.SetArchiver(archive)
-			switch mode {
-			case "no archive container":
-				t.Setenv(EnvArchiveContainer, "")
-				t.Setenv(envBlobContainer, "")
-			case "no archiver":
-				i.SetArchiver(nil)
-			case "upload fails":
-				archive.fail = true
-			case "read-back fails":
-				archive.downloadFail = true
-			case "read-back differs":
-				archive.corrupt = true
-			}
-			_, err := i.operationalRetention(ctx, false)
-			if err == nil || !strings.Contains(err.Error(), "records preserved") {
-				t.Fatalf("want a refusal saying the records were preserved, got %v", err)
-			}
-			if after := storedKeys(t, db, ids...); !maps.Equal(after, before) {
-				t.Fatalf("deleted without a verified archive: %d of %d versions left", len(after), len(before))
-			}
-			if mode != "read-back differs" && mode != "read-back fails" && len(archive.objects) != 0 {
-				t.Fatalf("an object was written with %s", mode)
-			}
+				archive := &verifyingArchive{}
+				i.SetArchiver(archive)
+				switch mode {
+				case "no archive container":
+					t.Setenv(EnvArchiveContainer, "")
+					t.Setenv(envBlobContainer, "")
+				case "no archiver":
+					i.SetArchiver(nil)
+				case "upload fails":
+					archive.fail = true
+				case "read-back fails":
+					archive.downloadFail = true
+				case "read-back differs":
+					archive.corrupt = true
+				}
+				results, err := i.operationalRetention(ctx, false)
+				if err == nil || !strings.Contains(err.Error(), "records preserved") {
+					t.Fatalf("want a refusal saying the records were preserved, got %v", err)
+				}
+				if last := results[len(results)-1]; last.Concept != population.concept || last.Env != EnvPipelinesRunRetentionDays {
+					t.Fatalf("refused by the %s policy on %s, want %s's own", last.Concept, last.Env, population.concept)
+				}
+				if after := storedKeys(t, db, ids...); !maps.Equal(after, before) {
+					t.Fatalf("deleted without a verified archive: %d of %d versions left", len(after), len(before))
+				}
+				if mode != "read-back differs" && mode != "read-back fails" && len(archive.objects) != 0 {
+					t.Fatalf("an object was written with %s", mode)
+				}
 
-			// The archive repaired, the same rows go.
-			t.Setenv(EnvArchiveContainer, "test-retention")
-			i.SetArchiver(&verifyingArchive{})
-			if _, err := i.operationalRetention(ctx, false); err != nil {
-				t.Fatalf("with a working archive: %v", err)
-			}
-			assertRetired(t, db, ids...)
-		})
+				// The archive repaired, the same rows go.
+				t.Setenv(EnvArchiveContainer, "test-retention")
+				i.SetArchiver(&verifyingArchive{})
+				if _, err := i.operationalRetention(ctx, false); err != nil {
+					t.Fatalf("with a working archive: %v", err)
+				}
+				assertRetired(t, db, ids...)
+			})
+		}
 	}
 }
 
@@ -747,9 +803,9 @@ func TestRetentionPipelinesWindowHonorsAStoredGlobalVariable(t *testing.T) {
 
 // TestRetentionSeesPipelinesRunsOnlyUnderTheMaintenancePrincipal: the reads
 // pass the PRODUCTION row gate here, not the admit-all the other tests use.
-// v1:pipelines:run declares the composite owner tier with the account
-// argument, so the sweep sees a person's run only as the cluster's
-// maintenance principal -- the one component/auth/maintenance_actor.go
+// v1:pipelines:run and v1:work:goal declare the composite owner tier with the
+// account argument, so the sweep sees a person's run and goal only as the
+// cluster's maintenance principal -- the one component/auth/maintenance_actor.go
 // already names for workJournalRetentionSweep. The negative controls are what
 // make the pass mean something: an unenforced tier would admit every caller.
 func TestRetentionSeesPipelinesRunsOnlyUnderTheMaintenancePrincipal(t *testing.T) {
@@ -770,28 +826,37 @@ func TestRetentionSeesPipelinesRunsOnlyUnderTheMaintenancePrincipal(t *testing.T
 	insertSweepRow(t, db, run, pipelinesRunConcept, old.Add(time.Second), map[string]any{"ownerUserId": pipelineOwner, "accountId": "v1:accounts:account:acme", "status": "completed", "conclusion": "success"})
 	workRun := seedPipelineWorkRun(t, db, "tiered", pipelineOwner, "succeeded", old)
 	step := seedWorkChild(t, db, "v1:work:step", "tiered", workRun, old, ownedBy(pipelineOwner, "status", "done"))
-	before := storedKeys(t, db, run, workRun, step)
+	goalFields := pipelineGoal(pipelineOwner)
+	goalFields["accountIds"] = []string{"v1:accounts:account:acme"}
+	goal := seedGoal(t, db, "tiered", old, goalFields)
+	before := storedKeys(t, db, run, workRun, step, goal)
 
-	var payload []byte
-	if err := db.QueryRowContext(context.Background(), `SELECT payload FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, run).Scan(&payload); err != nil {
-		t.Fatal(err)
+	latest := func(id, concept string) memorynodes.MemoryNode {
+		t.Helper()
+		var payload []byte
+		if err := db.QueryRowContext(context.Background(), `SELECT payload FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, id).Scan(&payload); err != nil {
+			t.Fatal(err)
+		}
+		return memorynodes.MemoryNode{ID: id, Concept: concept, Type: memorynodes.NodeTypeObject, CreatedAt: old, Payload: payload}
 	}
-	row := memorynodes.MemoryNode{ID: run, Concept: pipelinesRunConcept, Type: memorynodes.NodeTypeObject, CreatedAt: old, Payload: payload}
+	rows := []memorynodes.MemoryNode{latest(run, pipelinesRunConcept), latest(goal, goalConcept)}
 
 	// THE NEGATIVE CONTROLS. An automation that is not on the maintenance
 	// list runs as a reader: the handler floor refuses it, and the tier would
-	// hide the row from it anyway.
+	// hide the rows from it anyway.
 	reader := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "system:automation:workJournalRetentionSweep", Role: auth.RoleReader, Unranked: true, Synthetic: true})
 	if _, err := i.operationalRetention(reader, false); err == nil {
 		t.Fatal("a reader actor ran the sweep")
 	}
-	if memqlengine.AdmitSourceRow(reader, row) {
-		t.Fatal("the tier admitted a reader to a person's pipelines run; the maintenance principal would prove nothing")
+	for _, row := range rows {
+		if memqlengine.AdmitSourceRow(reader, row) {
+			t.Fatalf("the tier admitted a reader to a person's %s; the maintenance principal would prove nothing", row.Concept)
+		}
+		if memqlengine.AdmitSourceRow(actorCtx("somebody-else"), row) {
+			t.Fatalf("the tier admitted a stranger to a person's %s", row.Concept)
+		}
 	}
-	if memqlengine.AdmitSourceRow(actorCtx("somebody-else"), row) {
-		t.Fatal("the tier admitted a stranger to a person's pipelines run")
-	}
-	if after := storedKeys(t, db, run, workRun, step); !maps.Equal(after, before) {
+	if after := storedKeys(t, db, run, workRun, step, goal); !maps.Equal(after, before) {
 		t.Fatal("a refused sweep deleted rows")
 	}
 
@@ -800,16 +865,20 @@ func TestRetentionSeesPipelinesRunsOnlyUnderTheMaintenancePrincipal(t *testing.T
 	if auth.MaintenanceActor("workJournalRetentionSweep") == nil {
 		t.Fatal("workJournalRetentionSweep is not on the maintenance list")
 	}
-	if !memqlengine.AdmitSourceRow(ctx, row) {
-		t.Fatal("the maintenance principal cannot see a person's pipelines run; the sweep would retire nothing, silently")
+	for _, row := range rows {
+		if !memqlengine.AdmitSourceRow(ctx, row) {
+			t.Fatalf("the maintenance principal cannot see a person's %s; the sweep would retire nothing, silently", row.Concept)
+		}
 	}
 	results, err := i.operationalRetention(ctx, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRetired(t, db, run, workRun, step)
-	if r := resultFor(t, results, pipelinesRunConcept, EnvPipelinesRunRetentionDays); r.Candidates != 1 {
-		t.Errorf("the pipelines-run policy saw %d candidates, want 1", r.Candidates)
+	assertRetired(t, db, run, workRun, step, goal)
+	for _, concept := range []string{pipelinesRunConcept, goalConcept} {
+		if r := resultFor(t, results, concept, EnvPipelinesRunRetentionDays); r.Candidates != 1 {
+			t.Errorf("the %s policy saw %d candidates, want 1", concept, r.Candidates)
+		}
 	}
 }
 
@@ -872,6 +941,63 @@ FROM generate_series(1, ?) r CROSS JOIN generate_series(1, ?) v`,
 		}
 	})
 
+	t.Run("a full batch of work runs with their steps is retired in halves, and no step goes without its run", func(t *testing.T) {
+		db, i, archive, finished := setup(t)
+		// Two run versions and three per step: a hundred runs of 35 steps is
+		// 10,700 versions in one candidate batch.
+		const steps = 35
+		perRun := 2 + 3*steps
+		if retirementBatchSize*perRun <= retirementMaxVersions {
+			t.Fatalf("a batch of %d runs of %d versions fits one object; it would prove nothing", retirementBatchSize, perRun)
+		}
+		ctx := context.Background()
+		if _, err := db.ExecContext(ctx, `INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",type,schema,payload)
+SELECT ?||r, ?, ?::timestamptz - (2 - v) * interval '1 minute', 'sweep-test', 'object', '{}',
+       jsonb_build_object('ownerUserId', ?::text, 'triggeredBy', ?::text, 'status', CASE WHEN v = 2 THEN 'succeeded' ELSE 'running' END)
+FROM generate_series(1, ?) r CROSS JOIN generate_series(1, 2) v`,
+			runConcept+":wide-", runConcept, finished, pipelineOwner, pipelines.WorkTriggerPrefix+"full", retirementBatchSize); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",type,schema,payload)
+SELECT 'v1:work:step:wide-'||r||'-'||s, 'v1:work:step', ?::timestamptz - (3 - v) * interval '1 second', 'sweep-test', 'object', '{}',
+       jsonb_build_object('ownerUserId', ?::text, 'runId', ?||r, 'status', (ARRAY['pending','running','done'])[v])
+FROM generate_series(1, ?) r CROSS JOIN generate_series(1, ?) s CROSS JOIN generate_series(1, 3) v`,
+			finished, pipelineOwner, runConcept+":wide-", retirementBatchSize, steps); err != nil {
+			t.Fatal(err)
+		}
+		// Beside them, two runs a stranger's step keeps: each must keep EVERY
+		// one of its own steps too.
+		var held []string
+		for _, name := range []string{"held-1", "held-2"} {
+			run := seedPipelineWorkRun(t, db, name, pipelineOwner, "succeeded", finished)
+			held = append(held, run,
+				seedWorkChild(t, db, "v1:work:step", name+"-a", run, finished, ownedBy(pipelineOwner, "status", "done")),
+				seedWorkChild(t, db, "v1:work:step", name+"-b", run, finished, ownedBy(pipelineOwner, "status", "done")),
+				seedWorkChild(t, db, "v1:work:step", name+"-stranger", run, finished, ownedBy(strangerOwner, "status", "done")))
+		}
+		before := storedKeys(t, db, held...)
+
+		results, err := i.operationalRetention(retentionOwner(), false)
+		if err != nil {
+			t.Fatalf("an overflowing batch stopped the sweep: %v", err)
+		}
+		var wide, orphaned int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM "MemoryNodes" WHERE id LIKE 'v1:work:run:wide-%' OR id LIKE 'v1:work:step:wide-%'`).Scan(&wide); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM "MemoryNodes" s WHERE s.concept='v1:work:step' AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" r WHERE r.concept='v1:work:run' AND r.id=s.payload->>'runId')`).Scan(&orphaned); err != nil {
+			t.Fatal(err)
+		}
+		if wide != 0 || orphaned != 0 {
+			t.Fatalf("%d versions of the wide runs and their steps were left, and %d step versions outlived their run", wide, orphaned)
+		}
+		assertKeptWhole(t, db, before, held...)
+		r := resultFor(t, results, runConcept, EnvPipelinesRunRetentionDays)
+		if r.DeletedVersions != retirementBatchSize*perRun || len(r.Objects) < 2 || len(archive.objects) != len(r.Objects) || len(r.Oversized) != 0 {
+			t.Fatalf("result %+v with %d objects stored, want %d versions deleted across at least two objects", r, len(archive.objects), retirementBatchSize*perRun)
+		}
+	})
+
 	t.Run("a record too large for one object is kept whole and the rest go", func(t *testing.T) {
 		db, i, _, finished := setup(t)
 		seedWide(t, db, "small-", 3, 2, finished)
@@ -892,4 +1018,300 @@ FROM generate_series(1, ?) r CROSS JOIN generate_series(1, ?) v`,
 			t.Fatalf("oversized = %v, want %v", r.Oversized, want)
 		}
 	})
+}
+
+// TestJournalRetentionSplitsABatchLargerThanOneArchiveObject (ruling R27b).
+// RetentionSweep runs the journal's model-call and observation detail FIRST
+// and returned on its error, so one journal batch over an archive object's
+// budget failed the night AND skipped every operational policy after it, the
+// pipelines ones included. The journal loop now splits through the same
+// retireSplitting; a finished pipelines run seeded beside the journal rows is
+// the proof that the night goes on past them.
+func TestJournalRetentionSplitsABatchLargerThanOneArchiveObject(t *testing.T) {
+	seedJournal := func(t *testing.T, db *bun.DB, prefix string, ids, versions int, at time.Time) {
+		t.Helper()
+		// No runId: the summary fold reads nothing, so no engine is needed.
+		if _, err := db.ExecContext(context.Background(), `INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",type,schema,payload)
+SELECT ?||r, ?, ?::timestamptz - (? - v) * interval '1 second', 'sweep-test', 'object', '{}', jsonb_build_object('ownerUserId', '', 'inputTokens', v)
+FROM generate_series(1, ?) r CROSS JOIN generate_series(1, ?) v`,
+			modelCallConcept+":"+prefix, modelCallConcept, at, versions, ids, versions); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stored := func(t *testing.T, db *bun.DB, prefix string) int {
+		t.Helper()
+		var n int
+		if err := db.QueryRowContext(context.Background(), `SELECT count(*) FROM "MemoryNodes" WHERE id LIKE ?`, modelCallConcept+":"+prefix+"%").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	setup := func(t *testing.T) (*bun.DB, *Integration, time.Time, string) {
+		db, i := sweepDB(t)
+		now := time.Now().UTC().Truncate(time.Second)
+		i.SetNow(func() time.Time { return now })
+		t.Setenv(EnvArchiveContainer, "test-retention")
+		t.Setenv(EnvModelCallRetentionDays, "")
+		t.Setenv(EnvObservationRetentionDays, "")
+		t.Setenv(EnvPipelinesRunRetentionDays, "")
+		i.SetArchiver(&verifyingArchive{})
+		after := seedPipelinesRun(t, db, "after-the-journal", pipelineOwner, "completed", now.AddDate(0, 0, -(DefaultPipelinesRunRetentionDays+10)))
+		return db, i, now.AddDate(0, 0, -(DefaultModelCallRetentionDays + 10)), after
+	}
+
+	t.Run("a full batch that overflows one object is retired in halves, and the night goes on", func(t *testing.T) {
+		db, i, old, after := setup(t)
+		perRow := retirementMaxVersions/retirementBatchSize + 1
+		seedJournal(t, db, "wide-", retirementBatchSize, perRow, old)
+		if n := stored(t, db, "wide-"); n <= retirementMaxVersions {
+			t.Fatalf("the fixture holds %d versions, which one object takes; it would prove nothing", n)
+		}
+
+		res, err := i.RetentionSweep(retentionOwner(), false)
+		if err != nil {
+			t.Fatalf("an overflowing journal batch failed the night: %v", err)
+		}
+		if n := stored(t, db, "wide-"); n != 0 {
+			t.Fatalf("%d journal versions were left behind", n)
+		}
+		assertRetired(t, db, after)
+		if res.JournalCandidates != retirementBatchSize || len(res.Oversized) != 0 || len(res.Objects) < 3 {
+			t.Fatalf("result %+v: want %d journal candidates retired across at least two objects, plus the run row's", res, retirementBatchSize)
+		}
+	})
+
+	t.Run("a record too large for one object is kept whole and named, and the rest go", func(t *testing.T) {
+		db, i, old, after := setup(t)
+		seedJournal(t, db, "small-", 3, 2, old)
+		seedJournal(t, db, "oversized", 1, retirementMaxVersions+1, old)
+
+		res, err := i.RetentionSweep(retentionOwner(), false)
+		if err != nil {
+			t.Fatalf("one oversized journal record failed the night: %v", err)
+		}
+		if n := stored(t, db, "small-"); n != 0 {
+			t.Fatalf("%d versions of the ordinary rows were left behind the oversized one", n)
+		}
+		if n := stored(t, db, "oversized"); n != retirementMaxVersions+1 {
+			t.Fatalf("the oversized row kept %d of its %d versions; it has no archive and must be kept whole", n, retirementMaxVersions+1)
+		}
+		if want := []string{modelCallConcept + ":oversized1"}; !slices.Equal(res.Oversized, want) {
+			t.Fatalf("oversized = %v, want %v", res.Oversized, want)
+		}
+		assertRetired(t, db, after)
+	})
+}
+
+// TestRetentionRetiresAPipelineGoalOnceNoRunOfItRemains (ruling R28), with the
+// REAL writers: component/workjournal opens the goals, runs and steps exactly
+// as the pipelines driver does, through the real engine and the production row
+// gate. So the goalId spelling the sweep has to match is the one a run
+// actually stores, not one a fixture chose. A goal run twice goes in the same
+// sweep as its last run; a goal whose run is still in flight stays with it.
+func TestRetentionRetiresAPipelineGoalOnceNoRunOfItRemains(t *testing.T) {
+	db, i := sweepDB(t)
+	eng := dispatchDBEngine(t, db)
+	i.engine, i.admitRow = eng, memqlengine.AdmitSourceRow
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	t.Setenv(EnvPipelinesRunRetentionDays, "")
+	i.SetArchiver(&verifyingArchive{})
+	ctx := context.Background()
+	journal := workjournal.New(workjournal.ExecutorFunc(func(ctx context.Context, q string) (any, error) {
+		return eng.Execute(ctx, q)
+	}), slog.New(slog.NewTextHandler(io.Discard, nil)), "agent-1")
+	open := func(goalKey, attempt string) *workjournal.Run {
+		t.Helper()
+		run, err := journal.Begin(ctx, workjournal.Work{
+			OwnerUserID: "pipeline-goal-owner", Template: "pipeline:acme-app", Statement: "Run acme-app on 3f9c2ab (push)",
+			GoalKey: goalKey, RunKey: attempt, RequestedVia: "pipeline", TriggeredBy: pipelines.WorkTriggerPrefix + "full",
+			QueueSteps: true,
+			Steps: []workjournal.StepDecl{{Key: "checks.vet", Kind: workjournal.KindDeterministic, StepType: "exec",
+				Call: map[string]any{"construct": "pipeline", "name": "vet", "stage": "checks"}}},
+		})
+		if err != nil || run == nil {
+			t.Fatalf("the journal could not open the pipeline's run: %v", err)
+		}
+		return run
+	}
+	finish := func(run *workjournal.Run) {
+		run.Step(ctx, "checks.vet").Done(ctx, map[string]any{"exitCode": 0})
+		run.Succeeded(ctx, map[string]any{"conclusion": "success"})
+	}
+	// A goal run twice -- a re-run is a second run of the same goal -- both finished.
+	first := open("p|finished", "1")
+	finish(first)
+	second := open("p|finished", "2")
+	finish(second)
+	// And a goal whose run is still in flight.
+	live := open("p|live", "1")
+
+	family := func(run *workjournal.Run) (goal string, ids []string) {
+		t.Helper()
+		goal = goalConcept + ":" + run.GoalID()
+		runID := runConcept + ":" + run.RunID()
+		rows, err := db.QueryContext(ctx, `SELECT DISTINCT id FROM "MemoryNodes" WHERE concept='v1:work:step' AND payload->>'runId'=?`, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		ids = []string{runID}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, id)
+		}
+		if len(ids) != 2 {
+			t.Fatalf("run %s: want the run and its one step stored, found %v", runID, ids)
+		}
+		var stored string
+		if err := db.QueryRowContext(ctx, `SELECT payload->>'goalId' FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, runID).Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("run %s stores goalId %q; its goal's row id is %q", runID, stored, goal)
+		return goal, ids
+	}
+	finishedGoal, firstIDs := family(first)
+	_, secondIDs := family(second)
+	liveGoal, liveIDs := family(live)
+	retired := append(append([]string{finishedGoal}, firstIDs...), secondIDs...)
+	kept := append([]string{liveGoal}, liveIDs...)
+	if len(storedKeys(t, db, finishedGoal)) == 0 || len(storedKeys(t, db, liveGoal)) == 0 {
+		t.Fatal("the goals are not stored under their canonical ids; the assertions below would pass over nothing")
+	}
+	before := storedKeys(t, db, kept...)
+
+	// The sweep's clock moves past the window: every row above is now old.
+	i.SetNow(func() time.Time { return time.Now().UTC().AddDate(0, 0, DefaultPipelinesRunRetentionDays+15) })
+	results, err := i.operationalRetention(retentionOwner(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRetired(t, db, retired...)
+	assertKeptWhole(t, db, before, kept...)
+	if r := resultFor(t, results, goalConcept, EnvPipelinesRunRetentionDays); r.Candidates != 1 || r.DeletedVersions == 0 {
+		t.Errorf("the goal policy reported %+v, want the finished goal alone, retired", r)
+	}
+}
+
+// TestRetentionKeepsAPipelineGoalWhileARunOfItRemains (ruling R28): a
+// pipeline's goal goes only once no v1:work:run names it -- in EITHER
+// spelling, canonical as the relationship stores it or bare as an older row
+// might -- and only a pipeline's goal goes at all.
+func TestRetentionKeepsAPipelineGoalWhileARunOfItRemains(t *testing.T) {
+	db, i := sweepDB(t)
+	ctx := retentionOwner()
+	now := time.Now().UTC().Truncate(time.Second)
+	i.SetNow(func() time.Time { return now })
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	t.Setenv(EnvPipelinesRunRetentionDays, "")
+	i.SetArchiver(&verifyingArchive{})
+	old := now.AddDate(0, 0, -(DefaultPipelinesRunRetentionDays + 10))
+	runOf := func(name, goalID, status string) string {
+		return seedWorkRun(t, db, name, status, old, map[string]any{
+			"ownerUserId": pipelineOwner, "goalId": goalID, "automationName": "pipeline:acme-app",
+			"triggeredBy": pipelines.WorkTriggerPrefix + "full",
+		})
+	}
+
+	// The reachable positives: a goal no run was ever opened for, and one
+	// whose only run finished -- that run goes first, in the same sweep.
+	retired := []string{
+		seedGoal(t, db, "orphan", old, pipelineGoal(pipelineOwner)),
+		seedGoal(t, db, "ran-out", old, pipelineGoal(pipelineOwner)),
+		runOf("ran-out", goalConcept+":ran-out", runStatusSucceeded),
+	}
+	notPipeline := pipelineGoal(pipelineOwner)
+	notPipeline["requestedVia"], notPipeline["origin"] = "api", "user"
+	userOrigin := pipelineGoal(pipelineOwner)
+	userOrigin["origin"] = "user"
+	kept := []string{
+		// A run of it remains, naming it canonically...
+		seedGoal(t, db, "canonical", old, pipelineGoal(pipelineOwner)), runOf("canonical", goalConcept+":canonical", runStatusRunning),
+		// ...or bare.
+		seedGoal(t, db, "bare", old, pipelineGoal(pipelineOwner)), runOf("bare", "bare", runStatusRunning),
+		// Not a pipeline's goal: goals are not on the list.
+		seedGoal(t, db, "not-a-pipeline", old, notPipeline),
+		seedGoal(t, db, "user-origin", old, userOrigin),
+		// Its latest version is inside the window.
+		seedGoal(t, db, "recent", now.AddDate(0, 0, -2), pipelineGoal(pipelineOwner)),
+	}
+	before := storedKeys(t, db, kept...)
+
+	results, err := i.operationalRetention(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRetired(t, db, retired...)
+	assertKeptWhole(t, db, before, kept...)
+	// The SQL half: a goal a run still names is not even a candidate, in
+	// either spelling.
+	if r := resultFor(t, results, goalConcept, EnvPipelinesRunRetentionDays); r.Candidates != 2 {
+		t.Errorf("the goal policy read %d candidates, want only the orphan and the goal whose run went first", r.Candidates)
+	}
+}
+
+// TestRetentionKeepsAGoalWhoseRunIsOpenedAfterTheArchive (ruling R28): the
+// candidate read found a pipeline goal with no run, and a run of it is opened
+// before the delete. The pipelines driver opens a new run of an old goal by
+// writing the goal again and then the run; a run may also arrive on its own,
+// naming the goal either way. Every shape leaves the goal in place: the
+// archive was written, and nothing was deleted.
+func TestRetentionKeepsAGoalWhoseRunIsOpenedAfterTheArchive(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		exact bool // only a run is written, so the goal's versions are exactly as before
+		open  func(t *testing.T, db *bun.DB, goal string, at time.Time)
+	}{
+		{"the driver's order: the goal written again, then its run", false, func(t *testing.T, db *bun.DB, goal string, at time.Time) {
+			fields := pipelineGoal(pipelineOwner)
+			fields["status"] = "open"
+			insertSweepRow(t, db, goal, goalConcept, at, fields)
+			seedWorkRun(t, db, "raced", runStatusRunning, at, map[string]any{"ownerUserId": pipelineOwner, "goalId": goal, "triggeredBy": pipelines.WorkTriggerPrefix + "full"})
+		}},
+		{"a run alone, naming the goal canonically", true, func(t *testing.T, db *bun.DB, goal string, at time.Time) {
+			seedWorkRun(t, db, "raced", runStatusRunning, at, map[string]any{"ownerUserId": pipelineOwner, "goalId": goal, "triggeredBy": pipelines.WorkTriggerPrefix + "full"})
+		}},
+		{"a run alone, naming the goal bare", true, func(t *testing.T, db *bun.DB, goal string, at time.Time) {
+			seedWorkRun(t, db, "raced", runStatusRunning, at, map[string]any{"ownerUserId": pipelineOwner, "goalId": strings.TrimPrefix(goal, goalConcept+":"), "triggeredBy": pipelines.WorkTriggerPrefix + "full"})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, i := sweepDB(t)
+			ctx := retentionOwner()
+			now := time.Now().UTC().Truncate(time.Second)
+			i.SetNow(func() time.Time { return now })
+			t.Setenv(EnvArchiveContainer, "test-retention")
+			t.Setenv(EnvPipelinesRunRetentionDays, "")
+			goal := seedGoal(t, db, "raced", now.AddDate(0, 0, -(DefaultPipelinesRunRetentionDays+10)), pipelineGoal(pipelineOwner))
+			before := storedKeys(t, db, goal)
+			opened := false
+			archive := &verifyingArchive{afterUpload: func() {
+				if !opened {
+					opened = true
+					tc.open(t, db, goal, now)
+				}
+			}}
+			i.SetArchiver(archive)
+
+			results, err := i.operationalRetention(ctx, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := resultFor(t, results, goalConcept, EnvPipelinesRunRetentionDays)
+			// The race was real: the goal WAS a candidate and WAS archived.
+			if !opened || r.Candidates != 1 || len(archive.objects) != 1 {
+				t.Fatalf("the goal was never archived (%+v, %d objects); the race did not happen", r, len(archive.objects))
+			}
+			if r.DeletedVersions != 0 {
+				t.Fatalf("deleted %d versions of a goal a run was opened for", r.DeletedVersions)
+			}
+			if tc.exact {
+				assertKeptWhole(t, db, before, goal)
+			} else {
+				assertStillStored(t, db, before)
+			}
+		})
+	}
 }
