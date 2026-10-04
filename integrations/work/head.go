@@ -170,6 +170,8 @@ func reassertion(row map[string]any, version int) map[string]any {
 		"externalKey":       rowString(row, "externalKey"),
 		"input":             objectOrEmpty(row, "input"),
 		"fingerprint":       objectOrEmpty(row, "fingerprint"),
+		"logFileId":         rowString(row, "logFileId"),
+		"artifactFileIds":   stringsOrEmpty(rowStringSlice(row, "artifactFileIds")),
 	}
 	// resumeAt is a datetime, and an empty string is not one: it is named
 	// only when the version had a timer wait. A head moves only on a finished
@@ -187,6 +189,15 @@ func objectOrEmpty(row map[string]any, key string) map[string]any {
 		return m
 	}
 	return map[string]any{}
+}
+
+// stringsOrEmpty is a stored list field, or [] -- an explicit empty list,
+// which call() renders, rather than a nil one, which it drops.
+func stringsOrEmpty(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
 }
 
 // staleList renders the stale steps, [] when there are none: `[]` is how a
