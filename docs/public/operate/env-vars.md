@@ -641,9 +641,9 @@ MemQL OS Logs app reads them (epic memql#4893). Runbook: [Logs](logs.md).
 
 The pipelines substrate runs each command step of a pipeline run as a Kubernetes
 Job, created by the workbench node, or on one of the owner's machines,
-dispatched by the agent node (epic memql#5478). Registered `component: pipelines`, all
-optional; the pipelines component's `memql-pipelines` ConfigMap sets the first
-two on the workbench. Runbook:
+dispatched by the agent node (epic memql#5478). Registered
+`component: pipelines`, all optional; the pipelines component's
+`memql-pipelines` ConfigMap sets the first two on the workbench. Runbook:
 [Pipelines substrate](pipelines-substrate.md#environment-variables).
 
 | Variable                              | Default             | Purpose |

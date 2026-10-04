@@ -760,8 +760,8 @@ too, and says so: `ci.yml`'s lane stays the gate for it.
 
 `ghcr.io/znasllc-io/memql-toolchain` is what the engine's pipeline runs in,
 built from `deploy/toolchain-image/Dockerfile` by `build-toolchain-image.yml`:
-dispatched on main only, smoke-tested before it is pushed, one image per
-immutable tag, `linux/amd64` only. It carries:
+dispatched on main only, smoke-tested before it is pushed, a published tag
+never replaced unless the dispatch says so, `linux/amd64` only. It carries:
 
 - Go 1.27.1 (`go.work`'s toolchain line), Node 22, protoc 33.4 and kubectl
   1.32.13 (the minor of the local cluster's k3s); a test holds Go, protoc and

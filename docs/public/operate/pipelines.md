@@ -730,9 +730,10 @@ and a runner is registered on the agent node reporting it. Until then it says
 which are missing. Every agent node registers a runner, so that fact cannot
 tell whether a workbench replica can run steps, or whether the cluster passes
 the substrate's isolation proof
-([Known limitations](pipelines-substrate.md#known-limitations)). It cannot see whether an installation accepted checks write,
-which is a fact per installation: a run that could not write its check run says
-so itself ([The check run](#the-check-run)).
+([Known limitations](pipelines-substrate.md#known-limitations)). Nor can the
+item see whether an installation accepted checks write, which is a fact per
+installation: a run that could not write its check run says so itself
+([The check run](#the-check-run)).
 Nothing needs the item, so the first-run wizard does not walk it, and an owner
 may answer *Not now*.
 
@@ -755,13 +756,13 @@ before a run finds out by failing to report.
 ## What runs today
 
 This release is the seam (epic memql#5477), MemQL OS's surfaces for it (epic
-memql#5479) and the substrate that executes its steps (epic memql#5478):
+memql#5479) and the substrate that executes a run's steps (epic memql#5478):
 deliveries, the poll, run keys, the plan, the work goal, the check run, the
 Runs tab, run page, Checks and connect flow, and every command step run as a
 Kubernetes Job on the cluster, or on one of the owner's machines for a step
-naming a need, with its logs in the log store and its log and artifacts in the
-owner's Library ([Pipelines substrate](pipelines-substrate.md)). One thing
-waits for a later epic:
+naming a need, with its output in the log store and its full log and artifacts
+in the owner's Library ([Pipelines substrate](pipelines-substrate.md)). One
+thing waits for a later epic:
 
 | Not yet | Arrives with | Until then |
 |---|---|---|
