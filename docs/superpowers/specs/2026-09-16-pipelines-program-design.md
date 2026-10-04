@@ -505,7 +505,10 @@ open. The operator's account is `docs/public/operate/pipelines.md`.
   every use, after `verifyGrantRepository` confirms the grant still reaches
   the repository. A pipeline records the grant it mints under and the
   installation it was connected under, and a delivery from any other
-  installation opens nothing; a pasted token cannot drive a pipeline. (2) The
+  installation opens nothing; a pasted token cannot drive a pipeline. A
+  delivery through no installation -- a repository webhook, which Deployables'
+  update feed documents on the same inbound seam -- is ignored, never an error,
+  so the trigger automation does not fail on every push it posts. (2) The
   workbench does not clone. Deployables fetches a source through GitHub's
   tarball API and hands the workbench a tar.gz of the tree, inline or by blob
   reference; a pipeline run reads the tree the same way, keeping only
@@ -548,8 +551,12 @@ open. The operator's account is `docs/public/operate/pipelines.md`.
   over every `.go` file: the union over build tags, test imports included, a
   superset of any one build's graph, which is the safe direction. A file that
   does not parse, a compare that failed or listed 300 files, and an empty
-  change list each mean everything. Shards balance on a timing table merged
-  from every successful full run.
+  change list each mean everything. An import of a path under one of the
+  tree's own modules stays an edge when no package answers it, and a changed
+  path whose directory holds no package seeds every package importing the path
+  that directory would have: a change that deletes a package selects what
+  still imports it, rather than nothing. Shards balance on a timing table
+  merged from every successful full run.
 - **Where a run is driven (D11).** The trigger opens a `queued` run where it
   fires, the bff for a webhook and an agent replica for the poll; an agent
   replica claims it under a row lease (renewed every 30 seconds, stale after
@@ -558,9 +565,15 @@ open. The operator's account is `docs/public/operate/pipelines.md`.
   (`triggeredBy: pipeline:<mode>`): the work dispatcher never takes it, the
   spine's waiting sweep skips it, and Nexus's re-run and branch refuse it in
   favour of `pipelinesRerun`.
-- **One pipeline per source (D12).** A pipeline hangs off a
-  `v1:platform:package`, its id derived from the package's, and its owner is
-  the package's owner, whose grant mints every token.
+- **One pipeline per source, and one per repository (D12).** A pipeline hangs
+  off a `v1:platform:package`, its id derived from the package's, and its owner
+  is the package's owner, whose grant mints every token. A repository has one
+  active pipeline: two would write two same-named check runs on every commit,
+  so connect refuses a second source's with `pipeline_already_connected`,
+  checked again under the repository's gate before the write, and the remedy it
+  names is to disconnect the other source's pipeline (or work from that
+  source). A disconnected pipeline blocks nothing, and its runs stay as
+  history.
 - **The first poll records a baseline (D4)** and opens nothing; runs start with
   the next change, as they do under webhook delivery by construction.
 - **The check run (D4):** named `MemQL / <pipeline name>`, its `external_id`

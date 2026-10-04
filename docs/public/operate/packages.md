@@ -535,7 +535,7 @@ rollback button performs.
 Two feeds, one effect. Both write exactly `latestKnownVersion` and
 `updateAvailable` on the package row, and **neither ever deploys anything**.
 
-- **Webhook (preferred).** GitHub pushes and published releases arrive
+- **Webhook (preferred).** GitHub pushes and releases arrive
   through the existing `POST /inbound/{source}` seam -- deny-by-default source allowlist plus
   per-source HMAC (memql#2957). No new HTTP route. Point a repository webhook
   at `https://api.<domain>/inbound/github`, add `github` to

@@ -32,6 +32,12 @@ not the order a deploy runs in, which [Packages](packages.md#the-order-and-why-i
 also calls a pipeline: a pipeline here checks commits, and never starts a
 deploy by itself.
 
+**A repository has one pipeline.** Two would write two check runs of the same
+name on every commit, so connecting a repository that another source's pipeline
+already runs is refused `pipeline_already_connected`. To move a repository's
+checks to another source, disconnect the pipeline it has first
+([Connecting a pipeline](#connecting-a-pipeline)).
+
 | Row | One per | What it holds |
 |---|---|---|
 | `v1:pipelines:pipeline` | source | The repository, how deliveries arrive, where steps may run, which secrets they may resolve, what the poll has seen, the timing table. Never the manifest: every run reads that at its own commit |
@@ -82,18 +88,29 @@ or from an SDK: `pipelinesConnect({ packageId, delivery })` on the TS
 | `compute` | `cluster`, the default, or `cluster_and_fleet` | Where steps may run ([Compute](#compute)) |
 | `secretNames` | a list of names | The secrets steps may resolve: the owner's allowlist ([Secrets](#secrets)). A name beginning `MEMQL_` is refused |
 
-Connect proves the source's connection still reaches the repository by minting
-an installation token through it, reads the default branch's head and the
-manifest there, and validates the block. A source with no block is refused
+Before any request leaves the cluster, connect refuses a repository another
+source's pipeline already runs, `pipeline_already_connected`: a repository has
+one pipeline, so its checks are reported once per commit. The remedy is to
+disconnect the other source's pipeline -- its owner does, with
+`pipelinesDisconnect` -- or to work from that source. The refusal says that such
+a pipeline exists and nothing about whose it is; a disconnected pipeline blocks
+nothing.
+
+Connect then proves the source's connection still reaches the repository by
+minting an installation token through it, reads the default branch's head and
+the manifest there, and validates the block. A source with no block is refused
 `pipeline_not_declared`, and a block that does not validate is refused with its
 own code ([Refusal codes](#refusal-codes)), so a block that can never compile is
 never connected; a manifest that does not parse at all is refused
-`package_manifest_invalid`, as it is for a deploy. Whether a step's secrets are
-allowed and its needs consented to is asked of every run, against the stages
-that run ([Secrets](#secrets), [Compute](#compute)). The connection's own
-failures are the ones a fetch gives -- `credential_not_found` (the source
-fetches under a pasted token, or names no connection), `credential_revoked`,
-`reconnect_required`, `repository_not_installed`, `installation_pending`,
+`package_manifest_invalid`, as it is for a deploy. Connect also asks what this
+connection allows of every step, whatever event would plan it: a step naming a
+need on a `cluster` pipeline, or a secret `secretNames` does not hold, is
+refused with its own code now rather than on the first push that reaches it,
+and every run asks again of the stages it runs ([Secrets](#secrets),
+[Compute](#compute)). The connection's own failures are the ones a fetch gives
+-- `credential_not_found` (the source fetches under a pasted token, or names no
+connection), `credential_revoked`, `reconnect_required`,
+`repository_not_installed`, `installation_pending`,
 `github_app_not_configured` -- as
 [GitHub Connect](github-connect.md#what-a-person-sees) describes them.
 
@@ -106,11 +123,14 @@ Afterwards:
 - **Reconnect** with the same call. The pipeline keeps its id; the call restates
   delivery, compute and the allowed secret names and reactivates a
   disconnected pipeline, while what the poll has seen and the timing table
-  carry over. Pass the whole configuration each time.
+  carry over. Pass the whole configuration each time. Reconnecting is refused
+  `pipeline_already_connected` when another source's pipeline has taken the
+  repository meanwhile, as any second pipeline is.
 - **Disconnect** with `builtin pipelinesDisconnect(pipelineId: "<pipeline id>")`
   (`execute` on `app:deployables/sources`). It opens no more runs, and a run no
   agent has started yet concludes `pipeline_disconnected`. The pipeline and its
-  runs stay, as the history.
+  runs stay, as the history, and the repository is free for another source's
+  pipeline.
 - **Re-run** with `builtin pipelinesRerun(runId: "<run id>")` (`execute` on
   `app:deployables/deploy`): the next attempt of the run's key, in the
   original's mode and event, with a new check run. The original stays as it
@@ -330,7 +350,9 @@ group fail: the merge group's full run is the gate.
 
 Every other delivery opens nothing: a push to another branch (its pull request
 is what runs), a tag push, a deleted branch, a pull request closed or edited, a
-review, a ping, an installation event. What a delivery is comes from the shape
+review, a ping, an installation event, and any delivery that did not come
+through the GitHub App's installation ([Delivery](#delivery-webhook-or-poll)).
+Each is ignored, never failed on. What a delivery is comes from the shape
 of its signed body. The `X-GitHub-Event` header is not covered by the
 signature, so it is a cross-check only, and a delivery whose header disagrees
 with its body is ignored.
@@ -390,13 +412,23 @@ Go import graph:
   head.
 - The graph is read from source at the run's commit. Every `go.mod` names a
   module, every directory of `.go` files is a package of the nearest module
-  above it, and every import any file declares is an edge -- under any build
-  tag, test files included. That union is wider than any one build's graph,
-  which is the safe direction. Directories named `testdata` or `vendor`, or
+  above it, and every import of a path under one of those modules is an edge --
+  under any build tag, test files included, and whether or not a package still
+  answers the path. That union is wider than any one build's graph, which is
+  the safe direction. Imports of anything else, the standard library and
+  dependencies, are not edges. Directories named `testdata` or `vendor`, or
   starting with `.` or `_`, are skipped, as the go tool skips them.
 - A changed file selects the package that owns it -- its directory, or the
   nearest package above -- and every package importing one of those,
-  transitively. A change that touches no Go package selects none.
+  transitively.
+- A changed file in a directory that holds no package -- where a package was
+  until the change deleted or moved it -- also selects every package still
+  importing the path that directory would have (its module's path plus the
+  directory below the module's root), and their importers, transitively. A
+  change that deletes a package therefore tests the packages still importing
+  it, which no longer build, rather than selecting nothing and skipping green.
+- A change that touches no Go package, in no directory an import names, selects
+  none.
 
 It selects **every package** instead whenever the graph cannot say: the change
 could not be read (the compare failed, or listed 300 files, where GitHub stops
@@ -509,9 +541,12 @@ by guesswork.
 - **`webhook`**: GitHub posts each delivery to the cluster's inbound seam,
   `https://api.<domain>/inbound/github`, signed with the app's webhook secret,
   and a shipped automation opens the runs it asks for. A delivery opens runs
-  only for pipelines connected under the installation it came from. Setting the
-  webhook up: [GitHub Connect](github-connect.md#the-webhook) and
-  [Inbound delivery](inbound-delivery.md).
+  only for pipelines connected under the installation it came from. A delivery
+  through no installation -- a repository webhook, which
+  [Packages](packages.md#update-detection) documents for Deployables' update
+  feed on the same seam -- opens nothing, and is ignored rather than failed
+  on. Setting the webhook up: [GitHub Connect](github-connect.md#the-webhook)
+  and [Inbound delivery](inbound-delivery.md).
 - **`poll`**: every minute, one agent replica reads the default branch's head
   and the heads of the open pull requests -- the hundred most recently opened
   -- through the owner's connection. It opens a `push` run for a default-branch
@@ -595,10 +630,16 @@ all, with no app or no token, records `checkRunState: unavailable`.
 
 Pipelines is an optional item in the cluster's
 [readiness](configuration-readiness.md) list, reported by agent nodes. It is
-set up when the GitHub App is installed with checks write, at least one
-repository is connected, and a runner is present. Nothing needs it, so the
-first-run wizard does not walk it, and an owner may answer *Not now*. Its
-Settings section arrives with epic memql#5479.
+there for the three things a pipeline's checks need: a GitHub App whose
+installations hold checks write, a connected repository, and a runner to
+execute steps. A repository counts as connected once a pipeline is.
+
+Today the item reports configured once this cluster has a GitHub App and a
+runner is registered on the agent node reporting it. It cannot see whether an
+installation accepted checks write, which is a fact per installation: a run
+that could not write its check run says so itself ([The check run](#the-check-run)).
+Nothing needs the item, so the first-run wizard does not walk it, and an owner
+may answer *Not now*. Its Settings section arrives with epic memql#5479.
 
 ## What runs today
 
@@ -640,6 +681,7 @@ says where: `<stage>/<step>`, a stage, or a path into the block.
 | `pipeline_fleet_not_consented` | refusal | A step names a need, and the pipeline's compute is `cluster` | Reconnect with `compute: cluster_and_fleet`, or remove the need |
 | `pipeline_fork_refused` | refusal | The pull request's head is in another repository | Push the branch to this repository and open the pull request from it |
 | `pipeline_disconnected` | refusal | The pipeline was disconnected before an agent started the run | Connect it again; the next change runs |
+| `pipeline_already_connected` | refusal | Connect only: another source's pipeline already runs the repository, and a repository has one | Disconnect that pipeline -- its owner does, with `pipelinesDisconnect` -- or work from that source |
 | `pipeline_runner_unavailable` | failure | This cluster has no runner to execute steps | Install the runner (epic memql#5478). Nothing in the repository is wrong |
 | `pipeline_executor_error` | failure | The runner could not report how the step ended | Re-run; if it repeats, look at the runner |
 | `pipeline_secret_missing` | failure | An allowed secret has no value on this cluster | Store a value under that name, then re-run |
