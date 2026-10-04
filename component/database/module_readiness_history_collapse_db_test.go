@@ -3,14 +3,22 @@ package database_test
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/database"
 )
 
 // The collapse migration (memql#5325), run against a transaction-local table
 // that shadows the live one. Run TWICE: the second pass must find nothing,
 // because a migration that is not idempotent is one that deletes a verdict
 // the cluster wrote between two runs.
+//
+// The collapse is Go now (memql#5604) and runs here inside the test's
+// transaction, each of its own transactions a savepoint, so the shadow table
+// is all it ever sees. A batch of ONE version, the smallest there is, so the
+// three-version row is collapsed over several statements rather than one. The
+// bounded, resumable behaviour itself is pinned against a real hypertable in
+// module_readiness_history_collapse_bounded_db_test.go.
 func TestModuleReadinessHistoryCollapseMigration(t *testing.T) {
 	db := retiredFieldDB(t)
 	if db == nil {
@@ -34,11 +42,15 @@ func TestModuleReadinessHistoryCollapseMigration(t *testing.T) {
 	}
 	execFile("testdata/module_readiness_history_collapse_setup.sql")
 	for range 2 {
-		execFile(filepath.Join(migrationsDir, "20260921000000_module_readiness_history_collapse.up.sql"))
+		if _, err := database.CollapseModuleReadinessHistory(ctx, tx, nil, 1); err != nil {
+			t.Fatalf("collapse: %v", err)
+		}
 		execFile("testdata/module_readiness_history_collapse_assert.sql")
 	}
 	// The down is a no-op by decision, not by omission: running it must leave
 	// the collapsed table exactly as it is.
-	execFile(filepath.Join(migrationsDir, "20260921000000_module_readiness_history_collapse.down.sql"))
+	if err := database.RevertModuleReadinessHistoryCollapse(ctx, db); err != nil {
+		t.Fatalf("down: %v", err)
+	}
 	execFile("testdata/module_readiness_history_collapse_assert.sql")
 }
