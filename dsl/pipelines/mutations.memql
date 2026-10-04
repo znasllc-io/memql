@@ -201,3 +201,54 @@ mutation run updatePipelineRun {
     }
   }
 }
+
+/// Create a notification channel (D16, memql#5480) at a caller-chosen id. The owner is stamped from the
+/// actor, which under the borrowed authority is the person saving it.
+///
+/// @serverOnly rather than actor.userId scoping: a channel names a globalSecret the notify stage will
+/// resolve and POST to, and is unique by name per owner; both checks are made by the channel builtin in
+/// component/pipelinerun before this write, and a client-written row would skip them.
+@serverOnly
+@actor
+mutation channel createChannel {
+  args {
+    channelId   string!
+    accountId   string
+    name        string!
+    kind        string!
+    secretRef   string
+    recipients  []string
+  }
+  insert {
+    accept { accountId, name, kind, secretRef, recipients }
+    stamp {
+      id: args.channelId
+      ownerUserId: actor.userId
+      status: "active"
+    }
+  }
+}
+
+/// Change a channel: its name, kind, secret reference, recipients or status. Read-merge with no
+/// defaults, so a field not named keeps its value.
+///
+/// @serverOnly for createChannel's reason, and actor.userId scoping is no more the fix here than
+/// there: the builtin checks the name stays unique and the secret name is outside the platform's
+/// MEMQL_ namespace before it writes here, and an owner-scoped client write would skip both.
+@serverOnly
+mutation channel updateChannel {
+  args {
+    channelId   string!
+    name        string
+    kind        string
+    secretRef   string
+    recipients  []string
+    status      string
+  }
+  update {
+    accept { name, kind, secretRef, recipients, status }
+    stamp {
+      id: args.channelId
+    }
+  }
+}

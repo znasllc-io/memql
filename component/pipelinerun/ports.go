@@ -7,6 +7,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/packages/githubapp"
+	"github.com/znasllc-io/memql/component/pipelines"
 )
 
 // ports.go -- the narrow seams every decision in this package is made
@@ -38,18 +39,26 @@ type Gate func(ctx context.Context, key string, fn func(context.Context) error) 
 type Secrets func(ctx context.Context, name string) (string, error)
 
 // Store is every row this package reads and writes, over the DSL constructs
-// of dsl/pipelines (and Deployables' packageById). Each method applies its
-// own authority, so a caller cannot pick the wrong one:
+// of dsl/pipelines (and Deployables' packageById, the outbound seam's staging
+// and the Library's file read). Each method applies its own authority, so a
+// caller cannot pick the wrong one:
 //
 //   - the person-facing reads run under the CALLER's actor, unstamped: the
 //     owner-scoped constructs decide which rows come back, and a caller who
 //     does not own a row reads none;
+//   - the owner-scoped reads a driver makes for a person who is not on the
+//     line run under that OWNER's borrowed authority, likewise unstamped: the
+//     construct's owner conjunct decides the rows, so the borrowed actor reads
+//     what that person could and nothing more, and an empty owner is refused
+//     rather than read as nobody;
 //   - the server-only reads run under this package's own system actor with
 //     internal origin: the trigger, the poll and recovery have no person
 //     behind them and must see every owner's rows;
 //   - every write runs under the row OWNER's borrowed authority with
 //     internal origin: the @serverOnly mutations stamp ownerUserId from the
 //     actor, and an empty owner is refused rather than written as nobody's.
+//     The one exception is StageNotification: an outbound row is nobody's, so
+//     it is staged as the system actor, with internal origin.
 //
 // A nil row with a nil error is "no such row (that this authority reads)".
 type Store interface {
@@ -60,6 +69,21 @@ type Store interface {
 	PipelinesForOwner(ctx context.Context) ([]Pipeline, error)
 	RunForOwner(ctx context.Context, runID string) (*Run, error)
 	RunsForOwner(ctx context.Context, pipelineID string) ([]Run, error)
+	// ChannelsForOwner is the caller's notification channels, by name
+	// (pipelineChannelsForOwner).
+	ChannelsForOwner(ctx context.Context) ([]Channel, error)
+
+	// Owner-scoped, under the OWNER's borrowed authority and not the caller's.
+	//
+	// ChannelForOwnerByName is the owner's channel of one name
+	// (channelForOwnerByName) -- what a notify stage names -- and nil for a
+	// name no channel of theirs carries. An archived channel is returned as it
+	// is: telling it from an active one is the caller's.
+	ChannelForOwnerByName(ctx context.Context, owner, name string) (*Channel, error)
+	// LibraryFileNames is the name of each of the owner's Library files
+	// (libraryFileById), keyed by the id exactly as it was passed. A file the
+	// owner cannot read, or that is not there, is simply absent from the map.
+	LibraryFileNames(ctx context.Context, owner string, ids []string) (map[string]string, error)
 
 	// Server-only, under the pipelines system actor.
 	//
@@ -87,6 +111,18 @@ type Store interface {
 	// WorkSteps is every v1:work:step of one work run at its latest version
 	// (dsl/work's workStepsForRun): what a resumed driver keeps and re-sends.
 	WorkSteps(ctx context.Context, workRunID string) ([]WorkStep, error)
+	// PreviousRuns is one pipeline's runs of one event, newest queued first and
+	// at most twenty, in every status (pipelineRunsForPipelineEvent): what a
+	// notification reads to learn whether the run before this one failed. The
+	// caller picks the newest COMPLETED run other than its own.
+	PreviousRuns(ctx context.Context, pipelineID string, event pipelines.Event) ([]Run, error)
+	// OutboundStatuses is the delivery state of each outbound row asked for
+	// (outboundRequestById), one entry per id, in order. A row that is not
+	// there is an entry with an empty Status, never an error and never `sent`;
+	// a read that FAILS is an error, never an absent row. A poll reads FRESH
+	// (memql.ContextWithFreshRead): the worker that moves a row may be on
+	// another replica, and this node's result cache can hold the row as it was.
+	OutboundStatuses(ctx context.Context, ids []string) ([]OutboundStatus, error)
 
 	// Writes, under the owner's borrowed authority. Create* borrow the
 	// value's own OwnerUserID; Update* take the owner explicitly.
@@ -94,6 +130,21 @@ type Store interface {
 	UpdatePipeline(ctx context.Context, owner, pipelineID string, patch PipelinePatch) error
 	CreateRun(ctx context.Context, r Run) error
 	UpdateRun(ctx context.Context, owner, runID string, patch RunPatch) error
+	CreateChannel(ctx context.Context, c Channel) error
+	UpdateChannel(ctx context.Context, owner, channelID string, patch ChannelPatch) error
+
+	// StageNotification stages one outbound row for the outbound worker to
+	// deliver: a webhook to the globalSecret n.TargetSecret names
+	// (stageOutboundRequestToSecret), else a plain row for n.Medium and
+	// n.Target (stageOutboundRequest). As the system actor, not an owner: the
+	// row is nobody's, and the secret-target mutation is server-only. The
+	// stage is idempotent by RequestID, and the worker owns the row's delivery
+	// state: a second stage at an id refreshes what the row says and leaves
+	// where the worker has taken it. A notification that cannot be sent as
+	// written -- no id, nothing to say, a secret with a medium other than
+	// webhook, a plain row with nowhere to go -- is refused before the engine
+	// is asked.
+	StageNotification(ctx context.Context, n NotificationRequest) error
 }
 
 // GitHub is every GitHub call a pipeline makes. Repository is always

@@ -2105,6 +2105,28 @@ func CataloguedConstructsForOwnerBuild(args CataloguedConstructsForOwnerArgs) st
 	return "query cataloguedConstructsForOwner()"
 }
 
+// ChannelForOwnerByName -- The caller's channel of one name -- what a notify stage resolves its `channel:` through. A name is unique among a person's channels (the channel builtin checks it before it writes), so this answers at most one row; the sort and page of one say so. The driver that reads it has no person on the line and asks under the pipeline owner's borrowed authority, so the filter is the owner conjunct and nothing wider: it finds the owner's own channel, never another person's of the same name.
+//
+// Bound concept: v1:pipelines:channel (machine-readable: BoundConcepts["channelForOwnerByName"] in generated_concepts.go).
+type ChannelForOwnerByNameArgs struct {
+	Name string
+}
+
+// ChannelForOwnerByName calls the engine query channelForOwnerByName.
+func (qc *QueryClient) ChannelForOwnerByName(ctx context.Context, args ChannelForOwnerByNameArgs) (*Result, error) {
+	call := ChannelForOwnerByNameBuild(args)
+	return qc.executeNamed(ctx, "channelForOwnerByName", call)
+}
+
+func ChannelForOwnerByNameBuild(args ChannelForOwnerByNameArgs) string {
+	var b strings.Builder
+	b.WriteString("query channelForOwnerByName(")
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ClientAccountById -- Resolve one account by its own row id. The detail view's read on open, and the read every tie surface uses to put a name on an id it holds.
 //
 // Bound concept: v1:accounts:account (machine-readable: BoundConcepts["clientAccountById"] in generated_concepts.go).

@@ -259,3 +259,42 @@ query pipeline pipelinesActive {
   paginate  1
   shape     pipelineFull
 }
+
+// ---- the notify stage's (epic memql#5480) ----
+
+/// The caller's channel of one name -- what a notify stage resolves its `channel:` through. A name is
+/// unique among a person's channels (the channel builtin checks it before it writes), so this answers
+/// at most one row; the sort and page of one say so. The driver that reads it has no person on the
+/// line and asks under the pipeline owner's borrowed authority, so the filter is the owner conjunct
+/// and nothing wider: it finds the owner's own channel, never another person's of the same name.
+@actor
+query channel channelForOwnerByName {
+  args {
+    name  string!
+  }
+  filter    row => row.name == args.name && row.ownerUserId == actor.userId
+  sort      "row.createdAt", "desc"
+  paginate  1
+  shape     pipelineChannelFull
+}
+
+/// One pipeline's runs of one event, most recently queued first -- what the notify stage reads to learn
+/// whether the run before this one failed, so a notification can say the pipeline RECOVERED. @serverOnly
+/// rather than actor.userId scoping: the reader is the agent replica driving a run, not a person, and
+/// the pipeline's owner is learned from the run being driven, so an actor.userId conjunct would answer
+/// zero rows and read as a pipeline that never failed. Every status comes back, bounded at 20: the
+/// caller takes the newest COMPLETED run other than its own.
+@serverOnly
+@actor
+query run pipelineRunsForPipelineEvent {
+  args {
+    pipelineId  string!
+    event       string!
+  }
+  filter    row => row.pipelineId == args.pipelineId
+                && row.event == args.event
+                && actor.isClusterOwner == true
+  sort      "queuedAt", "desc"
+  paginate  20
+  shape     pipelineRunFull
+}

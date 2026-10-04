@@ -385,6 +385,253 @@ func TestAStagedDeliveryIsReadOverRealRows(t *testing.T) {
 	}
 }
 
+// The notify stage's rows over real storage (epic memql#5480): what the
+// recording engine cannot say about the channel, outbound and Library
+// constructs. A channel lands under the borrowed owner and reads back through
+// the owner conjunct -- to the owner, under either spelling of their id, and to
+// nobody else; the read-merge keeps what an update does not name and clears
+// what it names empty; the two server-only stagings are refused a client and
+// admitted with the stamp, and land as the plain row or the secret-target row
+// the outbound worker drains; the by-id status read sees what the worker moves
+// and keeps `sent` through a re-stage; a Library file's name is read under its
+// owner and a stranger's borrowed read finds none; and the previous runs of one
+// event come back newest first.
+func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
+	eng := dbEngine(t)
+	store := NewDSLStore(eng)
+	ctx := context.Background()
+	fresh := memqlengine.ContextWithFreshRead(ctx)
+
+	suffix := strings.ReplaceAll(id.NewShortId(), "-", "")[:12]
+	owner, stranger := "pr6c-owner-"+suffix, "pr6c-stranger-"+suffix
+	account := "pr6c-account-" + suffix
+	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Channels store test")`,
+		langparser.QuoteString(account))); err != nil {
+		t.Fatalf("createClientAccount: %v", err)
+	}
+
+	// ---- a Discord channel and an email one, written as their owner ----
+	discord := Channel{
+		ID: "pr6c-discord-" + suffix, OwnerUserID: owner, AccountID: account, Name: "releases-" + suffix, Kind: "discord",
+		SecretRef: "DISCORD_RELEASES",
+	}
+	email := Channel{
+		ID: "pr6c-email-" + suffix, OwnerUserID: owner, Name: "ops-" + suffix, Kind: "email",
+		Recipients: []string{"ops@example.test", "oncall@example.test"},
+	}
+	for _, c := range []Channel{discord, email} {
+		if err := store.CreateChannel(ctx, c); err != nil {
+			t.Fatalf("createChannel %s: %v", c.Name, err)
+		}
+	}
+	got, err := store.ChannelForOwnerByName(fresh, owner, discord.Name)
+	if err != nil || got == nil {
+		t.Fatalf("the owner's channel by name: %+v %v", got, err)
+	}
+	if got.ID != discord.ID || got.Name != discord.Name || got.Kind != "discord" || got.SecretRef != "DISCORD_RELEASES" ||
+		got.Status != "active" || got.AccountID != account || len(got.Recipients) != 0 {
+		t.Errorf("channel read back = %+v", got)
+	}
+	if !sameID(got.OwnerUserID, owner) {
+		t.Errorf("ownerUserId is stamped from the borrowed actor: %q", got.OwnerUserID)
+	}
+	// The driver borrows the owner under the spelling the pipeline row stores
+	// it in -- canonical -- and finds the same channel.
+	if again, err := store.ChannelForOwnerByName(fresh, got.OwnerUserID, discord.Name); err != nil || again == nil || again.ID != discord.ID {
+		t.Errorf("the channel is found under the owner's stored spelling too: %+v %v", again, err)
+	}
+	if other, err := store.ChannelForOwnerByName(fresh, stranger, discord.Name); err != nil || other != nil {
+		t.Errorf("a stranger's borrowed authority finds nobody else's channel: %+v %v", other, err)
+	}
+	if none, err := store.ChannelForOwnerByName(fresh, owner, "nobody-has-"+suffix); err != nil || none != nil {
+		t.Errorf("a name no channel carries reads nothing: %+v %v", none, err)
+	}
+	mine, err := store.ChannelsForOwner(signedIn(owner))
+	if err != nil || len(mine) < 2 || !hasChannel(mine, discord.ID) || !hasChannel(mine, email.ID) {
+		t.Fatalf("the owner's channels: %d rows, %v", len(mine), err)
+	}
+	if theirs, err := store.ChannelsForOwner(signedInAs(stranger, auth.RoleWriter)); err != nil || hasChannel(theirs, discord.ID) {
+		t.Errorf("a stranger lists nobody else's channels: %v", err)
+	}
+	mail, err := store.ChannelForOwnerByName(fresh, owner, email.Name)
+	if err != nil || mail == nil || mail.Kind != "email" || len(mail.Recipients) != 2 || mail.Recipients[1] != "oncall@example.test" || mail.SecretRef != "" {
+		t.Fatalf("an email channel keeps its recipients, in order: %+v %v", mail, err)
+	}
+
+	// ---- the read-merge: archive keeps everything else; an empty list and an
+	// empty secret reference are CLEARED ----
+	if err := store.UpdateChannel(ctx, owner, discord.ID, ChannelPatch{Status: ptr("archived")}); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if arch, _ := store.ChannelForOwnerByName(fresh, owner, discord.Name); arch == nil || arch.Status != "archived" ||
+		arch.SecretRef != "DISCORD_RELEASES" || arch.Kind != "discord" || arch.AccountID != account {
+		t.Errorf("a status write changes the status and nothing else: %+v", arch)
+	}
+	if err := store.UpdateChannel(ctx, owner, email.ID, ChannelPatch{Recipients: ptr([]string{}), SecretRef: ptr("")}); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if cleared, _ := store.ChannelForOwnerByName(fresh, owner, email.Name); cleared == nil || len(cleared.Recipients) != 0 || cleared.Name != email.Name || cleared.Status != "active" {
+		t.Errorf("an empty list is written, not kept: %+v", cleared)
+	}
+	if err := store.UpdateChannel(ctx, owner, email.ID, ChannelPatch{Name: ptr("ops2-" + suffix), Recipients: ptr([]string{"a@example.test"})}); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if renamed, _ := store.ChannelForOwnerByName(fresh, owner, "ops2-"+suffix); renamed == nil || renamed.ID != email.ID || len(renamed.Recipients) != 1 {
+		t.Errorf("a renamed channel is found by its new name: %+v", renamed)
+	}
+	if gone, _ := store.ChannelForOwnerByName(fresh, owner, email.Name); gone != nil {
+		t.Errorf("and no longer by the old one: %+v", gone)
+	}
+
+	// ---- the writes are server-only, and the concept's own enums hold ----
+	clientCall := fmt.Sprintf(`mutation createChannel(channelId: %s, kind: "email", name: "forged")`, langparser.QuoteString("pr6c-forged-"+suffix))
+	if _, err := eng.Execute(signedIn(owner), clientCall); err == nil || !strings.Contains(err.Error(), "server-only") {
+		t.Errorf("a client may not create a channel: %v", err)
+	}
+	if err := store.CreateChannel(ctx, Channel{ID: "pr6c-bad-" + suffix, OwnerUserID: owner, Name: "bad-" + suffix, Kind: "sms"}); err == nil {
+		t.Errorf("a kind the concept does not declare was written")
+	}
+	if bad, _ := store.ChannelForOwnerByName(fresh, owner, "bad-"+suffix); bad != nil {
+		t.Errorf("a refused write left a row: %+v", bad)
+	}
+
+	// ---- the outbox: staged as the system actor, drained by the worker ----
+	secretRow := NotificationRequest{
+		RequestID: "pr6c-pn-secret-" + suffix, Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Subject: "s",
+		Body: `{"username":"MemQL Pipelines"}`, DedupeKey: "pr6c-key-" + suffix, RequestedBy: "pipelines:notify:r1",
+	}
+	plainRow := NotificationRequest{
+		RequestID: "pr6c-pn-mail-" + suffix, Medium: "email", Target: "ops@example.test", Subject: "memql passed", Body: "all green",
+	}
+	for _, n := range []NotificationRequest{secretRow, plainRow} {
+		if err := store.StageNotification(ctx, n); err != nil {
+			t.Fatalf("stage %s: %v", n.RequestID, err)
+		}
+	}
+	systemRead := func(requestID string) map[string]any {
+		t.Helper()
+		res, err := eng.Execute(auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(fresh, systemActorName)),
+			fmt.Sprintf(`query outboundRequestById(requestId: %s)`, langparser.QuoteString(requestID)))
+		if err != nil {
+			t.Fatalf("outboundRequestById %s: %v", requestID, err)
+		}
+		rows := rowsOf(res)
+		if len(rows) != 1 {
+			t.Fatalf("outboundRequestById %s: %d rows", requestID, len(rows))
+		}
+		return rows[0]
+	}
+	if row := systemRead(secretRow.RequestID); rowString(row, "medium") != "webhook" || rowString(row, "targetSecret") != "DISCORD_RELEASES" ||
+		rowString(row, "target") != "secret:DISCORD_RELEASES" || rowString(row, "body") != secretRow.Body || rowString(row, "status") != "pending" ||
+		rowString(row, "dedupeKey") != secretRow.DedupeKey || rowString(row, "requestedBy") != "pipelines:notify:r1" {
+		t.Errorf("a secret-target row names the secret and never a URL: %+v", row)
+	}
+	if row := systemRead(plainRow.RequestID); rowString(row, "medium") != "email" || rowString(row, "target") != "ops@example.test" ||
+		rowString(row, "targetSecret") != "" || rowString(row, "subject") != "memql passed" || rowString(row, "status") != "pending" {
+		t.Errorf("a plain row is an ordinary delivery: %+v", row)
+	}
+	statuses, err := store.OutboundStatuses(fresh, []string{secretRow.RequestID, "v1:platform:outboundRequest:" + plainRow.RequestID, "pr6c-nothing-" + suffix})
+	if err != nil || len(statuses) != 3 {
+		t.Fatalf("OutboundStatuses: %+v %v", statuses, err)
+	}
+	if statuses[0].ID != secretRow.RequestID || statuses[0].Status != "pending" || statuses[0].Attempts != 0 || !statuses[0].SentAt.IsZero() ||
+		statuses[1].ID != plainRow.RequestID || statuses[1].Status != "pending" || statuses[2].ID != "pr6c-nothing-"+suffix || statuses[2].Status != "" {
+		t.Errorf("a staged row is pending, one entry per id in the order asked, and an unstaged one has no status: %+v", statuses)
+	}
+
+	// The outbound worker moves the row (internal origin: it is a server-written
+	// row end to end), and the next fresh read sees it.
+	sentAt := time.Date(2026, 10, 4, 12, 0, 5, 0, time.UTC)
+	if _, err := eng.Execute(seederCtx(), fmt.Sprintf(
+		`mutation updateOutboundRequestStatus(requestId: %s, status: "sent", attempts: 2, lastError: "webhook: status 502", sentAt: %s)`,
+		langparser.QuoteString(secretRow.RequestID), langparser.QuoteString(sentAt.Format(time.RFC3339)))); err != nil {
+		t.Fatalf("the worker's stamp: %v", err)
+	}
+	if after, err := store.OutboundStatuses(fresh, []string{secretRow.RequestID}); err != nil || len(after) != 1 || after[0].Status != "sent" ||
+		after[0].Attempts != 2 || !after[0].SentAt.Equal(sentAt) || after[0].LastError != "webhook: status 502" {
+		t.Errorf("a poll sees what the worker moved: %+v %v", after, err)
+	}
+	// @createOnly: a second stage at the id refreshes what the row says and
+	// leaves where the worker has taken it.
+	restage := secretRow
+	restage.Body = `{"username":"MemQL Pipelines","content":"again"}`
+	if err := store.StageNotification(ctx, restage); err != nil {
+		t.Fatalf("re-stage: %v", err)
+	}
+	if row := systemRead(secretRow.RequestID); rowString(row, "status") != "sent" || rowString(row, "body") != restage.Body || rowString(row, "targetSecret") != "DISCORD_RELEASES" {
+		t.Errorf("a re-stage keeps `sent` and refreshes the body: %+v", row)
+	}
+	// Neither staging is a client's.
+	for _, call := range []string{
+		fmt.Sprintf(`mutation stageOutboundRequestToSecret(requestId: %s, targetSecret: "DISCORD_RELEASES", body: "x")`, langparser.QuoteString("pr6c-forged-a-"+suffix)),
+		fmt.Sprintf(`query outboundRequestById(requestId: %s)`, langparser.QuoteString(secretRow.RequestID)),
+	} {
+		if _, err := eng.Execute(signedIn(owner), call); err == nil || !strings.Contains(err.Error(), "server-only") {
+			t.Errorf("a client may not reach %s: %v", constructOf(call), err)
+		}
+	}
+
+	// ---- a Library file's name, read under its owner ----
+	fileID := "pr6c-file-" + suffix
+	if _, err := eng.Execute(signedIn(owner), fmt.Sprintf(
+		`mutation createLibraryFile(fileId: %s, name: "tests.log", mimeType: "text/plain", size: 12, blobUrl: %s, source: "agent_generated")`,
+		langparser.QuoteString(fileID), langparser.QuoteString("https://blob.example.test/"+fileID))); err != nil {
+		t.Fatalf("createLibraryFile: %v", err)
+	}
+	names, err := store.LibraryFileNames(fresh, owner, []string{fileID, "pr6c-nofile-" + suffix})
+	if err != nil || len(names) != 1 || names[fileID] != "tests.log" {
+		t.Errorf("the owner's file is named, and a file that is not there is absent: %v %v", names, err)
+	}
+	if names, err := store.LibraryFileNames(fresh, got.OwnerUserID, []string{fileID}); err != nil || names[fileID] != "tests.log" {
+		t.Errorf("the owner's stored spelling reads it too: %v %v", names, err)
+	}
+	if names, err := store.LibraryFileNames(fresh, stranger, []string{fileID}); err != nil || len(names) != 0 {
+		t.Errorf("a stranger's borrowed authority reads nobody else's file: %v %v", names, err)
+	}
+
+	// ---- the previous runs of one event, newest queued first ----
+	pipelineID := "pr6c-pipeline-" + suffix
+	repo := "acme-" + suffix + "/shop"
+	base := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+	open := func(name string, event pipelines.Event, queued time.Time, conclusion string) Run {
+		t.Helper()
+		mode := pipelines.ModeFull
+		key := pipelines.RunKey(repo, shaA, mode, event) + ":" + name
+		r := Run{
+			ID: RunIDFor(pipelineID, key, 1), OwnerUserID: owner, PipelineID: pipelineID, Repository: repo, SHA: shaA, Mode: mode,
+			Event: event, RunKey: key, Attempt: 1, Trigger: TriggerWebhook, Status: StatusCompleted, Conclusion: conclusion,
+			QueuedAt: queued, FinishedAt: queued.Add(time.Minute),
+		}
+		if err := store.CreateRun(ctx, r); err != nil {
+			t.Fatalf("createPipelineRun %s: %v", name, err)
+		}
+		return r
+	}
+	older := open("older", pipelines.EventPush, base, ConclusionFailure)
+	newer := open("newer", pipelines.EventPush, base.Add(10*time.Minute), ConclusionSuccess)
+	release := open("release", pipelines.EventRelease, base.Add(20*time.Minute), ConclusionSuccess)
+	prev, err := store.PreviousRuns(fresh, pipelineID, pipelines.EventPush)
+	if err != nil || len(prev) != 2 || prev[0].ID != newer.ID || prev[1].ID != older.ID || prev[0].Conclusion != ConclusionSuccess ||
+		prev[1].Conclusion != ConclusionFailure || prev[0].Status != StatusCompleted || prev[0].Event != pipelines.EventPush {
+		t.Errorf("a pipeline's runs of one event, newest first, and none of another event: %+v %v", prev, err)
+	}
+	if rel, err := store.PreviousRuns(fresh, pipelineID, pipelines.EventRelease); err != nil || len(rel) != 1 || rel[0].ID != release.ID {
+		t.Errorf("the release's own runs: %+v %v", rel, err)
+	}
+	if none, err := store.PreviousRuns(fresh, "pr6c-other-"+suffix, pipelines.EventPush); err != nil || len(none) != 0 {
+		t.Errorf("another pipeline's runs are not this one's: %+v %v", none, err)
+	}
+}
+
+func hasChannel(cs []Channel, id string) bool {
+	for _, c := range cs {
+		if c.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // TestEveryPipelinesBuiltinResolvesToACapability registers this plug-in on a
 // real engine that has loaded the shipped DSL and runs the engine's own
 // load-time audit: every `@executor("integration.pipelines.*")` builtin

@@ -388,6 +388,7 @@ var BoundConcepts = map[string]string{
 	"catalogueConstruct":                               "v1:authoring:construct",
 	"cataloguedConstructsForGoalSignature":             "v1:authoring:construct",
 	"cataloguedConstructsForOwner":                     "v1:authoring:construct",
+	"channelForOwnerByName":                            "v1:pipelines:channel",
 	"checkRecord":                                      "v1:data:record",
 	"clearSiteCandidate":                               "v1:platform:site",
 	"clearWorkerConnectedNode":                         "v1:worker:registration",

@@ -3,6 +3,7 @@ package pipelinerun
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -25,11 +26,19 @@ import (
 // and holds every rendered call -- construct and argument names -- to them.
 const (
 	// Person-facing reads, owner-scoped by their own filters.
-	qPipelinesForOwner    = "pipelinesForOwner"    // ()
-	qPipelineForOwner     = "pipelineForOwner"     // (pipelineId)
-	qPipelineForPackage   = "pipelineForPackage"   // (packageId)
-	qPipelineRunsForOwner = "pipelineRunsForOwner" // (pipelineId?)
-	qPipelineRunForOwner  = "pipelineRunForOwner"  // (runId)
+	qPipelinesForOwner        = "pipelinesForOwner"        // ()
+	qPipelineForOwner         = "pipelineForOwner"         // (pipelineId)
+	qPipelineForPackage       = "pipelineForPackage"       // (packageId)
+	qPipelineRunsForOwner     = "pipelineRunsForOwner"     // (pipelineId?)
+	qPipelineRunForOwner      = "pipelineRunForOwner"      // (runId)
+	qPipelineChannelsForOwner = "pipelineChannelsForOwner" // ()
+
+	// The notify stage's reads of one owner's rows, person-facing like the
+	// ones above but made UNDER THAT OWNER'S BORROWED AUTHORITY: the driver
+	// that asks has no person on the line, and the owner conjunct in each
+	// filter is what decides the rows.
+	qChannelForOwnerByName = "channelForOwnerByName" // (name)
+	qLibraryFileByID       = "libraryFileById"       // (fileId) -- dsl/library
 
 	// Server-only reads, every owner's rows, cluster-owner conjunct.
 	qPipelinesForRepository     = "pipelinesForRepository"     // (repository)
@@ -46,6 +55,10 @@ const (
 	// final check run did not land, which it republishes.
 	qPipelineRunsCheckRunLost = "pipelineRunsFinalCheckRunUnavailable" // (finishedSince)
 
+	// The notify stage's: one pipeline's runs of one event, to learn whether
+	// the run before this one failed.
+	qPipelineRunsForPipelineEvent = "pipelineRunsForPipelineEvent" // (pipelineId, event)
+
 	// The work spine's read of one run's steps (dsl/work), server-only and
 	// cluster-owner-conjoined like the reads above: a resumed driver reads the
 	// steps its predecessor's journal wrote.
@@ -56,6 +69,8 @@ const (
 	mUpdatePipeline    = "updatePipeline"
 	mCreatePipelineRun = "createPipelineRun"
 	mUpdatePipelineRun = "updatePipelineRun"
+	mCreateChannel     = "createChannel"
+	mUpdateChannel     = "updateChannel"
 
 	// Deployables' read of the source a pipeline hangs off (dsl/platform).
 	qPackageByID = "packageById" // (packageId)
@@ -64,6 +79,13 @@ const (
 	// trigger takes the body, the headers and the signature verdict it acts
 	// on from the row, never from its own arguments.
 	qInboundRequestByID = "inboundRequestById" // (requestId)
+
+	// The outbound seam's two stagings and its by-id read (dsl/platform): the
+	// notify stage stages a delivery as the system actor and polls the row
+	// the outbound worker moves. Both stagings and the read are server-only.
+	mStageOutboundRequest         = "stageOutboundRequest"         // (requestId, medium, target, subject?, body, dedupeKey?, requestedBy?)
+	mStageOutboundRequestToSecret = "stageOutboundRequestToSecret" // (requestId, targetSecret, subject?, body, dedupeKey?, requestedBy?)
+	qOutboundRequestByID          = "outboundRequestById"          // (requestId)
 )
 
 // systemActorName is who the server-only reads are made as:
@@ -127,6 +149,44 @@ func (s *dslStore) ownerWrite(ctx context.Context, owner, name string, args map[
 		return err
 	}
 	_, err = s.executeInternal(auth.ContextWithUserActor(ctx, strings.TrimSpace(owner)), name, query)
+	return err
+}
+
+// ownerRead runs a person-facing read under owner's borrowed authority, for a
+// caller who is not that person -- a driver on an agent replica reading the
+// pipeline owner's channel. UNSTAMPED, like callerRead: the construct is not
+// @serverOnly and its owner conjunct decides the rows, so the borrowed actor
+// reads exactly what that person could and a stamp would buy nothing but
+// reach. An empty owner is refused for ownerWrite's reason: auth's helper
+// leaves ctx untouched for a blank id, and the read would run as whichever
+// actor the caller happened to carry.
+func (s *dslStore) ownerRead(ctx context.Context, owner, name string, args map[string]any) ([]map[string]any, error) {
+	owner, err := requireOwner(owner, name)
+	if err != nil {
+		return nil, err
+	}
+	return s.callerRead(auth.ContextWithUserActor(ctx, owner), name, args)
+}
+
+// requireOwner is the person a borrowed read is made for, refused when blank.
+func requireOwner(owner, call string) (string, error) {
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		return "", fmt.Errorf("pipelines: %s: the row's owner is unknown, and a person's rows are read only under their own authority", call)
+	}
+	return owner, nil
+}
+
+// systemWrite runs a server-only write as this package's own system actor, for
+// a row with no owner to borrow: an outbound row records a delivery, not a
+// person's act, and its concept declares no tier. The actor is attribution
+// and nothing more here -- no mutation it reaches stamps an owner from it.
+func (s *dslStore) systemWrite(ctx context.Context, name string, args map[string]any) error {
+	query, err := render("mutation", name, args)
+	if err != nil {
+		return err
+	}
+	_, err = s.executeInternal(auth.ContextWithSystemActor(ctx, systemActorName), name, query)
 	return err
 }
 
@@ -196,6 +256,62 @@ func (s *dslStore) RunsForOwner(ctx context.Context, pipelineID string) ([]Run, 
 	return allRuns(s.callerRead(ctx, qPipelineRunsForOwner, args))
 }
 
+func (s *dslStore) ChannelsForOwner(ctx context.Context) ([]Channel, error) {
+	return allChannels(s.callerRead(ctx, qPipelineChannelsForOwner, nil))
+}
+
+// ---------------------------------------------------------------------------
+// Owner-scoped reads, under the owner's borrowed authority
+// ---------------------------------------------------------------------------
+
+func (s *dslStore) ChannelForOwnerByName(ctx context.Context, owner, name string) (*Channel, error) {
+	// The owner is refused first, even when there is nothing to look for: a
+	// call that names nobody is a defect to surface, not a read to skip.
+	if _, err := requireOwner(owner, qChannelForOwnerByName); err != nil {
+		return nil, err
+	}
+	// No name is no read: there is no channel to find.
+	if name = strings.TrimSpace(name); name == "" {
+		return nil, nil
+	}
+	return oneChannel(s.ownerRead(ctx, owner, qChannelForOwnerByName, map[string]any{"name": name}))
+}
+
+// LibraryFileNames reads each file once, however its id is spelled, and keys
+// the answer by each id exactly as the caller passed it, so the caller looks a
+// name up with the variable it asked with. A file the owner cannot read comes
+// back as zero rows -- the same answer as one that does not exist -- and is
+// left out.
+func (s *dslStore) LibraryFileNames(ctx context.Context, owner string, ids []string) (map[string]string, error) {
+	if _, err := requireOwner(owner, qLibraryFileByID); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(ids))
+	read := map[string]string{} // bare id -> name, "" for a file not there
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		bare := bareID(id)
+		if bare == "" {
+			continue
+		}
+		name, done := read[bare]
+		if !done {
+			rows, err := s.ownerRead(ctx, owner, qLibraryFileByID, map[string]any{"fileId": bare})
+			if err != nil {
+				return nil, err
+			}
+			if len(rows) > 0 {
+				name = rowString(rows[0], "name")
+			}
+			read[bare] = name
+		}
+		if name != "" {
+			out[id] = name
+		}
+	}
+	return out, nil
+}
+
 // ---------------------------------------------------------------------------
 // Server-only reads
 // ---------------------------------------------------------------------------
@@ -263,6 +379,41 @@ func (s *dslStore) RunByID(ctx context.Context, runID string) (*Run, error) {
 
 func (s *dslStore) PipelinesActive(ctx context.Context) ([]Pipeline, error) {
 	return allPipelines(s.systemRead(ctx, qPipelinesActive, nil))
+}
+
+// PreviousRuns reads one pipeline's runs of one event, whoever owns them: a
+// driver has no person behind it. A blank pipeline or event is no read.
+func (s *dslStore) PreviousRuns(ctx context.Context, pipelineID string, event pipelines.Event) ([]Run, error) {
+	id, ev := bareID(pipelineID), strings.TrimSpace(string(event))
+	if id == "" || ev == "" {
+		return nil, nil
+	}
+	return allRuns(s.systemRead(ctx, qPipelineRunsForPipelineEvent, map[string]any{"pipelineId": id, "event": ev}))
+}
+
+// OutboundStatuses reads each row once, as the system actor, and answers one
+// entry per id in the order asked. The outbound row has no owner and its
+// by-id read is server-only; a row nothing staged is an entry with no status.
+func (s *dslStore) OutboundStatuses(ctx context.Context, ids []string) ([]OutboundStatus, error) {
+	out := make([]OutboundStatus, 0, len(ids))
+	for _, id := range ids {
+		id = bareID(id)
+		if id == "" {
+			out = append(out, OutboundStatus{})
+			continue
+		}
+		rows, err := s.systemRead(ctx, qOutboundRequestByID, map[string]any{"requestId": id})
+		if err != nil {
+			return nil, err
+		}
+		status := OutboundStatus{}
+		if len(rows) > 0 {
+			status = outboundStatusFromRow(rows[0])
+		}
+		status.ID = id
+		out = append(out, status)
+	}
+	return out, nil
 }
 
 func (s *dslStore) WorkSteps(ctx context.Context, workRunID string) ([]WorkStep, error) {
@@ -439,6 +590,65 @@ func (s *dslStore) UpdateRun(ctx context.Context, owner, runID string, patch Run
 		args["durationMs"] = *patch.DurationMs
 	}
 	return s.ownerWrite(ctx, owner, mUpdatePipelineRun, args)
+}
+
+// CreateChannel writes a channel at the caller's id, as its owner. An empty
+// optional field is OMITTED rather than written empty: the row is new, so
+// absent is the truth, and the mutation stamps ownerUserId and `active` itself.
+//
+// A blank id is refused here: `string!` means present, not non-empty, and the
+// engine answers an empty id by minting one -- a channel its writer never
+// learns the id of, and so can never allow a pipeline on.
+func (s *dslStore) CreateChannel(ctx context.Context, c Channel) error {
+	if bareID(c.ID) == "" {
+		return errors.New("pipelines: createChannel: a channel needs an id")
+	}
+	args := map[string]any{
+		"channelId": bareID(c.ID),
+		"name":      c.Name,
+		"kind":      c.Kind,
+	}
+	setIfSet(args, "accountId", bareID(c.AccountID))
+	setIfSet(args, "secretRef", c.SecretRef)
+	if len(c.Recipients) > 0 {
+		args["recipients"] = stringList(c.Recipients)
+	}
+	return s.ownerWrite(ctx, c.OwnerUserID, mCreateChannel, args)
+}
+
+// UpdateChannel writes the named fields of patch and nothing else.
+func (s *dslStore) UpdateChannel(ctx context.Context, owner, channelID string, patch ChannelPatch) error {
+	args := map[string]any{"channelId": bareID(channelID)}
+	setNamed(args, "name", patch.Name)
+	setNamed(args, "kind", patch.Kind)
+	setNamed(args, "secretRef", patch.SecretRef)
+	setNamed(args, "status", patch.Status)
+	if patch.Recipients != nil {
+		args["recipients"] = stringList(*patch.Recipients)
+	}
+	return s.ownerWrite(ctx, owner, mUpdateChannel, args)
+}
+
+// StageNotification stages one outbound row as the system actor. A row naming
+// a secret goes through stageOutboundRequestToSecret, which stamps the medium
+// and the secret:<NAME> descriptor itself -- so n.Target is not sent, the row's
+// target being the descriptor and never a URL. Any other row is a plain
+// stageOutboundRequest. An optional field nobody set is omitted.
+func (s *dslStore) StageNotification(ctx context.Context, n NotificationRequest) error {
+	if err := n.validate(); err != nil {
+		return err
+	}
+	args := map[string]any{"requestId": bareID(n.RequestID), "body": n.Body}
+	setIfSet(args, "subject", n.Subject)
+	setIfSet(args, "dedupeKey", n.DedupeKey)
+	setIfSet(args, "requestedBy", n.RequestedBy)
+	if secret := strings.TrimSpace(n.TargetSecret); secret != "" {
+		args["targetSecret"] = secret
+		return s.systemWrite(ctx, mStageOutboundRequestToSecret, args)
+	}
+	args["medium"] = strings.TrimSpace(n.Medium)
+	args["target"] = strings.TrimSpace(n.Target)
+	return s.systemWrite(ctx, mStageOutboundRequest, args)
 }
 
 // ---------------------------------------------------------------------------
@@ -625,6 +835,25 @@ func flattenRows(rows []map[string]any) []map[string]any {
 	return rows
 }
 
+func oneChannel(rows []map[string]any, err error) (*Channel, error) {
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	c := channelFromRow(rows[0])
+	return &c, nil
+}
+
+func allChannels(rows []map[string]any, err error) ([]Channel, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Channel, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, channelFromRow(row))
+	}
+	return out, nil
+}
+
 func onePipeline(rows []map[string]any, err error) (*Pipeline, error) {
 	if err != nil || len(rows) == 0 {
 		return nil, err
@@ -744,6 +973,34 @@ func runFromRow(row map[string]any) Run {
 		})
 	}
 	return r
+}
+
+// channelFromRow reads a v1:pipelines:channel through pipelineChannelFull. The
+// owner is kept as stored: it is what the driver borrows authority under.
+func channelFromRow(row map[string]any) Channel {
+	return Channel{
+		ID:          bareID(rowString(row, "id")),
+		OwnerUserID: rowString(row, "ownerUserId"),
+		AccountID:   bareID(rowString(row, "accountId")),
+		Name:        rowString(row, "name"),
+		Kind:        rowString(row, "kind"),
+		SecretRef:   rowString(row, "secretRef"),
+		Status:      rowString(row, "status"),
+		Recipients:  rowStrings(row, "recipients"),
+	}
+}
+
+// outboundStatusFromRow reads a v1:platform:outboundRequest through
+// outboundRequestFull, keeping only the delivery state: the notify stage
+// staged the rest and does not read it back.
+func outboundStatusFromRow(row map[string]any) OutboundStatus {
+	return OutboundStatus{
+		ID:        bareID(rowString(row, "id")),
+		Status:    rowString(row, "status"),
+		LastError: rowString(row, "lastError"),
+		Attempts:  rowInt(row, "attempts"),
+		SentAt:    rowTime(row, "sentAt"),
+	}
 }
 
 // workStepFromRow reads a v1:work:step through workStepFull. The call is the

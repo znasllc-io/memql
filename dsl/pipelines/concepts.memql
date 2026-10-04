@@ -51,7 +51,7 @@ concept pipeline {
   compute           enum("cluster", "cluster_and_fleet")  @description("Where steps may run. `cluster` keeps every step on the cluster and refuses a step naming a need the cluster cannot meet; `cluster_and_fleet` lets such a step route to a machine in the owner's fleet. Absent reads as cluster.")
   status            enum("active", "disconnected")!  @description("`active` opens runs; `disconnected` opens none, and a run an agent has yet to start concludes with pipeline_disconnected. The row stays: it is the history every run of it points at.")
   secretNames       []string  @description("The globalSecret NAMES a step of this pipeline may resolve -- the owner's allowlist. A step naming a secret not listed here is refused before any executor sees it, and a name beginning MEMQL_ never resolves whatever this list says.")
-  channelIds        []string  @description("The channels a notify stage of this pipeline may deliver to (D16). Empty until channels have writers (epic memql#5480).")
+  channelIds        []string  @description("The channels a notify stage of this pipeline may deliver to (D16): the ids of v1:pipelines:channel rows, written by pipelinesChannelSave when a person allows the pipeline on a channel. A notify stage naming a channel outside this set is refused (pipeline_channel_not_allowed).")
   heads             object  @description("What the poll has seen, keyed by ref: {\"branch:<name>\": sha, \"pr:<number>\": sha}. The first poll records it and opens nothing; a later poll opens a run for a head that moved and drops the keys of closed pull requests. Written whole, so a writer always sends the complete map.")
   timings           object  @description("Seconds per Go import path, merged from every successful FULL run's step timings -- what the shard split balances on. Written whole.")
   timingsRunId      string  @description("The v1:pipelines:run whose timings were merged into this table last.")
@@ -117,8 +117,10 @@ concept run {
 }
 
 /// Where a notify stage delivers (D16): a Discord webhook or an email list, named by a manifest
-/// stage. The secret a channel needs is a REFERENCE to a globalSecret, never its value. This epic
-/// declares the concept, its tier and its routing; its writers arrive with epic memql#5480.
+/// stage. The secret a channel needs is a REFERENCE to a globalSecret, never its value. A channel is
+/// written by component/pipelinerun -- createChannel and updateChannel, both server-only -- after the
+/// pipelinesChannelSave builtin has validated it; a person's own channels are read through
+/// pipelineChannelsForOwner.
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="name", secondary="kind", status="status")
 concept channel {

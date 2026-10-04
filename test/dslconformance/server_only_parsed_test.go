@@ -1592,6 +1592,24 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "pipelines/mutations.memql", Name: "updatePipeline"}:                     true,
 		{Path: "pipelines/mutations.memql", Name: "createPipelineRun"}:                  true,
 		{Path: "pipelines/mutations.memql", Name: "updatePipelineRun"}:                  true,
+
+		// epic memql#5480, pipelines delivery. THE CHANNEL'S TWO WRITES carry a
+		// credential's REFERENCE: a channel names the globalSecret the notify
+		// stage will resolve and POST to, and is unique by name per owner. Both
+		// checks -- the secret's name outside the platform's MEMQL_ namespace,
+		// the channel's name unused among the owner's -- are made by the channel
+		// builtin in component/pipelinerun before it writes, under the owner's
+		// borrowed authority. Caller-scoping would admit exactly the call the
+		// checks exist to refuse, the owner naming a secret nobody checked, and
+		// a client-reachable write would skip them. THE ONE READ is the notify
+		// stage's look at the runs before the one it drives: its reader is the
+		// agent replica driving a run, with no person behind it, and the
+		// pipeline's owner is learned from the run being driven, so an
+		// actor.userId conjunct would answer zero rows and read as a pipeline
+		// that never failed.
+		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineEvent"}: true,
+		{Path: "pipelines/mutations.memql", Name: "createChannel"}:              true,
+		{Path: "pipelines/mutations.memql", Name: "updateChannel"}:              true,
 	}
 	for k := range want {
 		if !set[k] {

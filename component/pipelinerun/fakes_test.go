@@ -45,15 +45,31 @@ type memStore struct {
 	runs       map[string]Run
 	deliveries map[string]InboundDelivery
 
+	// channels is the notify stage's destinations (D16) by bare id, and
+	// channelOrder the order they were created in -- the DSL reads the newest
+	// of two rows sharing a name. files is the Library's files by bare id.
+	channels     map[string]Channel
+	channelOrder []string
+	files        map[string]libraryFile
+
+	// outbound is the outbox by bare request id: what was staged, and the
+	// delivery state only the outbound worker moves (a test moves it through
+	// setOutbound, as the worker does).
+	outbound map[string]outboundRow
+
 	// Writes, in order, for assertions.
 	pipelineCreates []Pipeline
 	pipelineUpdates []pipelineUpdate
 	runCreates      []Run
 	runUpdates      []runUpdate
+	channelCreates  []Channel
+	channelUpdates  []channelUpdate
+	staged          []NotificationRequest
 
 	// Injected failures.
 	failCreateRun error
 	failUpdateRun error
+	failStage     error
 
 	// afterCreatePipeline runs after each CreatePipeline lands, outside the
 	// store's lock: what another writer does right after a connect.
@@ -74,10 +90,26 @@ type runUpdate struct {
 	Patch     RunPatch
 }
 
+type channelUpdate struct {
+	Owner, ID string
+	Patch     ChannelPatch
+}
+
+// libraryFile is the one fact about a v1:library:file the notify stage reads.
+type libraryFile struct{ Owner, Name string }
+
+// outboundRow is one v1:platform:outboundRequest as the fake keeps it: what
+// was staged, and the delivery state.
+type outboundRow struct {
+	Request NotificationRequest
+	State   OutboundStatus
+}
+
 func newMemStore() *memStore {
 	return &memStore{
 		packages: map[string]PackageSource{}, pipelines: map[string]Pipeline{}, runs: map[string]Run{},
-		deliveries: map[string]InboundDelivery{},
+		deliveries: map[string]InboundDelivery{}, channels: map[string]Channel{}, files: map[string]libraryFile{},
+		outbound: map[string]outboundRow{},
 	}
 }
 
@@ -524,6 +556,238 @@ func (s *memStore) UpdateRun(_ context.Context, owner, runID string, patch RunPa
 	}
 	s.runs[id] = r
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Channels, the outbox and the Library (the notify stage's, epic memql#5480)
+// ---------------------------------------------------------------------------
+
+func (s *memStore) addChannel(c Channel) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.putChannel(c)
+}
+
+// putChannel keeps c under its bare id, as the newest row. Callers hold s.mu.
+func (s *memStore) putChannel(c Channel) {
+	id := bareID(c.ID)
+	c.ID = id
+	if _, ok := s.channels[id]; !ok {
+		s.channelOrder = append(s.channelOrder, id)
+	}
+	s.channels[id] = c
+}
+
+func (s *memStore) channel(id string) (Channel, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.channels[bareID(id)]
+	return c, ok
+}
+
+// addFile puts a Library file on the shelf, as its owner's.
+func (s *memStore) addFile(owner, id, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.files[bareID(id)] = libraryFile{Owner: owner, Name: name}
+}
+
+// ChannelsForOwner is pipelineChannelsForOwner: the caller's own, by name.
+func (s *memStore) ChannelsForOwner(ctx context.Context) ([]Channel, error) {
+	who, _ := callerOf(ctx)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Channel
+	for _, c := range s.channels {
+		if sameID(c.OwnerUserID, who) {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// ChannelForOwnerByName is channelForOwnerByName under the OWNER's borrowed
+// authority: the owner is an argument, not whoever the context carries, and
+// nobody is refused. The newest of two rows sharing a name answers.
+func (s *memStore) ChannelForOwnerByName(_ context.Context, owner, name string) (*Channel, error) {
+	if strings.TrimSpace(owner) == "" {
+		return nil, errors.New("memStore: a channel is read only under its owner")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.channelOrder) - 1; i >= 0; i-- {
+		if c := s.channels[s.channelOrder[i]]; c.Name == name && sameID(c.OwnerUserID, owner) {
+			c.Recipients = slices.Clone(c.Recipients)
+			return &c, nil
+		}
+	}
+	return nil, nil
+}
+
+// CreateChannel is createChannel: a read-merge insert at the id that stamps
+// the owner and `active`, whatever status the value carries.
+func (s *memStore) CreateChannel(_ context.Context, c Channel) error {
+	if strings.TrimSpace(c.OwnerUserID) == "" {
+		return errors.New("memStore: a channel is written only under its owner")
+	}
+	if bareID(c.ID) == "" {
+		return errors.New("memStore: a channel needs an id")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.channelCreates = append(s.channelCreates, c)
+	c.Recipients = slices.Clone(c.Recipients)
+	c.Status = "active"
+	s.putChannel(c)
+	return nil
+}
+
+// UpdateChannel is updateChannel: the named fields of the patch, and nothing
+// else, on a channel the owner owns.
+func (s *memStore) UpdateChannel(_ context.Context, owner, channelID string, patch ChannelPatch) error {
+	if strings.TrimSpace(owner) == "" {
+		return errors.New("memStore: a channel is written only under its owner")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.channelUpdates = append(s.channelUpdates, channelUpdate{Owner: owner, ID: channelID, Patch: patch})
+	id := bareID(channelID)
+	c, ok := s.channels[id]
+	if !ok {
+		return fmt.Errorf("memStore: no channel %q", channelID)
+	}
+	if !sameID(c.OwnerUserID, owner) {
+		return fmt.Errorf("memStore: %q may not write %q's channel", owner, c.OwnerUserID)
+	}
+	set := func(dst *string, v *string) {
+		if v != nil {
+			*dst = *v
+		}
+	}
+	set(&c.Name, patch.Name)
+	set(&c.Kind, patch.Kind)
+	set(&c.SecretRef, patch.SecretRef)
+	set(&c.Status, patch.Status)
+	if patch.Recipients != nil {
+		c.Recipients = slices.Clone(*patch.Recipients)
+	}
+	s.channels[id] = c
+	return nil
+}
+
+// PreviousRuns is pipelineRunsForPipelineEvent: one pipeline's runs of one
+// event, newest queued first, one page of twenty, whoever owns them.
+func (s *memStore) PreviousRuns(_ context.Context, pipelineID string, event pipelines.Event) ([]Run, error) {
+	if strings.TrimSpace(pipelineID) == "" || event == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Run
+	for _, r := range s.runs {
+		if sameID(r.PipelineID, pipelineID) && r.Event == event {
+			out = append(out, r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].QueuedAt.After(out[j].QueuedAt) })
+	if len(out) > 20 {
+		out = out[:20]
+	}
+	return out, nil
+}
+
+// StageNotification is stageOutboundRequest / stageOutboundRequestToSecret,
+// @createOnly("status", "attempts") included: a second stage at an id
+// refreshes what the row says and leaves where the worker has taken it.
+func (s *memStore) StageNotification(_ context.Context, n NotificationRequest) error {
+	if err := n.validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failStage != nil {
+		return s.failStage
+	}
+	s.staged = append(s.staged, n)
+	id := bareID(n.RequestID)
+	row, ok := s.outbound[id]
+	row.Request = n
+	if !ok {
+		row.State = OutboundStatus{ID: id, Status: "pending"}
+	}
+	s.outbound[id] = row
+	return nil
+}
+
+// OutboundStatuses is outboundRequestById, once per id, in the order asked: a
+// row nothing staged is an entry with no status.
+func (s *memStore) OutboundStatuses(_ context.Context, ids []string) ([]OutboundStatus, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]OutboundStatus, 0, len(ids))
+	for _, id := range ids {
+		if row, ok := s.outbound[bareID(id)]; ok {
+			out = append(out, row.State)
+			continue
+		}
+		out = append(out, OutboundStatus{ID: bareID(id)})
+	}
+	return out, nil
+}
+
+// LibraryFileNames is libraryFileById under the owner's borrowed authority: a
+// file somebody else owns is not there to read.
+func (s *memStore) LibraryFileNames(_ context.Context, owner string, ids []string) (map[string]string, error) {
+	if strings.TrimSpace(owner) == "" {
+		return nil, errors.New("memStore: a Library file is read only under its owner")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]string{}
+	for _, id := range ids {
+		if id = strings.TrimSpace(id); id == "" {
+			continue
+		}
+		if f, ok := s.files[bareID(id)]; ok && sameID(f.Owner, owner) {
+			out[id] = f.Name
+		}
+	}
+	return out, nil
+}
+
+// stagedNotifications is every StageNotification call, in order.
+func (s *memStore) stagedNotifications() []NotificationRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.staged)
+}
+
+// outboundRows is the outbox, one row per id, ordered by id.
+func (s *memStore) outboundRows() []outboundRow {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := slices.Collect(maps.Values(s.outbound))
+	sort.Slice(out, func(i, j int) bool { return out[i].State.ID < out[j].State.ID })
+	return out
+}
+
+// setOutbound is the outbound worker moving a row: the delivery state, and
+// sentAt when the transport took it.
+func (s *memStore) setOutbound(id, status string, attempts int, lastError string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id = bareID(id)
+	row := s.outbound[id]
+	row.State = OutboundStatus{ID: id, Status: status, Attempts: attempts, LastError: lastError}
+	if status == "sent" {
+		row.State.SentAt = testNow
+	}
+	s.outbound[id] = row
 }
 
 // ---------------------------------------------------------------------------

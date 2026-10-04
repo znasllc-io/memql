@@ -2118,6 +2118,28 @@ QueryClient.prototype.cataloguedConstructsForOwner = function (this: QueryClient
   return this.executeNamed("cataloguedConstructsForOwner", buildCataloguedConstructsForOwner(args), opts);
 };
 
+/** The caller's channel of one name -- what a notify stage resolves its `channel:` through. A name is unique among a person's channels (the channel builtin checks it before it writes), so this answers at most one row; the sort and page of one say so. The driver that reads it has no person on the line and asks under the pipeline owner's borrowed authority, so the filter is the owner conjunct and nothing wider: it finds the owner's own channel, never another person's of the same name. */
+// Bound concept: v1:pipelines:channel (machine-readable: BoundConcepts["channelForOwnerByName"] in generated_concepts.ts).
+export interface ChannelForOwnerByNameArgs {
+  name: string;
+}
+
+export function buildChannelForOwnerByName(args: ChannelForOwnerByNameArgs): string {
+  const parts: string[] = [];
+  parts.push("name: " + renderMemQLValue(args.name));
+  return "query channelForOwnerByName(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    channelForOwnerByName(args: ChannelForOwnerByNameArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.channelForOwnerByName = function (this: QueryClient, args: ChannelForOwnerByNameArgs = {} as ChannelForOwnerByNameArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("channelForOwnerByName", buildChannelForOwnerByName(args), opts);
+};
+
 /** Resolve one account by its own row id. The detail view's read on open, and the read every tie surface uses to put a name on an id it holds. */
 // Bound concept: v1:accounts:account (machine-readable: BoundConcepts["clientAccountById"] in generated_concepts.ts).
 export interface ClientAccountByIdArgs {
