@@ -4,6 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/znasllc-io/memql/core/buildinfo"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -122,7 +123,18 @@ func snapshotDependencies() []common.Dependency {
 	return snapshot
 }
 
+// buildHealthResponse is /healthz's answer, with the release this binary was
+// cut from and its short revision on it (buildinfo, the one place either is
+// stated).
 func buildHealthResponse() GetHealthzResponseObject {
+	return buildHealthResponseFor(buildinfo.Version(), buildinfo.ShortCommit())
+}
+
+// buildHealthResponseFor is buildHealthResponse over explicit release facts.
+// The split is for the test: a test binary carries no revision, so a commit
+// read through buildinfo is always unknown there, and an assertion about it
+// would pass whether or not the field was ever set.
+func buildHealthResponseFor(version, commit string) GetHealthzResponseObject {
 	deps := snapshotDependencies()
 
 	statuses := make([]dependencyHealthStatus, 0, len(deps))
@@ -161,6 +173,8 @@ func buildHealthResponse() GetHealthzResponseObject {
 		}
 		resp := GetHealthz503JSONResponse{
 			Status:        status,
+			Version:       version,
+			Commit:        commit,
 			ActiveStreams: ActiveStreams(),
 			Dependencies:  statuses,
 		}
@@ -175,6 +189,8 @@ func buildHealthResponse() GetHealthzResponseObject {
 
 	resp := GetHealthz200JSONResponse{
 		Status:        "ok",
+		Version:       version,
+		Commit:        commit,
 		ActiveStreams: ActiveStreams(),
 		Dependencies:  statuses,
 	}
