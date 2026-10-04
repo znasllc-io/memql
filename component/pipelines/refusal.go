@@ -71,6 +71,7 @@ const (
 	// The run.
 	CodeRunnerUnavailable = "pipeline_runner_unavailable"
 	CodeExecutorError     = "pipeline_executor_error"
+	CodeSecretMissing     = "pipeline_secret_missing"
 	CodeDisconnected      = "pipeline_disconnected"
 	CodeCheckPermission   = "pipeline_check_permission_missing"
 
@@ -117,6 +118,7 @@ var codeClasses = map[string]Class{
 
 	CodeRunnerUnavailable: ClassFailure,
 	CodeExecutorError:     ClassFailure,
+	CodeSecretMissing:     ClassFailure,
 	CodeStepTimeout:       ClassFailure,
 	CodeRunCeiling:        ClassFailure,
 	CodeNoMachineForNeed:  ClassFailure,

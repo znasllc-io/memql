@@ -46,6 +46,7 @@ func TestStepResultWireNamesArePinned(t *testing.T) {
 		LogLines:        1,
 		LogCapped:       true,
 		Timings:         map[string]float64{"p": 1},
+		Notes:           []Failure{{Code: CodeArtifactMissing}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +57,7 @@ func TestStepResultWireNamesArePinned(t *testing.T) {
 	}
 	want := []string{
 		"artifactFileIds", "exitCode", "failure", "finishedAt", "logCapped",
-		"logFileId", "logLines", "logTail", "startedAt", "status", "timings", "where",
+		"logFileId", "logLines", "logTail", "notes", "startedAt", "status", "timings", "where",
 	}
 	if keys := sortedKeys(got); !reflect.DeepEqual(keys, want) {
 		t.Errorf("StepResult JSON keys = %v, want %v", keys, want)

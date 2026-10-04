@@ -205,4 +205,8 @@ type StepResult struct {
 	// path, read from the step's output with ParseGoTestOutput. The driver
 	// writes them back into the pipeline's timing table after a full run.
 	Timings map[string]float64 `json:"timings,omitempty"`
+	// Notes are note-class codes (ClassNote): facts a person should see
+	// beside the step that change no outcome -- a declared artifact path that
+	// matched nothing, beside a green step.
+	Notes []Failure `json:"notes,omitempty"`
 }
