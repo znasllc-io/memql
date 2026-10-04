@@ -150,7 +150,11 @@ any other `failed` with a reason naming the tier. That covers the case the
 receiver cannot see: a delivery an env pin admitted while no store had that id,
 dispatched after the store was connected. A row with no `verifiedBy` -- one the
 mailbox reader staged, or one staged before the field existed -- is dispatched
-as before.
+as before, provided the receiver verified it: a claimed row with
+`signatureVerified=false` is stamped `failed` too, whatever its tier says.
+Both are read off the staged row by the dispatcher itself, never from the
+automation's arguments (see [what a connector's `Apply`
+returns](#what-a-connectors-apply-returns)).
 
 ```bash
 MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_SCHEME=hmac-sha256-base64
@@ -186,8 +190,9 @@ dispatchInboundToConnector      an engine automation on inboundRequest.created
 ```
 
 `Apply` receives the row's fields as an `InboundRequest` — `Source`,
-`Topic`, `Body`, `Headers`, `ReceivedAt` and the staged row's id — and
-returns the rows it wants written. It does **not** write them itself: the
+`Body`, `Headers`, `ReceivedAt` and the staged row's id; `Topic` is empty,
+because a staged row carries none and the origin's event name, when it sends
+one, is in the headers — and returns the rows it wants written. It does **not** write them itself: the
 runtime does, under the connector's own actor, and refuses any write whose
 version is older than what MemQL already holds (recording it as `stale`).
 That is what stops an out-of-order webhook regressing a mirror.
@@ -201,6 +206,15 @@ left exactly as staged, `received`, for whatever automation serves that source.
 That holds even when its staged `headersJson` or `receivedAt` cannot be read.
 The dispatcher parses them only after a connector claims the row, and a claimed
 row that does not parse is stamped `failed` with the reason before `Apply` runs.
+
+**The dispatcher reads the row itself.** The automation hands
+`datasyncDispatchInbound` the staged row's id and nothing else; the source, the
+body, the headers, the receipt time, the verifying tier and the signature
+verdict all come from the row, which only the receiver (or the mailbox reader)
+can write. A call that did not come from the engine's own automation is refused
+before the row is read, because a builtin answers to its name in any signed-in
+client's query. So a connector applies a delivery a secret verified, and
+nothing a caller supplies.
 
 See [data origins](../concepts/data-origins.md) for the contract and
 `integrations/CLAUDE.md` for the recipe.

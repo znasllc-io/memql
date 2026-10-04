@@ -287,11 +287,13 @@ func TestAnEnvVerifiedRowForAStoreSourceIsRefusedAtDispatch(t *testing.T) {
 // A staged row carrying NONE of the optional delivery fields -- no
 // headersJson, no receivedAt, no verifiedBy, which is what the mailbox reader
 // stages and what every row staged before those fields existed looks like --
-// still reaches the dispatcher. The automation passes each one to the builtin,
-// whose fields are strings, so an absent value must arrive as "" rather than
-// as a null the builtin refuses before it runs. Proved on a store's own
-// source, where the dispatcher stamps the row: a refused call would leave it
-// `received`.
+// still reaches the connector and is applied. The automation hands the builtin
+// the row's id and nothing else (epic memql#5477), and the dispatcher reads
+// each field off the row, an absent one as "": there is no builtin field left
+// for a null to be refused by before the handler runs. Staged signed, as the
+// mailbox reader stages every row it writes -- a row NO secret verified is
+// refused at dispatch (TestAnUnsignedRowForAStoreSourceIsRefusedAtDispatch).
+// Proved on a store's own source, where the dispatcher stamps the row.
 func TestARowWithoutOptionalDeliveryFieldsIsStillDispatched(t *testing.T) {
 	a, db := engineOverPostgres(t)
 	if a == nil {
@@ -313,7 +315,7 @@ func TestARowWithoutOptionalDeliveryFieldsIsStillDispatched(t *testing.T) {
 	t.Cleanup(func() { memqlsync.UnbindForTest(shopify.ConnectorName) })
 
 	requestID := "inb-bare-" + suffix
-	if _, err := a.Execute(seedCtx(), fmt.Sprintf(`mutation stageInboundRequest(requestId: %s, source: %s, medium: "webhook", body: "{}")`,
+	if _, err := a.Execute(seedCtx(), fmt.Sprintf(`mutation stageInboundRequest(requestId: %s, source: %s, medium: "webhook", body: "{}", signatureVerified: true)`,
 		langparser.QuoteString(requestID), langparser.QuoteString("shopify-"+storeID))); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
@@ -321,9 +323,156 @@ func TestARowWithoutOptionalDeliveryFieldsIsStillDispatched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
-	if status := rowString(stagedRow(t, a, requestID), "status"); status == "received" {
-		t.Fatalf("a row without the optional delivery fields was never dispatched (run %s); the builtin refused its arguments", run.Status)
+	if status := rowString(stagedRow(t, a, requestID), "status"); status != "processed" {
+		t.Fatalf("a row without the optional delivery fields is %q after dispatch (run %s), want processed", status, run.Status)
 	}
+}
+
+// A row NO secret verified, on a store's own source, is refused at dispatch
+// (epic memql#5477): stamped failed, no privacy job, although the connector
+// claims the source and the tier says `connector`. A connector reads a claimed
+// row as signed, and no connector declares scheme none today -- this is the
+// refusal that holds if one ever does, and for a pre-verifiedBy row no secret
+// verified. The control is the same delivery signed, which queues the job.
+func TestAnUnsignedRowForAStoreSourceIsRefusedAtDispatch(t *testing.T) {
+	a, db := engineOverPostgres(t)
+	if a == nil {
+		return
+	}
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	storeID := "unsigned-" + suffix
+	shop := storeID + ".myshopify.com"
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM "MemoryNodes" WHERE payload::text LIKE $1 OR id LIKE $1`, "%"+suffix+"%")
+	})
+	for _, q := range []string{
+		call("createStore", map[string]string{"storeId": storeID, "domain": shop, "name": "Unsigned test", "adminTokenRef": "unused", "webhookSecretRef": "unused"}),
+		call("setStoreStatus", map[string]string{"storeId": storeID, "status": shopify.StatusPaused}),
+	} {
+		if _, err := a.Execute(seedCtx(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	conn := shopify.NewConnector(a, nil, shopify.NewStoreRegistry(a, a.ResolveSystemSecret), shopify.NewAdminClient())
+	if err := memqlsync.Bind(conn); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { memqlsync.UnbindForTest(shopify.ConnectorName) })
+	dispatch := dispatcherOn(t, a)
+
+	refused := stageComplianceDelivery(t, a, storeID, "unsigned-"+suffix, false)
+	if _, err := dispatch(stagedRow(t, a, refused)); err == nil {
+		t.Log("the run recorded no error; the row's status is what this asserts")
+	}
+	after := stagedRow(t, a, refused)
+	if status := rowString(after, "status"); status != "failed" {
+		t.Fatalf("an unsigned row for a store's source is %q after dispatch, want failed", status)
+	}
+	if reason := rowString(after, "lastError"); !strings.Contains(reason, "signature was not verified") {
+		t.Errorf("lastError = %q, want the reason the dispatcher stamps", reason)
+	}
+	if n := complianceJobsFor(t, db, storeID); n != 0 {
+		t.Fatalf("an unsigned row queued %d privacy jobs for the store", n)
+	}
+
+	accepted := stageComplianceDelivery(t, a, storeID, "signed-"+suffix, true)
+	if _, err := dispatch(stagedRow(t, a, accepted)); err != nil {
+		t.Fatalf("the signed control: %v", err)
+	}
+	if status := rowString(stagedRow(t, a, accepted), "status"); status != "processed" {
+		t.Fatalf("the control, signed, is %q after dispatch, want processed", status)
+	}
+	if n := complianceJobsFor(t, db, storeID); n != 1 {
+		t.Fatalf("the control queued %d privacy jobs, want 1 -- without it the refusal above proves nothing", n)
+	}
+}
+
+// THE CLIENT'S DOOR, end to end (epic memql#5477). datasyncDispatchInbound is
+// a builtin, and a builtin answers to its name in any signed-in client's
+// query: here a real cluster owner's session names it through Execute, on the
+// engine's own dispatch path, for a signed delivery the receiver staged. The
+// handler sees the CLIENT's origin and refuses before anything is read, so the
+// row stays `received` and no privacy job is queued. The control is the
+// shipped automation on the same row, which applies it.
+func TestAClientCannotDispatchAStagedDeliveryThroughTheBuiltin(t *testing.T) {
+	a, db := engineOverPostgres(t)
+	if a == nil {
+		return
+	}
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	storeID := "client-" + suffix
+	shop := storeID + ".myshopify.com"
+	t.Cleanup(func() {
+		_, _ = db.Exec(`DELETE FROM "MemoryNodes" WHERE payload::text LIKE $1 OR id LIKE $1`, "%"+suffix+"%")
+	})
+	for _, q := range []string{
+		call("createStore", map[string]string{"storeId": storeID, "domain": shop, "name": "Client test", "adminTokenRef": "unused", "webhookSecretRef": "unused"}),
+		call("setStoreStatus", map[string]string{"storeId": storeID, "status": shopify.StatusPaused}),
+	} {
+		if _, err := a.Execute(seedCtx(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	conn := shopify.NewConnector(a, nil, shopify.NewStoreRegistry(a, a.ResolveSystemSecret), shopify.NewAdminClient())
+	if err := memqlsync.Bind(conn); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { memqlsync.UnbindForTest(shopify.ConnectorName) })
+	// Registers the datasync integration, which is what lets a query name the
+	// builtin at all.
+	dispatch := dispatcherOn(t, a)
+	requestID := stageComplianceDelivery(t, a, storeID, "client-"+suffix, true)
+
+	// The same owner the fixtures write as, on a session: client origin.
+	client := auth.ContextWithClientOrigin(seedCtx())
+	_, err := a.Execute(client, fmt.Sprintf(`datasyncDispatchInbound(inboundRequestId: %s)`, langparser.QuoteString(requestID)))
+	if err == nil || !strings.Contains(err.Error(), "refuses a client-origin call") {
+		t.Fatalf("a client naming the builtin: err = %v, want the handler's origin refusal", err)
+	}
+	if status := rowString(stagedRow(t, a, requestID), "status"); status != "received" {
+		t.Fatalf("a refused client call left the row %q, want received", status)
+	}
+	if n := complianceJobsFor(t, db, storeID); n != 0 {
+		t.Fatalf("a refused client call queued %d privacy jobs", n)
+	}
+
+	if _, err := dispatch(stagedRow(t, a, requestID)); err != nil {
+		t.Fatalf("the shipped automation on the same row: %v", err)
+	}
+	if status := rowString(stagedRow(t, a, requestID), "status"); status != "processed" {
+		t.Fatalf("the shipped automation left the row %q, want processed", status)
+	}
+	if n := complianceJobsFor(t, db, storeID); n != 1 {
+		t.Fatalf("the shipped automation queued %d privacy jobs, want 1 -- without it the refusal above proves nothing", n)
+	}
+}
+
+// stageComplianceDelivery stages a customers/data_request delivery for a
+// store's own source through the receiver's @serverOnly mutation, the
+// connector's tier on it, signed or not.
+func stageComplianceDelivery(t *testing.T, eng *memql.MemQLEngine, storeID, tag string, signed bool) string {
+	t.Helper()
+	shop := storeID + ".myshopify.com"
+	requestID := "inb-" + tag
+	headers := langparser.QuoteString(`{"x-shopify-topic":"` + shopify.TopicDataRequest + `","x-shopify-shop-domain":"` + shop + `"}`)
+	body := fmt.Sprintf(`{"shop_domain":%q,"customer":{"id":991},"data_request":{"id":%q}}`, shop, tag)
+	if _, err := eng.Execute(seedCtx(), fmt.Sprintf(`mutation stageInboundRequest(requestId: %s, source: %s, medium: "webhook", `+
+		`body: %s, headersJson: %s, signatureVerified: %t, verifiedBy: "connector", receivedAt: "2026-10-04T12:00:00Z")`,
+		langparser.QuoteString(requestID), langparser.QuoteString("shopify-"+storeID), langparser.QuoteString(body),
+		headers, signed)); err != nil {
+		t.Fatalf("stage %s: %v", tag, err)
+	}
+	return requestID
+}
+
+// complianceJobsFor counts the privacy jobs queued for one store.
+func complianceJobsFor(t *testing.T, db *sql.DB, storeID string) int {
+	t.Helper()
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM "MemoryNodes" WHERE concept='v1:shopify:complianceJob' AND payload::text LIKE $1`, "%"+storeID+"%").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 // stagedRow reads one staged inboundRequest row through the engine, the way

@@ -182,6 +182,31 @@ func (s *Store) MarkDead(ctx context.Context, entryID, lastError string) error {
 	return err
 }
 
+// StagedInboundRequest reads one staged delivery by its row id: the ONLY
+// source of what the dispatcher hands a connector (epic memql#5477). The
+// automation that fires on the row passes its id and nothing else, so the
+// source, the body, the delivery metadata, the verifying tier and the
+// receiver's signature verdict are the row's -- the values the receiver wrote
+// under the @serverOnly stage -- and never an argument a caller could choose.
+// Each field reads as the automation used to hand it over: as stored, untrimmed
+// (the body is what the signature covered), an absent one as "".
+func (s *Store) StagedInboundRequest(ctx context.Context, requestID string) (StagedRequest, bool, error) {
+	rows, err := s.rows(ctx, call("query", "inboundRequestById", arg{"requestId", requestID}))
+	if err != nil || len(rows) == 0 {
+		return StagedRequest{}, false, err
+	}
+	row := rows[0]
+	return StagedRequest{
+		RequestId:         requestID,
+		Source:            argString(row, "source"),
+		Body:              []byte(argString(row, "body")),
+		HeadersJSON:       argString(row, "headersJson"),
+		ReceivedAt:        argString(row, "receivedAt"),
+		VerifiedBy:        argString(row, "verifiedBy"),
+		SignatureVerified: boolField(row, "signatureVerified"),
+	}, true, nil
+}
+
 // SyncStateFor reads one domain's health, or the zero value when the
 // domain has never been written.
 func (s *Store) SyncStateFor(ctx context.Context, conceptID, connector, direction string) (SyncState, error) {

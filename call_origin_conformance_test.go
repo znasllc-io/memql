@@ -423,10 +423,22 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		//   - the backfill and reconciliation runners are operator- or
 		//     schedule-driven;
 		//   - the inbound dispatcher works a v1:platform:inboundRequest ROW
-		//     that the HTTP edge staged and an automation handed over. It
-		//     never sees the request -- by the time it runs, the signature
+		//     that the HTTP edge staged and an automation handed over BY ID.
+		//     It never sees the request -- by the time it runs, the signature
 		//     has been checked, the body has been persisted, and the socket
 		//     is long closed.
+		//
+		// "Handed over" is ENFORCED, not assumed (epic memql#5477).
+		// datasyncDispatchInbound is a builtin, which any signed-in client's
+		// query can name (@sdk has no engine effect), and it used to take the
+		// source, the body, the headers and the verifying tier as arguments,
+		// so whatever reached it chose the delivery a connector applied. It
+		// refuses every call that did not arrive with internal origin before
+		// it reads anything, and takes no delivery from its caller at all: it
+		// is handed the staged row's id and reads the row itself, under the
+		// operator identity below, refusing a claimed row another tier or no
+		// secret verified (component/datasync/inbound_test.go, and end to end
+		// through Execute in test/inboundhop).
 		//
 		// What it stamps for: its own bookkeeping. The outbox queue and the
 		// health timeline are clusterOwner-tier concepts whose mutations are
@@ -444,7 +456,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// actor, a narrower credential admitted only to the concepts naming
 		// that connector; the two are stamped separately and the call sites
 		// say which is in scope.
-		"component/datasync": "the data-origins runtime -- server-initiated bookkeeping over its own clusterOwner-tier queue and health rows, and the handling stamp on a staged inbound row it worked (updateInboundRequestStatus, @serverOnly); mirror writes use the narrower connector actor instead (epic memql#4378)",
+		"component/datasync": "the data-origins runtime -- server-initiated bookkeeping over its own clusterOwner-tier queue and health rows, and the handling stamp on a staged inbound row it worked (updateInboundRequestStatus, @serverOnly), the dispatch builtin refusing every call without internal origin and reading its delivery from the staged row; mirror writes use the narrower connector actor instead (epic memql#4378, epic memql#5477)",
 		// The RELEASE CUTTER (epic memql#4434). REQUEST-DERIVED, and the
 		// fourth exception -- stated rather than borrowed, because the caller
 		// here is neither a connector nor a boot path: it is a signed-in human

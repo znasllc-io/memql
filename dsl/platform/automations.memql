@@ -15,27 +15,17 @@ use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains }
 // executor that is missing fails every inbound row from every source.
 
 /// Offer every staged inbound delivery to the connector its source names. The connector decides
-/// whether the delivery is its own; a source nothing serves is skipped, not failed. The optional
-/// delivery fields are passed as the row has them, absent included: a mailbox-reader row carries no
-/// headersJson, and a row staged before verifiedBy existed carries no tier.
+/// whether the delivery is its own; a source nothing serves is skipped, not failed. It hands the
+/// dispatcher the row's id and nothing else: the dispatcher reads the source, the body, the delivery
+/// metadata, the verifying tier and the signature verdict from the row itself, absent fields
+/// included -- a mailbox-reader row carries no headersJson, and a row staged before verifiedBy
+/// existed carries no tier.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
 automation dispatchInboundToConnector {
   args {
-    id     any
-    source any
-    body   any
-    headersJson any
-    receivedAt any
-    verifiedBy any
+    id  any
   }
-  dispatch := builtin datasyncDispatchInbound(
-    inboundRequestId: args.id,
-    source: args.source,
-    body: args.body,
-    headersJson: args.headersJson,
-    receivedAt: args.receivedAt,
-    verifiedBy: args.verifiedBy
-  )
+  dispatch := builtin datasyncDispatchInbound(inboundRequestId: args.id)
 }
 
 /// Sweep mirrored domains whose interval says they are due. Every 10 minutes, because the interval
