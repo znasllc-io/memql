@@ -3,6 +3,7 @@ package pipelinerun
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -212,6 +213,78 @@ func TestEveryGatedPathKeepsTheGateDiscipline(t *testing.T) {
 			t.Fatalf("poll: %+v %v", res, err)
 		}
 		waitDrives(t, dh.integ)
+	})
+
+	t.Run("a push supersedes its pull request's earlier run", func(t *testing.T) {
+		// The first delivery's run of #42, still queued: no agent claimed it.
+		var earlier Run
+		for _, r := range dh.store.allRuns() {
+			if r.PullRequest == 42 && r.Mode == pipelines.ModeAffected && !r.Finished() {
+				earlier = r
+			}
+		}
+		if earlier.ID == "" {
+			t.Fatalf("no unfinished run of #42 is left to supersede: %+v", dh.store.allRuns())
+		}
+		before, readsBefore := len(dh.gate.seen()), len(dh.github.headReads())
+		dh.github.setPullHead(repoName, 42, shaD)
+		res := trigger(t, dh.harness, "pull_request", "d-pr-push", prDelivery(t, "synchronize", 42, shaD, repoName, testInstallation))
+		if len(res.Opened) != 1 {
+			t.Fatalf("opened %+v", res)
+		}
+		sawKey(t, before, OpenGateKey(res.Opened[0].RunKey))
+		sawKey(t, before, RunGateKey(earlier.ID))
+		if reads := dh.github.headReads()[readsBefore:]; len(reads) != 1 {
+			t.Errorf("the push read #42's head from GitHub once, ungated: %v", reads)
+		}
+		if got, _ := dh.store.run(earlier.ID); got.Conclusion != ConclusionCancelled || got.CancelledBy != "superseded by "+res.Opened[0].ID {
+			t.Errorf("the superseded run is concluded cancelled, by the push's run: %s by %q", got.Conclusion, got.CancelledBy)
+		}
+	})
+
+	t.Run("a force-push back to the superseded head runs it again (R37)", func(t *testing.T) {
+		// #42's run at shaA, superseded above by the push to shaD.
+		var superseded Run
+		for _, r := range dh.store.allRuns() {
+			if r.PullRequest == 42 && r.SHA == shaA && r.Mode == pipelines.ModeAffected && strings.HasPrefix(r.CancelledBy, "superseded by ") {
+				superseded = r
+			}
+		}
+		if superseded.ID == "" {
+			t.Fatalf("no superseded run of #42 at shaA: %+v", dh.store.allRuns())
+		}
+		// Where the gate sequence stood at each head read.
+		var (
+			mu     sync.Mutex
+			atRead []int
+		)
+		dh.integ.Configure(func(d *Deps) {
+			d.GitHub = hookedGitHub{fakeGitHub: dh.github, afterHeadRead: func(context.Context) {
+				mu.Lock()
+				defer mu.Unlock()
+				atRead = append(atRead, len(dh.gate.seen()))
+			}}
+		})
+		before, readsBefore := len(dh.gate.seen()), len(dh.github.headReads())
+		dh.github.setPullHead(repoName, 42, shaA)
+		res := trigger(t, dh.harness, "pull_request", "d-pr-back", prDelivery(t, "synchronize", 42, shaA, repoName, testInstallation))
+		if len(res.Opened) != 1 || res.Opened[0].RunKey != superseded.RunKey || res.Opened[0].Attempt != superseded.Attempt+1 {
+			t.Fatalf("the force-push back opens the key's next attempt: %+v", res)
+		}
+		openKey := OpenGateKey(superseded.RunKey)
+		sawKey(t, before, openKey)
+		gateAt := before + slices.Index(dh.gate.seen()[before:], openKey)
+		mu.Lock()
+		defer mu.Unlock()
+		if reads := dh.github.headReads()[readsBefore:]; len(reads) != 2 || len(atRead) != 2 {
+			t.Fatalf("want the dedup's head read and the supersede's: %v (at %v)", reads, atRead)
+		}
+		if atRead[0] > gateAt {
+			t.Errorf("the dedup's head read came after the open gate %q was taken (read at %d, gate at %d)", openKey, atRead[0], gateAt)
+		}
+		if atRead[1] <= gateAt {
+			t.Errorf("the supersede's head read came before the open gate (read at %d, gate at %d)", atRead[1], gateAt)
+		}
 	})
 
 	t.Run("connect, reconnect elsewhere, disconnect", func(t *testing.T) {

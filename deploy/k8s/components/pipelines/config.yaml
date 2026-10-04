@@ -1,0 +1,40 @@
+# The workbench's pipelines env (epic memql#5478, task #5492), read through
+# envFrom by the workbench Deployment alone (kustomization.yaml's patch).
+#
+# NO NAMESPACE, deliberately: this is the one object of the component that
+# belongs in the MESH namespace, beside the Deployment that reads it, and the
+# overlays' unsetOnly transformer puts it there -- whatever that namespace is
+# called.
+#
+#   MEMQL_PIPELINES_NAMESPACE    where the runner creates Jobs; it must name the
+#                                namespace this component puts the Role, quota
+#                                and limits in, or every create is a 403.
+#   MEMQL_PIPELINES_CLONE_IMAGE  the image of each Job's `clone` init container,
+#                                which runs `git` and is handed the repository
+#                                token, and of the isolation probe, which runs
+#                                `bash` and `perl` (git's own dependency): this
+#                                one has all three. PINNED BY DIGEST: a tag is
+#                                whatever was pushed to it last, and whoever
+#                                controls the tag would control the token. The
+#                                digest is the multi-arch INDEX, measured with
+#                                  docker buildx imagetools inspect docker.io/library/buildpack-deps:bookworm-scm
+#                                on 2026-10-03; move it by measuring again, never
+#                                by editing the tag alone.
+#   MEMQL_PIPELINES_WORKSPACE_LIMIT
+#                                the size limit of every step's /workspace: the
+#                                LimitRange's default ephemeral-storage limit
+#                                (ceiling.yaml), stated beside it in each
+#                                overlay's pipelines-values.yaml, so the bound
+#                                the kubelet evicts a step for is the one its
+#                                Job shows.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: pipelines
+data:
+  MEMQL_PIPELINES_NAMESPACE: memql-pipelines
+  MEMQL_PIPELINES_CLONE_IMAGE: "docker.io/library/buildpack-deps:bookworm-scm@sha256:b42f74a50a22540b839042134919504ff7c51e7cf8d751b79d0f94c56566cb92"
+  MEMQL_PIPELINES_WORKSPACE_LIMIT: 20Gi

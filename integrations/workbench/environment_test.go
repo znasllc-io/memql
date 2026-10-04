@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+
+	pl "github.com/znasllc-io/memql/component/pipelines"
 )
 
 // environment_test.go -- memql#4353, first half.
@@ -62,9 +65,9 @@ func execWithEnvironment(env any) map[string]any {
 }
 
 // TestEachUnmetNeedRefusesAndTheActionDoesNotRun walks the closed vocabulary one
-// value at a time. Each of the four names something a workbench IS NOT -- no
-// display, no GPU, no macOS tooling, none of the user's files -- so each on its
-// own is a mismatch.
+// value at a time. Each value names something a workbench IS NOT -- no display,
+// no GPU, no macOS tooling, no Docker daemon, none of the user's files -- so
+// each on its own is a mismatch.
 func TestEachUnmetNeedRefusesAndTheActionDoesNotRun(t *testing.T) {
 	for _, need := range EnvironmentNeeds() {
 		t.Run(need, func(t *testing.T) {
@@ -341,4 +344,67 @@ func TestTheMismatchIsRefusedBeforeTheRemoteHop(t *testing.T) {
 			"lookup, or an unreachable workbench masks it", res.ErrorCode, ErrCodeEnvironmentMismatch)
 	}
 	assertNothingRan(t, root, "a mismatch refused in remote mode")
+}
+
+// TestDockerIsAKnownNeedTheWorkbenchCannotMeet -- epic memql#5478 (#5494).
+//
+// A pipeline step that builds or runs containers names `docker`, and a
+// workbench is an unprivileged sandbox with no daemon and no socket. Each way
+// of getting this wrong fails quietly in its own direction. Left out of the
+// closed set, `docker` is a caller error (invalid_environment_hint): a
+// well-formed step refused as if it were a typo, with the reroute half never
+// told there is a machine that could run it. Put in the set as something the
+// workbench PROVIDES, the call runs here and its first `docker build` fails
+// three layers down -- the failure the hint exists to replace.
+//
+// The literal "docker" rather than a constant: the spelling is the wire
+// contract a manifest and a tool call both write, so it is what is pinned.
+func TestDockerIsAKnownNeedTheWorkbenchCannotMeet(t *testing.T) {
+	hint, err := parseEnvironmentHint(map[string]any{"needs": []any{"docker"}})
+	if err != nil {
+		t.Fatalf("`docker` was refused as an unknown need: %v", err)
+	}
+	if m := evaluateEnvironmentHint(hint); m == nil || !slices.Equal(m.UnmetNeeds, []string{"docker"}) {
+		t.Fatalf("evaluateEnvironmentHint = %+v, want a mismatch naming exactly [docker] -- a workbench has "+
+			"no Docker daemon, so a call that needs one is a call it cannot serve", m)
+	}
+
+	// Through the dispatch path the tool loop actually calls: a structured
+	// refusal it can reroute on, and nothing ran.
+	i, root := envIntegration(t)
+	nodes, err := i.handleDispatchHost(context.Background(),
+		execWithEnvironment(map[string]any{"needs": []any{"docker"}}), 0)
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if res := decodeDispatch(t, nodes); res.ErrorCode != ErrCodeEnvironmentMismatch {
+		t.Fatalf("errorCode = %q (%s), want %q", res.ErrorCode, res.ErrorMsg, ErrCodeEnvironmentMismatch)
+	}
+	mismatch, ok := EnvironmentMismatchFromPayload(nodes[0].Payload)
+	if !ok || !slices.Equal(mismatch.UnmetNeeds, []string{"docker"}) {
+		t.Fatalf("structured mismatch = %+v (readable: %v), want unmetNeeds [docker]", mismatch, ok)
+	}
+	assertNothingRan(t, root, "a docker-need refusal")
+}
+
+// TestTheNeedVocabularyIsThePipelinesNeeds holds this package's closed set to
+// the pipelines seam's (component/pipelines.Needs), which the step compiler
+// validates a manifest against.
+//
+// Two lists of the same names always eventually disagree, and here each
+// direction of disagreement has a victim. A need only the seam knows is a step
+// the compiler accepts and the workbench then refuses as a typo; a need only
+// the workbench knows is one the compiler refuses before anything could route
+// it. Neither shows up anywhere but in a pipeline that cannot run.
+func TestTheNeedVocabularyIsThePipelinesNeeds(t *testing.T) {
+	want := pl.Needs()
+	if len(want) == 0 {
+		t.Fatal("component/pipelines.Needs() is empty; a parity check against nothing passes by matching nothing")
+	}
+	if got := EnvironmentNeeds(); !slices.Equal(got, want) {
+		t.Fatalf("the workbench accepts the needs %v and the pipelines seam accepts %v.\n\n"+
+			"Add a need to BOTH: component/pipelines/needs.go and integrations/workbench/environment.go "+
+			"(and say in workbenchProvides whether a workbench can meet it -- every need so far is one it "+
+			"cannot, which is what routes the step to a fleet machine).", got, want)
+	}
 }

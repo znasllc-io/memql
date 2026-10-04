@@ -49,7 +49,7 @@ import { artifactName, fileStory, type ArtifactRow, type CompositionRow } from "
 // is one unbreakable word, and the facts grid's `1fr` column refused to shrink
 // below it, so the panel grew past its own container. The fix is at the cause
 // (`minmax(0, 1fr)` in the stylesheet); an id nobody can select out of a
-// truncated line is only half an answer, so `Id` and `Plan` render as
+// truncated line is only half an answer, so `Id` and `Run` render as
 // `CopyValue` -- ellipsized, with the whole value on `title` and in the
 // clipboard. The short human facts get no button: one beside "Created" is
 // furniture.

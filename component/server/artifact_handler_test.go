@@ -1192,8 +1192,8 @@ func TestSanitizeLibraryFileName(t *testing.T) {
 		"line\nbreak.txt":        "linebreak.txt",
 		strings.Repeat("é", 400): strings.Repeat("é", libraryMaxFileNameRunes),
 	} {
-		if got := sanitizeLibraryFileName(in); got != want {
-			t.Errorf("sanitizeLibraryFileName(%q) = %q, want %q", in, got, want)
+		if got := SanitizeLibraryFileName(in); got != want {
+			t.Errorf("SanitizeLibraryFileName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

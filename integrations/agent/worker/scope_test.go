@@ -29,6 +29,9 @@ func TestActionRequiredScope_Table(t *testing.T) {
 		{"workerHost", "http_fetch", ScopeRequirement{Capability: headless, Scope: "observe"}},
 		{"workerHost", "exec", ScopeRequirement{Capability: headless, Scope: "full"}},
 		{"workerHost", "fs_write", ScopeRequirement{Capability: headless, Scope: "full"}},
+		// A pipeline step runs a command, so it sits where exec sits (#5494);
+		// only the pipeline purpose may dispatch it (pipeline_purpose_test.go).
+		{"workerHost", "pipeline_step", ScopeRequirement{Capability: headless, Scope: "full"}},
 
 		// --- workerComputer introspection / timing (cockpit #162 /
 		// #177): served by BOTH cockpit builds, so they gate on
@@ -100,5 +103,29 @@ func TestActionRequiredScope_NewActionsAdmitObserveOrFull(t *testing.T) {
 		if !scopeAllows("interact", req.Scope) {
 			t.Errorf("%s: legacy interact scope must read as full", action)
 		}
+	}
+}
+
+// TestDockerNeedMapsToTheDockerLabel -- epic memql#5478 (#5494).
+//
+// A step that needs Docker has to reach a machine that has it, and fleet labels
+// match EXACTLY: there is no "any value" form and no prefix match, so the
+// requirement is the literal pair docker=true or it routes nowhere. Before
+// this, an unrecognised need produced no label at all -- the dispatch would
+// have gone to the first machine that answered, with or without a daemon.
+//
+// The scope half is the ladder's ordinary answer for a need that runs commands
+// on the machine: full, never the observe tier user_files alone earns.
+func TestDockerNeedMapsToTheDockerLabel(t *testing.T) {
+	if got := EnvironmentNeedsLabels([]string{"docker"}, ""); len(got) != 1 || got["docker"] != "true" {
+		t.Fatalf("labels = %v, want exactly map[docker:true]", got)
+	}
+	// Beside an os the hint named, both requirements survive: a Linux machine
+	// without Docker and a Docker machine on the wrong OS are both wrong.
+	if got := EnvironmentNeedsLabels([]string{"docker"}, "linux"); len(got) != 2 || got["docker"] != "true" || got["os"] != "linux" {
+		t.Fatalf("labels = %v, want exactly map[docker:true os:linux]", got)
+	}
+	if got := EnvironmentNeedsScope([]string{"docker"}); got != "full" {
+		t.Fatalf("scope = %q, want full -- running containers on somebody's machine is not a read", got)
 	}
 }

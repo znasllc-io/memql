@@ -1,0 +1,52 @@
+# What a step may reach (epic memql#5478, task #5492).
+#
+# Every pod in the namespace (podSelector {}), both directions:
+#
+#   ingress  nothing. No rule, so nothing connects to a step or its services;
+#            a step reaches its own service sidecars over localhost, which a
+#            NetworkPolicy does not govern.
+#   egress   cluster DNS (port 53 into kube-system), and the internet minus
+#            every private and link-local range. A step can `git fetch`, reach
+#            a module proxy or a package registry; it cannot reach the mesh,
+#            the database, another pod, a node or the cloud's
+#            instance-metadata endpoint (169.254.169.254), all of which sit in
+#            the excepted ranges. (An API server with a PUBLIC endpoint is on
+#            the internet like any other host; the step holds no credential
+#            for it -- step-serviceaccount.yaml.)
+#            One PUBLIC address is excepted too: 168.63.129.16, Azure's
+#            WireServer. Every Azure VM reaches it, and on AKS it serves the
+#            node's goal state and, through the host agent, provisioning
+#            material -- a published path from code in a pod to the node's
+#            bootstrap credentials. A step needs none of it: it resolves names
+#            through cluster DNS above, never through the WireServer. Off
+#            Azure the address is a stranger's, and excepting it costs nothing.
+#
+# ENFORCEMENT IS THE CLUSTER'S, not this object's. k3s (the local cluster)
+# enforces NetworkPolicy out of the box. An AKS cluster enforces it only when it
+# runs a network policy engine (`az aks create --network-policy ...`); on one
+# without, this object is accepted and changes nothing -- so the workbench
+# proves it is enforced before it starts a step, and starts none while it
+# cannot (README.md).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: memql-pipelines-isolate
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: pipelines-isolate
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 168.63.129.16/32]

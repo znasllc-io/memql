@@ -289,6 +289,11 @@ function ensure_backup_storage() {
 function ensure_cluster() {
     if az aks show --name "$CLUSTER_NAME" --resource-group "$RESOURCE_GROUP" -o none 2>/dev/null; then
         cap_info "AKS cluster ${CLUSTER_NAME} already exists"
+        # The one cluster setting this script converges after creation: a
+        # cluster created before the pipelines substrate (memql#5492) has no
+        # Blob CSI driver, and the create below is the only other place it is
+        # turned on.
+        ensure_blob_driver
         return 0
     fi
     would_change "create AKS cluster ${CLUSTER_NAME} (${MESH_NODE_COUNT} x ${MESH_NODE_SIZE} mesh)" && return 0
@@ -307,6 +312,13 @@ function ensure_cluster() {
         --enable-oidc-issuer
         --enable-workload-identity
         --enable-managed-identity
+        # The Azure Blob CSI driver: the provisioner behind the azureblob-*
+        # storage classes. The cloud overlays' pipelines step cache claims
+        # azureblob-nfs-premium (ReadWriteMany, because the steps of one run land
+        # on different nodes), a class that exists only when this driver runs
+        # (memql#5492, gated by
+        # deploy/k8s/overlays/substrate_overlay_coupling_test.go).
+        --enable-blob-driver
         # Free tier: the paid tier buys a financially-backed uptime SLA for the
         # control plane and costs ~$73/month. A single-instance install does not
         # buy an SLA it cannot honour in its own data path.
@@ -320,6 +332,33 @@ function ensure_cluster() {
 
     az aks create "${args[@]}" \
         || cap_fail 5 "failed to create AKS cluster ${CLUSTER_NAME}"
+    cap_changed
+}
+
+# ensure_blob_driver turns the Azure Blob CSI driver on for a cluster that
+# already exists (memql#5492) -- the create above passes --enable-blob-driver,
+# so only a cluster that predates it reaches the update.
+#
+# READ FIRST, so a converged cluster makes no call that changes anything and
+# the envelope keeps reporting `changed: false`; the update is a full cluster
+# operation that takes minutes, not a cheap no-op.
+#
+# --yes IS NOT OPTIONAL. On an UPDATE (never on a create) az asks "Please make
+# sure there is no open-source Blob CSI driver installed before enabling" and
+# waits for an answer; a capability script never prompts, and with stdin
+# closed the call would fail instead. The question is about a hand-installed
+# open-source driver, which nothing in this repository installs.
+function ensure_blob_driver() {
+    local enabled
+    enabled="$(az aks show --name "$CLUSTER_NAME" --resource-group "$RESOURCE_GROUP" \
+        --query storageProfile.blobCsiDriver.enabled -o tsv 2>/dev/null || true)"
+    if [[ "$enabled" == "true" ]]; then
+        cap_info "Azure Blob CSI driver already enabled on ${CLUSTER_NAME}"
+        return 0
+    fi
+    would_change "enable the Azure Blob CSI driver on AKS cluster ${CLUSTER_NAME}" && return 0
+    az aks update --name "$CLUSTER_NAME" --resource-group "$RESOURCE_GROUP" --enable-blob-driver --yes -o none \
+        || cap_fail 5 "failed to enable the Azure Blob CSI driver on ${CLUSTER_NAME} -- the pipelines step cache's azureblob-* storage class does not exist without it"
     cap_changed
 }
 

@@ -76,6 +76,12 @@ type Store interface {
 	RunByCheckRun(ctx context.Context, repository string, checkRunID int64) (*Run, error)
 	// RunsUnfinished answers oldest first: recovery's read (Task 10b).
 	RunsUnfinished(ctx context.Context) ([]Run, error)
+	// RunsUnfinishedForPullRequest is every queued or in-progress run of one
+	// pipeline's pull request, in EVERY mode and in no order: what a new push
+	// to the pull request supersedes (supersede.go), whose caller applies
+	// the mode rule. A pull request numbered 0 or less is no pull request,
+	// and reads nothing.
+	RunsUnfinishedForPullRequest(ctx context.Context, pipelineID string, pullRequest int) ([]Run, error)
 	// RunsFinalCheckRunUnavailable is every run concluded at or after since
 	// whose final check run did not land (checkRunState unavailable), newest
 	// first: what recovery republishes.
@@ -115,6 +121,12 @@ type GitHub interface {
 	Repository(ctx context.Context, token, repository string) (githubapp.RepositoryInfo, error)
 	BranchHead(ctx context.Context, token, repository, branch string) (sha, message string, err error)
 	OpenPullRequests(ctx context.Context, token, repository string) ([]githubapp.PullRequestHead, error)
+	// PullRequestHead reads one pull request's head as GitHub reports it now,
+	// by its number: what decides whether an opening is the pull request's
+	// current head (supersede.go). Not OpenPullRequests, which is one page of
+	// a hundred, newest first, and misses an older pull request in a busy
+	// repository.
+	PullRequestHead(ctx context.Context, token, repository string, number int) (githubapp.PullRequestHead, error)
 	// Compare answers complete=false when GitHub stopped listing (300+).
 	Compare(ctx context.Context, token, repository, base, head string) (files []string, complete bool, err error)
 	CommitForRef(ctx context.Context, token, repository, ref string) (sha, message string, err error)

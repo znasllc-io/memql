@@ -267,7 +267,7 @@ export function languageIdFor(format: string, mimeType: string): string | undefi
  * IT MIRRORS THE SERVER'S OWN NAMING, and has to be composed here rather than
  * read from the response's `Content-Disposition`: the name is part of the uri,
  * and the uri exists before the fetch. component/server/artifact_handler.go is
- * the other half -- `sanitizeLibraryFileName(firstNonBlank(file.Name, title))`
+ * the other half -- `SanitizeLibraryFileName(firstNonBlank(file.Name, title))`
  * for a file, `exportFileName(title, ext)` for a rendered body -- and the two
  * agreeing is what stops a tab being called one thing and the saved file
  * another.

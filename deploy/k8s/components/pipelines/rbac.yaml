@@ -1,0 +1,95 @@
+# The runner's grant (epic memql#5478, task #5492).
+#
+# WHAT IT GRANTS, AND WHY EACH LINE. The workbench node turns a compiled step
+# into a Job here and sees it through, through component/deploycontrol.ClusterAPI
+# (net/http and the pod's projected token -- no client-go, no kubectl). Every
+# call it makes is in integrations/pipelinesteps/kube.go -- the step's runner,
+# the orphan-Secret sweep and the isolation proof alike -- and the grant is
+# exactly those calls, verb for verb (review M3):
+#
+#   batch/jobs  create, get, patch, delete, deletecollection
+#               one Job per step attempt, and the isolation probe's; read back
+#               by name while it runs and when another workbench replica adopts
+#               it (the runner polls the one Job it holds, so it neither lists
+#               nor watches); patched with the runner's heartbeat and the step's
+#               outcome; deleted once the agent acknowledged the result; a
+#               cancelled run's Jobs swept with one deletecollection by label.
+#   pods        list
+#               the Job's pods, found by the job-name label: their phase and
+#               container states classify a failure (an image that cannot be
+#               pulled, a clone that failed) and the probe's listener. Never one
+#               pod by name, and never a watch.
+#   pods/log    get
+#               the step's output, followed while it runs (a followed log is a
+#               get), and the tails of the clone, the services and the probe.
+#   secrets     create, get, list, patch, delete, deletecollection
+#               one Secret per Job: the clone token and the step's resolved
+#               secrets, created before the Job and removed with it; the Job
+#               made its owner (patch), the token freshened while the step
+#               waits for a slot (patch) and read back by a runner that took
+#               the Job over (get); and listed, by the runner's label and as
+#               metadata alone, by the sweep that deletes a Secret no Job ever
+#               came to own once nothing can want it. The namespace holds no
+#               Secret but the runner's, so list reaches nothing get did not.
+#
+# No `*`, no resourceNames (Job and Secret names are derived per attempt, and
+# RBAC cannot pin `create` to a name), no update, no ClusterRole, and no
+# ClusterRoleBinding of memql-engine anywhere (render_pipelines_test.go). Nothing
+# here reaches outside memql-pipelines, and the namespace holds no Secret but
+# the ones the runner writes: no platform credential is reachable through it.
+#
+# THE SUBJECT IS memql-engine, the ServiceAccount every engine Deployment
+# already runs as, and NOT a workbench-only account. The workbench also makes
+# model calls (it can hold the automations cron leader), and both vendors'
+# workload identity federation trusts memql-engine by name (the projected
+# tokens in base, render_anthropic_federation_test.go); a dedicated account
+# would cut the workbench off from both. This is the precedent the
+# custom-domain Role set (../../base/custom-domain-rbac.yaml): a feature Role
+# in its own file, bound to the shared identity. What confines it is the
+# namespace -- the grant holds only in memql-pipelines, where the mesh runs
+# nothing. The binary does NOT: only the workbench contains the runner, but
+# every engine pod holds a memql-engine token, so a compromised one (the edge
+# and mcp face the internet) can create a Job here and read the Secrets of the
+# steps in flight. An ACCEPTED RISK for this release; a workbench-only account
+# or a ValidatingAdmissionPolicy narrows it (memql#5811).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: memql-pipelines-runner
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: pipelines-runner
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "patch", "delete", "deletecollection"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "patch", "delete", "deletecollection"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: memql-pipelines-runner
+  namespace: memql-pipelines
+  labels:
+    app.kubernetes.io/part-of: memql
+    app.kubernetes.io/name: pipelines-runner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: memql-pipelines-runner
+subjects:
+  # The mesh namespace, stated: a RoleBinding's subject namespace is never
+  # filled in by the overlays' unsetOnly transformer (it touches only subjects
+  # named `default`), so this is the whole statement of where the engine runs.
+  - kind: ServiceAccount
+    name: memql-engine
+    namespace: memql

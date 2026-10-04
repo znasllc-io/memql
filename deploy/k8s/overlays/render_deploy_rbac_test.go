@@ -11,14 +11,17 @@
 //  3. `memql-deploy` holds get+patch on ONE named Application IN ARGOCD'S
 //     NAMESPACE -- and that grant cannot be shipped in deploy/k8s/base.
 //
-// WHY (3) IS A GATE AND NOT A COMMENT. It was in the base first. Every overlay
-// sets `namespace: memql`, and kustomize's namespace transformer rewrites
-// metadata.namespace on every namespaced resource it accumulates -- including
-// one that states `argocd` explicitly. Measured on all three overlays: the Role
-// and its RoleBinding both came out in `memql`. That is not an error at any
-// point an operator would see. It applies cleanly, it binds cleanly, and it
-// grants nothing; the first symptom is a repair failing with a 403 that names a
-// ServiceAccount which looks correctly bound in every manifest.
+// WHY (3) IS A GATE AND NOT A COMMENT. It was in the base first. A plain
+// `namespace:` field rewrites metadata.namespace on every namespaced resource
+// it accumulates -- including one that states `argocd` explicitly -- and base
+// sets `namespace: memql` itself, as every tenant overlay sets its own.
+// Measured on all three overlays (memql#4257, when they set the same plain
+// field; since memql#5492 they use an unsetOnly transformer, which base's own
+// field makes no difference to here): the Role and its RoleBinding both came
+// out in `memql`. That is not an error at any point an operator would see. It
+// applies cleanly, it binds cleanly, and it grants nothing; the first symptom
+// is a repair failing with a 403 that names a ServiceAccount which looks
+// correctly bound in every manifest.
 //
 // So the Application grant lives in deploy/argocd/apps/deploy-console-rbac.yaml,
 // rendered by the app-of-apps root with `directory:` rather than kustomize, and
@@ -150,10 +153,11 @@ func TestIdentityRunsAsTheDeployServiceAccount(t *testing.T) {
 				// transformer has quietly moved into the mesh namespace.
 				case d.Metadata.Name == deployArgoRole:
 					t.Errorf("%s/%s is rendered by the %s overlay, in namespace %q. The grant on "+
-						"ArgoCD's Application must NOT be composed through an overlay: the "+
-						"`namespace:` transformer rewrites it to %q, where it applies cleanly, "+
-						"binds cleanly and grants nothing. It belongs in %s, which the app-of-apps "+
-						"root renders with `directory:` (memql#4257).",
+						"ArgoCD's Application must NOT be composed through an overlay: placed in "+
+						"base, base's own `namespace:` field rewrites it to %q, where it applies "+
+						"cleanly, binds cleanly and grants nothing; and a grant into ArgoCD's own "+
+						"namespace is the operator's, not the mesh Application's. It belongs in %s, "+
+						"which the app-of-apps root renders with `directory:` (memql#4257).",
 						d.Kind, d.Metadata.Name, overlay, d.Metadata.Namespace, cloudNamespace, argoRBACFile)
 				}
 			}

@@ -515,7 +515,10 @@ const (
 	CodePipelineArtifactTooLarge    = "pipeline_artifact_too_large"
 	CodePipelineArtifactMissing     = "pipeline_artifact_missing"
 	CodePipelineLogCapped           = "pipeline_log_capped"
+	CodePipelineTimingsUnreadable   = "pipeline_timings_unreadable"
+	CodePipelineOutcomeTrimmed      = "pipeline_outcome_trimmed"
 	CodePipelineIsolationUnenforced = "pipeline_isolation_unenforced"
+	CodePipelineStepDiskExceeded    = "pipeline_step_disk_exceeded"
 	CodePipelineAlreadyConnected    = "pipeline_already_connected"
 )
 

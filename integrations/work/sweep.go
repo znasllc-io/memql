@@ -522,6 +522,9 @@ type RetentionResult struct {
 	Objects             []string                     `json:"objects,omitempty"`
 	Container           string                       `json:"container,omitempty"`
 	DryRun              bool                         `json:"dryRun,omitempty"`
+	// Oversized names every record kept because it alone is more than one
+	// archive object holds (retireSplitting), journal and operational alike.
+	Oversized []string `json:"oversized,omitempty"`
 	// Refused says why nothing was deleted, when nothing was. It is a
 	// SENTENCE rather than a flag because the operator response differs: no
 	// container is a configuration choice, a failed upload is an incident.
@@ -573,6 +576,7 @@ func (i *Integration) RetentionSweep(ctx context.Context, dryRun bool) (Retentio
 		result.RowsArchived += p.ArchivedVersions
 		result.RowsDeleted += p.DeletedVersions
 		result.Objects = append(result.Objects, p.Objects...)
+		result.Oversized = append(result.Oversized, p.Oversized...)
 	}
 	i.log().Info("work: operational retention pass complete", "component", "work.retention", "dryRun", dryRun, "policies", result.Operational, "error", err)
 	return result, err
@@ -641,28 +645,24 @@ func (i *Integration) journalRetentionSweep(ctx context.Context, dryRun bool) (R
 
 	// Archive complete versions in immutable batches and verify the bytes before
 	// an exact-key transactional delete. A second partial batch cannot overwrite
-	// the first day's evidence, and concurrent updates keep their history.
-	res.RowsArchived = 0
+	// the first day's evidence, and concurrent updates keep their history. A
+	// batch over one archive object's budget is SPLIT (retireSplitting) rather
+	// than returned: returned, it failed the night, and RetentionSweep never
+	// reached the operational policies at all.
+	var tally retirementTally
 	for concept, rows := range expired {
-		for start := 0; start < len(rows); start += retirementBatchSize {
-			end := min(start+retirementBatchSize, len(rows))
-			archived, deleted, object, err := i.retireVerified(ctx, concept, rows[start:end], false, now, false)
-			if err != nil {
-				return res, err
-			}
-			res.RowsArchived += archived
-			res.RowsDeleted += deleted
-			if object != "" {
-				res.Objects = append(res.Objects, object)
-			}
+		if err := i.retireInBatches(ctx, concept, rows, false, now, false, &tally); err != nil {
+			res.RowsArchived, res.RowsDeleted, res.Objects, res.Oversized = tally.archived, tally.deleted, tally.objects, tally.oversized
+			return res, err
 		}
 	}
+	res.RowsArchived, res.RowsDeleted, res.Objects, res.Oversized = tally.archived, tally.deleted, tally.objects, tally.oversized
 	sort.Strings(res.Objects)
 	res.Took = time.Since(started).String()
 
 	i.log().Info("work: journal retention pass complete",
 		"component", "work.retention", "archived", res.RowsArchived, "deleted", res.RowsDeleted,
-		"runsSummarized", res.RunsSummarized, "objects", len(res.Objects))
+		"runsSummarized", res.RunsSummarized, "objects", len(res.Objects), "oversized", res.Oversized)
 	return res, nil
 }
 

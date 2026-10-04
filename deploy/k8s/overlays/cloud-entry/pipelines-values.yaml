@@ -1,0 +1,80 @@
+# The pipelines substrate's ENTRY values (epic memql#5478, task #5492), over
+# ../../components/pipelines -- one strategic-merge patch per object. The
+# component's README.md says what each number bounds.
+#
+# CACHE CLASS <-> THE BLOB CSI DRIVER -- one coupling, two files. The steps of
+# one run land on whichever node has room, so the cache two step pods mount at
+# once must be ReadWriteMany, which on AKS is the Azure Blob CSI driver's NFS
+# class. That class exists ONLY on a cluster running the driver, which
+# `scripts/deploy/azure-provision.sh` turns on (`--enable-blob-driver` at
+# create, `az aks update --enable-blob-driver` on a cluster that predates it).
+# Without it the claim sits Pending naming a class that does not exist, and
+# every step that declares a cache waits out its scheduling timeout. Gated by
+# ../substrate_overlay_coupling_test.go.
+#
+# THE CEILING AND THE LIMITS ARE SIZED FOR THE DEFAULT POOL azure-provision.sh
+# CREATES -- 2 x Standard_D2as_v4 -- with this overlay's mesh already on it,
+# requesting 250m / 640Mi (measured from the render) and needing room for the
+# surge replica every roll places (kustomization.yaml, memql#4598). One step at
+# a time, the smallest ceiling that runs a pipeline at all: the LimitRange
+# applies to EVERY container of a step pod -- the clone init container and each
+# service sidecar as well as the step -- so a step's request multiplies with
+# its services. A CI-heavy instance raises the ceiling and the requests in ITS
+# OWN overlay, together with a dedicated node pool for the steps: raising them
+# alone gives steps that sit Pending until their scheduling timeout.
+#
+# THE DISK LIMIT IS SIZED FOR THE 32 GiB OS DISK azure-provision.sh gives each
+# node (--node-osdisk-size 32), which holds the OS, every image and the mesh as
+# well as the steps' ephemeral storage: 8 GiB a container, as on cloud, where
+# both steps the ceiling allows can land on one node, restated as the
+# workspace's size limit in the ConfigMap after the LimitRange. An instance
+# whose nodes have larger disks raises BOTH in its own overlay;
+# render_pipelines_test.go holds the two equal.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: memql-pipelines-cache
+  namespace: memql-pipelines
+spec:
+  storageClassName: azureblob-nfs-premium
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: memql-pipelines-ceiling
+  namespace: memql-pipelines
+spec:
+  hard:
+    count/jobs.batch: "1"
+---
+# `limits` is replaced whole, not merged, so the item is restated in full.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: memql-pipelines-limits
+  namespace: memql-pipelines
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "2"
+        memory: 4Gi
+        ephemeral-storage: 8Gi
+      defaultRequest:
+        cpu: 250m
+        memory: 512Mi
+        ephemeral-storage: 1Gi
+---
+# THE WORKSPACE LIMIT is the LimitRange's default ephemeral-storage limit above,
+# restated: the workbench gives every step's /workspace that size limit
+# (render_pipelines_test.go holds the two equal).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-pipelines
+data:
+  MEMQL_PIPELINES_WORKSPACE_LIMIT: 8Gi

@@ -746,8 +746,33 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// never returned. Asserted, with the person-facing precondition and
 		// the runner capabilities' origin refusal, in
 		// component/pipelinerun/internal_origin_test.go.
-		"component/pipelinerun":     "pipelines -- server-initiated; the trigger and the poll refuse every call without internal origin and the trigger reads its delivery from the staged row, the driver has no caller, and every person-facing act is downstream of an owner-scoped read under the person's own actor, save a cluster owner's disconnect (epic memql#5477)",
-		"integrations/agent/worker": "worker store, server-initiated",
+		"component/pipelinerun": "pipelines -- server-initiated; the trigger and the poll refuse every call without internal origin and the trigger reads its delivery from the staged row, the driver has no caller, and every person-facing act is downstream of an owner-scoped read under the person's own actor, save a cluster owner's disconnect (epic memql#5477)",
+		// THE PIPELINES EXECUTOR's fleet half (epic memql#5478, #5494).
+		// SERVER-INITIATED: its one caller is the pipelines driver on an agent
+		// node (component/pipelinerun, the entry above), which claims and
+		// drives runs on goroutines of its own; no request is in scope by the
+		// time a step reaches the executor.
+		//
+		// What the stamp opens is not a construct but the dispatcher's
+		// PIPELINE PURPOSE (integrations/agent/worker/pipeline_purpose.go,
+		// rule 1). The purpose switches the agent gates off -- there is no
+		// agent -- so only the engine's own Go may claim it, and the dispatcher
+		// reads exactly this stamp to know it is. What it stands on instead
+		// are two consents and a switch, none of them the stamp's to give: the
+		// pipeline owner's (compute: cluster_and_fleet, checked by the seam
+		// before a step is handed over), the machine owner's (pipelines=allowed,
+		// required by the gate and re-read on the replica that dispatches), and
+		// the owner's computer-use off switch, which still refuses.
+		//
+		// No caller-supplied identifier is in scope: the owner whose machines
+		// are routed over and whose authority is bound is copied by the driver
+		// off the pipeline row, and the run and step are the driver's own.
+		//
+		// The stamp is applied in ONE place, inline as the argument to the one
+		// Dispatch call in fleet.go, on a context made for that call and never
+		// returned -- asserted by integrations/pipelinesteps/internal_origin_test.go.
+		"integrations/pipelinesteps": "the pipelines executor's fleet half -- server-initiated, its one caller the agent's pipelines driver; the stamp is how the dispatcher admits the pipeline purpose from the engine's own Go and nothing else, applied inline on the one Dispatch call (epic memql#5478)",
+		"integrations/agent/worker":  "worker store, server-initiated",
 		// THE WORK SPINE's entry points (epic memql#4966). SERVER-INITIATED,
 		// and not one of the request-derived exceptions -- stated rather than
 		// borrowed, because the createGoal and decideApproval paths DO begin at

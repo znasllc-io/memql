@@ -2,18 +2,32 @@ package work
 
 // terminal.go -- the failures that are an OUTCOME rather than a symptom.
 //
-// # A goal has no duration, so nothing here is a clock
+// # A goal's work is never cut off by a clock -- a pipeline's steps are
 //
 // A goal runs until the work is done. It may take a minute or a month, and how
 // long it will take cannot be known when it starts, because the steps that
 // remain are discovered by doing the earlier ones. So MemQL imposes no
-// duration ceiling on a goal or a run -- not a fixed timeout and not a
-// wall-clock cancel -- and this file adds none: the only things that end a run
-// are a person cancelling it and a real failure.
+// duration ceiling that ENDS a goal or a run the work spine executes -- not a
+// fixed timeout and not a wall-clock cancel -- and this file adds none: the
+// only things that end such a run are a person cancelling it and a real
+// failure.
 //
-// v1:work:goal.ceilings does carry a `wallClockMs`, and it stays a RECORDED
-// figure rather than an enforced one. Nothing reads it to cancel anything,
-// and a reader of this file should not make it the first such caller.
+// v1:work:goal.ceilings does carry a `wallClockMs`. What reads it -- the run's
+// ceilings at the model seam (integrations/work/runceilings.go, memql#5580) --
+// PARKS the run on a budget approval a person answers; nothing reads it to
+// cancel anything, and a reader of this file should not make it the first
+// such caller.
+//
+// A pipeline's run is the exception, and its clocks are not this file's. Its
+// steps are a repository's commands, declared before the run starts, and each
+// carries a typed ceiling: its own timeout (the manifest's `timeout:`, 20
+// minutes when it names none) and its run's wall-clock ceiling
+// (MEMQL_PIPELINES_RUN_MAX_MINUTES, 120 minutes by default). The pipelines
+// substrate (integrations/pipelinesteps) enforces both and reports either as
+// the step's own code -- pipeline_step_timeout or pipeline_run_ceiling --
+// which the pipelines driver records on the step. That work run is the
+// driver's (triggeredBy "pipeline:<mode>"): the work dispatcher never executes
+// it, so neither ceiling ever reaches the matcher below.
 //
 // What it does add is the other half of that promise. Once the app stops
 // imposing clocks, the clocks that remain belong to somebody else -- a
@@ -63,8 +77,9 @@ const (
 	//
 	// The goal is that no long-running work ever produces this -- the
 	// duration caps that killed hour-long compositions are gone, and none
-	// replaced them. The code stays because "no self-imposed clock exists
-	// today" is a property of the tree that a future caller can break
+	// replaced them. The code stays because "no self-imposed clock reaches
+	// this matcher today" (a pipeline's ceilings are typed codes of their own,
+	// above) is a property of the tree that a future caller can break
 	// quietly, and the failure mode when they do should be an honest
 	// terminal row rather than a silent retry loop.
 	TerminalSelfTimeout = "self_timeout"

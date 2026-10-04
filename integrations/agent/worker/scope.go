@@ -74,6 +74,16 @@ func workerHostScope(action string) ScopeRequirement {
 		return ScopeRequirement{Capability: workerservice.CapabilityHeadless, Scope: "observe"}
 	case "exec", "fs_write":
 		return ScopeRequirement{Capability: workerservice.CapabilityHeadless, Scope: "full"}
+	case PipelineStepAction:
+		// A pipeline step runs a command on the machine, so it is classified
+		// where exec is (#5494). The tier admits nothing on its own -- the
+		// pipeline purpose reads no agent's standing scope, and every other
+		// purpose is refused this action (rule 0, pipeline_purpose.go) -- but
+		// the requirement must be EXPLICIT: HEADLESS is the capability the
+		// router selects a machine on and the slot the machine's concurrency
+		// valve hands out, and the empty requirement an unknown action gets
+		// would filter nothing and acquire no real slot.
+		return ScopeRequirement{Capability: workerservice.CapabilityHeadless, Scope: "full"}
 	}
 	return ScopeRequirement{}
 }
@@ -155,6 +165,12 @@ func EnvironmentNeedsLabels(needs []string, requestedOS string) map[string]strin
 		switch need {
 		case workbench.NeedDisplay:
 			out["display"] = "true"
+		case workbench.NeedDocker:
+			// The exact pair docker=true, because fleet labels match exactly
+			// and have no "any value" form: this is the label a machine able to
+			// run containers carries, and `docker=yes`, or a version in the
+			// value, would route nowhere (#5494).
+			out["docker"] = "true"
 		case workbench.NeedGPU:
 			out["gpu"] = "true"
 		case workbench.NeedMacOSTooling:

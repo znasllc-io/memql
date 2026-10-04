@@ -15,6 +15,7 @@ import {
   formatClockOffset,
   hasRoundTrip,
   machineName,
+  pipelineStepsStatus,
   type MachineRow,
 } from "../rows";
 import { CredentialHealth } from "./CredentialHealth";
@@ -117,6 +118,7 @@ export function MachineDetail({
         <Fact label="Build" value={machine.buildTag} mono />
         <Fact label="Display server" value={machine.displayServer} mono />
         <Fact label="Computer use" value={computerUseStatus(machine).answer} />
+        <Fact label="Pipeline steps" value={<PipelineStepsAnswer machine={machine} />} />
         <Fact label="Registration id" value={machine.id} mono />
       </Facts>
 
@@ -282,6 +284,25 @@ function LabelGroups({
         />
       </div>
     </div>
+  );
+}
+
+/** Whether this machine takes pipeline steps, and where that is decided (epic
+ *  memql#5478, ruling R35). The answer is the machine's own policy, so the
+ *  help names its file and keys rather than anything on this page. */
+function PipelineStepsAnswer({ machine }: { machine: MachineRow }) {
+  return (
+    <>
+      {pipelineStepsStatus(machine).answer}
+      <InfoDetail title="Pipeline steps">
+        <p>Set in the <code>pipelines</code> block of this machine&apos;s Cockpit <code>policy.yaml</code>.</p>
+        <p>
+          Setting <code>allow: true</code> lets it run pipeline steps, and its <code>repos</code> list names the
+          repositories it accepts. An empty list accepts any.
+        </p>
+        <p>Labels you set in Fleet cannot allow it.</p>
+      </InfoDetail>
+    </>
   );
 }
 

@@ -75,7 +75,7 @@ func TestOperationalRetentionDBProtectsActiveOwnedRecentAndArchivesSystemHistory
 	insertSweepRow(t, db, "v1:safety:classification:active", "v1:safety:classification", now.AddDate(0, 0, -100), map[string]any{"runId": runConcept + ":active"})
 	insertSweepRow(t, db, "v1:safety:classification:old", "v1:safety:classification", now.AddDate(0, 0, -100), map[string]any{})
 	dry, err := i.operationalRetention(ctx, true)
-	if err != nil || len(dry) != 5 || len(archive.blobs) != 0 {
+	if err != nil || len(dry) != len(operationalPolicies) || len(archive.blobs) != 0 {
 		t.Fatalf("dry run: %v %v", dry, err)
 	}
 	result, err := i.operationalRetention(ctx, false)
@@ -208,12 +208,12 @@ func TestOperationalRetentionDBHonorsStoredPolicyAndExplicitOverride(t *testing.
 	insertSweepRow(t, db, "v1:platform:globalVariable:audit", "v1:platform:globalVariable", now, map[string]any{"name": "MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS", "value": "730", "active": true})
 	insertSweepRow(t, db, "v1:platform:globalVariable:worker", "v1:platform:globalVariable", now, map[string]any{"name": "WORKER_INVOCATION_RETENTION_DAYS", "value": "180", "active": true})
 	windows, err := i.operationalRetentionWindows(ctx)
-	if err != nil || windows["v1:identity:auditEvent"] != 730 || windows["v1:worker:invocation"] != 180 {
+	if err != nil || windows["MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS"] != 730 || windows["MEMQL_WORKER_INVOCATION_RETENTION_DAYS"] != 180 {
 		t.Fatalf("stored policy lost: %v %v", windows, err)
 	}
 	t.Setenv("MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS", "800")
 	windows, err = i.operationalRetentionWindows(ctx)
-	if err != nil || windows["v1:identity:auditEvent"] != 800 {
+	if err != nil || windows["MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS"] != 800 {
 		t.Fatalf("explicit policy lost: %v %v", windows, err)
 	}
 }
