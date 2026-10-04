@@ -8742,21 +8742,43 @@ a.os-button {
   margin-top: 18px;
 }
 .os-setup-theme {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(3, 34px);
+  width: max-content;
+  height: var(--os-control-h);
   margin: 0;
   min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--os-line);
+  border-radius: 999px;
+  background: var(--os-ground);
 }
-.os-setup-theme .os-choice-row {
-  flex-wrap: wrap;
-  margin: 0;
+.os-setup-theme::before {
+  content: "";
+  position: absolute;
+  inset: 2px auto 2px 2px;
+  width: 34px;
+  border-radius: inherit;
+  background: var(--os-hover);
+  transition: transform var(--os-duration-med) var(--os-ease);
 }
-.os-setup-theme .os-choice {
+.os-setup-theme[data-mode="light"]::before { transform: translateX(100%); }
+.os-setup-theme[data-mode="system"]::before { transform: translateX(200%); }
+.os-setup-theme-option {
   position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--os-muted);
+  cursor: pointer;
+  transition: color var(--os-duration-fast) var(--os-ease);
 }
-.os-setup-theme .os-choice:has(:checked) {
-  background: var(--os-accent-soft);
-  border-color: var(--os-accent);
+.os-setup-theme-option:hover,
+.os-setup-theme-option:has(:checked) {
+  color: var(--os-ink);
 }
-.os-setup-theme .os-choice:has(:focus-visible) {
+.os-setup-theme-option:has(:focus-visible) {
   outline: 2px solid var(--os-accent);
   outline-offset: 2px;
 }

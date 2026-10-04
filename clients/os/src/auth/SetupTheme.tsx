@@ -1,18 +1,23 @@
 import { useId, useState } from "react";
+import { Monitor, Moon, Sun } from "lucide-react";
 import { readStoredTheme, setTheme, type ThemeChoice } from "../app/theme";
+
+const choices = [
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "system", label: "System", icon: Monitor },
+] as const;
 
 export function SetupTheme() {
   const name = useId();
   const [mode, setMode] = useState<ThemeChoice>(readStoredTheme);
 
-  return <fieldset className="os-field-group os-setup-theme">
-    <legend>Theme</legend>
-    <div className="os-choice-row">
-      {(["dark", "light", "system"] as const).map(choice => <label className="os-choice" key={choice}>
-        <input className="os-sr-only" type="radio" name={name} value={choice} checked={mode === choice}
-          onChange={() => { setMode(choice); setTheme(choice); }} />
-        {choice === "dark" ? "Dark" : choice === "light" ? "Light" : "System"}
-      </label>)}
-    </div>
+  return <fieldset className="os-setup-theme" data-mode={mode}>
+    <legend className="os-sr-only">Color theme</legend>
+    {choices.map(({ value, label, icon: Icon }) => <label className="os-setup-theme-option" key={value} title={label}>
+      <input className="os-sr-only" type="radio" name={name} value={value} aria-label={label} checked={mode === value}
+        onChange={() => { setMode(value); setTheme(value); }} />
+      <Icon size={14} strokeWidth={1.75} aria-hidden="true" />
+    </label>)}
   </fieldset>;
 }
