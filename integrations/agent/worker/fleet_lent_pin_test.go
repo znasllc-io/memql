@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/core/common"
@@ -275,14 +276,22 @@ func TestTheReceiverStillReDecidesAPinnedCall(t *testing.T) {
 
 func TestSystemWorkCannotPinAMachine(t *testing.T) {
 	// A pin is a person's choice of machine. A call with no acting person, or
-	// with the cluster's own synthetic identity, is the cluster's own work and
-	// picks nothing -- even a machine lent to everyone, which unpinned system
-	// work may use.
+	// with any identity the cluster synthesized -- an automation running as
+	// itself, a connector, the operator credential's stream -- is the
+	// cluster's own work and picks nothing: even a machine lent to everyone,
+	// which unpinned system work may use. auth.NamesNoPerson is the rule, the
+	// one the app gate applies.
 	for _, tc := range []struct {
 		name, actor, pin string
 		lend             func(*Candidate)
 	}{
 		{"no acting person", "", lentPin, lendToEveryone},
+		// ServesPerson admits a synthetic actor to a machine lent to
+		// everyone, so a refusal here has to come from the pin's own rule:
+		// these three were served by the shared plan before it.
+		{"a synthetic actor, on a machine lent to everyone", "system:automation:nightly", lentPin, lendToEveryone},
+		{"a connector, on a machine lent to everyone", "connector:shopify", lentPin, lendToEveryone},
+		{"the operator credential's stream, on a machine lent to everyone", "cluster:operator", lentPin, lendToEveryone},
 		// The automation's NAME spells the caller's short id. The share list
 		// names "ursula"; the automation is not her.
 		{"a synthetic actor named after a listed person", "system:automation:ursula", lentPin, lendTo([]string{"ursula"}, nil, true)},
@@ -302,6 +311,25 @@ func TestSystemWorkCannotPinAMachine(t *testing.T) {
 				t.Fatalf("lent=%d own=%d: system work must not run on a pinned machine", h.studioCalls.Load(), h.ownCalls.Load())
 			}
 		})
+	}
+}
+
+func TestASyntheticContextCannotPinUnderAnUnprefixedName(t *testing.T) {
+	// auth.ActsForNoPerson's second arm: a principal minted under a prefix
+	// NamesNoPerson does not know is still nobody when the context's own
+	// actor says it is Synthetic -- the cluster acting. The id alone would
+	// pass for a person's.
+	h := newLentPinHop(t, lendToEveryone, nil)
+	ctx := auth.ContextWithAccess(authorityCtx(t, "pipeline-runner"),
+		&auth.AccessContext{UserId: "pipeline-runner", Role: auth.RoleReader, Unranked: true, Synthetic: true})
+	_, err := h.f.Call(ctx, memqlengine.FleetCallRequest{
+		ActingUserId: "pipeline-runner", RegistrationId: lentPin, ModelId: sharedHopModel, Kind: memqlengine.FleetKindChat,
+	})
+	if !errors.Is(err, memqlengine.ErrFleetUnavailable) {
+		t.Fatalf("want a refusal, got %v", err)
+	}
+	if h.studioCalls.Load() != 0 || h.ownCalls.Load() != 0 {
+		t.Fatalf("lent=%d own=%d: the cluster acting under any name must not pin a machine", h.studioCalls.Load(), h.ownCalls.Load())
 	}
 }
 

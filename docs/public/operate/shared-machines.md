@@ -259,7 +259,10 @@ it is offered, rather than in this document.
   something" on a machine's page, or any call that names the machine that must
   run it, reaches your own machines and every machine lent to you under both
   consents — and nothing else. A pin never falls through to another machine,
-  and system work cannot pin. A pin to a machine that is not lent to you is
+  and system work cannot pin: neither a call with no acting person nor one
+  under an identity the cluster made for itself (an automation running as
+  itself, a connector, the operator credential) may name a machine, even one
+  lent to everyone. A pin to a machine that is not lent to you is
   refused with the pin's own sentence ("unavailable or not eligible for this
   call; check that it is yours or lent to you, online, and offers the model
   with the required context"), which reads the same for a machine that is

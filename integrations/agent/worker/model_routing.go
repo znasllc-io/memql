@@ -42,6 +42,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/auth"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	fleetcatalog "github.com/znasllc-io/memql/component/worker/fleetcatalog"
 )
@@ -105,12 +106,16 @@ func (r *Router) PlanModel(
 // IT NEVER FALLS THROUGH. The plan holds the pinned machine or nothing, so a
 // refusal before start cannot move the call onto another candidate.
 //
-// SYSTEM WORK CANNOT PIN. A blank acting user is refused rather than handed to
-// the shared plan, PlanModel's rule and for its reason: a pin is a person's
-// choice of machine, and a caller that failed to resolve its person must not
-// make one. The cluster's synthetic identities do reach the person path, where
-// ServesPerson admits them only to a machine lent to everyone, so a pin
-// decides nothing for them that an unpinned call would not.
+// SYSTEM WORK CANNOT PIN. A pin is a person's choice of machine, so a call
+// that acts for no person makes none: a blank acting user, and every identity
+// the cluster synthesizes -- an automation running as itself, a connector,
+// the operator credential's stream, a Synthetic context actor under any name.
+// That is auth.ActsForNoPerson, the rule the app gate (admitAppSession)
+// applies for the same reason. It is asked here and not left to the plan:
+// ServesPerson admits a synthetic actor to a machine lent to everyone, which
+// the cluster's own work may run on when the PLAN puts it there, so the shared
+// plan alone would let such an actor pick that machine by name. An automation
+// under a person's borrowed authority carries the person's id and pins as them.
 func (r *Router) PlanPinnedModel(
 	ctx context.Context,
 	actingUserId string,
@@ -121,8 +126,8 @@ func (r *Router) PlanPinnedModel(
 	if r == nil || r.store == nil {
 		return RoutePlan{Policy: DefaultPolicy()}, fmt.Errorf("worker router: no fleet store configured")
 	}
-	if strings.TrimSpace(actingUserId) == "" {
-		return RoutePlan{Policy: DefaultPolicy()}, fmt.Errorf("worker router: a pinned model call needs an acting user; system work cannot pick a machine")
+	if auth.ActsForNoPerson(ctx, actingUserId) {
+		return RoutePlan{Policy: DefaultPolicy()}, fmt.Errorf("worker router: a pinned model call needs a person acting; system work cannot pick a machine")
 	}
 	if strings.TrimSpace(registrationId) == "" {
 		return RoutePlan{Policy: DefaultPolicy()}, fmt.Errorf("worker router: a pinned model call needs the machine it is pinned to")
