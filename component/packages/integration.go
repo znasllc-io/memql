@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 
@@ -315,6 +316,14 @@ func (i *Integration) handleAnalyze(ctx context.Context, args map[string]any, _ 
 func (i *Integration) handleDeploy(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	deps, err := i.resolve()
 	if err != nil {
+		return nil, err
+	}
+	// A TARGET OF THE WRONG TYPE IS REFUSED HERE, before anything opens
+	// (memql#5601). placementsArg reads it with stringArg, which answers ""
+	// for a non-string, and "" is the serving version -- so `target: true`
+	// would otherwise publish to every visitor a build its sender meant as a
+	// candidate.
+	if err := placementTargetTypes(args, "placements"); err != nil {
 		return nil, err
 	}
 	deploy := Deploy
@@ -1034,6 +1043,33 @@ func boolArg(args map[string]any, key string) bool {
 		return strings.EqualFold(v, "true")
 	}
 	return false
+}
+
+// placementTargetTypes refuses a placement whose `target` is present and not a
+// string. JSON null passes: it is the platform's unset value, the same as an
+// absent key, and reads as the serving version like one.
+func placementTargetTypes(args map[string]any, key string) error {
+	raw, _ := args[key].(map[string]any)
+	names := make([]string, 0, len(raw))
+	for name := range raw {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fields, ok := raw[name].(map[string]any)
+		if !ok {
+			continue
+		}
+		target, present := fields["target"]
+		if !present || target == nil {
+			continue
+		}
+		if _, isString := target.(string); !isString {
+			return fmt.Errorf("placements[%q].target is a %T; it is the string %q or %q, and a target of any other type is refused rather than read as the serving version",
+				name, target, edge.TargetServing, edge.TargetCandidate)
+		}
+	}
+	return nil
 }
 
 // placementsArg reads the D8 wire shape: an object of deployable name to

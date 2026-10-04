@@ -93,6 +93,15 @@ func (s *fakeStager) StageDomain(_ context.Context, domain string, tree fs.FS) (
 	return "packages/" + domain + "/" + hash + "/", nil
 }
 
+// PrefixFor is StageDomain's prefix without the write or the record.
+func (s *fakeStager) PrefixFor(domain string, tree fs.FS) (string, error) {
+	hash, _, err := hashTree(tree)
+	if err != nil {
+		return "", err
+	}
+	return "packages/" + domain + "/" + hash + "/", nil
+}
+
 func (s *fakeStager) ReadActiveSet(context.Context) (map[string]string, error) {
 	out := map[string]string{}
 	for k, v := range s.active {

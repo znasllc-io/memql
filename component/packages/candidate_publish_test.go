@@ -2,6 +2,8 @@ package packages
 
 import (
 	"context"
+	"io/fs"
+	"path"
 	"strings"
 	"testing"
 
@@ -155,5 +157,114 @@ func TestPlacementsArgCarriesTheTarget(t *testing.T) {
 	}
 	if got["other"].Target != "" {
 		t.Errorf("an absent target must stay absent until the pipeline reads it as serving, got %q", got["other"].Target)
+	}
+}
+
+// A TARGET OF THE WRONG TYPE REFUSES THE CALL (memql#5601). stringArg answers
+// "" for a non-string, and "" is the serving version -- so a client that sent
+// `target: true` meaning "yes, the candidate" would have published to every
+// visitor. The call is refused before a run row exists. JSON null is the one
+// exception: it is the platform's unset value, the same as leaving the key out.
+func TestAWrongTypedTargetRefusesTheCallBeforeARunOpens(t *testing.T) {
+	for name, target := range map[string]any{"a boolean": true, "a number": float64(1), "an object": map[string]any{"kind": "candidate"}, "a list": []any{"candidate"}} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, spaOnlyPackage(), ownerPackage())
+			i := NewIntegration(h.engine, discardLogger())
+			i.depsOnce.Do(func() { i.deps = h.deps })
+			_, err := i.handleDeploy(callerCtx("v1:identity:user:someone"), map[string]any{
+				"packageId": "v1:platform:package:abc",
+				"confirm":   true,
+				"placements": map[string]any{
+					"storefront": map[string]any{"skip": true},
+					"docs":       map[string]any{"hostname": "docs.example.com", "target": target},
+				},
+			}, 0)
+			if err == nil || !strings.Contains(err.Error(), "target") || !strings.Contains(err.Error(), `"docs"`) {
+				t.Fatalf("%s as the target was not refused by name: %v", name, err)
+			}
+			if hasCall(h.engine.statements(), "mutation openPackageDeployment(") || len(h.publisher.published) != 0 {
+				t.Fatal("a wrong-typed target opened a run or published")
+			}
+		})
+	}
+
+	t.Run("null is unset and publishes the serving version", func(t *testing.T) {
+		h := newHarness(t, spaOnlyPackage(), ownerPackage())
+		i := NewIntegration(h.engine, discardLogger())
+		i.depsOnce.Do(func() { i.deps = h.deps })
+		if _, err := i.handleDeploy(callerCtx("v1:identity:user:someone"), map[string]any{
+			"packageId": "v1:platform:package:abc",
+			"confirm":   true,
+			"placements": map[string]any{
+				"storefront": map[string]any{"skip": true},
+				"docs":       map[string]any{"hostname": "docs.example.com", "target": nil},
+			},
+		}, 0); err != nil {
+			t.Fatalf("a null target was refused: %v", err)
+		}
+		if got := h.publisher.targets; len(got) != 1 || got[0] != edge.TargetServing {
+			t.Fatalf("a null target published %v, want the serving version", got)
+		}
+	})
+}
+
+// A CANDIDATE RUN DOES NOT ROLL THE CLUSTER ONTO NEW DSL (memql#5601). Staging
+// a changed MemQL domain flips the active-set pointer and restarts every node
+// that reads DSL, and a candidate run leaves every visitor on the serving
+// build -- so the public would keep app N running against DSL N+1, which is a
+// deploy of half a version that nobody chose. Refused after the analysis
+// (which is what knows the domains) and before the build, the stage and the
+// roll.
+func TestACandidateRunThatWouldChangeTheDslIsRefusedBeforeAnythingRuns(t *testing.T) {
+	h := newHarness(t, validPackage(), ownerPackage())
+	_, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Actor:      mayDeployDsl(),
+		Confirmed:  true,
+		Placements: candidatePlacements(),
+	})
+	if err == nil {
+		t.Fatal("a candidate run carrying a DSL change was allowed")
+	}
+	for _, says := range []string{`"docs"`, "acme", "serving version", "every app skipped"} {
+		if !strings.Contains(err.Error(), says) {
+			t.Errorf("the refusal does not say %q: %v", says, err)
+		}
+	}
+	if len(h.builder.built) != 0 || len(h.stager.staged) != 0 || h.stager.written != 0 || h.roller.rolls != 0 || len(h.publisher.published) != 0 {
+		t.Fatalf("the refused run built %v, staged %v, wrote the pointer %d times, rolled %d times and published %v",
+			h.builder.built, h.stager.staged, h.stager.written, h.roller.rolls, h.publisher.published)
+	}
+}
+
+// THE REACHABLE POSITIVE: the same candidate run against a cluster already
+// running this exact DSL changes no pointer, so it publishes its candidate
+// and rolls nothing.
+func TestACandidateRunWhoseDslIsUnchangedPublishesWithoutARoll(t *testing.T) {
+	tree := validPackage()
+	h := newHarness(t, tree, ownerPackage())
+	sub, err := fs.Sub(tree, path.Join(DslRoot, "acme"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix, err := h.stager.PrefixFor("acme", sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.stager.active = map[string]string{"acme": prefix}
+
+	if _, err := Deploy(context.Background(), h.deps, DeployRequest{
+		PackageId:  "v1:platform:package:abc",
+		Actor:      mayDeployDsl(),
+		Confirmed:  true,
+		Placements: candidatePlacements(),
+	}); err != nil {
+		t.Fatalf("a candidate run with unchanged DSL was refused: %v", err)
+	}
+	if h.roller.rolls != 0 || h.stager.written != 0 {
+		t.Fatalf("unchanged DSL rolled %d times and wrote the pointer %d times", h.roller.rolls, h.stager.written)
+	}
+	if got := h.publisher.targets; len(got) != 1 || got[0] != edge.TargetCandidate {
+		t.Fatalf("published %v, want one candidate", got)
 	}
 }

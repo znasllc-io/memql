@@ -720,11 +720,15 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 
 	// ---- candidates only where a candidate is served (memql#5601) ----
 	//
-	// After the analysis, because the KIND decides and the analysis is what
-	// knows it; before the build, the stage and every site write, because a
-	// storefront's publish re-points its store bindings first, and a binding
-	// reaches the live site the moment it is written.
+	// After the analysis, because the KIND and the DSL domains decide and the
+	// analysis is what knows them; before the build, the stage and every site
+	// write, because a storefront's publish re-points its store bindings first
+	// (a binding reaches the live site the moment it is written) and a DSL
+	// stage rolls the whole cluster.
 	if err := refuseUnservedCandidates(rep, req.Placements); err != nil {
+		return err
+	}
+	if err := d.refuseCandidateDslChange(ctx, snapshot, rep, req.Placements); err != nil {
 		return err
 	}
 

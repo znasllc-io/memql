@@ -282,6 +282,11 @@ type Stager interface {
 	// the same hash and therefore the same prefix, so re-staging overwrites
 	// bytes with themselves.
 	StageDomain(ctx context.Context, domain string, tree fs.FS) (prefix string, err error)
+	// PrefixFor is the prefix StageDomain WOULD write tree under, computed
+	// without writing anything. It is how a run asks "would this change the
+	// active set" before the confirm gate and the build (memql#5601), and it
+	// is the stager's to answer because the stager is what names a prefix.
+	PrefixFor(domain string, tree fs.FS) (prefix string, err error)
 	ReadActiveSet(ctx context.Context) (map[string]string, error)
 	WriteActiveSet(ctx context.Context, set map[string]string) error
 }

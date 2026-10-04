@@ -249,13 +249,29 @@ func (b *blobStager) StageDomain(ctx context.Context, domain string, tree fs.FS)
 	if err != nil {
 		return "", err
 	}
-	prefix := fmt.Sprintf("packages/%s/%s/", domain, hash)
+	prefix := blobStagePrefix(domain, hash)
 	for name, data := range files {
 		if _, err := b.uploader.Upload(ctx, b.container, prefix+name, data, "text/plain"); err != nil {
 			return "", err
 		}
 	}
 	return prefix, nil
+}
+
+// PrefixFor is StageDomain's prefix with nothing written and no storage
+// resolved: the content address alone.
+func (b *blobStager) PrefixFor(domain string, tree fs.FS) (string, error) {
+	hash, _, err := hashTree(tree)
+	if err != nil {
+		return "", err
+	}
+	return blobStagePrefix(domain, hash), nil
+}
+
+// blobStagePrefix is where blobStager keeps one domain's tree: one spelling
+// for the write and for the question asked before it.
+func blobStagePrefix(domain, hash string) string {
+	return fmt.Sprintf("packages/%s/%s/", domain, hash)
 }
 
 func (b *blobStager) ReadActiveSet(ctx context.Context) (map[string]string, error) {

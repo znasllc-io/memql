@@ -1,7 +1,12 @@
 package packages
 
 import (
+	"context"
 	"fmt"
+	"io/fs"
+	"path"
+	"sort"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/edge"
 )
@@ -85,4 +90,58 @@ func candidatesOnly(outcomes []DeployableOutcome) bool {
 		}
 	}
 	return candidates > 0
+}
+
+// refuseCandidateDslChange refuses a run that publishes any deployable as its
+// candidate while carrying MemQL DSL that differs from what the cluster runs.
+//
+// THE DSL HALF OF A RUN IS NEVER A CANDIDATE. Staging a changed domain flips
+// the active-set pointer and rolls every node that reads DSL, for every
+// visitor at once, while a candidate leaves every visitor on the serving
+// build -- so the public would keep app N running against DSL N+1, half a
+// version nobody chose, and the run would return without recording the
+// source as deployed. The question is answered with the stager's own
+// PrefixFor against the pointer as it stands, so "changed" means what the
+// stage would mean by it, and nothing is written to ask.
+//
+// A cluster with no stager is not judged here: such a run cannot stage at
+// all, and stageAndRoll refuses it before anything is published.
+func (d *Deps) refuseCandidateDslChange(ctx context.Context, snapshot *SourceSnapshot, rep *Report, placements map[string]Placement) error {
+	if rep == nil || snapshot == nil || len(rep.DslDomains) == 0 || d.Stager == nil {
+		return nil
+	}
+	var candidates []string
+	for _, dep := range rep.Deployables {
+		if p := placements[dep.Name]; !p.Skip && p.Target == edge.TargetCandidate {
+			candidates = append(candidates, fmt.Sprintf("%q", dep.Name))
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	current, err := d.Stager.ReadActiveSet(ctx)
+	if err != nil {
+		return err
+	}
+	var changed []string
+	for _, domain := range rep.DslDomains {
+		sub, err := fs.Sub(snapshot.Tree, path.Join(DslRoot, domain.Domain))
+		if err != nil {
+			return err
+		}
+		prefix, err := d.Stager.PrefixFor(domain.Domain, sub)
+		if err != nil {
+			return err
+		}
+		if current[domain.Domain] != prefix {
+			changed = append(changed, domain.Domain)
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	sort.Strings(changed)
+	return fmt.Errorf(
+		"this run publishes %s as a candidate, and it also carries MemQL DSL that differs from what this cluster runs (%s). Staging that DSL would restart every node onto it while the public keeps the serving build, so a candidate run cannot carry a DSL change. Publish this run to the serving version instead, or deploy the DSL change first -- a run with every app skipped stages and rolls it and publishes nothing -- and then publish the candidate, whose DSL will match",
+		strings.Join(candidates, ", "), strings.Join(changed, ", "))
 }
