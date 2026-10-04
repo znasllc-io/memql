@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { siteFromRow } from "../../src/apps/deployables/rows";
 import {
   EMPTY_STORE_DRAFT,
+  conflictingStoreIds,
   STORE_SETTINGS_MAX_STORES,
   keptStoreIds,
   storeCountProblem,
@@ -185,6 +186,15 @@ describe("a change made somewhere else", () => {
       "store-example": { customerAccountClientId: "shp_mine" },
       "store-example-dev": { customerAccountClientId: "shp_dev_rotated" },
     });
+  });
+
+  it("names the stores in conflict, so the panel can show what each is now", () => {
+    const both = editStore(edited, stored, "store-example-dev", [
+      { id: "customerAccountClientId", key: "customerAccountClientId", value: "shp_dev_mine" },
+    ]);
+    const moved = { ...stored, "store-example": { customerAccountClientId: "shp_rotated" } };
+    expect(conflictingStoreIds(both, moved)).toEqual(["store-example"]);
+    expect(conflictingStoreIds(both, stored)).toEqual([]);
   });
 
   it("keeping the edit takes the new row as its starting point, so Save replaces it knowingly", () => {

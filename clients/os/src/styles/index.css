@@ -8621,18 +8621,39 @@ a.os-button {
   font-weight: 400;
   color: var(--os-muted);
 }
+/* A ROW IS ITS FIELDS AND ITS NOTE, so rows stand further apart than a
+ * row's own parts do -- equal spacing left a note reading as the next row's. */
+.os-store-values .os-settings-rows {
+  gap: 14px;
+}
 /* What a store's value replaces, under the row it belongs to. */
 .os-store-values-note {
   grid-column: 1 / -1;
-  margin: 0;
+  margin: -3px 0 0;
   font-size: var(--os-text-sm);
   color: var(--os-muted);
   overflow-wrap: anywhere;
+}
+/* Stacked on a phone, a row's parts close up and Remove keeps its own
+ * width: three full-width controls a row read as three rows. */
+@media (max-width: 640px) {
+  .os-store-values .os-settings-row {
+    gap: 6px;
+  }
+  .os-store-values .os-settings-row > .os-button {
+    justify-self: start;
+  }
 }
 .os-store-values-kept {
   display: grid;
   gap: 4px;
   max-width: 720px;
+}
+/* What a store holds NOW, in the ink: the half of the choice the fields
+ * above do not show. */
+.os-store-values-now {
+  color: var(--os-ink);
+  overflow-wrap: anywhere;
 }
 /* The two answers to a change made elsewhere, equal: neither is primary. */
 .os-store-values-acts {
@@ -14841,6 +14862,12 @@ button.os-cluster-mesh-peer:focus-visible {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+}
+/* IN A FIELD, a copy field takes the field's width as an input does: sized
+ * to its content it cut a secret's name short, and a value cut short is one
+ * somebody copies without reading. */
+.os-form-row > .os-copyfield {
+  flex: 1 1 12ch;
 }
 .os-copyfield-line {
   position: relative;

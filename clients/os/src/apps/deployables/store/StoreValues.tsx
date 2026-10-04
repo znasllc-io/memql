@@ -8,6 +8,7 @@ import type { SiteRow } from "../rows";
 import type { SettingRow } from "../settings-editor";
 import {
   EMPTY_STORE_DRAFT,
+  conflictingStoreIds,
   editStore,
   keepDraftOverStored,
   keptStoreIds,
@@ -19,7 +20,6 @@ import {
   storeSettingsFingerprint,
   storeSettingsFromDraft,
   storeTargets,
-  storeValuesConflict,
   storeValuesDirty,
   takeStoredWhereMoved,
   type StoreDestination,
@@ -70,7 +70,7 @@ import {
 // and Save waits for them to choose (Fleet's sharing dialog, memql#5659).
 
 const ABOUT =
-  "Read by the storefront when it loads, for one store only. A value here replaces the app value of the same name for that store; any name a store does not set keeps the app value. Public, like every app value.";
+  "Read by the storefront when it loads, for one store only. A value here replaces the app value with the same name for that store; other names keep the app value. Public, like every app value.";
 
 export function StoreValues({
   site,
@@ -113,7 +113,8 @@ export function StoreValues({
 
   const map = storeSettingsFromDraft(draft, stored);
   const dirty = storeValuesDirty(draft, stored);
-  const conflict = storeValuesConflict(draft, stored);
+  const conflicts = conflictingStoreIds(draft, stored);
+  const conflict = conflicts.length > 0;
   const problems = Object.fromEntries(targets.map((t) => [t.storeId, storeRowProblems(rowsForStore(draft, stored, t.storeId))]));
   const rowsInvalid = Object.values(problems).some((list) => list.some((p) => p !== ""));
   const countProblem = storeCountProblem(map);
@@ -187,9 +188,15 @@ export function StoreValues({
       ) : null}
 
       {conflict ? (
-        // THE TWO ANSWERS, side by side and equal: neither writes anything --
-        // the write stays on Save -- so neither is primary.
-        <Notice tone="warn" sentence="Store values changed somewhere else while you were editing." next="Saving now would replace that change with yours.">
+        // WHAT EACH STORE IS NOW, then the two answers, side by side and equal:
+        // neither writes anything -- the write stays on Save -- so neither is
+        // primary. Keep my changes is the one that, saved, replaces the change.
+        <Notice tone="warn" sentence="Store values changed somewhere else while you were editing.">
+          {conflicts.map((storeId) => (
+            <p key={storeId} className="os-caption">
+              Now, for {labelFor(storeId)}: <span className="os-store-values-now">{nowSentence(stored[storeId] ?? {})}</span>
+            </p>
+          ))}
           <div className="os-store-values-acts">
             <Button onClick={() => setDraft((held) => takeStoredWhereMoved(held, stored))}>Use the new values</Button>
             <Button onClick={() => setDraft((held) => keepDraftOverStored(held, stored))}>Keep my changes</Button>
@@ -213,6 +220,13 @@ export function StoreValues({
       {refusal === "" ? null : <Notice tone="error" sentence="Store values were not saved." next="Your changes are still here." detail={refusal} />}
     </Panel>
   );
+}
+
+/** One store's stored values as the conflict notice says them. */
+function nowSentence(values: Readonly<Record<string, string>>): string {
+  const keys = Object.keys(values).sort();
+  if (keys.length === 0) return "no values of its own.";
+  return `${keys.map((key) => `${key} is ${quoted(values[key] ?? "")}`).join(", ")}.`;
 }
 
 /** "Production", "Testing", or "Production and Testing". */

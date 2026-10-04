@@ -225,7 +225,9 @@ describe("a change made somewhere else", () => {
     view.rerender(panel(moved({ "store-example": { customerAccountClientId: "shp_rotated" }, "old-shop": { wholesaleAdapter: "customerTag" } })));
     // THE EDIT SURVIVES THE ROW MOVING.
     expect((within(group(region, "example.myshopify.com")).getByLabelText(label) as HTMLInputElement).value).toBe("shp_mine");
-    expect(within(region).getByText("Store values changed somewhere else while you were editing.")).toBeTruthy();
+    const notice = within(region).getByText("Store values changed somewhere else while you were editing.").closest(".os-notice") as HTMLElement;
+    // WHAT IT IS NOW, so the choice is between two things the person can see.
+    expect(notice.textContent).toContain("Now, for example.myshopify.com: customerAccountClientId is shp_rotated.");
     expect(saveButton(region).disabled).toBe(true);
 
     await click(within(region).getByRole("button", { name: "Keep my changes" }));

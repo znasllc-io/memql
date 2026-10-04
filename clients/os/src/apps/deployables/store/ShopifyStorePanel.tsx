@@ -95,7 +95,10 @@ function ShopifyStoreContent({ site, canBind, trail, back, onWritten, can }: Pro
       </RecordList>}
       <div><button type="button" className="os-link" onClick={openSettings}>Manage Shopify connections in Settings</button></div>
     </Panel>
-    {misnamed.map((store) => <Notice key={store.id} tone="warn" sentence={`The Storefront token for ${storeLabel(store)} is registered under a different name, so the storefront cannot read it.`} next={`Reconnect the store to seal it as ${storefrontTokenSecretName(store.id)}.`}><Button onClick={openSettings}>Reconnect in Settings</Button></Notice>)}
+    {misnamed.map((store) => <Notice key={store.id} tone="warn" sentence={`The Storefront token for ${storeLabel(store)} is registered under a different name, so the storefront cannot read it.`}>
+      <p className="os-caption">Reconnecting the store seals it under its own name, <span className="os-mono">{storefrontTokenSecretName(store.id)}</span>.</p>
+      <div><Button onClick={openSettings}>Reconnect in Settings</Button></div>
+    </Notice>)}
     {readiness.readiness?.goLiveRefusal.code ? <RefusalNotice refusal={readiness.readiness.goLiveRefusal} storefront={false} onOpenStore={() => {}} compact /> : null}
     <p className="os-caption">Both websites share the same design. Connect either to any of your stores, including the same sandbox. An unconnected website shows design preview.</p>
     {/* VALUES THAT BELONG TO ONE STORE (memql#5602), beside the stores they

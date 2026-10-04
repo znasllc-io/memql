@@ -214,9 +214,18 @@ function movedStores(draft: StoreValuesDraft, stored: StoreSettings): string[] {
  * (their own save landing) is none either.
  */
 export function storeValuesConflict(draft: StoreValuesDraft, stored: StoreSettings): boolean {
-  return movedStores(draft, stored).some(
-    (id) => draftEntryFingerprint(draft, stored, id) !== settingsFingerprint({ ...storedFor(stored, id) }),
-  );
+  return conflictingStoreIds(draft, stored).length > 0;
+}
+
+/**
+ * The stores in conflict, sorted: touched, changed since, and disagreeing with
+ * the edit. Named so the panel can say what each one is NOW -- a choice
+ * between keeping an edit and taking a change nobody can see is not a choice.
+ */
+export function conflictingStoreIds(draft: StoreValuesDraft, stored: StoreSettings): string[] {
+  return movedStores(draft, stored)
+    .filter((id) => draftEntryFingerprint(draft, stored, id) !== settingsFingerprint({ ...storedFor(stored, id) }))
+    .sort();
 }
 
 /**
