@@ -8589,6 +8589,59 @@ a.os-button {
   margin-top: 4px;
 }
 
+/* ---- a storefront's values per store (memql#5602) ----
+ * One group per store, headed by the store's DOMAIN in the ink and the
+ * website it supplies in the quiet voice beside it: which store a value is
+ * for is the one thing this section must never leave in doubt. The groups
+ * reuse the settings editor's rows, header and readable measure above. */
+.os-store-values {
+  display: grid;
+  gap: 18px;
+}
+.os-store-values-store {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.os-store-values-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  margin: 0;
+  font-size: var(--os-text-base);
+  font-weight: 500;
+  color: var(--os-ink);
+}
+.os-store-values-name {
+  overflow-wrap: anywhere;
+}
+.os-store-values-where {
+  font-size: var(--os-text-sm);
+  font-weight: 400;
+  color: var(--os-muted);
+}
+/* What a store's value replaces, under the row it belongs to. */
+.os-store-values-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+  overflow-wrap: anywhere;
+}
+.os-store-values-kept {
+  display: grid;
+  gap: 4px;
+  max-width: 720px;
+}
+/* The two answers to a change made elsewhere, equal: neither is primary. */
+.os-store-values-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 /* Motion is emphasis, never information: the strip carries its whole meaning
  * standing still, so there is nothing here to disable. Stated so the next
  * person does not add a grow-in animation to sixty columns. */

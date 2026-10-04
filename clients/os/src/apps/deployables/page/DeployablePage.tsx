@@ -447,7 +447,7 @@ export function DeployablePage({
             <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" />
           ) : null}
       {detail ? <DetailDialog title={detailTitle(detail)} onClose={() => setDetail(null)}>
-        {detail === "runtime" ? <RuntimeSettingsPanel site={site} canEdit={can.publish} /> :
+        {detail === "runtime" ? <RuntimeSettingsPanel site={site} canEdit={can.publish} onOpenStore={site.kind === "shopify_storefront" && can.store ? () => setDetail("store") : undefined} /> :
           detail === "traffic" ? <TrafficPanel site={site} /> :
           (() => { const stage = railFor(rail).stages.find(s => s.id === detail); return stage ? <>{stage.reason ? <Caption>{stage.reason}</Caption> : null}{stopBody(stage)}</> : null; })()}
         {lifecycle.refusal ? <ProblemNotice problem={{ ...lifecycle.refusal, fatal: true }} tone="error" /> : null}

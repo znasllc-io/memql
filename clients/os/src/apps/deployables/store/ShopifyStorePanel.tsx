@@ -14,6 +14,7 @@ import type { DeploymentRow } from "../packages/rows";
 import { RefusalNotice } from "../preview/PreviewSection";
 import { usePreviewReadiness, usePreviewWrites } from "../preview/usePreview";
 import type { StorePanelProps } from "./StorePanel";
+import { StoreValues } from "./StoreValues";
 import { storeConnected, storeLabel, storefrontTokenMisnamed, storefrontTokenSecretName, type StoreRow } from "./rows";
 import { useStore, useStoreList, useStoreWrites } from "./useStore";
 
@@ -25,7 +26,7 @@ export function ShopifyStorePanel(props: Props) {
   return <AttentionDestination appId="deployables" sectionId="deployables" target="shopify-store" visible={active}><ShopifyStoreContent {...props} /></AttentionDestination>;
 }
 
-function ShopifyStoreContent({ site, canBind, trail, back, onWritten }: Props) {
+function ShopifyStoreContent({ site, canBind, trail, back, onWritten, can }: Props) {
   const { actions } = useOs();
   const connections = useExternalConnections();
   const catalog = useStoreList();
@@ -80,7 +81,10 @@ function ShopifyStoreContent({ site, canBind, trail, back, onWritten }: Props) {
   const misnamed = [production.store, testing.store].filter(
     (store, i, all): store is StoreRow => store !== null && storefrontTokenMisnamed(store) && all.findIndex((other) => other?.id === store.id) === i,
   );
-
+  const labelFor = (storeId: string): string => {
+    const known = [production.store, testing.store, ...catalog.stores].find((store) => store !== null && store.id === storeId);
+    return known ? storeLabel(known) : storeId;
+  };
   const readingBindings = [production, testing].some(reading => reading.state === "reading" && !reading.store) || (Boolean(boundStoreId(site)) && production.state === "unread") || (Boolean(previewStoreId(site)) && testing.state === "unread");
   const state = readingBindings ? "" : production.store ? productionReady ? "Connected" : "Setup needed" : testing.store ? testingReady ? "Testing" : "Setup needed" : "Design preview";
   return <section className="os-action-pane"><div className="os-action-body os-app-stack"><Head title="Store" breadcrumbs={trail} back={back} />{notices}
@@ -94,5 +98,9 @@ function ShopifyStoreContent({ site, canBind, trail, back, onWritten }: Props) {
     {misnamed.map((store) => <Notice key={store.id} tone="warn" sentence={`The Storefront token for ${storeLabel(store)} is registered under a different name, so the storefront cannot read it.`} next={`Reconnect the store to seal it as ${storefrontTokenSecretName(store.id)}.`}><Button onClick={openSettings}>Reconnect in Settings</Button></Notice>)}
     {readiness.readiness?.goLiveRefusal.code ? <RefusalNotice refusal={readiness.readiness.goLiveRefusal} storefront={false} onOpenStore={() => {}} compact /> : null}
     <p className="os-caption">Both websites share the same design. Connect either to any of your stores, including the same sandbox. An unconnected website shows design preview.</p>
+    {/* VALUES THAT BELONG TO ONE STORE (memql#5602), beside the stores they
+        belong to. App values' own gate: these are runtime values like those,
+        not a store binding, so they ask `publish` rather than `store`. */}
+    <StoreValues site={site} canEdit={can?.publish ?? false} labelFor={labelFor} />
   </div><ActionBar state={busy ? "Connecting" : state} tone={busy || readingBindings ? "busy" : productionReady ? "live" : "paused"} acts={[{ label: "Back", text: true, onAct: back.onSelect }]} /></section>;
 }

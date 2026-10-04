@@ -416,6 +416,24 @@ export async function saveSiteSettings(
 }
 
 /**
+ * Replace a storefront's PER-STORE settings (memql#5602): a bare store id to
+ * that store's own values.
+ *
+ * THE WHOLE MAP, for `saveSiteSettings`' reason -- the mutation replaces -- so
+ * the caller sends every store's entry, the ones it does not show included
+ * (`store/storeValues.ts` builds it). Through the generated builder, which
+ * quotes a store id that is not a bare identifier (`acme-widgets`) as the
+ * object key the grammar names for it.
+ */
+export async function saveSiteStoreSettings(
+  query: QueryClient,
+  siteId: string,
+  storeSettings: Record<string, Record<string, string>>,
+): Promise<void> {
+  await query.updateSiteStoreSettings({ siteId, storeSettings });
+}
+
+/**
  * Turn a deployable's SHOPPER SURFACE on or off (epic memql#5532, issue
  * memql#5551).
  *
