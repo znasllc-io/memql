@@ -640,8 +640,8 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// component/packages' one step on, because a pipeline hangs off a
 		// package and borrows its owner.
 		//
-		// Most of its work has no caller at all: a GitHub delivery staged on
-		// the inbound seam, the every-minute poll, and the agent driver that
+		// Most of its work is the runner's: a GitHub delivery staged on the
+		// inbound seam, the every-minute poll, and the agent driver that
 		// claims and concludes runs on another replica (Task 10b). There the
 		// stamp opens the @serverOnly constructs the work is made of -- the
 		// cross-owner reads (a delivery must find every owner's pipeline of a
@@ -650,6 +650,22 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// row owner's borrowed authority, which the mutations stamp
 		// ownerUserId from. Without it every run would be refused with one
 		// WARN and the check run would sit queued forever.
+		//
+		// "The runner's" is ENFORCED, not assumed. The driver is subscribed to
+		// run events on agent nodes and no request reaches it. The delivery
+		// and the poll ARE reachable: pipelinesTrigger and pipelinesPoll are
+		// builtins, which any signed-in client's query can name (@sdk has no
+		// engine effect; an earlier version of this argument said they had
+		// "no caller", and a review proved otherwise). So both refuse every
+		// call that did not arrive with internal origin, before their first
+		// read -- the automation executor stamps it on a tree-loaded
+		// automation's step context and on nothing a client sends -- and the
+		// trigger takes no delivery from its caller at all: it is handed the
+		// staged row's id and reads the body, the headers and the
+		// receiver's signature verdict from the row, refusing anything but a
+		// verified github row. The one caller-supplied value that reaches a
+		// stamped call there is that row id, and all it can name is a delivery
+		// GitHub signed.
 		//
 		// What a PERSON reaches -- connect, disconnect, re-run, cancel -- is
 		// downstream of an owner-scoped read under their own actor
@@ -662,9 +678,10 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		//
 		// The stamp is applied in ONE place, inline as the argument to
 		// dslStore.executeInternal's single Execute, and the marked context is
-		// never returned. Asserted, with the person-facing precondition, in
+		// never returned. Asserted, with the person-facing precondition and
+		// the runner capabilities' origin refusal, in
 		// component/pipelinerun/internal_origin_test.go.
-		"component/pipelinerun":     "pipelines -- server-initiated; deliveries, the poll and the driver have no caller, and every person-facing act is downstream of an owner-scoped read under the person's own actor (epic memql#5477)",
+		"component/pipelinerun":     "pipelines -- server-initiated; the trigger and the poll refuse every call without internal origin and the trigger reads its delivery from the staged row, the driver has no caller, and every person-facing act is downstream of an owner-scoped read under the person's own actor (epic memql#5477)",
 		"integrations/agent/worker": "worker store, server-initiated",
 		// THE WORK SPINE's entry points (epic memql#4966). SERVER-INITIATED,
 		// and not one of the request-derived exceptions -- stated rather than

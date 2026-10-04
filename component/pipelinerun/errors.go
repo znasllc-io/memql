@@ -27,6 +27,16 @@ var (
 	// ErrTreeTooLarge is a repository whose kept files exceed the cap a
 	// tree read was given.
 	ErrTreeTooLarge = errors.New("pipelines: the repository's files exceed what a pipeline reads")
+	// ErrClientOrigin is the trigger or the poll reached by anything but
+	// the engine's own automations. Both read every owner's pipelines and
+	// open runs that write check runs on GitHub, and a builtin is callable
+	// by any signed-in client, so each refuses a call that did not arrive
+	// with internal origin -- before it reads anything.
+	ErrClientOrigin = errors.New("pipelines: this capability is driven by the engine's own automations and refuses a call from a client")
+	// ErrDeliveryUnverified is a staged GitHub delivery whose signature the
+	// inbound receiver did not verify: a source configured to sign nothing.
+	// An unsigned body is anybody's, and never opens a run.
+	ErrDeliveryUnverified = errors.New("pipelines: this delivery's signature was not verified, and an unsigned delivery never opens a run; configure the github inbound source with the GitHub App's webhook secret")
 
 	errNoGate   = errors.New("pipelines: no cross-replica gate is wired on this node, so no run can be opened or changed safely")
 	errNoStore  = errors.New("pipelines: no store is wired on this node")

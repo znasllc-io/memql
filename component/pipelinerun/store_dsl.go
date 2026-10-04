@@ -55,6 +55,11 @@ const (
 
 	// Deployables' read of the source a pipeline hangs off (dsl/platform).
 	qPackageByID = "packageById" // (packageId)
+
+	// The inbound seam's read of one staged delivery (dsl/platform): the
+	// trigger takes the body, the headers and the signature verdict it acts
+	// on from the row, never from its own arguments.
+	qInboundRequestByID = "inboundRequestById" // (requestId)
 )
 
 // systemActorName is who the server-only reads are made as:
@@ -190,6 +195,22 @@ func (s *dslStore) RunsForOwner(ctx context.Context, pipelineID string) ([]Run, 
 // ---------------------------------------------------------------------------
 // Server-only reads
 // ---------------------------------------------------------------------------
+
+// InboundDelivery reads one staged delivery as the pipelines system actor: a
+// delivery has no person behind it, and the trigger must read the row
+// whoever's webhook staged it.
+func (s *dslStore) InboundDelivery(ctx context.Context, requestID string) (*InboundDelivery, error) {
+	id := bareID(requestID)
+	if id == "" {
+		return nil, nil
+	}
+	rows, err := s.systemRead(ctx, qInboundRequestByID, map[string]any{"requestId": id})
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	d := inboundDeliveryFromRow(rows[0])
+	return &d, nil
+}
 
 func (s *dslStore) PipelinesForRepository(ctx context.Context, repository string) ([]Pipeline, error) {
 	return allPipelines(s.systemRead(ctx, qPipelinesForRepository, map[string]any{"repository": normalizeRepository(repository)}))
@@ -735,6 +756,21 @@ func workStepFromRow(row map[string]any) WorkStep {
 		s.Reason = rowString(result, "reason")
 	}
 	return s
+}
+
+// inboundDeliveryFromRow reads a staged delivery through inboundRequestFull.
+// The body and headers are taken as stored, untrimmed: the body is what the
+// signature covered, byte for byte.
+func inboundDeliveryFromRow(row map[string]any) InboundDelivery {
+	body, _ := row["body"].(string)
+	headers, _ := row["headersJson"].(string)
+	return InboundDelivery{
+		ID:                bareID(rowString(row, "id")),
+		Source:            rowString(row, "source"),
+		Body:              body,
+		HeadersJSON:       headers,
+		SignatureVerified: rowBool(row, "signatureVerified"),
+	}
 }
 
 func packageFromRow(row map[string]any) PackageSource {

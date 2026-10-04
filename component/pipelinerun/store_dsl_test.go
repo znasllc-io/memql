@@ -102,6 +102,7 @@ func everyStoreCall(s Store, value string) []struct {
 		{"RunForOwner", func() error { _, err := s.RunForOwner(ctx, value); return err }},
 		{"RunsForOwner (one pipeline)", func() error { _, err := s.RunsForOwner(ctx, value); return err }},
 		{"RunsForOwner (every pipeline)", func() error { _, err := s.RunsForOwner(ctx, ""); return err }},
+		{"InboundDelivery", func() error { _, err := s.InboundDelivery(ctx, value); return err }},
 		{"PipelinesForRepository", func() error { _, err := s.PipelinesForRepository(ctx, value); return err }},
 		{"PipelinesPolled", func() error { _, err := s.PipelinesPolled(ctx); return err }},
 		{"PipelineByID", func() error { _, err := s.PipelineByID(ctx, value); return err }},
@@ -222,7 +223,7 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 		qPipelinesForOwner, qPipelineForOwner, qPipelineForPackage, qPipelineRunsForOwner, qPipelineRunForOwner,
 		qPipelinesForRepository, qPipelinesPolled, qPipelineByID, qPipelineRunsForKey, qPipelineRunsForPipelineSha,
 		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
-		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID,
+		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID, qInboundRequestByID,
 	} {
 		if !seen[want] {
 			t.Errorf("%s is named in store_dsl.go and no Store method calls it", want)
@@ -450,6 +451,40 @@ func TestWorkStepsAreReadBackForAResume(t *testing.T) {
 
 	if none, err := NewDSLStore(engine).WorkSteps(context.Background(), "  "); err != nil || none != nil || len(engine.recorded()) != 1 {
 		t.Errorf("no work run is no read: %v %v", none, err)
+	}
+}
+
+// The trigger's delivery is read back through inboundRequestFull, as the
+// pipelines system actor, by the row's bare id -- and its body exactly as it
+// was staged: the signature covered every byte, the whitespace included.
+func TestAStagedDeliveryIsReadBackAsStaged(t *testing.T) {
+	engine := newRecordingEngine()
+	const body = "  {\"action\":\"opened\"}\n"
+	engine.answers[qInboundRequestByID] = []any{map[string]any{
+		"id": "v1:platform:inboundRequest:in1", "source": "github", "signatureVerified": true,
+		"body": body, "headersJson": `{"x-github-event":"pull_request"}`, "status": "received",
+	}}
+	d, err := NewDSLStore(engine).InboundDelivery(context.Background(), "v1:platform:inboundRequest:in1")
+	if err != nil || d == nil {
+		t.Fatalf("InboundDelivery: %+v %v", d, err)
+	}
+	if d.ID != "in1" || d.Source != "github" || !d.SignatureVerified || d.Body != body || d.HeadersJSON != `{"x-github-event":"pull_request"}` {
+		t.Errorf("delivery = %+v", d)
+	}
+	calls := engine.recorded()
+	if len(calls) != 1 || calls[0].query != `query inboundRequestById(requestId: "in1")` {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if !calls[0].origin.IsInternal() || calls[0].actor == nil || calls[0].actor.UserId != "system:pipelines" {
+		t.Errorf("the read is the pipelines system actor's, stamped internal: %+v", calls[0].actor)
+	}
+
+	engine.answers[qInboundRequestByID] = []any{map[string]any{"id": "in2", "source": "github", "body": "{}"}}
+	if d, _ := NewDSLStore(engine).InboundDelivery(context.Background(), "in2"); d == nil || d.SignatureVerified {
+		t.Errorf("an absent signatureVerified reads as false: %+v", d)
+	}
+	if none, err := NewDSLStore(engine).InboundDelivery(context.Background(), " "); err != nil || none != nil || len(engine.recorded()) != 2 {
+		t.Errorf("no delivery id is no read: %v %v", none, err)
 	}
 }
 

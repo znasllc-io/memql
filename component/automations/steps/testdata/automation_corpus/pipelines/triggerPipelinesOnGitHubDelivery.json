@@ -7,9 +7,7 @@
           "kind": "node_created",
           "payload": {
             "agentId": "agent-1",
-            "body": "s-body",
             "createdBySubject": "subject-0",
-            "headersJson": "s-headersJson",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -26,7 +24,6 @@
             "scopes": [
               "read"
             ],
-            "source": "s-source",
             "status": "succeeded"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
@@ -37,10 +34,7 @@
         "calls": [
           {
             "args": {
-              "body": "s-body",
-              "headersJson": "s-headersJson",
-              "inboundRequestId": "v1:probe:thing:1",
-              "source": "s-source"
+              "inboundRequestId": "v1:probe:thing:1"
             },
             "kind": "builtin",
             "name": "pipelinesTrigger"
@@ -58,9 +52,7 @@
           "kind": "node_created",
           "payload": {
             "agentId": "agent-1",
-            "body": "s-body",
             "createdBySubject": "subject-0",
-            "headersJson": "s-headersJson",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -77,7 +69,6 @@
             "scopes": [
               "read"
             ],
-            "source": "s-source",
             "status": "succeeded"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
@@ -88,10 +79,7 @@
         "calls": [
           {
             "args": {
-              "body": "s-body",
-              "headersJson": "s-headersJson",
-              "inboundRequestId": "v1:probe:thing:1",
-              "source": "s-source"
+              "inboundRequestId": "v1:probe:thing:1"
             },
             "kind": "builtin",
             "name": "pipelinesTrigger"
@@ -109,9 +97,7 @@
           "kind": "node_created",
           "payload": {
             "agentId": "agent-1",
-            "body": "s-body",
             "createdBySubject": "subject-0",
-            "headersJson": "s-headersJson",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -128,7 +114,6 @@
             "scopes": [
               "read"
             ],
-            "source": "s-source",
             "status": "succeeded"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
@@ -139,10 +124,7 @@
         "calls": [
           {
             "args": {
-              "body": "s-body",
-              "headersJson": "s-headersJson",
-              "inboundRequestId": "v1:probe:thing:1",
-              "source": "s-source"
+              "inboundRequestId": "v1:probe:thing:1"
             },
             "kind": "builtin",
             "name": "pipelinesTrigger"
@@ -160,9 +142,7 @@
           "kind": "node_created",
           "payload": {
             "agentId": "agent-1",
-            "body": "s-body",
             "createdBySubject": "subject-0",
-            "headersJson": "s-headersJson",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -179,7 +159,6 @@
             "scopes": [
               "read"
             ],
-            "source": "s-source",
             "status": "succeeded"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
@@ -190,10 +169,7 @@
         "calls": [
           {
             "args": {
-              "body": "s-body",
-              "headersJson": "s-headersJson",
-              "inboundRequestId": "v1:probe:thing:1",
-              "source": "s-source"
+              "inboundRequestId": "v1:probe:thing:1"
             },
             "kind": "builtin",
             "name": "pipelinesTrigger"

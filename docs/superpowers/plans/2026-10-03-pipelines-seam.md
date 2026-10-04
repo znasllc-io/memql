@@ -496,7 +496,7 @@ Bare names `run` and `channel` exist in other domains: inside `dsl/pipelines` sa
 
 **Writes** (`mutations.memql`, every one `@serverOnly` with a `///` reason -- Go writes them under the owner's borrowed authority with internal origin): `createPipeline` (stamps `ownerUserId: actor.userId`, `status: "active"`, `connectedAt: now`), `updatePipeline` (read-merge: name, defaultBranch, delivery, compute, status, secretNames, channelIds, heads, timings, timingsRunId, timingsUpdatedAt), `createPipelineRun` (stamps owner, every open-time field), `updatePipelineRun` (read-merge: every lifecycle field). Remember the read-merge `??` trap: a field a later writer clears must be written explicitly, never defaulted with `??` against the stored row.
 
-**Builtins** (`builtins.memql`, `@args(profile="object")`): `pipelinesTrigger(inboundRequestId string!, source string, body string, headersJson string)` -> `integration.pipelines.trigger`; `pipelinesPoll()` -> `integration.pipelines.poll`; `pipelinesConnect(packageId string!, delivery string!, compute string, secretNames []string)` -> `integration.pipelines.connect`; `pipelinesDisconnect(pipelineId string!)` -> `integration.pipelines.disconnect`; `pipelinesRerun(runId string!)` -> `integration.pipelines.rerun`; `pipelinesCancel(runId string!)` -> `integration.pipelines.cancel`. Each field documented with `@description`.
+**Builtins** (`builtins.memql`, `@args(profile="object")`): `pipelinesTrigger(inboundRequestId string!)` -> `integration.pipelines.trigger` (the handler refuses a call without internal origin, then reads the body, headers and `signatureVerified` from the staged row and refuses an unverified one -- never from arguments; the poll refuses a client the same way); `pipelinesPoll()` -> `integration.pipelines.poll`; `pipelinesConnect(packageId string!, delivery string!, compute string, secretNames []string)` -> `integration.pipelines.connect`; `pipelinesDisconnect(pipelineId string!)` -> `integration.pipelines.disconnect`; `pipelinesRerun(runId string!)` -> `integration.pipelines.rerun`; `pipelinesCancel(runId string!)` -> `integration.pipelines.cancel`. Each field documented with `@description`.
 
 **Automations** (`automations.memql` only):
 
@@ -509,12 +509,9 @@ Bare names `run` and `channel` exist in other domains: inside `dsl/pipelines` sa
 @filter(row => row.source == "github" && row.status == "received")
 automation triggerPipelinesOnGitHubDelivery {
   args {
-    id          any
-    source      any
-    body        any
-    headersJson any
+    id  any
   }
-  opened := builtin pipelinesTrigger(inboundRequestId: args.id, source: args.source, body: args.body, headersJson: args.headersJson)
+  opened := builtin pipelinesTrigger(inboundRequestId: args.id)
 }
 
 /// Every minute: delivery=poll pipelines read the default branch's head and the

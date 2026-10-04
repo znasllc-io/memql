@@ -12,23 +12,17 @@
 
 /// A GitHub delivery opens pipeline runs (design record D4-D6). Filtered to the first, received
 /// version of a github row: a status write republishes node.created, and a redelivery collapses onto
-/// the same row id, so the trigger's run key is what keeps either from opening a second run.
+/// the same row id, so the trigger's run key is what keeps either from opening a second run. It hands
+/// the trigger the row's id and nothing else: the trigger reads the body, the headers and the
+/// signature verdict from the row itself.
 @trigger(event="node.created", concept="v1:platform:inboundRequest")
 @filter(row => row.source == "github" && row.status == "received")
 automation triggerPipelinesOnGitHubDelivery {
   args {
-    id           any
-    source       any
-    body         any
-    headersJson  any
+    id  any
   }
 
-  opened := builtin pipelinesTrigger(
-    inboundRequestId: args.id,
-    source: args.source,
-    body: args.body,
-    headersJson: args.headersJson
-  )
+  opened := builtin pipelinesTrigger(inboundRequestId: args.id)
 }
 
 /// Every minute: delivery=poll pipelines read the default branch's head and the open pull requests'

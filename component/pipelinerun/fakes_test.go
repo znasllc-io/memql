@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -38,10 +39,11 @@ import (
 // server-only reads see everything; its writes keep updatePipeline's and
 // updatePipelineRun's read-merge and createPipelineRun's @createOnly fields.
 type memStore struct {
-	mu        sync.Mutex
-	packages  map[string]PackageSource
-	pipelines map[string]Pipeline
-	runs      map[string]Run
+	mu         sync.Mutex
+	packages   map[string]PackageSource
+	pipelines  map[string]Pipeline
+	runs       map[string]Run
+	deliveries map[string]InboundDelivery
 
 	// Writes, in order, for assertions.
 	pipelineCreates []Pipeline
@@ -69,7 +71,28 @@ type runUpdate struct {
 }
 
 func newMemStore() *memStore {
-	return &memStore{packages: map[string]PackageSource{}, pipelines: map[string]Pipeline{}, runs: map[string]Run{}}
+	return &memStore{
+		packages: map[string]PackageSource{}, pipelines: map[string]Pipeline{}, runs: map[string]Run{},
+		deliveries: map[string]InboundDelivery{},
+	}
+}
+
+// stageDelivery puts a row on the inbound seam, as the receiver stages one.
+func (s *memStore) stageDelivery(d InboundDelivery) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deliveries[bareID(d.ID)] = d
+}
+
+// InboundDelivery is inboundRequestById: any staged row, whoever's.
+func (s *memStore) InboundDelivery(_ context.Context, requestID string) (*InboundDelivery, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.deliveries[bareID(requestID)]
+	if !ok {
+		return nil, nil
+	}
+	return &d, nil
 }
 
 func (s *memStore) addPackage(p PackageSource) {
@@ -745,7 +768,31 @@ type harness struct {
 	store  *memStore
 	github *fakeGitHub
 	gate   *keyedGate
+
+	staged atomic.Int64
 }
+
+// stage puts a GitHub delivery on the inbound seam as the receiver stages
+// one -- signature verified, the allowlisted headers beside it -- and answers
+// the row's id, which is all the trigger is handed.
+func (h *harness) stage(t *testing.T, event, deliveryID, body string) string {
+	t.Helper()
+	return h.stageFrom(t, githubSource, true, body, deliveryHeadersJSON(t, event, deliveryID))
+}
+
+// stageFrom stages a delivery on any source, verified or not.
+func (h *harness) stageFrom(t *testing.T, source string, verified bool, body, headersJSON string) string {
+	t.Helper()
+	id := fmt.Sprintf("inbound-%d", h.staged.Add(1))
+	h.store.stageDelivery(InboundDelivery{ID: id, Source: source, Body: body, HeadersJSON: headersJSON, SignatureVerified: verified})
+	return id
+}
+
+// automationCtx is the context a shipped automation reaches a builtin on:
+// internal origin, which the automation executor stamps on a tree-loaded
+// body's step context (component/automations, originForSource) and on
+// nothing a client sends.
+func automationCtx() context.Context { return auth.ContextWithInternalOrigin(context.Background()) }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()

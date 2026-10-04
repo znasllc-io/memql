@@ -14,7 +14,7 @@ import (
 
 func poll(t *testing.T, h *harness) PollResult {
 	t.Helper()
-	res, err := h.integ.Poll(context.Background())
+	res, err := h.integ.Poll(automationCtx())
 	if err != nil {
 		t.Fatalf("poll: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestThePollCallsTheRecoveryHook(t *testing.T) {
 
 	// Nil is a no-op: every node that does not drive.
 	h.integ.Configure(func(d *Deps) { d.Recover = nil })
-	if _, err := h.integ.Poll(context.Background()); err != nil {
+	if _, err := h.integ.Poll(automationCtx()); err != nil {
 		t.Errorf("poll with no hook: %v", err)
 	}
 }

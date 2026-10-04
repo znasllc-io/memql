@@ -90,7 +90,7 @@ func TestADriveThatStopsShortIsTakenUpAgainByItsOwnNode(t *testing.T) {
 
 	refusing.Store(false)
 	clock.Add(1)
-	if _, err := dh.integ.Poll(context.Background()); err != nil {
+	if _, err := dh.integ.Poll(automationCtx()); err != nil {
 		t.Fatalf("poll: %v", err)
 	}
 	waitDrives(t, dh.integ)
@@ -117,7 +117,7 @@ func TestRecoveryOnANodeThatCannotDriveSaysWhy(t *testing.T) {
 	if err := h.integ.RecoverRuns(context.Background()); err == nil || !strings.Contains(err.Error(), "no work journal") {
 		t.Errorf("recover: %v", err)
 	}
-	res, err := h.integ.Poll(context.Background())
+	res, err := h.integ.Poll(automationCtx())
 	if err != nil || !strings.Contains(res.RecoverError, "no work journal") {
 		t.Errorf("the poll reports it: %+v %v", res, err)
 	}

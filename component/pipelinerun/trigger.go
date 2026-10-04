@@ -13,6 +13,17 @@ import (
 
 // trigger.go -- a staged GitHub delivery becomes runs (design record D4-D6).
 //
+// THE TRIGGER IS HANDED A ROW ID AND NOTHING ELSE. pipelinesTrigger is a
+// builtin, and a builtin is callable by any signed-in client's query (@sdk has
+// no engine effect), so two things stand between a caller and a forged run:
+// the trigger refuses every call that did not arrive with internal origin --
+// which the automation executor stamps on a tree-loaded automation's step
+// context and on nothing a client sends -- before it reads anything; and it
+// reads the delivery it acts on from the STAGED v1:platform:inboundRequest
+// row, requiring the github source and the receiver's signatureVerified, so
+// the body that decides what opens is the one GitHub signed and never one an
+// argument supplied.
+//
 // The event is read from the SIGNED body's shape (decision 4,
 // pipelines.ClassifyDelivery); X-GitHub-Event is a cross-check only, and the
 // delivery id is correlation only. Neither is proof of anything: the body's
@@ -29,6 +40,8 @@ type SkippedPipeline struct {
 
 // TriggerResult is what one delivery did.
 type TriggerResult struct {
+	// Source is the staged row's source segment.
+	Source string
 	// Ignored is why the delivery asks pipelines for nothing; empty when it
 	// asked for something.
 	Ignored    string
@@ -44,15 +57,16 @@ type TriggerResult struct {
 }
 
 func (i *Integration) handleTrigger(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	res, err := i.Trigger(handlerContext(ctx), stringArg(args, "source"), rawStringArg(args, "body"), stringArg(args, "headersJson"))
+	inboundRequestID := stringArg(args, "inboundRequestId")
+	res, err := i.Trigger(handlerContext(ctx), inboundRequestID)
 	if err != nil {
 		return nil, err
 	}
 	answer := map[string]any{
 		// The staged row this answer is about, for an operator following a
 		// delivery from the inbound seam to its runs.
-		"inboundRequestId": stringArg(args, "inboundRequestId"),
-		"source":           stringArg(args, "source"),
+		"inboundRequestId": inboundRequestID,
+		"source":           res.Source,
 		"repository":       res.Repository,
 		"event":            string(res.Event),
 		"rerequest":        res.Rerequest,
@@ -67,28 +81,51 @@ func (i *Integration) handleTrigger(ctx context.Context, args map[string]any, _ 
 	return resultNode(answer), nil
 }
 
-// Trigger opens the runs one delivery asks for. A delivery that is not
-// GitHub's, or that pipelines do not run on, is Ignored -- not an error: most
-// of what reaches the inbound seam is about something else. A delivery
+// Trigger opens the runs the delivery staged as inboundRequestID asks for, on
+// behalf of the shipped automation that fires on its row. A call that did not
+// arrive with internal origin is refused (ErrClientOrigin) before anything is
+// read; a row staged on another source is Ignored -- not an error: most of
+// what reaches the inbound seam is about something else; a github row the
+// receiver did not verify is refused (ErrDeliveryUnverified); and a delivery
 // pipelines WOULD act on that cannot be read is an error.
-func (i *Integration) Trigger(ctx context.Context, source, body, headersJSON string) (TriggerResult, error) {
-	if !strings.EqualFold(strings.TrimSpace(source), githubSource) {
-		return TriggerResult{Ignored: fmt.Sprintf("source %q is not GitHub", source)}, nil
+func (i *Integration) Trigger(ctx context.Context, inboundRequestID string) (TriggerResult, error) {
+	if err := requireInternalOrigin(ctx, "trigger"); err != nil {
+		return TriggerResult{}, err
 	}
-	headerEvent, deliveryID := deliveryHeaders(headersJSON)
-	t, ignored, err := pipelines.ClassifyDelivery(headerEvent, []byte(body))
+	d := i.snapshot()
+	if d.Store == nil {
+		return TriggerResult{}, errNoStore
+	}
+	if strings.TrimSpace(inboundRequestID) == "" {
+		return TriggerResult{}, fmt.Errorf("pipelines: inboundRequestId is required")
+	}
+	staged, err := d.Store.InboundDelivery(ctx, inboundRequestID)
 	if err != nil {
 		return TriggerResult{}, err
 	}
-	if ignored != nil {
-		return TriggerResult{Ignored: ignored.Reason}, nil
+	if staged == nil {
+		return TriggerResult{}, fmt.Errorf("pipelines: no delivery is staged as %q", inboundRequestID)
 	}
-	res := TriggerResult{Event: t.Event, Rerequest: t.Rerequest, Repository: t.Repository, SHA: t.SHA}
+	res := TriggerResult{Source: staged.Source}
+	if !strings.EqualFold(strings.TrimSpace(staged.Source), githubSource) {
+		res.Ignored = fmt.Sprintf("source %q is not GitHub", staged.Source)
+		return res, nil
+	}
+	if !staged.SignatureVerified {
+		return res, fmt.Errorf("%w (staged as %q)", ErrDeliveryUnverified, inboundRequestID)
+	}
 
-	d := i.snapshot()
-	if d.Store == nil {
-		return res, errNoStore
+	headerEvent, deliveryID := deliveryHeaders(staged.HeadersJSON)
+	t, ignored, err := pipelines.ClassifyDelivery(headerEvent, []byte(staged.Body))
+	if err != nil {
+		return res, err
 	}
+	if ignored != nil {
+		res.Ignored = ignored.Reason
+		return res, nil
+	}
+	res.Event, res.Rerequest, res.Repository, res.SHA = t.Event, t.Rerequest, t.Repository, t.SHA
+
 	matched, err := d.Store.PipelinesForRepository(ctx, t.Repository)
 	if err != nil {
 		return res, err
@@ -236,16 +273,6 @@ func deliveryHeaders(headersJSON string) (event, deliveryID string) {
 		}
 	}
 	return event, deliveryID
-}
-
-// rawStringArg reads a string argument WITHOUT trimming: a body is what was
-// signed, byte for byte.
-func rawStringArg(args map[string]any, key string) string {
-	if args == nil {
-		return ""
-	}
-	s, _ := args[key].(string)
-	return s
 }
 
 func runIDs(runs []Run) []string {

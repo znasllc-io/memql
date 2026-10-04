@@ -59,6 +59,11 @@ type Store interface {
 	RunsForOwner(ctx context.Context, pipelineID string) ([]Run, error)
 
 	// Server-only, under the pipelines system actor.
+	//
+	// InboundDelivery is one staged delivery by its row id (the inbound
+	// seam's inboundRequestById): the trigger's only source of a delivery's
+	// body, headers and signature verdict.
+	InboundDelivery(ctx context.Context, requestID string) (*InboundDelivery, error)
 	PipelinesForRepository(ctx context.Context, repository string) ([]Pipeline, error)
 	PipelinesPolled(ctx context.Context) ([]Pipeline, error)
 	PipelineByID(ctx context.Context, pipelineID string) (*Pipeline, error)

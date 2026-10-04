@@ -120,7 +120,7 @@ func TestThePollRecoversARunNobodyClaimed(t *testing.T) {
 	if dh.integ.snapshot().Recover == nil || dh.integ.snapshot().SignalCancel == nil {
 		t.Fatalf("EnableDriver installs the poll's recovery and the cancel signal")
 	}
-	res, err := dh.integ.Poll(context.Background())
+	res, err := dh.integ.Poll(automationCtx())
 	if err != nil || res.RecoverError != "" {
 		t.Fatalf("poll: %+v %v", res, err)
 	}

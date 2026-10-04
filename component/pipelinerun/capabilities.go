@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -46,18 +47,15 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "trigger",
-			Description: "Open the pipeline runs a staged GitHub delivery asks for (design record D4-D6): classify the signed body's shape, then for every active pipeline of the repository whose installation matches, open one run keyed on (repository, SHA, mode, event) with a queued check run -- a fork's pull request refused with a failing one, a re-requested check run or suite as the next attempt of the original. A redelivery or a poll for the same head opens nothing.",
+			Description: "Open the pipeline runs a staged GitHub delivery asks for (design record D4-D6). The shipped automation's alone: a call without internal origin is refused before anything is read. Reads the staged v1:platform:inboundRequest row -- a github row the receiver verified, or nothing opens -- classifies its signed body's shape, then for every active pipeline of the repository whose installation matches, opens one run keyed on (repository, SHA, mode, event) with a queued check run -- a fork's pull request refused with a failing one, a re-requested check run or suite as the next attempt of the original. A redelivery or a poll for the same head opens nothing.",
 			Handler:     i.handleTrigger,
 			ArgsSchema: map[string]string{
-				"inboundRequestId": "string (required) -- the staged v1:platform:inboundRequest row",
-				"source":           "string -- the allowlisted source segment; anything but github is a no-op",
-				"body":             "string -- the verified raw body",
-				"headersJson":      "string -- the allowlisted delivery headers as a JSON object",
+				"inboundRequestId": "string (required) -- the staged v1:platform:inboundRequest row; its body, headers and signature verdict are read from the row, never taken as arguments",
 			},
 		},
 		{
 			Name:        "poll",
-			Description: "The polling delivery (D4, D11): for every active pipeline whose delivery is poll, read the default branch's head and the open pull requests' heads through the owner's grant; the first poll records a baseline and opens nothing, a later one opens a push run for a moved default head and a pull_request run (fork-aware) for a new or moved pull request head. Then, on a node that drives runs, recover the runs nobody claimed or whose driver went silent.",
+			Description: "The polling delivery (D4, D11), the schedule's alone: a call without internal origin is refused before anything is read. For every active pipeline whose delivery is poll, read the default branch's head and the open pull requests' heads through the owner's grant; the first poll records a baseline and opens nothing, a later one opens a push run for a moved default head and a pull_request run (fork-aware) for a new or moved pull request head. Then, on a node that drives runs, recover the runs nobody claimed or whose driver went silent.",
 			Handler:     i.handlePoll,
 			ArgsSchema:  map[string]string{},
 		},
@@ -187,4 +185,20 @@ func handlerContext(ctx context.Context) context.Context {
 		return context.Background()
 	}
 	return ctx
+}
+
+// requireInternalOrigin is the gate of the runner's own capabilities, the
+// trigger and the poll, checked BEFORE anything is read: a refusal after a
+// read is a read that happened. A builtin cannot be @serverOnly, and @sdk
+// has no engine effect, so any signed-in client's query can name either one
+// -- and each reads every owner's pipelines and opens runs that write check
+// runs on GitHub. The automation executor stamps internal origin on a
+// tree-loaded automation's step context (component/automations,
+// originForSource), which is how triggerPipelinesOnGitHubDelivery and
+// pollPipelines reach them; a client's query never carries it.
+func requireInternalOrigin(ctx context.Context, capability string) error {
+	if !auth.OriginFromContext(ctx).IsInternal() {
+		return fmt.Errorf("%w (%s)", ErrClientOrigin, capability)
+	}
+	return nil
 }

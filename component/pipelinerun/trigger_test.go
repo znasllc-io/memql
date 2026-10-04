@@ -14,13 +14,138 @@ import (
 // trigger_test.go -- a staged GitHub delivery becomes runs (design record
 // D4-D6, plan decisions 1, 3, 4, 14, 15; Review Focus 1 and 3).
 
+// trigger stages body as the inbound receiver would and hands the trigger the
+// row's id, on the context the shipped automation calls it on.
 func trigger(t *testing.T, h *harness, event, deliveryID, body string) TriggerResult {
 	t.Helper()
-	res, err := h.integ.Trigger(context.Background(), "github", body, deliveryHeadersJSON(t, event, deliveryID))
+	res, err := h.integ.Trigger(automationCtx(), h.stage(t, event, deliveryID, body))
 	if err != nil {
 		t.Fatalf("trigger %s: %v", event, err)
 	}
 	return res
+}
+
+// THE CRITICAL ONE (memql#5488 review): a builtin is callable by any
+// signed-in client -- @sdk has no engine effect -- so the trigger and the poll
+// refuse every call that did not arrive with internal origin, through the
+// handler and through the Go method alike, and they refuse it before anything
+// is read, minted or written.
+func TestTheTriggerAndThePollRefuseAClient(t *testing.T) {
+	h := newHarness(t)
+	h.store.addPipeline(testPipeline(DeliveryWebhook))
+	h.store.addPipeline(func() Pipeline {
+		p := testPipeline(DeliveryPoll)
+		p.ID, p.PackageID, p.Repository = PipelineIDFor("pkg-polled"), "pkg-polled", "acme/polled"
+		p.Heads = map[string]string{"branch:main": shaA}
+		return p
+	}())
+	h.github.heads["acme/polled@main"] = headAnswer{SHA: shaB}
+	id := h.stage(t, "pull_request", "d1", prDelivery(t, "opened", 42, shaA, repoName, testInstallation))
+
+	for name, ctx := range map[string]context.Context{
+		"a signed-in person": personCtx(ownerID),
+		"a cluster owner":    clusterOwnerCtx(ownerID),
+		"nobody":             context.Background(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := h.integ.Trigger(ctx, id); !errors.Is(err, ErrClientOrigin) {
+				t.Errorf("Trigger: %v, want ErrClientOrigin", err)
+			}
+			if _, err := h.integ.handleTrigger(ctx, map[string]any{"inboundRequestId": id}, 0); !errors.Is(err, ErrClientOrigin) {
+				t.Errorf("the trigger capability: %v, want ErrClientOrigin", err)
+			}
+			if _, err := h.integ.Poll(ctx); !errors.Is(err, ErrClientOrigin) {
+				t.Errorf("Poll: %v, want ErrClientOrigin", err)
+			}
+			if _, err := h.integ.handlePoll(ctx, nil, 0); !errors.Is(err, ErrClientOrigin) {
+				t.Errorf("the poll capability: %v, want ErrClientOrigin", err)
+			}
+		})
+	}
+	if n := len(h.store.allRuns()); n != 0 {
+		t.Errorf("a refused call opened %d runs", n)
+	}
+	if n := len(h.github.tokenMints) + len(h.github.createdRuns()); n != 0 {
+		t.Errorf("a refused call reached GitHub %d times", n)
+	}
+	if n := len(h.store.pipelineUpdates); n != 0 {
+		t.Errorf("a refused poll wrote %d pipeline rows", n)
+	}
+
+	// The control: the same delivery and the same poll, on the automation's
+	// context, do what they are for -- so the refusals above are about the
+	// origin and nothing else.
+	if res, err := h.integ.Trigger(automationCtx(), id); err != nil || len(res.Opened) != 1 {
+		t.Fatalf("the automation's trigger: %+v %v", res, err)
+	}
+	if res, err := h.integ.Poll(automationCtx()); err != nil || len(res.Opened) != 1 {
+		t.Fatalf("the automation's poll: %+v %v", res, err)
+	}
+}
+
+// The trigger acts on the STAGED ROW and on nothing its caller hands it: a
+// body, headers or a source passed as arguments -- which the automation no
+// longer passes, and a caller could forge -- change nothing about what opens.
+func TestAForgedBodyInTheArgumentsHasNoEffect(t *testing.T) {
+	h := newHarness(t)
+	h.store.addPipeline(testPipeline(DeliveryWebhook))
+	id := h.stage(t, "pull_request", "d1", prDelivery(t, "opened", 42, shaA, repoName, testInstallation))
+
+	nodes, err := h.integ.handleTrigger(automationCtx(), map[string]any{
+		"inboundRequestId": id,
+		"source":           "github",
+		"body":             pushDelivery(t, "refs/heads/main", shaA, shaC, testInstallation),
+		"headersJson":      deliveryHeadersJSON(t, "push", "forged"),
+	}, 0)
+	if err != nil {
+		t.Fatalf("trigger: %v", err)
+	}
+	runs := h.store.allRuns()
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want the staged delivery's one", len(runs))
+	}
+	if r := runs[0]; r.Event != pipelines.EventPullRequest || r.SHA != shaA || r.PullRequest != 42 || r.DeliveryID != "d1" {
+		t.Errorf("the run is the staged row's pull request, not the forged push: %+v", r)
+	}
+	for _, r := range runs {
+		if r.SHA == shaC {
+			t.Errorf("the forged body opened a run at %s", shaC)
+		}
+	}
+	if payload := decodeNode(t, nodes); payload["event"] != "pull_request" || payload["inboundRequestId"] != id {
+		t.Errorf("answer = %v", payload)
+	}
+}
+
+// A delivery the receiver did not verify -- the github source configured to
+// sign nothing -- is anybody's body, and is refused before anything is
+// minted, opened or written.
+func TestAnUnsignedDeliveryIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.store.addPipeline(testPipeline(DeliveryWebhook))
+	id := h.stageFrom(t, githubSource, false,
+		prDelivery(t, "opened", 42, shaA, repoName, testInstallation), deliveryHeadersJSON(t, "pull_request", "d1"))
+
+	if _, err := h.integ.Trigger(automationCtx(), id); !errors.Is(err, ErrDeliveryUnverified) {
+		t.Fatalf("err = %v, want ErrDeliveryUnverified", err)
+	}
+	if n := len(h.store.allRuns()); n != 0 {
+		t.Errorf("an unsigned delivery opened %d runs", n)
+	}
+	if n := len(h.github.tokenMints) + len(h.github.createdRuns()); n != 0 {
+		t.Errorf("an unsigned delivery reached GitHub %d times", n)
+	}
+}
+
+func TestATriggerForNoStagedRowIsAnError(t *testing.T) {
+	h := newHarness(t)
+	h.store.addPipeline(testPipeline(DeliveryWebhook))
+	if _, err := h.integ.Trigger(automationCtx(), "inbound-nobody-staged"); err == nil {
+		t.Errorf("a delivery id no row answers for must be an error, not a silent no-op")
+	}
+	if _, err := h.integ.Trigger(automationCtx(), "  "); err == nil {
+		t.Errorf("no delivery id is an error")
+	}
 }
 
 func TestAPullRequestDeliveryOpensOneQueuedRunWithItsCheckRun(t *testing.T) {
@@ -119,14 +244,14 @@ func TestARedeliveredWebhookOpensOneRunAndOneCheckRun(t *testing.T) {
 func TestConcurrentDeliveriesOfOneHeadOpenOneRun(t *testing.T) {
 	h := newHarness(t)
 	h.store.addPipeline(testPipeline(DeliveryWebhook))
-	body := pushDelivery(t, "refs/heads/main", shaA, shaB, testInstallation)
+	id := h.stage(t, "push", "d", pushDelivery(t, "refs/heads/main", shaA, shaB, testInstallation))
 
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := h.integ.Trigger(context.Background(), "github", body, deliveryHeadersJSON(t, "push", "d")); err != nil {
+			if _, err := h.integ.Trigger(automationCtx(), id); err != nil {
 				t.Errorf("trigger: %v", err)
 			}
 		}()
@@ -340,7 +465,7 @@ func TestDeliveriesPipelinesDoNotRunOnAreIgnored(t *testing.T) {
 			prDelivery(t, "opened", 42, shaA, repoName, testInstallation)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			res, err := h.integ.Trigger(context.Background(), c.source, c.body, deliveryHeadersJSON(t, c.event, "d"))
+			res, err := h.integ.Trigger(automationCtx(), h.stageFrom(t, c.source, true, c.body, deliveryHeadersJSON(t, c.event, "d")))
 			if err != nil {
 				t.Fatalf("an ignored delivery is not an error: %v", err)
 			}
@@ -467,8 +592,7 @@ func TestTheTriggerFailsClosedWithoutAGate(t *testing.T) {
 	h.store.addPipeline(testPipeline(DeliveryWebhook))
 	h.gate.refuse = errors.New("github: lifecycle database unavailable")
 
-	_, err := h.integ.Trigger(context.Background(), "github",
-		prDelivery(t, "opened", 42, shaA, repoName, testInstallation), deliveryHeadersJSON(t, "pull_request", "d1"))
+	_, err := h.integ.Trigger(automationCtx(), h.stage(t, "pull_request", "d1", prDelivery(t, "opened", 42, shaA, repoName, testInstallation)))
 	if err == nil {
 		t.Fatalf("no gate, no run: the open must refuse")
 	}
@@ -480,12 +604,8 @@ func TestTheTriggerFailsClosedWithoutAGate(t *testing.T) {
 func TestTheTriggerCapabilityAnswersWhatItDid(t *testing.T) {
 	h := newHarness(t)
 	h.store.addPipeline(testPipeline(DeliveryWebhook))
-	nodes, err := h.integ.handleTrigger(context.Background(), map[string]any{
-		"inboundRequestId": "inbound-1",
-		"source":           "github",
-		"body":             prDelivery(t, "opened", 42, shaA, repoName, testInstallation),
-		"headersJson":      deliveryHeadersJSON(t, "pull_request", "d1"),
-	}, 0)
+	id := h.stage(t, "pull_request", "d1", prDelivery(t, "opened", 42, shaA, repoName, testInstallation))
+	nodes, err := h.integ.handleTrigger(automationCtx(), map[string]any{"inboundRequestId": id}, 0)
 	if err != nil {
 		t.Fatalf("trigger: %v", err)
 	}
@@ -493,5 +613,8 @@ func TestTheTriggerCapabilityAnswersWhatItDid(t *testing.T) {
 	opened, _ := payload["opened"].([]any)
 	if len(opened) != 1 || payload["event"] != "pull_request" || payload["repository"] != repoName {
 		t.Errorf("answer = %v", payload)
+	}
+	if payload["inboundRequestId"] != id || payload["source"] != githubSource {
+		t.Errorf("the answer names the staged row it read: %v", payload)
 	}
 }

@@ -288,6 +288,22 @@ func (s StepState) Report() pipelines.StepReport {
 	}
 }
 
+// InboundDelivery is one staged v1:platform:inboundRequest row as the trigger
+// reads it: what a GitHub webhook left on the inbound seam. The trigger acts on
+// THIS row -- the body the receiver verified and the headers it staged beside
+// it -- and never on a body or headers handed to it as arguments, because a
+// builtin's arguments are whatever its caller chose.
+type InboundDelivery struct {
+	ID     string
+	Source string
+	// Body is exactly as staged: the bytes the signature covered, untrimmed.
+	Body        string
+	HeadersJSON string
+	// SignatureVerified is the receiver's verdict. False on a source an
+	// operator configured with no signature scheme, which signs nothing.
+	SignatureVerified bool
+}
+
 // PackageSource is the v1:platform:package row a pipeline hangs off -- the
 // fields connect reads, under the CALLER's actor.
 type PackageSource struct {

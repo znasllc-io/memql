@@ -1,6 +1,7 @@
 package pipelinerun
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -9,12 +10,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
-// internal_origin_test.go -- the two halves of this package's place on the
+// internal_origin_test.go -- the three halves of this package's place on the
 // internal-origin allowlist (call_origin_conformance_test.go): the stamp is
-// applied in ONE place, inline, so it never escapes its call; and everything
-// a person reaches is downstream of an owner-scoped read under their own actor.
+// applied in ONE place, inline, so it never escapes its call; everything a
+// person reaches is downstream of an owner-scoped read under their own actor;
+// and the runner's own capabilities -- the trigger and the poll, builtins any
+// client's query can name -- refuse every call that did not arrive with
+// internal origin.
 
 // TestTheStampNeverEscapesItsCall pins the memql#2879 escalation shape: a
 // trusted frame stamps internal, binds it to a variable, and a later frame
@@ -107,31 +113,71 @@ func TestNoPersonReachesAnotherOwnersRows(t *testing.T) {
 	}
 }
 
-// TestTheRunnersEntryPointsReadAsTheSystemActor: a delivery, a poll and a
-// substrate cancel have no person behind them, so every read they make is the
-// server-only kind -- whoever the context they arrive on claims to be.
-func TestTheRunnersEntryPointsReadAsTheSystemActor(t *testing.T) {
+// TestTheRunnersEntryPointsRefuseAClientAndReadAsTheSystemActor is the other
+// half of the allowlist argument. The trigger and the poll are BUILTINS, which
+// any signed-in client's query can name (@sdk has no engine effect), so each
+// refuses a client-origin call before its first read -- through the
+// capability and through the Go method alike. Reached the way the shipped
+// automations reach them, with internal origin, every read they make is the
+// server-only kind, as the pipelines system actor, whoever the context
+// otherwise claims to be; and the trigger's first read is the STAGED ROW, so
+// no delivery its caller could hand it is ever read. The substrate's cancel
+// is a Go API no client reaches, and reads the same way.
+func TestTheRunnersEntryPointsRefuseAClientAndReadAsTheSystemActor(t *testing.T) {
 	engine := newRecordingEngine()
 	integ := New(Deps{Store: NewDSLStore(engine), GitHub: newFakeGitHub(), Gate: newKeyedGate().run})
 	caller := personCtx(otherID)
 
-	if _, err := integ.Trigger(caller, "github", prDelivery(t, "opened", 1, shaA, repoName, testInstallation), ""); err != nil {
-		t.Fatalf("trigger: %v", err)
+	if _, err := integ.Trigger(caller, "inbound-1"); !errors.Is(err, ErrClientOrigin) {
+		t.Errorf("a person's trigger: %v, want ErrClientOrigin", err)
 	}
-	if _, err := integ.Poll(caller); err != nil {
-		t.Fatalf("poll: %v", err)
+	if _, err := integ.handleTrigger(caller, map[string]any{
+		"inboundRequestId": "inbound-1", "source": "github",
+		"body": prDelivery(t, "opened", 1, shaA, repoName, testInstallation),
+	}, 0); !errors.Is(err, ErrClientOrigin) {
+		t.Errorf("a person's trigger capability: %v, want ErrClientOrigin", err)
+	}
+	if _, err := integ.Poll(caller); !errors.Is(err, ErrClientOrigin) {
+		t.Errorf("a person's poll: %v, want ErrClientOrigin", err)
+	}
+	if _, err := integ.handlePoll(caller, nil, 0); !errors.Is(err, ErrClientOrigin) {
+		t.Errorf("a person's poll capability: %v, want ErrClientOrigin", err)
+	}
+	if calls := engine.recorded(); len(calls) != 0 {
+		t.Fatalf("a refused client call read %d rows first: %v", len(calls), calls)
+	}
+
+	// The automation's context: internal origin, here even beside a person.
+	automation := auth.ContextWithInternalOrigin(caller)
+	engine.answers[qInboundRequestByID] = []any{map[string]any{
+		"id": "v1:platform:inboundRequest:inbound-1", "source": "github", "signatureVerified": true,
+		"body":        prDelivery(t, "opened", 1, shaA, repoName, testInstallation),
+		"headersJson": `{"x-github-event":"pull_request","x-github-delivery":"d1"}`,
+	}}
+	if _, err := integ.Trigger(automation, "v1:platform:inboundRequest:inbound-1"); err != nil {
+		t.Fatalf("the automation's trigger: %v", err)
+	}
+	if _, err := integ.Poll(automation); err != nil {
+		t.Fatalf("the automation's poll: %v", err)
 	}
 	_ = integ.RequestCancel(caller, "r1", "substrate")
 	calls := engine.recorded()
-	if len(calls) != 3 {
-		t.Fatalf("calls = %d (%v)", len(calls), calls)
+	want := []string{qInboundRequestByID, qPipelinesForRepository, qPipelinesPolled, qPipelineRunByID}
+	if len(calls) != len(want) {
+		t.Fatalf("calls = %d (%v), want %v", len(calls), calls, want)
 	}
-	for _, c := range calls {
+	for i, c := range calls {
+		if got := constructOf(c.query); got != want[i] {
+			t.Errorf("call %d is %s, want %s", i, got, want[i])
+		}
 		if !c.origin.IsInternal() || c.actor == nil || c.actor.UserId != "system:pipelines" {
 			t.Errorf("%s ran as %+v (internal %v); want the pipelines system actor", c.query, c.actor, c.origin.IsInternal())
 		}
 	}
-	if !calls[2].fresh {
+	if calls[0].query != `query inboundRequestById(requestId: "inbound-1")` {
+		t.Errorf("the staged row is read by its bare id: %s", calls[0].query)
+	}
+	if !calls[3].fresh {
 		t.Errorf("the cancel's read decides a write under the gate, so it is fresh")
 	}
 }

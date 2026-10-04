@@ -325,6 +325,39 @@ func TestTheDSLStoreOverRealRows(t *testing.T) {
 	}
 }
 
+// The trigger's one read of a delivery, over a row the receiver's own
+// mutation staged: found by the id the automation hands it (canonical, as an
+// event carries it), its body exactly as staged, and the receiver's verdict
+// read back -- including the false a source configured to sign nothing
+// records.
+func TestAStagedDeliveryIsReadOverRealRows(t *testing.T) {
+	eng := dbEngine(t)
+	store := NewDSLStore(eng)
+	suffix := strings.ReplaceAll(id.NewShortId(), "-", "")[:12]
+	const body = "{\"action\":\"opened\",\"number\":42}\n"
+	headers := `{"x-github-event":"pull_request","x-github-delivery":"d-` + suffix + `"}`
+	for _, c := range []struct {
+		id       string
+		verified bool
+	}{{"pr10fix-in-signed-" + suffix, true}, {"pr10fix-in-unsigned-" + suffix, false}} {
+		if _, err := eng.Execute(seederCtx(), fmt.Sprintf(
+			`mutation stageInboundRequest(requestId: %s, source: "github", medium: "webhook", body: %s, headersJson: %s, signatureVerified: %t)`,
+			langparser.QuoteString(c.id), langparser.QuoteString(body), langparser.QuoteString(headers), c.verified)); err != nil {
+			t.Fatalf("stageInboundRequest: %v", err)
+		}
+		got, err := store.InboundDelivery(memqlengine.ContextWithFreshRead(context.Background()), "v1:platform:inboundRequest:"+c.id)
+		if err != nil || got == nil {
+			t.Fatalf("inboundRequestById %s: %+v %v", c.id, got, err)
+		}
+		if got.ID != c.id || got.Source != "github" || got.SignatureVerified != c.verified || got.Body != body || got.HeadersJSON != headers {
+			t.Errorf("delivery read back = %+v", got)
+		}
+	}
+	if none, err := store.InboundDelivery(context.Background(), "pr10fix-in-nobody-"+suffix); err != nil || none != nil {
+		t.Errorf("an id nothing staged reads nothing: %+v %v", none, err)
+	}
+}
+
 // TestEveryPipelinesBuiltinResolvesToACapability registers this plug-in on a
 // real engine that has loaded the shipped DSL and runs the engine's own
 // load-time audit: every `@executor("integration.pipelines.*")` builtin
