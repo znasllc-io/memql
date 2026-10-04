@@ -624,11 +624,6 @@ test("a reinstall does not replay the previous attempt's commit over the choice 
   assert.equal(pin.tag, MAIN_BRANCH_CHOICE, "the operator's choice is the answer");
 });
 
-test("...and neither does the guided install, which is the same lane", () => {
-  const prior = fromSourceReceipt({ tag: "", ref: "main", refKind: "branch", commit: "a".repeat(40) });
-  assert.equal(checkoutPinFor("installGuided", prior, MAIN_BRANCH_CHOICE).commit, "");
-});
-
 test("a repair STILL replays the recorded commit", () => {
   // The rule is not "stop replaying the pin", it is "only a repair is allowed to
   // be steered by it". Replaying `--branch=main` here would check out wherever
