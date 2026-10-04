@@ -272,6 +272,9 @@ type rtCluster struct {
 	// annotation alone, on a version -- and answers each 503, as a reply
 	// lost on its way back.
 	loseClaims int
+	// blockTails makes every tail of a container wait for its caller to
+	// give up: a kubelet that does not answer.
+	blockTails bool
 }
 
 func newRTCluster(t *testing.T, clock *rtClock) *rtCluster {
@@ -795,7 +798,15 @@ func (c *rtCluster) podLog(w http.ResponseWriter, r *http.Request, pod string) {
 	}
 	if q.Get("follow") != "true" {
 		text, ok := j.script.tails[container]
+		block := c.blockTails
 		c.mu.Unlock()
+		if block {
+			select {
+			case <-r.Context().Done():
+			case <-c.closing:
+			}
+			return
+		}
 		if !ok {
 			rtAnswer(w, rtNotStarted(container, pod))
 			return
@@ -3147,6 +3158,55 @@ func TestRunnerReapsOrphanedSecrets(t *testing.T) {
 			t.Errorf("%d sweeps once the interval had passed, want a second", n)
 		}
 	})
+}
+
+// TestTheAgentsGraceOutlastsSettling (fix round 2, minor 2): the agent gives a
+// step up its deadline and nodeLostGrace after it was handed over, then acks
+// its Job away. Settling a decided step -- every phase at its deadline -- must
+// be over by then, or the outcome being recorded is deleted under the runner
+// and reported as a deadline failure. The grace is derived from the
+// runner's budget, with room past it for the poll that sees the step
+// decided, the Job controller's mark and the reply.
+func TestTheAgentsGraceOutlastsSettling(t *testing.T) {
+	if margin := nodeLostGrace - settleBudget; margin < 30*time.Second {
+		t.Errorf("nodeLostGrace %v leaves %v past settleBudget %v, want at least 30s for the poll, the mark and the reply", nodeLostGrace, margin, settleBudget)
+	}
+	if NewExecutor(exConfig(), &scriptedWorkbench{}, nil, quietLogger()).lostGrace != nodeLostGrace {
+		t.Error("a new executor does not wait nodeLostGrace")
+	}
+	if r := NewRunner(rtConfig(), nil, nil, nil, nil); r.tailsTimeout != tailsTimeout || r.libraryTimeout != libraryPhaseTimeout || r.drainTimeout != followDrainTimeout {
+		t.Error("a new runner's phases are not the ones settleBudget adds up")
+	}
+}
+
+// TestRunnerTailsShareOneWindow (fix round 2, minor 2): a failed step's
+// clone and every service are tailed within ONE window, however many
+// services it has: a kubelet that answers none of them costs the window
+// once, never once per service, so settling stays within its budget.
+func TestRunnerTailsShareOneWindow(t *testing.T) {
+	h := newRunnerHarness(t)
+	h.r.tailsTimeout = 300 * time.Millisecond
+	run := rtRun()
+	run.Services = map[string]pl.Service{}
+	for _, name := range []string{"a", "b", "c", "d", "e", "f"} {
+		run.Services[name] = pl.Service{Image: "redis:7"}
+	}
+	h.c.script(testJobName, rtFinishingScript(testJobName, 1, captureKubeLine(rtAt(1100), "failing")))
+	h.c.with(func(c *rtCluster) { c.blockTails = true })
+
+	start := time.Now()
+	res := h.run(t, run)
+	took := time.Since(start)
+
+	if res.Status != pl.OutcomeFailed || res.ExitCode != 1 {
+		t.Fatalf("result = %+v, want the step's own failure", res)
+	}
+	if took > 1500*time.Millisecond {
+		t.Errorf("settling took %v with seven tails unanswered, want one 300ms window, not one each", took)
+	}
+	if archive := string(h.file(t, "tests-go-tests-2.log").Bytes); strings.Count(archive, "could not be read") != 7 {
+		t.Errorf("archive = %q, want each of the seven tails noted as not read", archive)
+	}
 }
 
 // TestRunnerCloneTokenFailureCreatesNothing: without a clone token there is

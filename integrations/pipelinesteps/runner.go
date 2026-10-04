@@ -75,6 +75,16 @@ const (
 	// included: a window of its own, so nothing spent before it is taken
 	// from it.
 	persistTimeout = 30 * time.Second
+	// tailsTimeout bounds every tail one settled step takes -- the clone's
+	// and, for a failed step, each service's -- together, however many
+	// services it has.
+	tailsTimeout = 20 * time.Second
+	// settleBudget is the most settling a decided step can take, every
+	// phase at its deadline: the observation recorded, the log drained, the
+	// tails, the Library writes and the outcome persisted. The agent's grace
+	// past a step's deadline is derived from it (nodeLostGrace), so the agent
+	// never gives up on a step that is still settling (fix round 2, minor 2).
+	settleBudget = quickCallTimeout + followDrainTimeout + tailsTimeout + libraryPhaseTimeout + persistTimeout
 	// followDrainTimeout bounds how long a decided step's log may take to
 	// be read to its end.
 	followDrainTimeout = 30 * time.Second
@@ -150,8 +160,9 @@ type Runner struct {
 	openCapture func(CaptureOptions) (*Capture, error)
 	// drainTimeout is followDrainTimeout.
 	drainTimeout time.Duration
-	// libraryTimeout is libraryPhaseTimeout.
+	// libraryTimeout is libraryPhaseTimeout; tailsTimeout is tailsTimeout.
 	libraryTimeout time.Duration
+	tailsTimeout   time.Duration
 
 	mu       sync.Mutex
 	inflight map[*inflight]struct{}
@@ -200,6 +211,7 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 		openCapture:    NewCapture,
 		drainTimeout:   followDrainTimeout,
 		libraryTimeout: libraryPhaseTimeout,
+		tailsTimeout:   tailsTimeout,
 		inflight:       map[*inflight]struct{}{},
 		claims:         map[string]*step{},
 		reapEvery:      reapInterval,

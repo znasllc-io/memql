@@ -61,9 +61,15 @@ const (
 	peerWatchInterval = 5 * time.Second
 	// nodeLostGrace is how long past a step's effective deadline the
 	// executor waits for anything before it gives the step up. The Job's own
-	// deadline ends it at the effective deadline; the grace covers its
-	// capture, its Library writes and the reply.
-	nodeLostGrace = 2 * time.Minute
+	// deadline ends it at the effective deadline; the grace covers settling
+	// it, every phase at its deadline (settleBudget, the runner's), and
+	// settleMargin past that -- derived, so the two cannot drift apart and
+	// the agent never acks away a Job whose outcome is still being recorded.
+	nodeLostGrace = settleBudget + settleMargin
+	// settleMargin is the grace past settleBudget: the poll that sees the
+	// step decided, the Job controller marking its deadline, and the reply's
+	// way back to the agent.
+	settleMargin = time.Minute
 	// noPeerRetry is how soon a step is forwarded again when no workbench
 	// replica could be reached at all.
 	noPeerRetry = 2 * time.Second

@@ -132,19 +132,23 @@ func (s *step) persistContext() (context.Context, context.CancelFunc) {
 // each service -- as notes in the archive, never in the store, whose live view
 // is the step's own output. The kubelet stops every service after every step,
 // so their last words only say something when the step failed.
+//
+// All of them share one window (tailsTimeout), so a step with many services
+// cannot stretch settling past settleBudget: a tail the window has run out
+// for is noted as not read.
 func (s *step) tails(pod string, failed bool) {
-	s.tail(pod, ContainerClone, "the clone", cloneTailLines)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), s.r.tailsTimeout)
+	defer cancel()
+	s.tail(ctx, pod, ContainerClone, "the clone", cloneTailLines)
 	if !failed {
 		return
 	}
 	for _, name := range sortedKeys(s.run.Services) {
-		s.tail(pod, ServicePrefix+name, "service "+name, serviceTailLines)
+		s.tail(ctx, pod, ServicePrefix+name, "service "+name, serviceTailLines)
 	}
 }
 
-func (s *step) tail(pod, container, who string, lines int) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), quickCallTimeout)
-	defer cancel()
+func (s *step) tail(ctx context.Context, pod, container, who string, lines int) {
 	out, err := s.r.kube.TailLog(ctx, pod, container, lines)
 	switch {
 	case errors.Is(err, ErrContainerNotStarted):
