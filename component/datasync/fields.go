@@ -37,6 +37,19 @@ func stringField(row map[string]any, key string) string {
 	return ""
 }
 
+// payloadField reads a CONCEPT field off a materialized row. A raw concept
+// read answers bundle nodes -- the intrinsics (id, concept, created_at, ...)
+// at the top level and the concept's own fields under `payload` -- so a field
+// is read there whenever the row carries a payload map, and never from beside
+// the intrinsics. Only a flat row, which a shaped read answers, is read at the
+// top level.
+func payloadField(row map[string]any, key string) string {
+	if payload, ok := row["payload"].(map[string]any); ok {
+		return stringField(payload, key)
+	}
+	return stringField(row, key)
+}
+
 // intField reads a sync-health row's numeric field.
 //
 // SATURATES out of range (memql#4779). These are health counters -- attempts,
