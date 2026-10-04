@@ -298,6 +298,48 @@ func TestUnparseableMetadataOnAnUnservedSourceIsLeftAlone(t *testing.T) {
 	}
 }
 
+// A row whose source a connector claims is applied only if the CONNECTOR's
+// secret verified it (memql#5795). The receiver refuses an env pin on a
+// claimed name at receipt, but a store connected between staging and dispatch
+// would otherwise hand an env-verified body to the connector as that store's.
+// The staged row's verifiedBy is what the dispatcher checks: `env` and
+// `registered` are refused and stamped failed, `connector` is applied, and an
+// ABSENT tier -- a row staged before the field existed, during a rolling
+// deploy -- is applied as before, because only server-side code can stage a
+// row at all.
+func TestADeliveryTheConnectorDidNotVerifyIsRefusedAtDispatch(t *testing.T) {
+	for _, tc := range []struct {
+		verifiedBy string
+		applied    bool
+	}{
+		{"env", false},
+		{"registered", false},
+		{"connector", true},
+		{"", true},
+	} {
+		t.Run("verifiedBy="+tc.verifiedBy, func(t *testing.T) {
+			engine := newFakeEngine()
+			c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
+			i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
+			args := map[string]any{"inboundRequestId": "req-tier", "source": "shopify", "body": "{}", "verifiedBy": tc.verifiedBy}
+			_, err := i.handleDispatchInbound(auth.ContextWithInternalOrigin(context.Background()), args, 0)
+			stamps := engine.callsContaining("updateInboundRequestStatus")
+			if tc.applied {
+				if err != nil || c.applyCalls != 1 {
+					t.Fatalf("a row the connector verified was not applied: err=%v applyCalls=%d", err, c.applyCalls)
+				}
+				return
+			}
+			if err == nil || c.applyCalls != 0 {
+				t.Fatalf("a row the %s tier verified reached the connector: err=%v applyCalls=%d", tc.verifiedBy, err, c.applyCalls)
+			}
+			if len(stamps) != 1 || !strings.Contains(stamps[0], `status: "failed"`) || !strings.Contains(stamps[0], tc.verifiedBy) {
+				t.Fatalf("stamped %q, want one failed stamp naming the %s tier", stamps, tc.verifiedBy)
+			}
+		})
+	}
+}
+
 // A source no connector serves is skipped, not failed: /inbound/{source}
 // is a shared door and most of what comes through belongs to something
 // else.

@@ -4025,7 +4025,8 @@
         "receivedAt",
         "signatureVerified",
         "source",
-        "status"
+        "status",
+        "verifiedBy"
       ],
       "required": [
         "body",
@@ -4042,6 +4043,11 @@
           "processed",
           "processing",
           "received"
+        ],
+        "verifiedBy": [
+          "connector",
+          "env",
+          "registered"
         ]
       }
     },

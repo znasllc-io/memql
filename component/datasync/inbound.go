@@ -236,6 +236,9 @@ type StagedRequest struct {
 	Body        []byte
 	HeadersJSON string
 	ReceivedAt  string
+	// VerifiedBy is the tier whose secret verified the delivery, as the
+	// receiver stamped it (memql#5795); empty on a row that predates it.
+	VerifiedBy string
 }
 
 // DispatchStaged is Dispatch for a row still in its staged form. The
@@ -249,6 +252,21 @@ func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (
 	connector, ok := d.connectorFor(ctx, staged.Source)
 	if !ok {
 		return DispatchResult{}, nil
+	}
+	// THE CONNECTOR's SECRET, OR NOTHING (memql#5795). The connector reads a
+	// row under a name it claims as signed by its own secret for that tenant
+	// -- and binds a per-store source's tenant off the NAME -- so a row another
+	// tier verified must not reach it. The receiver refuses such a pin at
+	// receipt; this is the half that holds when the claim appeared after
+	// receipt (a store connected between staging and dispatch). An absent tier
+	// is a row staged before the field existed and is dispatched as before:
+	// only server-side code can stage a row, so absence is history, not a
+	// forgery.
+	if tier := strings.TrimSpace(staged.VerifiedBy); tier != "" && tier != memqlsync.VerifiedByConnector {
+		reason := fmt.Sprintf("source %q is served by connector %q, but this delivery was verified by the %s tier's secret, not the connector's; "+
+			"rename or remove the env or registered source that verified it", strings.TrimSpace(staged.Source), connector.Name(), tier)
+		d.stamp(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), "failed", reason)
+		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
 	}
 	req, reason := staged.parse(d.now)
 	if reason != "" {

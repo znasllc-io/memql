@@ -73,6 +73,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"topic":            "string - optional delivery topic",
 				"headersJson":      "string - allowlisted delivery metadata as JSON",
 				"receivedAt":       "string - original receipt time in RFC3339",
+				"verifiedBy":       "string - the tier whose secret verified the delivery (env, registered, connector); a claimed source's row is applied only for connector",
 			},
 		},
 		{
@@ -153,6 +154,7 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 		Body:        []byte(argString(args, "body")),
 		HeadersJSON: argString(args, "headersJson"),
 		ReceivedAt:  argString(args, "receivedAt"),
+		VerifiedBy:  argString(args, "verifiedBy"),
 	})
 	if err != nil {
 		// Returned rather than swallowed: the automation step records it,

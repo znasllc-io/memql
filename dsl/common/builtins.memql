@@ -714,14 +714,15 @@ builtin providerFederationSet {
 // operator's Data origins page calls.
 
 @executor("integration.datasync.dispatchInbound")
-@description("Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard (a write older than the stored row's is recorded stale and skipped), and stamp the request processed or failed. A no-op for a source no connector serves, which is most of them.")
+@description("Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard (a write older than the stored row's is recorded stale and skipped), and stamp the request processed or failed. A row whose source a connector claims is applied only when the connector verified it (verifiedBy='connector', or absent on a row that predates the field); one another tier verified is stamped failed. A no-op for a source no connector serves, which is most of them.")
 builtin datasyncDispatchInbound {
   inboundRequestId  string
   source            string
   topic             string
   body              string
-  headersJson       string
-  receivedAt        string
+  headersJson       any  @description("Allowlisted delivery metadata as a JSON object string, or absent. Typed any, not string: a string field refuses a null and an empty value before the handler runs, and a mailbox-reader row carries none.")
+  receivedAt        any  @description("Original receipt time in RFC3339, or absent (the handler falls back to now).")
+  verifiedBy        any  @description("The tier whose secret verified the delivery -- env, registered or connector -- or absent on a row staged before the field existed (memql#5795).")
 }
 
 @executor("integration.datasync.reconcileDomains")

@@ -112,6 +112,12 @@ type SourceConfig struct {
 	DedupeHeader string
 	// ForwardHeaders is an explicit allowlist; credentials are never staged.
 	ForwardHeaders []string
+
+	// verifiedBy is the tier that resolved this policy, stamped on the staged
+	// row (memql#5795). Unexported on purpose: resolveSource sets it from
+	// WHERE it found the policy, and no configuration -- the environment, a
+	// registered resolver -- may claim a tier it is not.
+	verifiedBy string
 }
 
 // Config is the receiver's policy. Deny-by-default in the strongest sense:
