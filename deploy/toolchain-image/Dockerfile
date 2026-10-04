@@ -12,8 +12,8 @@
 #   Go        1.27.1   go.work's `toolchain` line, which overrides every go.mod
 #   Node      22 LTS   node:22-bookworm-slim
 #   protoc    33.4     scripts/dev/proto-gen.sh's PROTOC_VERSION
-#   git, make, bash, curl, tar, gzip, unzip, coreutils, ca-certificates, and
-#   postgresql-client (psql, pg_isready)
+#   git, make, bash, curl, tar, gzip, unzip, jq, python3 (with PyYAML),
+#   coreutils, ca-certificates, and postgresql-client (psql, pg_isready)
 #
 # The Postgres a db-gated step talks to is NOT built here. It is the
 # ci-timescaledb mirror ci.yml already pins (TimescaleDB + pgvector), run as
@@ -106,7 +106,16 @@ FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2
 # step contract depends on them (the step wrapper frames artifacts with
 # `tar -czf - | base64`, hence gzip too). unzip is how scripts/dev/proto-gen.sh
 # unpacks its own pinned protoc; without it the script falls back to the protoc
-# below with a warning that its fetch failed.
+# below with a warning that its fetch failed. jq is what
+# scripts/dev/stale_claims_test.go's gh stub evaluates the script's real --jq
+# filters with, and the test FAILS without it (requireJQ) -- in the go-tests,
+# path-routing and gate-inputs steps alike. GitHub's runner image carries jq,
+# which is why ci.yml never installs it, and python3 for the same reason:
+# scripts/k3d/up.sh's workload-wait narration reads the pod list with it
+# (TestWaitNarratesWhatItIsWaitingOn FAILS without it), and the
+# scripts/release/release-engine.sh tests and component/procedure/reference's
+# parity harness skip without it. python3-yaml is the PyYAML
+# scripts/deploy/conn-headroom-check.sh imports; its tests skip without it.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -116,8 +125,11 @@ RUN set -eux; \
         curl \
         git \
         gzip \
+        jq \
         make \
         postgresql-client \
+        python3 \
+        python3-yaml \
         tar \
         unzip; \
     rm -rf /var/lib/apt/lists/*; \

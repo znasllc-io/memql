@@ -12,8 +12,9 @@
 #
 #   1. Every tool a step reaches for runs.   go, node, npm, protoc, git, make,
 #                                            psql, pg_isready, curl, tar, gzip,
-#                                            base64, unzip. A miss exits
-#                                            non-zero naming the tool.
+#                                            base64, unzip, jq, python3 and its
+#                                            yaml module. A miss exits non-zero
+#                                            naming the tool.
 #   2. Go and protoc are the versions this repository pins, read from WHERE it
 #      pins them (go.work's toolchain line, scripts/dev/proto-gen.sh's
 #      PROTOC_VERSION) rather than from a third copy here. A pinned image
@@ -87,13 +88,18 @@ function assert_tools_run() {
 set -euo pipefail
 for probe in "go version" "node --version" "npm --version" "protoc --version" \
 	"git --version" "make --version" "psql --version" "pg_isready --version" \
-	"curl --version" "tar --version" "gzip --version" "base64 --version" "unzip -v"; do
+	"curl --version" "tar --version" "gzip --version" "base64 --version" "unzip -v" \
+	"jq --version" "python3 --version"; do
 	tool="${probe%% *}"
 	command -v "$tool" >/dev/null || { echo "ERROR: ${tool} is not on PATH" >&2; exit 1; }
 	# Word-split on purpose: the probe is a command and its flag.
 	out="$($probe 2>&1)" || { echo "ERROR: '${probe}' failed: ${out}" >&2; exit 1; }
 	printf '  %-10s %s\n' "$tool" "${out%%$'\n'*}"
 done
+# A module, not a binary, so not a probe above: scripts/deploy's
+# conn-headroom-check.sh imports it.
+python3 -c 'import yaml' || { echo "ERROR: python3 cannot import yaml (python3-yaml)" >&2; exit 1; }
+printf '  %-10s %s\n' "yaml" "$(python3 -c 'import yaml; print(yaml.__version__)')"
 SCRIPT
 }
 
