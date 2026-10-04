@@ -73,23 +73,37 @@ func TestARegisteredGitHubDeliveryStagesItsEvent(t *testing.T) {
 }
 
 // The env-configured source stages the same list only when an operator sets
-// FORWARD_HEADERS, and github-connect.md is where they copy it from. A list
-// that drifted from the registered one would stage two different rows for one
-// webhook depending on how it was set up.
+// FORWARD_HEADERS, and the two runbooks that spell out the `github` source are
+// where they copy it from, with its dedupe key. A list that drifted from the
+// registered one would stage two different rows for one webhook depending on
+// how it was set up; a dedupe key that drifted would make a redelivery a
+// second row.
 func TestTheGitHubDeliveryHeadersAreOneListInTwoPaths(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "docs", "public", "operate", "github-connect.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	const key = "MEMQL_INBOUND_SOURCE_GITHUB_FORWARD_HEADERS="
-	var documented []string
-	for _, line := range strings.Split(string(raw), "\n") {
-		if strings.HasPrefix(line, key) {
-			documented = strings.Split(strings.TrimPrefix(line, key), ",")
+	const (
+		forwardKey = "MEMQL_INBOUND_SOURCE_GITHUB_FORWARD_HEADERS="
+		dedupeKey  = "MEMQL_INBOUND_SOURCE_GITHUB_DEDUPE_HEADER="
+	)
+	for _, doc := range []string{"github-connect.md", "inbound-delivery.md"} {
+		raw, err := os.ReadFile(filepath.Join("..", "docs", "public", "operate", doc))
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if !reflect.DeepEqual(documented, githubDeliveryHeaders) {
-		t.Errorf("github-connect.md tells an operator to forward %q; a registered app forwards %q", documented, githubDeliveryHeaders)
+		var forwarded []string
+		dedupe := ""
+		for _, line := range strings.Split(string(raw), "\n") {
+			if strings.HasPrefix(line, forwardKey) {
+				forwarded = strings.Split(strings.TrimPrefix(line, forwardKey), ",")
+			}
+			if strings.HasPrefix(line, dedupeKey) {
+				dedupe = strings.TrimPrefix(line, dedupeKey)
+			}
+		}
+		if !reflect.DeepEqual(forwarded, githubDeliveryHeaders) {
+			t.Errorf("%s tells an operator to forward %q; a registered app forwards %q", doc, forwarded, githubDeliveryHeaders)
+		}
+		if want := githubWebhookPolicy("").DedupeHeader; dedupe != want {
+			t.Errorf("%s tells an operator to dedupe on %q; a registered app dedupes on %q", doc, dedupe, want)
+		}
 	}
 }
 

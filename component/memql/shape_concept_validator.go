@@ -83,15 +83,26 @@ func resolveShapeBoundConcept(concepts memoryNodes.Registry, shape *ShapeDefinit
 	if domain == "" {
 		return nil, err
 	}
-	id, hintErr := NewConceptResolver(concepts).resolveBareConceptNameWithNamespace(bare, domain)
-	if hintErr != nil {
-		return nil, err
+	// The SAME hints a signature concept resolves through (function_loader.go:
+	// ambientHints over the directory and its namespace.pin, pin first), so a
+	// shape binds the concept the query beside it binds. The directory alone
+	// is not enough for a nested, pinned domain: dsl/shopify/generated pins
+	// "shopify", but its directory answers "shopify/generated", which is no
+	// concept's namespace -- so every shape there stopped resolving the moment
+	// another domain declared a concept of the same bare name (epic
+	// memql#5477's v1:pipelines:channel beside v1:shopify:channel), while the
+	// queries bound to it went on resolving through the pin.
+	resolver := NewConceptResolver(concepts)
+	for _, hint := range ambientHints(domain, declaredNamespaceForOrigin(shape.Origin)) {
+		id, hintErr := resolver.resolveBareConceptNameWithNamespace(bare, hint)
+		if hintErr != nil {
+			continue
+		}
+		if hinted, getErr := concepts.Get(id); getErr == nil && hinted != nil {
+			return hinted, nil
+		}
 	}
-	hinted, getErr := concepts.Get(id)
-	if getErr != nil || hinted == nil {
-		return nil, err
-	}
-	return hinted, nil
+	return nil, err
 }
 
 // validateShapeConceptBindings reports every shape whose body disagrees with

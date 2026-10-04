@@ -2,6 +2,7 @@ package githubconnect
 
 import (
 	"encoding/json"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -35,24 +36,71 @@ func TestTheManifestIsTheRegistrationTheOperatorGuideDescribes(t *testing.T) {
 	if !m.HookAttributes.Active || m.HookAttributes.URL != "https://api.lab.example.com/inbound/github" {
 		t.Errorf("webhook = %+v, want active at the inbound seam", m.HookAttributes)
 	}
-	if strings.Join(m.DefaultEvents, ",") != "push" {
-		t.Errorf("events = %v, want pushes and nothing else", m.DefaultEvents)
+	if got := strings.Join(m.DefaultEvents, ","); got != "check_run,merge_group,pull_request,push,release" {
+		t.Errorf("events = %v, want the deliveries the update cue and pipelines read, and nothing else", m.DefaultEvents)
+	}
+	// The sentence GitHub shows for the app, so it says everything the app
+	// does: it reads, and it reports checks.
+	if m.Description != "Lets the MemQL cluster at lab.example.com read the repositories you choose and report checks on them." {
+		t.Errorf("description = %q", m.Description)
 	}
 }
 
-// TestTheAskIsContentsAndMetadataReadAndNothingElse is decision C8 of the
-// Connect design, restated where a regression would land: on the manifest.
-func TestTheAskIsContentsAndMetadataReadAndNothingElse(t *testing.T) {
+// TestTheAskIsReadsAndCheckWritesAndNothingElse is decision C8 of the Connect
+// design as pipelines widened it (pipelines record, D4), restated where a
+// regression would land: on the manifest. Every permission is read except
+// checks, the one write, which is how a run reports back.
+func TestTheAskIsReadsAndCheckWritesAndNothingElse(t *testing.T) {
 	m, err := BuildManifest("lab.example.com", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(m.DefaultPermissions) != 2 || m.DefaultPermissions["contents"] != "read" || m.DefaultPermissions["metadata"] != "read" {
-		t.Fatalf("permissions = %v", m.DefaultPermissions)
+	want := map[string]string{
+		"checks":        "write",
+		"contents":      "read",
+		"merge_queues":  "read",
+		"metadata":      "read",
+		"pull_requests": "read",
+	}
+	if !reflect.DeepEqual(m.DefaultPermissions, want) {
+		t.Fatalf("permissions = %v, want %v", m.DefaultPermissions, want)
 	}
 	for name, level := range m.DefaultPermissions {
-		if level != "read" {
+		if level != "read" && name != "checks" {
 			t.Errorf("%s is asked at %q", name, level)
+		}
+	}
+}
+
+// TestEveryEventIsOneTheAskCanSubscribeTo. GitHub lets an app subscribe to an
+// event only while it holds that event's permission (merge_group needs merge
+// queues read, which is why the ask carries it). The table is GitHub's, from
+// its webhook reference; an event added to the manifest without its
+// permission fails here rather than on GitHub's page, where the owner can fix
+// nothing.
+func TestEveryEventIsOneTheAskCanSubscribeTo(t *testing.T) {
+	needs := map[string]string{
+		"check_run":    "checks",
+		"merge_group":  "merge_queues",
+		"pull_request": "pull_requests",
+		"push":         "contents",
+		"release":      "contents",
+	}
+	m, err := BuildManifest("lab.example.com", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.DefaultEvents) == 0 {
+		t.Fatal("no events on a public cluster, so the loop below would pass on nothing")
+	}
+	for _, event := range m.DefaultEvents {
+		permission, known := needs[event]
+		if !known {
+			t.Errorf("the manifest subscribes to %q, and this table does not say which permission GitHub requires for it", event)
+			continue
+		}
+		if level := m.DefaultPermissions[permission]; level != "read" && level != "write" {
+			t.Errorf("%q needs %s, which the manifest asks at %q", event, permission, level)
 		}
 	}
 }
@@ -107,6 +155,11 @@ func TestALocalClusterRegistersItsWebhookOff(t *testing.T) {
 	}
 	if len(m.DefaultEvents) != 0 {
 		t.Errorf("events = %v on an app whose webhook is off", m.DefaultEvents)
+	}
+	// THE ASK IS THE SAME. A local cluster polls instead of receiving, and still
+	// reports a check run on what it polled.
+	if !reflect.DeepEqual(m.DefaultPermissions, RequestedPermissions()) {
+		t.Errorf("permissions = %v on a local cluster, want the whole ask %v", m.DefaultPermissions, RequestedPermissions())
 	}
 	// Everything a BROWSER follows is still this cluster's own: those redirects
 	// happen in the person's browser, which can reach a laptop.

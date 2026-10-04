@@ -413,6 +413,48 @@ func TestReservedDslDomainRefusesRatherThanBeingSkipped(t *testing.T) {
 	}
 }
 
+// TestAPipelineMistakeDoesNotRefuseTheDeployablesBesideIt is Review Focus 4 of
+// epic memql#5477: a pipeline: block naming a need nobody offers analyzes
+// clean. The need is the pipeline run's typed refusal (D9), raised when a run
+// compiles, and never a reason to refuse deploying the source the block sits
+// in. The control is the same tree with an unknown KEY in the block, which is
+// the manifest's shape and refuses as any unknown key does.
+func TestAPipelineMistakeDoesNotRefuseTheDeployablesBesideIt(t *testing.T) {
+	const block = "pipeline:\n  stages:\n    - name: checks\n      steps:\n" +
+		"        - name: gpu-tests\n          run: make gpu\n          needs: { quantum: true }\n"
+	tree := spaOnlyPackage()
+	tree[ManifestName] = file(validManifest + block)
+	rep, err := Analyze(tree, Options{SourceVersion: "sha-aaa"})
+	if err != nil {
+		t.Fatalf("an unknown need in the pipeline refused the deploy: %v (problems %+v)", err, rep.Problems)
+	}
+	if !rep.OK || len(rep.Problems) != 0 {
+		t.Fatalf("the pipeline's mistake reached the deploy's report: %+v", rep.Problems)
+	}
+	if rep.Manifest == nil || rep.Manifest.Pipeline == nil || !rep.Manifest.Pipeline.Stages[0].Steps[0].Needs["quantum"] {
+		t.Fatalf("the block must ride the report as written: %+v", rep.Manifest)
+	}
+	if len(rep.Deployables) != 2 {
+		t.Fatalf("both deployables still analyze: %+v", rep.Deployables)
+	}
+
+	// The block is not part of what deploying would do, so it does not move
+	// the plan an automatic deploy compares against: editing a pipeline never
+	// parks a source's auto-deploy.
+	plain, err := Analyze(spaOnlyPackage(), Options{SourceVersion: "sha-aaa"})
+	if err != nil {
+		t.Fatalf("control analysis: %v", err)
+	}
+	if PlanFingerprint(rep) != PlanFingerprint(plain) {
+		t.Fatalf("a pipeline block changed the deploy plan:\n%s\n%s", PlanFingerprint(rep), PlanFingerprint(plain))
+	}
+
+	tree[ManifestName] = file(validManifest + "pipeline:\n  stagez: []\n")
+	if _, err := Analyze(tree, Options{}); RefusalCode(err) != CodeManifestInvalid {
+		t.Fatalf("control failed: an unknown key in the block must refuse as %s, got %v", CodeManifestInvalid, err)
+	}
+}
+
 // The analysis leaves the process exactly as it found it. This is the property
 // that lets it run inside a serving node at all -- see package_gates.go.
 func TestAnalysisLeavesTheProcessConceptRegistryUntouched(t *testing.T) {

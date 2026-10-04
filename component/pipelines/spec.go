@@ -1,0 +1,103 @@
+package pipelines
+
+// Spec is the pipeline: block of memql-package.yaml (design record D3, D7).
+//
+// component/packages decodes the whole manifest with ONE strict decoder --
+// unknown keys refused, one document, the formatVersion check -- and hands
+// this package the typed block, which is why these types carry yaml tags but
+// this module imports no YAML package. The json tags match the yaml names so
+// the manifest round-trips through an analysis report unchanged.
+//
+// Decoding checks SHAPE only. Whether the block MEANS anything -- a stage that
+// needs a later stage, a need outside the closed set, a bucket nobody declared
+// -- is Validate's question, asked when a run compiles. Keeping the two apart
+// is deliberate: a typo in a pipeline must fail that pipeline's run with a
+// typed refusal (D9), not refuse every deploy of the source it sits in.
+type Spec struct {
+	// Image is the toolchain image every command step runs in, by digest.
+	Image string `yaml:"image,omitempty" json:"image,omitempty"`
+	// Services are the sidecars a step may name, by name.
+	Services map[string]Service `yaml:"services,omitempty" json:"services,omitempty"`
+	// Caches names the caches the runner mounts for every step (go, npm).
+	Caches []string    `yaml:"caches,omitempty" json:"caches,omitempty"`
+	Select *Select     `yaml:"select,omitempty" json:"select,omitempty"`
+	Stages []StageSpec `yaml:"stages" json:"stages"`
+}
+
+// Select declares how a step's packages are chosen (D8). It is declared, not
+// scripted: the platform reads the Go import graph and the path buckets
+// itself, so no repository ships a selection script.
+type Select struct {
+	// Go is the Go selection strategy; SelectImportGraph is the one there is.
+	Go string `yaml:"go,omitempty" json:"go,omitempty"`
+	// DBGated are the directory trees whose packages need a database:
+	// `only: db-gated` keeps them, `only: not-db-gated` drops them.
+	DBGated []string `yaml:"dbGated,omitempty" json:"dbGated,omitempty"`
+	// Full are path globs whose change selects everything, on top of the
+	// built-in ones (go.mod, go.sum, go.work, go.work.sum, the manifest).
+	Full []string `yaml:"full,omitempty" json:"full,omitempty"`
+	// Buckets are named path globs a non-Go step gates on with
+	// `when: { bucket: <name> }`.
+	Buckets map[string][]string `yaml:"buckets,omitempty" json:"buckets,omitempty"`
+}
+
+// StageSpec is one stage. Stages run one after another in the order written;
+// the steps inside a stage run at once (D7).
+type StageSpec struct {
+	Name string `yaml:"name" json:"name"`
+	// Needs names earlier stages this one depends on.
+	Needs []string `yaml:"needs,omitempty" json:"needs,omitempty"`
+	// On restricts the stage to events (pull_request, merge_group, push,
+	// release) or modes (affected, full). Empty means every run.
+	On []string `yaml:"on,omitempty" json:"on,omitempty"`
+	// Channel makes this a notify stage: it names a v1:pipelines:channel and
+	// carries no steps (D16).
+	Channel string     `yaml:"channel,omitempty" json:"channel,omitempty"`
+	Steps   []StepSpec `yaml:"steps,omitempty" json:"steps,omitempty"`
+}
+
+// StepSpec is one step: a shell command in the image's working copy, with
+// the same contract as a deployable's build.command. There is no step
+// language.
+type StepSpec struct {
+	Name string `yaml:"name" json:"name"`
+	Run  string `yaml:"run,omitempty" json:"run,omitempty"`
+	// Packages selects Go packages into MEMQL_PACKAGES: PackagesAffected or
+	// PackagesAll. Empty means the step selects none.
+	Packages string `yaml:"packages,omitempty" json:"packages,omitempty"`
+	// Only narrows the packages to the db-gated trees, or to everything else.
+	Only string `yaml:"only,omitempty" json:"only,omitempty"`
+	// Shards splits the packages over up to this many steps, by the timing
+	// table.
+	Shards int   `yaml:"shards,omitempty" json:"shards,omitempty"`
+	When   *When `yaml:"when,omitempty" json:"when,omitempty"`
+	// Needs is the environment hint: a need set true routes the step to a
+	// fleet machine that offers it. A map rather than a list because D7
+	// writes it `needs: { docker: true }`; a stage's needs is a different
+	// thing (the stages it waits for).
+	Needs map[string]bool `yaml:"needs,omitempty" json:"needs,omitempty"`
+	// Services name entries of the pipeline's services this step needs.
+	Services []string `yaml:"services,omitempty" json:"services,omitempty"`
+	// Timeout is a Go duration ("20m"); empty means DefaultStepTimeout.
+	Timeout   string   `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Artifacts []string `yaml:"artifacts,omitempty" json:"artifacts,omitempty"`
+	// Secrets are globalSecret NAMES the step's environment receives,
+	// resolved only when the pipeline's owner allowed them.
+	Secrets []string `yaml:"secrets,omitempty" json:"secrets,omitempty"`
+}
+
+// When gates a step on a path bucket.
+type When struct {
+	Bucket string `yaml:"bucket" json:"bucket"`
+}
+
+// The closed vocabularies a spec draws on.
+const (
+	SelectImportGraph = "import-graph"
+
+	PackagesAffected = "affected"
+	PackagesAll      = "all"
+
+	OnlyDBGated    = "db-gated"
+	OnlyNotDBGated = "not-db-gated"
+)

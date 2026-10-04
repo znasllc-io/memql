@@ -194,12 +194,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		},
 		{
 			Name:        "noteUpstreamFromWebhook",
-			Description: "Match a verified inbound webhook delivery to the packages tracking that repository and record the version it announced (epic memql#4794, D11). Writes only latestKnownVersion and updateAvailable; never starts a deployment. A delivery matching no package is a no-op.",
+			Description: "Match a verified inbound webhook delivery to the packages tracking that repository and record the version it announced (epic memql#4794, D11). Refuses a call without internal origin before reading anything; reads the source, the body and the signature verdict from the staged row, and notes nothing from an unverified one. Writes latestKnownVersion and updateAvailable; an armed auto-deploy source then starts its automatic run. A delivery matching no package is a no-op.",
 			Handler:     i.handleNoteUpstreamFromWebhook,
 			ArgsSchema: map[string]string{
-				"inboundRequestId": "string -- the staged v1:platform:inboundRequest row",
-				"source":           "string -- the allowlisted source segment",
-				"body":             "string -- the verified raw body",
+				"inboundRequestId": "string (required) -- the staged v1:platform:inboundRequest row; its source, body and signature verdict are read from the row",
 			},
 		},
 		{

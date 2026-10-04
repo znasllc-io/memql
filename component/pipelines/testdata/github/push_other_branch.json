@@ -1,0 +1,17 @@
+{
+  "ref": "refs/heads/cart-badge",
+  "before": "4d3a8f9483a084a44043bd93b16a4b4414d0c3cc",
+  "after": "c907455d2f334be04a32e43df29f61c07329f815",
+  "created": false,
+  "deleted": false,
+  "forced": false,
+  "base_ref": null,
+  "head_commit": {
+    "id": "c907455d2f334be04a32e43df29f61c07329f815",
+    "message": "Address review comments",
+    "timestamp": "2026-10-03T08:02:10Z"
+  },
+  "repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "master_branch": "main", "private": false },
+  "installation": { "id": 51234567 },
+  "sender": { "login": "octocat" }
+}

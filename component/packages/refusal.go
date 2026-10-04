@@ -458,6 +458,69 @@ const (
 	// answering a gate that admits developers, is a message that tells the
 	// caller most likely to see it exactly the wrong thing.
 	CodeDslRequiresAuthoring = "dsl_requires_authoring"
+
+	// -- Pipelines (epic memql#5477; substrate codes, epic memql#5478) --
+	//
+	// Raised by component/pipelines, component/pipelinerun and the
+	// substrate's runner, and catalogued here for dsl_requires_authoring's
+	// reason: MemQL OS reads its copy table's coverage from THIS file. Each is
+	// a LITERAL rather than a reference to pipelines' constant because that
+	// reading is text -- the OS test's pattern matches `CodeX = "..."` and
+	// nothing else -- and refusal_pipelines_parity_test.go holds the two
+	// spellings together in both directions. What each code means, and its
+	// class (a refusal, a failure, a skip or a note), is declared once, in
+	// component/pipelines/refusal.go.
+	//
+	// A pipeline's codes land on the PIPELINE RUN and its check run, never on
+	// a deploy: a manifest whose pipeline: block cannot compile is a failed
+	// run with one of these (D9), and the source it sits in still deploys.
+
+	// The manifest's block and the plan compiled from it.
+	CodePipelineNotDeclared       = "pipeline_not_declared"
+	CodePipelineStageInvalid      = "pipeline_stage_invalid"
+	CodePipelineStepInvalid       = "pipeline_step_invalid"
+	CodePipelineSelectInvalid     = "pipeline_select_invalid"
+	CodePipelineSelectMissing     = "pipeline_select_missing"
+	CodePipelineEventUnknown      = "pipeline_event_unknown"
+	CodePipelineBucketUnknown     = "pipeline_bucket_unknown"
+	CodePipelineServiceUnknown    = "pipeline_service_unknown"
+	CodePipelineNeedUnknown       = "pipeline_need_unknown"
+	CodePipelineSecretInvalid     = "pipeline_secret_invalid"
+	CodePipelineSecretNotAllowed  = "pipeline_secret_not_allowed"
+	CodePipelineFleetNotConsented = "pipeline_fleet_not_consented"
+
+	// The trigger: a fork head is refused, never queued (D6).
+	CodePipelineForkRefused = "pipeline_fork_refused"
+
+	// The run.
+	CodePipelineRunnerUnavailable      = "pipeline_runner_unavailable"
+	CodePipelineExecutorError          = "pipeline_executor_error"
+	CodePipelineSecretMissing          = "pipeline_secret_missing"
+	CodePipelineDisconnected           = "pipeline_disconnected"
+	CodePipelineCheckPermissionMissing = "pipeline_check_permission_missing"
+
+	// Skips: a step the plan or the run decided not to execute.
+	CodePipelineStageBlocked      = "pipeline_stage_blocked"
+	CodePipelineNotAffected       = "pipeline_not_affected"
+	CodePipelineNotifyUnavailable = "pipeline_notify_unavailable"
+
+	// The substrate's (epic memql#5478): where a step executes.
+	CodePipelineStepTimeout         = "pipeline_step_timeout"
+	CodePipelineRunCeiling          = "pipeline_run_ceiling"
+	CodePipelineNoMachineForNeed    = "pipeline_no_machine_for_need"
+	CodePipelineFleetDisabled       = "pipeline_fleet_disabled"
+	CodePipelineJobRejected         = "pipeline_job_rejected"
+	CodePipelineJobUnschedulable    = "pipeline_job_unschedulable"
+	CodePipelineImagePullFailed     = "pipeline_image_pull_failed"
+	CodePipelineCloneFailed         = "pipeline_clone_failed"
+	CodePipelineServiceFailed       = "pipeline_service_failed"
+	CodePipelineStepCancelled       = "pipeline_step_cancelled"
+	CodePipelineNodeLost            = "pipeline_node_lost"
+	CodePipelineArtifactTooLarge    = "pipeline_artifact_too_large"
+	CodePipelineArtifactMissing     = "pipeline_artifact_missing"
+	CodePipelineLogCapped           = "pipeline_log_capped"
+	CodePipelineIsolationUnenforced = "pipeline_isolation_unenforced"
+	CodePipelineAlreadyConnected    = "pipeline_already_connected"
 )
 
 // Refusal is an analysis or pipeline failure carrying a stable Code.

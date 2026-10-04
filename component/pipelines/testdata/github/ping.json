@@ -1,0 +1,12 @@
+{
+  "zen": "Design for failure.",
+  "hook_id": 512345678,
+  "hook": {
+    "type": "App",
+    "id": 512345678,
+    "active": true,
+    "events": ["check_run", "merge_group", "pull_request", "push", "release"],
+    "app_id": 1234567
+  },
+  "sender": { "login": "octocat" }
+}

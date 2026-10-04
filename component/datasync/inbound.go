@@ -227,27 +227,40 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req memqlsync.InboundRequest)
 	return d.dispatchTo(ctx, connector, req)
 }
 
-// StagedRequest is one staged row as the dispatch automation hands it over,
-// its delivery metadata still in the stored string form.
+// StagedRequest is one staged row as the dispatcher read it
+// (Store.StagedInboundRequest), its delivery metadata still in the stored
+// string form. There is no topic: a staged row carries none, and a connector
+// that wants the origin's event name reads it from the headers.
 type StagedRequest struct {
 	RequestId   string
 	Source      string
-	Topic       string
 	Body        []byte
 	HeadersJSON string
 	ReceivedAt  string
 	// VerifiedBy is the tier whose secret verified the delivery, as the
 	// receiver stamped it (memql#5795); empty on a row that predates it.
 	VerifiedBy string
+	// SignatureVerified is the receiver's verdict: false on a row staged by a
+	// source configured to verify nothing (scheme none).
+	SignatureVerified bool
+}
+
+// Staged reads one staged delivery by its row id, under the operator
+// identity the staged inbound requests are the deployment's bookkeeping under
+// (store.go). The dispatch builtin is handed that id and nothing else, so this
+// is where every delivery a connector sees comes from.
+func (d *Dispatcher) Staged(ctx context.Context, requestID string) (StagedRequest, bool, error) {
+	return d.store.StagedInboundRequest(OperatorContext(ctx), requestID)
 }
 
 // DispatchStaged is Dispatch for a row still in its staged form. The
-// connector is resolved FIRST and the metadata parsed only after, which is
-// what keeps a row of an unserved source a no-op even when its metadata is
-// unreadable. A served row whose metadata does not parse is stamped `failed`
-// and returned as an error, as Dispatch does with an apply failure: left
-// `received`, it would say nothing to the operator and, because @createOnly
-// keeps the bad value, re-fire identically on every re-stage.
+// connector is resolved FIRST and the row judged only after, which is what
+// keeps a row of an unserved source a no-op whatever its tier, its verdict or
+// its metadata say. A served row another tier verified, that nothing verified,
+// or whose metadata does not parse is stamped `failed` and returned as an
+// error, as Dispatch does with an apply failure: left `received`, it would say
+// nothing to the operator and, because @createOnly keeps the stored values,
+// re-fire identically on every re-stage.
 func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (DispatchResult, error) {
 	connector, ok := d.connectorFor(ctx, staged.Source)
 	if !ok {
@@ -268,6 +281,22 @@ func (d *Dispatcher) DispatchStaged(ctx context.Context, staged StagedRequest) (
 		d.stamp(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), "failed", reason)
 		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
 	}
+	// THE RECEIVER'S VERDICT, OR NOTHING (epic memql#5477). The tier above says
+	// WHOSE secret verified a row; this says that one did. A row a source
+	// configured to verify nothing (scheme none) staged was signed by nobody,
+	// and a connector reads a claimed row as signed. No connector declares
+	// scheme none today, so a delivery the receiver stages for one always
+	// carries true; this is the half that holds if one ever does, and for a
+	// row with no tier -- staged before the field existed -- that no secret
+	// verified. The mailbox reader's rows carry true: provenance is their
+	// verification.
+	if !staged.SignatureVerified {
+		reason := fmt.Sprintf("source %q is served by connector %q, but this delivery's signature was not verified; "+
+			"a connector applies only a delivery a secret verified, so its source must not be configured scheme none",
+			strings.TrimSpace(staged.Source), connector.Name())
+		d.stamp(OperatorContext(ctx), strings.TrimSpace(staged.RequestId), "failed", reason)
+		return DispatchResult{Handled: true}, fmt.Errorf("datasync: %s", reason)
+	}
 	req, reason := staged.parse(d.now)
 	if reason != "" {
 		d.stamp(OperatorContext(ctx), req.RequestId, "failed", reason)
@@ -282,7 +311,6 @@ func (s StagedRequest) parse(now func() time.Time) (memqlsync.InboundRequest, st
 	req := memqlsync.InboundRequest{
 		RequestId:  strings.TrimSpace(s.RequestId),
 		Source:     strings.TrimSpace(s.Source),
-		Topic:      strings.TrimSpace(s.Topic),
 		Body:       s.Body,
 		ReceivedAt: now().UTC(),
 	}

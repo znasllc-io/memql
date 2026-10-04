@@ -16,7 +16,7 @@ import (
 var reassertFields = []string{
 	"status", "result", "resultFingerprint", "binding", "postcondition", "symptom", "attempt", "version",
 	"basis", "override", "authoredBy", "childRunId", "idempotencyKey", "startedAt", "finishedAt",
-	"durationMs", "tokens", "cost", "errorCode", "errorMessage",
+	"durationMs", "tokens", "cost", "errorCode", "errorMessage", "logFileId", "artifactFileIds",
 }
 
 // headMoveFixture: four steps, all at version 1; then a re-run of draft

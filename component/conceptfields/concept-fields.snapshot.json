@@ -3722,6 +3722,170 @@
       ]
     },
     {
+      "concept": "v1:pipelines:channel",
+      "file": "pipelines/concepts.memql",
+      "fields": [
+        "accountId",
+        "kind",
+        "name",
+        "ownerUserId",
+        "recipients",
+        "secretRef",
+        "status"
+      ],
+      "required": [
+        "kind",
+        "name",
+        "status"
+      ],
+      "enums": {
+        "kind": [
+          "discord",
+          "email"
+        ],
+        "status": [
+          "active",
+          "archived"
+        ]
+      }
+    },
+    {
+      "concept": "v1:pipelines:pipeline",
+      "file": "pipelines/concepts.memql",
+      "fields": [
+        "accountId",
+        "channelIds",
+        "compute",
+        "connectedAt",
+        "credentialId",
+        "defaultBranch",
+        "delivery",
+        "heads",
+        "installationId",
+        "name",
+        "ownerUserId",
+        "packageId",
+        "repository",
+        "secretNames",
+        "status",
+        "timings",
+        "timingsRunId",
+        "timingsUpdatedAt"
+      ],
+      "required": [
+        "credentialId",
+        "delivery",
+        "installationId",
+        "name",
+        "packageId",
+        "repository",
+        "status"
+      ],
+      "enums": {
+        "compute": [
+          "cluster",
+          "cluster_and_fleet"
+        ],
+        "delivery": [
+          "poll",
+          "webhook"
+        ],
+        "status": [
+          "active",
+          "disconnected"
+        ]
+      }
+    },
+    {
+      "concept": "v1:pipelines:run",
+      "file": "pipelines/concepts.memql",
+      "fields": [
+        "accountId",
+        "attempt",
+        "baseSha",
+        "cancelRequested",
+        "cancelledBy",
+        "checkRunId",
+        "checkRunState",
+        "conclusion",
+        "deliveryId",
+        "driverHeartbeatAt",
+        "driverNodeId",
+        "durationMs",
+        "event",
+        "finishedAt",
+        "headBranch",
+        "mode",
+        "notes",
+        "ownerUserId",
+        "pipelineId",
+        "pullRequest",
+        "queuedAt",
+        "refusalCode",
+        "refusalMessage",
+        "refusalScope",
+        "repository",
+        "rerunOf",
+        "runKey",
+        "sha",
+        "stages",
+        "startedAt",
+        "status",
+        "title",
+        "trigger",
+        "version",
+        "workGoalId",
+        "workRunId"
+      ],
+      "required": [
+        "attempt",
+        "event",
+        "mode",
+        "pipelineId",
+        "queuedAt",
+        "repository",
+        "runKey",
+        "sha",
+        "status",
+        "trigger"
+      ],
+      "enums": {
+        "checkRunState": [
+          "",
+          "refused",
+          "unavailable",
+          "written"
+        ],
+        "conclusion": [
+          "",
+          "cancelled",
+          "failure",
+          "refused",
+          "success"
+        ],
+        "event": [
+          "merge_group",
+          "pull_request",
+          "push",
+          "release"
+        ],
+        "mode": [
+          "affected",
+          "full"
+        ],
+        "status": [
+          "completed",
+          "in_progress",
+          "queued"
+        ],
+        "trigger": [
+          "poll",
+          "rerun",
+          "webhook"
+        ]
+      }
+    },
+    {
       "concept": "v1:planner:responsibility",
       "file": "planner/concepts.memql",
       "fields": [
@@ -4191,10 +4355,12 @@
       "file": "platform/concepts.memql",
       "fields": [
         "core",
+        "dismissable",
         "lanes",
         "module",
         "nodeId",
         "nodeType",
+        "optional",
         "reason",
         "reportedAt",
         "state"
@@ -4222,8 +4388,10 @@
       "fields": [
         "core",
         "disagreement",
+        "dismissable",
         "module",
         "nodes",
+        "optional",
         "stale",
         "state",
         "unknown"
@@ -8210,6 +8378,7 @@
           "library",
           "materializer",
           "nexus",
+          "pipeline",
           "responsibility"
         ],
         "status": [
@@ -8362,6 +8531,7 @@
       "fields": [
         "actualFootprint",
         "approvalId",
+        "artifactFileIds",
         "attempt",
         "authoredBy",
         "basis",
@@ -8381,6 +8551,7 @@
         "input",
         "key",
         "kind",
+        "logFileId",
         "override",
         "ownerUserId",
         "postcondition",

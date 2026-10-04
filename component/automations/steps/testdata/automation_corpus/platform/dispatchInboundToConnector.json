@@ -7,9 +7,7 @@
           "kind": "node_created",
           "payload": {
             "agentId": "agent-1",
-            "body": "s-body",
             "createdBySubject": "subject-0",
-            "headersJson": "s-headersJson",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -21,15 +19,12 @@
               "type": "agent"
             },
             "partitionId": "space-1",
-            "receivedAt": "s-receivedAt",
             "recordType": "contact",
             "roleCeiling": "user",
             "scopes": [
               "read"
             ],
-            "source": "s-source",
-            "status": "succeeded",
-            "verifiedBy": "s-verifiedBy"
+            "status": "succeeded"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
         },
@@ -39,12 +34,7 @@
         "calls": [
           {
             "args": {
-              "body": "s-body",
-              "headersJson": "s-headersJson",
-              "inboundRequestId": "v1:probe:thing:1",
-              "receivedAt": "s-receivedAt",
-              "source": "s-source",
-              "verifiedBy": "s-verifiedBy"
+              "inboundRequestId": "v1:probe:thing:1"
             },
             "kind": "builtin",
             "name": "datasyncDispatchInbound"
@@ -62,9 +52,7 @@
           "kind": "node_created",
           "payload": {
             "agentId": "agent-1",
-            "body": "s-body",
             "createdBySubject": "subject-0",
-            "headersJson": "s-headersJson",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -76,15 +64,12 @@
               "type": "agent"
             },
             "partitionId": "space-1",
-            "receivedAt": "s-receivedAt",
             "recordType": "contact",
             "roleCeiling": "user",
             "scopes": [
               "read"
             ],
-            "source": "s-source",
-            "status": "succeeded",
-            "verifiedBy": "s-verifiedBy"
+            "status": "succeeded"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
         },
@@ -94,12 +79,7 @@
         "calls": [
           {
             "args": {
-              "body": "s-body",
-              "headersJson": "s-headersJson",
-              "inboundRequestId": "v1:probe:thing:1",
-              "receivedAt": "s-receivedAt",
-              "source": "s-source",
-              "verifiedBy": "s-verifiedBy"
+              "inboundRequestId": "v1:probe:thing:1"
             },
             "kind": "builtin",
             "name": "datasyncDispatchInbound"
@@ -117,9 +97,7 @@
           "kind": "node_created",
           "payload": {
             "agentId": "agent-1",
-            "body": "s-body",
             "createdBySubject": "subject-0",
-            "headersJson": "s-headersJson",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -131,15 +109,12 @@
               "type": "bff"
             },
             "partitionId": "space-1",
-            "receivedAt": "s-receivedAt",
             "recordType": "contact",
             "roleCeiling": "user",
             "scopes": [
               "read"
             ],
-            "source": "s-source",
-            "status": "succeeded",
-            "verifiedBy": "s-verifiedBy"
+            "status": "succeeded"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
         },
@@ -149,12 +124,7 @@
         "calls": [
           {
             "args": {
-              "body": "s-body",
-              "headersJson": "s-headersJson",
-              "inboundRequestId": "v1:probe:thing:1",
-              "receivedAt": "s-receivedAt",
-              "source": "s-source",
-              "verifiedBy": "s-verifiedBy"
+              "inboundRequestId": "v1:probe:thing:1"
             },
             "kind": "builtin",
             "name": "datasyncDispatchInbound"
@@ -172,9 +142,7 @@
           "kind": "node_created",
           "payload": {
             "agentId": "agent-1",
-            "body": "s-body",
             "createdBySubject": "subject-0",
-            "headersJson": "s-headersJson",
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -186,15 +154,12 @@
               "type": "bff"
             },
             "partitionId": "space-1",
-            "receivedAt": "s-receivedAt",
             "recordType": "contact",
             "roleCeiling": "user",
             "scopes": [
               "read"
             ],
-            "source": "s-source",
-            "status": "succeeded",
-            "verifiedBy": "s-verifiedBy"
+            "status": "succeeded"
           },
           "topic": "graph.node.created.v1:platform:inboundRequest"
         },
@@ -204,12 +169,7 @@
         "calls": [
           {
             "args": {
-              "body": "s-body",
-              "headersJson": "s-headersJson",
-              "inboundRequestId": "v1:probe:thing:1",
-              "receivedAt": "s-receivedAt",
-              "source": "s-source",
-              "verifiedBy": "s-verifiedBy"
+              "inboundRequestId": "v1:probe:thing:1"
             },
             "kind": "builtin",
             "name": "datasyncDispatchInbound"

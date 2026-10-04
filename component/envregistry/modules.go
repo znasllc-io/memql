@@ -11,8 +11,17 @@ import (
 // A readiness module: a named set of lanes over registry entries, or a named
 // evaluator (design record 2026-09-06-configuration-readiness, section 4.2).
 type Module struct {
-	Name        string   `yaml:"name"`
-	Core        bool     `yaml:"core,omitempty"`
+	Name string `yaml:"name"`
+	Core bool   `yaml:"core,omitempty"`
+	// Optional marks a module nothing needs: a feature an owner may choose to
+	// set up (pipelines program design record, D15). Never core -- the
+	// first-run wizard walks core modules, and an optional one is by
+	// definition not a step there.
+	Optional bool `yaml:"optional,omitempty"`
+	// Dismissable lets a person answer "Not now" to an optional module's
+	// setup prompt. It requires Optional: a module something needs cannot be
+	// waved away.
+	Dismissable bool     `yaml:"dismissable,omitempty"`
 	Description string   `yaml:"description"`
 	Evaluator   string   `yaml:"evaluator,omitempty"`
 	HostedBy    HostedBy `yaml:"hostedBy,omitempty"`
@@ -95,6 +104,11 @@ func (m *Manifest) Module(name string) (Module, bool) {
 // neither, an unknown evaluator, a lane with an unknown configurableFrom, and
 // a slot naming no registry entry. The last is the one that matters most: a
 // typo in a slot would otherwise read as a module nobody can ever configure.
+//
+// It also refuses the two flag combinations that contradict themselves:
+// dismissable without optional (a module something needs cannot be waved
+// away) and optional with core (the first-run wizard would walk a module the
+// manifest says nobody needs).
 func (m *Manifest) ValidateModules() error {
 	seen := map[string]bool{}
 	for _, mod := range m.Modules {
@@ -108,6 +122,12 @@ func (m *Manifest) ValidateModules() error {
 		seen[name] = true
 		if strings.TrimSpace(mod.Description) == "" {
 			return fmt.Errorf("manifest modules: module %q has no description; the setup surface renders it", name)
+		}
+		if mod.Optional && mod.Core {
+			return fmt.Errorf("manifest modules: module %q is both optional and core; the first-run wizard walks every core module, so a module nothing needs cannot be one", name)
+		}
+		if mod.Dismissable && !mod.Optional {
+			return fmt.Errorf("manifest modules: module %q is dismissable and not optional; only a module nothing needs may be dismissed", name)
 		}
 		hasEval := strings.TrimSpace(mod.Evaluator) != ""
 		if hasEval == (len(mod.Lanes) > 0) {

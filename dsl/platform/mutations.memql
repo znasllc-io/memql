@@ -2618,26 +2618,30 @@ mutation sourceCredential recordGithubAppInstallations {
 @serverOnly
 mutation moduleReadiness recordModuleReadiness {
   args {
-    rowId       string!
-    module      string!
-    nodeId      string!
-    nodeType    string!
-    state       enum("configured", "partial", "unconfigured", "notApplicable", "unknown")!
-    reason      string
-    core        boolean
-    lanes       []object
-    reportedAt  string!
+    rowId        string!
+    module       string!
+    nodeId       string!
+    nodeType     string!
+    state        enum("configured", "partial", "unconfigured", "notApplicable", "unknown")!
+    reason       string
+    core         boolean
+    optional     boolean
+    dismissable  boolean
+    lanes        []object
+    reportedAt   string!
   }
   insert {
-    id:          args.rowId
-    module:      args.module
-    nodeId:      args.nodeId
-    nodeType:    args.nodeType
-    state:       args.state
-    reason:      args.reason ?? ""
-    core:        args.core ?? false
-    lanes:       args.lanes ?? []
-    reportedAt:  args.reportedAt
+    id:           args.rowId
+    module:       args.module
+    nodeId:       args.nodeId
+    nodeType:     args.nodeType
+    state:        args.state
+    reason:       args.reason ?? ""
+    core:         args.core ?? false
+    optional:     args.optional ?? false
+    dismissable:  args.dismissable ?? false
+    lanes:        args.lanes ?? []
+    reportedAt:   args.reportedAt
   }
 }
 

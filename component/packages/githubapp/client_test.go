@@ -49,19 +49,32 @@ type fakeHub struct {
 	requests []*http.Request
 	bodies   map[*http.Request]string
 	handlers map[string]hubHandler
+	// headers are added to a route's response -- a redirect's Location.
+	headers map[string]http.Header
 }
 
 func newHub() *fakeHub {
-	return &fakeHub{handlers: map[string]hubHandler{}, bodies: map[*http.Request]string{}}
+	return &fakeHub{handlers: map[string]hubHandler{}, bodies: map[*http.Request]string{}, headers: map[string]http.Header{}}
 }
 
 func (h *fakeHub) on(path string, fn hubHandler) *fakeHub {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.handlers[path] = fn
 	return h
 }
 
 func (h *fakeHub) json(path string, status int, body string) *fakeHub {
 	return h.on(path, func(*http.Request) (int, string) { return status, body })
+}
+
+// redirect answers path with status and a Location, as GitHub answers an
+// archive request with a redirect to its download host.
+func (h *fakeHub) redirect(path string, status int, location string) *fakeHub {
+	h.mu.Lock()
+	h.headers[path] = http.Header{"Location": []string{location}}
+	h.mu.Unlock()
+	return h.on(path, func(*http.Request) (int, string) { return status, "" })
 }
 
 func (h *fakeHub) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -75,15 +88,20 @@ func (h *fakeHub) RoundTrip(req *http.Request) (*http.Response, error) {
 	h.requests = append(h.requests, clone)
 	h.bodies[clone] = sent
 	handler := h.handlers[req.URL.Path]
+	extra := h.headers[req.URL.Path]
 	h.mu.Unlock()
 
 	status, body := http.StatusNotFound, `{"message":"Not Found"}`
 	if handler != nil {
 		status, body = handler(req)
 	}
+	header := http.Header{"Content-Type": []string{"application/json"}}
+	for k, v := range extra {
+		header[k] = v
+	}
 	return &http.Response{
 		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Header:     header,
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Request:    req,
 	}, nil

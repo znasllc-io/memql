@@ -357,20 +357,7 @@ func TestAnActOnARunTheExecutorCannotRunIsRefused(t *testing.T) {
 		// side refused.
 		"a run with no goal": {func(r map[string]any) { r["goalId"] = "" }, codeRerunNeedsGoal},
 	}
-	acts := map[string]func(*Integration) error{
-		"rerunStep": func(i *Integration) error {
-			_, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0)
-			return err
-		},
-		"branchRun": func(i *Integration) error {
-			_, err := i.handleBranchRun(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0)
-			return err
-		},
-		"moveRunHead": func(i *Integration) error {
-			_, err := i.handleMoveRunHead(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft", "version": float64(1)}, 0)
-			return err
-		},
-	}
+	acts := actsThatRunARunAgain()
 	for name, tc := range cases {
 		for act, call := range acts {
 			t.Run(name+"/"+act, func(t *testing.T) {
@@ -389,5 +376,68 @@ func TestAnActOnARunTheExecutorCannotRunIsRefused(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// actsThatRunARunAgain are the acts that ask the executor to run a finished
+// run again, each against actRunId's `draft` step.
+func actsThatRunARunAgain() map[string]func(*Integration) error {
+	return map[string]func(*Integration) error{
+		"rerunStep": func(i *Integration) error {
+			_, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0)
+			return err
+		},
+		"branchRun": func(i *Integration) error {
+			_, err := i.handleBranchRun(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0)
+			return err
+		},
+		"moveRunHead": func(i *Integration) error {
+			_, err := i.handleMoveRunHead(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft", "version": float64(1)}, 0)
+			return err
+		},
+	}
+}
+
+// A PIPELINE'S RUN IS RE-RUN BY ITS RUNNER (epic memql#5477, decision 11 of
+// the pipelines plan). The dispatcher never takes it, so a re-run, a branch or
+// a head move written onto it would sit at `running` with nobody executing it
+// -- and the pipelines driver re-runs a run as the pipelines run's next
+// attempt, with a check run of its own. So every act that would ask the
+// executor refuses it, and names the act that does re-run it, so a person
+// reads where to go rather than only that they cannot. The run carries a goal
+// and a template, so nothing but its trigger refuses it; the same run without
+// the trigger is the control, and is re-run.
+func TestAnActOnAPipelineRunIsRefusedNamingPipelinesRerun(t *testing.T) {
+	for act, call := range actsThatRunARunAgain() {
+		t.Run(act, func(t *testing.T) {
+			i, eng, store := newActsIntegration(t)
+			addPristineRun(store, actRunId, "fetch", "draft", "publish")
+			run := actRunRow(runStatusSucceeded)
+			run["triggeredBy"] = "pipeline:affected"
+			eng.reply("workRunForOwner", run)
+			err := call(i)
+			var refusal *ActRefusal
+			if !errors.As(err, &refusal) || refusal.Code != codeRunNotExecutable {
+				t.Fatalf("err = %v, want %s", err, codeRunNotExecutable)
+			}
+			if !strings.Contains(refusal.Message, "pipelinesRerun") {
+				t.Errorf("the refusal %q does not name pipelinesRerun, the act that re-runs a pipeline's run", refusal.Message)
+			}
+			if writes := mutationsIn(eng); len(writes) != 0 {
+				t.Errorf("a refused act wrote: %s", eng.summary())
+			}
+		})
+	}
+
+	i, eng, store := newActsIntegration(t)
+	addPristineRun(store, actRunId, "fetch", "draft", "publish")
+	run := actRunRow(runStatusSucceeded)
+	run["triggeredBy"] = "direct"
+	eng.reply("workRunForOwner", run)
+	if _, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0); err != nil {
+		t.Fatalf("the control: an ordinary goal run's re-run was refused: %v", err)
+	}
+	if n := len(eng.callsTo("updateWorkRun")); n != 1 {
+		t.Fatalf("the control: the re-run wrote %d run updates, want 1 (calls: %s)", n, eng.summary())
 	}
 }

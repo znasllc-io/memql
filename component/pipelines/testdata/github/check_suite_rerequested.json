@@ -1,0 +1,15 @@
+{
+  "action": "rerequested",
+  "check_suite": {
+    "id": 27741904415,
+    "head_branch": "cart-badge",
+    "head_sha": "4d3a8f9483a084a44043bd93b16a4b4414d0c3cc",
+    "status": "completed",
+    "conclusion": "failure",
+    "before": "c5fa05f142af4f7c6bd9b18c24924ebed165a4ab",
+    "after": "4d3a8f9483a084a44043bd93b16a4b4414d0c3cc"
+  },
+  "repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "private": false },
+  "installation": { "id": 51234567 },
+  "sender": { "login": "octocat" }
+}

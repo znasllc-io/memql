@@ -41,23 +41,38 @@ func installationBearer(ctx context.Context, gh *githubapp.Client, rc ResolvedCr
 	if !rc.IsGrant() {
 		return rc.Bearer, nil
 	}
+	token, _, err := grantInstallationToken(ctx, gh, rc, owner, repo)
+	return token, err
+}
+
+// grantInstallationToken is the grant half of installationBearer, answering
+// the installation it minted for as well: ask which installation covers
+// owner/repo, VERIFY the grant still reaches it, and only then mint.
+//
+// The order is the security invariant, and every caller shares it by sharing
+// this function -- the fetch, the poll, the asset import, and pipelines
+// (pipeline_access.go). An installation token is the APP's
+// authority over every repository the installation covers; it is borrowed on
+// a person's behalf only after that person's own token shows they can still
+// reach this repository through this installation.
+func grantInstallationToken(ctx context.Context, gh *githubapp.Client, rc ResolvedCredential, owner, repo string) (string, int64, error) {
 	if gh == nil || !gh.Configured() {
-		return "", refuse(CodeGithubAppNotConfigured,
+		return "", 0, refuse(CodeGithubAppNotConfigured,
 			"credential %q is a GitHub App grant and this cluster has no GitHub App configured, so it cannot mint the token this fetch needs. An operator sets %s.",
 			rc.Id, strings.Join(gh.Missing(), ", "))
 	}
 	installationId, err := gh.InstallationForRepo(ctx, owner, repo)
 	if err != nil {
-		return "", grantRefusal(err, rc, owner, repo, gh.InstallURL())
+		return "", 0, grantRefusal(err, rc, owner, repo, gh.InstallURL())
 	}
 	if err := verifyGrantRepository(ctx, gh, rc, owner, repo, installationId); err != nil {
-		return "", err
+		return "", 0, err
 	}
 	token, terr := gh.InstallationToken(ctx, installationId)
 	if terr != nil {
-		return "", grantRefusal(terr, rc, owner, repo, gh.InstallURL())
+		return "", 0, grantRefusal(terr, rc, owner, repo, gh.InstallURL())
 	}
-	return token, nil
+	return token, installationId, nil
 }
 
 // Revalidate even when an installation token is cached on this replica. A

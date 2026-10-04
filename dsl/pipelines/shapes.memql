@@ -1,0 +1,91 @@
+// shapes.memql
+//
+// Full projections, one per pipelines concept. Explicit rather than the
+// default projection so a later field that ought to stay server-side cannot
+// leak by being added to the concept (the Users app lesson, clients/os/README.md).
+// Every field here is a name or a fact a person reads: no row in this
+// namespace holds a token or a secret value, and secretNames, credentialId and
+// secretRef are projected deliberately because they are NAMES.
+
+/// Every pipeline field the OS and the SDK read.
+@row
+shape pipeline pipelineFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  accountId
+  packageId
+  name
+  repository
+  defaultBranch
+  installationId
+  credentialId
+  delivery
+  compute
+  status
+  secretNames
+  channelIds
+  heads
+  timings
+  timingsRunId
+  timingsUpdatedAt
+  connectedAt
+}
+
+/// Every run field: the Runs list, the run page and the driver all read runs through this shape, so
+/// a field missing here is a field none of them can see.
+@row
+shape run pipelineRunFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  accountId
+  pipelineId
+  repository
+  sha
+  mode
+  event
+  runKey
+  attempt
+  trigger
+  rerunOf
+  deliveryId
+  pullRequest
+  headBranch
+  baseSha
+  title
+  version
+  status
+  conclusion
+  refusalCode
+  refusalMessage
+  refusalScope
+  checkRunId
+  checkRunState
+  notes
+  workRunId
+  workGoalId
+  driverNodeId
+  driverHeartbeatAt
+  cancelRequested
+  cancelledBy
+  stages
+  queuedAt
+  startedAt
+  finishedAt
+  durationMs
+}
+
+/// Every channel field.
+@row
+shape channel pipelineChannelFull {
+  row.id
+  row.createdAt
+  ownerUserId
+  accountId
+  name
+  kind
+  secretRef
+  recipients
+  status
+}

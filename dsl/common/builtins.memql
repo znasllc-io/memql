@@ -712,17 +712,19 @@ builtin providerFederationSet {
 // Four builtins over component/datasync. The first two are driven by the
 // automations in dsl/platform/automations.memql; the last two are what an
 // operator's Data origins page calls.
+//
+// THE FIRST TWO CARRY NO @sdk AND THAT KEEPS NOTHING OUT. @sdk has no engine
+// effect, a builtin takes no @serverOnly, and any signed-in client's query can
+// name a builtin, so each refuses a call without internal origin in its
+// HANDLER. datasyncDispatchInbound is also handed the staged row's id and
+// nothing else (epic memql#5477): it used to take the source, the body, the
+// headers, the receipt time and the verifying tier as arguments, so whatever
+// called it chose the delivery a connector saw.
 
 @executor("integration.datasync.dispatchInbound")
-@description("Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard (a write older than the stored row's is recorded stale and skipped), and stamp the request processed or failed. A row whose source a connector claims is applied only when the connector verified it (verifiedBy='connector', or absent on a row that predates the field); one another tier verified is stamped failed. A no-op for a source no connector serves, which is most of them.")
+@description("Route one staged inbound request to the connector its source names, apply the returned mirror writes behind the version guard (a write older than the stored row's is recorded stale and skipped), and stamp the request processed or failed. Only the shipped automation reaches it: a call without internal origin is refused before anything is read. Reads the v1:platform:inboundRequest row by its id -- its source, body, headers, receipt time, verifying tier and signature verdict, absent fields included -- and takes none of them from an argument. A row whose source a connector claims is applied only when the connector verified it (verifiedBy='connector', or absent on a row that predates the field) and the receiver's signature check passed (signatureVerified=true); one another tier verified, or nothing verified, is stamped failed. A no-op for a source no connector serves, which is most of them.")
 builtin datasyncDispatchInbound {
-  inboundRequestId  string
-  source            string
-  topic             string
-  body              string
-  headersJson       any  @description("Allowlisted delivery metadata as a JSON object string, or absent. Typed any, not string: a string field refuses a null and an empty value before the handler runs, and a mailbox-reader row carries none.")
-  receivedAt        any  @description("Original receipt time in RFC3339, or absent (the handler falls back to now).")
-  verifiedBy        any  @description("The tier whose secret verified the delivery -- env, registered or connector -- or absent on a row staged before the field existed (memql#5795).")
+  inboundRequestId  string!  @description("The v1:platform:inboundRequest row the inbound receiver staged. Its source, body, headers, receipt time, verifying tier and signature verdict are read from the row; no argument can supply them.")
 }
 
 @executor("integration.datasync.reconcileDomains")

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { OS_REGISTRY } from "../../src/apps/registry";
-import { READINESS_MODULES, isModuleId } from "../../src/system/modules";
+import { MODULE_SETTINGS_SECTION, READINESS_MODULES, isModuleId } from "../../src/system/modules";
 import { readinessProblem, requirementsFor, type OsAppManifest } from "../../src/system/registry";
 
 // The readiness contract (design record 2026-09-06-configuration-readiness,
@@ -99,5 +99,29 @@ describe("the readiness contract", () => {
     expect(isModuleId("storage")).toBe(true);
     expect(isModuleId("Storage")).toBe(false);
     expect(isModuleId("")).toBe(false);
+  });
+
+  // THE PIPELINES ITEM HAS NO SECTION TO OPEN YET. Its home is a Pipelines
+  // section of Settings (epic memql#5479), so its MODULE_SETTINGS_SECTION
+  // entry is null -- which a Set up group reads as "Set in the deployment",
+  // and the module has no lanes, so it would name nothing to set. Nothing may
+  // ask for it while that holds; the day the entry names a section, this
+  // stops constraining anything.
+  it("asks for the pipelines item nowhere while it has no section to open", () => {
+    const named = new Set<string>();
+    for (const app of OS_REGISTRY.apps) {
+      for (const id of [...(app.needs ?? []), ...(app.wants ?? [])]) named.add(id);
+      for (const section of app.sections ?? []) {
+        for (const id of [...(section.needs ?? []), ...(section.wants ?? [])]) named.add(id);
+      }
+    }
+    for (const widget of OS_REGISTRY.widgets) {
+      for (const id of widget.needs ?? []) named.add(id);
+    }
+    // A REACHABLE POSITIVE: the sweep found the modules shipped apps do ask for.
+    expect(named.has("ai")).toBe(true);
+    if (MODULE_SETTINGS_SECTION.pipelines === null) {
+      expect(named.has("pipelines"), "pipelines is required or wanted, and has no section to point at").toBe(false);
+    }
   });
 });

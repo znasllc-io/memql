@@ -2,6 +2,8 @@ package work
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/workjournal"
 )
 
 func dispatchDBEngine(t *testing.T, db *bun.DB) *memqlengine.MemQLEngine {
@@ -223,5 +226,98 @@ func TestDispatchDB_SweepLeavesAProcedureReplayRunToItsRunner(t *testing.T) {
 	}
 	if j.TriggeredBy != "procedure:trusted" || j.Status != runStatusAbandoned {
 		t.Fatalf("the replay run reads back triggeredBy %q status %q, want procedure:trusted and abandoned", j.TriggeredBy, j.Status)
+	}
+}
+
+// TestDispatchDB_SweepLeavesAPipelineRunToItsRunner is the pipeline half of
+// the replay test above (epic memql#5477), against the REAL recovery read and
+// the REAL journal. The pipeline's run is opened as the pipelines driver opens
+// it -- component/workjournal's Begin with the driver's trigger and every step
+// queued -- so the same test shows the journal's new writes are ones the work
+// DSL accepts, and that the trigger survives runsInFlight's projection for the
+// sweep to read past. Both runs are silent; only the ordinary one -- the
+// control -- is handed back, and the pipeline run reads back exactly as its
+// driver left it: running, every step pending, nothing abandoned.
+func TestDispatchDB_SweepLeavesAPipelineRunToItsRunner(t *testing.T) {
+	db, i := sweepDB(t)
+	eng := dispatchDBEngine(t, db)
+	i.engine = eng
+	d, c := &capturingDispatcher{}, &stubClaimer{grant: true}
+	i.SetDispatcher(d)
+	i.SetRunClaimer(c)
+	ctx := context.Background()
+
+	journal := workjournal.New(workjournal.ExecutorFunc(func(ctx context.Context, q string) (any, error) {
+		return eng.Execute(ctx, q)
+	}), slog.New(slog.NewTextHandler(io.Discard, nil)), "agent-1")
+	steps := []workjournal.StepDecl{
+		{
+			Key: "checks/build-vet", Kind: workjournal.KindDeterministic, StepType: "exec",
+			Call: map[string]any{"construct": "pipeline", "name": "build-vet", "stage": "checks"},
+		},
+		{
+			Key: "tests/go-tests#1", Kind: workjournal.KindDeterministic, StepType: "exec",
+			DependsOn: []string{"checks/build-vet"},
+			Call:      map[string]any{"construct": "pipeline", "name": "go-tests", "stage": "tests"},
+		},
+	}
+	run, err := journal.Begin(ctx, workjournal.Work{
+		OwnerUserID: "pipeline-sweep-owner",
+		Template:    "pipeline",
+		Statement:   "Run the checks on 1a2b3c4",
+		GoalKey:     "v1:pipelines:run:sweep-db",
+		TriggeredBy: "pipeline:full",
+		QueueSteps:  true,
+		Steps:       steps,
+	})
+	if err != nil {
+		t.Fatalf("the journal could not open the pipeline's run: %v", err)
+	}
+	pipelineRun := runConcept + ":" + run.RunID()
+	ordinary := runConcept + ":ordinary-beside-a-pipeline"
+	if err := i.store().createRunRow(actorCtx("pipeline-sweep-owner"), runSeed{
+		RunId: ordinary, AutomationName: "probe", TemplateFingerprint: "probe", TriggeredBy: "schedule",
+		Status: "running", Mode: "live", StartedAt: time.Now().UTC().Add(-time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The journal stamps the run's start as it opens it; a one-nanosecond
+	// window makes it as silent as the control, so only its trigger can keep
+	// the sweep off it.
+	result, err := i.SweepWaiting(auth.ContextWithAccess(ctx, auth.MaintenanceActor("sweepWaitingWorkRuns")), time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.seen(); len(got) != 1 || got[0].RunId != ordinary {
+		t.Fatalf("dispatched %+v, want only the ordinary run (sweep %+v)", got, result)
+	}
+	if len(c.keys) != 1 || c.keys[0] != ordinary {
+		t.Errorf("claimed %v, want only the ordinary run's claim", c.keys)
+	}
+	if result.Redispatched != 1 || result.Abandoned != 0 || result.Resumed != 0 {
+		t.Errorf("sweep %+v, want the ordinary run handed back and nothing else touched", result)
+	}
+	j, err := automations.LoadRunJournal(ctx, eng, pipelineRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.TriggeredBy != "pipeline:full" || j.Status != runStatusRunning {
+		t.Fatalf("the pipeline run reads back triggeredBy %q status %q, want pipeline:full and running", j.TriggeredBy, j.Status)
+	}
+	versions, err := i.StepVersions(actorCtx("pipeline-sweep-owner"), pipelineRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := map[string]bool{}
+	for _, v := range versions {
+		if rowString(v, "status") == "pending" && rowString(v, "stepType") == "exec" {
+			pending[rowString(v, "key")] = true
+		}
+	}
+	for _, s := range steps {
+		if !pending[s.Key] {
+			t.Errorf("step %s did not read back pending: the journal's queued write was refused or the sweep moved it (versions %v)", s.Key, versions)
+		}
 	}
 }

@@ -1,0 +1,24 @@
+{
+  "action": "opened",
+  "number": 43,
+  "pull_request": {
+    "number": 43,
+    "state": "open",
+    "title": "Fix a typo in the README",
+    "head": {
+      "label": "stranger:main",
+      "ref": "main",
+      "sha": "466b2bf6caf80eca5c375e0ea27c0687ad2b74d1",
+      "repo": { "full_name": "stranger/Storefront" }
+    },
+    "base": {
+      "label": "Acme-Corp:main",
+      "ref": "main",
+      "sha": "772c6a1d531d6f34ca4bc594a70987215f3ce1c8",
+      "repo": { "full_name": "Acme-Corp/Storefront" }
+    }
+  },
+  "repository": { "full_name": "Acme-Corp/Storefront", "default_branch": "main", "private": false },
+  "installation": { "id": 51234567 },
+  "sender": { "login": "stranger" }
+}

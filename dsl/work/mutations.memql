@@ -183,6 +183,9 @@ mutation step createWorkStep {
 /// against. The session writer has sent it on that receipt since epic memql#5396, and until this
 /// argument existed it was dropped without a word -- an internal caller's unknown argument is not
 /// refused -- so every recording's fingerprint was lost and no precondition could be learned.
+/// logFileId and artifactFileIds (epic memql#5477) are the Library files a runner's receipt names --
+/// a pipeline step's full log and its artifacts -- carried for the same reason: an argument this
+/// mutation does not declare is dropped in silence.
 @serverOnly
 mutation step updateWorkStep {
   args {
@@ -210,9 +213,11 @@ mutation step updateWorkStep {
     basis              object
     override           object
     authoredBy         string
+    logFileId          string
+    artifactFileIds    []string
   }
   update {
-    accept { status, result, resultFingerprint, binding, actualFootprint, postcondition, symptom, attempt, errorCode, errorMessage, finishedAt, durationMs, tokens, cost, childRunId, approvalId, resumeAt, externalKey, fingerprint, version, basis, override, authoredBy }
+    accept { status, result, resultFingerprint, binding, actualFootprint, postcondition, symptom, attempt, errorCode, errorMessage, finishedAt, durationMs, tokens, cost, childRunId, approvalId, resumeAt, externalKey, fingerprint, version, basis, override, authoredBy, logFileId, artifactFileIds }
     stamp {
       id: args.stepId
     }
@@ -262,9 +267,11 @@ mutation step reassertWorkStepVersion {
     externalKey        string
     input              object
     fingerprint        object
+    logFileId          string
+    artifactFileIds    []string
   }
   update {
-    accept { status, result, resultFingerprint, binding, postcondition, symptom, attempt, version, basis, override, authoredBy, childRunId, idempotencyKey, startedAt, finishedAt, durationMs, tokens, cost, errorCode, errorMessage, actualFootprint, approvalId, resumeAt, externalKey, input, fingerprint }
+    accept { status, result, resultFingerprint, binding, postcondition, symptom, attempt, version, basis, override, authoredBy, childRunId, idempotencyKey, startedAt, finishedAt, durationMs, tokens, cost, errorCode, errorMessage, actualFootprint, approvalId, resumeAt, externalKey, input, fingerprint, logFileId, artifactFileIds }
     stamp {
       id: args.stepId
     }

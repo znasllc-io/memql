@@ -27,10 +27,13 @@ import (
 // It is never an argument and never built from a request. Two things follow
 // from that, and both are the point:
 //
-//   - WHAT IS ASKED OF GITHUB CANNOT WIDEN. Contents read and metadata read is
-//     the whole ask (decision C8 of the Connect design). A manifest a browser
-//     could influence is a manifest that could ask for write access under this
-//     cluster's name, on an authorization screen the owner was told to trust.
+//   - WHAT IS ASKED OF GITHUB CANNOT WIDEN. RequestedPermissions is the whole
+//     ask: reads on the repositories people choose, plus the one write a
+//     pipeline run reports back with, checks (decision C8 of the Connect
+//     design, widened by D4 of the pipelines record). A manifest a browser
+//     could influence is a manifest that could ask for more write access under
+//     this cluster's name, on an authorization screen the owner was told to
+//     trust.
 //   - THE CALLBACK CANNOT MOVE. The callback URL is where GitHub sends every
 //     person's authorization code from then on; one composed from a request's
 //     Host would be one an attacker chooses (the RedirectURI argument, again).
@@ -99,12 +102,32 @@ type ManifestWebhook struct {
 	Active bool   `json:"active"`
 }
 
-// RequestedPermissions is the whole ask (decision C8). Exported because the
-// callback checks what GitHub says it created against it: the person can edit
-// only the app's NAME on GitHub's confirmation page, so anything wider coming
-// back is not the app this cluster asked for.
+// RequestedPermissions is the whole ask (decision C8 of the Connect design,
+// widened by D4 of the pipelines record). Exported because the callback checks
+// what GitHub says it created against it: the person can edit only the app's
+// NAME on GitHub's confirmation page, so anything wider coming back is not the
+// app this cluster asked for.
+//
+// Each one is here for one use:
+//
+//   - contents read: Deployables fetches a source, and a pipeline run reads
+//     the tree at the SHA it runs; pushes and releases are delivered under it.
+//   - metadata read: GitHub grants it with any repository permission.
+//   - checks write: a pipeline run reports a check run on the commit it ran,
+//     the one write the app holds. An app without it still runs pipelines;
+//     their check-run writes answer 403 and the run says so.
+//   - pull_requests read: the heads a pull-request run is for, both delivered
+//     and polled (`pull_request` events need it).
+//   - merge_queues read: GitHub will not subscribe an app to `merge_group`
+//     without it, and a merge queue's run is the full-suite gate.
 func RequestedPermissions() map[string]string {
-	return map[string]string{"contents": "read", "metadata": "read"}
+	return map[string]string{
+		"checks":        "write",
+		"contents":      "read",
+		"merge_queues":  "read",
+		"metadata":      "read",
+		"pull_requests": "read",
+	}
 }
 
 // maxAppNameLen is GitHub's limit on an app's name.
@@ -141,7 +164,7 @@ func BuildManifest(domain, identityBaseURL string) (Manifest, error) {
 	m := Manifest{
 		Name:        appName(domain),
 		URL:         "https://" + frontdoor.OsHost(domain),
-		Description: "Lets the MemQL cluster at " + domain + " read the repositories you choose to deploy from.",
+		Description: "Lets the MemQL cluster at " + domain + " read the repositories you choose and report checks on them.",
 		RedirectURL: identityBase + AppSetupCallbackPath,
 		// ONE CALLBACK, the route the Connect design approved. It is also where
 		// GitHub lands somebody who has just INSTALLED the app, because
@@ -162,8 +185,13 @@ func BuildManifest(domain, identityBaseURL string) (Manifest, error) {
 		},
 	}
 	if public {
-		// PUSHES, which is what lights the update cue, and nothing else.
-		m.DefaultEvents = []string{"push"}
+		// WHAT THE READERS READ, and nothing else. A push lights the update cue
+		// and runs a pipeline on the default branch; pull_request, merge_group
+		// and release open pipeline runs; check_run is how a re-run pressed on
+		// GitHub arrives. Each needs its permission in RequestedPermissions
+		// before GitHub will subscribe the app to it. check_suite is absent on
+		// purpose: GitHub subscribes every app holding checks write to it.
+		m.DefaultEvents = []string{"check_run", "merge_group", "pull_request", "push", "release"}
 	} else {
 		// GITHUB CANNOT REACH A LAPTOP, so on a name that can never resolve
 		// publicly the webhook is registered OFF. Its URL still has to be one
@@ -174,8 +202,10 @@ func BuildManifest(domain, identityBaseURL string) (Manifest, error) {
 		// answer: the URL is one that is syntactically public and guaranteed
 		// inert (RFC 2606 reserves example.com, and GitHub's own manifest
 		// documentation uses it). Nothing is ever delivered to it, because with
-		// the webhook off nothing is delivered at all; the ten-minute poll is
-		// what notices a push on such a cluster, as the operator guide says.
+		// the webhook off nothing is delivered at all, so it subscribes to no
+		// event; the polls are what notice a push or a pull request on such a
+		// cluster, as the operator guide says. The PERMISSIONS stay whole: a
+		// polled run still reads the tree and reports its check run.
 		m.HookAttributes.URL = "https://example.com" + WebhookPath
 	}
 	return m, nil

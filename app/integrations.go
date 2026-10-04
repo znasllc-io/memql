@@ -20,6 +20,9 @@ func (a *App) integrationsCore() {
 	// joins two plug-ins that each register themselves (epic memql#4900).
 	a.wirePackageBuildSurface()
 	a.wirePackageGitHubApp()
+	// Pipelines borrow that same GitHub App client and grant path, so they
+	// are wired after it (epic memql#5477).
+	a.wirePipelines()
 	// agent() and the produceArtifact tool open a work goal rather than
 	// minting a Plan (memql#5048). Both plug-ins are core, so this is core
 	// too -- produceArtifact is called from an Assistant's tool loop, which

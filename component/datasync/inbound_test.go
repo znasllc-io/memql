@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlsync "github.com/znasllc-io/memql/component/memql/sync"
 )
 
@@ -234,21 +235,21 @@ func TestTheDispatchersStampCarriesInternalOrigin(t *testing.T) {
 // re-fire identically on every re-stage.
 func TestUnparseableStagedMetadataStampsTheRowFailed(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		args map[string]any
+		name  string
+		field string
+		value string
 	}{
-		{"headers that are not a JSON object", map[string]any{"headersJson": "[]"}},
-		{"a receipt time that is not RFC3339", map[string]any{"receivedAt": "2026-09-27T23:59:60Z"}},
+		{"headers that are not a JSON object", "headersJson", "[]"},
+		{"a receipt time that is not RFC3339", "receivedAt", "2026-09-27T23:59:60Z"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := newFakeEngine()
 			c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
 			i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
-			args := map[string]any{"inboundRequestId": "req-bad", "source": "shopify", "body": "{}"}
-			for k, v := range tc.args {
-				args[k] = v
-			}
-			if _, err := i.handleDispatchInbound(auth.ContextWithInternalOrigin(context.Background()), args, 0); err == nil {
+			row := stagedInbound("shopify")
+			row[tc.field] = tc.value
+			stageInbound(engine, row)
+			if _, err := dispatchByID(i, "req-bad"); err == nil {
 				t.Fatal("unparseable metadata was dispatched as if it were valid")
 			}
 			stamps := engine.callsContaining("updateInboundRequestStatus")
@@ -270,21 +271,25 @@ func TestUnparseableStagedMetadataStampsTheRowFailed(t *testing.T) {
 // error is raised, and the builtin reports the row skipped.
 func TestUnparseableMetadataOnAnUnservedSourceIsLeftAlone(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		args map[string]any
+		name  string
+		field string
+		value any
 	}{
-		{"headers that are not a JSON object", map[string]any{"headersJson": "[]"}},
-		{"a receipt time that is not RFC3339", map[string]any{"receivedAt": "2026-09-27T23:59:60Z"}},
+		{"headers that are not a JSON object", "headersJson", "[]"},
+		{"a receipt time that is not RFC3339", "receivedAt", "2026-09-27T23:59:60Z"},
+		// The same holds for the two verdicts: a row of an unserved source is
+		// not the dispatcher's to refuse either.
+		{"a tier that is not the connector's", "verifiedBy", "env"},
+		{"no signature verified", "signatureVerified", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := newFakeEngine()
 			c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
 			i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
-			args := map[string]any{"inboundRequestId": "req-other", "source": "stripe", "body": "{}"}
-			for k, v := range tc.args {
-				args[k] = v
-			}
-			nodes, err := i.handleDispatchInbound(auth.ContextWithInternalOrigin(context.Background()), args, 0)
+			row := stagedInbound("stripe")
+			row[tc.field] = tc.value
+			stageInbound(engine, row)
+			nodes, err := dispatchByID(i, "req-other")
 			if err != nil {
 				t.Fatalf("a row no connector serves raised %v -- it is the product automation's, not a dispatch failure", err)
 			}
@@ -321,8 +326,13 @@ func TestADeliveryTheConnectorDidNotVerifyIsRefusedAtDispatch(t *testing.T) {
 			engine := newFakeEngine()
 			c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
 			i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
-			args := map[string]any{"inboundRequestId": "req-tier", "source": "shopify", "body": "{}", "verifiedBy": tc.verifiedBy}
-			_, err := i.handleDispatchInbound(auth.ContextWithInternalOrigin(context.Background()), args, 0)
+			row := stagedInbound("shopify")
+			row["verifiedBy"] = tc.verifiedBy
+			if tc.verifiedBy == "" {
+				delete(row, "verifiedBy")
+			}
+			stageInbound(engine, row)
+			_, err := dispatchByID(i, "req-tier")
 			stamps := engine.callsContaining("updateInboundRequestStatus")
 			if tc.applied {
 				if err != nil || c.applyCalls != 1 {
@@ -387,35 +397,43 @@ func TestApplyingADeliveryRecordsInboundHealth(t *testing.T) {
 }
 
 // dispatchInbound is a builtin, so it carries its gate in the handler: a
-// call whose context does not carry internal origin -- a client, or a
-// product bundle's logic, choosing the source, body and headers -- is refused
-// before any argument is read, the connector is never asked and the row is
-// never stamped. The automation executor's step context carries the origin,
-// which is the one legitimate caller (proved end to end by
-// test/inboundhop against Postgres).
+// call whose context does not carry internal origin -- a signed-in client, a
+// cluster owner, or a client context descended from a trusted frame -- is
+// refused before anything is read: the staged row is not even looked up, the
+// connector is never asked and the row is never stamped. The automation
+// executor's step context carries the origin, which is the one legitimate
+// caller (proved end to end by test/inboundhop against Postgres).
 func TestDispatchInboundRefusesACallWithoutInternalOrigin(t *testing.T) {
-	args := map[string]any{
-		"inboundRequestId": "req-forged", "source": "shopify", "body": `{"shop_domain":"acme.myshopify.com"}`,
-		"headersJson": `{"x-shopify-topic":"shop/redact"}`,
+	args := map[string]any{"inboundRequestId": "req-forged"}
+	for name, ctx := range map[string]context.Context{
+		"a signed-in person": auth.ContextWithUserActor(context.Background(), "v1:identity:user:someone"),
+		"a cluster owner": auth.ContextWithAccess(context.Background(),
+			&auth.AccessContext{UserId: "v1:identity:user:owner", Role: auth.RoleOwner}),
+		"nobody": context.Background(),
+		"a client descended from a trusted frame": auth.ContextWithClientOrigin(auth.ContextWithInternalOrigin(context.Background())),
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := newFakeEngine()
+			c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
+			i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
+			stageInbound(engine, stagedInbound("shopify"))
+			if _, err := i.handleDispatchInbound(ctx, args, 0); err == nil {
+				t.Fatal("a client-origin call reached the dispatcher")
+			}
+			if c.applyCalls != 0 {
+				t.Fatal("the connector was asked to apply a delivery a client named")
+			}
+			if n := len(engine.callsContaining("")); n != 0 {
+				t.Fatalf("a refused call reached the engine %d times; the refusal must come before the row is read: %v",
+					n, engine.callsContaining(""))
+			}
+		})
 	}
-	t.Run("client origin", func(t *testing.T) {
-		engine := newFakeEngine()
-		c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
-		i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
-		if _, err := i.handleDispatchInbound(context.Background(), args, 0); err == nil {
-			t.Fatal("a client-origin call reached the dispatcher")
-		}
-		if c.applyCalls != 0 {
-			t.Fatal("the connector was asked to apply a client-authored delivery")
-		}
-		if engine.countContaining("updateInboundRequestStatus") != 0 {
-			t.Fatal("a refused call stamped the row")
-		}
-	})
 	t.Run("internal origin", func(t *testing.T) {
 		engine := newFakeEngine()
 		c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
 		i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
+		stageInbound(engine, stagedInbound("shopify"))
 		if _, err := i.handleDispatchInbound(auth.ContextWithInternalOrigin(context.Background()), args, 0); err != nil {
 			t.Fatalf("the automation path was refused: %v", err)
 		}
@@ -426,6 +444,125 @@ func TestDispatchInboundRefusesACallWithoutInternalOrigin(t *testing.T) {
 			t.Fatalf("stamped %q, want one processed stamp", stamps)
 		}
 	})
+}
+
+// THE DELIVERY IS THE ROW'S (epic memql#5477). The builtin used to take the
+// source, the body, the headers, the receipt time and the verifying tier as
+// arguments, so whatever called it chose what a connector saw -- and the tier
+// check judged a value its caller supplied. Every one of them now comes from
+// the staged row: arguments beside the id change nothing, even on the
+// automation's own context.
+func TestDispatchInboundTakesTheDeliveryFromTheStagedRowNotItsArguments(t *testing.T) {
+	forged := map[string]any{
+		"inboundRequestId":  "req-1",
+		"source":            "shopify",
+		"body":              `{"shop_domain":"forged.myshopify.com"}`,
+		"headersJson":       `{"x-shopify-topic":"shop/redact"}`,
+		"receivedAt":        "2026-01-01T00:00:00Z",
+		"verifiedBy":        "connector",
+		"signatureVerified": true,
+	}
+	setup := func(t *testing.T, row map[string]any) (*Integration, *fakeEngine, *fakeConnector) {
+		t.Helper()
+		engine := newFakeEngine()
+		c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
+		i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
+		if row != nil {
+			stageInbound(engine, row)
+		}
+		return i, engine, c
+	}
+	automation := auth.ContextWithInternalOrigin(context.Background())
+
+	t.Run("the connector is handed the staged delivery", func(t *testing.T) {
+		row := stagedInbound("shopify")
+		row["body"] = `{"shop_domain":"acme.myshopify.com"}`
+		row["headersJson"] = `{"x-shopify-topic":"products/update"}`
+		i, _, c := setup(t, row)
+		if _, err := i.handleDispatchInbound(automation, forged, 0); err != nil {
+			t.Fatalf("dispatch: %v", err)
+		}
+		if len(c.applied) != 1 {
+			t.Fatalf("Apply called %d times, want 1", len(c.applied))
+		}
+		got := c.applied[0]
+		if string(got.Body) != `{"shop_domain":"acme.myshopify.com"}` || got.Headers["x-shopify-topic"] != "products/update" {
+			t.Fatalf("the connector was handed %q / %v, want the staged row's body and headers", got.Body, got.Headers)
+		}
+		if got.RequestId != "req-1" || got.Source != "shopify" {
+			t.Fatalf("the connector was handed request %q on %q", got.RequestId, got.Source)
+		}
+	})
+	t.Run("the staged source decides, not the argument's", func(t *testing.T) {
+		i, engine, c := setup(t, stagedInbound("stripe"))
+		nodes, err := i.handleDispatchInbound(automation, forged, 0)
+		if err != nil || c.applyCalls != 0 || engine.countContaining("updateInboundRequestStatus") != 0 {
+			t.Fatalf("an argument moved another source's row onto the connector: err=%v applyCalls=%d", err, c.applyCalls)
+		}
+		if len(nodes) != 1 || !strings.Contains(string(nodes[0].Payload), `"outcome":"skipped"`) {
+			t.Fatalf("result %v, want one skipped node", nodes)
+		}
+	})
+	t.Run("the staged tier decides, not the argument's", func(t *testing.T) {
+		row := stagedInbound("shopify")
+		row["verifiedBy"] = "env"
+		i, _, c := setup(t, row)
+		if _, err := i.handleDispatchInbound(automation, forged, 0); err == nil || c.applyCalls != 0 {
+			t.Fatalf("an argument's tier let an env-verified row reach the connector: err=%v applyCalls=%d", err, c.applyCalls)
+		}
+	})
+	t.Run("the staged verdict decides, not the argument's", func(t *testing.T) {
+		row := stagedInbound("shopify")
+		row["signatureVerified"] = false
+		i, _, c := setup(t, row)
+		if _, err := i.handleDispatchInbound(automation, forged, 0); err == nil || c.applyCalls != 0 {
+			t.Fatalf("an argument's verdict let an unsigned row reach the connector: err=%v applyCalls=%d", err, c.applyCalls)
+		}
+	})
+	t.Run("no staged row is no delivery", func(t *testing.T) {
+		i, engine, c := setup(t, nil)
+		for _, args := range []map[string]any{forged, {"inboundRequestId": "  ", "source": "shopify", "body": "{}"}} {
+			if _, err := i.handleDispatchInbound(automation, args, 0); err == nil {
+				t.Fatalf("arguments with no staged row behind them were dispatched: %v", args)
+			}
+		}
+		if c.applyCalls != 0 || engine.countContaining("updateInboundRequestStatus") != 0 {
+			t.Fatalf("arguments with no staged row reached the connector (%d) or stamped a row", c.applyCalls)
+		}
+	})
+}
+
+// A row no secret verified -- staged by a source configured scheme none -- is
+// refused for a connector's source exactly as a row another tier verified is:
+// stamped failed with the reason, the connector never asked. The tier check
+// cannot see it on a row that predates verifiedBy, and a connector that ever
+// declared scheme none would stage `connector` with no signature behind it.
+func TestAnUnsignedRowIsRefusedAtDispatch(t *testing.T) {
+	for _, tier := range []string{"connector", ""} {
+		t.Run("verifiedBy="+tier, func(t *testing.T) {
+			engine := newFakeEngine()
+			c := &fakeConnector{name: "shopify", domains: []memqlsync.DomainSpec{{Concept: testMirrorConcept}}}
+			i := &Integration{dispatcher: testDispatcher(engine, newFakeWriter(), c)}
+			row := stagedInbound("shopify")
+			row["signatureVerified"] = false
+			if tier == "" {
+				delete(row, "verifiedBy")
+			} else {
+				row["verifiedBy"] = tier
+			}
+			stageInbound(engine, row)
+			if _, err := dispatchByID(i, "req-unsigned"); err == nil {
+				t.Fatal("an unsigned row was dispatched")
+			}
+			if c.applyCalls != 0 {
+				t.Fatal("the connector was asked to apply a delivery no secret verified")
+			}
+			stamps := engine.callsContaining("updateInboundRequestStatus")
+			if len(stamps) != 1 || !strings.Contains(stamps[0], `status: "failed"`) || !strings.Contains(stamps[0], "signature was not verified") {
+				t.Fatalf("stamped %q, want one failed stamp naming the missing signature", stamps)
+			}
+		})
+	}
 }
 
 // reconcileDomains is the other automation-driven builtin and carries the
@@ -445,4 +582,29 @@ func TestReconcileDomainsRefusesACallWithoutInternalOrigin(t *testing.T) {
 			t.Fatalf("the cron's own call was refused: %v", err)
 		}
 	})
+}
+
+// stagedInbound is a v1:platform:inboundRequest row as the receiver stages a
+// delivery for a connector's source: signed, by the connector's own secret.
+func stagedInbound(source string) map[string]any {
+	return map[string]any{
+		"id":                "v1:platform:inboundRequest:req",
+		"source":            source,
+		"medium":            "webhook",
+		"body":              "{}",
+		"signatureVerified": true,
+		"verifiedBy":        "connector",
+		"status":            "received",
+	}
+}
+
+// stageInbound answers the dispatcher's read of a staged row with row.
+func stageInbound(engine *fakeEngine, row map[string]any) {
+	engine.seed("query inboundRequestById", []map[string]any{row})
+}
+
+// dispatchByID runs the builtin the way dispatchInboundToConnector does: on
+// the automation's context, handed the staged row's id and nothing else.
+func dispatchByID(i *Integration, requestID string) ([]memorynodes.MemoryNode, error) {
+	return i.handleDispatchInbound(auth.ContextWithInternalOrigin(context.Background()), map[string]any{"inboundRequestId": requestID}, 0)
 }
