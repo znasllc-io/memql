@@ -118,7 +118,13 @@ func (a *engineAuditor) Deploy(ctx context.Context, ev DeployAuditEvent) {
 	b.Write(detailJSON)
 	b.WriteString(")")
 
-	if _, err := a.engine.Execute(ctx, b.String()); err != nil {
+	// Internal origin for this one write (memql#5624): auditEvent's create
+	// admits a cluster owner or server code, and the person deploying need
+	// be neither. Through the store's one stamping site rather than a second
+	// one (internal_origin_test.go counts them); the statement is composed
+	// above field by field, so the stamp reaches this createAuditEvent and
+	// nothing else.
+	if err := (&store{engine: a.engine}).writeInternal(ctx, b.String()); err != nil {
 		a.logger.Warn("packages: the deploy audit event could not be written",
 			"component", "packages.pipeline", logger.Subject(packageDeploymentConcept, ev.DeploymentId),
 			"deployment", ev.DeploymentId, "package", ev.PackageId,

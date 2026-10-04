@@ -759,7 +759,11 @@ func (i *SitePublishIntegration) audit(ctx context.Context, siteId, artifactId s
 	b.Write(detailJSON)
 	b.WriteString(")")
 
-	if _, err := i.engine.Execute(ctx, b.String()); err != nil {
+	// Internal origin for this one write (memql#5624): auditEvent's create
+	// admits a cluster owner or server code, and the person publishing their
+	// site need be neither. The statement is composed above field by field,
+	// so the stamp reaches this createAuditEvent and nothing else.
+	if _, err := i.engine.Execute(auth.ContextWithInternalOrigin(ctx), b.String()); err != nil {
 		i.logger.Warn("sitePublishFromArtifact: the audit event could not be written",
 			"component", "library", "site", siteId, "artifact", artifactId,
 			"outcome", outcome, "error", err)
