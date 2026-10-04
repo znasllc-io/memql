@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -453,3 +454,49 @@ func TestACancelIsAnsweredBeforeADisconnect(t *testing.T) {
 		t.Errorf("run = %s %q", got.Conclusion, got.RefusalCode)
 	}
 }
+
+// A runner that answers at once is read as the answer it gave. The goroutine
+// that calls the executor releases the step's context on its way out, right
+// after it delivers the answer -- so when the driver reaches its select late,
+// both the answer and the context's end are ready, and a select that picked
+// the context read a passed step as cancelled: a run concluded failure with
+// nothing wrong. Many iterations, because the misreading needs the executor
+// to finish before the driver starts waiting.
+func TestAnInstantAnswerIsNeverReadAsACancel(t *testing.T) {
+	dr := &runDriver{lease: newLease("r1"), execCtx: context.Background()}
+	exec := instantExecutor{}
+	var (
+		wg        sync.WaitGroup
+		misreadMu sync.Mutex
+		misread   int
+	)
+	// Many drivers at once: a driver descheduled between handing a step over
+	// and waiting for it is what lets the answer and the context's end arrive
+	// together, and contention is what deschedules it.
+	for g := 0; g < 64; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := 0; n < 500; n++ {
+				if end := dr.execStep(exec, pipelines.StepRequest{StepKey: "checks.vet"}, time.Minute); end.kind != endResult {
+					misreadMu.Lock()
+					misread++
+					misreadMu.Unlock()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if misread != 0 {
+		t.Errorf("%d of 32000 steps the runner answered success were read as something else", misread)
+	}
+}
+
+// instantExecutor answers every step at once, succeeded.
+type instantExecutor struct{}
+
+func (instantExecutor) Execute(_ context.Context, req pipelines.StepRequest) (pipelines.StepResult, error) {
+	return pipelines.StepResult{Status: pipelines.OutcomeSucceeded}, nil
+}
+
+func (instantExecutor) Cancel(context.Context, string) error { return nil }

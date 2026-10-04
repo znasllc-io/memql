@@ -142,8 +142,9 @@ func TestRecoveryRepublishesAFinalCheckRunThatDidNotLand(t *testing.T) {
 	run := dh.openRun(t, prOpening())
 	deliver(t, dh.integ, run)
 	stuck, _ := dh.store.run(run.ID)
-	if stuck.Status != StatusCompleted || stuck.CheckRunState != CheckRunUnavailable {
-		t.Fatalf("the final report did not land and the row says so: %s %q", stuck.Status, stuck.CheckRunState)
+	if stuck.Status != StatusCompleted || stuck.Conclusion != ConclusionSuccess || stuck.CheckRunState != CheckRunUnavailable {
+		t.Fatalf("the run passed, its final report did not land, and the row says so: %s/%s %q\n%s",
+			stuck.Status, stuck.Conclusion, stuck.CheckRunState, dh.logs.String())
 	}
 
 	// Older than the window: concluded 25 hours ago, never republished.

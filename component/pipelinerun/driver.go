@@ -1007,6 +1007,18 @@ func (dr *runDriver) execStep(exec pipelines.Executor, req pipelines.StepRequest
 	case <-stepCtx.Done():
 	case <-dr.lease.stop:
 	}
+	if !got {
+		// The runner may have answered in the same instant: the goroutine
+		// above releases the step's context right after it delivers the
+		// answer, so both can be ready by the time this select runs, and a
+		// select picks among ready cases at random. An answer that arrived
+		// is the answer -- a passed step must never be read as cancelled.
+		select {
+		case a = <-answered:
+			got = true
+		default:
+		}
+	}
 	elapsed := time.Since(began)
 	switch {
 	case dr.lease.isLost():

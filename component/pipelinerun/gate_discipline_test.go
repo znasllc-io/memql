@@ -160,7 +160,8 @@ func TestEveryGatedPathKeepsTheGateDiscipline(t *testing.T) {
 		deliver(t, dh.integ, run)
 		got, _ := dh.store.run(run.ID)
 		if got.Status != StatusCompleted || got.Conclusion != ConclusionSuccess {
-			t.Fatalf("run %s/%s", got.Status, got.Conclusion)
+			rows, _ := dh.store.WorkSteps(context.Background(), got.WorkRunID)
+			t.Fatalf("run %s/%s, steps %+v\n%s", got.Status, got.Conclusion, rows, dh.logs.String())
 		}
 		sawKey(t, before, RunGateKey(run.ID))
 		sawKey(t, before, RepositoryGateKey(repoName))
