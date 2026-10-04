@@ -4855,11 +4855,12 @@ a.os-button {
  * in a story that cannot wrap breaks rather than widening the panel.
  *
  * This is the SECOND source of the same overflow, and the one a guard would
- * have hidden most convincingly: `fileStory` composes "Produced by plan
- * <id>", so a plan id -- forty characters with no break opportunity anywhere
- * in it -- sits inside an ordinary sentence. The facts grid was the first
- * source and this would have been the next, clipped mid-sentence with no
- * ellipsis to say anything had been cut.
+ * have hidden most convincingly: `fileStory` once composed "Produced by plan
+ * <id>", so an id -- forty characters with no break opportunity anywhere in
+ * it -- sat inside an ordinary sentence. The facts grid was the first source
+ * and this would have been the next, clipped mid-sentence with no ellipsis to
+ * say anything had been cut. The id has since left the story for the `Run`
+ * fact, but a story still names a machine, whose name nobody here chose.
  *
  * A sentence WRAPS where a table value TRUNCATES, and the difference is
  * deliberate: a cell has one line to give and a paragraph has as many as it

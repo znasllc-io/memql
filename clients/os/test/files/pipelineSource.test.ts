@@ -36,7 +36,7 @@ function pipelineArtifact(over: Partial<Row> = {}): Row {
 
 describe("a pipeline's file", () => {
   it("says it was made by a pipeline run, though a run produced it", () => {
-    // NOT "Produced by a plan", which is what any file carrying a run reads
+    // NOT "Produced by a run", which is what any file carrying a run reads
     // as: the source is the more specific fact, and the run id is the
     // inspector's Run fact to show.
     expect(fileStory(artifactFromRow(pipelineArtifact()), null)).toEqual({

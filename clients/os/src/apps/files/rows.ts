@@ -237,7 +237,7 @@ export function fileStory(row: ArtifactRow, machine: MachinePresence | null): Fi
   if (row.source === "pipeline") {
     // A PIPELINE'S FILE IS ALWAYS A RUN'S (epic memql#5478): a step's log and
     // its artifacts carry the work run that made them, so the run reading
-    // below would tell every one of them as "Produced by a plan". The source
+    // below would tell every one of them as "Produced by a run". The source
     // is the more specific fact; the run is the `Run` fact's to show.
     return { sentence: PIPELINE_SENTENCE, tone: "reachable", machineNamed: false };
   }
@@ -247,11 +247,14 @@ export function fileStory(row: ArtifactRow, machine: MachinePresence | null): Fi
     // This read `Produced by plan ${id}`, which put a 32-character opaque
     // token in the one line the inspector leads with -- three wrapped lines of
     // hex above the file's own summary, saying nothing a person can act on,
-    // and repeating the `Plan` fact four rows below it (DESIGN.md rule 7).
+    // and repeating the `Run` fact four rows below it (DESIGN.md rule 7).
     // The fact is where an id belongs: it is monospaced, truncated, and has a
     // button that copies the whole thing. The story is for the sentence only
     // this platform can say.
-    return { sentence: "Produced by a plan", tone: "reachable", machineNamed: false };
+    //
+    // And it says a RUN: plans are retired (epic memql#5000), and a work run
+    // is what `producedByRunId` names.
+    return { sentence: "Produced by a run", tone: "reachable", machineNamed: false };
   }
   const sentence = SOURCE_SENTENCES[row.source];
   if (sentence !== undefined) return { sentence, tone: "reachable", machineNamed: false };
