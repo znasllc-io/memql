@@ -72,11 +72,6 @@ export class SessionDefinitions {
     return this.byCluster.get(clusterName)?.has(name) === true;
   }
 
-  /** Everything defined on this stream for a cluster, in insertion order. */
-  defined(clusterName: string): DefinedConstruct[] {
-    return [...(this.byCluster.get(clusterName)?.values() ?? [])];
-  }
-
   /**
    * Forget a cluster's records.
    *

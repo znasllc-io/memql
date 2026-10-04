@@ -1,16 +1,16 @@
 // The uninstall's own run state: where the removal has got to, and what broke.
 //
 // WHY IT IS NOT AddClusterState. That machine folds an INSTALL: a failed step
-// takes it to the `failedStep` screen, which offers Retry and Switch-to-Guided.
-// Neither recovery exists here. An uninstall step that fails has not left a
+// takes it to the `failedStep` screen, which offers Retry. That recovery does
+// not exist here. An uninstall step that fails has not left a
 // half-built artifact to resume -- it has left the artifact it was told to
 // remove, still there, still recorded in the receipt -- so the honest answer is
 // to name the step that refused and stop, with the receipt untouched and the
 // whole run repeatable. Folding this into the install machine would put two
 // different meanings of "failed" behind one screen.
 //
-// WHAT IT DELIBERATELY REUSES. `StepProgress` and, through it, `toStepViews` /
-// `failureGuidance` from state/installProgress.ts. The rows an uninstall draws
+// WHAT IT DELIBERATELY REUSES. `StepProgress` and, through it, the run
+// progress and `failureGuidance` from state/installProgress.ts. The rows an uninstall draws
 // are the same rows an install draws -- a step, its state, what it said -- and
 // a parallel projection would be a second place for "how a step reads" to be
 // decided.
@@ -62,15 +62,13 @@ export class UninstallRunState {
   private problemMessage = "";
   private followUpMessage = "";
   // The log disclosure, held here for the same reason AddClusterState holds its
-  // own (memql#4455): the panel re-renders wholesale on every `stepLog`, so a
-  // `<details>` an operator opened would close itself a second later.
+  // own (memql#4455): the next document the page is given draws it the same.
   //
-  // A SECOND PAIR OF FIELDS RATHER THAN A SHARED ONE, because these are two
-  // different runs. An operator who opened the log on a failed install and then
+  // A SECOND FIELD RATHER THAN A SHARED ONE, because these are two different
+  // runs. An operator who opened the log on a failed install and then
   // started an uninstall should meet a closed pane: the disclosure being open is
   // a fact about the run they were reading, not a preference.
   private logsShown = false;
-  private logsFollowTail = true;
   // Cancel was pressed and the run has not come to rest; see
   // AddClusterState.requestStop for why the phase does not move at the click.
   private stopRequested = false;
@@ -126,26 +124,9 @@ export class UninstallRunState {
     return this.logsShown;
   }
 
-  /** Whether the pane should still be pinned to the tail on the next render. */
-  get logsFollow(): boolean {
-    return this.logsFollowTail;
-  }
-
-  /** The operator pressed the disclosure. See `AddClusterState.toggleLogs`. */
-  toggleLogs(): void {
-    this.logsShown = !this.logsShown;
-    if (this.logsShown) this.logsFollowTail = true;
-  }
-
-  /** Recorded, never repainted. See `AddClusterState.setLogsFollow`. */
-  setLogsFollow(follow: boolean): void {
-    this.logsFollowTail = follow;
-  }
-
   /** The page opened or closed the log; see `AddClusterState.setLogsOpen`. */
   setLogsOpen(open: boolean): void {
     this.logsShown = open;
-    if (open) this.logsFollowTail = true;
   }
 
   /** Cancel was pressed and the removal is still coming to rest. */
@@ -189,7 +170,6 @@ export class UninstallRunState {
     // A new removal starts closed, for the reason `AddClusterState.beginRun`
     // states: an open pane would be showing the previous run's output.
     this.logsShown = false;
-    this.logsFollowTail = true;
     this.highWater = 0;
     this.stopRequested = false;
   }

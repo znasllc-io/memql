@@ -128,15 +128,3 @@ export function checkoutSkew(i: CheckoutSkewInputs): CheckoutSkew {
     terse: `${shortCommit(extension)}, and the checkout is at ${shortCommit(checkout)}`,
   };
 }
-
-/**
- * The one-line form for a facts row, or "" when there is nothing to say.
- *
- * "" for `noCheckout` deliberately: a remote instance has no checkout and a row
- * saying so on every one of them is the noise that makes the row that matters
- * unreadable -- rebuildPreflight.ts states that rule about its own lane line,
- * and it is the same rule.
- */
-export function checkoutSkewFactValue(i: CheckoutSkewInputs): string {
-  return checkoutSkew(i).terse;
-}

@@ -13,8 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { addClusterMenu } from "../src/clusters/presence.js";
-import { offersReconnect, planLocalReconnect } from "../src/clusters/reconnect.js";
+import { planLocalReconnect } from "../src/clusters/reconnect.js";
 import { installedClusterEntry } from "../src/install/handoff.js";
 import { emptyReceipt, type Receipt, type ReceiptEntry } from "../src/install/receipt.js";
 import { DEFAULT_LOCAL_DOMAIN } from "../src/install/stackPin.js";
@@ -64,34 +63,6 @@ test("a receipt that recorded no domain falls back too", () => {
   const plan = planLocalReconnect(receiptWith({ tag: "v0.17.0" }));
   assert.equal(plan.domain, DEFAULT_LOCAL_DOMAIN);
   assert.equal(plan.fromReceipt, false);
-});
-
-// -----------------------------------------------------------------------------
-// when it is offered
-// -----------------------------------------------------------------------------
-
-test("offered for both installed verdicts, and never for absent", () => {
-  assert.equal(offersReconnect("installed-healthy", false), true);
-  // A cluster that is here and not answering is still one the operator wants
-  // listed -- that is where the repair action lives.
-  assert.equal(offersReconnect("installed-unreachable", false), true);
-  // Nothing installed: the card would register a row pointing at an address
-  // nothing serves.
-  assert.equal(offersReconnect("absent", false), false);
-});
-
-test("never offered when the cluster is already in the list", () => {
-  for (const verdict of ["absent", "installed-healthy", "installed-unreachable"] as const) {
-    assert.equal(offersReconnect(verdict, true), false, verdict);
-  }
-});
-
-test("the card says what it will do without being clicked", () => {
-  const card = addClusterMenu("installed-healthy", false).find((c) => c.action === "reconnect");
-  assert.notEqual(card, undefined);
-  assert.match(card?.label ?? "", /Connect to the local cluster/);
-  // The promise the action has to keep, made on the card itself.
-  assert.match(card?.detail ?? "", /nothing to type/);
 });
 
 // -----------------------------------------------------------------------------

@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { preflightBlocks, preflightChecks } from "../src/state/preflight.js";
+import { preflightChecks } from "../src/state/preflight.js";
 import { collectScreen } from "../src/webview/addClusterScreens.js";
 import type { Inputs } from "../src/state/addCluster.js";
 
@@ -22,10 +22,9 @@ const EMPTY_INPUTS: Inputs = {
 
 const GRAPH_OK = { ok: true as const, steps: 12, needsElevation: true };
 
-test("the installer's own files read Ready; missing ones block the run with the fix", () => {
+test("the installer's own files read Ready; missing ones say the fix", () => {
   const ok = preflightChecks({ action: "install", graph: GRAPH_OK, sudoFree: true });
   assert.deepEqual(ok[0], { label: "Installer", word: "Ready", tone: "ok" });
-  assert.equal(preflightBlocks(ok), false);
 
   const bad = preflightChecks({
     action: "install",
@@ -37,7 +36,6 @@ test("the installer's own files read Ready; missing ones block the run with the 
   assert.equal(bad[0]?.note, "Reinstall the MemQL extension.");
   // The read error is for the output channel, not the page.
   assert.doesNotMatch(JSON.stringify(bad), /ENOENT|install\.json/);
-  assert.equal(preflightBlocks(bad), true);
 });
 
 test("the password row appears exactly when a password will be asked for", () => {
@@ -88,7 +86,7 @@ test("every state is one word, and the list names no internal", () => {
 test("no action's checks mention an AI credential", () => {
   // There is no key path anywhere in the product: both cloud vendors are
   // reached by workload identity federation (epic memql#5088).
-  for (const action of ["install", "installGuided", "repair"] as const) {
+  for (const action of ["install", "repair"] as const) {
     const checks = preflightChecks({ action, graph: GRAPH_OK, sudoFree: false });
     assert.equal(
       checks.some((c) => /key|credential|provider|vendor/i.test(`${c.label} ${c.note ?? ""}`)),

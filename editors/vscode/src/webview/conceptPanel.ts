@@ -362,8 +362,8 @@ export class ConceptPanel {
     } catch (err) {
       // A subscription failure degrades to manual reload; it must never
       // take the panel down with it. This is a PERSISTENT notice, deliberately
-      // not routed through setConnectionError/state.error: that field is
-      // cleared by every successful loadPage()/resolveSelection(), and an
+      // not routed through the read errors: those are cleared by every
+      // successful loadPage()/resolveSelection(), and an
       // ordinary query succeeding on the same connection the subscribe just
       // failed on is the common case, not the exception -- routing through
       // it would flash this message away within moments of showing it,

@@ -40,8 +40,6 @@
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
-import { escapeHtml } from "@znasllc-io/memql-view-kit";
-
 import { DARK, LIGHT, PALETTE_KEYS, type PaletteKey } from "./palette.js";
 import { kitStyles } from "./ui/kitStyles.js";
 
@@ -86,30 +84,6 @@ const HIGH_CONTRAST: Readonly<Record<PaletteKey, string>> = {
  */
 function declarations(values: Readonly<Record<PaletteKey, string>>): string {
   return PALETTE_KEYS.map((key) => `    --memql-${key}: ${values[key]};`).join("\n");
-}
-
-/**
- * The progress bar's width, as 101 rules rather than an inline style
- * (memql#4454).
- *
- * NOT A STYLISTIC CHOICE. Every panel here runs under
- * `style-src 'nonce-<...>'` with no `'unsafe-inline'`, and a nonce cannot
- * apply to a style ATTRIBUTE -- only to a `<style>` element. So
- * `style="width: 42%"` is not merely discouraged on this surface, it is
- * DROPPED by the browser, and the bar would render empty at every value with
- * nothing in any log to say why. Widening the CSP for one bar is the wrong
- * trade on a page that also renders capability stderr.
- *
- * GENERATED, not written out. A hand-maintained table of a hundred rules is a
- * table with a gap in it, and the gap is a percentage at which the bar
- * silently renders empty.
- */
-function percentRules(): string {
-  const rules: string[] = [];
-  for (let percent = 0; percent <= 100; percent += 1) {
-    rules.push(`  .run-bar-fill[data-percent="${percent}"] { width: ${percent}%; }`);
-  }
-  return rules.join("\n");
 }
 
 /**
@@ -191,118 +165,7 @@ ${declarations(HIGH_CONTRAST)}
          background: var(--memql-bg); margin: 0; padding: 16px 20px; }
   h1 { font-size: 1.2em; margin: 0 0 4px; letter-spacing: 0.01em; }
   h2 { font-size: 1.02em; margin: 18px 0 6px; }
-  .lede { color: var(--memql-muted); margin: 0 0 16px; }
-  .hint { color: var(--memql-muted); margin-top: 3px; }
-
-  .brand-head { display: flex; align-items: center; gap: 10px;
-                border-bottom: 1px solid var(--memql-border);
-                padding-bottom: 10px; margin-bottom: 14px; }
-  .brand-head .memql-mark { color: var(--memql-accent); flex: 0 0 auto; }
-  .brand-head h1 { margin: 0; flex: 1 1 auto; }
-  .brand-head .head-actions { display: flex; gap: 8px; }
-  .brand-head .brand-name { font-weight: 700; letter-spacing: 0.02em;
-                            flex: 1 1 auto; }
-
-  /* The two voices: the editor face for chrome, the editor's monospace for
-     GRAPH DATA -- ids, counts, timestamps, field values -- with the site's
-     data tints. */
-  .data { font-family: var(--vscode-editor-font-family, ui-monospace, monospace); }
-  .data-number { color: var(--memql-data-number); }
-  .data-string { color: var(--memql-data-string); }
-
-  .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-  button.primary, button.secondary {
-    font: inherit; padding: 4px 12px; cursor: pointer; border-radius: var(--memql-radius);
-    border: 1px solid transparent; }
-  button.primary { background: var(--memql-accent); color: var(--memql-on-accent); }
-  button.primary:hover { background: var(--memql-accent-deep); color: var(--memql-on-accent-hover); }
-  button.secondary { background: var(--memql-raised); color: var(--memql-fg);
-                     border-color: var(--memql-border-strong); }
-  button.secondary:hover { border-color: var(--memql-accent); }
-  button.destructive { color: var(--memql-danger); }
   button:focus-visible { outline: 2px solid var(--memql-focus); outline-offset: 1px; }
-
-  .badge { display: inline-block; border: 1px solid var(--memql-border-strong);
-           border-radius: 999px; padding: 1px 8px; font-size: 0.85em;
-           color: var(--memql-muted); }
-  .badge.ok { color: var(--memql-accent); border-color: var(--memql-accent); }
-
-  .panel-box { background: var(--memql-surface); border: 1px solid var(--memql-border);
-               border-radius: 6px; padding: 12px 14px; }
-
-  .preflight-heading { margin-top: 18px; }
-  .preflight { list-style: none; margin: 6px 0 0; padding: 0; }
-  .preflight-item { display: flex; gap: 8px; align-items: baseline;
-                    padding: 4px 0; border-bottom: 1px solid var(--memql-border); }
-  .preflight-item:last-child { border-bottom: none; }
-  .preflight-mark { flex: 0 0 3.2em; font-size: 0.78em; font-weight: 700;
-                    letter-spacing: 0.06em; color: var(--memql-accent); }
-  .preflight-item.attention .preflight-mark { color: var(--memql-warn); }
-  .preflight-label { flex: 0 0 10em; font-weight: 600; }
-  .preflight-detail { color: var(--memql-muted); }
-
-  .boundary { color: var(--memql-muted); border-top: 1px solid var(--memql-border);
-              margin-top: 18px; padding-top: 10px; font-size: 0.92em; }
-
-  /* ---- the branded run block (memql#4454) ----
-     HERE RATHER THAN IN EITHER PANEL. The wizard and the Deployments page run
-     the same graph through the same renderer, and two copies of this would be
-     two answers to what a MemQL install LOOKS like -- which is the thing the
-     epic is trying to make one answer. */
-  .run-block { display: flex; flex-direction: column; align-items: center;
-               text-align: center; gap: 12px; padding: 22px 0 18px; }
-  .run-block .memql-mark { color: var(--memql-accent); }
-  .run-bar { width: 100%; max-width: 460px; height: 6px; border-radius: 999px;
-             background: var(--memql-raised); overflow: hidden; }
-  .run-bar-fill { height: 100%; background: var(--memql-accent); border-radius: 999px;
-                  transition: width 240ms ease; width: 0; }
-  .run-message { margin: 0; color: var(--memql-fg); }
-  .run-position { color: var(--memql-muted); }
-  .steps-heading { margin-top: 20px; }
-  /* The record, not the headline: quieter than the block above it. */
-  .step-list { font-size: 0.94em; }
-${percentRules()}
-  /* Before runStarted seeds the list there is no total, so the bar says
-     "something is happening" rather than claiming 0%. */
-  .run-bar-fill.indeterminate { width: 40%;
-                                animation: memql-run-indeterminate 1.4s ease-in-out infinite; }
-  @keyframes memql-run-indeterminate {
-    0%   { transform: translateX(-100%); }
-    100% { transform: translateX(250%); }
-  }
-
-  /* ---- the disclosure, shared by the run log and Diagnostics (memql#4455) ---- */
-  .disclosure { margin-top: 18px; border-top: 1px solid var(--memql-border);
-                padding-top: 10px; }
-  .disclosure-toggle { font: inherit; background: none; border: none; padding: 4px 0;
-                       color: var(--memql-accent); cursor: pointer; }
-  .disclosure-toggle:hover { text-decoration: underline; }
-  .disclosure-toggle[disabled] { color: var(--memql-muted); cursor: default;
-                                 text-decoration: none; }
-  .disclosure-toggle:focus-visible { outline: 2px solid var(--memql-focus);
-                                     outline-offset: 2px; }
-  .disclosure-pane { margin-top: 8px; }
-  /* SCROLLABLE AND BOUNDED. An install writes hundreds of lines; a pane that
-     grew with them would push everything above it -- including the actions row
-     this epic just moved to the top -- off the screen. */
-  .log-pane { max-height: 40vh; overflow-y: auto;
-              background: var(--memql-raised); border: 1px solid var(--memql-border);
-              border-radius: 4px; padding: 8px 10px; }
-  .log-step + .log-step { margin-top: 10px; border-top: 1px solid var(--memql-border);
-                          padding-top: 10px; }
-  .log-step-name { color: var(--memql-muted); font-size: 0.9em; margin-bottom: 3px; }
-  .log-step[data-status="failed"] .log-step-name { color: var(--memql-danger); }
-  .log-step-output { margin: 0; white-space: pre-wrap; word-break: break-word;
-                     font-size: 0.9em; color: var(--memql-fg); }
-
-  /* REDUCED MOTION IS HONOURED, and it takes the indeterminate animation with
-     it: a bar that cannot state a percentage still must not pulse at somebody
-     who asked the system to stop moving. It keeps its width, so it still reads
-     as "in progress" rather than as "empty". */
-  @media (prefers-reduced-motion: reduce) {
-    .run-bar-fill { transition: none; }
-    .run-bar-fill.indeterminate { animation: none; }
-  }
 
   /* ---- the page kit (src/webview/ui/kit.ts): every mq-* component ---- */
 ${kitStyles()}`;
@@ -339,24 +202,4 @@ export function brandMarkSvg(sizePx: number): string {
 <circle cx="21.52" cy="21.48" r="1.53"/>
 </g>
 </svg>`;
-}
-
-/**
- * A panel's branded header row: the mark, the title, optional right-side
- * actions (already-rendered, trusted HTML from the caller -- the TITLE is
- * escaped here, the actions are the caller's own buttons).
- */
-export function brandHeader(title: string, actionsHtml = ""): string {
-  const actions = actionsHtml === "" ? "" : `<div class="head-actions">${actionsHtml}</div>`;
-  return `<div class="brand-head">${brandMarkSvg(20)}<h1>${escapeHtml(title)}</h1>${actions}</div>`;
-}
-
-/**
- * The slim product strip for panels whose HEADING belongs to the screen
- * underneath (the wizard's screens each carry their own h1): the mark plus the
- * product name as a span, so the page keeps exactly one h1.
- */
-export function brandStrip(label: string, actionsHtml = ""): string {
-  const actions = actionsHtml === "" ? "" : `<div class="head-actions">${actionsHtml}</div>`;
-  return `<div class="brand-head">${brandMarkSvg(18)}<span class="brand-name">${escapeHtml(label)}</span>${actions}</div>`;
 }

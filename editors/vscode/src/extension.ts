@@ -5,13 +5,11 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   CancellationToken,
-  CodeLens,
   commands,
   ConfigurationTarget,
   Diagnostic,
   DiagnosticSeverity,
   env,
-  EventEmitter,
   ExtensionContext,
   ExtensionMode,
   languages,
@@ -4187,17 +4185,6 @@ function writeTraining(
   output.appendLine(report.body);
   output.appendLine('');
   return report;
-}
-
-// lspRange converts the server's 0-based line/character range to the editor's.
-function lspRange(range: {
-  start: { line: number; character: number };
-  end: { line: number; character: number };
-}): Range {
-  return new Range(
-    new Position(range.start.line, range.start.character),
-    new Position(range.end.line, range.end.character)
-  );
 }
 
 // requestImports asks the language server which modules `text` imports.

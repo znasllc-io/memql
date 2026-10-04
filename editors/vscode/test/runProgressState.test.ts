@@ -246,34 +246,6 @@ test("beginRun drops the last run's rows, so a new run's first paint is not the 
   assert.deepEqual(s.progress(), { percent: 0, status: "Starting", stepText: "", highWater: 0 });
 });
 
-test("resetRun forgets the last run before a different one starts on the same page", () => {
-  // The deployment page paints its run screen before the next run's plan
-  // arrives. Without this, that paint is the previous run's finished bar.
-  const s = new AddClusterState({ now: clock().now });
-  s.apply(plan("rebuildFromCheckout"));
-  s.apply(finished("rebuildFromCheckout", "failed"));
-  assert.equal(s.logsOpen, true, "a failure opens the log");
-  assert.equal(s.progress().status, "rebuildFromCheckout label");
-  s.resetRun();
-  assert.deepEqual(s.steps, []);
-  assert.equal(s.failed, undefined);
-  assert.equal(s.logsOpen, false);
-  assert.deepEqual(s.progress(), { percent: 0, status: "Starting", stepText: "", highWater: 0 });
-});
-
-test("a step switched to guided stays guided into the next attempt", () => {
-  const s = new AddClusterState({ now: clock().now });
-  s.chooseAction("install");
-  s.beginRun();
-  s.apply(plan("hostsBlock"));
-  s.apply(finished("hostsBlock", "failed"));
-  s.switchToGuided();
-  assert.equal(s.steps[0]?.guided, true, "guided before the plan arrives");
-  assert.equal(s.steps[0]?.state, "pending");
-  s.apply(plan("hostsBlock"));
-  assert.equal(s.steps[0]?.guided, true);
-});
-
 // -----------------------------------------------------------------------------
 // UninstallRunState
 // -----------------------------------------------------------------------------

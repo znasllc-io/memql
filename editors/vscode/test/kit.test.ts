@@ -11,9 +11,13 @@
 //      (or none, when indeterminate); loading is a status.
 //   4. Nothing the kit writes carries a `style` attribute, which this CSP
 //      would drop in silence.
+//   5. The kit is the only thing in src/webview that writes a page heading,
+//      so every page is built from it.
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 import { escapeHtml } from "@znasllc-io/memql-view-kit";
 
@@ -438,4 +442,17 @@ test("pageDocument is one CSP'd document with the brand block and the one runtim
   assert.equal(html.split("<script").length - 1, 1, "exactly one script");
   assert.ok(html.includes(`<script nonce="n0nce">${PAGE_RUNTIME}</script>`), "the page runtime under the nonce");
   assert.doesNotMatch(html.replace(/<style[\s\S]*<\/style>/, ""), /\sstyle=/);
+});
+
+test("the kit is the only producer of a page heading in src/webview", () => {
+  // A screen that writes its own <h1> is laying itself out, beside the head,
+  // body and action bar every page is built from.
+  const dir = path.resolve(__dirname, "..", "..", "src", "webview");
+  const files = fs.readdirSync(dir, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".ts"));
+  assert.ok(files.includes(path.join("ui", "kit.ts")), "the scan reached the kit");
+  for (const file of files) {
+    if (file === path.join("ui", "kit.ts")) continue;
+    const text = fs.readFileSync(path.join(dir, file), "utf8");
+    assert.equal(text.includes("<h1"), false, `src/webview/${file} writes a page heading; build it with the kit's head()`);
+  }
 });

@@ -311,19 +311,6 @@ export function runIsTerminal(status: RunStatus): boolean {
   return TERMINAL_RUN_STATUSES.has(status);
 }
 
-/**
- * A version, as a surface should print it.
- *
- * The word rather than the empty string, for the reason state/topology.ts gave
- * when it drew a node with no resolvable deployment: a blank is read as a fact
- * about the instance ("it has no version") when it is a fact about the read
- * ("we could not resolve one"). The two ask for different next actions.
- */
-export function displayVersion(version: string | undefined): string {
-  const value = (version ?? "").trim();
-  return value === "" ? "unknown" : value;
-}
-
 // ---------------------------------------------------------------------------
 // the local instance
 // ---------------------------------------------------------------------------

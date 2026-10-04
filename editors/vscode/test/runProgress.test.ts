@@ -46,7 +46,6 @@ function row(id: string, state: StepState, over: Partial<StepProgress> = {}): St
     reason: "",
     exitCode: null,
     log: "",
-    guided: false,
     remedy: "",
     ...over,
   };

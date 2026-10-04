@@ -20,7 +20,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { brandHeader, brandMarkSvg, brandStrip, brandStyleBlock } from "../src/webview/brandTokens.js";
+import { brandMarkSvg, brandStyleBlock } from "../src/webview/brandTokens.js";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 
@@ -82,19 +82,6 @@ test("the inline mark is the activity-bar asset's geometry", () => {
   const inlineCircles = circles(brandMarkSvg(20));
   assert.equal(assetCircles.length, 9, "the mark is the 9-node graph");
   assert.deepEqual(inlineCircles, assetCircles, "one mark, two carriers, no drift");
-});
-
-test("the header and strip escape their titles", () => {
-  // String assertions, not tag-shaped regexes (CodeQL js/bad-tag-filter): the
-  // claim is that the EXACT fixture text cannot survive unescaped and its
-  // escaped form is what renders -- both directions, so the test cannot pass
-  // vacuously against an empty string.
-  const header = brandHeader("<img src=x onerror=1>");
-  assert.ok(!header.includes("<img"), "the raw tag must not survive into the header");
-  assert.ok(header.includes("&lt;img src=x onerror=1&gt;"), "the escaped title must render");
-  const strip = brandStrip("</span><script>alert(1)</script>");
-  assert.ok(!strip.includes("<script>"), "the raw tag must not survive into the strip");
-  assert.ok(strip.includes("&lt;script&gt;"), "the escaped title must render");
 });
 
 // The two files permitted to name a hex, and what each is for. brandTokens.ts

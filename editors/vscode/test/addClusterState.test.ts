@@ -63,7 +63,6 @@ test("the page opens on the landing screen", () => {
 test("each action routes to the screen that action actually needs", () => {
   const cases = [
     ["install", "collect"],
-    ["installGuided", "collect"],
     ["repair", "collect"],
     ["uninstall", "uninstallPreview"],
     ["connect", "connect"],
@@ -73,20 +72,6 @@ test("each action routes to the screen that action actually needs", () => {
     s.chooseAction(action);
     assert.equal(s.screen, screen, `${action} routed to ${s.screen}`);
   }
-});
-
-test("guided is remembered as a property of the run, not of the screen", () => {
-  // The screen is the same one Automatic uses -- the difference shows up when
-  // steps run, where Guided renders the command and waits instead of running
-  // it. Carrying it on the state rather than in two screens is what keeps the
-  // collect step from being written twice.
-  const s = new AddClusterState();
-  s.chooseAction("installGuided");
-  assert.equal(s.guided, true);
-
-  const auto = new AddClusterState();
-  auto.chooseAction("install");
-  assert.equal(auto.guided, false);
 });
 
 test("back returns to the landing screen and forgets the action", () => {
@@ -127,7 +112,6 @@ test("an install needs everything up front; a repair needs what it can get wrong
     // reviewed answer and the field is the override.
     "version",
   ]);
-  assert.deepEqual(requiredFields("installGuided"), requiredFields("install"));
   // A REPAIR DOES NOT COLLECT THE VERSION. The receipt replays the version the
   // cluster was installed at (memql#3605); a field here would invite an
   // operator to silently upgrade a cluster they meant to repair -- which is the
@@ -444,55 +428,6 @@ test("retry clears the previous attempt's output", () => {
   const log = s.steps.find((p) => p.id === "cluster")?.log ?? "";
   assert.match(log, /second attempt/);
   assert.ok(!log.includes("first attempt"), "the retried step still carries the old output");
-});
-
-test("switching to guided clears the previous attempt's output too", () => {
-  // Same reasoning as retry: the step is about to run again.
-  const s = new AddClusterState();
-  s.chooseAction("repair");
-  s.beginRun();
-  s.apply({ type: "stepStarted", step: step("cluster"), params: {} } as ExecEvent);
-  s.apply({ type: "stepLog", step: step("cluster"), line: "E: needs sudo" } as ExecEvent);
-  s.apply(finished("cluster", { status: "failed", exitCode: 3 }));
-
-  s.switchToGuided();
-  assert.equal(s.steps.find((p) => p.id === "cluster")?.log, "");
-});
-
-test("switching one step to guided marks that step and nothing else", () => {
-  // The escape hatch is PER STEP: an operator who wants to run the one command
-  // that needs sudo by hand should not be dropped into a fully manual install.
-  const s = new AddClusterState();
-  s.chooseAction("repair");
-  s.setInput("domain", "memql.localhost");
-  s.beginRun();
-  s.apply({ type: "stepStarted", step: step("binary"), params: {} } as ExecEvent);
-  s.apply(finished("binary"));
-  s.apply(finished("cluster", { status: "failed", exitCode: 3 }));
-
-  s.switchToGuided();
-  assert.equal(s.steps.find((p) => p.id === "cluster")?.guided, true);
-  assert.equal(s.steps.find((p) => p.id === "binary")?.guided, false);
-  assert.equal(s.guided, false, "one step going guided must not convert the whole run");
-});
-
-test("cancelling reaches a terminal screen and says the run was cancelled", () => {
-  const s = new AddClusterState();
-  s.chooseAction("repair");
-  s.setInput("domain", "memql.localhost");
-  s.beginRun();
-  s.apply(finished("binary"));
-  s.cancel();
-
-  assert.equal(s.screen, "done");
-  assert.equal(s.cancelled, true);
-  // What ran, ran. The receipt records it and the uninstall can take it back;
-  // a cancel that erased the progress display would tell the operator less
-  // than the machine actually knows.
-  assert.deepEqual(
-    s.steps.map((p) => `${p.id}:${p.state}`),
-    ["binary:done"],
-  );
 });
 
 test("finishing a run reports whether it succeeded", () => {

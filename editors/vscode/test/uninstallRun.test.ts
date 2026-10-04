@@ -4,9 +4,9 @@
 // THE PROPERTIES, one section each:
 //
 //  1. THE PREVIEW IS THE CONFIRMATION. There is no yes/no box behind it, so the
-//     list has to be complete and honest by itself: both kinds in ONE list (no
-//     disclosure hiding what stays), every row saying what it will ask of the
-//     operator, and nothing in it that the receipt does not record.
+//     list has to be complete and honest by itself: what goes and what stays,
+//     what a removal will ask of the operator, and nothing in it that the
+//     receipt does not record.
 //  2. IT RUNS AGAINST A DEAD CLUSTER. An uninstall reverses a receipt. Nothing
 //     in this file dials anything, and that is the point -- gating the removal
 //     on reachability would strand precisely the machine that needs cleaning.
@@ -17,7 +17,7 @@
 //
 // The panel that draws all this imports `vscode` and so cannot be driven here
 // (cmd/memql-lsp/vscodeimportrule_test.go). What it renders CAN be: the panel
-// calls `renderRemovalPreview(removalPreviewItems(preview))` and adds no
+// calls `uninstallPreviewScreen` over `removalRows(preview)` and adds no
 // judgement of its own, so the composition below is the screen.
 
 import test from "node:test";
@@ -27,12 +27,9 @@ import { mkdtempSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { renderRemovalPreview, renderToHtml } from "@znasllc-io/memql-view-kit";
-
 import { completeLocalUninstall } from "../src/clusters/registry.js";
 import type { ExecEvent } from "../src/install/executor.js";
 import { loadGraph, type Graph } from "../src/install/graph.js";
-import { removalPreviewItems } from "../src/install/removalPreview.js";
 import type { RunScript } from "../src/install/runner.js";
 import { previewUninstall, runUninstall, type SessionOptions } from "../src/install/session.js";
 import { failureGuidance } from "../src/state/installProgress.js";
@@ -197,76 +194,54 @@ function remover(refuse: Record<string, number> = {}): { run: RunScript; seen: R
 // 1 -- the list the operator confirms
 // -----------------------------------------------------------------------------
 
-async function previewHtml(): Promise<string> {
+async function machinePreview() {
   const { run } = remover();
-  const preview = await previewUninstall(options({ receiptFile: await machineReceipt() }), {
+  return previewUninstall(options({ receiptFile: await machineReceipt() }), {
     graph: UNINSTALL_GRAPH,
     run,
   });
-  return renderToHtml(renderRemovalPreview(removalPreviewItems(preview)));
 }
 
-/** The `<li>` for each row, as the browser would see them. */
-function rows(html: string): string[] {
-  return html
-    .split("<li ")
-    .slice(1)
-    .map((chunk) => chunk.slice(0, chunk.indexOf("</li>")));
-}
-
-test("both kinds render in ONE list -- what stays is not hidden behind a disclosure", async () => {
+test("what goes and what stays are both on the page", async () => {
   // The preview IS the confirmation, so the operator is deciding about the
-  // whole set. A preserved artifact they expected to see removed is exactly the
-  // surprise worth stopping on, and it cannot be a surprise if it is one click
-  // away behind a summary.
-  const html = await previewHtml();
-
-  assert.equal(html.split("<ul").length - 1, 1, "the two kinds must share one list");
-  assert.ok(!html.includes("<details"), "nothing on this list may be hidden behind a disclosure");
-
-  const kinds = rows(html).map((row) => (row.includes('data-kind="preserved"') ? "preserved" : "removed"));
-  assert.deepEqual(kinds, ["removed", "removed", "preserved"]);
-});
-
-test("the privileged steps are marked, and the unprivileged ones say so too", async () => {
-  const html = await previewHtml();
-
-  // The CA is the one the operator most needs to see coming: it is preserved
-  // here, and it STILL carries what it would ask for.
-  const ca = rows(html).find((row) => row.includes("removeLocalCA"));
-  assert.ok(ca !== undefined);
-  assert.match(ca, /data-elevation="user-trust"/);
-
-  for (const row of rows(html)) {
-    assert.match(
-      row,
-      /data-elevation="(none|sudo|user-trust)"/,
-      `a row with no elevation attribute renders no marker, which reads as "this asks for nothing": ${row}`,
-    );
-  }
+  // whole set. A kept artifact they expected to see removed is exactly the
+  // surprise worth stopping on.
+  const rows = removalRows(await machinePreview());
+  assert.deepEqual(
+    rows.map((r) => [r.id, r.kept]),
+    [
+      ["removeCluster", false],
+      ["removeToolK3d", false],
+      ["removeLocalCA", true],
+    ],
+  );
 });
 
 test("nothing absent from the receipt appears in the list", async () => {
   // The graph has four steps and this machine has three artifacts. An
   // itemization built from the GRAPH would offer to edit a hosts file this
   // install never touched -- and the operator would approve it.
-  const html = await previewHtml();
-
-  assert.equal(rows(html).length, 3);
-  assert.ok(!html.includes("removeHostsBlock"), "a step with no receipt entry has no artifact to list");
-  assert.ok(!html.toLowerCase().includes("hosts"), "nothing on this list may name an artifact the receipt does not record");
+  const rows = removalRows(await machinePreview());
+  assert.equal(rows.length, 3);
+  assert.ok(!rows.some((r) => r.id === "removeHostsBlock"), "a step with no receipt entry has no artifact to list");
 });
 
-test("an empty receipt says so rather than rendering a blank panel", async () => {
+test("an empty receipt offers no Uninstall", async () => {
   const { run } = remover();
   const preview = await previewUninstall(options({ receiptFile: await tempReceipt([]) }), {
     graph: UNINSTALL_GRAPH,
     run,
   });
-  const html = renderToHtml(renderRemovalPreview(removalPreviewItems(preview)));
-
-  assert.match(html, /remove nothing/);
-  assert.ok(!html.includes("<li "), "an empty receipt has no rows");
+  const rows = removalRows(preview);
+  assert.deepEqual(rows, []);
+  const parts = uninstallPreviewScreen({
+    loading: false,
+    rows,
+    sharedTools: sharedToolRows(preview),
+    chosen: new Set(),
+    clusterName: "memql",
+  });
+  assert.doesNotMatch(parts.actions, /data-act="uninstallStart"/, "Uninstall offered for a run that removes nothing");
 });
 
 // -----------------------------------------------------------------------------

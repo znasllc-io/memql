@@ -80,7 +80,7 @@ test("no action collects an AI credential, under any name", () => {
     !fields.some((f) => CREDENTIAL_SHAPED.test(f)),
     `a collected field reads as an AI credential: ${fields.join(", ")}`,
   );
-  for (const action of ["install", "installGuided", "repair"] as const) {
+  for (const action of ["install", "repair"] as const) {
     assert.ok(
       !requiredFields(action).some((f) => CREDENTIAL_SHAPED.test(f)),
       `${action} requires a field that reads as an AI credential`,
@@ -100,7 +100,6 @@ test("the required tables are otherwise exactly what they were", () => {
     "ownerEmail",
     "version",
   ]);
-  assert.deepEqual(requiredFields("installGuided"), requiredFields("install"));
   assert.deepEqual(requiredFields("repair"), [
     "domain",
     "ownerFirstName",
@@ -124,7 +123,7 @@ test("nothing is collected but never waited for", () => {
   // a key in `DEFAULT_INPUTS` that appears in no required table, and that is
   // what this catches.
   const everRequired = new Set(
-    (["install", "installGuided", "repair", "uninstall", "connect", "reconnect"] as const).flatMap(
+    (["install", "repair", "uninstall", "connect", "reconnect"] as const).flatMap(
       (action) => requiredFields(action) as string[],
     ),
   );
