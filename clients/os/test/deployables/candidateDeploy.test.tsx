@@ -439,6 +439,12 @@ describe("the gate on a live deployable's page", () => {
     await waitFor(() => expect(choice.textContent).toContain("deploy it as the live version, or ship the MemQL on its own first"));
     // ONCE, and where the question is -- not again at the top of the page.
     expect(screen.getAllByText(/deploy it as the live version, or ship the MemQL on its own first/)).toHaveLength(1);
+
+    // Taking the remedy answers it: the refusal was about a question no longer
+    // being asked.
+    await click(option("Live version"));
+    expect(screen.queryByText(/deploy it as the live version, or ship the MemQL on its own first/)).toBeNull();
+    expect(barActs()).toEqual(["Cancel", "Deploy"]);
   });
 });
 

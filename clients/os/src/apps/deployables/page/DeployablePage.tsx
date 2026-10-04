@@ -215,6 +215,9 @@ export function DeployablePage({
   const deployedBy = deployedByLabel(deployerOf(run, site, pkg), viewerUserId, nameOf);
 
   function act(named: ActName) {
+    // Whatever this act is, a refusal it draws is its own: only the candidate
+    // confirm below marks one as belonging beside the choice.
+    setConfirmedAs(null);
     switch (named) {
       case "Discard":
       case "Delete":
@@ -471,7 +474,15 @@ export function DeployablePage({
             lifecycle={lifecycle}
             deployChoice={offerCandidate ? {
               target: gateTarget,
-              onChoose: setDeployTarget,
+              onChoose: (next) => {
+                setDeployTarget(next);
+                // A refusal of the candidate answered a question that changing
+                // the choice stops asking.
+                if (refusalAtChoice) {
+                  headActions.clear();
+                  setConfirmedAs(null);
+                }
+              },
               hostname: site.hostname,
               blocked: candidateBlocked,
               refusal: refusalAtChoice ? headActions.refusal : null,
