@@ -248,8 +248,8 @@ func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig,
 	if src, ok := h.cfg.Sources[name]; ok {
 		// A name a bound connector CLAIMS is never an env source. The
 		// dispatcher routes a staged row by its source name alone, through
-		// memqlsync.ConnectorForSource -- the predicate asked here, so the two
-		// cannot disagree -- and the connector reads a row under a name it
+		// memqlsync.ConnectorForSource -- SourceClaimed below gives the same
+		// answer, so the two cannot disagree -- and the connector reads a row under a name it
 		// claims as verified by ITS secret for that tenant: its own name as
 		// signed by the app secret, a tenant's `shopify-<storeId>` as signed
 		// by that store's webhook secret, with the store bound off the NAME.
@@ -264,7 +264,19 @@ func (h *Handler) resolveSource(ctx context.Context, name string) (SourceConfig,
 		// the verifying secret moves in neither direction and the operator
 		// has an ERROR naming the variable to rename or remove (memql#5707
 		// review and follow-up).
-		if c, claimed := memqlsync.ConnectorForSource(ctx, name); claimed {
+		//
+		// FAILS CLOSED. SourceClaimed asks the claim only, never the
+		// tenant's secret, and reports a connector that could not read its
+		// tenants as an error rather than "not mine" -- which is the answer
+		// that would admit the pin. Refused with the same 404, so an
+		// unauthenticated caller learns nothing either way.
+		c, claimed, err := memqlsync.SourceClaimed(ctx, name)
+		if err != nil {
+			h.logger.Error("inbound receiver: could not tell whether a connector claims an env source, refusing with 404",
+				"source", name, "env", "MEMQL_INBOUND_SOURCE_"+envSuffix(name)+"_*", "error", err)
+			return SourceConfig{}, false
+		}
+		if claimed {
 			h.logger.Error("inbound receiver: env source names a source a bound connector claims, refusing with 404",
 				"source", name, "connector", c.Name(), "env", "MEMQL_INBOUND_SOURCE_"+envSuffix(name)+"_*")
 			return SourceConfig{}, false

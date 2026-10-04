@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"errors"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -281,5 +282,89 @@ func TestAnEnvPinOnAConnectorClaimedNameIsRefused(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// claimingConnector answers the receiver's collision question through the
+// claim-only interface, and records whether the secret-resolving one was
+// asked at all.
+type claimingConnector struct {
+	memqlsync.Connector
+	name     string
+	claims   map[string]bool
+	claimErr error
+	resolved []string
+}
+
+func (c *claimingConnector) Name() string { return c.name }
+
+func (c *claimingConnector) ClaimsInboundSource(_ context.Context, name string) (bool, error) {
+	if c.claimErr != nil {
+		return false, c.claimErr
+	}
+	return c.claims[name], nil
+}
+
+func (c *claimingConnector) InboundSource(_ context.Context, name string) (memqlsync.InboundSource, bool) {
+	c.resolved = append(c.resolved, name)
+	return memqlsync.InboundSource{}, false
+}
+
+// The collision check FAILS CLOSED. A connector that cannot read its own
+// tenants -- a stale cache and a failed store read -- has not said "not mine",
+// and reading it that way admits the env pin on a tenant's name, which the
+// dispatcher then hands to the connector once the read recovers. So an
+// undeterminable claim is refused like a claimed one: 404, nothing staged.
+//
+// And it asks the CLAIM, never the secret. InboundSource resolves and unseals
+// the tenant's webhook secret; the collision check only needs to know the name
+// is taken, on a path any unauthenticated caller can hit.
+func TestTheEnvPinCollisionCheckFailsClosedAndResolvesNoSecret(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		c    *claimingConnector
+	}{
+		{"the connector claims the tenant", &claimingConnector{name: "shopify", claims: map[string]bool{"shopify-acme": true}}},
+		{"the connector cannot read its tenants", &claimingConnector{name: "shopify", claimErr: errors.New("list stores: context deadline exceeded")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withConnector(t, tc.c)
+			src := hexSource()
+			src.Name = "shopify-acme"
+			eng := &fakeEngine{}
+			h := NewHandler(Config{Enabled: true, MaxBodyBytes: 1024, Tolerance: 5 * time.Minute,
+				Sources: map[string]SourceConfig{"shopify-acme": src}}, eng, quietLogger())
+			body := `{"shop_domain":"acme.myshopify.com"}`
+			r := httptest.NewRequest(http.MethodPost, "/inbound/shopify-acme", strings.NewReader(body))
+			r.Header.Set("X-Sig", hex.EncodeToString(sign(testSecret, []byte(body))))
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+			if rec.Code != http.StatusNotFound || len(eng.calls) != 0 {
+				t.Errorf("an env pin the connector claims or cannot rule out was answered %d with %d staged; want 404, nothing staged",
+					rec.Code, len(eng.calls))
+			}
+			if len(tc.c.resolved) != 0 {
+				t.Errorf("the collision check resolved the tenant's secret for %v; it needs only the claim", tc.c.resolved)
+			}
+		})
+	}
+}
+
+// An env source the connector positively does NOT claim still verifies:
+// failing closed is for "cannot tell", not for every name in its namespace.
+func TestAnEnvPinTheClaimerDisownsStillVerifies(t *testing.T) {
+	withConnector(t, &claimingConnector{name: "shopify", claims: map[string]bool{}})
+	src := hexSource()
+	src.Name = "shopify-custom"
+	eng := &fakeEngine{}
+	h := NewHandler(Config{Enabled: true, MaxBodyBytes: 1024, Tolerance: 5 * time.Minute,
+		Sources: map[string]SourceConfig{"shopify-custom": src}}, eng, quietLogger())
+	body := `{"id":1}`
+	r := httptest.NewRequest(http.MethodPost, "/inbound/shopify-custom", strings.NewReader(body))
+	r.Header.Set("X-Sig", hex.EncodeToString(sign(testSecret, []byte(body))))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusAccepted || len(eng.calls) != 1 {
+		t.Fatalf("an env pin no connector claims was answered %d with %d staged; want 202", rec.Code, len(eng.calls))
 	}
 }

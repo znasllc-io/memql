@@ -125,7 +125,8 @@ signed for. A pin on the connector's own name is dropped AT BOOT, with an ERROR
 naming the `MEMQL_INBOUND_SOURCE_<NAME>_*` vars, exactly like a source with no
 secret. A pin on a store's name cannot be known at boot, because stores are
 connected at runtime, so the receiver refuses it per request: `404`, with an
-ERROR naming the connector and the vars. Neither secret is used either way: an
+ERROR naming the connector and the vars. If the connector cannot read its
+stores at that moment, the pin is refused the same way rather than admitted. Neither secret is used either way: an
 env pin never silently changes which secret verifies a live sender, and neither
 does a connector. So `shopify-custom` works only while no connected store has
 the id `custom`; connect one and the pin starts answering `404` until it is

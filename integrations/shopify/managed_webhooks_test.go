@@ -314,3 +314,43 @@ func TestAStoreNotIdentifiedAsManagedKeepsItsPerStorePrivacyURL(t *testing.T) {
 		})
 	}
 }
+
+// ClaimsInboundSource is the receiver's env-pin collision question
+// (memqlsync.InboundSourceClaimer). It must give InboundSource's answer for
+// every tenant name, resolve no secret doing it, and report a store list it
+// could not read as an ERROR: "no such store" there would admit an env pin on
+// a live store's name (memql#5707 follow-up).
+func TestClaimsInboundSourceAgreesFailsLoudAndResolvesNoSecret(t *testing.T) {
+	h := newHarness(t)
+	var resolved []string
+	inner := h.conn.stores.secrets
+	h.conn.stores.secrets = func(ctx context.Context, name string) (string, error) {
+		resolved = append(resolved, name)
+		return inner(ctx, name)
+	}
+	ctx := context.Background()
+	for _, name := range []string{ConnectorName + "-" + testStoreID, ConnectorName + "-nobody", "stripe", "shopifyx-" + testStoreID} {
+		claimed, err := h.conn.ClaimsInboundSource(ctx, name)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		resolved = nil
+		_, want := h.conn.InboundSource(ctx, name)
+		if claimed != want {
+			t.Errorf("%s: ClaimsInboundSource = %v, InboundSource claims %v; the receiver and the dispatcher would disagree", name, claimed, want)
+		}
+	}
+	if claimed, err := h.conn.ClaimsInboundSource(ctx, ConnectorName); err != nil || !claimed {
+		t.Errorf("the connector's own name: claimed=%v err=%v; the dispatcher always routes it here", claimed, err)
+	}
+
+	resolved = nil
+	if _, err := h.conn.ClaimsInboundSource(ctx, ConnectorName+"-"+testStoreID); err != nil || len(resolved) != 0 {
+		t.Errorf("the claim resolved %v (err=%v); it needs only the store list", resolved, err)
+	}
+
+	h.engine.fail["stores"] = fmt.Errorf("context deadline exceeded")
+	if claimed, err := h.conn.ClaimsInboundSource(ctx, ConnectorName+"-"+testStoreID); err == nil || claimed {
+		t.Errorf("an unreadable store list answered claimed=%v err=%v; want an error, never \"not mine\"", claimed, err)
+	}
+}

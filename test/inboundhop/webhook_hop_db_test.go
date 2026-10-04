@@ -133,7 +133,7 @@ func TestWebhookReceiptAndDispatchAcrossEngines(t *testing.T) {
 	if err := memqlsync.Bind(cb); err != nil {
 		t.Fatal(err)
 	}
-	run, err := dispatchOn(t, b, received)
+	run, err := dispatcherOn(t, b)(received)
 	if err != nil || run.Status != "completed" {
 		t.Fatalf("dispatch: %+v %v", run, err)
 	}
@@ -194,7 +194,7 @@ func TestAnUnparseableStagedHeaderRowIsStampedFailed(t *testing.T) {
 		t.Fatalf("stage: %v", err)
 	}
 	row := stagedRow(t, a, requestID)
-	if _, err := dispatchOn(t, a, row); err != nil {
+	if _, err := dispatcherOn(t, a)(row); err != nil {
 		t.Logf("dispatch returned %v (the builtin errors after stamping, which the run records)", err)
 	}
 	after := stagedRow(t, a, requestID)
@@ -221,10 +221,13 @@ func stagedRow(t *testing.T, eng *memql.MemQLEngine, requestID string) map[strin
 	return rows[0]
 }
 
-// dispatchOn runs the SHIPPED dispatchInboundToConnector automation on eng for
-// one staged row, through the real executor: a tree-loaded automation, so its
-// step context carries internal origin exactly as it does in production.
-func dispatchOn(t *testing.T, eng *memql.MemQLEngine, row map[string]any) (*automations.AutomationExecution, error) {
+// dispatcherOn wires the SHIPPED dispatchInboundToConnector automation on eng
+// through the real executor -- a tree-loaded automation, so its step context
+// carries internal origin exactly as it does in production -- and returns a
+// function that runs it for one staged row. The datasync integration is
+// registered ONCE here, so a test may dispatch any number of rows on one
+// engine without a duplicate registration.
+func dispatcherOn(t *testing.T, eng *memql.MemQLEngine) func(row map[string]any) (*automations.AutomationExecution, error) {
 	t.Helper()
 	if err := eng.RegisterIntegration(datasync.NewIntegration(engineAdapter{eng}, nil)); err != nil {
 		t.Fatal(err)
@@ -235,8 +238,10 @@ func dispatchOn(t *testing.T, eng *memql.MemQLEngine, row map[string]any) (*auto
 	}
 	executor := automations.NewExecutor(automations.ExecutorOptions{Engine: eng, Logger: eng.Logger, StepRegistry: steps.NewRegistry()})
 	t.Cleanup(executor.Close)
-	event := &events.Event{Topic: "graph.node.created.v1:platform:inboundRequest", Kind: events.KindNodeCreated, OriginNodeId: "receiver-a", Payload: row}
-	return executor.ExecuteWithEvent(seedCtx(), auto, "webhook-hop-test", event)
+	return func(row map[string]any) (*automations.AutomationExecution, error) {
+		event := &events.Event{Topic: "graph.node.created.v1:platform:inboundRequest", Kind: events.KindNodeCreated, OriginNodeId: "receiver-a", Payload: row}
+		return executor.ExecuteWithEvent(seedCtx(), auto, "webhook-hop-test", event)
+	}
 }
 
 // engineOverPostgres boots a real engine over dbtest.DSN(), the way the
