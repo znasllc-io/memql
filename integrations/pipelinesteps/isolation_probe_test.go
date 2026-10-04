@@ -274,8 +274,35 @@ func (l *isoListen) accepted() []time.Time {
 	return append([]time.Time(nil), l.times...)
 }
 
-// isoRefusing is a port nothing listens on: an attempt is refused.
+// isoRefusing is a port nothing listens on: an attempt is refused. The port
+// stays bound to a socket that never listens, for the test's life, rather
+// than being closed and handed back. A port handed back can be given to
+// another case's listener -- the cases run in parallel -- and the connection
+// meant to be refused then reaches that listener: "DNS answered the first
+// attempt only" closes its listener on its first accept, so such a stray
+// read as DNS refused on every attempt (seen once under a full -race run). A
+// bound socket that never listens still answers a connection with a reset,
+// and without SO_REUSEADDR no other socket can take its port.
 func isoRefusing(t *testing.T) int {
+	t.Helper()
+	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("socket: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Close(fd) })
+	if err := syscall.Bind(fd, &syscall.SockaddrInet4{Addr: [4]byte{127, 0, 0, 1}}); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	sa, err := syscall.Getsockname(fd)
+	if err != nil {
+		t.Fatalf("getsockname: %v", err)
+	}
+	return sa.(*syscall.SockaddrInet4).Port
+}
+
+// isoFreePort is a port free for a process the test starts to listen on: the
+// listener script binds it itself, so it is handed back, unlike isoRefusing's.
+func isoFreePort(t *testing.T) int {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -543,7 +570,7 @@ func TestIsolationProbeConnectorReadsTheThreeRoundsTogether(t *testing.T) {
 // so the proof never passes on it.
 func TestIsolationProbeListenerAcceptsUntilStopped(t *testing.T) {
 	requireTools(t, "perl")
-	port := isoRefusing(t)
+	port := isoFreePort(t)
 	if strings.Count(probeListenerScript, "8080") == 0 {
 		t.Fatal("the listener script no longer names port 8080; this harness points it at a free port")
 	}
@@ -596,7 +623,7 @@ func TestIsolationProbeStopsOnTERM(t *testing.T) {
 		env                 []string
 		need                []string
 	}{
-		{"the listener", "/bin/sh", strings.ReplaceAll(probeListenerScript, "8080", strconv.Itoa(isoRefusing(t))), nil, []string{"perl"}},
+		{"the listener", "/bin/sh", strings.ReplaceAll(probeListenerScript, "8080", strconv.Itoa(isoFreePort(t))), nil, []string{"perl"}},
 		{"index 0's holder", "/bin/bash", probeConnectorScript, []string{"JOB_COMPLETION_INDEX=0"}, []string{"bash", "sleep"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
