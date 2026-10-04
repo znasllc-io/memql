@@ -284,12 +284,21 @@ merchant.
 ## Step 4 -- what happens next
 
 **Subscriptions.** On boot and daily at 03:15, the connector registers every
-mirrored topic for every ingesting store: HTTPS delivery to
-`https://api.<your-domain>/inbound/shopify-<storeId>`, at the pinned API
-version, with `includeFields` trimmed to `id`, `admin_graphql_api_id` and
-`updated_at`. It updates subscriptions whose URL, version or fields have
-drifted, and removes its own that the allowlist no longer wants. Another
-app's subscriptions are not visible to this app and are never touched.
+mirrored topic the store's grant covers, for every ingesting store: HTTPS
+delivery to `https://api.<your-domain>/inbound/shopify-<storeId>`, at the
+pinned API version, with `includeFields` trimmed to `id`,
+`admin_graphql_api_id` and `updated_at`. It updates subscriptions whose URL,
+version or fields have drifted, and removes its own that the allowlist or the
+grant no longer wants. Another app's subscriptions are not visible to this app
+and are never touched.
+
+A topic is outside the grant when the store holds none of the scopes its
+domain reads under -- the rule reconciliation uses to skip a domain. A store
+connected through Connect Shopify holds the storefront's scopes only, so the
+customer, fulfillment-order, return and discount topics are not asked for;
+Shopify would refuse each one. They are listed on the store's health as
+`subscriptions.notGranted`, a standing fact about the connection rather than a
+failure. A store whose grant was never recorded is asked for every topic.
 
 The daily pass is not tidiness. Shopify retries a failed delivery eight times
 over four hours and then **deletes the subscription** after eight consecutive
