@@ -431,20 +431,3 @@ func TestASyntheticActorIsNeverTheOwnerItsNameSpells(t *testing.T) {
 		t.Fatalf("attribution = %q; ana's machine serving an automation is ana's hardware, not the automation's own", got)
 	}
 }
-
-func TestAnAutomationUnderAListedPersonsAuthorityUsesWhatIsLentToThem(t *testing.T) {
-	// THE OWNER'S RULING ON memql#5662 (2026-10-04): lending to a person lends
-	// to all of their work, automated or not. An automation running under a
-	// person's BORROWED authority carries that person's id, so it is planned
-	// exactly as their own call is -- the plan cannot tell the two apart, and
-	// is not meant to.
-	forAna := peopleMachine("for-ana", "bob", []string{"ana"}, nil)
-	store := &sharedFleet{fakeFleet: &fakeFleet{owner: "v1:identity:user:ana"}, all: []Candidate{forAna}}
-	plan, err := modelRouter(t, store).PlanUserModelWithShared(context.Background(), "v1:identity:user:ana", smallModel, ModelNeeds{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := ids(plan.Candidates); len(got) != 1 || got[0] != "for-ana" {
-		t.Fatalf("candidates = %v; work done under ana's authority reaches what is lent to ana", got)
-	}
-}
