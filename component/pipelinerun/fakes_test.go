@@ -607,9 +607,10 @@ func (s *memStore) ChannelsForOwner(ctx context.Context) ([]Channel, error) {
 	return out, nil
 }
 
-// ChannelForOwnerByName is channelForOwnerByName under the OWNER's borrowed
-// authority: the owner is an argument, not whoever the context carries, and
-// nobody is refused. The newest of two rows sharing a name answers.
+// ChannelForOwnerByName is pipelineChannelForOwnerByName under the OWNER's
+// borrowed authority: the owner is an argument, not whoever the context
+// carries, and a blank one is refused before a blank name is. The newest of two
+// rows sharing a name answers.
 func (s *memStore) ChannelForOwnerByName(_ context.Context, owner, name string) (*Channel, error) {
 	if strings.TrimSpace(owner) == "" {
 		return nil, errors.New("memStore: a channel is read only under its owner")
@@ -629,8 +630,10 @@ func (s *memStore) ChannelForOwnerByName(_ context.Context, owner, name string) 
 	return nil, nil
 }
 
-// CreateChannel is createChannel: a read-merge insert at the id that stamps
-// the owner and `active`, whatever status the value carries.
+// CreateChannel is createPipelineChannel, stamping the owner and `active`
+// whatever status the value carries. It REPLACES the row at an id already
+// used, where the DSL's insert is a read-merge: a channel's id is fresh, so no
+// caller creates at one twice, and the fake does not carry the merge.
 func (s *memStore) CreateChannel(_ context.Context, c Channel) error {
 	if strings.TrimSpace(c.OwnerUserID) == "" {
 		return errors.New("memStore: a channel is written only under its owner")
@@ -647,8 +650,13 @@ func (s *memStore) CreateChannel(_ context.Context, c Channel) error {
 	return nil
 }
 
-// UpdateChannel is updateChannel: the named fields of the patch, and nothing
-// else, on a channel the owner owns.
+// UpdateChannel is updatePipelineChannel: the named fields of the patch, and
+// nothing else, on a channel that exists. It does NOT check that the owner it
+// is given owns the channel, because production does not: the write is stamped
+// internal origin, which escapes the engine's owner write guard, so the owner
+// is attribution and the proof of ownership is the caller's own owner-scoped
+// read. A fake that refused a stranger here would let a caller that skipped
+// that read pass its tests on the fake's refusal, not its own.
 func (s *memStore) UpdateChannel(_ context.Context, owner, channelID string, patch ChannelPatch) error {
 	if strings.TrimSpace(owner) == "" {
 		return errors.New("memStore: a channel is written only under its owner")
@@ -660,9 +668,6 @@ func (s *memStore) UpdateChannel(_ context.Context, owner, channelID string, pat
 	c, ok := s.channels[id]
 	if !ok {
 		return fmt.Errorf("memStore: no channel %q", channelID)
-	}
-	if !sameID(c.OwnerUserID, owner) {
-		return fmt.Errorf("memStore: %q may not write %q's channel", owner, c.OwnerUserID)
 	}
 	set := func(dst *string, v *string) {
 		if v != nil {

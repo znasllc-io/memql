@@ -118,9 +118,9 @@ concept run {
 
 /// Where a notify stage delivers (D16): a Discord webhook or an email list, named by a manifest
 /// stage. The secret a channel needs is a REFERENCE to a globalSecret, never its value. A channel is
-/// written by component/pipelinerun -- createChannel and updateChannel, both server-only -- after the
-/// pipelinesChannelSave builtin has validated it; a person's own channels are read through
-/// pipelineChannelsForOwner.
+/// written by component/pipelinerun -- createPipelineChannel and updatePipelineChannel, both
+/// server-only -- after the pipelinesChannelSave builtin has validated it; a person's own channels are
+/// read through pipelineChannelsForOwner.
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 @displayCard(primary="name", secondary="kind", status="status")
 concept channel {

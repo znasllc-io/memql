@@ -3,7 +3,6 @@ package pipelinerun
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -37,8 +36,8 @@ const (
 	// ones above but made UNDER THAT OWNER'S BORROWED AUTHORITY: the driver
 	// that asks has no person on the line, and the owner conjunct in each
 	// filter is what decides the rows.
-	qChannelForOwnerByName = "channelForOwnerByName" // (name)
-	qLibraryFileByID       = "libraryFileById"       // (fileId) -- dsl/library
+	qPipelineChannelForOwnerByName = "pipelineChannelForOwnerByName" // (name)
+	qLibraryFileByID               = "libraryFileById"               // (fileId) -- dsl/library
 
 	// Server-only reads, every owner's rows, cluster-owner conjunct.
 	qPipelinesForRepository     = "pipelinesForRepository"     // (repository)
@@ -69,8 +68,10 @@ const (
 	mUpdatePipeline    = "updatePipeline"
 	mCreatePipelineRun = "createPipelineRun"
 	mUpdatePipelineRun = "updatePipelineRun"
-	mCreateChannel     = "createChannel"
-	mUpdateChannel     = "updateChannel"
+
+	// The notify stage's channels' writes, likewise @serverOnly.
+	mCreatePipelineChannel = "createPipelineChannel"
+	mUpdatePipelineChannel = "updatePipelineChannel"
 
 	// Deployables' read of the source a pipeline hangs off (dsl/platform).
 	qPackageByID = "packageById" // (packageId)
@@ -82,7 +83,9 @@ const (
 
 	// The outbound seam's two stagings and its by-id read (dsl/platform): the
 	// notify stage stages a delivery as the system actor and polls the row
-	// the outbound worker moves. Both stagings and the read are server-only.
+	// the outbound worker moves. Only stageOutboundRequestToSecret and the
+	// by-id read are @serverOnly; stageOutboundRequest is the client-reachable
+	// staging surface, and this package calls both with internal origin.
 	mStageOutboundRequest         = "stageOutboundRequest"         // (requestId, medium, target, subject?, body, dedupeKey?, requestedBy?)
 	mStageOutboundRequestToSecret = "stageOutboundRequestToSecret" // (requestId, targetSecret, subject?, body, dedupeKey?, requestedBy?)
 	qOutboundRequestByID          = "outboundRequestById"          // (requestId)
@@ -102,8 +105,21 @@ type dslStore struct {
 }
 
 // ---------------------------------------------------------------------------
-// The three authorities
+// The authorities
 // ---------------------------------------------------------------------------
+//
+// Every call is made as one of three actors, and is stamped internal origin or
+// not; the two are independent, and the helpers below are where both are
+// decided:
+//
+//   - as the CALLER, unstamped: callerRead, a person-facing read;
+//   - as the OWNER of the rows, borrowed: ownerRead, a person-facing read made
+//     for a person who is not on the line (unstamped), and ownerWrite, a write
+//     (stamped);
+//   - as this package's own SYSTEM actor, stamped: systemRead, a server-only
+//     read, and systemWrite, a write to a row with no owner to borrow.
+//
+// The stamp itself is applied in ONE place, executeInternal.
 
 // callerRead runs a person-facing read under whatever actor ctx carries --
 // the caller's. Unstamped: these constructs are not @serverOnly, and the
@@ -177,10 +193,13 @@ func requireOwner(owner, call string) (string, error) {
 	return owner, nil
 }
 
-// systemWrite runs a server-only write as this package's own system actor, for
-// a row with no owner to borrow: an outbound row records a delivery, not a
-// person's act, and its concept declares no tier. The actor is attribution
-// and nothing more here -- no mutation it reaches stamps an owner from it.
+// systemWrite runs a write as this package's own system actor, for a row with
+// no owner to borrow: an outbound row records a delivery, not a person's act,
+// and its concept declares no tier. It is stamped internal like every write
+// here -- stageOutboundRequestToSecret is @serverOnly, and the outbound write
+// guard wants internal origin on a secret-target row; stageOutboundRequest is
+// not @serverOnly, and is called with the stamp all the same. The actor is
+// attribution and nothing more: no mutation it reaches stamps an owner from it.
 func (s *dslStore) systemWrite(ctx context.Context, name string, args map[string]any) error {
 	query, err := render("mutation", name, args)
 	if err != nil {
@@ -267,21 +286,21 @@ func (s *dslStore) ChannelsForOwner(ctx context.Context) ([]Channel, error) {
 func (s *dslStore) ChannelForOwnerByName(ctx context.Context, owner, name string) (*Channel, error) {
 	// The owner is refused first, even when there is nothing to look for: a
 	// call that names nobody is a defect to surface, not a read to skip.
-	if _, err := requireOwner(owner, qChannelForOwnerByName); err != nil {
+	if _, err := requireOwner(owner, qPipelineChannelForOwnerByName); err != nil {
 		return nil, err
 	}
 	// No name is no read: there is no channel to find.
 	if name = strings.TrimSpace(name); name == "" {
 		return nil, nil
 	}
-	return oneChannel(s.ownerRead(ctx, owner, qChannelForOwnerByName, map[string]any{"name": name}))
+	return oneChannel(s.ownerRead(ctx, owner, qPipelineChannelForOwnerByName, map[string]any{"name": name}))
 }
 
 // LibraryFileNames reads each file once, however its id is spelled, and keys
-// the answer by each id exactly as the caller passed it, so the caller looks a
-// name up with the variable it asked with. A file the owner cannot read comes
-// back as zero rows -- the same answer as one that does not exist -- and is
-// left out.
+// the answer by each id as the caller passed it, trimmed of surrounding space
+// -- so the caller looks a name up with the id it asked with, trimmed. A blank
+// id asks nothing. A file the owner cannot read comes back as zero rows -- the
+// same answer as one that does not exist -- and is left out.
 func (s *dslStore) LibraryFileNames(ctx context.Context, owner string, ids []string) (map[string]string, error) {
 	if _, err := requireOwner(owner, qLibraryFileByID); err != nil {
 		return nil, err
@@ -393,8 +412,16 @@ func (s *dslStore) PreviousRuns(ctx context.Context, pipelineID string, event pi
 
 // OutboundStatuses reads each row once, as the system actor, and answers one
 // entry per id in the order asked. The outbound row has no owner and its
-// by-id read is server-only; a row nothing staged is an entry with no status.
+// by-id read is server-only; a row nothing staged is an entry with no status,
+// and a blank id is an empty entry that asks nothing.
+//
+// EVERY read here is FRESH, whatever the caller's ctx carries: the outbound
+// worker moves a row on whichever replica claimed it, so a poll that took this
+// node's cached `pending` after another replica stamped `sent` -- or the
+// reverse -- would report a delivery wrongly. The marked context is a local of
+// this call and goes no further.
 func (s *dslStore) OutboundStatuses(ctx context.Context, ids []string) ([]OutboundStatus, error) {
+	ctx = memql.ContextWithFreshRead(ctx)
 	out := make([]OutboundStatus, 0, len(ids))
 	for _, id := range ids {
 		id = bareID(id)
@@ -601,7 +628,7 @@ func (s *dslStore) UpdateRun(ctx context.Context, owner, runID string, patch Run
 // learns the id of, and so can never allow a pipeline on.
 func (s *dslStore) CreateChannel(ctx context.Context, c Channel) error {
 	if bareID(c.ID) == "" {
-		return errors.New("pipelines: createChannel: a channel needs an id")
+		return fmt.Errorf("pipelines: %s: a channel needs an id", mCreatePipelineChannel)
 	}
 	args := map[string]any{
 		"channelId": bareID(c.ID),
@@ -613,10 +640,12 @@ func (s *dslStore) CreateChannel(ctx context.Context, c Channel) error {
 	if len(c.Recipients) > 0 {
 		args["recipients"] = stringList(c.Recipients)
 	}
-	return s.ownerWrite(ctx, c.OwnerUserID, mCreateChannel, args)
+	return s.ownerWrite(ctx, c.OwnerUserID, mCreatePipelineChannel, args)
 }
 
-// UpdateChannel writes the named fields of patch and nothing else.
+// UpdateChannel writes the named fields of patch and nothing else. The owner it
+// is given is attribution, not a check that the channel is theirs: the caller
+// proves that with an owner-scoped read first (see Store).
 func (s *dslStore) UpdateChannel(ctx context.Context, owner, channelID string, patch ChannelPatch) error {
 	args := map[string]any{"channelId": bareID(channelID)}
 	setNamed(args, "name", patch.Name)
@@ -626,7 +655,7 @@ func (s *dslStore) UpdateChannel(ctx context.Context, owner, channelID string, p
 	if patch.Recipients != nil {
 		args["recipients"] = stringList(*patch.Recipients)
 	}
-	return s.ownerWrite(ctx, owner, mUpdateChannel, args)
+	return s.ownerWrite(ctx, owner, mUpdatePipelineChannel, args)
 }
 
 // StageNotification stages one outbound row as the system actor. A row naming

@@ -1603,13 +1603,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// checks exist to refuse, the owner naming a secret nobody checked, and
 		// a client-reachable write would skip them. THE ONE READ is the notify
 		// stage's look at the runs before the one it drives: its reader is the
-		// agent replica driving a run, with no person behind it, and the
-		// pipeline's owner is learned from the run being driven, so an
-		// actor.userId conjunct would answer zero rows and read as a pipeline
-		// that never failed.
+		// agent replica driving a run, which holds no person's request, and the
+		// question is about the pipeline -- every run of it, whoever owns it --
+		// so an actor.userId conjunct would narrow the answer to one person's
+		// runs, and a short answer reads as a pipeline that never failed.
 		{Path: "pipelines/queries.memql", Name: "pipelineRunsForPipelineEvent"}: true,
-		{Path: "pipelines/mutations.memql", Name: "createChannel"}:              true,
-		{Path: "pipelines/mutations.memql", Name: "updateChannel"}:              true,
+		{Path: "pipelines/mutations.memql", Name: "createPipelineChannel"}:      true,
+		{Path: "pipelines/mutations.memql", Name: "updatePipelineChannel"}:      true,
 	}
 	for k := range want {
 		if !set[k] {

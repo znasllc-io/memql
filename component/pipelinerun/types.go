@@ -422,13 +422,18 @@ type OutboundStatus struct {
 // URL being a credential that must never sit on a row; every other row names
 // its Target, an address, and a Medium.
 type NotificationRequest struct {
-	// RequestID is the row's id, chosen by the caller.
+	// RequestID is the row's id, chosen by the caller, and it must be
+	// UNGUESSABLE: a row keeps its delivery state at its id (@createOnly), and a
+	// client can pre-stage a plain row at a guessable id and leave it `sent`, so
+	// the stage the server makes there later inherits it. A caller uses a random
+	// id, one per row, never one derived from what it is about to say.
 	RequestID string
 	// Medium is `webhook` or `email`.
 	Medium string
 	// Target is where a plain row goes, an email address for the notify stage.
-	// A row naming TargetSecret sends none: its target is the descriptor the
-	// mutation stamps from the secret's name.
+	// A row naming TargetSecret carries none, and staging both is refused: its
+	// target is the descriptor the mutation stamps from the secret's name, and a
+	// Target beside it would be dropped without a word.
 	Target string
 	// TargetSecret is the globalSecret NAME whose value is a webhook's URL. A
 	// row naming one is a webhook, and Medium must say so.
@@ -443,8 +448,8 @@ type NotificationRequest struct {
 
 // validate refuses a notification that cannot be sent as written, before any
 // engine is asked. The DSL declares the arguments; these are the rules it
-// cannot: a webhook to a secret is a webhook and nothing else, and a plain row
-// says where it goes.
+// cannot: a webhook to a secret is a webhook and nothing else and names no
+// target beside the secret, and a plain row says where it goes.
 func (n NotificationRequest) validate() error {
 	if bareID(n.RequestID) == "" {
 		return errors.New("pipelines: a notification needs a request id")
@@ -456,6 +461,9 @@ func (n NotificationRequest) validate() error {
 	if strings.TrimSpace(n.TargetSecret) != "" {
 		if medium != secretTargetMedium {
 			return fmt.Errorf("pipelines: a notification to a secret is a webhook, not %q: only a webhook's URL is a secret", n.Medium)
+		}
+		if strings.TrimSpace(n.Target) != "" {
+			return errors.New("pipelines: a notification names the secret holding its URL or a target, not both: the row's target is the descriptor stamped from the secret's name")
 		}
 		return nil
 	}

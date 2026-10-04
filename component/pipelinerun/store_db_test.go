@@ -390,12 +390,14 @@ func TestAStagedDeliveryIsReadOverRealRows(t *testing.T) {
 // constructs. A channel lands under the borrowed owner and reads back through
 // the owner conjunct -- to the owner, under either spelling of their id, and to
 // nobody else; the read-merge keeps what an update does not name and clears
-// what it names empty; the two server-only stagings are refused a client and
-// admitted with the stamp, and land as the plain row or the secret-target row
-// the outbound worker drains; the by-id status read sees what the worker moves
-// and keeps `sent` through a re-stage; a Library file's name is read under its
-// owner and a stranger's borrowed read finds none; and the previous runs of one
-// event come back newest first.
+// what it names empty -- a real secret reference included -- and a stranger's
+// update is refused; the channel writes, the secret-target staging and the
+// by-id status read are server-only, refused a client and admitted with the
+// stamp, and the two stagings land as the secret-target row or the plain row
+// the outbound worker drains; the status read sees what the worker moves and
+// the stage keeps `sent` through a re-stage; a Library file's name is read
+// under its owner and a stranger's borrowed read finds none; and the previous
+// runs of one event come back newest first.
 func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 	eng := dbEngine(t)
 	store := NewDSLStore(eng)
@@ -421,7 +423,7 @@ func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 	}
 	for _, c := range []Channel{discord, email} {
 		if err := store.CreateChannel(ctx, c); err != nil {
-			t.Fatalf("createChannel %s: %v", c.Name, err)
+			t.Fatalf("createPipelineChannel %s: %v", c.Name, err)
 		}
 	}
 	got, err := store.ChannelForOwnerByName(fresh, owner, discord.Name)
@@ -458,8 +460,8 @@ func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 		t.Fatalf("an email channel keeps its recipients, in order: %+v %v", mail, err)
 	}
 
-	// ---- the read-merge: archive keeps everything else; an empty list and an
-	// empty secret reference are CLEARED ----
+	// ---- the read-merge: an update changes what it names and keeps the rest; a
+	// field named EMPTY is written, which is how it is cleared ----
 	if err := store.UpdateChannel(ctx, owner, discord.ID, ChannelPatch{Status: ptr("archived")}); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
@@ -467,7 +469,20 @@ func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 		arch.SecretRef != "DISCORD_RELEASES" || arch.Kind != "discord" || arch.AccountID != account {
 		t.Errorf("a status write changes the status and nothing else: %+v", arch)
 	}
-	if err := store.UpdateChannel(ctx, owner, email.ID, ChannelPatch{Recipients: ptr([]string{}), SecretRef: ptr("")}); err != nil {
+	// The Discord channel becomes an email one. Its secret reference is REAL --
+	// it was DISCORD_RELEASES a moment ago -- and naming it empty clears it,
+	// while the status the last write set and everything unnamed is kept.
+	if err := store.UpdateChannel(ctx, owner, discord.ID, ChannelPatch{
+		Kind: ptr("email"), SecretRef: ptr(""), Recipients: ptr([]string{"a@example.test"}),
+	}); err != nil {
+		t.Fatalf("switch to email: %v", err)
+	}
+	if sw, _ := store.ChannelForOwnerByName(fresh, owner, discord.Name); sw == nil || sw.Kind != "email" || sw.SecretRef != "" ||
+		len(sw.Recipients) != 1 || sw.Recipients[0] != "a@example.test" || sw.Status != "archived" || sw.Name != discord.Name || sw.AccountID != account {
+		t.Errorf("a secret reference named empty is cleared, and the rest is kept: %+v", sw)
+	}
+	// An empty list is written, not kept.
+	if err := store.UpdateChannel(ctx, owner, email.ID, ChannelPatch{Recipients: ptr([]string{})}); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 	if cleared, _ := store.ChannelForOwnerByName(fresh, owner, email.Name); cleared == nil || len(cleared.Recipients) != 0 || cleared.Name != email.Name || cleared.Status != "active" {
@@ -483,8 +498,28 @@ func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 		t.Errorf("and no longer by the old one: %+v", gone)
 	}
 
-	// ---- the writes are server-only, and the concept's own enums hold ----
-	clientCall := fmt.Sprintf(`mutation createChannel(channelId: %s, kind: "email", name: "forged")`, langparser.QuoteString("pr6c-forged-"+suffix))
+	// ---- ownership of an EXISTING channel is the CALLER's to have proved ----
+	// The channel writes are stamped internal origin, which escapes the engine's
+	// owner write guard (rowauthz_write_guard.go), so the owner an update names
+	// is attribution and not an authorization: measured on real rows, a
+	// stranger's update LANDS, and does not move the channel's owner. What keeps
+	// a stranger off a channel is the owner-scoped READ a caller makes first,
+	// which finds nothing of somebody else's (asserted above) -- so a caller
+	// that skips it has nothing else between it and the row, and
+	// TestNoPersonReachesAnotherOwnersRows is what holds each person-facing act
+	// to making it. Pinned so that nobody takes the borrowed owner for a guard.
+	if err := store.UpdateChannel(ctx, stranger, email.ID, ChannelPatch{Status: ptr("archived")}); err != nil {
+		t.Errorf("the owner an update names is attribution, not a check: %v", err)
+	}
+	if moved, _ := store.ChannelForOwnerByName(fresh, owner, "ops2-"+suffix); moved == nil || moved.Status != "archived" || !sameID(moved.OwnerUserID, owner) {
+		t.Errorf("the stranger's update landed and left the channel the owner's: %+v", moved)
+	}
+	if err := store.UpdateChannel(ctx, owner, email.ID, ChannelPatch{Status: ptr("active")}); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	// ---- the channel writes are server-only, and the concept's own enums hold ----
+	clientCall := fmt.Sprintf(`mutation createPipelineChannel(channelId: %s, kind: "email", name: "forged")`, langparser.QuoteString("pr6c-forged-"+suffix))
 	if _, err := eng.Execute(signedIn(owner), clientCall); err == nil || !strings.Contains(err.Error(), "server-only") {
 		t.Errorf("a client may not create a channel: %v", err)
 	}
@@ -561,7 +596,9 @@ func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 	if row := systemRead(secretRow.RequestID); rowString(row, "status") != "sent" || rowString(row, "body") != restage.Body || rowString(row, "targetSecret") != "DISCORD_RELEASES" {
 		t.Errorf("a re-stage keeps `sent` and refreshes the body: %+v", row)
 	}
-	// Neither staging is a client's.
+	// The secret-target staging and the by-id status read are not a client's.
+	// (The plain staging, stageOutboundRequest, is the client-reachable surface;
+	// this package calls both with internal origin.)
 	for _, call := range []string{
 		fmt.Sprintf(`mutation stageOutboundRequestToSecret(requestId: %s, targetSecret: "DISCORD_RELEASES", body: "x")`, langparser.QuoteString("pr6c-forged-a-"+suffix)),
 		fmt.Sprintf(`query outboundRequestById(requestId: %s)`, langparser.QuoteString(secretRow.RequestID)),

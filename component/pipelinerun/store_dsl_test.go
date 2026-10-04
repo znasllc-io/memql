@@ -267,7 +267,7 @@ func TestEveryCallNamesAConstructAndArgumentsTheDSLDeclares(t *testing.T) {
 		qPipelinesForRepository, qPipelinesPolled, qPipelineByID, qPipelineRunsForKey, qPipelineRunsForPipelineSha,
 		qPipelineRunByCheckRun, qPipelineRunsUnfinished, qPipelineRunsCheckRunLost, qPipelineRunByID, qPipelinesActive, qWorkStepsForRun,
 		mCreatePipeline, mUpdatePipeline, mCreatePipelineRun, mUpdatePipelineRun, qPackageByID, qInboundRequestByID,
-		qPipelineChannelsForOwner, qChannelForOwnerByName, qPipelineRunsForPipelineEvent, mCreateChannel, mUpdateChannel,
+		qPipelineChannelsForOwner, qPipelineChannelForOwnerByName, qPipelineRunsForPipelineEvent, mCreatePipelineChannel, mUpdatePipelineChannel,
 		mStageOutboundRequest, mStageOutboundRequestToSecret, qOutboundRequestByID, qLibraryFileByID,
 	} {
 		if !seen[want] {
@@ -579,6 +579,7 @@ func refusedChannelAndOutboundCalls(s Store) []struct {
 		run  func() error
 	}{
 		{"a channel read for nobody", func() error { _, err := s.ChannelForOwnerByName(ctx, "  ", "releases"); return err }},
+		{"a channel read for nobody, with nothing to find", func() error { _, err := s.ChannelForOwnerByName(ctx, "", ""); return err }},
 		{"Library names for nobody", func() error { _, err := s.LibraryFileNames(ctx, "", []string{"f1"}); return err }},
 		{"Library names for nobody, none asked", func() error { _, err := s.LibraryFileNames(ctx, "", nil); return err }},
 		{"a channel written for nobody", func() error {
@@ -595,6 +596,11 @@ func refusedChannelAndOutboundCalls(s Store) []struct {
 		}},
 		{"a secret notification naming no medium", func() error {
 			return s.StageNotification(ctx, NotificationRequest{RequestID: "pn1", TargetSecret: "DISCORD_RELEASES", Body: "x"})
+		}},
+		{"a secret notification that also names a target", func() error {
+			return s.StageNotification(ctx, NotificationRequest{
+				RequestID: "pn1", Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Target: "https://example.test/hook", Body: "x",
+			})
 		}},
 		{"a notification with no request id", func() error {
 			return s.StageNotification(ctx, NotificationRequest{Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Body: "x"})
@@ -659,23 +665,37 @@ func TestTheChannelAndOutboundCallsRunUnderTheirAuthority(t *testing.T) {
 	if c := one("PreviousRuns", func() error { _, err := store.PreviousRuns(caller, "p1", pipelines.EventPush); return err }); !asSystem(c) {
 		t.Errorf("the previous runs are a server-only read, as the system actor: %+v origin %v", c.actor, c.origin)
 	}
-	if c := one("OutboundStatuses", func() error { _, err := store.OutboundStatuses(caller, []string{"pn1"}); return err }); !asSystem(c) || c.fresh {
-		t.Errorf("a delivery's status is a server-only read, as the system actor, from the cache unless asked: %+v origin %v fresh %v", c.actor, c.origin, c.fresh)
+	// A delivery's state is moved by the outbound worker on whichever replica
+	// claimed the row, so the status read is FRESH by itself: no caller has to
+	// remember, and one that did not ask still gets the database's answer.
+	if c := one("OutboundStatuses", func() error { _, err := store.OutboundStatuses(caller, []string{"pn1"}); return err }); !asSystem(c) || !c.fresh {
+		t.Errorf("a delivery's status is a server-only read, as the system actor, and always fresh: %+v origin %v fresh %v", c.actor, c.origin, c.fresh)
 	}
-	// A poll that must see what another replica's worker just moved asks for a
-	// fresh read, and the store hands that on rather than dropping it.
-	if c := one("OutboundStatuses (fresh)", func() error {
-		_, err := store.OutboundStatuses(memql.ContextWithFreshRead(caller), []string{"pn1"})
-		return err
-	}); !asSystem(c) || !c.fresh {
-		t.Errorf("a poll's freshness reaches the read: %+v origin %v fresh %v", c.actor, c.origin, c.fresh)
+	// The other reads a driver decides on are fresh when the CALLER marks them,
+	// and the store hands the mark on rather than dropping it -- and adds none.
+	for name, read := range map[string]func(context.Context) error{
+		"ChannelForOwnerByName": func(ctx context.Context) error {
+			_, err := store.ChannelForOwnerByName(ctx, owner, "releases")
+			return err
+		},
+		"PreviousRuns": func(ctx context.Context) error {
+			_, err := store.PreviousRuns(ctx, "p1", pipelines.EventPush)
+			return err
+		},
+	} {
+		if c := one(name, func() error { return read(caller) }); c.fresh {
+			t.Errorf("%s is fresh only when its caller says so: the store marked a plain call", name)
+		}
+		if c := one(name+" (fresh)", func() error { return read(memql.ContextWithFreshRead(caller)) }); !c.fresh {
+			t.Errorf("%s dropped its caller's fresh mark", name)
+		}
 	}
 	for _, n := range []NotificationRequest{
 		{RequestID: "pn1", Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Body: "{}"},
 		{RequestID: "pn2", Medium: "email", Target: "a@example.test", Body: "text"},
 	} {
 		if c := one("StageNotification "+n.RequestID, func() error { return store.StageNotification(caller, n) }); !asSystem(c) {
-			t.Errorf("staging is a server-only write, as the system actor, because the row has no owner to borrow: %+v origin %v", c.actor, c.origin)
+			t.Errorf("staging is a write as the system actor with internal origin, because the row has no owner to borrow: %+v origin %v", c.actor, c.origin)
 		}
 	}
 	if c := one("CreateChannel", func() error {
@@ -757,6 +777,44 @@ func TestAFailedReadIsAnErrorNeverAnAbsentRow(t *testing.T) {
 	}
 }
 
+// A blank key asks nothing. A pipeline or an event that is not there is not a
+// question, so PreviousRuns answers nothing without asking the engine; and a
+// blank id in a status poll is an empty entry in its place -- the notify stage
+// reads the answer by position -- with no read made for it, and the real ids
+// beside it read as usual.
+func TestABlankKeyAsksNothing(t *testing.T) {
+	ctx := context.Background()
+	engine := newRecordingEngine()
+	for name, store := range map[string]Store{"dsl": NewDSLStore(engine), "fake": newMemStore()} {
+		before := len(engine.recorded())
+		for _, c := range []struct {
+			pipeline string
+			event    pipelines.Event
+		}{{"", pipelines.EventPush}, {"  ", pipelines.EventPush}, {"p1", ""}, {"p1", "  "}, {"", ""}} {
+			if got, err := store.PreviousRuns(ctx, c.pipeline, c.event); err != nil || got != nil {
+				t.Errorf("the %s store: PreviousRuns(%q, %q) = %+v, %v; want nothing", name, c.pipeline, c.event, got, err)
+			}
+		}
+		if n := len(engine.recorded()) - before; n != 0 {
+			t.Errorf("the %s store: a blank pipeline or event reached the engine: %d calls", name, n)
+		}
+
+		got, err := store.OutboundStatuses(ctx, []string{"", "  ", "pn1"})
+		if err != nil || len(got) != 3 {
+			t.Fatalf("the %s store: OutboundStatuses: %+v %v", name, got, err)
+		}
+		if got[0] != (OutboundStatus{}) || got[1] != (OutboundStatus{}) || got[2].ID != "pn1" {
+			t.Errorf("the %s store: a blank id is an empty entry in its place, the real id beside it: %+v", name, got)
+		}
+		if name == "dsl" {
+			calls := engine.recorded()[before:]
+			if len(calls) != 1 || calls[0].query != `query outboundRequestById(requestId: "pn1")` {
+				t.Errorf("a blank id asks nothing, and the real one is read once: %v", calls)
+			}
+		}
+	}
+}
+
 // The fake the notify stage's tests run over keeps the rules the DSL keeps:
 // a channel is created `active` whatever the value says, its by-name read is the
 // OWNER's whoever the context carries (and the newest of two rows sharing a name
@@ -797,8 +855,15 @@ func TestTheFakeStoreKeepsTheChannelAndOutboxRules(t *testing.T) {
 	if c, _ := s.channel("c2"); c.Status != "archived" || c.Name != "ops" || c.Kind != "email" || len(c.Recipients) != 0 {
 		t.Errorf("an update changes what it names and an empty list clears: %+v", c)
 	}
-	if err := s.UpdateChannel(ctx, "user-bob", "c2", ChannelPatch{Status: ptr("active")}); err == nil {
-		t.Errorf("another owner's update was not refused")
+	// Production does not check the owner of an update (see the port), so the
+	// fake must not either: a test that passed on the fake's refusal would hide a
+	// caller that never made the owner-scoped read.
+	ok(s.UpdateChannel(ctx, "user-bob", "c2", ChannelPatch{Status: ptr("active")}))
+	if c, _ := s.channel("c2"); c.Status != "active" {
+		t.Errorf("the owner an update names is attribution, as in production: %+v", c)
+	}
+	if err := s.UpdateChannel(ctx, owner, "c-nothing", ChannelPatch{Status: ptr("active")}); err == nil {
+		t.Errorf("a channel that is not there is an error, as in production")
 	}
 
 	n := NotificationRequest{RequestID: "v1:platform:outboundRequest:pn1", Medium: "webhook", TargetSecret: "DISCORD_RELEASES", Body: "first"}
@@ -868,12 +933,12 @@ func TestTheChannelAndOutboundCallsSayWhatTheRowsAre(t *testing.T) {
 	ok(err)
 
 	want := []string{
-		`mutation createChannel(accountId: "a1", channelId: "c1", kind: "email", name: "ops", recipients: ["a@example.test","b@example.test"])`,
-		`mutation createChannel(channelId: "c2", kind: "discord", name: "releases", secretRef: "DISCORD_RELEASES")`,
-		`mutation updateChannel(channelId: "c1", recipients: [], status: "archived")`,
-		`mutation updateChannel(channelId: "c2", name: "deploys", secretRef: "DISCORD_DEPLOYS")`,
+		`mutation createPipelineChannel(accountId: "a1", channelId: "c1", kind: "email", name: "ops", recipients: ["a@example.test","b@example.test"])`,
+		`mutation createPipelineChannel(channelId: "c2", kind: "discord", name: "releases", secretRef: "DISCORD_RELEASES")`,
+		`mutation updatePipelineChannel(channelId: "c1", recipients: [], status: "archived")`,
+		`mutation updatePipelineChannel(channelId: "c2", name: "deploys", secretRef: "DISCORD_DEPLOYS")`,
 		`query pipelineChannelsForOwner()`,
-		`query channelForOwnerByName(name: "releases")`,
+		`query pipelineChannelForOwnerByName(name: "releases")`,
 		`query pipelineRunsForPipelineEvent(event: "release", pipelineId: "p1")`,
 		`mutation stageOutboundRequestToSecret(body: "{\"username\":\"MemQL\"}", dedupeKey: "pn1", requestId: "pn1", requestedBy: "pipelines:notify:r1", targetSecret: "DISCORD_RELEASES")`,
 		`mutation stageOutboundRequest(body: "text", medium: "email", requestId: "pn2", subject: "memql - Release v1 passed", target: "a@example.test")`,
@@ -900,7 +965,7 @@ func TestTheChannelAndOutboundCallsSayWhatTheRowsAre(t *testing.T) {
 // an ANSWER -- an outbound status with no status -- rather than an error.
 func TestChannelAndOutboundRowsAreReadBack(t *testing.T) {
 	engine := newRecordingEngine()
-	engine.answers[qChannelForOwnerByName] = []any{map[string]any{
+	engine.answers[qPipelineChannelForOwnerByName] = []any{map[string]any{
 		"id": "v1:pipelines:channel:c1", "ownerUserId": "v1:identity:user:u1", "accountId": "v1:accounts:account:a1",
 		"name": "ops", "kind": "email", "secretRef": "", "status": "active",
 		"recipients": []any{" a@example.test ", "b@example.test", ""},
@@ -920,6 +985,7 @@ func TestChannelAndOutboundRowsAreReadBack(t *testing.T) {
 		"id": "v1:platform:outboundRequest:pn2", "status": "retrying", "attempts": float64(3), "lastError": "webhook: status 502",
 	}}
 	engine.byCall[`query libraryFileById(fileId: "f1")`] = []any{map[string]any{"id": "v1:library:file:f1", "name": "tests.log"}}
+	engine.byCall[`query libraryFileById(fileId: "f2")`] = []any{map[string]any{"id": "v1:library:file:f2", "name": "tests.xml"}}
 	store := NewDSLStore(engine)
 	ctx := context.Background()
 
@@ -936,7 +1002,7 @@ func TestChannelAndOutboundRowsAreReadBack(t *testing.T) {
 		list[1].ID != "c1" || list[1].Name != "ops" || list[1].OwnerUserID != "v1:identity:user:u1" {
 		t.Errorf("channels = %+v %v", list, err)
 	}
-	engine.answers[qChannelForOwnerByName] = []any{}
+	engine.answers[qPipelineChannelForOwnerByName] = []any{}
 	if none, err := store.ChannelForOwnerByName(ctx, "v1:identity:user:u1", "nobody-has-this"); err != nil || none != nil {
 		t.Errorf("a name nothing carries reads nothing: %+v %v", none, err)
 	}
@@ -961,18 +1027,21 @@ func TestChannelAndOutboundRowsAreReadBack(t *testing.T) {
 		t.Errorf("a row nothing staged is an entry with no status, one entry per id asked, in order: %+v", got[2])
 	}
 
-	names, err := store.LibraryFileNames(ctx, "v1:identity:user:u1", []string{"v1:library:file:f1", "f2", "f1", " "})
+	names, err := store.LibraryFileNames(ctx, "v1:identity:user:u1", []string{"v1:library:file:f1", " f2 ", "f1", " ", "f3"})
 	if err != nil {
 		t.Fatalf("LibraryFileNames: %v", err)
 	}
-	if len(names) != 2 || names["v1:library:file:f1"] != "tests.log" || names["f1"] != "tests.log" {
-		t.Errorf("names are keyed by each id as the caller spelled it, and a file the owner cannot read is simply absent: %v", names)
+	if len(names) != 3 || names["v1:library:file:f1"] != "tests.log" || names["f1"] != "tests.log" || names["f2"] != "tests.xml" {
+		t.Errorf("names are keyed by each id as the caller spelled it, trimmed, and a file the owner cannot read is simply absent: %v", names)
+	}
+	if _, padded := names[" f2 "]; padded {
+		t.Errorf("a key is trimmed: %v", names)
 	}
 	// One read per call above: two by name, the list, the previous runs, three
-	// statuses, and the two FILES (f1 once, however it was spelled; the blank
+	// statuses, and the three FILES (f1 once, however it was spelled; the blank
 	// asks nothing).
-	if n := len(engine.recorded()); n != 9 {
-		t.Errorf("calls = %d, want 9", n)
+	if n := len(engine.recorded()); n != 10 {
+		t.Errorf("calls = %d, want 10", n)
 	}
 }
 

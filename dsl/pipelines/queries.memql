@@ -268,7 +268,7 @@ query pipeline pipelinesActive {
 /// line and asks under the pipeline owner's borrowed authority, so the filter is the owner conjunct
 /// and nothing wider: it finds the owner's own channel, never another person's of the same name.
 @actor
-query channel channelForOwnerByName {
+query channel pipelineChannelForOwnerByName {
   args {
     name  string!
   }
@@ -280,10 +280,11 @@ query channel channelForOwnerByName {
 
 /// One pipeline's runs of one event, most recently queued first -- what the notify stage reads to learn
 /// whether the run before this one failed, so a notification can say the pipeline RECOVERED. @serverOnly
-/// rather than actor.userId scoping: the reader is the agent replica driving a run, not a person, and
-/// the pipeline's owner is learned from the run being driven, so an actor.userId conjunct would answer
-/// zero rows and read as a pipeline that never failed. Every status comes back, bounded at 20: the
-/// caller takes the newest COMPLETED run other than its own.
+/// rather than actor.userId scoping: the reader is the agent replica driving a run, which holds no
+/// person's request, and the question is about the PIPELINE -- every run of it, whoever owns it -- so
+/// an actor.userId conjunct would narrow the answer to one person's runs, and a short answer reads as a
+/// pipeline that never failed. Every status comes back, bounded at 20: the caller takes the newest
+/// COMPLETED run other than its own.
 @serverOnly
 @actor
 query run pipelineRunsForPipelineEvent {
