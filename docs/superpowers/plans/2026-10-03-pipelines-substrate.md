@@ -282,13 +282,10 @@ func IsForbiddenQuota(err error) bool
 **Interfaces (produces) -- `protocol.go`, the runner's own wire, JSON-tagged plain data:**
 
 ```go
-// Forward actions on WorkbenchForwardRequest.action (workbench node).
-const (
-	ActionStep   = "pipelineStep"   // long: runs or adopts the step's Job to completion
-	ActionStatus = "pipelineStatus" // immediate: running | finished | absent | stale (+ outcome when finished)
-	ActionAck    = "pipelineAck"    // immediate: the agent has the outcome; delete Job + Secret
-	ActionCancel = "pipelineCancel" // immediate: delete every Job of a run (+ Secrets)
-)
+// The four forward action NAMES are integrations/workbench's (Task 7:
+// workbench.PipelineStepAction "pipelineStep", PipelineStatusAction "pipelineStatus",
+// PipelineAckAction "pipelineAck", PipelineCancelAction "pipelineCancel"); this
+// package never re-declares them (ledger Ruling R3).
 
 // The step's identity and contract come from the seam (pl = component/pipelines):
 // pl.Repository, pl.Service, pl.Failure, pl.Where, pl.StepResult. StepRun is
@@ -666,6 +663,14 @@ func (r *Runner) CancelRun(ctx context.Context, req CancelRequest) (int, error)
 ```go
 // forward_handler.go -- implemented by *pipelinesteps.Runner through a small adapter in app/
 // (Task 8); JSON in, JSON out, so integrations/workbench does not import pipelinesteps.
+// The action names, owned here (ledger Ruling R3).
+const (
+	PipelineStepAction   = "pipelineStep"   // long: runs or adopts the step's Job to completion
+	PipelineStatusAction = "pipelineStatus" // immediate: running | finished | absent | stale
+	PipelineAckAction    = "pipelineAck"    // immediate: delete Job + Secret
+	PipelineCancelAction = "pipelineCancel" // immediate: delete every Job of a run
+)
+
 type PipelineRunner interface {
 	RunStep(ctx context.Context, argsJSON []byte) (outcomeJSON []byte)
 	Status(ctx context.Context, argsJSON []byte) (replyJSON []byte, errorCode string)
@@ -815,7 +820,7 @@ func (e *Executor) Cancel(ctx context.Context, runID string) error
 `Execute`:
 1. Deadline: `runDeadline := runStartedAt + cfg.RunCeiling`; if `now >= runDeadline` -> failed `pipeline_run_ceiling`, exit -1, no Job. Step timeout = `step.TimeoutSeconds` or `cfg.DefaultStepTimeout`; effective = min(step, runDeadline-now); `DeadlineCode` names whichever bound.
 2. A step whose `Kind` is not `pl.StepCommand` is refused `pl.CodeExecutorError` (notify steps are the driver's). Any need with `!pl.IsNeed(n)` is refused `pl.CodeNeedUnknown` (the compiler should already have; the executor never routes on a name it does not know). `len(step.Needs) > 0` with `req.Compute != pl.ComputeClusterAndFleet` is refused `pl.CodeFleetNotConsented`. `len(step.Needs) > 0` -> `fleet.RunStep` (Task 12b). Else cluster.
-3. Cluster: `ForwardWatched(pipelineStep, args=json(StepRun))` under `systemAuthority(ctx)` (a SYSTEM-class `ForwardedAuthority`, as `RunBuild` mints it). Concurrently every 30 s send `pipelineStatus{jobName}` to the same node. Outcome arrives -> `pipelineAck` (fire and forget) -> return. Status `finished` -> take that outcome, cancel the pending forward's wait (not the work), ack, return. `ErrWorkbenchPeerLost` or status `stale` -> re-forward `pipelineStep` with no pin (another replica adopts). Effective deadline + 2 min with nothing -> failed `pipeline_node_lost`.
+3. Cluster: `ForwardWatched(workbench.PipelineStepAction, args=json(StepRun))` under `systemAuthority(ctx)` (a SYSTEM-class `ForwardedAuthority`, as `RunBuild` mints it). Concurrently every 30 s send `pipelineStatus{jobName}` to the same node. Outcome arrives -> `pipelineAck` (fire and forget) -> return. Status `finished` -> take that outcome, cancel the pending forward's wait (not the work), ack, return. `ErrWorkbenchPeerLost` or status `stale` -> re-forward `pipelineStep` with no pin (another replica adopts). Effective deadline + 2 min with nothing -> failed `pipeline_node_lost`.
 4. Every outcome: `Timings = pipelines.ParseGoTestOutput(...)` is computed by the RUNNER before it replies (add to Task 6's finalize: parse the archive file when the step's command contains `go test`).
 5. `Cancel(runID)`: cancel this node's in-flight `Execute` contexts for the run; `Forward(pipelineCancel{runID})` to any workbench (deletion is by label, cluster-wide); fleet in-flight dispatches cancel through their contexts (the dispatcher sends `ToolCancel`).
 
