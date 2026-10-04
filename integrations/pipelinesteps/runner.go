@@ -63,10 +63,14 @@ const (
 	// workbench's receive loop (integrations/workbench): it reads nothing
 	// else while they do.
 	quickCallTimeout = 10 * time.Second
-	// settleTimeout bounds what a Run does once its step is decided or
-	// cancelled -- reading the log to its end, the deletions, the Library,
-	// persisting the outcome -- under a context a late cancel cannot end.
-	settleTimeout = 2 * time.Minute
+	// libraryPhaseTimeout bounds the owner's Library writes of one settled
+	// step -- its log and its artifacts -- under a context a late cancel
+	// cannot end, and that no other phase of settling shares.
+	libraryPhaseTimeout = 2 * time.Minute
+	// persistTimeout bounds recording the outcome on the Job, retries
+	// included: a window of its own, so nothing spent before it is taken
+	// from it.
+	persistTimeout = 30 * time.Second
 	// followDrainTimeout bounds how long a decided step's log may take to
 	// be read to its end.
 	followDrainTimeout = 30 * time.Second
@@ -129,6 +133,8 @@ type Runner struct {
 	openCapture func(CaptureOptions) (*Capture, error)
 	// drainTimeout is followDrainTimeout.
 	drainTimeout time.Duration
+	// libraryTimeout is libraryPhaseTimeout.
+	libraryTimeout time.Duration
 
 	mu       sync.Mutex
 	inflight map[*inflight]struct{}
@@ -159,12 +165,13 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 	cfg.NodeID = strings.TrimSpace(cfg.NodeID)
 	return &Runner{
 		cfg: cfg, kube: kube, sink: sink, library: library, tokens: tokens,
-		log:          slog.Default().With("component", "pipelines.runner"),
-		now:          time.Now,
-		tempDir:      os.TempDir(),
-		openCapture:  NewCapture,
-		drainTimeout: followDrainTimeout,
-		inflight:     map[*inflight]struct{}{},
+		log:            slog.Default().With("component", "pipelines.runner"),
+		now:            time.Now,
+		tempDir:        os.TempDir(),
+		openCapture:    NewCapture,
+		drainTimeout:   followDrainTimeout,
+		libraryTimeout: libraryPhaseTimeout,
+		inflight:       map[*inflight]struct{}{},
 	}
 }
 

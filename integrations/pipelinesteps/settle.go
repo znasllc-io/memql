@@ -60,16 +60,19 @@ func (s *step) record(dec pl.StepResult) {
 // clone's and -- for a failed step -- the services' last words archived, the
 // log and the artifacts stored in the owner's Library, the outcome persisted
 // on the Job. A cancel arriving now changes none of it.
+//
+// Each phase has a deadline of its own, and none can spend another's: a
+// Library that does not answer costs the step its files, never the outcome
+// recorded on the Job (step 9), which is what answers a reply lost with this
+// replica.
 func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), settleTimeout)
-	defer cancel()
 	if pod != nil {
 		if f == nil {
 			// It ended between two polls: its log is read now.
 			f = s.follow(pod.Metadata.Name, true)
 		}
 		f.drain(s.r.drainTimeout)
-		s.tails(ctx, pod.Metadata.Name, dec.Status == pl.OutcomeFailed)
+		s.tails(pod.Metadata.Name, dec.Status == pl.OutcomeFailed)
 	} else if f != nil {
 		f.stop()
 	}
@@ -77,31 +80,49 @@ func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
 	res := dec
 	res.Where = s.where()
 	notes := s.newNotes()
-	cr := s.storeLog(ctx, &res, notes)
-	s.storeArtifacts(ctx, cr, &res, notes)
+	libCtx, cancelLib := s.libraryContext()
+	defer cancelLib()
+	cr := s.storeLog(libCtx, &res, notes)
+	s.storeArtifacts(libCtx, cr, &res, notes)
 	res.Notes = notes.list()
 	// Timings stay empty until the seam exports ParseGoTestOutput (ledger
 	// ruling R6).
-	s.persist(ctx, res)
+	persistCtx, cancelPersist := s.persistContext()
+	defer cancelPersist()
+	s.persist(persistCtx, res)
 	s.log.Info("pipelines: the step is settled", "status", res.Status, "exitCode", res.ExitCode)
 	return res
+}
+
+// libraryContext is the deadline the owner's Library is written under: no
+// cancel ends it, and no other phase shares it.
+func (s *step) libraryContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(s.ctx), s.r.libraryTimeout)
+}
+
+// persistContext is the window the outcome is recorded on the Job in, retries
+// included: no cancel ends it, and nothing spent before it is taken from it.
+func (s *step) persistContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(s.ctx), persistTimeout)
 }
 
 // tails archives the last words of the clone and, when the step failed, of
 // each service -- as notes in the archive, never in the store, whose live view
 // is the step's own output. The kubelet stops every service after every step,
 // so their last words only say something when the step failed.
-func (s *step) tails(ctx context.Context, pod string, failed bool) {
-	s.tail(ctx, pod, ContainerClone, "the clone", cloneTailLines)
+func (s *step) tails(pod string, failed bool) {
+	s.tail(pod, ContainerClone, "the clone", cloneTailLines)
 	if !failed {
 		return
 	}
 	for _, name := range sortedKeys(s.run.Services) {
-		s.tail(ctx, pod, ServicePrefix+name, "service "+name, serviceTailLines)
+		s.tail(pod, ServicePrefix+name, "service "+name, serviceTailLines)
 	}
 }
 
-func (s *step) tail(ctx context.Context, pod, container, who string, lines int) {
+func (s *step) tail(pod, container, who string, lines int) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), quickCallTimeout)
+	defer cancel()
 	out, err := s.r.kube.TailLog(ctx, pod, container, lines)
 	switch {
 	case errors.Is(err, ErrContainerNotStarted):
@@ -115,7 +136,9 @@ func (s *step) tail(ctx context.Context, pod, container, who string, lines int) 
 }
 
 // persist writes the outcome on the Job, unconditionally, before the Run
-// answers: a reply lost now is answered again from the Job.
+// answers: a reply lost now is answered again from the Job. ctx is its own
+// window (persistContext): what the step's other phases spent is never taken
+// from it.
 func (s *step) persist(ctx context.Context, res pl.StepResult) {
 	body, err := json.Marshal(res)
 	if err != nil {
@@ -273,7 +296,7 @@ func (s *step) store(ctx context.Context, name, mimeType string, body []byte, wh
 // rewrites it. Otherwise the Job and its Secret are deleted and the step is
 // cancelled, with what this Run captured archived.
 func (s *step) abandon(pod *Pod) pl.StepResult {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), settleTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), quickCallTimeout)
 	defer cancel()
 	if job, err := s.r.kube.GetJob(ctx, s.jobName); err == nil {
 		if out, ok := persisted(job); ok {
@@ -288,19 +311,17 @@ func (s *step) abandon(pod *Pod) pl.StepResult {
 		s.log.Warn("pipelines: the cancelled step's Secret could not be deleted", "error", err)
 	}
 	s.log.Info("pipelines: the step was cancelled; its Job and Secret are deleted")
-	return s.cancelled(ctx, pod, "the step was cancelled")
+	return s.cancelled(pod, "the step was cancelled")
 }
 
 // vanished answers a Run whose Job was deleted under it with no cancel of its
 // own: another replica cancelled the run.
 func (s *step) vanished(pod *Pod) pl.StepResult {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), settleTimeout)
-	defer cancel()
 	s.log.Info("pipelines: the step's Job was deleted under this runner: its run was cancelled elsewhere")
-	return s.cancelled(ctx, pod, "the step's Job was deleted while it ran: its run was cancelled")
+	return s.cancelled(pod, "the step's Job was deleted while it ran: its run was cancelled")
 }
 
-func (s *step) cancelled(ctx context.Context, pod *Pod, why string) pl.StepResult {
+func (s *step) cancelled(pod *Pod, why string) pl.StepResult {
 	res := pl.StepResult{
 		Status: pl.OutcomeCancelled, ExitCode: -1,
 		Failure: &pl.Failure{Code: pl.CodeStepCancelled, Message: why},
@@ -311,7 +332,9 @@ func (s *step) cancelled(ctx context.Context, pod *Pod, why string) pl.StepResul
 	if s.capture != nil {
 		s.capture.Note("memql: " + why)
 		notes := s.newNotes()
+		ctx, cancel := s.libraryContext()
 		s.storeLog(ctx, &res, notes)
+		cancel()
 		res.Notes = notes.list()
 	}
 	return res

@@ -904,9 +904,19 @@ type rtLibrary struct {
 	files []RunFile
 	omit  map[string]string
 	fail  map[string]error
+	// block makes every store wait for its context to end, and fail with it:
+	// a Library that does not answer.
+	block bool
 }
 
-func (l *rtLibrary) StoreRunFile(_ context.Context, f RunFile) (StoredFile, error) {
+func (l *rtLibrary) StoreRunFile(ctx context.Context, f RunFile) (StoredFile, error) {
+	l.mu.Lock()
+	block := l.block
+	l.mu.Unlock()
+	if block {
+		<-ctx.Done()
+		return StoredFile{}, ctx.Err()
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.files = append(l.files, f)
@@ -2486,6 +2496,29 @@ func TestRunnerOmittedLibraryFileIsANote(t *testing.T) {
 			}
 			h.leftNoArchive(t)
 		})
+	}
+}
+
+// TestRunnerPersistsItsOutcomeWhateverTheLibraryCosts: the outcome is
+// recorded on the Job before Run answers (step 9), so a reply lost with a
+// replica can be answered again. A Library that does not answer must cost the
+// step its files -- notes say so -- and never that record: the Library phase
+// has a deadline of its own, and persisting runs under its own.
+func TestRunnerPersistsItsOutcomeWhateverTheLibraryCosts(t *testing.T) {
+	h := newRunnerHarness(t)
+	h.r.libraryTimeout = 50 * time.Millisecond
+	h.lib.block = true
+	h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
+
+	res := h.run(t, rtRun())
+
+	if res.Status != pl.OutcomeSucceeded || res.LogFileID != "" || len(res.Notes) != 1 || !strings.Contains(res.Notes[0].Message, "deadline") {
+		t.Fatalf("result = %+v, want success with no log file and a note saying the Library ran out of time", res)
+	}
+	var persisted pl.StepResult
+	raw := h.c.jobNow(t, testJobName).Metadata.Annotations[AnnotOutcome]
+	if err := json.Unmarshal([]byte(raw), &persisted); err != nil || !reflect.DeepEqual(persisted, res) {
+		t.Errorf("outcome on the Job = %q (%v), want the result Run answered: a slow Library cost the step its record", raw, err)
 	}
 }
 
