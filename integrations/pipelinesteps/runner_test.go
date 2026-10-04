@@ -3016,6 +3016,34 @@ func rtFramedLines(t *testing.T, line string, tgz []byte) []string {
 	return append(out, captureKubeLine(rtAt(1999), marker+" end"))
 }
 
+// TestRunnerMasksStepTextInItsOwnLog (fix round 1, minor 9): an artifact's
+// name is the step's, and a Library error can quote it. The node's own log
+// line about a file that was not stored is masked like the step's output.
+func TestRunnerMasksStepTextInItsOwnLog(t *testing.T) {
+	h := newRunnerHarness(t)
+	logs := h.logs()
+	run := rtRun()
+	run.Artifacts = []string{"dist/*"}
+	path := "dist/" + plantedNPM + ".txt"
+	tgz := extractTestTgz(t, []extractTestEntry{{name: path, body: "x"}})
+	h.c.script(testJobName, rtFinishingScript(testJobName, 0, rtFramedLines(t, "ok", tgz)...))
+	name := artifactFileName(path)
+	h.lib.fail = map[string]error{name: fmt.Errorf("the Library refused %q: the owner's quota is spent", name)}
+
+	res := h.run(t, run)
+
+	if res.Status != pl.OutcomeSucceeded || len(res.Notes) != 1 {
+		t.Fatalf("result = %+v (failure %+v), want a success with a note of the file not stored", res, res.Failure)
+	}
+	text := logs.String()
+	if logs.count("pipelines: a step's file could not be stored in the Library") != 1 {
+		t.Fatalf("the node logged nothing of the file it could not store:\n%s", text)
+	}
+	if strings.Contains(text, plantedNPM) {
+		t.Errorf("the node's log carries the step's secret:\n%s", text)
+	}
+}
+
 // TestRunnerStoresArtifactsUnderTheOwner: a step's artifacts come out of its
 // frame and into the owner's Library, one file each, named by their path; a
 // declared path that matched nothing and an entry that was refused are notes

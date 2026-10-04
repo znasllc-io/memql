@@ -284,7 +284,9 @@ func (s *step) store(ctx context.Context, name, mimeType string, body []byte, wh
 	})
 	switch {
 	case err != nil:
-		s.log.Warn("pipelines: a step's file could not be stored in the Library", "file", name, "error", err)
+		// The name is the step's, and the Library's error may quote it: the
+		// node's log gets them masked, like the note.
+		s.log.Warn("pipelines: a step's file could not be stored in the Library", "file", s.mask(name), "error", s.mask(err.Error()))
 		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: "+err.Error())
 	case got.Omitted != "":
 		notes.add(pl.CodeArtifactMissing, what+" was not stored in the Library: "+got.Omitted)
