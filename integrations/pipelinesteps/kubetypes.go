@@ -223,9 +223,13 @@ type PodList struct {
 	Items []Pod `json:"items"`
 }
 
-// PodStatus is a pod's observed state.
+// PodStatus is a pod's observed state. Reason and Message are set when the
+// pod as a whole failed or was stopped (Evicted, OutOfcpu, ...), which no
+// container's state says.
 type PodStatus struct {
 	Phase                 string            `json:"phase,omitempty"`
+	Reason                string            `json:"reason,omitempty"`
+	Message               string            `json:"message,omitempty"`
 	Conditions            []PodCondition    `json:"conditions,omitempty"`
 	InitContainerStatuses []ContainerStatus `json:"initContainerStatuses,omitempty"`
 	ContainerStatuses     []ContainerStatus `json:"containerStatuses,omitempty"`
@@ -240,10 +244,18 @@ type PodCondition struct {
 	Message string `json:"message,omitempty"`
 }
 
-// ContainerStatus is one container's observed state.
+// ContainerStatus is one container's observed state. Image is the image the
+// kubelet runs, or is trying to pull. RestartCount and LastState matter for a
+// service: a sidecar is restarted whatever the pod's restart policy, so one
+// that crashed, or that its startup probe killed, can read running again with
+// only these two saying it stopped before. LastState is a value, and an empty
+// one ({} on the wire) is the API saying there was no previous run.
 type ContainerStatus struct {
-	Name  string         `json:"name"`
-	State ContainerState `json:"state"`
+	Name         string         `json:"name"`
+	Image        string         `json:"image,omitempty"`
+	State        ContainerState `json:"state"`
+	LastState    ContainerState `json:"lastState,omitzero"`
+	RestartCount int32          `json:"restartCount,omitempty"`
 }
 
 // ContainerState is exactly one of waiting, running or terminated.
