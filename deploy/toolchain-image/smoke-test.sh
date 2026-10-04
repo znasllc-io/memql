@@ -13,8 +13,9 @@
 #   1. Every tool a step reaches for runs.   go, node, npm, protoc, git, make,
 #                                            psql, pg_isready, curl, tar, gzip,
 #                                            base64, unzip, jq, python3 and its
-#                                            yaml module, kubectl. A miss exits
-#                                            non-zero naming the tool.
+#                                            yaml module, kubectl, the docker
+#                                            client. A miss exits non-zero
+#                                            naming the tool.
 #   2. Go and protoc are the versions this repository pins, read from WHERE it
 #      pins them (go.work's toolchain line, scripts/dev/proto-gen.sh's
 #      PROTOC_VERSION) rather than from a third copy here. A pinned image
@@ -91,7 +92,7 @@ set -euo pipefail
 for probe in "go version" "node --version" "npm --version" "protoc --version" \
 	"git --version" "make --version" "psql --version" "pg_isready --version" \
 	"curl --version" "tar --version" "gzip --version" "base64 --version" "unzip -v" \
-	"jq --version" "python3 --version" "kubectl version --client"; do
+	"jq --version" "python3 --version" "kubectl version --client" "docker --version"; do
 	tool="${probe%% *}"
 	command -v "$tool" >/dev/null || { echo "ERROR: ${tool} is not on PATH" >&2; exit 1; }
 	# Word-split on purpose: the probe is a command and its flag.

@@ -14,6 +14,7 @@
 #   protoc    33.4     scripts/dev/proto-gen.sh's PROTOC_VERSION
 #   kubectl   1.32.13  scripts/k3d/up.sh's K3S_VERSION, the deploy target's
 #                      Kubernetes
+#   docker    29.8.2   the CLIENT only; there is no daemon (see its stage)
 #   git, make, bash, curl, tar, gzip, unzip, jq, python3 (with PyYAML),
 #   coreutils, ca-certificates, and postgresql-client (psql, pg_isready)
 #
@@ -78,6 +79,17 @@ FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddf
 # v5.5.0, renders the `components:` these overlays use, which Debian's own
 # kubectl, 1.20.2, cannot. The binary is static, so it runs on the base below.
 FROM registry.k8s.io/kubectl:v1.32.13@sha256:fbfd671cd51f0be98174170f2000cbb97d2788e2270bc1697323d401558307e1 AS kubectl-dist
+
+# The Docker CLIENT and nothing else: the official cli image, by digest, copied
+# out by stage name without its buildx and compose plugins. There is NO daemon
+# -- no dockerd, no containerd, here or anywhere in a step's pod -- so `docker
+# build` and `docker run` cannot work, and no step runs them. The client is for
+# scripts/release/release.sh, which checks `command -v docker` before every run,
+# dry runs included, and whose push dry run probes the registry for the tag it
+# would overwrite with `docker manifest inspect`: a registry call, not a daemon
+# one. Without it, four scripts/release tests fail. 29.8.2 is the newest 29.x
+# release at the time of pinning; the binary is static.
+FROM docker:29.8.2-cli@sha256:b1805116a6a86cc591b5d5f60a910a0715cdcc9d18d866ad68b1457ead25c35c AS docker-dist
 
 # protoc, fetched from its release and checked against a pinned SHA-256 per
 # architecture before it is unpacked. The stage runs on the BUILD platform
@@ -161,6 +173,7 @@ COPY --from=node-dist /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=protoc-dist /opt/protoc/bin/protoc /usr/local/bin/protoc
 COPY --from=protoc-dist /opt/protoc/include /usr/local/include
 COPY --from=kubectl-dist /bin/kubectl /usr/local/bin/kubectl
+COPY --from=docker-dist /usr/local/bin/docker /usr/local/bin/docker
 
 RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
     ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
@@ -182,7 +195,7 @@ USER 1000:1000
 # A broken copy fails the build here; deploy/toolchain-image/smoke-test.sh is
 # the full check, and the release lane runs it before anything is pushed.
 RUN go version && node --version && protoc --version && git --version && psql --version && \
-    kubectl version --client
+    kubectl version --client && docker --version
 
 LABEL org.opencontainers.image.title="memql-toolchain" \
       org.opencontainers.image.description="The container MemQL pipeline steps run in: Go, Node, protoc, git, make and the PostgreSQL client on Debian bookworm, as uid 1000" \
