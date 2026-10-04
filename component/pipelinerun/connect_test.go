@@ -3,6 +3,8 @@ package pipelinerun
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -54,12 +56,18 @@ func connectHarness(t *testing.T, manifest string) *harness {
 	return h
 }
 
+// connect connects with the defaults a test does not care about: the shop's
+// package, webhook delivery, and connectManifest's one secret allowed. A test
+// about the allowlist passes its own (an empty, non-nil list allows nothing).
 func connect(h *harness, ctx context.Context, req ConnectRequest) (ConnectResult, error) {
 	if req.PackageID == "" {
 		req.PackageID = packageID
 	}
 	if req.Delivery == "" {
 		req.Delivery = DeliveryWebhook
+	}
+	if req.SecretNames == nil {
+		req.SecretNames = []string{"SHOP_TOKEN"}
 	}
 	return h.integ.Connect(ctx, req)
 }
@@ -293,6 +301,120 @@ func TestTheConnectCapabilityAnswersThePipeline(t *testing.T) {
 	payload := decodeNode(t, nodes)
 	if payload["pipelineId"] != PipelineIDFor(packageID) || payload["compute"] != "cluster" || payload["repository"] != repoName {
 		t.Errorf("answer = %v", payload)
+	}
+}
+
+// Consent is asked of EVERY step, not only the stages one event would plan:
+// a step in a push-only stage that names a need, on a cluster-only pipeline,
+// is refused at connect rather than on the first push that reaches it.
+func TestConnectAsksConsentOfEveryStep(t *testing.T) {
+	const fleetManifest = `formatVersion: 1
+name: shop
+pipeline:
+  stages:
+    - name: checks
+      steps:
+        - name: vet
+          run: go vet ./...
+    - name: release
+      on: [push]
+      steps:
+        - name: sign
+          run: make sign
+          needs: { macos_tooling: true }
+`
+	h := connectHarness(t, fleetManifest)
+	_, err := connect(h, personCtx(ownerID), ConnectRequest{})
+	var r *pipelines.Refusal
+	if !errors.As(err, &r) || r.Code != pipelines.CodeFleetNotConsented || r.Scope != "release/sign" {
+		t.Fatalf("err = %v, want %s scoped release/sign", err, pipelines.CodeFleetNotConsented)
+	}
+	if _, err := connect(h, personCtx(ownerID), ConnectRequest{Compute: pipelines.ComputeClusterAndFleet}); err != nil {
+		t.Errorf("with the fleet consented the same pipeline connects: %v", err)
+	}
+
+	// The allowlist too: connectManifest's unit step names SHOP_TOKEN.
+	h = connectHarness(t, connectManifest)
+	_, err = connect(h, personCtx(ownerID), ConnectRequest{SecretNames: []string{}})
+	if !errors.As(err, &r) || r.Code != pipelines.CodeSecretNotAllowed || r.Scope != "tests/unit" {
+		t.Fatalf("err = %v, want %s scoped tests/unit", err, pipelines.CodeSecretNotAllowed)
+	}
+	if n := len(h.store.pipelineCreates); n != 0 {
+		t.Errorf("a pipeline some event could never run is never connected: %d writes", n)
+	}
+}
+
+// One pipeline per repository: another source's ACTIVE pipeline of the same
+// repository refuses the connect, before any request leaves the cluster; a
+// disconnected one is history and refuses nothing; the source's own is a
+// reconnect.
+func TestConnectRefusesARepositoryAnotherSourceRuns(t *testing.T) {
+	h := connectHarness(t, connectManifest)
+	theirs := testPipeline(DeliveryWebhook)
+	theirs.ID, theirs.PackageID, theirs.OwnerUserID = PipelineIDFor("pkg-theirs"), "pkg-theirs", "v1:identity:user:"+otherID
+	h.store.addPipeline(theirs)
+
+	_, err := connect(h, personCtx(ownerID), ConnectRequest{})
+	var r *pipelines.Refusal
+	if !errors.As(err, &r) || r.Code != pipelines.CodeAlreadyConnected {
+		t.Fatalf("err = %v, want %s", err, pipelines.CodeAlreadyConnected)
+	}
+	if strings.Contains(r.Detail, otherID) {
+		t.Errorf("the refusal names whose pipeline it is: %q", r.Detail)
+	}
+	if n := len(h.github.tokenMints); n != 0 {
+		t.Errorf("the repository was known taken before any request left the cluster: %d mints", n)
+	}
+	if n := len(h.store.pipelineCreates); n != 0 {
+		t.Errorf("nothing is written: %d", n)
+	}
+
+	theirs.Status = PipelineDisconnected
+	h.store.addPipeline(theirs)
+	if _, err := connect(h, personCtx(ownerID), ConnectRequest{}); err != nil {
+		t.Fatalf("a disconnected predecessor blocks nothing: %v", err)
+	}
+	// And the source's own pipeline, now active, is a reconnect.
+	res, err := connect(h, personCtx(ownerID), ConnectRequest{Delivery: DeliveryPoll})
+	if err != nil || !res.Reconnected {
+		t.Fatalf("reconnecting the source's own pipeline: %+v %v", res, err)
+	}
+}
+
+// Two sources connecting one repository at once: the repository's gate
+// serializes them, and exactly one pipeline is connected.
+func TestConcurrentConnectsOfOneRepositoryConnectOne(t *testing.T) {
+	h := connectHarness(t, connectManifest)
+	second := h.store.packages[packageID]
+	second.ID, second.OwnerUserID = "pkg-second", "v1:identity:user:"+otherID
+	h.store.addPackage(second)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i, c := range []struct {
+		ctx context.Context
+		pkg string
+	}{
+		{personCtx(ownerID), packageID},
+		{personCtx(otherID), "pkg-second"},
+	} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = connect(h, c.ctx, ConnectRequest{PackageID: c.pkg})
+		}()
+	}
+	wg.Wait()
+	refused := 0
+	for _, err := range errs {
+		if refusalCode(err) == pipelines.CodeAlreadyConnected {
+			refused++
+		} else if err != nil {
+			t.Errorf("unexpected: %v", err)
+		}
+	}
+	if refused != 1 || len(h.store.pipelineCreates) != 1 {
+		t.Errorf("refused %d, created %d; want exactly one of each", refused, len(h.store.pipelineCreates))
 	}
 }
 

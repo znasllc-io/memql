@@ -145,6 +145,12 @@ func (i *Integration) Connect(ctx context.Context, req ConnectRequest) (ConnectR
 		return ConnectResult{}, &packages.Refusal{Code: packages.CodeCredentialNotFound,
 			Detail: "this source names no GitHub connection, and a pipeline's checks are minted only through its owner's: switch the source to your GitHub connection first"}
 	}
+	// One pipeline per repository, asked BEFORE any request leaves the
+	// cluster so a second source learns it at once; asked again under the
+	// repository's gate before the write, which is the answer that counts.
+	if refusal, err := alreadyConnected(ctx, d, repository, pkg.ID); err != nil || refusal != nil {
+		return ConnectResult{}, firstErr(err, refusal)
+	}
 
 	// THE GRANT: minting proves it still reaches the repository, and names
 	// the installation deliveries must arrive through.
@@ -179,6 +185,12 @@ func (i *Integration) Connect(ctx context.Context, req ConnectRequest) (ConnectR
 	if refusal := pipelines.Validate(manifest.Pipeline); refusal != nil {
 		return ConnectResult{}, refusal
 	}
+	// Consent, of EVERY step whatever event would plan it: a step naming a
+	// need on a cluster-only pipeline, or a secret this allowlist does not
+	// hold, is refused now rather than on the first push that reaches it.
+	if refusal := pipelines.Consent(manifest.Pipeline, compute, secretNames); refusal != nil {
+		return ConnectResult{}, refusal
+	}
 
 	p := Pipeline{
 		ID:             PipelineIDFor(pkg.ID),
@@ -195,21 +207,30 @@ func (i *Integration) Connect(ctx context.Context, req ConnectRequest) (ConnectR
 		SecretNames:    secretNames,
 	}
 	reconnected := false
-	err = d.gate(ctx, PipelineGateKey(p.ID), func(gctx context.Context) error {
-		existing, err := d.Store.PipelineByID(memql.ContextWithFreshRead(gctx), p.ID)
-		if err != nil {
-			return err
+	// The repository's gate, then the pipeline's (ids.go's order): two
+	// sources connecting one repository at once serialize here, and the
+	// second finds the first.
+	err = d.gate(ctx, RepositoryGateKey(repository), func(rctx context.Context) error {
+		refusal, err := alreadyConnected(memql.ContextWithFreshRead(rctx), d, repository, pkg.ID)
+		if err != nil || refusal != nil {
+			return firstErr(err, refusal)
 		}
-		reconnected = existing != nil
-		if err := d.Store.CreatePipeline(gctx, p); err != nil {
-			return err
-		}
-		if existing != nil && existing.Repository != p.Repository && len(existing.Heads) > 0 {
-			// The source now points at another repository: what the poll
-			// saw there is not a baseline here.
-			return d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Heads: ptr(map[string]string{})})
-		}
-		return nil
+		return d.gate(rctx, PipelineGateKey(p.ID), func(gctx context.Context) error {
+			existing, err := d.Store.PipelineByID(memql.ContextWithFreshRead(gctx), p.ID)
+			if err != nil {
+				return err
+			}
+			reconnected = existing != nil
+			if err := d.Store.CreatePipeline(gctx, p); err != nil {
+				return err
+			}
+			if existing != nil && existing.Repository != p.Repository && len(existing.Heads) > 0 {
+				// The source now points at another repository: what the
+				// poll saw there is not a baseline here.
+				return d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Heads: ptr(map[string]string{})})
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		return ConnectResult{}, err
@@ -263,6 +284,39 @@ func (i *Integration) Disconnect(ctx context.Context, pipelineID string) (Pipeli
 	}
 	p.Status = PipelineDisconnected
 	return *p, nil
+}
+
+// alreadyConnected refuses a repository another source already runs -- an
+// ACTIVE pipeline of it under a different package -- because two pipelines
+// on one repository would write two same-named check runs on every commit.
+// The same package's own pipeline is a reconnect, never a refusal, and a
+// disconnected one is history that blocks nothing. The read is the
+// server-only kind on purpose: the other pipeline is somebody else's, so the
+// refusal says that one exists and nothing about whose it is.
+func alreadyConnected(ctx context.Context, d Deps, repository, packageID string) (*pipelines.Refusal, error) {
+	active, err := d.Store.PipelinesForRepository(ctx, repository)
+	if err != nil {
+		return nil, err
+	}
+	for _, other := range active {
+		if other.Active() && !sameID(other.PackageID, packageID) {
+			return pipelines.Refuse(pipelines.CodeAlreadyConnected, "",
+				"%s already has a pipeline, connected from another source. A repository has one pipeline, so its checks are reported once per commit.", repository), nil
+		}
+	}
+	return nil, nil
+}
+
+// firstErr is err, else refusal as an error, else nil -- never a typed nil
+// inside a non-nil error.
+func firstErr(err error, refusal *pipelines.Refusal) error {
+	if err != nil {
+		return err
+	}
+	if refusal != nil {
+		return refusal
+	}
+	return nil
 }
 
 // allowlist validates and normalizes the secret names a pipeline may resolve:

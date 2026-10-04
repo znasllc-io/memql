@@ -13,7 +13,7 @@ import (
 func queuedRun(p Pipeline, sha string) Run {
 	key := pipelines.RunKey(p.Repository, sha, pipelines.ModeAffected, pipelines.EventPullRequest)
 	return Run{
-		ID: RunIDFor(key, 1), OwnerUserID: p.OwnerUserID, PipelineID: p.ID, Repository: p.Repository, SHA: sha,
+		ID: RunIDFor(p.ID, key, 1), OwnerUserID: p.OwnerUserID, PipelineID: p.ID, Repository: p.Repository, SHA: sha,
 		Mode: pipelines.ModeAffected, Event: pipelines.EventPullRequest, RunKey: key, Attempt: 1, Trigger: TriggerWebhook,
 		PullRequest: 42, Status: StatusQueued, CheckRunID: 501, CheckRunState: CheckRunWritten, QueuedAt: testNow.Add(-tenMinutes),
 	}

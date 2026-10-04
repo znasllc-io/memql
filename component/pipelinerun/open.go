@@ -12,11 +12,17 @@ import (
 // open.go -- the one way a run comes into existence (decisions 1, 14, 15).
 //
 // A delivery, the poll and a re-run all arrive here, and here is where they
-// become ONE run per (repository, SHA, mode, event): the dedup read and the
-// create are a single critical section under the run key's gate, read fresh,
-// so a redelivered webhook, or a webhook and a poll for the same head, open
-// exactly one run and exactly one check run (Review Focus 1). Only a re-run
-// opens a second attempt of a key.
+// become ONE run per (repository, SHA, mode, event) of a pipeline: the dedup
+// read and the create are a single critical section under the run key's
+// gate, read fresh, so a redelivered webhook, or a webhook and a poll for the
+// same head, open exactly one run and exactly one check run (Review Focus 1).
+// Only a re-run opens a second attempt of a key.
+//
+// THE DEDUP IS PER PIPELINE. A repository has one active pipeline (connect
+// refuses a second, pipeline_already_connected), but a pipeline disconnected
+// and replaced by another source's keeps its runs, and those carry the same
+// keys: a predecessor's run of a head is not this pipeline's, and must not
+// stop it opening its own.
 
 // Opening is what one cause asks a pipeline to open.
 type Opening struct {
@@ -80,10 +86,11 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 
 	var result OpenResult
 	err := d.gate(ctx, OpenGateKey(key), func(gctx context.Context) error {
-		runs, err := d.Store.RunsForKey(memql.ContextWithFreshRead(gctx), key)
+		keyed, err := d.Store.RunsForKey(memql.ContextWithFreshRead(gctx), key)
 		if err != nil {
 			return err
 		}
+		runs := runsOf(keyed, p.ID)
 		newest, attempts := newestAttempt(runs)
 		if o.Trigger != TriggerRerun {
 			if attempts > 0 {
@@ -108,7 +115,7 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 
 		now := d.now()
 		run := Run{
-			ID:          RunIDFor(key, attempts+1),
+			ID:          RunIDFor(p.ID, key, attempts+1),
 			OwnerUserID: p.OwnerUserID,
 			AccountID:   p.AccountID,
 			PipelineID:  p.ID,
@@ -157,6 +164,18 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 		return nil
 	})
 	return result, err
+}
+
+// runsOf is the runs that are pipelineID's -- compared by bare short id,
+// because pipelineId is a relationship and reads back canonical.
+func runsOf(runs []Run, pipelineID string) []Run {
+	var out []Run
+	for _, r := range runs {
+		if sameID(r.PipelineID, pipelineID) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // newestAttempt is the highest attempt of a key's runs and that run; 0 when

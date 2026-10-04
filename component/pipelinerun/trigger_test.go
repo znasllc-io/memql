@@ -52,7 +52,7 @@ func TestAPullRequestDeliveryOpensOneQueuedRunWithItsCheckRun(t *testing.T) {
 		"owner":      {run.OwnerUserID, p.OwnerUserID},
 		"accountId":  {run.AccountID, p.AccountID},
 		"state":      {run.CheckRunState, CheckRunWritten},
-		"id":         {run.ID, RunIDFor(key, 1)},
+		"id":         {run.ID, RunIDFor(p.ID, key, 1)},
 	} {
 		if got[0] != got[1] {
 			t.Errorf("%s = %q, want %q", name, got[0], got[1])
@@ -219,7 +219,7 @@ func TestACheckRunRerequestOpensTheNextAttemptOfTheOriginal(t *testing.T) {
 	h.store.addPipeline(p)
 	key := pipelines.RunKey(repoName, shaA, pipelines.ModeAffected, pipelines.EventPullRequest)
 	original := Run{
-		ID: RunIDFor(key, 1), OwnerUserID: p.OwnerUserID, PipelineID: p.ID, Repository: repoName, SHA: shaA,
+		ID: RunIDFor(p.ID, key, 1), OwnerUserID: p.OwnerUserID, PipelineID: p.ID, Repository: repoName, SHA: shaA,
 		Mode: pipelines.ModeAffected, Event: pipelines.EventPullRequest, RunKey: key, Attempt: 1, Trigger: TriggerWebhook,
 		PullRequest: 42, HeadBranch: "cart-badge", BaseSHA: shaBase, Title: "Show the cart count", Version: shaA,
 		Status: StatusCompleted, Conclusion: ConclusionFailure, CheckRunID: 4242, CheckRunState: CheckRunWritten,
@@ -235,7 +235,7 @@ func TestACheckRunRerequestOpensTheNextAttemptOfTheOriginal(t *testing.T) {
 	if next.Attempt != 2 || next.RunKey != key || next.Mode != pipelines.ModeAffected || next.Event != pipelines.EventPullRequest {
 		t.Errorf("next attempt = %d key %q mode %s event %s", next.Attempt, next.RunKey, next.Mode, next.Event)
 	}
-	if next.Trigger != TriggerRerun || next.RerunOf != original.ID || next.ID != RunIDFor(key, 2) {
+	if next.Trigger != TriggerRerun || next.RerunOf != original.ID || next.ID != RunIDFor(p.ID, key, 2) {
 		t.Errorf("trigger %q rerunOf %q id %q", next.Trigger, next.RerunOf, next.ID)
 	}
 	if next.PullRequest != 42 || next.HeadBranch != "cart-badge" || next.Status != StatusQueued {
@@ -261,10 +261,10 @@ func TestACheckSuiteRerequestRerunsTheNewestRunAtTheSHA(t *testing.T) {
 	h.store.addPipeline(p)
 	mgKey := pipelines.RunKey(repoName, shaB, pipelines.ModeFull, pipelines.EventMergeGroup)
 	pushKey := pipelines.RunKey(repoName, shaB, pipelines.ModeFull, pipelines.EventPush)
-	h.store.addRun(Run{ID: RunIDFor(mgKey, 1), OwnerUserID: p.OwnerUserID, PipelineID: p.ID, Repository: repoName, SHA: shaB,
+	h.store.addRun(Run{ID: RunIDFor(p.ID, mgKey, 1), OwnerUserID: p.OwnerUserID, PipelineID: p.ID, Repository: repoName, SHA: shaB,
 		Mode: pipelines.ModeFull, Event: pipelines.EventMergeGroup, RunKey: mgKey, Attempt: 1, Status: StatusCompleted,
 		Conclusion: ConclusionSuccess, QueuedAt: testNow.Add(-2 * tenMinutes)})
-	h.store.addRun(Run{ID: RunIDFor(pushKey, 1), OwnerUserID: p.OwnerUserID, PipelineID: p.ID, Repository: repoName, SHA: shaB,
+	h.store.addRun(Run{ID: RunIDFor(p.ID, pushKey, 1), OwnerUserID: p.OwnerUserID, PipelineID: p.ID, Repository: repoName, SHA: shaB,
 		Mode: pipelines.ModeFull, Event: pipelines.EventPush, RunKey: pushKey, Attempt: 1, Status: StatusCompleted,
 		Conclusion: ConclusionFailure, QueuedAt: testNow.Add(-tenMinutes)})
 
@@ -282,7 +282,7 @@ func TestARerequestOfARunStillGoingOpensNothing(t *testing.T) {
 	p := testPipeline(DeliveryWebhook)
 	h.store.addPipeline(p)
 	key := pipelines.RunKey(repoName, shaA, pipelines.ModeFull, pipelines.EventPush)
-	h.store.addRun(Run{ID: RunIDFor(key, 1), OwnerUserID: p.OwnerUserID, PipelineID: p.ID, Repository: repoName, SHA: shaA,
+	h.store.addRun(Run{ID: RunIDFor(p.ID, key, 1), OwnerUserID: p.OwnerUserID, PipelineID: p.ID, Repository: repoName, SHA: shaA,
 		Mode: pipelines.ModeFull, Event: pipelines.EventPush, RunKey: key, Attempt: 1, Status: StatusInProgress,
 		CheckRunID: 77, QueuedAt: testNow})
 
@@ -410,24 +410,43 @@ func TestNoTokenOpensTheRunWithTheCheckRunUnavailable(t *testing.T) {
 	}
 }
 
-// One run per key per cluster: a second owner's pipeline of the same
-// repository finds the first's run rather than opening a second check run
-// of the same name on the same commit.
-func TestTwoPipelinesOfOneRepositoryShareOneRunPerKey(t *testing.T) {
+// The dedup is PER PIPELINE: a disconnected predecessor's run of a head is
+// not the new pipeline's, so it must not stop the new pipeline opening its
+// own -- and the two are different rows, because the run id carries the
+// pipeline. The new pipeline's own redelivery still dedups.
+func TestAPredecessorsRunDoesNotBlockANewPipelinesRun(t *testing.T) {
 	h := newHarness(t)
-	first := testPipeline(DeliveryWebhook)
-	second := testPipeline(DeliveryWebhook)
-	second.ID, second.PackageID, second.OwnerUserID = PipelineIDFor("pkg-other"), "pkg-other", "v1:identity:user:"+otherID
-	second.ConnectedAt = testNow
-	h.store.addPipeline(first)
-	h.store.addPipeline(second)
-
-	res := trigger(t, h, "pull_request", "d1", prDelivery(t, "opened", 42, shaA, repoName, testInstallation))
-	if len(res.Opened) != 1 || len(res.Existing) != 1 {
-		t.Fatalf("opened %d existing %d; want 1 and 1", len(res.Opened), len(res.Existing))
+	old := testPipeline(DeliveryWebhook)
+	old.ID, old.PackageID, old.OwnerUserID = PipelineIDFor("pkg-old"), "pkg-old", "v1:identity:user:"+otherID
+	old.Status = PipelineDisconnected
+	h.store.addPipeline(old)
+	key := pipelines.RunKey(repoName, shaA, pipelines.ModeAffected, pipelines.EventPullRequest)
+	predecessor := Run{
+		ID: RunIDFor(old.ID, key, 1), OwnerUserID: old.OwnerUserID,
+		// Canonical, as a relationship field reads back.
+		PipelineID: "v1:pipelines:pipeline:" + old.ID,
+		Repository: repoName, SHA: shaA, Mode: pipelines.ModeAffected, Event: pipelines.EventPullRequest,
+		RunKey: key, Attempt: 1, Status: StatusCompleted, Conclusion: ConclusionSuccess, QueuedAt: testNow.Add(-tenMinutes),
 	}
-	if !sameID(res.Opened[0].PipelineID, first.ID) {
-		t.Errorf("the earliest-connected pipeline opens the run")
+	h.store.addRun(predecessor)
+	current := testPipeline(DeliveryWebhook)
+	h.store.addPipeline(current)
+
+	body := prDelivery(t, "opened", 42, shaA, repoName, testInstallation)
+	res := trigger(t, h, "pull_request", "d1", body)
+	if len(res.Opened) != 1 || len(res.Existing) != 0 {
+		t.Fatalf("opened %d existing %d; the predecessor's run must not answer for the new pipeline", len(res.Opened), len(res.Existing))
+	}
+	opened := res.Opened[0]
+	if !sameID(opened.PipelineID, current.ID) || opened.Attempt != 1 || opened.ID == predecessor.ID {
+		t.Errorf("the new pipeline's first attempt is a row of its own: %+v", opened)
+	}
+	if got, _ := h.store.run(predecessor.ID); got.Status != StatusCompleted || got.Conclusion != ConclusionSuccess || got.OwnerUserID != old.OwnerUserID {
+		t.Errorf("the predecessor's run is untouched: %+v", got)
+	}
+	again := trigger(t, h, "pull_request", "d1", body)
+	if len(again.Opened) != 0 || len(again.Existing) != 1 || again.Existing[0].ID != opened.ID {
+		t.Errorf("the new pipeline's own redelivery dedups: %+v", again)
 	}
 }
 
