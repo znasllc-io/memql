@@ -410,6 +410,14 @@ seed capability cap-owner-read-app-deployables-logs { roleSlug: "owner"  verb: "
 seed capability cap-developer-read-app-deployables-logs { roleSlug: "developer"  verb: "read"  resourceType: "app:deployables/logs"  predefined: true }
 @description("admin: open the logs section of the deployables app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-admin-read-app-deployables-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:deployables/logs"  predefined: true }
+// The Runs section (epic memql#5479, task memql#5498): every pipeline run of the
+// sources a person connected. OWNER AND DEVELOPER, the two roles holding the
+// `connect` part below -- the runs it lists are read owner-scoped, so a role
+// that cannot connect a pipeline would only ever open an empty tab.
+@description("owner: open the runs section of the deployables app -- the pipeline runs of the sources you connected (memql#5498).")
+seed capability cap-owner-read-app-deployables-runs { roleSlug: "owner"  verb: "read"  resourceType: "app:deployables/runs"  predefined: true }
+@description("developer: open the runs section of the deployables app -- the pipeline runs of the sources you connected (memql#5498).")
+seed capability cap-developer-read-app-deployables-runs { roleSlug: "developer"  verb: "read"  resourceType: "app:deployables/runs"  predefined: true }
 
 // ---- app:fleet (registry floor: no floor) ----
 @description("owner: open the fleet app -- reproduces the OS registry floor no floor (memql#5300).")
@@ -616,6 +624,16 @@ seed capability cap-developer-read-app-settings-access { roleSlug: "developer"  
 @description("admin: open the access section of the settings app -- the grant reads' admin floor (memql#5307).")
 seed capability cap-admin-read-app-settings-access { roleSlug: "admin"  verb: "read"  resourceType: "app:settings/access"  predefined: true }
 
+// Settings -> Pipelines (epic memql#5479, task memql#5498; pipelines program
+// design record, D15): the cluster's optional Pipelines readiness item -- the
+// GitHub App, a connected repository, compute -- and the marker under the
+// gear while it is neither done nor dismissed. OWNER ONLY, by decision: what
+// the item asks for is the cluster's GitHub App and its installations, which
+// only an owner registers, and the marker is a nudge meant for the person who
+// decides whether this cluster runs anybody's CI at all.
+@description("owner: open the pipelines section of the settings app -- the optional Pipelines readiness item and its marker (memql#5498, D15).")
+seed capability cap-owner-read-app-settings-pipelines { roleSlug: "owner"  verb: "read"  resourceType: "app:settings/pipelines"  predefined: true }
+
 // ---- app:bin (registry floor: no floor) ----
 @description("owner: open the bin app -- reproduces the OS registry floor no floor (memql#5300).")
 seed capability cap-owner-read-app-bin { roleSlug: "owner"  verb: "read"  resourceType: "app:bin"  predefined: true }
@@ -732,6 +750,34 @@ seed capability cap-developer-execute-app-deployables-preview { roleSlug: "devel
 seed capability cap-owner-execute-app-deployables-store { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/store"  predefined: true }
 @description("developer: the store part of the Deployables app -- attach or change the Shopify store a storefront fronts (Connect Shopify, D3).")
 seed capability cap-developer-execute-app-deployables-store { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/store"  predefined: true }
+
+// ---- The pipelines parts (epic memql#5479, task memql#5498) ----
+//
+// OWNER AND DEVELOPER, like every part above, and FOUR rather than one,
+// because they are four different consequences. CONNECTING a pipeline
+// (connect, reconnect, disconnect, and the preview that reads the manifest
+// first) decides that every push and pull request of a repository runs on
+// this cluster under its owner's grant. RE-RUNNING one spends that compute
+// again. CANCELLING one stops work somebody may be waiting on. CHANNELS name
+// where a notify stage delivers, and epic memql#5480 writes them. A person
+// may be trusted with the second without the first, so the seam borrowing
+// `sources` and `deploy` for these (epic memql#5477) ends here.
+@description("owner: the connect part of the Deployables app -- preview, connect, reconnect or disconnect a source's pipeline (memql#5498).")
+seed capability cap-owner-execute-app-deployables-connect { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/connect"  predefined: true }
+@description("developer: the connect part of the Deployables app -- preview, connect, reconnect or disconnect a source's pipeline (memql#5498).")
+seed capability cap-developer-execute-app-deployables-connect { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/connect"  predefined: true }
+@description("owner: the rerun part of the Deployables app -- re-run a pipeline run, whole or only its failed steps (memql#5498).")
+seed capability cap-owner-execute-app-deployables-rerun { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/rerun"  predefined: true }
+@description("developer: the rerun part of the Deployables app -- re-run a pipeline run, whole or only its failed steps (memql#5498).")
+seed capability cap-developer-execute-app-deployables-rerun { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/rerun"  predefined: true }
+@description("owner: the cancel part of the Deployables app -- stop a queued or running pipeline run (memql#5498).")
+seed capability cap-owner-execute-app-deployables-cancel { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/cancel"  predefined: true }
+@description("developer: the cancel part of the Deployables app -- stop a queued or running pipeline run (memql#5498).")
+seed capability cap-developer-execute-app-deployables-cancel { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/cancel"  predefined: true }
+@description("owner: the channels part of the Deployables app -- name where a pipeline's notify stage delivers (memql#5498; its writers arrive with memql#5480).")
+seed capability cap-owner-execute-app-deployables-channels { roleSlug: "owner"  verb: "execute"  resourceType: "app:deployables/channels"  predefined: true }
+@description("developer: the channels part of the Deployables app -- name where a pipeline's notify stage delivers (memql#5498; its writers arrive with memql#5480).")
+seed capability cap-developer-execute-app-deployables-channels { roleSlug: "developer"  verb: "execute"  resourceType: "app:deployables/channels"  predefined: true }
 
 
 // ---- app:identity (registry floor: no floor) ----

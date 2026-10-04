@@ -228,6 +228,11 @@
         "name": "Sources"
       },
       {
+        "id": "runs",
+        "name": "Runs",
+        "requires": "app:deployables/runs"
+      },
+      {
         "id": "logs",
         "name": "Logs",
         "requires": "app:deployables/logs"
@@ -507,6 +512,11 @@
         "id": "integrations",
         "name": "Integrations",
         "requires": "app:settings/integrations"
+      },
+      {
+        "id": "pipelines",
+        "name": "Pipelines",
+        "requires": "app:settings/pipelines"
       },
       {
         "id": "providers",
