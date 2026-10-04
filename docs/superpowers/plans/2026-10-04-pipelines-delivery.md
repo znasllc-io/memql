@@ -433,7 +433,7 @@ Rendering rules:
 ### Task 6c: Channel and outbound rows the driver reads and writes
 
 **Files:**
-- Modify: `dsl/pipelines/mutations.memql` (append `createChannel`, `updateChannel`), `dsl/pipelines/queries.memql` (append `channelsForOwner`, `channelForOwnerByName`, `pipelineRunsForPipelineEvent`), `dsl/pipelines/shapes.memql` (append `channelFull`)
+- Modify: `dsl/pipelines/mutations.memql` (append `createPipelineChannel`, `updatePipelineChannel`), `dsl/pipelines/queries.memql` (append `pipelineChannelsForOwner`, `pipelineChannelForOwnerByName`, `pipelineRunsForPipelineEvent`), `dsl/pipelines/shapes.memql` (append `pipelineChannelFull`)
 - Modify: `component/pipelinerun/types.go` (Channel, OutboundStatus, NotificationRequest), `ports.go` (Store methods), `store_dsl.go` (+ constants), `fakes_test.go`, `store_dsl_test.go`
 - Modify: `test/dslconformance/server_only_parsed_test.go`
 
@@ -479,7 +479,7 @@ DSL (append; channels are a person's, written only by component/pipelinerun afte
 /// component/pipelinerun before this write, and a client-written row would skip them.
 @serverOnly
 @actor
-mutation channel createChannel {
+mutation channel createPipelineChannel {
   args {
     channelId   string!
     accountId   string
@@ -501,10 +501,10 @@ mutation channel createChannel {
 /// Change a channel: its name, kind, secret reference, recipients or status. Read-merge with no
 /// defaults, so a field not named keeps its value.
 ///
-/// @serverOnly for createChannel's reason: the builtin checks the name stays unique and the secret
+/// @serverOnly for createPipelineChannel's reason: the builtin checks the name stays unique and the secret
 /// name is outside the platform's MEMQL_ namespace before it writes here.
 @serverOnly
-mutation channel updateChannel {
+mutation channel updatePipelineChannel {
   args {
     channelId   string!
     name        string
@@ -522,10 +522,10 @@ mutation channel updateChannel {
 }
 ```
 
-Queries: `channelsForOwner` (@actor, `filter row => row.ownerUserId == actor.userId`, `sort "name", "asc"`, `paginate 100`, `shape channelFull`); `channelForOwnerByName(name)` (@actor, owner conjunct, `sort "row.createdAt", "desc"`, `paginate 1`); `pipelineRunsForPipelineEvent(pipelineId, event)` (@serverOnly, `actor.isClusterOwner == true` conjunct like the other server reads, `sort "queuedAt", "desc"`, `paginate 20`, `shape` = the run shape the other run reads use). Shape `channelFull`: `row.id`, `ownerUserId`, `accountId`, `name`, `kind`, `secretRef`, `recipients`, `status`, `row.createdAt`.
+Queries: `pipelineChannelsForOwner` (@actor, `filter row => row.ownerUserId == actor.userId`, `sort "name", "asc"`, `paginate 100`, `shape pipelineChannelFull`); `pipelineChannelForOwnerByName(name)` (@actor, owner conjunct, `sort "row.createdAt", "desc"`, `paginate 1`); `pipelineRunsForPipelineEvent(pipelineId, event)` (@serverOnly, `actor.isClusterOwner == true` conjunct like the other server reads, `sort "queuedAt", "desc"`, `paginate 20`, `shape` = the run shape the other run reads use). Shape `pipelineChannelFull`: `row.id`, `ownerUserId`, `accountId`, `name`, `kind`, `secretRef`, `recipients`, `status`, `row.createdAt`.
 
 - [ ] **Step 1: Failing tests:** `store_dsl_test.go`'s rendered-call check (it reads the .memql files) covers the new constants; fakes implement the methods; a borrowed-actor test: `ChannelForOwnerByName` renders under `auth.ContextWithUserActor(owner)` (assert the fake engine saw that actor).
-- [ ] **Step 2-4:** run (FAIL), implement, run (PASS): `go test ./component/pipelinerun/ -count=1`, `go run ./cmd/memqllint dsl/`, `make sdk-gen` (createChannel/updateChannel are @serverOnly and excluded; `channelsForOwner` and `channelForOwnerByName` appear), `go test ./test/dslconformance/ -count=1`, and `go test ./component/memql/ -run 'TestUndeclaredRowAuthz|TestEngineInitLoadsFullDSL|TestRowAuthz' -count=1`.
+- [ ] **Step 2-4:** run (FAIL), implement, run (PASS): `go test ./component/pipelinerun/ -count=1`, `go run ./cmd/memqllint dsl/`, `make sdk-gen` (createPipelineChannel/updatePipelineChannel are @serverOnly and excluded; `pipelineChannelsForOwner` and `pipelineChannelForOwnerByName` appear), `go test ./test/dslconformance/ -count=1`, and `go test ./component/memql/ -run 'TestUndeclaredRowAuthz|TestEngineInitLoadsFullDSL|TestRowAuthz' -count=1`.
 - [ ] **Step 5: Commit** -- `Issue #5504: channel rows and the reads the notify stage needs`.
 
 ### Task 6d: The notify executor
@@ -788,7 +788,7 @@ Invoke `frontend-design:frontend-design` before building. Clean and minimal, eve
 **Files:** Create `clients/os/src/apps/deployables/channels/ChannelsSection.tsx`, `ChannelForm.tsx`, `channels.ts` (pure: row projection, validation mirror for inline hints, summary words); Modify `clients/os/src/apps/deployables/settings.ts` (the section beside Sources, `requires: "app:deployables/channels"`), `pipelines/words.ts`, `pipelines/calls.ts`; Tests under `clients/os/test/deployables/channels/`.
 
 Layout and behavior:
-- List: one line per channel -- name; `Discord · secret DISCORD_RELEASES` or `Email · 2 recipients`; the pipelines it accepts (`memql, shop-site`, or `No pipeline yet`); status (archived lines dimmed, labelled `Archived`). A retained live collection over `channelsForOwner` (README live-collection contract); arrival cue only on a new channel.
+- List: one line per channel -- name; `Discord · secret DISCORD_RELEASES` or `Email · 2 recipients`; the pipelines it accepts (`memql, shop-site`, or `No pipeline yet`); status (archived lines dimmed, labelled `Archived`). A retained live collection over `pipelineChannelsForOwner` (README live-collection contract); arrival cue only on a new channel.
 - Empty state: one sentence ("A channel is where a pipeline's notify stage announces its runs.") plus the `New channel` action and an info detail naming the manifest syntax (`channel: <name>`).
 - Form (guided, one column): Name; Kind as a two-option segmented control (Discord webhook / Email); for Discord, the secret NAME as a text field with the hint "The globalSecret holding the webhook URL. Ask a cluster owner to store it."; for Email, recipients as a chip input; "Accepts deliveries from" as a checklist of the caller's pipelines (switches are for true on/off settings; this is multi-selection -- checkboxes). Save / Cancel. Inline refusal copy from the engine's code (never a generic error). Drafts kept when the window loses focus.
 - Per channel: `Send test message` (shows Sending..., then `Delivered` / `Failed: <reason>` / `Staged, not delivered yet` -- success only after `sent`), `Edit`, `Archive` (confirm inline with the consequence: "Runs naming it will fail pipeline_channel_archived.").
