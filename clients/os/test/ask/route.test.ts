@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AUTO_ROUTING,
-  ASK_ROUTES_KEY,
+  ASK_ROUTES_STORAGE,
   LocalAskRouteStore,
   routeLabel,
   routingFor,
@@ -93,7 +93,7 @@ describe("the per-viewer store", () => {
     const store = new LocalAskRouteStore(storage);
     store.save("c1", { source: "app:codex", level: "" });
     store.save("c1", AUTO_ROUTING);
-    expect(JSON.parse(storage.getItem(ASK_ROUTES_KEY)!).routes).toEqual({});
+    expect(JSON.parse(storage.getItem(ASK_ROUTES_STORAGE)!).routes).toEqual({});
   });
 
   it("keeps only the most recent choices", () => {
@@ -102,14 +102,14 @@ describe("the per-viewer store", () => {
     for (const id of ["a", "b", "c", "d"]) store.save(id, { source: "app:codex", level: "" });
     expect(store.load("a")).toEqual(AUTO_ROUTING);
     expect(store.load("d")).toEqual({ source: "app:codex", level: "" });
-    expect(Object.keys(JSON.parse(storage.getItem(ASK_ROUTES_KEY)!).routes)).toEqual(["b", "c", "d"]);
+    expect(Object.keys(JSON.parse(storage.getItem(ASK_ROUTES_STORAGE)!).routes)).toEqual(["b", "c", "d"]);
   });
 
   it("works with corrupt or unavailable storage: Auto, never a crash", () => {
     const corrupt = new MemoryStorage();
-    corrupt.setItem(ASK_ROUTES_KEY, "{not json");
+    corrupt.setItem(ASK_ROUTES_STORAGE, "{not json");
     expect(new LocalAskRouteStore(corrupt).load("c1")).toEqual(AUTO_ROUTING);
-    corrupt.setItem(ASK_ROUTES_KEY, JSON.stringify({ version: 9, routes: { c1: { source: "app:codex", level: "" } } }));
+    corrupt.setItem(ASK_ROUTES_STORAGE, JSON.stringify({ version: 9, routes: { c1: { source: "app:codex", level: "" } } }));
     expect(new LocalAskRouteStore(corrupt).load("c1")).toEqual(AUTO_ROUTING);
 
     const throwing = {
@@ -136,7 +136,7 @@ describe("the per-viewer store", () => {
 
     // Readable but full: what this page chose wins over what is stored.
     const full = new MemoryStorage();
-    full.setItem(ASK_ROUTES_KEY, JSON.stringify({ version: 1, routes: { c2: { source: "app:codex", level: "" } } }));
+    full.setItem(ASK_ROUTES_STORAGE, JSON.stringify({ version: 1, routes: { c2: { source: "app:codex", level: "" } } }));
     full.setItem = () => { throw new Error("QuotaExceededError"); };
     const fullStore = new LocalAskRouteStore(full);
     fullStore.save("c2", AUTO_ROUTING);

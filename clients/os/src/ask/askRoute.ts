@@ -123,7 +123,7 @@ export interface AskRouteStore {
   save(conversationId: string, routing: AskRouting): void;
 }
 
-export const ASK_ROUTES_KEY = "memql-os-ask-routes-v1";
+export const ASK_ROUTES_STORAGE = "memql-os-ask-routes-v1";
 /** Enough for every conversation somebody is plausibly still in. */
 const ASK_ROUTES_KEPT = 200;
 
@@ -168,7 +168,7 @@ export class LocalAskRouteStore implements AskRouteStore {
     const ids = Object.keys(doc.routes);
     for (const id of ids.slice(0, Math.max(0, ids.length - this.kept))) delete doc.routes[id];
     try {
-      this.storage?.setItem(ASK_ROUTES_KEY, JSON.stringify(doc));
+      this.storage?.setItem(ASK_ROUTES_STORAGE, JSON.stringify(doc));
     } catch {
       // Refused: the session map above still holds it for this page.
     }
@@ -176,7 +176,7 @@ export class LocalAskRouteStore implements AskRouteStore {
 
   private read(): RoutesDocument {
     try {
-      const raw = this.storage?.getItem(ASK_ROUTES_KEY);
+      const raw = this.storage?.getItem(ASK_ROUTES_STORAGE);
       const parsed = raw ? (JSON.parse(raw) as Partial<RoutesDocument>) : null;
       if (!parsed || parsed.version !== 1 || !parsed.routes || typeof parsed.routes !== "object") {
         return { version: 1, routes: {} };
