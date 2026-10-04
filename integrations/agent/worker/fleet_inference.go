@@ -149,27 +149,21 @@ func (f *FleetInference) Call(ctx context.Context, req memqlengine.FleetCallRequ
 		err  error
 	)
 	if strings.TrimSpace(req.RegistrationId) != "" {
-		// A machine pin narrows the ordinary owner-scoped plan. It cannot
-		// authorize a foreign/shared machine or bypass model/context/policy
-		// eligibility, and it must never fall through to another candidate.
-		plan, err = f.router.PlanModel(ctx, req.ActingUserId, req.ModelId, needs)
-		if err == nil {
-			selected := make([]Candidate, 0, 1)
-			for _, candidate := range plan.Candidates {
-				if sameSubject(candidate.RegistrationId, req.RegistrationId) {
-					selected = append(selected, candidate)
-				}
-			}
-			plan.Candidates = selected
-			// Only this machine can serve the pinned call. Rejections from the
-			// broader owner plan must not obscure its actual dispatch failure.
-			plan.Rejected = nil
-			plan.Total = 1
-			if len(selected) == 0 {
-				return memqlengine.FleetCallResult{}, &memqlengine.FleetUnavailable{
-					ModelId: req.ModelId, Total: 1,
-					Considered: map[string]string{"selected machine": "unavailable or not eligible for this call; check that it is yours, online, and offers the model with the required context"},
-				}
+		// A machine pin selects one machine from the plan the same call gets
+		// unpinned: the caller's own machines and the ones lent to them
+		// (memql#5662). It cannot reach a machine that plan would not, cannot
+		// bypass model, context or policy eligibility, and never falls through
+		// to another candidate -- PlanPinnedModel says why for each.
+		plan, err = f.router.PlanPinnedModel(ctx, req.ActingUserId, req.RegistrationId, req.ModelId, needs)
+		if err == nil && len(plan.Candidates) == 0 {
+			// ONE SENTENCE, keyed by the pin rather than by a machine id. A
+			// machine that is offline, one that is somebody else's and not
+			// lent, and one that does not exist all read the same, so the
+			// refusal names nothing and answers no question about who owns
+			// what (D12).
+			return memqlengine.FleetCallResult{}, &memqlengine.FleetUnavailable{
+				ModelId: req.ModelId, Total: 1,
+				Considered: map[string]string{"selected machine": "unavailable or not eligible for this call; check that it is yours or lent to you, online, and offers the model with the required context"},
 			}
 		}
 	} else if strings.TrimSpace(req.ActingUserId) == "" {

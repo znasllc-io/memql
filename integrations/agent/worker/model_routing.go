@@ -15,11 +15,15 @@ package worker
 // TWO PROPERTIES ARE SECURITY-LOAD-BEARING, and both are structural rather
 // than checked:
 //
-//   - A MODEL CALL CARRIES THE ACTING USER'S PROMPTS. So it routes ONLY to
-//     that user's machines, and the way that is guaranteed is that the
-//     user-scoped path reads through WorkersForOwner, which is caller-scoped
-//     at the query (`ownerUserId==actor.userId`). There is no filter to forget
-//     because there is no cross-user read on this path at all.
+//   - A MODEL CALL CARRIES THE ACTING USER'S PROMPTS. So PlanModel routes
+//     ONLY to that user's machines, and the way that is guaranteed is that it
+//     reads through WorkersForOwner, which is caller-scoped at the query
+//     (`ownerUserId==actor.userId`). There is no filter to forget because
+//     there is no cross-user read in it at all. The one widening is a machine
+//     somebody LENT to the user, under both consents, and it lives in
+//     shared_resolution.go behind its own interface -- for an unpinned call
+//     (PlanUserModelWithShared) and for a pinned one (PlanPinnedModel,
+//     memql#5662) alike.
 //   - A SYSTEM CALL HAS NO ACTING USER, so it cannot use that path. It reaches
 //     only machines whose OWNER opted in, and the opt-in is read from
 //     `operatorLabels` ALONE -- never from the merge. That distinction is the
@@ -83,6 +87,64 @@ func (r *Router) PlanModel(
 		return plan, err
 	}
 	return narrowToModel(plan, modelId, needs), nil
+}
+
+// PlanPinnedModel plans a call PINNED to one machine: the person named the
+// machine that runs it, and no other machine may (memql#5662).
+//
+// THE PIN NARROWS, IT NEVER WIDENS. It selects from exactly the machines the
+// same call is planned over unpinned -- the caller's own, then the ones lent
+// to them under both consents (PlanUserModelWithShared) -- so naming a machine
+// cannot reach one the person could not otherwise use, and cannot skip the
+// model, context or capability checks narrowToModel applies. A pin to a
+// machine lent to the caller is served; one to a machine that is not lent to
+// them finds nothing, exactly as one to an id that does not exist. Before the
+// owner's ruling of 2026-10-04 this read PlanModel, so a pin to a lent machine
+// was refused while the same call unpinned could land on that very machine.
+//
+// IT NEVER FALLS THROUGH. The plan holds the pinned machine or nothing, so a
+// refusal before start cannot move the call onto another candidate.
+//
+// SYSTEM WORK CANNOT PIN. A blank acting user is refused rather than handed to
+// the shared plan, PlanModel's rule and for its reason: a pin is a person's
+// choice of machine, and a caller that failed to resolve its person must not
+// make one. The cluster's synthetic identities do reach the person path, where
+// ServesPerson admits them only to a machine lent to everyone, so a pin
+// decides nothing for them that an unpinned call would not.
+func (r *Router) PlanPinnedModel(
+	ctx context.Context,
+	actingUserId string,
+	registrationId string,
+	modelId string,
+	needs ModelNeeds,
+) (RoutePlan, error) {
+	if r == nil || r.store == nil {
+		return RoutePlan{Policy: DefaultPolicy()}, fmt.Errorf("worker router: no fleet store configured")
+	}
+	if strings.TrimSpace(actingUserId) == "" {
+		return RoutePlan{Policy: DefaultPolicy()}, fmt.Errorf("worker router: a pinned model call needs an acting user; system work cannot pick a machine")
+	}
+	if strings.TrimSpace(registrationId) == "" {
+		return RoutePlan{Policy: DefaultPolicy()}, fmt.Errorf("worker router: a pinned model call needs the machine it is pinned to")
+	}
+	plan, err := r.PlanUserModelWithShared(ctx, actingUserId, modelId, needs)
+	if err != nil {
+		return plan, err
+	}
+	selected := make([]Candidate, 0, 1)
+	for _, c := range plan.Candidates {
+		if sameSubject(c.RegistrationId, registrationId) {
+			selected = append(selected, c)
+		}
+	}
+	plan.Candidates = selected
+	// Only this machine can serve the call. The reasons the rest of the plan
+	// ruled machines out -- and the counted refusals for machines that are
+	// somebody else's -- are about other machines, and must not obscure what
+	// happened to this one.
+	plan.Rejected = nil
+	plan.Total = 1
+	return plan, nil
 }
 
 // PlanSharedModel orders the machines eligible for CLUSTER work -- the calls

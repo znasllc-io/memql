@@ -236,18 +236,14 @@ func OwnMachineFirst(c Candidate, actingUserId string) bool {
 // sameSubjectId compares two identity subjects tolerantly of the bare/canonical
 // split, which is the one comparison in this package that a naive == gets
 // wrong: the row carries a canonical id and a token's subject may be bare.
+//
+// It IS component/worker.SameSubjectId, the share list's own rule -- the short
+// id after a `v<N>:domain:entity` prefix, the whole value otherwise. It used
+// the text after the LAST colon, which read the synthetic actor
+// `system:automation:ana` as `ana`: an automation running as itself recovered
+// ana's private machine as its own, with no consent (memql#5662). The cluster's
+// own work is nobody's owner, and an automation under ana's borrowed authority
+// already carries ana's id.
 func sameSubjectId(a, b string) bool {
-	a = strings.TrimSpace(a)
-	b = strings.TrimSpace(b)
-	if a == "" || b == "" {
-		return false
-	}
-	return a == b || trimIdPrefix(a) == trimIdPrefix(b)
-}
-
-func trimIdPrefix(v string) string {
-	if i := strings.LastIndex(v, ":"); i >= 0 {
-		return v[i+1:]
-	}
-	return v
+	return workerservice.SameSubjectId(a, b)
 }
