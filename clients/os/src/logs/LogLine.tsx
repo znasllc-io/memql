@@ -75,19 +75,22 @@ export const STACK_BELOW = {
 } as const;
 
 /** The list width from which the message's share of a WIDE row is a
- *  COMFORTABLE message -- forty characters, a quarter more than the readable
- *  minimum -- beside the widest mark, per density, in STACK_BELOW's two parts.
- *  Derived from the same measurements. In WIDE the flexible width (what the
- *  fixed cells and the mark's fixed column leave) goes seventy percent to the
- *  message and thirty to the attributes, so the message's forty characters
- *  (288px; 264px) are divided by 0.7 (411.4px; 377.1px) and added to the
- *  fixed cells and the mark's eighteen characters (342.1px; 323.5px). The
- *  pixel part is STACK_BELOW's own -- the cells' spaces, the mark's padding
- *  and border, the row's padding and rule, the list's border and a classic
- *  scrollbar -- because the same things stand beside the message here. */
+ *  COMFORTABLE message -- sixty characters -- beside the widest mark, per
+ *  density, in STACK_BELOW's two parts. Sixty because below it the aligned
+ *  column costs a typical line its end: a half-screen window cut a
+ *  70-character `ok  github.com/.../pipelinesteps  6.865s` at 46 characters
+ *  that MEDIUM shows whole (R40c). Derived from the same measurements. In
+ *  WIDE the flexible width (what the fixed cells and the mark's fixed column
+ *  leave) goes seventy percent to the message and thirty to the attributes,
+ *  so the message's sixty characters (432px; 396px) are divided by 0.7
+ *  (617.1px; 565.7px) and added to the fixed cells and the mark's eighteen
+ *  characters (342.1px; 323.5px). The pixel part is STACK_BELOW's own -- the
+ *  cells' spaces, the mark's padding and border, the row's padding and rule,
+ *  the list's border and a classic scrollbar -- because the same things stand
+ *  beside the message here. */
 export const WIDE_FROM = {
-  comfortable: { scaled: 753.5, fixed: 94 },
-  compact: { scaled: 700.6, fixed: 86 },
+  comfortable: { scaled: 959.3, fixed: 94 },
+  compact: { scaled: 889.2, fixed: 86 },
 } as const;
 
 /** One of the two measures in CSS pixels at a root font size. Only the part

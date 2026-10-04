@@ -94,10 +94,10 @@ describe("the layouts' boundaries", () => {
   it("are the measured widths, at 16px and 20px roots", () => {
     // The widths the captures were taken at. A change to either measure is
     // a change to these, and the captures have to be taken again.
-    expect([STACK_16, WIDE_16]).toEqual([667, 848]);
-    expect([STACK_20, WIDE_20]).toEqual([810, 1036]);
-    expect([stackBelow("compact", 16), wideFrom("compact", 16)]).toEqual([621, 787]);
-    expect([stackBelow("compact", 20), wideFrom("compact", 20)]).toEqual([755, 962]);
+    expect([STACK_16, WIDE_16]).toEqual([667, 1054]);
+    expect([STACK_20, WIDE_20]).toEqual([810, 1294]);
+    expect([stackBelow("compact", 16), wideFrom("compact", 16)]).toEqual([621, 976]);
+    expect([stackBelow("compact", 20), wideFrom("compact", 20)]).toEqual([755, 1198]);
   });
 
   it.each([16, 20])("divide the widths into the three layouts at a %ipx root", (rootPx) => {

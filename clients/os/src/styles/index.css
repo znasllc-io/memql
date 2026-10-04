@@ -8139,7 +8139,7 @@ a.os-button {
  * column starts at one x on every line with a mark, and the message has the
  * larger share: a column wider than its attributes is room the message did
  * not get. A list is WIDE only from WIDE_FROM (src/logs/LogLine.tsx),
- * measured so that the message's share is a comfortable forty characters
+ * measured so that the message's share is a comfortable sixty characters
  * beside the widest mark. The 32-character minimum is MEDIUM's floor; WIDE
  * never reaches it. */
 .os-logs-message {
