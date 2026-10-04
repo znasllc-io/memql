@@ -125,7 +125,10 @@ Afterwards:
   disconnected pipeline, while what the poll has seen and the timing table
   carry over. Pass the whole configuration each time. Reconnecting is refused
   `pipeline_already_connected` when another source's pipeline has taken the
-  repository meanwhile, as any second pipeline is.
+  repository meanwhile, as any second pipeline is. Reconnect, too, after
+  reinstalling the GitHub App on the repository or renaming the repository:
+  deliveries are matched on the installation and the repository name a
+  pipeline was connected with ([Delivery](#delivery-webhook-or-poll)).
 - **Disconnect** with `builtin pipelinesDisconnect(pipelineId: "<pipeline id>")`
   (`execute` on `app:deployables/sources`). It opens no more runs, and a run no
   agent has started yet concludes `pipeline_disconnected`. The pipeline and its
@@ -547,9 +550,15 @@ by guesswork.
 
 - **`webhook`**: GitHub posts each delivery to the cluster's inbound seam,
   `https://api.<domain>/inbound/github`, signed with the app's webhook secret,
-  and a shipped automation opens the runs it asks for. A delivery opens runs
-  only for pipelines connected under the installation it came from. A delivery
-  through no installation -- a repository webhook, which
+  and a shipped automation opens the runs it asks for. The runs are decided by
+  the delivery the seam staged and verified, never by anything else: a
+  `github` source configured to verify no signature opens no run. A delivery
+  opens runs only for pipelines connected under the installation it came from,
+  for the repository name they were connected with. **Reinstalling the GitHub
+  App on the repository, or renaming the repository, therefore needs a
+  reconnect** (the same `pipelinesConnect` call): until then its deliveries
+  carry an installation or a name no pipeline matches, and open nothing. A
+  delivery through no installation -- a repository webhook, which
   [Packages](packages.md#update-detection) documents for Deployables' update
   feed on the same seam -- opens nothing, and is ignored rather than failed
   on. Setting the webhook up: [GitHub Connect](github-connect.md#the-webhook)
@@ -651,10 +660,12 @@ there for the three things a pipeline's checks need: a GitHub App whose
 installations hold checks write, a connected repository, and a runner to
 execute steps. A repository counts as connected once a pipeline is.
 
-Today the item reports configured once this cluster has a GitHub App and a
-runner is registered on the agent node reporting it. It cannot see whether an
-installation accepted checks write, which is a fact per installation: a run
-that could not write its check run says so itself ([The check run](#the-check-run)).
+Today the item reports configured once all three hold: this cluster has a
+GitHub App, at least one pipeline is connected and active -- whoever owns it --
+and a runner is registered on the agent node reporting it. Until then it says
+which are missing. It cannot see whether an installation accepted checks write,
+which is a fact per installation: a run that could not write its check run says
+so itself ([The check run](#the-check-run)).
 Nothing needs the item, so the first-run wizard does not walk it, and an owner
 may answer *Not now*. Its Settings section arrives with epic memql#5479.
 
