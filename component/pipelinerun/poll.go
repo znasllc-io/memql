@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"strconv"
 	"strings"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/packages/githubapp"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // poll.go -- the polling delivery (D4, D11), for a cluster GitHub cannot
@@ -84,7 +87,7 @@ func (i *Integration) Poll(ctx context.Context) (PollResult, error) {
 		}
 		if err != nil {
 			d.Logger.Warn("pipelines: a pipeline could not be polled",
-				"component", "pipelinerun", "pipeline", p.ID, "repository", p.Repository, "error", err)
+				"component", "pipelinerun", logger.Subject(PipelineConcept, p.ID), "repository", p.Repository, "error", err)
 			res.Failed = append(res.Failed, SkippedPipeline{PipelineID: p.ID, Reason: err.Error()})
 		}
 	}
@@ -136,7 +139,22 @@ func (i *Integration) pollOne(ctx context.Context, d Deps, listed Pipeline) (pol
 		if branch == "" {
 			return fmt.Errorf("GitHub names no default branch for %s", p.Repository)
 		}
+		// branchPatch records a default branch that moved on GitHub since the
+		// row was written, so the next poll asks for the right one.
+		var branchPatch *string
 		headSHA, headMessage, err := d.GitHub.BranchHead(gctx, token, p.Repository, branch)
+		if githubapp.StatusOf(err) == http.StatusNotFound {
+			// The stored branch is gone: renamed since connect. Ask GitHub
+			// which branch is the default now, rather than failing every
+			// minute until somebody reconnects. Its key is new to the heads,
+			// so it is a baseline -- a rename is not a push.
+			if info, rerr := d.GitHub.Repository(gctx, token, p.Repository); rerr == nil {
+				if renamed := strings.TrimSpace(info.DefaultBranch); renamed != "" && renamed != branch {
+					branch, branchPatch = renamed, ptr(renamed)
+					headSHA, headMessage, err = d.GitHub.BranchHead(gctx, token, p.Repository, branch)
+				}
+			}
+		}
 		if err != nil {
 			return fmt.Errorf("reading %s's head: %w", branch, err)
 		}
@@ -157,7 +175,7 @@ func (i *Integration) pollOne(ctx context.Context, d Deps, listed Pipeline) (pol
 		if len(p.Heads) == 0 {
 			// The baseline: record, open nothing.
 			out.baseline = true
-			return d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Heads: ptr(seen)})
+			return d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Heads: ptr(seen), DefaultBranch: branchPatch})
 		}
 
 		next := maps.Clone(seen) // closed pull requests' keys drop out here
@@ -210,8 +228,8 @@ func (i *Integration) pollOne(ctx context.Context, d Deps, listed Pipeline) (pol
 			})
 		}
 
-		if !maps.Equal(next, p.Heads) {
-			if err := d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Heads: ptr(next)}); err != nil {
+		if !maps.Equal(next, p.Heads) || branchPatch != nil {
+			if err := d.Store.UpdatePipeline(gctx, p.OwnerUserID, p.ID, PipelinePatch{Heads: ptr(next), DefaultBranch: branchPatch}); err != nil {
 				failures = append(failures, err)
 			}
 		}

@@ -8,6 +8,13 @@ import (
 	"github.com/znasllc-io/memql/component/pipelines"
 )
 
+// The concepts this package reads and writes, for a log line's subject
+// (logger.Subject takes the concept and a BARE id).
+const (
+	PipelineConcept = "v1:pipelines:pipeline"
+	RunConcept      = "v1:pipelines:run"
+)
+
 // The values v1:pipelines:run and v1:pipelines:pipeline spell their
 // lifecycle in (dsl/pipelines/concepts.memql). One spelling, here, so the
 // opening half and the driver never write two words for one state.

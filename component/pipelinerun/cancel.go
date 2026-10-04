@@ -7,6 +7,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // cancel.go -- asking a run to stop.
@@ -114,7 +115,7 @@ func (i *Integration) requestCancel(ctx context.Context, d Deps, runID, by strin
 				w := publishCheckRun(gctx, d, *p, *r, ReportFor(*p, *r, nil))
 				if w.Err != nil {
 					d.Logger.Warn("pipelines: the cancelled run's check run was not moved",
-						"component", "pipelinerun", "run", r.ID, "checkRunState", w.State, "error", w.Err)
+						"component", "pipelinerun", logger.Subject(RunConcept, r.ID), "checkRunState", w.State, "error", w.Err)
 				}
 				if cr, changed := w.Patch(*r); changed {
 					patch.CheckRunID, patch.CheckRunState, patch.Notes = cr.CheckRunID, cr.CheckRunState, cr.Notes

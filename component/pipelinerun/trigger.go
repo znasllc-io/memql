@@ -49,14 +49,17 @@ func (i *Integration) handleTrigger(ctx context.Context, args map[string]any, _ 
 		return nil, err
 	}
 	answer := map[string]any{
-		"source":     stringArg(args, "source"),
-		"repository": res.Repository,
-		"event":      string(res.Event),
-		"rerequest":  res.Rerequest,
-		"sha":        res.SHA,
-		"opened":     runIDs(res.Opened),
-		"existing":   runIDs(res.Existing),
-		"skipped":    res.Skipped,
+		// The staged row this answer is about, for an operator following a
+		// delivery from the inbound seam to its runs.
+		"inboundRequestId": stringArg(args, "inboundRequestId"),
+		"source":           stringArg(args, "source"),
+		"repository":       res.Repository,
+		"event":            string(res.Event),
+		"rerequest":        res.Rerequest,
+		"sha":              res.SHA,
+		"opened":           runIDs(res.Opened),
+		"existing":         runIDs(res.Existing),
+		"skipped":          res.Skipped,
 	}
 	if res.Ignored != "" {
 		answer["ignored"] = res.Ignored

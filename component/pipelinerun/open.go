@@ -7,6 +7,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/pipelines"
+	"github.com/znasllc-io/memql/core/logger"
 )
 
 // open.go -- the one way a run comes into existence (decisions 1, 14, 15).
@@ -154,7 +155,7 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 		}
 		if w.Err != nil {
 			d.Logger.Warn("pipelines: the run opens without a written check run",
-				"component", "pipelinerun", "run", run.ID, "pipeline", p.ID,
+				"component", "pipelinerun", logger.Subject(RunConcept, run.ID), "pipeline", p.ID,
 				"repository", p.Repository, "checkRunState", w.State, "error", w.Err)
 		}
 		if err := d.Store.CreateRun(gctx, run); err != nil {

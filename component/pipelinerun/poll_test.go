@@ -181,6 +181,28 @@ func TestAFailedOpenKeepsThePreviousHead(t *testing.T) {
 	}
 }
 
+// A default branch renamed on GitHub since connect: the poll asks which
+// branch is the default now, records it, and treats its head as a baseline --
+// a rename is not a push -- rather than failing every minute.
+func TestARenamedDefaultBranchIsFollowedNotRun(t *testing.T) {
+	h := newHarness(t)
+	p := testPipeline(DeliveryPoll)
+	p.DefaultBranch = "master"
+	p.Heads = map[string]string{"branch:master": shaA}
+	h.store.addPipeline(p)
+	h.github.repos[repoName] = githubapp.RepositoryInfo{FullName: repoName, DefaultBranch: "main"}
+	h.github.heads[repoName+"@main"] = headAnswer{SHA: shaB}
+
+	res := poll(t, h)
+	if len(res.Failed) != 0 || len(res.Opened) != 0 {
+		t.Fatalf("a rename opens nothing and fails nothing: %+v", res)
+	}
+	got, _ := h.store.pipeline(p.ID)
+	if got.DefaultBranch != "main" || got.Heads["branch:main"] != shaB || len(got.Heads) != 1 {
+		t.Errorf("default branch %q heads %v; want main at the new head, the old key gone", got.DefaultBranch, got.Heads)
+	}
+}
+
 func TestOnlyPolledPipelinesArePolled(t *testing.T) {
 	h := newHarness(t)
 	webhook := testPipeline(DeliveryWebhook)
