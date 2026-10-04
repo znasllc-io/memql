@@ -915,6 +915,41 @@ func TestEachStepMountsItsRepositorysCacheAtItsTrust(t *testing.T) {
 			}
 		}
 	})
+
+	// Ruling R45: the trust is read from the contract environment, where the
+	// engine renders StepRequest.Event as MEMQL_EVENT. A step's secret of that
+	// name -- the compiler refuses one, so this is the walls behind it --
+	// cannot move a pull request's step into the trusted half: the seam's
+	// rendering keeps the platform's value and does not carry the secret, and
+	// a StepRun that carries one anyway is refused before any Job exists.
+	t.Run("a step's secret named MEMQL_EVENT cannot move it into the trusted cache", func(t *testing.T) {
+		req := testRequest() // a pull request's step
+		req.Secrets["MEMQL_EVENT"] = string(pl.EventPush)
+		run := stepRunFor(req, 600, pl.CodeStepTimeout)
+		if got := run.Env["MEMQL_EVENT"]; got != string(pl.EventPullRequest) {
+			t.Errorf("the contract's MEMQL_EVENT = %q, want the request's own %q", got, pl.EventPullRequest)
+		}
+		mounted, prepared := cacheOf(t, mustBuild(t, testConfig(), run))
+		if mounted != widgetPR || prepared != widgetPR {
+			t.Errorf("a pull request's step with a MEMQL_EVENT secret mounts %q (cache-prep prepares %q), want the untrusted %q",
+				mounted, prepared, widgetPR)
+		}
+
+		for _, contract := range []map[string]string{
+			{"MEMQL_EVENT": string(pl.EventPullRequest)}, // beside the contract's own value
+			{}, // with no contract value at all
+		} {
+			direct := testRun()
+			direct.Env = maps.Clone(direct.Env)
+			delete(direct.Env, "MEMQL_EVENT")
+			maps.Copy(direct.Env, contract)
+			direct.Secrets = map[string]string{"MEMQL_EVENT": string(pl.EventPush)}
+			if job, err := BuildJob(testConfig(), direct, testJobName); err == nil || !reflect.DeepEqual(job, Job{}) {
+				t.Errorf("a StepRun carrying a MEMQL_EVENT secret (contract %v) built a Job (err %v); it must be refused, so that "+
+					"no Job of it mounts a cache and no step sees a MEMQL_EVENT the engine did not render", contract, err)
+			}
+		}
+	})
 }
 
 // TestBuildJobIsAPureFunctionOfItsInputs: a replica rebuilding the Job
