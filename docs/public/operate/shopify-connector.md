@@ -375,6 +375,42 @@ privacy delivery on a per-store URL is held to the same body check, and a
 **paused** store still queues its privacy jobs -- a pause stops the mirror,
 not the merchant's obligations.
 
+### app/uninstalled
+
+Declare `app/uninstalled` beside the three, at the same app-level endpoint
+`https://api.<your-domain>/inbound/shopify`. It is not a privacy topic, but it
+is the app's own, and it is bound the same way: the shop is the one the
+**signed** body names (`myshopify_domain`, since the payload is the Shop
+resource), the `X-Shopify-Shop-Domain` header may not disagree with it, and
+the store must be one this app installed. On a per-store URL the topic is
+ignored: a managed store's per-store deliveries are signed with the same
+secret, so a captured one would replay there.
+
+When it arrives the store is **disconnected**:
+
+- `uninstalledAt` is stamped on the store row. The store ingests nothing while
+  it is set, whatever its status says, and the edge serves its storefronts
+  with `connectionState: "unavailable"` and no token;
+- the Admin grant Shopify ended is dropped from the row (`adminTokenRef`
+  cleared) and its sealed secret blanked;
+- the store owner's saved connection to it reads `disconnected`, so it leaves
+  the list of connected stores in Settings -> Connections;
+- it is audited as `shopify_app_uninstalled`.
+
+The mirror stays: purging is `shop/redact`'s, 48 hours later. Shopify retries
+an undelivered webhook for four hours, so an `app/uninstalled` can arrive after
+the shop has already reinstalled. The store's current grant is asked one
+question first, under the lock a reinstall holds, and a grant that answers
+means a reinstall superseded the uninstall: nothing changes, audited as
+`shopify_app_uninstall_superseded`.
+
+A **reinstall** through Connect Shopify is the shop's new consent. Once the
+callback has the fresh grant on the row it clears `uninstalledAt` -- and, for a
+store `shop/redact` purged, `redactedAt`, returning the store to `configured`
+with nothing mirrored -- and audits it as `shopify_store_reinstalled`, naming
+what it cleared. It also asks the store whether the Storefront token it kept
+still works, and mints another only when the store refuses it.
+
 ### Upgrading from the per-store compliance URL
 
 Earlier versions of this step pointed the three topics at the per-store
@@ -431,10 +467,12 @@ Shopify. An hourly automation runs the ones whose hold has elapsed.
   `shopify_customer_redacted`, and scheduled rather than immediate so a
   merchant's own grace period applies.
 - **`shop/redact`** purges the store's whole mirror and its sync state after
-  a 48-hour hold, then pauses the store row. Before purging it re-checks
-  whether the store is reachable again: an uninstall an operator reverses
-  within the hold must not cost the mirror. Audited as
-  `shopify_shop_redacted` (or `shopify_shop_redact_skipped`).
+  a 48-hour hold, then pauses the store row and stamps `redactedAt`. Before
+  purging it re-checks whether the store is reachable again: an uninstall an
+  operator reverses within the hold must not cost the mirror. Audited as
+  `shopify_shop_redacted` (or `shopify_shop_redact_skipped`). A purged store
+  is served as unavailable, like an uninstalled one, until a verified
+  reinstall clears it (see [app/uninstalled](#appuninstalled)).
 
 Redaction is the **one write to a mirror that is not an apply**. Everything
 else converges the mirror onto what the origin says; redaction deliberately

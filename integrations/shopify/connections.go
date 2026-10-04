@@ -73,6 +73,15 @@ func (c *Connector) mayManageConnections(ctx context.Context) bool {
 // Connecting an existing store must not replace another person's app grant or
 // a differently registered app. An OAuth proof authorizes this app at Shopify;
 // it does not authorize changing another MemQL user's deployment credentials.
+//
+// A store Shopify reported UNINSTALLED, or one shop/redact PURGED, is not
+// refused (memql#5638). Its row is keyed by its domain, so a refusal would
+// lock the shop out of this app for good, and in Shopify's model a reinstall
+// is the shop's new consent: the staff approve the app again, Shopify signs
+// the callback, and the write clears what the uninstall and the purge recorded
+// (markReconnected) and audits it. The owner and app checks above still hold.
+// The refusal this replaced asked for a status the store enum does not have,
+// so it never fired.
 func (c *Connector) managedTarget(ctx context.Context, shop, clientID string) (ConnectTarget, bool) {
 	var target ConnectTarget
 	domain, err := NormalizeShopDomain(shop)
@@ -91,8 +100,7 @@ func (c *Connector) managedTarget(ctx context.Context, shop, clientID string) (C
 	if err != nil {
 		return target, false
 	}
-	if found && (memql.BareShortId(prior.OwnerUserID) != memql.BareShortId(actor) ||
-		prior.AppClientID != clientID || prior.Status == "redacted") {
+	if found && (memql.BareShortId(prior.OwnerUserID) != memql.BareShortId(actor) || prior.AppClientID != clientID) {
 		return target, false
 	}
 	return ConnectTarget{ShopDomain: domain, StoreID: storeID, Store: prior, StoreFound: found}, true

@@ -300,6 +300,9 @@ func TestAReconnectUpdatesTheStoreInPlace(t *testing.T) {
 	h.engine.setRows(namedRowsQuery(conceptGlobalVariable, storeSecretName(connectStoreID, suffixPendingClientID)), nil)
 	webhookName := storeSecretName(connectStoreID, suffixWebhookSecret)
 	h.secrets[webhookName] = "the-current-secret"
+	// The Storefront token the store already has, which the store accepts: a
+	// reconnect asks before keeping it (memql#5638), and keeps it.
+	h.secrets["SHOPIFY_ACME-WIDGETS_STOREFRONT_TOKEN"] = connectToken
 	h.store(map[string]any{
 		"appClientId": connectClientID, "webhookSecretRef": webhookName, "ownerUserId": "the-first-owner",
 		"adminTokenRef": storeSecretName(connectStoreID, suffixAdminToken), "storefrontTokenRef": "SHOPIFY_ACME-WIDGETS_STOREFRONT_TOKEN",
@@ -467,5 +470,156 @@ func TestReconnectAuditsResealedCredentialsWhenStoreUpdateFails(t *testing.T) {
 	h.engine.fail["updateStore"] = errors.New("store write failed")
 	if got, kept := h.writeKept(credentialSourceCurrent); got != connectReasonExchangeFailed || kept != connectResultReconnected {
 		t.Fatalf("result = %q kept %q; an already referenced credential changed", got, kept)
+	}
+}
+
+// reconnectHarness is a reconnect of a store Connect connected before: it has
+// an Admin token, its app, its webhook secret and a Storefront token Connect
+// minted, sealed under the store's own name.
+func reconnectHarness(t *testing.T, fields map[string]any) *writeHarness {
+	t.Helper()
+	h := newWriteHarness(t)
+	h.engine.setRows(namedRowsQuery(conceptGlobalVariable, storeSecretName(connectStoreID, suffixPendingClientID)), nil)
+	webhookName := storeSecretName(connectStoreID, suffixWebhookSecret)
+	h.secrets[webhookName] = "the-current-secret"
+	h.secrets[storeSecretName(connectStoreID, suffixStorefrontToken)] = connectToken
+	row := map[string]any{
+		"appClientId": connectClientID, "webhookSecretRef": webhookName, "ownerUserId": connectDev,
+		"adminTokenRef":      storeSecretName(connectStoreID, suffixAdminToken),
+		"storefrontTokenRef": storeSecretName(connectStoreID, suffixStorefrontToken),
+	}
+	for k, v := range fields {
+		row[k] = v
+	}
+	h.store(row)
+	h.engine.setRows("siteById", []map[string]any{{
+		"id": connectSiteID, "kind": "shopify_storefront", "status": "draft", "ownerUserId": connectDev,
+		"packageId": "v1:platform:package:p1", "packageDeployableName": "storefront",
+		"binding": map[string]any{"storeId": connectStoreID},
+	}})
+	return h
+}
+
+// THE KEPT TOKEN IS ASKED, NOT TRUSTED (memql#5638, G5). An uninstall may have
+// revoked the Storefront token Connect minted; a reconnect that kept it
+// unchecked left the storefront serving a token the store refuses. Refused,
+// it is replaced: one mint, sealed under the store's own name, the store
+// pointed at it.
+func TestAReconnectRemintsAStorefrontTokenTheStoreRefuses(t *testing.T) {
+	h := reconnectHarness(t, nil)
+	h.storefront.status = http.StatusUnauthorized
+
+	if got := h.write(credentialSourceCurrent); got != connectResultReconnected {
+		t.Fatalf("result = %q, want reconnected", got)
+	}
+	if n := h.storefront.requests(); n != 1 {
+		t.Fatalf("the kept token was asked %d times, want once", n)
+	}
+	if got := h.storefront.tokens[0]; got != connectToken {
+		t.Fatalf("the check sent %q, want the kept token", got)
+	}
+	if n := h.admin.countOp("ShopifyStorefrontTokenCreate"); n != 1 {
+		t.Fatalf("minted %d tokens for a refused one, want 1", n)
+	}
+	if got := h.sealedValue(t, storeSecretName(connectStoreID, suffixStorefrontToken)); got != writeMintedToken {
+		t.Errorf("the store's Storefront token is %q, want the minted one", got)
+	}
+	if h.statementIndex("updateStore", `storefrontTokenRef: "`+storeSecretName(connectStoreID, suffixStorefrontToken)+`"`) < 0 {
+		t.Error("the store was not pointed at the minted token")
+	}
+	h.assertNoCredential(t)
+}
+
+// The other arms. A token the store accepts is kept: each mint counts toward
+// the shop's limit of 100 and only Shopify can delete one. A check that merely
+// FAILED -- the store answering 503 -- says nothing about the token and keeps
+// it too. A reference naming a secret the edge will not publish cannot serve,
+// and is replaced without asking Shopify anything.
+func TestAReconnectKeepsAStorefrontTokenUnlessItCannotServe(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		ref       string
+		wantMint  int
+		wantAsked int
+	}{
+		{"the store accepts it", http.StatusOK, "", 0, 1},
+		{"the check fails", http.StatusServiceUnavailable, "", 0, 1},
+		{"the reference names another secret", http.StatusOK, storeSecretName(connectStoreID, suffixAdminToken), 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fields := map[string]any{}
+			if tc.ref != "" {
+				fields["storefrontTokenRef"] = tc.ref
+			}
+			h := reconnectHarness(t, fields)
+			h.storefront.status = tc.status
+			if got := h.write(credentialSourceCurrent); got != connectResultReconnected {
+				t.Fatalf("result = %q, want reconnected", got)
+			}
+			if n := h.admin.countOp("ShopifyStorefrontTokenCreate"); n != tc.wantMint {
+				t.Errorf("minted %d, want %d", n, tc.wantMint)
+			}
+			if n := h.storefront.requests(); n != tc.wantAsked {
+				t.Errorf("asked the store %d times, want %d", n, tc.wantAsked)
+			}
+		})
+	}
+}
+
+// A VERIFIED REINSTALL CLEARS THE DISCONNECTION (memql#5638, G1 and G4). The
+// shop's staff approved the app again and the store holds a fresh grant, so
+// what the uninstall recorded is cleared once that grant is on the row, and
+// the reinstall is audited with what it cleared. A store that was only
+// uninstalled keeps the status an operator gave it.
+func TestAVerifiedReinstallClearsAnUninstall(t *testing.T) {
+	h := reconnectHarness(t, map[string]any{"uninstalledAt": "2026-10-01T12:00:00Z", "adminTokenRef": "", "status": StatusLive})
+
+	if got := h.write(credentialSourceCurrent); got != connectResultConnected {
+		t.Fatalf("result = %q, want connected: the store had no Admin token", got)
+	}
+	update := h.statementIndex("updateStore", `adminTokenRef: "`+storeSecretName(connectStoreID, suffixAdminToken)+`"`)
+	clear := h.statementIndex("markStoreReconnected", `storeId: "`+connectStoreID+`"`)
+	if update < 0 || clear < 0 || clear < update {
+		t.Fatalf("updateStore at %d, markStoreReconnected at %d: the disconnection is cleared after the fresh grant is on the row", update, clear)
+	}
+	if h.statementIndex("markStoreReconnected", `status:`) >= 0 {
+		t.Error("a store that was only uninstalled had its status reset")
+	}
+	if c := h.engine.callsNamed("markStoreReconnected")[0]; c.role != "owner" || !c.internal {
+		t.Errorf("markStoreReconnected ran as %+v, want operatorContext", c)
+	}
+	if h.statementIndex("createAuditEvent", `action: "shopify_store_reinstalled"`, `"uninstalledAt": "2026-10-01T12:00:00Z"`) < 0 {
+		t.Error("the reinstall was not audited with the uninstall it cleared")
+	}
+	h.assertNoCredential(t)
+}
+
+// A purged store comes back too, configured, with nothing mirrored: the purge
+// left it paused and its sync state gone. Its redactedAt is cleared, and the
+// purge stays on the audit trail beside the reinstall.
+func TestAVerifiedReinstallClearsAPurge(t *testing.T) {
+	h := reconnectHarness(t, map[string]any{
+		"uninstalledAt": "2026-10-01T12:00:00Z", "redactedAt": "2026-10-03T12:00:00Z", "adminTokenRef": "", "status": StatusPaused,
+	})
+	if got := h.write(credentialSourceCurrent); got != connectResultConnected {
+		t.Fatalf("result = %q, want connected", got)
+	}
+	if h.statementIndex("markStoreReconnected", `storeId: "`+connectStoreID+`"`, `status: "configured"`) < 0 {
+		t.Errorf("a purged store was not returned to configured: %v", h.engine.callsNamed("markStoreReconnected"))
+	}
+	if h.statementIndex("createAuditEvent", `action: "shopify_store_reinstalled"`, `"redactedAt": "2026-10-03T12:00:00Z"`) < 0 {
+		t.Error("the reinstall was not audited with the purge it cleared")
+	}
+}
+
+// A reconnect of a store that was never disconnected clears nothing.
+func TestAReconnectOfAConnectedStoreClearsNothing(t *testing.T) {
+	h := reconnectHarness(t, nil)
+	if got := h.write(credentialSourceCurrent); got != connectResultReconnected {
+		t.Fatalf("result = %q", got)
+	}
+	if n := len(h.engine.callsNamed("markStoreReconnected")); n != 0 {
+		t.Errorf("markStoreReconnected ran %d times for a connected store", n)
 	}
 }
