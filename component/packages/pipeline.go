@@ -680,6 +680,11 @@ func runDeploy(ctx context.Context, d *Deps, req DeployRequest, pkg map[string]a
 		aerr = validateAssetRepositories(rep, repository)
 	}
 
+	// WHETHER DEPLOYING WOULD CHANGE THE ACTIVE DSL (memql#5601), on the
+	// report before it is recorded, so the confirm gate shows it and MemQL OS
+	// can offer a candidate exactly where the confirm would accept one.
+	d.recordDslChanges(ctx, snapshot, rep)
+
 	snapshotArtifactId := d.storeSnapshot(ctx, req, out.DeploymentId, snapshot)
 	if rerr := d.Store.recordReport(ctx, out.DeploymentId, rep, snapshotArtifactId); rerr != nil {
 		d.log().Warn("packages: could not record the analysis report",

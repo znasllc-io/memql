@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -172,6 +173,60 @@ func candidatesOnly(outcomes []DeployableOutcome) bool {
 	return candidates > 0
 }
 
+// errNoStager is changedDslDomains' answer on a node with no DSL staging
+// surface: not a failure to read, but no way to ask.
+var errNoStager = errors.New("packages: this node has no DSL staging surface to compare against")
+
+// changedDslDomains is the plan's DSL domains whose tree differs from what the
+// cluster's active-set pointer names, sorted -- the stage's own meaning of
+// "changed", asked of the stager's PrefixFor without writing anything. A plan
+// with no DSL changes nothing. errNoStager on a node that cannot ask; any
+// other error is a pointer or a tree that could not be read.
+func (d *Deps) changedDslDomains(ctx context.Context, snapshot *SourceSnapshot, rep *Report) ([]string, error) {
+	if rep == nil || len(rep.DslDomains) == 0 {
+		return nil, nil
+	}
+	if d.Stager == nil || snapshot == nil {
+		return nil, errNoStager
+	}
+	current, err := d.Stager.ReadActiveSet(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for _, domain := range rep.DslDomains {
+		sub, err := fs.Sub(snapshot.Tree, path.Join(DslRoot, domain.Domain))
+		if err != nil {
+			return nil, err
+		}
+		prefix, err := d.Stager.PrefixFor(domain.Domain, sub)
+		if err != nil {
+			return nil, err
+		}
+		if current[domain.Domain] != prefix {
+			changed = append(changed, domain.Domain)
+		}
+	}
+	sort.Strings(changed)
+	return changed, nil
+}
+
+// recordDslChanges sets the report's dslChanges from changedDslDomains, and
+// leaves it ABSENT whenever that cannot answer (Report.DslChanges): unknown
+// is not false.
+func (d *Deps) recordDslChanges(ctx context.Context, snapshot *SourceSnapshot, rep *Report) {
+	if rep == nil {
+		return
+	}
+	changed, err := d.changedDslDomains(ctx, snapshot, rep)
+	if err != nil {
+		rep.DslChanges = nil
+		return
+	}
+	changes := len(changed) > 0
+	rep.DslChanges = &changes
+}
+
 // refuseCandidateDslChange refuses a run that publishes any deployable as its
 // candidate while carrying MemQL DSL that differs from what the cluster runs.
 //
@@ -180,14 +235,15 @@ func candidatesOnly(outcomes []DeployableOutcome) bool {
 // visitor at once, while a candidate leaves every visitor on the serving
 // build -- so the public would keep app N running against DSL N+1, half a
 // version nobody chose, and the run would return without recording the
-// source as deployed. The question is answered with the stager's own
-// PrefixFor against the pointer as it stands, so "changed" means what the
-// stage would mean by it, and nothing is written to ask.
+// source as deployed.
 //
-// A cluster with no stager is not judged here: such a run cannot stage at
-// all, and stageAndRoll refuses it before anything is published.
+// ASKED AGAIN HERE, after the report's dslChanges was recorded, because the
+// pointer can move between the analysis a person read and the confirm they
+// press. A pointer that cannot be read fails the run with that error. A node
+// with no stager is not judged here: such a run cannot stage at all, and
+// stageAndRoll refuses it before anything is published.
 func (d *Deps) refuseCandidateDslChange(ctx context.Context, snapshot *SourceSnapshot, rep *Report, placements map[string]Placement) error {
-	if rep == nil || snapshot == nil || len(rep.DslDomains) == 0 || d.Stager == nil {
+	if rep == nil || len(rep.DslDomains) == 0 {
 		return nil
 	}
 	var candidates []string
@@ -199,28 +255,16 @@ func (d *Deps) refuseCandidateDslChange(ctx context.Context, snapshot *SourceSna
 	if len(candidates) == 0 {
 		return nil
 	}
-	current, err := d.Stager.ReadActiveSet(ctx)
+	changed, err := d.changedDslDomains(ctx, snapshot, rep)
+	if errors.Is(err, errNoStager) {
+		return nil
+	}
 	if err != nil {
 		return err
-	}
-	var changed []string
-	for _, domain := range rep.DslDomains {
-		sub, err := fs.Sub(snapshot.Tree, path.Join(DslRoot, domain.Domain))
-		if err != nil {
-			return err
-		}
-		prefix, err := d.Stager.PrefixFor(domain.Domain, sub)
-		if err != nil {
-			return err
-		}
-		if current[domain.Domain] != prefix {
-			changed = append(changed, domain.Domain)
-		}
 	}
 	if len(changed) == 0 {
 		return nil
 	}
-	sort.Strings(changed)
 	return fmt.Errorf(
 		"this run publishes %s as a candidate, and it also carries MemQL DSL that differs from what this cluster runs (%s). Staging that DSL would restart every node onto it while the public keeps the serving build, so a candidate run cannot carry a DSL change. Publish this run to the serving version instead, or deploy the DSL change first -- a run with every app skipped stages and rolls it and publishes nothing -- and then publish the candidate, whose DSL will match",
 		strings.Join(candidates, ", "), strings.Join(changed, ", "))

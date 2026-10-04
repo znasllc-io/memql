@@ -278,7 +278,10 @@ decision about the run, not about the software.
   public on the serving build -- so a run with any candidate whose DSL
   differs from what the cluster runs is refused before the build. Publish it
   to the serving version, or deploy the DSL first in a run with every app
-  skipped and then publish the candidate.
+  skipped and then publish the candidate. The run's report says in advance
+  whether that applies: `report.dslChanges` is `true`, `false`, or absent
+  when unknown ([packages.md](packages.md#the-order-and-why-it-never-changes)),
+  and the confirm checks again.
 - **The target survives the confirm gate.** A run records its candidates when
   it opens (`candidates` on the run row). At the gate, a target the
   confirming call names wins -- choosing there, with the plan on screen, is

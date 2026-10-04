@@ -38,6 +38,21 @@ type Report struct {
 	// DslDomains is every DISCOVERED dsl/<domain>/, with construct counts.
 	DslDomains []DslDomainReport `json:"dslDomains"`
 
+	// DslChanges says whether deploying this plan would change the cluster's
+	// ACTIVE DSL set (memql#5601): true when some domain's tree differs from
+	// what the pointer names -- so the run would stage and roll every node
+	// that reads DSL -- false when every domain is already active or the plan
+	// ships none. ABSENT WHEN UNKNOWN, and a consumer must read it so: a node
+	// with no stager, or one that could not read the pointer, does not know,
+	// and false there would offer what the confirm then refuses.
+	//
+	// Computed when the run is analysed, before the confirm gate, from the
+	// stager's own answer (Stager.PrefixFor against the pointer) -- the answer
+	// the candidate refusal acts on. That refusal asks again at confirm,
+	// because the pointer can move in between; this is what lets MemQL OS
+	// offer "Deploy as candidate" only where the engine would take it.
+	DslChanges *bool `json:"dslChanges,omitempty"`
+
 	// GoPacks is every bff/ with a go.mod (D3): reported so nobody wonders
 	// where their Go went, and deferred so the rest of the package deploys.
 	GoPacks []GoPackReport `json:"goPacks,omitempty"`
