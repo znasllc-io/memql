@@ -27,6 +27,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
 // verify_test.go -- memql-verify tested the way it is used: against a fake
@@ -1023,6 +1025,36 @@ func TestFlagDefaultsAndTheOriginsDerivedFromTheDomain(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "http://127.0.0.1:9", resolved.osURL)
 	assert.Equal(t, "https://api.lab.example.com", resolved.apiURL)
+}
+
+// The hosts the command probes by default are the front door's own. They are
+// composed by component/frontdoor -- the one derivation the Ingress rules, the
+// certificate and every node's issuer and CORS origins are written from -- and
+// not spelled a second time here, because a second copy is the one that
+// disagrees: the command would verify a cluster by asking a host nothing is
+// served at, and say so with a reachable-looking error.
+//
+// The expected values below are the package's answers, not strings written out
+// in this test, so a change to the rule that this command did not follow is a
+// red test. (TestFlagDefaultsAndTheOriginsDerivedFromTheDomain pins the shapes
+// the rule produces today.) The OS is a platform SITE and not a role, and the
+// package composes the two differently.
+func TestDefaultOriginsAreTheFrontDoorsOwnHosts(t *testing.T) {
+	for _, domain := range []string{"lab.example.com", "example.org", "memql.localhost"} {
+		cfg := config{
+			version:        testRelease,
+			domain:         domain,
+			samples:        1,
+			interval:       time.Second,
+			requestTimeout: time.Second,
+			evidencePath:   "verify-rollout.json",
+		}
+		resolved, _, err := cfg.resolve()
+		require.NoError(t, err, domain)
+		assert.Equal(t, "https://"+frontdoor.RoleHost(frontdoor.RoleAPI, domain), resolved.apiURL, domain)
+		assert.Equal(t, "https://"+frontdoor.RoleHost(frontdoor.RoleIdentity, domain), resolved.identityURL, domain)
+		assert.Equal(t, "https://"+frontdoor.OsHost(domain), resolved.osURL, domain)
+	}
 }
 
 // A release compares with the leading v stripped on both sides.

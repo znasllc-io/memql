@@ -10,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
 // verify.go -- the command's configuration, its retry loop and its report.
@@ -43,9 +45,11 @@ type config struct {
 	evidencePath   string
 	requestTimeout time.Duration
 
-	// The origins of the three hosts probed. Each defaults to
-	// https://<role>.<domain>; the overrides are for tests, and for a front door
-	// that is not laid out that way.
+	// The origins of the three hosts probed. Each defaults to the host
+	// component/frontdoor composes for it under the domain -- the one derivation
+	// the Ingress rules, the certificate and every node's issuer and CORS origins
+	// are written from, which a second spelling here would drift from. The
+	// overrides are for tests, and for a front door that is not laid out that way.
 	apiURL      string
 	identityURL string
 	osURL       string
@@ -82,12 +86,16 @@ func (c config) resolve() (config, expectation, error) {
 	}
 
 	for _, origin := range []struct {
-		flag, role string
-		target     *string
+		flag   string
+		target *string
+		// host is the front door's own composition of this host. The api and
+		// identity hosts are roles and the OS is a platform site, and the
+		// package composes the two differently: none of them is spelled here.
+		host func(domain string) string
 	}{
-		{"--api-url", "api", &c.apiURL},
-		{"--identity-url", "identity", &c.identityURL},
-		{"--os-url", "os", &c.osURL},
+		{"--api-url", &c.apiURL, func(d string) string { return frontdoor.RoleHost(frontdoor.RoleAPI, d) }},
+		{"--identity-url", &c.identityURL, func(d string) string { return frontdoor.RoleHost(frontdoor.RoleIdentity, d) }},
+		{"--os-url", &c.osURL, frontdoor.OsHost},
 	} {
 		switch {
 		case *origin.target != "":
@@ -97,7 +105,7 @@ func (c config) resolve() (config, expectation, error) {
 			// Every probe appends its own path, so an origin has no trailing slash.
 			*origin.target = strings.TrimRight(*origin.target, "/")
 		case c.domain != "":
-			*origin.target = "https://" + origin.role + "." + c.domain
+			*origin.target = "https://" + origin.host(c.domain)
 		default:
 			return c, want, errors.New("--domain is required unless --api-url, --identity-url and --os-url are all given")
 		}
