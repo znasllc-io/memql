@@ -1812,9 +1812,11 @@ func (c *githubCapture) only(t *testing.T, method, path string) []byte {
 }
 
 // forkRows are the rows the fork's opening reads and writes: the staged
-// delivery, the one pipeline connected to its repository, and the runs it
-// opens. Every other Store method is the nil interface's, so a path that
-// reached one would fail loudly.
+// delivery, the one pipeline connected to its repository, the runs it opens,
+// and the pull request's unfinished runs a new head would supersede. Every
+// other Store method is the nil interface's, so a path that reached one would
+// fail loudly: an opening reads and writes nothing else, and a refused fork's
+// run is never driven, re-run or concluded again.
 type forkRows struct {
 	pipelinerun.Store
 	delivery pipelinerun.InboundDelivery
@@ -1844,6 +1846,26 @@ func (s *forkRows) RunsForKey(_ context.Context, runKey string) ([]pipelinerun.R
 	var out []pipelinerun.Run
 	for _, r := range s.runs {
 		if r.RunKey == runKey {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// RunsUnfinishedForPullRequest is what a new head of the pull request stops
+// (component/pipelinerun's supersede.go): its unfinished runs among the ones
+// opened here, which the opening reads before it creates its own. A fork's run
+// is refused, and so finished, the moment it is created, so there is never
+// one to stop; the answer is the rows' all the same.
+func (s *forkRows) RunsUnfinishedForPullRequest(_ context.Context, pipelineID string, pullRequest int) ([]pipelinerun.Run, error) {
+	if pullRequest <= 0 {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []pipelinerun.Run
+	for _, r := range s.runs {
+		if r.PipelineID == pipelineID && r.PullRequest == pullRequest && !r.Finished() {
 			out = append(out, r)
 		}
 	}
