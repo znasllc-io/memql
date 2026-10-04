@@ -7,6 +7,7 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 	"strings"
 	"testing"
+	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/safety"
@@ -218,6 +219,97 @@ func TestDecideApprovalLeavesARunParkedOnSomethingElseAlone(t *testing.T) {
 	}
 	if reply := decodeReply(t, nodes); reply["runResumed"] != false {
 		t.Errorf("runResumed = %v, want false", reply["runResumed"])
+	}
+}
+
+// THE FAILURE PATH'S QUESTIONS ARE DECIDABLE (memql#5664). The row the failure
+// path raises -- built by component/work's FailureApproval, whose subject and
+// hash are one map -- is fed to the decide handler as the graph returns it,
+// JSON round trip included. Approve and both answers land; Abandon stops the
+// run rather than resuming it; and a subject edited since the question was
+// asked is still refused, so the fix did not buy decidability by dropping the
+// guarantee. component/automations' TestAFailureApprovalHashesTheSubjectItStores
+// pins that the failure path writes exactly this shape.
+func TestDecideApprovalLandsOnAFailurePathQuestion(t *testing.T) {
+	ev := work.Evidence{Tier: "escalate", Reason: "the work no longer fits", RuleId: work.RuleIdContextExhausted, Source: work.EvidenceSourceRules}
+	stored := func(t *testing.T, kind string, edit func(map[string]any)) map[string]any {
+		t.Helper()
+		req := work.FailureApproval(kind, "v1:work:run:r1", "draft", work.SymptomHuman, "prompt is too long", "q", ev, testNow, time.Hour)
+		raw, err := json.Marshal(map[string]any{
+			"id": "v1:work:approval:a1", "runId": req.RunId, "ownerUserId": "u-alice", "stepKey": req.StepKey,
+			"kind": req.Kind, "subject": req.Subject, "artifactHash": req.ArtifactHash,
+			"question": req.Question, "options": req.Options,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var row map[string]any
+		if err := json.Unmarshal(raw, &row); err != nil {
+			t.Fatal(err)
+		}
+		if edit != nil {
+			edit(row["subject"].(map[string]any))
+		}
+		return row
+	}
+	for _, tc := range []struct {
+		name       string
+		kind       string
+		decision   string
+		answer     map[string]any
+		edit       func(map[string]any)
+		wantStatus string
+		wantErrIs  error
+	}{
+		{name: "approved", kind: work.ApprovalKindFeedback, decision: "approved", wantStatus: runStatusRunning},
+		{name: "answered Retry", kind: work.ApprovalKindFeedback, decision: "answered", answer: map[string]any{"value": work.FailureAnswerRetry, "label": "Retry"}, wantStatus: runStatusRunning},
+		{name: "answered Abandon stops the run", kind: work.ApprovalKindFeedback, decision: "answered", answer: map[string]any{"value": work.FailureAnswerAbandon, "label": "Abandon"}, wantStatus: runStatusFailed},
+		{name: "a planReview approved", kind: work.ApprovalKindPlanReview, decision: "approved", wantStatus: runStatusRunning},
+		{name: "a budget question approved", kind: work.ApprovalKindBudget, decision: "approved", wantStatus: runStatusRunning},
+		{name: "rejected", kind: work.ApprovalKindFeedback, decision: "rejected", wantStatus: runStatusFailed},
+		{name: "the failure changed since -- REFUSED", kind: work.ApprovalKindFeedback, decision: "approved",
+			edit: func(s map[string]any) { s["errorMessage"] = "a different failure" }, wantErrIs: work.ErrArtifactChanged},
+		{name: "answered over a changed failure -- REFUSED", kind: work.ApprovalKindFeedback, decision: "answered",
+			answer: map[string]any{"value": work.FailureAnswerRetry}, edit: func(s map[string]any) { s["symptom"] = "transient" }, wantErrIs: work.ErrArtifactChanged},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			i, eng := newTestIntegration(t)
+			eng.reply("workApprovalsForOwner", stored(t, tc.kind, tc.edit))
+			eng.reply("workRunForOwner", map[string]any{
+				"id": "v1:work:run:r1", "ownerUserId": "u-alice", "status": runStatusWaiting,
+				"waitingOn": map[string]any{"kind": "approval", "subject": "v1:work:approval:a1", "approvalKind": tc.kind},
+			})
+			args := map[string]any{"approvalId": "v1:work:approval:a1", "decision": tc.decision}
+			if tc.answer != nil {
+				args["answer"] = tc.answer
+			}
+			nodes, err := i.handleDecideApproval(callerContext("u-alice"), args, 0)
+			if tc.wantErrIs != nil {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErrIs.Error()) {
+					t.Fatalf("err = %v, want %q: a decision must never carry to a failure it was not about", err, tc.wantErrIs)
+				}
+				if n := len(eng.callsTo("decideWorkApproval")); n != 0 {
+					t.Fatalf("the refused decision was recorded anyway (%d calls)", n)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decideApproval refused a decision on the failure path's own question: %v", err)
+			}
+			if n := len(eng.callsTo("decideWorkApproval")); n != 1 {
+				t.Fatalf("decideWorkApproval called %d times, want 1", n)
+			}
+			update := eng.callTo(t, "updateWorkRun").Args(t)
+			if update["status"] != tc.wantStatus {
+				t.Fatalf("run status = %v, want %v", update["status"], tc.wantStatus)
+			}
+			if tc.wantStatus == runStatusFailed && update["errorCode"] != "approval_rejected" {
+				t.Errorf("errorCode = %v, want approval_rejected", update["errorCode"])
+			}
+			if reply := decodeReply(t, nodes); reply["runResumed"] != true {
+				t.Errorf("runResumed = %v", reply["runResumed"])
+			}
+		})
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/airoute"
 )
@@ -44,13 +46,226 @@ func failedRun(id, message string, attempt, retries int) *AutomationExecution {
 	return run
 }
 
+// closeWith closes run through the failure path against a journal whose run
+// row is readable and names no goal -- an automation's run, whose retry budget
+// is work.DefaultMaxRetries with nothing spent.
 func closeWith(t *testing.T, c SymptomClassifier, run *AutomationExecution) []string {
 	t.Helper()
-	exec := &recordingJournalExecutor{}
+	return closeWithBudget(t, c, run, &budgetAnsweringExecutor{run: map[string]any{"id": run.ID}})
+}
+
+func closeWithBudget(t *testing.T, c SymptomClassifier, run *AutomationExecution, exec *budgetAnsweringExecutor) []string {
+	t.Helper()
 	j := newWorkJournal(exec, nil)
 	j.classifier = c
 	j.closeRun(context.Background(), run, "")
 	return exec.calls
+}
+
+// budgetAnsweringExecutor is the journal seam answering the two reads the
+// failure path makes to learn the run-wide retry budget: the run row (its
+// spent.retries and goal) and the goal row (its ceilings.maxRetries). Every
+// other call is recorded and answered with nothing.
+type budgetAnsweringExecutor struct {
+	recordingJournalExecutor
+	// run answers workRunById; nil answers no row.
+	run map[string]any
+	// goal answers workGoalForOwner; nil answers no row.
+	goal map[string]any
+	// failRun makes workRunById fail.
+	failRun bool
+	// goalActors is the actor every workGoalForOwner read was made as.
+	goalActors []string
+	// stale counts budget reads this node's result cache could have served:
+	// a count read, raised by one and written back must be read fresh.
+	stale int
+}
+
+func (b *budgetAnsweringExecutor) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	_, _ = b.recordingJournalExecutor.Execute(ctx, query)
+	q := strings.TrimSpace(query)
+	runRead, goalRead := strings.HasPrefix(q, "query workRunById"), strings.HasPrefix(q, "query workGoalForOwner")
+	if (runRead || goalRead) && !memql.FreshReadFromContext(ctx) {
+		b.stale++
+	}
+	switch {
+	case runRead:
+		if b.failRun {
+			return nil, errors.New("read timeout")
+		}
+		if b.run == nil {
+			return &memql.ExecuteResult{}, nil
+		}
+		return memql.NewResultWithOutput([]any{b.run}), nil
+	case goalRead:
+		if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+			b.goalActors = append(b.goalActors, ac.UserId)
+		}
+		if b.goal == nil {
+			return &memql.ExecuteResult{}, nil
+		}
+		return memql.NewResultWithOutput([]any{b.goal}), nil
+	}
+	return &memql.ExecuteResult{}, nil
+}
+
+// goalRun is a goal's run row with some of its retry budget spent.
+func goalRun(id string, retriesSpent int) map[string]any {
+	return map[string]any{
+		"id": id, "goalId": "v1:work:goal:g1", "ownerUserId": "u-alice",
+		"spent": map[string]any{"retries": retriesSpent, "tokens": 120},
+	}
+}
+
+// defaultRetryBudget is work.DefaultMaxRetries, spelled as its value so this
+// file also compiles against a component/work that predates the constant --
+// which is how the tests below were run against the unfixed tree.
+const defaultRetryBudget = 3
+
+// THE RETRY THE DESIGN PROMISES, FROM WHAT THE EXECUTOR ACTUALLY RECORDS
+// (memql#5664). A step with no retry(n) that failed once is recorded as
+// attempt 1 of a retry budget of 0 -- and the act used to compare exactly
+// those, `1 < 0`, so a transient failure never retried. The budget is the
+// RUN's: three here, two spent, so this failure takes the last retry, and the
+// write that parks the run counts it.
+func TestATransientFailureRetriesWhileTheRunBudgetRemains(t *testing.T) {
+	c := &countingClassifier{symptom: work.SymptomHuman}
+	exec := &budgetAnsweringExecutor{
+		run:  goalRun("v1:work:run:b1", 2),
+		goal: map[string]any{"id": "v1:work:goal:g1", "ceilings": map[string]any{"maxRetries": 3}},
+	}
+	calls := closeWithBudget(t, c, failedRun("v1:work:run:b1", "dial tcp: connection refused", 1, 0), exec)
+
+	_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+	waiting, _ := args["waitingOn"].(map[string]any)
+	if args["status"] != "waiting" || waiting["kind"] != WaitKindRetry {
+		t.Fatalf("status = %v waitingOn = %v, want a retry wait: two of three retries spent leaves one", args["status"], waiting)
+	}
+	if anyCallNamed(calls, "createWorkApproval") {
+		t.Fatalf("a person was asked about a blip the budget still covers: %v", calls)
+	}
+	spent, _ := args["spent"].(map[string]any)
+	if spent["retries"] != float64(3) {
+		t.Fatalf("spent.retries = %v, want 3: a retry the budget never counted is a retry it can never stop", spent["retries"])
+	}
+	if spent["tokens"] != float64(120) {
+		t.Errorf("spent.tokens = %v, want 120: the write is a shallow read-merge, so counting a retry must not erase the other counters", spent["tokens"])
+	}
+	if len(exec.goalActors) != 1 || exec.goalActors[0] != "u-alice" {
+		t.Errorf("the goal was read as %v, want its owner u-alice: an unscoped read of an owned goal answers nothing and would read as 'no ceilings'", exec.goalActors)
+	}
+	if exec.stale != 0 {
+		t.Errorf("%d budget read(s) could be served from this node's result cache; a count read, raised and written back must be read fresh", exec.stale)
+	}
+}
+
+// The other edge: the budget is spent, so the same blip asks a person -- and
+// the wait spends nothing more.
+func TestATransientFailureAsksOnceTheRunBudgetIsSpent(t *testing.T) {
+	c := &countingClassifier{symptom: work.SymptomHuman}
+	exec := &budgetAnsweringExecutor{
+		run:  goalRun("v1:work:run:b2", 3),
+		goal: map[string]any{"id": "v1:work:goal:g1", "ceilings": map[string]any{"maxRetries": 3}},
+	}
+	calls := closeWithBudget(t, c, failedRun("v1:work:run:b2", "dial tcp: connection refused", 1, 0), exec)
+
+	_, approval := argsOf(t, lastCallNamed(t, calls, "createWorkApproval"))
+	if approval["kind"] != work.ApprovalKindFeedback {
+		t.Fatalf("approval kind = %v, want %q: past the budget a person decides", approval["kind"], work.ApprovalKindFeedback)
+	}
+	_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+	if _, counted := args["spent"]; counted {
+		t.Errorf("asking a person spent a retry: %v", args["spent"])
+	}
+}
+
+// A goal that declares a smaller budget than the default is held to it, and a
+// goal that declares none gets the default rather than "nothing allowed".
+func TestTheRetryBudgetIsTheGoalsOrTheDefault(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		ceilings map[string]any
+		spent    int
+		want     string
+	}{
+		{"the goal's own budget of one, spent", map[string]any{"maxRetries": 1}, 1, WaitKindApproval},
+		{"no budget declared: the default", map[string]any{}, defaultRetryBudget - 1, WaitKindRetry},
+		{"no budget declared, the default spent", map[string]any{}, defaultRetryBudget, WaitKindApproval},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := &budgetAnsweringExecutor{
+				run:  goalRun("v1:work:run:b3", tc.spent),
+				goal: map[string]any{"id": "v1:work:goal:g1", "ceilings": tc.ceilings},
+			}
+			calls := closeWithBudget(t, &countingClassifier{}, failedRun("v1:work:run:b3", "503 Service Unavailable", 1, 0), exec)
+			_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+			if waiting, _ := args["waitingOn"].(map[string]any); waiting["kind"] != tc.want {
+				t.Fatalf("waitingOn.kind = %v, want %q", waiting["kind"], tc.want)
+			}
+		})
+	}
+}
+
+// A BUDGET NOBODY COULD READ IS A BUDGET OF NOTHING. A run row that will not
+// read, or a goal that answers nothing under its owner, asks a person rather
+// than handing the run a retry no budget is counting.
+func TestAnUnreadableRetryBudgetAsksRatherThanLoops(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		exec *budgetAnsweringExecutor
+	}{
+		{"the run read fails", &budgetAnsweringExecutor{failRun: true}},
+		{"the run row is absent", &budgetAnsweringExecutor{}},
+		{"the goal is not readable as its owner", &budgetAnsweringExecutor{run: goalRun("v1:work:run:b4", 0)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := closeWithBudget(t, &countingClassifier{}, failedRun("v1:work:run:b4", "connection reset by peer", 1, 0), tc.exec)
+			if !anyCallNamed(calls, "createWorkApproval") {
+				t.Fatalf("an unreadable budget did not ask a person: %v", calls)
+			}
+			_, args := argsOf(t, lastCallNamed(t, calls, "updateWorkRun"))
+			if waiting, _ := args["waitingOn"].(map[string]any); waiting["kind"] != WaitKindApproval {
+				t.Fatalf("waitingOn.kind = %v, want %q", waiting["kind"], WaitKindApproval)
+			}
+		})
+	}
+}
+
+// THE APPROVAL THE FAILURE PATH RAISES MUST BE DECIDABLE (memql#5664). The
+// decide side recomputes the hash over the STORED subject; the row used to
+// store one map and hash another, so every approve and every answer was
+// refused as "artifact changed" and only a rejection could land. Each of the
+// three kinds this path raises is checked against that recompute.
+func TestAFailureApprovalHashesTheSubjectItStores(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		message string
+		run     func(*AutomationExecution)
+		kind    string
+	}{
+		{"feedback, a full context window", "prompt is too long: 216000 tokens > 200000 maximum", nil, work.ApprovalKindFeedback},
+		{"budget, a spent balance", "429 You exceeded your current quota (insufficient_quota)", nil, work.ApprovalKindBudget},
+		{"planReview, a precondition miss", "the check did not hold", func(r *AutomationExecution) { r.PreconditionMissed = true }, work.ApprovalKindPlanReview},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := failedRun("v1:work:run:h1", tc.message, 1, 0)
+			if tc.run != nil {
+				tc.run(run)
+			}
+			calls := closeWith(t, &countingClassifier{}, run)
+			_, approval := argsOf(t, lastCallNamed(t, calls, "createWorkApproval"))
+			if approval["kind"] != tc.kind {
+				t.Fatalf("approval kind = %v, want %q", approval["kind"], tc.kind)
+			}
+			subject, _ := approval["subject"].(map[string]any)
+			if len(subject) == 0 {
+				t.Fatal("the approval stores no subject, so a person has nothing to decide about")
+			}
+			if got := work.ArtifactHash(subject); got != approval["artifactHash"] {
+				t.Fatalf("artifactHash = %v, but the stored subject %v hashes to %s: the decide side recomputes over the subject, so every approve and answer would be refused", approval["artifactHash"], subject, got)
+			}
+		})
+	}
 }
 
 // TestATransientFailureCostsZeroProviderCalls is the design's headline

@@ -44,6 +44,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/id"
@@ -152,7 +154,22 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 		return false
 	}
 
-	act := work.ActFor(symptom, sig.Attempt, sig.MaxRetries)
+	// THE RUN-WIDE RETRY BUDGET IS READ ONLY WHEN THE ACT COULD SPEND IT: the
+	// three symptoms whose act runs the work again. Every other failure costs
+	// no read. A budget that cannot be read is a budget of nothing, so the run
+	// asks a person rather than looping on a number nobody could see -- the
+	// fail-closed direction the run ceilings take for the same reason.
+	var budget runRetryBudget
+	if work.ActsAgain(symptom) {
+		var readable bool
+		if budget, readable = j.retryBudget(ctx, exec); !readable && j.logger != nil {
+			j.logger.Warn("work journal: the run's retry budget could not be read, so this failure asks a person instead of running the work again",
+				"component", ComponentName, "run", exec.ID, "step", stepKey, "symptom", string(symptom))
+		}
+		sig.RetriesSpent, sig.MaxRetries = budget.spent, budget.max
+	}
+
+	act := work.ActFor(symptom, sig.RetriesSpent, sig.MaxRetries)
 	j.recordSymptom(ctx, exec, stepKey, symptom)
 
 	now := time.Now().UTC()
@@ -165,7 +182,7 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 			"resumeAt": rfc3339(now.Add(retryBackoff)),
 			"reason":   evidence.Reason,
 			"ruleId":   evidence.RuleId,
-		})
+		}, budget.spending())
 	case work.ActReplan:
 		j.waitFor(ctx, exec, chainHead, map[string]any{
 			"kind":    WaitKindReplan,
@@ -173,7 +190,7 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 			"since":   rfc3339(now),
 			"reason":  evidence.Reason,
 			"ruleId":  evidence.RuleId,
-		})
+		}, budget.spending())
 	case work.ActRepair:
 		j.waitFor(ctx, exec, chainHead, map[string]any{
 			"kind":    WaitKindRepair,
@@ -181,7 +198,7 @@ func (j *workJournal) classifyAndAct(ctx context.Context, exec *AutomationExecut
 			"since":   rfc3339(now),
 			"reason":  evidence.Reason,
 			"ruleId":  evidence.RuleId,
-		})
+		}, budget.spending())
 	case work.ActHeal, work.ActAsk:
 		// The KIND is chosen from the verdict rather than the act alone: an
 		// exhausted budget and "the system cannot decide this" are both
@@ -313,59 +330,60 @@ func (j *workJournal) recordSymptom(ctx context.Context, exec *AutomationExecuti
 // NOR an errorCode, for parkOnInference's reason: the run has not finished and
 // has not failed, and writing either would make every terminal-run reader
 // treat a waiting run as done.
-func (j *workJournal) waitFor(ctx context.Context, exec *AutomationExecution, chainHead string, waiting map[string]any) {
-	j.call(ctx, "updateWorkRun", map[string]any{
+//
+// spent is the run's spend with this act's retry counted, for an act that
+// runs the work again (runRetryBudget.spending), and nil otherwise. It rides
+// the SAME write as the wait: a wait recorded without its retry would hand the
+// run another attempt the budget never saw, and the next failure would be
+// judged against a count one short -- for ever, if every write lost it.
+func (j *workJournal) waitFor(ctx context.Context, exec *AutomationExecution, chainHead string, waiting, spent map[string]any) {
+	args := map[string]any{
 		"runId":        exec.ID,
 		"status":       "waiting",
 		"chainHead":    chainHead,
 		"stepOrder":    exec.StepOrder,
 		"waitingOn":    waiting,
 		"errorMessage": exec.Error,
-	})
+	}
+	if spent != nil {
+		args["spent"] = spent
+	}
+	j.call(ctx, "updateWorkRun", args)
 }
 
 // waitOnApproval raises the approval and then parks on it. THE ORDER IS
 // LOAD-BEARING, exactly as it is in parkOnInference: a run parked on an
 // approval id that does not exist waits on nothing, which no person can decide
 // and no sweep can resolve.
+//
+// The row is component/work's FailureApproval, which builds the subject and
+// hashes THAT subject: the decide side recomputes the hash over the stored
+// subject, and a hash taken over any other map refuses every approve and
+// every answer as "artifact changed" (memql#5664).
 func (j *workJournal) waitOnApproval(ctx context.Context, exec *AutomationExecution, chainHead, stepKey, kind string, symptom work.Symptom, evidence work.Evidence, now time.Time) bool {
 	approvalId := "v1:work:approval:" + id.NewShortId()
 	question := "This run failed and the system does not know how to proceed."
 	if evidence.Reason != "" {
 		question = evidence.Reason
 	}
+	req := work.FailureApproval(kind, exec.ID, stepKey, symptom, exec.Error, question, evidence, now, workApprovalTTL)
 	if !j.persistApproval(ctx, exec, chainHead, map[string]any{
-		"approvalId": approvalId,
-		"runId":      exec.ID,
-		"stepKey":    stepKey,
-		"kind":       kind,
-		"subject": map[string]any{
-			"symptom":      string(symptom),
-			"stepKey":      stepKey,
-			"errorMessage": exec.Error,
-		},
-		// The hash covers the FAILURE, not a proposed change: an approval is a
-		// decision about one specific situation, and resume compares the hash
-		// so a decision cannot carry to a different failure of the same step.
-		"artifactHash": work.ArtifactHash(map[string]any{
-			"runId":   exec.ID,
-			"stepKey": stepKey,
-			"error":   exec.Error,
-			"symptom": string(symptom),
-		}),
-		"question": question,
-		"options": []map[string]any{
-			{"label": "Retry", "value": "retry"},
-			{"label": "Abandon", "value": "abandon"},
-		},
+		"approvalId":   approvalId,
+		"runId":        req.RunId,
+		"stepKey":      req.StepKey,
+		"kind":         req.Kind,
+		"subject":      req.Subject,
+		"artifactHash": req.ArtifactHash,
+		"question":     req.Question,
+		"options":      req.Options,
 		"evidence": map[string]any{
-			"tier":   evidence.Tier,
-			"reason": evidence.Reason,
-			"ruleId": evidence.RuleId,
-			"source": evidence.Source,
+			"tier":   req.Evidence.Tier,
+			"reason": req.Evidence.Reason,
+			"ruleId": req.Evidence.RuleId,
+			"source": req.Evidence.Source,
 		},
-		"requestedAt": rfc3339(now),
-		"expiresAt":   rfc3339(now.Add(workApprovalTTL)),
+		"requestedAt": rfc3339(req.RequestedAt),
+		"expiresAt":   rfc3339(req.ExpiresAt),
 	}) {
 		return false
 	}
@@ -374,8 +392,92 @@ func (j *workJournal) waitOnApproval(ctx context.Context, exec *AutomationExecut
 		"subject":      approvalId,
 		"approvalKind": kind,
 		"since":        rfc3339(now),
-	})
+	}, nil)
 	return true
+}
+
+// runRetryBudget is the run-wide retry budget and what the run has already
+// spent of it, read at the failure.
+type runRetryBudget struct {
+	spent int
+	max   int
+	// stored is the run's spent object as read, so the write that counts a
+	// retry keeps every other counter on it: updateWorkRun's read-merge is
+	// shallow, and `spent: {retries: n}` alone would erase the rest.
+	stored map[string]any
+}
+
+// spending is the run's spend with one more retry counted.
+func (b runRetryBudget) spending() map[string]any {
+	out := make(map[string]any, len(b.stored)+1)
+	for k, v := range b.stored {
+		out[k] = v
+	}
+	out["retries"] = b.spent + 1
+	return out
+}
+
+// retryBudget reads the run-wide retry budget for exec's run: its
+// spent.retries off the run row, and its goal's ceilings.maxRetries --
+// work.RetryBudget's default for a goal that declares none, and for a run with
+// no goal at all. ok is false when either could not be read, and the zero
+// budget then returned is a budget of nothing.
+//
+// BOTH READS SKIP THIS NODE'S RESULT CACHE. The count is read here, raised by
+// one and written back, and the previous failure may have been closed on
+// another replica: a cached run row from before that write would hand the run
+// the retry that failure already spent.
+//
+// The run is read as the journal reads it, under its own cluster actor; the
+// goal under its OWNER's borrowed authority, because a goal is one person's
+// and an unscoped read answers zero rows and no error -- which would read as
+// "no ceilings", the default budget, when the person declared a smaller one.
+func (j *workJournal) retryBudget(ctx context.Context, exec *AutomationExecution) (runRetryBudget, bool) {
+	if j == nil || exec == nil || exec.ID == "" {
+		return runRetryBudget{}, false
+	}
+	fresh := memql.ContextWithFreshRead(ctx)
+	runCall, err := journalArgs("workRunById", map[string]any{"runId": exec.ID})
+	if err != nil {
+		return runRetryBudget{}, false
+	}
+	res, err := j.exec.Execute(journalContext(fresh), "query "+runCall)
+	if err != nil {
+		j.warn("workRunById", err)
+		return runRetryBudget{}, false
+	}
+	runs := memql.MaterializeRows(res)
+	if len(runs) == 0 {
+		return runRetryBudget{}, false
+	}
+	stored, _ := runs[0]["spent"].(map[string]any)
+	budget := runRetryBudget{spent: intField(stored, "retries"), max: work.DefaultMaxRetries, stored: stored}
+	goalId := stringField(runs[0], "goalId")
+	if goalId == "" {
+		return budget, true
+	}
+	owner := stringField(runs[0], "ownerUserId")
+	if owner == "" {
+		// A goal is a person's; one with no owner on its run is an anomaly,
+		// and its ceilings cannot be read as anybody.
+		return runRetryBudget{}, false
+	}
+	goalCall, err := journalArgs("workGoalForOwner", map[string]any{"goalId": goalId})
+	if err != nil {
+		return runRetryBudget{}, false
+	}
+	res, err = j.exec.Execute(auth.ContextWithUserActor(fresh, owner), "query "+goalCall)
+	if err != nil {
+		j.warn("workGoalForOwner", err)
+		return runRetryBudget{}, false
+	}
+	goals := memql.MaterializeRows(res)
+	if len(goals) == 0 {
+		return runRetryBudget{}, false
+	}
+	ceilings, _ := goals[0]["ceilings"].(map[string]any)
+	budget.max = work.RetryBudget(work.Ceilings{MaxRetries: intField(ceilings, "maxRetries")})
+	return budget, true
 }
 
 // signalFor builds the rules table's input from what the executor actually
@@ -389,6 +491,13 @@ func (j *workJournal) waitOnApproval(ctx context.Context, exec *AutomationExecut
 // the signal is served -- but do not read the presence of that arm as evidence
 // that contract misses are being caught today. PreconditionFailed IS produced,
 // by emitPreconditionMiss, and is carried here through exec.PreconditionMissed.
+//
+// THE RUN-WIDE RETRY BUDGET IS NOT HERE. Signal.MaxRetries used to be filled
+// from the failed step's retry(n) and Signal.Attempt from that step's attempts
+// (1+n), so ActFor's `attempt < maxRetries` was `1+n < n` and no failure ever
+// retried (memql#5664). The step's own retry loop is the stall signal below
+// and nothing else; the run's budget is read by classifyAndAct, and only for
+// a symptom whose act could spend it.
 func signalFor(exec *AutomationExecution) work.Signal {
 	if exec == nil {
 		return work.Signal{}
@@ -397,7 +506,6 @@ func signalFor(exec *AutomationExecution) work.Signal {
 		ErrorMessage:       exec.Error,
 		StepType:           exec.FailedStepType,
 		Attempt:            exec.FailedStepAttempt,
-		MaxRetries:         exec.FailedStepRetries,
 		PreconditionFailed: exec.PreconditionMissed,
 	}
 	if sig.Attempt < 1 {
@@ -410,8 +518,8 @@ func signalFor(exec *AutomationExecution) work.Signal {
 	// time IS the stall signal. The rules table puts that rule above every
 	// transient matcher precisely so a repeated action escalates rather than
 	// retrying forever -- and the executor is the only place that knows the
-	// difference, because the budget is spent inside its loop.
-	sig.RepeatedAction = sig.MaxRetries > 0 && sig.Attempt > sig.MaxRetries
+	// difference, because the step's retry(n) is spent inside its loop.
+	sig.RepeatedAction = exec.FailedStepRetries > 0 && exec.FailedStepAttempt > exec.FailedStepRetries
 	return sig
 }
 

@@ -200,7 +200,15 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		}), nil
 	}
 
-	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, decision, now)
+	// AN ANSWER CAN BE A STOP. A failure-path question offers Retry and
+	// Abandon (work.FailureApproval) and is decided `answered`, the choice
+	// riding the answer -- so reading the decision alone would carry on with
+	// work the person had just chosen to stop.
+	runDecision := decision
+	if decision == "answered" && work.AnswerAbandons(approval["options"], answer) {
+		runDecision = decisionAbandoned
+	}
+	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, now)
 	if err != nil {
 		// The DECISION landed. Failing the whole call now would tell the
 		// caller their answer was not recorded when it was, and a retry
@@ -241,40 +249,22 @@ func withTrainingOutcome(payload map[string]any, goalId, runId string, escalated
 }
 
 // currentArtifactHash answers "what does the thing being approved hash to
-// NOW", and the answer depends on where the stored hash came from.
+// NOW". The rule is component/work's CurrentArtifactHash, beside the builders
+// every approval is raised with, so the raise side and this side cannot drift
+// apart again: the failure path's approvals were raised with a hash over one
+// map and checked here against another, and every approve and every answer on
+// them was refused as "artifact changed" (memql#5664).
 //
-//   - For kinds whose hash is DERIVED from the subject (budget, feedback, and
-//     a planReview with no explicit hash), recomputing over the stored subject
-//     is the check: a subject edited since the approval was raised hashes
-//     differently and the resume refuses.
-//
-//   - For `sideEffect` the stored hash is safety.ApprovalCorrelationKey over
-//     the redacted DESCRIPTOR, which is not a function of the stored subject
-//     and cannot be recomputed from a row. It is passed through unchanged, and
-//     the modified-artifact protection for that kind lives where the artifact
-//     actually is: the NEXT dispatch of a changed command computes a DIFFERENT
-//     correlation key, finds no approved row under it, and raises a fresh
-//     pending approval. Approving one command can therefore never run another
-//     -- which is the guarantee, arrived at by construction rather than by a
-//     comparison this function is not in a position to make.
-//
-// Returning storedHash for that case is deliberate and is what makes the
-// distinction visible: the alternative -- recomputing over the subject for
-// every kind -- would make every sideEffect decision fail as "changed", every
-// time, and the safety gate's inbox would be undecidable.
+// `sideEffect` is the case worth restating here, because this is where it
+// would be broken: its stored hash is safety.ApprovalCorrelationKey over the
+// redacted DESCRIPTOR, not a function of the stored subject, so it is passed
+// through, and the modified-artifact protection for it lives where the
+// artifact is -- the next dispatch of a changed command computes a different
+// key, finds no approved row under it, and raises a fresh approval.
+// Recomputing over the subject for every kind would make every sideEffect
+// decision fail as "changed" and the safety gate's inbox undecidable.
 func currentArtifactHash(kind, storedHash string, subject map[string]any) string {
-	switch kind {
-	case work.ApprovalKindSideEffect, work.ApprovalKindScopeElevation, work.ApprovalKindSkillMint:
-		return storedHash
-	}
-	if len(subject) == 0 {
-		// No subject to recompute over. Treating an absent subject as a
-		// mismatch would refuse every approval raised before the subject was
-		// recorded; treating it as a match is what the stored hash already
-		// asserts.
-		return storedHash
-	}
-	return work.ArtifactHash(subject)
+	return work.CurrentArtifactHash(kind, storedHash, subject)
 }
 
 // resumeParkedRun takes the run off its wait, or stops it.
@@ -287,7 +277,9 @@ func currentArtifactHash(kind, storedHash string, subject map[string]any) string
 //   - rejected -> the run FAILS with errorCode approval_rejected. Leaving it
 //     `waiting` would park it forever: a rejected approval has no timer, so
 //     the timer sweep never resumes it and the abandoned sweep deliberately
-//     leaves waiting runs alone. Someone said no, and the run stops.
+//     leaves waiting runs alone. Someone said no, and the run stops. An
+//     answer choosing Abandon (decisionAbandoned) is the same no, said
+//     through a question's options, and stops the run the same way.
 //   - the run is not actually parked on THIS approval -> nothing is written.
 //     A stale decision must not un-park a run that has since moved on.
 //
@@ -325,12 +317,16 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 		// the run would read as parked while running.
 		"waitingOn": map[string]any{},
 	}
-	if decision == "rejected" {
+	switch decision {
+	case "rejected", decisionAbandoned:
 		fields["status"] = runStatusFailed
 		fields["errorCode"] = "approval_rejected"
 		fields["errorMessage"] = "a person rejected the approval this run was parked on"
+		if decision == decisionAbandoned {
+			fields["errorMessage"] = "a person chose to abandon this run when asked about its failure"
+		}
 		fields["finishedAt"] = rfc(now)
-	} else {
+	default:
 		fields["status"] = runStatusRunning
 		fields["heartbeatAt"] = rfc(now)
 	}
@@ -339,6 +335,11 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 	}
 	return true, nil
 }
+
+// decisionAbandoned is not a decision anybody records -- the approval row
+// says `answered` -- but what an answer choosing work.FailureAnswerAbandon
+// means for the run parked on it: the run stops, as it does on a rejection.
+const decisionAbandoned = "answered:abandon"
 
 // ---------------------------------------------------------------------------
 // The safety gate's sink
