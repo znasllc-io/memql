@@ -148,7 +148,7 @@ func (r *Router) PlanPinnedModel(
 	}
 	selected := make([]Candidate, 0, 1)
 	for _, c := range plan.Candidates {
-		if sameSubject(c.RegistrationId, registrationId) {
+		if sameRegistration(c.RegistrationId, registrationId) {
 			selected = append(selected, c)
 		}
 	}
@@ -166,12 +166,12 @@ func (r *Router) PlanPinnedModel(
 // it as a candidate, or rejected it with a reason.
 func planJudged(plan RoutePlan, registrationId string) bool {
 	for _, c := range plan.Candidates {
-		if sameSubject(c.RegistrationId, registrationId) {
+		if sameRegistration(c.RegistrationId, registrationId) {
 			return true
 		}
 	}
 	for id := range plan.Rejected {
-		if sameSubject(id, registrationId) {
+		if sameRegistration(id, registrationId) {
 			return true
 		}
 	}

@@ -259,7 +259,7 @@ func (h *ForwardHandler) verifyRegistration(ctx context.Context, ownerUserId, re
 		return err
 	}
 	for _, m := range machines {
-		if !sameSubject(m.RegistrationId, registrationId) {
+		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
@@ -332,7 +332,7 @@ func (h *ForwardHandler) verifySharedRegistration(ctx context.Context, actingUse
 	}
 	person := workerservice.NewPerson(ctx, actingUserId, groups)
 	for _, m := range machines {
-		if !sameSubject(m.RegistrationId, registrationId) {
+		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if !m.RevokedAt.IsZero() {
@@ -369,7 +369,7 @@ func (h *ForwardHandler) ownerOfSharedMachine(ctx context.Context, registrationI
 		return err
 	}
 	for _, m := range machines {
-		if !sameSubject(m.RegistrationId, registrationId) {
+		if !sameRegistration(m.RegistrationId, registrationId) {
 			continue
 		}
 		if sameSubject(m.OwnerUserId, registryOwner) {
@@ -450,12 +450,12 @@ func (h *ForwardHandler) send(send func(*nodev1.NodeServerMessage) error, resp *
 // (`v1:identity:user:abc`) on one side and bare (`abc`) on the other. The
 // engine bare-ifies on egress and canonicalizes on write, so both spellings
 // are in play on any given comparison -- see docs/public/concepts/identifiers.md.
+//
+// It compares PEOPLE, by component/worker.SameSubjectId's rule, never by the
+// text after the last colon: that read `system:automation:ana` as `ana`.
+// Registration ids keep that rule, through sameRegistration.
 func sameSubject(a, b string) bool {
-	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
-	if a == b {
-		return a != ""
-	}
-	return a != "" && b != "" && lastSegment(a) == lastSegment(b)
+	return workerservice.SameSubjectId(a, b)
 }
 
 func lastSegment(s string) string {
