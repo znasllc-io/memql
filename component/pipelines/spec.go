@@ -52,8 +52,12 @@ type StageSpec struct {
 	On []string `yaml:"on,omitempty" json:"on,omitempty"`
 	// Channel makes this a notify stage: it names a v1:pipelines:channel and
 	// carries no steps (D16).
-	Channel string     `yaml:"channel,omitempty" json:"channel,omitempty"`
-	Steps   []StepSpec `yaml:"steps,omitempty" json:"steps,omitempty"`
+	Channel string `yaml:"channel,omitempty" json:"channel,omitempty"`
+	// Links are the notify stage's own links, shown in its message beside the
+	// run page: the docs a release's announcement points to. Only a notify
+	// stage carries them.
+	Links []Link     `yaml:"links,omitempty" json:"links,omitempty"`
+	Steps []StepSpec `yaml:"steps,omitempty" json:"steps,omitempty"`
 }
 
 // StepSpec is one step: a shell command in the image's working copy, with

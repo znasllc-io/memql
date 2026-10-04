@@ -3,12 +3,14 @@ package pipelines
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"path"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // DefaultStepTimeout applies when a step names none; MaxStepTimeout caps one.
@@ -20,6 +22,15 @@ const (
 // minStepTimeout is the shortest timeout a step may name: under a minute, the
 // clone and the image pull alone could time out a step that did nothing wrong.
 const minStepTimeout = time.Minute
+
+// What a notify stage's links may be (epic memql#5480). A message carries them
+// beside the run page, so they are few, short and plainly addressed: the bounds
+// keep a message inside Discord's limits and a label from becoming a paragraph.
+const (
+	maxStageLinks     = 5
+	maxLinkLabelRunes = 40
+	maxLinkURLBytes   = 512
+)
 
 // reservedSecretPrefix is the platform's own environment (StepRequest's
 // Environment). A secret under it never resolves, so a manifest cannot shadow
@@ -192,12 +203,16 @@ func validateStage(spec *Spec, i int, stage StageSpec, earlier, declared map[str
 			"Stage %q has both a channel and steps; a notify stage names a channel and carries no steps.", stage.Name)
 	case stage.Channel == "" && len(stage.Steps) == 0:
 		return Refuse(CodeStageInvalid, stage.Name, "Stage %q has neither steps nor a channel.", stage.Name)
+	case stage.Channel == "" && len(stage.Links) > 0:
+		// Steps are the only other thing a stage can have by now.
+		return Refuse(CodeStageInvalid, stage.Name,
+			"Stage %q has links, and only a notify stage carries them: a stage that names a channel and no steps.", stage.Name)
 	case stage.Channel != "":
 		if !manifestNameRe.MatchString(stage.Channel) {
 			return Refuse(CodeStageInvalid, stage.Name, "Stage %q names channel %q, which is not a name: %s.",
 				stage.Name, stage.Channel, manifestNameRule)
 		}
-		return nil
+		return validateLinks(stage.Name, stage.Links)
 	}
 
 	seen := make(map[string]bool, len(stage.Steps))
@@ -206,6 +221,53 @@ func validateStage(spec *Spec, i int, stage StageSpec, earlier, declared map[str
 			return r
 		}
 		seen[step.Name] = true
+	}
+	return nil
+}
+
+// validateLinks holds a notify stage's links to what a message can carry: at
+// most maxStageLinks of them, each with a label and an address.
+func validateLinks(stage string, links []Link) *Refusal {
+	if len(links) > maxStageLinks {
+		return Refuse(CodeStageInvalid, stage, "Stage %q lists %d links; a notify stage carries at most %d.", stage, len(links), maxStageLinks)
+	}
+	for i, link := range links {
+		label := strings.TrimSpace(link.Label)
+		switch n := utf8.RuneCountInString(label); {
+		case n == 0:
+			return Refuse(CodeStageInvalid, stage, "Link %d of stage %q has no label; every link needs one.", i+1, stage)
+		case n > maxLinkLabelRunes:
+			return Refuse(CodeStageInvalid, stage, "Link %d of stage %q has a label of %d characters; a label is at most %d.",
+				i+1, stage, n, maxLinkLabelRunes)
+		}
+		if r := validateLinkURL(stage, label, link.URL); r != nil {
+			return r
+		}
+	}
+	return nil
+}
+
+// validateLinkURL asks of one link's address what a message needs of it: an
+// absolute https URL that names a host, carries no credential and is at most
+// maxLinkURLBytes. A refusal names the link by its label and never repeats the
+// URL: it is printed in the check run, and the reason for refusing one may be
+// that it carries a secret.
+//
+// White space of any kind is part of "not a URL" here, so a link a message
+// would leave out for it is refused where its author reads the reason, and a
+// message never drops a link without a word.
+func validateLinkURL(stage, label, raw string) *Refusal {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil || u.Scheme != "https" || u.Hostname() == "" || strings.ContainsFunc(raw, isSpaceOrControl):
+		return Refuse(CodeStageInvalid, stage,
+			"The URL of link %q in stage %q is not an absolute https URL, such as https://example.com/docs.", label, stage)
+	case u.User != nil:
+		return Refuse(CodeStageInvalid, stage,
+			"The URL of link %q in stage %q carries a user name or password; a link is published in every message, so it must not.", label, stage)
+	case len(raw) > maxLinkURLBytes:
+		return Refuse(CodeStageInvalid, stage,
+			"The URL of link %q in stage %q is %d bytes; a URL is at most %d.", label, stage, len(raw), maxLinkURLBytes)
 	}
 	return nil
 }

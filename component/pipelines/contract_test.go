@@ -65,6 +65,35 @@ func TestStepResultWireNamesArePinned(t *testing.T) {
 	}
 }
 
+// A compiled step crosses NodeService inside the request and is kept on the
+// run's journal, so a notify step's links are on the wire too. Their names are
+// pinned, and a step that carries none says nothing about them.
+func TestStepLinksWireNamesArePinned(t *testing.T) {
+	raw, err := json.Marshal(Step{Kind: StepNotify, Links: []Link{{Label: "Docs", URL: "https://memql.io/docs/"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	links, ok := got["links"].([]any)
+	if !ok || len(links) != 1 {
+		t.Fatalf("a step's links on the wire = %v, want an array of one in %s", got["links"], raw)
+	}
+	if keys := sortedKeys(links[0].(map[string]any)); !reflect.DeepEqual(keys, []string{"label", "url"}) {
+		t.Errorf("a link's JSON keys = %v, want [label url]", keys)
+	}
+
+	raw, err = json.Marshal(Step{Kind: StepNotify})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "links") {
+		t.Errorf("a step with no links carries the key anyway: %s", raw)
+	}
+}
+
 // The environment contract: what every runner exports, rendered in one place.
 func TestEnvironmentRendersTheContractAndPlatformNamesWin(t *testing.T) {
 	req := StepRequest{

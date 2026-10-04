@@ -124,6 +124,9 @@ type Step struct {
 	Shard    ShardRef `json:"shard"`
 	// Channel names the v1:pipelines:channel a notify step delivers to.
 	Channel string `json:"channel,omitempty"`
+	// Links are the notify stage's own links (a Docs link), rendered into its
+	// message beside the run page. A command step carries none.
+	Links []Link `json:"links,omitempty"`
 	// DependsOn are the keys of the steps this one waits for: the steps of
 	// the stage before it.
 	DependsOn []string `json:"dependsOn,omitempty"`

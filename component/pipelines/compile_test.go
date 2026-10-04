@@ -384,6 +384,83 @@ func TestCompileAFullSelectionSelectsEveryPackage(t *testing.T) {
 	}
 }
 
+// A notify stage may carry its own links (epic memql#5480: the docs link a
+// release's message offers beside the run page). They ride the compiled notify
+// step, in the order written, so the driver that executes the stage renders
+// them and the runner is never asked about them.
+func TestCompileCarriesANotifyStagesLinks(t *testing.T) {
+	in := CompileInput{
+		Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet,
+		Selector: d7Selector(Selection{}), Timings: d7Timings,
+	}
+	spec := d7ExampleSpec()
+	spec.Stages[3].Links = []Link{
+		{Label: "Docs", URL: "https://memql.io/docs/"},
+		{Label: "Changelog", URL: "https://memql.io/changelog"},
+	}
+	plan := mustCompilePlan(t, spec, in)
+
+	notify := planStepByKey(t, plan, "notify.notify")
+	want := []Link{{Label: "Docs", URL: "https://memql.io/docs/"}, {Label: "Changelog", URL: "https://memql.io/changelog"}}
+	if !reflect.DeepEqual(notify.Links, want) {
+		t.Fatalf("the notify step's links = %+v, want %+v", notify.Links, want)
+	}
+	for _, step := range plan.Steps() {
+		if step.Key != "notify.notify" && step.Links != nil {
+			t.Errorf("step %s carries links %+v; only a notify step does", step.Key, step.Links)
+		}
+	}
+
+	// A stage with none compiles to a step with none -- nil, so the step's wire
+	// form is the one it had before links existed.
+	plain := mustCompilePlan(t, d7ExampleSpec(), in)
+	if got := planStepByKey(t, plain, "notify.notify").Links; got != nil {
+		t.Errorf("a notify stage with no links compiled to links %+v, want nil", got)
+	}
+
+	// The step owns its links: changing one changes nothing in the spec.
+	notify.Links[0].URL = "https://changed.example.test/"
+	if got := spec.Stages[3].Links[0].URL; got != "https://memql.io/docs/" {
+		t.Errorf("changing a compiled step's link changed the spec to %q", got)
+	}
+}
+
+// Links belong to a notify stage and to nothing else, so a command step never
+// compiles with any, and Compile refuses what Validate refuses.
+func TestCompileRefusesLinksValidateRefuses(t *testing.T) {
+	spec := d7ExampleSpec()
+	spec.Stages[3].Links = linksOf(6)
+	plan, r := Compile(spec, CompileInput{Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet, Selector: d7Selector(Selection{})})
+	if r == nil || r.Code != CodeStageInvalid || r.Scope != "notify" {
+		t.Errorf("Compile = %v, want pipeline_stage_invalid (notify)", r)
+	}
+	if !reflect.DeepEqual(plan, Plan{}) {
+		t.Errorf("a refused compile returned a plan: %+v", plan)
+	}
+
+	// And a stage with steps refuses links even when its event never plans it:
+	// a typo in the deploy stage fails the pull request's run too.
+	spec = d7ExampleSpec()
+	spec.Stages[2].Links = linksOf(1)
+	if _, r := Compile(spec, CompileInput{Mode: ModeAffected, Event: EventPullRequest, Compute: ComputeClusterAndFleet, Selector: d7Selector(Selection{})}); r == nil || r.Scope != "deploy" {
+		t.Errorf("a pull request's Compile = %v, want a refusal of the deploy stage's links", r)
+	}
+}
+
+// cloneCompiledStep is what a shard is made with: it must not hand two steps
+// one slice, and a step's links are a slice like the rest.
+func TestCloneCompiledStepSharesNoLinks(t *testing.T) {
+	original := Step{Links: []Link{{Label: "Docs", URL: "https://memql.io/docs/"}}}
+	clone := cloneCompiledStep(original)
+	clone.Links[0].Label = "changed"
+	if original.Links[0].Label != "Docs" {
+		t.Errorf("the clone shares its links with the step it came from: %+v", original.Links)
+	}
+	if got := cloneCompiledStep(Step{}).Links; got != nil {
+		t.Errorf("a step with no links cloned to %+v, want nil", got)
+	}
+}
+
 func TestCompileRefusesAPackageStepWithNoSelector(t *testing.T) {
 	_, r := Compile(d7ExampleSpec(), CompileInput{Mode: ModeFull, Event: EventPush, Compute: ComputeClusterAndFleet})
 	if r == nil || r.Code != CodeSelectMissing || r.Scope != "tests/go-tests" {

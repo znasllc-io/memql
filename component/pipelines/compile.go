@@ -78,7 +78,8 @@ func NeedsSelector(spec *Spec) bool {
 // `on` excludes the run is absent from the plan, not skipped. Each planned
 // stage compiles, in order:
 //
-//   - a notify stage to one notify step, "<stage>.notify";
+//   - a notify stage to one notify step, "<stage>.notify", which carries the
+//     stage's links;
 //   - every other step to one step "<stage>.<step>", or, split by the timing
 //     table into k > 1 shards, to k steps "<stage>.<step>#<i>";
 //   - every step depends on every step of the stage planned before it, so
@@ -122,7 +123,7 @@ func Compile(spec *Spec, in CompileInput) (Plan, *Refusal) {
 		if stage.Channel != "" {
 			planned.Steps = []Step{{
 				Key: StepKey(stage.Name, "notify"), Stage: stage.Name, Name: "notify", Kind: StepNotify,
-				Channel: stage.Channel, TimeoutSeconds: int(DefaultStepTimeout / time.Second),
+				Channel: stage.Channel, Links: compiledLinks(stage.Links), TimeoutSeconds: int(DefaultStepTimeout / time.Second),
 				DependsOn: compiledCopy(previous),
 			}}
 		} else {
@@ -351,6 +352,14 @@ func compiledCopy(s []string) []string {
 	return slices.Clone(s)
 }
 
+// compiledLinks copies a stage's links for a plan, nil when it has none.
+func compiledLinks(links []Link) []Link {
+	if len(links) == 0 {
+		return nil
+	}
+	return slices.Clone(links)
+}
+
 // cloneCompiledStep copies a step so that no slice or map is shared with the
 // step it came from: each shard of a step is a value of its own.
 func cloneCompiledStep(s Step) Step {
@@ -368,6 +377,7 @@ func cloneCompiledStep(s Step) Step {
 	s.Secrets = slices.Clone(s.Secrets)
 	s.Packages = slices.Clone(s.Packages)
 	s.DependsOn = slices.Clone(s.DependsOn)
+	s.Links = slices.Clone(s.Links)
 	if s.Skip != nil {
 		skip := *s.Skip
 		s.Skip = &skip
