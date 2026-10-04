@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -143,32 +142,18 @@ func (i *Integration) handleDispatchInbound(ctx context.Context, args map[string
 	if source == "" {
 		return resultNode("skipped", "no source on the staged row")
 	}
-	req := memqlsync.InboundRequest{
-		RequestId:  strings.TrimSpace(argString(args, "inboundRequestId")),
-		Source:     source,
-		Topic:      strings.TrimSpace(argString(args, "topic")),
-		Body:       []byte(argString(args, "body")),
-		ReceivedAt: time.Now().UTC(),
-	}
-	// Either parse failure is stamped before it is returned, as Dispatch
-	// stamps an apply failure: a row left `received` says nothing to the
-	// operator and, because @createOnly keeps the bad value, re-fires
-	// identically on every re-stage (memql#5707 review).
-	if raw := argString(args, "headersJson"); raw != "" {
-		if err := json.Unmarshal([]byte(raw), &req.Headers); err != nil {
-			i.dispatcher.stamp(OperatorContext(ctx), req.RequestId, "failed", "invalid staged delivery headers")
-			return nil, fmt.Errorf("datasync: invalid staged delivery headers")
-		}
-	}
-	if raw := argString(args, "receivedAt"); raw != "" {
-		at, err := time.Parse(time.RFC3339Nano, raw)
-		if err != nil {
-			i.dispatcher.stamp(OperatorContext(ctx), req.RequestId, "failed", "invalid staged delivery timestamp")
-			return nil, fmt.Errorf("datasync: invalid staged delivery timestamp")
-		}
-		req.ReceivedAt = at.UTC()
-	}
-	res, err := i.dispatcher.Dispatch(ctx, req)
+	// The staged metadata is parsed INSIDE DispatchStaged, after the
+	// connector lookup, so a row of a source no connector serves stays the
+	// no-op Dispatch's contract promises whatever its metadata says; a
+	// served row that does not parse is stamped `failed` there.
+	res, err := i.dispatcher.DispatchStaged(ctx, StagedRequest{
+		RequestId:   argString(args, "inboundRequestId"),
+		Source:      source,
+		Topic:       argString(args, "topic"),
+		Body:        []byte(argString(args, "body")),
+		HeadersJSON: argString(args, "headersJson"),
+		ReceivedAt:  argString(args, "receivedAt"),
+	})
 	if err != nil {
 		// Returned rather than swallowed: the automation step records it,
 		// and the request row has already been stamped `failed` with the

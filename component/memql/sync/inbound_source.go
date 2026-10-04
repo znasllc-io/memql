@@ -67,10 +67,12 @@ func SourceName(connector, tenant string) string { return connector + "-" + tena
 // SourceFor asks every BOUND connector whether it owns a source name,
 // and returns the first that says yes.
 //
-// The receiver calls this AFTER its env-configured sources, so an
-// operator who pinned a source in the environment keeps it: a connector
-// silently taking over a pinned name would move which secret verifies a
-// live sender, with nothing in the environment changed to say so.
+// The receiver calls this AFTER its env-configured sources, so a
+// connector never silently takes over a name an operator pinned: that
+// would move which secret verifies a live sender, with nothing in the
+// environment changed to say so. A pinned name ConnectorForSource
+// resolves is REFUSED by the receiver instead of verified by either
+// secret (memql#5707 follow-up).
 func SourceFor(ctx context.Context, name string) (InboundSource, bool) {
 	src, _, ok := sourceOwner(ctx, name)
 	return src, ok
@@ -78,6 +80,12 @@ func SourceFor(ctx context.Context, name string) (InboundSource, bool) {
 
 // ConnectorForSource resolves an exact connector name or a source explicitly
 // claimed by a bound connector. It never guesses ownership from a prefix.
+//
+// It is the dispatcher's routing rule AND the inbound receiver's collision
+// rule: a name this resolves is never verified by an env-pinned secret,
+// because the connector it routes to reads the row as signed by its own. One
+// predicate, so the receiver cannot admit a row the dispatcher would then
+// hand to a connector on a premise the receiver did not check.
 func ConnectorForSource(ctx context.Context, name string) (Connector, bool) {
 	if c, ok := Lookup(name); ok {
 		return c, true

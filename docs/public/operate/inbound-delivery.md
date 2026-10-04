@@ -113,15 +113,23 @@ a *leading* prefix, because `t=<unix>,` comes first. That is precisely the shape
 the element vars exist for.
 
 A Shopify-shaped one, for a custom app's webhook secret. The source is named
-`shopify-custom`, not `shopify`: a connector's own name is its app-level
-source (for Shopify, the three compliance topics, verified with the managed
-app's secret), and an env pin on a connector's own name is dropped AT BOOT,
-with an ERROR naming the `MEMQL_INBOUND_SOURCE_<NAME>_*` vars, exactly like a
-source with no secret -- the connector would otherwise read a body verified by
-the env secret as app-signed, and the connector for its part refuses an
-app-level row it cannot have signed for. The receiver refuses the same pin per
-request as well, so the answer to every such delivery is 404 either way; the
-boot line is what says why.
+`shopify-custom`, not `shopify`, and the name matters: an env pin on a name a
+connector serves is refused. For Shopify that is the connector's own name, its
+app-level source for the three compliance topics, verified with the managed
+app's secret, and each connected store's `shopify-<storeId>`. The dispatcher
+hands a row staged under such a name to the connector, which reads it as signed
+by its own secret for that tenant -- the app secret, or that store's webhook
+secret -- so a body the env secret verified must never reach it on that
+premise, and the connector for its part refuses an app-level row it cannot have
+signed for. A pin on the connector's own name is dropped AT BOOT, with an ERROR
+naming the `MEMQL_INBOUND_SOURCE_<NAME>_*` vars, exactly like a source with no
+secret. A pin on a store's name cannot be known at boot, because stores are
+connected at runtime, so the receiver refuses it per request: `404`, with an
+ERROR naming the connector and the vars. Neither secret is used either way: an
+env pin never silently changes which secret verifies a live sender, and neither
+does a connector. So `shopify-custom` works only while no connected store has
+the id `custom`; connect one and the pin starts answering `404` until it is
+renamed or removed.
 
 ```bash
 MEMQL_INBOUND_SOURCE_SHOPIFY_CUSTOM_SIGNATURE_SCHEME=hmac-sha256-base64
@@ -150,7 +158,7 @@ usual answer is *implement a connector*, not *write an automation*:
 
 ```
 dispatchInboundToConnector      an engine automation on inboundRequest.created
-  -> the connector whose Name() matches the row's `source`
+  -> the connector that claims the row's `source` (its Name(), or a tenant's source it answers for)
   -> Connector.Apply(ctx, InboundRequest) -> []MirrorWrite
   -> the runtime writes each one behind the VERSION GUARD
   -> the request row is stamped `processed` or `failed`
@@ -166,6 +174,12 @@ That is what stops an out-of-order webhook regressing a mirror.
 Returning **no** writes is normal, not a failure. `/inbound/{source}` is a
 shared door and most of what comes through it belongs to something else;
 an unrecognised delivery is stamped `processed` and forgotten.
+
+A row whose `source` no connector claims is not the dispatcher's at all: it is
+left exactly as staged, `received`, for whatever automation serves that source.
+That holds even when its staged `headersJson` or `receivedAt` cannot be read.
+The dispatcher parses them only after a connector claims the row, and a claimed
+row that does not parse is stamped `failed` with the reason before `Apply` runs.
 
 See [data origins](../concepts/data-origins.md) for the contract and
 `integrations/CLAUDE.md` for the recipe.
@@ -197,6 +211,13 @@ body reads in its `args` block (`body`, `contentType`, ...), and stamp
 `updateInboundRequestStatus` with `processing` / `processed` / `failed` as you
 work the row. The engine only ever writes the initial `received`; everything
 after that is yours.
+
+Both staging mutations are `@serverOnly`: `stageInboundRequest`, the
+receiver's one write, and `updateInboundRequestStatus`. An automation loaded
+from the DSL tree, embedded or mounted at `MEMQL_DSL_PATH`, runs its steps with
+internal origin and may call the second. A client may call neither, and the
+generated SDKs carry neither. The staged queue records what the server did with
+each delivery, and nothing a client sends can rewrite that record.
 
 Both can coexist: the dispatcher only ever offers a row to the connector
 its `source` names, so an automation on a different source never sees a
@@ -242,7 +263,7 @@ signed payload, so it separates them and cannot be forged.
 | code | meaning |
 |---|---|
 | `202` | staged; the row exists |
-| `404` | source unlisted, misconfigured, receiver disabled, or a nested path |
+| `404` | source unlisted, misconfigured, receiver disabled, a nested path, or an env pin on a name a connector claims |
 | `401` | signature absent, malformed, mismatched, or outside the replay window |
 | `413` | body over the cap |
 | `400` | body is not valid UTF-8, body contains a NUL byte, or the dedupe header is malformed |
@@ -257,6 +278,12 @@ reason is in the node log.
 **Everything 404s.** The source is not in `MEMQL_INBOUND_SOURCE_ALLOWLIST`, or
 it is listed but incomplete. Check the node log at boot: a dropped source logs
 an error naming the exact env var that is missing.
+
+**A pinned source started answering 404.** A connector now claims its name --
+for Shopify, a store whose id makes `shopify-<storeId>` equal to the pinned
+name was connected. The node log has an error naming the connector and the
+`MEMQL_INBOUND_SOURCE_<NAME>_*` variables. Rename the env source, or remove the
+pin and let the connector serve the name with its own secret.
 
 **Everything 401s.** Usually the prefix. GitHub sends `sha256=<hex>`; without
 `..._SIGNATURE_PREFIX=sha256=` the receiver tries to decode the whole thing as
