@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"hash/crc64"
 	"io"
 	"sync"
 	"time"
@@ -20,7 +21,28 @@ import (
 // ---------------------------------------------------------------------------
 
 // follower follows the step container's log into the capture, opening it
-// again from the cursor whenever a stream ends while the step runs.
+// again whenever a stream ends while the step runs.
+//
+// What it keeps of a stream (review finding 2, ruling R36). stdout and stderr
+// are stamped by goroutines of their own, so the log file holds lines out of
+// stamp order, and a stream is opened again at a whole second (Kube.FollowLog),
+// so it replays that second:
+//
+//   - Within one stream a line is dropped only as a repeat of one this Run
+//     already fed -- judged against where the stream was OPENED from, never
+//     against the lines just before it.
+//   - A stream opened again drops a replayed line only when its fingerprint
+//     (stamp and text) is one this Run fed in that second; any other line of
+//     the second is output it never saw.
+//   - A line a stream ends inside is held back: the stream opened next
+//     replays it whole. Once the step has ended, a last line with no newline
+//     is all there is, and is fed.
+//   - A Run that ADOPTED the step follows its log from the start. The store
+//     has every line up to the adoption cursor, so those reach the archive
+//     only, and the store is fed from the cursor on, behind one notice at the
+//     seam. The blind spot: a line the previous holder never captured,
+//     written after the cursor's line but stamped before it, reaches the
+//     archive only.
 type follower struct {
 	s       *step
 	capture *Capture
@@ -31,6 +53,16 @@ type follower struct {
 	done    chan struct{}
 	// noted are the stream's own sentences already archived.
 	noted map[string]bool
+
+	// adopted is the cursor the Run adopted the step at; zero for a step it
+	// started, or one whose holder had captured nothing.
+	adopted time.Time
+	// fed is the latest stamp this Run fed, to the store or the archive: a
+	// stream is opened again from its second.
+	fed time.Time
+	// seen fingerprints the lines fed in seenSecond, fed's second.
+	seenSecond time.Time
+	seen       map[linePrint]struct{}
 }
 
 // follow starts following the pod's step container. draining starts it
@@ -42,6 +74,7 @@ func (s *step) follow(pod string, draining bool) *follower {
 	f := &follower{
 		s: s, capture: s.capture, pod: pod, cancel: cancel,
 		drainC: make(chan struct{}), done: make(chan struct{}), noted: map[string]bool{},
+		adopted: s.adoptedAt, seen: map[linePrint]struct{}{},
 	}
 	if draining {
 		f.once.Do(func() { close(f.drainC) })
@@ -67,9 +100,11 @@ func (f *follower) run(ctx context.Context) {
 			}
 			continue
 		}
-		rc, err := f.s.r.kube.FollowLog(ctx, f.pod, ContainerStep, f.s.getCursor())
+		// From the second of the last line fed; from the start before any --
+		// for an adopter too, whose archive is made whole (ruling R36).
+		rc, err := f.s.r.kube.FollowLog(ctx, f.pod, ContainerStep, f.fed)
 		if err == nil {
-			err = f.consume(rc)
+			err = f.consume(rc, final)
 			_ = rc.Close()
 		}
 		if ctx.Err() != nil {
@@ -140,44 +175,41 @@ func (f *follower) noteStream(text string) {
 	f.capture.Note("memql: the log stream reported: " + text)
 }
 
-// consume feeds one stream to the capture, line by line. A resumed stream
-// starts at the cursor's whole second (Kube.FollowLog), so the lines stamped
-// at or before the cursor are the store's already and are dropped; every line
-// fed moves the cursor.
-func (f *follower) consume(r io.Reader) error {
+// lineFate is what becomes of one line of a stream.
+type lineFate int
+
+const (
+	fateStore   lineFate = iota // output: the store, the archive, the tail
+	fateArchive                 // output the store has already: the archive and the tail
+	fateRepeat                  // fed already by this Run: dropped
+	fateStream                  // the kubelet's words, not the step's: one note
+)
+
+// consume feeds one stream to the capture, line by line (the rules on
+// follower). final says the step had ended when the stream was opened, so a
+// last line with no newline is all there is.
+func (f *follower) consume(r io.Reader, final bool) error {
 	lines := newLogLines(r, followLineMax)
-	cursor := f.s.getCursor()
+	opened := f.fed
 	var (
+		fate  lineFate
 		stamp time.Time // the line's timestamp, for its continuation pieces
-		skip  bool      // the line is not the step's to capture
+		print linePrint
 	)
 	for {
-		piece, first, err := lines.next()
-		switch {
-		case piece == "" && (err != nil || !first):
-			// Nothing after the last newline, or after a long line's last cut.
-		case first:
-			at, _, ok := captureSplitStamp(piece)
-			switch {
-			case !ok:
-				// Followed with timestamps, every line the step writes comes
-				// stamped: an unstamped one is the kubelet or the API server
-				// speaking in the stream (measured on k3s v1.32, following a
-				// pod as it is deleted: "failed to try resolving symlinks in
-				// path .../step/0.log ..."). Archived as that, never as the
-				// step's own words.
-				skip = true
-				f.noteStream(piece)
-			case !cursor.IsZero() && !at.After(cursor):
-				skip = true
-			default:
-				skip, stamp, cursor = false, at, at
-				f.capture.Feed(piece)
-				f.s.setCursor(at)
-			}
-		case !skip:
-			// The rest of a long line, stamped like its start.
-			f.capture.Feed(stamp.Format(time.RFC3339Nano) + " " + piece)
+		piece, first, end, err := lines.next()
+		if err != nil && !end && !final {
+			// The stream ended inside a line: the next one replays it whole.
+			piece = ""
+		}
+		if first && (piece != "" || end) {
+			fate, stamp, print = f.judge(piece, opened)
+		}
+		if piece != "" {
+			f.feed(fate, stamp, piece, first)
+		}
+		if piece != "" && (end || err != nil) {
+			f.fedLine(fate, stamp, print)
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -185,6 +217,87 @@ func (f *follower) consume(r io.Reader) error {
 			}
 			return err
 		}
+	}
+}
+
+// linePrint tells the lines of one second of a step's log apart: a line's
+// stamp to the nanosecond, its length and a checksum of it -- the first piece
+// of a long line. It lives in memory for one second of output and never
+// becomes an id or leaves the process, so it is a fast checksum rather than a
+// core/id content address, which costs a SHA-256 per byte (1 ms a 4 KiB line,
+// measured) on a path every line takes.
+type linePrint struct {
+	at  int64
+	n   int
+	sum uint64
+}
+
+var linePrintTable = crc64.MakeTable(crc64.ISO)
+
+// judge decides what becomes of a line from its first piece. opened is where
+// the stream was opened from: only a line at or before it can be a repeat.
+func (f *follower) judge(piece string, opened time.Time) (lineFate, time.Time, linePrint) {
+	at, _, ok := captureSplitStamp(piece)
+	if !ok {
+		// Followed with timestamps, every line the step writes comes stamped:
+		// an unstamped one is the kubelet or the API server speaking in the
+		// stream (measured on k3s v1.32, following a pod as it is deleted:
+		// "failed to try resolving symlinks in path .../step/0.log ...").
+		return fateStream, time.Time{}, linePrint{}
+	}
+	print := linePrint{at: at.UnixNano(), n: len(piece), sum: crc64.Checksum([]byte(piece), linePrintTable)}
+	switch _, seen := f.seen[print]; {
+	case !opened.IsZero() && !at.After(opened) && seen:
+		return fateRepeat, at, print
+	case !f.adopted.IsZero() && !at.After(f.adopted):
+		return fateArchive, at, print
+	}
+	return fateStore, at, print
+}
+
+// feed hands one piece of a line to the capture as its fate says. A
+// continuation piece of a long line is stamped like the line's start.
+func (f *follower) feed(fate lineFate, stamp time.Time, piece string, first bool) {
+	raw := piece
+	if !first {
+		raw = stamp.Format(time.RFC3339Nano) + " " + piece
+	}
+	switch fate {
+	case fateStream:
+		if first {
+			f.noteStream(piece)
+		}
+	case fateArchive:
+		f.s.replayedHead = true
+		f.capture.FeedArchived(raw)
+	case fateStore:
+		if first && !f.adopted.IsZero() {
+			// The seam: the first line after the cursor.
+			f.s.noteReattach(!f.s.replayedHead)
+		}
+		f.capture.Feed(raw)
+	}
+}
+
+// fedLine records a line fed whole: its fingerprint, for the second it is in,
+// and how far the Run has fed -- and, for a stored line, the cursor the
+// heartbeat publishes, which only ever moves forward.
+func (f *follower) fedLine(fate lineFate, at time.Time, print linePrint) {
+	if fate == fateRepeat || fate == fateStream {
+		return
+	}
+	switch second := at.Truncate(time.Second); {
+	case second.After(f.seenSecond):
+		f.seenSecond = second
+		f.seen = map[linePrint]struct{}{print: {}}
+	case second.Equal(f.seenSecond):
+		f.seen[print] = struct{}{}
+	}
+	if at.After(f.fed) {
+		f.fed = at
+	}
+	if fate == fateStore {
+		f.s.publishCursor(at)
 	}
 }
 
@@ -203,9 +316,10 @@ func newLogLines(r io.Reader, max int) *logLines {
 }
 
 // next is the next piece of the stream, without its newline. first says it
-// begins a line rather than continuing one. A stream that ends inside a line
-// answers that line's last piece with the stream's error.
-func (l *logLines) next() (piece string, first bool, err error) {
+// begins a line rather than continuing one, end that it ends it: a newline
+// followed. A stream that ends inside a line answers what it had of the line
+// with end false and the stream's error.
+func (l *logLines) next() (piece string, first, end bool, err error) {
 	first = !l.mid
 	chunk, err := l.br.ReadSlice('\n')
 	buf := append(l.carry, chunk...)
@@ -217,15 +331,15 @@ func (l *logLines) next() (piece string, first bool, err error) {
 		if n := len(buf); n > 0 && buf[n-1] == '\r' {
 			buf = buf[:n-1]
 		}
-		return string(buf), first, nil
+		return string(buf), first, true, nil
 	case errors.Is(err, bufio.ErrBufferFull):
 		cut := runeCut(buf, l.max)
 		l.carry = append([]byte(nil), buf[cut:]...)
 		l.mid = true
-		return string(buf[:cut]), first, nil
+		return string(buf[:cut]), first, false, nil
 	default:
 		l.mid = false
-		return string(buf), first, err
+		return string(buf), first, false, err
 	}
 }
 
@@ -252,9 +366,12 @@ func runeCut(b []byte, max int) int {
 	return len(b)
 }
 
-func (s *step) setCursor(at time.Time) {
+// publishCursor moves the cursor the heartbeat publishes to at, never back.
+func (s *step) publishCursor(at time.Time) {
 	s.mu.Lock()
-	s.cursor = at
+	if at.After(s.cursor) {
+		s.cursor = at
+	}
 	s.mu.Unlock()
 }
 

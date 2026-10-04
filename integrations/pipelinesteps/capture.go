@@ -269,11 +269,33 @@ func (c *Capture) Feed(raw string) time.Time {
 		return at
 	}
 	if !strings.Contains(text, "\n") {
-		c.feedLine(at, text)
+		c.feedLine(at, text, true)
 		return at
 	}
 	for _, line := range strings.Split(text, "\n") {
-		c.feedLine(at, strings.TrimSuffix(line, "\r"))
+		c.feedLine(at, strings.TrimSuffix(line, "\r"), true)
+	}
+	return at
+}
+
+// FeedArchived consumes one raw log line, as Feed does, that the log store
+// already has: a line a replica that held the step before this one captured,
+// replayed so the archive is whole (ruling R36). It is the step's output --
+// cleaned and masked, archived, in the tail, counted in Lines, read for the
+// artifact frame -- and never reaches the store, which has it.
+func (c *Capture) FeedArchived(raw string) time.Time {
+	raw = strings.TrimSuffix(strings.TrimSuffix(raw, "\n"), "\r")
+	at, text, ok := captureSplitStamp(raw)
+	if !ok {
+		at, text = c.now(), raw
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return at
+	}
+	for _, line := range strings.Split(text, "\n") {
+		c.feedLine(at, strings.TrimSuffix(line, "\r"), false)
 	}
 	return at
 }
@@ -294,7 +316,7 @@ func (c *Capture) FeedLine(text string) time.Time {
 		return at
 	}
 	for _, line := range strings.Split(text, "\n") {
-		c.feedLine(at, strings.TrimSuffix(line, "\r"))
+		c.feedLine(at, strings.TrimSuffix(line, "\r"), true)
 	}
 	return at
 }
@@ -395,9 +417,9 @@ func (c *Capture) Close() (CaptureResult, error) {
 	return c.result, c.closeErr
 }
 
-// feedLine routes one line: frame syntax, frame content, or output.
-// Caller holds c.mu.
-func (c *Capture) feedLine(at time.Time, text string) {
+// feedLine routes one line: frame syntax, frame content, or output, which
+// reaches the store when stored says so. Caller holds c.mu.
+func (c *Capture) feedLine(at time.Time, text string, stored bool) {
 	if c.frameBegin != "" {
 		switch strings.TrimSpace(text) {
 		case c.frameBegin:
@@ -415,12 +437,13 @@ func (c *Capture) feedLine(at time.Time, text string) {
 			return
 		}
 	}
-	c.output(at, c.clean(text))
+	c.output(at, c.clean(text), stored)
 }
 
 // output sends one cleaned line of the step's output to the archive whole,
-// and to the tail and the store as store lines. Caller holds c.mu.
-func (c *Capture) output(at time.Time, line string) {
+// and to the tail -- and, when stored, the store -- as store lines. Caller
+// holds c.mu.
+func (c *Capture) output(at time.Time, line string, stored bool) {
 	c.lines++
 	c.archiveLine(line)
 	for _, piece := range captureSplit(line, captureStoreLineBytes) {
@@ -429,7 +452,9 @@ func (c *Capture) output(at time.Time, line string) {
 		if c.tailLen < captureTailLines {
 			c.tailLen++
 		}
-		c.store(at, piece)
+		if stored {
+			c.store(at, piece)
+		}
 	}
 }
 

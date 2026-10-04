@@ -330,9 +330,22 @@ type step struct {
 	claimFailures int
 	// ownedSecret: this Run made the Job its Secret's owner.
 	ownedSecret bool
+	// adopted: this Run took over a Job another Run had claimed; adoptedAt
+	// is the cursor it was left at -- the store has every line up to it.
+	adopted   bool
+	adoptedAt time.Time
+	// reattachNoted: the notice that this Run re-attached is written;
+	// headLost: when it was, the node's log no longer reached back to the
+	// cursor, so the archive starts where the node's log does.
+	reattachNoted bool
+	headLost      bool
+	// replayedHead: a line at or before the adoption cursor was replayed into
+	// the archive -- the node's log still reached back that far. Written by
+	// the follower, read once it has stopped.
+	replayedHead bool
 
 	mu     sync.Mutex
-	cursor time.Time // the timestamp of the last line captured
+	cursor time.Time // the timestamp of the last line stored, published by the heartbeat
 }
 
 // execute is the multi-replica contract, read and decided again after every
@@ -527,8 +540,12 @@ func (s *step) own(job Job) (pl.StepResult, bool) {
 	s.ownSecret(claimed)
 	if adopted {
 		cursor := logCursor(claimed)
-		s.setCursor(cursor)
-		s.capture.Notice(reattachNotice(s.r.cfg.NodeID, cursor))
+		s.publishCursor(cursor)
+		s.adopted, s.adoptedAt = true, cursor
+		if cursor.IsZero() {
+			// Nothing was captured before: there is no seam to wait for.
+			s.noteReattach(false)
+		}
 		s.log.Info("pipelines: adopted the step's Job", "cursor", cursor)
 	}
 	if dec, ok := recordedObservation(claimed); ok {
@@ -1031,9 +1048,27 @@ func podOfJob(pod *Pod, job Job) bool {
 	return false
 }
 
-func reattachNotice(node string, cursor time.Time) string {
-	if cursor.IsZero() {
-		return "memql: re-attached on " + node + "; no line of the step's output had been captured, so it is followed from its start"
+// noteReattach writes, once, the notice that this Run re-attached to a step
+// another Run had held: to the store, where the lines after the cursor follow
+// it, and to the archive, at the seam between the lines replayed from the
+// node's log and the ones after the cursor (ruling R36). headLost says the
+// node's log no longer reached back to the cursor.
+func (s *step) noteReattach(headLost bool) {
+	if !s.adopted || s.reattachNoted || s.capture == nil {
+		return
 	}
-	return "memql: re-attached on " + node + "; lines before " + cursor.UTC().Format(time.RFC3339Nano) + " are in the store already"
+	s.reattachNoted, s.headLost = true, headLost && !s.adoptedAt.IsZero()
+	s.capture.Notice(reattachNotice(s.r.cfg.NodeID, s.adoptedAt, s.headLost))
+}
+
+func reattachNotice(node string, cursor time.Time, headLost bool) string {
+	switch {
+	case cursor.IsZero():
+		return "memql: re-attached on " + node + "; no line of the step's output had been captured, so it is followed from its start"
+	case headLost:
+		return "memql: re-attached on " + node + "; lines before " + cursor.UTC().Format(time.RFC3339Nano) +
+			" are in the store already, but the node's log no longer holds them, so this archive starts where the node's log does"
+	}
+	return "memql: re-attached on " + node + ": earlier lines replayed from the node's log; lines before " +
+		cursor.UTC().Format(time.RFC3339Nano) + " are in the store already"
 }

@@ -740,6 +740,40 @@ func TestCaptureMaskCleansLikeOutput(t *testing.T) {
 	}
 }
 
+// TestCaptureFeedArchivedIsOutputTheStoreHasAlready (ruling R36): an adopter
+// replays the lines its step printed before the adoption cursor so the
+// archive is whole. They are the step's output -- masked, archived, in the
+// tail, counted -- and the store, which has them, never sees them again. A
+// frame begun before the cursor is read across the seam like any frame.
+func TestCaptureFeedArchivedIsOutputTheStoreHasAlready(t *testing.T) {
+	c, sink := newCaptureForTest(t, CaptureOptions{Secrets: []string{"opensesame"}, Marker: captureTestMarker})
+	tgz := extractTestTgz(t, []extractTestEntry{{name: "dist/a.txt", body: "artifact"}})
+	frame := captureFrameLines(tgz)
+
+	c.FeedArchived(captureKubeLine(captureTestClock, "before the cursor: opensesame"))
+	c.FeedArchived(captureKubeLine(captureTestClock, captureTestMarker+" begin"))
+	c.FeedArchived(captureKubeLine(captureTestClock, frame[0]))
+	for _, l := range frame[1:] {
+		c.Feed(captureKubeLine(captureTestClock, l))
+	}
+	c.Feed(captureKubeLine(captureTestClock, captureTestMarker+" end"))
+	c.Feed(captureKubeLine(captureTestClock, "after the cursor"))
+	res := closeCaptureForTest(t, c)
+
+	if got := sink.messages(); !reflect.DeepEqual(got, []string{"after the cursor"}) {
+		t.Errorf("store = %q, want only the line after the cursor", got)
+	}
+	if archive := readArchiveForTest(t, res); archive != "before the cursor: ***\nafter the cursor\n" {
+		t.Errorf("archive = %q, want both lines, masked, and none of the frame", archive)
+	}
+	if res.Tail != "before the cursor: ***\nafter the cursor" || res.Lines != 2 {
+		t.Errorf("tail %q, lines %d; want both lines of output", res.Tail, res.Lines)
+	}
+	if res.ArtifactNote != nil || len(res.Artifacts) == 0 {
+		t.Errorf("artifacts %d bytes, note %+v; want the frame read across the seam", len(res.Artifacts), res.ArtifactNote)
+	}
+}
+
 func TestNewCaptureRefusesAnIncompleteContract(t *testing.T) {
 	valid := func(t *testing.T) CaptureOptions {
 		return CaptureOptions{

@@ -158,6 +158,13 @@ type rtScript struct {
 	// while it ran ends only after the runner has read the pod as ended --
 	// the API's stream lags the container -- and without them.
 	final []string
+	// cutFirstStream is written, without its newline, at the end of the
+	// first followed stream, which then ends: a connection that dropped
+	// while the step was writing a line.
+	cutFirstStream string
+	// finalNoEOL serves the last line of a stream opened once the step has
+	// ended without its newline: a step whose last output did not end one.
+	finalNoEOL bool
 }
 
 // rtRunningScript is a step that prints its lines and runs until the test
@@ -695,10 +702,11 @@ func (c *rtCluster) podLog(w http.ResponseWriter, r *http.Request, pod string) {
 		}
 	}
 	c.streams++
-	drop := 0
+	drop, cut := 0, ""
 	if c.streams == 1 {
-		drop = j.script.dropAfter
+		drop, cut = j.script.dropAfter, j.script.cutFirstStream
 	}
+	noEOL := withFinal && j.script.finalNoEOL
 	c.mu.Unlock()
 
 	w.Header().Set("Content-Type", "text/plain")
@@ -725,12 +733,21 @@ func (c *rtCluster) podLog(w http.ResponseWriter, r *http.Request, pod string) {
 			if at, ok := rtLineStamp(lines[next]); ok && !since.IsZero() && at.Before(since) {
 				continue
 			}
-			_, _ = io.WriteString(w, lines[next]+"\n")
+			eol := "\n"
+			if noEOL && next == len(lines)-1 {
+				eol = ""
+			}
+			_, _ = io.WriteString(w, lines[next]+eol)
 			sent++
 			if drop > 0 && sent >= drop {
 				flusher.Flush()
 				return
 			}
+		}
+		if cut != "" {
+			_, _ = io.WriteString(w, cut)
+			flusher.Flush()
+			return
 		}
 		flusher.Flush()
 		if withFinal || ended {
@@ -1447,17 +1464,19 @@ func TestRunnerWaitsWhileAnotherReplicaHoldsAFreshHeartbeat(t *testing.T) {
 	})
 }
 
-// TestRunnerAdoptsAJobWhoseRunnerWentStale (Review Focus 2): workbench-a
-// followed the step to a cursor, then went quiet -- a deploy restarted it.
-// The step's Job is still running, so this replica adopts it: it claims it on
-// the version it read, resumes the log from the cursor without repeating a
-// line the store already has, says it re-attached, and creates nothing.
+// TestRunnerAdoptsAJobWhoseRunnerWentStale (Review Focus 2, ruling R36):
+// workbench-a followed the step to a cursor, then went quiet -- a deploy
+// restarted it. The step's Job is still running, so this replica adopts it: it
+// claims it on the version it read and creates nothing. The store has every
+// line up to the cursor, so it gets only the lines after it, behind a notice
+// saying this replica re-attached. The archive is complete: the step's log is
+// followed from its start, the lines up to the cursor replayed into the
+// archive only, and the same notice marks the seam.
 func TestRunnerAdoptsAJobWhoseRunnerWentStale(t *testing.T) {
 	h := newRunnerHarness(t)
 	run := rtRun()
 	cursor := rtAt(2500)
-	// The API resumes a log from the cursor's whole second, so it repeats
-	// the lines of that second up to and including the cursor's own.
+	l0 := captureKubeLine(rtAt(1100), "line 0, an earlier second")
 	l1 := captureKubeLine(rtAt(2100), "line 1, captured by workbench-a")
 	l2 := captureKubeLine(cursor, "line 2, the cursor")
 	l3 := captureKubeLine(rtAt(2700), "line 3")
@@ -1465,13 +1484,13 @@ func TestRunnerAdoptsAJobWhoseRunnerWentStale(t *testing.T) {
 	h.c.putJob(h.existingJob(t, run, map[string]string{
 		AnnotRunner:    rtStamp(rtOther, rtT0.Add(-time.Minute)),
 		AnnotLogCursor: cursor.Format(time.RFC3339Nano),
-	}), rtFinishingScript(testJobName, 0, l1, l2, l3, l4))
+	}), rtFinishingScript(testJobName, 0, l0, l1, l2, l3, l4))
 	h.c.putSecret(BuildSecret(h.cfg, run, testJobName, rtCloneToken))
 
 	res := h.run(t, run)
 
-	if res.Status != pl.OutcomeSucceeded || res.ExitCode != 0 || res.Where.NodeID != rtNode || res.LogLines != 2 {
-		t.Fatalf("result = %+v, want success with the two lines after the cursor, by %s", res, rtNode)
+	if res.Status != pl.OutcomeSucceeded || res.ExitCode != 0 || res.Where.NodeID != rtNode || res.LogLines != 5 {
+		t.Fatalf("result = %+v, want success with all five lines in the archive, by %s", res, rtNode)
 	}
 	rtNoRequests(t, h.c, http.MethodPost, kubeJobs)
 	rtNoRequests(t, h.c, http.MethodPost, kubeSecrets)
@@ -1493,8 +1512,8 @@ func TestRunnerAdoptsAJobWhoseRunnerWentStale(t *testing.T) {
 			follows = append(follows, r.Query)
 		}
 	}
-	if len(follows) == 0 || follows[0] != "container=step&follow=true&sinceTime=2026-10-04T09%3A00%3A02Z&timestamps=true" {
-		t.Errorf("follows = %q, want the first from the cursor's second", follows)
+	if len(follows) == 0 || follows[0] != "container=step&follow=true&timestamps=true" {
+		t.Errorf("follows = %q, want the first from the log's start: the archive is made whole", follows)
 	}
 
 	store := h.sink.messages()
@@ -1502,21 +1521,181 @@ func TestRunnerAdoptsAJobWhoseRunnerWentStale(t *testing.T) {
 		t.Fatalf("store = %q, want the re-attach notice and the two lines after the cursor", store)
 	}
 	notice := store[0]
-	for _, w := range []string{"re-attached on " + rtNode, cursor.Format(time.RFC3339Nano), "in the store already"} {
+	for _, w := range []string{"re-attached on " + rtNode, cursor.Format(time.RFC3339Nano), "in the store already", "replayed from the node's log"} {
 		if !strings.Contains(notice, w) {
 			t.Errorf("notice %q does not say %q", notice, w)
 		}
 	}
 	if !reflect.DeepEqual(store[1:], rtTexts(l3, l4)) {
-		t.Errorf("store after the notice = %q, want lines 3 and 4 only: lines 1 and 2 are in the store already", store[1:])
+		t.Errorf("store after the notice = %q, want lines 3 and 4 only: lines 0 to 2 are in the store already", store[1:])
 	}
 	archive := string(h.file(t, "tests-go-tests-2.log").Bytes)
-	if want := notice + "\n" + strings.Join(rtTexts(l3, l4), "\n") + "\n"; !strings.HasPrefix(archive, want) {
-		t.Errorf("archive = %q, want it to begin %q", archive, want)
+	want := strings.Join(rtTexts(l0, l1, l2), "\n") + "\n" + notice + "\n" + strings.Join(rtTexts(l3, l4), "\n") + "\n"
+	if !strings.HasPrefix(archive, want) {
+		t.Errorf("archive = %q, want it to begin %q: whole, the notice at the seam", archive, want)
 	}
-	if res.LogTail != "line 3\nline 4" {
+	if res.LogTail != strings.Join(rtTexts(l0, l1, l2, l3, l4), "\n") {
 		t.Errorf("tail = %q, want the step's lines, not the runner's notice", res.LogTail)
 	}
+}
+
+// TestRunnerAdoptionArchiveStartsWhereTheNodesLogDoes (ruling R36): the
+// kubelet serves a container's current log file only, so once the log has
+// rotated, the lines before the cursor are gone from the node. The archive
+// then starts where the node's log does, and says so -- and so does the note
+// on a capped live log, which may not claim the Library's copy is complete.
+func TestRunnerAdoptionArchiveStartsWhereTheNodesLogDoes(t *testing.T) {
+	h := newRunnerHarness(t, func(c *Config) { c.LogStoreMaxLines = 2 })
+	run := rtRun()
+	cursor := rtAt(2500)
+	after := []string{captureKubeLine(rtAt(3100), "a"), captureKubeLine(rtAt(3200), "b"), captureKubeLine(rtAt(3300), "c")}
+	h.c.putJob(h.existingJob(t, run, map[string]string{
+		AnnotRunner:    rtStamp(rtOther, rtT0.Add(-time.Minute)),
+		AnnotLogCursor: cursor.Format(time.RFC3339Nano),
+	}), rtFinishingScript(testJobName, 0, after...))
+
+	res := h.run(t, run)
+
+	if res.Status != pl.OutcomeSucceeded || res.LogLines != 3 {
+		t.Fatalf("result = %+v, want success with the three lines the node still has", res)
+	}
+	archive := string(h.file(t, "tests-go-tests-2.log").Bytes)
+	first, _, _ := strings.Cut(archive, "\n")
+	if !strings.Contains(first, "re-attached on "+rtNode) || !strings.Contains(first, "starts where the node's log does") {
+		t.Errorf("archive begins %q, want the notice saying it starts where the node's log does", first)
+	}
+	if !res.LogCapped {
+		t.Fatalf("LogCapped false with 3 lines past a 2-line cap")
+	}
+	for _, n := range res.Notes {
+		if n.Code == pl.CodeLogCapped && strings.Contains(n.Message, "complete log") {
+			t.Errorf("note %q claims the Library holds the complete log; its archive starts where the node's log did", n.Message)
+		}
+	}
+}
+
+// TestRunnerKeepsLinesWrittenOutOfStampOrder: stdout and stderr are stamped by
+// goroutines of their own, so the log file holds lines out of stamp order. A
+// line stamped before the line ahead of it in the same stream is output like
+// any other -- in the store and the archive, never dropped as a repeat.
+func TestRunnerKeepsLinesWrittenOutOfStampOrder(t *testing.T) {
+	h := newRunnerHarness(t)
+	lines := []string{
+		captureKubeLine(rtAt(2100), "out: building"),
+		captureKubeLine(rtAt(2050), "err: warning: deprecated flag"),
+		captureKubeLine(rtAt(2200), "out: done"),
+	}
+	h.c.script(testJobName, rtFinishingScript(testJobName, 0, lines...))
+
+	res := h.run(t, rtRun())
+
+	if got := h.sink.messages(); !reflect.DeepEqual(got, rtTexts(lines...)) {
+		t.Errorf("store = %q, want all three lines in the order written", got)
+	}
+	if archive := string(h.file(t, "tests-go-tests-2.log").Bytes); !strings.HasPrefix(archive, strings.Join(rtTexts(lines...), "\n")+"\n") {
+		t.Errorf("archive = %q, want all three lines", archive)
+	}
+	if res.LogLines != 3 {
+		t.Errorf("LogLines = %d, want 3", res.LogLines)
+	}
+}
+
+// TestTheHeartbeatsCursorOnlyMovesForward: the cursor the heartbeat publishes
+// is where an adopter resumes the store from. A line stamped before the one
+// fed ahead of it (stdout and stderr stamp on their own) must not move it
+// back, or an adopter would store again what this Run stored.
+func TestTheHeartbeatsCursorOnlyMovesForward(t *testing.T) {
+	s := &step{}
+	s.publishCursor(rtAt(2200))
+	s.publishCursor(rtAt(2150))
+	if got := s.getCursor(); !got.Equal(rtAt(2200)) {
+		t.Errorf("cursor = %s, want %s: it moved back", got.Format(time.RFC3339Nano), rtAt(2200).Format(time.RFC3339Nano))
+	}
+}
+
+// TestRunnerDropsOnlyWhatItCapturedFromAReplayedSecond: a stream opened again
+// starts at the cursor's whole second and replays it. A replayed line is
+// dropped only when this Run captured it; one stamped inside that second that
+// it never saw -- written after the line it stopped at, stamped before it --
+// is output, not a repeat.
+func TestRunnerDropsOnlyWhatItCapturedFromAReplayedSecond(t *testing.T) {
+	h := newRunnerHarness(t)
+	lines := []string{
+		captureKubeLine(rtAt(2100), "one"),
+		captureKubeLine(rtAt(2400), "two"),
+		captureKubeLine(rtAt(2300), "two and a half, stamped before two, written after it"),
+		captureKubeLine(rtAt(2800), "three"),
+	}
+	running := rtPod(testJobName, rtStepRunning(rtAt(1000)), clsCloneDone)
+	h.c.script(testJobName, &rtScript{
+		states: []rtState{
+			{pod: running, visible: 4, until: func(c *rtCluster) bool { return c.streams >= 2 && c.cursorPatchedLocked(testJobName, rtAt(2800)) }},
+			{pod: rtPod(testJobName, rtStepEnded(0, rtAt(1000), rtAt(4000)), clsCloneDone), visible: 4},
+		},
+		log:       lines,
+		tails:     map[string]string{ContainerClone: rtCloneTail},
+		dropAfter: 2,
+	})
+
+	res := h.run(t, rtRun())
+
+	if got := h.sink.messages(); !reflect.DeepEqual(got, rtTexts(lines...)) {
+		t.Errorf("store = %q, want each line once, the late one kept", got)
+	}
+	if res.LogLines != 4 {
+		t.Errorf("LogLines = %d, want 4", res.LogLines)
+	}
+}
+
+// TestRunnerHoldsALineAStreamEndedInside (minor 10): a stream that ends in
+// the middle of a line -- a connection dropped while the step wrote it -- has
+// not seen the whole line. The piece is held back, and the stream opened again
+// replays the line whole, which is what is captured. A step's last line with
+// no newline at all is captured once the step has ended.
+func TestRunnerHoldsALineAStreamEndedInside(t *testing.T) {
+	t.Run("cut by a dropped connection", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		l1 := captureKubeLine(rtAt(1100), "one")
+		l2 := captureKubeLine(rtAt(1200), "two, written in full")
+		running := rtPod(testJobName, rtStepRunning(rtAt(1000)), clsCloneDone)
+		h.c.script(testJobName, &rtScript{
+			states: []rtState{
+				{pod: running, visible: 1, until: func(c *rtCluster) bool { return c.streams >= 2 }},
+				{pod: running, visible: 2, until: func(c *rtCluster) bool { return c.cursorPatchedLocked(testJobName, rtAt(1200)) }},
+				{pod: rtPod(testJobName, rtStepEnded(0, rtAt(1000), rtAt(4000)), clsCloneDone), visible: 2},
+			},
+			log:            []string{l1, l2},
+			tails:          map[string]string{ContainerClone: rtCloneTail},
+			cutFirstStream: captureKubeLine(rtAt(1200), "two, writ"),
+		})
+
+		h.run(t, rtRun())
+
+		if got := h.sink.messages(); !reflect.DeepEqual(got, rtTexts(l1, l2)) {
+			t.Errorf("store = %q, want both lines whole, and nothing of the cut", got)
+		}
+	})
+
+	t.Run("the step's last line, with no newline", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		l1 := captureKubeLine(rtAt(1100), "one")
+		l2 := captureKubeLine(rtAt(1200), "done")
+		h.c.script(testJobName, &rtScript{
+			states: []rtState{
+				{pod: rtPod(testJobName, rtStepRunning(rtAt(1000)), clsCloneDone), visible: 1, reads: 2},
+				{pod: rtPod(testJobName, rtStepEnded(0, rtAt(1000), rtAt(4000)), clsCloneDone), visible: 2},
+			},
+			log:        []string{l1, l2},
+			tails:      map[string]string{ContainerClone: rtCloneTail},
+			finalNoEOL: true,
+		})
+
+		h.run(t, rtRun())
+
+		if got := h.sink.messages(); !reflect.DeepEqual(got, rtTexts(l1, l2)) {
+			t.Errorf("store = %q, want the last line too", got)
+		}
+	})
 }
 
 // TestRunnerLosesTheOwnershipRaceAndWaits: two replicas read an unclaimed Job
@@ -1663,8 +1842,18 @@ func TestAFollowerReopensOnlyForTheClaimsHolder(t *testing.T) {
 
 	f := s.follow(rtPodName(testJobName), false)
 	rtWaitUntil(t, "the first stream to drop", func() bool { return len(h.sink.messages()) == 1 })
-	h.c.with(func(c *rtCluster) { c.annotateLocked(testJobName, AnnotRunner, rtStamp(rtOther, rtT0)) })
-	time.Sleep(5 * h.cfg.PollInterval)
+	var base int
+	h.c.with(func(c *rtCluster) {
+		base = c.jobGets
+		c.annotateLocked(testJobName, AnnotRunner, rtStamp(rtOther, rtT0))
+	})
+	// The follower reads the claim before it opens a stream again: once it
+	// has, it has decided.
+	rtWaitUntil(t, "the follower to read the claim", func() bool {
+		var n int
+		h.c.with(func(c *rtCluster) { n = c.jobGets })
+		return n > base
+	})
 	f.stop()
 
 	if n := h.c.streamCount(); n != 1 {

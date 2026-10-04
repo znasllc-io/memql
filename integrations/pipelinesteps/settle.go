@@ -72,9 +72,14 @@ func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
 			f = s.follow(pod.Metadata.Name, true)
 		}
 		f.drain(s.r.drainTimeout)
-		s.tails(pod.Metadata.Name, dec.Status == pl.OutcomeFailed)
 	} else if f != nil {
 		f.stop()
+	}
+	// An adopted step that printed nothing after the cursor has had no seam:
+	// the notice goes after what was replayed.
+	s.noteReattach(!s.replayedHead)
+	if pod != nil {
+		s.tails(pod.Metadata.Name, dec.Status == pl.OutcomeFailed)
 	}
 
 	res := dec
@@ -168,7 +173,11 @@ func (s *step) storeLog(ctx context.Context, res *pl.StepResult, notes *noteList
 		notes.add(pl.CodeArtifactMissing, "the step's log archive could not be written whole, so its Library copy may stop early: "+err.Error())
 	}
 	res.LogTail, res.LogLines, res.LogCapped = cr.Tail, cr.Lines, cr.StoreCapped
-	if cr.StoreCapped {
+	switch {
+	case cr.StoreCapped && s.headLost:
+		notes.add(pl.CodeLogCapped, fmt.Sprintf("the live log of this step stops at %d lines; the log archived to the Library "+
+			"starts where the node's log did when this replica re-attached to the step", s.r.cfg.LogStoreMaxLines))
+	case cr.StoreCapped:
 		notes.add(pl.CodeLogCapped, fmt.Sprintf("the live log of this step stops at %d lines; the complete log is archived to the Library", s.r.cfg.LogStoreMaxLines))
 	}
 	body, err := os.ReadFile(cr.ArchivePath)
@@ -330,6 +339,7 @@ func (s *step) cancelled(pod *Pod, why string) pl.StepResult {
 	res.StartedAt, _ = stepTimes(pod)
 	res.FinishedAt = s.r.nowText()
 	if s.capture != nil {
+		s.noteReattach(!s.replayedHead)
 		s.capture.Note("memql: " + why)
 		notes := s.newNotes()
 		ctx, cancel := s.libraryContext()
