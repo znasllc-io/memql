@@ -101,6 +101,22 @@ type Result struct {
 	WorkerId string
 	NodeId   string
 	Labels   map[string]string
+
+	// RefusedBeforeStart is the dispatcher's own verdict that the call started
+	// on NO machine (#5494): refused at a gate, no candidate to route to, or
+	// every candidate tried refused before anything was sent to it -- this
+	// replica's own refusals (a stale row, a machine at its cap, one not
+	// allowing pipelines on its connection here) and a sibling's, under
+	// whatever code the sibling answered with, which travels through
+	// verbatim. False means a machine may have started it: the call reached
+	// one, or a forward's answer was lost after the envelope left this node,
+	// which is indistinguishable from a call that ran.
+	//
+	// It is the fact the re-pick loop moves on by, surfaced so a caller never
+	// guesses it from an error code: a code list misses the codes a sibling
+	// refuses with, and a step that never ran must not read as one that
+	// failed.
+	RefusedBeforeStart bool
 }
 
 // Request carries the inputs of one dispatch: from the agent tool loop, or --
@@ -291,6 +307,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			OK:           false,
 			ErrorCode:    gate.errorCode,
 			ErrorMessage: gate.errorMessage,
+			// Refused at a gate: nothing was routed, so nothing started.
+			RefusedBeforeStart: true,
 		}
 		// A denial never reached the pick, so the record carries only what was
 		// asked for -- not an empty candidate list, which would read as "the
@@ -308,15 +326,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 	record := plan.Record()
 	record.ReroutedFrom = req.ReroutedFrom
 	if err != nil {
-		res := Result{OK: false, ErrorCode: "no_worker_available", ErrorMessage: err.Error()}
+		res := Result{OK: false, ErrorCode: "no_worker_available", ErrorMessage: err.Error(), RefusedBeforeStart: true}
 		d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
 		return res, nil
 	}
 	if len(plan.Candidates) == 0 {
 		res := Result{
-			OK:           false,
-			ErrorCode:    "no_worker_available",
-			ErrorMessage: noCandidateMessage(plan, gate.requiredCapability),
+			OK:                 false,
+			ErrorCode:          "no_worker_available",
+			ErrorMessage:       noCandidateMessage(plan, gate.requiredCapability),
+			RefusedBeforeStart: true,
 		}
 		d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
 		return res, nil
@@ -371,9 +390,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 	// Unreachable while the loop returns on every path; kept as the honest
 	// answer if it ever does not.
 	res := Result{
-		OK:           false,
-		ErrorCode:    "no_worker_available",
-		ErrorMessage: noCandidateMessage(plan, gate.requiredCapability),
+		OK:                 false,
+		ErrorCode:          "no_worker_available",
+		ErrorMessage:       noCandidateMessage(plan, gate.requiredCapability),
+		RefusedBeforeStart: true,
 	}
 	d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
 	return res, nil
@@ -407,6 +427,9 @@ func (d *Dispatcher) attempt(
 	} else {
 		res, outcome = d.attemptRemote(ctx, req, capability, cand, timeout)
 	}
+	// The verdict the re-pick loop moves on by, on the result itself: local
+	// and forwarded alike, a sibling's own refusal codes included.
+	res.RefusedBeforeStart = outcome == ForwardRefusedBeforeStart
 	res.WorkerId = cand.RegistrationId
 	res.NodeId = nodeId
 	res.Labels = maps.Clone(cand.Labels)

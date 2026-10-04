@@ -62,18 +62,6 @@ const (
 	surfaceFleet = "fleet"
 )
 
-// refusedBeforeStart are the dispatcher's answers that mean no machine took
-// the step: none matched, every one that matched was busy, held by a replica
-// this one cannot reach, or no longer allowed pipelines on its live
-// connection.
-var refusedBeforeStart = map[string]bool{
-	"no_worker_available":    true,
-	"worker_busy":            true,
-	"worker_unreachable":     true,
-	"pipelines_not_allowed":  true,
-	"no_forwarded_authority": true,
-}
-
 // Fleet runs steps on the owner's machines.
 type Fleet struct {
 	cfg      Config
@@ -368,14 +356,20 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 	needs := strings.Join(req.Step.Needs, ", ")
 	limit := time.Duration(run.TimeoutSeconds) * time.Second
 	switch code := r.ErrorCode; {
-	case refusedBeforeStart[code]:
-		return withWhere(refusedResult(pl.CodeNoMachineForNeed, fmt.Sprintf(
-			"No machine of the owner's that offers %s and allows pipeline steps could take the step (%s): %s",
-			needs, code, msg)), pl.Where{Surface: surfaceFleet})
 	case code == "kill_switch_engaged":
+		// The owner's off switch, named as such: it says what to turn back on.
 		return withWhere(refusedResult(pl.CodeFleetDisabled,
 			"The owner has turned computer use off, so no step runs on their machines; turning it back on lets this "+
-				"one run. Nothing ran."), pl.Where{Surface: surfaceFleet})
+				"one run. Nothing ran."), where)
+	case r.RefusedBeforeStart:
+		// THE DISPATCHER'S VERDICT, never a guess from the code: nothing
+		// started on any machine -- no candidate, or every one refused before
+		// anything was sent to it, a sibling replica's refusals under codes of
+		// their own included. The machine the dispatcher named, if it named
+		// one, is kept: it is where the step was last looked for.
+		return withWhere(refusedResult(pl.CodeNoMachineForNeed, fmt.Sprintf(
+			"No machine of the owner's that offers %s and allows pipeline steps could take the step (%s): %s",
+			needs, code, msg)), where)
 	case code == "denied_by_policy":
 		return withWhere(failedResult(pl.CodeNoMachineForNeed, fmt.Sprintf(
 			"%s refused the step under its own pipelines policy: %s", machine, msg)), where)
@@ -385,6 +379,8 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 	case code == "cancelled":
 		return withWhere(cancelledResult("The step was cancelled on "+machine+"."), where)
 	case code == "worker_disconnected":
+		// Not refused before start: the call may have started, and the
+		// connection ended before the machine reported it.
 		return withWhere(failedResult(pl.CodeNodeLost, fmt.Sprintf(
 			"The connection to %s ended before it reported the step: %s", machine, msg)), where)
 	case code == pl.CodeCloneFailed:

@@ -288,10 +288,20 @@ func TestFleetStepRoutesByNeedLabelsAndPipelinesLabel(t *testing.T) {
 // no machine could take the step reads as pipeline_no_machine_for_need, a
 // refusal -- never as the step's command failing.
 func TestFleetStepWithNoMachineIsTyped(t *testing.T) {
-	for _, code := range []string{"no_worker_available", "worker_busy", "worker_unreachable", "pipelines_not_allowed"} {
+	// THE DISPATCHER'S VERDICT DECIDES, not the code. These are this
+	// replica's own refusals and the ones a sibling replica answers with --
+	// which travel through verbatim, so no list of codes here could keep up
+	// with them -- each carried with RefusedBeforeStart.
+	for _, code := range []string{
+		"no_worker_available", "worker_busy", "worker_unreachable", "pipelines_not_allowed", "worker_disconnected",
+		"owner_mismatch", "registration_refused", "forwarded_authority_refused", "decode_args",
+		"denied_pipeline_purpose", "a_code_this_engine_has_never_seen",
+	} {
 		t.Run(code, func(t *testing.T) {
+			labels := map[string]string{"docker": "true", "gpu": "true", "pipelines": "allowed"}
 			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
-				return worker.Result{OK: false, ErrorCode: code, ErrorMessage: "none of the 2 paired machine(s) can take it"}, nil
+				return worker.Result{OK: false, ErrorCode: code, ErrorMessage: "none of the 2 paired machine(s) can take it",
+					RefusedBeforeStart: true, WorkerId: "reg-9", NodeId: "agent-b", Labels: labels}, nil
 			}}
 			f, lib, _, _ := newTestFleet(t, d)
 			res := runFleet(t, f, fleetReq())
@@ -304,8 +314,25 @@ func TestFleetStepWithNoMachineIsTyped(t *testing.T) {
 			if len(lib.files) != 0 {
 				t.Errorf("a step that ran nowhere stored %d Library file(s)", len(lib.files))
 			}
+			// The machine the dispatcher named is where the step was last
+			// looked for; a refusal keeps it.
+			if res.Where.Surface != "fleet" || res.Where.WorkerID != "reg-9" || res.Where.NodeID != "agent-b" ||
+				!maps.Equal(res.Where.MachineLabels, labels) {
+				t.Errorf("Where = %+v, want the fleet and the machine the dispatcher named", res.Where)
+			}
 		})
 	}
+
+	t.Run("the same code without the verdict is a step that may have run", func(t *testing.T) {
+		// worker_disconnected is both: a stale row refused before start, and a
+		// connection that ended mid-call. Only the flag tells them apart.
+		d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+			return worker.Result{OK: false, ErrorCode: "worker_disconnected", ErrorMessage: "stream reset",
+				WorkerId: "reg-9", NodeId: "agent-b"}, nil
+		}}
+		f, _, _, _ := newTestFleet(t, d)
+		wantFailure(t, runFleet(t, f, fleetReq()), pl.OutcomeFailed, pl.CodeNodeLost)
+	})
 
 	t.Run("a machine whose own policy refuses the repository fails the step", func(t *testing.T) {
 		// Not a refusal before start: the machine was reached and said no,
@@ -718,5 +745,45 @@ func TestFleetStepPassesTheRealDispatchersPipelineGate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestFleetStepFeedsAnOverlongPartialLineAsALineOfItsOwn: a partial line is
+// held for its newline, but not without bound. The cockpit cuts a line past
+// 64 KiB where no secret straddles the cut, so a partial that grows past the
+// bound is fed as a line of its own at exactly such a cut -- and what follows
+// the cut's newline is a line of its own, never glued to it.
+func TestFleetStepFeedsAnOverlongPartialLineAsALineOfItsOwn(t *testing.T) {
+	first, second := strings.Repeat("a", 40<<10), strings.Repeat("b", 40<<10)
+	d := &fakeDispatcher{answer: func(_ context.Context, req worker.Request) (worker.Result, error) {
+		req.OnStreamChunk(chunk("stdout", first))  // held: under the bound
+		req.OnStreamChunk(chunk("stdout", second)) // past it: fed whole, at the cockpit's cut
+		req.OnStreamChunk(chunk("stdout", "tail\n"))
+		return worker.Result{OK: true, OutputJSON: `{"exitCode":0,"durationMs":10}`, WorkerId: "reg-1"}, nil
+	}}
+	f, lib, _, _ := newTestFleet(t, d)
+	req := fleetReq()
+	req.Step.Artifacts = nil
+	res := runFleet(t, f, req)
+	log, ok := lib.named(runLogFileName(req.StepKey))
+	if !ok {
+		t.Fatal("no log archive")
+	}
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSuffix(string(log.Bytes), "\n"), "\n") {
+		if !strings.HasPrefix(line, "memql: ") {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) != 2 || lines[0] != first+second || lines[1] != "tail" {
+		lens := make([]int, len(lines))
+		for i, l := range lines {
+			lens[i] = len(l)
+		}
+		t.Fatalf("archived lines of lengths %v, want %d then the 4-byte \"tail\": a partial past the bound is a line "+
+			"of its own", lens, len(first+second))
+	}
+	if res.LogLines != 2 || !strings.HasSuffix(res.LogTail, "tail") {
+		t.Errorf("LogLines = %d, tail ends %q; want 2 lines ending in tail", res.LogLines, res.LogTail[max(len(res.LogTail)-10, 0):])
 	}
 }
