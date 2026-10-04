@@ -148,3 +148,26 @@ func TestSiteStoreSettingsGuard(t *testing.T) {
 		}
 	})
 }
+
+// THE ROW IS BOUNDED AS A WHOLE, not only store by store (memql#5602). Sixteen
+// stores of sixty-four keys at the per-value cap is two megabytes on every
+// version of a site row, against the 128 KiB one full `settings` object can
+// reach -- so every store's values together share that one budget.
+func TestSiteStoreSettingsShareOneTotalBudget(t *testing.T) {
+	userCtx, userActor := userActorContext()
+	g := validatorOnNilEngine()
+	full := func() map[string]any {
+		values := map[string]any{}
+		for i := 0; i < defaultSiteSettingsMaxKeys; i++ {
+			values["k"+strconv.Itoa(i)] = strings.Repeat("v", defaultSiteSettingsMaxValueLength)
+		}
+		return values
+	}
+	if err := g.validateSiteStoreSettings(userCtx, map[string]any{"storeSettings": map[string]any{"acme": full()}}, false, userActor); err != nil {
+		t.Fatalf("one store at the settings ceiling is within the budget: %v", err)
+	}
+	err := g.validateSiteStoreSettings(userCtx, map[string]any{"storeSettings": map[string]any{"acme": full(), "acme-dev": map[string]any{"k": "v"}}}, false, userActor)
+	if err == nil || !strings.Contains(err.Error(), "MEMQL_SITE_SETTINGS_MAX_KEYS") {
+		t.Fatalf("past the settings ceiling across stores must be refused naming the caps, got %v", err)
+	}
+}

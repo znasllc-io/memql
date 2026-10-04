@@ -261,6 +261,12 @@ func (e *MemQLEngine) validateSiteStoreSettings(
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	// ONE BUDGET FOR EVERY STORE TOGETHER: the characters one full `settings`
+	// object can hold (MEMQL_SITE_SETTINGS_MAX_KEYS values of
+	// MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH). Store by store, the caps alone
+	// would let sixteen stores put two megabytes on every version of the row.
+	maxKeys, maxValueLength := siteSettingsCaps()
+	budget, total := maxKeys*maxValueLength, 0
 	for _, id := range ids {
 		if !siteStoreIdForm.MatchString(id) {
 			return fmt.Errorf(
@@ -277,6 +283,15 @@ func (e *MemQLEngine) validateSiteStoreSettings(
 		if err := validateSiteSettingsObject(stores[id], fmt.Sprintf("storeSettings[%q]", id)); err != nil {
 			return err
 		}
+		for _, v := range stores[id].(map[string]any) {
+			total += len([]rune(stringFromAny(v)))
+		}
+	}
+	if total > budget {
+		return fmt.Errorf(
+			"v1:platform:site: storeSettings hold %d characters of values across all stores, more than one deployable keeps (%d -- MEMQL_SITE_SETTINGS_MAX_KEYS values of MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH, the most `settings` itself can hold).",
+			total, budget,
+		)
 	}
 	return nil
 }

@@ -835,8 +835,11 @@ bound to one store get that store's values.
   new store's entry; pointing it back restores the old one.
 - **The same rules as `settings`, store by store** -- key form, the `Ref`
   refusal, plain strings, the per-deployable caps -- plus bare store ids
-  (`acme-widgets`, never `v1:shopify:store:acme-widgets`) and at most 16
-  stores. Public by construction, like every setting.
+  (`acme-widgets`, never `v1:shopify:store:acme-widgets`), at most 16 stores,
+  and one budget for every store's values together: no more characters than
+  one full `settings` object can hold (`MEMQL_SITE_SETTINGS_MAX_KEYS` values
+  of `MEMQL_SITE_SETTINGS_MAX_VALUE_LENGTH`). Public by construction, like
+  every setting.
 - **The write REPLACES**, for `updateSiteSettings`' reason, and has its
   authorization: the deployable's owner, or a cluster owner. It needs no
   store part -- which store a deployable is bound to stays

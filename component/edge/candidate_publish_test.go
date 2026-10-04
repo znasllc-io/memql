@@ -178,3 +178,17 @@ func TestPointVersionStatementNamesOneFieldPerTarget(t *testing.T) {
 		t.Error("an unknown target rendered a statement")
 	}
 }
+
+// A CANDIDATE CARRIES NO PROVENANCE (memql#5601). setSiteCandidate accepts
+// artifactId, and the site row has one artifactId: the provenance of the
+// bundle it SERVES. A candidate written with one would overwrite that, so the
+// statement refuses it rather than dropping it silently -- a caller passing
+// provenance for a candidate has a bug worth hearing about.
+func TestACandidateStatementRefusesProvenance(t *testing.T) {
+	if q, err := PointVersionStatement("s1", TargetCandidate, "blob://b/", "art-1"); err == nil {
+		t.Fatalf("a candidate statement carried provenance: %q", q)
+	}
+	if _, err := PointVersionStatement("s1", TargetServing, "blob://a/", "art-1"); err != nil {
+		t.Fatalf("the serving version lost its provenance: %v", err)
+	}
+}

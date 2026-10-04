@@ -624,9 +624,11 @@ func (p *enginePublisher) requireSiteAction(ctx context.Context, siteID, action 
 // THE PART RECHECKED FOLLOWS THE TARGET (memql#5601). The serving version is
 // the `deploy` part, as it always was; the candidate is `preview` -- "publish a
 // candidate version" is that part's own definition, and setSiteCandidate
-// carries it -- so a person may prepare a version for a preview without being
-// able to put one in front of the public. PublishBundle has already checked
-// `deploy` for the run's upload either way.
+// carries it. PublishBundle checks `deploy` for every run's upload first, so on
+// this route a candidate needs BOTH parts: a package deploy never publishes
+// for somebody who holds only `preview`. Holding `preview` without `deploy` is
+// the setSiteCandidate act -- naming a version that already exists -- not a
+// package deploy.
 type packageSiteWriter struct{ publisher *enginePublisher }
 
 func (s packageSiteWriter) PointVersion(ctx context.Context, siteID string, target edge.Target, ref string) error {

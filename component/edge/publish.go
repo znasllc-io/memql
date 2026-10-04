@@ -91,9 +91,11 @@ type Result struct {
 
 // PointVersionStatement renders the one write that points a site's target
 // version at ref: updateSiteBundle for the serving version, setSiteCandidate
-// for the candidate. artifactID is optional provenance, passed through to the
-// mutation, which accepts it; empty omits it so the read-merge keeps what is
-// stored.
+// for the candidate. artifactID is optional provenance for the SERVING version,
+// passed through to updateSiteBundle; empty omits it so the read-merge keeps
+// what is stored. A candidate with provenance is refused: the row has one
+// artifactId, the provenance of the bundle it serves, and setSiteCandidate
+// would overwrite it with a candidate's.
 //
 // ONE FUNCTION FOR EVERY ROUTE, so "a candidate publish never writes
 // bundleRef" is true in one place rather than three. Both mutations are
@@ -107,6 +109,9 @@ func PointVersionStatement(siteID string, target Target, ref, artifactID string)
 		b.WriteString(langparser.QuoteString(siteID))
 		b.WriteString(", bundleRef: ")
 	case TargetCandidate:
+		if strings.TrimSpace(artifactID) != "" {
+			return "", fmt.Errorf("edge: a candidate publish carries no artifactId -- %s's artifactId is the provenance of the bundle it serves", siteID)
+		}
 		// setSiteCandidate, not updateSiteBundle with a second field: its
 		// guard (component/memql/platform_site_preview_guard.go) is what
 		// refuses a candidate equal to the serving version, and on a
