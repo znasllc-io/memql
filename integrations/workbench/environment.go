@@ -17,9 +17,10 @@ import (
 //	environment: { os: "darwin", needs: ["macos_tooling"] }
 //
 // A workbench is a headless Linux sandbox in the cluster with an empty
-// directory tree: no display, no GPU, no macOS tooling, and none of the user's
-// own files. So the four need values name exactly the things a workbench
-// cannot provide, and declaring any of them is by construction a mismatch.
+// directory tree: no display, no GPU, no macOS tooling, no Docker daemon, and
+// none of the user's own files. So the need values name exactly the things a
+// workbench cannot provide, and declaring any of them is by construction a
+// mismatch.
 // Encoding that as a table rather than as `len(needs) > 0` is deliberate --
 // the day a GPU-bearing workbench flavour exists, one `false` becomes `true`
 // and nothing else in this file moves.
@@ -59,6 +60,14 @@ const ErrCodeInvalidEnvironmentHint = "invalid_environment_hint"
 const (
 	// NeedDisplay -- the action drives a GUI / needs an X or Wayland display.
 	NeedDisplay = "display"
+	// NeedDocker -- the action needs a Docker daemon: it builds or runs
+	// containers. A workbench is an unprivileged sandbox with no daemon and no
+	// socket (`docker` is not on its exec allowlist either), so this is a need
+	// it structurally cannot meet; a fleet machine carrying the label
+	// `docker=true` can. Added for pipeline steps (epic memql#5478, #5494),
+	// whose compiler validates a manifest against the same closed set
+	// (component/pipelines.Needs, held to this one by a parity test).
+	NeedDocker = "docker"
 	// NeedGPU -- the action needs GPU compute or hardware acceleration.
 	NeedGPU = "gpu"
 	// NeedMacOSTooling -- the action needs macOS-only tooling (Xcode,
@@ -81,10 +90,11 @@ const UnmetNeedOS = "os"
 
 // workbenchProvides answers, for each declared need, whether a workbench can
 // satisfy it. Every answer is currently false, which is the whole point of the
-// vocabulary -- these are the four things the workbench is not. Written as a
-// table so the claim is inspectable and a future flavour can flip one entry.
+// vocabulary -- these are the things the workbench is not. Written as a table
+// so the claim is inspectable and a future flavour can flip one entry.
 var workbenchProvides = map[string]bool{
 	NeedDisplay:      false,
+	NeedDocker:       false,
 	NeedGPU:          false,
 	NeedMacOSTooling: false,
 	NeedUserFiles:    false,
@@ -109,7 +119,7 @@ func EnvironmentNeeds() []string {
 // ErrCodeEnvironmentMismatch.
 type EnvironmentMismatch struct {
 	// UnmetNeeds names every reason the workbench cannot serve this call, drawn
-	// from the four need constants plus UnmetNeedOS. Never empty in a mismatch.
+	// from the need constants plus UnmetNeedOS. Never empty in a mismatch.
 	UnmetNeeds []string `json:"unmetNeeds"`
 	// RequestedOS is the hint's `os` when it was supplied, empty otherwise.
 	RequestedOS string `json:"requestedOs,omitempty"`
@@ -288,7 +298,7 @@ func describeMismatch(m EnvironmentMismatch) string {
 	b.WriteString(strings.Join(m.UnmetNeeds, ", "))
 	b.WriteString("). A workbench is a headless ")
 	b.WriteString(m.WorkbenchOS)
-	b.WriteString(" sandbox in the cluster: no display, no GPU, no macOS tooling, and none of the user's own files.")
+	b.WriteString(" sandbox in the cluster: no display, no GPU, no macOS tooling, no Docker daemon, and none of the user's own files.")
 	if m.RequestedOS != "" && m.RequestedOS != m.WorkbenchOS {
 		fmt.Fprintf(&b, " The call asked for %s.", m.RequestedOS)
 	}

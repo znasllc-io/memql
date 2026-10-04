@@ -155,6 +155,12 @@ func EnvironmentNeedsLabels(needs []string, requestedOS string) map[string]strin
 		switch need {
 		case workbench.NeedDisplay:
 			out["display"] = "true"
+		case workbench.NeedDocker:
+			// The exact pair docker=true, because fleet labels match exactly
+			// and have no "any value" form: this is the label a machine able to
+			// run containers carries, and `docker=yes`, or a version in the
+			// value, would route nowhere (#5494).
+			out["docker"] = "true"
 		case workbench.NeedGPU:
 			out["gpu"] = "true"
 		case workbench.NeedMacOSTooling:

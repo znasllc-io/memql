@@ -346,6 +346,10 @@ func (r *Runner) chooseSurface(req Request) (Surface, error) {
 // unrecognised need is left for it to refuse by name
 // (`invalid_environment_hint`) rather than being read here as "send it to a
 // machine". A typo must never route somebody's script onto their laptop.
+//
+// The names are the workbench's closed set (integrations/workbench,
+// EnvironmentNeeds), every one of which is a need the sandbox cannot meet;
+// TestEveryNeedTheWorkbenchCannotMeetRunsOnTheFleet holds this list to it.
 func needsBeyondWorkbench(env map[string]any) bool {
 	raw, ok := env["needs"]
 	if !ok {
@@ -357,7 +361,7 @@ func needsBeyondWorkbench(env map[string]any) bool {
 	}
 	for _, item := range list {
 		switch strings.TrimSpace(strings.ToLower(fmt.Sprint(item))) {
-		case "display", "gpu", "macos_tooling", "user_files":
+		case "display", "docker", "gpu", "macos_tooling", "user_files":
 			return true
 		}
 	}
