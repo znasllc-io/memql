@@ -33,11 +33,17 @@ import (
 //     already fed -- judged against where the stream was OPENED from, never
 //     against the lines just before it.
 //   - A stream opened again drops a replayed line only when its fingerprint
-//     (stamp and text) is one this Run fed in that second; any other line of
-//     the second is output it never saw.
+//     (stamp and text) is one this Run fed; any other line of the seconds it
+//     replays is output it never saw.
 //   - A line a stream ends inside is held back: the stream opened next
 //     replays it whole. Once the step has ended, a last line with no newline
-//     is all there is, and is fed.
+//     is all there is, and is fed. A long line whose first pieces were fed
+//     before its stream ended is replayed from its start, and only the
+//     pieces not fed yet are fed (fix round 2, minor 1).
+//   - A stream is opened again from the earliest of the last line fed, a
+//     held line and a partly fed one -- a held line stamped a second before
+//     the last line fed would otherwise be past the stream's sinceTime -- and
+//     the fingerprints are kept for every second it can replay.
 //   - A Run that ADOPTED the step follows its log from the start. The store
 //     has every line up to the adoption cursor, so those reach the archive
 //     only, and the store is fed from the cursor on, behind one notice at the
@@ -58,15 +64,35 @@ type follower struct {
 	// adopted is the cursor the Run adopted the step at; zero for a step it
 	// started, or one whose holder had captured nothing.
 	adopted time.Time
-	// fed is the latest stamp this Run fed, to the store or the archive: a
-	// stream is opened again from its second.
+	// fed is the latest stamp of a line this Run fed whole, to the store or
+	// the archive.
 	fed time.Time
-	// seen fingerprints the lines fed in seenSecond, fed's second.
-	seenSecond time.Time
-	seen       map[linePrint]struct{}
+	// seen fingerprints the lines fed whole whose second is floor's or
+	// later: every line a stream opened again (reopenFrom) can replay.
+	seen  map[linePrint]struct{}
+	floor time.Time
+	// held is the stamp of a line a stream ended inside before any of it was
+	// fed (zero when unknown); partial is a long line whose first pieces were
+	// fed when its stream ended.
+	held    time.Time
+	partial *partialLine
 	// trouble is what the follower last logged of the errors its streams
 	// ended on.
 	trouble apiTrouble
+}
+
+// replaySkew is how far before the last line fed a line written after it can
+// be stamped, as far as the fingerprints kept reach back.
+const replaySkew = time.Second
+
+// partialLine is a long line some of whose pieces were fed: its fingerprint
+// (its first piece's), its stamp, what became of it, and how many of its
+// bytes, as the reader gives them, were fed.
+type partialLine struct {
+	print linePrint
+	at    time.Time
+	fate  lineFate
+	fed   int
 }
 
 // follow starts following the pod's step container. draining starts it
@@ -104,9 +130,10 @@ func (f *follower) run(ctx context.Context) {
 			}
 			continue
 		}
-		// From the second of the last line fed; from the start before any --
-		// for an adopter too, whose archive is made whole (ruling R36).
-		rc, err := f.s.r.kube.FollowLog(ctx, f.pod, ContainerStep, f.fed)
+		// From the second of reopenFrom; from the start before any line was
+		// fed whole -- for an adopter too, whose archive is made whole
+		// (ruling R36).
+		rc, err := f.s.r.kube.FollowLog(ctx, f.pod, ContainerStep, f.reopenFrom())
 		if err == nil {
 			err = f.consume(rc, final)
 			_ = rc.Close()
@@ -199,18 +226,37 @@ func (f *follower) consume(r io.Reader, final bool) error {
 		fate  lineFate
 		stamp time.Time // the line's timestamp, for its continuation pieces
 		print linePrint
+		given int // bytes of the line given out so far, fed now or before
+		skip  int // bytes of the line an earlier stream fed: not fed again
 	)
 	for {
 		piece, first, end, err := lines.next()
 		if err != nil && !end && !final {
 			// The stream ended inside a line: the next one replays it whole.
+			f.hold(piece, first, fate, stamp, print, given)
 			piece = ""
 		}
 		if first && (piece != "" || end) {
 			fate, stamp, print = f.judge(piece, opened)
+			given, skip = 0, 0
+			if p := f.partial; p != nil && print == p.print {
+				fate, skip = p.fate, p.fed
+			}
 		}
 		if piece != "" {
-			f.feed(fate, stamp, piece, first)
+			switch n := len(piece); {
+			case skip >= n:
+				skip -= n
+			case skip > 0:
+				// A piece cut where an earlier stream did not cut it (the
+				// reader cuts the same bytes the same way, so this is a
+				// guard): the part not fed goes as the line's continuation.
+				f.feed(fate, stamp, piece[skip:], false)
+				skip = 0
+			default:
+				f.feed(fate, stamp, piece, first)
+			}
+			given += len(piece)
 		}
 		if piece != "" && (end || err != nil) {
 			f.fedLine(fate, stamp, print)
@@ -285,26 +331,78 @@ func (f *follower) feed(fate lineFate, stamp time.Time, piece string, first bool
 	}
 }
 
-// fedLine records a line fed whole: its fingerprint, for the second it is in,
-// and how far the Run has fed -- and, for a stored line, the cursor the
-// heartbeat publishes, which only ever moves forward.
+// fedLine records a line fed whole: its fingerprint, how far the Run has fed,
+// that a held or partly fed line is held no longer -- and, for a stored
+// line, the cursor the heartbeat publishes, which only ever moves forward.
 func (f *follower) fedLine(fate lineFate, at time.Time, print linePrint) {
+	if f.partial != nil && f.partial.print == print {
+		f.partial = nil
+	}
 	if fate == fateRepeat || fate == fateStream {
 		return
 	}
-	switch second := at.Truncate(time.Second); {
-	case second.After(f.seenSecond):
-		f.seenSecond = second
-		f.seen = map[linePrint]struct{}{print: {}}
-	case second.Equal(f.seenSecond):
-		f.seen[print] = struct{}{}
-	}
+	f.seen[print] = struct{}{}
 	if at.After(f.fed) {
 		f.fed = at
 	}
+	if at.Equal(f.held) {
+		f.held = time.Time{}
+	}
+	f.prune()
 	if fate == fateStore {
 		f.s.publishCursor(at)
 		f.s.noteFirstStored(at)
+	}
+}
+
+// hold records the line a stream ended inside, which the next stream
+// replays: given out in part, a partly fed line; not at all, a held one, by
+// its stamp when the part read holds one. A line already partly fed stays so
+// until its end is fed.
+func (f *follower) hold(piece string, first bool, fate lineFate, at time.Time, print linePrint, given int) {
+	switch {
+	case !first && (fate == fateStore || fate == fateArchive):
+		f.partial = &partialLine{print: print, at: at, fate: fate, fed: given}
+	case first && f.partial == nil:
+		if stamp, _, ok := captureSplitStamp(piece); ok {
+			f.held = stamp
+		}
+	}
+	f.prune()
+}
+
+// reopenFrom is where the next stream opens: the log's start before any line
+// was fed whole; else the earliest of the last line fed, a held line and a
+// partly fed one (Kube.FollowLog opens at its whole second).
+func (f *follower) reopenFrom() time.Time {
+	from := f.fed
+	if from.IsZero() {
+		return from
+	}
+	if !f.held.IsZero() && f.held.Before(from) {
+		from = f.held
+	}
+	if f.partial != nil && f.partial.at.Before(from) {
+		from = f.partial.at
+	}
+	return from
+}
+
+// prune forgets the fingerprints of seconds no stream opened from now on can
+// replay. One second more is kept than reopenFrom needs now: a line held
+// later may be stamped before the last line fed (stdout and stderr are
+// stamped apart, by milliseconds), and a stream opened at its second
+// replays the lines fed since.
+func (f *follower) prune() {
+	floor := f.reopenFrom().Truncate(time.Second).Add(-replaySkew)
+	if !floor.After(f.floor) {
+		return
+	}
+	f.floor = floor
+	for p := range f.seen {
+		if p.at < floor.UnixNano() {
+			delete(f.seen, p)
+		}
 	}
 }
 

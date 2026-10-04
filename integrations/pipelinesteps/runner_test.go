@@ -1988,6 +1988,92 @@ func TestRunnerDropsOnlyWhatItCapturedFromAReplayedSecond(t *testing.T) {
 	}
 }
 
+// TestRunnerReopensFromWhatAStreamLeftUnfed (fix round 2, minor 1): a stream
+// that ends inside a line is opened again early enough to replay that line,
+// and nothing it replays is fed twice.
+//
+//   - A line over a mebibyte had its first pieces fed when its stream ended:
+//     the next stream replays it from its start, and only the rest of it is
+//     fed (the re-review's probe archived 2.5 MiB for a 1.5 MiB line).
+//   - A line held back, stamped in an earlier second than the last line fed
+//     (stdout and stderr are stamped apart), is in no stream opened at the
+//     last line's second: the next opens at the held line's.
+func TestRunnerReopensFromWhatAStreamLeftUnfed(t *testing.T) {
+	t.Run("a long line partly fed", func(t *testing.T) {
+		h := newRunnerHarness(t, func(cfg *Config) { cfg.ArchiveMaxBytes = 8 << 20; cfg.LogStoreMaxLines = 100000 })
+		l1 := captureKubeLine(rtAt(1100), "one")
+		long := captureKubeLine(rtAt(1200), strings.Repeat("p", followLineMax+followLineMax/2))
+		l3 := captureKubeLine(rtAt(1300), "three")
+		running := rtPod(testJobName, rtStepRunning(rtAt(1000)), clsCloneDone)
+		h.c.script(testJobName, &rtScript{
+			states: []rtState{
+				{pod: running, visible: 1, until: func(c *rtCluster) bool { return c.streams >= 2 }},
+				{pod: running, visible: 3, until: func(c *rtCluster) bool { return c.cursorPatchedLocked(testJobName, rtAt(1300)) }},
+				{pod: rtPod(testJobName, rtStepEnded(0, rtAt(1000), rtAt(4000)), clsCloneDone), visible: 3},
+			},
+			log:            []string{l1, long, l3},
+			tails:          map[string]string{ContainerClone: rtCloneTail},
+			cutFirstStream: long[:followLineMax+followLineMax/4],
+		})
+
+		res := h.run(t, rtRun())
+
+		if res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("result = %+v, want success", res)
+		}
+		archive := string(h.file(t, "tests-go-tests-2.log").Bytes)
+		n := 0
+		for _, l := range strings.Split(archive, "\n") {
+			if l != "" && strings.Trim(l, "p") == "" {
+				n += len(l)
+			}
+		}
+		if n != followLineMax+followLineMax/2 {
+			t.Errorf("the archive holds %d of the line's bytes, want the line once (%d)", n, followLineMax+followLineMax/2)
+		}
+		if strings.Count(archive, "one\n") != 1 || strings.Count(archive, "three\n") != 1 {
+			t.Errorf("the lines around it are not each archived once")
+		}
+		stored := 0
+		for _, m := range h.sink.messages() {
+			stored += strings.Count(m, "p")
+		}
+		if stored != followLineMax+followLineMax/2 {
+			t.Errorf("the store holds %d of the line's bytes, want the line once", stored)
+		}
+	})
+
+	t.Run("a held line stamped a second before the last line fed", func(t *testing.T) {
+		h := newRunnerHarness(t)
+		a := captureKubeLine(rtAt(1100), "a")
+		b := captureKubeLine(rtAt(2100), "b")
+		c := captureKubeLine(rtAt(1500), "c, stamped before b and written after it")
+		running := rtPod(testJobName, rtStepRunning(rtAt(1000)), clsCloneDone)
+		h.c.script(testJobName, &rtScript{
+			states: []rtState{
+				{pod: running, visible: 2, until: func(c *rtCluster) bool { return c.streams >= 2 }},
+				{pod: running, visible: 3, until: func(c *rtCluster) bool { return c.cursorPatchedLocked(testJobName, rtAt(2100)) }},
+				{pod: rtPod(testJobName, rtStepEnded(0, rtAt(1000), rtAt(4000)), clsCloneDone), visible: 3},
+			},
+			log:            []string{a, b, c},
+			tails:          map[string]string{ContainerClone: rtCloneTail},
+			cutFirstStream: c[:len(c)-5],
+		})
+
+		res := h.run(t, rtRun())
+
+		if res.Status != pl.OutcomeSucceeded {
+			t.Fatalf("result = %+v, want success", res)
+		}
+		if got := h.sink.messages(); !reflect.DeepEqual(got, rtTexts(a, b, c)) {
+			t.Errorf("store = %q, want each line once, the held one included", got)
+		}
+		if archive := string(h.file(t, "tests-go-tests-2.log").Bytes); !strings.HasPrefix(archive, strings.Join(rtTexts(a, b, c), "\n")+"\n") {
+			t.Errorf("archive = %q, want each line once", archive)
+		}
+	})
+}
+
 // TestRunnerHoldsALineAStreamEndedInside (minor 10): a stream that ends in
 // the middle of a line -- a connection dropped while the step wrote it -- has
 // not seen the whole line. The piece is held back, and the stream opened again
