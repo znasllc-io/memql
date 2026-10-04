@@ -48,10 +48,12 @@ import (
 // depends on nothing -- and for index 1's to run; create the probe Secret,
 // naming index 0's address and the Job's uid and owned by the Job, which
 // starts both connectors; wait (probeEndWait) for index 1's connector to end;
-// read the pods again (R42); and judge by the connector's exit code and by
-// whether the listener it tried is still ready, the incarnation that was ready
-// before the Secret existed. The probe's Job and Secret are deleted before
-// anyone is answered, so under a ceiling of one the slot is free for the step.
+// read the pods again (R42) and ask the listener's kubelet once (R42b); and
+// judge by the connector's exit code and by whether the listener it tried is
+// still ready, the incarnation that was ready before the Secret existed, in a
+// pod still standing on a node that still answers. The probe's Job and Secret
+// are deleted before anyone is answered, so under a ceiling of one the slot is
+// free for the step.
 
 // IsolationVerdict is what this replica's last proof found (Runner.Isolation).
 type IsolationVerdict struct {
@@ -91,6 +93,9 @@ const (
 	// to its end: its settle and three rounds of two attempts, each bounded
 	// at five seconds, come to at most 37 seconds.
 	probeEndTimeout = 60 * time.Second
+	// probeKubeletTimeout bounds the re-read's one round trip through the
+	// listener's kubelet (R42b).
+	probeKubeletTimeout = 5 * time.Second
 	// probeSaidMaxBytes bounds the connector's own line in a verdict.
 	probeSaidMaxBytes = 1 << 10
 )
@@ -455,6 +460,16 @@ func (p *prober) end(job Job) (ContainerStateTerminated, error) {
 // pod's refusals are no evidence of a policy. A replacement started within
 // the second the first one did reads the same startedAt, so the pod is
 // matched by its uid.
+//
+// And the pod's status is its kubelet's last word (R42b): a node lost in the
+// seconds after the listener was seen ready can no longer update its pod,
+// which reads as it was, and the node controller acts only after its grace
+// period -- by marking the pod's Ready condition, never the container's
+// ready. On a cluster that enforces no policy, the SYNs a
+// lost node never answers time out, and DNS answers from another node, which
+// reads as a pass. So the pod's Ready condition is read too, and, last, one
+// round trip is made THROUGH the listener's kubelet -- its log, bounded at
+// probeKubeletWait -- which a lost node cannot answer.
 func (p *prober) held(job Job, was probeListener) (bool, string, error) {
 	var pods []Pod
 	err := p.retry(func() (err error) {
@@ -472,6 +487,8 @@ func (p *prober) held(job Job, was probeListener) (bool, string, error) {
 	switch {
 	case zero == nil:
 		return false, "the listener's pod was gone", nil
+	case zero.Metadata.UID != was.uid && zero.Metadata.Name == was.pod:
+		return false, fmt.Sprintf("the listener's pod %s had been replaced by a new pod of the same name since it was seen ready", was.pod), nil
 	case zero.Metadata.UID != was.uid || zero.Metadata.Name != was.pod:
 		return false, fmt.Sprintf("the listener's pod %s had been replaced by %s since it was seen ready", was.pod, zero.Metadata.Name), nil
 	case !zero.Metadata.DeletionTimestamp.IsZero():
@@ -487,8 +504,36 @@ func (p *prober) held(job Job, was probeListener) (bool, string, error) {
 		return false, "the listener had restarted since it was seen ready", nil
 	case !l.Ready:
 		return false, "the listener was not ready", nil
+	case !podReady(zero):
+		return false, "the listener's pod's Ready condition was not True", nil
 	}
-	return true, "", nil
+	return p.kubeletAnswers(zero)
+}
+
+// podReady says a pod's Ready condition is True.
+func podReady(pod *Pod) bool {
+	c := podCondition(pod, "Ready")
+	return c != nil && c.Status == "True"
+}
+
+// kubeletAnswers makes the re-read's one round trip through the listener's
+// kubelet (R42b): a tail of the listener's log, which the API server can
+// fetch only from that kubelet, bounded at probeKubeletWait. The log itself
+// is nothing -- the listener prints none -- the answer is the point. Any
+// failure is a node that may be lost: not held.
+func (p *prober) kubeletAnswers(pod *Pod) (bool, string, error) {
+	ctx, cancel := context.WithTimeout(p.ctx, p.r.probeKubeletWait)
+	defer cancel()
+	_, err := p.r.kube.TailLog(ctx, pod.Metadata.Name, ContainerProbeListener, 1)
+	switch {
+	case err == nil:
+		return true, "", nil
+	case p.ctx.Err() != nil:
+		return false, "", errProbeStopped
+	case ctx.Err() != nil:
+		return false, fmt.Sprintf("the listener's kubelet did not answer within %v, so its node may be lost", p.r.probeKubeletWait), nil
+	}
+	return false, "the listener's kubelet could not be reached through the API server, so its node may be lost: " + apiMessage(err), nil
 }
 
 // remove deletes the probe Job -- background propagation, so its pods go
@@ -548,11 +593,12 @@ func probePods(pods []Pod, job Job) (zero, one *Pod) {
 	return zero, one
 }
 
-// listening is index 0's listener, when its pod has an address and the
+// listening is index 0's listener, when its pod has an address and a uid --
+// the re-read knows the same pod by it, never by its name alone -- and the
 // listener runs and is ready.
 func listening(pod *Pod) (probeListener, bool) {
 	l := podContainer(pod, true, ContainerProbeListener)
-	if pod == nil || pod.Status.PodIP == "" || l == nil || l.State.Running == nil || !l.Ready {
+	if pod == nil || pod.Status.PodIP == "" || pod.Metadata.UID == "" || l == nil || l.State.Running == nil || !l.Ready {
 		return probeListener{}, false
 	}
 	return probeListener{

@@ -633,9 +633,11 @@ func jobOwner(job Job) OwnerReference {
 //	      timed out), and every DNS attempt connected             re-read finds the listener
 //	                                                              still ready, the same
 //	                                                              incarnation in the same
-//	                                                              pod, which the API server
-//	                                                              has not marked as going
-//	                                                              away; inconclusive
+//	                                                              pod, Ready, which the API
+//	                                                              server has not marked as
+//	                                                              going away, and its kubelet
+//	                                                              still answers through the
+//	                                                              API server; inconclusive
 //	                                                              otherwise
 //	21    a listener attempt connected                            not isolated
 //	22    a DNS attempt failed, and none to the listener          inconclusive

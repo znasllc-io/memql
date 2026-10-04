@@ -294,6 +294,9 @@ type rtCluster struct {
 	// loseSecretCreates makes that many Secret creates, and answers each
 	// 503, as a reply lost on its way back.
 	loseSecretCreates int
+	// tailAnswer, when set, answers every tail of a container's log
+	// instead: the API server's word for a kubelet it cannot reach.
+	tailAnswer *kubeAnswer
 }
 
 func newRTCluster(t *testing.T, clock *rtClock) *rtCluster {
@@ -836,6 +839,14 @@ func (c *rtCluster) podLog(w http.ResponseWriter, r *http.Request, pod string) {
 		if cand.script == nil {
 			continue
 		}
+		// An Indexed Job's pods are found by their own names.
+		if len(cand.script.states) > 0 {
+			for _, p := range cand.script.states[cand.state].pods {
+				if p != nil && p.Metadata.Name == pod {
+					j, jobName = cand, name
+				}
+			}
+		}
 		for _, st := range cand.script.states {
 			if st.leftover != nil && st.leftover.Metadata.Name == pod {
 				c.t.Errorf("the runner read the log of %s, a leftover pod of an earlier Job", pod)
@@ -849,8 +860,12 @@ func (c *rtCluster) podLog(w http.ResponseWriter, r *http.Request, pod string) {
 	}
 	if q.Get("follow") != "true" {
 		text, ok := j.script.tails[container]
-		block := c.blockTails
+		block, answer := c.blockTails, c.tailAnswer
 		c.mu.Unlock()
+		if answer != nil {
+			rtAnswer(w, *answer)
+			return
+		}
 		if block {
 			select {
 			case <-r.Context().Done():

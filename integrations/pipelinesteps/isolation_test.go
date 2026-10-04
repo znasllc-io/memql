@@ -66,9 +66,15 @@ func isoEnded(exit int32, said string) ContainerStatus {
 		ExitCode: exit, Reason: "Error", Message: said + "\n", StartedAt: rtAt(2000), FinishedAt: rtAt(12000)}}}
 }
 
-// isoPod is one of the probe's pods, as the Job controller labels it.
+// isoPod is one of the probe's pods, as the Job controller labels it, with the
+// Ready condition its containers make: True once its listener is ready and its
+// main container runs (measured: kube_test.go's probe pods).
 func isoPod(index int, ip string, listener, main ContainerStatus) *Pod {
 	i := strconv.Itoa(index)
+	ready := "False"
+	if listener.Ready && main.State.Running != nil {
+		ready = "True"
+	}
 	return &Pod{
 		Metadata: ObjectMeta{
 			Name:              fmt.Sprintf("%s-%d-x7kk6", isoName(), index),
@@ -77,7 +83,11 @@ func isoPod(index int, ip string, listener, main ContainerStatus) *Pod {
 			Annotations:       map[string]string{"batch.kubernetes.io/job-completion-index": i},
 			CreationTimestamp: rtT0,
 		},
-		Status: PodStatus{Phase: "Pending", PodIP: ip, InitContainerStatuses: []ContainerStatus{listener}, ContainerStatuses: []ContainerStatus{main}},
+		Status: PodStatus{
+			Phase: "Pending", PodIP: ip,
+			Conditions:            []PodCondition{{Type: "Ready", Status: ready}},
+			InitContainerStatuses: []ContainerStatus{listener}, ContainerStatuses: []ContainerStatus{main},
+		},
 	}
 }
 
@@ -94,7 +104,7 @@ func isoScript(exit int32, said string) *rtScript {
 		},
 		{pods: []*Pod{isoPod(0, isoListenerIP, up, isoHolding), isoPod(1, isoOtherIP, up, isoRunning)}},
 		{pods: []*Pod{isoPod(0, isoListenerIP, up, isoHolding), isoPod(1, isoOtherIP, up, isoEnded(exit, said))}},
-	}}
+	}, tails: map[string]string{ContainerProbeListener: ""}} // the listener prints nothing
 }
 
 // then adds the moment after the last: the pods as a later read finds them.
@@ -109,6 +119,34 @@ func (s *rtScript) then(pods ...*Pod) *rtScript {
 func isoScriptAfter(first []rtState, exit int32, said string) *rtScript {
 	s := isoScript(exit, said)
 	s.states = append(append([]rtState{}, first...), s.states[1:]...)
+	return s
+}
+
+// isoRereadFails is the probe's life, with every list of its pods after the
+// one that saw the connector end answered by answer: the re-read fails.
+func isoRereadFails(answer kubeAnswer) *rtScript {
+	s := isoScript(probeExitIsolated, isoSaid[probeExitIsolated]).then(isoMarked(func(*Pod) {}),
+		isoPod(1, isoOtherIP, isoListener(false, 0), isoEnded(probeExitIsolated, isoSaid[probeExitIsolated])))
+	s.states[3].until = func(c *rtCluster) bool { c.podsAnswer = &answer; return true }
+	return s
+}
+
+// isoScriptPlanting is the probe's life, with a probe Secret naming this
+// probe Job and the address target(job) planted before the proof makes its
+// own -- once the Job exists, so the Secret can name it.
+func isoScriptPlanting(target func(job Job) string) *rtScript {
+	s := isoScript(probeExitIsolated, isoSaid[probeExitIsolated])
+	s.states[0].until = func(c *rtCluster) bool {
+		j := c.jobs[isoName()]
+		if j == nil {
+			return false
+		}
+		if planted, err := BuildIsolationTarget(testConfig(), j.job, target(j.job)); err == nil {
+			planted.Metadata.Namespace = j.job.Metadata.Namespace
+			c.secrets[isoTarget()] = planted
+		}
+		return true
+	}
 	return s
 }
 
@@ -363,6 +401,7 @@ func TestIsolationProofRefusedConnectionPassesOnlyWhileTheListenerHeld(t *testin
 	for _, c := range []struct {
 		name         string
 		script       *rtScript
+		setup        func(h *rtHarness)
 		isolated     bool
 		inconclusive bool
 		said         string
@@ -433,12 +472,55 @@ func TestIsolationProofRefusedConnectionPassesOnlyWhileTheListenerHeld(t *testin
 			inconclusive: true, said: "replaced",
 		},
 		{
+			// Only the uid tells a replacement of the same name apart (fix
+			// round 2): a uid check reduced to the name would pass it.
+			name: "a replacement of the same name, with a new uid: inconclusive",
+			script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]).then(isoMarked(func(p *Pod) {
+				p.Metadata.UID = "uid-pod-0-other"
+			}), ended(probeExitIsolated)),
+			inconclusive: true, said: "replaced by a new pod of the same name",
+		},
+		{
+			// The node controller marks a lost node's pods not Ready -- the
+			// pod's condition, which the container's ready never reflects.
+			name: "the listener's pod is not Ready, its container still ready: inconclusive",
+			script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]).then(isoMarked(func(p *Pod) {
+				p.Status.Conditions = []PodCondition{{Type: "Ready", Status: "False", Reason: "NodeLost"}}
+			}), ended(probeExitIsolated)),
+			inconclusive: true, said: "Ready condition",
+		},
+		{
+			// R42b: a node lost in the seconds after the listener was seen
+			// ready can no longer update its pod, which reads as it was; only
+			// a round trip through its kubelet tells.
+			name:   "the listener's node is lost, its kubelet silent: inconclusive",
+			script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]),
+			setup: func(h *rtHarness) {
+				h.r.probeKubeletWait = 200 * time.Millisecond
+				h.c.with(func(c *rtCluster) { c.blockTails = true })
+			},
+			inconclusive: true, said: "did not answer within",
+		},
+		{
+			name:   "the API server cannot reach the listener's kubelet: inconclusive",
+			script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]),
+			setup: func(h *rtHarness) {
+				h.c.with(func(c *rtCluster) {
+					c.tailAnswer = &kubeAnswer{code: 500, body: `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"Get \"https://10.89.0.3:10250/containerLogs/steps-ns/x/listener?tailLines=1\": dial tcp 10.89.0.3:10250: connect: no route to host","code":500}`}
+				})
+			},
+			inconclusive: true, said: "could not be reached",
+		},
+		{
 			name:   "a connection is never isolation, whatever the listener did after",
 			script: isoScript(probeExitConnected, isoSaid[probeExitConnected]).then(isoPod(0, isoListenerIP, isoListener(false, 0), isoHolding), ended(probeExitConnected)),
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			h := newIsoHarness(t, c.script)
+			if c.setup != nil {
+				c.setup(h)
+			}
 			run := isoStep(h, rtRun().StepKey)
 
 			res := h.run(t, run)
@@ -564,6 +646,23 @@ func TestIsolationProofInconclusiveIsNotAPass(t *testing.T) {
 					}
 				})
 			}, said: "pod could not be read"},
+		{name: "the pods could not be read again: forbidden", script: isoRereadFails(kubeStatus(403, "Forbidden", `pods is forbidden: User "system:serviceaccount:memql:memql-engine" cannot list resource "pods"`)),
+			setup: func(h *rtHarness) { h.r.probeEndWait = 2 * time.Second }, said: "read again"},
+		{name: "the pods could not be read again: unavailable on every try", script: isoRereadFails(rtUnavailable),
+			setup: func(h *rtHarness) { h.r.probeEndWait = 2 * time.Second }, said: "read again"},
+		{name: "an earlier probe's Secret naming this very listener", script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]),
+			setup: func(h *rtHarness) {
+				// Pod addresses are reused: only the Job's uid tells it apart.
+				stale, err := BuildIsolationTarget(h.cfg, Job{Metadata: ObjectMeta{Name: isoName(), UID: "uid-earlier-probe"}}, isoListenerIP)
+				if err != nil {
+					t.Fatal(err)
+				}
+				h.c.with(func(c *rtCluster) {
+					c.onJobCreate = func(c *rtCluster, _ int) { c.secrets[isoTarget()] = stale }
+				})
+			}, said: "naming another probe Job or listener"},
+		{name: "a Secret naming this probe Job but another listener", script: isoScriptPlanting(func(job Job) string { return "10.42.9.9" }),
+			said: "naming another probe Job or listener"},
 		{name: "an earlier probe Job came back after every delete", script: isoScript(probeExitIsolated, isoSaid[probeExitIsolated]),
 			setup: func(h *rtHarness) {
 				h.c.with(func(c *rtCluster) {
@@ -861,6 +960,13 @@ func TestIsolationProofArmsOnlyOnceTheListenerIsReady(t *testing.T) {
 		}},
 		{"index 0 has no address yet", []rtState{
 			{pods: []*Pod{isoPod(0, "", up, isoWaiting()), isoPod(1, isoOtherIP, up, isoWaiting())}, reads: 2},
+		}},
+		{"index 0's pod has no uid", []rtState{
+			{pods: []*Pod{func() *Pod {
+				p := isoPod(0, isoListenerIP, up, isoWaiting())
+				p.Metadata.UID = ""
+				return p
+			}(), isoPod(1, isoOtherIP, up, isoWaiting())}, reads: 2},
 		}},
 		{"an older pod of index 0 is not the listener", []rtState{
 			{pods: []*Pod{older, isoPod(0, isoListenerIP, notReady, isoWaiting()), isoPod(1, isoOtherIP, up, isoWaiting())}, reads: 2},
@@ -1166,8 +1272,9 @@ func TestRunnerIsolationDefaults(t *testing.T) {
 	cfg := rtConfig()
 	cfg.IsolationTTL = 0
 	r := NewRunner(cfg, nil, nil, nil, nil)
-	if r.cfg.IsolationTTL != time.Hour || r.probeUpWait != 90*time.Second || r.probeEndWait != 60*time.Second {
-		t.Errorf("IsolationTTL %v, bounds %v and %v; want 1h, 1m30s and 1m0s", r.cfg.IsolationTTL, r.probeUpWait, r.probeEndWait)
+	if r.cfg.IsolationTTL != time.Hour || r.probeUpWait != 90*time.Second || r.probeEndWait != 60*time.Second || r.probeKubeletWait != 5*time.Second {
+		t.Errorf("IsolationTTL %v, bounds %v, %v and %v; want 1h, 1m30s, 1m0s and 5s",
+			r.cfg.IsolationTTL, r.probeUpWait, r.probeEndWait, r.probeKubeletWait)
 	}
 	cfg.IsolationTTL = 5 * time.Minute
 	if r := NewRunner(cfg, nil, nil, nil, nil); r.cfg.IsolationTTL != 5*time.Minute {

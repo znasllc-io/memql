@@ -184,13 +184,15 @@ type Runner struct {
 	statusTrouble apiTrouble
 
 	// The isolation proof (isolation.go): the last verdict and the proof in
-	// flight, if any, guarded by isoMu; probeUpWait and probeEndWait are
-	// probeUpTimeout and probeEndTimeout.
-	isoMu        sync.Mutex
-	isoLast      IsolationVerdict
-	isoProof     *isolationProof
-	probeUpWait  time.Duration
-	probeEndWait time.Duration
+	// flight, if any, guarded by isoMu; probeUpWait, probeEndWait and
+	// probeKubeletWait are probeUpTimeout, probeEndTimeout and
+	// probeKubeletTimeout.
+	isoMu            sync.Mutex
+	isoLast          IsolationVerdict
+	isoProof         *isolationProof
+	probeUpWait      time.Duration
+	probeEndWait     time.Duration
+	probeKubeletWait time.Duration
 }
 
 // inflight is one Run on this replica: what CancelRun cancels by run, and
@@ -221,19 +223,20 @@ func NewRunner(cfg Config, kube *Kube, sink func() LineSink, library LibraryStor
 	cfg.NodeID = strings.TrimSpace(cfg.NodeID)
 	return &Runner{
 		cfg: cfg, kube: kube, sink: sink, library: library, tokens: tokens,
-		log:            slog.Default().With("component", "pipelines.runner"),
-		now:            time.Now,
-		tempDir:        os.TempDir(),
-		openCapture:    NewCapture,
-		drainTimeout:   followDrainTimeout,
-		libraryTimeout: libraryPhaseTimeout,
-		tailsTimeout:   tailsTimeout,
-		inflight:       map[*inflight]struct{}{},
-		claims:         map[string]*step{},
-		reapEvery:      reapInterval,
-		statusTrouble:  apiTrouble{},
-		probeUpWait:    probeUpTimeout,
-		probeEndWait:   probeEndTimeout,
+		log:              slog.Default().With("component", "pipelines.runner"),
+		now:              time.Now,
+		tempDir:          os.TempDir(),
+		openCapture:      NewCapture,
+		drainTimeout:     followDrainTimeout,
+		libraryTimeout:   libraryPhaseTimeout,
+		tailsTimeout:     tailsTimeout,
+		inflight:         map[*inflight]struct{}{},
+		claims:           map[string]*step{},
+		reapEvery:        reapInterval,
+		statusTrouble:    apiTrouble{},
+		probeUpWait:      probeUpTimeout,
+		probeEndWait:     probeEndTimeout,
+		probeKubeletWait: probeKubeletTimeout,
 	}
 }
 
