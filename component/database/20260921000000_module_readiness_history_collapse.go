@@ -99,7 +99,10 @@ import (
 // readinessCollapseBatch-th version below the cursor, so it removes at most
 // that many versions: (id, "createdAt") is the primary key, so no two versions
 // of an id share a "createdAt" and the range holds exactly the versions the
-// floor counted. Every read is a probe of the latest-row index (concept, id,
+// floor counted. The range is also bounded by the id's newest version as the
+// statement reads it, which the cursor alone always is too -- but the cursor is
+// a value in a table, and a version this migration exists to keep is not left
+// resting on one. Every read is a probe of the latest-row index (concept, id,
 // "createdAt" DESC), which 20260913000000 and 20260914000000 ensure before this
 // runs:
 //
@@ -136,9 +139,10 @@ import (
 // backend stalled in a wait no interrupt reaches answers when the wait ends.
 // For that case the collapse knows something the runner cannot -- the cut-off
 // backend's pid, and that its transaction can only end whole, because the
-// driver closed the connection its COMMIT would have come on -- so it waits for
-// that backend to exit and then defers, instead of handing the runner a
-// transport error it must keep its lock for (awaitOrphan). At a load average of
+// driver closed the connection its COMMIT would have come on -- so it waits
+// until that backend has no transaction open and then defers, instead of
+// handing the runner a transport error it must keep its lock for (awaitOrphan,
+// and THE MIGRATION ATTEMPT below). At a load average of
 // 72 the whole 791,770-version walk took three runs, two of them ended this
 // way after a five-second wait, and between them the three deleted exactly the
 // 791,630 versions that were not their id's newest.
@@ -181,20 +185,53 @@ import (
 // revisited: a version written to that id after it was collapsed stays, as a
 // version written after the single DELETE's snapshot did.
 //
+// ONE WALK AT A TIME, CHECKED. The runner's lock is what keeps a second walk
+// off the table, and the runbook says never to clear a lock whose migration is
+// still running. A second walk is therefore an operator's mistake -- but one
+// that, unchecked, lets a walk on id X write X's floor into a row the other
+// walk has already moved to Y, after which a resume deletes Y's versions below
+// a time from X's history. So every step that writes the row takes its lock
+// first, in the statement that writes, and acts only if the row still names the
+// id this walk is on; a mismatch fails the step having written nothing
+// (errReadinessCollapseCursorMoved). The newest-version bound above is the
+// second line: whatever a row says, no batch can take an id's newest version.
+//
 // ===========================================================================
-// THE MIGRATION DEADLINE
+// THE MIGRATION ATTEMPT
 // ===========================================================================
 // The runner gives a whole attempt MIGRATION_TIMEOUT_MS (30 s by default), and
-// at production volume the collapse can need more than one attempt. So before
-// each statement it checks the attempt's deadline and stops while there is
-// still room for the longest statement it might send plus the runner's own
-// bookkeeping, returning errReadinessCollapseDeferred. That error is
-// deliberately NOT a context error: the runner reads a context or transport
-// error as "the statement may still be running" and keeps its lock for an
-// operator, which is right for a statement cut off in flight and wrong for a
-// run that stopped between statements with nothing outstanding. The next
-// attempt -- the node's monitor tick, or the migrate Job's retry -- resumes
-// from the cursor.
+// at production volume the collapse can need more than one attempt. What it
+// hands the runner when an attempt ends is the whole question, because the
+// runner reads a context or transport error as "the statement may still be
+// running" and keeps its lock for an operator (migrationMayStillBeRunning) --
+// right for a statement cut off in flight, and wrong for an attempt that
+// stopped with nothing outstanding, which would strand the lock until someone
+// cleared it by hand. So the collapse returns errReadinessCollapseDeferred,
+// which is neither, whenever nothing of its own is left running:
+//
+//   - A step runs on a context of its own: the attempt's values without its
+//     cancellation, and a deadline of the step's own, under the read deadline.
+//     A cancelled attempt -- a SIGTERM during a node's restart -- cannot cut a
+//     step off midway, which database/sql would answer with context.Canceled
+//     and a ROLLBACK. The attempt's context is read between steps instead, and
+//     a cancelled or exhausted attempt stops there.
+//   - A step starts only while the attempt has more left than its reserve:
+//     one step's bound and the runner's own bookkeeping, kept for the
+//     migrations after this one, but never more than a third of what the
+//     attempt had when the collapse began -- so a short MIGRATION_TIMEOUT_MS
+//     still collapses something every attempt rather than deferring forever.
+//     No step runs into the runner's bookkeeping, so MarkApplied always has
+//     its time. An attempt too short for even one step says so, naming what
+//     it needs.
+//   - A step that ends without a reply it can trust -- a read deadline, a cut
+//     connection -- has a backend whose transaction can only end whole, since
+//     the driver closed the connection its COMMIT would come on. The collapse
+//     knows that backend's pid and waits, bounded, until it has no transaction
+//     open (awaitOrphan). One that failed before its opening statement
+//     answered never ran a statement that writes.
+//
+// The next attempt resumes from the cursor: a node's on its monitor tick, the
+// migrate subcommand's at once (awaitMigrations, subcommand_migrate.go).
 //
 // bun names a Go migration after the FILE its Register call sits in, so the
 // call must stay in this file.
@@ -225,16 +262,36 @@ const (
 	// cancels a runaway and answers before the client stops reading.
 	readinessCollapseStatementTimeout = 5 * time.Second
 
-	// readinessCollapseReserve is how much of the attempt's deadline must be
-	// left before another statement is sent: the longest one may run (the
-	// statement bound) plus the runner's MarkApplied and unlock.
-	readinessCollapseReserve = readinessCollapseStatementTimeout + 2*time.Second
+	// readinessCollapseStepTimeout is the client-side bound on a whole step:
+	// the deadline of the step's own context, which the attempt's cancellation
+	// does not reach. The statement bound plus room for the step's other round
+	// trips, and still under the 10 s read deadline, so the deadline the driver
+	// reads by is the step's.
+	readinessCollapseStepTimeout = readinessCollapseStatementTimeout + 2*time.Second
+
+	// readinessCollapseBookkeeping is the end of the attempt the runner needs
+	// once the migration returns: MarkApplied runs on the attempt's own
+	// context. No step runs into it.
+	readinessCollapseBookkeeping = 2 * time.Second
+
+	// readinessCollapseMinStep is the least time a step is started with.
+	readinessCollapseMinStep = time.Second
+
+	// readinessCollapseReserve is what the collapse leaves of a full attempt for
+	// the migrations after it and the runner: one step's bound and the
+	// bookkeeping. A run keeps less when its attempt is short -- see reserve.
+	readinessCollapseReserve = readinessCollapseStepTimeout + readinessCollapseBookkeeping
 )
 
-// errReadinessCollapseDeferred marks an attempt that stopped between
-// statements, with every batch it ran committed and nothing in flight. Not a
-// context error, on purpose; see the header.
-var errReadinessCollapseDeferred = errors.New("module readiness history collapse deferred to the next migration attempt")
+// errReadinessCollapseDeferred is this migration's ErrMigrationDeferred: an
+// attempt that stopped with nothing of its own outstanding. Neither a context
+// nor a transport error, on purpose; see the header.
+var errReadinessCollapseDeferred = fmt.Errorf("module readiness history collapse %w", ErrMigrationDeferred)
+
+// errReadinessCollapseCursorMoved marks a step that found the progress row
+// naming another id than the one its walk is on, which only a second walk over
+// the table can do. The step wrote nothing.
+var errReadinessCollapseCursorMoved = errors.New("the progress row names another id than this walk's: a second walk is running over the table, which the migration lock exists to prevent")
 
 // readinessCollapseReport is what one run of the collapse did.
 type readinessCollapseReport struct {
@@ -294,7 +351,10 @@ func collapseModuleReadinessHistory(ctx context.Context, db bun.IDB, logger *slo
 	if batch < 1 {
 		return readinessCollapseReport{}, fmt.Errorf("module readiness history collapse: batch size %d, want at least 1", batch)
 	}
-	c := &readinessCollapse{db: db, logger: logger, batch: batch, started: time.Now()}
+	c := &readinessCollapse{db: db, logger: logger, batch: batch, started: time.Now(), reserve: readinessCollapseReserve}
+	if deadline, ok := ctx.Deadline(); ok {
+		c.reserve = min(c.reserve, time.Until(deadline)/3)
+	}
 	return c.run(ctx)
 }
 
@@ -304,6 +364,13 @@ type readinessCollapse struct {
 	logger  *slog.Logger
 	batch   int
 	started time.Time
+
+	// reserve is what this run leaves of its attempt: readinessCollapseReserve,
+	// or a third of what the attempt had left when the run began if that is
+	// less, so a short attempt still spends most of itself on the walk. steps
+	// counts the steps it started.
+	reserve time.Duration
+	steps   int
 
 	// cursor is the id being collapsed. olderThan bounds the versions of it
 	// still to delete; invalid means the walk has not started on it, so the
@@ -362,63 +429,120 @@ func (c *readinessCollapse) run(ctx context.Context) (readinessCollapseReport, e
 
 // readinessCollapseStepSQL opens every step's transaction: the two settings
 // SET LOCAL would make (set_config's third argument), and the backend running
-// the transaction, which awaitOrphan watches if the driver gives up on it.
+// the transaction, which awaitOrphan watches if the step ends without a reply
+// it can trust.
 var readinessCollapseStepSQL = fmt.Sprintf(`SELECT pg_backend_pid(),
        set_config('statement_timeout', '%d', true),
        set_config('synchronous_commit', 'off', true)`, readinessCollapseStatementTimeout.Milliseconds())
 
-// step runs one statement's work in its own transaction under the statement
-// bound, after making sure the attempt has room for it.
+// step runs one statement's work in its own transaction, on a context of its
+// own, after making sure the attempt has room for it (see THE MIGRATION ATTEMPT
+// in the header).
 func (c *readinessCollapse) step(ctx context.Context, fn func(ctx context.Context, tx bun.Tx) error) error {
-	if why, stop := c.mustStop(ctx); stop {
+	limit, why, ok := c.stepLimit(ctx)
+	if !ok {
 		return c.deferred(why)
 	}
+	c.steps++
+	stepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limit)
+	defer cancel()
 	var backend int64
-	err := c.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+	err := c.db.RunInTx(stepCtx, nil, func(ctx context.Context, tx bun.Tx) error {
 		var timeout, commit string
 		if err := tx.QueryRowContext(ctx, readinessCollapseStepSQL).Scan(&backend, &timeout, &commit); err != nil {
 			return err
 		}
 		return fn(ctx, tx)
 	})
-	if err != nil && backend != 0 && isClientReadDeadline(err) {
-		return c.awaitOrphan(backend, err)
+	if err == nil || !migrationMayStillBeRunning(err) {
+		return err
 	}
-	return err
+	if backend == 0 {
+		// The transaction failed before its opening statement answered: at
+		// BEGIN, or at the settings it reads. Neither writes, and neither runs
+		// long, so nothing of the collapse's is outstanding.
+		return c.deferred(fmt.Sprintf("a step failed before its first statement answered (%v), so it wrote nothing and left nothing running", err))
+	}
+	return c.awaitOrphan(backend, err)
 }
 
-// readinessCollapseOrphanWait bounds how long awaitOrphan waits for a cut-off
-// statement's backend to exit. The server cancels a statement at the statement
-// bound; one the client gave up on outlived that already, so it was waiting on
-// something a cancel cannot interrupt, and this is generous on purpose.
+// stepLimit says whether the next step may start and, if so, how long it may
+// run. It is the one place the attempt's own context is read: between steps,
+// so an attempt that was cancelled or has run out stops here, with nothing in
+// flight, and what the runner receives is the deferral rather than a context
+// error.
+//
+// A step starts only while the attempt has more left than the run's reserve,
+// and never less than one step and the runner's bookkeeping; its bound is cut
+// so that it ends before the bookkeeping does. A run that cannot start even
+// its first step says what an attempt needs, because one that never has it
+// never runs the collapse.
+func (c *readinessCollapse) stepLimit(ctx context.Context) (time.Duration, string, bool) {
+	if ctx.Err() != nil {
+		return 0, "the migration attempt ended", false
+	}
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return readinessCollapseStepTimeout, "", true
+	}
+	left := time.Until(deadline)
+	least := readinessCollapseBookkeeping + readinessCollapseMinStep
+	if keep := max(c.reserve, least); left < keep {
+		if c.steps == 0 && left < least {
+			return 0, fmt.Sprintf("%s was left before the migration deadline when the collapse began, too little for one step: "+
+				"a step needs at least %s left, %s of its own and %s for the runner after it. Migrations in one attempt share "+
+				"its budget, so the next attempt, which starts with this one, has more; but an attempt that never has %s "+
+				"never runs the collapse, and MEMORY_NODES_DATABASE_MIGRATION_TIMEOUT_MS must allow it, as its 30s default does",
+				left.Round(time.Millisecond), least, readinessCollapseMinStep, readinessCollapseBookkeeping, least), false
+		}
+		return 0, fmt.Sprintf("%s was left before the migration deadline, under the %s this attempt keeps for the migrations after it and the runner",
+			left.Round(time.Millisecond), keep.Round(time.Millisecond)), false
+	}
+	return min(readinessCollapseStepTimeout, left-readinessCollapseBookkeeping), "", true
+}
+
+// readinessCollapseOrphanWait bounds how long awaitOrphan waits on a backend.
+// The server cancels a statement at the statement bound, and one still running
+// after the step's own deadline was waiting on something a cancel cannot
+// interrupt, so this is generous on purpose.
 const readinessCollapseOrphanWait = 30 * time.Second
 
-// awaitOrphan answers a step the driver's read deadline cut off. The backend
-// is still running the statement, so the attempt cannot yet say nothing is
-// outstanding -- which is the runner's reason to keep its lock for an
-// operator. But this backend's transaction can only end whole: pgdriver closed
-// the connection, so no COMMIT can follow the statement, and the batch either
-// committed with its cursor move (when the COMMIT itself was cut off) or rolls
-// back with it. Once the backend has exited, nothing is outstanding and the
-// next attempt resumes from whatever the progress row says. So wait for it,
-// bounded, and defer; a backend still running at the bound is left to the
-// runner's rule, with the transport error the runner reads it by.
+// readinessCollapseOrphanSQL asks whether the watched backend could still be
+// doing anything for the step: true in the second column while it exists in a
+// state other than idle. The first column is the answer that it is this very
+// connection, which database/sql hands back to the pool once a transaction it
+// rolled back has ended -- a connection reused for this query has no step's
+// transaction open.
+const readinessCollapseOrphanSQL = `SELECT pg_backend_pid() = ?,
+       EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = ? AND state IS DISTINCT FROM 'idle')`
+
+// awaitOrphan answers a step that ended without a reply it can trust: a read
+// deadline, a cut connection, a context the step outlived. The step's backend
+// may still be running a statement, so the attempt cannot yet say nothing is
+// outstanding -- which is the runner's reason to keep its lock for an operator.
+// But that backend's transaction can only end whole: either the driver closed
+// the connection, so no COMMIT can follow, or database/sql rolled it back. So
+// the batch committed with its cursor move (when the COMMIT itself was the
+// statement cut off) or rolled back with it, and once the backend has no
+// transaction open the next attempt resumes from whatever the progress row
+// says. Wait for that, bounded, and defer; a backend still busy at the bound is
+// left to the runner's rule, with the error the runner reads it by.
 func (c *readinessCollapse) awaitOrphan(backend int64, cause error) error {
-	c.logger.Warn("module readiness history collapse: a statement outlived the driver's read deadline; waiting for its backend to exit",
+	c.logger.Warn("module readiness history collapse: a step ended without a reply it can trust; waiting until its backend has no transaction open",
 		"migration", readinessCollapseMigrationName, "backend", backend, "cursor", c.cursor, "error", cause)
 	ctx, cancel := context.WithTimeout(context.Background(), readinessCollapseOrphanWait)
 	defer cancel()
 	wait := latestRowIndexPoll
 	for {
-		var running bool
-		err := c.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = ?)`, backend).Scan(&running)
-		if err == nil && !running {
-			return c.deferred(fmt.Sprintf("a statement outlived the driver's read deadline (%v); its backend %d has since exited, so its batch and cursor move committed or rolled back together and nothing is left running",
-				cause, backend))
+		var self, busy bool
+		err := c.db.QueryRowContext(ctx, readinessCollapseOrphanSQL, backend, backend).Scan(&self, &busy)
+		if err == nil && (self || !busy) {
+			return c.deferred(fmt.Sprintf("a step ended without a reply it could trust (%v); its backend %d has no transaction open any more, "+
+				"so its batch and cursor move committed or rolled back together and nothing is left running", cause, backend))
 		}
 		select {
 		case <-ctx.Done():
-			return c.fail(cause, fmt.Sprintf("waiting for backend %d, still running a statement the driver's read deadline cut off %s ago",
+			return c.fail(cause, fmt.Sprintf("waiting for backend %d, still busy %s after its step ended without a reply",
 				backend, readinessCollapseOrphanWait))
 		case <-time.After(wait):
 		}
@@ -426,23 +550,6 @@ func (c *readinessCollapse) awaitOrphan(backend int64, cause error) error {
 			wait *= 2
 		}
 	}
-}
-
-// mustStop says whether the next statement must not be sent, and why. An
-// attempt whose context has already ended stops HERE, between statements, so
-// what the runner receives is errReadinessCollapseDeferred rather than the
-// context error it would read as a statement still running.
-func (c *readinessCollapse) mustStop(ctx context.Context) (string, bool) {
-	if ctx.Err() != nil {
-		return "the migration attempt ended", true
-	}
-	if deadline, ok := ctx.Deadline(); ok {
-		if left := time.Until(deadline); left < readinessCollapseReserve {
-			return fmt.Sprintf("%s was left before the migration deadline, less than the %s one more statement and the runner's bookkeeping may need",
-				left.Round(time.Millisecond), readinessCollapseReserve), true
-		}
-	}
-	return "", false
 }
 
 // deferred ends the attempt with nothing outstanding. The counts are the
@@ -546,44 +653,68 @@ func (c *readinessCollapse) newest(ctx context.Context) (time.Time, bool, error)
 // batch it raced would remove fewer than it counted while versions below the
 // floor still waited.
 //
+// owner takes the progress row's lock and is empty unless the row still names
+// the id this walk is on; nothing is deleted or moved without it. newest is the
+// id's newest version as this statement reads it, and no batch reaches it,
+// whatever the cursor says (ONE WALK AT A TIME, CHECKED, in the header).
+//
 // staged-data: MUST-NOT-GATE -- a MIGRATION must see every row, by definition
 // (epic memql#3974, task memql#3984): gated, a staged id keeps every version
 // the migration exists to remove.
-const readinessCollapseBatchSQL = `WITH floor AS (
+const readinessCollapseBatchSQL = `WITH owner AS (
+  SELECT cursor_id
+    FROM ` + readinessCollapseProgressTable + `
+   WHERE singleton AND cursor_id = ?
+     FOR UPDATE
+), newest AS (
   SELECT "createdAt" AS at
     FROM "MemoryNodes"
-   WHERE concept = ? AND id = ? AND "createdAt" < ?
+   WHERE concept = ? AND id = ?
+   ORDER BY "createdAt" DESC
+   LIMIT 1
+), floor AS (
+  SELECT "createdAt" AS at
+    FROM "MemoryNodes"
+   WHERE concept = ? AND id = ? AND "createdAt" < ? AND "createdAt" < (SELECT at FROM newest)
    ORDER BY "createdAt" DESC
   OFFSET ? LIMIT 1
 ), gone AS (
   DELETE FROM "MemoryNodes"
-   WHERE concept = ? AND id = ? AND "createdAt" < ?
+   WHERE EXISTS (SELECT 1 FROM owner)
+     AND concept = ? AND id = ? AND "createdAt" < ? AND "createdAt" < (SELECT at FROM newest)
      AND "createdAt" >= COALESCE((SELECT at FROM floor), '-infinity'::timestamptz)
   RETURNING "createdAt"
 ), moved AS (
   UPDATE ` + readinessCollapseProgressTable + `
      SET older_than = COALESCE((SELECT at FROM floor), (SELECT min("createdAt") FROM gone), older_than),
          collapsed = collapsed + (SELECT count(*) FROM gone)
-   WHERE singleton
+   WHERE singleton AND cursor_id = ?
 )
-SELECT (SELECT count(*) FROM gone), (SELECT at FROM floor)`
+SELECT EXISTS (SELECT 1 FROM owner), (SELECT count(*) FROM gone), (SELECT at FROM floor)`
 
 // deleteBatch deletes at most c.batch versions of the cursor id below
 // c.olderThan. It reports how many it deleted and the batch's floor, which is
 // absent when the batch reached the id's oldest version.
 func (c *readinessCollapse) deleteBatch(ctx context.Context) (int64, sql.NullTime, error) {
 	var (
+		owned   bool
 		deleted int64
 		floor   sql.NullTime
 	)
 	err := c.step(ctx, func(ctx context.Context, tx bun.Tx) error {
 		return tx.QueryRowContext(ctx, readinessCollapseBatchSQL,
+			c.cursor,
+			readinessCollapseConcept, c.cursor,
 			readinessCollapseConcept, c.cursor, c.olderThan.Time, c.batch-1,
-			readinessCollapseConcept, c.cursor, c.olderThan.Time).Scan(&deleted, &floor)
+			readinessCollapseConcept, c.cursor, c.olderThan.Time,
+			c.cursor).Scan(&owned, &deleted, &floor)
 	})
+	doing := fmt.Sprintf("deleting a batch of %q older than %s", c.cursor, c.olderThan.Time.UTC().Format(time.RFC3339Nano))
 	if err != nil {
-		return 0, sql.NullTime{}, c.fail(err, fmt.Sprintf("deleting a batch of %q older than %s",
-			c.cursor, c.olderThan.Time.UTC().Format(time.RFC3339Nano)))
+		return 0, sql.NullTime{}, c.fail(err, doing)
+	}
+	if !owned {
+		return 0, sql.NullTime{}, c.fail(errReadinessCollapseCursorMoved, doing)
 	}
 	c.report.Batches++
 	c.report.Collapsed += deleted
@@ -591,49 +722,76 @@ func (c *readinessCollapse) deleteBatch(ctx context.Context) (int64, sql.NullTim
 	return deleted, floor, nil
 }
 
-// readinessCollapseAdvanceSQL moves the cursor to the concept's next id. No
-// row comes back after the last one.
+// readinessCollapseAdvanceSQL moves the cursor to the concept's next id, under
+// the progress row's lock and only while the row still names the id this walk
+// is on: owner answers that, and an absent next id with the row owned is the
+// end of the walk.
 //
 // staged-data: MUST-NOT-GATE -- a MIGRATION must see every row, by definition
 // (epic memql#3974, task memql#3984): gated, the walk steps over a staged id
 // and never collapses it.
-const readinessCollapseAdvanceSQL = `UPDATE ` + readinessCollapseProgressTable + ` p
-   SET cursor_id = n.id, older_than = NULL
-  FROM (SELECT id
-          FROM "MemoryNodes"
-         WHERE concept = ? AND id > ?
-         ORDER BY id
-         LIMIT 1) n
- WHERE p.singleton
-RETURNING p.cursor_id`
+const readinessCollapseAdvanceSQL = `WITH owner AS (
+  SELECT cursor_id
+    FROM ` + readinessCollapseProgressTable + `
+   WHERE singleton AND cursor_id = ?
+     FOR UPDATE
+), next AS (
+  SELECT id
+    FROM "MemoryNodes"
+   WHERE concept = ? AND id > ?
+   ORDER BY id
+   LIMIT 1
+), moved AS (
+  UPDATE ` + readinessCollapseProgressTable + `
+     SET cursor_id = (SELECT id FROM next), older_than = NULL
+   WHERE singleton AND cursor_id = ? AND EXISTS (SELECT 1 FROM next)
+  RETURNING cursor_id
+)
+SELECT EXISTS (SELECT 1 FROM owner), (SELECT cursor_id FROM moved)`
 
 // advance moves the cursor to the next id of the concept and reports it, or
 // found=false when the cursor id was the last.
 func (c *readinessCollapse) advance(ctx context.Context) (string, bool, error) {
-	var next string
-	found := true
+	var (
+		owned bool
+		next  sql.NullString
+	)
 	err := c.step(ctx, func(ctx context.Context, tx bun.Tx) error {
-		err := tx.QueryRowContext(ctx, readinessCollapseAdvanceSQL, readinessCollapseConcept, c.cursor).Scan(&next)
-		if errors.Is(err, sql.ErrNoRows) {
-			found = false
-			return nil
-		}
-		return err
+		return tx.QueryRowContext(ctx, readinessCollapseAdvanceSQL,
+			c.cursor, readinessCollapseConcept, c.cursor, c.cursor).Scan(&owned, &next)
 	})
+	doing := fmt.Sprintf("moving past %q", c.cursor)
 	if err != nil {
-		return "", false, c.fail(err, fmt.Sprintf("moving past %q", c.cursor))
+		return "", false, c.fail(err, doing)
 	}
-	return next, found, nil
+	if !owned {
+		return "", false, c.fail(errReadinessCollapseCursorMoved, doing)
+	}
+	return next.String, next.Valid, nil
 }
 
 // finish drops the progress table: the walk is over, and a completed run
-// leaves nothing behind.
+// leaves nothing behind. Only while the row still names the walk's last id --
+// a second walk's table is not this one's to drop.
 func (c *readinessCollapse) finish(ctx context.Context) error {
+	owned := false
 	if err := c.step(ctx, func(ctx context.Context, tx bun.Tx) error {
-		_, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+readinessCollapseProgressTable)
+		var cursor string
+		err := tx.QueryRowContext(ctx, `SELECT cursor_id FROM `+readinessCollapseProgressTable+` WHERE singleton FOR UPDATE`).Scan(&cursor)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && cursor != c.cursor) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		owned = true
+		_, err = tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+readinessCollapseProgressTable)
 		return err
 	}); err != nil {
 		return c.fail(err, "dropping the finished progress table")
+	}
+	if !owned {
+		return c.fail(errReadinessCollapseCursorMoved, "dropping the finished progress table")
 	}
 	c.report.Done = true
 	c.logger.Info("module readiness history collapse: done",

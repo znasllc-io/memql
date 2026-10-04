@@ -1407,6 +1407,18 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 // tests for this with errors.Is on MigrationError() and waits the holder out.
 var ErrMigrationLockHeld = errors.New("migration lock held by another migrator")
 
+// ErrMigrationDeferred marks a migration attempt that a migration ended early
+// on purpose: it stopped with nothing of its own left running, everything it
+// did committed or rolled back whole, and the next attempt carries on from
+// where it stopped. The
+// readiness history collapse (20260921000000) is the migration that does it,
+// because its work can outlast one attempt's MIGRATION_TIMEOUT_MS (memql#5604).
+// It is neither a context nor a transport error, so the runner releases its
+// lock (migrationMayStillBeRunning). A node starts the next attempt on its
+// monitor tick (tryPing, via migrationsPending); the migrate subcommand, which
+// has no tick, starts it at once (awaitMigrations, subcommand_migrate.go).
+var ErrMigrationDeferred = errors.New("deferred to the next migration attempt")
+
 // pgUniqueViolation is the SQLSTATE of the refusal bun's Lock meets when the
 // lock row already exists.
 const pgUniqueViolation = "23505"

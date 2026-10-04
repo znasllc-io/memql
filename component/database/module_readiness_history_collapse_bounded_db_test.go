@@ -4,13 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"io/fs"
+	"net"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/uptrace/bun/migrate"
 )
 
@@ -225,8 +231,9 @@ func (f *readinessCollapseFixture) progress(t *testing.T) (cursor string, collap
 
 // readinessCollapseRecorder watches what a run sends and can end the run's
 // context at a chosen batch: AFTER its COMMIT returns, which interrupts the
-// run between statements, or just BEFORE its COMMIT is sent, which interrupts
-// a batch in flight.
+// run between statements, or just BEFORE its COMMIT is sent, which cancels the
+// attempt with a batch midway. before, when set, sees every statement just
+// before it is sent, which is where a case acts as a second walk would.
 type readinessCollapseRecorder struct {
 	mu                 sync.Mutex
 	statements         []string
@@ -235,11 +242,15 @@ type readinessCollapseRecorder struct {
 	cancelAfterCommit  int
 	cancelBeforeCommit int
 	cancel             context.CancelFunc
+	before             func(query string)
 }
 
 func (r *readinessCollapseRecorder) BeforeQuery(ctx context.Context, e *bun.QueryEvent) context.Context {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.before != nil {
+		r.before(e.Query)
+	}
 	if e.Query == "COMMIT" && r.inBatch && r.cancelBeforeCommit == r.batchCommits+1 {
 		r.cancel()
 	}
@@ -350,8 +361,8 @@ func TestTheReadinessCollapseMigrationDeletesInBoundedStatements(t *testing.T) {
 
 // AN INTERRUPTED WALK RESUMES FROM ITS CURSOR, AND NOTHING IS DELETED TWICE OR
 // LOST. Three runs over one history larger than one batch: the first is ended
-// between statements after three batches, the second is ended with a batch in
-// flight, the third completes. What each run reports, what the progress row
+// between statements after three batches, the second is cancelled with a batch
+// midway, the third completes. What each run reports, what the progress row
 // records and what the table holds must agree at every step.
 func TestReadinessCollapseResumesFromItsCursor(t *testing.T) {
 	const batch = 5
@@ -381,21 +392,26 @@ func TestReadinessCollapseResumesFromItsCursor(t *testing.T) {
 			cursor, collapsed, exists, readinessCollapseTestBigId, r1.Collapsed)
 	}
 
-	// Ended IN FLIGHT: the context ends just before the second batch's COMMIT
-	// is sent. That batch rolls back, with the cursor move inside it -- and the
-	// error is the context's, because a statement the client cannot see finish
-	// is one the runner must keep its lock for.
+	// Ended MIDWAY THROUGH A STEP: the attempt's context ends after the second
+	// batch's DELETE and before its COMMIT is sent, as a SIGTERM at a node's
+	// restart would end it. A step runs on a context of its own, so the cancel
+	// cannot cut it off: the batch commits whole, and the walk stops at its next
+	// statement with the deferral. On the attempt's context, database/sql would
+	// answer with context.Canceled and a ROLLBACK -- an error the runner keeps
+	// its lock for although nothing is left running.
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 	r2, err := collapseModuleReadinessHistory(ctx2, f.db.WithQueryHook(&readinessCollapseRecorder{cancel: cancel2, cancelBeforeCommit: 2}), nil, batch)
-	if !errors.Is(err, context.Canceled) || !migrationMayStillBeRunning(err) {
-		t.Fatalf("a batch cut off before its COMMIT must surface as the context's error, got %v", err)
+	if !errors.Is(err, errReadinessCollapseDeferred) || migrationMayStillBeRunning(err) {
+		t.Fatalf("an attempt cancelled midway through a step must defer once the step ends, got %v", err)
 	}
-	if !r2.Resumed || r2.Batches != 1 || r2.Collapsed != batch {
-		t.Fatalf("second run: %+v, want it resumed with one committed batch of %d", r2, batch)
+	// The big id's 22 restatements: 15 went in the first run, 5 in this one's
+	// first batch, and the last 2 in the batch the cancel arrived during.
+	if !r2.Resumed || r2.Batches != 2 || r2.Collapsed != batch+2 {
+		t.Fatalf("second run: %+v, want it resumed with two committed batches, of %d and 2", r2, batch)
 	}
 	if got, want := f.readinessVersions(t), f.total-r1.Collapsed-r2.Collapsed; got != want {
-		t.Fatalf("after the in-flight interruption the table holds %d readiness versions, want %d: the cut-off batch must roll back whole", got, want)
+		t.Fatalf("after the cancelled attempt the table holds %d readiness versions, want %d: the step the cancel arrived during must have finished", got, want)
 	}
 	f.assertNewestIntact(t)
 	if _, collapsed, _ := f.progress(t); collapsed != r1.Collapsed+r2.Collapsed {
@@ -572,7 +588,7 @@ func TestReadinessCollapseWaitsOutAStatementTheReadDeadlineCutOff(t *testing.T) 
 	}
 
 	got := <-done
-	if !errors.Is(got.err, errReadinessCollapseDeferred) || !strings.Contains(got.err.Error(), "read deadline") {
+	if !errors.Is(got.err, errReadinessCollapseDeferred) || !strings.Contains(got.err.Error(), "without a reply") {
 		t.Fatalf("a statement the read deadline cut off must end in a deferral once its backend exits, got %v", got.err)
 	}
 	if migrationMayStillBeRunning(got.err) {
@@ -592,20 +608,56 @@ func TestReadinessCollapseWaitsOutAStatementTheReadDeadlineCutOff(t *testing.T) 
 	f.assertCollapsed(t)
 }
 
-// A RUN THAT STARTS INSIDE THE RESERVE SENDS NOTHING. Its error is the
-// deferral, which the runner answers by releasing its lock, because no
-// statement can still be running.
-func TestReadinessCollapseStopsBeforeTheMigrationDeadline(t *testing.T) {
+// A SHORT ATTEMPT STILL MAKES PROGRESS. Five seconds is less than the reserve
+// a full attempt leaves the migrations after the collapse, and an attempt that
+// kept the full reserve whatever its budget would defer at once, every time,
+// with MEMORY_NODES_DATABASE_MIGRATION_TIMEOUT_MS at 5000. The reserve scales
+// to the budget instead, so every attempt collapses something until the walk
+// is done.
+func TestReadinessCollapseMakesProgressInAShortAttempt(t *testing.T) {
 	f := newReadinessCollapseFixture(t, 23)
-	ctx, cancel := context.WithTimeout(context.Background(), readinessCollapseReserve/2)
+	var collapsed int64
+	for attempt := 1; ; attempt++ {
+		if attempt > 10 {
+			t.Fatalf("the walk was still not done after %d five-second attempts", attempt-1)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		r, err := collapseModuleReadinessHistory(ctx, f.db, nil, 5)
+		cancel()
+		collapsed += r.Collapsed
+		if err == nil && r.Done {
+			break
+		}
+		if !errors.Is(err, errReadinessCollapseDeferred) || r.Collapsed == 0 {
+			t.Fatalf("attempt %d of five seconds: %+v, %v; every attempt must collapse something until the walk is done", attempt, r, err)
+		}
+	}
+	if collapsed != f.doomed {
+		t.Fatalf("the attempts collapsed %d versions in all, want %d", collapsed, f.doomed)
+	}
+	f.assertCollapsed(t)
+}
+
+// AN ATTEMPT TOO SHORT FOR ONE STEP SENDS NOTHING, AND SAYS WHAT IT NEEDS. Its
+// error is the deferral, which the runner answers by releasing its lock, and it
+// names the least an attempt must have left and the setting that gives it --
+// an attempt that never has that much never runs the collapse, and an operator
+// reading the log has to be told which knob that is.
+func TestReadinessCollapseNamesTheMinimumAnAttemptNeeds(t *testing.T) {
+	f := newReadinessCollapseFixture(t, 23)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	rec := &readinessCollapseRecorder{}
 	r, err := collapseModuleReadinessHistory(ctx, f.db.WithQueryHook(rec), nil, 5)
 	if !errors.Is(err, errReadinessCollapseDeferred) || migrationMayStillBeRunning(err) {
-		t.Fatalf("a run starting inside the reserve must defer without a context error, got %v", err)
+		t.Fatalf("an attempt too short for one step must defer without a context error, got %v", err)
+	}
+	minimum := (readinessCollapseBookkeeping + readinessCollapseMinStep).String()
+	if !strings.Contains(err.Error(), "MEMORY_NODES_DATABASE_MIGRATION_TIMEOUT_MS") || !strings.Contains(err.Error(), minimum) {
+		t.Fatalf("the deferral must name the setting and the %s minimum, got %v", minimum, err)
 	}
 	if len(rec.statements) != 0 || r.Collapsed != 0 {
-		t.Fatalf("a run starting inside the reserve sent %d statements and collapsed %d versions; it must send none",
+		t.Fatalf("an attempt too short for one step sent %d statements and collapsed %d versions; it must send none",
 			len(rec.statements), r.Collapsed)
 	}
 	if got := f.readinessVersions(t); got != f.total {
@@ -661,4 +713,281 @@ func TestReadinessCollapseDeferralReleasesTheRunnersLock(t *testing.T) {
 	if _, _, removed := f.deletes(t); removed != f.doomed {
 		t.Fatalf("the two attempts removed %d versions, want %d", removed, f.doomed)
 	}
+}
+
+// THROUGH THE RUNNER: AN ATTEMPT CANCELLED MIDWAY THROUGH A STEP RELEASES THE
+// LOCK. The attempt's context ends after the first batch's DELETE and before
+// its COMMIT -- a SIGTERM during a node's restart. On the attempt's context the
+// step would end in context.Canceled and a ROLLBACK, and the runner, reading a
+// context error as a statement that may still be running, would keep its lock:
+// every later attempt "migration lock held" until an operator cleared it, with
+// nothing committed and nothing running. The step finishes on its own context
+// instead, and the walk defers.
+func TestReadinessCollapseCancelledMidStepReleasesTheRunnersLock(t *testing.T) {
+	f := newReadinessCollapseFixture(t, 23)
+	migrations := migrate.NewMigrations()
+	registerModuleReadinessHistoryCollapse(migrations, nil)
+	runner := lockedMigrationRunner(t, migrations)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner.runMigrations(ctx, f.db.WithQueryHook(&readinessCollapseRecorder{cancel: cancel, cancelBeforeCommit: 1}))
+	if err := runner.MigrationError(); !errors.Is(err, errReadinessCollapseDeferred) {
+		t.Fatalf("an attempt cancelled midway through a step must end deferred, got %v", err)
+	}
+	if held := f.count(t, `SELECT count(*) FROM bun_migration_locks`); held != 0 {
+		t.Fatalf("the cancelled attempt left %d migration lock row(s); nothing was left running, so it must release the lock", held)
+	}
+
+	runner.runMigrations(context.Background(), f.db)
+	if err := runner.MigrationError(); err != nil {
+		t.Fatalf("the attempt after the cancelled one failed: %v", err)
+	}
+	if n := f.count(t, `SELECT count(*) FROM bun_migrations WHERE name = '20260921000000'`); n != 1 {
+		t.Fatalf("the migration is recorded %d times, want once", n)
+	}
+	f.assertCollapsed(t)
+}
+
+// severableProxy forwards TCP connections to the database and can cut every
+// one it carries at once. The driver then sees its connection end mid-statement
+// while the backend on the other end runs on until it next talks to its socket,
+// which is what a failover or a dropped NAT entry looks like from the client.
+type severableProxy struct {
+	ln    net.Listener
+	mu    sync.Mutex
+	conns []net.Conn
+}
+
+func newSeverableProxy(t *testing.T, target string) *severableProxy {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &severableProxy{ln: ln}
+	go p.serve(target)
+	t.Cleanup(func() {
+		_ = ln.Close()
+		p.sever()
+	})
+	return p
+}
+
+func (p *severableProxy) serve(target string) {
+	for {
+		client, err := p.ln.Accept()
+		if err != nil {
+			return
+		}
+		server, err := net.Dial("tcp", target)
+		if err != nil {
+			_ = client.Close()
+			continue
+		}
+		p.mu.Lock()
+		p.conns = append(p.conns, client, server)
+		p.mu.Unlock()
+		go func() { _, _ = io.Copy(server, client); _ = server.Close() }()
+		go func() { _, _ = io.Copy(client, server); _ = client.Close() }()
+	}
+}
+
+func (p *severableProxy) sever() {
+	p.mu.Lock()
+	conns := p.conns
+	p.conns = nil
+	p.mu.Unlock()
+	for _, c := range conns {
+		_ = c.Close()
+	}
+}
+
+// A STEP WHOSE CONNECTION IS CUT IS WAITED OUT, NOT HANDED TO THE RUNNER. The
+// first batch blocks on a row lock another session holds; then the connection
+// under it is cut, as a failover would cut it. The driver reports end of file,
+// a transport error the runner would keep its lock for -- but the collapse
+// knows the backend's pid, waits until that backend is gone, and defers. The
+// batch never committed: the backend can only have rolled it back.
+func TestReadinessCollapseWaitsOutAStepWhoseConnectionWasCut(t *testing.T) {
+	_, admin, schema := migrationLockDB(t, 10*time.Second)
+	u, err := url.Parse(os.Getenv("MEMQL_DATABASE_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := newSeverableProxy(t, u.Host)
+	u.Host = proxy.ln.Addr().String()
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(u.String()),
+		pgdriver.WithConnParams(map[string]any{"search_path": schema}), pgdriver.WithApplicationName(schema))), pgdialect.New())
+	t.Cleanup(func() { _ = db.Close() })
+	f := seedReadinessCollapseFixture(t, db, admin, schema, 23)
+	ctx := context.Background()
+	table := quoteIdentifier(f.schema) + `."MemoryNodes"`
+
+	var victim time.Time
+	if err := f.admin.QueryRowContext(ctx, `SELECT "createdAt" FROM `+table+`
+ WHERE concept = ? AND id = ? ORDER BY "createdAt" DESC OFFSET 1 LIMIT 1`,
+		readinessCollapseTestConcept, readinessCollapseTestBigId).Scan(&victim); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := f.admin.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback() //nolint:errcheck // the release, below or here
+	if _, err := holder.ExecContext(ctx, `SELECT 1 FROM `+table+` WHERE concept = ? AND id = ? AND "createdAt" = ? FOR UPDATE`,
+		readinessCollapseTestConcept, readinessCollapseTestBigId, victim); err != nil {
+		t.Fatal(err)
+	}
+
+	type outcome struct {
+		report readinessCollapseReport
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		r, err := collapseModuleReadinessHistory(ctx, f.db, nil, 5)
+		done <- outcome{r, err}
+	}()
+
+	deadline := time.Now().Add(readinessCollapseStatementTimeout)
+	for {
+		var waiting int
+		if err := f.admin.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity
+ WHERE application_name = ? AND wait_event_type = 'Lock'`, f.schema).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the collapse never waited on the held row lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	proxy.sever()
+	// The backend is still waiting on the lock: the collapse must still be
+	// waiting for it, not deferring over a statement that could yet commit.
+	select {
+	case got := <-done:
+		t.Fatalf("the collapse returned while its cut-off backend was still running: %+v, %v", got.report, got.err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := holder.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := <-done
+	if !errors.Is(got.err, errReadinessCollapseDeferred) || migrationMayStillBeRunning(got.err) {
+		t.Fatalf("a step whose connection was cut must end in a deferral once its backend is gone, got %v", got.err)
+	}
+	if got.report.Collapsed != 0 {
+		t.Fatalf("the cut-off batch is reported collapsed (%d); its COMMIT was never sent", got.report.Collapsed)
+	}
+	if n := f.readinessVersions(t); n != f.total {
+		t.Fatalf("the table holds %d readiness versions after the cut-off batch, want all %d: it must have rolled back", n, f.total)
+	}
+
+	r, err := collapseModuleReadinessHistory(ctx, f.db, nil, 5)
+	if err != nil || !r.Done || r.Collapsed != f.doomed {
+		t.Fatalf("the next run: %+v, %v; want it done, collapsing all %d", r, err, f.doomed)
+	}
+	f.assertCollapsed(t)
+}
+
+// A STEP REFUSES A CURSOR ANOTHER WALK MOVED. Two walks over one table should
+// never happen -- the runner's lock is what prevents it -- but an operator who
+// clears a live lock against the runbook makes one. Each writing step therefore
+// checks, under the progress row's lock and in the statement that writes, that
+// the row still names the id this walk is on. Here the row is moved to another
+// id just before the walk's statement goes out, as the other walk's committed
+// advance would move it: the batch must delete nothing and write nothing into
+// the row, and the advance must not mistake the mismatch for the end of the
+// walk.
+func TestReadinessCollapseRefusesACursorAnotherWalkMoved(t *testing.T) {
+	const other = "v1:platform:moduleReadiness:storage--node-a"
+	for _, tc := range []struct {
+		name string
+		// start positions the progress row before the walk opens it.
+		start string
+		// moving names the statement the row is moved under.
+		moving string
+	}{
+		{name: "batch", start: readinessCollapseTestBigId, moving: `DELETE FROM "MemoryNodes"`},
+		{name: "advance", start: "v1:platform:moduleReadiness:email--node-b", moving: `SET cursor_id`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newReadinessCollapseFixture(t, 23)
+			ctx := context.Background()
+			if _, err := f.db.ExecContext(ctx, readinessCollapseProgressDDL); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.db.ExecContext(ctx, `INSERT INTO `+readinessCollapseProgressTable+` (singleton, cursor_id) VALUES (true, ?)`, tc.start); err != nil {
+				t.Fatal(err)
+			}
+			progress := quoteIdentifier(f.schema) + `.` + readinessCollapseProgressTable
+			moved := false
+			rec := &readinessCollapseRecorder{before: func(query string) {
+				if moved || !strings.Contains(query, tc.moving) {
+					return
+				}
+				moved = true
+				if _, err := f.admin.ExecContext(ctx, `UPDATE `+progress+` SET cursor_id = ?, older_than = NULL WHERE singleton`, other); err != nil {
+					t.Errorf("moving the cursor: %v", err)
+				}
+			}}
+
+			r, err := collapseModuleReadinessHistory(ctx, f.db.WithQueryHook(rec), nil, 5)
+			if !moved {
+				t.Fatalf("the walk never sent the statement the case moves the cursor under (%+v, %v)", r, err)
+			}
+			if !errors.Is(err, errReadinessCollapseCursorMoved) {
+				t.Fatalf("a %s under a cursor another walk moved must fail on the mismatch, got %+v, %v", tc.name, r, err)
+			}
+			if r.Done || r.Collapsed != 0 {
+				t.Fatalf("the refused walk reported %+v; it must have deleted nothing and not finished", r)
+			}
+			if got := f.readinessVersions(t); got != f.total {
+				t.Fatalf("the table holds %d readiness versions, want all %d: the refused step deleted rows", got, f.total)
+			}
+			cursor, collapsed, exists := f.progress(t)
+			if !exists || cursor != other || collapsed != 0 {
+				t.Fatalf("progress after the refusal: cursor %q collapsed %d exists %v; the other walk's row must be as it left it",
+					cursor, collapsed, exists)
+			}
+			var olderThan sql.NullTime
+			if err := f.db.QueryRowContext(ctx, `SELECT older_than FROM `+readinessCollapseProgressTable+` WHERE singleton`).Scan(&olderThan); err != nil {
+				t.Fatal(err)
+			}
+			if olderThan.Valid {
+				t.Fatalf("the refused step wrote %s into a row naming another id", olderThan.Time)
+			}
+		})
+	}
+}
+
+// NO CURSOR, HOWEVER WRONG, CAN DELETE AN ID'S NEWEST VERSION. The state a
+// second walk could leave behind: the row names one id while older_than is a
+// time from another id's history, here one newer than every version the named
+// id has. Bounded only by the cursor, the resumed batch would take that id's
+// newest version with the rest. Every batch is also bounded by the id's newest
+// version as the statement reads it, so the walk collapses the id to that
+// version and finishes as if the row had been right. The row names the walk's
+// first id, so the whole table is walked and the whole expected result holds; a
+// cursor further on would leave the ids before it to the walk that passed them.
+func TestReadinessCollapseNeverDeletesAnIdsNewestFromACorruptCursor(t *testing.T) {
+	f := newReadinessCollapseFixture(t, 23)
+	ctx := context.Background()
+	if _, err := f.db.ExecContext(ctx, readinessCollapseProgressDDL); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.ExecContext(ctx, `INSERT INTO `+readinessCollapseProgressTable+` (singleton, cursor_id, older_than)
+VALUES (true, ?, timestamptz '2099-01-01 00:00:00+00')`, readinessCollapseTestBigId); err != nil {
+		t.Fatal(err)
+	}
+	r, err := collapseModuleReadinessHistory(ctx, f.db, nil, 5)
+	if err != nil || !r.Done {
+		t.Fatalf("the walk from a corrupt cursor: %+v, %v; want it done", r, err)
+	}
+	f.assertCollapsed(t)
 }
