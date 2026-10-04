@@ -76,8 +76,8 @@ can run.
 | Steps at once | 4 | 2 | 1 |
 | Container limit | 2 CPU / 4Gi | 2 CPU / 4Gi | 2 CPU / 4Gi |
 | Container request | 250m / 512Mi | 250m / 512Mi | 250m / 512Mi |
-| Container disk limit / request (`ephemeral-storage`) | 20Gi / 1Gi | 20Gi / 1Gi | 10Gi / 1Gi |
-| Workspace size limit (`MEMQL_PIPELINES_WORKSPACE_LIMIT`) | 20Gi | 20Gi | 10Gi |
+| Container disk limit / request (`ephemeral-storage`) | 20Gi / 1Gi | 8Gi / 1Gi | 8Gi / 1Gi |
+| Workspace size limit (`MEMQL_PIPELINES_WORKSPACE_LIMIT`) | 20Gi | 8Gi | 8Gi |
 
 - **The cloud numbers are sized for the default pool** `azure-provision.sh`
   creates — 2 x Standard_D2as_v4, about 3.8 allocatable CPU — with the
@@ -144,6 +144,17 @@ can run.
   equal. A declared cache is the claim's storage, not ephemeral storage, and
   counts against neither — and `local-path`, the local class, keeps its claim
   on a node's disk without enforcing the claim's size.
+- **The cloud disk values are sized for the 32 GiB OS disk** `azure-provision.sh`
+  gives each node (`--node-osdisk-size 32`), which holds the OS, every image
+  and the mesh as well as the steps: at the ceiling both of `cloud`'s steps can
+  land on one node, so 8Gi a container is sized for two beside the rest. A step
+  with no services takes at most 8Gi in all; each service it names adds
+  another 8Gi to its pod's sum, while the workspace stays within its own 8Gi.
+  An operator who provisions larger disks raises both values — the
+  LimitRange's default ephemeral-storage limit and
+  `MEMQL_PIPELINES_WORKSPACE_LIMIT` — in their own overlay, which the render
+  gate keeps equal. `local`, on a workstation's disk, keeps the component's
+  20Gi.
 
 ## The grant
 

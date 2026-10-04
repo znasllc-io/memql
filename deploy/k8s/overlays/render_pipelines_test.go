@@ -123,17 +123,21 @@ func ptr[T any](v T) *T { return &v }
 // DISK (review M4) is a container's ephemeral storage: its own files outside
 // any volume and its logs, and -- summed over the pod's containers -- every
 // emptyDir too, the step's workspace among them. The kubelet evicts a pod
-// past either, so a step cannot fill its node's disk. The entry overlay, the
-// smallest install, gives a step half what the others do. The workspace's own
-// size limit is the same number (TestThePipelinesWorkspaceLimitIsTheLimitRanges).
+// past either, so a step cannot fill its node's disk. The cloud overlays'
+// 8Gi is sized for the nodes azure-provision.sh creates, whose OS disk is 32
+// GiB (--node-osdisk-size 32) and holds the OS, every image and the mesh as
+// well as the steps: at the ceiling, both of cloud's steps can land on one
+// node (ruling R46). An instance on larger disks raises it in its own
+// overlay. The workspace's own size limit is the same number
+// (TestThePipelinesWorkspaceLimitIsTheLimitRanges).
 var pipelinesSizing = map[string]struct {
 	ceiling                   string
 	limitCPU, limitMemory     string
 	requestCPU, requestMemory string
 	limitDisk, requestDisk    string
 }{
-	"cloud":       {ceiling: "2", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "20Gi", requestDisk: "1Gi"},
-	"cloud-entry": {ceiling: "1", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "10Gi", requestDisk: "1Gi"},
+	"cloud":       {ceiling: "2", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "8Gi", requestDisk: "1Gi"},
+	"cloud-entry": {ceiling: "1", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "8Gi", requestDisk: "1Gi"},
 	"local":       {ceiling: "4", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "20Gi", requestDisk: "1Gi"},
 }
 

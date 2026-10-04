@@ -21,9 +21,15 @@
 # service sidecar as well as the step -- so a step's request multiplies with
 # its services. A CI-heavy instance raises the ceiling and the requests in ITS
 # OWN overlay, together with a dedicated node pool for the steps: raising them
-# alone gives steps that sit Pending until their scheduling timeout. The disk
-# limit is half the other overlays', 10 GiB a container, restated as the
-# workspace's in the ConfigMap after it.
+# alone gives steps that sit Pending until their scheduling timeout.
+#
+# THE DISK LIMIT IS SIZED FOR THE 32 GiB OS DISK azure-provision.sh gives each
+# node (--node-osdisk-size 32), which holds the OS, every image and the mesh as
+# well as the steps' ephemeral storage: 8 GiB a container, as on cloud, where
+# both steps the ceiling allows can land on one node, restated as the
+# workspace's size limit in the ConfigMap after the LimitRange. An instance
+# whose nodes have larger disks raises BOTH in its own overlay;
+# render_pipelines_test.go holds the two equal.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -57,7 +63,7 @@ spec:
       default:
         cpu: "2"
         memory: 4Gi
-        ephemeral-storage: 10Gi
+        ephemeral-storage: 8Gi
       defaultRequest:
         cpu: 250m
         memory: 512Mi
@@ -71,4 +77,4 @@ kind: ConfigMap
 metadata:
   name: memql-pipelines
 data:
-  MEMQL_PIPELINES_WORKSPACE_LIMIT: 10Gi
+  MEMQL_PIPELINES_WORKSPACE_LIMIT: 8Gi

@@ -253,8 +253,8 @@ multiplies with its services.
 |---|---|---|---|
 | Steps at once | 4 | 2 | 1 |
 | Each container's request | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk |
-| Each container's limit | 2 CPU, 4Gi, 20Gi of disk | 2 CPU, 4Gi, 20Gi of disk | 2 CPU, 4Gi, 10Gi of disk |
-| The workspace's size limit | 20Gi | 20Gi | 10Gi |
+| Each container's limit | 2 CPU, 4Gi, 20Gi of disk | 2 CPU, 4Gi, 8Gi of disk | 2 CPU, 4Gi, 8Gi of disk |
+| The workspace's size limit | 20Gi | 8Gi | 8Gi |
 | Cache claim | 20Gi, `ReadWriteOnce`, the cluster's default class | 100Gi, `ReadWriteMany`, `azureblob-nfs-premium` | 50Gi, `ReadWriteMany`, `azureblob-nfs-premium` |
 
 **Disk** is ephemeral storage. A container's own files outside any volume, and
@@ -267,6 +267,19 @@ LimitRange). The kubelet evicts a pod past any of them, and the step fails
 claim's storage and counts against none of them; on a local cluster the
 `local-path` class keeps that claim on a node's disk and does not enforce its
 size.
+
+**The cloud disk values are sized for the 32 GiB OS disk** `azure-provision.sh`
+gives each node (`--node-osdisk-size 32`). That disk holds the OS, every image
+and the mesh as well as the steps' ephemeral storage, and at the ceiling both of
+`cloud`'s steps can land on one node, so 8Gi a container is sized for two steps
+beside the rest. A step's pod is bounded by the sum of its containers' limits:
+a step with no services takes at most 8Gi in all, and each service it names
+adds another 8Gi to that sum, while its workspace stays within its own 8Gi. An
+operator who provisions nodes with larger disks raises both values -- the
+LimitRange's default ephemeral-storage limit and
+`MEMQL_PIPELINES_WORKSPACE_LIMIT` -- in their own overlay; the render gate
+(`render_pipelines_test.go`) keeps the two equal. A local cluster, on a
+workstation's disk, keeps 20Gi.
 
 The cloud values are sized for the default node pool `azure-provision.sh`
 creates (2 x Standard_D2as_v4) with the mesh already on it. An instance that runs
