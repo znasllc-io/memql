@@ -20,10 +20,12 @@
 // the Job before it replies, and every name it uses is derived (names.go), so
 // whichever replica asks next finds the same Job.
 //
-// The STEP'S POD is not a MemQL node at all, and that is the point. An init
-// container shallow-clones the commit, named services run as native sidecars,
-// and the manifest's own image runs the command through a POSIX wrapper that
-// frames declared artifacts on stdout. Nothing in the pod holds a cluster
+// The STEP'S POD is not a MemQL node at all, and that is the point. When the
+// step declares caches, an init container opens the owner's directory of the
+// cache claim; another shallow-clones the commit; named services run as native
+// sidecars; and the manifest's own image runs the command through a POSIX
+// wrapper that frames declared artifacts on stdout. The step sees only its
+// owner's cache, in a tree of its own uid. Nothing in the pod holds a cluster
 // credential: no ServiceAccount token, no Service links, no platform Secret.
 // The one credential it ever sees is a short-lived clone token, which only the
 // clone container can read (TestTheCloneTokenReachesOnlyTheCloneContainer).
@@ -32,6 +34,6 @@
 //
 // The configuration, the derived names, the forward payloads, the Kubernetes
 // JSON types and the Job and Secret builders are functions over values, shared
-// by both MemQL halves and tested without a cluster. The two shell scripts
+// by both MemQL halves and tested without a cluster. The three shell scripts
 // they install are tested by running them.
 package pipelinesteps

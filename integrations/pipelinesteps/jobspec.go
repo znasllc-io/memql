@@ -13,20 +13,25 @@ import (
 	pl "github.com/znasllc-io/memql/component/pipelines"
 )
 
-// A step's pod, end to end (design record D10):
+// A step's pod, end to end (design record D10, rulings R13b, R15b, R17):
 //
-//	init  clone          cfg.CloneImage: shallow-fetches the SHA into /workspace,
-//	                     the ONLY container that can read the clone token
+//	init  cache-prep     only when caches are declared: root, the claim's ROOT
+//	                     at /cache-root, opens the owner's directory -- no git,
+//	                     no token, no checkout
+//	init  clone          cfg.CloneImage as root: shallow-fetches the SHA into
+//	                     /workspace, the ONLY container that can read the clone
+//	                     token; never sees the cache claim
 //	init  svc-<name>...  one native sidecar per service, sorted by name; the
 //	                     kubelet starts the next container only once a
 //	                     sidecar's startup probe passes
-//	main  step           the manifest's image, running the command through
-//	                     stepWrapper in /workspace, with the contract
-//	                     environment and the step's secrets by reference
+//	main  step           the manifest's image as its own user, running the
+//	                     command through stepWrapper in /workspace, with the
+//	                     contract environment, the step's secrets by reference,
+//	                     and only the owner's directory of the cache at /cache
 //
 // No cluster credential of any kind is present: the pod runs as an identity
 // with no RoleBinding, its token is never mounted, Service links are off, and
-// the only Secret it can name is its own.
+// the only Secret it can name is its own. No container may gain privileges.
 //
 // BuildJob and BuildSecret are pure: the same inputs give the same objects,
 // which is what lets a replica rebuild what another replica created.
@@ -37,14 +42,13 @@ const (
 	cacheVolume     = "cache"
 	cachePath       = "/cache"
 
-	// cacheRootPath is where the clone container mounts the cache claim's
-	// ROOT, and ownerCacheVar names the owner's directory under it that the
-	// clone prepares (ruling R15). Kubelet creates a missing subPath
-	// root-owned with the claim root's mode, so on a claim whose root is not
-	// world-writable a non-root step would get a cache it cannot write; the
-	// clone runs first, as root in the clone image, and creates the directory
-	// world-writable itself. Only the clone sees the root -- platform code,
-	// never a step's.
+	// cacheRootPath is where cache-prep mounts the cache claim's ROOT, and
+	// ownerCacheVar names the owner's directory under it that cache-prep opens
+	// (rulings R15, R15b). Kubelet creates a missing subPath root-owned with
+	// the claim root's mode, so on a claim whose root is not world-writable a
+	// non-root step would get a cache it cannot enter. Only cache-prep -- a
+	// fixed script, no git, no token -- ever sees the claim's root, where every
+	// owner's cache lives.
 	cacheRootPath = "/cache-root"
 	ownerCacheVar = "OWNER_CACHE"
 
@@ -52,10 +56,12 @@ const (
 	// variable only the clone container receives it as.
 	gitTokenKey = "GIT_TOKEN"
 
-	// The wrapper's own variables (wrapper.go).
+	// The wrapper's own variables (wrapper.go). stepCachesVar names the
+	// declared caches; the wrapper derives each uid's cache paths from it.
 	stepCommandVar    = "MEMQL_STEP_COMMAND"
 	stepArtifactsVar  = "MEMQL_STEP_ARTIFACTS"
 	artifactMarkerVar = "MEMQL_ARTIFACT_MARKER"
+	stepCachesVar     = "MEMQL_CACHES"
 
 	// The step's git configuration (ruling R13). The clone container's uid
 	// never matches every step image's, and git refuses a repository another
@@ -63,7 +69,7 @@ const (
 	// git's environment configuration because that is the command scope, one
 	// of the protected scopes safe.directory is read from; a repository's own
 	// config cannot vouch for itself. A substrate implementation detail, like
-	// the wrapper's umask, not part of the MEMQL_* contract.
+	// the wrapper's per-uid cache paths, not part of the MEMQL_* contract.
 	gitConfigCountVar = "GIT_CONFIG_COUNT"
 	gitConfigKeyVar   = "GIT_CONFIG_KEY_0"
 	gitConfigValueVar = "GIT_CONFIG_VALUE_0"
@@ -77,19 +83,32 @@ const (
 	// whitespace. The wrapper word-splits the list unquoted on purpose (globs
 	// expand), and none of these has any business in a path it hands to tar.
 	artifactForbidden = ";&|$\\`'\"<>"
+
+	// stepGracePeriodSeconds bounds how long a cancelled step's pod lingers
+	// (ruling R17): the wrapper is PID 1 and does not forward SIGTERM, so the
+	// API's default 30 seconds would be 30 seconds of a step nobody wants.
+	stepGracePeriodSeconds = 10
 )
 
-// cacheVars is the closed set of caches the runner knows, each pointing its
-// tool's cache directories into the cache volume, in export order.
-var cacheVars = map[string][]EnvVar{
-	"go":  {{Name: "GOMODCACHE", Value: cachePath + "/go/mod"}, {Name: "GOCACHE", Value: cachePath + "/go/build"}},
-	"npm": {{Name: "npm_config_cache", Value: cachePath + "/npm"}},
+// cacheVariables is the closed set of caches the runner knows, and the
+// variables the wrapper points into the step's own uid tree of the owner's
+// cache when that cache is declared. Each is reserved while its cache is
+// declared: the wrapper would overwrite a step secret of the same name as the
+// step starts.
+var cacheVariables = map[string][]string{
+	"go":  {"GOMODCACHE", "GOCACHE"},
+	"npm": {"npm_config_cache"},
 }
 
 var (
-	// secretNameShape is a portable shell variable name: what the step's
-	// command reads as $NAME, and a legal key in a Secret.
-	secretNameShape = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	// envNameShape is a portable shell variable name: what the step's command
+	// reads as $NAME, and a legal key in a Secret. The step's own variables --
+	// the contract and its secrets -- are held to it.
+	envNameShape = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	// serviceEnvNameShape is the name the API server accepts for a variable.
+	// A service's environment is read by its image's own process rather than a
+	// shell, so dotted names its image documents (discovery.type) are legal.
+	serviceEnvNameShape = regexp.MustCompile(`^[-._a-zA-Z][-._a-zA-Z0-9]*$`)
 	// shaShape is a full object id, SHA-1 or SHA-256. Never an abbreviation
 	// (ambiguous) and never a ref name (it moves).
 	shaShape = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})$`)
@@ -138,11 +157,12 @@ func BuildSecret(cfg Config, run StepRun, jobName, cloneToken string) Secret {
 // BuildJob is the step's batch/v1 Job, a pure function of its inputs. It
 // refuses -- with a *pl.Refusal and a zero Job, never a half-built one -- any
 // input it cannot turn into a Job that is both correct and safe: no image or
-// command, no time left, an artifact path that leaves the working copy or
-// carries shell metacharacters, a secret that is not a variable name or that
-// collides with a name the platform sets, an unknown cache, and the malformed
-// identities (run id, attempt, SHA, clone URL, service) the API server or git
-// would otherwise reject later and less legibly.
+// command, no time left, an artifact path that can name anything outside the
+// working copy or carries shell metacharacters, a variable or secret name the
+// step cannot have, a secret that collides with a name the platform sets, an
+// unknown cache, and the malformed identities (owner, run id, attempt, SHA,
+// clone URL, service) the API server or git would otherwise reject later and
+// less legibly.
 func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 	ttl, refusal := checkJob(cfg, run)
 	if refusal != nil {
@@ -151,7 +171,11 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 	secretName := SecretName(jobName)
 	caches := declaredCaches(run.Caches)
 
-	initContainers := []Container{cloneContainer(cfg, run, secretName, caches)}
+	var initContainers []Container
+	if len(caches) > 0 {
+		initContainers = append(initContainers, cachePrepContainer(cfg, run))
+	}
+	initContainers = append(initContainers, cloneContainer(cfg, run, secretName))
 	initContainers = append(initContainers, serviceContainers(run.Services)...)
 
 	volumes := []Volume{{Name: workspaceVolume, EmptyDir: &EmptyDirVolumeSource{}}}
@@ -178,10 +202,11 @@ func BuildJob(cfg Config, run StepRun, jobName string) (Job, error) {
 			Template: PodTemplateSpec{
 				Metadata: ObjectMeta{Labels: objectLabels(run)},
 				Spec: PodSpec{
-					RestartPolicy:                "Never",
-					ServiceAccountName:           cfg.StepServiceAccount,
-					AutomountServiceAccountToken: ptr(false),
-					EnableServiceLinks:           ptr(false),
+					RestartPolicy:                 "Never",
+					ServiceAccountName:            cfg.StepServiceAccount,
+					AutomountServiceAccountToken:  ptr(false),
+					EnableServiceLinks:            ptr(false),
+					TerminationGracePeriodSeconds: ptr(int64(stepGracePeriodSeconds)),
 					SecurityContext: &PodSecurityContext{
 						SeccompProfile: &SeccompProfile{Type: "RuntimeDefault"},
 					},
@@ -235,8 +260,8 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 		return refuse("%s", problem)
 	}
 	for _, name := range run.Caches {
-		if _, known := cacheVars[name]; !known {
-			return refuse("cache %q is not one the runner knows (%s)", name, strings.Join(sortedKeys(cacheVars), ", "))
+		if _, known := cacheVariables[name]; !known {
+			return refuse("cache %q is not one the runner knows (%s)", name, strings.Join(sortedKeys(cacheVariables), ", "))
 		}
 	}
 	for _, path := range run.Artifacts {
@@ -251,11 +276,21 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 		if strings.TrimSpace(run.Services[name].Image) == "" {
 			return refuse("service %q names no image", name)
 		}
+		for _, variable := range sortedKeys(run.Services[name].Env) {
+			if !serviceEnvNameShape.MatchString(variable) {
+				return refuse("service %q variable %q is not a name Kubernetes accepts for an environment variable", name, variable)
+			}
+		}
+	}
+	for _, name := range sortedKeys(run.Env) {
+		if !envNameShape.MatchString(name) {
+			return refuse("step variable %q is not a name the step's shell can read", name)
+		}
 	}
 	taken := namesTheJobSets(run)
 	for _, name := range sortedKeys(run.Secrets) {
 		switch {
-		case len(name) > 253 || !secretNameShape.MatchString(name):
+		case len(name) > 253 || !envNameShape.MatchString(name):
 			return refuse("secret %q is not a variable name the step's shell can read", name)
 		case strings.HasPrefix(name, platformPrefix):
 			return refuse("secret %q is named in the platform's %s namespace", name, platformPrefix)
@@ -266,15 +301,17 @@ func checkJob(cfg Config, run StepRun) (int32, *pl.Refusal) {
 	return int32(ttl), nil
 }
 
-// namesTheJobSets is every variable name the Job sets on its own account, in
-// the step container or its Secret, that a step secret may therefore not
-// take: the contract environment, the wrapper's variables, the step's git
-// configuration, the declared caches' variables, and the clone token's key.
+// namesTheJobSets is every variable name the Job or the wrapper sets on its
+// own account, in the step container or its Secret, that a step secret may
+// therefore not take: the contract environment, the wrapper's variables, the
+// step's git configuration, the declared caches' variables, and the clone
+// token's key.
 func namesTheJobSets(run StepRun) map[string]bool {
 	taken := map[string]bool{
 		stepCommandVar:    true,
 		stepArtifactsVar:  true,
 		artifactMarkerVar: true,
+		stepCachesVar:     true,
 		gitConfigCountVar: true,
 		gitConfigKeyVar:   true,
 		gitConfigValueVar: true,
@@ -284,8 +321,8 @@ func namesTheJobSets(run StepRun) map[string]bool {
 		taken[name] = true
 	}
 	for _, cache := range declaredCaches(run.Caches) {
-		for _, v := range cacheVars[cache] {
-			taken[v.Name] = true
+		for _, name := range cacheVariables[cache] {
+			taken[name] = true
 		}
 	}
 	return taken
@@ -323,16 +360,20 @@ func cloneURLProblem(raw string) string {
 }
 
 // artifactProblem says what is wrong with an artifact path, or "". It is the
-// wrapper's safety: the list reaches tar word-split and unquoted, so a path
-// must be one word that stays inside the working copy.
+// wrapper's safety: the list reaches tar word-split, unquoted and GLOBBED, so a
+// path must be one word that cannot name anything outside the working copy --
+// not as written, and not as the shell expands it. On dash `.?` expands to
+// `..` and `.*` to `. ..`, so besides a literal `.` or `..` segment, a glob
+// segment that begins with a dot, or with a bracket that can stand for one, is
+// refused. A plain dotfile (`.coverage`) and an ordinary glob (`dist/*.js`)
+// stay legal: a leading dot must be matched explicitly, so a segment that
+// begins with anything else cannot expand to one.
 func artifactProblem(path string) string {
 	switch {
 	case path == "":
 		return "is empty"
 	case strings.HasPrefix(path, "/"):
 		return "is absolute; artifact paths are relative to the working copy"
-	case strings.Contains(path, ".."):
-		return "contains .., which could leave the working copy"
 	}
 	for _, r := range path {
 		switch {
@@ -342,13 +383,43 @@ func artifactProblem(path string) string {
 			return "contains the shell metacharacter " + strconv.QuoteRune(r)
 		}
 	}
+	for _, segment := range strings.Split(path, "/") {
+		switch {
+		case segment == "." || segment == "..":
+			return "names " + segment + " as a path segment, which could leave the working copy"
+		case (strings.HasPrefix(segment, ".") || strings.HasPrefix(segment, "[")) && strings.ContainsAny(segment, "*?["):
+			return "has the glob segment " + strconv.Quote(segment) + ", which the shell can expand to . or .."
+		}
+	}
 	return ""
 }
 
-// cloneContainer fetches the commit and, when the step declares caches,
-// prepares the owner's directory of the cache claim (see cacheRootPath).
-func cloneContainer(cfg Config, run StepRun, secretName string, caches []string) Container {
-	c := Container{
+// rootContext is the security context of the two init containers that must
+// be root (ruling R17): the emptyDir and the claim's root are root-owned, so
+// an image whose user is not root could write neither.
+func rootContext() *SecurityContext {
+	return &SecurityContext{RunAsUser: ptr(int64(0)), AllowPrivilegeEscalation: ptr(false)}
+}
+
+// cachePrepContainer opens the owner's directory of the cache claim before
+// anything else runs (ruling R15b). It mounts the claim's ROOT and nothing
+// else, and runs a fixed script: the container that sees every owner's cache
+// is the one that runs no repository content.
+func cachePrepContainer(cfg Config, run StepRun) Container {
+	return Container{
+		Name:            ContainerCachePrep,
+		Image:           cfg.CloneImage,
+		Command:         []string{"/bin/sh", "-c", cachePrepScript},
+		Env:             []EnvVar{plainVar(ownerCacheVar, cacheRootPath+"/"+CacheSubPath(run.OwnerUserID))},
+		VolumeMounts:    []VolumeMount{{Name: cacheVolume, MountPath: cacheRootPath}},
+		SecurityContext: rootContext(),
+	}
+}
+
+// cloneContainer fetches the commit into the workspace, as root. It runs git
+// on untrusted repository content, so it never mounts the cache claim.
+func cloneContainer(cfg Config, run StepRun, secretName string) Container {
+	return Container{
 		Name:    ContainerClone,
 		Image:   cfg.CloneImage,
 		Command: []string{"/bin/sh", "-c", cloneScript},
@@ -360,26 +431,24 @@ func cloneContainer(cfg Config, run StepRun, secretName string, caches []string)
 			secretVar(gitTokenKey, secretName, gitTokenKey, true),
 		},
 		VolumeMounts:    []VolumeMount{{Name: workspaceVolume, MountPath: workspacePath}},
-		SecurityContext: &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
+		SecurityContext: rootContext(),
 	}
-	if len(caches) > 0 {
-		c.Env = append(c.Env, plainVar(ownerCacheVar, cacheRootPath+"/"+CacheSubPath(run.OwnerUserID)))
-		c.VolumeMounts = append(c.VolumeMounts, VolumeMount{Name: cacheVolume, MountPath: cacheRootPath})
-	}
-	return c
 }
 
 // serviceContainers are the native sidecars, in name order: init containers
-// with restartPolicy Always. They see neither the checkout nor the cache, and
-// get their declared plain values only, never the step's secrets.
+// with restartPolicy Always. They see neither the checkout nor the cache, get
+// their declared plain values only, never the step's secrets, and may not gain
+// privileges (an image's entrypoint dropping from root to its own user still
+// works; a setuid binary does not).
 func serviceContainers(services map[string]pl.Service) []Container {
 	var out []Container
 	for _, name := range sortedKeys(services) {
 		svc := services[name]
 		c := Container{
-			Name:          ServicePrefix + name,
-			Image:         svc.Image,
-			RestartPolicy: ptr("Always"),
+			Name:            ServicePrefix + name,
+			Image:           svc.Image,
+			RestartPolicy:   ptr("Always"),
+			SecurityContext: &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
 		}
 		for _, key := range sortedKeys(svc.Env) {
 			c.Env = append(c.Env, plainVar(key, svc.Env[key]))
@@ -397,7 +466,7 @@ func serviceContainers(services map[string]pl.Service) []Container {
 }
 
 func stepContainer(run StepRun, jobName, secretName string, caches []string) Container {
-	env := make([]EnvVar, 0, len(run.Env)+len(run.Secrets)+9)
+	env := make([]EnvVar, 0, len(run.Env)+len(run.Secrets)+8)
 	for _, name := range sortedKeys(run.Env) {
 		env = append(env, plainVar(name, run.Env[name]))
 	}
@@ -411,8 +480,8 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 		plainVar(gitConfigKeyVar, "safe.directory"),
 		plainVar(gitConfigValueVar, workspacePath),
 	)
-	for _, cache := range caches {
-		env = append(env, cacheVars[cache]...)
+	if len(caches) > 0 {
+		env = append(env, plainVar(stepCachesVar, strings.Join(caches, " ")))
 	}
 	for _, name := range sortedKeys(run.Secrets) {
 		env = append(env, secretVar(name, secretName, name, false))
@@ -454,7 +523,7 @@ func objectAnnotations(run StepRun) map[string]string {
 }
 
 // declaredCaches is the set of declared caches, sorted, so the same
-// declaration always exports the same variables in the same order.
+// declaration always names the same caches in the same order.
 func declaredCaches(caches []string) []string {
 	seen := make(map[string]bool, len(caches))
 	out := make([]string, 0, len(caches))

@@ -1,6 +1,11 @@
 package pipelinesteps
 
-import pl "github.com/znasllc-io/memql/component/pipelines"
+import (
+	"fmt"
+	"log/slog"
+
+	pl "github.com/znasllc-io/memql/component/pipelines"
+)
 
 // The runner's own wire: what the agent node forwards to a workbench replica
 // over NodeService, as JSON, and what comes back.
@@ -59,6 +64,50 @@ type StepRun struct {
 	DeadlineCode string `json:"deadlineCode"`
 	// GoTimings asks the runner to read Go test timings out of the output.
 	GoTimings bool `json:"goTimings,omitempty"`
+}
+
+// A StepRun carries resolved secret values because the runner needs them, so
+// printing one must not print them (ruling R17). Format and LogValue show each
+// secret's NAME, so a reader can tell it was there, and never its value. JSON
+// keeps the values: it is the forward's wire, the one place they travel.
+
+// redactedStepRun has StepRun's fields and none of its methods, so formatting
+// one cannot come back into Format.
+type redactedStepRun StepRun
+
+func (r StepRun) redacted() redactedStepRun {
+	out := redactedStepRun(r)
+	if r.Secrets != nil {
+		out.Secrets = make(map[string]string, len(r.Secrets))
+		for name := range r.Secrets {
+			out.Secrets[name] = "[redacted]"
+		}
+	}
+	return out
+}
+
+// Format prints a StepRun with every secret value replaced, whatever the verb
+// and flags.
+func (r StepRun) Format(f fmt.State, verb rune) {
+	fmt.Fprintf(f, fmt.FormatString(f, verb), r.redacted())
+}
+
+// LogValue is what slog records for a StepRun: who and what it is, and its
+// secrets by name only.
+func (r StepRun) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("runId", r.RunID),
+		slog.String("workRunId", r.WorkRunID),
+		slog.String("stepKey", r.StepKey),
+		slog.Int("attempt", r.Attempt),
+		slog.String("ownerUserId", r.OwnerUserID),
+		slog.String("repository", r.Repository.FullName()),
+		slog.String("sha", r.SHA),
+		slog.String("image", r.Image),
+		slog.Any("secretNames", sortedKeys(r.Secrets)),
+		slog.Int("timeoutSeconds", r.TimeoutSeconds),
+		slog.String("deadlineCode", r.DeadlineCode),
+	)
 }
 
 // The states a pipelineStatus reply reports for a step's Job.

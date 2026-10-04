@@ -34,10 +34,13 @@ func JobName(runID, stepKey string, attempt int) string {
 // resolved secrets.
 func SecretName(jobName string) string { return jobName + "-env" }
 
-// ArtifactMarker is the line prefix the step wrapper frames artifacts between
-// ("<marker> begin" ... "<marker> end"). It is derived from the Job's name
-// alone, so whichever replica captures the output knows it without asking the
-// one that built the Job.
+// ArtifactMarker is the token the step wrapper frames artifacts with: it
+// prints the lines "<marker> begin" and "<marker> end", each a whole line of
+// its own (the begin line after a newline of its own, so a command that ended
+// without one cannot glue its last words to it), and the capture matches them
+// as whole lines. It is derived from the Job's name alone, so whichever
+// replica captures the output knows it without asking the one that built the
+// Job.
 //
 // It is not a secret, and does not need to be: the step can read it from its
 // own environment, and a step that forges a frame gains nothing it could not
@@ -73,11 +76,14 @@ const (
 const ManagedBy = "memql-workbench"
 
 // The containers of a step's pod, by name. ServicePrefix + a service's name is
-// that service's sidecar.
+// that service's sidecar. ContainerCachePrep runs first, and only when the
+// step declares caches; its failure is a Job the runner could not set up
+// (pl.CodeJobRejected), not a clone failure.
 const (
-	ContainerClone = "clone"
-	ContainerStep  = "step"
-	ServicePrefix  = "svc-"
+	ContainerCachePrep = "cache-prep"
+	ContainerClone     = "clone"
+	ContainerStep      = "step"
+	ServicePrefix      = "svc-"
 )
 
 // labelValueShape is a Kubernetes label value: alphanumeric at both ends,

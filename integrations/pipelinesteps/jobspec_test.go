@@ -20,6 +20,9 @@ const testJobName = "mp-a7a72726d5075767e0b6d115"
 // testSecretName is the Secret every reference in testJobName's Job names.
 const testSecretName = testJobName + "-env"
 
+// testOwnerCache is CacheSubPath("user-5d1e"), pinned in names_test.go.
+const testOwnerCache = "owners/0dde18ce172fff450b32bf41"
+
 // Planted values: distinctive enough that finding one in a marshalled Job can
 // only mean it leaked, and assembled from parts so a secret scanner reads
 // them as the fixtures they are.
@@ -160,6 +163,25 @@ func allContainers(job Job) []Container {
 	return append(append([]Container{}, pod.InitContainers...), pod.Containers...)
 }
 
+func initNames(job Job) []string {
+	var names []string
+	for _, c := range job.Spec.Template.Spec.InitContainers {
+		names = append(names, c.Name)
+	}
+	return names
+}
+
+// initNamed finds an init container and its index by name; ok is false when
+// the Job has none of that name.
+func initNamed(job Job, name string) (Container, int, bool) {
+	for i, c := range job.Spec.Template.Spec.InitContainers {
+		if c.Name == name {
+			return c, i, true
+		}
+	}
+	return Container{}, -1, false
+}
+
 // stepOf and cloneOf fail the test, rather than panic the binary, on a Job
 // that lacks the container.
 func stepOf(t *testing.T, job Job) Container {
@@ -173,11 +195,11 @@ func stepOf(t *testing.T, job Job) Container {
 
 func cloneOf(t *testing.T, job Job) Container {
 	t.Helper()
-	init := job.Spec.Template.Spec.InitContainers
-	if len(init) == 0 {
-		t.Fatal("no init containers: nothing clones the repository")
+	clone, _, ok := initNamed(job, "clone")
+	if !ok {
+		t.Fatalf("no clone init container among %q: nothing clones the repository", initNames(job))
 	}
-	return init[0]
+	return clone
 }
 
 func ptrTo[T any](v T) *T { return &v }
@@ -246,15 +268,21 @@ func TestBuildJob(t *testing.T) {
 		wantField(t, doc, "RuntimeDefault", "spec", "template", "spec", "securityContext", "seccompProfile", "type")
 	})
 
-	t.Run("the clone init container fetches the SHA, the only one offered the token, optionally", func(t *testing.T) {
+	// Ruling R17: the wrapper is PID 1 and does not forward SIGTERM, so a
+	// cancelled step's pod would otherwise linger the default 30 seconds.
+	t.Run("a cancelled step's pod is killed after 10 seconds, not 30", func(t *testing.T) {
 		job := mustBuild(t, testConfig(), testRun())
-		pod := job.Spec.Template.Spec
-		if len(pod.InitContainers) == 0 {
-			t.Fatal("no init containers: nothing clones the repository")
+		if got := job.Spec.Template.Spec.TerminationGracePeriodSeconds; got == nil || *got != 10 {
+			t.Errorf("terminationGracePeriodSeconds = %v, want 10", got)
 		}
-		clone := pod.InitContainers[0]
-		if clone.Name != "clone" {
-			t.Errorf("first init container = %q, want clone (it must finish before any service starts)", clone.Name)
+		wantField(t, wire(t, job), float64(10), "spec", "template", "spec", "terminationGracePeriodSeconds")
+	})
+
+	t.Run("the clone init container fetches the SHA as root, the only one offered the token, optionally", func(t *testing.T) {
+		job := mustBuild(t, testConfig(), testRun())
+		clone, index, ok := initNamed(job, "clone")
+		if !ok {
+			t.Fatalf("no clone init container among %q", initNames(job))
 		}
 		if clone.Image != "registry.example.com/library/git:2" {
 			t.Errorf("clone image = %q, want the Config's clone image", clone.Image)
@@ -268,46 +296,81 @@ func TestBuildJob(t *testing.T) {
 			{Name: "GIT_TOKEN", ValueFrom: &EnvVarSource{SecretKeyRef: &SecretKeySelector{
 				Name: testSecretName, Key: "GIT_TOKEN", Optional: ptrTo(true),
 			}}},
-			// Ruling R15: the clone prepares the owner's cache directory, which
-			// kubelet would otherwise create with the claim root's mode.
-			{Name: "OWNER_CACHE", Value: "/cache-root/owners/0dde18ce172fff450b32bf41"},
 		}
 		if !reflect.DeepEqual(clone.Env, wantEnv) {
 			t.Errorf("clone env =\n  %s\nwant\n  %s", mustJSON(t, clone.Env), mustJSON(t, wantEnv))
 		}
-		wantCloneMounts := []VolumeMount{{Name: "workspace", MountPath: "/workspace"}, {Name: "cache", MountPath: "/cache-root"}}
-		if !reflect.DeepEqual(clone.VolumeMounts, wantCloneMounts) {
-			t.Errorf("clone mounts = %+v, want the workspace at /workspace and the cache claim's root at /cache-root", clone.VolumeMounts)
+		// Ruling R15b: git runs on untrusted content here, so the clone never
+		// sees the cache claim -- every owner's caches are under its root.
+		if !reflect.DeepEqual(clone.VolumeMounts, []VolumeMount{{Name: "workspace", MountPath: "/workspace"}}) {
+			t.Errorf("clone mounts = %+v, want only the workspace at /workspace", clone.VolumeMounts)
 		}
-		if clone.SecurityContext == nil || clone.SecurityContext.AllowPrivilegeEscalation == nil ||
-			*clone.SecurityContext.AllowPrivilegeEscalation {
-			t.Errorf("clone securityContext = %+v, want allowPrivilegeEscalation false", clone.SecurityContext)
+		// Ruling R17: root, because the emptyDir is root-owned and a git image
+		// that runs as non-root could not write it.
+		wantSecurity := &SecurityContext{RunAsUser: ptrTo(int64(0)), AllowPrivilegeEscalation: ptrTo(false)}
+		if !reflect.DeepEqual(clone.SecurityContext, wantSecurity) {
+			t.Errorf("clone securityContext = %s, want %s", mustJSON(t, clone.SecurityContext), mustJSON(t, wantSecurity))
 		}
 		if clone.RestartPolicy != nil {
 			t.Errorf("clone restartPolicy = %q: an init container with one is a sidecar, which never finishes, so the step would never start", *clone.RestartPolicy)
 		}
 
 		doc := wire(t, job)
-		wantField(t, doc, "GIT_TOKEN", "spec", "template", "spec", "initContainers", 0, "env", 2, "valueFrom", "secretKeyRef", "key")
-		wantField(t, doc, true, "spec", "template", "spec", "initContainers", 0, "env", 2, "valueFrom", "secretKeyRef", "optional")
-		wantField(t, doc, false, "spec", "template", "spec", "initContainers", 0, "securityContext", "allowPrivilegeEscalation")
-		if _, ok := field(doc, "spec", "template", "spec", "initContainers", 0, "restartPolicy"); ok {
+		wantField(t, doc, "GIT_TOKEN", "spec", "template", "spec", "initContainers", index, "env", 2, "valueFrom", "secretKeyRef", "key")
+		wantField(t, doc, true, "spec", "template", "spec", "initContainers", index, "env", 2, "valueFrom", "secretKeyRef", "optional")
+		wantField(t, doc, float64(0), "spec", "template", "spec", "initContainers", index, "securityContext", "runAsUser")
+		wantField(t, doc, false, "spec", "template", "spec", "initContainers", index, "securityContext", "allowPrivilegeEscalation")
+		if _, ok := field(doc, "spec", "template", "spec", "initContainers", index, "restartPolicy"); ok {
 			t.Error("the clone container carries a restartPolicy on the wire")
+		}
+	})
+
+	// Ruling R15b: a dedicated init container, before the clone, does the one
+	// thing that needs the claim's root -- preparing the owner's directory --
+	// and nothing else: no git, no token, no checkout.
+	t.Run("cache-prep runs first, as root, and sees the claim's root and nothing else", func(t *testing.T) {
+		job := mustBuild(t, testConfig(), testRun())
+		if names := initNames(job); !reflect.DeepEqual(names[:2], []string{"cache-prep", "clone"}) {
+			t.Fatalf("init containers = %q, want cache-prep then clone first", names)
+		}
+		prep := job.Spec.Template.Spec.InitContainers[0]
+		if prep.Image != "registry.example.com/library/git:2" {
+			t.Errorf("cache-prep image = %q, want the Config's clone image", prep.Image)
+		}
+		if !reflect.DeepEqual(prep.Command, []string{"/bin/sh", "-c", cachePrepScript}) {
+			t.Errorf("cache-prep command = %q, want /bin/sh -c <cachePrepScript>", prep.Command)
+		}
+		wantEnv := []EnvVar{{Name: "OWNER_CACHE", Value: "/cache-root/" + testOwnerCache}}
+		if !reflect.DeepEqual(prep.Env, wantEnv) {
+			t.Errorf("cache-prep env = %s, want only OWNER_CACHE", mustJSON(t, prep.Env))
+		}
+		if !reflect.DeepEqual(prep.VolumeMounts, []VolumeMount{{Name: "cache", MountPath: "/cache-root"}}) {
+			t.Errorf("cache-prep mounts = %+v, want only the claim's root at /cache-root", prep.VolumeMounts)
+		}
+		wantSecurity := &SecurityContext{RunAsUser: ptrTo(int64(0)), AllowPrivilegeEscalation: ptrTo(false)}
+		if !reflect.DeepEqual(prep.SecurityContext, wantSecurity) {
+			t.Errorf("cache-prep securityContext = %s, want %s", mustJSON(t, prep.SecurityContext), mustJSON(t, wantSecurity))
+		}
+		if prep.RestartPolicy != nil {
+			t.Errorf("cache-prep restartPolicy = %q, want none: it runs to completion", *prep.RestartPolicy)
+		}
+		wantField(t, wire(t, job), float64(0), "spec", "template", "spec", "initContainers", 0, "securityContext", "runAsUser")
+
+		run := testRun()
+		run.Caches = nil
+		if _, _, ok := initNamed(mustBuild(t, testConfig(), run), "cache-prep"); ok {
+			t.Error("a step declaring no cache still gets a cache-prep container")
 		}
 	})
 
 	t.Run("each service is a native sidecar, in name order, probed when it declares ready", func(t *testing.T) {
 		job := mustBuild(t, testConfig(), testRun())
 		init := job.Spec.Template.Spec.InitContainers
-		var names []string
-		for _, c := range init {
-			names = append(names, c.Name)
-		}
-		if !reflect.DeepEqual(names, []string{"clone", "svc-postgres", "svc-redis"}) {
-			t.Fatalf("init containers = %q, want clone, svc-postgres, svc-redis (services sorted by name)", names)
+		if names := initNames(job); !reflect.DeepEqual(names, []string{"cache-prep", "clone", "svc-postgres", "svc-redis"}) {
+			t.Fatalf("init containers = %q, want cache-prep, clone, svc-postgres, svc-redis (services sorted by name)", names)
 		}
 
-		pg, redis := init[1], init[2]
+		pg, redis := init[2], init[3]
 		if pg.Image != "postgres:16" || redis.Image != "redis:7" {
 			t.Errorf("service images = %q, %q, want postgres:16, redis:7", pg.Image, redis.Image)
 		}
@@ -322,6 +385,11 @@ func TestBuildJob(t *testing.T) {
 				if e.ValueFrom != nil {
 					t.Errorf("%s env %s is a reference: a service gets its declared plain values, never the step's secrets", svc.Name, e.Name)
 				}
+			}
+			// Ruling R17.
+			if svc.SecurityContext == nil || svc.SecurityContext.AllowPrivilegeEscalation == nil ||
+				*svc.SecurityContext.AllowPrivilegeEscalation {
+				t.Errorf("%s securityContext = %+v, want allowPrivilegeEscalation false", svc.Name, svc.SecurityContext)
 			}
 		}
 		wantPGEnv := []EnvVar{{Name: "POSTGRES_PASSWORD", Value: "memql"}, {Name: "POSTGRES_USER", Value: "memql"}}
@@ -341,24 +409,21 @@ func TestBuildJob(t *testing.T) {
 		}
 
 		doc := wire(t, job)
-		wantField(t, doc, "Always", "spec", "template", "spec", "initContainers", 1, "restartPolicy")
-		wantField(t, doc, []any{"/bin/sh", "-c", "pg_isready -U memql"},
-			"spec", "template", "spec", "initContainers", 1, "startupProbe", "exec", "command")
-		wantField(t, doc, float64(2), "spec", "template", "spec", "initContainers", 1, "startupProbe", "periodSeconds")
-		wantField(t, doc, float64(90), "spec", "template", "spec", "initContainers", 1, "startupProbe", "failureThreshold")
 		wantField(t, doc, "Always", "spec", "template", "spec", "initContainers", 2, "restartPolicy")
-		if _, ok := field(doc, "spec", "template", "spec", "initContainers", 2, "startupProbe"); ok {
+		wantField(t, doc, []any{"/bin/sh", "-c", "pg_isready -U memql"},
+			"spec", "template", "spec", "initContainers", 2, "startupProbe", "exec", "command")
+		wantField(t, doc, float64(2), "spec", "template", "spec", "initContainers", 2, "startupProbe", "periodSeconds")
+		wantField(t, doc, float64(90), "spec", "template", "spec", "initContainers", 2, "startupProbe", "failureThreshold")
+		wantField(t, doc, false, "spec", "template", "spec", "initContainers", 2, "securityContext", "allowPrivilegeEscalation")
+		wantField(t, doc, "Always", "spec", "template", "spec", "initContainers", 3, "restartPolicy")
+		if _, ok := field(doc, "spec", "template", "spec", "initContainers", 3, "startupProbe"); ok {
 			t.Error("svc-redis carries a startupProbe on the wire")
 		}
 	})
 
 	t.Run("the step runs the manifest image through the wrapper with the contract environment", func(t *testing.T) {
 		job := mustBuild(t, testConfig(), testRun())
-		containers := job.Spec.Template.Spec.Containers
-		if len(containers) != 1 {
-			t.Fatalf("%d main containers, want exactly the step", len(containers))
-		}
-		step := containers[0]
+		step := stepOf(t, job)
 		if step.Name != "step" {
 			t.Errorf("main container = %q, want step", step.Name)
 		}
@@ -386,9 +451,7 @@ func TestBuildJob(t *testing.T) {
 			{Name: "GIT_CONFIG_COUNT", Value: "1"},
 			{Name: "GIT_CONFIG_KEY_0", Value: "safe.directory"},
 			{Name: "GIT_CONFIG_VALUE_0", Value: "/workspace"},
-			{Name: "GOMODCACHE", Value: "/cache/go/mod"},
-			{Name: "GOCACHE", Value: "/cache/go/build"},
-			{Name: "npm_config_cache", Value: "/cache/npm"},
+			{Name: "MEMQL_CACHES", Value: "go npm"},
 			{Name: "DEPLOY_KEY", ValueFrom: ref("DEPLOY_KEY")},
 			{Name: "NPM_TOKEN", ValueFrom: ref("NPM_TOKEN")},
 		}
@@ -397,7 +460,7 @@ func TestBuildJob(t *testing.T) {
 		}
 		wantMounts := []VolumeMount{
 			{Name: "workspace", MountPath: "/workspace"},
-			{Name: "cache", MountPath: "/cache", SubPath: "owners/0dde18ce172fff450b32bf41"},
+			{Name: "cache", MountPath: "/cache", SubPath: testOwnerCache},
 		}
 		if !reflect.DeepEqual(step.VolumeMounts, wantMounts) {
 			t.Errorf("step mounts = %+v, want %+v (the cache is the OWNER's directory of the claim, never its root)", step.VolumeMounts, wantMounts)
@@ -406,6 +469,9 @@ func TestBuildJob(t *testing.T) {
 			*step.SecurityContext.AllowPrivilegeEscalation {
 			t.Errorf("step securityContext = %+v, want allowPrivilegeEscalation false", step.SecurityContext)
 		}
+		if step.SecurityContext != nil && step.SecurityContext.RunAsUser != nil {
+			t.Errorf("step runAsUser = %d: the step runs as its image's own user", *step.SecurityContext.RunAsUser)
+		}
 		if step.RestartPolicy != nil {
 			t.Errorf("step restartPolicy = %q, want none on a main container", *step.RestartPolicy)
 		}
@@ -413,7 +479,7 @@ func TestBuildJob(t *testing.T) {
 		doc := wire(t, job)
 		wantField(t, doc, false, "spec", "template", "spec", "containers", 0, "securityContext", "allowPrivilegeEscalation")
 		wantField(t, doc, "/workspace", "spec", "template", "spec", "containers", 0, "workingDir")
-		wantField(t, doc, "owners/0dde18ce172fff450b32bf41", "spec", "template", "spec", "containers", 0, "volumeMounts", 1, "subPath")
+		wantField(t, doc, testOwnerCache, "spec", "template", "spec", "containers", 0, "volumeMounts", 1, "subPath")
 	})
 
 	t.Run("every step of one owner shares a cache and two owners never do", func(t *testing.T) {
@@ -424,8 +490,10 @@ func TestBuildJob(t *testing.T) {
 					subPath = m.SubPath
 				}
 			}
-			if e, ok := envNamed(cloneOf(t, job), "OWNER_CACHE"); ok {
-				prepared = e.Value
+			if prep, _, ok := initNamed(job, "cache-prep"); ok {
+				if e, ok := envNamed(prep, "OWNER_CACHE"); ok {
+					prepared = e.Value
+				}
 			}
 			return subPath, prepared
 		}
@@ -444,9 +512,9 @@ func TestBuildJob(t *testing.T) {
 		if theirs != "owners/97d5292f36414d4a6638d794" || theirs == mine {
 			t.Errorf("owners user-5d1e and user-77aa mount %q and %q, want two different caches", mine, theirs)
 		}
-		// The directory the clone prepares is exactly the one the step mounts.
+		// The directory cache-prep prepares is exactly the one the step mounts.
 		if minePrepared != "/cache-root/"+mine || theirsPrepared != "/cache-root/"+theirs {
-			t.Errorf("the clone prepares %q and %q, but the steps mount %q and %q", minePrepared, theirsPrepared, mine, theirs)
+			t.Errorf("cache-prep prepares %q and %q, but the steps mount %q and %q", minePrepared, theirsPrepared, mine, theirs)
 		}
 	})
 
@@ -477,32 +545,27 @@ func TestBuildJob(t *testing.T) {
 		}
 	})
 
-	t.Run("caches point their tools at the cache volume, and an unknown cache is refused", func(t *testing.T) {
-		cacheEnv := func(c Container) []EnvVar {
-			var out []EnvVar
-			for _, e := range c.Env {
-				switch e.Name {
-				case "GOMODCACHE", "GOCACHE", "npm_config_cache":
-					out = append(out, e)
-				}
-			}
-			return out
-		}
-		goEnv := []EnvVar{{Name: "GOMODCACHE", Value: "/cache/go/mod"}, {Name: "GOCACHE", Value: "/cache/go/build"}}
-		npmEnv := []EnvVar{{Name: "npm_config_cache", Value: "/cache/npm"}}
+	// Ruling R13b: the Job names the declared caches and the wrapper picks
+	// each uid's own directories at run time, so the Job sets no cache path.
+	t.Run("caches are named for the wrapper, never set as paths, and an unknown cache is refused", func(t *testing.T) {
 		for _, tc := range []struct {
 			caches []string
-			want   []EnvVar
+			want   string
 		}{
-			{[]string{"go"}, goEnv},
-			{[]string{"npm"}, npmEnv},
-			{[]string{"npm", "go", "go"}, append(append([]EnvVar{}, goEnv...), npmEnv...)},
+			{[]string{"go"}, "go"},
+			{[]string{"npm"}, "npm"},
+			{[]string{"npm", "go", "go"}, "go npm"},
 		} {
 			run := testRun()
 			run.Caches = tc.caches
 			step := stepOf(t, mustBuild(t, testConfig(), run))
-			if got := cacheEnv(step); !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("caches %q: cache env = %+v, want %+v", tc.caches, got, tc.want)
+			if e, ok := envNamed(step, "MEMQL_CACHES"); !ok || e.Value != tc.want {
+				t.Errorf("caches %q: MEMQL_CACHES = %+v (present %v), want %q", tc.caches, e, ok, tc.want)
+			}
+			for _, path := range []string{"GOMODCACHE", "GOCACHE", "npm_config_cache"} {
+				if e, ok := envNamed(step, path); ok {
+					t.Errorf("caches %q: the Job sets %s=%q itself; the wrapper derives it per uid", tc.caches, path, e.Value)
+				}
 			}
 		}
 
@@ -510,27 +573,25 @@ func TestBuildJob(t *testing.T) {
 		run.Caches = nil
 		job := mustBuild(t, testConfig(), run)
 		step := stepOf(t, job)
-		if got := cacheEnv(step); len(got) != 0 {
-			t.Errorf("no caches declared, cache env = %+v", got)
+		if e, ok := envNamed(step, "MEMQL_CACHES"); ok {
+			t.Errorf("no caches declared, MEMQL_CACHES = %q", e.Value)
 		}
 		for _, m := range step.VolumeMounts {
 			if m.Name == "cache" || m.MountPath == "/cache" {
 				t.Errorf("no caches declared, the step still mounts %+v", m)
 			}
 		}
-		clone := cloneOf(t, job)
-		for _, m := range clone.VolumeMounts {
-			if m.Name == "cache" {
-				t.Errorf("no caches declared, the clone still mounts the claim: %+v", m)
+		for _, c := range job.Spec.Template.Spec.InitContainers {
+			for _, m := range c.VolumeMounts {
+				if m.Name == "cache" {
+					t.Errorf("no caches declared, %s still mounts the claim: %+v", c.Name, m)
+				}
 			}
-		}
-		if e, ok := envNamed(clone, "OWNER_CACHE"); ok {
-			t.Errorf("no caches declared, the clone still prepares %q", e.Value)
 		}
 
 		run.Caches = []string{"go", "maven"}
 		if job, err := BuildJob(testConfig(), run, testJobName); err == nil || !reflect.DeepEqual(job, Job{}) {
-			t.Errorf("an unknown cache built a Job (err %v); the runner has nowhere to point it", err)
+			t.Errorf("an unknown cache built a Job (err %v); the wrapper has nowhere to point it", err)
 		}
 	})
 
@@ -590,6 +651,37 @@ func TestBuildJob(t *testing.T) {
 		}
 	})
 
+	// The reviewer's IMPORTANT 1: the wrapper word-splits and globs the list,
+	// and on dash `.?` expands to `..` and `.*` to `. ..`, so a glob segment
+	// that begins with a dot or a bracket can name the working copy's parent.
+	// Plain dotfiles and ordinary globs stay legal.
+	t.Run("ordinary globs and literal dotfiles are legal artifact paths", func(t *testing.T) {
+		for _, path := range []string{
+			".coverage", ".nyc_output/out.json", "dist/*.js", "reports/*.xml", "build/**/report.txt",
+			"out[0-9].log", "foo..bar", "a.b/c", "coverage.out",
+		} {
+			run := testRun()
+			run.Artifacts = []string{path}
+			if _, err := BuildJob(testConfig(), run, testJobName); err != nil {
+				t.Errorf("artifact path %q refused: %v", path, err)
+			}
+		}
+	})
+
+	// Ruling R17 validates service variable names. A service's environment is
+	// read by its image's own process, not by a shell, so the bar is the one the
+	// API server applies -- OpenSearch's image documents discovery.type -- while
+	// the step's own names stay shell names its command can read.
+	t.Run("a service's variables may be named as its image expects", func(t *testing.T) {
+		for _, name := range []string{"discovery.type", "POSTGRES_PASSWORD", "plugins-dir", "_X"} {
+			run := testRun()
+			run.Services["search"] = pl.Service{Image: "opensearch:2", Env: map[string]string{name: "x"}}
+			if _, err := BuildJob(testConfig(), run, testJobName); err != nil {
+				t.Errorf("service variable %q refused: %v", name, err)
+			}
+		}
+	})
+
 	t.Run("a refusal never leaves a half-built Job", func(t *testing.T) {
 		type mutation func(cfg *Config, run *StepRun)
 		withArtifact := func(path string) mutation {
@@ -622,14 +714,27 @@ func TestBuildJob(t *testing.T) {
 			{"a secret in the platform's reserved names", withSecret("MEMQL_SHARD"), pl.CodeJobRejected},
 			{"a secret named like the wrapper's command", withSecret("MEMQL_STEP_COMMAND"), pl.CodeJobRejected},
 			{"a secret named like the artifact marker", withSecret("MEMQL_ARTIFACT_MARKER"), pl.CodeJobRejected},
+			{"a secret named like the cache list", withSecret("MEMQL_CACHES"), pl.CodeJobRejected},
 			{"a secret sharing the clone token's key", withSecret("GIT_TOKEN"), pl.CodeJobRejected},
-			{"a secret named like a cache variable", withSecret("GOCACHE"), pl.CodeJobRejected},
+			{"a secret named like a go cache variable", withSecret("GOCACHE"), pl.CodeJobRejected},
+			{"a secret named like the go module cache variable", withSecret("GOMODCACHE"), pl.CodeJobRejected},
+			{"a secret named like the npm cache variable", withSecret("npm_config_cache"), pl.CodeJobRejected},
 			{"a secret named like git's config count", withSecret("GIT_CONFIG_COUNT"), pl.CodeJobRejected},
 			{"a secret named like git's config key", withSecret("GIT_CONFIG_KEY_0"), pl.CodeJobRejected},
 			{"a secret named like git's config value", withSecret("GIT_CONFIG_VALUE_0"), pl.CodeJobRejected},
 			{"a secret also present as a plain value", func(_ *Config, r *StepRun) {
 				r.Env["CI"] = "true"
 				r.Secrets["CI"] = "planted-" + strings.Repeat("v", 8)
+			}, pl.CodeJobRejected},
+			{"a step variable the shell cannot read", func(_ *Config, r *StepRun) { r.Env["1BAD"] = "x" }, pl.CodeJobRejected},
+			{"a service variable name with a space", func(_ *Config, r *StepRun) {
+				r.Services["postgres"] = pl.Service{Image: "postgres:16", Env: map[string]string{"MY VAR": "x"}}
+			}, pl.CodeJobRejected},
+			{"a service variable name with an equals sign", func(_ *Config, r *StepRun) {
+				r.Services["postgres"] = pl.Service{Image: "postgres:16", Env: map[string]string{"A=B": "x"}}
+			}, pl.CodeJobRejected},
+			{"a service variable starting with a digit", func(_ *Config, r *StepRun) {
+				r.Services["postgres"] = pl.Service{Image: "postgres:16", Env: map[string]string{"1X": "x"}}
 			}, pl.CodeJobRejected},
 			{"an unknown cache", func(_ *Config, r *StepRun) { r.Caches = []string{"maven"} }, pl.CodeJobRejected},
 			{"no run id", func(_ *Config, r *StepRun) { r.RunID = "" }, pl.CodeJobRejected},
@@ -661,6 +766,17 @@ func TestBuildJob(t *testing.T) {
 				mutate   mutation
 				wantCode string
 			}{fmt.Sprintf("an artifact path with %q", metachar), withArtifact("out" + metachar + "x"), pl.CodeJobRejected})
+		}
+		// The reviewer's IMPORTANT 1, case by case: each is . or .., or a glob
+		// segment the shell can expand to one.
+		for _, dotGlob := range []string{
+			".", "..", "a/./b", "a/..", ".?", ".*", "*/.*/.*", ".??", ".a*", ".[.]", "[.][.]", "[.]*", "reports/.*",
+		} {
+			cases = append(cases, struct {
+				name     string
+				mutate   mutation
+				wantCode string
+			}{fmt.Sprintf("an artifact path %q that is or can glob to . or ..", dotGlob), withArtifact(dotGlob), pl.CodeJobRejected})
 		}
 
 		for _, tc := range cases {
@@ -742,7 +858,7 @@ func TestARefusedCloneURLNeverRepeatsItsCredential(t *testing.T) {
 // TestTheCloneTokenReachesOnlyTheCloneContainer: the token can read the
 // repository, so it must never be in the environment of the code the
 // repository contains. Only the clone container may reference it -- not the
-// step, and not a service image somebody else published.
+// step, not cache-prep, and not a service image somebody else published.
 func TestTheCloneTokenReachesOnlyTheCloneContainer(t *testing.T) {
 	job := mustBuild(t, testConfig(), testRun())
 	var holders []string

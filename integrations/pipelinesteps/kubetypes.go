@@ -93,14 +93,17 @@ type PodTemplateSpec struct {
 
 // PodSpec is the step's pod.
 type PodSpec struct {
-	RestartPolicy                string              `json:"restartPolicy,omitempty"`
-	ServiceAccountName           string              `json:"serviceAccountName,omitempty"`
-	AutomountServiceAccountToken *bool               `json:"automountServiceAccountToken,omitempty"`
-	EnableServiceLinks           *bool               `json:"enableServiceLinks,omitempty"`
-	SecurityContext              *PodSecurityContext `json:"securityContext,omitempty"`
-	InitContainers               []Container         `json:"initContainers,omitempty"`
-	Containers                   []Container         `json:"containers"`
-	Volumes                      []Volume            `json:"volumes,omitempty"`
+	RestartPolicy                string `json:"restartPolicy,omitempty"`
+	ServiceAccountName           string `json:"serviceAccountName,omitempty"`
+	AutomountServiceAccountToken *bool  `json:"automountServiceAccountToken,omitempty"`
+	EnableServiceLinks           *bool  `json:"enableServiceLinks,omitempty"`
+	// TerminationGracePeriodSeconds is a pointer because 0 means "kill at
+	// once", while absent is the API's 30 seconds.
+	TerminationGracePeriodSeconds *int64              `json:"terminationGracePeriodSeconds,omitempty"`
+	SecurityContext               *PodSecurityContext `json:"securityContext,omitempty"`
+	InitContainers                []Container         `json:"initContainers,omitempty"`
+	Containers                    []Container         `json:"containers"`
+	Volumes                       []Volume            `json:"volumes,omitempty"`
 }
 
 // PodSecurityContext is the pod-wide security context.
@@ -129,9 +132,12 @@ type Container struct {
 	SecurityContext *SecurityContext `json:"securityContext,omitempty"`
 }
 
-// SecurityContext is a container's security context.
+// SecurityContext is a container's security context. RunAsUser is a pointer
+// because 0 -- root -- is a value the runner writes, and absent means the
+// image's own user.
 type SecurityContext struct {
-	AllowPrivilegeEscalation *bool `json:"allowPrivilegeEscalation,omitempty"`
+	RunAsUser                *int64 `json:"runAsUser,omitempty"`
+	AllowPrivilegeEscalation *bool  `json:"allowPrivilegeEscalation,omitempty"`
 }
 
 // Probe is a startup probe: an exec command polled until it succeeds.
