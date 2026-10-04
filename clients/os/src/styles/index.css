@@ -8102,11 +8102,19 @@ a.os-button {
   white-space: nowrap;
   color: var(--os-muted);
 }
-/* The message takes what the fixed cells and the attributes leave, and never
- * less than a readable minimum: 32 characters of its own mono voice. A
- * one-line row is only ever as narrow as STACK_BELOW (src/logs/LogLine.tsx)
- * allows, which was measured to hold that minimum beside the fixed cells and
- * the widest subject mark. */
+/* THE MESSAGE AND THE ATTRIBUTES: three layouts, one per list (R40, R40b,
+ * epic memql#5478). useLogRowLayout names one on `.os-logs-list` as
+ * `data-layout`, from the list's width and the reader's font size. These two
+ * rules are WIDE's, and an unmeasured list is WIDE; MEDIUM and NARROW are
+ * below.
+ *
+ * WIDE: the attributes are an aligned column of forty percent of the row,
+ * whose fixed basis starts it at one x on every line that ends in the same
+ * mark, and the message takes the rest. A list is WIDE only from WIDE_FROM
+ * (src/logs/LogLine.tsx), measured to hold the fixed cells, the widest mark
+ * and the whole column beside a comfortable message of forty characters, so
+ * the column never takes the message below that. The 32-character minimum
+ * is MEDIUM's floor; WIDE never reaches it. */
 .os-logs-message {
   flex: 1 1 0;
   min-width: 32ch;
@@ -8114,13 +8122,9 @@ a.os-button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Inline attributes are a column of at most forty percent of the row: they
- * are the quiet half, and a line whose attributes crowded out its message
- * would read backwards. So they are the cell that gives way. The column's
- * basis is fixed, which starts it at one x on every wide row that ends in
- * the same mark; a row too short for the fixed cells, the message's minimum
- * and the whole column takes the difference from the attributes alone --
- * they truncate, then vanish -- and the message keeps its 32 characters. */
+/* Inline attributes are the quiet half, and a line whose attributes crowded
+ * out its message would read backwards: at most forty percent of the row,
+ * and in every layout the first cell to give way. */
 .os-logs-attrs {
   flex: 0 1 40%;
   min-width: 0;
@@ -8143,11 +8147,11 @@ a.os-button {
  * rather than doing one to it.
  *
  * AT MOST EIGHTEEN CHARACTERS, then an ellipsis. The word is a concept's last
- * segment, which nothing bounds, and STACK_BELOW can only hold the message's
- * minimum beside a mark of known width. Eighteen keeps every subject the
- * logs name today whole ("packageDeployment" is seventeen); the full name
- * stays on the mark's title and in its label. The 16px is its padding and
- * border. */
+ * segment, which nothing bounds, and the two measures that choose a list's
+ * layout can only hold a message beside a mark of known width. Eighteen keeps
+ * every subject the logs name today whole ("packageDeployment" is
+ * seventeen); the full name stays on the mark's title and in its label. The
+ * 16px is its padding and border. */
 .os-logs-subject {
   max-width: calc(18ch + 16px);
   overflow: hidden;
@@ -8177,18 +8181,41 @@ a.os-button {
   font-size: var(--os-text-xs);
 }
 
-/* ---- the stacked row (R40, epic memql#5478) ----
+/* ---- MEDIUM: the message first (R40b) ----
+ *
+ * From STACK_BELOW up to WIDE_FROM a row cannot hold the whole attribute
+ * column beside a comfortable message, so the column is what goes. The
+ * message is sized by its own length and is the only cell that can shrink,
+ * so it is cut only when the row has nothing else to give, and never below
+ * its 32 characters; the attributes have no basis and take only what it
+ * leaves -- truncated, then gone, before the message loses a character.
+ * Their auto margin seats them against the mark, so the column is ragged
+ * here: that is the price of the message. */
+.os-logs-list[data-layout="medium"] .os-logs-message {
+  flex: 0 1 auto;
+}
+.os-logs-list[data-layout="medium"] .os-logs-attrs {
+  flex: 1 1 0;
+  margin-left: auto;
+}
+/* A line with no attributes still ends at the row's edge: the message does
+ * not grow here, so the mark is pushed there. */
+.os-logs-list[data-layout="medium"] .os-logs-attrs:empty + .os-logs-subject-cell {
+  margin-left: auto;
+}
+
+/* ---- NARROW: the stacked row (R40) ----
  *
  * A list narrower than STACK_BELOW cannot hold the fixed cells and a readable
  * message on one line, so the row takes two: time, level, component and the
- * subject mark, then the whole message at full width. The list says so as
- * `data-stacked`, from the same measurement that tells the windowed list the
- * taller STACKED_ROW_HEIGHT (src/logs/useLogRowLayout.ts) -- a container query
- * here would restyle rows the list still spaced as one line. The inline
- * attributes go: the line's detail lists every one of them and opens from the
- * row (a click, or Enter on the focused list), and a third line of quiet
- * text would cost every row a third of its height for what the detail holds. */
-.os-logs-list[data-stacked] .os-logs-line {
+ * subject mark, then the whole message at full width. The same measurement
+ * tells the windowed list the taller row (src/logs/useLogRowLayout.ts) -- a
+ * container query here would restyle rows the list still spaced as one line.
+ * The inline attributes go: the line's detail lists every one of them and
+ * opens from the row (a click, or Enter on the focused list), and a third
+ * line of quiet text would cost every row a third of its height for what the
+ * detail holds. */
+.os-logs-list[data-layout="narrow"] .os-logs-line {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr) auto;
   grid-template-areas:
@@ -8197,12 +8224,12 @@ a.os-button {
   align-content: center;
   row-gap: 3px;
 }
-.os-logs-list[data-stacked] .os-logs-time { grid-area: time; }
-.os-logs-list[data-stacked] .os-logs-level { grid-area: level; }
-.os-logs-list[data-stacked] .os-logs-component { grid-area: component; width: auto; }
-.os-logs-list[data-stacked] .os-logs-subject-cell { grid-area: subject; }
-.os-logs-list[data-stacked] .os-logs-message { grid-area: message; min-width: 0; }
-.os-logs-list[data-stacked] .os-logs-attrs { display: none; }
+.os-logs-list[data-layout="narrow"] .os-logs-time { grid-area: time; }
+.os-logs-list[data-layout="narrow"] .os-logs-level { grid-area: level; }
+.os-logs-list[data-layout="narrow"] .os-logs-component { grid-area: component; width: auto; }
+.os-logs-list[data-layout="narrow"] .os-logs-subject-cell { grid-area: subject; }
+.os-logs-list[data-layout="narrow"] .os-logs-message { grid-area: message; min-width: 0; }
+.os-logs-list[data-layout="narrow"] .os-logs-attrs { display: none; }
 
 /* ---- the scope line ----
  *

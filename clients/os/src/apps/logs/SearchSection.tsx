@@ -104,7 +104,7 @@ export function SearchSection({
   const sources = useLogSources(bounds, bounds === null ? "" : `search:${windowKey}`);
 
   const selected = selectedId === "" ? undefined : search.rows.find((row) => row.id === selectedId);
-  const layout = useLogRowLayout(settings.density);
+  const arrangement = useLogRowLayout(settings.density);
   const narrowed = isNarrowed(filters);
   const chips: RefineChip[] = constraintsOf(filters).map((c) => ({
     id: c.id,
@@ -208,10 +208,10 @@ export function SearchSection({
             ) : null
           ) : (
             <>
-              <div className="os-logs-list" ref={layout.listRef} data-stacked={layout.stacked || undefined}>
+              <div className="os-logs-list" ref={arrangement.listRef} data-layout={arrangement.layout}>
                 <WindowedList
                   rows={search.rows}
-                  rowHeight={layout.rowHeight}
+                  rowHeight={arrangement.rowHeight}
                   renderRow={(row) => <LogLine row={row} now={now} onSubject={narrowTo} />}
                   rowId={(row) => row.id}
                   selectedId={selectedId}

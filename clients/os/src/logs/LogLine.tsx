@@ -7,17 +7,20 @@ import { attrsInline, conceptWord, levelWord, type LogRow } from "./rows";
 // warn and error only; the elapsed time, tabular and muted, with the exact
 // instant on `title`; the level WORD, coloured only for warn and error and
 // muted otherwise -- colour is never the only carrier; the component; the
-// message in the mono voice; the attributes inline as `key=value`, muted, a
-// column of at most forty percent of the row and the FIRST thing to give way
-// when the row is short; and, when the line is about something, a small quiet
-// mark at the row end, at most eighteen characters, that narrows to it.
+// message in the mono voice; the attributes inline as `key=value`, muted, at
+// most forty percent of the row and the FIRST thing to give way when the row
+// is short; and, when the line is about something, a small quiet mark at the
+// row end, at most eighteen characters, that narrows to it.
 //
-// IN A NARROW LIST THE LINE TAKES TWO ROWS (R40, epic memql#5478): time,
-// level, component and the mark, then the whole message beneath them. One line
-// could not hold the fixed cells and a readable message there, and the message
-// is the line. The inline attributes are left to the line's detail, which
-// lists every one of them (useLogRowLayout says when, at the list's width and
-// the reader's font size).
+// THREE LAYOUTS, ONE PER LIST (R40, R40b, epic memql#5478), named on the
+// list as `data-layout` by useLogRowLayout from its width and the reader's
+// font size. WIDE: the attributes are an aligned column, because the row has
+// room for it beside a comfortable message. MEDIUM: the message first, sized
+// by its own length, with the attributes in whatever it leaves. NARROW: two
+// rows -- time, level, component and the mark, then the whole message beneath
+// them; the inline attributes are left to the line's detail, which lists
+// every one of them. The message is the line, so it is never the cell that
+// loses.
 //
 // No badge, no per-row border, no arrival ring: a log is nothing but
 // arrivals, and a row that announced itself would be a list that never
@@ -36,9 +39,9 @@ export const ROW_HEIGHT = { comfortable: 30, compact: 22 } as const;
 export type LogDensity = keyof typeof ROW_HEIGHT;
 
 /** The same rows, stacked on two lines in a narrow list
- *  (`.os-logs-list[data-stacked]` in the stylesheet), at the default 16px
- *  root. Two lines of text are most of the row, so the row grows with the
- *  reader's font size: stackedRowHeight. */
+ *  (`.os-logs-list[data-layout="narrow"]` in the stylesheet), at the default
+ *  16px root. Two lines of text are most of the row, so the row grows with
+ *  the reader's font size: stackedRowHeight. */
 export const STACKED_ROW_HEIGHT = { comfortable: 48, compact: 40 } as const;
 
 /** STACKED_ROW_HEIGHT at a root font size, in whole pixels. Held at its 16px
@@ -66,12 +69,50 @@ export const STACK_BELOW = {
   compact: { scaled: 534.7, fixed: 94 },
 } as const;
 
-/** STACK_BELOW in CSS pixels at a root font size. Only the part sized in
- *  characters scales: scaling the pixels as well would stack too early under
- *  a large font and too late under a small one, where the line overflows. */
+/** The list width from which a row holds the fixed cells, the widest mark, a
+ *  COMFORTABLE message -- forty characters, a quarter more than the readable
+ *  minimum -- and the whole forty-percent attribute column, per density, in
+ *  STACK_BELOW's two parts. Derived from the same measurements: the cells,
+ *  the mark and the message are sixty percent of the line at most, because
+ *  the column takes the other forty, so they and the row's own gaps and mark
+ *  padding (66px; 56px) are divided by 0.6 -- time, level and component, the
+ *  mark's eighteen characters and forty of the message's (288px; 264px) come
+ *  to 630.1px comfortable and 587.5px compact before that -- and the list's
+ *  border, the row's padding and rule and a classic scrollbar (38px) are
+ *  added after it. */
+export const WIDE_FROM = {
+  comfortable: { scaled: 1050.2, fixed: 148 },
+  compact: { scaled: 979.1, fixed: 131.3 },
+} as const;
+
+/** One of the two measures in CSS pixels at a root font size. Only the part
+ *  sized in characters scales: scaling the pixels as well would ask too much
+ *  under a large font and too little under a small one, where the line
+ *  overflows. */
+function atRoot(measure: { scaled: number; fixed: number }, rootPx: number): number {
+  return Math.ceil((measure.scaled * rootPx) / 16 + measure.fixed);
+}
+
+/** The width below which a list's rows stack, at a root font size. */
 export function stackBelow(density: LogDensity, rootPx: number): number {
-  const { scaled, fixed } = STACK_BELOW[density];
-  return Math.ceil((scaled * rootPx) / 16 + fixed);
+  return atRoot(STACK_BELOW[density], rootPx);
+}
+
+/** The width from which a list's attributes are an aligned column, at a root
+ *  font size. */
+export function wideFrom(density: LogDensity, rootPx: number): number {
+  return atRoot(WIDE_FROM[density], rootPx);
+}
+
+/** How a list lays its rows out (`.os-logs-list[data-layout]`). */
+export type LogLayout = "wide" | "medium" | "narrow";
+
+/** The layout for a list this wide at this root font size. An unmeasured
+ *  list (zero wide: a test's DOM, a list not yet laid out) is WIDE, the one
+ *  line every row had before R40. */
+export function logLayout(width: number, density: LogDensity, rootPx: number): LogLayout {
+  if (width <= 0 || width >= wideFrom(density, rootPx)) return "wide";
+  return width < stackBelow(density, rootPx) ? "narrow" : "medium";
 }
 
 export function LogLine({

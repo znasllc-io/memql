@@ -64,7 +64,7 @@ export function TailView({
 }) {
   const selected = selectedId === "" ? undefined : rows.find((row) => row.id === selectedId);
   const pending = tail.newSinceScrolled;
-  const layout = useLogRowLayout(density);
+  const arrangement = useLogRowLayout(density);
 
   return (
     <>
@@ -104,10 +104,10 @@ export function TailView({
           </div>
         )
       ) : (
-        <div className="os-logs-list" ref={layout.listRef} data-stacked={layout.stacked || undefined}>
+        <div className="os-logs-list" ref={arrangement.listRef} data-layout={arrangement.layout}>
           <WindowedList
             rows={rows}
-            rowHeight={layout.rowHeight}
+            rowHeight={arrangement.rowHeight}
             renderRow={(row) => <LogLine row={row} now={now} onSubject={onSubject} />}
             rowId={(row) => row.id}
             selectedId={selectedId}
