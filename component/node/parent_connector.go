@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -32,10 +33,17 @@ type ParentConnector struct {
 	peerMgr  *PeerManager
 	logger   *slog.Logger
 
-	mu                   sync.Mutex
-	conn                 *peerConnection
-	cancel               context.CancelFunc
-	parentNodeId         string                       // learned from NodeWelcome
+	mu           sync.Mutex
+	conn         *peerConnection
+	cancel       context.CancelFunc
+	parentNodeId string // learned from NodeWelcome
+	// parentAddr is the address dialled now: identity.ParentAddress at
+	// first, a re-resolved one after a discovered parent went away.
+	parentAddr string
+	// resolveParent re-runs peer discovery skipping the given address; nil
+	// when the parent address is configured rather than discovered.
+	resolveParent func(ctx context.Context, exclude string) (string, bool)
+
 	aiForwardSink        AiForwardResponseSink        // optional, set on BFF binaries
 	workbenchForwardSink WorkbenchForwardResponseSink // optional, set on agent binaries in cluster mode
 	workerForwardSink    WorkerForwardResponseSink    // optional, set on agent binaries (memql#4352)
@@ -106,10 +114,12 @@ func NewParentConnector(identity *Identity, peerMgr *PeerManager, logger *slog.L
 	comp, _ := component.New(ParentConnectorComponentName)
 
 	pc := &ParentConnector{
-		Component: comp,
-		identity:  identity,
-		peerMgr:   peerMgr,
-		logger:    logger,
+		Component:     comp,
+		identity:      identity,
+		peerMgr:       peerMgr,
+		logger:        logger,
+		parentAddr:    identity.ParentAddress,
+		resolveParent: identity.parentResolver,
 	}
 	pc.ConfigureLifecycle(
 		component.WithRunHook(pc.run),
@@ -133,6 +143,20 @@ func (*ParentConnector) Order() int {
 // parent's own rollout) so we re-establish promptly without busy-spinning.
 const parentReconnectDelay = 2 * time.Second
 
+// parentUnreachableAttempts is how many consecutive unanswered dials a
+// DISCOVERED parent gets before the connector looks for another one. Three
+// attempts span the first backoff steps (1s, 2s), long enough to ride out a
+// parent that is restarting its listener, short enough that a node whose
+// parent pod was replaced finds the new topology within seconds.
+const parentUnreachableAttempts = 3
+
+// currentParentAddress is the address the connector dials now.
+func (pc *ParentConnector) currentParentAddress() string {
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	return pc.parentAddr
+}
+
 func (pc *ParentConnector) run(ctx context.Context, markStarted func()) error {
 	ctx, cancel := context.WithCancel(ctx)
 	pc.mu.Lock()
@@ -142,10 +166,17 @@ func (pc *ParentConnector) run(ctx context.Context, markStarted func()) error {
 	markStarted()
 
 	pc.logger.Info("parent_connector: dialing parent",
-		"parent_address", pc.identity.ParentAddress,
+		"parent_address", pc.currentParentAddress(),
 		"node_id", pc.identity.ID,
 		"node_type", string(pc.identity.Type),
+		"re_resolvable", pc.resolveParent != nil,
 	)
+
+	// delay is the pause before the next outer attempt. It grows while a
+	// discovered parent is gone and the topology offers no other, so a node
+	// with nothing to connect to asks the database about as often as it would
+	// have dialled the dead address, and no more.
+	delay := parentReconnectDelay
 
 	// Supervising reconnect loop (memql#1246). A lost parent stream -- even a
 	// clean/transient one while the parent (e.g. identity) is ITSELF rolling
@@ -160,7 +191,8 @@ func (pc *ParentConnector) run(ctx context.Context, markStarted func()) error {
 	// path where Connect itself returns. A peer removal permanently closes its
 	// transport, so each outer attempt must create a fresh connection.
 	for {
-		conn := newPeerConnection(pc.identity, "", pc.identity.ParentAddress, pc.logger)
+		addr := pc.currentParentAddress()
+		conn := newPeerConnection(pc.identity, "", addr, pc.logger)
 		conn.SetHeartbeatInterval(pc.peerMgr.HeartbeatInterval())
 		// Advertise this node's lifecycle health on every heartbeat to the parent
 		// (memql#1268) so the parent routes around us the instant we drain.
@@ -170,9 +202,14 @@ func (pc *ParentConnector) run(ctx context.Context, markStarted func()) error {
 		// forever on a dead token. Only wired when self-bootstrap is configured --
 		// an out-of-band MEMQL_NODE_TOKEN cannot be re-minted.
 		if pc.identity.CanRemintBearerToken() {
-			conn.SetReauthFn(func(ctx context.Context) (string, error) {
-				return pc.identity.RemintBearerToken(ctx, pc.logger)
+			conn.SetReauthFn(func(ctx context.Context, rejected string) (string, error) {
+				return pc.identity.RefreshRejectedBearerToken(ctx, pc.logger, rejected)
 			})
+		}
+		// A discovered parent is a pod address. Stop redialling it once it
+		// has gone unanswered, so the loop below can look for a live one.
+		if pc.resolveParent != nil {
+			conn.SetGiveUpAfter(parentUnreachableAttempts)
 		}
 
 		pc.mu.Lock()
@@ -196,20 +233,50 @@ func (pc *ParentConnector) run(ctx context.Context, markStarted func()) error {
 			return nil
 		}
 
-		// Connect returned without a cancellation: the parent stream ended
-		// (clean EOF or error). Log + re-dial after a short backoff rather than
-		// returning, so the node stays serving-capable across the parent's
-		// reconnect window.
-		pc.logger.Warn("parent_connector: parent stream ended; will reconnect",
-			"error", err,
-			"parent_address", pc.identity.ParentAddress,
-			"node_id", pc.identity.ID,
-		)
+		switch {
+		case errors.Is(err, ErrPeerUnreachable) && pc.resolveParent != nil:
+			// The discovered parent stopped answering: its pod is gone or
+			// going. Ask the topology for another rather than redialling it.
+			next, ok := pc.resolveParent(ctx, addr)
+			if ok && next != addr {
+				pc.mu.Lock()
+				pc.parentAddr = next
+				pc.mu.Unlock()
+				delay = parentReconnectDelay
+				pc.logger.Info("parent_connector: parent unreachable; re-resolved a parent from the cluster topology",
+					"previous_address", addr,
+					"parent_address", next,
+					"node_id", pc.identity.ID,
+					"error", err,
+				)
+				break
+			}
+			if delay *= 2; delay > maxBackoff {
+				delay = maxBackoff
+			}
+			pc.logger.Warn("parent_connector: parent unreachable and the cluster topology offers no other; will look again",
+				"parent_address", addr,
+				"node_id", pc.identity.ID,
+				"retry_in", delay,
+				"error", err,
+			)
+		default:
+			// Connect returned without a cancellation: the parent stream ended
+			// (clean EOF or error). Log + re-dial after a short backoff rather
+			// than returning, so the node stays serving-capable across the
+			// parent's reconnect window.
+			delay = parentReconnectDelay
+			pc.logger.Warn("parent_connector: parent stream ended; will reconnect",
+				"error", err,
+				"parent_address", addr,
+				"node_id", pc.identity.ID,
+			)
+		}
 
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(parentReconnectDelay):
+		case <-time.After(delay):
 		}
 	}
 }
@@ -260,7 +327,7 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 			pc.peerMgr.RegisterMonitored(&nodev1.PeerInfo{
 				NodeId:   welcome.NodeId,
 				NodeType: welcome.NodeType,
-				Address:  pc.identity.ParentAddress,
+				Address:  pc.currentParentAddress(),
 				Health:   nodev1.NodeHealthStatus_NODE_HEALTH_HEALTHY,
 			})
 			// Bind our outbound stream onto the parent's PeerEntry so

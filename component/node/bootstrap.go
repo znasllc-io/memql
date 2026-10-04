@@ -83,7 +83,7 @@ func BootstrapFor(nodeType NodeType) NodeBootstrap {
 
 // DiscoverPeerAddress queries the DB for a healthy peer to connect to.
 // If the identity already has a parent address (from MEMQL_PARENT_ADDRESS),
-// this is a no-op. Otherwise it queries v1:cluster:node for any healthy
+// this is a no-op. Otherwise it reads the cluster topology for any healthy
 // node whose address is non-empty and not this node's own address, and
 // that relays mesh events (not identity), and sets identity.ParentAddress to
 // the first match.
@@ -91,6 +91,15 @@ func BootstrapFor(nodeType NodeType) NodeBootstrap {
 // This uses DB-based peer discovery to find mesh peers.
 // The first node in a fresh cluster finds no peers, starts as the mesh
 // root, and waits for others to discover it via their own DB query.
+//
+// A DISCOVERED parent is a pod address, and a pod is replaced on every
+// rollout. So when discovery supplies the address it also leaves the
+// Identity a way to discover again, which the ParentConnector uses once the
+// parent stops answering (ErrPeerUnreachable) instead of redialling a pod that
+// is gone. On 2026-09-28 a bff redialled the address of an edge pod its
+// rollout had replaced every 30 seconds for as long as it ran. An address
+// from MEMQL_PARENT_ADDRESS is a Service that always routes to a live pod, so
+// it gets no resolver and is redialled as before.
 func DiscoverPeerAddress(ctx BootstrapContext) {
 	if ctx.Identity == nil || ctx.Identity.ParentAddress != "" {
 		return // already configured via env var
@@ -99,7 +108,7 @@ func DiscoverPeerAddress(ctx BootstrapContext) {
 		return // no engine to query (shouldn't happen in normal bootstrap)
 	}
 
-	result, err := ctx.Engine.Execute(context.Background(), "concept==v1:cluster:node")
+	addr, peerId, err := discoverParentAddress(context.Background(), ctx.Engine, ctx.Identity, "")
 	if err != nil {
 		if ctx.Logger != nil {
 			ctx.Logger.Info("peer discovery: no existing peers found (first node or empty cluster)",
@@ -107,15 +116,61 @@ func DiscoverPeerAddress(ctx BootstrapContext) {
 		}
 		return
 	}
-	if result == nil || result.Bundle == nil || len(result.Bundle.Nodes) == 0 {
-		if ctx.Logger != nil {
-			ctx.Logger.Info("peer discovery: no existing peers in DB (this is the first node)")
+	logger := ctx.Logger
+	if addr == "" {
+		// The mesh root: no parent now, and no ParentConnector to lose one.
+		if logger != nil {
+			logger.Info("peer discovery: no healthy peers found (this node will accept inbound connections)")
 		}
 		return
 	}
+	engine := ctx.Engine
+	identity := ctx.Identity
+	ctx.Identity.ParentAddress = addr
+	ctx.Identity.parentResolver = func(rctx context.Context, exclude string) (string, bool) {
+		next, _, err := discoverParentAddress(rctx, engine, identity, exclude)
+		if err != nil {
+			if logger != nil {
+				logger.Warn("peer discovery: re-resolving the parent failed", "error", err)
+			}
+			return "", false
+		}
+		return next, next != ""
+	}
+	if logger != nil {
+		logger.Info("peer discovery: discovered peer from DB",
+			"peer_address", addr,
+			"peer_id", peerId)
+	}
+}
 
-	selfAddr := ctx.Identity.Address
-	selfId := ctx.Identity.ID
+// parentTopologyQuery is the topology read parent discovery makes: the LATEST
+// row per node, nodes already marked stopped left out. The raw
+// `concept==v1:cluster:node` scan it replaces returns historical versions
+// (capped, see WorkerDialer.discoverFromDB), so a pod that has since gone
+// offline could still look healthy to it.
+const parentTopologyQuery = "query staleClusterNodes()"
+
+// topologyReader is the one engine call parent discovery makes.
+type topologyReader interface {
+	Execute(ctx context.Context, query string) (*memqlengine.ExecuteResult, error)
+}
+
+// discoverParentAddress returns the NodeService address of a peer this node
+// can take as its parent, or "" when the topology offers none. It skips this
+// node itself, `exclude` (the address that just stopped answering), a node
+// that relays no mesh events, and any node not healthy or connecting.
+func discoverParentAddress(ctx context.Context, engine topologyReader, identity *Identity, exclude string) (addr, peerId string, err error) {
+	result, err := engine.Execute(ctx, parentTopologyQuery)
+	if err != nil {
+		return "", "", err
+	}
+	if result == nil || result.Bundle == nil {
+		return "", "", nil
+	}
+
+	selfAddr := identity.Address
+	selfId := identity.ID
 	for _, n := range result.Bundle.Nodes {
 		nodeId := n.GetId()
 		if nodeId == selfId || nodeId == "v1:cluster:node:"+selfId {
@@ -129,7 +184,7 @@ func DiscoverPeerAddress(ctx BootstrapContext) {
 		fields := payloadStruct.GetFields()
 		addr := fields["address"].GetStringValue()
 		health := fields["health"].GetStringValue()
-		if addr == "" || addr == selfAddr {
+		if addr == "" || addr == selfAddr || addr == exclude {
 			continue
 		}
 		// NEVER A NODE THAT RELAYS NOTHING (memql#5338, D8). A parent is often
@@ -142,17 +197,8 @@ func DiscoverPeerAddress(ctx BootstrapContext) {
 		}
 		// Accept healthy or connecting nodes.
 		if health == "healthy" || health == "connecting" || health == "" {
-			ctx.Identity.ParentAddress = addr
-			if ctx.Logger != nil {
-				ctx.Logger.Info("peer discovery: discovered peer from DB",
-					"peer_address", addr,
-					"peer_id", nodeId)
-			}
-			return
+			return addr, nodeId, nil
 		}
 	}
-
-	if ctx.Logger != nil {
-		ctx.Logger.Info("peer discovery: no healthy peers found (this node will accept inbound connections)")
-	}
+	return "", "", nil
 }
