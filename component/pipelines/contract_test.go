@@ -15,6 +15,7 @@ import (
 // another node.
 func TestStepRequestWireNamesArePinned(t *testing.T) {
 	raw, err := json.Marshal(StepRequest{
+		Domain:  "example.test",
 		Step:    Step{Shard: ShardRef{Index: 1, Count: 2}},
 		Secrets: map[string]string{"TOKEN": "x"},
 	})
@@ -26,7 +27,7 @@ func TestStepRequestWireNamesArePinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"attempt", "compute", "event", "installationId", "mode", "ownerUserId",
+		"attempt", "compute", "domain", "event", "installationId", "mode", "ownerUserId",
 		"pipelineId", "repository", "runAttempt", "runId", "runStartedAt",
 		"secrets", "sha", "step", "stepKey", "version", "workRunId",
 	}
@@ -104,6 +105,21 @@ func TestEnvironmentOmitsTheShardOfAnUnshardedStep(t *testing.T) {
 	env := StepRequest{}.Environment()
 	if _, ok := env["MEMQL_SHARD"]; ok {
 		t.Errorf("an unsharded step exported MEMQL_SHARD=%q", env["MEMQL_SHARD"])
+	}
+}
+
+// A step reaches its cluster's public hosts -- api.<domain>, identity.<domain>,
+// os.<domain> -- from the domain it is handed, so the domain is a platform
+// name like the rest: a secret of the same name never replaces it, and a
+// cluster with none configured exports nothing rather than an empty value a
+// step would build "https://api." from.
+func TestEnvironmentCarriesTheClusterDomain(t *testing.T) {
+	req := StepRequest{Domain: "example.test", Secrets: map[string]string{"MEMQL_DOMAIN": "evil.test"}}
+	if got := req.Environment()["MEMQL_DOMAIN"]; got != "example.test" {
+		t.Fatalf("MEMQL_DOMAIN = %q, want example.test", got)
+	}
+	if _, ok := (StepRequest{}).Environment()["MEMQL_DOMAIN"]; ok {
+		t.Fatal("an empty domain must leave MEMQL_DOMAIN unset, not empty")
 	}
 }
 

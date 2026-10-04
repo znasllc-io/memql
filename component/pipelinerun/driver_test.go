@@ -402,6 +402,58 @@ func TestTheDriverRunsAPipelineEndToEnd(t *testing.T) {
 	}
 }
 
+// A step is told its cluster's front-door domain on its request, from the port
+// the node was configured with, so every step of a run carries the one value
+// and a step exports it as MEMQL_DOMAIN (verify-rollout reaches the cluster's
+// api.<domain>, identity.<domain> and os.<domain> through it).
+func TestEveryStepRequestCarriesTheClustersDomain(t *testing.T) {
+	dh := newDriveHarness(t, driveManifest)
+	dh.integ.Configure(func(d *Deps) { d.Domain = func() string { return "example.test" } })
+	deliver(t, dh.integ, dh.openRun(t, prOpening()))
+
+	sent := dh.exec.sent()
+	if len(sent) != 3 {
+		t.Fatalf("the runner was handed %v; want all three steps", dh.exec.sentKeys())
+	}
+	for _, req := range sent {
+		if req.Domain != "example.test" {
+			t.Errorf("%s: Domain = %q, want example.test", req.StepKey, req.Domain)
+		}
+		if got := req.Environment()["MEMQL_DOMAIN"]; got != "example.test" {
+			t.Errorf("%s: MEMQL_DOMAIN = %q, want example.test", req.StepKey, got)
+		}
+	}
+}
+
+// A cluster with no domain configured -- no port at all, or one that answers
+// "" -- sends none: a step must see MEMQL_DOMAIN unset, not an empty domain it
+// would build "https://api." from.
+func TestAClusterWithNoDomainSendsStepsNone(t *testing.T) {
+	for name, port := range map[string]func() string{
+		"no port":          nil,
+		"a port answering": func() string { return "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			dh := newDriveHarness(t, driveManifest)
+			dh.integ.Configure(func(d *Deps) { d.Domain = port })
+			deliver(t, dh.integ, dh.openRun(t, prOpening()))
+
+			sent := dh.exec.sent()
+			if len(sent) != 3 {
+				t.Fatalf("the runner was handed %v; want all three steps", dh.exec.sentKeys())
+			}
+			for _, req := range sent {
+				if req.Domain != "" {
+					t.Errorf("%s: Domain = %q, want none", req.StepKey, req.Domain)
+				}
+				if _, ok := req.Environment()["MEMQL_DOMAIN"]; ok {
+					t.Errorf("%s: exported MEMQL_DOMAIN with no domain configured", req.StepKey)
+				}
+			}
+		})
+	}
+}
+
 // An affected run reads what changed and the Go graph at its commit: a
 // packages step is handed the packages the change reaches, a step gated on a
 // bucket the change missed is skipped, and the slice each step was given is

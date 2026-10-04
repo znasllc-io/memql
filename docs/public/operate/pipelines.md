@@ -393,6 +393,7 @@ Every runner exports the same environment to a step's command:
 | `MEMQL_VERSION` | The release's tag on a release, the commit otherwise |
 | `MEMQL_PACKAGES` | The step's Go import paths, separated by spaces. Empty for a step that selects none |
 | `MEMQL_SHARD` | `<i>/<k>` on a shard, absent otherwise |
+| `MEMQL_DOMAIN` | The cluster's front-door domain, through which a step reaches `api.<domain>`, `identity.<domain>` and `os.<domain>` from outside, as any client does. Absent when the cluster has none configured |
 
 Each allowed secret is added under its own name. The platform's names win over
 a secret of the same name, which the manifest refuses anyway.

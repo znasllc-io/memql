@@ -57,6 +57,11 @@ type Deps struct {
 	// webhook delivery where it does and the poll where it does not; nil is
 	// "no", which suggests the poll.
 	WebhookReachable func() bool
+	// Domain is the cluster's MEMQL_DOMAIN, read at each call: the front-door
+	// domain the driver puts on every step's request, which a step exports as
+	// MEMQL_DOMAIN to reach the cluster's public hosts from outside. Nil or ""
+	// sends no MEMQL_DOMAIN.
+	Domain func() string
 	// NodeID is this replica's MEMQL_NODE_ID: what a driver writes as its
 	// lease, and what RequestCancel compares a run's driverNodeId with.
 	NodeID string
@@ -144,6 +149,9 @@ func (i *Integration) snapshot() Deps {
 	}
 	if d.OSOrigin == nil {
 		d.OSOrigin = func() string { return "" }
+	}
+	if d.Domain == nil {
+		d.Domain = func() string { return "" }
 	}
 	if d.HeartbeatEvery <= 0 {
 		d.HeartbeatEvery = leaseRenewEvery

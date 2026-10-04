@@ -148,17 +148,23 @@ type StepRequest struct {
 	RunAttempt int `json:"runAttempt"`
 	// RunStartedAt is RFC3339: a step's deadline is the lesser of its own
 	// timeout and the run's ceiling, measured from here.
-	RunStartedAt   string     `json:"runStartedAt"`
-	PipelineID     string     `json:"pipelineId"`
-	OwnerUserID    string     `json:"ownerUserId"`
-	Repository     Repository `json:"repository"`
-	SHA            string     `json:"sha"`
-	Mode           Mode       `json:"mode"`
-	Event          Event      `json:"event"`
-	Version        string     `json:"version"`
-	InstallationID int64      `json:"installationId"`
-	Compute        Compute    `json:"compute"`
-	Step           Step       `json:"step"`
+	RunStartedAt string     `json:"runStartedAt"`
+	PipelineID   string     `json:"pipelineId"`
+	OwnerUserID  string     `json:"ownerUserId"`
+	Repository   Repository `json:"repository"`
+	SHA          string     `json:"sha"`
+	Mode         Mode       `json:"mode"`
+	Event        Event      `json:"event"`
+	Version      string     `json:"version"`
+	// Domain is the front-door domain of the cluster running the pipeline
+	// (its MEMQL_DOMAIN), "" when none is configured. A step reads it as
+	// MEMQL_DOMAIN to reach this cluster's public hosts -- verify-rollout's
+	// api.<domain>, identity.<domain> and os.<domain> -- from outside, the
+	// way any client does; a step reaches nothing inside the cluster.
+	Domain         string  `json:"domain,omitempty"`
+	InstallationID int64   `json:"installationId"`
+	Compute        Compute `json:"compute"`
+	Step           Step    `json:"step"`
 	// Secrets are the resolved values of Step.Secrets, by name, resolved
 	// under the owner's allowlist on the driver's side. They are never
 	// journaled: a step row records only the names.

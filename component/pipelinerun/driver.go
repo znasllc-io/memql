@@ -1138,6 +1138,7 @@ type requestFacts struct {
 	event                               pipelines.Event
 	installation                        int64
 	compute                             pipelines.Compute
+	domain                              string
 }
 
 func (dr *runDriver) setFacts() {
@@ -1162,6 +1163,7 @@ func (dr *runDriver) setFacts() {
 		},
 		sha: dr.run.SHA, version: version, mode: dr.run.Mode, event: dr.run.Event,
 		installation: dr.installation, compute: dr.p.Compute,
+		domain: dr.d.Domain(),
 	}
 }
 
@@ -1183,6 +1185,7 @@ func (dr *runDriver) request(t *stepTrack, secrets map[string]string) pipelines.
 		Mode:           f.mode,
 		Event:          f.event,
 		Version:        f.version,
+		Domain:         f.domain,
 		InstallationID: f.installation,
 		Compute:        f.compute,
 		Step:           t.step,

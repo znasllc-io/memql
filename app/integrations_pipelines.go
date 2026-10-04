@@ -23,8 +23,9 @@ import (
 // Deployables' GitHub App client and verified grant path (the packages
 // plug-in), serializes replicas on a Postgres advisory lock (the DIRECT
 // database, which a transaction pooler would silently break), names this
-// replica (MEMQL_NODE_ID) and links its check runs to MemQL OS (the cluster's
-// domain). Only app/ holds every one of those.
+// replica (MEMQL_NODE_ID), links its check runs to MemQL OS and tells its steps
+// the cluster's front-door domain (both from MEMQL_DOMAIN). Only app/ holds
+// every one of those.
 //
 // NO BUILD TAG. A webhook is staged on the bff and opens its run there, the
 // poll is placed on agent replicas and opens runs there, and a person's
@@ -69,6 +70,7 @@ func (a *App) wirePipelines() {
 		d.WebhookReachable = func() bool {
 			return githubconnect.DomainIsPubliclyReachable(os.Getenv("MEMQL_DOMAIN"))
 		}
+		d.Domain = pipelinesDomain
 		if a.engine != nil {
 			d.Journal = workjournal.New(
 				workjournal.ExecutorFunc(func(ctx context.Context, q string) (any, error) {
@@ -87,12 +89,16 @@ func (a *App) wirePipelines() {
 // composed by (component/envregistry/domain.go). The domain is a value, read
 // at each call; with none set the link is omitted rather than invented.
 func pipelinesOSOrigin() string {
-	domain := strings.TrimSpace(os.Getenv("MEMQL_DOMAIN"))
+	domain := pipelinesDomain()
 	if domain == "" {
 		return ""
 	}
 	return "https://" + frontdoor.OsHost(domain)
 }
+
+// pipelinesDomain is this cluster's front-door domain, MEMQL_DOMAIN, read at
+// each call: what a step receives as MEMQL_DOMAIN. "" sends none.
+func pipelinesDomain() string { return strings.TrimSpace(os.Getenv("MEMQL_DOMAIN")) }
 
 // lookupPipelinesIntegration recovers the materialized pipelines plug-in, or
 // nil.
