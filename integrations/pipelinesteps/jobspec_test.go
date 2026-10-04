@@ -460,7 +460,10 @@ func TestBuildJob(t *testing.T) {
 			{Name: "MEMQL_RUN_ID", Value: "run-7f3a"},
 			{Name: "MEMQL_SHA", Value: testSHA},
 			{Name: "MEMQL_STEP", Value: "tests/go-tests#2"},
-			{Name: "MEMQL_STEP_COMMAND", Value: "go test $MEMQL_PACKAGES"},
+			// The wire form: $ doubled, which the kubelet's template rule
+			// turns back into `go test $MEMQL_PACKAGES` (ruling R25,
+			// jobspec_template_test.go).
+			{Name: "MEMQL_STEP_COMMAND", Value: "go test $$MEMQL_PACKAGES"},
 			{Name: "MEMQL_STEP_ARTIFACTS", Value: "coverage.out reports/*.xml"},
 			{Name: "MEMQL_ARTIFACT_MARKER", Value: "::memql-artifacts::4887b49fa27936d6"},
 			{Name: "GIT_CONFIG_COUNT", Value: "1"},

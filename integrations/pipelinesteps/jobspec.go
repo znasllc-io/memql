@@ -469,7 +469,10 @@ func serviceContainers(services map[string]pl.Service) []Container {
 		}
 		if strings.TrimSpace(svc.Ready) != "" {
 			c.StartupProbe = &Probe{
-				Exec:             &ExecAction{Command: []string{"/bin/sh", "-c", svc.Ready}},
+				// The kubelet expands a probe's command against the container's
+				// values like an env value (measured), so the check is the
+				// manifest's text through the same escape.
+				Exec:             &ExecAction{Command: []string{"/bin/sh", "-c", kubeLiteral(svc.Ready)}},
 				PeriodSeconds:    2,
 				FailureThreshold: 90,
 			}
@@ -551,7 +554,20 @@ func declaredCaches(caches []string) []string {
 	return out
 }
 
-func plainVar(name, value string) EnvVar { return EnvVar{Name: name, Value: value} }
+// plainVar is a literal environment variable, written through kubeLiteral:
+// every value BuildJob gives a container goes through here.
+func plainVar(name, value string) EnvVar { return EnvVar{Name: name, Value: kubeLiteral(value)} }
+
+// kubeLiteral writes s so that the container receives s itself (ruling R25).
+// Kubernetes treats an env value, a command and an exec probe's command as a
+// template: $(NAME) becomes the value of a variable defined before it and $$
+// becomes $. So a step's `kill -9 $$` reached the shell as `kill -9 $`, and a
+// quoted `$(MEMQL_RUN_ID)` arrived as the run id (measured on k3s v1.32). The
+// step's command, the contract values, a service's values and its ready check
+// are the manifest's text, or the event's, and must arrive as written, so
+// every $ is doubled; the kubelet turns $$ back into $ and expands nothing.
+// A secretKeyRef's value is not a template and is never passed through here.
+func kubeLiteral(s string) string { return strings.ReplaceAll(s, "$", "$$") }
 
 func secretVar(name, secretName, key string, optional bool) EnvVar {
 	ref := &SecretKeySelector{Name: secretName, Key: key}
