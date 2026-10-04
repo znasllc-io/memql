@@ -93,6 +93,13 @@ A step's pod runs up to four kinds of container, in this order:
 Every container runs with `allowPrivilegeEscalation: false`, and the pod with
 the `RuntimeDefault` seccomp profile, `restartPolicy: Never` and a 10-second
 termination grace (the step's wrapper is PID 1 and does not forward a SIGTERM).
+No container keeps the container runtime's `NET_RAW`, with which a root process
+on a bridge network can forge ARP replies and read the traffic of the pods
+beside it -- something no network policy governs. `cache-prep`, `clone` and the
+isolation probe run fixed scripts that need no capability at all, and drop every
+one; the step and each service drop `NET_RAW` alone, because their images'
+entrypoints may use the rest of the runtime's set (postgres's changes the owner
+of its data directory and steps down to its own user).
 The pod runs as the ServiceAccount `memql-pipelines-step`, which nothing is bound
 to and whose token is never mounted, with Service links off: no cluster
 credential is in it, and the only Secret it can name is its own. The namespace

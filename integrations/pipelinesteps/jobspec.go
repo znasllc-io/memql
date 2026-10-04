@@ -32,7 +32,8 @@ import (
 //
 // No cluster credential of any kind is present: the pod runs as an identity
 // with no RoleBinding, its token is never mounted, Service links are off, and
-// the only Secret it can name is its own. No container may gain privileges.
+// the only Secret it can name is its own. No container may gain privileges,
+// and none keeps the runtime's NET_RAW (rootContext, imageContext).
 //
 // BuildJob and BuildSecret are pure: the same inputs give the same objects,
 // which is what lets a replica rebuild what another replica created.
@@ -406,11 +407,43 @@ func artifactProblem(path string) string {
 	return ""
 }
 
+// The capabilities a container gives up (review I2). Pod Security baseline
+// refuses a pod that ADDS a capability, never the container runtime's default
+// set, and that set holds NET_RAW: with it a root container on a bridge
+// network (k3s's flannel) can forge ARP replies and read the traffic of the
+// pods beside it, the mesh's included, and no NetworkPolicy governs that. So
+// no container a pipeline runs keeps it.
+const (
+	capAll    = "ALL"
+	capNetRaw = "NET_RAW"
+)
+
 // rootContext pins cache-prep and the clone to uid 0 (ruling R17): the cache
 // claim's root is root-owned and may be 0755, so only root can open the
-// owner's directory under it.
+// owner's directory under it. Root by uid alone: both run a fixed script that
+// needs none of the runtime's default capabilities -- an owner creates and
+// chmods its own directories, and git fetches and checks out as anyone does --
+// so they drop every one (measured on k3s v1.35, under a root-owned claim root
+// of 0777 and of 0755). A claim whose root another uid owns and keeps closed
+// fails cache-prep, naming the directory, rather than being forced open.
 func rootContext() *SecurityContext {
-	return &SecurityContext{RunAsUser: ptr(int64(0)), AllowPrivilegeEscalation: ptr(false)}
+	return &SecurityContext{
+		RunAsUser:                ptr(int64(0)),
+		AllowPrivilegeEscalation: ptr(false),
+		Capabilities:             &Capabilities{Drop: []string{capAll}},
+	}
+}
+
+// imageContext is the step's and every service's: the image's own user, no
+// privilege escalation, and the runtime's default capabilities but NET_RAW.
+// These are images the platform did not build, whose entrypoints use the rest
+// of the set -- postgres's chowns its data directory and steps down to its own
+// user -- so only the one that reaches the network beneath the pod goes.
+func imageContext() *SecurityContext {
+	return &SecurityContext{
+		AllowPrivilegeEscalation: ptr(false),
+		Capabilities:             &Capabilities{Drop: []string{capNetRaw}},
+	}
 }
 
 // cachePrepContainer opens the owner's directory of the cache claim before
@@ -453,7 +486,7 @@ func cloneContainer(cfg Config, run StepRun, secretName string) Container {
 // with restartPolicy Always. They see neither the checkout nor the cache, get
 // their declared plain values only, never the step's secrets, and may not gain
 // privileges (an image's entrypoint dropping from root to its own user still
-// works; a setuid binary does not).
+// works; a setuid binary does not) or keep NET_RAW (imageContext).
 func serviceContainers(services map[string]pl.Service) []Container {
 	var out []Container
 	for _, name := range sortedKeys(services) {
@@ -462,7 +495,7 @@ func serviceContainers(services map[string]pl.Service) []Container {
 			Name:                     ServicePrefix + name,
 			Image:                    svc.Image,
 			RestartPolicy:            ptr("Always"),
-			SecurityContext:          &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
+			SecurityContext:          imageContext(),
 			TerminationMessagePolicy: failureFromLogs,
 		}
 		for _, key := range sortedKeys(svc.Env) {
@@ -517,7 +550,7 @@ func stepContainer(run StepRun, jobName, secretName string, caches []string) Con
 		WorkingDir:      workspacePath,
 		Env:             env,
 		VolumeMounts:    mounts,
-		SecurityContext: &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
+		SecurityContext: imageContext(),
 	}
 }
 
@@ -619,7 +652,8 @@ func jobOwner(job Job) OwnerReference {
 //
 // The pods hold no credential and run as a step's do: the step identity, no
 // token, no Service links, seccomp RuntimeDefault, no privilege escalation,
-// and no run label, so no cancel of a run reaches them.
+// and no run label, so no cancel of a run reaches them. Their containers keep
+// no capability at all (probeContext).
 //
 // The connector's exit code is its verdict, which the runner reads together
 // with its own re-read of the listener (ruling R42). After a settle of five
@@ -782,6 +816,17 @@ func probeResources() *Resources {
 	}
 }
 
+// probeContext is each probe container's: the clone image's own user, no
+// privilege escalation, and every capability dropped. A listener on an
+// unprivileged port and a TCP connection need none of them -- which matters
+// in one direction above all: a connector that could not connect would read
+// as isolated. Measured on k3s v1.35 with every capability dropped: under the
+// policy the proof passes, and with the policy deleted the connector reaches
+// the listener and the proof refuses.
+func probeContext() *SecurityContext {
+	return &SecurityContext{AllowPrivilegeEscalation: ptr(false), Capabilities: &Capabilities{Drop: []string{capAll}}}
+}
+
 // probeLabels are the labels on the probe Job, its pods and its Secret.
 func probeLabels() map[string]string {
 	return map[string]string{LabelManagedBy: ManagedBy, LabelProbe: ProbeIsolation}
@@ -823,7 +868,7 @@ func BuildIsolationProbe(cfg Config, name string) Job {
 						RestartPolicy:            ptr("Always"),
 						ReadinessProbe:           &Probe{TCPSocket: &TCPSocketAction{Port: probePort}, PeriodSeconds: 1, FailureThreshold: 1},
 						Resources:                probeResources(),
-						SecurityContext:          &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
+						SecurityContext:          probeContext(),
 						TerminationMessagePolicy: failureFromLogs,
 					}},
 					Containers: []Container{{
@@ -838,7 +883,7 @@ func BuildIsolationProbe(cfg Config, name string) Job {
 							}}},
 						},
 						Resources:                probeResources(),
-						SecurityContext:          &SecurityContext{AllowPrivilegeEscalation: ptr(false)},
+						SecurityContext:          probeContext(),
 						TerminationMessagePolicy: failureFromLogs,
 					}},
 				},

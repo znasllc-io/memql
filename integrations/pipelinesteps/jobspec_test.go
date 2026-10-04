@@ -305,8 +305,10 @@ func TestBuildJob(t *testing.T) {
 		if !reflect.DeepEqual(clone.VolumeMounts, []VolumeMount{{Name: "workspace", MountPath: "/workspace"}}) {
 			t.Errorf("clone mounts = %+v, want only the workspace at /workspace", clone.VolumeMounts)
 		}
-		// Ruling R17: the clone runs as uid 0, whatever user its image declares.
-		wantSecurity := &SecurityContext{RunAsUser: ptrTo(int64(0)), AllowPrivilegeEscalation: ptrTo(false)}
+		// Ruling R17: the clone runs as uid 0, whatever user its image declares,
+		// and keeps no capability (review I2).
+		wantSecurity := &SecurityContext{RunAsUser: ptrTo(int64(0)), AllowPrivilegeEscalation: ptrTo(false),
+			Capabilities: &Capabilities{Drop: []string{"ALL"}}}
 		if !reflect.DeepEqual(clone.SecurityContext, wantSecurity) {
 			t.Errorf("clone securityContext = %s, want %s", mustJSON(t, clone.SecurityContext), mustJSON(t, wantSecurity))
 		}
@@ -352,7 +354,8 @@ func TestBuildJob(t *testing.T) {
 		if !reflect.DeepEqual(prep.VolumeMounts, []VolumeMount{{Name: "cache", MountPath: "/cache-root"}}) {
 			t.Errorf("cache-prep mounts = %+v, want only the claim's root at /cache-root", prep.VolumeMounts)
 		}
-		wantSecurity := &SecurityContext{RunAsUser: ptrTo(int64(0)), AllowPrivilegeEscalation: ptrTo(false)}
+		wantSecurity := &SecurityContext{RunAsUser: ptrTo(int64(0)), AllowPrivilegeEscalation: ptrTo(false),
+			Capabilities: &Capabilities{Drop: []string{"ALL"}}}
 		if !reflect.DeepEqual(prep.SecurityContext, wantSecurity) {
 			t.Errorf("cache-prep securityContext = %s, want %s", mustJSON(t, prep.SecurityContext), mustJSON(t, wantSecurity))
 		}
@@ -849,6 +852,80 @@ func TestBuildJobIsAPureFunctionOfItsInputs(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		if again := mustJSON(t, mustBuild(t, testConfig(), run)); again != first {
 			t.Fatalf("build %d differs from the first:\n%s\nvs\n%s", i+2, again, first)
+		}
+	}
+}
+
+// TestEveryContainerGivesUpTheRuntimesRawSockets (review I2): Pod Security
+// baseline refuses a pod that ADDS a capability, never the container
+// runtime's default set, and that set holds NET_RAW -- with which a root
+// container on a bridge network (k3s's flannel) can forge ARP replies and read
+// a neighbour's traffic, which no NetworkPolicy governs. So every container of
+// every Job this package builds drops it. The containers that run the
+// platform's own fixed scripts -- cache-prep, the clone and the isolation
+// probe's two -- need nothing of the default set (measured on k3s v1.35: the
+// clone fetched and checked out, and cache-prep created and opened up its
+// directory under a root-owned claim root of 0777 and of 0755, with every
+// capability dropped), so they drop ALL. The step and the services run images
+// the platform did not build, whose entrypoints use the rest of the set
+// (postgres's chowns its data directory and steps down to its own user), so
+// they drop NET_RAW alone. No container adds one back.
+func TestEveryContainerGivesUpTheRuntimesRawSockets(t *testing.T) {
+	want := map[string][]string{
+		ContainerCachePrep:         {"ALL"},
+		ContainerClone:             {"ALL"},
+		ServicePrefix + "postgres": {"NET_RAW"},
+		ServicePrefix + "redis":    {"NET_RAW"},
+		ContainerStep:              {"NET_RAW"},
+		ContainerProbeListener:     {"ALL"},
+		ContainerProbeConnector:    {"ALL"},
+	}
+	// testRun declares caches and two services, so its Job has every kind of
+	// container a step's pod can have; the probe's has its two.
+	jobs := []struct {
+		what string
+		job  Job
+	}{
+		{"a step's Job", mustBuild(t, testConfig(), testRun())},
+		{"the isolation probe's Job", BuildIsolationProbe(testConfig(), IsolationProbeName(rtNode))},
+	}
+	seen := map[string]bool{}
+	for _, j := range jobs {
+		doc := wire(t, j.job)
+		pod := j.job.Spec.Template.Spec
+		for _, list := range []struct {
+			key        string
+			containers []Container
+		}{{"initContainers", pod.InitContainers}, {"containers", pod.Containers}} {
+			for i, c := range list.containers {
+				drop, known := want[c.Name]
+				if !known {
+					t.Errorf("%s: container %q has no row here; every container drops NET_RAW, and the table says how", j.what, c.Name)
+					continue
+				}
+				seen[c.Name] = true
+				var got []string
+				if c.SecurityContext != nil && c.SecurityContext.Capabilities != nil {
+					got = c.SecurityContext.Capabilities.Drop
+				}
+				if !reflect.DeepEqual(got, drop) {
+					t.Errorf("%s: %s drops capabilities %q, want exactly %q", j.what, c.Name, got, drop)
+				}
+				wantDrop := make([]any, len(drop))
+				for k, d := range drop {
+					wantDrop[k] = d
+				}
+				path := []any{"spec", "template", "spec", list.key, i, "securityContext", "capabilities"}
+				wantField(t, doc, wantDrop, append(path, "drop")...)
+				if add, ok := field(doc, append(path, "add")...); ok {
+					t.Errorf("%s: %s adds capabilities %v back on the wire", j.what, c.Name, add)
+				}
+			}
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("no Job built here has a %q container; the table is out of date with the builders", name)
 		}
 	}
 }

@@ -157,7 +157,12 @@ A step is code from a repository, in an image the platform did not build:
 - It runs as `memql-pipelines-step`, which has no token mounted and nothing
   bound to it, so it holds no Kubernetes credential at all.
 - Pod Security `baseline` refuses a privileged, host-path or host-network pod
-  in the namespace at admission, whatever spec reaches the API server.
+  in the namespace at admission, whatever spec reaches the API server. It
+  refuses a pod that ADDS a capability, not the runtime's default set, so the
+  runner drops `NET_RAW` from every container itself (with it, a root process
+  on a bridge network can forge ARP and read its neighbours' traffic, which no
+  network policy governs): `cache-prep`, `clone` and the isolation probe drop
+  every capability, the step and its services `NET_RAW` alone.
 - The network policy admits nothing in and lets out only cluster DNS and the
   internet minus `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
   `169.254.0.0/16` and `168.63.129.16/32`: not the mesh, the database, another

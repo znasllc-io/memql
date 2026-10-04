@@ -164,8 +164,16 @@ type Resources struct {
 // because 0 -- root -- is a value the runner writes, and absent means the
 // image's own user.
 type SecurityContext struct {
-	RunAsUser                *int64 `json:"runAsUser,omitempty"`
-	AllowPrivilegeEscalation *bool  `json:"allowPrivilegeEscalation,omitempty"`
+	RunAsUser                *int64        `json:"runAsUser,omitempty"`
+	AllowPrivilegeEscalation *bool         `json:"allowPrivilegeEscalation,omitempty"`
+	Capabilities             *Capabilities `json:"capabilities,omitempty"`
+}
+
+// Capabilities are the Linux capabilities a container gives up from the
+// container runtime's default set, by name ("NET_RAW") or all of them
+// ("ALL"). Drop only: no container the runner builds adds one back.
+type Capabilities struct {
+	Drop []string `json:"drop,omitempty"`
 }
 
 // Probe is a service's startup probe -- an exec command polled until it
