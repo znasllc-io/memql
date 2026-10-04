@@ -239,6 +239,44 @@ func TestScanGoTreeMarksWhatItCannotNameIncomplete(t *testing.T) {
 	}
 }
 
+// An import of a path under one of the tree's own modules is an edge whether
+// or not a package answers it: at the head of a change that deleted package
+// a, b still imports a, and b is what that change breaks. Such an edge is not
+// a file the graph could not read, so the graph stays complete. An import of
+// a path under no module of the tree is another module's and no edge, a path
+// that only shares a module path's prefix included.
+func TestScanGoTreeKeepsAnImportOfAPackageTheTreeLacks(t *testing.T) {
+	g, err := ScanGoTree(deletedPackageTree())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Package{
+		{ImportPath: "example.test/devtools/gen", Dir: "tools/gen", Imports: []string{"example.test/devtools/lib"}},
+		{ImportPath: "example.test/probe/b", Dir: "b", Imports: []string{"example.test/probe/a"}},
+		{ImportPath: "example.test/probe/c", Dir: "c", Imports: []string{"example.test/probe/b"}},
+		{ImportPath: "example.test/probe/d", Dir: "d"},
+		{ImportPath: "example.test/probe/e", Dir: "e", Imports: []string{"example.test/probe"}},
+		{ImportPath: "example.test/probe/f", Dir: "f", Imports: []string{"example.test/probe/e"}},
+	}
+	if got := g.Packages(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Packages() =\n%s\nwant\n%s", describePackages(got), describePackages(want))
+	}
+	if got := g.Incomplete(); len(got) != 0 {
+		t.Errorf("Incomplete() = %v, want nothing: every file parsed", got)
+	}
+	// An import path is not a package: the graph hands nobody a missing one
+	// as something to test.
+	s := GraphSelector(g, Selection{})
+	for _, ip := range s.All() {
+		if ip == "example.test/probe/a" || ip == "example.test/probe" || ip == "example.test/devtools/lib" {
+			t.Errorf("All() lists %s, a package the tree lacks", ip)
+		}
+	}
+	if got := s.DirOf("example.test/probe/a"); got != "" {
+		t.Errorf("DirOf(example.test/probe/a) = %q for a package the tree lacks", got)
+	}
+}
+
 // A .go file under no go.mod is not a package any module build can name.
 func TestScanGoTreeIgnoresGoFilesOutsideEveryModule(t *testing.T) {
 	g, err := ScanGoTree(fstest.MapFS{

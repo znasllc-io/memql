@@ -14,8 +14,13 @@ import (
 // Package is one Go package of a repository, as selection sees it.
 type Package struct {
 	ImportPath string
-	Dir        string   // repo-relative, "." for the root
-	Imports    []string // first-party import paths, sorted, deduplicated, test imports included
+	Dir        string // repo-relative, "." for the root
+	// Imports are the first-party import paths -- the repository's own, under
+	// a module its tree declares -- sorted, deduplicated, test imports
+	// included. One no package of the tree answers stays: it is a package a
+	// change deleted or moved away, and this package is what that change
+	// breaks.
+	Imports []string
 }
 
 // Graph is a repository's Go import graph, read from source (decision 5 of
@@ -26,10 +31,12 @@ type Package struct {
 // the step that tests them, in that step's image, and nowhere before. Source
 // is enough for selection, because an import is a line in a file.
 type Graph struct {
-	pkgs       map[string]*Package // import path -> package
-	byDir      map[string]string   // package directory -> import path
-	modules    map[string]string   // module root directory -> module path, "" when its go.mod names none
-	importers  map[string][]string // import path -> the packages importing it, sorted
+	pkgs    map[string]*Package // import path -> package
+	byDir   map[string]string   // package directory -> import path
+	modules map[string]string   // module root directory -> module path, "" when its go.mod names none
+	// importers is import path -> the packages importing it, sorted. Its keys
+	// include first-party import paths no package answers (Package.Imports).
+	importers  map[string][]string
 	incomplete []string
 }
 
@@ -45,6 +52,12 @@ type Graph struct {
 // narrower, and too wide is the direction that costs minutes rather than a
 // red merge. A .go file under no go.mod belongs to no package a module build
 // can name, and is not one. Only an error reading fsys fails the scan.
+//
+// An edge is an import of the repository's own code: a path under a module
+// the tree declares. One that resolves to no package directory is kept, not
+// dropped -- at the head of a change that deletes package a, b still imports
+// a, and b is exactly what that change breaks; Affected reaches b through it.
+// Every other import (the standard library, a dependency) is no edge.
 func ScanGoTree(fsys fs.FS) (*Graph, error) {
 	modules := map[string]string{}
 	goFiles := map[string][]string{} // directory -> its .go files
@@ -98,17 +111,9 @@ func ScanGoTree(fsys fs.FS) (*Graph, error) {
 	fset := token.NewFileSet()
 	declared := map[string]map[string]bool{} // import path -> everything its files import
 	for _, dir := range sortedMapKeys(goFiles) {
-		root, ok := moduleRootOf(modules, dir)
-		if !ok || modules[root] == "" {
+		importPath, ok := importPathOf(modules, dir)
+		if !ok {
 			continue // outside every module, or inside one whose path is unknown
-		}
-		importPath := modules[root]
-		if dir != root {
-			rel := dir
-			if root != "." {
-				rel = strings.TrimPrefix(dir, root+"/")
-			}
-			importPath += "/" + rel
 		}
 		if other, taken := g.pkgs[importPath]; taken {
 			// Two directories come out as one import path (two modules
@@ -146,7 +151,9 @@ func ScanGoTree(fsys fs.FS) (*Graph, error) {
 	for importPath, imports := range declared {
 		var firstParty []string
 		for imported := range imports {
-			if imported != importPath && g.pkgs[imported] != nil {
+			// Not g.pkgs[imported]: a first-party import no package answers
+			// is the edge a deleted package leaves behind (ScanGoTree).
+			if imported != importPath && isFirstParty(modules, imported) {
 				firstParty = append(firstParty, imported)
 			}
 		}
@@ -214,6 +221,27 @@ func (g *Graph) PackageAt(p string) (string, bool) {
 	}
 }
 
+// orphans answers for a repository path whose directory holds no package: the
+// import path a package there would have, and the packages importing it all
+// the same, sorted. That directory is where a package was until a change
+// deleted or moved it, and those importers are what the change breaks. For a
+// directory that holds a package, or one under no module, it answers nothing:
+// a live package's importers follow from the package itself.
+func (g *Graph) orphans(p string) (string, []string) {
+	if g == nil {
+		return "", nil
+	}
+	dir := path.Dir(p)
+	if _, isPackage := g.byDir[dir]; isPackage {
+		return "", nil
+	}
+	importPath, ok := importPathOf(g.modules, dir)
+	if !ok {
+		return "", nil
+	}
+	return importPath, g.importers[importPath]
+}
+
 // importPaths is every import path, sorted.
 func (g *Graph) importPaths() []string {
 	if g == nil {
@@ -237,6 +265,39 @@ func (g *Graph) dirOf(importPath string) string {
 // and vendor, and any name beginning with "." or "_".
 func skippedByTheGoTool(name string) bool {
 	return name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
+}
+
+// importPathOf is the import path a package in dir has, or would have: the
+// path of the module owning dir -- the nearest go.mod at or above it -- plus
+// dir below that module's root. False when no module owns dir, or the one
+// that does names no path.
+func importPathOf(modules map[string]string, dir string) (string, bool) {
+	root, ok := moduleRootOf(modules, dir)
+	if !ok || modules[root] == "" {
+		return "", false
+	}
+	importPath := modules[root]
+	if dir != root {
+		rel := dir
+		if root != "." {
+			rel = strings.TrimPrefix(dir, root+"/")
+		}
+		importPath += "/" + rel
+	}
+	return importPath, true
+}
+
+// isFirstParty reports whether an import path is the repository's own: a
+// module path the tree declares, or a path below one on a "/" boundary, so
+// example.test/probes is not under example.test/probe. Whether a package of
+// the tree answers it is a separate question, and deliberately not this one.
+func isFirstParty(modules map[string]string, importPath string) bool {
+	for _, modPath := range modules {
+		if modPath != "" && (importPath == modPath || strings.HasPrefix(importPath, modPath+"/")) {
+			return true
+		}
+	}
+	return false
 }
 
 // moduleRootOf is the root of the module owning dir: dir itself or the

@@ -7,7 +7,9 @@ type Selection struct {
 	Full bool
 	// Reason says why Full, or how many packages the change seeded.
 	Reason string
-	// Seeds are the packages a changed path belongs to directly.
+	// Seeds are the packages a changed path belongs to directly, and the
+	// importers of a package the change deleted or moved away: a changed
+	// path in a directory that holds no package, which they still import.
 	Seeds []string
 	// Packages are the selected import paths, sorted; every package when Full.
 	Packages []string
