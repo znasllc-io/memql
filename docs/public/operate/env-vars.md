@@ -506,6 +506,17 @@ before retrying. Never clear a live migration's lock or mark a migration
 applied without completing its work. Increasing the migration context timeout
 alone does not change pgdriver's socket read deadline.
 
+A migration with more work than one attempt holds splits it into bounded
+statements instead. The `v1:platform:moduleReadiness` history collapse
+(`20260921000000`) deletes in committed batches and stops before the
+attempt's deadline, releasing the lock with nothing left running; the next
+attempt, on the node's next monitor tick or the migrate Job's retry, resumes
+where it stopped. On an upgrade carrying a large readiness history, expect a
+few attempts to end with `deferred to the next migration attempt`: that error
+is progress, not a failure, and needs no recovery. Until the walk finishes,
+its position is the one row of the `module_readiness_collapse_progress`
+table, which is dropped when it does.
+
 #### Connection pooling: hybrid endpoint split (`DIRECT_DSN`)
 
 Tiger Cloud PgBouncer transaction-mode pooling decouples client

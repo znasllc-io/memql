@@ -1733,7 +1733,11 @@ func sessionConnParams() map[string]any {
 // runner retains its lock on that uncertain outcome (memql#5604). A statement that is meant to
 // outlive them has to be written for that: the latest-row index build takes a
 // session lock its orphan keeps holding and verifies the catalog after waiting
-// for it (latest_row_index.go).
+// for it (latest_row_index.go). Work that does not have to be one statement
+// should not be: the readiness history collapse deletes in bounded batches
+// under a server-side statement_timeout, keeps its cursor in a table, and stops
+// before the run's deadline so the next attempt resumes
+// (20260921000000_module_readiness_history_collapse.go).
 //
 // And without TimescaleDB's cap on DML decompression. "MemoryNodes" is meant to
 // compress its 90-day-cold tail (memory_nodes_compression.go, memql#5421 --
