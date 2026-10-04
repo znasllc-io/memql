@@ -56,7 +56,11 @@ package citags
 // `-c` step would otherwise be the cheapest way to make any tag "covered".
 // ciLanes marks such a lane compileOnly and the coverage walk skips it; the
 // tag stays in deliberatelyNotRunInCI with its reason, and the compile lane
-// is pinned separately by TestClusterE2ECompileLaneGatesTheMerge.
+// is pinned separately by TestClusterE2ECompileLaneGatesTheMerge -- which also
+// holds every file of the package to the lane's own tag sets. An exclusion
+// excuses a file that needs the excluded tag and others besides
+// (needsExcludedTag), so without that hold such a file could be compiled by
+// nothing at all (memql#5497).
 //
 // Untagged on purpose: this must run in the default lane, because it is what
 // catches the tags that do not.
@@ -614,6 +618,15 @@ func laneCovers(cmdArgs, tag, dir string) bool {
 	return lane{pkgs: pkgs}.covers(dir)
 }
 
+// tagSet is the tags one command's -tags flag names, nil for none.
+func tagSet(cmdArgs string) []string {
+	m := tagsFlag.FindStringSubmatch(cmdArgs)
+	if m == nil {
+		return nil
+	}
+	return strings.Split(m[1], ",")
+}
+
 var (
 	goVetCmd = regexp.MustCompile(`go vet\b([^\n]*)`)
 	flagC    = regexp.MustCompile(`(^|\s)-c(\s|$)`)
@@ -627,6 +640,16 @@ var (
 // point it at another package, let it run in workspace mode, or leave it out
 // of ci-required, and every other test in this package stays green while the
 // package goes back to rotting. Each of those edits is checked here.
+//
+// So is the one the lane's own discovery cannot see. The job is FOUND by any
+// vet and any `-c` step carrying the tag, and a file of the package can need
+// more tags than that: test/clustere2e/pipelines_substrate_test.go is
+// `//go:build clustere2e && agent` (memql#5497). The coverage gate excuses
+// such a file through needsExcludedTag, so if the steps that name its tags
+// were deleted, the lane would still be found, every gate would stay green,
+// and no pull request would compile the file. So every *_test.go of the
+// package must build under the tags of at least one `-c` step AND of at least
+// one vet step of this job.
 //
 // The lane runs with GOWORK=off because scripts/test/cluster-e2e.sh runs the
 // live suite with GOWORK=off: under the workspace a module silently satisfies
@@ -678,6 +701,50 @@ func TestClusterE2ECompileLaneGatesTheMerge(t *testing.T) {
 	}
 	jobName := found[0]
 	job := wf.Jobs[jobName]
+
+	// Every file of the package, compiled and vetted under a tag set the job
+	// itself uses (see the doc comment).
+	var vetSets, compileSets [][]string
+	for _, step := range job.Steps {
+		for _, cmd := range goVetCmd.FindAllStringSubmatch(step.Run, -1) {
+			if laneCovers(cmd[1], tag, dir) {
+				vetSets = append(vetSets, tagSet(cmd[1]))
+			}
+		}
+		for _, cmd := range goTestCmd.FindAllStringSubmatch(step.Run, -1) {
+			if laneCovers(cmd[1], tag, dir) && flagC.MatchString(cmd[1]) {
+				compileSets = append(compileSets, tagSet(cmd[1]))
+			}
+		}
+	}
+	pkgDir := filepath.Join(root, filepath.FromSlash(dir))
+	pkgFiles := 0
+	for _, f := range testFiles(t, pkgDir) {
+		if f[0] != pkgDir {
+			continue // a package below this one is not what `./test/clustere2e/` compiles
+		}
+		pkgFiles++
+		for _, half := range []struct {
+			verb, flag string
+			sets       [][]string
+		}{{"compiles", "go test -c", compileSets}, {"vets", "go vet", vetSets}} {
+			reached := false
+			for _, set := range half.sets {
+				if buildsUnder(t, f[0], f[1], set) {
+					reached = true
+					break
+				}
+			}
+			if !reached {
+				t.Errorf("%s/%s builds under none of the tag sets ci.yml job %q %s the package with (%v), so no pull "+
+					"request %s it -- memql#4212's rot. Add a `%s -tags <the tags its build constraint needs>` step "+
+					"for ./%s/ to the job.", dir, f[1], jobName, half.verb, half.sets, half.verb, half.flag, dir)
+			}
+		}
+	}
+	if pkgFiles == 0 {
+		t.Fatalf("found no *_test.go in %s: the hold above checked nothing, so it fails closed", dir)
+	}
 
 	if got := strings.TrimSpace(job.Env["GOWORK"]); got != "off" {
 		t.Errorf("ci.yml job %q must set GOWORK: 'off' at job level (got %q): scripts/test/cluster-e2e.sh "+
