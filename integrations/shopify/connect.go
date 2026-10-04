@@ -81,6 +81,16 @@ func storeSecretName(storeID, suffix string) string {
 	return "SHOPIFY_" + strings.ToUpper(storeID) + "_" + suffix
 }
 
+// StorefrontTokenSecretName is the name this package seals a store's
+// Storefront API token under, and so the one secret component/edge will
+// publish for that store (memql#5626). It is exported for the parity test
+// that holds the edge's spelling to this one, which lives in app/ because
+// that is the module importing both: this module does not require the root
+// module component/edge belongs to.
+func StorefrontTokenSecretName(storeID string) string {
+	return storeSecretName(storeID, suffixStorefrontToken)
+}
+
 // StorefrontScopes are the Storefront API scopes Connect REQUIRES (design 12.8):
 // without them the storefront cannot read its catalog or hold a cart, and
 // storefrontAccessTokenCreate refuses to mint. Derived from the Storefront calls
