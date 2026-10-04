@@ -62,18 +62,39 @@ func TestMaskSecretsMasksTheFormsAValueIsPrintedIn(t *testing.T) {
 	}
 }
 
+// A carriage return breaks a value into parts as a newline does: a value
+// whose parts a bare CR separates ("user\rpass", as a credential file or a
+// terminal writes it) has each part masked when printed alone, and a value
+// stored with CRLF line ends is masked line by line still.
+func TestMaskSecretsMasksEachPartOfAValueACarriageReturnBreaks(t *testing.T) {
+	for _, c := range []struct {
+		name, value, text, want string
+	}{
+		{"parts a bare CR separates", "user-name-abcd\rpass-word-efgh",
+			"pass-word-efgh\nuser-name-abcd\n", "***\n***\n"},
+		{"lines a CRLF ends", "line-one-abcd\r\nline-two-efgh\r\n",
+			"x line-two-efgh\r\nline-one-abcd y\r\n", "x ***\r\n*** y\r\n"},
+	} {
+		if got := MaskSecrets(c.text, []string{c.value}); got != c.want {
+			t.Errorf("%s: MaskSecrets(%q, %q) = %q, want %q", c.name, c.text, c.value, got, c.want)
+		}
+	}
+}
+
 // MaskForms is what MaskSecrets masks, for a caller that masks text a piece
 // at a time and must know what a piece may end inside of (the substrate's log
 // follower): each value as stored, without the whitespace around it, and each
-// of its lines without theirs -- four bytes or more, each once. The forms are
-// their own forms, so MaskSecrets over them masks exactly what it masks over
-// the values.
+// of its parts between line breaks -- a newline or a carriage return --
+// without theirs, four bytes or more, each once. The forms are their own
+// forms, so MaskSecrets over them masks exactly what it masks over the
+// values.
 func TestMaskFormsAreWhatMaskSecretsMasks(t *testing.T) {
 	values := []string{
 		"hunter2-token \n",                           // stored with whitespace around it
 		"-----BEGIN-----\n    \nbody-line\n  ab  \n", // an indent-only line and a short one are no forms
-		"abc",           // too short to mask
-		"hunter2-token", // a form already given
+		" cr-part-one\rcr-part-two ",                 // parts a bare carriage return separates
+		"abc",                                        // too short to mask
+		"hunter2-token",                              // a form already given
 	}
 	want := []string{
 		"hunter2-token \n",
@@ -82,6 +103,10 @@ func TestMaskFormsAreWhatMaskSecretsMasks(t *testing.T) {
 		"-----BEGIN-----\n    \nbody-line\n  ab",
 		"-----BEGIN-----",
 		"body-line",
+		" cr-part-one\rcr-part-two ",
+		"cr-part-one\rcr-part-two",
+		"cr-part-one",
+		"cr-part-two",
 	}
 	got := MaskForms(values)
 	if !slices.Equal(sorted(got), sorted(want)) {

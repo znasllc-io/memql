@@ -43,12 +43,13 @@ import (
 // dropped (Postgres refuses them in text and in jsonb), invalid UTF-8 becomes
 // U+FFFD, and every secret becomes *** exactly as the seam masks text
 // (pl.MaskSecrets: each value as stored, without the whitespace around it,
-// and line by line, four bytes or more; occurrences that overlap or touch as
-// one span) -- Review Focus 1: a step that echoes a resolved secret must put
-// it in none of the three, and the seam re-masks the check run but neither
-// the store nor the archive, nor can it find again a secret half masked here.
-// Masking runs on the whole line BEFORE the store's split, so a value
-// straddling a split boundary is masked like any other.
+// and line by line -- a line ending at a newline or a carriage return -- four
+// bytes or more; occurrences that overlap or touch as one span). Review Focus
+// 1: a step that echoes a resolved secret must put it in none of the three,
+// and the seam re-masks the check run but neither the store nor the archive,
+// nor can it find again a secret half masked here. Masking runs on the whole
+// line BEFORE the store's split, so a value straddling a split boundary is
+// masked like any other.
 //
 // One thing in the stream is not output at all. A step that declares
 // artifacts ends with its wrapper printing them as base64 of a tar.gz between
@@ -68,10 +69,11 @@ type CaptureOptions struct {
 	RunID, WorkRunID, StepKey string
 	// Secrets are the resolved values to mask, masked as the seam masks them
 	// (pl.MaskSecrets): as stored, without the whitespace around them, and --
-	// a value holding newlines -- line by line as well as whole, because the
-	// capture sees one line at a time. A form shorter than four bytes is not
-	// masked: it would mask ordinary words, and an indent-only line of a
-	// key would mask every indentation in the log.
+	// a value holding line breaks, newlines or carriage returns -- line by
+	// line as well as whole, because the capture sees one line at a time and
+	// a part a bare CR separates may be printed alone. A form shorter than
+	// four bytes is not masked: it would mask ordinary words, and an
+	// indent-only line of a key would mask every indentation in the log.
 	Secrets []string
 	// Marker is the step's artifact marker (MEMQL_ARTIFACT_MARKER on the
 	// Job). Set it exactly when the step declares artifacts: it is how the

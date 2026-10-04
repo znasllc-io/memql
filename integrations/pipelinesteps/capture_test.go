@@ -221,11 +221,26 @@ func TestCaptureMasksAsTheSeamMasks(t *testing.T) {
 			want:    []string{"***", "x ***mnop *** y"},
 			leaks:   []string{"ijkl", "efgh"},
 		},
+		{
+			// A carriage return breaks a value into parts as a newline does.
+			name:    "a secret whose parts a bare carriage return separates, each printed alone",
+			secrets: []string{"user-name-abcd\rpass-word-efgh"},
+			printed: []string{"pass-word-efgh", "user-name-abcd"},
+			want:    []string{"***", "***"},
+			leaks:   []string{"pass-word-efgh", "user-name-abcd"},
+		},
+		{
+			name:    "a secret stored with CRLF line ends, its lines printed alone",
+			secrets: []string{"line-one-abcd\r\nline-two-efgh\r\n"},
+			printed: []string{"x line-two-efgh", "line-one-abcd y"},
+			want:    []string{"x ***", "*** y"},
+			leaks:   []string{"line-one-abcd", "line-two-efgh"},
+		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			for i, line := range c.printed {
 				if seam := pl.MaskSecrets(line, c.secrets); seam != c.want[i] {
-					t.Fatalf("the seam masks %q to %q, and the case wants %q: fix the case", line, seam, c.want[i])
+					t.Fatalf("the seam masks %q to %q, and the case wants %q: the capture is held to the seam, so the two must agree", line, seam, c.want[i])
 				}
 			}
 			capture, sink := newCaptureForTest(t, CaptureOptions{Secrets: c.secrets})

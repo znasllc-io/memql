@@ -2850,9 +2850,10 @@ func TestLogLinesMaskAsTheWholeLineWould(t *testing.T) {
 
 // TestLogLinesMaskRandomLinesAsTheSeamDoes is the same rule, randomized:
 // secrets drawn from a small alphabet -- so they overlap, nest and repeat --
-// stored padded, or over lines with indent-only lines among them; lines made
-// of their forms, whole and cut short, between filler of the same alphabet,
-// with runes of two and three bytes for cuts to fall inside of.
+// stored padded, over lines with indent-only lines among them, or in parts
+// a carriage return separates, bare or before a newline; lines made of their
+// forms, whole and cut short, between filler of the same alphabet, with runes
+// of two and three bytes for cuts to fall inside of.
 func TestLogLinesMaskRandomLinesAsTheSeamDoes(t *testing.T) {
 	rng := rand.New(rand.NewSource(20261004))
 	alphabet := []string{"a", "b", "c", "a", "b", "é", "€", " ", "\t"}
@@ -2867,7 +2868,7 @@ func TestLogLinesMaskRandomLinesAsTheSeamDoes(t *testing.T) {
 		var secrets []string
 		for k := 0; k < 1+rng.Intn(3); k++ {
 			s := word(4 + rng.Intn(8))
-			switch rng.Intn(5) {
+			switch rng.Intn(7) {
 			case 0: // stored padded
 				s = strings.Repeat(" ", rng.Intn(3)) + s + strings.Repeat(" ", rng.Intn(3)) + []string{"", "\n"}[rng.Intn(2)]
 			case 1: // over lines, an indent-only one among them
@@ -2889,6 +2890,10 @@ func TestLogLinesMaskRandomLinesAsTheSeamDoes(t *testing.T) {
 						s = strings.ToValidUTF8(s, "")
 					}
 				}
+			case 4: // in parts a bare carriage return separates
+				s += "\r" + word(4+rng.Intn(6))
+			case 5: // over lines CRLF ends
+				s += "\r\n" + word(4+rng.Intn(6)) + "\r\n"
 			}
 			secrets = append(secrets, s)
 		}
@@ -2910,6 +2915,11 @@ func TestLogLinesMaskRandomLinesAsTheSeamDoes(t *testing.T) {
 			}
 			line.WriteString(f)
 		}
+		if strings.HasSuffix(line.String(), "\r") {
+			// A line's own CR before its newline is the line end's, which
+			// the reader and the capture both take off.
+			line.WriteString("a")
+		}
 		ok := t.Run(fmt.Sprintf("case %d", n), func(t *testing.T) {
 			wantPiecesMaskedAsTheSeamMasks(t, secrets, line.String(), 4, line.Len()+1, false)
 		})
@@ -2925,10 +2935,13 @@ func TestLogLinesMaskRandomLinesAsTheSeamDoes(t *testing.T) {
 // line it is fed, and wants the pieces to join into the whole line as
 // pl.MaskSecrets masks it -- the capture's repair first, as the capture
 // repairs every line and every secret -- with no piece over its window, and
-// the line after it read whole. bounded also wants the reader to hold no more
-// of the line than a window and the longest form whenever it reads more --
-// what it holds while it reads on through a span gives out no piece to look
-// at -- at windows no smaller than what one read gives it (bufio's 16 bytes).
+// the line after it read whole. Apart from the seam, it wants no part of a
+// secret between its line breaks -- a newline or a carriage return --
+// trimmed and four bytes or more, left in the line. bounded also wants the
+// reader to hold no more of the line than a window and the longest form
+// whenever it reads more -- what it holds while it reads on through a span
+// gives out no piece to look at -- at windows no smaller than what one read
+// gives it (bufio's 16 bytes).
 func wantPiecesMaskedAsTheSeamMasks(t *testing.T, secrets []string, line string, lo, hi int, bounded bool) {
 	t.Helper()
 	capture, _ := newCaptureForTest(t, CaptureOptions{Secrets: secrets})
@@ -2937,6 +2950,13 @@ func wantPiecesMaskedAsTheSeamMasks(t *testing.T, secrets []string, line string,
 		repaired = append(repaired, captureRepair(s))
 	}
 	want := pl.MaskSecrets(captureRepair(line), repaired)
+	for _, s := range repaired {
+		for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == '\n' || r == '\r' }) {
+			if part = strings.TrimSpace(part); len(part) >= 4 && strings.Contains(want, part) {
+				t.Fatalf("the seam leaves %q, a part of the secret %q, in %q", part, s, want)
+			}
+		}
+	}
 	forms := captureMaskForms(secrets)
 	longest := 0
 	for _, f := range forms {
