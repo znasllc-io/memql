@@ -14,7 +14,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { readUpdateState, type UpdateState } from "../src/install/updateState.js";
-import { updateCheck, updateIsBlocked, type UpdatePreflightInputs } from "../src/state/updatePreflight.js";
+import { updateCheck, type UpdatePreflightInputs } from "../src/state/updatePreflight.js";
 import { updateRebuildPlan, type SessionOptions } from "../src/install/session.js";
 import type { Step } from "../src/install/graph.js";
 import type { Instance } from "../src/state/deployments.js";
@@ -207,7 +207,6 @@ test("an unreachable remote is a notice, and the run still gets to try", () => {
   assert.equal(fact(check, "To pull"), "");
   // Not blocking: the run reaches the network properly and reports what it finds.
   assert.equal(check.blocked, false);
-  assert.equal(updateIsBlocked(state({ remoteError: "could not resolve host" })), false);
 });
 
 test("a shallow checkout is warned about once, because the deepening is the slow part", () => {
@@ -234,13 +233,14 @@ test("the rebuild half's notices ride along -- one account of one run", () => {
 // it fetches; everything else is a maybe only the run can settle, and a Start
 // disabled on a maybe withholds a button that would very often have worked.
 test("only an unfinished operation and a missing branch block Start", () => {
-  assert.equal(updateIsBlocked(state()), false);
-  assert.equal(updateIsBlocked(state({ dirtyCount: 9 })), false);
-  assert.equal(updateIsBlocked(state({ ahead: 4 })), false);
-  assert.equal(updateIsBlocked(state({ inProgress: "a merge" })), true);
-  assert.equal(updateIsBlocked(state({ branch: "" })), true);
+  const blocked = (update: UpdateState | undefined): boolean => updateCheck(inputs({ update })).blocked;
+  assert.equal(blocked(state()), false);
+  assert.equal(blocked(state({ dirtyCount: 9 })), false);
+  assert.equal(blocked(state({ ahead: 4 })), false);
+  assert.equal(blocked(state({ inProgress: "a merge" })), true);
+  assert.equal(blocked(state({ branch: "" })), true);
   // Nothing read means nothing to block on -- the checklist says so in a line.
-  assert.equal(updateIsBlocked(undefined), false);
+  assert.equal(blocked(undefined), false);
 });
 
 test("a checkout git could not read says so instead of describing an update", () => {

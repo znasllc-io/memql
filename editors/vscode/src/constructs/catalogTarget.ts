@@ -105,29 +105,6 @@ export function catalogUri(construct: CatalogConstruct): string {
 }
 
 /**
- * Whether the detail page should offer to run this construct at all.
- *
- * EITHER target kind counts. The page asks one question -- draw a Run control
- * or do not -- and the answer is the same for both; which command it posts is
- * `isAutomationRun`'s business, one layer in.
- */
-export function offersRun(construct: CatalogConstruct): boolean {
-  return catalogRunTarget(construct) !== undefined || catalogAutomationTarget(construct) !== undefined;
-}
-
-/**
- * Whether a run of this construct goes through the automation form rather than
- * the argument form.
- *
- * Exported so the page and its renderer agree on the branch instead of each
- * testing `kind === "automation"` -- the same reason `runnableKind` exists
- * rather than a set membership test on `kind`.
- */
-export function isAutomationRun(construct: CatalogConstruct): boolean {
-  return catalogAutomationTarget(construct) !== undefined;
-}
-
-/**
  * A run target for an AUTOMATION read from the catalog, or undefined when this
  * construct is not one that can be run that way.
  *

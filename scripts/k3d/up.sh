@@ -683,13 +683,18 @@ function wait_for_workloads() {
         fi
         # The deadline includes time spent inside kubectl, not only sleeps.
         waited=$((SECONDS - started))
-        if (( waited >= deadline )); then
-            break
-        fi
+        # REPORT, THEN CHECK THE DEADLINE. The first failed poll always says who
+        # is not ready (last_report starts 30s in the past). Checked the other
+        # way round, a short budget spent inside one slow poll -- each poll
+        # also counts the Available workloads for the progress bar -- timed out
+        # without a word about what it was waiting on.
         if (( waited - last_report >= 30 )); then
             info "still waiting (${waited}s/${deadline}s):"
             what_is_not_ready >&2
             last_report=$waited
+        fi
+        if (( waited >= deadline )); then
+            break
         fi
         remaining=$((deadline - (SECONDS - started)))
         if (( remaining <= 0 )); then break; fi

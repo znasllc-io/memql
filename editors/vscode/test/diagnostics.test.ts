@@ -2,17 +2,14 @@
 //
 // briefMessage and recordDiagnostic are the mechanical half of the rule
 // README.md's Security section states: surfaces carry a short verdict, the
-// channel keeps the record. argShapeLines is the Runs-tree half: shapes on the
-// hover, never the values a developer typed.
+// channel keeps the record.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  argShapeLines,
   briefMessage,
   recordDiagnostic,
-  valueShape,
 } from "../src/state/diagnostics.js";
 
 test("briefMessage keeps a short first line untouched", () => {
@@ -49,21 +46,4 @@ test("recordDiagnostic does not repeat a detail that IS the headline", () => {
   const lines: string[] = [];
   recordDiagnostic({ appendLine: (l) => lines.push(l) }, "same", "same", "T");
   assert.deepEqual(lines, ["[T] same", ""]);
-});
-
-test("valueShape names the shape and never the value", () => {
-  assert.equal(valueShape("hunter2hunter2"), "string(14)");
-  assert.equal(valueShape(42), "number");
-  assert.equal(valueShape(true), "boolean");
-  assert.equal(valueShape(null), "null");
-  assert.equal(valueShape([1, 2, 3]), "array[3]");
-  assert.equal(valueShape({ a: 1, b: 2 }), "object{2}");
-});
-
-test("argShapeLines is sorted, one line per argument, and value-free", () => {
-  const lines = argShapeLines({ zeta: "sk-secret-value", alpha: 7 });
-  assert.deepEqual(lines, ["alpha: number", "zeta: string(15)"]);
-  for (const line of lines) {
-    assert.doesNotMatch(line, /sk-secret/);
-  }
 });

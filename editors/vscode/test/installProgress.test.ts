@@ -1,4 +1,4 @@
-// The run's projection and its failure vocabulary (memql#3474).
+// The run's failure vocabulary (memql#3474).
 //
 // This is where what an operator is SHOWN during a run gets asserted. The panel
 // that draws it imports `vscode` and so cannot be reached from this lane, which
@@ -7,11 +7,10 @@
 //
 // The ones that carry weight:
 //
-//   - a stale exit code never rides on a step that did not fail;
 //   - an unrecognised exit code is reported AS unrecognised rather than mapped
 //     to the nearest known one, because confident wrong advice arrives exactly
 //     when the operator is relying on it;
-//   - order is the graph's, not this function's.
+//   - every code the installer can produce is claimed.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -22,10 +21,7 @@ import { SYNTHESISED_EXIT_CODES } from "../src/install/runner.js";
 import {
   failureGuidance,
   refusedPlatformGuidance,
-  runIsSettled,
-  toStepViews,
 } from "../src/state/installProgress.js";
-import type { StepProgress } from "../src/state/addCluster.js";
 
 // dist-test/test -> dist-test -> editors/vscode -> editors -> the repository.
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -53,109 +49,6 @@ function contractExitCodes(): number[] {
   }
   return codes;
 }
-
-function step(over: Partial<StepProgress> = {}): StepProgress {
-  return {
-    id: "toolK3d",
-    label: "",
-    description: "Place the pinned k3d binary",
-    state: "pending",
-    reason: "",
-    exitCode: null,
-    remedy: "",
-    log: "",
-    guided: false,
-    ...over,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// projection
-// ---------------------------------------------------------------------------
-
-test("a step's description is its label, and the id stands in until one arrives", () => {
-  // A blank row reads as a bug in the wizard rather than as a step whose first
-  // event has not landed.
-  assert.equal(toStepViews([step()])[0]?.label, "Place the pinned k3d binary");
-  assert.equal(toStepViews([step({ description: "" })])[0]?.label, "toolK3d");
-});
-
-test("every state survives the projection unchanged", () => {
-  // The projection must not quietly collapse states -- that is the failure the
-  // whole two-type renderer exists to prevent.
-  const states: StepProgress["state"][] = [
-    "pending",
-    "running",
-    "done",
-    "skipped",
-    "preserved",
-    "failed",
-  ];
-  const views = toStepViews(states.map((state, i) => step({ id: `s${i}`, state })));
-  assert.deepEqual(
-    views.map((v) => v.state),
-    states,
-  );
-});
-
-test("order is the caller's -- the graph's wave order, not a re-sort", () => {
-  const views = toStepViews([
-    step({ id: "clusterUp" }),
-    step({ id: "toolK3d" }),
-    step({ id: "seedBootstrap" }),
-  ]);
-  assert.deepEqual(
-    views.map((v) => v.id),
-    ["clusterUp", "toolK3d", "seedBootstrap"],
-  );
-});
-
-test("A CHECKLIST ROW CARRIES NEITHER AN EXIT CODE NOR A LOG LINE", () => {
-  // REPLACES TWO memql#4194 TESTS, and the reason the old behaviour went is
-  // that the page changed underneath it. #4194 put a short redacted last-line
-  // on a failed row because the full log had nowhere on the page to be -- it
-  // went to the MemQL Install output channel, and the inline line ended by
-  // saying so. The run screens now carry a log pane (memql#4455), so that
-  // sentence pointed somewhere else while the thing it described sat one click
-  // below it, and the same stderr rendered twice.
-  //
-  // D4 (memql#4456) gives verbatim output, exit codes and envelope fields
-  // exactly one home. This asserts the checklist is not it. What a row keeps is
-  // what a checklist is for: which step, what state, and the human sentence the
-  // capability itself wrote -- see `detailFor` below.
-  const failed = toStepViews([step({ state: "failed", exitCode: 4, log: "first line\nboom" })])[0];
-  assert.equal(failed?.exitCode, undefined, "the exit code belongs to the pane");
-  assert.equal(failed?.error, undefined, "the output belongs to the pane");
-  assert.equal(failed?.state, "failed", "the row still says the step failed");
-
-  const preserved = toStepViews([step({ state: "preserved", log: "kept" })])[0];
-  assert.equal(preserved?.error, undefined);
-  const done = toStepViews([step({ state: "done", log: "chatter" })])[0];
-  assert.equal(done?.error, undefined);
-});
-
-test("the capability's own reason still reaches the row, because it was written for a human", () => {
-  // The distinction D4 turns on. `reason` is a sentence the capability contract
-  // requires be readable; `log` is whatever the process wrote. Only the second
-  // is demoted, and collapsing them would leave a failed row saying nothing.
-  const view = toStepViews([
-    step({ state: "failed", reason: "the port was already in use", log: "E0814 bind: EADDRINUSE" }),
-  ])[0];
-  assert.match(view?.detail ?? "", /the port was already in use/);
-  assert.doesNotMatch(view?.detail ?? "", /EADDRINUSE/);
-});
-
-test("a guided step says so, alongside any reason", () => {
-  // "You run this one" changes what the operator is looking at more than the
-  // reason does, so it leads.
-  const view = toStepViews([step({ guided: true, reason: "needs sudo" })])[0];
-  assert.match(view?.detail ?? "", /^guided/);
-  assert.match(view?.detail ?? "", /needs sudo/);
-});
-
-test("a step with nothing to add carries no detail at all", () => {
-  assert.equal(toStepViews([step()])[0]?.detail, undefined);
-});
 
 // ---------------------------------------------------------------------------
 // the failure taxonomy
@@ -222,7 +115,6 @@ test("exit 1 is explained as the catch-all, not as unknown", () => {
   assert.equal(g.retryable, true);
 });
 
-
 test("a bad parameter is named as MemQL's fault, not the operator's", () => {
   // Exit 2 means the installer passed something wrong. Telling the operator to
   // check their answers would send them to fix something they did not break.
@@ -285,27 +177,6 @@ test("no exit code at all reads as stopped rather than failed", () => {
   const g = failureGuidance(null);
   assert.match(g.headline, /didn't finish/);
   assert.equal(g.retryable, true);
-});
-
-// ---------------------------------------------------------------------------
-// settledness
-// ---------------------------------------------------------------------------
-
-test("a run is settled only when nothing is pending or running", () => {
-  // Cancel is offered off this. Offering it on a finished run promises to stop
-  // something there is nothing left to stop.
-  assert.equal(runIsSettled([step({ state: "done" }), step({ state: "skipped" })]), true);
-  assert.equal(runIsSettled([step({ state: "done" }), step({ state: "pending" })]), false);
-  assert.equal(runIsSettled([step({ state: "running" })]), false);
-  assert.equal(runIsSettled([step({ state: "failed" })]), true);
-});
-
-test("a run with no steps yet is NOT settled", () => {
-  // Nothing reported is the START of a run, not the end of one -- and that is
-  // exactly when an operator is most likely to want out. Reading "nothing
-  // pending" off an empty list would withdraw Cancel for the whole opening
-  // stretch of the longest operation the wizard performs.
-  assert.equal(runIsSettled([]), false);
 });
 
 // ---------------------------------------------------------------------------

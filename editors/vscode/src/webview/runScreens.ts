@@ -33,7 +33,7 @@ import {
 
 import type { RunTarget } from "../constructs/runnable.js";
 import type { RunOutcome } from "../run/orchestrator.js";
-import type { ArgFieldModel } from "../state/argForm.js";
+import { AUTO_INJECTED_FIELD_NOTE, type ArgFieldModel } from "../state/argForm.js";
 import { kindWord } from "../state/constructCatalog.js";
 import { briefMessage } from "../state/diagnostics.js";
 import { groupRowsByConcept, resultBannerFor } from "../state/runResult.js";
@@ -95,7 +95,7 @@ function hintFor(f: ArgFieldModel): string {
   if (f.type === "object" || f.type === "array") parts.push(f.type === "object" ? "A JSON object." : "A JSON array.");
   if (f.type === "any") parts.push("JSON, or plain text.");
   if (!f.required && !f.autoInjected) parts.push("Optional.");
-  if (f.autoInjected) parts.push("Set by the cluster; anything entered here is ignored.");
+  if (f.autoInjected) parts.push(AUTO_INJECTED_FIELD_NOTE);
   return parts.join(" ");
 }
 

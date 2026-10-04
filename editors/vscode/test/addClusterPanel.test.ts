@@ -901,6 +901,47 @@ test("log lines and phases travel as messages; the document is not replaced per 
   }
 });
 
+test("a log line reaches the page redacted", async () => {
+  // The run log is verbatim subprocess output, the most likely place for a
+  // seeded key or the operator's home directory to reach a screen. Whether
+  // redactForDisplay is right is displayRedaction.test.ts; this is the call.
+  const home = os.homedir();
+  const runner = await fakeRunner();
+  const inner = runner.run;
+  let emitted = false;
+  runner.run = async (run) => {
+    if (run.capability === "install.dockerAccess") {
+      run.onLog?.(`reading the key from ${home}/.memql/anthropic.key`);
+      run.onLog?.("using key sk-ant-abcdef1234567890 for provider");
+      run.onLog?.("worker token mql_wkr_abcdefghijklmnop");
+      emitted = true;
+    }
+    return inner(run);
+  };
+  const h = await open({ runner });
+  try {
+    beginInstall(h);
+    await until(() => /Installing MemQL/.test(h.html()), "the run screen");
+    h.post({ type: "ready" });
+    await until(() => emitted, "the lines");
+    const logText = (): string =>
+      h.panel.posted
+        .filter((m) => (m as { type?: string }).type === "log")
+        .flatMap((m) => (m as { lines: { text: string }[] }).lines)
+        .map((l) => l.text)
+        .join("\n");
+    await until(() => /worker token/.test(logText()), "the lines to cross as a log message");
+    const text = logText();
+    assert.match(text, /anthropic\.key/, "the lines arrived");
+    assert.doesNotMatch(text, /sk-ant-abcdef1234567890/, "a provider key never reaches the page");
+    assert.doesNotMatch(text, /mql_wkr_[A-Za-z0-9]/, "nor any mql_ credential");
+    assert.ok(!text.includes(home), "nor the operator's home directory");
+    await until(() => shows(h, INSTALLED), "the run to settle");
+  } finally {
+    h.close();
+  }
+});
+
 // -----------------------------------------------------------------------------
 // install: Cancel, and failures
 // -----------------------------------------------------------------------------

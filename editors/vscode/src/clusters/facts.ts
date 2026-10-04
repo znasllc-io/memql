@@ -1,13 +1,13 @@
 // What this machine knows about a cluster's sign-in, without asking the cluster.
 //
 // WHY THIS EXISTS. The Clusters row and the cluster page used to decide "needs
-// sign-in" from clusters.yaml alone (`needsAuth`). But the thirty-day refresh
-// token lives in SecretStorage once a sign-in has happened, and the access
-// token in the file is cleared on a terminal refresh -- or by the Cockpit
-// rewriting the shared file. So a row said "needs sign-in" for a cluster a
-// click would simply connect, and sent the person through a browser for
-// nothing. These facts read every place a credential can be (the file and
-// SecretStorage), once, asynchronously, for the synchronous renderers to use.
+// sign-in" from clusters.yaml alone. But the thirty-day refresh token lives in
+// SecretStorage once a sign-in has happened, and the access token in the file
+// is cleared on a terminal refresh -- or by the Cockpit rewriting the shared
+// file. So a row said "needs sign-in" for a cluster a click would simply
+// connect, and sent the person through a browser for nothing. These facts read
+// every place a credential can be (the file and SecretStorage), once,
+// asynchronously, for the synchronous renderers to use.
 //
 // THE PASSKEY OFFER is decided here too, because it rests on the same kind of
 // evidence: the install receipt names this cluster's owner, and nobody has

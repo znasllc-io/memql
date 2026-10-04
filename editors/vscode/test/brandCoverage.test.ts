@@ -309,7 +309,6 @@ test("the *Screens.ts fragment modules are exempt because they build no document
     "conceptScreens.ts",
     "constructScreens.ts",
     "deploymentScreens.ts",
-    "installScreens.ts",
     "languageReferenceScreens.ts",
     "runScreens.ts",
   ]);
