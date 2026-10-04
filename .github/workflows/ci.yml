@@ -338,6 +338,16 @@ jobs:
               #                  boots a mesh with no control plane in it.
               #                  TestBundleImageCopiesTheBundle reads it.
               - 'deploy/fleet/**'
+              #   deploy/toolchain-image/** -> scripts/ci/toolchain_image_workflow_test.go
+              #                  (epic memql#5478 / #5496). The pipeline toolchain
+              #                  image's Dockerfile and smoke test. The guard READS
+              #                  the Dockerfile: its Go must be go.work's toolchain,
+              #                  its protoc proto-gen.sh's pin, every base pinned by
+              #                  digest, its user uid 1000. Same shape as
+              #                  deploy/db-image/** above: no PR lane builds the
+              #                  image, but the guard over it has to run, and
+              #                  `deploy/**` matches no bucket.
+              - 'deploy/toolchain-image/**'
               - 'scripts/secrets/manifest.yaml'
               - 'component/envregistry/manifest.yaml'
               - 'component/architecture/embedded/**'
