@@ -156,7 +156,8 @@ func (f *Fleet) RunStep(ctx context.Context, req pl.StepRequest, run StepRun) (p
 	// dropped rather than racing the archive.
 	lines.close()
 	if err != nil {
-		return failedResult(pl.CodeRunnerUnavailable, "The agent's dispatcher could not take the step: "+mask(err.Error())), nil
+		return failedResult(pl.CodeRunnerUnavailable,
+			cutBytes(mask("The agent's dispatcher could not take the step: "+err.Error()), failureMaxBytes)), nil
 	}
 
 	out, outErr := parseFleetOutput(result)
@@ -206,8 +207,8 @@ func (f *Fleet) cloneToken(ctx context.Context, run StepRun) (string, pl.StepRes
 		if ctx.Err() != nil {
 			return "", stoppedResult(ctx, run.DeadlineCode), false
 		}
-		return "", failedResult(pl.CodeCloneFailed, fmt.Sprintf(
-			"A token to clone %s could not be minted, so the step did not run: %v", run.Repository.FullName(), err)), false
+		return "", failedResult(pl.CodeCloneFailed, cutBytes(fmt.Sprintf(
+			"A token to clone %s could not be minted, so the step did not run: %v", run.Repository.FullName(), err), failureMaxBytes)), false
 	}
 	return token, pl.StepResult{}, true
 }
@@ -319,22 +320,33 @@ func parseFleetOutput(r worker.Result) (*fleetOutput, error) {
 }
 
 // classify is how the step ended, read off the dispatcher's result. Every
-// sentence that quotes the machine is masked: the result's text is the
-// machine's, and a failed clone or an echoing command can fill it with the
-// step's credentials.
+// sentence that quotes the machine is masked and bounded, as the cluster's
+// are: the result's text is the machine's, and a failed clone or an echoing
+// command can fill it with the step's credentials, or with anything at all.
 func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r worker.Result, out *fleetOutput, outErr error, mask func(string) string) pl.StepResult {
 	where := pl.Where{Surface: surfaceFleet, WorkerID: r.WorkerId, NodeID: r.NodeId, MachineLabels: maps.Clone(r.Labels)}
 	machine := r.WorkerId
 	if machine == "" {
 		machine = "the machine"
 	}
+	// Every sentence below is made by these two, as the cluster's runner
+	// makes one: masked whole -- it quotes the machine, whose words a failed
+	// clone or an echoing command can fill with the step's credentials -- and
+	// then cut to failureMaxBytes, so the outcome stays within outcomeMaxBytes
+	// however long the machine's words, or a sibling replica's code, are.
+	failed := func(code, message string) pl.StepResult {
+		return withWhere(failedResult(code, cutBytes(mask(message), failureMaxBytes)), where)
+	}
+	refused := func(code, message string) pl.StepResult {
+		return withWhere(refusedResult(code, cutBytes(mask(message), failureMaxBytes)), where)
+	}
 	if ctx.Err() != nil {
 		return withWhere(stoppedResult(ctx, run.DeadlineCode), where)
 	}
 	if r.OK {
 		if outErr != nil {
-			return withWhere(failedResult(pl.CodeExecutorError, fmt.Sprintf(
-				"%s answered something that is not a pipeline step's result (%s).", machine, mask(outErr.Error()))), where)
+			return failed(pl.CodeExecutorError, fmt.Sprintf(
+				"%s answered something that is not a pipeline step's result (%s).", machine, outErr.Error()))
 		}
 		res := pl.StepResult{Status: pl.OutcomeSucceeded, ExitCode: *out.ExitCode, Where: where}
 		if *out.ExitCode != 0 {
@@ -344,51 +356,51 @@ func (f *Fleet) classify(ctx context.Context, req pl.StepRequest, run StepRun, r
 		return res
 	}
 
-	msg := mask(strings.TrimSpace(r.ErrorMessage))
+	msg := strings.TrimSpace(r.ErrorMessage)
 	needs := strings.Join(req.Step.Needs, ", ")
 	limit := time.Duration(run.TimeoutSeconds) * time.Second
 	switch code := r.ErrorCode; {
 	case code == "kill_switch_engaged":
 		// The owner's off switch, named as such: it says what to turn back on.
-		return withWhere(refusedResult(pl.CodeFleetDisabled,
+		return refused(pl.CodeFleetDisabled,
 			"The owner has turned computer use off, so no step runs on their machines; turning it back on lets this "+
-				"one run. Nothing ran."), where)
+				"one run. Nothing ran.")
 	case r.RefusedByGate:
 		// THIS ENGINE refused before any routing decision, by its own checks
 		// or reads (rulings R33b, R33c): its gate, or a read of the owner's
 		// machines the router could not make. A decision about the request or
 		// a fault of the engine's, not a fact about the owner's machines, so it
 		// is the executor's error, carrying the dispatcher's code and words.
-		return withWhere(refusedResult(pl.CodeExecutorError, fmt.Sprintf(
+		return refused(pl.CodeExecutorError, fmt.Sprintf(
 			"The engine's dispatcher refused the step before routing it, on a check or a read of its own (%s): %s. Nothing ran.",
-			code, msg)), where)
+			code, msg))
 	case r.RefusedBeforeStart:
 		// THE DISPATCHER'S VERDICT, never a guess from the code: nothing
 		// started on any machine -- no candidate, or every one refused before
 		// anything was sent to it, a sibling replica's refusals under codes of
 		// their own included. The machine the dispatcher named, if it named
 		// one, is kept: it is where the step was last looked for.
-		return withWhere(refusedResult(pl.CodeNoMachineForNeed, fmt.Sprintf(
+		return refused(pl.CodeNoMachineForNeed, fmt.Sprintf(
 			"No machine of the owner's that offers %s and allows pipeline steps could take the step (%s): %s",
-			needs, code, msg)), where)
+			needs, code, msg))
 	case code == "denied_by_policy":
-		return withWhere(failedResult(pl.CodeNoMachineForNeed, fmt.Sprintf(
-			"%s refused the step under its own pipelines policy: %s", machine, msg)), where)
+		return failed(pl.CodeNoMachineForNeed, fmt.Sprintf(
+			"%s refused the step under its own pipelines policy: %s", machine, msg))
 	case code == "timeout":
-		return withWhere(failedResult(run.DeadlineCode, fmt.Sprintf(
-			"The step did not finish within its %s deadline on %s; it was stopped.", limit, machine)), where)
+		return failed(run.DeadlineCode, fmt.Sprintf(
+			"The step did not finish within its %s deadline on %s; it was stopped.", limit, machine))
 	case code == "cancelled":
 		return withWhere(cancelledResult("The step was cancelled on "+machine+"."), where)
 	case code == "worker_disconnected":
 		// Not refused before start: the call may have started, and the
 		// connection ended before the machine reported it.
-		return withWhere(failedResult(pl.CodeNodeLost, fmt.Sprintf(
-			"The connection to %s ended before it reported the step: %s", machine, msg)), where)
+		return failed(pl.CodeNodeLost, fmt.Sprintf(
+			"The connection to %s ended before it reported the step: %s", machine, msg))
 	case code == pl.CodeCloneFailed:
-		return withWhere(failedResult(pl.CodeCloneFailed, msg), where)
+		return failed(pl.CodeCloneFailed, msg)
 	default:
-		return withWhere(failedResult(pl.CodeExecutorError, fmt.Sprintf(
-			"%s could not run the step (%s): %s", machine, code, msg)), where)
+		return failed(pl.CodeExecutorError, fmt.Sprintf(
+			"%s could not run the step (%s): %s", machine, code, msg))
 	}
 }
 

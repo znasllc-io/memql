@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
@@ -1020,6 +1021,65 @@ func TestFleetStepFilesWhatACancelledStepCaptured(t *testing.T) {
 			}
 		case <-time.After(5 * time.Second):
 			t.Fatal("RunStep did not return: a Library that does not answer held the step past its window")
+		}
+	})
+}
+
+// TestFleetStepBoundsItsFailureAsTheClusterDoes: a machine's words, a sibling
+// replica's code and the dispatcher's own error are as long as they like, and
+// the failure sentence quoting them is cut where it is made, to
+// failureMaxBytes, as the cluster's runner cuts one -- so the outcome stays
+// within outcomeMaxBytes whatever was said.
+func TestFleetStepBoundsItsFailureAsTheClusterDoes(t *testing.T) {
+	long := "boom " + strings.Repeat("x", 300<<10)
+	for _, c := range []struct {
+		name   string
+		result worker.Result
+		err    error
+		status pl.Outcome
+		code   string
+	}{
+		{"the machine's error", worker.Result{ErrorCode: "exec_failed", ErrorMessage: long}, nil, pl.OutcomeFailed, pl.CodeExecutorError},
+		{"a code nobody bounded", worker.Result{ErrorCode: long, ErrorMessage: "no"}, nil, pl.OutcomeFailed, pl.CodeExecutorError},
+		{"the machine's own policy", worker.Result{ErrorCode: "denied_by_policy", ErrorMessage: long}, nil, pl.OutcomeFailed, pl.CodeNoMachineForNeed},
+		{"a connection lost mid-run", worker.Result{ErrorCode: "worker_disconnected", ErrorMessage: long}, nil, pl.OutcomeFailed, pl.CodeNodeLost},
+		{"a failed clone", worker.Result{ErrorCode: pl.CodeCloneFailed, ErrorMessage: long}, nil, pl.OutcomeFailed, pl.CodeCloneFailed},
+		{"no machine could take it", worker.Result{ErrorCode: "worker_busy", ErrorMessage: long, RefusedBeforeStart: true},
+			nil, pl.OutcomeRefused, pl.CodeNoMachineForNeed},
+		{"the engine's own gate", worker.Result{ErrorCode: "bad_request", ErrorMessage: long, RefusedBeforeStart: true, RefusedByGate: true},
+			nil, pl.OutcomeRefused, pl.CodeExecutorError},
+		{"the dispatcher could not take it", worker.Result{}, errors.New(long), pl.OutcomeFailed, pl.CodeRunnerUnavailable},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := &fakeDispatcher{answer: func(context.Context, worker.Request) (worker.Result, error) {
+				r := c.result
+				r.WorkerId, r.NodeId = "reg-1", "agent-b"
+				return r, c.err
+			}}
+			f, _, _, _ := newTestFleet(t, d)
+			res := runFleet(t, f, fleetReq())
+			wantFailure(t, res, c.status, c.code)
+			if n := len(res.Failure.Message); n > failureMaxBytes {
+				t.Errorf("the failure sentence is %d bytes, over failureMaxBytes (%d)", n, failureMaxBytes)
+			}
+			if n := outcomeBytes(res); n > outcomeMaxBytes {
+				t.Errorf("the outcome is %d bytes, over outcomeMaxBytes (%d)", n, outcomeMaxBytes)
+			}
+			if !utf8.ValidString(res.Failure.Message) {
+				t.Error("the failure sentence was cut inside a rune")
+			}
+		})
+	}
+
+	t.Run("the token minter's error", func(t *testing.T) {
+		d := &fakeDispatcher{}
+		f, _, tokens, _ := newTestFleet(t, d)
+		tokens.err = errors.New(long)
+		res := runFleet(t, f, fleetReq())
+		wantFailure(t, res, pl.OutcomeFailed, pl.CodeCloneFailed)
+		if n := len(res.Failure.Message); n > failureMaxBytes || len(d.reqs) != 0 {
+			t.Errorf("the failure sentence is %d bytes (failureMaxBytes %d), %d dispatch(es); want it bounded and nothing run",
+				n, failureMaxBytes, len(d.reqs))
 		}
 	})
 }
