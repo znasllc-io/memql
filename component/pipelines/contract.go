@@ -205,8 +205,10 @@ type StepResult struct {
 	Where           Where    `json:"where"`
 	LogFileID       string   `json:"logFileId,omitempty"`
 	ArtifactFileIDs []string `json:"artifactFileIds,omitempty"`
-	// LogTail is the last lines of output (at most 40), for a failed step's
-	// inline excerpt (D13).
+	// LogTail is the last lines of output -- at most 40 lines and at most 16
+	// KiB, because the runner's outcome rides a Job annotation and all of a
+	// Job's annotations share 256 KiB -- for a failed step's inline excerpt
+	// (D13).
 	LogTail  string `json:"logTail,omitempty"`
 	LogLines int    `json:"logLines,omitempty"`
 	// LogCapped says the live log hit its cap; the Library copy is complete.
