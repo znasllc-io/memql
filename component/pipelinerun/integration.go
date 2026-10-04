@@ -29,6 +29,7 @@ package pipelinerun
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -151,9 +152,24 @@ func (d Deps) now() time.Time { return d.Now().UTC().Truncate(time.Second) }
 
 // gate runs fn under key, or refuses when no gate is wired: a missing gate
 // fails CLOSED, like githubconnect.WithGate with no database.
+//
+// A gate that could not be TAKEN -- the production one gives up after five
+// seconds when the direct pool is busy, and its error names GitHub's
+// lifecycle lock -- is said to be the pipelines' gate, with its key, so the
+// failure reads as what it is wherever it surfaces: a delivery's automation
+// step, which retries it, or a person's re-run. What fn itself returns passes
+// through untouched, for its caller to read.
 func (d Deps) gate(ctx context.Context, key string, fn func(context.Context) error) error {
 	if d.Gate == nil {
 		return errNoGate
 	}
-	return d.Gate(ctx, key, fn)
+	ran := false
+	err := d.Gate(ctx, key, func(gctx context.Context) error {
+		ran = true
+		return fn(gctx)
+	})
+	if err != nil && !ran {
+		return fmt.Errorf("pipelines: the cross-replica gate %s was not taken: %w", key, err)
+	}
+	return err
 }
