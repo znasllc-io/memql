@@ -27,6 +27,12 @@ package worker
 //     sender read one heartbeat ago. This node reads it again at the moment of
 //     dispatch, because "revoked while a turn was in flight" is precisely the
 //     window that matters.
+//
+// And ONE consent rule IS re-run, because it needs nothing but the envelope:
+// rule 0 (purposeBinding, #5494). workerHost.pipeline_step is a shell command
+// the machine admits without a consent window, so it runs only under the
+// pipeline purpose the envelope carries -- a sender that forwarded one without
+// it is refused here rather than trusted to have checked.
 
 import (
 	"context"
@@ -145,6 +151,17 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		return
 	}
 
+	// RULE 0, re-decided from the envelope (purposeBinding): a pipeline_step
+	// without the pipeline purpose, the purpose on any other action or naming
+	// an agent, or a purpose nothing defines, runs nothing here.
+	if code, msg := purposeBinding(req.GetPurpose(), req.GetTool(), req.GetAction(), req.GetAgentId()); code != "" {
+		h.logger.Warn("worker forward: refused an envelope whose action does not belong to its purpose",
+			"request_id", requestId, "purpose", req.GetPurpose(), "tool", req.GetTool(),
+			"action", req.GetAction(), "error_code", code)
+		h.sendRefusal(send, requestId, code, msg)
+		return
+	}
+
 	registrationId := req.GetRegistrationId()
 	if err := h.verifyRegistration(cctx, owner, registrationId); err != nil {
 		h.sendRefusal(send, requestId, "registration_refused", err.Error())
@@ -193,6 +210,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	envelope := buildToolDispatch(Request{
 		Tool:          req.GetTool(),
 		Action:        req.GetAction(),
+		Purpose:       req.GetPurpose(),
 		Args:          innerArgs,
 		AgentId:       req.GetAgentId(),
 		OwnerUserId:   owner,

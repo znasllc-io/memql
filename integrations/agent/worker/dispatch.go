@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -86,9 +87,24 @@ type Result struct {
 	BytesIn       int
 	BytesOut      int
 	OutputPreview string
+
+	// WorkerId, NodeId and Labels NAME THE MACHINE the dispatch was attempted
+	// on (#5494): its registration id, the replica that held its stream, and
+	// the labels the router matched it on. Set on every result that came back
+	// from a machine the router selected, local or forwarded -- a refusal
+	// before start included, which names the machine that refused. Empty when
+	// nothing was selected: a gate denial, or no candidate at all.
+	//
+	// A caller that routes by need, such as a pipeline step, has no other way
+	// to say where its work ran: the request carries no machine (design D4),
+	// so the answer can only come back on the result.
+	WorkerId string
+	NodeId   string
+	Labels   map[string]string
 }
 
-// Request carries the inputs from the agent tool loop.
+// Request carries the inputs of one dispatch: from the agent tool loop, or --
+// with Purpose set -- from Go dispatching for itself.
 //
 // THERE IS NO WorkerId FIELD, and its absence is a design decision rather than
 // an omission (design D4, memql#4351). An agent says what the work NEEDS --
@@ -96,8 +112,17 @@ type Result struct {
 // owner's routing policy decides which of their machines that lands on. A
 // model cannot name a machine, so it cannot hallucinate one.
 type Request struct {
-	Tool          string
-	Action        string
+	Tool   string
+	Action string
+	// Purpose says WHO is asking, which decides which gates apply. Empty is an
+	// agent's call: per-task approval, the kill switch, standing scope and the
+	// classifier, exactly as before the field existed. PurposePipeline is a
+	// pipeline run's step, with no agent, admitted by two owner consents and
+	// the kill switch (pipeline_purpose.go). Any other value is refused.
+	//
+	// Set only by Go that dispatches for itself. The builtins never read it
+	// from their arguments, so nothing a model writes can choose it.
+	Purpose       string
 	Args          map[string]any
 	AgentId       string
 	OwnerUserId   string
@@ -348,6 +373,12 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 
 // attempt runs one candidate. It returns ForwardRefusedBeforeStart only when
 // it is CERTAIN nothing executed on the machine.
+//
+// Whatever came back names the machine (Result.WorkerId / NodeId / Labels):
+// the candidate it was attempted on, and the replica holding its stream --
+// this one for a local dispatch, the forward's target otherwise. NodeId falls
+// back to the row's connectedNodeId only on a single-node install with no node
+// id of its own, where the row is the one place an id is written.
 func (d *Dispatcher) attempt(
 	ctx context.Context,
 	req Request,
@@ -355,10 +386,29 @@ func (d *Dispatcher) attempt(
 	cand Candidate,
 	timeout time.Duration,
 ) (Result, ForwardOutcome) {
+	var (
+		res     Result
+		outcome ForwardOutcome
+		nodeId  = strings.TrimSpace(cand.ConnectedNodeId)
+	)
 	if d.isLocal(cand) {
-		return d.attemptLocal(ctx, req, capability, cand, timeout)
+		res, outcome = d.attemptLocal(ctx, req, capability, cand, timeout)
+		if d.selfNodeId != "" {
+			nodeId = d.selfNodeId
+		}
+	} else {
+		res, outcome = d.attemptRemote(ctx, req, capability, cand, timeout)
 	}
-	return d.attemptRemote(ctx, req, capability, cand, timeout)
+	res.WorkerId = cand.RegistrationId
+	res.NodeId = nodeId
+	res.Labels = maps.Clone(cand.Labels)
+	// A pipeline step's credentials stay out of what the caller is handed back
+	// to show, as they stay out of the record (recordInvocation).
+	if m := pipelineCredentialMasker(req); m != nil {
+		res.OutputPreview = m.Replace(res.OutputPreview)
+		res.ErrorMessage = m.Replace(res.ErrorMessage)
+	}
+	return res, outcome
 }
 
 // isLocal reports whether this replica holds the machine's stream.
@@ -573,7 +623,21 @@ type gateResult struct {
 //
 // workerStatus is exempt -- it's the cheap connectivity probe and
 // has no side effects on the user's machine.
+//
+// THE PURPOSE DECIDES WHICH GATES APPLY, and RULE 0 is decided before any of
+// them: an action and a purpose that do not belong together are refused
+// first -- above all pipeline_step under any purpose but the pipeline's,
+// however much standing scope an agent holds (purposeBinding). Then a pipeline
+// step takes gates of its own (pipelineGate), and everything below is an
+// agent's call.
 func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResult {
+	if refused, ok := purposeRefusal(req); ok {
+		return refused
+	}
+	if req.Purpose == PurposePipeline {
+		return d.pipelineGate(ctx, req)
+	}
+
 	required := actionRequiredScope(req.Tool, req.Action)
 	if required.Capability == "" || required.Scope == "" {
 		return gateResult{
@@ -705,11 +769,18 @@ func buildToolDispatch(req Request, timeout time.Duration) *memqlv1.ToolDispatch
 		"action":   req.Action,
 		req.Action: req.Args,
 	})
+	agentId := req.AgentId
+	if req.Purpose == PurposePipeline {
+		// A pipeline step has no agent, and the cockpit refuses a pipeline_step
+		// that names one. Rule 0 refuses such a request before it gets here;
+		// the envelope says so too, whatever path reaches it.
+		agentId = ""
+	}
 	return &memqlv1.ToolDispatch{
 		CallId:        newCallId(),
 		RunId:         req.RunId,
 		StepId:        req.StepId,
-		AgentId:       req.AgentId,
+		AgentId:       agentId,
 		CorrelationId: req.CorrelationId,
 		Tool:          req.Tool,
 		Action:        req.Action,
@@ -781,6 +852,22 @@ func (d *Dispatcher) recordInvocation(
 	if d.store == nil {
 		return
 	}
+	argsRedacted := redactArgs(req.Args)
+	preview := res.OutputPreview
+	errorMessage := res.ErrorMessage
+	// A pipeline step's clone token and secrets are masked by VALUE as well as
+	// by key: argsRedacted, outputPreview and errorMessage never carry them,
+	// wherever in the call they appeared (pipeline_purpose.go). Masked before
+	// the preview is clamped, so a value cut in half by the clamp is not.
+	if m := pipelineCredentialMasker(req); m != nil {
+		if argsRedacted != nil {
+			if masked, ok := maskCredentials(argsRedacted, m).(map[string]any); ok {
+				argsRedacted = masked
+			}
+		}
+		preview = m.Replace(preview)
+		errorMessage = m.Replace(errorMessage)
+	}
 	row := workerservice.InvocationRow{
 		ID:            newInvocationId(),
 		OwnerUserId:   req.OwnerUserId,
@@ -791,16 +878,16 @@ func (d *Dispatcher) recordInvocation(
 		CorrelationId: req.CorrelationId,
 		Tool:          req.Tool,
 		Action:        req.Action,
-		ArgsRedacted:  redactArgs(req.Args),
+		ArgsRedacted:  argsRedacted,
 		StartedAt:     startedAt,
 		CompletedAt:   completedAt,
 		DurationMs:    int(completedAt.Sub(startedAt).Milliseconds()),
 		Outcome:       outcome,
 		BytesIn:       res.BytesIn,
 		BytesOut:      res.BytesOut,
-		OutputPreview: clampPreview(res.OutputPreview),
+		OutputPreview: clampPreview(preview),
 		ErrorCode:     res.ErrorCode,
-		ErrorMessage:  res.ErrorMessage,
+		ErrorMessage:  errorMessage,
 		Routing:       routing.AsMap(),
 	}
 	if err := d.store.WriteInvocation(ctx, row); err != nil {
@@ -815,11 +902,14 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 	if d.auditor == nil {
 		return
 	}
+	// "agent:<id>" for an agent's call; a pipeline step has no agent and is
+	// attributed to its run (auditActor).
+	actor := auditActor(req)
 	switch gate.outcome {
 	case "denied_by_scope":
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "scope_elevation_requested",
-			Actor:         "agent:" + req.AgentId,
+			Actor:         actor,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,
@@ -836,7 +926,7 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 	case "kill_switch_engaged":
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "worker_call_blocked_by_kill_switch",
-			Actor:         "agent:" + req.AgentId,
+			Actor:         actor,
 			Target:        req.OwnerUserId,
 			TargetType:    "user",
 			OwnerUserId:   req.OwnerUserId,
@@ -844,9 +934,9 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 			Timestamp:     d.clock(),
 		})
 	case "denied_by_policy":
-		d.auditor.Emit(ctx, workerservice.AuditEvent{
+		ev := workerservice.AuditEvent{
 			Action:        "worker_call_denied_by_policy",
-			Actor:         "agent:" + req.AgentId,
+			Actor:         actor,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,
@@ -855,7 +945,21 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 				"errorMessage": gate.errorMessage,
 			},
 			Timestamp: d.clock(),
-		})
+		}
+		if req.Purpose == PurposePipeline || (req.Tool == "workerHost" && req.Action == PipelineStepAction) {
+			// A pipeline dispatch, or an attempt to name pipeline_step outside
+			// one (rule 0): either way a decision about what may reach the
+			// owner's machines, filed against the owner -- with the actor
+			// saying who asked. And "user" is a target type the durable audit
+			// row accepts, so this security signal survives as a row rather
+			// than a log line.
+			ev.Target, ev.TargetType = req.OwnerUserId, "user"
+			ev.Detail["purpose"] = req.Purpose
+			ev.Detail["action"] = req.Action
+			ev.Detail["runId"] = req.RunId
+			ev.Detail["stepId"] = req.StepId
+		}
+		d.auditor.Emit(ctx, ev)
 	case "denied_by_classifier":
 		// memql#229. The gate's per-decision SlogRecorder line is
 		// the lightweight observability sink; this auditEvent is the
@@ -878,7 +982,7 @@ func (d *Dispatcher) emitDenied(ctx context.Context, req Request, gate gateResul
 		}
 		d.auditor.Emit(ctx, workerservice.AuditEvent{
 			Action:        "command_blocked",
-			Actor:         "agent:" + req.AgentId,
+			Actor:         actor,
 			Target:        req.AgentId,
 			TargetType:    "agent",
 			OwnerUserId:   req.OwnerUserId,

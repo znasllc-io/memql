@@ -2716,8 +2716,16 @@ type WorkerForwardRequest struct {
 	StepId        string `protobuf:"bytes,10,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
 	CorrelationId string `protobuf:"bytes,11,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
 	// Optional timeout hint; the receiver clamps to its own caps.
-	TimeoutSec    int32               `protobuf:"varint,12,opt,name=timeout_sec,json=timeoutSec,proto3" json:"timeout_sec,omitempty"`
-	Authority     *ForwardedAuthority `protobuf:"bytes,13,opt,name=authority,proto3" json:"authority,omitempty"`
+	TimeoutSec int32               `protobuf:"varint,12,opt,name=timeout_sec,json=timeoutSec,proto3" json:"timeout_sec,omitempty"`
+	Authority  *ForwardedAuthority `protobuf:"bytes,13,opt,name=authority,proto3" json:"authority,omitempty"`
+	// Who is asking (#5494): empty for an agent's call, "pipeline" for a pipeline
+	// run's step. The one consent fact the receiver DOES re-check, because it can:
+	// workerHost.pipeline_step belongs to the pipeline purpose and the pipeline
+	// purpose to it alone, with no agent named. A pipeline_step arriving without
+	// it is refused before anything is dispatched -- on the machine it is a shell
+	// command admitted without a consent window, so a sender that forwarded one
+	// past its gate is not trusted to have been right.
+	Purpose       string `protobuf:"bytes,14,opt,name=purpose,proto3" json:"purpose,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2841,6 +2849,13 @@ func (x *WorkerForwardRequest) GetAuthority() *ForwardedAuthority {
 		return x.Authority
 	}
 	return nil
+}
+
+func (x *WorkerForwardRequest) GetPurpose() string {
+	if x != nil {
+		return x.Purpose
+	}
+	return ""
 }
 
 // WorkerForwardResponse carries the dispatch result back to the originating
@@ -4365,7 +4380,7 @@ const file_node_proto_rawDesc = "" +
 	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"K\n" +
 	"\fNodeShutdown\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\x12#\n" +
-	"\rgrace_seconds\x18\x02 \x01(\x05R\fgraceSeconds\"\xc7\x03\n" +
+	"\rgrace_seconds\x18\x02 \x01(\x05R\fgraceSeconds\"\xe1\x03\n" +
 	"\x14WorkerForwardRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12'\n" +
@@ -4384,7 +4399,8 @@ const file_node_proto_rawDesc = "" +
 	"\x0ecorrelation_id\x18\v \x01(\tR\rcorrelationId\x12\x1f\n" +
 	"\vtimeout_sec\x18\f \x01(\x05R\n" +
 	"timeoutSec\x12G\n" +
-	"\tauthority\x18\r \x01(\v2).znasllc.memql.node.v1.ForwardedAuthorityR\tauthority\"\xbc\x02\n" +
+	"\tauthority\x18\r \x01(\v2).znasllc.memql.node.v1.ForwardedAuthorityR\tauthority\x12\x18\n" +
+	"\apurpose\x18\x0e \x01(\tR\apurpose\"\xbc\x02\n" +
 	"\x15WorkerForwardResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +

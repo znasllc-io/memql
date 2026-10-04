@@ -29,6 +29,9 @@ func TestActionRequiredScope_Table(t *testing.T) {
 		{"workerHost", "http_fetch", ScopeRequirement{Capability: headless, Scope: "observe"}},
 		{"workerHost", "exec", ScopeRequirement{Capability: headless, Scope: "full"}},
 		{"workerHost", "fs_write", ScopeRequirement{Capability: headless, Scope: "full"}},
+		// A pipeline step runs a command, so it sits where exec sits (#5494);
+		// only the pipeline purpose may dispatch it (pipeline_purpose_test.go).
+		{"workerHost", "pipeline_step", ScopeRequirement{Capability: headless, Scope: "full"}},
 
 		// --- workerComputer introspection / timing (cockpit #162 /
 		// #177): served by BOTH cockpit builds, so they gate on
