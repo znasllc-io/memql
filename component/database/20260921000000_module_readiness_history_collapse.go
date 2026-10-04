@@ -131,7 +131,7 @@ import (
 // rolls back whole and the next attempt redoes it.
 //
 // A cancel can still arrive late. On a host at a load average of 43 (a shared
-// test machine, measured), one 1000-version batch ran 7.9 s before the 5 s
+// test machine, measured), one 1000-version batch ran 7.92 s before the 5 s
 // cancel took effect and another outlived the 10 s read deadline outright: a
 // backend stalled in a wait no interrupt reaches answers when the wait ends.
 // For that case the collapse knows something the runner cannot -- the cut-off
@@ -143,17 +143,17 @@ import (
 // way after a five-second wait, and between them the three deleted exactly the
 // 791,630 versions that were not their id's newest.
 //
-// And each transaction commits ASYNCHRONOUSLY (SET LOCAL synchronous_commit =
-// off). A production-sized walk is some 1100 commits, and a synchronous commit
-// waits for its WAL flush -- the one wait statement_timeout cannot end.
-// Measured on the same seed: commits were 29 of the walk's 45 s, and one waited
-// 7.9 s; asynchronous, they were half a second in all. Nothing is lost by it
-// that matters. A crash can lose the last few batches, but only whole, with the
-// cursor moves inside them, so the next attempt redoes exactly those. And it
-// cannot leave the migration recorded over a lost batch: bun's MarkApplied
-// commits synchronously after the last of them, and flushing a commit record
-// flushes every WAL record before it, on the primary and on any standby the
-// WAL streams to.
+// And each transaction commits ASYNCHRONOUSLY (synchronous_commit off, set
+// for the transaction alone). A production-sized walk is some 1100 commits,
+// and a synchronous commit waits for its WAL flush -- the one wait
+// statement_timeout cannot end. Measured on the same seed: commits were 29 of
+// the walk's 45 s, and one waited 7.89 s; asynchronous, they were half a
+// second in all. Nothing is lost by it that matters. A crash can lose the last
+// few batches, but only whole, with the cursor moves inside them, so the next
+// attempt redoes exactly those. And it cannot leave the migration recorded
+// over a lost batch: bun's MarkApplied commits synchronously after the last of
+// them, and flushing a commit record flushes every WAL record before it, on
+// the primary and on any standby the WAL streams to.
 //
 // ===========================================================================
 // HOW IT RESUMES
@@ -445,12 +445,15 @@ func (c *readinessCollapse) mustStop(ctx context.Context) (string, bool) {
 	return "", false
 }
 
+// deferred ends the attempt with nothing outstanding. The counts are the
+// batches this attempt saw commit; the progress row, which the next attempt
+// reads, is the authority on where the walk stands.
 func (c *readinessCollapse) deferred(why string) error {
-	c.logger.Info("module readiness history collapse: stopping between statements; the next migration attempt resumes from the cursor",
+	c.logger.Info("module readiness history collapse: stopping with nothing outstanding; the next migration attempt resumes from the cursor",
 		"migration", readinessCollapseMigrationName, "why", why, "cursor", c.cursor,
 		"collapsedThisAttempt", c.report.Collapsed, "collapsedInAll", c.collapsedBefore+c.report.Collapsed,
 		"idsThisAttempt", c.report.Ids, "duration", time.Since(c.started).Round(time.Millisecond).String())
-	return fmt.Errorf("%w: %s; %d versions collapsed by this attempt, %d in all, every batch committed and the cursor at %q",
+	return fmt.Errorf("%w: %s; %d versions collapsed by this attempt, %d in all, and the next attempt resumes from the cursor at %q",
 		errReadinessCollapseDeferred, why, c.report.Collapsed, c.collapsedBefore+c.report.Collapsed, c.cursor)
 }
 
