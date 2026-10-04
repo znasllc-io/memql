@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -92,19 +93,31 @@ func (tf *testFollower) archive() string {
 }
 
 // wantEachOnce checks every line's text is in the archive exactly once;
-// atLeast relaxes that to at least once.
+// atLeast relaxes that to at least once. A line carrying the generator's
+// <i: ... :i> markers has each marker counted too: a duplicated PREFIX of a
+// long line followed by a whole copy leaves the whole text once and its
+// start marker twice.
 func wantEachOnce(t *testing.T, archive string, log nodeLog, atLeast bool) {
 	t.Helper()
 	for _, line := range log {
 		_, text, _ := captureSplitStamp(line)
-		switch n := strings.Count(archive, text); {
-		case n == 0:
-			t.Errorf("lost %.60q", text)
-		case n > 1 && !atLeast:
-			t.Errorf("%.60q is in the archive %d times", text, n)
+		marks := []string{text}
+		if m := lineMarker.FindStringSubmatch(text); m != nil && strings.HasSuffix(text, ":"+m[1]+">") {
+			marks = append(marks, "<"+m[1]+":", ":"+m[1]+">")
+		}
+		for _, mark := range marks {
+			switch n := strings.Count(archive, mark); {
+			case n == 0:
+				t.Errorf("lost %.60q (of %.60q)", mark, text)
+			case n > 1 && !atLeast:
+				t.Errorf("%.60q (of %.60q) is in the archive %d times", mark, text, n)
+			}
 		}
 	}
 }
+
+// lineMarker finds the generator's start marker, <i:, in a line's text.
+var lineMarker = regexp.MustCompile(`<(\d+):`)
 
 // TestFollowerFeedsEveryLineOnceAcrossCuts is the rule, randomized: logs of
 // short lines and long ones (some exactly a multiple of the piece size, so

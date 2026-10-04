@@ -4422,7 +4422,12 @@ func TestTroubleKeyNamesNoObject(t *testing.T) {
 		return fmt.Errorf("GET %s: %w", kubeJobs+"/"+job, &url.Error{Op: "Get", URL: "https://10.0.0.1:443" + kubeJobs + "/" + job,
 			Err: errors.New("dial tcp 10.0.0.1:443: connect: connection refused")})
 	}
-	for name, mk := range map[string]func(string) error{"a refusal": refusal, "a transport error": dial} {
+	notAJob := func(job string) error {
+		var v map[string]any
+		err := json.Unmarshal([]byte("<html>proxy</html>"), &v)
+		return fmt.Errorf("pipelinesteps: reading job %s: %w", job, err)
+	}
+	for name, mk := range map[string]func(string) error{"a refusal": refusal, "a transport error": dial, "a body that is not a Job": notAJob} {
 		a, b := troubleKey(mk("mp-aaaaaaaaaaaaaaaaaaaaaaaa")), troubleKey(mk("mp-bbbbbbbbbbbbbbbbbbbbbbbb"))
 		if a != b || strings.Contains(a, "mp-") || a == "" {
 			t.Errorf("%s: keys %q and %q, want one key naming no Job", name, a, b)

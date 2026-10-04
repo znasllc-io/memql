@@ -49,8 +49,12 @@ import (
 //     second of the latest line fed whole -- a line written after a stream
 //     ended, or cut inside its stamp, may be stamped that much before it --
 //     whichever is earlier. The ledger keeps every line from that second on,
-//     so all a stream replays is known. A line stamped further back than
-//     replaySkew is fed again rather than lost.
+//     so all a stream replays is known. A CUT line is replayed however far
+//     back it is stamped. A line with no cut entry -- written after a stream
+//     ended, or cut inside its stamp -- that is stamped more than replaySkew
+//     before the second of the latest line fed whole is never served again,
+//     and is lost: replaySkew bounds the milliseconds stdout and stderr
+//     disagree by, not a clock that jumps.
 //
 // A Run that ADOPTED the step follows its log from the start. The store has
 // every line up to the adoption cursor, so those reach the archive only, and

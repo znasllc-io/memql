@@ -1254,7 +1254,14 @@ func troubleKey(err error) string {
 	if errors.As(err, &ue) {
 		return ue.Err.Error()
 	}
-	return err.Error()
+	// Anything else -- a body that is not a Job, say -- is keyed by its
+	// innermost error, which says what went wrong without the wrapping that
+	// names the Job.
+	root := err
+	for next := errors.Unwrap(root); next != nil; next = errors.Unwrap(root) {
+		root = next
+	}
+	return root.Error()
 }
 
 // createFailure is the step's failure when the API server refused to create
