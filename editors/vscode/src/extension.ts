@@ -820,7 +820,7 @@ const HANDOFF_ADD_FOLDER_TIMEOUT_MS = 5_000;
  */
 function noteHandoffFailure(err: unknown): void {
   const detail = err instanceof Error ? err.message : String(err);
-  noteDiagnostic(connectionOutput, 'Handoff from the console failed', detail);
+  noteDiagnostic(connectionOutput, 'Link from MemQL OS failed', detail);
   void offerDetails('error', connectionOutput, "MemQL: The link from MemQL OS couldn't be opened.");
 }
 
@@ -850,7 +850,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   const request = parseOpenRequest({ path: uri.path, query: uri.query });
   if ('error' in request) {
     // The validator's words go to the channel; the toast says what happened.
-    noteDiagnostic(connectionOutput, 'Handoff refused', request.error);
+    noteDiagnostic(connectionOutput, 'Link from MemQL OS refused', request.error);
     void offerDetails('error', connectionOutput, "MemQL: This link from MemQL OS isn't valid.");
     return { outcome: 'refused', detail: request.error };
   }
@@ -866,7 +866,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     // is exactly the report a missing line cannot be answered from.
     noteDiagnostic(
       connectionOutput,
-      'Handoff from the console',
+      'Link from MemQL OS',
       `${request.domain} ${describeOpenRequest(request)} -> untrusted workspace`
     );
     void (async () => {
@@ -885,17 +885,17 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   const registry = await readClustersFileSafe(surface.clustersPath);
   if (!registry.ok) {
     void offerClusterListFix(surface.clustersPath);
-    // 'Handoff from the console', not 'Handoff refused': the link was fine and the
+    // 'Link from MemQL OS', not '... refused': the link was fine and the
     // REGISTRY was not, which is the outcome this returns. A headline naming
     // the other outcome sends a reader looking for a malformed link.
-    noteDiagnostic(connectionOutput, 'Handoff from the console', `the cluster registry could not be read: ${registry.error}`);
+    noteDiagnostic(connectionOutput, 'Link from MemQL OS', `the cluster registry could not be read: ${registry.error}`);
     return { outcome: 'noCluster', detail: 'the cluster registry could not be read' };
   }
   const match = matchCluster(registry.file.clusters, request.domain, registry.file.selectedCluster);
   if (match.kind === 'none') {
     noteDiagnostic(
       connectionOutput,
-      'Handoff from the console',
+      'Link from MemQL OS',
       `${request.domain} ${describeOpenRequest(request)} -> no registered cluster`
     );
     // DETACHED, never awaited (the shape memql#4079 established above). A
@@ -930,7 +930,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
     // catalog looks wrong, and is noise every other time.
     noteDiagnostic(
       connectionOutput,
-      'Handoff from the console',
+      'Link from MemQL OS',
       `${request.domain} is registered as ${cluster.name}; also as ${match.alsoMatched.join(', ')}`
     );
   }
@@ -960,7 +960,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
       // abandoned, so the two toasts do not say the same thing twice.
       noteDiagnostic(
         connectionOutput,
-        'Handoff from the console',
+        'Link from MemQL OS',
         `${cluster.name} ${describeOpenRequest(request)} -> not connected (${settled.status})`
       );
       // THE ARTIFACT PATH SAYS ONE MORE THING, and the asymmetry is deliberate
@@ -1010,7 +1010,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   if (dispatcher === undefined) {
     noteDiagnostic(
       connectionOutput,
-      'Handoff from the console',
+      'Link from MemQL OS',
       `${cluster.name} ${describeOpenRequest(request)} -> no dispatcher`
     );
     return { outcome: 'noCluster', detail: `${cluster.name} is not connected` };
@@ -1046,7 +1046,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
   // failure would have nothing to compare against.
   noteDiagnostic(
     connectionOutput,
-    'Handoff from the console',
+    'Link from MemQL OS',
     `${cluster.name} ${describeOpenRequest(request)} -> ${landing.kind}`
   );
 
@@ -1094,7 +1094,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
             await openFileAtSignature(nowIn.uri, found.kind, found.name);
             noteDiagnostic(
               connectionOutput,
-              'Handoff from the console',
+              'Link from MemQL OS',
               `${cluster.name} ${request.kind} ${request.name} -> workspaceFile (after adding the checkout)`
             );
             return { outcome: 'opened', detail: 'workspaceFile' };
@@ -1107,7 +1107,7 @@ async function handleOpenUri(uri: Uri): Promise<HandoffOutcome> {
           });
           noteDiagnostic(
             connectionOutput,
-            'Handoff from the console',
+            'Link from MemQL OS',
             `${cluster.name} ${request.kind} ${request.name} -> clusterDocument (the added checkout does not hold it)`
           );
           return { outcome: 'opened', detail: 'clusterDocument' };
@@ -1155,7 +1155,7 @@ async function landOnArtifact(
   if (query === undefined || bearer === undefined) {
     noteDiagnostic(
       connectionOutput,
-      'Handoff from the console',
+      'Link from MemQL OS',
       `${cluster.name} ${describeOpenRequest(request)} -> no connection`
     );
     return { outcome: 'noCluster', detail: `${cluster.name} is not connected` };
@@ -1173,7 +1173,7 @@ async function landOnArtifact(
   if (!lookup.found) {
     noteDiagnostic(
       connectionOutput,
-      'Handoff from the console',
+      'Link from MemQL OS',
       `${cluster.name} ${describeOpenRequest(request)} -> no such artifact`
     );
     // ONE SENTENCE FOR TWO CONDITIONS, because the graph gives one answer for
@@ -1190,7 +1190,7 @@ async function landOnArtifact(
   if (base === undefined) {
     noteDiagnostic(
       connectionOutput,
-      'Handoff from the console',
+      'Link from MemQL OS',
       `${cluster.name} ${describeOpenRequest(request)} -> no https address`
     );
     void (async () => {
@@ -1207,7 +1207,7 @@ async function landOnArtifact(
   // which cluster, which row, what it is and how big.
   noteDiagnostic(
     connectionOutput,
-    'Handoff from the console',
+    'Link from MemQL OS',
     `${artifactProvenanceLine(cluster.name, meta)} -> ${delivery.kind} as ${fileName}` +
       (delivery.kind === 'saveToDisk' ? ` (${delivery.reason})` : '') +
       (lookup.archived ? ' (archived)' : '')
@@ -1239,7 +1239,7 @@ async function landOnArtifact(
       // link this extension would not act on at all.
       noteDiagnostic(
         connectionOutput,
-        'Handoff from the console',
+        'Link from MemQL OS',
         `${cluster.name} ${describeOpenRequest(request)} -> save cancelled`
       );
       return { outcome: 'notLoaded', detail: 'cancelled' };
@@ -1254,7 +1254,7 @@ async function landOnArtifact(
       return { outcome: 'noCluster', detail: `save failed (${saved.failure.reason})` };
     }
     void window.showInformationMessage(`MemQL: Saved ${fileName}.`);
-    noteDiagnostic(connectionOutput, 'Handoff from the console', `${cluster.name} saved ${fileName}`);
+    noteDiagnostic(connectionOutput, 'Link from MemQL OS', `${cluster.name} saved ${fileName}`);
     return { outcome: 'saved', detail: 'artifactFile' };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
