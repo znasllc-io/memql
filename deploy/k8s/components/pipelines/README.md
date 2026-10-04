@@ -148,8 +148,11 @@ can run.
   gives each node (`--node-osdisk-size 32`), which holds the OS, every image
   and the mesh as well as the steps: at the ceiling both of `cloud`'s steps can
   land on one node, so 8Gi a container is sized for two beside the rest. A step
-  with no services takes at most 8Gi in all; each service it names adds
-  another 8Gi to its pod's sum, while the workspace stays within its own 8Gi.
+  with no services is held to 8Gi in all; each service it names adds another
+  8Gi to its pod's sum, while the workspace stays within its own 8Gi. The
+  kubelet enforces these by measuring periodically (a volume about once a
+  minute), so a step can write past its bound for up to about a minute before
+  it is evicted.
   An operator who provisions larger disks raises both values — the
   LimitRange's default ephemeral-storage limit and
   `MEMQL_PIPELINES_WORKSPACE_LIMIT` — in their own overlay, which the render
@@ -172,10 +175,18 @@ It is bound to **`memql-engine`**, the ServiceAccount every engine Deployment
 runs as, not to a workbench-only account: the workbench also makes model calls,
 and both vendors' workload identity federation trusts `memql-engine` by name.
 That is the precedent [`custom-domain-rbac.yaml`](../../base/custom-domain-rbac.yaml)
-set. What confines the grant is the namespace — it holds only in
-`memql-pipelines`, where the mesh runs nothing — and the binary: only the
-workbench contains the runner. There is no ClusterRole, and no
-ClusterRoleBinding anywhere in an overlay's render reaches `memql-engine`.
+set. The namespace confines the grant: it holds only in `memql-pipelines`,
+where the mesh runs nothing. There is no ClusterRole, and no ClusterRoleBinding
+anywhere in an overlay's render reaches `memql-engine`.
+
+**The binary does not confine it, and that is an accepted risk.** Only the
+workbench contains the runner, but every engine pod holds a `memql-engine`
+token, including the edge and mcp, which face the internet. A compromised
+engine pod can create a Job in `memql-pipelines` and read the Secrets of the
+steps in flight there: their clone tokens and resolved secrets. A
+workbench-only account (with its own federation trust), or a
+ValidatingAdmissionPolicy that admits only the runner's Jobs, narrows it
+(memql#5811).
 
 ## The step
 
@@ -209,8 +220,10 @@ namespace isolated before it creates a step, refuses every step there
 it creates -- and again once a pass is an hour old -- each workbench replica
 runs a probe here: one Indexed Job (`memql.io/probe=isolation`) whose pods each
 listen on a port, one of which tries to reach the other while it reaches the
-cluster's DNS, which the policy allows. Reaching DNS but not the listener is a
-pass. Reaching the listener refuses every step `pipeline_isolation_unenforced`,
+cluster's DNS, which the policy allows. Reaching DNS but not a listener that
+provably held its port throughout is a pass (the operator page says what
+holding takes, and what the proof does not exercise). Reaching the listener
+refuses every step `pipeline_isolation_unenforced`,
 naming the fix: a network policy engine. A probe that cannot decide (DNS
 unreachable, the listener gone) refuses every step too, until a later proof
 passes; its refusal says what it saw and, should it persist, where to look:

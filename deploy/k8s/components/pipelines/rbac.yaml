@@ -47,7 +47,11 @@
 # custom-domain Role set (../../base/custom-domain-rbac.yaml): a feature Role
 # in its own file, bound to the shared identity. What confines it is the
 # namespace -- the grant holds only in memql-pipelines, where the mesh runs
-# nothing -- and the binary: only the workbench contains the runner.
+# nothing. The binary does NOT: only the workbench contains the runner, but
+# every engine pod holds a memql-engine token, so a compromised one (the edge
+# and mcp face the internet) can create a Job here and read the Secrets of the
+# steps in flight. An ACCEPTED RISK for this release; a workbench-only account
+# or a ValidatingAdmissionPolicy narrows it (memql#5811).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
