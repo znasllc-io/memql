@@ -128,7 +128,13 @@ func (w *EngineMirrorWriter) StoredVersion(ctx context.Context, spec memqlsync.D
 		return "", false, nil
 	}
 
-	q := fmt.Sprintf("concept==%s && id==%s", conceptID, rowID)
+	// The row id is a literal, quoted as WriteMirror quotes it (memql#5625's
+	// sweep). It is the connector's to mint and the contract types it as a
+	// string: pasted bare, an id carrying a quote or a space failed to parse,
+	// and since this read runs before every versioned write, such a row could
+	// never be applied at all. The concept is the connector's declared domain
+	// and stays bare.
+	q := fmt.Sprintf("concept==%s && id==%s", conceptID, langparser.QuoteString(rowID))
 	res, err := w.engine.Execute(ctx, q)
 	if err != nil {
 		return "", false, fmt.Errorf("datasync: reading the stored version of %s %q: %w", conceptID, rowID, err)
