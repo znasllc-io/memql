@@ -121,6 +121,12 @@ type GitHub interface {
 	Repository(ctx context.Context, token, repository string) (githubapp.RepositoryInfo, error)
 	BranchHead(ctx context.Context, token, repository, branch string) (sha, message string, err error)
 	OpenPullRequests(ctx context.Context, token, repository string) ([]githubapp.PullRequestHead, error)
+	// PullRequestHead reads one pull request's head as GitHub reports it now,
+	// by its number: what decides whether an opening is the pull request's
+	// current head (supersede.go). Not OpenPullRequests, which is one page of
+	// a hundred, newest first, and misses an older pull request in a busy
+	// repository.
+	PullRequestHead(ctx context.Context, token, repository string, number int) (githubapp.PullRequestHead, error)
 	// Compare answers complete=false when GitHub stopped listing (300+).
 	Compare(ctx context.Context, token, repository, base, head string) (files []string, complete bool, err error)
 	CommitForRef(ctx context.Context, token, repository, ref string) (sha, message string, err error)

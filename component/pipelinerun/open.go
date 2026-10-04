@@ -83,8 +83,10 @@ func (i *Integration) open(ctx context.Context, d Deps, p Pipeline, o Opening) (
 //
 // A pull request's new head SUPERSEDES the pull request's earlier runs
 // (supersede.go): they are read before the gate, while the new run does not
-// exist yet, and asked to stop once the gate is released -- each ask takes
-// that run's own gate, and may write its check run.
+// exist yet, and asked to stop once the gate is released -- and only when
+// GitHub, asked then, names this opening's commit as the pull request's head.
+// The head read is a call to GitHub and each ask takes that run's own gate and
+// may write its check run, so neither happens under the open gate.
 func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o Opening, token string) (OpenResult, error) {
 	if d.Store == nil {
 		return OpenResult{}, errNoStore
@@ -197,8 +199,12 @@ func (i *Integration) openWithToken(ctx context.Context, d Deps, p Pipeline, o O
 		return nil
 	})
 	if err == nil && result.Opened {
-		// The gate is released: only now may a run be asked to stop.
-		i.supersede(ctx, d, result.Run, earlier)
+		// The gate is released: only now may GitHub be asked for the pull
+		// request's head and a run be asked to stop. A failed mint is no token.
+		if tokenErr != nil {
+			token = ""
+		}
+		i.supersede(ctx, d, result.Run, earlier, token)
 	}
 	return result, err
 }

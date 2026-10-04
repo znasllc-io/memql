@@ -585,6 +585,10 @@ type fakeGitHub struct {
 
 	// pullsErr is every OpenPullRequests call's answer when set.
 	pullsErr error
+	// pullHeadErr is every PullRequestHead call's answer when set;
+	// pullHeadCalls is each one asked, "owner/name#<number>", in order.
+	pullHeadErr   error
+	pullHeadCalls []string
 
 	// treeKeeps records each Tree call's keep decision for the files it
 	// held, so a test can assert what was asked for.
@@ -705,6 +709,49 @@ func (g *fakeGitHub) OpenPullRequests(ctx context.Context, _, repository string)
 		return nil, g.pullsErr
 	}
 	return slices.Clone(g.pulls[repository]), nil
+}
+
+// PullRequestHead answers one pull request from the SAME list OpenPullRequests
+// answers -- GitHub's single read agrees with its list -- and a number the list
+// does not hold is GitHub's 404.
+func (g *fakeGitHub) PullRequestHead(ctx context.Context, _, repository string, number int) (githubapp.PullRequestHead, error) {
+	watchGitHubCall(g.t, ctx, "PullRequestHead")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.pullHeadCalls = append(g.pullHeadCalls, fmt.Sprintf("%s#%d", repository, number))
+	if g.pullHeadErr != nil {
+		return githubapp.PullRequestHead{}, g.pullHeadErr
+	}
+	for _, pr := range g.pulls[repository] {
+		if pr.Number == number {
+			return pr, nil
+		}
+	}
+	return githubapp.PullRequestHead{}, &githubapp.StatusError{Status: 404, Endpoint: fmt.Sprintf("/repos/%s/pulls/%d", repository, number)}
+}
+
+// setPullHead is a push to pull request number on GitHub: its head moves to
+// sha, and a pull request the list does not hold yet is opened from this
+// repository.
+func (g *fakeGitHub) setPullHead(repository string, number int, sha string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for i, pr := range g.pulls[repository] {
+		if pr.Number == number {
+			g.pulls[repository][i].HeadSHA = sha
+			return
+		}
+	}
+	g.pulls[repository] = append(g.pulls[repository], githubapp.PullRequestHead{
+		Number: number, Title: "Show the cart count", HeadSHA: sha, HeadRef: "cart-badge", HeadRepository: repository, BaseSHA: shaBase,
+	})
+}
+
+// headReads is every PullRequestHead call, in order.
+func (g *fakeGitHub) headReads() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.pullHeadCalls)
 }
 
 func (g *fakeGitHub) Compare(ctx context.Context, _, repository, base, head string) ([]string, bool, error) {

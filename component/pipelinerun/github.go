@@ -107,6 +107,14 @@ func (g *packagesGitHub) OpenPullRequests(ctx context.Context, token, repository
 	return c.OpenPullRequests(ctx, token, owner, name)
 }
 
+func (g *packagesGitHub) PullRequestHead(ctx context.Context, token, repository string, number int) (githubapp.PullRequestHead, error) {
+	c, owner, name, err := g.target(repository)
+	if err != nil {
+		return githubapp.PullRequestHead{}, err
+	}
+	return c.PullRequest(ctx, token, owner, name, number)
+}
+
 func (g *packagesGitHub) Compare(ctx context.Context, token, repository, base, head string) ([]string, bool, error) {
 	c, owner, name, err := g.target(repository)
 	if err != nil {

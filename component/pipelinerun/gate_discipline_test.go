@@ -226,12 +226,16 @@ func TestEveryGatedPathKeepsTheGateDiscipline(t *testing.T) {
 			t.Fatalf("no unfinished run of #42 is left to supersede: %+v", dh.store.allRuns())
 		}
 		before := len(dh.gate.seen())
+		dh.github.setPullHead(repoName, 42, shaD)
 		res := trigger(t, dh.harness, "pull_request", "d-pr-push", prDelivery(t, "synchronize", 42, shaD, repoName, testInstallation))
 		if len(res.Opened) != 1 {
 			t.Fatalf("opened %+v", res)
 		}
 		sawKey(t, before, OpenGateKey(res.Opened[0].RunKey))
 		sawKey(t, before, RunGateKey(earlier.ID))
+		if reads := dh.github.headReads(); len(reads) != 1 {
+			t.Errorf("the push read #42's head from GitHub once, ungated: %v", reads)
+		}
 		if got, _ := dh.store.run(earlier.ID); got.Conclusion != ConclusionCancelled || got.CancelledBy != "superseded by "+res.Opened[0].ID {
 			t.Errorf("the superseded run is concluded cancelled, by the push's run: %s by %q", got.Conclusion, got.CancelledBy)
 		}
