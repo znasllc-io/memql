@@ -51,13 +51,15 @@ import (
 // longer changes.
 //
 // The persisted outcome must fit a Job annotation: Kubernetes caps all of an
-// object's annotations at 256 KiB together. Everything in it is bounded where
-// it is made -- the tail at 16 KiB (the capture), a failure's sentence at
-// failureMaxBytes, the notes at noteMaxBytes each and notesMaxBytes in all,
-// the artifact ids at the extractor's 1024 files. With JSON's six-byte escapes
-// that is at most some 96 KiB of tail, 25 of notes and 12 of failure, and
-// with the observation beside it the Job stays under the cap for any Library
-// file id shorter than about 80 bytes.
+// object's annotations at 256 KiB together. Most of it is bounded where it is
+// made -- the tail at 16 KiB (the capture), a failure's sentence at
+// failureMaxBytes, the notes at noteMaxBytes each and notesMaxBytes in all --
+// which with JSON's six-byte escapes is at most some 96 KiB of tail, 25 of
+// notes and 12 of failure. The artifact file ids (up to the extractor's 1024,
+// each as long as the Library makes it) and the Go timings (one per passing
+// package) are not, so settling measures the encoded outcome and cuts those
+// two to outcomeMaxBytes (fitOutcome): an outcome the API server refused
+// would be lost, and with it the answer to a reply lost with this replica.
 
 const (
 	// quickCallTimeout bounds Status, Ack and CancelRun, which run on the
@@ -110,6 +112,11 @@ const (
 	// apiTroubleRepeat is how often a polling loop logs an API error again
 	// while what it says has not changed (apiTrouble).
 	apiTroubleRepeat = 5 * time.Minute
+	// outcomeMaxBytes is the most the encoded outcome may take. The other
+	// annotations on the Job -- the observation (at most some 13 KiB), the
+	// claim, the cursor and the step's identity -- stay well inside the
+	// 32 KiB of the 256 KiB this leaves them.
+	outcomeMaxBytes = 224 << 10
 	// tokenRefreshAge is how old a clone token may be when the step's Job is
 	// created: an installation token lasts an hour, the step queues for as
 	// long as the ceiling is full, and the clone runs once the pod is placed

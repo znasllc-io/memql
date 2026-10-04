@@ -9,6 +9,7 @@ import (
 	"mime"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -90,7 +91,7 @@ func (s *step) settle(dec pl.StepResult, pod *Pod, f *follower) pl.StepResult {
 	defer cancelLib()
 	cr := s.storeLog(libCtx, &res, notes)
 	s.storeArtifacts(libCtx, cr, &res, notes)
-	res.Notes = notes.list()
+	s.fitOutcome(&res, notes)
 	persistCtx, cancelPersist := s.persistContext()
 	defer cancelPersist()
 	s.persist(persistCtx, res)
@@ -137,6 +138,73 @@ func (s *step) tail(pod, container, who string, lines int) {
 		s.capture.Note(fmt.Sprintf("memql: %s's output, its last %d lines:", who, lines))
 		s.capture.Note(out)
 	}
+}
+
+// fitOutcome keeps the outcome within outcomeMaxBytes, so the API server never
+// refuses it as too large (fix round 1, minor 13), and fills in its notes. The
+// artifact file ids give way first, from the end -- the files stay in the
+// owner's Library all the same, bound to the run and the step -- and the Go
+// timings next, by package path; each cut is said in a note at the head of
+// the list. The log's file id is never cut. What remains is bounded where it
+// is made, and fits.
+func (s *step) fitOutcome(res *pl.StepResult, notes *noteList) {
+	res.Notes = notes.list()
+	if outcomeBytes(*res) <= outcomeMaxBytes {
+		return
+	}
+	if ids := res.ArtifactFileIDs; len(ids) > 0 {
+		fits := keepMost(res, notes, len(ids), func(r *pl.StepResult, k int) string {
+			r.ArtifactFileIDs = ids[:k:k]
+			if k == 0 {
+				r.ArtifactFileIDs = nil
+			}
+			return fmt.Sprintf("%d of the step's %d artifact file ids were left out of its outcome, which must fit in a Job annotation; "+
+				"the files are in the owner's Library all the same", len(ids)-k, len(ids))
+		})
+		if fits {
+			return
+		}
+	}
+	if timings := res.Timings; len(timings) > 0 {
+		paths := sortedKeys(timings)
+		keepMost(res, notes, len(paths), func(r *pl.StepResult, k int) string {
+			r.Timings = nil
+			if k > 0 {
+				r.Timings = make(map[string]float64, k)
+				for _, p := range paths[:k] {
+					r.Timings[p] = timings[p]
+				}
+			}
+			return fmt.Sprintf("the Go test timings of %d of the step's %d passing packages were left out of its outcome, which must fit in a Job annotation",
+				len(paths)-k, len(paths))
+		})
+	}
+}
+
+// keepMost cuts one of the outcome's lists to the most of its n items that
+// fit, with the note cut answers at the head of the notes, and says whether
+// the outcome fits now. cut keeps the first k items in r. Fewer items are
+// never more bytes, so the most that fit is searched for.
+func keepMost(res *pl.StepResult, notes *noteList, n int, cut func(r *pl.StepResult, k int) string) bool {
+	try := func(k int) (pl.StepResult, noteList, bool) {
+		r, trial := *res, *notes
+		trial.addFirst(pl.CodeArtifactMissing, cut(&r, k))
+		r.Notes = trial.list()
+		return r, trial, outcomeBytes(r) <= outcomeMaxBytes
+	}
+	k := max(sort.Search(n+1, func(k int) bool { _, _, fits := try(k); return !fits })-1, 0)
+	r, trial, fits := try(k)
+	*res, *notes = r, trial
+	return fits
+}
+
+// outcomeBytes is the outcome's size as persist encodes it.
+func outcomeBytes(res pl.StepResult) int {
+	body, err := json.Marshal(res)
+	if err != nil {
+		return 0 // persist reports it
+	}
+	return len(body)
 }
 
 // persist writes the outcome on the Job, unconditionally, before the Run
@@ -449,6 +517,22 @@ func (n *noteList) add(code, message string) {
 	}
 	n.notes = append(n.notes, pl.Failure{Code: code, Message: message})
 	n.bytes += len(message)
+}
+
+// addFirst puts a note at the head of the list, within the same bounds: a
+// note it pushes off the end is counted with the rest left out.
+func (n *noteList) addFirst(code, message string) {
+	message = cutBytes(n.mask(message), noteMaxBytes)
+	n.notes = append([]pl.Failure{{Code: code, Message: message}}, n.notes...)
+	n.bytes += len(message)
+	for len(n.notes) > 1 && (len(n.notes) > maxNotes || n.bytes > notesMaxBytes) {
+		last := n.notes[len(n.notes)-1]
+		n.notes, n.bytes = n.notes[:len(n.notes)-1], n.bytes-len(last.Message)
+		if n.more == 0 {
+			n.code = last.Code
+		}
+		n.more++
+	}
 }
 
 func (n *noteList) list() []pl.Failure {

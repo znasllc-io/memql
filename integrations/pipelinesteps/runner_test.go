@@ -988,6 +988,8 @@ type rtLibrary struct {
 	// block makes every store wait for its context to end, and fail with it:
 	// a Library that does not answer.
 	block bool
+	// idPad lengthens every file id it answers.
+	idPad string
 }
 
 func (l *rtLibrary) StoreRunFile(ctx context.Context, f RunFile) (StoredFile, error) {
@@ -1007,7 +1009,7 @@ func (l *rtLibrary) StoreRunFile(ctx context.Context, f RunFile) (StoredFile, er
 	if err, ok := l.fail[f.Name]; ok {
 		return StoredFile{}, err
 	}
-	return StoredFile{FileID: fmt.Sprintf("file-%d", len(l.files))}, nil
+	return StoredFile{FileID: fmt.Sprintf("file-%d", len(l.files)) + l.idPad}, nil
 }
 
 func (l *rtLibrary) stored() []RunFile {
@@ -3064,6 +3066,145 @@ func TestRunnerReadsGoTimings(t *testing.T) {
 				t.Errorf("the outcome recorded on the Job has Timings %v (%v), want %v", recorded.Timings, err, c.want)
 			}
 		})
+	}
+}
+
+// TestRunnerFitsItsOutcomeInAJobAnnotation (fix round 1, minor 13): all of a
+// Job's annotations share 256 KiB, and an outcome the API server refused would
+// be lost. The two lists in it nothing bounds -- the artifact file ids and the
+// Go timings -- are cut to fit, each with a note saying how many were left
+// out; the log's file id stays. The fake API server refuses an annotation
+// past the cap as a real one does, and fails the test.
+func TestRunnerFitsItsOutcomeInAJobAnnotation(t *testing.T) {
+	persistedOutcome := func(t *testing.T, h *rtHarness, res pl.StepResult) {
+		t.Helper()
+		raw := h.c.jobNow(t, testJobName).Metadata.Annotations[AnnotOutcome]
+		var recorded pl.StepResult
+		if err := json.Unmarshal([]byte(raw), &recorded); err != nil || !reflect.DeepEqual(recorded, res) {
+			t.Fatalf("the outcome recorded on the Job (%d bytes, %v) is not the one Run answered", len(raw), err)
+		}
+		if len(raw) > outcomeMaxBytes {
+			t.Errorf("the outcome is %d bytes, over outcomeMaxBytes (%d)", len(raw), outcomeMaxBytes)
+		}
+	}
+
+	t.Run("artifact file ids", func(t *testing.T) {
+		const files = 400
+		h := newRunnerHarness(t)
+		h.lib.idPad = "-" + strings.Repeat("i", 800)
+		run := rtRun()
+		run.Artifacts = []string{"dist/*"}
+		var entries []extractTestEntry
+		for i := 0; i < files; i++ {
+			entries = append(entries, extractTestEntry{name: fmt.Sprintf("dist/f%04d.txt", i), body: "x"})
+		}
+		h.c.script(testJobName, rtFinishingScript(testJobName, 0, rtFramedLines(t, "ok", extractTestTgz(t, entries))...))
+
+		res := h.run(t, run)
+
+		persistedOutcome(t, h, res)
+		if res.Status != pl.OutcomeSucceeded || res.LogFileID != "file-1"+h.lib.idPad {
+			t.Errorf("status %s, log file %.20q...; want a success that keeps its log", res.Status, res.LogFileID)
+		}
+		kept := len(res.ArtifactFileIDs)
+		if kept == 0 || kept == files {
+			t.Fatalf("%d of %d artifact file ids kept, want as many as fit", kept, files)
+		}
+		for i, id := range res.ArtifactFileIDs {
+			if id != fmt.Sprintf("file-%d", i+2)+h.lib.idPad {
+				t.Fatalf("artifact file id %d is %.20q..., want the first ones stored, in order", i, id)
+			}
+		}
+		want := fmt.Sprintf("%d of the step's %d artifact file ids were left out of its outcome", files-kept, files)
+		if len(res.Notes) == 0 || !strings.HasPrefix(res.Notes[0].Message, want) || res.Notes[0].Code != pl.CodeArtifactMissing {
+			t.Errorf("notes = %+v, want the first to say %q", res.Notes, want)
+		}
+	})
+
+	t.Run("Go timings", func(t *testing.T) {
+		const packages = 5000
+		h := newRunnerHarness(t)
+		run := rtRun()
+		run.GoTimings = true
+		var lines []string
+		for i := 0; i < packages; i++ {
+			lines = append(lines, captureKubeLine(rtAt(1100+i), fmt.Sprintf("ok  \tgithub.com/acme/widget/internal/generated/clients/v%04d\t0.%03ds", i, i%1000)))
+		}
+		h.c.script(testJobName, rtFinishingScript(testJobName, 0, lines...))
+
+		res := h.run(t, run)
+
+		persistedOutcome(t, h, res)
+		kept := len(res.Timings)
+		if kept == 0 || kept == packages {
+			t.Fatalf("%d of %d timings kept, want as many as fit", kept, packages)
+		}
+		for i := 0; i < kept; i++ {
+			if _, ok := res.Timings[fmt.Sprintf("github.com/acme/widget/internal/generated/clients/v%04d", i)]; !ok {
+				t.Fatalf("package %d's timing was cut while a later one was kept: want the first by path", i)
+			}
+		}
+		want := fmt.Sprintf("the Go test timings of %d of the step's %d passing packages were left out of its outcome", packages-kept, packages)
+		if len(res.Notes) == 0 || !strings.HasPrefix(res.Notes[0].Message, want) {
+			t.Errorf("notes = %+v, want the first to say %q", res.Notes, want)
+		}
+	})
+}
+
+// TestWhatTheCutsLeaveAlwaysFits: fitOutcome cuts only the artifact file ids
+// and the Go timings, because the rest of an outcome is bounded where it is
+// made. With neither, the largest outcome those bounds allow -- a full tail,
+// full notes and a full failure, every byte one JSON spends six on -- fits in
+// outcomeMaxBytes, and the largest observation, the claim, the cursor and the
+// step's identity fit in what is left beside it. A bound raised past this
+// needs a cut of its own.
+func TestWhatTheCutsLeaveAlwaysFits(t *testing.T) {
+	esc := func(n int) string { return strings.Repeat("<", n) }
+	notes := &noteList{mask: func(s string) string { return s }}
+	for i := 0; i <= maxNotes; i++ {
+		notes.add(pl.CodeArtifactMissing, esc(notesMaxBytes/maxNotes))
+	}
+	failure := &pl.Failure{Code: pl.CodeServiceFailed, Message: esc(failureMaxBytes)}
+	res := pl.StepResult{
+		Status: pl.OutcomeFailed, ExitCode: 137, Failure: failure,
+		StartedAt: rtT0.Format(time.RFC3339), FinishedAt: rtT0.Format(time.RFC3339),
+		Where:     pl.Where{Surface: "cluster", NodeID: strings.Repeat("n", 253), JobName: testJobName},
+		LogFileID: strings.Repeat("f", 1024), LogTail: esc(captureTailBytes), LogLines: 1 << 30, LogCapped: true,
+		Notes: notes.list(),
+	}
+	if n := outcomeBytes(res); n > outcomeMaxBytes {
+		t.Errorf("the largest outcome left after the cuts is %d bytes, over outcomeMaxBytes (%d)", n, outcomeMaxBytes)
+	}
+	observation, _ := json.Marshal(pl.StepResult{Status: res.Status, ExitCode: res.ExitCode, Failure: failure, StartedAt: res.StartedAt, FinishedAt: res.FinishedAt})
+	others := map[string]string{
+		AnnotObservation: string(observation),
+		AnnotRunner:      rtStamp(strings.Repeat("n", 253), rtT0),
+		AnnotLogCursor:   rtT0.Format(time.RFC3339Nano),
+		AnnotStepKey:     strings.Repeat("s", 1024),
+		AnnotWorkRun:     strings.Repeat("w", 256),
+		AnnotOwner:       strings.Repeat("o", 256),
+	}
+	total := len(AnnotOutcome) + outcomeMaxBytes
+	for k, v := range others {
+		total += len(k) + len(v)
+	}
+	if total > 256<<10 {
+		t.Errorf("an outcome of outcomeMaxBytes beside the largest other annotations is %d bytes, past the API server's 262144", total)
+	}
+}
+
+// TestNoteListAddFirstKeepsItsBounds: a note put at the head of a full list
+// pushes the last one into the count of notes left out.
+func TestNoteListAddFirstKeepsItsBounds(t *testing.T) {
+	n := &noteList{mask: func(s string) string { return s }}
+	for i := 0; i < maxNotes; i++ {
+		n.add(pl.CodeLogCapped, fmt.Sprintf("note %d", i))
+	}
+	n.addFirst(pl.CodeArtifactMissing, "the head")
+	got := n.list()
+	if len(got) != maxNotes+1 || got[0].Message != "the head" || got[maxNotes-1].Message != fmt.Sprintf("note %d", maxNotes-2) ||
+		got[maxNotes].Message != "1 more note was left out" || got[maxNotes].Code != pl.CodeLogCapped {
+		t.Errorf("notes = %+v, want the head, the first %d, and one note counting the last", got, maxNotes-1)
 	}
 }
 
