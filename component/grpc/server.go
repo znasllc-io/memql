@@ -101,6 +101,16 @@ const (
 	defaultAddress = ":50051"
 )
 
+// grpcServerGracefulStopTimeout bounds how long shutdown waits for
+// grpcServer.GracefulStop before forcing grpcServer.Stop -- the bound
+// memql#1119 put on NodeServer, which this server never got. GracefulStop
+// returns only when every in-flight RPC has, and the streams this server holds
+// (a browser over /memql/ws, a cockpit's WorkerService stream) are long-lived
+// and do not end on their own. By the time the Stop sweep reaches this server
+// Run has already waited out the in-flight grace for user streams, so what is
+// still open is held, not mid-turn. A var so a test can shorten it.
+var grpcServerGracefulStopTimeout = 5 * time.Second
+
 // Server implements the MemQL gRPC surface as a common.Dependency.
 type Server struct {
 	address           string
@@ -394,18 +404,59 @@ func (s *Server) RegisterService(register func(*grpc.Server)) {
 }
 
 func (s *Server) run(ctx context.Context, markStarted func()) error {
-	if s.grpcServer == nil || s.listener == nil {
+	// Locals, not the fields: the OnStop hook (cleanup) nils them, and the
+	// Serve goroutine below reads at execution time, which can race a fast
+	// Start/Stop.
+	srv := s.grpcServer
+	lis := s.listener
+	if srv == nil || lis == nil {
 		return fmt.Errorf("gRPC server not initialized")
 	}
 
+	// Serve ignores ctx, so it runs on its own goroutine and this loop owns
+	// the ctx-driven shutdown -- memql#1119's NodeServer fix, applied to the
+	// server it missed. Serving inline left the only GracefulStop in the
+	// OnStop hook, which runs after run returns, which Serve never did: Stop
+	// then waited out the whole 30s shared budget and handed every later
+	// dependency in the sweep an expired context.
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(lis) }()
+
 	markStarted()
-	return s.grpcServer.Serve(s.listener)
+
+	select {
+	case err := <-serveErr:
+		return err
+	case <-ctx.Done():
+		s.stopGRPC(srv)
+		return nil
+	}
+}
+
+// stopGRPC bounds GracefulStop with a forceful Stop fallback, so a held
+// stream cannot wedge shutdown. Takes the server explicitly so it cannot race
+// the cleanup hook's nil-out.
+func (s *Server) stopGRPC(srv *grpc.Server) {
+	stopped := make(chan struct{})
+	go func() {
+		srv.GracefulStop()
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+	case <-time.After(grpcServerGracefulStopTimeout):
+		s.logger.Warn("gRPC server: graceful stop timed out; forcing stop",
+			"timeout", grpcServerGracefulStopTimeout.String())
+		srv.Stop()
+		<-stopped
+	}
 }
 
 func (s *Server) cleanup() {
-	if s.grpcServer != nil {
-		s.grpcServer.GracefulStop()
-	}
+	// run already stopped the server (which closes the listener) on ctx
+	// cancellation; this hook clears references. The Close stays for the path
+	// where Serve returned on its own.
 	if s.listener != nil {
 		_ = s.listener.Close()
 	}

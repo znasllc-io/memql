@@ -153,6 +153,21 @@ How it is wired (`app/cluster.go` + `app/run.go`):
 - **Stopped (memql#1269):** `app.MarkNodeStopped()` at the END of the drain,
   immediately before the dependency Stop sweep, so the node leaves the mesh
   cleanly Stopped rather than vanishing mid-Draining.
+- **New mesh streams are refused once Draining:** `drainGateStreamInterceptor`
+  (`server.go`) runs AHEAD of the auth chain and answers a new
+  `NodeService.Stream` `Unavailable` while the lifecycle is Draining or
+  Stopped. The pool is released before the Stop sweep (memql#1875) but the
+  listener stays open until the sweep reaches the NodeServer, and a stream
+  admitted in between failed the node-token revocation lookup (a database
+  read) as an AUTH refusal, sending the peer to re-mint. Streams opened before
+  the drain keep being served. Gate: `server_drain_gate_test.go`.
+- **Both gRPC servers own a ctx-driven, bounded stop.** The Stop sweep shares
+  ONE 30s context, so a Stop that waits out its deadline hands every later
+  dependency an expired one and they all log `failed to stop` in the same
+  instant. NodeServer got the fix in #1119; the MemqlService server
+  (`component/grpc`) kept a bare `Serve` until 2026-10 and hung every drain
+  for the full budget. A new `common.Lifecycle` component whose Run hook
+  blocks on something ctx does not end has the same defect.
 - **Gossip advertisement:** `LifecycleState.Health()` maps onto the existing
   `NodeHealthStatus` wire enum (Starting->CONNECTING, Ready->HEALTHY,
   Draining->DRAINING, Stopped->STOPPED), stamped by both the outbound

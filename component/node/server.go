@@ -12,6 +12,8 @@ import (
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/common"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -247,13 +249,17 @@ func (s *NodeServer) prepareForRun(ctx context.Context) (context.Context, contex
 		grpc.MaxRecvMsgSize(maxNodeMessageSize),
 		grpc.MaxSendMsgSize(maxNodeMessageSize),
 	}
+	// The drain gate runs FIRST, ahead of the auth chain: see
+	// drainGateStreamInterceptor.
+	interceptors := []grpc.StreamServerInterceptor{drainGateStreamInterceptor(s.peerManager)}
 	if s.authInterceptor != nil {
 		// class="node" enforcement (#105). When unset, the binary
 		// runs single-node mode (no inter-node traffic), so
 		// installing nothing is fine.
-		serverOpts = append(serverOpts, grpc.StreamInterceptor(s.authInterceptor))
+		interceptors = append(interceptors, s.authInterceptor)
 		s.logger.Info("node server: auth interceptor enabled (class=node required)")
 	}
+	serverOpts = append(serverOpts, grpc.ChainStreamInterceptor(interceptors...))
 	s.grpcServer = grpc.NewServer(serverOpts...)
 
 	svc := &nodeService{
@@ -278,6 +284,34 @@ func (s *NodeServer) prepareForRun(ctx context.Context) (context.Context, contex
 	)
 
 	return ctx, nil, nil
+}
+
+// drainGateStreamInterceptor refuses a NEW NodeService.Stream with
+// codes.Unavailable once this node's lifecycle is Draining or Stopped.
+//
+// A draining node is de-routed (gossip DRAINING, readiness 503) and, once the
+// drain reaches Stopped, has released its database pool (memql#1875) -- yet
+// its listener stays open until the Stop sweep reaches this server. A stream
+// admitted in that window cannot be served, and before this gate it was not
+// even refused honestly: it passed JWT verification and then failed the
+// node-token revocation lookup, which is a database read, so the peer was told
+// its credentials were bad and went to re-mint them. Unavailable is the answer
+// a peer's reconnect loop backs off on and that sends it elsewhere.
+//
+// It sits AHEAD of the auth chain so the refusal reads nothing. It judges the
+// stream only at open: a stream admitted before the drain keeps being served
+// through it (memql#1269's in-flight drain).
+func drainGateStreamInterceptor(pm *PeerManager) grpc.StreamServerInterceptor {
+	var lifecycle *NodeLifecycle
+	if pm != nil {
+		lifecycle = pm.Lifecycle()
+	}
+	return func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if lifecycle != nil && lifecycle.IsDraining() {
+			return status.Errorf(codes.Unavailable, "node is %s; dial another peer", lifecycle.State())
+		}
+		return handler(srv, ss)
+	}
 }
 
 func (s *NodeServer) run(ctx context.Context, markStarted func()) error {
