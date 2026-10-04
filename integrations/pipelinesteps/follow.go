@@ -24,32 +24,39 @@ import (
 // follower follows the step container's log into the capture, opening it
 // again whenever a stream ends while the step runs.
 //
-// What it keeps of a stream (review finding 2, ruling R36). stdout and stderr
-// are stamped by goroutines of their own, so the log file holds lines out of
-// stamp order, and a stream is opened again at a whole second (Kube.FollowLog),
-// so it replays that second:
+// THE RULE (fix round 3): a line the step wrote reaches the archive exactly
+// once -- never lost, never twice -- across any number of stream cuts,
+// wherever a cut falls (inside a stamp, inside a line, inside a long line's
+// pieces, at its last empty piece) and whatever the stamp order, as far apart
+// as stdout and stderr stamp (replaySkew). The kubelet serves a stream in the
+// order lines were written, from the second it is opened at; stdout and
+// stderr are stamped by goroutines of their own, so the order of the stamps
+// is not the order of the lines.
 //
-//   - Within one stream a line is dropped only as a repeat of one this Run
-//     already fed -- judged against where the stream was OPENED from, never
-//     against the lines just before it.
-//   - A stream opened again drops a replayed line only when its fingerprint
-//     (stamp and text) is one this Run fed; any other line of the seconds it
-//     replays is output it never saw.
-//   - A line a stream ends inside is held back: the stream opened next
-//     replays it whole. Once the step has ended, a last line with no newline
-//     is all there is, and is fed. A long line whose first pieces were fed
-//     before its stream ended is replayed from its start, and only the
-//     pieces not fed yet are fed (fix round 2, minor 1).
-//   - A stream is opened again from the earliest of the last line fed, a
-//     held line and a partly fed one -- a held line stamped a second before
-//     the last line fed would otherwise be past the stream's sinceTime -- and
-//     the fingerprints are kept for every second it can replay.
-//   - A Run that ADOPTED the step follows its log from the start. The store
-//     has every line up to the adoption cursor, so those reach the archive
-//     only, and the store is fed from the cursor on, behind one notice at the
-//     seam. The blind spot: a line the previous holder never captured,
-//     written after the cursor's line but stamped before it, reaches the
-//     archive only.
+// One ledger keeps it, simple enough to see that it does:
+//
+//   - lines: every line fed any of, by fingerprint, with how many of its
+//     bytes were fed and whether that was all. A line a stream serves is fed
+//     from where the ledger says it stopped -- not at all when whole. A line
+//     is whole at its newline, or, once the step has ended, at the clean end
+//     of its log; any other end of a stream is a cut.
+//   - cut: the stamp of each line a stream ended inside before it was fed
+//     whole, with the latest stamp fed whole when it was cut. A line stays
+//     cut until it is fed whole (or served as a repeat) -- or until a line
+//     stamped later than that is, which the kubelet serves only after the
+//     cut line: one still cut then is gone from the node (its log rotated).
+//   - A stream opens again at the earliest cut line, or replaySkew before the
+//     second of the latest line fed whole -- a line written after a stream
+//     ended, or cut inside its stamp, may be stamped that much before it --
+//     whichever is earlier. The ledger keeps every line from that second on,
+//     so all a stream replays is known. A line stamped further back than
+//     replaySkew is fed again rather than lost.
+//
+// A Run that ADOPTED the step follows its log from the start. The store has
+// every line up to the adoption cursor, so those reach the archive only, and
+// the store is fed from the cursor on, behind one notice at the seam. The
+// blind spot: a line the previous holder never captured, written after the
+// cursor's line but stamped before it, reaches the archive only.
 type follower struct {
 	s       *step
 	capture *Capture
@@ -60,39 +67,34 @@ type follower struct {
 	done    chan struct{}
 	// noted are the stream's own sentences already archived.
 	noted map[string]bool
+	// lineMax is the longest piece of a line it holds: followLineMax.
+	lineMax int
 
 	// adopted is the cursor the Run adopted the step at; zero for a step it
 	// started, or one whose holder had captured nothing.
 	adopted time.Time
-	// fed is the latest stamp of a line this Run fed whole, to the store or
-	// the archive.
-	fed time.Time
-	// seen fingerprints the lines fed whole whose second is floor's or
-	// later: every line a stream opened again (reopenFrom) can replay.
-	seen  map[linePrint]struct{}
+	// The ledger (THE RULE above): lines fed, by fingerprint, from floor's
+	// second on; fed, the latest stamp of a line fed whole; cut, each line a
+	// stream ended inside, by stamp, with fed as it stood then.
+	lines map[linePrint]fedLine
+	fed   time.Time
+	cut   map[int64]time.Time
 	floor time.Time
-	// held is the stamp of a line a stream ended inside before any of it was
-	// fed (zero when unknown); partial is a long line whose first pieces were
-	// fed when its stream ended.
-	held    time.Time
-	partial *partialLine
 	// trouble is what the follower last logged of the errors its streams
 	// ended on.
 	trouble apiTrouble
 }
 
-// replaySkew is how far before the last line fed a line written after it can
-// be stamped, as far as the fingerprints kept reach back.
+// replaySkew is how far before the latest line fed whole a line written after
+// it can be stamped and still be fed exactly once: a stream opens again that
+// far back, and the ledger keeps that far.
 const replaySkew = time.Second
 
-// partialLine is a long line some of whose pieces were fed: its fingerprint
-// (its first piece's), its stamp, what became of it, and how many of its
-// bytes, as the reader gives them, were fed.
-type partialLine struct {
-	print linePrint
-	at    time.Time
-	fate  lineFate
-	fed   int
+// fedLine is what the ledger knows of one line: how many of its bytes, as the
+// reader gives them out, were fed, and whether that was all of it.
+type fedLine struct {
+	n     int
+	whole bool
 }
 
 // follow starts following the pod's step container. draining starts it
@@ -101,16 +103,23 @@ func (s *step) follow(pod string, draining bool) *follower {
 	// Not s.ctx: a decided step's log is read to its end whatever a late
 	// cancel says. The watch stops a follower itself on a cancel.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(s.ctx))
-	f := &follower{
-		s: s, capture: s.capture, pod: pod, cancel: cancel,
-		drainC: make(chan struct{}), done: make(chan struct{}), noted: map[string]bool{},
-		adopted: s.adoptedAt, seen: map[linePrint]struct{}{}, trouble: apiTrouble{},
-	}
+	f := newFollower(s, pod)
+	f.cancel = cancel
 	if draining {
 		f.once.Do(func() { close(f.drainC) })
 	}
 	go f.run(ctx)
 	return f
+}
+
+// newFollower is a follower of the pod's step container into the step's
+// capture, not started.
+func newFollower(s *step, pod string) *follower {
+	return &follower{
+		s: s, capture: s.capture, pod: pod,
+		drainC: make(chan struct{}), done: make(chan struct{}), noted: map[string]bool{}, lineMax: followLineMax,
+		adopted: s.adoptedAt, lines: map[linePrint]fedLine{}, cut: map[int64]time.Time{}, trouble: apiTrouble{},
+	}
 }
 
 func (f *follower) run(ctx context.Context) {
@@ -216,50 +225,45 @@ const (
 	fateStream                  // the kubelet's words, not the step's: one note
 )
 
-// consume feeds one stream to the capture, line by line (the rules on
-// follower). final says the step had ended when the stream was opened, so a
-// last line with no newline is all there is.
+// consume feeds one stream to the capture, line by line, keeping the ledger
+// (THE RULE on follower). final says the step had ended when the stream was
+// opened, so its clean end is the log's: a last line with no newline is all
+// there is of it.
 func (f *follower) consume(r io.Reader, final bool) error {
-	lines := newLogLines(r, followLineMax, captureMaskForms(f.s.maskSecrets()))
-	opened := f.fed
+	lines := newLogLines(r, f.lineMax, captureMaskForms(f.s.maskSecrets()))
 	var (
+		in    bool // inside a line whose first piece was read whole
 		fate  lineFate
 		stamp time.Time // the line's timestamp, for its continuation pieces
 		print linePrint
-		given int // bytes of the line given out so far, fed now or before
-		skip  int // bytes of the line an earlier stream fed: not fed again
+		given int // bytes of the line given out by this stream so far
+		done  int // bytes of it the ledger says were fed before
 	)
 	for {
 		piece, first, end, err := lines.next()
-		if err != nil && !end && !final {
-			// The stream ended inside a line: the next one replays it whole.
-			f.hold(piece, first, fate, stamp, print, given)
-			piece = ""
-		}
-		if first && (piece != "" || end) {
-			fate, stamp, print = f.judge(piece, opened)
-			given, skip = 0, 0
-			if p := f.partial; p != nil && print == p.print {
-				fate, skip = p.fate, p.fed
+		whole := end || (final && errors.Is(err, io.EOF))
+		cut := err != nil && !whole
+		if first {
+			in = false
+			switch {
+			case cut:
+				f.cutBefore(piece)
+			case piece != "" || end:
+				fate, stamp, print = f.judge(piece)
+				in, given, done = true, 0, f.lines[print].n
 			}
 		}
-		if piece != "" {
-			switch n := len(piece); {
-			case skip >= n:
-				skip -= n
-			case skip > 0:
-				// A piece cut where an earlier stream did not cut it (the
-				// reader cuts the same bytes the same way, so this is a
-				// guard): the part not fed goes as the line's continuation.
-				f.feed(fate, stamp, piece[skip:], false)
-				skip = 0
-			default:
-				f.feed(fate, stamp, piece, first)
+		if in {
+			if cut {
+				f.cutInside(fate, stamp, print, given)
+			} else {
+				f.feedPart(fate, stamp, piece, first, given, done)
+				given += len(piece)
+				if whole {
+					f.ended(fate, stamp, print)
+					in = false
+				}
 			}
-			given += len(piece)
-		}
-		if piece != "" && (end || err != nil) {
-			f.fedLine(fate, stamp, print)
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -284,9 +288,9 @@ type linePrint struct {
 
 var linePrintTable = crc64.MakeTable(crc64.ISO)
 
-// judge decides what becomes of a line from its first piece. opened is where
-// the stream was opened from: only a line at or before it can be a repeat.
-func (f *follower) judge(piece string, opened time.Time) (lineFate, time.Time, linePrint) {
+// judge decides what becomes of a line from its first piece: a repeat when the
+// ledger has all of it.
+func (f *follower) judge(piece string) (lineFate, time.Time, linePrint) {
 	at, _, ok := captureSplitStamp(piece)
 	if !ok {
 		// Followed with timestamps, every line the step writes comes stamped:
@@ -296,8 +300,8 @@ func (f *follower) judge(piece string, opened time.Time) (lineFate, time.Time, l
 		return fateStream, time.Time{}, linePrint{}
 	}
 	print := linePrint{at: at.UnixNano(), n: len(piece), sum: crc64.Checksum([]byte(piece), linePrintTable)}
-	switch _, seen := f.seen[print]; {
-	case !opened.IsZero() && !at.After(opened) && seen:
+	switch {
+	case f.lines[print].whole:
 		return fateRepeat, at, print
 	case !f.adopted.IsZero() && !at.After(f.adopted):
 		return fateArchive, at, print
@@ -331,22 +335,37 @@ func (f *follower) feed(fate lineFate, stamp time.Time, piece string, first bool
 	}
 }
 
-// fedLine records a line fed whole: its fingerprint, how far the Run has fed,
-// that a held or partly fed line is held no longer -- and, for a stored
-// line, the cursor the heartbeat publishes, which only ever moves forward.
-func (f *follower) fedLine(fate lineFate, at time.Time, print linePrint) {
-	if f.partial != nil && f.partial.print == print {
-		f.partial = nil
+// feedPart feeds the bytes of a line a piece holds -- given out of the
+// line before it, done fed by an earlier stream -- that were not fed yet.
+func (f *follower) feedPart(fate lineFate, stamp time.Time, piece string, first bool, given, done int) {
+	switch {
+	case piece == "" || given+len(piece) <= done:
+	case given < done:
+		// A piece cut where the earlier stream did not cut it (the reader
+		// cuts the same bytes the same way, so this is a guard): the part
+		// not fed yet goes as the line's continuation.
+		f.feed(fate, stamp, piece[done-given:], false)
+	default:
+		f.feed(fate, stamp, piece, first)
 	}
-	if fate == fateRepeat || fate == fateStream {
+}
+
+// ended records a line fed whole -- or served whole as a repeat: no longer
+// cut; the latest stamp fed whole, and any cut line it shows gone; and, for a
+// stored line, the cursor the heartbeat publishes, which only moves forward.
+func (f *follower) ended(fate lineFate, at time.Time, print linePrint) {
+	if fate == fateStream {
 		return
 	}
-	f.seen[print] = struct{}{}
+	delete(f.cut, at.UnixNano())
+	f.lines[print] = fedLine{whole: true}
 	if at.After(f.fed) {
 		f.fed = at
-	}
-	if at.Equal(f.held) {
-		f.held = time.Time{}
+		for c, fedThen := range f.cut {
+			if at.After(fedThen) {
+				delete(f.cut, c) // served before this line, and not served: gone
+			}
+		}
 	}
 	f.prune()
 	if fate == fateStore {
@@ -355,53 +374,63 @@ func (f *follower) fedLine(fate lineFate, at time.Time, print linePrint) {
 	}
 }
 
-// hold records the line a stream ended inside, which the next stream
-// replays: given out in part, a partly fed line; not at all, a held one, by
-// its stamp when the part read holds one. A line already partly fed stays so
-// until its end is fed.
-func (f *follower) hold(piece string, first bool, fate lineFate, at time.Time, print linePrint, given int) {
-	switch {
-	case !first && (fate == fateStore || fate == fateArchive):
-		f.partial = &partialLine{print: print, at: at, fate: fate, fed: given}
-	case first && f.partial == nil:
-		if stamp, _, ok := captureSplitStamp(piece); ok {
-			f.held = stamp
-		}
+// cutBefore records a line a stream ended inside its first piece: by its
+// stamp, when the part read holds the stamp whole. Cut inside its stamp, it
+// is replayed all the same: a stream opens replaySkew before the latest line
+// fed whole, and a line written after it is stamped no further back.
+func (f *follower) cutBefore(part string) {
+	stamp, _, found := strings.Cut(part, " ")
+	if !found {
+		return
 	}
-	f.prune()
+	if at, err := time.Parse(time.RFC3339Nano, stamp); err == nil {
+		f.cut[at.UnixNano()] = f.fed
+	}
+}
+
+// cutInside records a line a stream ended inside after giving out given of
+// its bytes: the ledger keeps the most of it any stream fed.
+func (f *follower) cutInside(fate lineFate, at time.Time, print linePrint, given int) {
+	if fate != fateStore && fate != fateArchive {
+		return // a repeat is in the ledger whole; the stream's words are no line
+	}
+	if l := f.lines[print]; !l.whole && given > l.n {
+		f.lines[print] = fedLine{n: given}
+	}
+	f.cut[at.UnixNano()] = f.fed
 }
 
 // reopenFrom is where the next stream opens: the log's start before any line
-// was fed whole; else the earliest of the last line fed, a held line and a
-// partly fed one (Kube.FollowLog opens at its whole second).
+// was fed whole; else the earliest cut line, or replaySkew before the second
+// of the latest line fed whole, whichever is earlier (Kube.FollowLog opens at
+// its whole second).
 func (f *follower) reopenFrom() time.Time {
-	from := f.fed
-	if from.IsZero() {
-		return from
+	if f.fed.IsZero() {
+		return time.Time{}
 	}
-	if !f.held.IsZero() && f.held.Before(from) {
-		from = f.held
-	}
-	if f.partial != nil && f.partial.at.Before(from) {
-		from = f.partial.at
+	from := f.fed.Truncate(time.Second).Add(-replaySkew)
+	for at := range f.cut {
+		if c := time.Unix(0, at).UTC(); c.Before(from) {
+			from = c
+		}
 	}
 	return from
 }
 
-// prune forgets the fingerprints of seconds no stream opened from now on can
-// replay. One second more is kept than reopenFrom needs now: a line held
-// later may be stamped before the last line fed (stdout and stderr are
-// stamped apart, by milliseconds), and a stream opened at its second
-// replays the lines fed since.
+// prune forgets the lines of seconds no stream opened from now on can replay.
 func (f *follower) prune() {
-	floor := f.reopenFrom().Truncate(time.Second).Add(-replaySkew)
+	from := f.reopenFrom()
+	if from.IsZero() {
+		return
+	}
+	floor := from.Truncate(time.Second)
 	if !floor.After(f.floor) {
 		return
 	}
 	f.floor = floor
-	for p := range f.seen {
+	for p := range f.lines {
 		if p.at < floor.UnixNano() {
-			delete(f.seen, p)
+			delete(f.lines, p)
 		}
 	}
 }
@@ -495,6 +524,11 @@ func (l *logLines) cut(b []byte, complete bool) (piece string, rest []byte) {
 		n := wholeRunes(body)
 		body, short = body[:n], body[n:]
 	}
+	// Repaired as the capture repairs a whole line. Each piece is repaired
+	// apart, so a cut inside a run of two or more invalid bytes repairs to
+	// two U+FFFD where the whole line has one -- and a secret holding such a
+	// run would mask differently. No secret can: they cross to the runner as
+	// JSON strings, which are valid UTF-8 (accepted in fix round 3).
 	text := captureRepair(string(body))
 	out, used := l.masker.scan(text, l.max-prefix, complete)
 	if used == 0 {

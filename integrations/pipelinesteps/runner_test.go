@@ -2455,9 +2455,10 @@ func TestAFollowerReopensOnlyForTheClaimsHolder(t *testing.T) {
 }
 
 // TestRunnerReopensTheLogFromItsCursor: a followed stream that ends while the
-// step still runs -- a dropped connection -- is opened again from the cursor,
-// and the lines the API repeats from the cursor's second are dropped: every
-// line is captured once.
+// step still runs -- a dropped connection -- is opened again replaySkew before
+// the cursor's second (a line written after the stream ended may be stamped
+// that far back, fix round 3), and the lines the API repeats are dropped:
+// every line is captured once.
 func TestRunnerReopensTheLogFromItsCursor(t *testing.T) {
 	h := newRunnerHarness(t)
 	lines := []string{
@@ -2496,8 +2497,8 @@ func TestRunnerReopensTheLogFromItsCursor(t *testing.T) {
 		}
 	}
 	if len(follows) < 2 || follows[0] != "container=step&follow=true&timestamps=true" ||
-		follows[1] != "container=step&follow=true&sinceTime=2026-10-04T09%3A00%3A02Z&timestamps=true" {
-		t.Errorf("follows = %q, want the first from the start and the second from the cursor's second", follows)
+		follows[1] != "container=step&follow=true&sinceTime=2026-10-04T09%3A00%3A01Z&timestamps=true" {
+		t.Errorf("follows = %q, want the first from the start and the second a second before the cursor's", follows)
 	}
 }
 
