@@ -5,18 +5,38 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/pipelines"
 )
 
 const EnvSystemRunRetentionDays = "MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS"
 const DefaultSystemRunRetentionDays = 30
+
+// EnvPipelinesRunRetentionDays is how long a finished pipeline run is kept
+// (epic memql#5478, #5496): its v1:pipelines:run row, and the v1:work:run it
+// compiled into with that run's steps. One window for both, so a run and its
+// work leave on the same night rather than on two clocks. The Library files a
+// run's steps archived -- logs, artifacts -- are the owner's, and no policy
+// here names them.
+const EnvPipelinesRunRetentionDays = "MEMQL_PIPELINES_RUN_RETENTION_DAYS"
+const DefaultPipelinesRunRetentionDays = 30
+
+// pipelinesRunConcept is spelled here, as integrations/pipelinesteps spells it
+// for itself: component/pipelinerun owns the name and this module does not
+// depend on it. TestRetentionPredicatesNameStatusesTheirConceptsDeclare reads
+// the concept out of the DSL, so a rename fails there instead of retiring
+// nothing.
+const pipelinesRunConcept = "v1:pipelines:run"
+
 const retirementBatchSize = 100
 const retirementMaxVersions = 10000
 const retirementMaxBytes = 32 << 20
@@ -29,7 +49,22 @@ const retentionInactiveParentSQL = `NOT EXISTS (SELECT 1 FROM "MemoryNodes" pare
 
 // This is a closed list of operational records, never a default lifetime for
 // arbitrary concepts. Business records, goals, templates and active work are
-// not eligible. A terminal system run owns its step/approval archive as a unit.
+// not eligible. A terminal run owns its step/approval archive as a unit: the
+// children that are the run's own (retireVerified says which).
+//
+// A WINDOW IS KEYED BY ITS ENV NAME, NEVER BY ITS CONCEPT. Two policies read
+// v1:work:run, and they never select the same run: a system run is triggered
+// by `schedule`, a pipeline's by `pipeline:<mode>` (pipelines.WorkTriggerPrefix).
+// And one window, MEMQL_PIPELINES_RUN_RETENTION_DAYS, governs two concepts.
+//
+// A FINISHED PIPELINE RUN (#5496) is its v1:pipelines:run row once it is
+// `completed` -- the conclusion is not the test, a refused run is completed
+// too -- and the work run it compiled into once component/workjournal closed
+// it succeeded, failed or cancelled. Nothing closes a pipeline's work run
+// `abandoned` (the waiting sweep reads past it: runnerOwnsRecovery), so that
+// status is not one this list was told about and such a run is kept. The work
+// run comes first: the run row carries the stage table, so it is the last
+// thing of a run to go. The goal the run compiled into stays, like every goal.
 type operationalPolicy struct {
 	concept, env string
 	days         int
@@ -42,15 +77,19 @@ var operationalPolicies = []operationalPolicy{
 	{"v1:safety:outputScreening", "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS", 90, "TRUE"},
 	{"v1:worker:invocation", "MEMQL_WORKER_INVOCATION_RETENTION_DAYS", 90, `COALESCE(n.payload->>'outcome','') IN ('success','failure','cancelled','timeout','denied_by_scope','denied_by_policy','denied_by_classifier','kill_switch_engaged','no_worker_available','rerouted')`},
 	{runConcept, EnvSystemRunRetentionDays, DefaultSystemRunRetentionDays, `n.payload->>'ownerUserId' = '' AND COALESCE(n.payload->>'goalId','') = '' AND n.payload->>'triggeredBy' = 'schedule' AND n.payload->>'status' IN ('succeeded','failed','cancelled','abandoned')`},
+	{runConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'triggeredBy' LIKE '` + pipelines.WorkTriggerPrefix + `%' AND n.payload->>'status' IN ('succeeded','failed','cancelled')`},
+	{pipelinesRunConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'status' = 'completed'`},
 }
 
 type OperationalRetentionResult struct {
 	Concept          string   `json:"concept"`
+	Env              string   `json:"env"`
 	RetentionDays    int      `json:"retentionDays"`
 	Candidates       int      `json:"candidates"`
 	ArchivedVersions int      `json:"archivedVersions"`
 	DeletedVersions  int      `json:"deletedVersions"`
 	Objects          []string `json:"objects,omitempty"`
+	Oversized        []string `json:"oversized,omitempty"`
 }
 
 // staged-data: MUST-NOT-GATE -- retention is physical retirement, including
@@ -65,7 +104,7 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 		return nil, err
 	}
 	for _, p := range operationalPolicies {
-		days := windows[p.concept]
+		days := windows[p.env]
 		cutoff := i.clock().UTC().AddDate(0, 0, -days)
 		// The age applies to the TRUE LATEST version. An old terminal version of
 		// recently updated/active work must never qualify on its own.
@@ -74,8 +113,10 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 		if p.concept == runConcept {
 			// Apply child eligibility before LIMIT as well as after loading: a
 			// large population awaiting longer detail retention cannot starve
-			// later, eligible system runs every night.
-			predicate += ` AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" child WHERE child.concept IN ('v1:work:step','v1:work:approval','v1:work:modelCall','v1:work:observation') AND child.payload->>'runId'=n.id AND (child.concept IN ('v1:work:modelCall','v1:work:observation') OR child."createdAt">=? OR COALESCE(child.payload->>'ownerUserId','missing')!='' OR (child.concept='v1:work:approval' AND COALESCE(child.payload->>'decision','')='')) AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newerChild WHERE newerChild.concept=child.concept AND newerChild.id=child.id AND newerChild."createdAt">child."createdAt"))`
+			// later, eligible runs every night. The ownership term is
+			// retireVerified's rule in SQL: a child that is not the run's own --
+			// another owner's, or one carrying no owner -- keeps the run.
+			predicate += ` AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" child WHERE child.concept IN ('v1:work:step','v1:work:approval','v1:work:modelCall','v1:work:observation') AND child.payload->>'runId'=n.id AND (child.concept IN ('v1:work:modelCall','v1:work:observation') OR child."createdAt">=? OR child.payload->>'ownerUserId' IS NULL OR child.payload->>'ownerUserId' IS DISTINCT FROM n.payload->>'ownerUserId' OR (child.concept='v1:work:approval' AND COALESCE(child.payload->>'decision','')='')) AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newerChild WHERE newerChild.concept=child.concept AND newerChild.id=child.id AND newerChild."createdAt">child."createdAt"))`
 			params = append(params, cutoff)
 		}
 		query := `SELECT n.id,n."createdAt",n.payload FROM "MemoryNodes" n WHERE n.concept=? AND n."createdAt" < ? AND (` + predicate + `) AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" newer WHERE newer.concept=n.concept AND newer.id=n.id AND newer."createdAt">n."createdAt") AND ` + retentionInactiveParentSQL + ` ORDER BY n."createdAt",n.id LIMIT 20000`
@@ -83,22 +124,63 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 		if err != nil {
 			return results, err
 		}
-		result := OperationalRetentionResult{Concept: p.concept, RetentionDays: days, Candidates: len(rows)}
+		result := OperationalRetentionResult{Concept: p.concept, Env: p.env, RetentionDays: days, Candidates: len(rows)}
 		for start := 0; start < len(rows); start += retirementBatchSize {
 			end := min(start+retirementBatchSize, len(rows))
-			archived, deleted, object, err := i.retireVerified(ctx, p.concept, rows[start:end], p.concept == runConcept, cutoff, dry)
-			if err != nil {
+			if err := i.retireBatch(ctx, p, rows[start:end], cutoff, dry, &result); err != nil {
 				return append(results, result), err
-			}
-			result.ArchivedVersions += archived
-			result.DeletedVersions += deleted
-			if object != "" {
-				result.Objects = append(result.Objects, object)
 			}
 		}
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+// errRetirementOverBudget is retireVerified's answer for a batch whose
+// versions are more than one archive object takes. It is raised while the
+// rows are read, so nothing was uploaded and nothing was deleted.
+var errRetirementOverBudget = errors.New("retention batch exceeds archive budget; records preserved")
+
+// retireBatch retires one batch of a policy's candidates, halving it while it
+// is more than one archive object takes.
+//
+// A batch is counted in CANDIDATES and an object is bounded in VERSIONS, and a
+// candidate is every version of a record -- of a run, every version of its
+// steps and approvals as well. A pipeline's run is many: both its rows take a
+// version per 30-second heartbeat, and each of its steps three (queued,
+// running, finished), so a hundred finished runs of a few dozen steps, or of
+// an hour each, pass the 10,000 versions one object holds. Refused whole, the
+// batch would be refused again every night and hold every run behind it for
+// good. So it is halved until each half fits. A record that ALONE does not fit
+// cannot be archived in one object, so it is kept whole -- never deleted
+// without its archive -- named in the result and logged, and the sweep goes
+// on: one oversized record is never the reason nothing else is retired.
+func (i *Integration) retireBatch(ctx context.Context, p operationalPolicy, rows []map[string]any, cutoff time.Time, dry bool, result *OperationalRetentionResult) error {
+	archived, deleted, object, err := i.retireVerified(ctx, p.concept, rows, p.concept == runConcept, cutoff, dry)
+	if errors.Is(err, errRetirementOverBudget) {
+		if len(rows) == 1 {
+			id := rowString(rows[0], "id")
+			result.Oversized = append(result.Oversized, id)
+			i.log().Warn("work: a record is more than one retention archive object holds, so it was kept",
+				"component", "work.retention", "concept", p.concept, "env", p.env, "id", id,
+				"maxVersions", retirementMaxVersions, "maxBytes", retirementMaxBytes)
+			return nil
+		}
+		half := len(rows) / 2
+		if err := i.retireBatch(ctx, p, rows[:half], cutoff, dry, result); err != nil {
+			return err
+		}
+		return i.retireBatch(ctx, p, rows[half:], cutoff, dry, result)
+	}
+	if err != nil {
+		return err
+	}
+	result.ArchivedVersions += archived
+	result.DeletedVersions += deleted
+	if object != "" {
+		result.Objects = append(result.Objects, object)
+	}
+	return nil
 }
 
 // Retain existing global-variable settings. Explicit process configuration
@@ -109,7 +191,9 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 func (i *Integration) operationalRetentionWindows(ctx context.Context) (map[string]int, error) {
 	names := []string{"WORKER_INVOCATION_RETENTION_DAYS"}
 	for _, p := range operationalPolicies {
-		names = append(names, p.env)
+		if !slices.Contains(names, p.env) {
+			names = append(names, p.env)
+		}
 	}
 	rows, err := i.selectAdmitted(ctx, "v1:platform:globalVariable", `WITH latest AS (SELECT DISTINCT ON(id) id,"createdAt" FROM "MemoryNodes" WHERE concept=? ORDER BY id,"createdAt" DESC) SELECT n.id,n."createdAt",n.payload FROM latest l JOIN "MemoryNodes" n ON n.id=l.id AND n."createdAt"=l."createdAt" WHERE n.payload->>'name' IN (?) AND n.payload->>'active'='true'`, "v1:platform:globalVariable", bun.In(names))
 	if err != nil {
@@ -122,6 +206,11 @@ func (i *Integration) operationalRetentionWindows(ctx context.Context) (map[stri
 	if _, ok := stored["MEMQL_WORKER_INVOCATION_RETENTION_DAYS"]; !ok {
 		stored["MEMQL_WORKER_INVOCATION_RETENTION_DAYS"] = stored["WORKER_INVOCATION_RETENTION_DAYS"]
 	}
+	// Keyed by the env name, which is what a window IS: two policies share
+	// v1:work:run, and the two pipelines policies share one variable.
+	// Policies sharing a variable share its default too
+	// (TestOperationalPoliciesSharingAWindowShareItsDefault), so the answer
+	// does not depend on which of them was read last.
 	windows := map[string]int{}
 	for _, p := range operationalPolicies {
 		days := retentionDays(p.env, p.days)
@@ -130,7 +219,7 @@ func (i *Integration) operationalRetentionWindows(ctx context.Context) (map[stri
 				days = n
 			}
 		}
-		windows[p.concept] = days
+		windows[p.env] = days
 	}
 	return windows, nil
 }
@@ -186,7 +275,7 @@ func (i *Integration) retireVerified(ctx context.Context, concept string, candid
 		}
 		size += len(raw)
 		if size > retirementMaxBytes || len(nodes) == retirementMaxVersions {
-			err = fmt.Errorf("retention batch exceeds archive budget; records preserved")
+			err = errRetirementOverBudget
 			break
 		}
 		var n memorynodes.MemoryNode
@@ -206,8 +295,9 @@ func (i *Integration) retireVerified(ctx context.Context, concept string, candid
 	if err != nil {
 		return 0, 0, "", err
 	}
-	// Group system children by their parent, and preserve parents with detail
-	// under its longer policy, a live approval, a new child, or an owned child.
+	// Group children by their parent, and preserve parents with detail under
+	// its longer policy, a live approval, a new child, or a child that is not
+	// the run's own.
 	blocked := map[string]bool{}
 	latest := map[string]memorynodes.MemoryNode{}
 	for _, n := range nodes {
@@ -219,6 +309,30 @@ func (i *Integration) retireVerified(ctx context.Context, concept string, candid
 			blocked[n.ID] = true
 		}
 	}
+	// A CHILD GOES WITH ITS RUN ONLY WHEN IT IS THE RUN'S OWN: the same owner,
+	// spelled the same way, as the run's newest version. One rule for both run
+	// policies. A system run is unowned, so only an unowned child goes with it
+	// -- the rule that policy always had; a pipeline's run is its owner's, and
+	// component/workjournal writes every one of its steps under that owner. A
+	// child somebody else owns, or one carrying no owner at all, keeps the run
+	// whole. Exact rather than spelling-insensitive: both rows come through the
+	// same canonicalizing write, and a disagreement keeps the run rather than
+	// being reasoned past.
+	owners := map[string]string{}
+	if withChildren {
+		for id, n := range latest {
+			if n.Concept != concept {
+				continue
+			}
+			var p map[string]any
+			if err = json.Unmarshal(n.Payload, &p); err != nil {
+				return 0, 0, "", err
+			}
+			if owner, ok := p["ownerUserId"].(string); ok {
+				owners[id] = owner
+			}
+		}
+	}
 	for _, n := range latest {
 		if n.Concept == concept {
 			continue
@@ -228,7 +342,9 @@ func (i *Integration) retireVerified(ctx context.Context, concept string, candid
 			return 0, 0, "", err
 		}
 		parent := rowString(p, "runId")
-		if n.Concept == modelCallConcept || n.Concept == observationConcept || !n.CreatedAt.Before(cutoff) || p["ownerUserId"] != "" || (n.Concept == "v1:work:approval" && rowString(p, "decision") == "") {
+		owner, owned := p["ownerUserId"].(string)
+		runOwner, runOwned := owners[parent]
+		if n.Concept == modelCallConcept || n.Concept == observationConcept || !n.CreatedAt.Before(cutoff) || !owned || !runOwned || owner != runOwner || (n.Concept == "v1:work:approval" && rowString(p, "decision") == "") {
 			blocked[parent] = true
 		}
 	}

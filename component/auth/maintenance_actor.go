@@ -129,7 +129,9 @@ var maintenanceAutomations = map[string]string{
 		"ROWS AND NO ERROR. A sweep that resumes nothing is indistinguishable from a cluster with nothing " +
 		"parked, and the symptom a person reports is that their goal simply stopped",
 	"workJournalRetentionSweep": "the nightly verified archive-and-delete sweep over completed system runs and steps, worker invocation history, audit and safety evidence, plus v1:work:modelCall and " +
-		"v1:work:observation (epic memql#4966), same tier and same silence as the row above. It is also the " +
+		"v1:work:observation (epic memql#4966), same tier and same silence as the row above -- and a finished pipeline's " +
+		"runs (#5496): the v1:pipelines:run row, whose composite tier with the account argument hides a person's run " +
+		"from the reader actor just the same, and the v1:work:run it compiled into with that run's steps. It is also the " +
 		"one writer that folds a run's summary onto the run row BEFORE deleting its detail, so a read that " +
 		"sees nothing does not merely skip the delete -- it skips the fold, and the detail then ages out of " +
 		"a run that never got its summary, which is the one failure here that destroys evidence",

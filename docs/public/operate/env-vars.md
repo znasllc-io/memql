@@ -1005,11 +1005,13 @@ block that declares it.
 The cron-leader job `workJournalRetentionSweep` runs nightly at 03:40 UTC. It
 archives complete historical versions, verifies the uploaded bytes, then removes
 only the archived versions in bounded transactions. Failed verification preserves
-the records. Active parent work and user-owned goals/runs remain protected.
+the records. Active parent work, goals and user-owned runs remain protected; a
+finished pipeline's runs are the one exception, on their own window.
 
 | Variable | Default | Records |
 | --- | --- | --- |
 | `MEMQL_WORK_SYSTEM_RUN_RETENTION_DAYS` | `30` | Terminal, unowned scheduled runs, their steps and closed approvals |
+| `MEMQL_PIPELINES_RUN_RETENTION_DAYS` | `30` | Finished pipeline runs: the `v1:pipelines:run` row and the work run it compiled into, with that run's steps and closed approvals. The Library files a run's steps archived (logs, artifacts) are the owner's and are kept |
 | `MEMQL_WORKER_INVOCATION_RETENTION_DAYS` | `90` | Completed worker invocation history |
 | `MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS` | `90` | Safety classification evidence |
 | `MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS` | `90` | Safety output-screening evidence |
@@ -1017,12 +1019,16 @@ the records. Active parent work and user-owned goals/runs remain protected.
 | `MEMQL_WORK_MODELCALL_RETENTION_DAYS` | `90` | Model-call detail; the run retains its summary |
 | `MEMQL_WORK_OBSERVATION_RETENTION_DAYS` | `180` | Observation detail; the run retains its summary |
 
-Ages use the latest stored version. System runs with retained model-call or
-observation detail, pending approvals, or recent children stay until those
-constraints clear. An explicit environment setting overrides a stored global
-variable; the first five policies honor existing global settings, including the
-legacy `WORKER_INVOCATION_RETENTION_DAYS` global variable. Invalid/nonpositive
-values use the documented defaults.
+Ages use the latest stored version. Runs with retained model-call or
+observation detail, pending approvals, recent children, or a child that is not
+the run's own -- an owned child of a system run, another person's child of a
+pipeline's run -- stay until those constraints clear. A batch whose versions
+exceed one archive object is split; a single record too large for one object is
+kept whole and named in the sweep's result. An explicit environment setting
+overrides a stored global variable; every window above except the two
+journal-detail windows honors an existing global setting, including the legacy
+`WORKER_INVOCATION_RETENTION_DAYS` global variable. Invalid/nonpositive values
+use the documented defaults.
 
 `MEMQL_WORK_ARCHIVE_CONTAINER` defaults to `MEMQL_AZURE_BLOB_CONTAINER`.
 Archives use `retention/<UTC-day>/<sha256>.ndjson.gz`, with the original node
