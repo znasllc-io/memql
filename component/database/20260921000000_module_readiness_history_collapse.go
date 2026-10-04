@@ -121,7 +121,7 @@ import (
 // seed. That is the trade, made on purpose: the total is spread across
 // statements and, if need be, across attempts, and no one statement carries it.
 //
-// Each statement runs in its own transaction under SET LOCAL
+// Each statement runs in its own transaction under a transaction-local
 // statement_timeout, below the read deadline. One that runs long anyway -- a
 // lock wait behind the stopped-node purge, an I/O stall, a plan nobody
 // measured -- is then cancelled by the SERVER, with an error the client
@@ -129,6 +129,19 @@ import (
 // retries, rather than the client timing out over a backend that is still
 // running (migrationMayStillBeRunning, database.go). The batch it cancelled
 // rolls back whole and the next attempt redoes it.
+//
+// A cancel can still arrive late. On a host at a load average of 43 (a shared
+// test machine, measured), one 1000-version batch ran 7.9 s before the 5 s
+// cancel took effect and another outlived the 10 s read deadline outright: a
+// backend stalled in a wait no interrupt reaches answers when the wait ends.
+// For that case the collapse knows something the runner cannot -- the cut-off
+// backend's pid, and that its transaction can only end whole, because the
+// driver closed the connection its COMMIT would have come on -- so it waits for
+// that backend to exit and then defers, instead of handing the runner a
+// transport error it must keep its lock for (awaitOrphan). At a load average of
+// 72 the whole 791,770-version walk took three runs, two of them ended this
+// way after a five-second wait, and between them the three deleted exactly the
+// 791,630 versions that were not their id's newest.
 //
 // And each transaction commits ASYNCHRONOUSLY (SET LOCAL synchronous_commit =
 // off). A production-sized walk is some 1100 commits, and a synchronous commit
@@ -323,13 +336,13 @@ func (c *readinessCollapse) run(ctx context.Context) (readinessCollapseReport, e
 			}
 		}
 		if c.olderThan.Valid {
-			deleted, floor, err := c.deleteBatch(ctx)
+			_, floor, err := c.deleteBatch(ctx)
 			if err != nil {
 				return c.report, err
 			}
-			if deleted == int64(c.batch) {
-				// A full batch: there may be more below its floor.
-				c.olderThan = sql.NullTime{Time: floor, Valid: true}
+			if floor.Valid {
+				// A whole batch stood above its floor: there may be more below.
+				c.olderThan = floor
 				continue
 			}
 		}
@@ -347,21 +360,72 @@ func (c *readinessCollapse) run(ctx context.Context) (readinessCollapseReport, e
 	}
 }
 
+// readinessCollapseStepSQL opens every step's transaction: the two settings
+// SET LOCAL would make (set_config's third argument), and the backend running
+// the transaction, which awaitOrphan watches if the driver gives up on it.
+var readinessCollapseStepSQL = fmt.Sprintf(`SELECT pg_backend_pid(),
+       set_config('statement_timeout', '%d', true),
+       set_config('synchronous_commit', 'off', true)`, readinessCollapseStatementTimeout.Milliseconds())
+
 // step runs one statement's work in its own transaction under the statement
 // bound, after making sure the attempt has room for it.
 func (c *readinessCollapse) step(ctx context.Context, fn func(ctx context.Context, tx bun.Tx) error) error {
 	if why, stop := c.mustStop(ctx); stop {
 		return c.deferred(why)
 	}
-	return c.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", readinessCollapseStatementTimeout.Milliseconds())); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
+	var backend int64
+	err := c.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var timeout, commit string
+		if err := tx.QueryRowContext(ctx, readinessCollapseStepSQL).Scan(&backend, &timeout, &commit); err != nil {
 			return err
 		}
 		return fn(ctx, tx)
 	})
+	if err != nil && backend != 0 && isClientReadDeadline(err) {
+		return c.awaitOrphan(backend, err)
+	}
+	return err
+}
+
+// readinessCollapseOrphanWait bounds how long awaitOrphan waits for a cut-off
+// statement's backend to exit. The server cancels a statement at the statement
+// bound; one the client gave up on outlived that already, so it was waiting on
+// something a cancel cannot interrupt, and this is generous on purpose.
+const readinessCollapseOrphanWait = 30 * time.Second
+
+// awaitOrphan answers a step the driver's read deadline cut off. The backend
+// is still running the statement, so the attempt cannot yet say nothing is
+// outstanding -- which is the runner's reason to keep its lock for an
+// operator. But this backend's transaction can only end whole: pgdriver closed
+// the connection, so no COMMIT can follow the statement, and the batch either
+// committed with its cursor move (when the COMMIT itself was cut off) or rolls
+// back with it. Once the backend has exited, nothing is outstanding and the
+// next attempt resumes from whatever the progress row says. So wait for it,
+// bounded, and defer; a backend still running at the bound is left to the
+// runner's rule, with the transport error the runner reads it by.
+func (c *readinessCollapse) awaitOrphan(backend int64, cause error) error {
+	c.logger.Warn("module readiness history collapse: a statement outlived the driver's read deadline; waiting for its backend to exit",
+		"migration", readinessCollapseMigrationName, "backend", backend, "cursor", c.cursor, "error", cause)
+	ctx, cancel := context.WithTimeout(context.Background(), readinessCollapseOrphanWait)
+	defer cancel()
+	wait := latestRowIndexPoll
+	for {
+		var running bool
+		err := c.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = ?)`, backend).Scan(&running)
+		if err == nil && !running {
+			return c.deferred(fmt.Sprintf("a statement outlived the driver's read deadline (%v); its backend %d has since exited, so its batch and cursor move committed or rolled back together and nothing is left running",
+				cause, backend))
+		}
+		select {
+		case <-ctx.Done():
+			return c.fail(cause, fmt.Sprintf("waiting for backend %d, still running a statement the driver's read deadline cut off %s ago",
+				backend, readinessCollapseOrphanWait))
+		case <-time.After(wait):
+		}
+		if wait < latestRowIndexPollMax {
+			wait *= 2
+		}
+	}
 }
 
 // mustStop says whether the next statement must not be sent, and why. An
@@ -468,11 +532,16 @@ func (c *readinessCollapse) newest(ctx context.Context) (time.Time, bool, error)
 }
 
 // readinessCollapseBatchSQL deletes one batch below the cursor and moves the
-// cursor to the oldest version it deleted, in one statement, so the two commit
-// or roll back together. floor is the batch-th version below the cursor --
-// OFFSET batch-1 is the statement's bound -- and when fewer remain it is absent
-// and the range runs to the id's oldest version. A batch that deleted nothing
-// leaves the progress row as it was.
+// cursor down past it, in one statement, so the two commit or roll back
+// together. floor is the batch-th version below the cursor -- OFFSET batch-1
+// is the statement's bound -- and the batch is the range from the floor up to
+// the cursor. When fewer versions than a batch remain the floor is absent, the
+// range runs to the id's oldest version, and the id is finished.
+//
+// Whether more remain is read off the floor, never off how many rows the
+// delete removed: the stopped-node purge deletes readiness rows too, and a
+// batch it raced would remove fewer than it counted while versions below the
+// floor still waited.
 //
 // staged-data: MUST-NOT-GATE -- a MIGRATION must see every row, by definition
 // (epic memql#3974, task memql#3984): gated, a staged id keeps every version
@@ -490,15 +559,16 @@ const readinessCollapseBatchSQL = `WITH floor AS (
   RETURNING "createdAt"
 ), moved AS (
   UPDATE ` + readinessCollapseProgressTable + `
-     SET older_than = (SELECT min("createdAt") FROM gone),
+     SET older_than = COALESCE((SELECT at FROM floor), (SELECT min("createdAt") FROM gone), older_than),
          collapsed = collapsed + (SELECT count(*) FROM gone)
-   WHERE singleton AND EXISTS (SELECT 1 FROM gone)
+   WHERE singleton
 )
-SELECT count(*), min("createdAt") FROM gone`
+SELECT (SELECT count(*) FROM gone), (SELECT at FROM floor)`
 
 // deleteBatch deletes at most c.batch versions of the cursor id below
-// c.olderThan and reports how many it deleted and the oldest of them.
-func (c *readinessCollapse) deleteBatch(ctx context.Context) (int64, time.Time, error) {
+// c.olderThan. It reports how many it deleted and the batch's floor, which is
+// absent when the batch reached the id's oldest version.
+func (c *readinessCollapse) deleteBatch(ctx context.Context) (int64, sql.NullTime, error) {
 	var (
 		deleted int64
 		floor   sql.NullTime
@@ -509,13 +579,13 @@ func (c *readinessCollapse) deleteBatch(ctx context.Context) (int64, time.Time, 
 			readinessCollapseConcept, c.cursor, c.olderThan.Time).Scan(&deleted, &floor)
 	})
 	if err != nil {
-		return 0, time.Time{}, c.fail(err, fmt.Sprintf("deleting a batch of %q older than %s",
+		return 0, sql.NullTime{}, c.fail(err, fmt.Sprintf("deleting a batch of %q older than %s",
 			c.cursor, c.olderThan.Time.UTC().Format(time.RFC3339Nano)))
 	}
 	c.report.Batches++
 	c.report.Collapsed += deleted
 	c.report.LargestBatch = max(c.report.LargestBatch, deleted)
-	return deleted, floor.Time, nil
+	return deleted, floor, nil
 }
 
 // readinessCollapseAdvanceSQL moves the cursor to the concept's next id. No

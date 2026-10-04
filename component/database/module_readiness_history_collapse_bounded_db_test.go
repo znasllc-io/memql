@@ -56,6 +56,13 @@ type readinessCollapseFixture struct {
 func newReadinessCollapseFixture(t *testing.T, bigHistory int) *readinessCollapseFixture {
 	t.Helper()
 	db, admin, schema := migrationLockDB(t, 10*time.Second)
+	return seedReadinessCollapseFixture(t, db, admin, schema, bigHistory)
+}
+
+// seedReadinessCollapseFixture seeds a scratch schema migrationLockDB made, for
+// a case that needs the pool's read deadline to be other than the driver's 10 s.
+func seedReadinessCollapseFixture(t *testing.T, db, admin *bun.DB, schema string, bigHistory int) *readinessCollapseFixture {
+	t.Helper()
 	db.DB.SetMaxOpenConns(1)
 	ctx := context.Background()
 	exec := func(query string, args ...any) {
@@ -82,7 +89,9 @@ func newReadinessCollapseFixture(t *testing.T, bigHistory int) *readinessCollaps
 		exec(`SELECT ` + quoteIdentifier(extension.String) + `.create_hypertable('"MemoryNodes"', 'createdAt', chunk_time_interval => interval '1 day')`)
 	}
 	exec(`CREATE TABLE readiness_collapse_deletes (n bigint NOT NULL)`)
-	exec(`CREATE FUNCTION readiness_collapse_log_deletes() RETURNS trigger LANGUAGE plpgsql AS $$
+	// SET search_path FROM CURRENT: the log is found from any session that
+	// deletes, including one that has not set the scratch schema's path.
+	exec(`CREATE FUNCTION readiness_collapse_log_deletes() RETURNS trigger LANGUAGE plpgsql SET search_path FROM CURRENT AS $$
 BEGIN
   INSERT INTO readiness_collapse_deletes SELECT count(*) FROM old_rows;
   RETURN NULL;
@@ -419,6 +428,166 @@ func TestReadinessCollapseResumesFromItsCursor(t *testing.T) {
 	r4, err := collapseModuleReadinessHistory(context.Background(), f.db, nil, batch)
 	if err != nil || !r4.Done || r4.Collapsed != 0 || r4.Resumed {
 		t.Fatalf("a run over a collapsed table: %+v, %v; want a fresh walk that deletes nothing", r4, err)
+	}
+	f.assertCollapsed(t)
+}
+
+// A BATCH ANOTHER DELETER RACED DOES NOT END ITS ID EARLY. A version inside the
+// second batch's range is deleted by another session that holds its row lock
+// until the batch is waiting on it: the batch's floor counted that version,
+// its DELETE then skips it, and the batch removes one fewer than a batch. The
+// id is finished only when a batch finds no floor, so the walk carries on below
+// it; a walk that took "fewer than a batch" for "finished" would leave every
+// older version of the id behind.
+func TestReadinessCollapseKeepsGoingWhenAnotherDeleterRacesABatch(t *testing.T) {
+	const batch = 5
+	f := newReadinessCollapseFixture(t, 23)
+	ctx := context.Background()
+	table := quoteIdentifier(f.schema) + `."MemoryNodes"`
+
+	// Below the id's newest, batches run newest first: the first takes the 2nd
+	// to 6th newest versions, the second the 7th to 11th. The 8th sits inside
+	// the second.
+	var victim time.Time
+	if err := f.admin.QueryRowContext(ctx, `SELECT "createdAt" FROM `+table+`
+ WHERE concept = ? AND id = ? ORDER BY "createdAt" DESC OFFSET 7 LIMIT 1`,
+		readinessCollapseTestConcept, readinessCollapseTestBigId).Scan(&victim); err != nil {
+		t.Fatal(err)
+	}
+	racer, err := f.admin.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer racer.Rollback() //nolint:errcheck // a no-op once committed
+	if _, err := racer.ExecContext(ctx, `DELETE FROM `+table+` WHERE concept = ? AND id = ? AND "createdAt" = ?`,
+		readinessCollapseTestConcept, readinessCollapseTestBigId, victim); err != nil {
+		t.Fatal(err)
+	}
+
+	type outcome struct {
+		report readinessCollapseReport
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		r, err := collapseModuleReadinessHistory(ctx, f.db, nil, batch)
+		done <- outcome{r, err}
+	}()
+
+	// The collapse's statements run on the scratch pool, whose backends carry
+	// the schema as their application_name. Commit the racing delete only once
+	// one of them is waiting on its lock -- well inside the statement bound.
+	deadline := time.Now().Add(readinessCollapseStatementTimeout - time.Second)
+	for {
+		var waiting int
+		if err := f.admin.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity
+ WHERE application_name = ? AND wait_event_type = 'Lock'`, f.schema).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the collapse never waited on the racing delete's lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := racer.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := <-done
+	if got.err != nil || !got.report.Done {
+		t.Fatalf("the raced walk: %+v, %v; want it done", got.report, got.err)
+	}
+	if got.report.Collapsed != f.doomed-1 {
+		t.Fatalf("the walk collapsed %d versions; with one taken by the racer it should have taken the other %d",
+			got.report.Collapsed, f.doomed-1)
+	}
+	f.assertCollapsed(t)
+}
+
+// A STATEMENT THE DRIVER'S READ DEADLINE CUTS OFF IS WAITED OUT, NOT HANDED TO
+// THE RUNNER. The first batch blocks on a row lock another session holds, past
+// a read deadline shortened to two seconds, and the driver gives up on it with
+// the backend still running. The collapse waits for that backend to exit --
+// it does once the lock is released and its statement ends, since its
+// connection is gone and no COMMIT can follow -- and then defers, which the
+// runner answers by releasing its lock. The batch never committed, and the
+// next run collapses everything.
+func TestReadinessCollapseWaitsOutAStatementTheReadDeadlineCutOff(t *testing.T) {
+	const readTimeout = 2 * time.Second
+	db, admin, schema := migrationLockDB(t, readTimeout)
+	f := seedReadinessCollapseFixture(t, db, admin, schema, 23)
+	ctx := context.Background()
+	table := quoteIdentifier(f.schema) + `."MemoryNodes"`
+
+	// Lock the version just below the big id's newest: the first batch's range.
+	var victim time.Time
+	if err := f.admin.QueryRowContext(ctx, `SELECT "createdAt" FROM `+table+`
+ WHERE concept = ? AND id = ? ORDER BY "createdAt" DESC OFFSET 1 LIMIT 1`,
+		readinessCollapseTestConcept, readinessCollapseTestBigId).Scan(&victim); err != nil {
+		t.Fatal(err)
+	}
+	holder, err := f.admin.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback() //nolint:errcheck // the release, below or here
+	if _, err := holder.ExecContext(ctx, `SELECT 1 FROM `+table+` WHERE concept = ? AND id = ? AND "createdAt" = ? FOR UPDATE`,
+		readinessCollapseTestConcept, readinessCollapseTestBigId, victim); err != nil {
+		t.Fatal(err)
+	}
+
+	type outcome struct {
+		report readinessCollapseReport
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		r, err := collapseModuleReadinessHistory(ctx, f.db, nil, 5)
+		done <- outcome{r, err}
+	}()
+
+	// Hold the lock until the driver has given up on the blocked batch, then
+	// release it so the orphan's statement can end.
+	deadline := time.Now().Add(readinessCollapseStatementTimeout)
+	for {
+		var waiting int
+		if err := f.admin.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity
+ WHERE application_name = ? AND wait_event_type = 'Lock'`, f.schema).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the collapse never waited on the held row lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(readTimeout + 500*time.Millisecond)
+	if err := holder.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := <-done
+	if !errors.Is(got.err, errReadinessCollapseDeferred) || !strings.Contains(got.err.Error(), "read deadline") {
+		t.Fatalf("a statement the read deadline cut off must end in a deferral once its backend exits, got %v", got.err)
+	}
+	if migrationMayStillBeRunning(got.err) {
+		t.Fatalf("the runner would keep its lock for an operator although the backend has exited: %v", got.err)
+	}
+	if got.report.Collapsed != 0 {
+		t.Fatalf("the cut-off batch is reported collapsed (%d); its COMMIT was never sent", got.report.Collapsed)
+	}
+	if n := f.readinessVersions(t); n != f.total {
+		t.Fatalf("the table holds %d readiness versions after the cut-off batch, want all %d: it must have rolled back", n, f.total)
+	}
+
+	r, err := collapseModuleReadinessHistory(ctx, f.db, nil, 5)
+	if err != nil || !r.Done || r.Collapsed != f.doomed {
+		t.Fatalf("the next run: %+v, %v; want it done, collapsing all %d", r, err, f.doomed)
 	}
 	f.assertCollapsed(t)
 }
