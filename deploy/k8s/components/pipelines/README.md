@@ -167,7 +167,10 @@ A step is code from a repository, in an image the platform did not build:
 local cluster, enforces it out of the box. An AKS cluster enforces it only when
 it runs a network policy engine (`az aks create --network-policy ...`), and
 `azure-provision.sh` does not set one today; on such a cluster the policy is
-accepted and changes nothing.
+accepted and changes nothing — so the workbench's runner, which proves the
+namespace isolated before it creates a step, refuses every step there
+(`pipeline_isolation_unenforced`) until an engine is enabled
+([the isolation proof](../../../../docs/public/operate/pipelines-substrate.md#the-isolation-proof)).
 
 ## The clone image
 
@@ -190,8 +193,8 @@ docker buildx imagetools inspect docker.io/library/buildpack-deps:bookworm-scm
    carrying this component, or the sync is refused for every object here.
 2. **On AKS, the Blob CSI driver.** Re-run `azure-provision.sh` against the
    cluster; it converges an existing one with the update above.
-3. **Network policy enforcement**, if the isolation is to mean anything on
-   that cluster (see above).
+3. **A network policy engine**: on a cluster without one, every step is
+   refused `pipeline_isolation_unenforced` (see above).
 
 ## Gates
 

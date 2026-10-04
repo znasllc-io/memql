@@ -637,6 +637,30 @@ MemQL OS Logs app reads them (epic memql#4893). Runbook: [Logs](logs.md).
 | `MEMQL_LOGS_RETENTION_DAYS`         | `30`                          | Days of lines kept before the nightly `logsRetentionSweep` archives a day to blob storage and then deletes it (clamped 1..365). No archive, no delete: with no container the sweep keeps every line and says so. |
 | `MEMQL_LOGS_ARCHIVE_CONTAINER`      | `MEMQL_AZURE_BLOB_CONTAINER`  | The blob container the archive objects (`logs/<day>/<nodeType>.ndjson.gz`) land in. Empty means no archive is configured. |
 
+#### Pipelines (the substrate)
+
+The pipelines substrate runs each command step of a pipeline run as a Kubernetes
+Job, created by the workbench node, or on one of the owner's machines,
+dispatched by the agent node (epic memql#5478). Registered `component: pipelines`, all
+optional; the pipelines component's `memql-pipelines` ConfigMap sets the first
+two on the workbench. Runbook:
+[Pipelines substrate](pipelines-substrate.md#environment-variables).
+
+| Variable                              | Default             | Purpose |
+|---------------------------------------|---------------------|---------|
+| `MEMQL_PIPELINES_NAMESPACE`           | `memql-pipelines`   | The namespace the workbench node creates step Jobs and their Secrets in. It must be the namespace whose Role grants the engine's identity Jobs -- the pipelines component renders both into `memql-pipelines` -- or every create is a 403 and every step fails `pipeline_runner_unavailable`. |
+| `MEMQL_PIPELINES_CLONE_IMAGE`         | none                | The image every step's clone init container runs, pinned by digest and providing `git`, `base64` and `tr`. Unset, the workbench node cannot run pipeline steps and refuses them, rather than guess which image to hand a repository token to. |
+| `MEMQL_PIPELINES_RUN_MAX_MINUTES`     | `120`               | A run's wall-clock ceiling in minutes (clamped 5..1440): a step is given only the time left under it, and fails `pipeline_run_ceiling` when that runs out. Read by the agent and the workbench. |
+| `MEMQL_PIPELINES_LOG_STORE_MAX_LINES` | `2000`              | How many lines of one step's output reach the log store (clamped 100..100000) before that copy stops with a `pipeline_log_capped` line; the full log is still archived to the Library. Read by the workbench (a cluster step) and the agent (a fleet step). |
+| `MEMQL_PIPELINES_ARTIFACT_MAX_BYTES`  | `67108864` (64 MiB) | The cap on one step's decoded artifact archive (clamped 1 MiB..256 MiB), past which the archive is dropped and the step fails `pipeline_artifact_too_large`. Read by the workbench and the agent. |
+| `MEMQL_PIPELINES_RUN_RETENTION_DAYS`  | `30`                | Days after a finished pipeline run's latest version before the nightly sweep archives and deletes its records: [Operational record retention](#operational-record-retention). |
+
+For the three clamped knobs, a value that is not a positive whole number falls
+back to its default -- never to a bound, and never to "no limit" -- and a value
+past a bound is clamped to it. The ceiling and both caps are read on the agent
+and on the workbench, so set them where both read them: `memql-secrets`, which
+every node reads.
+
 ## Concept-stored config
 
 This is the table to look at when you ask "where do I put a new API

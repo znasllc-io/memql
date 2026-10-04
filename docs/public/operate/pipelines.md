@@ -19,10 +19,10 @@ commit it checked. A pull request runs what it affects; the merge queue, a push
 to the default branch and a published release run everything.
 
 > **What runs today.** This release takes deliveries, opens and deduplicates
-> runs, plans them and reports them on GitHub. Executing a step is a runner's
-> job, and no runner ships with it: until the pipelines substrate (epic
-> memql#5478) installs one, every command step fails
-> `pipeline_runner_unavailable`, and the check run says so. Read
+> runs, plans them, executes their steps and reports them on GitHub. A step
+> runs as a Kubernetes Job on the cluster, or on one of the owner's own machines
+> when it names a need: [the pipelines substrate](pipelines-substrate.md) is
+> that half, and what an operator sets up before the first run. Read
 > [What runs today](#what-runs-today) before you make the check required.
 
 A pipeline is a fact about a source. Each Deployables source
@@ -152,7 +152,9 @@ Afterwards:
 - **Cancel** with `builtin pipelinesCancel(runId: "<run id>")` (`execute` on
   `app:deployables/cancel`). It flags the run; the agent driving it cancels
   what is executing at its next heartbeat and concludes the run cancelled. A
-  queued run no agent has claimed is concluded cancelled at once.
+  queued run no agent has claimed is concluded cancelled at once. A new push
+  to a pull request cancels the pull request's earlier runs the same way
+  ([Cancel-on-push](pipelines-substrate.md#cancel-on-push)).
 
 Each acts on your own pipeline or run only. A caller who does not own it is
 refused by name before anything is written. The one exception is disconnect: a
@@ -311,7 +313,8 @@ refusal's scope, so it never holds a dot, a slash or a hash.
 | `stages` | The stages, in the order they run. At least one | required | Absent or empty: `pipeline_stage_invalid` |
 
 `image` and `caches` are passed to the runner as written; what each cache name
-mounts is the runner's (epic memql#5478).
+mounts is the runner's ([Caches](pipelines-substrate.md#caches)): it knows
+`go` and `npm`, and a step declaring any other fails `pipeline_job_rejected`.
 
 ### `select`
 
@@ -345,7 +348,7 @@ mounts is the runner's (epic memql#5478).
 | `needs` | `{ <need>: true }`, the need one of `display`, `docker`, `gpu`, `macos_tooling`, `user_files`: the step needs a fleet machine that offers it. A need set `false` is the same as none | runs on the cluster | A need outside the set: `pipeline_need_unknown`. Any need on a pipeline whose compute is `cluster`: `pipeline_fleet_not_consented` |
 | `services` | Declared services the step runs beside | none | A name `services` does not declare: `pipeline_service_unknown` |
 | `timeout` | A duration such as `20m` or `1h30m`, from 1 minute to 2 hours. A step still running at its timeout is stopped and fails `pipeline_step_timeout` | `20m` | Not a duration, under `1m` or over `2h`: `pipeline_step_invalid` |
-| `artifacts` | Paths the runner saves as Library files owned by the pipeline's owner (epic memql#5478) | none | -- |
+| `artifacts` | Paths the runner saves as Library files owned by the pipeline's owner ([Artifacts](pipelines-substrate.md#artifacts)) | none | -- |
 | `secrets` | Names of secrets the step's environment receives, each under its own name ([Secrets](#secrets)) | none | A name that is not upper-case letters, digits and underscores starting with a letter (at most 128 characters), or that begins `MEMQL_`: `pipeline_secret_invalid`. A name the pipeline does not allow: `pipeline_secret_not_allowed` |
 
 Two keys share the word `needs`: a stage's names earlier stages, a step's names
@@ -599,8 +602,9 @@ resolves.
   need fails the run's compile with `pipeline_fleet_not_consented`, scoped to
   the step -- nothing about somebody's laptop is a default.
 - **`cluster_and_fleet`**: a step naming a need may run on a machine in the
-  owner's fleet that offers it; every other step stays on the cluster. Routing
-  a step to a machine is the runner's (epic memql#5478).
+  owner's fleet that offers it; every other step stays on the cluster. How the
+  step reaches a machine, and what the machine must allow, is
+  [the fleet](pipelines-substrate.md#the-fleet).
 
 A need outside the closed set is refused (`pipeline_need_unknown`), never routed
 by guesswork.
@@ -723,7 +727,10 @@ execute steps. A repository counts as connected once a pipeline is.
 Today the item reports configured once all three hold: this cluster has a
 GitHub App, at least one pipeline is connected and active -- whoever owns it --
 and a runner is registered on the agent node reporting it. Until then it says
-which are missing. It cannot see whether an installation accepted checks write,
+which are missing. Every agent node registers a runner, so that fact cannot
+tell whether a workbench replica can run steps, or whether the cluster passes
+the substrate's isolation proof
+([Known limitations](pipelines-substrate.md#known-limitations)). It cannot see whether an installation accepted checks write,
 which is a fact per installation: a run that could not write its check run says
 so itself ([The check run](#the-check-run)).
 Nothing needs the item, so the first-run wizard does not walk it, and an owner
@@ -747,22 +754,26 @@ before a run finds out by failing to report.
 
 ## What runs today
 
-This release is the seam (epic memql#5477) and MemQL OS's surfaces for it
-(epic memql#5479): deliveries, the poll, run keys, the plan, the work goal, the
-check run, and the Runs tab, run page, Checks and connect flow. Two things wait
-for later epics:
+This release is the seam (epic memql#5477), MemQL OS's surfaces for it (epic
+memql#5479) and the substrate that executes its steps (epic memql#5478):
+deliveries, the poll, run keys, the plan, the work goal, the check run, the
+Runs tab, run page, Checks and connect flow, and every command step run as a
+Kubernetes Job on the cluster, or on one of the owner's machines for a step
+naming a need, with its logs in the log store and its log and artifacts in the
+owner's Library ([Pipelines substrate](pipelines-substrate.md)). One thing
+waits for a later epic:
 
 | Not yet | Arrives with | Until then |
 |---|---|---|
-| A runner to execute command steps: a Kubernetes Job per step, a fleet machine for a step naming a need, logs into the log store, artifacts into the Library | epic memql#5478 | Every command step that would execute fails `pipeline_runner_unavailable`. The first stage holding one fails, every later stage is *Not run*, and the run concludes failure. Nothing in the repository is wrong |
 | Channels and notify delivery | epic memql#5480 | A notify stage's step is skipped `pipeline_notify_unavailable`, which fails nothing |
 
-Everything decided before a step executes works today: which deliveries open
-runs, the mode, the run key, fork refusal, the manifest's refusals, the plan
-with its skips and shards, and the check run reporting all of it.
-
-**Do not make `MemQL / <name>` a required check until the cluster has a
-runner.** Until then every run that reaches a command step concludes failure.
+**Do not make `MemQL / <name>` a required check until a run has passed on this
+cluster.** A cluster has to be ready for steps before any runs: on one that does
+not enforce network policy -- an AKS cluster as `azure-provision.sh` creates it
+-- every step is refused `pipeline_isolation_unenforced`, and a step's images
+must be pullable with no registry credential.
+[Owner actions](pipelines-substrate.md#owner-actions) lists what to set up
+first.
 
 ## Refusal codes
 
@@ -788,7 +799,7 @@ says where: `<stage>/<step>`, a stage, or a path into the block.
 | `pipeline_disconnected` | refusal | The pipeline was disconnected before an agent started the run | Connect it again; the next change runs |
 | `pipeline_already_connected` | refusal | Connect only: another source's pipeline already runs the repository, and a repository has one | Disconnect that pipeline -- its owner does, with `pipelinesDisconnect` -- or work from that source |
 | `pipeline_nothing_to_rerun` | refusal | Re-run failed only: the run has no failed or cancelled step to run again | Re-run it whole |
-| `pipeline_runner_unavailable` | failure | This cluster has no runner to execute steps | Install the runner (epic memql#5478). Nothing in the repository is wrong |
+| `pipeline_runner_unavailable` | failure | No runner could take the step: the cluster is not set up to run steps, or the part that would run it was unreachable | Set the cluster up as [Where a step runs](pipelines-substrate.md#where-a-step-runs) says, then re-run. Nothing in the repository is wrong |
 | `pipeline_executor_error` | failure | The runner could not report how the step ended | Re-run; if it repeats, look at the runner |
 | `pipeline_secret_missing` | failure | An allowed secret has no value on this cluster | Store a value under that name, then re-run |
 | `pipeline_stage_blocked` | skip | An earlier stage failed | Fix that stage |
@@ -798,14 +809,19 @@ says where: `<stage>/<step>`, a stage, or a path into the block.
 | `pipeline_check_permission_missing` | note | GitHub answered 403 to a check-run write; the run went ahead | Accept the app's wider permissions on GitHub |
 
 The runner adds codes of its own -- a step past its timeout
-(`pipeline_step_timeout`), an image that will not pull, a clone that fails --
-with epic memql#5478. Connecting refuses with Deployables' codes as well as
-these ([Connecting a pipeline](#connecting-a-pipeline)).
+(`pipeline_step_timeout`), an image that will not pull, a clone that fails, a
+cluster that cannot prove its steps isolated -- listed with their remedies in
+[the substrate's codes](pipelines-substrate.md#codes). Connecting refuses with
+Deployables' codes as well as these
+([Connecting a pipeline](#connecting-a-pipeline)).
 
 ---
 
 ## Related
 
+- [Pipelines substrate](pipelines-substrate.md) -- where a step runs, what it
+  may reach, its logs and artifacts, how it ends, and what an operator sets up
+  first
 - [GitHub Connect](github-connect.md) -- the app that delivers a pipeline's
   events and writes its check runs, and the upgrade an older app needs
 - [Inbound delivery](inbound-delivery.md) -- the webhook seam and its signatures
