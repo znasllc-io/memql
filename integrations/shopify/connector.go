@@ -285,6 +285,41 @@ func (c *Connector) InboundSource(ctx context.Context, name string) (memqlsync.I
 // Per-store source names are authoritative. The managed app-level privacy
 // source instead resolves the signed shop_domain and verifies app ownership.
 // An unknown source never falls back to an unsigned shop-domain header.
+// ClaimsInboundSource answers whether name is one of this connector's
+// sources -- its own app-level name, or `shopify-<storeId>` for a store that
+// exists -- without resolving any secret (memqlsync.InboundSourceClaimer).
+//
+// It is the inbound receiver's env-pin collision question, and it differs
+// from InboundSource in two deliberate ways. It never unseals a webhook
+// secret it would discard. And a store list it could not read is an ERROR,
+// not "no such store": ByID's false there would admit an env pin on a live
+// store's name, which the dispatcher then routes here once the read recovers
+// (memql#5707 follow-up). Where neither errors, the two agree -- the
+// dispatcher routes the bare name here through memqlsync.Lookup regardless.
+func (c *Connector) ClaimsInboundSource(ctx context.Context, name string) (bool, error) {
+	if c == nil || c.stores == nil {
+		return false, nil
+	}
+	if name == ConnectorName {
+		return true, nil
+	}
+	prefix := ConnectorName + "-"
+	if !strings.HasPrefix(name, prefix) {
+		return false, nil
+	}
+	stores, err := c.stores.Stores(ctx)
+	if err != nil {
+		return false, err
+	}
+	id := strings.TrimPrefix(name, prefix)
+	for _, s := range stores {
+		if s.ID == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (c *Connector) StoreFor(ctx context.Context, req memqlsync.InboundRequest) (Store, bool) {
 	if req.Source == ConnectorName {
 		return c.managedComplianceStore(ctx, req)
@@ -366,3 +401,11 @@ var originDomains = []string{
 // registry takes it through a factory -- so a missing method would
 // surface at boot rather than at build.
 var _ memqlsync.Connector = (*Connector)(nil)
+
+// The two optional inbound interfaces, asserted so a signature drift is a
+// build failure rather than the receiver silently falling back to the
+// secret-resolving path for its collision check.
+var (
+	_ memqlsync.InboundSourceProvider = (*Connector)(nil)
+	_ memqlsync.InboundSourceClaimer  = (*Connector)(nil)
+)

@@ -295,6 +295,14 @@ func (s *Store) InboundRequestByID(ctx context.Context, requestID string) (Inbou
 
 // SetInboundStatus stamps the product-side handling transition the inbound
 // receiver deliberately never writes past `received`.
+//
+// updateInboundRequestStatus is @serverOnly (memql#5707 follow-up), so the
+// write goes through execServerOnly. The automation reaches the ingester on
+// an internal-origin step context, but campaignIngestFeedback is also a
+// builtin a client may call directly -- it is gated by configuration, not
+// origin -- and on that path the context is the client's. The status written
+// is always the outcome of THIS function's own processing of the row, never
+// a value the caller chose, which is what the stamp vouches for.
 func (s *Store) SetInboundStatus(ctx context.Context, requestID, status, lastError string) error {
 	args := []arg{
 		{"requestId", requestID},
@@ -304,5 +312,5 @@ func (s *Store) SetInboundStatus(ctx context.Context, requestID, status, lastErr
 	// Always sent, including empty: a row moving from `failed` to
 	// `processed` on a redelivery must not keep the earlier reason.
 	args = append(args, arg{"lastError", truncateError(lastError)})
-	return s.exec(ctx, call("mutation", "updateInboundRequestStatus", args...))
+	return s.execServerOnly(ctx, call("mutation", "updateInboundRequestStatus", args...))
 }

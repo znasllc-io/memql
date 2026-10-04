@@ -8075,34 +8075,6 @@ QueryClient.prototype.updateIdentity = function (this: QueryClient, args: Update
   return this.executeNamed("updateIdentity", buildUpdateIdentity(args), opts);
 };
 
-/** Stamp a handling transition on a v1:platform:inboundRequest row (memql#2957). Called by the product automation draining the row (processing/processed/failed); the engine receiver only ever writes the initial 'received'. */
-// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["updateInboundRequestStatus"] in generated_concepts.ts).
-export interface UpdateInboundRequestStatusArgs {
-  requestId: string;
-  status: string;
-  lastError?: string;
-  processedAt?: string;
-}
-
-export function buildUpdateInboundRequestStatus(args: UpdateInboundRequestStatusArgs): string {
-  const parts: string[] = [];
-  parts.push("requestId: " + renderMemQLValue(args.requestId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  if (args.lastError !== undefined) parts.push("lastError: " + renderMemQLValue(args.lastError));
-  if (args.processedAt !== undefined) parts.push("processedAt: " + renderMemQLValue(args.processedAt));
-  return "mutation updateInboundRequestStatus(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    updateInboundRequestStatus(args: UpdateInboundRequestStatusArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.updateInboundRequestStatus = function (this: QueryClient, args: UpdateInboundRequestStatusArgs = {} as UpdateInboundRequestStatusArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("updateInboundRequestStatus", buildUpdateInboundRequestStatus(args), opts);
-};
-
 /** Re-point or re-tune a watch: where it files, what it skips, whether it sweeps hidden entries. A read-merge update (memql#1628), so the arguments are MINIMAL -- the machine and the path are deliberately absent, because they are the backup's IDENTITY (the (machine, path) key every re-push is matched on) and re-supplying them would be dead weight that an undeclared-argument DISCARD then hides.
 THE THREE IT DOES TAKE ARE A FULL REPLACE, and each writes its explicit empty rather than a bare `args.X` -- the `?? []` / `?? ""` idiom setArtifactAccounts and renameWorker already use. Omitting one therefore CLEARS it (back to the Library root, back to skipping nothing, back to hiding hidden files), which is the one semantic the caller can rely on: a bare `args.excludeGlobs` would leave "the caller sent nothing" meaning whatever the writer happened to do with an absent value, and that is exactly the ambiguity the idiom exists to remove. The Files form always sends all three, because it shows all three.
 Re-pointing folderId moves NOTHING that already arrived. Files carry their own folderId and the engine has no cascade; this decides where the next push lands. The app says exactly that at the moment of the change, because a person re-pointing a backup reasonably expects otherwise. */

@@ -2,6 +2,7 @@ package inbound
 
 import (
 	"context"
+	"errors"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -128,19 +129,19 @@ func TestTwoConnectorSourcesVerifyIndependently(t *testing.T) {
 	}
 }
 
-// ENV WINS. An operator who pinned a source in the environment has made a
-// statement about it, and a connector claiming the same name later must not
-// silently take it over -- that would move which secret verifies a live
-// sender with nothing in the environment changed to say so.
-func TestAnEnvSourceIsNotTakenOverByAConnector(t *testing.T) {
+// An env pin on a name NO bound connector claims is untouched by the
+// connector being there: the environment still verifies it with its own
+// secret. The collision rule below is about a name the dispatcher would hand
+// to a connector, and it must not reach any further than that.
+func TestAnEnvSourceBesideABoundConnectorStillVerifies(t *testing.T) {
 	withConnector(t, &fakeConnector{name: "shopify", sources: map[string]memqlsync.InboundSource{
-		"acme": {Scheme: SchemeHMACSHA256Hex, SignatureHeader: "X-Sig", Secret: "connector-secret"},
+		"shopify-acme": {Scheme: SchemeHMACSHA256Hex, SignatureHeader: "X-Sig", Secret: "connector-secret"},
 	}})
 	eng := &fakeEngine{}
 	rec := httptest.NewRecorder()
 	testHandler(t, eng, hexSource()).ServeHTTP(rec, signedRequest(t, `{"id":1}`))
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("the env-configured secret stopped verifying: %d", rec.Code)
+	if rec.Code != http.StatusAccepted || len(eng.calls) != 1 {
+		t.Fatalf("an env source no connector claims stopped verifying: %d, %d staged", rec.Code, len(eng.calls))
 	}
 }
 
@@ -224,45 +225,146 @@ func TestTheRequestPathOnlyStages(t *testing.T) {
 	}
 }
 
-// An env pin on a BOUND connector's own name is a contradiction, not an
-// override. The connector reads a delivery under that name as "verified by my
-// app secret" and binds the tenant off the signed body on that premise, so a
-// body verified by the env secret would be handed to it as app-signed.
-// Refused with 404, nothing staged, whether or not the connector currently
-// claims the name: a half-configured app (client id, no sealed secret) claims
-// nothing, and that is exactly the state in which a stray row would be bound
-// by client id. A per-tenant name stays env-wins (the test above)
-// (memql#5707 review).
-func TestAnEnvPinOnABoundConnectorsOwnNameIsRefused(t *testing.T) {
+// An env pin on a name a bound connector CLAIMS is a contradiction, not an
+// override, and it is refused with 404 whichever secret signed the delivery.
+//
+// The dispatcher routes a staged row by its source name alone
+// (memqlsync.ConnectorForSource), and the connector reads a row under a name
+// it claims as "verified by MY secret for this tenant": its own name as
+// signed by the app secret, with the tenant bound off the signed body; a
+// tenant's `shopify-<storeId>` as signed by that store's webhook secret, with
+// the tenant bound off the NAME. A body the env secret verified would be
+// handed to it on that premise -- for a custom-app store, a privacy purge
+// queued from a body the operator's env secret signed. So the receiver asks
+// the dispatcher's own predicate and refuses the collision (memql#5707
+// follow-up).
+//
+// Refused rather than handed to the connector, for the reason env-wins was
+// written: which secret verifies a live sender must not move silently. Here
+// it moves in neither direction -- the env secret and the connector's are
+// both refused, and an ERROR names the env variable to rename or remove.
+// A half-configured app (client id, no sealed secret) claims nothing, and its
+// bare name is still refused, because a bound connector's own name always
+// routes to it.
+func TestAnEnvPinOnAConnectorClaimedNameIsRefused(t *testing.T) {
+	const connectorSecret = "connector-secret"
 	for _, tc := range []struct {
-		name    string
-		sources map[string]memqlsync.InboundSource
+		name, source string
+		sources      map[string]memqlsync.InboundSource
 	}{
-		{"the connector claims its name", map[string]memqlsync.InboundSource{
-			"shopify": {Scheme: SchemeHMACSHA256Hex, SignatureHeader: "X-Sig", Secret: "app-secret"},
+		{"the connector claims its own name", "shopify", map[string]memqlsync.InboundSource{
+			"shopify": {Scheme: SchemeHMACSHA256Hex, SignatureHeader: "X-Sig", Secret: connectorSecret},
 		}},
-		{"the connector is half-configured and claims nothing", map[string]memqlsync.InboundSource{}},
+		{"the connector is half-configured and claims nothing", "shopify", map[string]memqlsync.InboundSource{}},
+		{"the connector claims a tenant's name", "shopify-acme", map[string]memqlsync.InboundSource{
+			"shopify-acme": {Scheme: SchemeHMACSHA256Hex, SignatureHeader: "X-Sig", Secret: connectorSecret},
+		}},
+		{"the connector claims a tenant whose secret does not resolve", "shopify-acme", map[string]memqlsync.InboundSource{
+			"shopify-acme": {Scheme: SchemeHMACSHA256Hex, SignatureHeader: "X-Sig", SecretRef: "GONE"},
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			envPinOnConnectorNameIsRefused(t, tc.sources)
+			withConnector(t, &fakeConnector{name: "shopify", sources: tc.sources})
+			for _, signer := range []struct{ who, secret string }{{"env", testSecret}, {"connector", connectorSecret}} {
+				src := hexSource()
+				src.Name = tc.source
+				eng := &fakeEngine{}
+				h := NewHandler(Config{Enabled: true, MaxBodyBytes: 1024, Tolerance: 5 * time.Minute,
+					Sources: map[string]SourceConfig{tc.source: src}}, eng, quietLogger())
+				body := `{"shop_domain":"acme.myshopify.com"}`
+				r := httptest.NewRequest(http.MethodPost, "/inbound/"+tc.source, strings.NewReader(body))
+				r.Header.Set("X-Sig", hex.EncodeToString(sign(signer.secret, []byte(body))))
+				rec := httptest.NewRecorder()
+				h.ServeHTTP(rec, r)
+				if rec.Code != http.StatusNotFound || len(eng.calls) != 0 {
+					t.Errorf("signed by the %s secret, an env pin on %q was answered %d with %d staged; "+
+						"want 404 and nothing staged", signer.who, tc.source, rec.Code, len(eng.calls))
+				}
+			}
 		})
 	}
 }
 
-func envPinOnConnectorNameIsRefused(t *testing.T, sources map[string]memqlsync.InboundSource) {
-	t.Helper()
-	withConnector(t, &fakeConnector{name: "shopify", sources: sources})
+// claimingConnector answers the receiver's collision question through the
+// claim-only interface, and records whether the secret-resolving one was
+// asked at all.
+type claimingConnector struct {
+	memqlsync.Connector
+	name     string
+	claims   map[string]bool
+	claimErr error
+	resolved []string
+}
+
+func (c *claimingConnector) Name() string { return c.name }
+
+func (c *claimingConnector) ClaimsInboundSource(_ context.Context, name string) (bool, error) {
+	if c.claimErr != nil {
+		return false, c.claimErr
+	}
+	return c.claims[name], nil
+}
+
+func (c *claimingConnector) InboundSource(_ context.Context, name string) (memqlsync.InboundSource, bool) {
+	c.resolved = append(c.resolved, name)
+	return memqlsync.InboundSource{}, false
+}
+
+// The collision check FAILS CLOSED. A connector that cannot read its own
+// tenants -- a stale cache and a failed store read -- has not said "not mine",
+// and reading it that way admits the env pin on a tenant's name, which the
+// dispatcher then hands to the connector once the read recovers. So an
+// undeterminable claim is refused like a claimed one: 404, nothing staged.
+//
+// And it asks the CLAIM, never the secret. InboundSource resolves and unseals
+// the tenant's webhook secret; the collision check only needs to know the name
+// is taken, on a path any unauthenticated caller can hit.
+func TestTheEnvPinCollisionCheckFailsClosedAndResolvesNoSecret(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		c    *claimingConnector
+	}{
+		{"the connector claims the tenant", &claimingConnector{name: "shopify", claims: map[string]bool{"shopify-acme": true}}},
+		{"the connector cannot read its tenants", &claimingConnector{name: "shopify", claimErr: errors.New("list stores: context deadline exceeded")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withConnector(t, tc.c)
+			src := hexSource()
+			src.Name = "shopify-acme"
+			eng := &fakeEngine{}
+			h := NewHandler(Config{Enabled: true, MaxBodyBytes: 1024, Tolerance: 5 * time.Minute,
+				Sources: map[string]SourceConfig{"shopify-acme": src}}, eng, quietLogger())
+			body := `{"shop_domain":"acme.myshopify.com"}`
+			r := httptest.NewRequest(http.MethodPost, "/inbound/shopify-acme", strings.NewReader(body))
+			r.Header.Set("X-Sig", hex.EncodeToString(sign(testSecret, []byte(body))))
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, r)
+			if rec.Code != http.StatusNotFound || len(eng.calls) != 0 {
+				t.Errorf("an env pin the connector claims or cannot rule out was answered %d with %d staged; want 404, nothing staged",
+					rec.Code, len(eng.calls))
+			}
+			if len(tc.c.resolved) != 0 {
+				t.Errorf("the collision check resolved the tenant's secret for %v; it needs only the claim", tc.c.resolved)
+			}
+		})
+	}
+}
+
+// An env source the connector positively does NOT claim still verifies:
+// failing closed is for "cannot tell", not for every name in its namespace.
+func TestAnEnvPinTheClaimerDisownsStillVerifies(t *testing.T) {
+	withConnector(t, &claimingConnector{name: "shopify", claims: map[string]bool{}})
 	src := hexSource()
-	src.Name = "shopify"
+	src.Name = "shopify-custom"
 	eng := &fakeEngine{}
 	h := NewHandler(Config{Enabled: true, MaxBodyBytes: 1024, Tolerance: 5 * time.Minute,
-		Sources: map[string]SourceConfig{"shopify": src}}, eng, quietLogger())
-	body := `{"shop_domain":"acme.myshopify.com"}`
-	r := httptest.NewRequest(http.MethodPost, "/inbound/shopify", strings.NewReader(body))
+		Sources: map[string]SourceConfig{"shopify-custom": src}}, eng, quietLogger())
+	body := `{"id":1}`
+	r := httptest.NewRequest(http.MethodPost, "/inbound/shopify-custom", strings.NewReader(body))
 	r.Header.Set("X-Sig", hex.EncodeToString(sign(testSecret, []byte(body))))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, r)
-	if rec.Code != http.StatusNotFound || len(eng.calls) != 0 {
-		t.Fatalf("a body signed with the env secret was admitted under the connector's own name: %d, %d staged", rec.Code, len(eng.calls))
+	if rec.Code != http.StatusAccepted || len(eng.calls) != 1 {
+		t.Fatalf("an env pin no connector claims was answered %d with %d staged; want 202", rec.Code, len(eng.calls))
 	}
 }

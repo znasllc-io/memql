@@ -57,7 +57,9 @@ import (
 //	exec            the ordinary write. Reaches every mutation that is not
 //	                @serverOnly, on the context it was handed.
 //	execServerOnly  stamps internal origin INLINE, on the one Execute that
-//	                needs it, for the nine that are.
+//	                needs it, for the nine that are -- and for platform's
+//	                updateInboundRequestStatus, the one @serverOnly write
+//	                this store issues outside its own domain.
 //
 // Stamping everything through one path would be strictly worse in both
 // directions. It would mark contexts that have no business being marked, and
@@ -1366,7 +1368,9 @@ func (s *Store) exec(ctx context.Context, q string) error {
 // execServerOnly runs one @serverOnly mutation with internal origin stamped
 // INLINE, as the argument to the single Execute that needs it (memql#4820).
 //
-// Only the nine @serverOnly writers come through here. The stamp is what the
+// Only the nine @serverOnly writers come through here, plus platform's
+// updateInboundRequestStatus, which the feedback ingester stamps on a row it
+// has just worked (feedback_ingest.go, SetInboundStatus). The stamp is what the
 // engine's gate looks for, so without it the call does not degrade -- it fails
 // every time, on every cluster, with `function X is server-only and cannot be
 // called by a client` and a WARN nobody reads. That is the failure mode this
