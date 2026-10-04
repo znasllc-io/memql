@@ -50,27 +50,25 @@ import "strings"
 // failure the body continued past is not a failure of the run, so it is
 // refused the same way.
 //
-// The one fallback left is a TEMPLATE THAT NO LONGER HAS THE FAILED STEP. A
+// There is NO fallback for a template that no longer has the failed step. A
 // re-plan (epic memql#5127) replaces the run's template from the failed step
-// on, re-emitting the completed steps as its prefix, so the step the run broke
-// at may be gone. The run then resumes at the new template's first statement
-// it never reached: the prefix is served from its journal and the new steps
-// run, each as its first attempt.
+// on, and the install says where the run resumes: a `replan` re-run request
+// naming the new template's first step, served by PrepareRerun under a claim
+// of its own. Without that request such a journal has nothing to resume --
+// falling back to the first step the run never reached is what let a second
+// replica, after the first one's dispatch lease lapsed, start a re-planned run
+// it was still executing.
 func statementResumePoint(j *RunJournal, automation *Automation) string {
-	failedInBody := false
 	for _, step := range automation.Steps {
 		if step == nil {
 			continue
 		}
 		state, recorded := j.StepStates[step.ID]
-		if step.ID == j.FailedStep {
-			failedInBody = true
-			if !recorded {
-				// A journal that names its failed step and records nothing
-				// else about it -- one built by hand; LoadRunJournal records
-				// every row's state -- resumes there, as it always has.
-				return step.ID
-			}
+		if step.ID == j.FailedStep && !recorded {
+			// A journal that names its failed step and records nothing else
+			// about it -- one built by hand; LoadRunJournal records every
+			// row's state -- resumes there, as it always has.
+			return step.ID
 		}
 		switch state.Status {
 		case "running":
@@ -79,17 +77,6 @@ func statementResumePoint(j *RunJournal, automation *Automation) string {
 			if step.OnError != ErrorStrategyContinue {
 				return step.ID
 			}
-		}
-	}
-	if j.FailedStep == "" || failedInBody {
-		return ""
-	}
-	for _, step := range automation.Steps {
-		if step == nil {
-			continue
-		}
-		if _, reached := j.StepStates[step.ID]; !reached {
-			return step.ID
 		}
 	}
 	return ""
@@ -109,12 +96,7 @@ func resumedStatements(j *RunJournal, automation *Automation, at int, rerun *Rer
 			continue
 		}
 		if i == at {
-			state, recorded := j.StepStates[step.ID]
-			r.at, r.attempt = step.ID, state.Attempt
-			// A resume point the run never reached -- a re-planned
-			// template's first new step -- runs as its first attempt, not
-			// as the next attempt of a step that has none.
-			r.atReached = recorded || step.ID == j.FailedStep
+			r.at, r.attempt = step.ID, j.StepStates[step.ID].Attempt
 			break
 		}
 		switch state := j.StepStates[step.ID]; {

@@ -168,7 +168,8 @@ func (r *WorkRemedy) Replan(ctx context.Context, runId, ownerUserId, stepKey, re
 		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
 			"The re-planned draft does not compile: "+err.Error())
 	}
-	if err := replanKeepsPrefix(auto, rc, failedKey); err != nil {
+	resumeAt, stepKeys, err := replanKeepsPrefix(auto, rc)
+	if err != nil {
 		return r.ask(ctx, ownerUserId, runId, failedKey, workintegration.RemedyReplan,
 			"The re-planned draft does not keep the completed steps where they would be served: "+err.Error())
 	}
@@ -187,6 +188,8 @@ func (r *WorkRemedy) Replan(ctx context.Context, runId, ownerUserId, stepKey, re
 		TemplateConstructId: persisted.ConstructId,
 		TemplateFingerprint: persisted.TemplateFingerprint,
 		TemplateVersion:     persisted.TemplateVersion,
+		StepKeys:            stepKeys,
+		ResumeAt:            resumeAt,
 		Outcome: map[string]any{
 			"replannedFrom":       failedKey,
 			"replannedAt":         r.clock().UTC().Format(time.RFC3339),
@@ -289,62 +292,53 @@ func parseReplanDraft(resp any) (replanDraft, error) {
 }
 
 // replanKeepsPrefix checks a re-planned template against what the run
-// recorded, in the terms the executing node will resume it in. It mirrors
-// component/automations' statementResumePoint: the resume point R is the
-// template's first step whose row is running or failed (and not continued
-// past in the new template); with none, the template's first step the run
-// never reached -- unless the template still has the failed step and
-// continues past it, in which case nothing would resume the run. Resume serves
-// a completed step from its row only BEFORE R and runs everything from R on,
-// so every completed step must be in the template and come before R, or it
-// runs a second time, its side effects with it.
-func replanKeepsPrefix(auto *automations.Automation, rc workintegration.ReplanContext, failedKey string) error {
+// recorded, and answers where the install's `replan` request starts it.
+//
+// The request is served as a re-run (component/automations' PrepareRerun): the
+// steps before its target are served from their rows -- a finished one bound
+// to what it recorded, a skipped one or a failure continued past left as it
+// was -- and the target and every step after it run. So the target is the
+// template's first step the run has not given a finished version, finished
+// meaning what resume means by it: done, skipped, or a failure the new template
+// continues past. Every completed step must be in the template and come before
+// that target, or it runs a second time, its side effects with it; and there
+// must be a step left to run.
+func replanKeepsPrefix(auto *automations.Automation, rc workintegration.ReplanContext) (resumeAt string, stepKeys []string, err error) {
 	if auto == nil {
-		return fmt.Errorf("no template")
+		return "", nil, fmt.Errorf("no template")
 	}
 	at := map[string]int{}
-	resume, failedInTemplate := -1, false
+	resume := -1
 	for i, step := range auto.Steps {
 		if step == nil {
 			continue
 		}
 		at[step.ID] = i
-		if step.ID == failedKey {
-			failedInTemplate = true
+		stepKeys = append(stepKeys, step.ID)
+		if resume >= 0 {
+			continue
 		}
-		status, recorded := rc.Recorded[step.ID]
-		if resume < 0 && recorded && (status == "running" || (status == "failed" && step.OnError != automations.ErrorStrategyContinue)) {
+		switch status := rc.Recorded[step.ID]; {
+		case status == "done", status == "skipped":
+		case status == "failed" && step.OnError == automations.ErrorStrategyContinue:
+		default:
 			resume = i
 		}
 	}
 	if resume < 0 {
-		if failedInTemplate {
-			return fmt.Errorf("the template continues past the failed step %q, so nothing would resume the run", failedKey)
-		}
-		for i, step := range auto.Steps {
-			if step == nil {
-				continue
-			}
-			if _, recorded := rc.Recorded[step.ID]; !recorded {
-				resume = i
-				break
-			}
-		}
-	}
-	if resume < 0 {
-		return fmt.Errorf("every step of the template has already run, so there is nothing left to do")
+		return "", nil, fmt.Errorf("every step of the template has already run, so there is nothing left to do")
 	}
 	for _, done := range rc.CompletedSteps {
 		key, _ := done["key"].(string)
 		i, ok := at[key]
 		if !ok {
-			return fmt.Errorf("the completed step %q is not in the template", key)
+			return "", nil, fmt.Errorf("the completed step %q is not in the template", key)
 		}
 		if i > resume {
-			return fmt.Errorf("the completed step %q comes after the step the run would resume at (%q), so it would run again", key, auto.Steps[resume].ID)
+			return "", nil, fmt.Errorf("the completed step %q comes after the step the run would resume at (%q), so it would run again", key, auto.Steps[resume].ID)
 		}
 	}
-	return nil
+	return auto.Steps[resume].ID, stepKeys, nil
 }
 
 func (r *WorkRemedy) clock() time.Time {

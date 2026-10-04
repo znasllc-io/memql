@@ -136,6 +136,10 @@ func workRerunRefusal(j *automations.RunJournal) (string, error) {
 	}
 	switch spec.Reason {
 	case automations.RerunReasonRerun, automations.RerunReasonHeadMove:
+	case automations.RerunReasonReplan:
+		// A re-planned run's first execution on its new template (memql#5664):
+		// served exactly as a re-run is, from the first step the run never
+		// reached.
 	case automations.RerunReasonBranch:
 		if j.Mode != common.RunModeFork || strings.TrimSpace(j.ForkedFromRunId) == "" {
 			return workRerunReasonInvalid, fmt.Errorf("run %s carries a branch request but is not a fork of another run", j.RunId)

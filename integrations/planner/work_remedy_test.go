@@ -186,6 +186,11 @@ func TestReplanInstallsTheDraftThroughTheCompilePath(t *testing.T) {
 	if got.Outcome["replannedFrom"] != "draft" {
 		t.Errorf("outcome = %v, want it to name the step the plan broke at", got.Outcome)
 	}
+	// The install's request starts the run at its first new step, with the
+	// whole new template named: that is what the agents serve it from.
+	if got.ResumeAt != "write" || len(got.StepKeys) != 2 || got.StepKeys[0] != "gather" || got.StepKeys[1] != "write" {
+		t.Errorf("installed resumeAt %q over %v, want write over [gather write]", got.ResumeAt, got.StepKeys)
+	}
 	if len(rec.asked) != 0 {
 		t.Errorf("a person was asked (%v) about a re-plan that succeeded", rec.asked)
 	}

@@ -81,10 +81,6 @@ type resumedList struct {
 	at        string
 	// attempt is the attempt `at` last recorded.
 	attempt int
-	// atReached is false when the journal holds no row for `at` at all: a
-	// re-planned template's first new step (statementResumePoint), which
-	// runs as its first attempt rather than as a second.
-	atReached bool
 	// bases, on a re-run, is the attempt base of every step it may execute
 	// (rerunBases): each runs one past the highest version it recorded.
 	bases map[string]int
@@ -104,7 +100,7 @@ func (r *sequenceRun) attemptBase(step *Step) int {
 	if base, ok := r.resumed.bases[step.ID]; ok {
 		return base
 	}
-	if step.ID == r.resumed.at && r.resumed.atReached {
+	if step.ID == r.resumed.at {
 		return max(r.resumed.attempt, 1)
 	}
 	return 0

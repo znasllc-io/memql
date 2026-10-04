@@ -312,6 +312,11 @@ type ReplanTemplate struct {
 	TemplateConstructId string
 	TemplateFingerprint string
 	TemplateVersion     string
+	// StepKeys are the new template's top-level step keys, in order.
+	StepKeys []string
+	// ResumeAt is the first of them the run has not given a finished version:
+	// where the install's request starts the run.
+	ResumeAt string
 	// Outcome is what the re-plan did, for the run's outcome.
 	Outcome map[string]any
 }
@@ -323,25 +328,42 @@ type ReplanTemplate struct {
 // writes them -- automationName, templateConstructId, templateFingerprint,
 // templateVersion -- because the executing node loads a run's template from
 // exactly those (app/work_template.go), and checks the fingerprint against the
-// journal before it resumes. The run goes back to `running` with the reopen
-// fields a re-run writes, so its `running` event reaches the agents, one
-// claims it, and it resumes from the journal: the completed prefix is served,
-// and the first step of the new template the run never reached runs
-// (statementResumePoint).
+// journal before it resumes.
+//
+// THE RUN STARTS FROM A REQUEST OF ITS OWN (memql#5664). The install writes a
+// `replan` re-run request naming the first step of the new template the run
+// has not finished, with the steps from there on stale, and the agents serve it
+// exactly as they serve a re-run: under a claim keyed on the request, so the
+// claim the failed execution still holds on the bare run id -- four minutes
+// from its own dispatch, never released -- does not strand the run; the
+// completed prefix served from the run's own rows; the new steps run as their
+// first versions. With no request the run was claimed on the bare id, lost to
+// that lease on every agent, and was closed as abandoned a minute later.
+//
+// THE FAILED STEP THE TEMPLATE DROPPED IS SUPERSEDED FIRST. Its row stays
+// `failed` otherwise, a resume point for a step no template has; written
+// `skipped` before the run moves -- the run's write is what starts it -- the
+// journal says the step is behind the run, and a journal with no request and
+// no failure in its template stays unresumable, as it must be for a second
+// replica claiming from one of the executing replica's events.
 func (i *Integration) InstallReplan(ctx context.Context, ownerUserId, runId string, t ReplanTemplate) error {
 	if strings.TrimSpace(t.AutomationName) == "" || strings.TrimSpace(t.TemplateConstructId) == "" {
 		return fmt.Errorf("work: a re-planned template names no automation or construct")
 	}
+	stale := staleFrom(t.StepKeys, t.ResumeAt)
+	if len(stale) == 0 {
+		return fmt.Errorf("work: the re-planned template does not name %q, the step its run resumes at", t.ResumeAt)
+	}
 	if _, err := i.remedyRun(ctx, ownerUserId, runId, waitKindReplan); err != nil {
 		return err
 	}
-	fields := reopenFields(i.clock().UTC())
-	// A re-run request the failed execution was serving names a step of the
-	// template being replaced, and a run that parks keeps its request so the
-	// replica resuming it serves it (closeHeadArgs): left in place it would
-	// be served against the new template, whose steps it does not name. The
-	// re-plan supersedes it, as a close does.
-	fields["rerun"] = map[string]any{}
+	if err := i.supersedeDroppedSteps(ctx, ownerUserId, runId, t.StepKeys); err != nil {
+		return err
+	}
+	now := i.clock().UTC()
+	fields := remedyReopenFields(now)
+	fields["rerun"] = rerunRequest(rerunReasonReplan, t.ResumeAt, work.Override{}, map[string]int{}, nil, "", "", now)
+	fields["staleSteps"] = stale
 	fields["automationName"] = t.AutomationName
 	fields["templateConstructId"] = t.TemplateConstructId
 	if t.TemplateFingerprint != "" {
@@ -354,6 +376,60 @@ func (i *Integration) InstallReplan(ctx context.Context, ownerUserId, runId stri
 		fields["outcome"] = t.Outcome
 	}
 	return i.store().updateRun(ownerActor(ctx, ownerUserId), runId, fields)
+}
+
+// staleFrom is keys from resumeAt on, or nil when keys does not name it.
+func staleFrom(keys []string, resumeAt string) []string {
+	for n, k := range keys {
+		if k == resumeAt && strings.TrimSpace(k) != "" {
+			return append([]string(nil), keys[n:]...)
+		}
+	}
+	return nil
+}
+
+// supersedeDroppedSteps marks skipped every failed top-level step of the run
+// that the new template does not have. The rows are read fresh under the
+// owner, as every remedy read is; a nested key belongs to the step that called
+// it and goes with that step.
+func (i *Integration) supersedeDroppedSteps(ctx context.Context, ownerUserId, runId string, keep []string) error {
+	kept := map[string]bool{}
+	for _, k := range keep {
+		kept[k] = true
+	}
+	actorCtx := ownerActor(memql.ContextWithFreshRead(ctx), ownerUserId)
+	rows, err := i.store().query(actorCtx, "query "+call("workStepsForOwnerRun", map[string]any{"runId": runId}))
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		key := rowString(row, "key")
+		if key == "" || strings.Contains(key, "/") || kept[key] || rowString(row, "status") != "failed" {
+			continue
+		}
+		if err := i.store().writeInternal(ownerActor(ctx, ownerUserId), "mutation "+call("updateWorkStep", map[string]any{
+			"stepId":       rowString(row, "id"),
+			"status":       "skipped",
+			"errorCode":    "replaced_by_replan",
+			"errorMessage": "the run was re-planned from this step, and the new plan does not have it",
+		})); err != nil {
+			return fmt.Errorf("work: supersede step %s of run %s: %w", key, runId, err)
+		}
+	}
+	return nil
+}
+
+// remedyReopenFields are reopenFields for a write a remedy makes: everything a
+// reopened run must say, except the cancel. The remedy re-read the run and
+// refuses one already asked to stop, so writing `cancelRequested: false` could
+// only ever erase a cancel that landed AFTER that read -- a goal cancel racing
+// the remedy across replicas. Left unwritten, a late cancel survives the
+// read-merge and the executor stops the run at its first step boundary.
+func remedyReopenFields(now time.Time) map[string]any {
+	fields := reopenFields(now)
+	delete(fields, "cancelRequested")
+	delete(fields, "cancelledBy")
+	return fields
 }
 
 // RequestRepair carries out a contract miss's repair (spec section E): the
@@ -392,7 +468,7 @@ func (i *Integration) RequestRepair(ctx context.Context, ownerUserId, runId, ste
 		override.Guidance = &work.Guidance{Reason: v}
 	}
 	now := i.clock().UTC()
-	fields := reopenFields(now)
+	fields := remedyReopenFields(now)
 	fields["rerun"] = rerunRequest(rerunReasonRerun, stepKey, override, plan.Versions, nil, "", "", now)
 	fields["staleSteps"] = plan.Stale
 	return i.store().updateRun(ownerActor(ctx, ownerUserId), runId, fields)

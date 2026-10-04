@@ -178,6 +178,33 @@ func TestAGoallessRerunIsRefusedAtDispatch(t *testing.T) {
 	}
 }
 
+// A RE-PLANNED RUN IS SERVED AS ITS INSTALL'S REQUEST (memql#5664). The
+// install records the new template and a `replan` request naming its first
+// step the run never reached; the dispatcher serves it as a re-run, from that
+// step, with the completed prefix served from the run's own rows. Refused as an
+// unknown reason, the run would be failed `rerun_reason_invalid` instead.
+func TestAReplanIsPreparedFromItsRequestAtDispatch(t *testing.T) {
+	auto := rerunDispatchTemplate(t)
+	j := finishedDispatchJournal(&automations.RerunSpec{RequestId: "req-replan", Reason: automations.RerunReasonReplan, StepKey: "b"})
+	// The old template failed at `broke`, which the new one replaced; the
+	// install superseded its row, and `b` and `publish` never ran.
+	j.Steps = map[string]*automations.MinimalStepResult{"a": {StepId: "a", Status: "success", Value: "A1"}}
+	j.StepStates = map[string]automations.StepState{"a": {Status: "done", Attempt: 1, Version: 1}, "broke": {Status: "skipped", Attempt: 1, Version: 1}}
+	j.MaxAttempt = map[string]int{"a": 1, "broke": 1}
+	j.StepOrder = []string{"a", "broke"}
+	j.StaleSteps = []string{"b", "publish"}
+	resume, opts, code, err := workRerunResumption(j, nil, auto)
+	if err != nil || code != "" {
+		t.Fatalf("a replan request was refused at dispatch: %s %v", code, err)
+	}
+	if opts.FromStep != "b" || opts.Rerun == nil || opts.Rerun.Reason != automations.RerunReasonReplan {
+		t.Fatalf("options = %+v, want the request served from the first new step", opts)
+	}
+	if resume == nil || resume.FailedStep != "" {
+		t.Fatalf("prepared journal = %+v", resume)
+	}
+}
+
 func TestARerunWithAnUnknownReasonIsRefusedAtDispatch(t *testing.T) {
 	auto := rerunDispatchTemplate(t)
 	j := finishedDispatchJournal(&automations.RerunSpec{RequestId: "req-1", Reason: "rewind", StepKey: "b"})

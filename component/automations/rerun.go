@@ -53,6 +53,14 @@ const (
 	// what follows run live, the prefix is served from the source by
 	// reference.
 	RerunReasonBranch = "branch"
+	// RerunReasonReplan is a re-planned run's first execution on its new
+	// template (memql#5664): the request names the template's first step the
+	// run never reached, the completed prefix is served from the run's own
+	// rows, and the new steps run, each as its first version. It is served
+	// exactly as a re-run is -- under a claim of its own, so the lease of the
+	// execution that failed does not strand it -- and asks for nothing but
+	// where to start.
+	RerunReasonReplan = "replan"
 )
 
 var (

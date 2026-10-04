@@ -13,18 +13,37 @@ import (
 // through this package (memql#5664): each re-reads the run and moves it only
 // while it is still parked on the remedy's wait.
 
-// INSTALLING A RE-PLAN IS COMPILE'S WRITE, onto a run still waiting on it:
-// the template fields the executing node loads a run's template from, and the
-// reopen a re-run writes, so the run's `running` event dispatches it.
-func TestInstallReplanRecordsTheTemplateAndReopensTheRun(t *testing.T) {
+// replannedTemplate is a re-plan that kept `gather`, dropped the failed
+// `draft`, and starts the run again at `write`.
+func replannedTemplate() ReplanTemplate {
+	return ReplanTemplate{
+		AutomationName: "summariseReplanned", TemplateConstructId: "v1:authoring:construct:c2",
+		TemplateFingerprint: "fp-2", TemplateVersion: "v-2",
+		StepKeys: []string{"gather", "write", "publish"}, ResumeAt: "write",
+		Outcome: map[string]any{"replannedFrom": "draft"},
+	}
+}
+
+// replanStepRows are the run's step rows as the install reads them: the
+// completed `gather`, and the failed `draft` the new template replaced.
+func replanStepRows() []map[string]any {
+	return []map[string]any{
+		{"id": "v1:work:step:rm1-gather", "runId": remedyRunId, "key": "gather", "status": "done", "attempt": 1, "version": 1},
+		{"id": "v1:work:step:rm1-draft", "runId": remedyRunId, "key": "draft", "status": "failed", "attempt": 1, "version": 1, "errorMessage": "the summary format does not exist"},
+	}
+}
+
+// INSTALLING A RE-PLAN IS COMPILE'S WRITE PLUS A REQUEST OF ITS OWN
+// (memql#5664): the template fields the executing node loads a run's template
+// from, and a `replan` request naming the first step the run never reached --
+// so the agents claim the run under that request rather than under the bare
+// run id, which the execution that failed still holds for its lease.
+func TestInstallReplanRecordsTheTemplateAndARequestOfItsOwn(t *testing.T) {
 	i, eng := newTestIntegration(t)
 	eng.reply("workRunForOwner", remedyWaitRow(waitKindReplan))
+	eng.reply("workStepsForOwnerRun", replanStepRows()...)
 
-	err := i.InstallReplan(context.Background(), "u-alice", remedyRunId, ReplanTemplate{
-		AutomationName: "summariseReplanned", TemplateConstructId: "v1:authoring:construct:c2",
-		TemplateFingerprint: "fp-2", TemplateVersion: "v-2", Outcome: map[string]any{"replannedFrom": "draft"},
-	})
-	if err != nil {
+	if err := i.InstallReplan(context.Background(), "u-alice", remedyRunId, replannedTemplate()); err != nil {
 		t.Fatalf("InstallReplan: %v", err)
 	}
 	call := eng.callTo(t, "updateWorkRun")
@@ -37,11 +56,15 @@ func TestInstallReplanRecordsTheTemplateAndReopensTheRun(t *testing.T) {
 			t.Errorf("%s = %v, want %v", k, args[k], want)
 		}
 	}
+	rerun, _ := args["rerun"].(map[string]any)
+	if rerun["reason"] != rerunReasonReplan || rerun["stepKey"] != "write" || rerun["requestId"] == nil || rerun["requestId"] == "" {
+		t.Fatalf("rerun = %v, want a replan request naming the first new step", rerun)
+	}
+	if stale, _ := args["staleSteps"].([]any); len(stale) != 2 || stale[0] != "write" || stale[1] != "publish" {
+		t.Errorf("staleSteps = %v, want the new steps from the first one on: an interrupted execution resumes where the request stands", args["staleSteps"])
+	}
 	if w, _ := args["waitingOn"].(map[string]any); w == nil || len(w) != 0 {
 		t.Errorf("waitingOn = %v, want cleared: a running run that still names a wait is one every sweep keeps serving", args["waitingOn"])
-	}
-	if r, _ := args["rerun"].(map[string]any); r == nil || len(r) != 0 {
-		t.Errorf("rerun = %v, want cleared: a request naming a step of the replaced template must not be served against the new one", args["rerun"])
 	}
 	if args["heartbeatAt"] == nil || args["heartbeatAt"] == "" {
 		t.Error("the reopened run carries no fresh heartbeat; the abandoned sweep would call it lost before an agent took it")
@@ -50,6 +73,105 @@ func TestInstallReplanRecordsTheTemplateAndReopensTheRun(t *testing.T) {
 		t.Errorf("written as %q with origin %v, want the owner's borrowed authority under internal origin", call.Actor, call.Origin)
 	}
 	assertEveryCallParses(t, eng)
+}
+
+// THE FAILED STEP A RE-PLAN DROPPED IS SUPERSEDED, BEFORE THE RUN MOVES. A
+// failed row for a step the template no longer has is a resume point no
+// template can serve; marked skipped -- and written before the run's own
+// write, which is what starts the run -- the journal says plainly the step is
+// behind the run.
+func TestInstallReplanSupersedesTheFailedStepItDropped(t *testing.T) {
+	i, eng := newTestIntegration(t)
+	eng.reply("workRunForOwner", remedyWaitRow(waitKindReplan))
+	eng.reply("workStepsForOwnerRun", replanStepRows()...)
+
+	if err := i.InstallReplan(context.Background(), "u-alice", remedyRunId, replannedTemplate()); err != nil {
+		t.Fatalf("InstallReplan: %v", err)
+	}
+	step := eng.callTo(t, "updateWorkStep").Args(t)
+	if step["stepId"] != "v1:work:step:rm1-draft" || step["status"] != "skipped" {
+		t.Fatalf("updateWorkStep = %v, want the dropped `draft` superseded as skipped", step)
+	}
+	order := eng.summary()
+	if strings.Index(order, "updateWorkStep") > strings.Index(order, "updateWorkRun") {
+		t.Fatalf("the run moved before its dropped step was superseded: %s", order)
+	}
+}
+
+// AN INSTALLED RE-PLAN IS DISPATCHED THOUGH THE FAILING EXECUTION STILL HOLDS
+// THE RUN'S CLAIM (memql#5664). Installed with no request of its own, the
+// run's `running` event was claimed under the bare run id, which the execution
+// that failed held for four minutes from its own dispatch: every agent lost
+// that claim, no second event came, and the sweep closed the run as abandoned.
+func TestAnInstalledReplanIsDispatchedDespiteTheFailingExecutionsClaim(t *testing.T) {
+	i, eng := newTestIntegration(t)
+	row := remedyWaitRow(waitKindReplan)
+	eng.reply("workRunForOwner", row)
+	eng.reply("workStepsForOwnerRun", replanStepRows()...)
+	if err := i.InstallReplan(context.Background(), "u-alice", remedyRunId, replannedTemplate()); err != nil {
+		t.Fatalf("InstallReplan: %v", err)
+	}
+	installed := map[string]any{}
+	for k, v := range row {
+		installed[k] = v
+	}
+	for k, v := range eng.callTo(t, "updateWorkRun").Args(t) {
+		if k != "runId" {
+			installed[k] = v
+		}
+	}
+
+	claims := &pkClaims{}
+	if !claims.ClaimWithTTL(context.Background(), runClaimName, remedyRunId, runClaimTTL) {
+		t.Fatal("could not stand in for the failing execution's claim")
+	}
+	agent, _ := newTestIntegration(t)
+	d := &signallingDispatcher{}
+	agent.SetDispatcher(d)
+	agent.SetRunClaimer(claims)
+	agent.HandleRunEvent(remedyEvent(installed))
+
+	got := d.settled(t, 1)
+	if len(got) != 1 {
+		t.Fatalf("the re-planned run was dispatched %d times, want once: claimed under the bare run id, it loses to the execution that failed", len(got))
+	}
+	if got[0].RerunRequestId == "" {
+		t.Fatalf("dispatched %+v without its request", got[0])
+	}
+}
+
+// A REMEDY NEVER CLEARS A CANCEL IT DID NOT OBSERVE. Each remedy write re-reads
+// the run and refuses one already asked to stop; a cancel that lands between
+// that read and the write must survive the write, so neither writes the flag.
+func TestARemedyWriteNeverClearsACancel(t *testing.T) {
+	i, eng := newTestIntegration(t)
+	eng.reply("workRunForOwner", remedyWaitRow(waitKindReplan))
+	eng.reply("workStepsForOwnerRun", replanStepRows()...)
+	if err := i.InstallReplan(context.Background(), "u-alice", remedyRunId, replannedTemplate()); err != nil {
+		t.Fatalf("InstallReplan: %v", err)
+	}
+	args := eng.callTo(t, "updateWorkRun").Args(t)
+	for _, k := range []string{"cancelRequested", "cancelledBy"} {
+		if _, written := args[k]; written {
+			t.Errorf("the install wrote %s = %v: a cancel landing after its read would be erased", k, args[k])
+		}
+	}
+
+	r, reng, store := newActsIntegration(t)
+	addVersion(store, actRunId, "fetch", 0, 1, "done", nil, nil)
+	addVersion(store, actRunId, "draft", 1, 1, "failed", nil, nil)
+	waiting := actRunRow(runStatusWaiting, "fetch", "draft")
+	waiting["waitingOn"] = map[string]any{"kind": waitKindRepair, "subject": "draft", "since": "2026-09-05T11:59:00Z"}
+	reng.reply("workRunForOwner", waiting)
+	if err := r.RequestRepair(context.Background(), actOwner, actRunId, "draft", "v"); err != nil {
+		t.Fatalf("RequestRepair: %v", err)
+	}
+	repair := argsOf(t, reng, "updateWorkRun")
+	for _, k := range []string{"cancelRequested", "cancelledBy"} {
+		if _, written := repair[k]; written {
+			t.Errorf("the repair wrote %s = %v", k, repair[k])
+		}
+	}
 }
 
 // A REPAIR IS A RE-RUN OF THE FAILED STEP WITH THE VIOLATION AS GUIDANCE: the
@@ -144,7 +266,7 @@ func TestARemedyWriteRefusesARunThatMovedOn(t *testing.T) {
 			row := remedyWaitRow(waitKindReplan)
 			tc.edit(row)
 			eng.reply("workRunForOwner", row)
-			err := i.InstallReplan(context.Background(), "u-alice", remedyRunId, ReplanTemplate{AutomationName: "x", TemplateConstructId: "v1:authoring:construct:c"})
+			err := i.InstallReplan(context.Background(), "u-alice", remedyRunId, replannedTemplate())
 			if !errors.Is(err, ErrRemedyNotWaiting) {
 				t.Fatalf("InstallReplan err = %v, want ErrRemedyNotWaiting", err)
 			}

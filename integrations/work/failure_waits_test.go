@@ -92,6 +92,38 @@ func (r *signallingRemedy) settled(t *testing.T, want int) []remedyCall {
 	return append([]remedyCall(nil), r.calls...)
 }
 
+// signallingDispatcher records what an agent replica was asked to run. The
+// event path dispatches on its own goroutine, so a test waits on it.
+type signallingDispatcher struct {
+	mu   sync.Mutex
+	reqs []DispatchRequest
+}
+
+func (d *signallingDispatcher) Dispatch(_ context.Context, req DispatchRequest) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.reqs = append(d.reqs, req)
+}
+
+// settled is signallingRemedy.settled's wait, for dispatches.
+func (d *signallingDispatcher) settled(t *testing.T, want int) []DispatchRequest {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for want > 0 && time.Now().Before(deadline) {
+		d.mu.Lock()
+		n := len(d.reqs)
+		d.mu.Unlock()
+		if n >= want {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(300 * time.Millisecond)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]DispatchRequest(nil), d.reqs...)
+}
+
 const remedyRunId = "v1:work:run:rm1"
 
 // remedyWaitRow is a goal's run the failure path parked on a replan or repair.
