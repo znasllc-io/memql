@@ -37,6 +37,10 @@
 //   - Go and protoc are written down where the repository pins them and again
 //     in the Dockerfile. A bump that lands in one copy builds an image that
 //     tests on another Go, or stamps another protoc, than everything else.
+//   - kubectl's minor is the Kubernetes minor scripts/k3d/up.sh's K3S_VERSION
+//     runs. Its embedded kustomize renders the overlays in the deploy render
+//     tests, so a Dependabot bump of the kubectl FROM line alone would test
+//     them against a kustomize the deploy target never runs -- and merge green.
 //
 // TestToolchainImageGuardsFireOnTheShapesTheyExistFor feeds each check a
 // broken copy of the real file it reads, so a check that stopped seeing its
@@ -81,6 +85,8 @@ var (
 	toolchainEnvRef      = regexp.MustCompile(`\$\{\{\s*env\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`)
 	toolchainFromLine    = regexp.MustCompile(`(?mi)^FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$`)
 	toolchainLeadVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+(?:\.[0-9]+)?`)
+	// toolchainMinor is a Kubernetes version's minor, "1.32" of "v1.32.13".
+	toolchainMinor = regexp.MustCompile(`^v?([0-9]+\.[0-9]+)\.`)
 	// toolchainInspectsTheTag is the guard's question to the registry, in any
 	// of the ways a shell can spell the two variables.
 	toolchainInspectsTheTag = regexp.MustCompile(`imagetools\s+inspect\s+"?\$\{?IMAGE\}?:\$\{?VERSION\}?"?`)
@@ -573,9 +579,10 @@ func toolchainRunScriptProblems(wf toolchainWorkflow) []string {
 }
 
 // toolchainDockerfileProblems: every base is pinned by digest, the versions
-// are the repository's, the protoc download is verified, and the image runs as
-// a numeric non-root user.
-func toolchainDockerfileProblems(dockerfile, goWork, protoGen string) []string {
+// are the repository's (kubectl's minor the deploy target's, read from
+// scripts/k3d/up.sh), the protoc download is verified, and the image runs as a
+// numeric non-root user.
+func toolchainDockerfileProblems(dockerfile, goWork, protoGen, k3dUp string) []string {
 	var out []string
 	first := func(re, body string) string {
 		m := regexp.MustCompile(re).FindStringSubmatch(body)
@@ -606,7 +613,7 @@ func toolchainDockerfileProblems(dockerfile, goWork, protoGen string) []string {
 			stages[strings.ToLower(m[2])] = true
 		}
 	}
-	var goTags []string
+	var goTags, kubectlTags []string
 	for _, m := range matches {
 		ref := m[1]
 		if stages[strings.ToLower(ref)] {
@@ -623,6 +630,9 @@ func toolchainDockerfileProblems(dockerfile, goWork, protoGen string) []string {
 		if repo == "golang" || strings.HasSuffix(repo, "/golang") {
 			goTags = append(goTags, tag)
 		}
+		if repo == "kubectl" || strings.HasSuffix(repo, "/kubectl") {
+			kubectlTags = append(kubectlTags, tag)
+		}
 	}
 	if len(goTags) != 1 {
 		out = append(out, fmt.Sprintf("expected exactly one FROM golang:<version> stage, found %d", len(goTags)))
@@ -635,6 +645,28 @@ func toolchainDockerfileProblems(dockerfile, goWork, protoGen string) []string {
 			"go.work, then dispatch build-toolchain-image.yml and re-pin memql-package.yaml -- the PINNED "+
 			"image is what a pipeline runs, not this file. If the pipeline must deliberately run another Go, "+
 			"argue it here.", got, goTags[0], wantGo))
+	}
+
+	// kubectl renders the overlays the deploy target applies, so its minor is
+	// the Kubernetes minor that target runs. The patch may differ: kubectl and
+	// k3s patch releases do not land together.
+	wantK8s := first(`(?m)^K3S_VERSION="\$\{[A-Z0-9_]+:-v([0-9]+\.[0-9]+)\.`, k3dUp)
+	if wantK8s == "" {
+		out = append(out, "could not read the K3S_VERSION default out of scripts/k3d/up.sh; this guard is "+
+			"no longer reading what it claims to")
+	}
+	if len(kubectlTags) != 1 {
+		out = append(out, fmt.Sprintf("expected exactly one FROM <registry>/kubectl:<version> stage, found %d: the "+
+			"deploy render tests skip without kubectl", len(kubectlTags)))
+	} else if m := toolchainMinor.FindStringSubmatch(kubectlTags[0]); m == nil {
+		out = append(out, fmt.Sprintf("the kubectl stage's tag %q is not a version this guard can read", kubectlTags[0]))
+	} else if wantK8s != "" && m[1] != wantK8s {
+		out = append(out, fmt.Sprintf("the toolchain image's kubectl is %s, minor %s, but scripts/k3d/up.sh's "+
+			"K3S_VERSION runs Kubernetes %s.\n"+
+			"kubectl's embedded kustomize renders the overlays in the deploy render tests, and up.sh holds the "+
+			"deploy target at %s on purpose (its comment: ArgoCD's schema). A bump of the kubectl FROM line alone "+
+			"tests the overlays against a kustomize that target never runs. Move K3S_VERSION and the kubectl FROM "+
+			"line in one change.", kubectlTags[0], m[1], wantK8s, wantK8s))
 	}
 
 	if got := first(`(?m)^ARG PROTOC_VERSION=(\S+)\s*$`, dockerfile); wantProtoc != "" && got != wantProtoc {
@@ -720,6 +752,7 @@ func TestToolchainImageVersionsMatchTheRepositoryPins(t *testing.T) {
 		toolchainRead(t, toolchainDockerfilePath),
 		toolchainRead(t, "go.work"),
 		toolchainRead(t, "scripts/dev/proto-gen.sh"),
+		toolchainRead(t, "scripts/k3d/up.sh"),
 	))
 }
 
@@ -750,6 +783,7 @@ func toolchainDockerfileMutations(t *testing.T) {
 	real := toolchainRead(t, toolchainDockerfilePath)
 	goWork := toolchainRead(t, "go.work")
 	protoGen := toolchainRead(t, "scripts/dev/proto-gen.sh")
+	k3dUp := toolchainRead(t, "scripts/k3d/up.sh")
 	for _, tc := range []struct {
 		name string
 		want string
@@ -783,13 +817,19 @@ func toolchainDockerfileMutations(t *testing.T) {
 		{"a root user", "NUMERIC uid 1000", func(s string) string {
 			return regexp.MustCompile(`(?m)^USER\s+\S+\s*$`).ReplaceAllString(s, "USER root")
 		}},
+		{"kubectl past the deploy target's minor", "K3S_VERSION runs Kubernetes", func(s string) string {
+			return regexp.MustCompile(`(?m)^(FROM \S+/kubectl:v)[0-9]+\.[0-9]+`).ReplaceAllString(s, "${1}1.99")
+		}},
+		{"no kubectl stage", "kubectl:<version> stage, found 0", func(s string) string {
+			return regexp.MustCompile(`(?m)^FROM \S+/kubectl:\S+ AS \S+\n`).ReplaceAllString(s, "")
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			edited := tc.edit(real)
 			if edited == real {
 				t.Fatal("the mutation changed nothing; its anchor is gone from the Dockerfile")
 			}
-			toolchainExpectProblem(t, toolchainDockerfileProblems(edited, goWork, protoGen), tc.want)
+			toolchainExpectProblem(t, toolchainDockerfileProblems(edited, goWork, protoGen, k3dUp), tc.want)
 		})
 	}
 }

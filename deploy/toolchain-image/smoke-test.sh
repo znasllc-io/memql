@@ -14,8 +14,10 @@
 #                                            psql, pg_isready, curl, tar, gzip,
 #                                            base64, unzip, jq, python3 and its
 #                                            yaml module, kubectl, the docker
-#                                            client. A miss exits non-zero
-#                                            naming the tool.
+#                                            client with its manifest command,
+#                                            and NO dockerd or containerd. A
+#                                            miss exits non-zero naming the
+#                                            tool.
 #   2. Go and protoc are the versions this repository pins, read from WHERE it
 #      pins them (go.work's toolchain line, scripts/dev/proto-gen.sh's
 #      PROTOC_VERSION) rather than from a third copy here. A pinned image
@@ -103,6 +105,16 @@ done
 # conn-headroom-check.sh imports it.
 python3 -c 'import yaml' || { echo "ERROR: python3 cannot import yaml (python3-yaml)" >&2; exit 1; }
 printf '  %-10s %s\n' "yaml" "$(python3 -c 'import yaml; print(yaml.__version__)')"
+# The Docker CLIENT and no daemon: scripts/release/release.sh's push dry run
+# probes the registry with `docker manifest`, and nothing here may be a daemon.
+for daemon in dockerd containerd; do
+	if command -v "$daemon" >/dev/null; then
+		echo "ERROR: ${daemon} is on PATH; the image carries the Docker client and no daemon" >&2
+		exit 1
+	fi
+done
+docker manifest --help >/dev/null || { echo "ERROR: 'docker manifest' is not available; release.sh's tag probe runs it" >&2; exit 1; }
+printf '  %-10s %s\n' "daemon" "none (no dockerd, no containerd); docker manifest: OK"
 SCRIPT
 }
 

@@ -6,14 +6,16 @@
 # Epic memql#5478, issue memql#5496. A pipeline step is a Kubernetes Job whose
 # main container runs the manifest's `pipeline.image`, with the step's shell
 # command, in a fresh checkout at /workspace. For this repository's own
-# pipeline that image is THIS one, named by digest in memql-package.yaml, so it
-# carries what this repository's CI steps reach for:
+# pipeline that image is THIS one, named in memql-package.yaml -- by its first
+# tag until build-toolchain-image.yml has run on main, then by the digest that
+# run prints, pinned in a follow-up after the epic merges -- so it carries what
+# this repository's CI steps reach for:
 #
 #   Go        1.27.1   go.work's `toolchain` line, which overrides every go.mod
 #   Node      22 LTS   node:22-bookworm-slim
 #   protoc    33.4     scripts/dev/proto-gen.sh's PROTOC_VERSION
-#   kubectl   1.32.13  scripts/k3d/up.sh's K3S_VERSION, the deploy target's
-#                      Kubernetes
+#   kubectl   1.32.13  the minor of scripts/k3d/up.sh's K3S_VERSION, the deploy
+#                      target's Kubernetes (the patch may differ)
 #   docker    29.8.2   the CLIENT only; there is no daemon (see its stage)
 #   git, make, bash, curl, tar, gzip, unzip, jq, python3 (with PyYAML),
 #   coreutils, ca-certificates, and postgresql-client (psql, pg_isready)
@@ -23,8 +25,8 @@
 # the step's sidecar, so the pipeline and the GitHub lanes test against one
 # database image.
 #
-# THE VERSIONS ARE THE REPOSITORY'S, NOT THIS FILE'S. Go and protoc are written
-# down where the repository pins them and again below, and
+# THE VERSIONS ARE THE REPOSITORY'S, NOT THIS FILE'S. Go, protoc and kubectl's
+# minor are written down where the repository pins them and again below, and
 # scripts/ci/toolchain_image_workflow_test.go fails when the copies disagree:
 # `toolchain` is a floor, so a newer Go here would be used as found and the
 # pipeline would test on a Go nothing else runs. A bump moves both copies in
@@ -75,7 +77,9 @@ FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddf
 # with `kubectl kustomize` when no standalone kustomize is on PATH, and skip
 # without either -- 147 of them, measured. GitHub's runner image carries both.
 # v1.32.13 is the Kubernetes the local deploy target runs (scripts/k3d/up.sh's
-# K3S_VERSION, held at 1.32 for ArgoCD's schema). Its embedded kustomize,
+# K3S_VERSION, held at 1.32 for ArgoCD's schema), and scripts/ci holds the two
+# minors equal, so a Dependabot bump past it goes red rather than merging
+# green: move K3S_VERSION and this line together. Its embedded kustomize,
 # v5.5.0, renders the `components:` these overlays use, which Debian's own
 # kubectl, 1.20.2, cannot. The binary is static, so it runs on the base below.
 FROM registry.k8s.io/kubectl:v1.32.13@sha256:fbfd671cd51f0be98174170f2000cbb97d2788e2270bc1697323d401558307e1 AS kubectl-dist
@@ -135,7 +139,9 @@ FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2
 # scripts/dev/stale_claims_test.go's gh stub evaluates the script's real --jq
 # filters with, and the test FAILS without it (requireJQ) -- in the go-tests,
 # path-routing and gate-inputs steps alike. GitHub's runner image carries jq,
-# which is why ci.yml never installs it, and python3 for the same reason:
+# which is why ci.yml never installs it, and it carries jq 1.7, the version
+# those filters were checked against; bookworm ships 1.6, so a filter that only
+# 1.7 understands fails here first. python3 is here for the same reason as jq:
 # scripts/k3d/up.sh's workload-wait narration reads the pod list with it
 # (TestWaitNarratesWhatItIsWaitingOn FAILS without it), and the
 # scripts/release/release-engine.sh tests and component/procedure/reference's
@@ -198,5 +204,5 @@ RUN go version && node --version && protoc --version && git --version && psql --
     kubectl version --client && docker --version
 
 LABEL org.opencontainers.image.title="memql-toolchain" \
-      org.opencontainers.image.description="The container MemQL pipeline steps run in: Go, Node, protoc, git, make and the PostgreSQL client on Debian bookworm, as uid 1000" \
+      org.opencontainers.image.description="The container MemQL pipeline steps run in: Go, Node, protoc, kubectl, the Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client on Debian bookworm, as uid 1000" \
       org.opencontainers.image.source="https://github.com/znasllc-io/memql"
